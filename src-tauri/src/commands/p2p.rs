@@ -13,8 +13,12 @@ use crate::crypto::wallet;
 use crate::db::Database;
 use crate::p2p::catalog as p2p_catalog;
 use crate::p2p::evidence as p2p_evidence;
+use crate::p2p::governance as p2p_governance;
 use crate::p2p::network::{self, keypair_from_cardano_key};
-use crate::p2p::types::{NetworkStatus, TOPIC_CATALOG, TOPIC_EVIDENCE};
+use crate::p2p::taxonomy as p2p_taxonomy;
+use crate::p2p::types::{
+    NetworkStatus, TOPIC_CATALOG, TOPIC_EVIDENCE, TOPIC_GOVERNANCE, TOPIC_TAXONOMY,
+};
 use crate::AppState;
 
 /// Start the P2P network node.
@@ -96,6 +100,31 @@ pub async fn p2p_start(state: State<'_, AppState>) -> Result<String, String> {
                             }
                             Err(e) => {
                                 log::warn!("Failed to handle evidence message: {e}");
+                            }
+                        }
+                    } else if topic == TOPIC_TAXONOMY {
+                        match p2p_taxonomy::handle_taxonomy_message(&db, message) {
+                            Ok(update) => {
+                                log::info!(
+                                    "Taxonomy: applied v{} (cid: {})",
+                                    update.version,
+                                    update.cid,
+                                );
+                            }
+                            Err(e) => {
+                                log::warn!("Failed to handle taxonomy message: {e}");
+                            }
+                        }
+                    } else if topic == TOPIC_GOVERNANCE {
+                        match p2p_governance::handle_governance_message(&db, message) {
+                            Ok(ann) => {
+                                log::info!(
+                                    "Governance: processed event for DAO '{}'",
+                                    ann.dao_id,
+                                );
+                            }
+                            Err(e) => {
+                                log::warn!("Failed to handle governance message: {e}");
                             }
                         }
                     }

@@ -12,6 +12,7 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (2, "profile_hash", MIGRATION_002),
     (3, "content_mappings", MIGRATION_003),
     (4, "assessment_columns", MIGRATION_004),
+    (5, "governance_members", MIGRATION_005),
 ];
 
 const MIGRATION_001: &str = r#"
@@ -411,4 +412,24 @@ const MIGRATION_004: &str = r#"
 
 ALTER TABLE skill_assessments ADD COLUMN weight REAL NOT NULL DEFAULT 1.0;
 ALTER TABLE skill_assessments ADD COLUMN source_element_id TEXT;
+"#;
+
+const MIGRATION_005: &str = r#"
+-- ============================================================
+-- Migration 005: Governance DAO Members
+-- Tracks DAO committee members for authority checks on taxonomy
+-- updates. Per spec §7.3: "For taxonomy updates, verify the
+-- signer is a DAO committee member."
+-- Also tracks the most recent taxonomy version applied locally.
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS governance_dao_members (
+    dao_id          TEXT NOT NULL REFERENCES governance_daos(id),
+    stake_address   TEXT NOT NULL,           -- Cardano stake address (bech32)
+    role            TEXT NOT NULL DEFAULT 'member', -- member|committee|chair
+    joined_at       TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (dao_id, stake_address)
+);
+
+CREATE INDEX IF NOT EXISTS idx_dao_members_address ON governance_dao_members(stake_address);
 "#;

@@ -1,8 +1,10 @@
 pub mod catalog;
 pub mod discovery;
 pub mod evidence;
+pub mod governance;
 pub mod gossip;
 pub mod network;
 pub mod signing;
+pub mod taxonomy;
 pub mod types;
 pub mod validation;
