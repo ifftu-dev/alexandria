@@ -13,6 +13,11 @@ interface Identity {
   payment_address: string
   display_name: string | null
   bio: string | null
+  profile_hash: string | null
+}
+
+interface PublishResult {
+  profile_hash: string
 }
 
 const profile = ref<Identity | null>(null)
@@ -20,6 +25,10 @@ const displayName = ref('')
 const bio = ref('')
 const saving = ref(false)
 const message = ref('')
+
+// Profile publishing state
+const publishing = ref(false)
+const publishMessage = ref('')
 
 // Security section state
 const showExportModal = ref(false)
@@ -58,6 +67,22 @@ async function saveProfile() {
     message.value = `Error: ${e}`
   } finally {
     saving.value = false
+  }
+}
+
+async function publishProfile() {
+  publishing.value = true
+  publishMessage.value = ''
+
+  try {
+    await invoke<PublishResult>('publish_profile')
+    publishMessage.value = 'Published!'
+    // Refresh profile to get the updated profile_hash
+    profile.value = await invoke<Identity | null>('get_profile')
+  } catch (e) {
+    publishMessage.value = `Error: ${e}`
+  } finally {
+    publishing.value = false
   }
 }
 
@@ -144,7 +169,21 @@ async function lockWallet() {
           >
             {{ saving ? 'Saving...' : 'Save Profile' }}
           </button>
+          <button
+            class="px-4 py-2 rounded-md text-sm font-medium border border-[rgb(var(--color-border))] hover:bg-[rgb(var(--color-muted)/0.5)] transition-colors disabled:opacity-50"
+            :disabled="publishing"
+            @click="publishProfile"
+          >
+            {{ publishing ? 'Publishing...' : 'Publish to Network' }}
+          </button>
           <span v-if="message" class="text-xs text-[rgb(var(--color-success))]">{{ message }}</span>
+          <span v-if="publishMessage" class="text-xs text-[rgb(var(--color-success))]">{{ publishMessage }}</span>
+        </div>
+
+        <!-- Profile Hash -->
+        <div v-if="profile?.profile_hash" class="pt-2 border-t border-[rgb(var(--color-border))]">
+          <span class="text-xs text-[rgb(var(--color-muted-foreground))]">Published Profile Hash</span>
+          <code class="block font-mono text-xs mt-0.5 break-all text-[rgb(var(--color-muted-foreground))]">{{ profile.profile_hash }}</code>
         </div>
       </div>
     </div>

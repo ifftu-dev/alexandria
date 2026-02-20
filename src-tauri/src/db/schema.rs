@@ -7,7 +7,10 @@
 ///   - Only self + known peers in users table
 ///   - Local-only tables: peers, pins, sync_log, catalog
 ///   - No server-side tables: refresh_tokens, oauth_accounts
-pub const MIGRATIONS: &[(i64, &str, &str)] = &[(1, "initial_schema", MIGRATION_001)];
+pub const MIGRATIONS: &[(i64, &str, &str)] = &[
+    (1, "initial_schema", MIGRATION_001),
+    (2, "profile_hash", MIGRATION_002),
+];
 
 const MIGRATION_001: &str = r#"
 -- ============================================================
@@ -364,4 +367,14 @@ CREATE INDEX IF NOT EXISTS idx_reputation_skill ON reputation_assertions(skill_i
 CREATE INDEX IF NOT EXISTS idx_catalog_author ON catalog(author_address);
 CREATE INDEX IF NOT EXISTS idx_peers_last_seen ON peers(last_seen);
 CREATE INDEX IF NOT EXISTS idx_sync_log_entity ON sync_log(entity_type, entity_id);
+"#;
+
+const MIGRATION_002: &str = r#"
+-- ============================================================
+-- Migration 002: Profile Hash
+-- Stores the iroh BLAKE3 hash of the user's published profile
+-- document. The profile is a signed JSON blob on iroh.
+-- ============================================================
+
+ALTER TABLE local_identity ADD COLUMN profile_hash TEXT;
 "#;

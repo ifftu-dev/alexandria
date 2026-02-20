@@ -5,6 +5,8 @@ use tauri::State;
 use crate::crypto::keystore::Keystore;
 use crate::crypto::wallet;
 use crate::domain::identity::{Identity, ProfileUpdate, WalletInfo};
+use crate::domain::profile::{ProfilePayload, PublishProfileResult, SignedProfile};
+use crate::ipfs::profile as ipfs_profile;
 use crate::AppState;
 
 #[derive(Debug, Serialize)]
@@ -252,7 +254,7 @@ pub async fn get_profile(state: State<'_, AppState>) -> Result<Option<Identity>,
     let db = state.db.lock().await;
 
     let result = db.conn().query_row(
-        "SELECT stake_address, payment_address, display_name, bio, avatar_cid, created_at, updated_at
+        "SELECT stake_address, payment_address, display_name, bio, avatar_cid, profile_hash, created_at, updated_at
          FROM local_identity WHERE id = 1",
         [],
         |row| {
@@ -262,8 +264,9 @@ pub async fn get_profile(state: State<'_, AppState>) -> Result<Option<Identity>,
                 display_name: row.get(2)?,
                 bio: row.get(3)?,
                 avatar_cid: row.get(4)?,
-                created_at: row.get(5)?,
-                updated_at: row.get(6)?,
+                profile_hash: row.get(5)?,
+                created_at: row.get(6)?,
+                updated_at: row.get(7)?,
             })
         },
     );
@@ -321,7 +324,7 @@ pub async fn update_profile(
     // Return the updated profile
     db.conn()
         .query_row(
-            "SELECT stake_address, payment_address, display_name, bio, avatar_cid, created_at, updated_at
+            "SELECT stake_address, payment_address, display_name, bio, avatar_cid, profile_hash, created_at, updated_at
              FROM local_identity WHERE id = 1",
             [],
             |row| {
@@ -331,10 +334,108 @@ pub async fn update_profile(
                     display_name: row.get(2)?,
                     bio: row.get(3)?,
                     avatar_cid: row.get(4)?,
-                    created_at: row.get(5)?,
-                    updated_at: row.get(6)?,
+                    profile_hash: row.get(5)?,
+                    created_at: row.get(6)?,
+                    updated_at: row.get(7)?,
                 })
             },
         )
         .map_err(|e| e.to_string())
+}
+
+/// Publish the local user's profile to iroh.
+///
+/// Reads the current profile from the database, signs it with the
+/// wallet's Ed25519 key, stores the signed JSON on iroh, and saves
+/// the resulting BLAKE3 hash in the database.
+///
+/// Requires the vault to be unlocked (wallet key needed for signing).
+#[tauri::command]
+pub async fn publish_profile(
+    state: State<'_, AppState>,
+) -> Result<PublishProfileResult, String> {
+    // Get the wallet signing key from the vault
+    let keystore = state.keystore.lock().await;
+    let ks = keystore.as_ref().ok_or("vault is locked — unlock first")?;
+    let mnemonic = ks.retrieve_mnemonic().map_err(|e| e.to_string())?;
+    drop(keystore);
+
+    let w = wallet::wallet_from_mnemonic(&mnemonic).map_err(|e| e.to_string())?;
+
+    // Read the current profile from the database
+    let db = state.db.lock().await;
+    let (stake_address, display_name, bio, avatar_cid, created_at_str): (
+        String,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        String,
+    ) = db
+        .conn()
+        .query_row(
+            "SELECT stake_address, display_name, bio, avatar_cid, created_at
+             FROM local_identity WHERE id = 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+        )
+        .map_err(|e| e.to_string())?;
+    drop(db);
+
+    // Parse created_at to unix timestamp
+    let created_at = parse_datetime_to_unix(&created_at_str);
+    let updated_at = chrono::Utc::now().timestamp();
+
+    // Build the profile payload
+    let payload = ProfilePayload {
+        version: 1,
+        stake_address,
+        name: display_name,
+        bio,
+        avatar_hash: avatar_cid,
+        created_at,
+        updated_at,
+    };
+
+    // Sign the profile
+    let signed = ipfs_profile::sign_profile(&payload, &w.signing_key)
+        .map_err(|e| e.to_string())?;
+
+    // Publish to iroh
+    let result = ipfs_profile::publish_profile(&state.content_node, &signed)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    // Save the profile_hash in the database
+    let db = state.db.lock().await;
+    db.conn()
+        .execute(
+            "UPDATE local_identity SET profile_hash = ?1, updated_at = datetime('now') WHERE id = 1",
+            params![result.profile_hash],
+        )
+        .map_err(|e| e.to_string())?;
+
+    Ok(result)
+}
+
+/// Resolve a profile from iroh by BLAKE3 hash.
+///
+/// Fetches the signed profile document, verifies the Ed25519 signature,
+/// and returns the verified profile. Used for viewing other users'
+/// profiles (received via P2P in Phase 3).
+#[tauri::command]
+pub async fn resolve_profile(
+    state: State<'_, AppState>,
+    hash: String,
+) -> Result<SignedProfile, String> {
+    ipfs_profile::resolve_profile(&state.content_node, &hash)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Parse a SQLite datetime string to a Unix timestamp.
+/// Falls back to current time if parsing fails.
+fn parse_datetime_to_unix(datetime_str: &str) -> i64 {
+    chrono::NaiveDateTime::parse_from_str(datetime_str, "%Y-%m-%d %H:%M:%S")
+        .map(|dt| dt.and_utc().timestamp())
+        .unwrap_or_else(|_| chrono::Utc::now().timestamp())
 }

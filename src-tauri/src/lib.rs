@@ -100,6 +100,8 @@ pub fn run() {
             commands::identity::get_wallet_info,
             commands::identity::get_profile,
             commands::identity::update_profile,
+            commands::identity::publish_profile,
+            commands::identity::resolve_profile,
             commands::courses::list_courses,
             commands::courses::get_course,
             commands::courses::create_course,
