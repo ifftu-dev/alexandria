@@ -3,6 +3,7 @@ use tauri::State;
 
 use crate::crypto::hash::entity_id;
 use crate::domain::enrollment::{ElementProgress, Enrollment, UpdateProgressRequest};
+use crate::evidence::{aggregator, reputation};
 use crate::AppState;
 
 /// List all enrollments for the local user.
@@ -160,7 +161,9 @@ pub async fn update_progress(
         )
         .map_err(|e| e.to_string())?;
 
-    db.conn()
+    // Read back the progress
+    let progress: ElementProgress = db
+        .conn()
         .query_row(
             "SELECT id, enrollment_id, element_id, status, score, time_spent, completed_at, updated_at \
              FROM element_progress WHERE enrollment_id = ?1 AND element_id = ?2",
@@ -178,7 +181,69 @@ pub async fn update_progress(
                 })
             },
         )
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+
+    // Trigger evidence pipeline on completion with a score
+    if req.status == "completed" {
+        if let Some(score) = req.score {
+            // Get course_id and stake_address for evidence creation
+            let course_id: String = db
+                .conn()
+                .query_row(
+                    "SELECT course_id FROM enrollments WHERE id = ?1",
+                    params![enrollment_id],
+                    |row| row.get(0),
+                )
+                .map_err(|e| e.to_string())?;
+
+            let stake_address: String = db
+                .conn()
+                .query_row(
+                    "SELECT stake_address FROM local_identity WHERE id = 1",
+                    [],
+                    |row| row.get(0),
+                )
+                .map_err(|e| e.to_string())?;
+
+            // Create evidence records for each skill tagged on this element
+            let skills = aggregator::create_evidence_for_element(
+                db.conn(),
+                &course_id,
+                &req.element_id,
+                score,
+                &stake_address,
+            )
+            .map_err(|e| format!("evidence creation failed: {}", e))?;
+
+            // Evaluate and update proofs + reputation for each skill
+            for skill_id in &skills {
+                match aggregator::evaluate_and_update(db.conn(), &stake_address, skill_id) {
+                    Ok(result) => {
+                        if let (Some(level), Some(ref proof_id)) =
+                            (result.achieved_level, &result.proof_id)
+                        {
+                            if result.confidence > result.old_confidence {
+                                let _ = reputation::on_proof_updated(
+                                    db.conn(),
+                                    &stake_address,
+                                    skill_id,
+                                    result.old_confidence,
+                                    result.confidence,
+                                    level.as_str(),
+                                    proof_id,
+                                );
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        log::warn!("proof evaluation failed for skill {}: {}", skill_id, e);
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(progress)
 }
 
 /// Get all progress for an enrollment.
