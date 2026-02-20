@@ -2,35 +2,24 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useLocalApi } from '@/composables/useLocalApi'
+import { useAuth } from '@/composables/useAuth'
 import { useTheme } from '@/composables/useTheme'
+import { AppButton, AppInput, AppTextarea, AppModal, AppAlert, DataRow } from '@/components/ui'
+import type { Identity } from '@/types'
 
 const { invoke } = useLocalApi()
+const { identity, lockVault: authLock, exportMnemonic: authExport, refreshProfile } = useAuth()
 const { theme, toggleTheme } = useTheme()
 const router = useRouter()
 
-interface Identity {
-  stake_address: string
-  payment_address: string
-  display_name: string | null
-  bio: string | null
-  profile_hash: string | null
-}
-
-interface PublishResult {
-  profile_hash: string
-}
-
-const profile = ref<Identity | null>(null)
 const displayName = ref('')
 const bio = ref('')
 const saving = ref(false)
 const message = ref('')
 
-// Profile publishing state
 const publishing = ref(false)
 const publishMessage = ref('')
 
-// Security section state
 const showExportModal = ref(false)
 const exportConfirmed = ref(false)
 const exportedMnemonic = ref('')
@@ -38,15 +27,10 @@ const exportError = ref('')
 const exporting = ref(false)
 const locking = ref(false)
 
-onMounted(async () => {
-  try {
-    profile.value = await invoke<Identity | null>('get_profile')
-    if (profile.value) {
-      displayName.value = profile.value.display_name ?? ''
-      bio.value = profile.value.bio ?? ''
-    }
-  } catch (e) {
-    console.error('Failed to load profile:', e)
+onMounted(() => {
+  if (identity.value) {
+    displayName.value = identity.value.display_name ?? ''
+    bio.value = identity.value.bio ?? ''
   }
 })
 
@@ -55,13 +39,13 @@ async function saveProfile() {
   message.value = ''
 
   try {
-    const updated = await invoke<Identity>('update_profile', {
+    await invoke<Identity>('update_profile', {
       update: {
         display_name: displayName.value || null,
         bio: bio.value || null,
       },
     })
-    profile.value = updated
+    await refreshProfile()
     message.value = 'Profile updated.'
   } catch (e) {
     message.value = `Error: ${e}`
@@ -75,10 +59,9 @@ async function publishProfile() {
   publishMessage.value = ''
 
   try {
-    await invoke<PublishResult>('publish_profile')
+    await invoke('publish_profile')
     publishMessage.value = 'Published!'
-    // Refresh profile to get the updated profile_hash
-    profile.value = await invoke<Identity | null>('get_profile')
+    await refreshProfile()
   } catch (e) {
     publishMessage.value = `Error: ${e}`
   } finally {
@@ -99,12 +82,13 @@ function closeExportModal() {
   exportConfirmed.value = false
 }
 
-async function exportMnemonic() {
+async function doExport() {
+  exportConfirmed.value = true
   exporting.value = true
   exportError.value = ''
 
   try {
-    exportedMnemonic.value = await invoke<string>('export_mnemonic')
+    exportedMnemonic.value = await authExport()
   } catch (e) {
     exportError.value = String(e)
   } finally {
@@ -115,7 +99,7 @@ async function exportMnemonic() {
 async function lockWallet() {
   locking.value = true
   try {
-    await invoke('lock_vault')
+    await authLock()
     router.replace('/unlock')
   } catch (e) {
     console.error('Failed to lock:', e)
@@ -137,53 +121,32 @@ async function lockWallet() {
       <h2 class="text-base font-semibold mb-4">Profile</h2>
 
       <div class="space-y-4">
-        <div>
-          <label class="block text-xs font-medium text-[rgb(var(--color-muted-foreground))] mb-1">
-            Display Name
-          </label>
-          <input
-            v-model="displayName"
-            type="text"
-            placeholder="How others see you"
-            class="w-full px-3 py-2 text-sm rounded-md border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))] focus:outline-none focus:ring-2 focus:ring-[rgb(var(--color-ring))]"
-          >
-        </div>
+        <AppInput
+          v-model="displayName"
+          label="Display Name"
+          placeholder="How others see you"
+        />
 
-        <div>
-          <label class="block text-xs font-medium text-[rgb(var(--color-muted-foreground))] mb-1">
-            Bio
-          </label>
-          <textarea
-            v-model="bio"
-            placeholder="A short description about yourself"
-            rows="3"
-            class="w-full px-3 py-2 text-sm rounded-md border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))] focus:outline-none focus:ring-2 focus:ring-[rgb(var(--color-ring))] resize-none"
-          />
-        </div>
+        <AppTextarea
+          v-model="bio"
+          label="Bio"
+          placeholder="A short description about yourself"
+        />
 
         <div class="flex items-center gap-3">
-          <button
-            class="px-4 py-2 rounded-md text-sm font-medium bg-[rgb(var(--color-primary))] text-[rgb(var(--color-primary-foreground))] hover:bg-[rgb(var(--color-primary-hover))] transition-colors disabled:opacity-50"
-            :disabled="saving"
-            @click="saveProfile"
-          >
-            {{ saving ? 'Saving...' : 'Save Profile' }}
-          </button>
-          <button
-            class="px-4 py-2 rounded-md text-sm font-medium border border-[rgb(var(--color-border))] hover:bg-[rgb(var(--color-muted)/0.5)] transition-colors disabled:opacity-50"
-            :disabled="publishing"
-            @click="publishProfile"
-          >
-            {{ publishing ? 'Publishing...' : 'Publish to Network' }}
-          </button>
+          <AppButton :loading="saving" @click="saveProfile">
+            Save Profile
+          </AppButton>
+          <AppButton variant="outline" :loading="publishing" @click="publishProfile">
+            Publish to Network
+          </AppButton>
           <span v-if="message" class="text-xs text-[rgb(var(--color-success))]">{{ message }}</span>
           <span v-if="publishMessage" class="text-xs text-[rgb(var(--color-success))]">{{ publishMessage }}</span>
         </div>
 
-        <!-- Profile Hash -->
-        <div v-if="profile?.profile_hash" class="pt-2 border-t border-[rgb(var(--color-border))]">
+        <div v-if="identity?.profile_hash" class="pt-2 border-t border-[rgb(var(--color-border))]">
           <span class="text-xs text-[rgb(var(--color-muted-foreground))]">Published Profile Hash</span>
-          <code class="block font-mono text-xs mt-0.5 break-all text-[rgb(var(--color-muted-foreground))]">{{ profile.profile_hash }}</code>
+          <code class="block font-mono text-xs mt-0.5 break-all text-[rgb(var(--color-muted-foreground))]">{{ identity.profile_hash }}</code>
         </div>
       </div>
     </div>
@@ -193,7 +156,6 @@ async function lockWallet() {
       <h2 class="text-base font-semibold mb-3">Security</h2>
 
       <div class="space-y-3">
-        <!-- Export Recovery Phrase -->
         <div class="flex items-center justify-between">
           <div>
             <div class="text-sm">Recovery Phrase</div>
@@ -201,15 +163,11 @@ async function lockWallet() {
               Export your 24-word backup phrase
             </div>
           </div>
-          <button
-            class="px-3 py-1.5 rounded-md text-sm border border-[rgb(var(--color-border))] hover:bg-[rgb(var(--color-muted)/0.5)] transition-colors"
-            @click="openExportModal"
-          >
+          <AppButton variant="outline" size="sm" @click="openExportModal">
             Export
-          </button>
+          </AppButton>
         </div>
 
-        <!-- Lock Wallet -->
         <div class="flex items-center justify-between">
           <div>
             <div class="text-sm">Lock Wallet</div>
@@ -217,13 +175,9 @@ async function lockWallet() {
               Clear secrets from memory and require password
             </div>
           </div>
-          <button
-            class="px-3 py-1.5 rounded-md text-sm border border-[rgb(var(--color-border))] hover:bg-[rgb(var(--color-muted)/0.5)] transition-colors disabled:opacity-50"
-            :disabled="locking"
-            @click="lockWallet"
-          >
-            {{ locking ? 'Locking...' : 'Lock' }}
-          </button>
+          <AppButton variant="outline" size="sm" :loading="locking" @click="lockWallet">
+            Lock
+          </AppButton>
         </div>
       </div>
     </div>
@@ -238,104 +192,76 @@ async function lockWallet() {
             Current: {{ theme }}
           </div>
         </div>
-        <button
-          class="px-3 py-1.5 rounded-md text-sm border border-[rgb(var(--color-border))] hover:bg-[rgb(var(--color-muted)/0.5)] transition-colors"
-          @click="toggleTheme"
-        >
+        <AppButton variant="outline" size="sm" @click="toggleTheme">
           Toggle ({{ theme === 'light' ? 'Dark' : theme === 'dark' ? 'System' : 'Light' }})
-        </button>
+        </AppButton>
       </div>
     </div>
 
     <!-- Identity (read-only) -->
-    <div v-if="profile" class="card p-5">
+    <div v-if="identity" class="card p-5">
       <h2 class="text-base font-semibold mb-3">Identity</h2>
-      <div class="space-y-2 text-sm">
-        <div>
-          <span class="text-xs text-[rgb(var(--color-muted-foreground))]">Stake Address</span>
-          <code class="block font-mono text-xs mt-0.5 break-all">{{ profile.stake_address }}</code>
-        </div>
-        <div>
-          <span class="text-xs text-[rgb(var(--color-muted-foreground))]">Payment Address</span>
-          <code class="block font-mono text-xs mt-0.5 break-all">{{ profile.payment_address }}</code>
-        </div>
+      <div class="space-y-2">
+        <DataRow label="Stake Address" mono>{{ identity.stake_address }}</DataRow>
+        <DataRow label="Payment Address" mono>{{ identity.payment_address }}</DataRow>
       </div>
     </div>
 
     <!-- Export Recovery Phrase Modal -->
-    <Teleport to="body">
-      <div
-        v-if="showExportModal"
-        class="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-        @click.self="closeExportModal"
-      >
-        <div class="card p-6 w-full max-w-md mx-4">
-          <h3 class="text-base font-semibold mb-3">Export Recovery Phrase</h3>
+    <AppModal
+      :open="showExportModal"
+      title="Export Recovery Phrase"
+      max-width="28rem"
+      @close="closeExportModal"
+    >
+      <!-- Confirmation step -->
+      <div v-if="!exportedMnemonic && !exportConfirmed">
+        <AppAlert variant="error" class="mb-4">
+          Your recovery phrase gives full access to your identity and credentials.
+          Only export it in a private, secure environment.
+        </AppAlert>
 
-          <!-- Confirmation step -->
-          <div v-if="!exportedMnemonic && !exportConfirmed">
-            <div class="card p-4 mb-4 border-[rgb(var(--color-error))] bg-[rgb(var(--color-error)/0.05)]">
-              <p class="text-sm text-[rgb(var(--color-error))] font-medium">
-                Your recovery phrase gives full access to your identity and credentials.
-                Only export it in a private, secure environment.
-              </p>
-            </div>
-
-            <div class="flex gap-2">
-              <button
-                class="flex-1 py-2 px-3 rounded-md text-sm border border-[rgb(var(--color-border))] hover:bg-[rgb(var(--color-muted)/0.5)] transition-colors"
-                @click="closeExportModal"
-              >
-                Cancel
-              </button>
-              <button
-                class="flex-1 py-2 px-3 rounded-md text-sm font-medium bg-[rgb(var(--color-error))] text-[rgb(var(--color-error-foreground))] hover:opacity-90 transition-opacity"
-                @click="exportConfirmed = true; exportMnemonic()"
-              >
-                I Understand, Show Phrase
-              </button>
-            </div>
-          </div>
-
-          <!-- Loading -->
-          <div v-else-if="exporting" class="text-center py-4">
-            <div class="w-6 h-6 border-2 border-[rgb(var(--color-primary))] border-t-transparent rounded-full animate-spin mx-auto mb-2" />
-            <p class="text-sm text-[rgb(var(--color-muted-foreground))]">Decrypting...</p>
-          </div>
-
-          <!-- Error -->
-          <div v-else-if="exportError">
-            <p class="text-sm text-[rgb(var(--color-error))] mb-3">{{ exportError }}</p>
-            <button
-              class="w-full py-2 px-3 rounded-md text-sm border border-[rgb(var(--color-border))] hover:bg-[rgb(var(--color-muted)/0.5)] transition-colors"
-              @click="closeExportModal"
-            >
-              Close
-            </button>
-          </div>
-
-          <!-- Mnemonic display -->
-          <div v-else-if="exportedMnemonic">
-            <div class="grid grid-cols-3 gap-2 mb-4">
-              <div
-                v-for="(word, i) in exportedMnemonic.split(' ')"
-                :key="i"
-                class="flex items-center gap-2 text-sm py-1.5 px-2.5 rounded bg-[rgb(var(--color-muted)/0.3)]"
-              >
-                <span class="text-xs text-[rgb(var(--color-muted-foreground))] w-5 text-right">{{ i + 1 }}.</span>
-                <span class="font-mono font-medium">{{ word }}</span>
-              </div>
-            </div>
-
-            <button
-              class="w-full py-2 px-3 rounded-md text-sm font-medium bg-[rgb(var(--color-primary))] text-[rgb(var(--color-primary-foreground))] hover:bg-[rgb(var(--color-primary-hover))] transition-colors"
-              @click="closeExportModal"
-            >
-              Done
-            </button>
-          </div>
+        <div class="flex gap-2">
+          <AppButton variant="ghost" class="flex-1" @click="closeExportModal">
+            Cancel
+          </AppButton>
+          <AppButton variant="danger" class="flex-1" @click="doExport">
+            I Understand, Show Phrase
+          </AppButton>
         </div>
       </div>
-    </Teleport>
+
+      <!-- Loading -->
+      <div v-else-if="exporting" class="text-center py-4">
+        <div class="w-6 h-6 border-2 border-[rgb(var(--color-primary))] border-t-transparent rounded-full animate-spin mx-auto mb-2" />
+        <p class="text-sm text-[rgb(var(--color-muted-foreground))]">Decrypting...</p>
+      </div>
+
+      <!-- Error -->
+      <div v-else-if="exportError">
+        <AppAlert variant="error" class="mb-3">{{ exportError }}</AppAlert>
+        <AppButton variant="outline" class="w-full" @click="closeExportModal">
+          Close
+        </AppButton>
+      </div>
+
+      <!-- Mnemonic display -->
+      <div v-else-if="exportedMnemonic">
+        <div class="grid grid-cols-3 gap-2 mb-4">
+          <div
+            v-for="(word, i) in exportedMnemonic.split(' ')"
+            :key="i"
+            class="flex items-center gap-2 text-sm py-1.5 px-2.5 rounded bg-[rgb(var(--color-muted)/0.3)]"
+          >
+            <span class="text-xs text-[rgb(var(--color-muted-foreground))] w-5 text-right">{{ i + 1 }}.</span>
+            <span class="font-mono font-medium">{{ word }}</span>
+          </div>
+        </div>
+
+        <AppButton class="w-full" @click="closeExportModal">
+          Done
+        </AppButton>
+      </div>
+    </AppModal>
   </div>
 </template>

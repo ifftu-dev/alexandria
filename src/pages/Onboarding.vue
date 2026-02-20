@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { useLocalApi } from '@/composables/useLocalApi'
+import { useAuth } from '@/composables/useAuth'
 
-const { invoke } = useLocalApi()
 const router = useRouter()
+const { generateWallet: authGenerate, restoreWallet: authRestore } = useAuth()
 
 type Step = 'welcome' | 'password' | 'generating' | 'backup' | 'done'
 type Mode = 'create' | 'import'
@@ -65,12 +65,7 @@ async function createWallet() {
   step.value = 'generating'
 
   try {
-    const result = await invoke<{
-      mnemonic: string
-      stake_address: string
-      payment_address: string
-    }>('generate_wallet', { password: password.value })
-
+    const result = await authGenerate(password.value)
     mnemonic.value = result.mnemonic
     step.value = 'backup'
   } catch (e) {
@@ -95,12 +90,7 @@ async function restoreWallet() {
   step.value = 'generating'
 
   try {
-    await invoke<{
-      stake_address: string
-      payment_address: string
-      has_mnemonic_backup: boolean
-    }>('restore_wallet', { mnemonic: phrase, password: password.value })
-
+    await authRestore(phrase, password.value)
     step.value = 'done'
   } catch (e) {
     error.value = String(e)

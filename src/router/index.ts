@@ -3,15 +3,13 @@ import { createRouter, createWebHistory } from 'vue-router'
 const router = createRouter({
   history: createWebHistory(),
   routes: [
-    // Onboarding (no wallet yet)
+    // ---- Auth (blank layout) ----
     {
       path: '/onboarding',
       name: 'onboarding',
       component: () => import('@/pages/Onboarding.vue'),
       meta: { layout: 'blank' },
     },
-
-    // Unlock screen (vault exists but locked)
     {
       path: '/unlock',
       name: 'unlock',
@@ -19,7 +17,7 @@ const router = createRouter({
       meta: { layout: 'blank' },
     },
 
-    // App routes (wallet required)
+    // ---- App routes (app layout, wallet required) ----
     {
       path: '/',
       redirect: '/home',
@@ -30,6 +28,8 @@ const router = createRouter({
       component: () => import('@/pages/Home.vue'),
       meta: { layout: 'app' },
     },
+
+    // Courses — catalog
     {
       path: '/courses',
       name: 'courses',
@@ -42,10 +42,86 @@ const router = createRouter({
       component: () => import('@/pages/courses/Detail.vue'),
       meta: { layout: 'app' },
     },
+
+    // Instructor — course authoring
+    {
+      path: '/instructor/courses/new',
+      name: 'course-create',
+      component: () => import('@/pages/instructor/CourseNew.vue'),
+      meta: { layout: 'app' },
+    },
+    {
+      path: '/instructor/courses/:id',
+      name: 'course-edit',
+      component: () => import('@/pages/instructor/CourseEdit.vue'),
+      meta: { layout: 'app' },
+    },
+
+    // Learning player
+    {
+      path: '/learn/:id',
+      name: 'learn',
+      component: () => import('@/pages/learn/Player.vue'),
+      meta: { layout: 'app' },
+    },
+
+    // Skills & Taxonomy
+    {
+      path: '/skills',
+      name: 'skills',
+      component: () => import('@/pages/skills/Index.vue'),
+      meta: { layout: 'app' },
+    },
+    {
+      path: '/skills/:id',
+      name: 'skill-detail',
+      component: () => import('@/pages/skills/Detail.vue'),
+      meta: { layout: 'app' },
+    },
+
+    // Governance
+    {
+      path: '/governance',
+      name: 'governance',
+      component: () => import('@/pages/governance/Index.vue'),
+      meta: { layout: 'app' },
+    },
+    {
+      path: '/governance/:id',
+      name: 'dao-detail',
+      component: () => import('@/pages/governance/DaoDetail.vue'),
+      meta: { layout: 'app' },
+    },
+
+    // Dashboard
     {
       path: '/dashboard/courses',
       name: 'dashboard-courses',
       component: () => import('@/pages/dashboard/Courses.vue'),
+      meta: { layout: 'app' },
+    },
+    {
+      path: '/dashboard/credentials',
+      name: 'dashboard-credentials',
+      component: () => import('@/pages/dashboard/Credentials.vue'),
+      meta: { layout: 'app' },
+    },
+    {
+      path: '/dashboard/reputation',
+      name: 'dashboard-reputation',
+      component: () => import('@/pages/dashboard/Reputation.vue'),
+      meta: { layout: 'app' },
+    },
+    {
+      path: '/dashboard/network',
+      name: 'dashboard-network',
+      component: () => import('@/pages/dashboard/Network.vue'),
+      meta: { layout: 'app' },
+    },
+    {
+      path: '/dashboard/sync',
+      name: 'dashboard-sync',
+      component: () => import('@/pages/dashboard/Sync.vue'),
       meta: { layout: 'app' },
     },
     {

@@ -1,0 +1,668 @@
+// ============================================
+// Alexandria v2 — Shared TypeScript Types
+// Generated from Rust domain structs (src-tauri/src/domain/)
+// ============================================
+
+// ---- Identity & Profile ----
+
+export interface Identity {
+  stake_address: string
+  payment_address: string
+  display_name: string | null
+  bio: string | null
+  avatar_cid: string | null
+  profile_hash: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface WalletInfo {
+  stake_address: string
+  payment_address: string
+  has_mnemonic_backup: boolean
+}
+
+export interface ProfileUpdate {
+  display_name?: string | null
+  bio?: string | null
+  avatar_cid?: string | null
+}
+
+export interface PublishProfileResult {
+  profile_hash: string
+  profile: SignedProfile
+}
+
+export interface SignedProfile {
+  version: number
+  stake_address: string
+  name?: string | null
+  bio?: string | null
+  avatar_hash?: string | null
+  created_at: number
+  updated_at: number
+  signature: string
+  public_key: string
+}
+
+// ---- Course ----
+
+export interface Course {
+  id: string
+  title: string
+  description: string | null
+  author_address: string
+  content_cid: string | null
+  thumbnail_cid: string | null
+  tags: string[] | null
+  skill_ids: string[] | null
+  version: number
+  status: string
+  published_at: string | null
+  on_chain_tx: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface CreateCourseRequest {
+  title: string
+  description?: string | null
+  tags?: string[] | null
+  skill_ids?: string[] | null
+}
+
+export interface UpdateCourseRequest {
+  title?: string | null
+  description?: string | null
+  tags?: string[] | null
+  skill_ids?: string[] | null
+  status?: string | null
+}
+
+export interface Chapter {
+  id: string
+  course_id: string
+  title: string
+  description: string | null
+  position: number
+}
+
+export interface CreateChapterRequest {
+  title: string
+  description?: string | null
+}
+
+export interface UpdateChapterRequest {
+  title?: string | null
+  description?: string | null
+  position?: number | null
+}
+
+export interface Element {
+  id: string
+  chapter_id: string
+  title: string
+  element_type: string
+  content_cid: string | null
+  position: number
+  duration_seconds: number | null
+}
+
+export interface CreateElementRequest {
+  title: string
+  element_type: string
+  content_hash?: string | null
+  duration_seconds?: number | null
+}
+
+export interface UpdateElementRequest {
+  title?: string | null
+  element_type?: string | null
+  content_hash?: string | null
+  position?: number | null
+  duration_seconds?: number | null
+}
+
+export interface PublishCourseResult {
+  content_hash: string
+  size: number
+}
+
+// ---- Enrollment ----
+
+export interface Enrollment {
+  id: string
+  course_id: string
+  enrolled_at: string
+  completed_at: string | null
+  status: string
+  updated_at: string
+}
+
+export interface ElementProgress {
+  id: string
+  enrollment_id: string
+  element_id: string
+  status: string
+  score: number | null
+  time_spent: number
+  completed_at: string | null
+  updated_at: string
+}
+
+export interface UpdateProgressRequest {
+  element_id: string
+  status: string
+  score?: number | null
+  time_spent?: number | null
+}
+
+// ---- Evidence & Skill Proofs ----
+
+export type ProficiencyLevel = 'remember' | 'understand' | 'apply' | 'analyze' | 'evaluate' | 'create'
+
+export interface SkillAssessment {
+  id: string
+  skill_id: string
+  course_id: string | null
+  source_element_id: string | null
+  assessment_type: string
+  proficiency_level: string
+  difficulty: number
+  weight: number
+  trust_factor: number
+  created_at: string
+}
+
+export interface EvidenceRecord {
+  id: string
+  skill_assessment_id: string
+  skill_id: string
+  proficiency_level: string
+  score: number
+  difficulty: number
+  trust_factor: number
+  course_id: string | null
+  instructor_address: string | null
+  created_at: string
+}
+
+export interface SkillProof {
+  id: string
+  skill_id: string
+  proficiency_level: string
+  confidence: number
+  evidence_count: number
+  computed_at: string
+  updated_at: string
+}
+
+export interface ReputationAssertion {
+  id: string
+  actor_address: string
+  role: string
+  skill_id: string | null
+  proficiency_level: string | null
+  score: number
+  evidence_count: number
+  computation_spec: string
+  updated_at: string
+}
+
+// ---- Reputation ----
+
+export type ReputationRole = 'instructor' | 'learner' | 'assessor' | 'author' | 'mentor'
+
+export interface FullReputationAssertion {
+  id: string
+  actor_address: string
+  role: string
+  skill_id: string | null
+  proficiency_level: string | null
+  score: number
+  confidence: number
+  evidence_count: number
+  distribution: DistributionMetrics | null
+  computation_spec: string
+  window_start: string | null
+  window_end: string | null
+  updated_at: string
+}
+
+export interface DistributionMetrics {
+  median_impact: number
+  impact_p25: number
+  impact_p75: number
+  learner_count: number
+  impact_variance: number
+}
+
+export interface InstructorRanking {
+  actor_address: string
+  skill_id: string
+  proficiency_level: string
+  impact_score: number
+  confidence: number
+  learner_count: number
+  median_impact: number
+  rank: number
+}
+
+export interface ReputationQuery {
+  actor_address?: string | null
+  role?: string | null
+  skill_id?: string | null
+  proficiency_level?: string | null
+  limit?: number | null
+}
+
+export interface RecomputeResult {
+  assertions_updated: number
+  deltas_recomputed: number
+  duration_ms: number
+}
+
+export interface VerificationResult {
+  score_matches: boolean
+  confidence_matches: boolean
+  recomputed_score: number
+  recomputed_confidence: number
+  claimed_score: number
+  claimed_confidence: number
+  max_diff: number
+}
+
+// ---- Snapshots ----
+
+export type SnapshotStatus = 'pending' | 'building' | 'submitted' | 'confirmed' | 'failed'
+
+export interface SnapshotRecord {
+  id: string
+  actor_address: string
+  subject_id: string
+  role: string
+  skill_count: number
+  tx_status: string
+  tx_hash: string | null
+  policy_id: string | null
+  ref_asset_name: string | null
+  user_asset_name: string | null
+  error_message: string | null
+  snapshot_at: string
+  confirmed_at: string | null
+}
+
+export interface CreateSnapshotParams {
+  subject_id: string
+  role: string
+}
+
+// ---- Governance ----
+
+export type ElectionPhase = 'nomination' | 'voting' | 'finalized' | 'cancelled'
+export type ProposalStatus = 'draft' | 'published' | 'approved' | 'rejected' | 'cancelled'
+
+export interface DaoInfo {
+  id: string
+  name: string
+  description: string | null
+  scope_type: string
+  scope_id: string
+  status: string
+  committee_size: number
+  election_interval_days: number
+  on_chain_tx: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface DaoMember {
+  dao_id: string
+  stake_address: string
+  role: string
+  joined_at: string
+}
+
+export interface CreateDaoParams {
+  name: string
+  description?: string | null
+  scope_type: string
+  scope_id: string
+  committee_size?: number | null
+  election_interval_days?: number | null
+}
+
+export interface Election {
+  id: string
+  dao_id: string
+  title: string
+  description: string | null
+  phase: string
+  seats: number
+  nominee_min_proficiency: string
+  voter_min_proficiency: string
+  nomination_start: string
+  nomination_end: string | null
+  voting_end: string | null
+  on_chain_tx: string | null
+  created_at: string
+  finalized_at: string | null
+}
+
+export interface ElectionNominee {
+  id: string
+  election_id: string
+  stake_address: string
+  accepted: boolean
+  votes_received: number
+  is_winner: boolean
+  nominated_at: string
+}
+
+export interface ElectionVote {
+  id: string
+  election_id: string
+  voter: string
+  nominee_id: string
+  on_chain_tx: string | null
+  voted_at: string
+}
+
+export interface OpenElectionParams {
+  dao_id: string
+  title: string
+  description?: string | null
+  seats?: number | null
+  nominee_min_proficiency?: string | null
+  voter_min_proficiency?: string | null
+  nomination_end?: string | null
+  voting_end?: string | null
+}
+
+export interface Proposal {
+  id: string
+  dao_id: string
+  title: string
+  description: string | null
+  category: string
+  status: string
+  proposer: string
+  votes_for: number
+  votes_against: number
+  voting_deadline: string | null
+  min_vote_proficiency: string
+  on_chain_tx: string | null
+  created_at: string
+  resolved_at: string | null
+}
+
+export interface ProposalVote {
+  id: string
+  proposal_id: string
+  voter: string
+  in_favor: boolean
+  on_chain_tx: string | null
+  voted_at: string
+}
+
+export interface SubmitProposalParams {
+  dao_id: string
+  title: string
+  description?: string | null
+  category: string
+  min_vote_proficiency?: string | null
+}
+
+export interface GovernanceTxResult {
+  tx_hash: string
+  action: string
+}
+
+// ---- Catalog ----
+
+export interface CatalogEntry {
+  course_id: string
+  title: string
+  description: string | null
+  author_address: string
+  content_cid: string
+  thumbnail_cid: string | null
+  tags: string[] | null
+  skill_ids: string[] | null
+  version: number
+  published_at: string
+  received_at: string
+  pinned: boolean
+  on_chain_tx: string | null
+}
+
+// ---- Taxonomy ----
+
+export interface TaxonomySubjectField {
+  id: string
+  name: string
+  description: string | null
+}
+
+export interface TaxonomySubject {
+  id: string
+  name: string
+  description: string | null
+  subject_field_id: string
+}
+
+export interface TaxonomySkill {
+  id: string
+  name: string
+  description: string | null
+  subject_id: string
+  bloom_level: string
+}
+
+export interface TaxonomyChanges {
+  subject_fields: TaxonomySubjectField[]
+  subjects: TaxonomySubject[]
+  skills: TaxonomySkill[]
+  prerequisites: [string, string][]
+  removed_prerequisites: [string, string][]
+}
+
+export interface TaxonomyVersion {
+  version: number
+  cid: string
+  previous_cid: string | null
+  ratified_by: string | null
+  ratified_at: string | null
+  signature: string | null
+  applied_at: string
+}
+
+export interface TaxonomyPreview {
+  subject_fields_affected: number
+  subjects_affected: number
+  skills_affected: number
+  prerequisites_added: number
+  prerequisites_removed: number
+  has_modifications: boolean
+  new_skill_ids: string[]
+  modified_skill_ids: string[]
+}
+
+export interface TaxonomyPublishResult {
+  version: number
+  content_cid: string
+  changes_applied: number
+}
+
+export interface ProposeTaxonomyParams {
+  dao_id: string
+  title: string
+  description?: string | null
+  changes: TaxonomyChanges
+}
+
+// ---- Sync ----
+
+export interface DeviceInfo {
+  id: string
+  device_name: string | null
+  platform: string | null
+  first_seen: string
+  last_synced: string | null
+  is_local: boolean
+  peer_id: string | null
+}
+
+export interface SyncStatus {
+  device_count: number
+  queue_length: number
+  auto_sync: boolean
+  last_sync: string | null
+  devices: DeviceSyncSummary[]
+}
+
+export interface DeviceSyncSummary {
+  device_id: string
+  device_name: string | null
+  last_synced: string | null
+  tables_synced: number
+  is_online: boolean
+}
+
+export interface SyncResult {
+  rows_sent: number
+  rows_received: number
+  rows_merged: number
+  table_stats: [string, number, number][]
+  duration_ms: number
+}
+
+export interface SyncHistoryEntry {
+  device_id: string
+  device_name: string | null
+  synced_at: string
+  rows_sent: number
+  rows_received: number
+  direction: string
+}
+
+// ---- Challenge ----
+
+export type ChallengeTargetType = 'evidence' | 'skill_proof'
+export type ChallengeStatus = 'pending' | 'reviewing' | 'upheld' | 'rejected' | 'expired'
+
+export interface EvidenceChallenge {
+  id: string
+  challenger: string
+  target_type: string
+  target_ids: string[]
+  evidence_cids: string[]
+  reason: string
+  stake_lovelace: number
+  stake_tx_hash: string | null
+  status: string
+  dao_id: string
+  learner_address: string
+  reviewed_by: string[]
+  resolution_tx: string | null
+  signature: string
+  created_at: string
+  resolved_at: string | null
+  expires_at: string | null
+}
+
+export interface ChallengeVote {
+  id: string
+  challenge_id: string
+  voter: string
+  upheld: boolean
+  reason: string | null
+  voted_at: string
+}
+
+export interface SubmitChallengeParams {
+  target_type: string
+  target_ids: string[]
+  evidence_cids: string[]
+  reason: string
+  stake_lovelace: number
+  dao_id: string
+  learner_address: string
+}
+
+export interface ChallengeResolution {
+  challenge_id: string
+  status: string
+  votes_upheld: number
+  votes_rejected: number
+  proofs_invalidated: number
+  reputation_zeroed: boolean
+}
+
+// ---- Attestation ----
+
+export type AttestorRole = 'assessor' | 'proctor'
+export type AttestationType = 'co_sign' | 'proctor_verify' | 'skill_verify'
+
+export interface AttestationRequirement {
+  skill_id: string
+  proficiency_level: string
+  required_attestors: number
+  dao_id: string
+  set_by_proposal: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface EvidenceAttestation {
+  id: string
+  evidence_id: string
+  attestor_address: string
+  attestor_role: string
+  attestation_type: string
+  integrity_score: number | null
+  session_cid: string | null
+  signature: string
+  created_at: string
+}
+
+export interface AttestationStatus {
+  evidence_id: string
+  skill_id: string
+  proficiency_level: string
+  required_attestors: number
+  current_attestors: number
+  is_fully_attested: boolean
+  attestations: EvidenceAttestation[]
+}
+
+export interface SubmitAttestationParams {
+  evidence_id: string
+  attestation_type?: string | null
+  integrity_score?: number | null
+  session_cid?: string | null
+}
+
+// ---- P2P ----
+
+export interface P2PStatus {
+  running: boolean
+  peer_id: string | null
+  listening_addresses: string[]
+  connected_peers: number
+  gossipsub_topics: string[]
+}
+
+export interface PeerInfo {
+  peer_id: string
+  addresses: string[]
+  protocols: string[]
+}
+
+// ---- Health ----
+
+export interface HealthResponse {
+  status: string
+  version: string
+  database: string
+}

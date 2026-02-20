@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { useLocalApi } from '@/composables/useLocalApi'
+import { useAuth } from '@/composables/useAuth'
+import { AppButton } from '@/components/ui'
 
-const { invoke } = useLocalApi()
 const router = useRouter()
+const { unlockVault } = useAuth()
 
 const password = ref('')
 const error = ref('')
@@ -20,12 +21,7 @@ async function unlock() {
   error.value = ''
 
   try {
-    await invoke<{
-      stake_address: string
-      payment_address: string
-      has_mnemonic_backup: boolean
-    }>('unlock_vault', { password: password.value })
-
+    await unlockVault(password.value)
     router.replace('/home')
   } catch (e) {
     const msg = String(e)
@@ -41,9 +37,7 @@ async function unlock() {
 }
 
 function handleKeydown(e: KeyboardEvent) {
-  if (e.key === 'Enter') {
-    unlock()
-  }
+  if (e.key === 'Enter') unlock()
 }
 </script>
 
@@ -64,14 +58,12 @@ function handleKeydown(e: KeyboardEvent) {
 
       <div class="card p-6">
         <div class="mb-4">
-          <label class="block text-xs font-medium text-[rgb(var(--color-muted-foreground))] mb-1.5">
-            Password
-          </label>
+          <label class="label text-xs text-[rgb(var(--color-muted-foreground))]">Password</label>
           <input
             v-model="password"
             type="password"
             placeholder="Enter your vault password"
-            class="w-full px-3 py-2.5 text-sm rounded-md border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))] focus:outline-none focus:ring-2 focus:ring-[rgb(var(--color-ring))]"
+            class="input"
             autofocus
             @keydown="handleKeydown"
           >
@@ -79,17 +71,14 @@ function handleKeydown(e: KeyboardEvent) {
 
         <p v-if="error" class="text-sm text-[rgb(var(--color-error))] mb-4">{{ error }}</p>
 
-        <button
-          class="w-full py-2.5 px-4 rounded-md text-sm font-medium bg-[rgb(var(--color-primary))] text-[rgb(var(--color-primary-foreground))] hover:bg-[rgb(var(--color-primary-hover))] transition-colors disabled:opacity-50"
-          :disabled="unlocking || !password"
+        <AppButton
+          class="w-full"
+          :loading="unlocking"
+          :disabled="!password"
           @click="unlock"
         >
-          <span v-if="unlocking" class="flex items-center justify-center gap-2">
-            <span class="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
-            Unlocking...
-          </span>
-          <span v-else>Unlock</span>
-        </button>
+          Unlock
+        </AppButton>
       </div>
 
       <p class="text-center text-xs text-[rgb(var(--color-muted-foreground))] mt-4">
