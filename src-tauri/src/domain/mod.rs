@@ -7,4 +7,5 @@ pub mod governance;
 pub mod identity;
 pub mod profile;
 pub mod reputation;
+pub mod sync;
 pub mod taxonomy;

@@ -15,6 +15,9 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (5, "governance_members", MIGRATION_005),
     (6, "reputation_engine", MIGRATION_006),
     (7, "governance_elections", MIGRATION_007),
+    (8, "reputation_snapshots", MIGRATION_008),
+    (9, "taxonomy_ratification", MIGRATION_009),
+    (10, "cross_device_sync", MIGRATION_010),
 ];
 
 const MIGRATION_001: &str = r#"
@@ -564,4 +567,105 @@ ALTER TABLE governance_daos ADD COLUMN election_interval_days INTEGER NOT NULL D
 
 ALTER TABLE governance_proposals ADD COLUMN voting_deadline TEXT;
 ALTER TABLE governance_proposals ADD COLUMN min_vote_proficiency TEXT NOT NULL DEFAULT 'remember';
+"#;
+
+const MIGRATION_008: &str = r#"
+-- ============================================================
+-- Migration 008: Reputation Snapshots
+-- Tracks CIP-68 soulbound token minting for on-chain reputation
+-- anchoring. Each snapshot records the status of anchoring a
+-- subject+role reputation to the Cardano blockchain.
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS reputation_snapshots (
+    id              TEXT PRIMARY KEY,
+    actor_address   TEXT NOT NULL,
+    subject_id      TEXT NOT NULL,
+    role            TEXT NOT NULL,
+    skill_count     INTEGER NOT NULL DEFAULT 0,
+    tx_status       TEXT NOT NULL DEFAULT 'pending',  -- pending|building|submitted|confirmed|failed
+    tx_hash         TEXT,
+    policy_id       TEXT,
+    ref_asset_name  TEXT,   -- CIP-68 reference token asset name (hex)
+    user_asset_name TEXT,   -- CIP-68 user token asset name (hex)
+    error_message   TEXT,
+    snapshot_at     TEXT NOT NULL DEFAULT (datetime('now')),
+    confirmed_at    TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_snapshots_actor ON reputation_snapshots(actor_address);
+CREATE INDEX IF NOT EXISTS idx_snapshots_status ON reputation_snapshots(tx_status);
+CREATE INDEX IF NOT EXISTS idx_snapshots_subject ON reputation_snapshots(subject_id);
+"#;
+
+const MIGRATION_009: &str = r#"
+-- ============================================================
+-- Migration 009: Taxonomy Ratification
+-- Adds content_cid and taxonomy_version columns to governance
+-- proposals, enabling the DAO taxonomy ratification workflow:
+--   propose → gossip → submit → vote → resolve+publish → apply
+-- content_cid stores the serialized taxonomy changes JSON
+-- (replaced with the IPFS CID on publish). taxonomy_version
+-- records the target version number for the ratified taxonomy.
+-- ============================================================
+
+ALTER TABLE governance_proposals ADD COLUMN content_cid TEXT;
+ALTER TABLE governance_proposals ADD COLUMN taxonomy_version INTEGER;
+"#;
+
+const MIGRATION_010: &str = r#"
+-- ============================================================
+-- Migration 010: Cross-Device Sync
+-- Adds tables for multi-device synchronization:
+--   - devices: registered devices sharing the same wallet
+--   - sync_state: per-table last-synced timestamps (LWW vector)
+--   - sync_queue: outbound changes queued for replication
+-- Pairing = importing the same mnemonic on both devices.
+-- Encryption: XChaCha20-Poly1305 with HKDF-derived key.
+-- ============================================================
+
+-- Known devices sharing this wallet identity.
+-- Each device has a unique device_id (random UUID) and an
+-- optional user-assigned name.
+CREATE TABLE IF NOT EXISTS devices (
+    id              TEXT PRIMARY KEY,      -- Random UUID per device
+    device_name     TEXT,                  -- User-assigned label
+    platform        TEXT,                  -- macos|windows|linux
+    first_seen      TEXT NOT NULL DEFAULT (datetime('now')),
+    last_synced     TEXT,
+    is_local        INTEGER NOT NULL DEFAULT 0,  -- 1 = this device
+    peer_id         TEXT                   -- libp2p PeerId (if known)
+);
+
+CREATE INDEX IF NOT EXISTS idx_devices_local ON devices(is_local);
+
+-- Per-table sync state tracking (LWW vector clock).
+-- Records the latest updated_at timestamp received from each
+-- remote device per table, so we only send newer rows on sync.
+CREATE TABLE IF NOT EXISTS sync_state (
+    device_id       TEXT NOT NULL REFERENCES devices(id),
+    table_name      TEXT NOT NULL,         -- enrollments|element_progress|course_notes|evidence_records|skill_proof_evidence
+    last_synced_at  TEXT NOT NULL,          -- ISO 8601 timestamp of last sync
+    row_count       INTEGER NOT NULL DEFAULT 0,  -- Number of rows synced
+    PRIMARY KEY (device_id, table_name)
+);
+
+-- Outbound sync queue — changes that need to be sent to peers.
+-- Items are dequeued after successful delivery to all known devices.
+CREATE TABLE IF NOT EXISTS sync_queue (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    table_name      TEXT NOT NULL,
+    row_id          TEXT NOT NULL,          -- PK of the changed row
+    operation       TEXT NOT NULL,          -- insert|update|delete
+    row_data        TEXT,                   -- JSON snapshot of the row (null for delete)
+    updated_at      TEXT NOT NULL,          -- Timestamp of the change (LWW tiebreaker)
+    queued_at       TEXT NOT NULL DEFAULT (datetime('now')),
+    delivered_to    TEXT DEFAULT '[]'       -- JSON array of device_ids that received it
+);
+
+CREATE INDEX IF NOT EXISTS idx_sync_queue_table ON sync_queue(table_name);
+CREATE INDEX IF NOT EXISTS idx_sync_queue_queued ON sync_queue(queued_at);
+
+-- Add device_id to local_identity so we know which device we are.
+ALTER TABLE local_identity ADD COLUMN device_id TEXT;
 "#;

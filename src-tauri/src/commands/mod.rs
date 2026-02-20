@@ -11,3 +11,6 @@ pub mod health;
 pub mod identity;
 pub mod p2p;
 pub mod reputation;
+pub mod snapshot;
+pub mod sync;
+pub mod taxonomy;

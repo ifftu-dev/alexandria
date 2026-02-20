@@ -198,3 +198,101 @@ pub struct VerificationResult {
     /// Maximum absolute difference (tolerance = 0.001).
     pub max_diff: f64,
 }
+
+/// CIP-68 label prefixes for soulbound reputation tokens.
+pub mod cip68 {
+    /// Reference NFT label (100) — 4-byte prefix.
+    pub const REFERENCE_LABEL_PREFIX: [u8; 4] = [0x00, 0x06, 0x43, 0xb0];
+    /// User token label (222) — 4-byte prefix.
+    pub const USER_LABEL_PREFIX: [u8; 4] = [0x00, 0x0d, 0xe1, 0x40];
+
+    /// Role byte encoding for asset name.
+    pub const ROLE_INSTRUCTOR: u8 = 0x01;
+    pub const ROLE_LEARNER: u8 = 0x02;
+    pub const ROLE_ASSESSOR: u8 = 0x03;
+    pub const ROLE_AUTHOR: u8 = 0x04;
+    pub const ROLE_MENTOR: u8 = 0x05;
+
+    /// Scale factor for on-chain impact scores (10^6).
+    pub const IMPACT_SCALE: i64 = 1_000_000;
+    /// Scale factor for on-chain confidence values (10^4).
+    pub const CONFIDENCE_SCALE: i64 = 10_000;
+}
+
+/// Snapshot status for on-chain reputation anchoring.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SnapshotStatus {
+    Pending,
+    Building,
+    Submitted,
+    Confirmed,
+    Failed,
+}
+
+impl SnapshotStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            SnapshotStatus::Pending => "pending",
+            SnapshotStatus::Building => "building",
+            SnapshotStatus::Submitted => "submitted",
+            SnapshotStatus::Confirmed => "confirmed",
+            SnapshotStatus::Failed => "failed",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<SnapshotStatus> {
+        match s {
+            "pending" => Some(SnapshotStatus::Pending),
+            "building" => Some(SnapshotStatus::Building),
+            "submitted" => Some(SnapshotStatus::Submitted),
+            "confirmed" => Some(SnapshotStatus::Confirmed),
+            "failed" => Some(SnapshotStatus::Failed),
+            _ => None,
+        }
+    }
+}
+
+/// A reputation snapshot record — tracks on-chain anchoring of reputation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SnapshotRecord {
+    pub id: String,
+    pub actor_address: String,
+    pub subject_id: String,
+    pub role: String,
+    pub skill_count: i64,
+    pub tx_status: String,
+    pub tx_hash: Option<String>,
+    pub policy_id: Option<String>,
+    pub ref_asset_name: Option<String>,
+    pub user_asset_name: Option<String>,
+    pub error_message: Option<String>,
+    pub snapshot_at: String,
+    pub confirmed_at: Option<String>,
+}
+
+/// On-chain skill score (part of ReputationDatum).
+///
+/// Stored as Plutus Data integers with fixed-point scaling.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OnChainSkillScore {
+    /// First 16 bytes of skill_id (hex-encoded for serialization).
+    pub skill_id_bytes: String,
+    /// Bloom's proficiency level as enum index (0-5).
+    pub proficiency: u8,
+    /// Impact score scaled by 10^6.
+    pub impact_score: i64,
+    /// Confidence scaled by 10^4.
+    pub confidence: i64,
+    /// Number of evidence records.
+    pub evidence_count: i64,
+}
+
+/// Parameters for creating a reputation snapshot.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateSnapshotParams {
+    /// Subject ID to snapshot reputation for.
+    pub subject_id: String,
+    /// Role to snapshot (instructor/learner).
+    pub role: String,
+}
