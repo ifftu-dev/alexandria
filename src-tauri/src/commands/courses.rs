@@ -2,7 +2,13 @@ use rusqlite::params;
 use tauri::State;
 
 use crate::crypto::hash::entity_id;
+use crate::crypto::wallet;
 use crate::domain::course::{Course, CreateCourseRequest, UpdateCourseRequest};
+use crate::domain::course_document::{
+    CourseDocumentPayload, DocumentChapter, DocumentElement, PublishCourseResult,
+    SignedCourseDocument,
+};
+use crate::ipfs::course as ipfs_course;
 use crate::AppState;
 
 /// List all courses in the local database.
@@ -240,6 +246,162 @@ pub async fn delete_course(
     }
 
     Ok(())
+}
+
+/// Publish a course to the iroh blob store.
+///
+/// Reads the course, its chapters, and elements from SQLite, builds
+/// a CourseDocumentPayload, signs it with the wallet key, stores it
+/// on iroh, and updates the course's `content_cid` with the BLAKE3 hash.
+///
+/// Requires the vault to be unlocked (wallet key needed for signing).
+#[tauri::command]
+pub async fn publish_course(
+    state: State<'_, AppState>,
+    course_id: String,
+) -> Result<PublishCourseResult, String> {
+    // Get the wallet signing key from the vault
+    let keystore = state.keystore.lock().await;
+    let ks = keystore.as_ref().ok_or("vault is locked — unlock first")?;
+    let mnemonic = ks.retrieve_mnemonic().map_err(|e| e.to_string())?;
+    drop(keystore);
+
+    let w = wallet::wallet_from_mnemonic(&mnemonic).map_err(|e| e.to_string())?;
+
+    // Read course data from DB (scoped to release the lock before iroh calls)
+    let payload = {
+        let db = state.db.lock().await;
+        let course = get_course_by_id(db.conn(), &course_id)?;
+
+        // Read chapters with their elements
+        let chapter_rows: Vec<(String, String, Option<String>, i64)> = {
+            let mut stmt = db
+                .conn()
+                .prepare(
+                    "SELECT id, title, description, position \
+                     FROM course_chapters WHERE course_id = ?1 ORDER BY position ASC",
+                )
+                .map_err(|e| e.to_string())?;
+
+            let rows = stmt.query_map(params![course_id], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+            rows
+        };
+
+        let mut chapters = Vec::new();
+        for (ch_id, ch_title, ch_desc, ch_pos) in &chapter_rows {
+            let elements: Vec<DocumentElement> = {
+                let mut el_stmt = db
+                    .conn()
+                    .prepare(
+                        "SELECT id, title, element_type, content_cid, position, duration_seconds \
+                         FROM course_elements WHERE chapter_id = ?1 ORDER BY position ASC",
+                    )
+                    .map_err(|e| e.to_string())?;
+
+                let els = el_stmt
+                    .query_map(params![ch_id], |row| {
+                        Ok(DocumentElement {
+                            id: row.get(0)?,
+                            title: row.get(1)?,
+                            element_type: row.get(2)?,
+                            content_hash: row.get(3)?,
+                            position: row.get(4)?,
+                            duration_seconds: row.get(5)?,
+                        })
+                    })
+                    .map_err(|e| e.to_string())?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|e| e.to_string())?;
+                els
+            };
+
+            chapters.push(DocumentChapter {
+                id: ch_id.clone(),
+                position: *ch_pos,
+                title: ch_title.clone(),
+                description: ch_desc.clone(),
+                elements,
+            });
+        }
+
+        let created_at = parse_datetime_to_unix(&course.created_at);
+        let updated_at = chrono::Utc::now().timestamp();
+
+        CourseDocumentPayload {
+            version: 1,
+            course_id: course.id.clone(),
+            author_address: course.author_address.clone(),
+            title: course.title.clone(),
+            description: course.description.clone(),
+            thumbnail_hash: course.thumbnail_cid.clone(),
+            tags: course.tags.clone().unwrap_or_default(),
+            skill_ids: course.skill_ids.clone().unwrap_or_default(),
+            chapters,
+            created_at,
+            updated_at,
+        }
+        // db lock dropped here
+    };
+
+    // Sign the document
+    let signed = ipfs_course::sign_course_document(&payload, &w.signing_key)
+        .map_err(|e| e.to_string())?;
+
+    // Publish to iroh
+    let result = ipfs_course::publish_course_document(&state.content_node, &signed)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    // Update the course in the database
+    let db = state.db.lock().await;
+    db.conn()
+        .execute(
+            "UPDATE courses SET content_cid = ?1, status = 'published', \
+             version = version + 1, published_at = datetime('now'), \
+             updated_at = datetime('now') WHERE id = ?2",
+            params![result.content_hash, course_id],
+        )
+        .map_err(|e| e.to_string())?;
+
+    // Track the pin
+    db.conn()
+        .execute(
+            "INSERT OR REPLACE INTO pins (cid, pin_type, size_bytes, last_accessed, auto_unpin) \
+             VALUES (?1, 'course', ?2, datetime('now'), 0)",
+            params![result.content_hash, result.size as i64],
+        )
+        .map_err(|e| e.to_string())?;
+
+    Ok(result)
+}
+
+/// Fetch and verify a course document by identifier (BLAKE3 hash or IPFS CID).
+///
+/// Resolves the content, deserializes the signed JSON document,
+/// verifies the author's Ed25519 signature, and returns the verified
+/// course document.
+#[tauri::command]
+pub async fn fetch_course_document(
+    state: State<'_, AppState>,
+    identifier: String,
+) -> Result<SignedCourseDocument, String> {
+    // Try local iroh first
+    ipfs_course::resolve_course_document(&state.content_node, &identifier)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Parse a SQLite datetime string to a Unix timestamp.
+/// Falls back to current time if parsing fails.
+fn parse_datetime_to_unix(datetime_str: &str) -> i64 {
+    chrono::NaiveDateTime::parse_from_str(datetime_str, "%Y-%m-%d %H:%M:%S")
+        .map(|dt| dt.and_utc().timestamp())
+        .unwrap_or_else(|_| chrono::Utc::now().timestamp())
 }
 
 /// Internal helper: fetch a course by ID from the connection.

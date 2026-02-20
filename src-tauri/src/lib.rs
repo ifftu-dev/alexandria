@@ -146,6 +146,16 @@ pub fn run() {
             commands::content::content_node_status,
             commands::content::content_resolve,
             commands::content::content_resolve_bytes,
+            commands::chapters::list_chapters,
+            commands::chapters::create_chapter,
+            commands::chapters::update_chapter,
+            commands::chapters::delete_chapter,
+            commands::elements::list_elements,
+            commands::elements::create_element,
+            commands::elements::update_element,
+            commands::elements::delete_element,
+            commands::courses::publish_course,
+            commands::courses::fetch_course_document,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
