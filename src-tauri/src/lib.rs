@@ -6,7 +6,9 @@ pub mod ipfs;
 
 use crypto::keystore::Keystore;
 use db::Database;
+use ipfs::gateway::GatewayClient;
 use ipfs::node::ContentNode;
+use ipfs::resolver::ContentResolver;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::Manager;
@@ -21,6 +23,9 @@ pub struct AppState {
     pub vault_dir: PathBuf,
     /// The embedded iroh content node for IPFS-like blob storage.
     pub content_node: Arc<ContentNode>,
+    /// Content resolver: local iroh + CID mapping + IPFS gateway fallback.
+    /// `None` until iroh node is started (initialized asynchronously).
+    pub resolver: Arc<Mutex<Option<ContentResolver>>>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -70,21 +75,45 @@ pub fn run() {
             log::info!("iroh data directory: {}", iroh_dir.display());
 
             let content_node = Arc::new(ContentNode::new(&iroh_dir));
+            let db = Arc::new(Mutex::new(database));
+            let resolver: Arc<Mutex<Option<ContentResolver>>> =
+                Arc::new(Mutex::new(None));
 
-            // Start the iroh node in the background
+            // Start the iroh node and initialize the resolver in the background
             let content_node_clone = content_node.clone();
+            let db_clone = db.clone();
+            let resolver_clone = resolver.clone();
             tauri::async_runtime::spawn(async move {
                 match content_node_clone.start().await {
-                    Ok(()) => log::info!("iroh content node started successfully"),
+                    Ok(()) => {
+                        log::info!("iroh content node started successfully");
+
+                        // Initialize the content resolver with gateway fallback
+                        match GatewayClient::with_defaults() {
+                            Ok(gateway) => {
+                                let r = ContentResolver::new(
+                                    content_node_clone,
+                                    gateway,
+                                    db_clone,
+                                );
+                                *resolver_clone.lock().await = Some(r);
+                                log::info!("content resolver initialized with IPFS gateway fallback");
+                            }
+                            Err(e) => {
+                                log::error!("failed to create gateway client: {e}");
+                            }
+                        }
+                    }
                     Err(e) => log::error!("failed to start iroh content node: {e}"),
                 }
             });
 
             app.manage(AppState {
-                db: Arc::new(Mutex::new(database)),
+                db,
                 keystore: Arc::new(Mutex::new(None)),
                 vault_dir,
                 content_node,
+                resolver,
             });
 
             Ok(())
@@ -115,6 +144,8 @@ pub fn run() {
             commands::content::content_get,
             commands::content::content_has,
             commands::content::content_node_status,
+            commands::content::content_resolve,
+            commands::content::content_resolve_bytes,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
