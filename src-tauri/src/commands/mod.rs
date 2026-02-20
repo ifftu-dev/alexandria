@@ -6,6 +6,7 @@ pub mod courses;
 pub mod elements;
 pub mod enrollment;
 pub mod evidence;
+pub mod governance;
 pub mod health;
 pub mod identity;
 pub mod p2p;

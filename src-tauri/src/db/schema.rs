@@ -14,6 +14,7 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (4, "assessment_columns", MIGRATION_004),
     (5, "governance_members", MIGRATION_005),
     (6, "reputation_engine", MIGRATION_006),
+    (7, "governance_elections", MIGRATION_007),
 ];
 
 const MIGRATION_001: &str = r#"
@@ -479,4 +480,88 @@ CREATE INDEX IF NOT EXISTS idx_impact_deltas_learner
 -- GET /v1/skills/:id/instructors
 CREATE INDEX IF NOT EXISTS idx_reputation_role_skill
     ON reputation_assertions(role, skill_id, proficiency_level);
+"#;
+
+const MIGRATION_007: &str = r#"
+-- ============================================================
+-- Migration 007: Governance Elections
+-- Adds full election lifecycle tables (nomination → voting →
+-- finalized), proposal voting, and extended DAO/proposal columns
+-- matching the v1 schema and whitepaper §4.
+-- ============================================================
+
+-- ---- Elections ----
+
+CREATE TABLE IF NOT EXISTS governance_elections (
+    id                      TEXT PRIMARY KEY,
+    dao_id                  TEXT NOT NULL REFERENCES governance_daos(id),
+    title                   TEXT NOT NULL,
+    description             TEXT,
+    phase                   TEXT NOT NULL DEFAULT 'nomination',  -- nomination|voting|finalized|cancelled
+    seats                   INTEGER NOT NULL DEFAULT 5,
+    nominee_min_proficiency TEXT NOT NULL DEFAULT 'apply',       -- Bloom's level for nominees
+    voter_min_proficiency   TEXT NOT NULL DEFAULT 'remember',    -- Bloom's level for voters
+    nomination_start        TEXT NOT NULL DEFAULT (datetime('now')),
+    nomination_end          TEXT,
+    voting_end              TEXT,
+    on_chain_tx             TEXT,
+    created_at              TEXT NOT NULL DEFAULT (datetime('now')),
+    finalized_at            TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_elections_dao ON governance_elections(dao_id);
+CREATE INDEX IF NOT EXISTS idx_elections_phase ON governance_elections(phase);
+
+-- ---- Election Nominees ----
+
+CREATE TABLE IF NOT EXISTS governance_election_nominees (
+    id              TEXT PRIMARY KEY,
+    election_id     TEXT NOT NULL REFERENCES governance_elections(id) ON DELETE CASCADE,
+    stake_address   TEXT NOT NULL,
+    accepted        INTEGER NOT NULL DEFAULT 0,   -- 0 = pending, 1 = accepted
+    votes_received  INTEGER NOT NULL DEFAULT 0,
+    is_winner       INTEGER NOT NULL DEFAULT 0,   -- 1 = elected
+    nominated_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(election_id, stake_address)
+);
+
+CREATE INDEX IF NOT EXISTS idx_nominees_election ON governance_election_nominees(election_id);
+
+-- ---- Election Votes ----
+
+CREATE TABLE IF NOT EXISTS governance_election_votes (
+    id           TEXT PRIMARY KEY,
+    election_id  TEXT NOT NULL REFERENCES governance_elections(id) ON DELETE CASCADE,
+    voter        TEXT NOT NULL,       -- stake address
+    nominee_id   TEXT NOT NULL REFERENCES governance_election_nominees(id),
+    on_chain_tx  TEXT,
+    voted_at     TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(election_id, voter)        -- one vote per voter per election
+);
+
+CREATE INDEX IF NOT EXISTS idx_election_votes_election ON governance_election_votes(election_id);
+
+-- ---- Proposal Votes ----
+
+CREATE TABLE IF NOT EXISTS governance_proposal_votes (
+    id           TEXT PRIMARY KEY,
+    proposal_id  TEXT NOT NULL REFERENCES governance_proposals(id) ON DELETE CASCADE,
+    voter        TEXT NOT NULL,       -- stake address
+    in_favor     INTEGER NOT NULL,    -- 1 = for, 0 = against
+    on_chain_tx  TEXT,
+    voted_at     TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(proposal_id, voter)        -- one vote per voter per proposal
+);
+
+CREATE INDEX IF NOT EXISTS idx_proposal_votes_proposal ON governance_proposal_votes(proposal_id);
+
+-- ---- Extended DAO columns ----
+
+ALTER TABLE governance_daos ADD COLUMN committee_size INTEGER NOT NULL DEFAULT 5;
+ALTER TABLE governance_daos ADD COLUMN election_interval_days INTEGER NOT NULL DEFAULT 365;
+
+-- ---- Extended Proposal columns ----
+
+ALTER TABLE governance_proposals ADD COLUMN voting_deadline TEXT;
+ALTER TABLE governance_proposals ADD COLUMN min_vote_proficiency TEXT NOT NULL DEFAULT 'remember';
 "#;
