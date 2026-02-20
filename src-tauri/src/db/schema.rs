@@ -13,6 +13,7 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (3, "content_mappings", MIGRATION_003),
     (4, "assessment_columns", MIGRATION_004),
     (5, "governance_members", MIGRATION_005),
+    (6, "reputation_engine", MIGRATION_006),
 ];
 
 const MIGRATION_001: &str = r#"
@@ -432,4 +433,50 @@ CREATE TABLE IF NOT EXISTS governance_dao_members (
 );
 
 CREATE INDEX IF NOT EXISTS idx_dao_members_address ON governance_dao_members(stake_address);
+"#;
+
+const MIGRATION_006: &str = r#"
+-- ============================================================
+-- Migration 006: Reputation Engine
+-- Adds tables for full whitepaper reputation computation:
+--   - reputation_evidence: links assertions to skill proofs
+--   - reputation_impact_deltas: per-learner impact deltas for
+--     distribution metrics (median, percentiles, variance)
+-- Also adds an index on reputation_assertions for role+skill
+-- lookups used by instructor ranking queries.
+-- ============================================================
+
+-- Links a reputation assertion to the skill proofs that contributed
+-- to it, recording the delta confidence and attribution weight per §2.7.
+CREATE TABLE IF NOT EXISTS reputation_evidence (
+    assertion_id       TEXT NOT NULL REFERENCES reputation_assertions(id) ON DELETE CASCADE,
+    proof_id           TEXT NOT NULL REFERENCES skill_proofs(id),
+    delta_confidence   REAL NOT NULL DEFAULT 0.0,
+    attribution_weight REAL NOT NULL DEFAULT 1.0,
+    PRIMARY KEY (assertion_id, proof_id)
+);
+
+-- Per-learner impact deltas for computing distribution metrics per §2.8.
+-- Each row = one learner's proof update contributing to an instructor assertion.
+-- Stored separately so we can compute median, p25, p75, variance.
+CREATE TABLE IF NOT EXISTS reputation_impact_deltas (
+    id              TEXT PRIMARY KEY,
+    assertion_id    TEXT NOT NULL REFERENCES reputation_assertions(id) ON DELETE CASCADE,
+    learner_address TEXT NOT NULL,
+    delta           REAL NOT NULL,
+    attribution     REAL NOT NULL,
+    proof_id        TEXT REFERENCES skill_proofs(id),
+    created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_impact_deltas_assertion
+    ON reputation_impact_deltas(assertion_id);
+
+CREATE INDEX IF NOT EXISTS idx_impact_deltas_learner
+    ON reputation_impact_deltas(learner_address);
+
+-- Composite index for instructor ranking queries:
+-- GET /v1/skills/:id/instructors
+CREATE INDEX IF NOT EXISTS idx_reputation_role_skill
+    ON reputation_assertions(role, skill_id, proficiency_level);
 "#;

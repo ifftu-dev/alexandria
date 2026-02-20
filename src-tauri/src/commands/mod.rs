@@ -9,3 +9,4 @@ pub mod evidence;
 pub mod health;
 pub mod identity;
 pub mod p2p;
+pub mod reputation;

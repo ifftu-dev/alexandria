@@ -175,6 +175,10 @@ pub fn run() {
             commands::p2p::p2p_publish,
             commands::catalog::search_catalog,
             commands::catalog::get_catalog_entry,
+            commands::reputation::get_reputation,
+            commands::reputation::compute_reputation,
+            commands::reputation::get_instructor_ranking,
+            commands::reputation::verify_reputation,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
