@@ -215,6 +215,21 @@ pub fn run() {
             commands::sync::sync_now,
             commands::sync::sync_set_auto,
             commands::sync::sync_history,
+            commands::challenge::submit_evidence_challenge,
+            commands::challenge::list_challenges,
+            commands::challenge::get_challenge,
+            commands::challenge::vote_on_challenge,
+            commands::challenge::resolve_challenge,
+            commands::challenge::list_my_challenges,
+            commands::challenge::list_challenges_against_me,
+            commands::attestation::get_attestation_requirement,
+            commands::attestation::list_attestation_requirements,
+            commands::attestation::set_attestation_requirement,
+            commands::attestation::remove_attestation_requirement,
+            commands::attestation::submit_attestation,
+            commands::attestation::list_attestations_for_evidence,
+            commands::attestation::get_attestation_status,
+            commands::attestation::list_unattested_evidence,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

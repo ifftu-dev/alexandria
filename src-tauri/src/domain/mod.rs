@@ -1,4 +1,6 @@
+pub mod attestation;
 pub mod catalog;
+pub mod challenge;
 pub mod course;
 pub mod course_document;
 pub mod enrollment;

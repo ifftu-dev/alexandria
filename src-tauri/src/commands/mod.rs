@@ -1,5 +1,7 @@
+pub mod attestation;
 pub mod cardano;
 pub mod catalog;
+pub mod challenge;
 pub mod chapters;
 pub mod content;
 pub mod courses;

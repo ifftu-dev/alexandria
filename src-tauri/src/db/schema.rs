@@ -18,6 +18,8 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (8, "reputation_snapshots", MIGRATION_008),
     (9, "taxonomy_ratification", MIGRATION_009),
     (10, "cross_device_sync", MIGRATION_010),
+    (11, "evidence_challenges", MIGRATION_011),
+    (12, "multi_party_attestation", MIGRATION_012),
 ];
 
 const MIGRATION_001: &str = r#"
@@ -668,4 +670,93 @@ CREATE INDEX IF NOT EXISTS idx_sync_queue_queued ON sync_queue(queued_at);
 
 -- Add device_id to local_identity so we know which device we are.
 ALTER TABLE local_identity ADD COLUMN device_id TEXT;
+"#;
+
+const MIGRATION_011: &str = r#"
+-- ============================================================
+-- Migration 011: Evidence Challenges
+-- Adds tables for the evidence challenge mechanism. Any P2P
+-- observer can dispute evidence or credentials by staking ADA.
+-- DAO committee reviews; outcome is burn (upheld) or slash
+-- (rejected). Challenges reuse the /alexandria/governance/1.0
+-- gossip topic.
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS evidence_challenges (
+    id              TEXT PRIMARY KEY,
+    challenger      TEXT NOT NULL,
+    target_type     TEXT NOT NULL,          -- evidence|skill_proof
+    target_ids      TEXT NOT NULL,          -- JSON array of IDs
+    evidence_cids   TEXT NOT NULL,          -- JSON array of IPFS CIDs
+    reason          TEXT NOT NULL,
+    stake_lovelace  INTEGER NOT NULL,
+    stake_tx_hash   TEXT,
+    status          TEXT NOT NULL DEFAULT 'pending',  -- pending|reviewing|upheld|rejected|expired
+    dao_id          TEXT NOT NULL,
+    learner_address TEXT NOT NULL,
+    reviewed_by     TEXT DEFAULT '[]',      -- JSON array of reviewer addresses
+    resolution_tx   TEXT,
+    signature       TEXT NOT NULL,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    resolved_at     TEXT,
+    expires_at      TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_challenges_status ON evidence_challenges(status);
+CREATE INDEX IF NOT EXISTS idx_challenges_learner ON evidence_challenges(learner_address);
+CREATE INDEX IF NOT EXISTS idx_challenges_dao ON evidence_challenges(dao_id);
+CREATE INDEX IF NOT EXISTS idx_challenges_challenger ON evidence_challenges(challenger);
+
+CREATE TABLE IF NOT EXISTS challenge_votes (
+    id              TEXT PRIMARY KEY,
+    challenge_id    TEXT NOT NULL REFERENCES evidence_challenges(id) ON DELETE CASCADE,
+    voter           TEXT NOT NULL,
+    upheld          INTEGER NOT NULL,       -- 1 = uphold, 0 = reject
+    reason          TEXT,
+    voted_at        TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(challenge_id, voter)
+);
+
+CREATE INDEX IF NOT EXISTS idx_challenge_votes_challenge ON challenge_votes(challenge_id);
+"#;
+
+const MIGRATION_012: &str = r#"
+-- ============================================================
+-- Migration 012: Multi-Party Attestation
+-- Adds governance-gated multi-party attestation for high-stakes
+-- skills. When a skill is marked as high-stakes by the DAO,
+-- evidence records require assessor co-signatures before they
+-- count toward skill proof aggregation.
+-- ============================================================
+
+-- Skills that require multi-party attestation (set by DAO governance).
+CREATE TABLE IF NOT EXISTS attestation_requirements (
+    skill_id            TEXT NOT NULL REFERENCES skills(id),
+    proficiency_level   TEXT NOT NULL,
+    required_attestors  INTEGER NOT NULL DEFAULT 1,
+    dao_id              TEXT NOT NULL,
+    set_by_proposal     TEXT,
+    created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at          TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (skill_id, proficiency_level)
+);
+
+CREATE INDEX IF NOT EXISTS idx_attest_req_dao ON attestation_requirements(dao_id);
+
+-- Assessor attestations on evidence records.
+CREATE TABLE IF NOT EXISTS evidence_attestations (
+    id                  TEXT PRIMARY KEY,
+    evidence_id         TEXT NOT NULL REFERENCES evidence_records(id) ON DELETE CASCADE,
+    attestor_address    TEXT NOT NULL,
+    attestor_role       TEXT NOT NULL DEFAULT 'assessor',
+    attestation_type    TEXT NOT NULL DEFAULT 'co_sign',
+    integrity_score     REAL,
+    session_cid         TEXT,
+    signature           TEXT NOT NULL,
+    created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(evidence_id, attestor_address)
+);
+
+CREATE INDEX IF NOT EXISTS idx_attestations_evidence ON evidence_attestations(evidence_id);
+CREATE INDEX IF NOT EXISTS idx_attestations_attestor ON evidence_attestations(attestor_address);
 "#;
