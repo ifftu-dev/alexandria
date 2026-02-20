@@ -60,6 +60,27 @@ pub struct PeerInfo {
     pub reputation: Option<f64>,
 }
 
+/// NAT reachability status.
+///
+/// Determined by AutoNAT probing — peers try to dial us back
+/// to determine if we're publicly reachable.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "status", content = "address")]
+pub enum NatState {
+    /// NAT status not yet determined (probing in progress).
+    Unknown,
+    /// Node is publicly reachable at the given address.
+    Public(String),
+    /// Node is behind a NAT and not directly reachable.
+    Private,
+}
+
+impl Default for NatState {
+    fn default() -> Self {
+        Self::Unknown
+    }
+}
+
 /// P2P network status reported to the frontend.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NetworkStatus {
@@ -73,6 +94,10 @@ pub struct NetworkStatus {
     pub listening_addresses: Vec<String>,
     /// Topics the node is subscribed to.
     pub subscribed_topics: Vec<String>,
+    /// NAT traversal status (public, private, or unknown).
+    pub nat_status: NatState,
+    /// Addresses we are reachable at via circuit relay.
+    pub relay_addresses: Vec<String>,
 }
 
 /// Events emitted by the P2P layer to the application.
@@ -89,4 +114,10 @@ pub enum P2pEvent {
     },
     /// Network status changed.
     StatusChanged(NetworkStatus),
+    /// NAT status changed (as determined by AutoNAT probing).
+    NatStatusChanged(NatState),
+    /// A relay reservation was accepted (we can be reached via relay).
+    RelayReservation { relay_peer: String },
+    /// A relayed connection was upgraded to a direct connection via DCUtR.
+    DirectConnectionUpgraded { peer_id: String },
 }

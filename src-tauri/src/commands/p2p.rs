@@ -135,6 +135,15 @@ pub async fn p2p_start(state: State<'_, AppState>) -> Result<String, String> {
                         status.connected_peers
                     );
                 }
+                crate::p2p::types::P2pEvent::NatStatusChanged(ref nat_state) => {
+                    log::info!("P2P event: NAT status changed — {nat_state:?}");
+                }
+                crate::p2p::types::P2pEvent::RelayReservation { ref relay_peer } => {
+                    log::info!("P2P event: relay reservation — {relay_peer}");
+                }
+                crate::p2p::types::P2pEvent::DirectConnectionUpgraded { ref peer_id } => {
+                    log::info!("P2P event: direct connection upgraded — {peer_id}");
+                }
             }
         }
     });
@@ -177,6 +186,8 @@ pub async fn p2p_status(state: State<'_, AppState>) -> Result<NetworkStatus, Str
             connected_peers: 0,
             listening_addresses: vec![],
             subscribed_topics: vec![],
+            nat_status: crate::p2p::types::NatState::Unknown,
+            relay_addresses: vec![],
         }),
     }
 }

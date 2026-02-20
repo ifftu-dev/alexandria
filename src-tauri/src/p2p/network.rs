@@ -6,13 +6,15 @@ use libp2p::gossipsub::{self, IdentTopic, MessageAuthenticity, MessageId, Valida
 use libp2p::identity::Keypair;
 use libp2p::kad::store::MemoryStore;
 use libp2p::swarm::NetworkBehaviour;
-use libp2p::{identify, kad, mdns, PeerId, Swarm, SwarmBuilder};
+use libp2p::{autonat, dcutr, identify, kad, mdns, noise, relay, yamux, PeerId, Swarm, SwarmBuilder};
 use thiserror::Error;
 use tokio::sync::mpsc;
 
 use crate::crypto::hash::blake2b_256;
 
-use super::types::{NetworkStatus, P2pEvent, SignedGossipMessage, ALL_TOPICS};
+use super::nat::build_autonat_config;
+use super::scoring::{build_peer_score_params, build_peer_score_thresholds};
+use super::types::{NatState, NetworkStatus, P2pEvent, SignedGossipMessage, ALL_TOPICS};
 use super::validation::MessageValidator;
 
 #[derive(Error, Debug)]
@@ -33,17 +35,23 @@ pub enum NetworkError {
 
 /// Composed network behaviour for the Alexandria P2P node.
 ///
-/// Combines four libp2p protocols:
-/// - **GossipSub v1.1**: Topic-based publish/subscribe for gossip messages
+/// Combines seven libp2p protocols:
+/// - **GossipSub v1.1**: Topic-based publish/subscribe with peer scoring
 /// - **Kademlia DHT**: Peer discovery and content routing
 /// - **mDNS**: Local network peer discovery (LAN, university campus)
 /// - **Identify**: Exchange peer info (needed by GossipSub and Kademlia)
+/// - **AutoNAT**: Determine NAT reachability via peer probing
+/// - **Relay Client**: Use circuit relay v2 when behind NAT
+/// - **DCUtR**: Upgrade relayed connections to direct connections
 #[derive(NetworkBehaviour)]
 pub struct AlexandriaBehaviour {
     pub gossipsub: gossipsub::Behaviour,
     pub kademlia: kad::Behaviour<MemoryStore>,
     pub mdns: mdns::tokio::Behaviour,
     pub identify: identify::Behaviour,
+    pub autonat: autonat::Behaviour,
+    pub relay_client: relay::client::Behaviour,
+    pub dcutr: dcutr::Behaviour,
 }
 
 /// The running P2P network node.
@@ -97,7 +105,8 @@ pub fn keypair_from_cardano_key(payment_key_bytes: &[u8; 32]) -> Result<Keypair,
 /// Build and start the P2P node.
 ///
 /// Returns a `P2pNode` handle and spawns the swarm event loop
-/// as a background tokio task.
+/// as a background tokio task. Includes NAT traversal (AutoNAT,
+/// circuit relay v2, DCUtR) and GossipSub peer scoring.
 pub async fn start_node(
     keypair: Keypair,
     event_tx: mpsc::Sender<P2pEvent>,
@@ -105,14 +114,22 @@ pub async fn start_node(
     let peer_id = keypair.public().to_peer_id();
     log::info!("Starting P2P node with PeerId: {peer_id}");
 
-    // Build the composed network behaviour
-    let behaviour = build_behaviour(&keypair, peer_id)?;
-
-    // Build the swarm with QUIC transport
-    let mut swarm = SwarmBuilder::with_existing_identity(keypair)
+    // Build the swarm with QUIC + relay client transport.
+    //
+    // The relay client transport enables connecting via circuit relay v2
+    // when behind NAT. It requires noise + yamux for the relay hop
+    // (QUIC has built-in encryption but relay connections use TCP/WebSocket).
+    //
+    // The SwarmBuilder chain: identity → tokio → quic → relay_client → behaviour → build
+    // When relay_client is used, `with_behaviour` receives (keypair, relay_behaviour).
+    let mut swarm = SwarmBuilder::with_existing_identity(keypair.clone())
         .with_tokio()
         .with_quic()
-        .with_behaviour(|_| Ok(behaviour))
+        .with_relay_client(noise::Config::new, yamux::Config::default)
+        .map_err(|e| NetworkError::SwarmBuild(format!("relay client: {e}")))?
+        .with_behaviour(|key, relay_behaviour| {
+            build_behaviour(key, peer_id, relay_behaviour)
+        })
         .map_err(|e| NetworkError::SwarmBuild(e.to_string()))?
         .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60)))
         .build();
@@ -159,10 +176,14 @@ pub async fn start_node(
 }
 
 /// Build the composed network behaviour.
+///
+/// Includes GossipSub with peer scoring, Kademlia, mDNS, Identify,
+/// AutoNAT, relay client, and DCUtR.
 fn build_behaviour(
     keypair: &Keypair,
     peer_id: PeerId,
-) -> Result<AlexandriaBehaviour, NetworkError> {
+    relay_behaviour: relay::client::Behaviour,
+) -> Result<AlexandriaBehaviour, Box<dyn std::error::Error + Send + Sync>> {
     // GossipSub configuration
     let gossipsub_config = gossipsub::ConfigBuilder::default()
         .heartbeat_interval(Duration::from_secs(1))
@@ -174,13 +195,21 @@ fn build_behaviour(
         })
         .max_transmit_size(65536) // 64KB max message size
         .build()
-        .map_err(|e| NetworkError::SwarmBuild(format!("gossipsub config: {e}")))?;
+        .map_err(|e| format!("gossipsub config: {e}"))?;
 
-    let gossipsub = gossipsub::Behaviour::new(
+    let mut gossipsub = gossipsub::Behaviour::new(
         MessageAuthenticity::Signed(keypair.clone()),
         gossipsub_config,
     )
-    .map_err(|e| NetworkError::SwarmBuild(format!("gossipsub behaviour: {e}")))?;
+    .map_err(|e| format!("gossipsub behaviour: {e}"))?;
+
+    // Enable peer scoring per spec §7.3: "Peers that repeatedly send
+    // invalid messages are scored down, eventually disconnected."
+    let score_params = build_peer_score_params();
+    let score_thresholds = build_peer_score_thresholds();
+    gossipsub
+        .with_peer_score(score_params, score_thresholds)
+        .map_err(|e| format!("gossipsub peer scoring: {e}"))?;
 
     // Kademlia DHT
     let mut kademlia_config = kad::Config::new(libp2p::StreamProtocol::new("/alexandria/kad/1.0"));
@@ -192,7 +221,7 @@ fn build_behaviour(
         mdns::Config::default(),
         peer_id,
     )
-    .map_err(|e| NetworkError::SwarmBuild(format!("mdns: {e}")))?;
+    .map_err(|e| format!("mdns: {e}"))?;
 
     // Identify protocol (needed by GossipSub and Kademlia)
     let identify = identify::Behaviour::new(
@@ -203,11 +232,23 @@ fn build_behaviour(
         .with_push_listen_addr_updates(true),
     );
 
+    // AutoNAT — peer-assisted NAT detection (spec §7.5)
+    let autonat = autonat::Behaviour::new(
+        peer_id,
+        build_autonat_config(),
+    );
+
+    // DCUtR — upgrade relayed connections to direct via hole punching
+    let dcutr = dcutr::Behaviour::new(peer_id);
+
     Ok(AlexandriaBehaviour {
         gossipsub,
         kademlia,
         mdns,
         identify,
+        autonat,
+        relay_client: relay_behaviour,
+        dcutr,
     })
 }
 
@@ -223,6 +264,10 @@ async fn swarm_event_loop(
     validator: Arc<MessageValidator>,
 ) {
     use libp2p::swarm::SwarmEvent;
+
+    // Track NAT state locally for the Status command
+    let mut current_nat_state = NatState::Unknown;
+    let mut relay_addrs: Vec<String> = Vec::new();
 
     loop {
         tokio::select! {
@@ -258,6 +303,8 @@ async fn swarm_event_loop(
                             connected_peers: connected,
                             listening_addresses: listeners,
                             subscribed_topics: topics,
+                            nat_status: current_nat_state.clone(),
+                            relay_addresses: relay_addrs.clone(),
                         }).await;
                     }
                     Some(SwarmCommand::Peers { reply }) => {
@@ -349,6 +396,72 @@ async fn swarm_event_loop(
                             swarm.behaviour_mut().kademlia.add_address(&peer_id, addr.clone());
                         }
                     }
+                    // AutoNAT events — track NAT reachability
+                    SwarmEvent::Behaviour(AlexandriaBehaviourEvent::Autonat(event)) => {
+                        match &event {
+                            autonat::Event::InboundProbe(probe) => {
+                                log::debug!("AutoNAT: inbound probe: {probe:?}");
+                            }
+                            autonat::Event::OutboundProbe(probe) => {
+                                log::debug!("AutoNAT: outbound probe: {probe:?}");
+                            }
+                            autonat::Event::StatusChanged { old, new } => {
+                                log::info!("AutoNAT: status changed from {old:?} to {new:?}");
+                                let new_state = match new {
+                                    autonat::NatStatus::Public(addr) => {
+                                        NatState::Public(addr.to_string())
+                                    }
+                                    autonat::NatStatus::Private => NatState::Private,
+                                    autonat::NatStatus::Unknown => NatState::Unknown,
+                                };
+                                current_nat_state = new_state.clone();
+                                let _ = event_tx.send(P2pEvent::NatStatusChanged(new_state)).await;
+                            }
+                        }
+                    }
+                    // Relay client events — circuit relay v2
+                    SwarmEvent::Behaviour(AlexandriaBehaviourEvent::RelayClient(event)) => {
+                        match &event {
+                            relay::client::Event::ReservationReqAccepted {
+                                relay_peer_id, ..
+                            } => {
+                                let relay_str = relay_peer_id.to_string();
+                                log::info!(
+                                    "Relay: reservation accepted by {relay_str}"
+                                );
+                                if !relay_addrs.iter().any(|a| a.contains(&relay_str)) {
+                                    relay_addrs.push(format!(
+                                        "/p2p/{relay_str}/p2p-circuit"
+                                    ));
+                                }
+                                let _ = event_tx.send(P2pEvent::RelayReservation {
+                                    relay_peer: relay_str,
+                                }).await;
+                            }
+                            _ => {
+                                log::debug!("Relay client event: {event:?}");
+                            }
+                        }
+                    }
+                    // DCUtR events — direct connection upgrade through relay
+                    SwarmEvent::Behaviour(AlexandriaBehaviourEvent::Dcutr(event)) => {
+                        let peer_str = event.remote_peer_id.to_string();
+                        match event.result {
+                            Ok(_conn_id) => {
+                                log::info!(
+                                    "DCUtR: direct connection upgrade succeeded with {peer_str}"
+                                );
+                                let _ = event_tx.send(P2pEvent::DirectConnectionUpgraded {
+                                    peer_id: peer_str,
+                                }).await;
+                            }
+                            Err(error) => {
+                                log::debug!(
+                                    "DCUtR: upgrade failed with {peer_str}: {error}"
+                                );
+                            }
+                        }
+                    }
                     SwarmEvent::NewListenAddr { address, .. } => {
                         log::info!("Listening on {address}");
                     }
@@ -403,6 +516,8 @@ impl P2pNode {
                 connected_peers: 0,
                 listening_addresses: vec![],
                 subscribed_topics: vec![],
+                nat_status: NatState::Unknown,
+                relay_addresses: vec![],
             });
         }
         let (reply_tx, mut reply_rx) = mpsc::channel(1);
@@ -489,8 +604,15 @@ mod tests {
         assert!(status.peer_id.is_some());
         assert_eq!(status.subscribed_topics.len(), 5); // All 5 topics
         assert_eq!(status.connected_peers, 0); // No peers yet
+        assert_eq!(status.nat_status, NatState::Unknown); // NAT unknown initially
+        assert!(status.relay_addresses.is_empty()); // No relays yet
 
         // Shutdown
         node.shutdown().await;
+    }
+
+    #[test]
+    fn nat_state_default_is_unknown() {
+        assert_eq!(NatState::default(), NatState::Unknown);
     }
 }
