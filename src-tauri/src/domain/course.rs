@@ -48,6 +48,21 @@ pub struct Chapter {
     pub position: i64,
 }
 
+/// Request to create a new chapter.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateChapterRequest {
+    pub title: String,
+    pub description: Option<String>,
+}
+
+/// Request to update an existing chapter.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateChapterRequest {
+    pub title: Option<String>,
+    pub description: Option<String>,
+    pub position: Option<i64>,
+}
+
 /// An element (learning item) within a chapter.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Element {
@@ -57,5 +72,24 @@ pub struct Element {
     pub element_type: String,
     pub content_cid: Option<String>,
     pub position: i64,
+    pub duration_seconds: Option<i64>,
+}
+
+/// Request to create a new element.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateElementRequest {
+    pub title: String,
+    pub element_type: String,
+    pub content_hash: Option<String>,
+    pub duration_seconds: Option<i64>,
+}
+
+/// Request to update an existing element.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateElementRequest {
+    pub title: Option<String>,
+    pub element_type: Option<String>,
+    pub content_hash: Option<String>,
+    pub position: Option<i64>,
     pub duration_seconds: Option<i64>,
 }
