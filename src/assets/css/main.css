@@ -1,0 +1,121 @@
+@import "tailwindcss";
+
+/* ============================================
+   Alexandria Design System
+   Adapted from web/ for Tauri desktop app
+   ============================================ */
+
+:root {
+  --color-background: 247 246 243;
+  --color-foreground: 23 25 35;
+  --color-muted: 233 231 226;
+  --color-muted-foreground: 75 85 99;
+  --color-card: 255 255 255;
+  --color-card-foreground: 23 25 35;
+  --color-border: 209 211 216;
+  --color-input: 209 211 216;
+  --color-ring: 99 102 241;
+
+  --color-primary: 79 70 229;
+  --color-primary-foreground: 255 255 255;
+  --color-primary-hover: 67 56 202;
+
+  --color-secondary: 233 231 226;
+  --color-secondary-foreground: 23 25 35;
+
+  --color-accent: 79 70 229;
+  --color-accent-foreground: 255 255 255;
+
+  --color-success: 22 163 74;
+  --color-success-foreground: 255 255 255;
+  --color-warning: 202 138 4;
+  --color-warning-foreground: 255 255 255;
+  --color-error: 220 38 38;
+  --color-error-foreground: 255 255 255;
+
+  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+
+  --radius: 0.5rem;
+  --radius-sm: 0.375rem;
+  --radius-lg: 1rem;
+
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.06), 0 1px 3px 0 rgb(0 0 0 / 0.04);
+  --shadow: 0 1px 3px 0 rgb(0 0 0 / 0.12), 0 1px 2px -1px rgb(0 0 0 / 0.08);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.08);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.12), 0 4px 6px -4px rgb(0 0 0 / 0.08);
+
+  --focus-ring: 0 0 0 2px rgb(var(--color-background)), 0 0 0 4px rgb(var(--color-ring));
+  --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-base: 200ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-slow: 300ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.dark {
+  --color-background: 17 24 39;
+  --color-foreground: 249 250 251;
+  --color-muted: 31 41 55;
+  --color-muted-foreground: 156 163 175;
+  --color-card: 31 41 55;
+  --color-card-foreground: 249 250 251;
+  --color-border: 55 65 81;
+  --color-input: 55 65 81;
+  --color-ring: 129 140 248;
+
+  --color-primary: 129 140 248;
+  --color-primary-foreground: 17 24 39;
+  --color-primary-hover: 165 180 252;
+
+  --color-secondary: 55 65 81;
+  --color-secondary-foreground: 249 250 251;
+
+  --color-accent: 129 140 248;
+  --color-accent-foreground: 17 24 39;
+
+  --color-success: 34 197 94;
+  --color-success-foreground: 255 255 255;
+  --color-warning: 234 179 8;
+  --color-warning-foreground: 255 255 255;
+  --color-error: 239 68 68;
+  --color-error-foreground: 255 255 255;
+
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.4);
+  --shadow: 0 1px 3px 0 rgb(0 0 0 / 0.5), 0 1px 2px -1px rgb(0 0 0 / 0.5);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.5), 0 2px 4px -2px rgb(0 0 0 / 0.5);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.5), 0 4px 6px -4px rgb(0 0 0 / 0.5);
+}
+
+html {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  background-color: rgb(var(--color-background));
+  color: rgb(var(--color-foreground));
+  line-height: 1.6;
+  margin: 0;
+  overflow-x: hidden;
+}
+
+@layer base {
+  h1, h2, h3, h4, h5, h6 {
+    font-weight: 600;
+    line-height: 1.3;
+    letter-spacing: -0.015em;
+  }
+  h1 { font-size: 1.5rem; }
+  h2 { font-size: 1.25rem; }
+  h3 { font-size: 1.125rem; }
+  h4 { font-size: 1rem; }
+}
+
+/* Card utility */
+.card {
+  background-color: rgb(var(--color-card));
+  border: 1px solid rgb(var(--color-border));
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+}
