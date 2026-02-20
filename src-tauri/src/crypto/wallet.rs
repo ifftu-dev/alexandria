@@ -34,11 +34,17 @@ pub struct Wallet {
     pub mnemonic: String,
     /// Ed25519 signing key derived at m/1852'/1815'/0'/0/0.
     pub signing_key: SigningKey,
+    /// Raw BIP32-Ed25519 extended payment key (64 bytes: 32-byte scalar + 32-byte extension).
+    /// Needed by pallas-txbuilder for Cardano transaction signing (uses `PrivateKey::Extended`).
+    pub payment_key_extended: [u8; 64],
     /// The Cardano stake address (bech32, starts with "stake_test1..." on preprod).
     /// Derived from the stake key at m/1852'/1815'/0'/2/0.
     pub stake_address: String,
     /// The Cardano payment address (bech32, starts with "addr_test1..." on preprod).
     pub payment_address: String,
+    /// Blake2b-224 hash of the payment public key (28 bytes).
+    /// Used for NativeScript policy creation and disclosed signers.
+    pub payment_key_hash: [u8; 28],
 }
 
 /// The Cardano network to use for address generation.
@@ -109,15 +115,29 @@ pub fn wallet_from_mnemonic(phrase: &str) -> Result<Wallet, WalletError> {
         .to_bech32()
         .map_err(|e| WalletError::DerivationFailed(format!("stake address bech32: {e}")))?;
 
+    // Extract the raw extended key bytes (64 bytes) for pallas-txbuilder signing.
+    let payment_key_extended = extract_extended_key_bytes(&payment_bip32)?;
+
     // Extract Ed25519 signing key (first 32 bytes of extended key) for
     // ed25519-dalek compatibility (used in our signing module).
-    let signing_key = extract_signing_key(&payment_bip32)?;
+    let signing_key = SigningKey::from_bytes(
+        &payment_key_extended[..32]
+            .try_into()
+            .map_err(|_| WalletError::DerivationFailed("signing key slice failed".into()))?,
+    );
+
+    // Store the payment key hash (28 bytes) for policy/signer use.
+    let payment_key_hash_pallas = payment_key_hash;
+    let mut pkh_bytes = [0u8; 28];
+    pkh_bytes.copy_from_slice(payment_key_hash_pallas.as_ref());
 
     Ok(Wallet {
         mnemonic: mnemonic_str,
         signing_key,
+        payment_key_extended,
         stake_address,
         payment_address,
+        payment_key_hash: pkh_bytes,
     })
 }
 
@@ -126,29 +146,27 @@ fn harden(index: u32) -> u32 {
     0x8000_0000 + index
 }
 
-/// Extract an ed25519-dalek SigningKey from a pallas Bip32PrivateKey.
+/// Extract the raw 64-byte extended key from a pallas Bip32PrivateKey.
 ///
 /// pallas stores an extended BIP32-Ed25519 key (64 bytes: 32-byte scalar + 32-byte extension).
-/// We take the first 32 bytes (the Ed25519 scalar) for signing operations.
-fn extract_signing_key(bip32_key: &Bip32PrivateKey) -> Result<SigningKey, WalletError> {
+/// Both halves are needed for pallas-txbuilder's `PrivateKey::Extended` signing.
+/// The first 32 bytes alone serve as the Ed25519 scalar for ed25519-dalek.
+fn extract_extended_key_bytes(bip32_key: &Bip32PrivateKey) -> Result<[u8; 64], WalletError> {
     let pallas_private = bip32_key.to_ed25519_private_key();
 
-    // The key is always Extended from BIP32 derivation.
-    // Use leak_into_bytes to access the raw bytes.
     match pallas_private {
         pallas_wallet::PrivateKey::Normal(sk) => {
+            // Normal key is only 32 bytes — pad with zeros for the extension half.
             let bytes: [u8; 32] =
                 unsafe { pallas_crypto::key::ed25519::SecretKey::leak_into_bytes(sk) };
-            Ok(SigningKey::from_bytes(&bytes))
+            let mut extended = [0u8; 64];
+            extended[..32].copy_from_slice(&bytes);
+            Ok(extended)
         }
         pallas_wallet::PrivateKey::Extended(xsk) => {
-            // Extended key is 64 bytes: first 32 = Ed25519 scalar
             let bytes: [u8; SecretKeyExtended::SIZE] =
                 unsafe { SecretKeyExtended::leak_into_bytes(xsk) };
-            let scalar: [u8; 32] = bytes[..32].try_into().map_err(|_| {
-                WalletError::DerivationFailed("signing key extraction failed".into())
-            })?;
-            Ok(SigningKey::from_bytes(&scalar))
+            Ok(bytes)
         }
     }
 }

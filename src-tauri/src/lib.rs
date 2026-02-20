@@ -1,3 +1,4 @@
+pub mod cardano;
 pub mod commands;
 pub mod crypto;
 pub mod db;
@@ -160,6 +161,8 @@ pub fn run() {
             commands::evidence::list_skill_proofs,
             commands::evidence::list_evidence,
             commands::evidence::list_reputation,
+            commands::cardano::mint_skill_proof_nft,
+            commands::cardano::register_course_onchain,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
