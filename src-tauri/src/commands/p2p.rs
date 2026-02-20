@@ -4,11 +4,16 @@
 //! starting/stopping the node, querying network status, listing
 //! connected peers, and publishing gossip messages.
 
+use std::sync::Arc;
+
 use tauri::State;
+use tokio::sync::Mutex;
 
 use crate::crypto::wallet;
+use crate::db::Database;
+use crate::p2p::catalog as p2p_catalog;
 use crate::p2p::network::{self, keypair_from_cardano_key};
-use crate::p2p::types::NetworkStatus;
+use crate::p2p::types::{NetworkStatus, TOPIC_CATALOG};
 use crate::AppState;
 
 /// Start the P2P network node.
@@ -48,7 +53,10 @@ pub async fn p2p_start(state: State<'_, AppState>) -> Result<String, String> {
     // Create event channel (events are logged for now; frontend emission in a later PR)
     let (event_tx, mut event_rx) = tokio::sync::mpsc::channel(256);
 
-    // Spawn event consumer (logs events; Tauri event emission added in a later PR)
+    // Clone the database handle for the event consumer task
+    let db_for_events: Arc<Mutex<Database>> = state.db.clone();
+
+    // Spawn event consumer — handles incoming gossip messages by topic
     tokio::spawn(async move {
         while let Some(event) = event_rx.recv().await {
             match &event {
@@ -58,8 +66,24 @@ pub async fn p2p_start(state: State<'_, AppState>) -> Result<String, String> {
                 crate::p2p::types::P2pEvent::PeerDisconnected { peer_id } => {
                     log::info!("P2P event: peer disconnected — {peer_id}");
                 }
-                crate::p2p::types::P2pEvent::GossipMessage { topic, .. } => {
+                crate::p2p::types::P2pEvent::GossipMessage { topic, message } => {
                     log::debug!("P2P event: gossip message on {topic}");
+                    if topic == TOPIC_CATALOG {
+                        let db = db_for_events.lock().await;
+                        match p2p_catalog::handle_catalog_message(&db, message) {
+                            Ok(ann) => {
+                                log::info!(
+                                    "Catalog: indexed '{}' (v{}) from {}",
+                                    ann.title,
+                                    ann.version,
+                                    ann.author_address,
+                                );
+                            }
+                            Err(e) => {
+                                log::warn!("Failed to handle catalog message: {e}");
+                            }
+                        }
+                    }
                 }
                 crate::p2p::types::P2pEvent::StatusChanged(status) => {
                     log::debug!(

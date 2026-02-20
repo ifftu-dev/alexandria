@@ -1,4 +1,5 @@
 pub mod cardano;
+pub mod catalog;
 pub mod chapters;
 pub mod content;
 pub mod courses;

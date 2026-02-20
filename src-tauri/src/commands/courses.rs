@@ -9,6 +9,7 @@ use crate::domain::course_document::{
     SignedCourseDocument,
 };
 use crate::ipfs::course as ipfs_course;
+use crate::p2p::catalog;
 use crate::AppState;
 
 /// List all courses in the local database.
@@ -376,6 +377,53 @@ pub async fn publish_course(
             params![result.content_hash, result.size as i64],
         )
         .map_err(|e| e.to_string())?;
+
+    // Read back the updated course to get the new version number
+    let updated_course = get_course_by_id(db.conn(), &course_id)?;
+    let version = updated_course.version;
+
+    // Build a catalog announcement for P2P discovery
+    let announcement = catalog::build_catalog_announcement(
+        &payload.author_address,
+        &payload.title,
+        payload.description.as_deref(),
+        &result.content_hash,
+        payload.thumbnail_hash.as_deref(),
+        &payload.tags,
+        &payload.skill_ids,
+        version,
+    );
+
+    // Sign the announcement payload to get the signature for the catalog entry
+    let ann_json = serde_json::to_vec(&announcement).map_err(|e| e.to_string())?;
+    let signed_ann =
+        crate::p2p::signing::sign_gossip_message(
+            crate::p2p::types::TOPIC_CATALOG,
+            ann_json,
+            &w.signing_key,
+            &w.stake_address,
+        );
+    let signature_hex = hex::encode(&signed_ann.signature);
+
+    // Insert into local catalog table (author's own course, pinned=1)
+    catalog::insert_own_catalog_entry(&db, &announcement, &signature_hex)
+        .map_err(|e| format!("catalog insert: {e}"))?;
+
+    // Release DB lock before P2P publish (which is async and may take time)
+    drop(db);
+
+    // Broadcast via P2P if the node is running (best-effort — don't fail publish)
+    let p2p_node = state.p2p_node.lock().await;
+    if let Some(ref node) = *p2p_node {
+        if let Err(e) = node.publish_signed(&signed_ann).await {
+            log::warn!("Failed to broadcast catalog announcement via P2P: {e}");
+        } else {
+            log::info!(
+                "Broadcast catalog announcement for '{}' (v{version})",
+                announcement.title,
+            );
+        }
+    }
 
     Ok(result)
 }

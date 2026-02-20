@@ -1,3 +1,4 @@
+pub mod catalog;
 pub mod course;
 pub mod course_document;
 pub mod enrollment;
