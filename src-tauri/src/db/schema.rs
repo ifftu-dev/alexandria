@@ -10,6 +10,7 @@
 pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (1, "initial_schema", MIGRATION_001),
     (2, "profile_hash", MIGRATION_002),
+    (3, "content_mappings", MIGRATION_003),
 ];
 
 const MIGRATION_001: &str = r#"
@@ -377,4 +378,23 @@ const MIGRATION_002: &str = r#"
 -- ============================================================
 
 ALTER TABLE local_identity ADD COLUMN profile_hash TEXT;
+"#;
+
+const MIGRATION_003: &str = r#"
+-- ============================================================
+-- Migration 003: Content Mappings
+-- Bridges IPFS CIDs (SHA-256, used by v1 content on Blockfrost)
+-- to iroh BLAKE3 hashes (used natively by v2). When content is
+-- fetched from an IPFS gateway, it's cached in iroh and the
+-- CID↔BLAKE3 mapping is recorded here for future lookups.
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS content_mappings (
+    ipfs_cid    TEXT PRIMARY KEY,
+    blake3_hash TEXT NOT NULL,
+    size_bytes  INTEGER,
+    mapped_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_content_mappings_blake3 ON content_mappings(blake3_hash);
 "#;

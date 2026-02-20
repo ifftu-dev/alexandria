@@ -48,6 +48,9 @@ iroh-blobs = { version = "0.98", features = ["fs-store"] }
 anyhow = "1"
 bytes = "1"
 
+# HTTP client (IPFS gateway fallback)
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+
 # HMAC (used by keystore for password derivation)
 hmac = "0.12"
 

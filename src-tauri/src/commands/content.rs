@@ -1,12 +1,15 @@
-//! IPC commands for content-addressed storage (iroh).
+//! IPC commands for content-addressed storage (iroh + IPFS gateway).
 //!
 //! These commands expose the iroh blob store to the frontend for
-//! adding, fetching, and querying content by BLAKE3 hash.
+//! adding, fetching, and querying content by BLAKE3 hash. The
+//! `content_resolve` command additionally supports IPFS CIDs with
+//! automatic gateway fallback.
 
 use serde::Serialize;
 use tauri::State;
 
 use crate::ipfs::content;
+use crate::ipfs::resolver;
 use crate::AppState;
 
 /// Status of the content node.
@@ -63,4 +66,69 @@ pub async fn content_has(
     content::has(&state.content_node, &hash)
         .await
         .map_err(|e| e.to_string())
+}
+
+/// Metadata about resolved content (bytes excluded for the response).
+#[derive(Debug, Serialize)]
+pub struct ResolveResponse {
+    /// BLAKE3 hash of the content.
+    pub blake3_hash: String,
+    /// IPFS CID if known.
+    pub ipfs_cid: Option<String>,
+    /// Where the content was resolved from.
+    pub source: resolver::ResolveSource,
+    /// Size in bytes.
+    pub size: u64,
+}
+
+/// Resolve content by any identifier (BLAKE3 hex or IPFS CID).
+///
+/// Uses the full resolution chain: local store → CID mapping →
+/// IPFS gateway fallback. Content fetched from gateways is cached
+/// locally and mapped for future lookups.
+///
+/// Returns the raw bytes and metadata about the resolution.
+#[tauri::command]
+pub async fn content_resolve(
+    state: State<'_, AppState>,
+    identifier: String,
+) -> Result<ResolveResponse, String> {
+    let resolver = state.resolver.lock().await;
+    let resolver = resolver
+        .as_ref()
+        .ok_or_else(|| "content resolver not initialized".to_string())?;
+
+    let result = resolver
+        .resolve(&identifier)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(ResolveResponse {
+        blake3_hash: result.blake3_hash,
+        ipfs_cid: result.ipfs_cid,
+        source: result.source,
+        size: result.size,
+    })
+}
+
+/// Resolve content and return the raw bytes.
+///
+/// Same as `content_resolve` but returns the actual content data.
+/// Use this when you need the bytes (e.g., displaying course content).
+#[tauri::command]
+pub async fn content_resolve_bytes(
+    state: State<'_, AppState>,
+    identifier: String,
+) -> Result<Vec<u8>, String> {
+    let resolver = state.resolver.lock().await;
+    let resolver = resolver
+        .as_ref()
+        .ok_or_else(|| "content resolver not initialized".to_string())?;
+
+    let result = resolver
+        .resolve(&identifier)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(result.bytes)
 }
