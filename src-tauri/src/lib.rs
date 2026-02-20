@@ -5,12 +5,14 @@ pub mod db;
 pub mod domain;
 pub mod evidence;
 pub mod ipfs;
+pub mod p2p;
 
 use crypto::keystore::Keystore;
 use db::Database;
 use ipfs::gateway::GatewayClient;
 use ipfs::node::ContentNode;
 use ipfs::resolver::ContentResolver;
+use p2p::network::P2pNode;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::Manager;
@@ -28,6 +30,8 @@ pub struct AppState {
     /// Content resolver: local iroh + CID mapping + IPFS gateway fallback.
     /// `None` until iroh node is started (initialized asynchronously).
     pub resolver: Arc<Mutex<Option<ContentResolver>>>,
+    /// The P2P network node — `None` until started (requires unlocked wallet).
+    pub p2p_node: Arc<Mutex<Option<P2pNode>>>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -116,6 +120,7 @@ pub fn run() {
                 vault_dir,
                 content_node,
                 resolver,
+                p2p_node: Arc::new(Mutex::new(None)),
             });
 
             Ok(())
@@ -163,6 +168,11 @@ pub fn run() {
             commands::evidence::list_reputation,
             commands::cardano::mint_skill_proof_nft,
             commands::cardano::register_course_onchain,
+            commands::p2p::p2p_start,
+            commands::p2p::p2p_stop,
+            commands::p2p::p2p_status,
+            commands::p2p::p2p_peers,
+            commands::p2p::p2p_publish,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

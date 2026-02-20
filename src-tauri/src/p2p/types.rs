@@ -1,0 +1,92 @@
+use serde::{Deserialize, Serialize};
+
+/// Gossip topic identifiers for the Alexandria P2P protocol.
+///
+/// Each topic uses a versioned path to allow protocol upgrades.
+pub const TOPIC_CATALOG: &str = "/alexandria/catalog/1.0";
+pub const TOPIC_EVIDENCE: &str = "/alexandria/evidence/1.0";
+pub const TOPIC_TAXONOMY: &str = "/alexandria/taxonomy/1.0";
+pub const TOPIC_GOVERNANCE: &str = "/alexandria/governance/1.0";
+pub const TOPIC_PROFILES: &str = "/alexandria/profiles/1.0";
+
+/// All gossip topics the node subscribes to.
+pub const ALL_TOPICS: &[&str] = &[
+    TOPIC_CATALOG,
+    TOPIC_EVIDENCE,
+    TOPIC_TAXONOMY,
+    TOPIC_GOVERNANCE,
+    TOPIC_PROFILES,
+];
+
+/// A signed gossip message envelope.
+///
+/// Every message broadcast on the P2P network is wrapped in this
+/// envelope. The sender signs the payload with their Cardano Ed25519
+/// key, enabling receivers to verify authenticity and link the
+/// message to an on-chain identity (stake address).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SignedGossipMessage {
+    /// The topic this message was published on.
+    pub topic: String,
+    /// The actual message payload (JSON-encoded, topic-specific).
+    pub payload: Vec<u8>,
+    /// Ed25519 signature over `payload` by the sender's Cardano signing key.
+    pub signature: Vec<u8>,
+    /// The sender's Ed25519 public key (32 bytes).
+    /// This is the Cardano payment verification key, not the libp2p peer key.
+    pub public_key: Vec<u8>,
+    /// Sender's Cardano stake address (bech32).
+    pub stake_address: String,
+    /// Unix timestamp (seconds) when the message was created.
+    pub timestamp: u64,
+}
+
+/// Information about a known peer.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PeerInfo {
+    /// libp2p PeerId (base58 encoded).
+    pub peer_id: String,
+    /// Cardano stake address (if known).
+    pub stake_address: Option<String>,
+    /// Display name (if known).
+    pub display_name: Option<String>,
+    /// Last seen timestamp (ISO 8601).
+    pub last_seen: String,
+    /// Known multiaddresses (JSON array).
+    pub addresses: Vec<String>,
+    /// Peer roles (e.g., ["instructor", "learner"]).
+    pub roles: Vec<String>,
+    /// Cached reputation score.
+    pub reputation: Option<f64>,
+}
+
+/// P2P network status reported to the frontend.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NetworkStatus {
+    /// Whether the P2P node is running.
+    pub is_running: bool,
+    /// The local PeerId (base58).
+    pub peer_id: Option<String>,
+    /// Number of connected peers.
+    pub connected_peers: usize,
+    /// Multiaddresses the node is listening on.
+    pub listening_addresses: Vec<String>,
+    /// Topics the node is subscribed to.
+    pub subscribed_topics: Vec<String>,
+}
+
+/// Events emitted by the P2P layer to the application.
+#[derive(Debug, Clone)]
+pub enum P2pEvent {
+    /// A new peer connected.
+    PeerConnected { peer_id: String },
+    /// A peer disconnected.
+    PeerDisconnected { peer_id: String },
+    /// Received a gossip message on a topic.
+    GossipMessage {
+        topic: String,
+        message: SignedGossipMessage,
+    },
+    /// Network status changed.
+    StatusChanged(NetworkStatus),
+}

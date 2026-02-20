@@ -6,7 +6,7 @@ authors = ["Alexandria Contributors"]
 license = "AGPL-3.0"
 repository = "https://github.com/pratyushpundir/alexandria-mark3"
 edition = "2021"
-rust-version = "1.77.2"
+rust-version = "1.83.0"
 
 [lib]
 name = "app_lib"
@@ -68,6 +68,8 @@ chrono = { version = "0.4", features = ["serde"] }
 thiserror = "2"
 log = "0.4"
 hex = "0.4"
+libp2p = { version = "0.56.0", features = ["gossipsub", "kad", "mdns", "quic", "noise", "identify", "tokio", "ed25519", "macros"] }
+futures = "0.3"
 
 [dev-dependencies]
 tempfile = "3"
