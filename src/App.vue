@@ -10,7 +10,6 @@ const router = useRouter()
 const { invoke } = useLocalApi()
 
 const initialized = ref(false)
-const hasWallet = ref(false)
 
 const layout = computed(() => {
   const meta = route.meta?.layout as string | undefined
@@ -20,15 +19,39 @@ const layout = computed(() => {
 
 onMounted(async () => {
   try {
-    const wallet = await invoke<{ stake_address: string; payment_address: string; has_mnemonic_backup: boolean } | null>('get_wallet_info')
-    hasWallet.value = wallet !== null
-  } catch {
-    hasWallet.value = false
-  }
+    // Check if a Stronghold vault exists
+    const vaultExists = await invoke<boolean>('check_vault_exists')
 
-  // Redirect to onboarding if no wallet exists
-  if (!hasWallet.value && route.name !== 'onboarding') {
-    router.replace('/onboarding')
+    if (!vaultExists) {
+      // No vault — first-time setup
+      if (route.name !== 'onboarding') {
+        router.replace('/onboarding')
+      }
+    } else {
+      // Vault exists — check if we have an identity in DB (meaning vault was
+      // already unlocked this session, e.g., navigating back)
+      const wallet = await invoke<{ stake_address: string; payment_address: string; has_mnemonic_backup: boolean } | null>('get_wallet_info')
+
+      if (wallet && route.name !== 'unlock') {
+        // Wallet row exists, but we might not be unlocked yet.
+        // The unlock page will handle the actual decryption.
+        // If we're on a protected route, redirect to unlock.
+        if (route.meta?.layout === 'app') {
+          router.replace('/unlock')
+        }
+      } else if (!wallet) {
+        // Vault exists but no DB identity — edge case (maybe DB was reset).
+        // Send to unlock which will re-create the identity row.
+        if (route.name !== 'unlock') {
+          router.replace('/unlock')
+        }
+      }
+    }
+  } catch {
+    // On error, default to onboarding
+    if (route.name !== 'onboarding') {
+      router.replace('/onboarding')
+    }
   }
 
   initialized.value = true

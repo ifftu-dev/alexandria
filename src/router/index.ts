@@ -11,6 +11,14 @@ const router = createRouter({
       meta: { layout: 'blank' },
     },
 
+    // Unlock screen (vault exists but locked)
+    {
+      path: '/unlock',
+      name: 'unlock',
+      component: () => import('@/pages/Unlock.vue'),
+      meta: { layout: 'blank' },
+    },
+
     // App routes (wallet required)
     {
       path: '/',

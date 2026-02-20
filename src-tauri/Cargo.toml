@@ -41,6 +41,10 @@ bip39 = { version = "2", features = ["rand"] }
 ed25519-bip32 = "0.4"
 hmac = "0.12"
 
+# Secure secret storage (IOTA Stronghold encrypted vault)
+iota_stronghold = "2"
+zeroize = { version = "1", features = ["derive"] }
+
 # Utilities
 uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
