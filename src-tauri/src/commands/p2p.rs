@@ -12,8 +12,9 @@ use tokio::sync::Mutex;
 use crate::crypto::wallet;
 use crate::db::Database;
 use crate::p2p::catalog as p2p_catalog;
+use crate::p2p::evidence as p2p_evidence;
 use crate::p2p::network::{self, keypair_from_cardano_key};
-use crate::p2p::types::{NetworkStatus, TOPIC_CATALOG};
+use crate::p2p::types::{NetworkStatus, TOPIC_CATALOG, TOPIC_EVIDENCE};
 use crate::AppState;
 
 /// Start the P2P network node.
@@ -68,8 +69,8 @@ pub async fn p2p_start(state: State<'_, AppState>) -> Result<String, String> {
                 }
                 crate::p2p::types::P2pEvent::GossipMessage { topic, message } => {
                     log::debug!("P2P event: gossip message on {topic}");
+                    let db = db_for_events.lock().await;
                     if topic == TOPIC_CATALOG {
-                        let db = db_for_events.lock().await;
                         match p2p_catalog::handle_catalog_message(&db, message) {
                             Ok(ann) => {
                                 log::info!(
@@ -81,6 +82,20 @@ pub async fn p2p_start(state: State<'_, AppState>) -> Result<String, String> {
                             }
                             Err(e) => {
                                 log::warn!("Failed to handle catalog message: {e}");
+                            }
+                        }
+                    } else if topic == TOPIC_EVIDENCE {
+                        match p2p_evidence::handle_evidence_message(&db, message) {
+                            Ok(ann) => {
+                                log::info!(
+                                    "Evidence: stored '{}' for skill '{}' from {}",
+                                    ann.evidence_id,
+                                    ann.skill_id,
+                                    ann.learner_address,
+                                );
+                            }
+                            Err(e) => {
+                                log::warn!("Failed to handle evidence message: {e}");
                             }
                         }
                     }

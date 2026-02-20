@@ -2,8 +2,11 @@ use rusqlite::params;
 use tauri::State;
 
 use crate::crypto::hash::entity_id;
+use crate::crypto::wallet;
 use crate::domain::enrollment::{ElementProgress, Enrollment, UpdateProgressRequest};
 use crate::evidence::{aggregator, reputation};
+use crate::p2p::evidence as p2p_evidence;
+use crate::p2p::types::TOPIC_EVIDENCE;
 use crate::AppState;
 
 /// List all enrollments for the local user.
@@ -184,6 +187,12 @@ pub async fn update_progress(
         .map_err(|e| e.to_string())?;
 
     // Trigger evidence pipeline on completion with a score
+    // Collect broadcast data while holding the DB lock
+    let mut broadcast_data: Vec<(
+        crate::domain::evidence::EvidenceAnnouncement,
+        String, // stake_address
+    )> = Vec::new();
+
     if req.status == "completed" {
         if let Some(score) = req.score {
             // Get course_id and stake_address for evidence creation
@@ -237,6 +246,92 @@ pub async fn update_progress(
                     }
                     Err(e) => {
                         log::warn!("proof evaluation failed for skill {}: {}", skill_id, e);
+                    }
+                }
+            }
+
+            // Collect un-sent evidence for P2P broadcast
+            for skill_id in &skills {
+                match p2p_evidence::collect_evidence_for_broadcast(&db, skill_id) {
+                    Ok(rows) => {
+                        for row in rows {
+                            let ann = p2p_evidence::build_evidence_announcement(
+                                &row.evidence_id,
+                                &stake_address,
+                                skill_id,
+                                &row.proficiency_level,
+                                &row.assessment_id,
+                                row.score,
+                                row.difficulty,
+                                row.trust_factor,
+                                row.course_id.as_deref(),
+                                row.instructor_address.as_deref(),
+                            );
+                            broadcast_data.push((ann, stake_address.clone()));
+                        }
+                    }
+                    Err(e) => {
+                        log::warn!("failed to collect evidence for broadcast: {e}");
+                    }
+                }
+            }
+        }
+    }
+
+    // Release DB lock before async P2P operations
+    drop(db);
+
+    // Broadcast evidence to P2P network (best-effort — don't fail the progress update)
+    if !broadcast_data.is_empty() {
+        let p2p_node = state.p2p_node.lock().await;
+        if let Some(ref node) = *p2p_node {
+            // Get signing key from vault
+            let signing_key_result = {
+                let ks_guard = state.keystore.lock().await;
+                match ks_guard.as_ref() {
+                    Some(ks) => ks
+                        .retrieve_mnemonic()
+                        .map_err(|e| e.to_string())
+                        .and_then(|m| wallet::wallet_from_mnemonic(&m).map_err(|e| e.to_string())),
+                    None => Err("vault locked".to_string()),
+                }
+            };
+
+            if let Ok(w) = signing_key_result {
+                let db = state.db.lock().await;
+                for (ann, stake_addr) in &broadcast_data {
+                    let payload = match serde_json::to_vec(ann) {
+                        Ok(p) => p,
+                        Err(e) => {
+                            log::warn!("failed to serialize evidence announcement: {e}");
+                            continue;
+                        }
+                    };
+
+                    // Sign the message
+                    let signed = crate::p2p::signing::sign_gossip_message(
+                        TOPIC_EVIDENCE,
+                        payload,
+                        &w.signing_key,
+                        stake_addr,
+                    );
+                    let sig_hex = hex::encode(&signed.signature);
+
+                    // Mark as sent in sync_log
+                    let _ = p2p_evidence::mark_evidence_broadcast(&db, &ann.evidence_id, &sig_hex);
+
+                    // Publish (best-effort)
+                    match node.publish_signed(&signed).await {
+                        Ok(()) => {
+                            log::info!(
+                                "Broadcast evidence '{}' for skill '{}'",
+                                ann.evidence_id,
+                                ann.skill_id,
+                            );
+                        }
+                        Err(e) => {
+                            log::warn!("Failed to broadcast evidence: {e}");
+                        }
                     }
                 }
             }

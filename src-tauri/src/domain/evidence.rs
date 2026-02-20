@@ -107,3 +107,38 @@ pub struct ReputationAssertion {
     pub computation_spec: String,
     pub updated_at: String,
 }
+
+/// An evidence announcement broadcast on `/alexandria/evidence/1.0`.
+///
+/// This is the gossip payload for sharing evidence records across the
+/// P2P network. Other nodes store these for reputation computation.
+/// Matches the spec §10.1 evidence record structure.
+///
+/// **Important**: Received evidence does NOT trigger local aggregation.
+/// Only the learner's own node aggregates proofs — peers store evidence
+/// solely for reputation inputs (instructor impact, verification).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EvidenceAnnouncement {
+    /// Deterministic evidence ID: `blake2b(learner + assessment + timestamp + skill)`.
+    pub evidence_id: String,
+    /// Learner's Cardano stake address (bech32).
+    pub learner_address: String,
+    /// Skill ID this evidence applies to.
+    pub skill_id: String,
+    /// Bloom's taxonomy proficiency level being assessed.
+    pub proficiency_level: String,
+    /// Assessment ID this evidence was generated from.
+    pub assessment_id: String,
+    /// Score achieved (0.0 to 1.0).
+    pub score: f64,
+    /// Assessment difficulty (0.0 to 1.0).
+    pub difficulty: f64,
+    /// Assessment trust factor (default 1.0).
+    pub trust_factor: f64,
+    /// Course ID this evidence was generated from (if any).
+    pub course_id: Option<String>,
+    /// Instructor's Cardano stake address (if applicable).
+    pub instructor_address: Option<String>,
+    /// Unix timestamp of evidence creation.
+    pub created_at: i64,
+}
