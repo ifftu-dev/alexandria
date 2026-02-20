@@ -8,6 +8,8 @@ pub struct Identity {
     pub display_name: Option<String>,
     pub bio: Option<String>,
     pub avatar_cid: Option<String>,
+    /// BLAKE3 hash of the published profile document on iroh.
+    pub profile_hash: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
