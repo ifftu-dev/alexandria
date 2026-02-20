@@ -2,9 +2,11 @@ pub mod commands;
 pub mod crypto;
 pub mod db;
 pub mod domain;
+pub mod ipfs;
 
 use crypto::keystore::Keystore;
 use db::Database;
+use ipfs::node::ContentNode;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::Manager;
@@ -17,6 +19,8 @@ pub struct AppState {
     pub keystore: Arc<Mutex<Option<Keystore>>>,
     /// Path to the Stronghold vault directory.
     pub vault_dir: PathBuf,
+    /// The embedded iroh content node for IPFS-like blob storage.
+    pub content_node: Arc<ContentNode>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -58,10 +62,29 @@ pub fn run() {
 
             log::info!("Vault directory: {}", vault_dir.display());
 
+            // iroh content node directory
+            let iroh_dir = app_dir.join("iroh");
+            std::fs::create_dir_all(&iroh_dir)
+                .expect("failed to create iroh data directory");
+
+            log::info!("iroh data directory: {}", iroh_dir.display());
+
+            let content_node = Arc::new(ContentNode::new(&iroh_dir));
+
+            // Start the iroh node in the background
+            let content_node_clone = content_node.clone();
+            tauri::async_runtime::spawn(async move {
+                match content_node_clone.start().await {
+                    Ok(()) => log::info!("iroh content node started successfully"),
+                    Err(e) => log::error!("failed to start iroh content node: {e}"),
+                }
+            });
+
             app.manage(AppState {
                 db: Arc::new(Mutex::new(database)),
                 keystore: Arc::new(Mutex::new(None)),
                 vault_dir,
+                content_node,
             });
 
             Ok(())
@@ -86,6 +109,10 @@ pub fn run() {
             commands::enrollment::enroll,
             commands::enrollment::update_progress,
             commands::enrollment::get_progress,
+            commands::content::content_add,
+            commands::content::content_get,
+            commands::content::content_has,
+            commands::content::content_node_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

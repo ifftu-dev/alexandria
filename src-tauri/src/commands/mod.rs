@@ -1,3 +1,4 @@
+pub mod content;
 pub mod courses;
 pub mod enrollment;
 pub mod health;
