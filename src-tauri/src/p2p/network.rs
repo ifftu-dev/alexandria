@@ -1,5 +1,4 @@
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
+use std::sync::Arc;
 use std::time::Duration;
 
 use futures::StreamExt;
@@ -11,7 +10,10 @@ use libp2p::{identify, kad, mdns, PeerId, Swarm, SwarmBuilder};
 use thiserror::Error;
 use tokio::sync::mpsc;
 
-use super::types::{NetworkStatus, P2pEvent, ALL_TOPICS};
+use crate::crypto::hash::blake2b_256;
+
+use super::types::{NetworkStatus, P2pEvent, SignedGossipMessage, ALL_TOPICS};
+use super::validation::MessageValidator;
 
 #[derive(Error, Debug)]
 pub enum NetworkError {
@@ -143,8 +145,11 @@ pub async fn start_node(
     // Create command channel
     let (command_tx, command_rx) = mpsc::channel::<SwarmCommand>(256);
 
+    // Create the message validator (shared via Arc for the event loop)
+    let validator = Arc::new(MessageValidator::new());
+
     // Spawn the swarm event loop
-    tokio::spawn(swarm_event_loop(swarm, command_rx, event_tx));
+    tokio::spawn(swarm_event_loop(swarm, command_rx, event_tx, validator));
 
     Ok(P2pNode {
         command_tx,
@@ -163,10 +168,9 @@ fn build_behaviour(
         .heartbeat_interval(Duration::from_secs(1))
         .validation_mode(ValidationMode::Strict)
         .message_id_fn(|msg: &gossipsub::Message| {
-            // Deduplicate by blake2b hash of data (spec requirement)
-            let mut hasher = DefaultHasher::new();
-            msg.data.hash(&mut hasher);
-            MessageId::from(hasher.finish().to_string())
+            // Deduplicate by Blake2b-256 hash of data (spec §7.3)
+            let hash = blake2b_256(&msg.data);
+            MessageId::from(hex::encode(hash))
         })
         .max_transmit_size(65536) // 64KB max message size
         .build()
@@ -216,6 +220,7 @@ async fn swarm_event_loop(
     mut swarm: Swarm<AlexandriaBehaviour>,
     mut command_rx: mpsc::Receiver<SwarmCommand>,
     event_tx: mpsc::Sender<P2pEvent>,
+    validator: Arc<MessageValidator>,
 ) {
     use libp2p::swarm::SwarmEvent;
 
@@ -280,21 +285,35 @@ async fn swarm_event_loop(
                             message.source,
                             message.data.len()
                         );
-                        // Forward raw message to application layer for validation
-                        // (message signing/verification is handled in a later PR)
-                        if let Some(_source) = message.source {
-                            let _ = event_tx.send(P2pEvent::GossipMessage {
-                                topic: topic.clone(),
-                                message: super::types::SignedGossipMessage {
-                                    topic,
-                                    payload: message.data,
-                                    signature: vec![], // Will be populated after envelope parsing
-                                    public_key: vec![],
-                                    stake_address: String::new(),
-                                    timestamp: 0,
-                                },
-                            }).await;
+
+                        // Step 1: Deserialize the signed envelope
+                        let envelope = match serde_json::from_slice::<SignedGossipMessage>(
+                            &message.data,
+                        ) {
+                            Ok(env) => env,
+                            Err(e) => {
+                                log::debug!(
+                                    "Dropping message on {topic}: invalid envelope: {e}"
+                                );
+                                continue;
+                            }
+                        };
+
+                        // Step 2: Run the full validation pipeline
+                        // (signature, freshness, dedup, schema, authority)
+                        if let Err(e) = validator.validate(&envelope) {
+                            log::debug!(
+                                "Dropping message on {topic} from {}: {e}",
+                                envelope.stake_address
+                            );
+                            continue;
                         }
+
+                        // Step 3: Forward validated message to the application layer
+                        let _ = event_tx.send(P2pEvent::GossipMessage {
+                            topic: topic.clone(),
+                            message: envelope,
+                        }).await;
                     }
                     SwarmEvent::Behaviour(AlexandriaBehaviourEvent::Gossipsub(
                         gossipsub::Event::Subscribed { peer_id, topic }
