@@ -91,7 +91,7 @@ impl MessageValidator {
     }
 
     /// Step 2: Check that the message timestamp is within ±5 minutes.
-    fn check_freshness(&self, message: &SignedGossipMessage) -> ValidationResult {
+    pub(crate) fn check_freshness(&self, message: &SignedGossipMessage) -> ValidationResult {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
