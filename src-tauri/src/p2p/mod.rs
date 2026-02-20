@@ -7,6 +7,8 @@ pub mod nat;
 pub mod network;
 pub mod scoring;
 pub mod signing;
+pub mod stress;
+pub mod sync;
 pub mod taxonomy;
 pub mod types;
 pub mod validation;

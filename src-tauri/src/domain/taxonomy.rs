@@ -98,3 +98,70 @@ pub struct TaxonomyVersion {
     pub signature: Option<String>,
     pub applied_at: String,
 }
+
+/// A taxonomy version document stored on IPFS.
+///
+/// This is the full artifact produced by the ratification workflow.
+/// Stored as JSON on IPFS, with the CID anchored on-chain.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaxonomyDocument {
+    /// Monotonically increasing version number.
+    pub version: i64,
+    /// BLAKE3 hash (iroh) of this document.
+    pub root_cid: String,
+    /// CID of the previous version (for chain validation).
+    pub previous_cid: Option<String>,
+    /// DAO committee members who ratified (stake addresses).
+    pub ratified_by: Vec<String>,
+    /// ISO 8601 timestamp of ratification.
+    pub ratified_at: String,
+    /// Ed25519 signature of the document content.
+    pub signature: String,
+    /// The actual taxonomy changes.
+    pub content: TaxonomyChanges,
+}
+
+/// Parameters for proposing a taxonomy change via governance.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProposeTaxonomyParams {
+    /// DAO ID to submit the proposal under.
+    pub dao_id: String,
+    /// Human-readable title for the proposal.
+    pub title: String,
+    /// Description of what this change does.
+    pub description: Option<String>,
+    /// The taxonomy changes being proposed.
+    pub changes: TaxonomyChanges,
+}
+
+/// Preview of what a taxonomy change would do.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaxonomyPreview {
+    /// Number of subject fields added/modified.
+    pub subject_fields_affected: i64,
+    /// Number of subjects added/modified.
+    pub subjects_affected: i64,
+    /// Number of skills added/modified.
+    pub skills_affected: i64,
+    /// Number of prerequisite edges added.
+    pub prerequisites_added: i64,
+    /// Number of prerequisite edges removed.
+    pub prerequisites_removed: i64,
+    /// Whether any existing skills would be modified (vs only new ones).
+    pub has_modifications: bool,
+    /// Skill IDs that would be newly created.
+    pub new_skill_ids: Vec<String>,
+    /// Skill IDs that would be modified.
+    pub modified_skill_ids: Vec<String>,
+}
+
+/// Result of publishing a ratified taxonomy version.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaxonomyPublishResult {
+    /// The new version number assigned.
+    pub version: i64,
+    /// IPFS CID (BLAKE3) of the published taxonomy document.
+    pub content_cid: String,
+    /// Number of changes applied to local skill tables.
+    pub changes_applied: i64,
+}

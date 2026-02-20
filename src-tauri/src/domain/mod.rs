@@ -1,4 +1,6 @@
+pub mod attestation;
 pub mod catalog;
+pub mod challenge;
 pub mod course;
 pub mod course_document;
 pub mod enrollment;
@@ -6,4 +8,6 @@ pub mod evidence;
 pub mod governance;
 pub mod identity;
 pub mod profile;
+pub mod reputation;
+pub mod sync;
 pub mod taxonomy;
