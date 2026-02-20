@@ -1,12 +1,12 @@
 use bip39::{Language, Mnemonic};
 use ed25519_dalek::SigningKey;
-use hmac::{Hmac, Mac};
-use sha2::Sha512;
+use pallas_addresses::{
+    Address, Network, ShelleyAddress, ShelleyDelegationPart, ShelleyPaymentPart, StakeAddress,
+};
+use pallas_crypto::hash::Hasher;
+use pallas_crypto::key::ed25519::SecretKeyExtended;
+use pallas_wallet::hd::Bip32PrivateKey;
 use thiserror::Error;
-
-use super::hash::blake2b_256;
-
-type HmacSha512 = Hmac<Sha512>;
 
 #[derive(Error, Debug)]
 pub enum WalletError {
@@ -14,8 +14,6 @@ pub enum WalletError {
     InvalidMnemonic(String),
     #[error("key derivation failed: {0}")]
     DerivationFailed(String),
-    #[error("invalid seed length")]
-    InvalidSeedLength,
 }
 
 /// A Cardano wallet derived from a BIP-39 mnemonic.
@@ -27,28 +25,33 @@ pub enum WalletError {
 ///   - Payment key: m/1852'/1815'/0'/0/0 (for receiving NFTs)
 ///   - Stake key:   m/1852'/1815'/0'/2/0 (persistent identity)
 ///   - Signing key: m/1852'/1815'/0'/0/0 (for Ed25519 signatures)
+///
+/// Uses pallas for proper Icarus-style BIP32-Ed25519 derivation and
+/// bech32 address encoding (addr_test1... / stake_test1... for preprod).
 #[derive(Debug, Clone)]
 pub struct Wallet {
     /// The BIP-39 mnemonic phrase (24 words).
     pub mnemonic: String,
     /// Ed25519 signing key derived at m/1852'/1815'/0'/0/0.
     pub signing_key: SigningKey,
-    /// The Cardano stake address (bech32, starts with "stake1...").
+    /// The Cardano stake address (bech32, starts with "stake_test1..." on preprod).
     /// Derived from the stake key at m/1852'/1815'/0'/2/0.
     pub stake_address: String,
-    /// The Cardano payment address (bech32, starts with "addr1...").
+    /// The Cardano payment address (bech32, starts with "addr_test1..." on preprod).
     pub payment_address: String,
 }
 
-/// Extended private key for BIP32-Ed25519 derivation.
-/// Cardano uses a non-standard BIP32 variant (Icarus/Byron-era derivation).
-#[derive(Clone)]
-struct ExtendedKey {
-    /// The 64-byte extended secret key (left 32 = scalar, right 32 = chain extension).
-    secret: [u8; 64],
-    /// The 32-byte chain code.
-    chain_code: [u8; 32],
-}
+/// The Cardano network to use for address generation.
+/// Preprod testnet for development, mainnet for production.
+const CARDANO_NETWORK: Network = Network::Testnet;
+
+/// CIP-1852 derivation path constants.
+const PURPOSE: u32 = 1852;
+const COIN_TYPE: u32 = 1815;
+const ACCOUNT: u32 = 0;
+const PAYMENT_ROLE: u32 = 0;
+const STAKE_ROLE: u32 = 2;
+const ADDRESS_INDEX: u32 = 0;
 
 /// Generate a new wallet with a fresh 24-word mnemonic.
 pub fn generate_wallet() -> Result<Wallet, WalletError> {
@@ -62,175 +65,92 @@ pub fn wallet_from_mnemonic(phrase: &str) -> Result<Wallet, WalletError> {
     let mnemonic = Mnemonic::parse_in(Language::English, phrase)
         .map_err(|e| WalletError::InvalidMnemonic(e.to_string()))?;
 
-    // Derive the master key using Icarus-style derivation:
-    // PBKDF2-HMAC-SHA512 with password="" and the entropy as the seed.
-    // For simplicity in Phase 1, we use the BIP-39 seed directly with
-    // HMAC-SHA512 (ed25519 seed) — this will be upgraded to full
-    // Icarus/CIP-1852 derivation when the Cardano integration matures.
-    let entropy = mnemonic.to_entropy();
-    let master = derive_master_key(&entropy)?;
+    let mnemonic_str = mnemonic.to_string();
 
-    // Derive payment key: m/1852'/1815'/0'/0/0
-    let account = derive_hardened(&master, &[1852, 1815, 0])?;
-    let payment_key = derive_soft(&account, &[0, 0])?;
+    // Derive master key using Icarus-style derivation (PBKDF2-HMAC-SHA512).
+    // pallas-wallet handles this correctly via from_bip39_mnenomic.
+    let master = Bip32PrivateKey::from_bip39_mnenomic(mnemonic_str.clone(), String::new())
+        .map_err(|e| WalletError::DerivationFailed(format!("master key derivation: {e}")))?;
 
-    // Derive stake key: m/1852'/1815'/0'/2/0
-    let stake_key = derive_soft(&account, &[2, 0])?;
+    // CIP-1852 account key: m/1852'/1815'/0'
+    let account = master
+        .derive(harden(PURPOSE))
+        .derive(harden(COIN_TYPE))
+        .derive(harden(ACCOUNT));
 
-    // Extract the Ed25519 signing key (left 32 bytes of extended secret)
-    let signing_bytes: [u8; 32] = payment_key.secret[..32]
+    // Payment key: m/1852'/1815'/0'/0/0
+    let payment_bip32 = account.derive(PAYMENT_ROLE).derive(ADDRESS_INDEX);
+
+    // Stake key: m/1852'/1815'/0'/2/0
+    let stake_bip32 = account.derive(STAKE_ROLE).derive(ADDRESS_INDEX);
+
+    // Extract Ed25519 public keys and compute Blake2b-224 key hashes
+    let payment_pub = payment_bip32.to_public().to_ed25519_pubkey();
+    let stake_pub = stake_bip32.to_public().to_ed25519_pubkey();
+
+    let payment_key_hash = Hasher::<224>::hash(payment_pub.as_ref());
+    let stake_key_hash = Hasher::<224>::hash(stake_pub.as_ref());
+
+    // Construct Shelley-era base address (payment + stake delegation)
+    let shelley_addr = ShelleyAddress::new(
+        CARDANO_NETWORK,
+        ShelleyPaymentPart::key_hash(payment_key_hash),
+        ShelleyDelegationPart::key_hash(stake_key_hash),
+    );
+    let payment_address = Address::from(shelley_addr.clone())
+        .to_bech32()
+        .map_err(|e| WalletError::DerivationFailed(format!("payment address bech32: {e}")))?;
+
+    // Construct stake address via TryFrom<ShelleyAddress>
+    let stake_addr: StakeAddress = shelley_addr
         .try_into()
-        .map_err(|_| WalletError::DerivationFailed("signing key extraction failed".into()))?;
-    let signing_key = SigningKey::from_bytes(&signing_bytes);
+        .map_err(|e| WalletError::DerivationFailed(format!("stake address conversion: {e}")))?;
+    let stake_address = stake_addr
+        .to_bech32()
+        .map_err(|e| WalletError::DerivationFailed(format!("stake address bech32: {e}")))?;
 
-    // Compute addresses from public key hashes
-    let payment_pub = signing_key.verifying_key().to_bytes();
-    let stake_pub_bytes: [u8; 32] = {
-        let sk: [u8; 32] = stake_key.secret[..32]
-            .try_into()
-            .map_err(|_| WalletError::DerivationFailed("stake key extraction failed".into()))?;
-        let sk = SigningKey::from_bytes(&sk);
-        sk.verifying_key().to_bytes()
-    };
-
-    // Cardano addresses use Blake2b-224 hashes of public keys.
-    // For Phase 1, we use a simplified hex representation.
-    // Full bech32 encoding will be added with the Cardano integration.
-    let payment_hash = blake2b_256(&payment_pub);
-    let stake_hash = blake2b_256(&stake_pub_bytes);
-
-    // Placeholder address format — will be replaced with proper bech32
-    // (addr1... / stake1...) when pallas or cardano-serialization-lib
-    // is integrated in Phase 2.
-    let payment_address = format!("addr1_{}", hex::encode(&payment_hash[..28]));
-    let stake_address = format!("stake1_{}", hex::encode(&stake_hash[..28]));
+    // Extract Ed25519 signing key (first 32 bytes of extended key) for
+    // ed25519-dalek compatibility (used in our signing module).
+    let signing_key = extract_signing_key(&payment_bip32)?;
 
     Ok(Wallet {
-        mnemonic: mnemonic.to_string(),
+        mnemonic: mnemonic_str,
         signing_key,
         stake_address,
         payment_address,
     })
 }
 
-/// Derive the master extended key from entropy using HMAC-SHA512.
-fn derive_master_key(entropy: &[u8]) -> Result<ExtendedKey, WalletError> {
-    let mut mac = HmacSha512::new_from_slice(b"ed25519 cardano seed")
-        .map_err(|e| WalletError::DerivationFailed(e.to_string()))?;
-    mac.update(entropy);
-    let hmac_out: [u8; 64] = mac
-        .finalize()
-        .into_bytes()
-        .as_slice()
-        .try_into()
-        .map_err(|_| WalletError::InvalidSeedLength)?;
-
-    let mut secret = [0u8; 64];
-    secret.copy_from_slice(&hmac_out);
-
-    // Clamp the scalar (Cardano Ed25519-BIP32 requirement)
-    secret[0] &= 0b1111_1000;
-    secret[31] &= 0b0111_1111;
-    secret[31] |= 0b0100_0000;
-
-    // Chain code: HMAC-SHA512 with different key
-    let mut cc_mac = HmacSha512::new_from_slice(b"ed25519 cardano chaincode")
-        .map_err(|e| WalletError::DerivationFailed(e.to_string()))?;
-    cc_mac.update(entropy);
-    let cc_out: [u8; 64] = cc_mac
-        .finalize()
-        .into_bytes()
-        .as_slice()
-        .try_into()
-        .map_err(|_| WalletError::InvalidSeedLength)?;
-
-    let mut chain_code = [0u8; 32];
-    chain_code.copy_from_slice(&cc_out[..32]);
-
-    Ok(ExtendedKey { secret, chain_code })
+/// Apply hardened derivation offset to an index.
+fn harden(index: u32) -> u32 {
+    0x8000_0000 + index
 }
 
-/// Derive a hardened child key (index >= 2^31).
-fn derive_hardened(parent: &ExtendedKey, indices: &[u32]) -> Result<ExtendedKey, WalletError> {
-    let mut current = parent.clone();
-    for &idx in indices {
-        let hardened_idx = idx + 0x8000_0000;
-        let mut data = Vec::with_capacity(1 + 64 + 4);
-        data.push(0x00); // Hardened derivation prefix
-        data.extend_from_slice(&current.secret);
-        data.extend_from_slice(&hardened_idx.to_le_bytes());
+/// Extract an ed25519-dalek SigningKey from a pallas Bip32PrivateKey.
+///
+/// pallas stores an extended BIP32-Ed25519 key (64 bytes: 32-byte scalar + 32-byte extension).
+/// We take the first 32 bytes (the Ed25519 scalar) for signing operations.
+fn extract_signing_key(bip32_key: &Bip32PrivateKey) -> Result<SigningKey, WalletError> {
+    let pallas_private = bip32_key.to_ed25519_private_key();
 
-        let mut mac = HmacSha512::new_from_slice(&current.chain_code)
-            .map_err(|e| WalletError::DerivationFailed(e.to_string()))?;
-        mac.update(&data);
-        let hmac_bytes = mac.finalize().into_bytes();
-        let result: &[u8] = hmac_bytes.as_slice();
-
-        let mut child_secret = [0u8; 64];
-        child_secret[..32].copy_from_slice(&result[..32]);
-        child_secret[32..64].copy_from_slice(&current.secret[32..64]);
-
-        // Clamp
-        child_secret[0] &= 0b1111_1000;
-        child_secret[31] &= 0b0111_1111;
-        child_secret[31] |= 0b0100_0000;
-
-        let mut child_cc = [0u8; 32];
-        child_cc.copy_from_slice(&result[32..64]);
-
-        current = ExtendedKey {
-            secret: child_secret,
-            chain_code: child_cc,
-        };
-    }
-    Ok(current)
-}
-
-/// Derive a soft (non-hardened) child key (index < 2^31).
-fn derive_soft(parent: &ExtendedKey, indices: &[u32]) -> Result<ExtendedKey, WalletError> {
-    let mut current = parent.clone();
-    for &idx in indices {
-        // Soft derivation uses the public key
-        let sk_bytes: [u8; 32] = current.secret[..32]
-            .try_into()
-            .map_err(|_| WalletError::DerivationFailed("key slice failed".into()))?;
-        let sk = SigningKey::from_bytes(&sk_bytes);
-        let pk = sk.verifying_key().to_bytes();
-
-        let mut data = Vec::with_capacity(1 + 32 + 4);
-        data.push(0x02); // Soft derivation prefix
-        data.extend_from_slice(&pk);
-        data.extend_from_slice(&idx.to_le_bytes());
-
-        let mut mac = HmacSha512::new_from_slice(&current.chain_code)
-            .map_err(|e| WalletError::DerivationFailed(e.to_string()))?;
-        mac.update(&data);
-        let hmac_bytes = mac.finalize().into_bytes();
-        let result: &[u8] = hmac_bytes.as_slice();
-
-        let mut child_secret = [0u8; 64];
-        // Add parent scalar + derived scalar (mod L for Ed25519)
-        // Simplified: wrapping_add for Phase 1, will use proper scalar
-        // addition when pallas is integrated.
-        for i in 0..32 {
-            child_secret[i] = current.secret[i].wrapping_add(result[i]);
+    // The key is always Extended from BIP32 derivation.
+    // Use leak_into_bytes to access the raw bytes.
+    match pallas_private {
+        pallas_wallet::PrivateKey::Normal(sk) => {
+            let bytes: [u8; 32] =
+                unsafe { pallas_crypto::key::ed25519::SecretKey::leak_into_bytes(sk) };
+            Ok(SigningKey::from_bytes(&bytes))
         }
-        child_secret[32..64].copy_from_slice(&current.secret[32..64]);
-
-        // Clamp
-        child_secret[0] &= 0b1111_1000;
-        child_secret[31] &= 0b0111_1111;
-        child_secret[31] |= 0b0100_0000;
-
-        let mut child_cc = [0u8; 32];
-        child_cc.copy_from_slice(&result[32..64]);
-
-        current = ExtendedKey {
-            secret: child_secret,
-            chain_code: child_cc,
-        };
+        pallas_wallet::PrivateKey::Extended(xsk) => {
+            // Extended key is 64 bytes: first 32 = Ed25519 scalar
+            let bytes: [u8; SecretKeyExtended::SIZE] =
+                unsafe { SecretKeyExtended::leak_into_bytes(xsk) };
+            let scalar: [u8; 32] = bytes[..32].try_into().map_err(|_| {
+                WalletError::DerivationFailed("signing key extraction failed".into())
+            })?;
+            Ok(SigningKey::from_bytes(&scalar))
+        }
     }
-    Ok(current)
 }
 
 #[cfg(test)]
@@ -241,8 +161,17 @@ mod tests {
     fn generate_wallet_produces_valid_wallet() {
         let wallet = generate_wallet().expect("wallet generation failed");
         assert_eq!(wallet.mnemonic.split_whitespace().count(), 24);
-        assert!(wallet.stake_address.starts_with("stake1_"));
-        assert!(wallet.payment_address.starts_with("addr1_"));
+        // Preprod testnet addresses
+        assert!(
+            wallet.stake_address.starts_with("stake_test1"),
+            "stake address should start with stake_test1, got: {}",
+            wallet.stake_address
+        );
+        assert!(
+            wallet.payment_address.starts_with("addr_test1"),
+            "payment address should start with addr_test1, got: {}",
+            wallet.payment_address
+        );
     }
 
     #[test]
@@ -263,6 +192,7 @@ mod tests {
         let wallet1 = generate_wallet().expect("wallet generation failed");
         let wallet2 = generate_wallet().expect("wallet generation failed");
         assert_ne!(wallet1.stake_address, wallet2.stake_address);
+        assert_ne!(wallet1.payment_address, wallet2.payment_address);
     }
 
     #[test]
@@ -273,5 +203,78 @@ mod tests {
         // Verify the mnemonic is valid BIP-39
         let parsed = Mnemonic::parse_in(Language::English, &phrase);
         assert!(parsed.is_ok());
+    }
+
+    #[test]
+    fn payment_address_is_valid_bech32() {
+        let wallet = generate_wallet().expect("wallet generation failed");
+        // addr_test1 prefix = Shelley testnet base address (type 0x00)
+        assert!(wallet.payment_address.starts_with("addr_test1"));
+        // Base addresses are typically 98+ chars in bech32
+        assert!(
+            wallet.payment_address.len() > 50,
+            "payment address too short: {}",
+            wallet.payment_address
+        );
+    }
+
+    #[test]
+    fn stake_address_is_valid_bech32() {
+        let wallet = generate_wallet().expect("wallet generation failed");
+        // stake_test1 prefix = Shelley testnet stake/reward address
+        assert!(wallet.stake_address.starts_with("stake_test1"));
+        assert!(
+            wallet.stake_address.len() > 40,
+            "stake address too short: {}",
+            wallet.stake_address
+        );
+    }
+
+    #[test]
+    fn signing_key_is_32_bytes() {
+        let wallet = generate_wallet().expect("wallet generation failed");
+        assert_eq!(wallet.signing_key.to_bytes().len(), 32);
+    }
+
+    #[test]
+    fn signing_key_can_sign_and_verify() {
+        use ed25519_dalek::Signer;
+        let wallet = generate_wallet().expect("wallet generation failed");
+        let message = b"hello cardano";
+        let signature = wallet.signing_key.sign(message);
+
+        let verifying_key = wallet.signing_key.verifying_key();
+        use ed25519_dalek::Verifier;
+        assert!(verifying_key.verify(message, &signature).is_ok());
+    }
+
+    #[test]
+    fn payment_address_roundtrips_through_bech32_parsing() {
+        let wallet = generate_wallet().expect("wallet generation failed");
+        // Parse the bech32 address back and verify it's a valid Shelley address
+        let parsed = Address::from_bech32(&wallet.payment_address)
+            .expect("payment address should parse as bech32");
+        assert!(
+            matches!(parsed, Address::Shelley(_)),
+            "payment address should be Shelley type"
+        );
+        // Re-encode and compare
+        let re_encoded = parsed.to_bech32().expect("re-encoding should succeed");
+        assert_eq!(wallet.payment_address, re_encoded);
+    }
+
+    #[test]
+    fn stake_address_roundtrips_through_bech32_parsing() {
+        let wallet = generate_wallet().expect("wallet generation failed");
+        // Parse the bech32 address back and verify it's a valid Stake address
+        let parsed = Address::from_bech32(&wallet.stake_address)
+            .expect("stake address should parse as bech32");
+        assert!(
+            matches!(parsed, Address::Stake(_)),
+            "stake address should be Stake type"
+        );
+        // Re-encode and compare
+        let re_encoded = parsed.to_bech32().expect("re-encoding should succeed");
+        assert_eq!(wallet.stake_address, re_encoded);
     }
 }

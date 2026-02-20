@@ -37,8 +37,12 @@ sha2 = "0.10"
 rand = "0.8"
 bip39 = { version = "2", features = ["rand"] }
 
-# Cardano key derivation (CIP-1852 / BIP32-Ed25519)
-ed25519-bip32 = "0.4"
+# Cardano (pallas 0.35 — proper Icarus BIP32-Ed25519 + bech32 addresses)
+pallas-wallet = "0.35"
+pallas-addresses = "0.35"
+pallas-crypto = "0.35"
+
+# HMAC (used by keystore for password derivation)
 hmac = "0.12"
 
 # Secure secret storage (IOTA Stronghold encrypted vault)
@@ -51,4 +55,3 @@ chrono = { version = "0.4", features = ["serde"] }
 thiserror = "2"
 log = "0.4"
 hex = "0.4"
-base64 = "0.22"
