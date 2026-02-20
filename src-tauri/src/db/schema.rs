@@ -11,6 +11,7 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (1, "initial_schema", MIGRATION_001),
     (2, "profile_hash", MIGRATION_002),
     (3, "content_mappings", MIGRATION_003),
+    (4, "assessment_columns", MIGRATION_004),
 ];
 
 const MIGRATION_001: &str = r#"
@@ -397,4 +398,17 @@ CREATE TABLE IF NOT EXISTS content_mappings (
 );
 
 CREATE INDEX IF NOT EXISTS idx_content_mappings_blake3 ON content_mappings(blake3_hash);
+"#;
+
+const MIGRATION_004: &str = r#"
+-- ============================================================
+-- Migration 004: Assessment Columns
+-- Adds weight and source_element_id to skill_assessments.
+-- weight: used in evidence weighting (default 1.0, matches v1)
+-- source_element_id: enables (course, element, skill) lookups
+--   for auto-creating assessments when elements are completed.
+-- ============================================================
+
+ALTER TABLE skill_assessments ADD COLUMN weight REAL NOT NULL DEFAULT 1.0;
+ALTER TABLE skill_assessments ADD COLUMN source_element_id TEXT;
 "#;

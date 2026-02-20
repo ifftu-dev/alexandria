@@ -2,6 +2,7 @@ pub mod commands;
 pub mod crypto;
 pub mod db;
 pub mod domain;
+pub mod evidence;
 pub mod ipfs;
 
 use crypto::keystore::Keystore;
@@ -156,6 +157,9 @@ pub fn run() {
             commands::elements::delete_element,
             commands::courses::publish_course,
             commands::courses::fetch_course_document,
+            commands::evidence::list_skill_proofs,
+            commands::evidence::list_evidence,
+            commands::evidence::list_reputation,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
