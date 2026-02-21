@@ -31,4 +31,8 @@ pub struct UpdateProgressRequest {
     pub status: String,
     pub score: Option<f64>,
     pub time_spent: Option<i64>,
+    /// Sentinel integrity session ID — linked to evidence records.
+    pub integrity_session_id: Option<String>,
+    /// Final integrity score from the Sentinel engine (0.0 to 1.0).
+    pub integrity_score: Option<f64>,
 }

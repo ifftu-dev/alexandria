@@ -125,6 +125,12 @@ const router = createRouter({
       meta: { layout: 'app' },
     },
     {
+      path: '/dashboard/sentinel',
+      name: 'dashboard-sentinel',
+      component: () => import('@/pages/dashboard/Sentinel.vue'),
+      meta: { layout: 'app' },
+    },
+    {
       path: '/dashboard/settings',
       name: 'dashboard-settings',
       component: () => import('@/pages/dashboard/Settings.vue'),

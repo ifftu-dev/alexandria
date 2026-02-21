@@ -643,6 +643,160 @@ export interface SubmitAttestationParams {
   session_cid?: string | null
 }
 
+// ---- Integrity / Sentinel ----
+
+export type SessionOutcome = 'clean' | 'flagged' | 'suspended'
+export type FlagSeverity = 'info' | 'warning' | 'critical'
+export type FlagType =
+  | 'multi_account'
+  | 'low_integrity'
+  | 'speed_anomaly'
+  | 'device_change'
+  | 'tab_switching'
+  | 'paste_detected'
+  | 'no_face'
+  | 'multiple_faces'
+  | 'behavior_shift'
+  | 'face_mismatch'
+  | 'prolonged_absence'
+  | 'frequent_absence'
+  | 'bot_suspected'
+  | 'devtools_detected'
+
+export interface IntegritySession {
+  id: string
+  enrollment_id: string
+  status: string
+  integrity_score: number | null
+  started_at: string
+  ended_at: string | null
+}
+
+export interface IntegritySnapshot {
+  id: string
+  session_id: string
+  typing_score: number | null
+  mouse_score: number | null
+  human_score: number | null
+  tab_score: number | null
+  paste_score: number | null
+  devtools_score: number | null
+  camera_score: number | null
+  composite_score: number | null
+  captured_at: string
+}
+
+export interface SignalData {
+  typing_consistency: number
+  typing_speed_wpm: number
+  mouse_consistency: number
+  is_human_likely: boolean
+  face_present?: boolean
+  face_count?: number
+  face_consistency?: number
+  tab_switches: number
+  unfocused_ms: number
+  devtools_detected: boolean
+  paste_events: number
+  pasted_chars: number
+  environment_changed: boolean
+  ai_keystroke_anomaly?: number
+  ai_mouse_human_prob?: number
+  ai_face_similarity?: number
+  ai_face_match?: boolean
+}
+
+export interface BehavioralProfile {
+  userId: string
+  deviceFingerprint: string
+  typingPattern: {
+    avgDwellTime: number
+    avgFlightTime: number
+    speedWpm: number
+    sampleCount: number
+  }
+  mousePattern: {
+    avgVelocity: number
+    avgAcceleration: number
+    clickPrecision: number
+    sampleCount: number
+  }
+  lastUpdated: number
+  aiModels?: {
+    keystrokeAutoencoder?: Record<string, unknown>
+    mouseCNN?: Record<string, unknown>
+    faceEnrollment?: {
+      vector: number[]
+      frameCount: number
+      updatedAt: number
+    }
+  }
+}
+
+export interface StartSessionResponse {
+  session_id: string
+}
+
+export interface SubmitSnapshotRequest {
+  session_id: string
+  element_id: string
+  integrity_score: number
+  consistency_score: number
+  typing_score: number | null
+  mouse_score: number | null
+  human_score: number | null
+  tab_score: number | null
+  paste_score: number | null
+  devtools_score: number | null
+  camera_score: number | null
+  anomaly_flags: string[]
+}
+
+export interface EndSessionRequest {
+  overall_integrity_score: number
+  overall_consistency_score: number
+}
+
+/** Content document structure returned from IPFS */
+export interface ContentDocument {
+  content_type: string
+  body: string
+  metadata?: Record<string, unknown>
+}
+
+/** Quiz question model embedded in content */
+export interface QuizQuestion {
+  id: string
+  type: 'single_choice' | 'multiple_choice' | 'true_false' | 'short_answer'
+  prompt: string
+  options?: string[]
+  correct_indices?: number[]
+  correct_answer?: string
+  explanation?: string
+  points: number
+  difficulty: number
+}
+
+/** A complete quiz/assessment definition */
+export interface QuizDefinition {
+  title: string
+  description?: string
+  time_limit_seconds?: number
+  pass_threshold: number
+  questions: QuizQuestion[]
+  skill_tags?: { skill_id: string; weight: number }[]
+}
+
+/** Result of completing a quiz */
+export interface QuizResult {
+  total_points: number
+  earned_points: number
+  score: number
+  passed: boolean
+  answers: { question_id: string; correct: boolean; points: number }[]
+  time_spent_seconds: number
+}
+
 // ---- P2P ----
 
 export interface P2PStatus {

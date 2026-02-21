@@ -221,6 +221,8 @@ pub async fn update_progress(
                 &req.element_id,
                 score,
                 &stake_address,
+                req.integrity_session_id.as_deref(),
+                req.integrity_score,
             )
             .map_err(|e| format!("evidence creation failed: {}", e))?;
 

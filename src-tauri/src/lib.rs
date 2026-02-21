@@ -230,6 +230,12 @@ pub fn run() {
             commands::attestation::list_attestations_for_evidence,
             commands::attestation::get_attestation_status,
             commands::attestation::list_unattested_evidence,
+            commands::integrity::integrity_start_session,
+            commands::integrity::integrity_submit_snapshot,
+            commands::integrity::integrity_end_session,
+            commands::integrity::integrity_get_session,
+            commands::integrity::integrity_list_sessions,
+            commands::integrity::integrity_list_snapshots,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

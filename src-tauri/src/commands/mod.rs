@@ -11,6 +11,7 @@ pub mod evidence;
 pub mod governance;
 pub mod health;
 pub mod identity;
+pub mod integrity;
 pub mod p2p;
 pub mod reputation;
 pub mod snapshot;

@@ -53,6 +53,8 @@ pub fn create_evidence_for_element(
     element_id: &str,
     score: f64,
     stake_address: &str,
+    integrity_session_id: Option<&str>,
+    integrity_score: Option<f64>,
 ) -> Result<Vec<String>, String> {
     // Look up skills tagged on this element
     let mut stmt = conn
@@ -120,8 +122,9 @@ pub fn create_evidence_for_element(
         conn.execute(
             "INSERT OR IGNORE INTO evidence_records \
              (id, skill_assessment_id, skill_id, proficiency_level, score, \
-              difficulty, trust_factor, course_id, instructor_address, created_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, datetime('now'))",
+              difficulty, trust_factor, course_id, instructor_address, \
+              integrity_session_id, integrity_score, created_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, datetime('now'))",
             params![
                 evidence_id,
                 assessment_id,
@@ -132,6 +135,8 @@ pub fn create_evidence_for_element(
                 trust_factor,
                 course_id,
                 instructor_address,
+                integrity_session_id,
+                integrity_score,
             ],
         )
         .map_err(|e| e.to_string())?;
@@ -436,7 +441,8 @@ mod tests {
 
         // Complete element with 80% score
         let skills =
-            create_evidence_for_element(conn, "c1", "el1", 0.80, "stake_test1uq123").unwrap();
+            create_evidence_for_element(conn, "c1", "el1", 0.80, "stake_test1uq123", None, None)
+                .unwrap();
         assert_eq!(skills, vec!["sk1"]);
 
         // Evaluate — 1 evidence at 0.80 should meet "remember" (min_conf 0.60)
@@ -467,8 +473,10 @@ mod tests {
         .unwrap();
 
         // Complete both elements with 70% score
-        create_evidence_for_element(conn, "c1", "el1", 0.70, "stake_test1uq123").unwrap();
-        create_evidence_for_element(conn, "c1", "el2", 0.70, "stake_test1uq123").unwrap();
+        create_evidence_for_element(conn, "c1", "el1", 0.70, "stake_test1uq123", None, None)
+            .unwrap();
+        create_evidence_for_element(conn, "c1", "el2", 0.70, "stake_test1uq123", None, None)
+            .unwrap();
 
         let result = evaluate_and_update(conn, "stake_test1uq123", "sk1").unwrap();
         // 2 evidence, confidence ~0.70 meets "apply" (min 2 evidence, min 0.70 conf)
@@ -482,7 +490,8 @@ mod tests {
         let conn = db.conn();
 
         // Single evidence at 50% — below "remember" threshold (0.60)
-        create_evidence_for_element(conn, "c1", "el1", 0.50, "stake_test1uq123").unwrap();
+        create_evidence_for_element(conn, "c1", "el1", 0.50, "stake_test1uq123", None, None)
+            .unwrap();
 
         let result = evaluate_and_update(conn, "stake_test1uq123", "sk1").unwrap();
         assert_eq!(result.achieved_level, None);
@@ -495,7 +504,8 @@ mod tests {
         let conn = db.conn();
 
         // First: high score
-        create_evidence_for_element(conn, "c1", "el1", 0.90, "stake_test1uq123").unwrap();
+        create_evidence_for_element(conn, "c1", "el1", 0.90, "stake_test1uq123", None, None)
+            .unwrap();
         let r1 = evaluate_and_update(conn, "stake_test1uq123", "sk1").unwrap();
 
         // Add a low score element — should not decrease proof confidence
@@ -511,7 +521,8 @@ mod tests {
             [],
         )
         .unwrap();
-        create_evidence_for_element(conn, "c1", "el2", 0.50, "stake_test1uq123").unwrap();
+        create_evidence_for_element(conn, "c1", "el2", 0.50, "stake_test1uq123", None, None)
+            .unwrap();
         let r2 = evaluate_and_update(conn, "stake_test1uq123", "sk1").unwrap();
 
         // The proof still stores the old (higher) confidence
@@ -546,9 +557,16 @@ mod tests {
         )
         .unwrap();
 
-        let skills =
-            create_evidence_for_element(conn, "c1", "el_untagged", 0.80, "stake_test1uq123")
-                .unwrap();
+        let skills = create_evidence_for_element(
+            conn,
+            "c1",
+            "el_untagged",
+            0.80,
+            "stake_test1uq123",
+            None,
+            None,
+        )
+        .unwrap();
         assert!(skills.is_empty());
     }
 
@@ -566,7 +584,8 @@ mod tests {
         assert_eq!(count, 0);
 
         // Creating evidence auto-creates assessment
-        create_evidence_for_element(conn, "c1", "el1", 0.80, "stake_test1uq123").unwrap();
+        create_evidence_for_element(conn, "c1", "el1", 0.80, "stake_test1uq123", None, None)
+            .unwrap();
 
         let count: i64 = conn
             .query_row("SELECT COUNT(*) FROM skill_assessments", [], |row| {
@@ -588,7 +607,8 @@ mod tests {
             [],
         )
         .unwrap();
-        create_evidence_for_element(conn, "c1", "el2", 0.70, "stake_test1uq123").unwrap();
+        create_evidence_for_element(conn, "c1", "el2", 0.70, "stake_test1uq123", None, None)
+            .unwrap();
 
         let count: i64 = conn
             .query_row("SELECT COUNT(*) FROM skill_assessments", [], |row| {

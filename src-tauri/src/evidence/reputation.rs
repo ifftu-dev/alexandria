@@ -846,6 +846,8 @@ mod tests {
             element_id,
             score,
             "stake_test1ulearner",
+            None,
+            None,
         )
         .unwrap();
 
@@ -1114,6 +1116,8 @@ mod tests {
             "el1",
             0.80,
             "stake_test1ulearner",
+            None,
+            None,
         )
         .unwrap();
 
@@ -1301,6 +1305,8 @@ mod tests {
             "el_c2",
             0.90,
             "stake_test1ulearner",
+            None,
+            None,
         )
         .unwrap();
         let result =
