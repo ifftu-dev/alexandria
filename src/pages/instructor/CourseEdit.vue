@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useLocalApi } from '@/composables/useLocalApi'
-import { AppButton, AppSpinner, EmptyState, StatusBadge, ConfirmDialog } from '@/components/ui'
-import type { Course, Chapter, Element, CreateChapterRequest, CreateElementRequest, PublishCourseResult } from '@/types'
+import { AppButton, AppSpinner, AppBadge, EmptyState, StatusBadge, ConfirmDialog } from '@/components/ui'
+import type { Course, Chapter, Element, CreateChapterRequest, CreateElementRequest, PublishCourseResult, ElementSkillTag, SkillInfo } from '@/types'
 
 const { invoke } = useLocalApi()
 const route = useRoute()
@@ -36,6 +36,32 @@ const publishResult = ref<PublishCourseResult | null>(null)
 const showDeleteConfirm = ref(false)
 const deleting = ref(false)
 
+// Skill tagging
+const elementSkillTags = ref<Record<string, ElementSkillTag[]>>({})
+const allSkills = ref<SkillInfo[]>([])
+const taggingElement = ref<string | null>(null)
+const skillSearch = ref('')
+const skillSearchResults = computed<SkillInfo[]>(() => {
+  const q = skillSearch.value.toLowerCase().trim()
+  if (!q) return allSkills.value.slice(0, 20)
+  return allSkills.value
+    .filter(s => s.name.toLowerCase().includes(q) || (s.subject_name || '').toLowerCase().includes(q))
+    .slice(0, 20)
+})
+
+function isSkillAlreadyTagged(elementId: string, skillId: string): boolean {
+  return (elementSkillTags.value[elementId] || []).some(t => t.skill_id === skillId)
+}
+
+const bloomColors: Record<string, string> = {
+  remember: 'var(--color-muted-foreground)',
+  understand: '59 130 246',
+  apply: '16 185 129',
+  analyze: '245 158 11',
+  evaluate: '239 68 68',
+  create: '139 92 246',
+}
+
 onMounted(async () => {
   try {
     course.value = await invoke<Course>('get_course', { courseId })
@@ -44,7 +70,15 @@ onMounted(async () => {
     // Load elements for each chapter
     for (const ch of chapters.value) {
       elements.value[ch.id] = await invoke<Element[]>('list_elements', { chapterId: ch.id }).catch(() => [])
+
+      // Load skill tags for each element
+      for (const el of (elements.value[ch.id] ?? [])) {
+        elementSkillTags.value[el.id] = await invoke<ElementSkillTag[]>('list_element_skill_tags', { elementId: el.id }).catch(() => [])
+      }
     }
+
+    // Load all skills for the picker
+    allSkills.value = await invoke<SkillInfo[]>('list_skills', {}).catch(() => [])
   } catch (e) {
     error.value = String(e)
   } finally {
@@ -80,6 +114,7 @@ async function addElement(chapterId: string) {
     const element = await invoke<Element>('create_element', { chapterId, request: req })
     if (!elements.value[chapterId]) elements.value[chapterId] = []
     elements.value[chapterId].push(element)
+    elementSkillTags.value[element.id] = []
     newElementTitle.value = ''
     newElementType.value = 'video'
     addingToChapter.value = null
@@ -87,6 +122,33 @@ async function addElement(chapterId: string) {
     error.value = String(e)
   } finally {
     creatingElement.value = false
+  }
+}
+
+async function tagSkill(elementId: string, skill: SkillInfo) {
+  if (isSkillAlreadyTagged(elementId, skill.id)) return
+  try {
+    await invoke('tag_element_skill', { elementId, skillId: skill.id })
+    if (!elementSkillTags.value[elementId]) elementSkillTags.value[elementId] = []
+    elementSkillTags.value[elementId].push({
+      skill_id: skill.id,
+      skill_name: skill.name,
+      bloom_level: skill.bloom_level,
+      weight: 1.0,
+    })
+    skillSearch.value = ''
+    taggingElement.value = null
+  } catch (e) {
+    error.value = String(e)
+  }
+}
+
+async function untagSkill(elementId: string, skillId: string) {
+  try {
+    await invoke('untag_element_skill', { elementId, skillId })
+    elementSkillTags.value[elementId] = (elementSkillTags.value[elementId] || []).filter(t => t.skill_id !== skillId)
+  } catch (e) {
+    error.value = String(e)
   }
 }
 
@@ -118,10 +180,10 @@ async function deleteCourse() {
 
 const elementTypes = [
   { value: 'video', label: 'Video' },
-  { value: 'pdf', label: 'PDF' },
-  { value: 'quiz', label: 'Quiz (MCQ)' },
-  { value: 'essay', label: 'Essay' },
-  { value: 'download', label: 'Download' },
+  { value: 'text', label: 'Text' },
+  { value: 'quiz', label: 'Quiz' },
+  { value: 'interactive', label: 'Interactive' },
+  { value: 'assessment', label: 'Assessment' },
 ]
 </script>
 
@@ -185,17 +247,67 @@ const elementTypes = [
           </div>
 
           <!-- Elements -->
-          <div v-if="elements[chapter.id]?.length" class="space-y-1 mb-2">
+          <div v-if="elements[chapter.id]?.length" class="space-y-2 mb-2">
             <div
               v-for="el in elements[chapter.id]"
               :key="el.id"
-              class="flex items-center gap-2 p-2 rounded bg-[rgb(var(--color-muted)/0.3)] text-sm"
+              class="p-2 rounded bg-[rgb(var(--color-muted)/0.3)]"
             >
-              <StatusBadge :status="el.element_type" />
-              <span>{{ el.title }}</span>
-              <span v-if="el.content_cid" class="text-xs font-mono text-[rgb(var(--color-muted-foreground))] ml-auto truncate max-w-40">
-                {{ el.content_cid }}
-              </span>
+              <div class="flex items-center gap-2 text-sm">
+                <StatusBadge :status="el.element_type" />
+                <span>{{ el.title }}</span>
+                <span v-if="el.content_cid" class="text-xs font-mono text-[rgb(var(--color-muted-foreground))] ml-auto truncate max-w-40">
+                  {{ el.content_cid }}
+                </span>
+              </div>
+
+              <!-- Skill tags row -->
+              <div class="flex flex-wrap items-center gap-1.5 mt-1.5">
+                <button
+                  v-for="tag in elementSkillTags[el.id] || []"
+                  :key="tag.skill_id"
+                  class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium transition-colors hover:opacity-80"
+                  :style="{ backgroundColor: `rgb(${bloomColors[tag.bloom_level] || bloomColors.apply} / 0.15)`, color: `rgb(${bloomColors[tag.bloom_level] || bloomColors.apply})` }"
+                  :title="`Remove ${tag.skill_name}`"
+                  @click="untagSkill(el.id, tag.skill_id)"
+                >
+                  {{ tag.skill_name }}
+                  <svg class="w-3 h-3 opacity-60" viewBox="0 0 20 20" fill="currentColor"><path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z"/></svg>
+                </button>
+
+                <!-- Add skill button / picker -->
+                <div v-if="taggingElement === el.id" class="relative">
+                  <input
+                    v-model="skillSearch"
+                    class="input text-xs py-0.5 px-2 w-48"
+                    placeholder="Search skills..."
+                    @keydown.escape="taggingElement = null; skillSearch = ''"
+                  >
+                  <div
+                    v-if="skillSearchResults.length"
+                    class="absolute z-20 top-full left-0 mt-1 w-64 max-h-48 overflow-y-auto rounded border border-[rgb(var(--color-border))] bg-[rgb(var(--color-card))] shadow-lg"
+                  >
+                    <button
+                      v-for="skill in skillSearchResults"
+                      :key="skill.id"
+                      class="w-full text-left px-3 py-1.5 text-xs hover:bg-[rgb(var(--color-muted)/0.3)] flex items-center justify-between gap-2 disabled:opacity-40"
+                      :disabled="isSkillAlreadyTagged(el.id, skill.id)"
+                      @click="tagSkill(el.id, skill)"
+                    >
+                      <span class="truncate">{{ skill.name }}</span>
+                      <AppBadge size="xs">{{ skill.bloom_level }}</AppBadge>
+                    </button>
+                  </div>
+                </div>
+                <button
+                  v-else
+                  class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-xs text-[rgb(var(--color-muted-foreground))] border border-dashed border-[rgb(var(--color-border))] hover:border-[rgb(var(--color-primary))] hover:text-[rgb(var(--color-primary))] transition-colors"
+                  @click="taggingElement = el.id; skillSearch = ''"
+                >
+                  <svg class="w-3 h-3" viewBox="0 0 20 20" fill="currentColor"><path d="M10.75 4.75a.75.75 0 00-1.5 0v4.5h-4.5a.75.75 0 000 1.5h4.5v4.5a.75.75 0 001.5 0v-4.5h4.5a.75.75 0 000-1.5h-4.5v-4.5z"/></svg>
+                  Skill
+                </button>
+              </div>
             </div>
           </div>
 
