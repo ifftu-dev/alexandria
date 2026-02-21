@@ -101,6 +101,22 @@ pub fn run() {
                     Ok(()) => {
                         log::info!("iroh content node started successfully");
 
+                        // Seed content blobs for dev/testnet elements (idempotent)
+                        match db::seed_content::seed_content_if_needed(
+                            &db_clone,
+                            &content_node_clone,
+                        )
+                        .await
+                        {
+                            Ok(n) if n > 0 => {
+                                log::info!("seeded content for {n} elements");
+                            }
+                            Ok(_) => {}
+                            Err(e) => {
+                                log::warn!("content seed failed (non-fatal): {e}");
+                            }
+                        }
+
                         // Initialize the content resolver with gateway fallback
                         match GatewayClient::with_defaults() {
                             Ok(gateway) => {

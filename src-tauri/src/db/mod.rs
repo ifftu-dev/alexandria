@@ -1,5 +1,6 @@
 pub mod schema;
 pub mod seed;
+pub mod seed_content;
 
 use rusqlite::Connection;
 use std::path::Path;
