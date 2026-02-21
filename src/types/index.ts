@@ -643,6 +643,78 @@ export interface SubmitAttestationParams {
   session_cid?: string | null
 }
 
+// ---- Taxonomy (skill graph) ----
+
+export interface SubjectFieldInfo {
+  id: string
+  name: string
+  description: string | null
+  subject_count: number
+  skill_count: number
+  created_at: string | null
+}
+
+export interface SubjectInfo {
+  id: string
+  name: string
+  description: string | null
+  subject_field_id: string | null
+  subject_field_name: string | null
+  skill_count: number
+  created_at: string | null
+}
+
+export interface SkillInfo {
+  id: string
+  name: string
+  description: string | null
+  subject_id: string | null
+  subject_name: string | null
+  subject_field_id: string | null
+  subject_field_name: string | null
+  bloom_level: string
+  prerequisite_count: number
+  dependent_count: number
+  created_at: string | null
+}
+
+export interface SkillSummary {
+  id: string
+  name: string
+  bloom_level: string
+  subject_name: string | null
+}
+
+export interface SkillRelation {
+  skill_id: string
+  skill_name: string
+  bloom_level: string
+  relation_type: string
+}
+
+export interface SkillDetail {
+  skill: SkillInfo
+  prerequisites: SkillSummary[]
+  dependents: SkillSummary[]
+  related: SkillRelation[]
+}
+
+export interface SkillGraphEdge {
+  skill_id: string
+  skill_name: string
+  skill_bloom: string
+  prerequisite_id: string
+  prerequisite_name: string
+  prerequisite_bloom: string
+}
+
+export interface ElementSkillTag {
+  skill_id: string
+  skill_name: string
+  bloom_level: string
+  weight: number
+}
+
 // ---- Integrity / Sentinel ----
 
 export type SessionOutcome = 'clean' | 'flagged' | 'suspended'

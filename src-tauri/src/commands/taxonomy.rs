@@ -1,11 +1,17 @@
-//! IPC commands for taxonomy DAO ratification.
+//! IPC commands for taxonomy browsing and DAO ratification.
 //!
-//! Exposes the taxonomy ratification workflow to the frontend:
+//! Read commands for the skill taxonomy:
+//!   - Browse subject fields, subjects, skills
+//!   - Query prerequisites and relations
+//!
+//! Write commands for the taxonomy ratification workflow:
 //!   - Propose a taxonomy change via governance
 //!   - Preview what a change would affect
 //!   - Publish a ratified taxonomy version
 //!   - Query taxonomy versions
 
+use rusqlite::params;
+use serde::Serialize;
 use tauri::State;
 
 use crate::domain::taxonomy::{
@@ -13,6 +19,512 @@ use crate::domain::taxonomy::{
 };
 use crate::evidence::taxonomy;
 use crate::AppState;
+
+// ============================================================================
+// Read-only taxonomy types (returned to frontend)
+// ============================================================================
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SubjectFieldInfo {
+    pub id: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub subject_count: i64,
+    pub skill_count: i64,
+    pub created_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SubjectInfo {
+    pub id: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub subject_field_id: Option<String>,
+    pub subject_field_name: Option<String>,
+    pub skill_count: i64,
+    pub created_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SkillInfo {
+    pub id: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub subject_id: Option<String>,
+    pub subject_name: Option<String>,
+    pub subject_field_id: Option<String>,
+    pub subject_field_name: Option<String>,
+    pub bloom_level: String,
+    pub prerequisite_count: i64,
+    pub dependent_count: i64,
+    pub created_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SkillDetail {
+    pub skill: SkillInfo,
+    pub prerequisites: Vec<SkillSummary>,
+    pub dependents: Vec<SkillSummary>,
+    pub related: Vec<SkillRelation>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SkillSummary {
+    pub id: String,
+    pub name: String,
+    pub bloom_level: String,
+    pub subject_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SkillRelation {
+    pub skill_id: String,
+    pub skill_name: String,
+    pub bloom_level: String,
+    pub relation_type: String,
+}
+
+// ============================================================================
+// Taxonomy read commands
+// ============================================================================
+
+/// List all subject fields with aggregate counts.
+#[tauri::command]
+pub async fn list_subject_fields(
+    state: State<'_, AppState>,
+) -> Result<Vec<SubjectFieldInfo>, String> {
+    let db = state.db.lock().await;
+    let conn = db.conn();
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT sf.id, sf.name, sf.description, sf.created_at,
+                    (SELECT COUNT(*) FROM subjects s WHERE s.subject_field_id = sf.id) as subject_count,
+                    (SELECT COUNT(*) FROM skills sk
+                     JOIN subjects s ON sk.subject_id = s.id
+                     WHERE s.subject_field_id = sf.id) as skill_count
+             FROM subject_fields sf
+             ORDER BY sf.name",
+        )
+        .map_err(|e| e.to_string())?;
+
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(SubjectFieldInfo {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                description: row.get(2)?,
+                created_at: row.get(3)?,
+                subject_count: row.get(4)?,
+                skill_count: row.get(5)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+
+    Ok(rows)
+}
+
+/// List subjects, optionally filtered by subject_field_id.
+#[tauri::command]
+pub async fn list_subjects(
+    state: State<'_, AppState>,
+    subject_field_id: Option<String>,
+) -> Result<Vec<SubjectInfo>, String> {
+    let db = state.db.lock().await;
+    let conn = db.conn();
+
+    let sql = if subject_field_id.is_some() {
+        "SELECT s.id, s.name, s.description, s.subject_field_id, sf.name, s.created_at,
+                (SELECT COUNT(*) FROM skills sk WHERE sk.subject_id = s.id) as skill_count
+         FROM subjects s
+         LEFT JOIN subject_fields sf ON s.subject_field_id = sf.id
+         WHERE s.subject_field_id = ?1
+         ORDER BY s.name"
+    } else {
+        "SELECT s.id, s.name, s.description, s.subject_field_id, sf.name, s.created_at,
+                (SELECT COUNT(*) FROM skills sk WHERE sk.subject_id = s.id) as skill_count
+         FROM subjects s
+         LEFT JOIN subject_fields sf ON s.subject_field_id = sf.id
+         ORDER BY s.name"
+    };
+
+    let mut stmt = conn.prepare(sql).map_err(|e| e.to_string())?;
+
+    let rows = if let Some(ref field_id) = subject_field_id {
+        stmt.query_map(params![field_id], |row| {
+            Ok(SubjectInfo {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                description: row.get(2)?,
+                subject_field_id: row.get(3)?,
+                subject_field_name: row.get(4)?,
+                created_at: row.get(5)?,
+                skill_count: row.get(6)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?
+    } else {
+        stmt.query_map([], |row| {
+            Ok(SubjectInfo {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                description: row.get(2)?,
+                subject_field_id: row.get(3)?,
+                subject_field_name: row.get(4)?,
+                created_at: row.get(5)?,
+                skill_count: row.get(6)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?
+    };
+
+    Ok(rows)
+}
+
+/// List skills, optionally filtered by subject_id or search query.
+#[tauri::command]
+pub async fn list_skills(
+    state: State<'_, AppState>,
+    subject_id: Option<String>,
+    search: Option<String>,
+    bloom_level: Option<String>,
+) -> Result<Vec<SkillInfo>, String> {
+    let db = state.db.lock().await;
+    let conn = db.conn();
+
+    // Build dynamic query
+    let mut conditions = Vec::new();
+    let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+    let mut param_idx = 1;
+
+    if let Some(ref sid) = subject_id {
+        conditions.push(format!("sk.subject_id = ?{param_idx}"));
+        param_values.push(Box::new(sid.clone()));
+        param_idx += 1;
+    }
+
+    if let Some(ref q) = search {
+        conditions.push(format!(
+            "(sk.name LIKE ?{param_idx} OR sk.description LIKE ?{param_idx})"
+        ));
+        param_values.push(Box::new(format!("%{q}%")));
+        param_idx += 1;
+    }
+
+    if let Some(ref bl) = bloom_level {
+        conditions.push(format!("sk.bloom_level = ?{param_idx}"));
+        param_values.push(Box::new(bl.clone()));
+        // param_idx not needed after last use
+    }
+
+    let where_clause = if conditions.is_empty() {
+        String::new()
+    } else {
+        format!("WHERE {}", conditions.join(" AND "))
+    };
+
+    let sql = format!(
+        "SELECT sk.id, sk.name, sk.description, sk.subject_id, s.name, sf.id, sf.name,
+                sk.bloom_level, sk.created_at,
+                (SELECT COUNT(*) FROM skill_prerequisites sp WHERE sp.skill_id = sk.id) as prereq_count,
+                (SELECT COUNT(*) FROM skill_prerequisites sp WHERE sp.prerequisite_id = sk.id) as dep_count
+         FROM skills sk
+         LEFT JOIN subjects s ON sk.subject_id = s.id
+         LEFT JOIN subject_fields sf ON s.subject_field_id = sf.id
+         {where_clause}
+         ORDER BY sk.name"
+    );
+
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    let params_slice: Vec<&dyn rusqlite::types::ToSql> =
+        param_values.iter().map(|p| p.as_ref()).collect();
+
+    let rows = stmt
+        .query_map(params_slice.as_slice(), |row| {
+            Ok(SkillInfo {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                description: row.get(2)?,
+                subject_id: row.get(3)?,
+                subject_name: row.get(4)?,
+                subject_field_id: row.get(5)?,
+                subject_field_name: row.get(6)?,
+                bloom_level: row.get(7)?,
+                created_at: row.get(8)?,
+                prerequisite_count: row.get(9)?,
+                dependent_count: row.get(10)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+
+    Ok(rows)
+}
+
+/// Get full detail for a single skill, including prerequisites and relations.
+#[tauri::command]
+pub async fn get_skill(
+    state: State<'_, AppState>,
+    skill_id: String,
+) -> Result<SkillDetail, String> {
+    let db = state.db.lock().await;
+    let conn = db.conn();
+
+    // Main skill info
+    let skill = conn
+        .query_row(
+            "SELECT sk.id, sk.name, sk.description, sk.subject_id, s.name, sf.id, sf.name,
+                    sk.bloom_level, sk.created_at,
+                    (SELECT COUNT(*) FROM skill_prerequisites sp WHERE sp.skill_id = sk.id),
+                    (SELECT COUNT(*) FROM skill_prerequisites sp WHERE sp.prerequisite_id = sk.id)
+             FROM skills sk
+             LEFT JOIN subjects s ON sk.subject_id = s.id
+             LEFT JOIN subject_fields sf ON s.subject_field_id = sf.id
+             WHERE sk.id = ?1",
+            params![skill_id],
+            |row| {
+                Ok(SkillInfo {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    description: row.get(2)?,
+                    subject_id: row.get(3)?,
+                    subject_name: row.get(4)?,
+                    subject_field_id: row.get(5)?,
+                    subject_field_name: row.get(6)?,
+                    bloom_level: row.get(7)?,
+                    created_at: row.get(8)?,
+                    prerequisite_count: row.get(9)?,
+                    dependent_count: row.get(10)?,
+                })
+            },
+        )
+        .map_err(|e| format!("skill not found: {e}"))?;
+
+    // Prerequisites (skills this skill depends on)
+    let mut prereq_stmt = conn
+        .prepare(
+            "SELECT sk.id, sk.name, sk.bloom_level, s.name
+             FROM skill_prerequisites sp
+             JOIN skills sk ON sp.prerequisite_id = sk.id
+             LEFT JOIN subjects s ON sk.subject_id = s.id
+             WHERE sp.skill_id = ?1
+             ORDER BY sk.name",
+        )
+        .map_err(|e| e.to_string())?;
+
+    let prerequisites = prereq_stmt
+        .query_map(params![skill_id], |row| {
+            Ok(SkillSummary {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                bloom_level: row.get(2)?,
+                subject_name: row.get(3)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+
+    // Dependents (skills that depend on this skill)
+    let mut dep_stmt = conn
+        .prepare(
+            "SELECT sk.id, sk.name, sk.bloom_level, s.name
+             FROM skill_prerequisites sp
+             JOIN skills sk ON sp.skill_id = sk.id
+             LEFT JOIN subjects s ON sk.subject_id = s.id
+             WHERE sp.prerequisite_id = ?1
+             ORDER BY sk.name",
+        )
+        .map_err(|e| e.to_string())?;
+
+    let dependents = dep_stmt
+        .query_map(params![skill_id], |row| {
+            Ok(SkillSummary {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                bloom_level: row.get(2)?,
+                subject_name: row.get(3)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+
+    // Related skills
+    let mut rel_stmt = conn
+        .prepare(
+            "SELECT sk.id, sk.name, sk.bloom_level, sr.relation_type
+             FROM skill_relations sr
+             JOIN skills sk ON sr.related_skill_id = sk.id
+             WHERE sr.skill_id = ?1
+             UNION
+             SELECT sk.id, sk.name, sk.bloom_level, sr.relation_type
+             FROM skill_relations sr
+             JOIN skills sk ON sr.skill_id = sk.id
+             WHERE sr.related_skill_id = ?1
+             ORDER BY 2",
+        )
+        .map_err(|e| e.to_string())?;
+
+    let related = rel_stmt
+        .query_map(params![skill_id], |row| {
+            Ok(SkillRelation {
+                skill_id: row.get(0)?,
+                skill_name: row.get(1)?,
+                bloom_level: row.get(2)?,
+                relation_type: row.get(3)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+
+    Ok(SkillDetail {
+        skill,
+        prerequisites,
+        dependents,
+        related,
+    })
+}
+
+/// Get all prerequisite edges for building the skill graph.
+///
+/// Returns all (skill_id, prerequisite_id) pairs with names for rendering.
+#[tauri::command]
+pub async fn list_skill_graph_edges(
+    state: State<'_, AppState>,
+) -> Result<Vec<SkillGraphEdge>, String> {
+    let db = state.db.lock().await;
+    let conn = db.conn();
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT sp.skill_id, sk1.name, sk1.bloom_level,
+                    sp.prerequisite_id, sk2.name, sk2.bloom_level
+             FROM skill_prerequisites sp
+             JOIN skills sk1 ON sp.skill_id = sk1.id
+             JOIN skills sk2 ON sp.prerequisite_id = sk2.id
+             ORDER BY sk2.name, sk1.name",
+        )
+        .map_err(|e| e.to_string())?;
+
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(SkillGraphEdge {
+                skill_id: row.get(0)?,
+                skill_name: row.get(1)?,
+                skill_bloom: row.get(2)?,
+                prerequisite_id: row.get(3)?,
+                prerequisite_name: row.get(4)?,
+                prerequisite_bloom: row.get(5)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+
+    Ok(rows)
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SkillGraphEdge {
+    pub skill_id: String,
+    pub skill_name: String,
+    pub skill_bloom: String,
+    pub prerequisite_id: String,
+    pub prerequisite_name: String,
+    pub prerequisite_bloom: String,
+}
+
+// ============================================================================
+// Element skill tag commands
+// ============================================================================
+
+/// Tag an element with a skill (for the evidence pipeline).
+#[tauri::command]
+pub async fn tag_element_skill(
+    state: State<'_, AppState>,
+    element_id: String,
+    skill_id: String,
+    weight: Option<f64>,
+) -> Result<(), String> {
+    let db = state.db.lock().await;
+    db.conn()
+        .execute(
+            "INSERT OR REPLACE INTO element_skill_tags (element_id, skill_id, weight)
+             VALUES (?1, ?2, ?3)",
+            params![element_id, skill_id, weight.unwrap_or(1.0)],
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Remove a skill tag from an element.
+#[tauri::command]
+pub async fn untag_element_skill(
+    state: State<'_, AppState>,
+    element_id: String,
+    skill_id: String,
+) -> Result<(), String> {
+    let db = state.db.lock().await;
+    db.conn()
+        .execute(
+            "DELETE FROM element_skill_tags WHERE element_id = ?1 AND skill_id = ?2",
+            params![element_id, skill_id],
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// List skill tags for an element.
+#[tauri::command]
+pub async fn list_element_skill_tags(
+    state: State<'_, AppState>,
+    element_id: String,
+) -> Result<Vec<ElementSkillTag>, String> {
+    let db = state.db.lock().await;
+    let conn = db.conn();
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT est.skill_id, sk.name, sk.bloom_level, est.weight
+             FROM element_skill_tags est
+             JOIN skills sk ON est.skill_id = sk.id
+             WHERE est.element_id = ?1
+             ORDER BY sk.name",
+        )
+        .map_err(|e| e.to_string())?;
+
+    let rows = stmt
+        .query_map(params![element_id], |row| {
+            Ok(ElementSkillTag {
+                skill_id: row.get(0)?,
+                skill_name: row.get(1)?,
+                bloom_level: row.get(2)?,
+                weight: row.get(3)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+
+    Ok(rows)
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ElementSkillTag {
+    pub skill_id: String,
+    pub skill_name: String,
+    pub bloom_level: String,
+    pub weight: f64,
+}
 
 /// Propose a taxonomy change via a governance proposal.
 ///
