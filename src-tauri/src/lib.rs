@@ -64,6 +64,13 @@ pub fn run() {
                 .run_migrations()
                 .expect("failed to run database migrations");
 
+            // Seed demo data on first launch (skips if tables already populated)
+            match db::seed::seed_if_empty(database.conn()) {
+                Ok(true) => log::info!("Demo seed data inserted"),
+                Ok(false) => log::info!("Database already populated — seed skipped"),
+                Err(e) => log::warn!("Seed data failed (non-fatal): {e}"),
+            }
+
             log::info!("Database initialized successfully");
 
             // Vault directory for Stronghold
