@@ -24,17 +24,18 @@ async function checkVaultExists(): Promise<boolean> {
 }
 
 async function unlockVault(password: string): Promise<WalletInfo> {
-  const info = await invoke<WalletInfo>('unlock_vault', { password })
-  walletInfo.value = info
+  // unlock_vault returns both wallet info and profile in a single IPC call
+  const response = await invoke<{ wallet: WalletInfo; profile: Identity | null }>('unlock_vault', { password })
+  walletInfo.value = response.wallet
+  identity.value = response.profile
   vaultUnlocked.value = true
-  // Fetch full profile after unlock
-  await refreshProfile()
-  return info
+  return response.wallet
 }
 
 async function generateWallet(password: string): Promise<{ mnemonic: string; stake_address: string; payment_address: string }> {
   const result = await invoke<{ mnemonic: string; stake_address: string; payment_address: string }>('generate_wallet', { password })
   vaultUnlocked.value = true
+  // Profile was just created — fetch it immediately (fast DB read, no crypto)
   await refreshProfile()
   return result
 }
@@ -75,27 +76,27 @@ async function initialize(): Promise<'onboarding' | 'unlock' | 'ready'> {
 
   loading.value = true
   try {
-    const exists = await checkVaultExists()
+    // Fire both IPC calls in parallel — they're independent DB/filesystem reads
+    const [exists, info] = await Promise.all([
+      checkVaultExists(),
+      invoke<WalletInfo | null>('get_wallet_info').catch(() => null),
+    ])
+
     if (!exists) {
       initialized.value = true
       return 'onboarding'
     }
 
     // Vault exists — check if we have wallet info (session might still be unlocked)
-    try {
-      const info = await invoke<WalletInfo | null>('get_wallet_info')
-      if (info) {
-        walletInfo.value = info
-        // Try to load profile to confirm we're truly unlocked
-        await refreshProfile()
-        if (identity.value) {
-          vaultUnlocked.value = true
-          initialized.value = true
-          return 'ready'
-        }
+    if (info) {
+      walletInfo.value = info
+      // Try to load profile to confirm we're truly unlocked
+      await refreshProfile()
+      if (identity.value) {
+        vaultUnlocked.value = true
+        initialized.value = true
+        return 'ready'
       }
-    } catch (e) {
-      console.warn('[useAuth] get_wallet_info failed (vault likely locked):', e)
     }
 
     initialized.value = true
