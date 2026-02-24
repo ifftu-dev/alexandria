@@ -625,26 +625,32 @@ const QUIZ_COMPLEXITY: &str = r#"{
     {
       "id": "q1",
       "type": "single_choice",
-      "text": "What is the time complexity of binary search on a sorted array of n elements?",
+      "prompt": "What is the time complexity of binary search on a sorted array of n elements?",
       "options": ["O(1)", "O(log n)", "O(n)", "O(n log n)"],
       "correct_indices": [1],
-      "explanation": "Binary search halves the search space each step, giving O(log n)."
+      "explanation": "Binary search halves the search space each step, giving O(log n).",
+      "points": 1,
+      "difficulty": 1
     },
     {
       "id": "q2",
       "type": "single_choice",
-      "text": "A function has two nested loops, each iterating n times. What is its time complexity?",
+      "prompt": "A function has two nested loops, each iterating n times. What is its time complexity?",
       "options": ["O(n)", "O(n log n)", "O(n²)", "O(2ⁿ)"],
       "correct_indices": [2],
-      "explanation": "Two nested loops of n iterations each: n × n = O(n²)."
+      "explanation": "Two nested loops of n iterations each: n × n = O(n²).",
+      "points": 1,
+      "difficulty": 1
     },
     {
       "id": "q3",
       "type": "true_false",
-      "text": "O(3n² + 5n) simplifies to O(n²).",
+      "prompt": "O(3n² + 5n) simplifies to O(n²).",
       "options": ["True", "False"],
       "correct_indices": [0],
-      "explanation": "Big-O drops constants and lower-order terms."
+      "explanation": "Big-O drops constants and lower-order terms.",
+      "points": 1,
+      "difficulty": 1
     }
   ]
 }"#;
@@ -656,26 +662,32 @@ const QUIZ_DATA_STRUCTURES: &str = r#"{
     {
       "id": "q1",
       "type": "single_choice",
-      "text": "Which data structure uses LIFO (Last In, First Out) ordering?",
+      "prompt": "Which data structure uses LIFO (Last In, First Out) ordering?",
       "options": ["Queue", "Stack", "Linked List", "Array"],
       "correct_indices": [1],
-      "explanation": "A stack follows LIFO — the last element pushed is the first one popped."
+      "explanation": "A stack follows LIFO — the last element pushed is the first one popped.",
+      "points": 1,
+      "difficulty": 1
     },
     {
       "id": "q2",
       "type": "single_choice",
-      "text": "What is the time complexity of accessing an element by index in an array?",
+      "prompt": "What is the time complexity of accessing an element by index in an array?",
       "options": ["O(1)", "O(log n)", "O(n)", "O(n²)"],
       "correct_indices": [0],
-      "explanation": "Arrays provide O(1) random access because elements are stored contiguously."
+      "explanation": "Arrays provide O(1) random access because elements are stored contiguously.",
+      "points": 1,
+      "difficulty": 1
     },
     {
       "id": "q3",
       "type": "single_choice",
-      "text": "What is the main advantage of a linked list over an array?",
+      "prompt": "What is the main advantage of a linked list over an array?",
       "options": ["Faster random access", "O(1) insertion at a known position", "Less memory usage", "Better cache locality"],
       "correct_indices": [1],
-      "explanation": "Linked lists can insert/delete at a known node in O(1) without shifting elements."
+      "explanation": "Linked lists can insert/delete at a known node in O(1) without shifting elements.",
+      "points": 1,
+      "difficulty": 1
     }
   ]
 }"#;
@@ -687,26 +699,32 @@ const QUIZ_TREES_GRAPHS: &str = r#"{
     {
       "id": "q1",
       "type": "single_choice",
-      "text": "Which traversal of a BST produces elements in sorted order?",
+      "prompt": "Which traversal of a BST produces elements in sorted order?",
       "options": ["Pre-order", "In-order", "Post-order", "Level-order"],
       "correct_indices": [1],
-      "explanation": "In-order traversal (left → root → right) visits BST nodes in ascending order."
+      "explanation": "In-order traversal (left → root → right) visits BST nodes in ascending order.",
+      "points": 1,
+      "difficulty": 1
     },
     {
       "id": "q2",
       "type": "single_choice",
-      "text": "Which algorithm guarantees the shortest path in an unweighted graph?",
+      "prompt": "Which algorithm guarantees the shortest path in an unweighted graph?",
       "options": ["DFS", "BFS", "Dijkstra's", "Bellman-Ford"],
       "correct_indices": [1],
-      "explanation": "BFS explores nodes level by level, guaranteeing shortest paths in unweighted graphs."
+      "explanation": "BFS explores nodes level by level, guaranteeing shortest paths in unweighted graphs.",
+      "points": 1,
+      "difficulty": 1
     },
     {
       "id": "q3",
       "type": "true_false",
-      "text": "A tree with n nodes always has exactly n-1 edges.",
+      "prompt": "A tree with n nodes always has exactly n-1 edges.",
       "options": ["True", "False"],
       "correct_indices": [0],
-      "explanation": "A tree is a connected acyclic graph, and any such graph with n nodes has n-1 edges."
+      "explanation": "A tree is a connected acyclic graph, and any such graph with n nodes has n-1 edges.",
+      "points": 1,
+      "difficulty": 1
     }
   ]
 }"#;
@@ -718,26 +736,32 @@ const QUIZ_SORTING: &str = r#"{
     {
       "id": "q1",
       "type": "single_choice",
-      "text": "What is the average-case time complexity of Quick Sort?",
+      "prompt": "What is the average-case time complexity of Quick Sort?",
       "options": ["O(n)", "O(n log n)", "O(n²)", "O(log n)"],
       "correct_indices": [1],
-      "explanation": "Quick Sort averages O(n log n) with good pivot selection, though worst case is O(n²)."
+      "explanation": "Quick Sort averages O(n log n) with good pivot selection, though worst case is O(n²).",
+      "points": 1,
+      "difficulty": 1
     },
     {
       "id": "q2",
       "type": "single_choice",
-      "text": "Which sorting algorithm is stable and always O(n log n)?",
+      "prompt": "Which sorting algorithm is stable and always O(n log n)?",
       "options": ["Quick Sort", "Selection Sort", "Merge Sort", "Heap Sort"],
       "correct_indices": [2],
-      "explanation": "Merge Sort is stable and guarantees O(n log n) regardless of input."
+      "explanation": "Merge Sort is stable and guarantees O(n log n) regardless of input.",
+      "points": 1,
+      "difficulty": 1
     },
     {
       "id": "q3",
       "type": "true_false",
-      "text": "Bubble Sort's best case is O(n) when the array is already sorted.",
+      "prompt": "Bubble Sort's best case is O(n) when the array is already sorted.",
       "options": ["True", "False"],
       "correct_indices": [0],
-      "explanation": "With early termination (no swaps in a pass), Bubble Sort detects a sorted array in O(n)."
+      "explanation": "With early termination (no swaps in a pass), Bubble Sort detects a sorted array in O(n).",
+      "points": 1,
+      "difficulty": 1
     }
   ]
 }"#;
@@ -749,26 +773,32 @@ const QUIZ_HASH_TABLES: &str = r#"{
     {
       "id": "q1",
       "type": "single_choice",
-      "text": "What is the average time complexity for lookup in a hash table?",
+      "prompt": "What is the average time complexity for lookup in a hash table?",
       "options": ["O(1)", "O(log n)", "O(n)", "O(n²)"],
       "correct_indices": [0],
-      "explanation": "With a good hash function and reasonable load factor, hash table lookups are O(1) on average."
+      "explanation": "With a good hash function and reasonable load factor, hash table lookups are O(1) on average.",
+      "points": 1,
+      "difficulty": 1
     },
     {
       "id": "q2",
       "type": "single_choice",
-      "text": "Which collision resolution strategy stores all entries in the array itself?",
+      "prompt": "Which collision resolution strategy stores all entries in the array itself?",
       "options": ["Chaining", "Open addressing", "Separate chaining", "Bucket sorting"],
       "correct_indices": [1],
-      "explanation": "Open addressing probes for empty slots within the array rather than using external chains."
+      "explanation": "Open addressing probes for empty slots within the array rather than using external chains.",
+      "points": 1,
+      "difficulty": 1
     },
     {
       "id": "q3",
       "type": "single_choice",
-      "text": "What happens when a hash table's load factor gets too high?",
+      "prompt": "What happens when a hash table's load factor gets too high?",
       "options": ["Keys are deleted", "The table resizes and rehashes", "Lookups become O(1)", "Nothing changes"],
       "correct_indices": [1],
-      "explanation": "When load factor exceeds the threshold (~0.75), the table doubles capacity and rehashes all entries."
+      "explanation": "When load factor exceeds the threshold (~0.75), the table doubles capacity and rehashes all entries.",
+      "points": 1,
+      "difficulty": 1
     }
   ]
 }"#;
@@ -780,26 +810,32 @@ const QUIZ_ML_EVAL: &str = r#"{
     {
       "id": "q1",
       "type": "single_choice",
-      "text": "In 5-fold cross-validation, how many times is each data point used for testing?",
+      "prompt": "In 5-fold cross-validation, how many times is each data point used for testing?",
       "options": ["0", "1", "5", "Depends on the data"],
       "correct_indices": [1],
-      "explanation": "Each data point appears in exactly one test fold, so it's tested exactly once."
+      "explanation": "Each data point appears in exactly one test fold, so it's tested exactly once.",
+      "points": 1,
+      "difficulty": 1
     },
     {
       "id": "q2",
       "type": "single_choice",
-      "text": "Which metric is most appropriate for an imbalanced classification dataset?",
+      "prompt": "Which metric is most appropriate for an imbalanced classification dataset?",
       "options": ["Accuracy", "F1 Score", "Mean Squared Error", "R² Score"],
       "correct_indices": [1],
-      "explanation": "F1 Score balances precision and recall, making it more meaningful than accuracy when classes are imbalanced."
+      "explanation": "F1 Score balances precision and recall, making it more meaningful than accuracy when classes are imbalanced.",
+      "points": 1,
+      "difficulty": 1
     },
     {
       "id": "q3",
       "type": "single_choice",
-      "text": "A model with high training accuracy but low test accuracy is likely:",
+      "prompt": "A model with high training accuracy but low test accuracy is likely:",
       "options": ["Underfitting", "Overfitting", "Well-calibrated", "Too simple"],
       "correct_indices": [1],
-      "explanation": "High train / low test accuracy indicates the model memorized training data rather than learning generalizable patterns."
+      "explanation": "High train / low test accuracy indicates the model memorized training data rather than learning generalizable patterns.",
+      "points": 1,
+      "difficulty": 1
     }
   ]
 }"#;
