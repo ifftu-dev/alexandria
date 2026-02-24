@@ -6,7 +6,7 @@ mod runner;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
-use commands::{build, clean, config, db, dev, health};
+use commands::{build, clean, config, db, dev, health, run};
 use context::ProjectContext;
 
 #[derive(Parser)]
@@ -23,7 +23,11 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Development workflow commands
+    /// Run the app on desktop, iOS, or Android (with device picker)
+    #[command(subcommand)]
+    Run(run::RunCommand),
+
+    /// Development workflow commands (test, lint, fmt)
     #[command(subcommand)]
     Dev(dev::DevCommand),
 
@@ -63,6 +67,7 @@ fn run(cli: Cli) -> Result<()> {
     let ctx = ProjectContext::detect()?;
 
     match &cli.command {
+        Commands::Run(cmd) => run::execute(cmd, &ctx),
         Commands::Dev(cmd) => dev::execute(cmd, &ctx),
         Commands::Db(cmd) => db::execute(cmd, &ctx),
         Commands::Build(cmd) => build::execute(cmd, &ctx),

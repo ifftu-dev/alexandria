@@ -94,10 +94,29 @@ The `alex` CLI wraps common dev tasks, multi-platform builds, and data managemen
 cargo install --path cli    # install globally as `alex`
 ```
 
-#### Development
+#### Running
 
 ```bash
-alex dev run          # cargo tauri dev
+# Desktop (hot-reload dev server)
+alex run desktop                              # cargo tauri dev
+
+# iOS (interactive device/simulator picker)
+alex run ios                                  # pick from available simulators + devices
+alex run ios --device "iPhone 17 Pro"         # skip picker, run on specific device
+alex run ios --open                           # open in Xcode instead
+
+# Android (interactive emulator/device picker)
+alex run android                              # pick from available AVDs + devices
+alex run android --device "Pixel_9_Pro"       # skip picker, run on specific emulator
+alex run android --open                       # open in Android Studio instead
+
+# All run commands support --release for release mode
+alex run ios --release
+```
+
+#### Code Quality
+
+```bash
 alex dev test         # cargo test (309 tests)
 alex dev clippy       # cargo clippy -- -D warnings
 alex dev fmt          # cargo fmt --check
