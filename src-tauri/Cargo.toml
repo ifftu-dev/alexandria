@@ -12,18 +12,6 @@ rust-version = "1.83.0"
 name = "app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
-[features]
-default = ["desktop"]
-desktop = [
-  "dep:iroh",
-  "dep:iroh-blobs",
-  "dep:iota_stronghold",
-  "dep:libp2p",
-  "dep:futures",
-  "dep:hmac",
-  "dep:zeroize",
-]
-
 [build-dependencies]
 tauri-build = { version = "2.5.4", features = [] }
 
@@ -58,32 +46,30 @@ pallas-primitives = "0.35"
 pallas-traverse = "0.35"
 pallas-codec = "0.35"
 
-# Content-addressed storage (desktop only — iroh embedded BLAKE3 blob store)
-iroh = { version = "0.96", optional = true }
-iroh-blobs = { version = "0.98", features = ["fs-store"], optional = true }
+# Common utilities (all platforms)
 anyhow = "1"
 bytes = "1"
-
-# HTTP client (IPFS gateway fallback — always available)
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
-
-# HMAC (desktop only — used by Stronghold keystore for password derivation)
-hmac = { version = "0.12", optional = true }
-
-# Secure secret storage (desktop only — IOTA Stronghold encrypted vault)
-iota_stronghold = { version = "2", optional = true }
-zeroize = { version = "1", features = ["derive"], optional = true }
-
-# P2P networking (desktop only — libp2p swarm)
-libp2p = { version = "0.56.0", features = ["gossipsub", "kad", "mdns", "quic", "noise", "identify", "tokio", "ed25519", "macros", "autonat", "relay", "dcutr", "yamux"], optional = true }
-futures = { version = "0.3", optional = true }
-
-# Utilities
 uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 thiserror = "2"
 log = "0.4"
 hex = "0.4"
+
+# ── Desktop-only dependencies ────────────────────────────────────────
+# These are excluded on iOS/Android via target gating. The `cfg(desktop)`
+# alias is set by tauri-build based on the compile target.
+[target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
+# Content-addressed storage (iroh embedded BLAKE3 blob store)
+iroh = "0.96"
+iroh-blobs = { version = "0.98", features = ["fs-store"] }
+# Secure secret storage (IOTA Stronghold encrypted vault)
+iota_stronghold = "2"
+hmac = "0.12"
+zeroize = { version = "1", features = ["derive"] }
+# P2P networking (libp2p swarm)
+libp2p = { version = "0.56.0", features = ["gossipsub", "kad", "mdns", "quic", "noise", "identify", "tokio", "ed25519", "macros", "autonat", "relay", "dcutr", "yamux"] }
+futures = "0.3"
 
 [dev-dependencies]
 tempfile = "3"

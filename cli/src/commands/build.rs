@@ -93,18 +93,24 @@ fn all_targets() -> Vec<Target> {
             rust_target: "x86_64-linux-android",
             build_args: &["tauri", "android", "build", "--target", "x86_64"],
         },
-        // iOS
+        // iOS (Tauri uses short target names: aarch64, aarch64-sim, x86_64)
         Target {
             label: "iOS (device)",
             platform: Platform::Ios,
             rust_target: "aarch64-apple-ios",
-            build_args: &["tauri", "ios", "build"],
+            build_args: &["tauri", "ios", "build", "--target", "aarch64"],
         },
         Target {
-            label: "iOS (simulator)",
+            label: "iOS (simulator, ARM)",
             platform: Platform::Ios,
             rust_target: "aarch64-apple-ios-sim",
-            build_args: &["tauri", "ios", "build", "--target", "aarch64-apple-ios-sim"],
+            build_args: &["tauri", "ios", "build", "--target", "aarch64-sim"],
+        },
+        Target {
+            label: "iOS (simulator, Intel)",
+            platform: Platform::Ios,
+            rust_target: "x86_64-apple-ios",
+            build_args: &["tauri", "ios", "build", "--target", "x86_64"],
         },
     ]
 }

@@ -1,6 +1,6 @@
 pub mod schema;
 pub mod seed;
-#[cfg(feature = "desktop")]
+#[cfg(desktop)]
 pub mod seed_content;
 
 use rusqlite::Connection;
