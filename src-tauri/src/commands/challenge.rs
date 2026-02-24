@@ -23,7 +23,7 @@ pub async fn submit_evidence_challenge(
     state: State<'_, AppState>,
     params: SubmitChallengeParams,
 ) -> Result<EvidenceChallenge, String> {
-    let db = state.db.lock().await;
+    let db = state.db.write().await;
     let conn = db.conn();
 
     challenge_logic::submit_challenge(conn, &params)
@@ -38,7 +38,7 @@ pub async fn list_challenges(
     learner_address: Option<String>,
     challenger: Option<String>,
 ) -> Result<Vec<EvidenceChallenge>, String> {
-    let db = state.db.lock().await;
+    let db = state.db.read().await;
     let conn = db.conn();
 
     challenge_logic::list_challenges(
@@ -56,7 +56,7 @@ pub async fn get_challenge(
     state: State<'_, AppState>,
     challenge_id: String,
 ) -> Result<(EvidenceChallenge, Vec<ChallengeVote>), String> {
-    let db = state.db.lock().await;
+    let db = state.db.read().await;
     let conn = db.conn();
 
     challenge_logic::get_challenge(conn, &challenge_id)
@@ -71,7 +71,7 @@ pub async fn vote_on_challenge(
     upheld: bool,
     reason: Option<String>,
 ) -> Result<ChallengeVote, String> {
-    let db = state.db.lock().await;
+    let db = state.db.write().await;
     let conn = db.conn();
 
     challenge_logic::vote_on_challenge(
@@ -89,7 +89,7 @@ pub async fn resolve_challenge(
     state: State<'_, AppState>,
     challenge_id: String,
 ) -> Result<ChallengeResolution, String> {
-    let db = state.db.lock().await;
+    let db = state.db.write().await;
     let conn = db.conn();
 
     challenge_logic::resolve_challenge(conn, &challenge_id)
@@ -100,7 +100,7 @@ pub async fn resolve_challenge(
 pub async fn list_my_challenges(
     state: State<'_, AppState>,
 ) -> Result<Vec<EvidenceChallenge>, String> {
-    let db = state.db.lock().await;
+    let db = state.db.read().await;
     let conn = db.conn();
 
     let stake_address: String = conn
@@ -119,7 +119,7 @@ pub async fn list_my_challenges(
 pub async fn list_challenges_against_me(
     state: State<'_, AppState>,
 ) -> Result<Vec<EvidenceChallenge>, String> {
-    let db = state.db.lock().await;
+    let db = state.db.read().await;
     let conn = db.conn();
 
     let stake_address: String = conn

@@ -71,7 +71,7 @@ pub async fn integrity_start_session(
     state: State<'_, AppState>,
     enrollment_id: String,
 ) -> Result<StartSessionResponse, String> {
-    let db = state.db.lock().await;
+    let db = state.db.write().await;
 
     let session_id = entity_id(&[&enrollment_id, &chrono::Utc::now().to_rfc3339()]);
 
@@ -92,7 +92,7 @@ pub async fn integrity_submit_snapshot(
     state: State<'_, AppState>,
     req: SubmitSnapshotRequest,
 ) -> Result<IntegritySnapshot, String> {
-    let db = state.db.lock().await;
+    let db = state.db.write().await;
 
     // Verify session exists and is active
     let session_exists: bool = db
@@ -177,7 +177,7 @@ pub async fn integrity_end_session(
     session_id: String,
     req: EndSessionRequest,
 ) -> Result<IntegritySession, String> {
-    let db = state.db.lock().await;
+    let db = state.db.write().await;
 
     db.conn()
         .execute(
@@ -220,7 +220,7 @@ pub async fn integrity_get_session(
     state: State<'_, AppState>,
     enrollment_id: String,
 ) -> Result<Option<IntegritySession>, String> {
-    let db = state.db.lock().await;
+    let db = state.db.read().await;
 
     let result = db.conn().query_row(
         "SELECT id, enrollment_id, status, integrity_score, started_at, ended_at
@@ -253,7 +253,7 @@ pub async fn integrity_list_sessions(
     state: State<'_, AppState>,
     status: Option<String>,
 ) -> Result<Vec<IntegritySession>, String> {
-    let db = state.db.lock().await;
+    let db = state.db.read().await;
 
     let (sql, param_values): (String, Vec<Box<dyn rusqlite::types::ToSql>>) =
         if let Some(ref s) = status {
@@ -301,7 +301,7 @@ pub async fn integrity_list_snapshots(
     state: State<'_, AppState>,
     session_id: String,
 ) -> Result<Vec<IntegritySnapshot>, String> {
-    let db = state.db.lock().await;
+    let db = state.db.read().await;
 
     let mut stmt = db
         .conn()

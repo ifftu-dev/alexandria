@@ -14,7 +14,7 @@ pub struct HealthResponse {
 #[tauri::command]
 pub async fn check_health(state: State<'_, AppState>) -> Result<HealthResponse, String> {
     let db_status = {
-        let db = state.db.lock().await;
+        let db = state.db.read().await;
         match db.conn().query_row("SELECT 1", [], |_| Ok(())) {
             Ok(()) => "ok".to_string(),
             Err(e) => format!("error: {}", e),

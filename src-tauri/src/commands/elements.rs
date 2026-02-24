@@ -16,7 +16,7 @@ pub async fn list_elements(
     state: State<'_, AppState>,
     chapter_id: String,
 ) -> Result<Vec<Element>, String> {
-    let db = state.db.lock().await;
+    let db = state.db.read().await;
 
     let mut stmt = db
         .conn()
@@ -54,7 +54,7 @@ pub async fn create_element(
     chapter_id: String,
     req: CreateElementRequest,
 ) -> Result<Element, String> {
-    let db = state.db.lock().await;
+    let db = state.db.write().await;
 
     // Get the next position
     let next_pos: i64 = db
@@ -102,7 +102,7 @@ pub async fn update_element(
     element_id: String,
     req: UpdateElementRequest,
 ) -> Result<Element, String> {
-    let db = state.db.lock().await;
+    let db = state.db.write().await;
 
     let mut set_clauses = Vec::new();
     let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
@@ -306,7 +306,7 @@ pub async fn delete_element(
     state: State<'_, AppState>,
     element_id: String,
 ) -> Result<(), String> {
-    let db = state.db.lock().await;
+    let db = state.db.write().await;
 
     let rows = db
         .conn()
