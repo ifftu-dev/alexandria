@@ -1,17 +1,17 @@
 pub mod cardano;
 pub mod commands;
-#[cfg(feature = "desktop")]
+#[cfg(desktop)]
 pub mod crypto;
 pub mod db;
 pub mod domain;
 pub mod evidence;
-#[cfg(feature = "desktop")]
+#[cfg(desktop)]
 pub mod ipfs;
-#[cfg(feature = "desktop")]
+#[cfg(desktop)]
 pub mod p2p;
 
 // Minimal stubs for mobile (no iroh, no stronghold, no libp2p)
-#[cfg(not(feature = "desktop"))]
+#[cfg(mobile)]
 pub mod crypto {
     pub mod hash;
     pub mod signing;
@@ -24,32 +24,32 @@ use std::sync::Arc;
 use tauri::Manager;
 use tokio::sync::Mutex;
 
-#[cfg(feature = "desktop")]
+#[cfg(desktop)]
 use std::path::PathBuf;
 
-#[cfg(feature = "desktop")]
+#[cfg(desktop)]
 use crypto::keystore::Keystore;
-#[cfg(feature = "desktop")]
+#[cfg(desktop)]
 use ipfs::gateway::GatewayClient;
-#[cfg(feature = "desktop")]
+#[cfg(desktop)]
 use ipfs::node::ContentNode;
-#[cfg(feature = "desktop")]
+#[cfg(desktop)]
 use ipfs::resolver::ContentResolver;
-#[cfg(feature = "desktop")]
+#[cfg(desktop)]
 use p2p::network::P2pNode;
 
 /// Shared application state accessible from all Tauri commands.
 pub struct AppState {
     pub db: Arc<Mutex<Database>>,
-    #[cfg(feature = "desktop")]
+    #[cfg(desktop)]
     pub keystore: Arc<Mutex<Option<Keystore>>>,
-    #[cfg(feature = "desktop")]
+    #[cfg(desktop)]
     pub vault_dir: PathBuf,
-    #[cfg(feature = "desktop")]
+    #[cfg(desktop)]
     pub content_node: Arc<ContentNode>,
-    #[cfg(feature = "desktop")]
+    #[cfg(desktop)]
     pub resolver: Arc<Mutex<Option<ContentResolver>>>,
-    #[cfg(feature = "desktop")]
+    #[cfg(desktop)]
     pub p2p_node: Arc<Mutex<Option<P2pNode>>>,
 }
 
@@ -94,7 +94,7 @@ pub fn run() {
 
             let db = Arc::new(Mutex::new(database));
 
-            #[cfg(feature = "desktop")]
+            #[cfg(desktop)]
             {
                 // Vault directory for Stronghold
                 let vault_dir = app_dir.join("stronghold");
@@ -167,7 +167,7 @@ pub fn run() {
                 });
             }
 
-            #[cfg(not(feature = "desktop"))]
+            #[cfg(mobile)]
             {
                 app.manage(AppState { db });
             }
@@ -177,27 +177,27 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::health::check_health,
             // Identity / Wallet (desktop only — requires Stronghold)
-            #[cfg(feature = "desktop")]
+            #[cfg(desktop)]
             commands::identity::check_vault_exists,
-            #[cfg(feature = "desktop")]
+            #[cfg(desktop)]
             commands::identity::unlock_vault,
-            #[cfg(feature = "desktop")]
+            #[cfg(desktop)]
             commands::identity::generate_wallet,
-            #[cfg(feature = "desktop")]
+            #[cfg(desktop)]
             commands::identity::restore_wallet,
-            #[cfg(feature = "desktop")]
+            #[cfg(desktop)]
             commands::identity::export_mnemonic,
-            #[cfg(feature = "desktop")]
+            #[cfg(desktop)]
             commands::identity::lock_vault,
-            #[cfg(feature = "desktop")]
+            #[cfg(desktop)]
             commands::identity::get_wallet_info,
-            #[cfg(feature = "desktop")]
+            #[cfg(desktop)]
             commands::identity::get_profile,
-            #[cfg(feature = "desktop")]
+            #[cfg(desktop)]
             commands::identity::update_profile,
-            #[cfg(feature = "desktop")]
+            #[cfg(desktop)]
             commands::identity::publish_profile,
-            #[cfg(feature = "desktop")]
+            #[cfg(desktop)]
             commands::identity::resolve_profile,
             // Courses
             commands::courses::list_courses,
@@ -211,17 +211,17 @@ pub fn run() {
             commands::enrollment::update_progress,
             commands::enrollment::get_progress,
             // Content (desktop only — requires iroh)
-            #[cfg(feature = "desktop")]
+            #[cfg(desktop)]
             commands::content::content_add,
-            #[cfg(feature = "desktop")]
+            #[cfg(desktop)]
             commands::content::content_get,
-            #[cfg(feature = "desktop")]
+            #[cfg(desktop)]
             commands::content::content_has,
-            #[cfg(feature = "desktop")]
+            #[cfg(desktop)]
             commands::content::content_node_status,
-            #[cfg(feature = "desktop")]
+            #[cfg(desktop)]
             commands::content::content_resolve,
-            #[cfg(feature = "desktop")]
+            #[cfg(desktop)]
             commands::content::content_resolve_bytes,
             // Chapters & Elements
             commands::chapters::list_chapters,
@@ -233,29 +233,29 @@ pub fn run() {
             commands::elements::update_element,
             commands::elements::delete_element,
             // Course publishing (desktop only — requires iroh)
-            #[cfg(feature = "desktop")]
+            #[cfg(desktop)]
             commands::courses::publish_course,
-            #[cfg(feature = "desktop")]
+            #[cfg(desktop)]
             commands::courses::fetch_course_document,
             // Evidence
             commands::evidence::list_skill_proofs,
             commands::evidence::list_evidence,
             commands::evidence::list_reputation,
             // Cardano (desktop only — requires Stronghold keystore)
-            #[cfg(feature = "desktop")]
+            #[cfg(desktop)]
             commands::cardano::mint_skill_proof_nft,
-            #[cfg(feature = "desktop")]
+            #[cfg(desktop)]
             commands::cardano::register_course_onchain,
             // P2P (desktop only — requires libp2p)
-            #[cfg(feature = "desktop")]
+            #[cfg(desktop)]
             commands::p2p::p2p_start,
-            #[cfg(feature = "desktop")]
+            #[cfg(desktop)]
             commands::p2p::p2p_stop,
-            #[cfg(feature = "desktop")]
+            #[cfg(desktop)]
             commands::p2p::p2p_status,
-            #[cfg(feature = "desktop")]
+            #[cfg(desktop)]
             commands::p2p::p2p_peers,
-            #[cfg(feature = "desktop")]
+            #[cfg(desktop)]
             commands::p2p::p2p_publish,
             // Catalog
             commands::catalog::search_catalog,
@@ -305,36 +305,36 @@ pub fn run() {
             commands::taxonomy::untag_element_skill,
             commands::taxonomy::list_element_skill_tags,
             // Sync (desktop only — requires libp2p)
-            #[cfg(feature = "desktop")]
+            #[cfg(desktop)]
             commands::sync::sync_get_device_info,
-            #[cfg(feature = "desktop")]
+            #[cfg(desktop)]
             commands::sync::sync_set_device_name,
-            #[cfg(feature = "desktop")]
+            #[cfg(desktop)]
             commands::sync::sync_list_devices,
-            #[cfg(feature = "desktop")]
+            #[cfg(desktop)]
             commands::sync::sync_remove_device,
-            #[cfg(feature = "desktop")]
+            #[cfg(desktop)]
             commands::sync::sync_status,
-            #[cfg(feature = "desktop")]
+            #[cfg(desktop)]
             commands::sync::sync_now,
-            #[cfg(feature = "desktop")]
+            #[cfg(desktop)]
             commands::sync::sync_set_auto,
-            #[cfg(feature = "desktop")]
+            #[cfg(desktop)]
             commands::sync::sync_history,
             // Challenges (desktop only — requires P2P)
-            #[cfg(feature = "desktop")]
+            #[cfg(desktop)]
             commands::challenge::submit_evidence_challenge,
-            #[cfg(feature = "desktop")]
+            #[cfg(desktop)]
             commands::challenge::list_challenges,
-            #[cfg(feature = "desktop")]
+            #[cfg(desktop)]
             commands::challenge::get_challenge,
-            #[cfg(feature = "desktop")]
+            #[cfg(desktop)]
             commands::challenge::vote_on_challenge,
-            #[cfg(feature = "desktop")]
+            #[cfg(desktop)]
             commands::challenge::resolve_challenge,
-            #[cfg(feature = "desktop")]
+            #[cfg(desktop)]
             commands::challenge::list_my_challenges,
-            #[cfg(feature = "desktop")]
+            #[cfg(desktop)]
             commands::challenge::list_challenges_against_me,
             // Attestation
             commands::attestation::get_attestation_requirement,

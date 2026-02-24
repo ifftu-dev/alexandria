@@ -1,5 +1,5 @@
 pub mod attestation;
-#[cfg(feature = "desktop")]
+#[cfg(desktop)]
 pub mod cardano;
 pub mod catalog;
 pub mod chapters;
@@ -15,13 +15,13 @@ pub mod snapshot;
 pub mod taxonomy;
 
 // Desktop-only command modules (require iroh, stronghold, libp2p)
-#[cfg(feature = "desktop")]
+#[cfg(desktop)]
 pub mod challenge;
-#[cfg(feature = "desktop")]
+#[cfg(desktop)]
 pub mod content;
-#[cfg(feature = "desktop")]
+#[cfg(desktop)]
 pub mod identity;
-#[cfg(feature = "desktop")]
+#[cfg(desktop)]
 pub mod p2p;
-#[cfg(feature = "desktop")]
+#[cfg(desktop)]
 pub mod sync;
