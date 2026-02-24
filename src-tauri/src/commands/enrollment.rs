@@ -350,6 +350,207 @@ pub async fn update_progress(
     Ok(progress)
 }
 
+#[cfg(test)]
+mod tests {
+    use crate::crypto::hash::entity_id;
+    use crate::db::Database;
+    use rusqlite::params;
+
+    fn test_db() -> Database {
+        let db = Database::open_in_memory().expect("in-memory db");
+        db.run_migrations().expect("migrations");
+        db
+    }
+
+    fn setup_enrollment(db: &Database) -> (String, String) {
+        db.conn()
+            .execute(
+                "INSERT INTO local_identity (id, stake_address, payment_address) \
+                 VALUES (1, 'stake_test1u', 'addr_test1q')",
+                [],
+            )
+            .unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO courses (id, title, author_address) VALUES ('c1', 'Course', 'stake_test1u')",
+                [],
+            )
+            .unwrap();
+        let enrollment_id = entity_id(&["stake_test1u", "c1"]);
+        db.conn()
+            .execute(
+                "INSERT INTO enrollments (id, course_id) VALUES (?1, 'c1')",
+                params![enrollment_id],
+            )
+            .unwrap();
+        (enrollment_id, "c1".into())
+    }
+
+    #[test]
+    fn enrollment_insert_and_read() {
+        let db = test_db();
+        let (enrollment_id, _) = setup_enrollment(&db);
+
+        let (id, status): (String, String) = db
+            .conn()
+            .query_row(
+                "SELECT id, status FROM enrollments WHERE id = ?1",
+                params![enrollment_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(id, enrollment_id);
+        assert_eq!(status, "active");
+    }
+
+    #[test]
+    fn enrollment_duplicate_prevention() {
+        let db = test_db();
+        let (_, _) = setup_enrollment(&db);
+
+        let already: bool = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM enrollments WHERE course_id = 'c1' AND status = 'active'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(already);
+    }
+
+    #[test]
+    fn enrollment_course_must_exist() {
+        let db = test_db();
+        db.conn()
+            .execute(
+                "INSERT INTO local_identity (id, stake_address, payment_address) \
+                 VALUES (1, 'stake_test1u', 'addr_test1q')",
+                [],
+            )
+            .unwrap();
+
+        let exists: bool = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM courses WHERE id = 'nonexistent'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(!exists);
+    }
+
+    #[test]
+    fn element_progress_upsert() {
+        let db = test_db();
+        let (enrollment_id, _) = setup_enrollment(&db);
+
+        // Setup chapter + element
+        db.conn()
+            .execute(
+                "INSERT INTO course_chapters (id, course_id, title, position) VALUES ('ch1', 'c1', 'Ch', 0)",
+                [],
+            )
+            .unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO course_elements (id, chapter_id, title, element_type, position) \
+                 VALUES ('el1', 'ch1', 'Video', 'video', 0)",
+                [],
+            )
+            .unwrap();
+
+        let progress_id = entity_id(&[&enrollment_id, "el1"]);
+
+        // Insert progress
+        db.conn()
+            .execute(
+                "INSERT INTO element_progress (id, enrollment_id, element_id, status, score, time_spent) \
+                 VALUES (?1, ?2, 'el1', 'in_progress', NULL, 60)",
+                params![progress_id, enrollment_id],
+            )
+            .unwrap();
+
+        let (status, score): (String, Option<f64>) = db
+            .conn()
+            .query_row(
+                "SELECT status, score FROM element_progress WHERE id = ?1",
+                params![progress_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(status, "in_progress");
+        assert!(score.is_none());
+
+        // Update via ON CONFLICT (upsert)
+        db.conn()
+            .execute(
+                "INSERT INTO element_progress (id, enrollment_id, element_id, status, score, time_spent)
+                 VALUES (?1, ?2, 'el1', 'completed', 0.95, 120)
+                 ON CONFLICT(enrollment_id, element_id) DO UPDATE SET
+                    status = excluded.status,
+                    score = excluded.score,
+                    time_spent = excluded.time_spent,
+                    updated_at = datetime('now')",
+                params![progress_id, enrollment_id],
+            )
+            .unwrap();
+
+        let (status2, score2, time2): (String, Option<f64>, i64) = db
+            .conn()
+            .query_row(
+                "SELECT status, score, time_spent FROM element_progress WHERE id = ?1",
+                params![progress_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(status2, "completed");
+        assert_eq!(score2, Some(0.95));
+        assert_eq!(time2, 120);
+    }
+
+    #[test]
+    fn enrollment_status_filter() {
+        let db = test_db();
+        let (_, _) = setup_enrollment(&db);
+
+        // Add a completed enrollment for a second course
+        db.conn()
+            .execute(
+                "INSERT INTO courses (id, title, author_address) VALUES ('c2', 'Course 2', 'stake_test1u')",
+                [],
+            )
+            .unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO enrollments (id, course_id, status) VALUES ('e2', 'c2', 'completed')",
+                [],
+            )
+            .unwrap();
+
+        let active: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM enrollments WHERE status = 'active'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(active, 1);
+
+        let completed: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM enrollments WHERE status = 'completed'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(completed, 1);
+    }
+}
+
 /// Get all progress for an enrollment.
 #[tauri::command]
 pub async fn get_progress(

@@ -460,6 +460,139 @@ fn parse_datetime_to_unix(datetime_str: &str) -> i64 {
         .unwrap_or_else(|_| chrono::Utc::now().timestamp())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::Database;
+
+    fn test_db() -> Database {
+        let db = Database::open_in_memory().expect("in-memory db");
+        db.run_migrations().expect("migrations");
+        db
+    }
+
+    fn setup_identity(db: &Database) {
+        db.conn()
+            .execute(
+                "INSERT INTO local_identity (id, stake_address, payment_address) \
+                 VALUES (1, 'stake_test1uauthor', 'addr_test1q123')",
+                [],
+            )
+            .unwrap();
+    }
+
+    fn insert_course(db: &Database, id: &str, title: &str, status: &str) {
+        db.conn()
+            .execute(
+                "INSERT INTO courses (id, title, author_address, status) \
+                 VALUES (?1, ?2, 'stake_test1uauthor', ?3)",
+                params![id, title, status],
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn get_course_by_id_returns_course() {
+        let db = test_db();
+        setup_identity(&db);
+        insert_course(&db, "c1", "Test Course", "draft");
+
+        let course = get_course_by_id(db.conn(), "c1").unwrap();
+        assert_eq!(course.title, "Test Course");
+        assert_eq!(course.status, "draft");
+        assert_eq!(course.version, 1);
+    }
+
+    #[test]
+    fn get_course_by_id_not_found() {
+        let db = test_db();
+        let result = get_course_by_id(db.conn(), "nonexistent");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn course_list_with_status_filter() {
+        let db = test_db();
+        setup_identity(&db);
+        insert_course(&db, "c1", "Draft Course", "draft");
+        insert_course(&db, "c2", "Published Course", "published");
+        insert_course(&db, "c3", "Another Draft", "draft");
+
+        // Count drafts
+        let count: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM courses WHERE status = 'draft'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 2);
+
+        // Count published
+        let count: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM courses WHERE status = 'published'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn course_crud_lifecycle() {
+        let db = test_db();
+        setup_identity(&db);
+
+        // Create
+        let id = entity_id(&["stake_test1uauthor", "Test", "2025"]);
+        let tags = serde_json::to_string(&vec!["rust", "programming"]).unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO courses (id, title, description, author_address, tags) \
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![id, "Test", "A test course", "stake_test1uauthor", tags],
+            )
+            .unwrap();
+
+        let course = get_course_by_id(db.conn(), &id).unwrap();
+        assert_eq!(course.title, "Test");
+        assert_eq!(course.tags.unwrap(), vec!["rust", "programming"]);
+
+        // Update
+        db.conn()
+            .execute(
+                "UPDATE courses SET title = 'Updated', updated_at = datetime('now') WHERE id = ?1",
+                params![id],
+            )
+            .unwrap();
+        let updated = get_course_by_id(db.conn(), &id).unwrap();
+        assert_eq!(updated.title, "Updated");
+
+        // Delete
+        let rows = db
+            .conn()
+            .execute("DELETE FROM courses WHERE id = ?1", params![id])
+            .unwrap();
+        assert_eq!(rows, 1);
+        assert!(get_course_by_id(db.conn(), &id).is_err());
+    }
+
+    #[test]
+    fn course_json_columns_null_handling() {
+        let db = test_db();
+        setup_identity(&db);
+        insert_course(&db, "c1", "No Tags", "draft");
+
+        let course = get_course_by_id(db.conn(), "c1").unwrap();
+        assert!(course.tags.is_none());
+        assert!(course.skill_ids.is_none());
+        assert!(course.content_cid.is_none());
+    }
+}
+
 /// Internal helper: fetch a course by ID from the connection.
 fn get_course_by_id(
     conn: &rusqlite::Connection,

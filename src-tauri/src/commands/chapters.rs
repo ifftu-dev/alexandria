@@ -157,6 +157,140 @@ pub async fn update_chapter(
         .map_err(|e| e.to_string())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::Database;
+
+    fn test_db() -> Database {
+        let db = Database::open_in_memory().expect("in-memory db");
+        db.run_migrations().expect("migrations");
+        db
+    }
+
+    fn setup_course(db: &Database) {
+        db.conn()
+            .execute(
+                "INSERT INTO local_identity (id, stake_address, payment_address) \
+                 VALUES (1, 'stake_test1u', 'addr_test1q')",
+                [],
+            )
+            .unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO courses (id, title, author_address) \
+                 VALUES ('c1', 'Test Course', 'stake_test1u')",
+                [],
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn create_chapter_auto_positions() {
+        let db = test_db();
+        setup_course(&db);
+
+        // First chapter gets position 0
+        let id1 = entity_id(&["c1", "Ch1", "0"]);
+        db.conn()
+            .execute(
+                "INSERT INTO course_chapters (id, course_id, title, position) VALUES (?1, 'c1', 'Ch1', 0)",
+                params![id1],
+            )
+            .unwrap();
+
+        // Verify next position calculation
+        let next_pos: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COALESCE(MAX(position), -1) + 1 FROM course_chapters WHERE course_id = 'c1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(next_pos, 1);
+
+        // Second chapter
+        let id2 = entity_id(&["c1", "Ch2", "1"]);
+        db.conn()
+            .execute(
+                "INSERT INTO course_chapters (id, course_id, title, position) VALUES (?1, 'c1', 'Ch2', 1)",
+                params![id2],
+            )
+            .unwrap();
+
+        // List in order
+        let mut stmt = db
+            .conn()
+            .prepare("SELECT title FROM course_chapters WHERE course_id = 'c1' ORDER BY position")
+            .unwrap();
+        let titles: Vec<String> = stmt
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(titles, vec!["Ch1", "Ch2"]);
+    }
+
+    #[test]
+    fn update_chapter_title() {
+        let db = test_db();
+        setup_course(&db);
+
+        db.conn()
+            .execute(
+                "INSERT INTO course_chapters (id, course_id, title, position) VALUES ('ch1', 'c1', 'Old', 0)",
+                [],
+            )
+            .unwrap();
+
+        db.conn()
+            .execute("UPDATE course_chapters SET title = 'New' WHERE id = 'ch1'", [])
+            .unwrap();
+
+        let title: String = db
+            .conn()
+            .query_row("SELECT title FROM course_chapters WHERE id = 'ch1'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(title, "New");
+    }
+
+    #[test]
+    fn delete_chapter_removes_row() {
+        let db = test_db();
+        setup_course(&db);
+
+        db.conn()
+            .execute(
+                "INSERT INTO course_chapters (id, course_id, title, position) VALUES ('ch1', 'c1', 'Ch1', 0)",
+                [],
+            )
+            .unwrap();
+
+        let rows = db
+            .conn()
+            .execute("DELETE FROM course_chapters WHERE id = 'ch1'", [])
+            .unwrap();
+        assert_eq!(rows, 1);
+
+        let count: i64 = db
+            .conn()
+            .query_row("SELECT COUNT(*) FROM course_chapters WHERE course_id = 'c1'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn delete_nonexistent_chapter_returns_zero() {
+        let db = test_db();
+        let rows = db
+            .conn()
+            .execute("DELETE FROM course_chapters WHERE id = 'nonexistent'", [])
+            .unwrap();
+        assert_eq!(rows, 0);
+    }
+}
+
 /// Delete a chapter and all its elements.
 #[tauri::command]
 pub async fn delete_chapter(
