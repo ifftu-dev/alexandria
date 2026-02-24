@@ -22,7 +22,7 @@ pub mod crypto {
 use db::Database;
 use std::sync::Arc;
 use tauri::Manager;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 
 #[cfg(desktop)]
 use std::path::PathBuf;
@@ -39,8 +39,13 @@ use ipfs::resolver::ContentResolver;
 use p2p::network::P2pNode;
 
 /// Shared application state accessible from all Tauri commands.
+///
+/// The database uses `RwLock` instead of `Mutex` to allow concurrent
+/// read access — most IPC commands (list, get, search) only need a
+/// read lock, so they can execute in parallel rather than being
+/// serialized behind a single mutex.
 pub struct AppState {
-    pub db: Arc<Mutex<Database>>,
+    pub db: Arc<RwLock<Database>>,
     #[cfg(desktop)]
     pub keystore: Arc<Mutex<Option<Keystore>>>,
     #[cfg(desktop)]
@@ -92,7 +97,7 @@ pub fn run() {
 
             log::info!("Database initialized successfully");
 
-            let db = Arc::new(Mutex::new(database));
+            let db = Arc::new(RwLock::new(database));
 
             #[cfg(desktop)]
             {

@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use rusqlite::params;
 use thiserror::Error;
-use tokio::sync::Mutex;
+use tokio::sync::RwLock;
 
 use crate::db::Database;
 use crate::ipfs::cid::{self, ContentId};
@@ -70,7 +70,7 @@ pub struct ResolveResult {
 pub struct ContentResolver {
     node: Arc<ContentNode>,
     gateway: GatewayClient,
-    db: Arc<Mutex<Database>>,
+    db: Arc<RwLock<Database>>,
 }
 
 impl ContentResolver {
@@ -78,7 +78,7 @@ impl ContentResolver {
     pub fn new(
         node: Arc<ContentNode>,
         gateway: GatewayClient,
-        db: Arc<Mutex<Database>>,
+        db: Arc<RwLock<Database>>,
     ) -> Self {
         Self { node, gateway, db }
     }
@@ -194,7 +194,7 @@ impl ContentResolver {
 
     /// Look up the BLAKE3 hash for a given IPFS CID in the mapping table.
     async fn lookup_blake3_for_cid(&self, cid_str: &str) -> Option<String> {
-        let db = self.db.lock().await;
+        let db = self.db.read().await;
         db.conn()
             .query_row(
                 "SELECT blake3_hash FROM content_mappings WHERE ipfs_cid = ?1",
@@ -206,7 +206,7 @@ impl ContentResolver {
 
     /// Look up the IPFS CID for a given BLAKE3 hash in the mapping table.
     async fn lookup_cid_for_blake3(&self, blake3_hash: &str) -> Option<String> {
-        let db = self.db.lock().await;
+        let db = self.db.read().await;
         db.conn()
             .query_row(
                 "SELECT ipfs_cid FROM content_mappings WHERE blake3_hash = ?1",
@@ -218,7 +218,7 @@ impl ContentResolver {
 
     /// Save a CID↔BLAKE3 mapping to the database.
     async fn save_mapping(&self, cid_str: &str, blake3_hash: &str, size: u64) {
-        let db = self.db.lock().await;
+        let db = self.db.write().await;
         if let Err(e) = db.conn().execute(
             "INSERT OR REPLACE INTO content_mappings (ipfs_cid, blake3_hash, size_bytes) VALUES (?1, ?2, ?3)",
             params![cid_str, blake3_hash, size as i64],
@@ -241,7 +241,7 @@ mod tests {
         // Set up database
         let db = Database::open_in_memory().expect("open db");
         db.run_migrations().expect("migrations");
-        let db = Arc::new(Mutex::new(db));
+        let db = Arc::new(RwLock::new(db));
 
         // Set up iroh node
         let node = Arc::new(ContentNode::new(tmp.path()));

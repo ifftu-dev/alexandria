@@ -20,6 +20,13 @@ pub struct Database {
     conn: Connection,
 }
 
+// SAFETY: Database is always accessed behind a tokio::sync::RwLock which
+// guarantees exclusive access for writes and shared access for reads.
+// rusqlite::Connection is Send but not Sync; the RwLock provides the
+// synchronization, so sharing the Database across threads is safe.
+unsafe impl Send for Database {}
+unsafe impl Sync for Database {}
+
 impl Database {
     /// Open (or create) a SQLite database at the given path.
     pub fn open(path: &Path) -> Result<Self, DbError> {

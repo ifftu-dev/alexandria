@@ -19,7 +19,7 @@ pub async fn list_enrollments(
     state: State<'_, AppState>,
     status: Option<String>,
 ) -> Result<Vec<Enrollment>, String> {
-    let db = state.db.lock().await;
+    let db = state.db.read().await;
 
     let (sql, param_values): (String, Vec<Box<dyn rusqlite::types::ToSql>>) =
         if let Some(ref s) = status {
@@ -67,7 +67,7 @@ pub async fn enroll(
     state: State<'_, AppState>,
     course_id: String,
 ) -> Result<Enrollment, String> {
-    let db = state.db.lock().await;
+    let db = state.db.write().await;
 
     // Get the local user's stake address for deterministic ID
     let stake_address: String = db
@@ -142,7 +142,7 @@ pub async fn update_progress(
     enrollment_id: String,
     req: UpdateProgressRequest,
 ) -> Result<ElementProgress, String> {
-    let db = state.db.lock().await;
+    let db = state.db.write().await;
 
     let id = entity_id(&[&enrollment_id, &req.element_id]);
 
@@ -307,7 +307,7 @@ pub async fn update_progress(
             };
 
             if let Ok(w) = signing_key_result {
-                let db = state.db.lock().await;
+                let db = state.db.write().await;
                 for (ann, stake_addr) in &broadcast_data {
                     let payload = match serde_json::to_vec(ann) {
                         Ok(p) => p,
@@ -557,7 +557,7 @@ pub async fn get_progress(
     state: State<'_, AppState>,
     enrollment_id: String,
 ) -> Result<Vec<ElementProgress>, String> {
-    let db = state.db.lock().await;
+    let db = state.db.read().await;
 
     let mut stmt = db
         .conn()

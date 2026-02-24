@@ -23,7 +23,7 @@ pub async fn list_courses(
     state: State<'_, AppState>,
     status: Option<String>,
 ) -> Result<Vec<Course>, String> {
-    let db = state.db.lock().await;
+    let db = state.db.read().await;
 
     let (sql, param_values): (String, Vec<Box<dyn rusqlite::types::ToSql>>) =
         if let Some(ref s) = status {
@@ -86,7 +86,7 @@ pub async fn get_course(
     state: State<'_, AppState>,
     course_id: String,
 ) -> Result<Option<Course>, String> {
-    let db = state.db.lock().await;
+    let db = state.db.read().await;
 
     let result = db.conn().query_row(
         "SELECT id, title, description, author_address, content_cid, thumbnail_cid, \
@@ -131,7 +131,7 @@ pub async fn create_course(
     state: State<'_, AppState>,
     req: CreateCourseRequest,
 ) -> Result<Course, String> {
-    let db = state.db.lock().await;
+    let db = state.db.write().await;
 
     // Get the local user's stake address
     let author_address: String = db
@@ -178,7 +178,7 @@ pub async fn update_course(
     course_id: String,
     req: UpdateCourseRequest,
 ) -> Result<Course, String> {
-    let db = state.db.lock().await;
+    let db = state.db.write().await;
 
     let mut set_clauses = Vec::new();
     let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
@@ -240,7 +240,7 @@ pub async fn delete_course(
     state: State<'_, AppState>,
     course_id: String,
 ) -> Result<(), String> {
-    let db = state.db.lock().await;
+    let db = state.db.write().await;
 
     let rows = db
         .conn()
@@ -277,7 +277,7 @@ pub async fn publish_course(
 
     // Read course data from DB (scoped to release the lock before iroh calls)
     let payload = {
-        let db = state.db.lock().await;
+        let db = state.db.read().await;
         let course = get_course_by_id(db.conn(), &course_id)?;
 
         // Read chapters with their elements
@@ -365,7 +365,7 @@ pub async fn publish_course(
         .map_err(|e| e.to_string())?;
 
     // Update the course in the database
-    let db = state.db.lock().await;
+    let db = state.db.write().await;
     db.conn()
         .execute(
             "UPDATE courses SET content_cid = ?1, status = 'published', \

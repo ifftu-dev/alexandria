@@ -7,7 +7,7 @@
 use std::sync::Arc;
 
 use tauri::State;
-use tokio::sync::Mutex;
+use tokio::sync::RwLock;
 
 use crate::crypto::wallet;
 use crate::db::Database;
@@ -59,7 +59,7 @@ pub async fn p2p_start(state: State<'_, AppState>) -> Result<String, String> {
     let (event_tx, mut event_rx) = tokio::sync::mpsc::channel(256);
 
     // Clone the database handle for the event consumer task
-    let db_for_events: Arc<Mutex<Database>> = state.db.clone();
+    let db_for_events: Arc<RwLock<Database>> = state.db.clone();
 
     // Spawn event consumer — handles incoming gossip messages by topic
     tokio::spawn(async move {
@@ -73,8 +73,11 @@ pub async fn p2p_start(state: State<'_, AppState>) -> Result<String, String> {
                 }
                 crate::p2p::types::P2pEvent::GossipMessage { topic, message } => {
                     log::debug!("P2P event: gossip message on {topic}");
-                    let db = db_for_events.lock().await;
+                    // Acquire a write lock per-message and release immediately
+                    // after handling. This prevents a single gossip burst from
+                    // blocking UI commands for the entire duration of the loop.
                     if topic == TOPIC_CATALOG {
+                        let db = db_for_events.write().await;
                         match p2p_catalog::handle_catalog_message(&db, message) {
                             Ok(ann) => {
                                 log::info!(
@@ -89,6 +92,7 @@ pub async fn p2p_start(state: State<'_, AppState>) -> Result<String, String> {
                             }
                         }
                     } else if topic == TOPIC_EVIDENCE {
+                        let db = db_for_events.write().await;
                         match p2p_evidence::handle_evidence_message(&db, message) {
                             Ok(ann) => {
                                 log::info!(
@@ -103,6 +107,7 @@ pub async fn p2p_start(state: State<'_, AppState>) -> Result<String, String> {
                             }
                         }
                     } else if topic == TOPIC_TAXONOMY {
+                        let db = db_for_events.write().await;
                         match p2p_taxonomy::handle_taxonomy_message(&db, message) {
                             Ok(update) => {
                                 log::info!(
@@ -116,6 +121,7 @@ pub async fn p2p_start(state: State<'_, AppState>) -> Result<String, String> {
                             }
                         }
                     } else if topic == TOPIC_GOVERNANCE {
+                        let db = db_for_events.write().await;
                         match p2p_governance::handle_governance_message(&db, message) {
                             Ok(ann) => {
                                 log::info!(

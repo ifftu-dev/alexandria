@@ -21,7 +21,7 @@ pub async fn search_catalog(
     author: Option<String>,
     limit: Option<u32>,
 ) -> Result<Vec<CatalogEntry>, String> {
-    let db = state.db.lock().await;
+    let db = state.db.read().await;
     let max = limit.unwrap_or(50).min(200) as usize;
 
     // Build dynamic WHERE clause
@@ -204,7 +204,7 @@ pub async fn get_catalog_entry(
     state: State<'_, AppState>,
     course_id: String,
 ) -> Result<Option<CatalogEntry>, String> {
-    let db = state.db.lock().await;
+    let db = state.db.read().await;
 
     let result = db.conn().query_row(
         "SELECT course_id, title, description, author_address, content_cid, \
