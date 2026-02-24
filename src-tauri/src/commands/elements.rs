@@ -170,6 +170,136 @@ pub async fn update_element(
         .map_err(|e| e.to_string())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::Database;
+
+    fn test_db() -> Database {
+        let db = Database::open_in_memory().expect("in-memory db");
+        db.run_migrations().expect("migrations");
+        db
+    }
+
+    fn setup_chapter(db: &Database) {
+        db.conn()
+            .execute(
+                "INSERT INTO local_identity (id, stake_address, payment_address) \
+                 VALUES (1, 'stake_test1u', 'addr_test1q')",
+                [],
+            )
+            .unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO courses (id, title, author_address) VALUES ('c1', 'Course', 'stake_test1u')",
+                [],
+            )
+            .unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO course_chapters (id, course_id, title, position) VALUES ('ch1', 'c1', 'Chapter', 0)",
+                [],
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn create_element_auto_positions() {
+        let db = test_db();
+        setup_chapter(&db);
+
+        let id1 = entity_id(&["ch1", "Video", "video", "0"]);
+        db.conn()
+            .execute(
+                "INSERT INTO course_elements (id, chapter_id, title, element_type, position) \
+                 VALUES (?1, 'ch1', 'Video', 'video', 0)",
+                params![id1],
+            )
+            .unwrap();
+
+        let next_pos: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COALESCE(MAX(position), -1) + 1 FROM course_elements WHERE chapter_id = 'ch1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(next_pos, 1);
+    }
+
+    #[test]
+    fn element_crud_lifecycle() {
+        let db = test_db();
+        setup_chapter(&db);
+
+        // Insert
+        let id = entity_id(&["ch1", "Quiz", "assessment", "0"]);
+        db.conn()
+            .execute(
+                "INSERT INTO course_elements (id, chapter_id, title, element_type, content_cid, position, duration_seconds) \
+                 VALUES (?1, 'ch1', 'Quiz', 'assessment', 'hash1', 0, 300)",
+                params![id],
+            )
+            .unwrap();
+
+        // Read
+        let (title, etype, dur): (String, String, Option<i64>) = db
+            .conn()
+            .query_row(
+                "SELECT title, element_type, duration_seconds FROM course_elements WHERE id = ?1",
+                params![id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(title, "Quiz");
+        assert_eq!(etype, "assessment");
+        assert_eq!(dur, Some(300));
+
+        // Update
+        db.conn()
+            .execute("UPDATE course_elements SET title = 'Final Quiz' WHERE id = ?1", params![id])
+            .unwrap();
+        let new_title: String = db
+            .conn()
+            .query_row("SELECT title FROM course_elements WHERE id = ?1", params![id], |r| r.get(0))
+            .unwrap();
+        assert_eq!(new_title, "Final Quiz");
+
+        // Delete
+        let rows = db
+            .conn()
+            .execute("DELETE FROM course_elements WHERE id = ?1", params![id])
+            .unwrap();
+        assert_eq!(rows, 1);
+    }
+
+    #[test]
+    fn element_with_null_optional_fields() {
+        let db = test_db();
+        setup_chapter(&db);
+
+        db.conn()
+            .execute(
+                "INSERT INTO course_elements (id, chapter_id, title, element_type, position) \
+                 VALUES ('el1', 'ch1', 'Text', 'text', 0)",
+                [],
+            )
+            .unwrap();
+
+        let (cid, dur): (Option<String>, Option<i64>) = db
+            .conn()
+            .query_row(
+                "SELECT content_cid, duration_seconds FROM course_elements WHERE id = 'el1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert!(cid.is_none());
+        assert!(dur.is_none());
+    }
+}
+
 /// Delete an element.
 #[tauri::command]
 pub async fn delete_element(

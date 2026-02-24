@@ -93,6 +93,111 @@ pub async fn search_catalog(
     Ok(entries)
 }
 
+#[cfg(test)]
+mod tests {
+    use crate::db::Database;
+    use rusqlite::params;
+
+    fn test_db() -> Database {
+        let db = Database::open_in_memory().expect("in-memory db");
+        db.run_migrations().expect("migrations");
+        db
+    }
+
+    fn insert_catalog_entry(db: &Database, course_id: &str, title: &str, author: &str, tags: &str) {
+        db.conn()
+            .execute(
+                "INSERT INTO catalog (course_id, title, author_address, content_cid, tags, version, published_at, signature) \
+                 VALUES (?1, ?2, ?3, 'cid123', ?4, 1, datetime('now'), 'sig_placeholder')",
+                params![course_id, title, author, tags],
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn catalog_search_by_title() {
+        let db = test_db();
+        insert_catalog_entry(&db, "c1", "Intro to Rust", "author1", "[\"rust\"]");
+        insert_catalog_entry(&db, "c2", "Advanced Python", "author2", "[\"python\"]");
+
+        let mut stmt = db
+            .conn()
+            .prepare("SELECT course_id FROM catalog WHERE title LIKE '%Rust%'")
+            .unwrap();
+        let ids: Vec<String> = stmt
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(ids, vec!["c1"]);
+    }
+
+    #[test]
+    fn catalog_search_by_author() {
+        let db = test_db();
+        insert_catalog_entry(&db, "c1", "Course 1", "author1", "[]");
+        insert_catalog_entry(&db, "c2", "Course 2", "author2", "[]");
+        insert_catalog_entry(&db, "c3", "Course 3", "author1", "[]");
+
+        let count: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM catalog WHERE author_address = 'author1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 2);
+    }
+
+    #[test]
+    fn catalog_entry_not_found() {
+        let db = test_db();
+        let result = db.conn().query_row(
+            "SELECT course_id FROM catalog WHERE course_id = 'nonexistent'",
+            [],
+            |row| row.get::<_, String>(0),
+        );
+        assert!(matches!(result, Err(rusqlite::Error::QueryReturnedNoRows)));
+    }
+
+    #[test]
+    fn catalog_tags_as_json() {
+        let db = test_db();
+        insert_catalog_entry(&db, "c1", "Tagged", "author1", "[\"rust\",\"systems\"]");
+
+        let tags_json: String = db
+            .conn()
+            .query_row(
+                "SELECT tags FROM catalog WHERE course_id = 'c1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let tags: Vec<String> = serde_json::from_str(&tags_json).unwrap();
+        assert_eq!(tags, vec!["rust", "systems"]);
+    }
+
+    #[test]
+    fn catalog_limit_respected() {
+        let db = test_db();
+        for i in 0..10 {
+            insert_catalog_entry(&db, &format!("c{i}"), &format!("Course {i}"), "auth", "[]");
+        }
+
+        let mut stmt = db
+            .conn()
+            .prepare("SELECT course_id FROM catalog ORDER BY published_at DESC LIMIT 3")
+            .unwrap();
+        let ids: Vec<String> = stmt
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(ids.len(), 3);
+    }
+}
+
 /// Get a single catalog entry by course_id.
 #[tauri::command]
 pub async fn get_catalog_entry(
