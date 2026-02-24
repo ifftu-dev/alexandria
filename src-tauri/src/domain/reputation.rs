@@ -199,6 +199,135 @@ pub struct VerificationResult {
     pub max_diff: f64,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reputation_role_roundtrip() {
+        let all = [
+            (ReputationRole::Instructor, "instructor"),
+            (ReputationRole::Learner, "learner"),
+            (ReputationRole::Assessor, "assessor"),
+            (ReputationRole::Author, "author"),
+            (ReputationRole::Mentor, "mentor"),
+        ];
+        for (variant, expected_str) in all {
+            assert_eq!(variant.as_str(), expected_str);
+            let parsed = ReputationRole::from_str(expected_str).unwrap();
+            assert_eq!(variant, parsed);
+        }
+    }
+
+    #[test]
+    fn reputation_role_from_str_invalid() {
+        assert!(ReputationRole::from_str("").is_none());
+        assert!(ReputationRole::from_str("Instructor").is_none());
+        assert!(ReputationRole::from_str("student").is_none());
+    }
+
+    #[test]
+    fn reputation_role_serde_roundtrip() {
+        for variant in [
+            ReputationRole::Instructor,
+            ReputationRole::Learner,
+            ReputationRole::Assessor,
+            ReputationRole::Author,
+            ReputationRole::Mentor,
+        ] {
+            let json = serde_json::to_string(&variant).unwrap();
+            let parsed: ReputationRole = serde_json::from_str(&json).unwrap();
+            assert_eq!(variant, parsed);
+        }
+    }
+
+    #[test]
+    fn snapshot_status_roundtrip() {
+        let all = [
+            (SnapshotStatus::Pending, "pending"),
+            (SnapshotStatus::Building, "building"),
+            (SnapshotStatus::Submitted, "submitted"),
+            (SnapshotStatus::Confirmed, "confirmed"),
+            (SnapshotStatus::Failed, "failed"),
+        ];
+        for (variant, expected_str) in all {
+            assert_eq!(variant.as_str(), expected_str);
+            let parsed = SnapshotStatus::from_str(expected_str).unwrap();
+            assert_eq!(variant, parsed);
+        }
+    }
+
+    #[test]
+    fn snapshot_status_from_str_invalid() {
+        assert!(SnapshotStatus::from_str("").is_none());
+        assert!(SnapshotStatus::from_str("PENDING").is_none());
+        assert!(SnapshotStatus::from_str("completed").is_none());
+    }
+
+    #[test]
+    fn distribution_metrics_default() {
+        let metrics = DistributionMetrics::default();
+        assert_eq!(metrics.median_impact, 0.0);
+        assert_eq!(metrics.impact_p25, 0.0);
+        assert_eq!(metrics.impact_p75, 0.0);
+        assert_eq!(metrics.learner_count, 0);
+        assert_eq!(metrics.impact_variance, 0.0);
+    }
+
+    #[test]
+    fn reputation_query_default() {
+        let query = ReputationQuery::default();
+        assert!(query.actor_address.is_none());
+        assert!(query.role.is_none());
+        assert!(query.skill_id.is_none());
+        assert!(query.proficiency_level.is_none());
+        assert!(query.limit.is_none());
+    }
+
+    #[test]
+    fn cip68_constants() {
+        assert_eq!(cip68::REFERENCE_LABEL_PREFIX, [0x00, 0x06, 0x43, 0xb0]);
+        assert_eq!(cip68::USER_LABEL_PREFIX, [0x00, 0x0d, 0xe1, 0x40]);
+        assert_eq!(cip68::ROLE_INSTRUCTOR, 0x01);
+        assert_eq!(cip68::ROLE_LEARNER, 0x02);
+        assert_eq!(cip68::ROLE_ASSESSOR, 0x03);
+        assert_eq!(cip68::ROLE_AUTHOR, 0x04);
+        assert_eq!(cip68::ROLE_MENTOR, 0x05);
+        assert_eq!(cip68::IMPACT_SCALE, 1_000_000);
+        assert_eq!(cip68::CONFIDENCE_SCALE, 10_000);
+    }
+
+    #[test]
+    fn full_reputation_assertion_serde_roundtrip() {
+        let assertion = FullReputationAssertion {
+            id: "ra1".into(),
+            actor_address: "stake_test1u123".into(),
+            role: "instructor".into(),
+            skill_id: Some("sk1".into()),
+            proficiency_level: Some("apply".into()),
+            score: 0.85,
+            confidence: 0.625,
+            evidence_count: 5,
+            distribution: Some(DistributionMetrics {
+                median_impact: 0.1,
+                impact_p25: 0.05,
+                impact_p75: 0.15,
+                learner_count: 3,
+                impact_variance: 0.002,
+            }),
+            computation_spec: "v2".into(),
+            window_start: None,
+            window_end: None,
+            updated_at: "2025-01-01".into(),
+        };
+        let json = serde_json::to_string(&assertion).unwrap();
+        let parsed: FullReputationAssertion = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.score, 0.85);
+        assert!(parsed.distribution.is_some());
+        assert_eq!(parsed.distribution.unwrap().learner_count, 3);
+    }
+}
+
 /// CIP-68 label prefixes for soulbound reputation tokens.
 pub mod cip68 {
     /// Reference NFT label (100) — 4-byte prefix.

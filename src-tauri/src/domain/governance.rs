@@ -302,3 +302,133 @@ pub struct ProposalDatum {
     pub votes_against: i64,
     pub vote_receipt_policy: Option<String>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn election_phase_roundtrip() {
+        for (variant, expected) in [
+            (ElectionPhase::Nomination, "nomination"),
+            (ElectionPhase::Voting, "voting"),
+            (ElectionPhase::Finalized, "finalized"),
+            (ElectionPhase::Cancelled, "cancelled"),
+        ] {
+            assert_eq!(variant.as_str(), expected);
+            let parsed = ElectionPhase::from_str(expected).unwrap();
+            assert_eq!(variant, parsed);
+        }
+    }
+
+    #[test]
+    fn election_phase_from_str_invalid() {
+        assert!(ElectionPhase::from_str("").is_none());
+        assert!(ElectionPhase::from_str("VOTING").is_none());
+        assert!(ElectionPhase::from_str("completed").is_none());
+    }
+
+    #[test]
+    fn election_phase_serde_roundtrip() {
+        for variant in [
+            ElectionPhase::Nomination,
+            ElectionPhase::Voting,
+            ElectionPhase::Finalized,
+            ElectionPhase::Cancelled,
+        ] {
+            let json = serde_json::to_string(&variant).unwrap();
+            let parsed: ElectionPhase = serde_json::from_str(&json).unwrap();
+            assert_eq!(variant, parsed);
+        }
+    }
+
+    #[test]
+    fn proposal_status_roundtrip() {
+        for (variant, expected) in [
+            (ProposalStatus::Draft, "draft"),
+            (ProposalStatus::Published, "published"),
+            (ProposalStatus::Approved, "approved"),
+            (ProposalStatus::Rejected, "rejected"),
+            (ProposalStatus::Cancelled, "cancelled"),
+        ] {
+            assert_eq!(variant.as_str(), expected);
+            let parsed = ProposalStatus::from_str(expected).unwrap();
+            assert_eq!(variant, parsed);
+        }
+    }
+
+    #[test]
+    fn proposal_status_from_str_invalid() {
+        assert!(ProposalStatus::from_str("").is_none());
+        assert!(ProposalStatus::from_str("Draft").is_none());
+        assert!(ProposalStatus::from_str("accepted").is_none());
+    }
+
+    #[test]
+    fn governance_event_type_serde_proposal_created() {
+        let event = GovernanceEventType::ProposalCreated {
+            proposal_id: "prop1".into(),
+            title: "Add new skill".into(),
+            description: Some("Description".into()),
+            category: "taxonomy".into(),
+            proposer: "stake_test1u123".into(),
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"type\":\"ProposalCreated\""));
+        let parsed: GovernanceEventType = serde_json::from_str(&json).unwrap();
+        if let GovernanceEventType::ProposalCreated { proposal_id, .. } = parsed {
+            assert_eq!(proposal_id, "prop1");
+        } else {
+            panic!("wrong variant");
+        }
+    }
+
+    #[test]
+    fn governance_event_type_serde_proposal_resolved() {
+        let event = GovernanceEventType::ProposalResolved {
+            proposal_id: "prop1".into(),
+            status: "approved".into(),
+            votes_for: 10,
+            votes_against: 2,
+            on_chain_tx: Some("txhash".into()),
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        let parsed: GovernanceEventType = serde_json::from_str(&json).unwrap();
+        if let GovernanceEventType::ProposalResolved { votes_for, .. } = parsed {
+            assert_eq!(votes_for, 10);
+        } else {
+            panic!("wrong variant");
+        }
+    }
+
+    #[test]
+    fn governance_event_type_serde_committee_updated() {
+        let event = GovernanceEventType::CommitteeUpdated {
+            members: vec!["addr1".into(), "addr2".into()],
+            on_chain_tx: None,
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        let parsed: GovernanceEventType = serde_json::from_str(&json).unwrap();
+        if let GovernanceEventType::CommitteeUpdated { members, .. } = parsed {
+            assert_eq!(members.len(), 2);
+        } else {
+            panic!("wrong variant");
+        }
+    }
+
+    #[test]
+    fn governance_announcement_serde_roundtrip() {
+        let ann = GovernanceAnnouncement {
+            event_type: GovernanceEventType::CommitteeUpdated {
+                members: vec!["addr1".into()],
+                on_chain_tx: None,
+            },
+            dao_id: "dao1".into(),
+            timestamp: 1700000000,
+        };
+        let json = serde_json::to_string(&ann).unwrap();
+        let parsed: GovernanceAnnouncement = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.dao_id, "dao1");
+        assert_eq!(parsed.timestamp, 1700000000);
+    }
+}

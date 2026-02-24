@@ -118,3 +118,117 @@ pub struct PublishCourseResult {
     /// Size of the document in bytes.
     pub size: u64,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_signed_course_doc() -> SignedCourseDocument {
+        SignedCourseDocument {
+            version: 1,
+            course_id: "course1".into(),
+            author_address: "stake_test1u123".into(),
+            title: "Intro to Rust".into(),
+            description: Some("Learn Rust".into()),
+            thumbnail_hash: None,
+            tags: vec!["rust".into(), "programming".into()],
+            skill_ids: vec!["sk1".into()],
+            chapters: vec![DocumentChapter {
+                id: "ch1".into(),
+                position: 0,
+                title: "Getting Started".into(),
+                description: None,
+                elements: vec![DocumentElement {
+                    id: "el1".into(),
+                    position: 0,
+                    title: "Install Rust".into(),
+                    element_type: "text".into(),
+                    content_hash: Some("hash1".into()),
+                    duration_seconds: None,
+                }],
+            }],
+            created_at: 1700000000,
+            updated_at: 1700100000,
+            signature: "deadbeef".into(),
+            public_key: "cafebabe".into(),
+        }
+    }
+
+    #[test]
+    fn signed_course_document_payload_extracts() {
+        let signed = sample_signed_course_doc();
+        let payload = signed.payload();
+
+        assert_eq!(payload.version, 1);
+        assert_eq!(payload.course_id, "course1");
+        assert_eq!(payload.author_address, "stake_test1u123");
+        assert_eq!(payload.title, "Intro to Rust");
+        assert_eq!(payload.tags.len(), 2);
+        assert_eq!(payload.chapters.len(), 1);
+        assert_eq!(payload.chapters[0].elements.len(), 1);
+    }
+
+    #[test]
+    fn signed_course_document_serde_roundtrip() {
+        let signed = sample_signed_course_doc();
+        let json = serde_json::to_string(&signed).unwrap();
+        let parsed: SignedCourseDocument = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.signature, "deadbeef");
+        assert_eq!(parsed.chapters.len(), 1);
+        assert_eq!(parsed.chapters[0].elements[0].title, "Install Rust");
+    }
+
+    #[test]
+    fn course_document_payload_serde_roundtrip() {
+        let payload = CourseDocumentPayload {
+            version: 1,
+            course_id: "c1".into(),
+            author_address: "addr1".into(),
+            title: "Test".into(),
+            description: None,
+            thumbnail_hash: None,
+            tags: vec![],
+            skill_ids: vec![],
+            chapters: vec![],
+            created_at: 0,
+            updated_at: 0,
+        };
+        let json = serde_json::to_string(&payload).unwrap();
+        let parsed: CourseDocumentPayload = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.course_id, "c1");
+        assert!(parsed.chapters.is_empty());
+    }
+
+    #[test]
+    fn document_chapter_with_elements_serde() {
+        let chapter = DocumentChapter {
+            id: "ch1".into(),
+            position: 0,
+            title: "Chapter 1".into(),
+            description: Some("First chapter".into()),
+            elements: vec![
+                DocumentElement {
+                    id: "el1".into(),
+                    position: 0,
+                    title: "Video".into(),
+                    element_type: "video".into(),
+                    content_hash: Some("hash".into()),
+                    duration_seconds: Some(300),
+                },
+                DocumentElement {
+                    id: "el2".into(),
+                    position: 1,
+                    title: "Quiz".into(),
+                    element_type: "assessment".into(),
+                    content_hash: None,
+                    duration_seconds: None,
+                },
+            ],
+        };
+        let json = serde_json::to_string(&chapter).unwrap();
+        let parsed: DocumentChapter = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.elements.len(), 2);
+        assert_eq!(parsed.elements[0].duration_seconds, Some(300));
+        assert_eq!(parsed.elements[1].content_hash, None);
+    }
+}

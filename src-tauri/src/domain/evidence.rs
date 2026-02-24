@@ -108,6 +108,120 @@ pub struct ReputationAssertion {
     pub updated_at: String,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn proficiency_level_roundtrip_all() {
+        for level in ProficiencyLevel::ALL {
+            let s = level.as_str();
+            let parsed =
+                ProficiencyLevel::from_str(s).unwrap_or_else(|| panic!("failed to parse '{s}'"));
+            assert_eq!(*level, parsed);
+        }
+    }
+
+    #[test]
+    fn proficiency_level_ordering() {
+        assert!(ProficiencyLevel::Remember < ProficiencyLevel::Understand);
+        assert!(ProficiencyLevel::Understand < ProficiencyLevel::Apply);
+        assert!(ProficiencyLevel::Apply < ProficiencyLevel::Analyze);
+        assert!(ProficiencyLevel::Analyze < ProficiencyLevel::Evaluate);
+        assert!(ProficiencyLevel::Evaluate < ProficiencyLevel::Create);
+    }
+
+    #[test]
+    fn proficiency_level_all_has_six() {
+        assert_eq!(ProficiencyLevel::ALL.len(), 6);
+    }
+
+    #[test]
+    fn proficiency_level_from_str_invalid() {
+        assert!(ProficiencyLevel::from_str("").is_none());
+        assert!(ProficiencyLevel::from_str("Remember").is_none()); // case-sensitive
+        assert!(ProficiencyLevel::from_str("master").is_none());
+    }
+
+    #[test]
+    fn proficiency_level_serde_json_roundtrip() {
+        for level in ProficiencyLevel::ALL {
+            let json = serde_json::to_string(level).unwrap();
+            let parsed: ProficiencyLevel = serde_json::from_str(&json).unwrap();
+            assert_eq!(*level, parsed);
+        }
+    }
+
+    #[test]
+    fn proficiency_level_serde_uses_snake_case() {
+        let json = serde_json::to_string(&ProficiencyLevel::Remember).unwrap();
+        assert_eq!(json, "\"remember\"");
+        let json = serde_json::to_string(&ProficiencyLevel::Create).unwrap();
+        assert_eq!(json, "\"create\"");
+    }
+
+    #[test]
+    fn evidence_record_serde_roundtrip() {
+        let record = EvidenceRecord {
+            id: "ev1".into(),
+            skill_assessment_id: "sa1".into(),
+            skill_id: "sk1".into(),
+            proficiency_level: "apply".into(),
+            score: 0.85,
+            difficulty: 0.7,
+            trust_factor: 1.0,
+            course_id: Some("c1".into()),
+            instructor_address: None,
+            created_at: "2025-01-01 00:00:00".into(),
+        };
+        let json = serde_json::to_string(&record).unwrap();
+        let parsed: EvidenceRecord = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.id, "ev1");
+        assert_eq!(parsed.score, 0.85);
+        assert!(parsed.instructor_address.is_none());
+        assert_eq!(parsed.course_id.unwrap(), "c1");
+    }
+
+    #[test]
+    fn skill_proof_serde_roundtrip() {
+        let proof = SkillProof {
+            id: "sp1".into(),
+            skill_id: "sk1".into(),
+            proficiency_level: "analyze".into(),
+            confidence: 0.92,
+            evidence_count: 12,
+            computed_at: "2025-01-01".into(),
+            updated_at: "2025-01-02".into(),
+        };
+        let json = serde_json::to_string(&proof).unwrap();
+        let parsed: SkillProof = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.confidence, 0.92);
+        assert_eq!(parsed.evidence_count, 12);
+    }
+
+    #[test]
+    fn evidence_announcement_serde_roundtrip() {
+        let ann = EvidenceAnnouncement {
+            evidence_id: "ev1".into(),
+            learner_address: "stake_test1u123".into(),
+            skill_id: "sk1".into(),
+            proficiency_level: "apply".into(),
+            assessment_id: "sa1".into(),
+            score: 0.75,
+            difficulty: 0.6,
+            trust_factor: 1.0,
+            course_id: None,
+            instructor_address: Some("stake_test1uinst".into()),
+            created_at: 1700000000,
+        };
+        let json = serde_json::to_string(&ann).unwrap();
+        let parsed: EvidenceAnnouncement = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.created_at, 1700000000);
+        assert!(parsed.course_id.is_none());
+        assert_eq!(parsed.instructor_address.unwrap(), "stake_test1uinst");
+    }
+}
+
 /// An evidence announcement broadcast on `/alexandria/evidence/1.0`.
 ///
 /// This is the gossip payload for sharing evidence records across the

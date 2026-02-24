@@ -190,3 +190,114 @@ pub struct SyncHistoryEntry {
     /// Direction: push, pull, or bidirectional.
     pub direction: String,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn syncable_tables_count() {
+        assert_eq!(SYNCABLE_TABLES.len(), 5);
+    }
+
+    #[test]
+    fn syncable_tables_contents() {
+        assert!(SYNCABLE_TABLES.contains(&"enrollments"));
+        assert!(SYNCABLE_TABLES.contains(&"element_progress"));
+        assert!(SYNCABLE_TABLES.contains(&"course_notes"));
+        assert!(SYNCABLE_TABLES.contains(&"evidence_records"));
+        assert!(SYNCABLE_TABLES.contains(&"skill_proof_evidence"));
+    }
+
+    #[test]
+    fn sync_message_type_hello_serde() {
+        let msg_type = SyncMessageType::Hello {
+            platform: "macos".into(),
+            sync_vector: vec![SyncTableState {
+                device_id: "dev1".into(),
+                table_name: "enrollments".into(),
+                last_synced_at: "2025-01-01".into(),
+                row_count: 10,
+            }],
+        };
+        let json = serde_json::to_string(&msg_type).unwrap();
+        assert!(json.contains("\"type\":\"Hello\""));
+        let parsed: SyncMessageType = serde_json::from_str(&json).unwrap();
+        if let SyncMessageType::Hello {
+            platform,
+            sync_vector,
+        } = parsed
+        {
+            assert_eq!(platform, "macos");
+            assert_eq!(sync_vector.len(), 1);
+        } else {
+            panic!("wrong variant");
+        }
+    }
+
+    #[test]
+    fn sync_message_type_request_sync_serde() {
+        let msg_type = SyncMessageType::RequestSync {
+            requests: vec![("enrollments".into(), "2025-01-01".into())],
+        };
+        let json = serde_json::to_string(&msg_type).unwrap();
+        let parsed: SyncMessageType = serde_json::from_str(&json).unwrap();
+        if let SyncMessageType::RequestSync { requests } = parsed {
+            assert_eq!(requests.len(), 1);
+            assert_eq!(requests[0].0, "enrollments");
+        } else {
+            panic!("wrong variant");
+        }
+    }
+
+    #[test]
+    fn sync_message_type_sync_data_serde() {
+        let msg_type = SyncMessageType::SyncData {
+            table_name: "enrollments".into(),
+            rows: vec![SyncRow {
+                row_id: "row1".into(),
+                operation: "insert".into(),
+                data: Some(serde_json::json!({"id": "row1"})),
+                updated_at: "2025-01-01".into(),
+            }],
+        };
+        let json = serde_json::to_string(&msg_type).unwrap();
+        let parsed: SyncMessageType = serde_json::from_str(&json).unwrap();
+        if let SyncMessageType::SyncData { table_name, rows } = parsed {
+            assert_eq!(table_name, "enrollments");
+            assert_eq!(rows.len(), 1);
+            assert!(rows[0].data.is_some());
+        } else {
+            panic!("wrong variant");
+        }
+    }
+
+    #[test]
+    fn sync_message_type_ack_serde() {
+        let msg_type = SyncMessageType::SyncAck {
+            merged: vec![("enrollments".into(), 5)],
+        };
+        let json = serde_json::to_string(&msg_type).unwrap();
+        let parsed: SyncMessageType = serde_json::from_str(&json).unwrap();
+        if let SyncMessageType::SyncAck { merged } = parsed {
+            assert_eq!(merged.len(), 1);
+            assert_eq!(merged[0].1, 5);
+        } else {
+            panic!("wrong variant");
+        }
+    }
+
+    #[test]
+    fn sync_message_envelope_serde() {
+        let msg = SyncMessage {
+            msg_type: SyncMessageType::SyncAck { merged: vec![] },
+            device_id: "dev1".into(),
+            device_name: Some("MacBook".into()),
+            timestamp: 1700000000,
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        let parsed: SyncMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.device_id, "dev1");
+        assert_eq!(parsed.timestamp, 1700000000);
+    }
+}
