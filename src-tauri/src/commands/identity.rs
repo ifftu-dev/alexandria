@@ -25,6 +25,14 @@ pub struct GenerateWalletResponse {
     pub payment_address: String,
 }
 
+/// Combined response from unlock/generate that includes wallet + profile,
+/// eliminating the need for a separate `get_profile` IPC call.
+#[derive(Debug, Serialize)]
+pub struct UnlockResponse {
+    pub wallet: WalletInfo,
+    pub profile: Option<Identity>,
+}
+
 /// Emit a vault progress event to the frontend.
 fn emit_progress(app: &AppHandle, step: &str, detail: &str) {
     let _ = app.emit(
@@ -49,20 +57,31 @@ pub async fn check_vault_exists(state: State<'_, AppState>) -> Result<bool, Stri
 /// Called on app startup when a vault already exists. Decrypts the
 /// Stronghold snapshot, derives the wallet from the stored mnemonic,
 /// and loads the identity into memory.
+///
+/// Returns both wallet info and profile in a single response to avoid
+/// an extra IPC round-trip.
 #[tauri::command]
 pub async fn unlock_vault(
     app: AppHandle,
     state: State<'_, AppState>,
     password: String,
-) -> Result<WalletInfo, String> {
+) -> Result<UnlockResponse, String> {
     emit_progress(&app, "vault", "Decrypting vault...");
-    let ks = Keystore::open(&state.vault_dir, &password).map_err(|e| e.to_string())?;
 
-    emit_progress(&app, "mnemonic", "Retrieving identity keys...");
-    let mnemonic = ks.retrieve_mnemonic().map_err(|e| e.to_string())?;
-
-    emit_progress(&app, "derive", "Deriving Cardano wallet (BIP32-Ed25519)...");
-    let w = wallet::wallet_from_mnemonic(&mnemonic).map_err(|e| e.to_string())?;
+    // Move all CPU-bound crypto work to a blocking thread so we don't
+    // stall the Tokio async executor. Stronghold snapshot decryption
+    // (scrypt internally) and BIP32-Ed25519 derivation (PBKDF2) are
+    // the main time sinks.
+    let vault_dir = state.vault_dir.clone();
+    let (ks, w) = tokio::task::spawn_blocking(move || {
+        let ks = Keystore::open(&vault_dir, &password).map_err(|e| e.to_string())?;
+        let mnemonic = ks.retrieve_mnemonic().map_err(|e| e.to_string())?;
+        let w = wallet::wallet_from_mnemonic(&mnemonic).map_err(|e| e.to_string())?;
+        Ok::<_, String>((ks, w))
+    })
+    .await
+    .map_err(|e| format!("blocking task failed: {e}"))?
+    .map_err(|e: String| e)?;
 
     emit_progress(&app, "db", "Loading identity from database...");
     let db = state.db.lock().await;
@@ -84,6 +103,9 @@ pub async fn unlock_vault(
             )
             .map_err(|e| e.to_string())?;
     }
+
+    // Read back the full profile in the same DB lock — no extra IPC needed
+    let profile = read_profile(db.conn());
     drop(db);
 
     // Store keystore in app state
@@ -92,10 +114,13 @@ pub async fn unlock_vault(
 
     emit_progress(&app, "done", "Vault unlocked successfully");
 
-    Ok(WalletInfo {
-        stake_address: w.stake_address,
-        payment_address: w.payment_address,
-        has_mnemonic_backup: true,
+    Ok(UnlockResponse {
+        wallet: WalletInfo {
+            stake_address: w.stake_address,
+            payment_address: w.payment_address,
+            has_mnemonic_backup: true,
+        },
+        profile,
     })
 }
 
@@ -111,13 +136,21 @@ pub async fn generate_wallet(
     password: String,
 ) -> Result<GenerateWalletResponse, String> {
     emit_progress(&app, "vault", "Creating encrypted vault...");
-    let ks = Keystore::create(&state.vault_dir, &password).map_err(|e| e.to_string())?;
 
-    emit_progress(&app, "keygen", "Generating 24-word recovery phrase...");
-    let w = wallet::generate_wallet().map_err(|e| e.to_string())?;
-
-    emit_progress(&app, "derive", "Deriving Cardano wallet (BIP32-Ed25519)...");
-    ks.store_mnemonic(&w.mnemonic).map_err(|e| e.to_string())?;
+    // Move all CPU-bound crypto to a blocking thread:
+    // - Keystore::create() sets up Stronghold in memory
+    // - wallet::generate_wallet() does PBKDF2 + BIP32-Ed25519
+    // - ks.store_mnemonic() encrypts + commits to disk (single write)
+    let vault_dir = state.vault_dir.clone();
+    let (ks, w) = tokio::task::spawn_blocking(move || {
+        let ks = Keystore::create(&vault_dir, &password).map_err(|e| e.to_string())?;
+        let w = wallet::generate_wallet().map_err(|e| e.to_string())?;
+        ks.store_mnemonic(&w.mnemonic).map_err(|e| e.to_string())?;
+        Ok::<_, String>((ks, w))
+    })
+    .await
+    .map_err(|e| format!("blocking task failed: {e}"))?
+    .map_err(|e: String| e)?;
 
     emit_progress(&app, "db", "Storing identity in local database...");
     let db = state.db.lock().await;
@@ -175,13 +208,18 @@ pub async fn restore_wallet(
     password: String,
 ) -> Result<WalletInfo, String> {
     emit_progress(&app, "validate", "Validating recovery phrase...");
-    let w = wallet::wallet_from_mnemonic(&mnemonic).map_err(|e| e.to_string())?;
 
-    emit_progress(&app, "vault", "Creating encrypted vault...");
-    let ks = Keystore::create(&state.vault_dir, &password).map_err(|e| e.to_string())?;
-
-    emit_progress(&app, "store", "Encrypting and storing mnemonic...");
-    ks.store_mnemonic(&mnemonic).map_err(|e| e.to_string())?;
+    // Move all CPU-bound crypto to a blocking thread
+    let vault_dir = state.vault_dir.clone();
+    let (ks, w) = tokio::task::spawn_blocking(move || {
+        let w = wallet::wallet_from_mnemonic(&mnemonic).map_err(|e| e.to_string())?;
+        let ks = Keystore::create(&vault_dir, &password).map_err(|e| e.to_string())?;
+        ks.store_mnemonic(&mnemonic).map_err(|e| e.to_string())?;
+        Ok::<_, String>((ks, w))
+    })
+    .await
+    .map_err(|e| format!("blocking task failed: {e}"))?
+    .map_err(|e: String| e)?;
 
     emit_progress(&app, "db", "Storing identity in local database...");
     let db = state.db.lock().await;
@@ -279,8 +317,12 @@ pub async fn get_wallet_info(
 #[tauri::command]
 pub async fn get_profile(state: State<'_, AppState>) -> Result<Option<Identity>, String> {
     let db = state.db.lock().await;
+    Ok(read_profile(db.conn()))
+}
 
-    let result = db.conn().query_row(
+/// Internal helper: read the local user's profile from the database.
+fn read_profile(conn: &rusqlite::Connection) -> Option<Identity> {
+    conn.query_row(
         "SELECT stake_address, payment_address, display_name, bio, avatar_cid, profile_hash, created_at, updated_at
          FROM local_identity WHERE id = 1",
         [],
@@ -296,13 +338,8 @@ pub async fn get_profile(state: State<'_, AppState>) -> Result<Option<Identity>,
                 updated_at: row.get(7)?,
             })
         },
-    );
-
-    match result {
-        Ok(profile) => Ok(Some(profile)),
-        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-        Err(e) => Err(e.to_string()),
-    }
+    )
+    .ok()
 }
 
 /// Update the local user's profile.
