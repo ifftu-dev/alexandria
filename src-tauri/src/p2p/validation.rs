@@ -15,10 +15,12 @@
 //! repeatedly send invalid messages are scored down by GossipSub's
 //! peer scoring mechanism, eventually disconnected."
 
-use std::collections::HashSet;
+use std::collections::HashMap;
+use std::num::NonZeroUsize;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use lru::LruCache;
 use thiserror::Error;
 
 use crate::crypto::hash::blake2b_256;
@@ -37,6 +39,8 @@ const DEDUP_CACHE_MAX: usize = 100_000;
 pub enum ValidationError {
     #[error("signature verification failed: {0}")]
     InvalidSignature(String),
+    #[error("identity mismatch: stake_address '{stake_address}' previously bound to different public key")]
+    IdentityMismatch { stake_address: String },
     #[error("message too old: timestamp {timestamp} is {age_secs}s in the past (max {FRESHNESS_WINDOW_SECS}s)")]
     TooOld { timestamp: u64, age_secs: u64 },
     #[error("message from the future: timestamp {timestamp} is {ahead_secs}s ahead (max {FRESHNESS_WINDOW_SECS}s)")]
@@ -54,19 +58,27 @@ pub type ValidationResult = Result<(), ValidationError>;
 
 /// The message validator.
 ///
-/// Maintains a dedup cache of seen payload hashes. Thread-safe via
-/// interior mutability (`Mutex`) so it can be shared across the
-/// async swarm event loop.
+/// Maintains an LRU dedup cache of seen payload hashes and an identity
+/// binding table (TOFU: trust-on-first-use) that maps stake addresses
+/// to their first-seen public key. Thread-safe via interior mutability
+/// (`Mutex`) so it can be shared across the async swarm event loop.
 pub struct MessageValidator {
-    /// Set of Blake2b-256 hashes (hex) of previously seen payloads.
-    seen: Mutex<HashSet<String>>,
+    /// LRU cache of Blake2b-256 hashes (hex) of previously seen payloads.
+    /// When full, the least-recently-used entry is evicted (no replay
+    /// window, unlike the previous full-clear strategy).
+    seen: Mutex<LruCache<String, ()>>,
+    /// TOFU identity bindings: stake_address → first-seen public_key (hex).
+    /// Once a stake_address is bound to a public key, messages claiming
+    /// the same stake_address with a different key are rejected.
+    identity_bindings: Mutex<HashMap<String, String>>,
 }
 
 impl MessageValidator {
-    /// Create a new validator with an empty dedup cache.
+    /// Create a new validator with an empty dedup cache and identity table.
     pub fn new() -> Self {
         Self {
-            seen: Mutex::new(HashSet::new()),
+            seen: Mutex::new(LruCache::new(NonZeroUsize::new(DEDUP_CACHE_MAX).unwrap())),
+            identity_bindings: Mutex::new(HashMap::new()),
         }
     }
 
@@ -74,9 +86,10 @@ impl MessageValidator {
     ///
     /// Returns `Ok(())` if the message passes all checks, or the first
     /// `ValidationError` encountered. Checks run in order:
-    /// signature → freshness → dedup → schema → authority.
+    /// signature → identity → freshness → dedup → schema → authority.
     pub fn validate(&self, message: &SignedGossipMessage) -> ValidationResult {
         self.check_signature(message)?;
+        self.check_identity_binding(message)?;
         self.check_freshness(message)?;
         self.check_dedup(message)?;
         self.check_schema(message)?;
@@ -88,6 +101,41 @@ impl MessageValidator {
     fn check_signature(&self, message: &SignedGossipMessage) -> ValidationResult {
         verify_gossip_signature(message)
             .map_err(|e| ValidationError::InvalidSignature(e.to_string()))
+    }
+
+    /// Step 1.5: TOFU identity binding — verify public key consistency.
+    ///
+    /// On first contact, the (stake_address, public_key) pair is recorded.
+    /// Subsequent messages from the same stake_address MUST use the same
+    /// public_key — otherwise the message is rejected as an impersonation
+    /// attempt.
+    ///
+    /// This prevents an attacker from signing with their own key while
+    /// claiming another user's stake_address. Without on-chain lookup,
+    /// this TOFU model is the best available local defense.
+    fn check_identity_binding(&self, message: &SignedGossipMessage) -> ValidationResult {
+        let pubkey_hex = hex::encode(&message.public_key);
+        let mut bindings = self.identity_bindings.lock().unwrap();
+
+        match bindings.get(&message.stake_address) {
+            Some(existing_key) if *existing_key != pubkey_hex => {
+                log::warn!(
+                    "Identity mismatch: stake_address '{}' bound to key '{}' but message has '{}'",
+                    message.stake_address,
+                    &existing_key[..16],
+                    &pubkey_hex[..16],
+                );
+                Err(ValidationError::IdentityMismatch {
+                    stake_address: message.stake_address.clone(),
+                })
+            }
+            Some(_) => Ok(()), // Same key — consistent identity
+            None => {
+                // First time seeing this stake_address — bind it
+                bindings.insert(message.stake_address.clone(), pubkey_hex);
+                Ok(())
+            }
+        }
     }
 
     /// Step 2: Check that the message timestamp is within ±5 minutes.
@@ -117,24 +165,20 @@ impl MessageValidator {
     /// Step 3: Check for duplicate messages using Blake2b-256 of the payload.
     ///
     /// If the payload hash has been seen before, the message is rejected.
-    /// Otherwise, the hash is added to the seen cache.
+    /// Otherwise, the hash is added to the LRU cache. When the cache is
+    /// full, the least-recently-used entry is evicted — no full-clear
+    /// replay window.
     fn check_dedup(&self, message: &SignedGossipMessage) -> ValidationResult {
         let hash = hex::encode(blake2b_256(&message.payload));
 
         let mut seen = self.seen.lock().unwrap();
 
-        // Prune if cache is too large (simple strategy: clear all).
-        // A more sophisticated approach (LRU, time-based expiry) can
-        // be added later — the freshness check already limits the
-        // window of relevant messages to ±5 minutes.
-        if seen.len() >= DEDUP_CACHE_MAX {
-            log::info!("Dedup cache reached {DEDUP_CACHE_MAX} entries, clearing");
-            seen.clear();
-        }
-
-        if !seen.insert(hash.clone()) {
+        if seen.contains(&hash) {
             return Err(ValidationError::Duplicate { hash });
         }
+
+        // put() returns the evicted entry (if any) when the cache is full
+        seen.put(hash, ());
 
         Ok(())
     }
@@ -184,6 +228,12 @@ impl MessageValidator {
     #[cfg(test)]
     pub fn seen_count(&self) -> usize {
         self.seen.lock().unwrap().len()
+    }
+
+    /// Get the number of known identity bindings.
+    #[cfg(test)]
+    pub fn identity_count(&self) -> usize {
+        self.identity_bindings.lock().unwrap().len()
     }
 }
 
@@ -328,6 +378,80 @@ mod tests {
         assert!(validator.validate(&msg1).is_ok());
         assert!(validator.validate(&msg2).is_ok());
         assert_eq!(validator.seen_count(), 2);
+    }
+
+    // -- Identity binding tests --
+
+    #[test]
+    fn identity_binding_accepts_consistent_key() {
+        let key = test_key();
+        let validator = MessageValidator::new();
+
+        let msg1 = valid_message(&key, "/alexandria/catalog/1.0");
+        assert!(validator.validate(&msg1).is_ok());
+
+        // Second message from same key + same stake_address should pass
+        // (different payload so dedup doesn't trigger)
+        let msg2 = sign_gossip_message(
+            "/alexandria/catalog/1.0",
+            b"{\"second\":true}".to_vec(),
+            &key,
+            "stake_test1uqfu74w3wh4gfzu8m6e7j987h4lq9r3t7ef5gaw497uu8q0kd9u4",
+        );
+        assert!(validator.validate(&msg2).is_ok());
+    }
+
+    #[test]
+    fn identity_binding_rejects_different_key_same_address() {
+        let key1 = test_key();
+        let key2 = test_key();
+        let validator = MessageValidator::new();
+        let stake_address = "stake_test1uqfu74w3wh4gfzu8m6e7j987h4lq9r3t7ef5gaw497uu8q0kd9u4";
+
+        // First message from key1 — binds the address
+        let msg1 = sign_gossip_message(
+            "/alexandria/catalog/1.0",
+            b"{\"first\":true}".to_vec(),
+            &key1,
+            stake_address,
+        );
+        assert!(validator.validate(&msg1).is_ok());
+
+        // Second message from key2 claiming same stake_address — should be rejected
+        let msg2 = sign_gossip_message(
+            "/alexandria/catalog/1.0",
+            b"{\"impersonation\":true}".to_vec(),
+            &key2,
+            stake_address,
+        );
+        let result = validator.validate(&msg2);
+        assert!(
+            matches!(result, Err(ValidationError::IdentityMismatch { .. })),
+            "different key claiming same stake_address should be rejected"
+        );
+    }
+
+    #[test]
+    fn different_stake_addresses_can_use_different_keys() {
+        let key1 = test_key();
+        let key2 = test_key();
+        let validator = MessageValidator::new();
+
+        let msg1 = sign_gossip_message(
+            "/alexandria/catalog/1.0",
+            b"{\"user1\":true}".to_vec(),
+            &key1,
+            "stake_test1user1",
+        );
+        assert!(validator.validate(&msg1).is_ok());
+
+        let msg2 = sign_gossip_message(
+            "/alexandria/catalog/1.0",
+            b"{\"user2\":true}".to_vec(),
+            &key2,
+            "stake_test1user2",
+        );
+        assert!(validator.validate(&msg2).is_ok());
     }
 
     // -- Schema tests --

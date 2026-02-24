@@ -46,6 +46,9 @@ pallas-primitives = "0.35"
 pallas-traverse = "0.35"
 pallas-codec = "0.35"
 
+# LRU cache (used for gossip dedup — avoids full-clear replay window)
+lru = "0.12"
+
 # Common utilities (all platforms)
 anyhow = "1"
 bytes = "1"
@@ -65,7 +68,7 @@ iroh = "0.96"
 iroh-blobs = { version = "0.98", features = ["fs-store"] }
 # Secure secret storage (IOTA Stronghold encrypted vault)
 iota_stronghold = "2"
-hmac = "0.12"
+argon2 = "0.5"
 zeroize = { version = "1", features = ["derive"] }
 # P2P networking (libp2p swarm)
 libp2p = { version = "0.56.0", features = ["gossipsub", "kad", "mdns", "quic", "noise", "identify", "tokio", "ed25519", "macros", "autonat", "relay", "dcutr", "yamux"] }
