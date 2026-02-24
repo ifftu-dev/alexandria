@@ -4,13 +4,25 @@ version = "0.1.0"
 description = "Alexandria — Decentralized Learning Platform (Desktop Node)"
 authors = ["Alexandria Contributors"]
 license = "TBD"
-repository = "https://github.com/pratyushpundir/alexandria-mark3"
+repository = "https://github.com/ifftu-dev/alexandria"
 edition = "2021"
 rust-version = "1.83.0"
 
 [lib]
 name = "app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
+
+[features]
+default = ["desktop"]
+desktop = [
+  "dep:iroh",
+  "dep:iroh-blobs",
+  "dep:iota_stronghold",
+  "dep:libp2p",
+  "dep:futures",
+  "dep:hmac",
+  "dep:zeroize",
+]
 
 [build-dependencies]
 tauri-build = { version = "2.5.4", features = [] }
@@ -30,14 +42,14 @@ tokio = { version = "1", features = ["full"] }
 # Database
 rusqlite = { version = "0.38", features = ["bundled", "uuid"] }
 
-# Cryptography
+# Cryptography (always available — needed for wallet on all platforms)
 ed25519-dalek = { version = "2", features = ["serde", "rand_core"] }
 blake2 = "0.10"
 sha2 = "0.10"
 rand = "0.8"
 bip39 = { version = "2", features = ["rand"] }
 
-# Cardano (pallas 0.35 — proper Icarus BIP32-Ed25519 + bech32 addresses + tx building)
+# Cardano (pallas 0.35 — always available for wallet + tx building)
 pallas-wallet = "0.35"
 pallas-addresses = "0.35"
 pallas-crypto = "0.35"
@@ -46,21 +58,25 @@ pallas-primitives = "0.35"
 pallas-traverse = "0.35"
 pallas-codec = "0.35"
 
-# Content-addressed storage (iroh — embedded IPFS-like blob store)
-iroh = "0.96"
-iroh-blobs = { version = "0.98", features = ["fs-store"] }
+# Content-addressed storage (desktop only — iroh embedded BLAKE3 blob store)
+iroh = { version = "0.96", optional = true }
+iroh-blobs = { version = "0.98", features = ["fs-store"], optional = true }
 anyhow = "1"
 bytes = "1"
 
-# HTTP client (IPFS gateway fallback)
+# HTTP client (IPFS gateway fallback — always available)
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 
-# HMAC (used by keystore for password derivation)
-hmac = "0.12"
+# HMAC (desktop only — used by Stronghold keystore for password derivation)
+hmac = { version = "0.12", optional = true }
 
-# Secure secret storage (IOTA Stronghold encrypted vault)
-iota_stronghold = "2"
-zeroize = { version = "1", features = ["derive"] }
+# Secure secret storage (desktop only — IOTA Stronghold encrypted vault)
+iota_stronghold = { version = "2", optional = true }
+zeroize = { version = "1", features = ["derive"], optional = true }
+
+# P2P networking (desktop only — libp2p swarm)
+libp2p = { version = "0.56.0", features = ["gossipsub", "kad", "mdns", "quic", "noise", "identify", "tokio", "ed25519", "macros", "autonat", "relay", "dcutr", "yamux"], optional = true }
+futures = { version = "0.3", optional = true }
 
 # Utilities
 uuid = { version = "1", features = ["v4", "serde"] }
@@ -68,8 +84,6 @@ chrono = { version = "0.4", features = ["serde"] }
 thiserror = "2"
 log = "0.4"
 hex = "0.4"
-libp2p = { version = "0.56.0", features = ["gossipsub", "kad", "mdns", "quic", "noise", "identify", "tokio", "ed25519", "macros", "autonat", "relay", "dcutr", "yamux"] }
-futures = "0.3"
 
 [dev-dependencies]
 tempfile = "3"

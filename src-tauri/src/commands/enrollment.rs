@@ -2,12 +2,16 @@ use rusqlite::params;
 use tauri::State;
 
 use crate::crypto::hash::entity_id;
-use crate::crypto::wallet;
 use crate::domain::enrollment::{ElementProgress, Enrollment, UpdateProgressRequest};
 use crate::evidence::{aggregator, reputation};
-use crate::p2p::evidence as p2p_evidence;
-use crate::p2p::types::TOPIC_EVIDENCE;
 use crate::AppState;
+
+#[cfg(feature = "desktop")]
+use crate::crypto::wallet;
+#[cfg(feature = "desktop")]
+use crate::p2p::evidence as p2p_evidence;
+#[cfg(feature = "desktop")]
+use crate::p2p::types::TOPIC_EVIDENCE;
 
 /// List all enrollments for the local user.
 #[tauri::command]
@@ -188,6 +192,7 @@ pub async fn update_progress(
 
     // Trigger evidence pipeline on completion with a score
     // Collect broadcast data while holding the DB lock
+    #[cfg(feature = "desktop")]
     let mut broadcast_data: Vec<(
         crate::domain::evidence::EvidenceAnnouncement,
         String, // stake_address
@@ -252,7 +257,8 @@ pub async fn update_progress(
                 }
             }
 
-            // Collect un-sent evidence for P2P broadcast
+            // Collect un-sent evidence for P2P broadcast (desktop only)
+            #[cfg(feature = "desktop")]
             for skill_id in &skills {
                 match p2p_evidence::collect_evidence_for_broadcast(&db, skill_id) {
                     Ok(rows) => {
@@ -283,7 +289,8 @@ pub async fn update_progress(
     // Release DB lock before async P2P operations
     drop(db);
 
-    // Broadcast evidence to P2P network (best-effort — don't fail the progress update)
+    // Broadcast evidence to P2P network (desktop only — best-effort, don't fail progress update)
+    #[cfg(feature = "desktop")]
     if !broadcast_data.is_empty() {
         let p2p_node = state.p2p_node.lock().await;
         if let Some(ref node) = *p2p_node {

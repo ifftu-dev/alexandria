@@ -2,15 +2,20 @@ use rusqlite::params;
 use tauri::State;
 
 use crate::crypto::hash::entity_id;
-use crate::crypto::wallet;
 use crate::domain::course::{Course, CreateCourseRequest, UpdateCourseRequest};
+use crate::AppState;
+
+#[cfg(feature = "desktop")]
+use crate::crypto::wallet;
+#[cfg(feature = "desktop")]
 use crate::domain::course_document::{
     CourseDocumentPayload, DocumentChapter, DocumentElement, PublishCourseResult,
     SignedCourseDocument,
 };
+#[cfg(feature = "desktop")]
 use crate::ipfs::course as ipfs_course;
+#[cfg(feature = "desktop")]
 use crate::p2p::catalog;
-use crate::AppState;
 
 /// List all courses in the local database.
 #[tauri::command]
@@ -256,6 +261,7 @@ pub async fn delete_course(
 /// on iroh, and updates the course's `content_cid` with the BLAKE3 hash.
 ///
 /// Requires the vault to be unlocked (wallet key needed for signing).
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn publish_course(
     state: State<'_, AppState>,
@@ -433,6 +439,7 @@ pub async fn publish_course(
 /// Resolves the content, deserializes the signed JSON document,
 /// verifies the author's Ed25519 signature, and returns the verified
 /// course document.
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn fetch_course_document(
     state: State<'_, AppState>,
@@ -446,6 +453,7 @@ pub async fn fetch_course_document(
 
 /// Parse a SQLite datetime string to a Unix timestamp.
 /// Falls back to current time if parsing fails.
+#[cfg(feature = "desktop")]
 fn parse_datetime_to_unix(datetime_str: &str) -> i64 {
     chrono::NaiveDateTime::parse_from_str(datetime_str, "%Y-%m-%d %H:%M:%S")
         .map(|dt| dt.and_utc().timestamp())
