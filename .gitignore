@@ -1,25 +1,85 @@
-# Logs
-logs
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
+# ── OS ────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+Desktop.ini
+._*
 
-node_modules
-dist
-dist-ssr
-*.local
-target/
-
-# Editor directories and files
+# ── Editors / IDEs ────────────────────────────────────────────────────
 .vscode/*
 !.vscode/extensions.json
-.idea
-.DS_Store
+!.vscode/settings.json
+.idea/
 *.suo
 *.ntvs*
 *.njsproj
 *.sln
 *.sw?
+*.swp
+*~
+
+# ── Node.js ───────────────────────────────────────────────────────────
+node_modules/
+dist/
+dist-ssr/
+*.local
+.vite/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ── Rust / Cargo ──────────────────────────────────────────────────────
+target/
+# The workspace root Cargo.lock IS tracked (required for applications).
+# src-tauri/Cargo.lock is NOT tracked — workspace members share the root lockfile.
+src-tauri/Cargo.lock
+
+# ── Tauri ─────────────────────────────────────────────────────────────
+# Generated IPC schema files (rebuilt on every dev/build)
+src-tauri/gen/schemas/
+
+# ── Android (Tauri gen) ──────────────────────────────────────────────
+# Build outputs and caches (the gen/android/ scaffold itself IS tracked)
+src-tauri/gen/android/.gradle/
+src-tauri/gen/android/build/
+src-tauri/gen/android/app/build/
+src-tauri/gen/android/buildSrc/.gradle/
+src-tauri/gen/android/buildSrc/build/
+src-tauri/gen/android/local.properties
+# Tauri-generated files (rebuilt per build)
+src-tauri/gen/android/app/src/main/assets/
+src-tauri/gen/android/app/src/main/java/org/alexandria/node/generated/
+src-tauri/gen/android/app/src/main/jniLibs/
+src-tauri/gen/android/app/tauri.build.gradle.kts
+src-tauri/gen/android/app/tauri.properties
+src-tauri/gen/android/app/proguard-tauri.pro
+src-tauri/gen/android/tauri.settings.gradle
+src-tauri/gen/android/.tauri/
+
+# ── iOS / Xcode (Tauri gen) ──────────────────────────────────────────
+# Build outputs and caches (the gen/apple/ scaffold itself IS tracked)
+src-tauri/gen/apple/build/
+src-tauri/gen/apple/Externals/
+src-tauri/gen/apple/Pods/
+xcuserdata/
+*.xcuserstate
+
+# ── Java / jenv ──────────────────────────────────────────────────────
+.java-version
+
+# ── Environment / secrets ─────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+credentials.json
+key.properties
+
+# ── Misc ──────────────────────────────────────────────────────────────
+*.tgz
+*.tsbuildinfo
