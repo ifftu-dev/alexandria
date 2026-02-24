@@ -9,6 +9,19 @@
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" />
   </head>
   <body>
+    <script>
+      // Apply theme class + background before anything renders
+      ;(function () {
+        var t = localStorage.getItem('alexandria-theme')
+        var dark = t === 'dark' || (!t || t === 'system') && window.matchMedia('(prefers-color-scheme: dark)').matches
+        if (dark) {
+          document.documentElement.classList.add('dark')
+          document.documentElement.style.backgroundColor = '#111827'
+        } else {
+          document.documentElement.style.backgroundColor = '#f7f6f3'
+        }
+      })()
+    </script>
     <div id="app"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>

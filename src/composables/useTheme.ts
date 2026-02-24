@@ -1,30 +1,52 @@
-import { ref, watch, onMounted } from 'vue'
+import { ref, watch, onMounted, onUnmounted } from 'vue'
 
 type Theme = 'light' | 'dark' | 'system'
 
+const STORAGE_KEY = 'alexandria-theme'
 const theme = ref<Theme>('system')
+let initialized = false
+let mediaQuery: MediaQueryList | null = null
+let mediaHandler: (() => void) | null = null
 
 function applyTheme(t: Theme) {
   const isDark =
     t === 'dark' || (t === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)
-
   document.documentElement.classList.toggle('dark', isDark)
 }
 
-export function useTheme() {
-  onMounted(() => {
-    const stored = localStorage.getItem('alexandria-theme') as Theme | null
-    if (stored) theme.value = stored
-    applyTheme(theme.value)
+/** Call once at app startup (from App.vue) to eagerly apply the stored theme. */
+export function initTheme() {
+  if (initialized) return
+  initialized = true
 
-    // Listen for OS theme changes when using "system"
-    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+  const stored = localStorage.getItem(STORAGE_KEY) as Theme | null
+  if (stored) theme.value = stored
+  applyTheme(theme.value)
+}
+
+export function useTheme() {
+  // Start listening for OS theme changes while this component is mounted.
+  onMounted(() => {
+    // Ensure theme is applied even if initTheme() wasn't called
+    if (!initialized) initTheme()
+
+    mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
+    mediaHandler = () => {
       if (theme.value === 'system') applyTheme('system')
-    })
+    }
+    mediaQuery.addEventListener('change', mediaHandler)
+  })
+
+  onUnmounted(() => {
+    if (mediaQuery && mediaHandler) {
+      mediaQuery.removeEventListener('change', mediaHandler)
+      mediaQuery = null
+      mediaHandler = null
+    }
   })
 
   watch(theme, (val) => {
-    localStorage.setItem('alexandria-theme', val)
+    localStorage.setItem(STORAGE_KEY, val)
     applyTheme(val)
   })
 

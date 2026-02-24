@@ -1,6 +1,6 @@
 use rusqlite::params;
 use serde::Serialize;
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
 
 use crate::crypto::keystore::Keystore;
 use crate::crypto::wallet;
@@ -9,6 +9,13 @@ use crate::domain::profile::{ProfilePayload, PublishProfileResult, SignedProfile
 use crate::ipfs::profile as ipfs_profile;
 use crate::AppState;
 
+/// Progress event payload sent to the frontend during wallet operations.
+#[derive(Clone, Serialize)]
+struct VaultProgress {
+    step: String,
+    detail: String,
+}
+
 #[derive(Debug, Serialize)]
 pub struct GenerateWalletResponse {
     /// The mnemonic phrase — shown once during onboarding so the user
@@ -16,6 +23,17 @@ pub struct GenerateWalletResponse {
     pub mnemonic: String,
     pub stake_address: String,
     pub payment_address: String,
+}
+
+/// Emit a vault progress event to the frontend.
+fn emit_progress(app: &AppHandle, step: &str, detail: &str) {
+    let _ = app.emit(
+        "vault-progress",
+        VaultProgress {
+            step: step.to_string(),
+            detail: detail.to_string(),
+        },
+    );
 }
 
 /// Check whether a Stronghold vault file exists.
@@ -33,17 +51,20 @@ pub async fn check_vault_exists(state: State<'_, AppState>) -> Result<bool, Stri
 /// and loads the identity into memory.
 #[tauri::command]
 pub async fn unlock_vault(
+    app: AppHandle,
     state: State<'_, AppState>,
     password: String,
 ) -> Result<WalletInfo, String> {
-    // Open the vault
+    emit_progress(&app, "vault", "Decrypting vault...");
     let ks = Keystore::open(&state.vault_dir, &password).map_err(|e| e.to_string())?;
 
-    // Retrieve the stored mnemonic and derive the wallet
+    emit_progress(&app, "mnemonic", "Retrieving identity keys...");
     let mnemonic = ks.retrieve_mnemonic().map_err(|e| e.to_string())?;
+
+    emit_progress(&app, "derive", "Deriving Cardano wallet (BIP32-Ed25519)...");
     let w = wallet::wallet_from_mnemonic(&mnemonic).map_err(|e| e.to_string())?;
 
-    // Ensure identity exists in DB (it should, but be defensive)
+    emit_progress(&app, "db", "Loading identity from database...");
     let db = state.db.lock().await;
     let exists: bool = db
         .conn()
@@ -69,6 +90,8 @@ pub async fn unlock_vault(
     let mut keystore = state.keystore.lock().await;
     *keystore = Some(ks);
 
+    emit_progress(&app, "done", "Vault unlocked successfully");
+
     Ok(WalletInfo {
         stake_address: w.stake_address,
         payment_address: w.payment_address,
@@ -83,20 +106,20 @@ pub async fn unlock_vault(
 /// mnemonic once for the user to write down.
 #[tauri::command]
 pub async fn generate_wallet(
+    app: AppHandle,
     state: State<'_, AppState>,
     password: String,
 ) -> Result<GenerateWalletResponse, String> {
-    // Create the vault with the user's password
+    emit_progress(&app, "vault", "Creating encrypted vault...");
     let ks = Keystore::create(&state.vault_dir, &password).map_err(|e| e.to_string())?;
 
-    // Generate wallet
+    emit_progress(&app, "keygen", "Generating 24-word recovery phrase...");
     let w = wallet::generate_wallet().map_err(|e| e.to_string())?;
 
-    // Store mnemonic in the encrypted vault
-    ks.store_mnemonic(&w.mnemonic)
-        .map_err(|e| e.to_string())?;
+    emit_progress(&app, "derive", "Deriving Cardano wallet (BIP32-Ed25519)...");
+    ks.store_mnemonic(&w.mnemonic).map_err(|e| e.to_string())?;
 
-    // Store identity in DB
+    emit_progress(&app, "db", "Storing identity in local database...");
     let db = state.db.lock().await;
 
     // Check if identity already exists
@@ -131,6 +154,8 @@ pub async fn generate_wallet(
     let mut keystore = state.keystore.lock().await;
     *keystore = Some(ks);
 
+    emit_progress(&app, "done", "Identity created successfully");
+
     Ok(GenerateWalletResponse {
         mnemonic: w.mnemonic,
         stake_address: w.stake_address,
@@ -144,21 +169,21 @@ pub async fn generate_wallet(
 /// creates a new Stronghold vault, and derives the wallet.
 #[tauri::command]
 pub async fn restore_wallet(
+    app: AppHandle,
     state: State<'_, AppState>,
     mnemonic: String,
     password: String,
 ) -> Result<WalletInfo, String> {
-    // Validate mnemonic by attempting to derive a wallet
+    emit_progress(&app, "validate", "Validating recovery phrase...");
     let w = wallet::wallet_from_mnemonic(&mnemonic).map_err(|e| e.to_string())?;
 
-    // Create the vault with the user's password
+    emit_progress(&app, "vault", "Creating encrypted vault...");
     let ks = Keystore::create(&state.vault_dir, &password).map_err(|e| e.to_string())?;
 
-    // Store mnemonic in the encrypted vault
-    ks.store_mnemonic(&mnemonic)
-        .map_err(|e| e.to_string())?;
+    emit_progress(&app, "store", "Encrypting and storing mnemonic...");
+    ks.store_mnemonic(&mnemonic).map_err(|e| e.to_string())?;
 
-    // Store identity in DB
+    emit_progress(&app, "db", "Storing identity in local database...");
     let db = state.db.lock().await;
 
     let exists: bool = db
@@ -190,6 +215,8 @@ pub async fn restore_wallet(
     // Store keystore in app state
     let mut keystore = state.keystore.lock().await;
     *keystore = Some(ks);
+
+    emit_progress(&app, "done", "Wallet restored successfully");
 
     Ok(WalletInfo {
         stake_address: w.stake_address,

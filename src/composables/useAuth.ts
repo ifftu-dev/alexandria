@@ -50,7 +50,8 @@ async function restoreWallet(mnemonic: string, password: string): Promise<Wallet
 async function refreshProfile(): Promise<void> {
   try {
     identity.value = await invoke<Identity | null>('get_profile')
-  } catch {
+  } catch (e) {
+    console.warn('[useAuth] refreshProfile failed:', e)
     identity.value = null
   }
 }
@@ -60,6 +61,7 @@ async function lockVault(): Promise<void> {
   vaultUnlocked.value = false
   identity.value = null
   walletInfo.value = null
+  initialized.value = false
 }
 
 async function exportMnemonic(): Promise<string> {
@@ -92,8 +94,8 @@ async function initialize(): Promise<'onboarding' | 'unlock' | 'ready'> {
           return 'ready'
         }
       }
-    } catch {
-      // Not unlocked — need password
+    } catch (e) {
+      console.warn('[useAuth] get_wallet_info failed (vault likely locked):', e)
     }
 
     initialized.value = true

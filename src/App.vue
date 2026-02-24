@@ -1,9 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow'
 import AppLayout from '@/layouts/AppLayout.vue'
 import BlankLayout from '@/layouts/BlankLayout.vue'
 import { useAuth } from '@/composables/useAuth'
+import { initTheme } from '@/composables/useTheme'
+
+// Apply stored theme immediately (before first render)
+initTheme()
 
 const route = useRoute()
 const router = useRouter()
@@ -33,6 +38,9 @@ onMounted(async () => {
   }
 
   ready.value = true
+
+  // Show the window now that the frontend is rendered and themed
+  getCurrentWebviewWindow().show()
 })
 </script>
 

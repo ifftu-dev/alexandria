@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import AppSidebar from '@/components/layout/AppSidebar.vue'
-import AppTopBar from '@/components/layout/AppTopBar.vue'
 import { ref } from 'vue'
 
 const sidebarCollapsed = ref(false)
@@ -15,11 +14,8 @@ const sidebarCollapsed = ref(false)
     />
 
     <!-- Main content -->
-    <div class="flex-1 flex flex-col overflow-hidden">
-      <AppTopBar :sidebar-collapsed="sidebarCollapsed" />
-      <main class="flex-1 overflow-y-auto p-6">
-        <slot />
-      </main>
-    </div>
+    <main class="flex-1 overflow-y-auto p-6">
+      <slot />
+    </main>
   </div>
 </template>

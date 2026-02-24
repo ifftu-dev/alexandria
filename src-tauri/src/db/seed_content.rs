@@ -39,27 +39,37 @@ pub async fn seed_content_if_needed(
 
     log::info!("Seeding content blobs for dev/testnet elements…");
 
-    let mut updated = 0u32;
-
+    // Phase 1: Add all blobs to iroh WITHOUT holding the DB lock.
+    // This is the slow part and must not block other DB consumers.
+    let mut pending: Vec<(&str, String)> = Vec::new();
     for (element_id, body) in SEED_CONTENT {
-        // Add to iroh
         let result = content::add_bytes(node, body.as_bytes())
             .await
             .map_err(|e| format!("failed to add content for {element_id}: {e}"))?;
+        pending.push((element_id, result.hash.clone()));
+    }
 
-        // Update the element row
-        let hash = result.hash.clone();
-        let eid = element_id.to_string();
+    // Phase 2: Single DB lock acquisition — batch-update all rows in a transaction.
+    let updated = {
         let db = db.lock().await;
-        db.conn()
-            .execute(
+        let conn = db.conn();
+        conn.execute_batch("BEGIN")
+            .map_err(|e| format!("begin tx: {e}"))?;
+
+        let mut count = 0u32;
+        for (element_id, hash) in &pending {
+            conn.execute(
                 "UPDATE course_elements SET content_cid = ?1 WHERE id = ?2",
-                rusqlite::params![hash, eid],
+                rusqlite::params![hash, element_id],
             )
             .map_err(|e| format!("failed to update {element_id}: {e}"))?;
+            count += 1;
+        }
 
-        updated += 1;
-    }
+        conn.execute_batch("COMMIT")
+            .map_err(|e| format!("commit tx: {e}"))?;
+        count
+    };
 
     log::info!("Seeded content for {updated} elements");
     Ok(updated)

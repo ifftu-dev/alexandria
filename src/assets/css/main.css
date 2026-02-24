@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+/* Use .dark class on <html> instead of prefers-color-scheme media query */
+@custom-variant dark (&:is(.dark *));
+
 /* ============================================
    Alexandria Design System — Tauri Desktop App
    "Refined Editorial" — Notion meets The Verge
@@ -851,4 +854,74 @@ body {
   border-radius: var(--radius);
   margin-top: 0.75rem;
   margin-bottom: 0.75rem;
+}
+
+/* ============================================
+   Starfield animations (auth backgrounds)
+   ============================================ */
+
+@keyframes sf-drift-slow {
+  0%   { transform: translate3d(0, 0, 0); }
+  25%  { transform: translate3d(14px, -10px, 0); }
+  50%  { transform: translate3d(-8px, 6px, 0); }
+  75%  { transform: translate3d(10px, 12px, 0); }
+  100% { transform: translate3d(0, 0, 0); }
+}
+
+@keyframes sf-drift-mid {
+  0%   { transform: translate3d(0, 0, 0); }
+  25%  { transform: translate3d(-12px, 8px, 0); }
+  50%  { transform: translate3d(8px, -10px, 0); }
+  75%  { transform: translate3d(10px, 6px, 0); }
+  100% { transform: translate3d(0, 0, 0); }
+}
+
+@keyframes sf-drift-fast {
+  0%   { transform: translate3d(0, 0, 0); }
+  33%  { transform: translate3d(16px, 10px, 0); }
+  66%  { transform: translate3d(-10px, -6px, 0); }
+  100% { transform: translate3d(0, 0, 0); }
+}
+
+@keyframes sf-pulse {
+  0%, 100% { opacity: 0.25; }
+  50% { opacity: 0.8; }
+}
+
+@keyframes sf-line-draw {
+  from { stroke-dashoffset: 1000; }
+  to { stroke-dashoffset: 0; }
+}
+
+.sf-drift-slow {
+  animation: sf-drift-slow 90s ease-in-out infinite;
+}
+
+.sf-drift-mid {
+  animation: sf-drift-mid 70s ease-in-out infinite;
+}
+
+.sf-drift-fast {
+  animation: sf-drift-fast 50s ease-in-out infinite;
+}
+
+.sf-pulse {
+  animation: sf-pulse 10s ease-in-out infinite;
+}
+
+.sf-line-draw {
+  stroke-dasharray: 1000;
+  stroke-dashoffset: 1000;
+  animation: sf-line-draw 2s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  animation-delay: 0.5s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sf-drift-slow,
+  .sf-drift-mid,
+  .sf-drift-fast,
+  .sf-pulse,
+  .sf-line-draw {
+    animation: none;
+  }
 }
