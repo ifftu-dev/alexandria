@@ -98,3 +98,88 @@ pub struct PublishProfileResult {
     /// The profile that was published.
     pub profile: SignedProfile,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_signed_profile() -> SignedProfile {
+        SignedProfile {
+            version: 1,
+            stake_address: "stake_test1u123".into(),
+            name: Some("Alice".into()),
+            bio: Some("Studying CS".into()),
+            avatar_hash: None,
+            created_at: 1700000000,
+            updated_at: 1700100000,
+            signature: "deadbeef".into(),
+            public_key: "cafebabe".into(),
+        }
+    }
+
+    #[test]
+    fn signed_profile_payload_extracts_correctly() {
+        let signed = sample_signed_profile();
+        let payload = signed.payload();
+
+        assert_eq!(payload.version, 1);
+        assert_eq!(payload.stake_address, "stake_test1u123");
+        assert_eq!(payload.name, Some("Alice".into()));
+        assert_eq!(payload.bio, Some("Studying CS".into()));
+        assert_eq!(payload.avatar_hash, None);
+        assert_eq!(payload.created_at, 1700000000);
+        assert_eq!(payload.updated_at, 1700100000);
+    }
+
+    #[test]
+    fn profile_payload_equality() {
+        let signed = sample_signed_profile();
+        let p1 = signed.payload();
+        let p2 = signed.payload();
+        assert_eq!(p1, p2);
+    }
+
+    #[test]
+    fn profile_payload_skip_serializing_none() {
+        let payload = ProfilePayload {
+            version: 1,
+            stake_address: "stake_test1u123".into(),
+            name: None,
+            bio: None,
+            avatar_hash: None,
+            created_at: 0,
+            updated_at: 0,
+        };
+        let json = serde_json::to_string(&payload).unwrap();
+        assert!(!json.contains("name"));
+        assert!(!json.contains("bio"));
+        assert!(!json.contains("avatar_hash"));
+    }
+
+    #[test]
+    fn profile_payload_includes_present_fields() {
+        let payload = ProfilePayload {
+            version: 1,
+            stake_address: "stake_test1u123".into(),
+            name: Some("Alice".into()),
+            bio: None,
+            avatar_hash: Some("hash123".into()),
+            created_at: 0,
+            updated_at: 0,
+        };
+        let json = serde_json::to_string(&payload).unwrap();
+        assert!(json.contains("\"name\":\"Alice\""));
+        assert!(!json.contains("\"bio\""));
+        assert!(json.contains("\"avatar_hash\":\"hash123\""));
+    }
+
+    #[test]
+    fn signed_profile_serde_roundtrip() {
+        let signed = sample_signed_profile();
+        let json = serde_json::to_string(&signed).unwrap();
+        let parsed: SignedProfile = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.signature, "deadbeef");
+        assert_eq!(parsed.public_key, "cafebabe");
+        assert_eq!(parsed.payload(), signed.payload());
+    }
+}
