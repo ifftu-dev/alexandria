@@ -70,6 +70,11 @@ For the full architecture breakdown, see [Architecture](docs/architecture.md).
 - **Node.js 22+** with `npm`
 - **Tauri CLI**: `cargo install tauri-cli`
 
+For mobile builds (optional):
+
+- **Android**: Android SDK + NDK (`ANDROID_HOME`), Java 21 (`jenv` recommended)
+- **iOS**: Xcode 15+ with command-line tools, Rust iOS targets (`rustup target add aarch64-apple-ios aarch64-apple-ios-sim`)
+
 ### Development
 
 ```bash
@@ -81,30 +86,93 @@ cargo tauri dev
 
 The app launches a native window backed by a local webview. First launch generates the SQLite database, runs 12 migrations, seeds taxonomy/courses/governance data, and starts the iroh content store.
 
-### Using the Developer CLI
+### Developer CLI (`alex`)
 
-All common dev tasks are available through the `alex` CLI:
+The `alex` CLI wraps common dev tasks, multi-platform builds, and data management into a single tool.
 
 ```bash
-cargo install --path cli
+cargo install --path cli    # install globally as `alex`
+```
 
+#### Development
+
+```bash
 alex dev run          # cargo tauri dev
 alex dev test         # cargo test (309 tests)
 alex dev clippy       # cargo clippy -- -D warnings
 alex dev fmt          # cargo fmt --check
 alex dev check        # vue-tsc type check
-alex dev all          # fmt + clippy + test + check
+alex dev all          # fmt + clippy + test + check (full CI pass)
+```
 
+#### Building
+
+```bash
+# Quick builds
+alex build check      # cargo check + vue-tsc (fast, no codegen)
+alex build release    # Full desktop release (cargo tauri build)
+
+# Platform-specific builds
+alex build desktop                        # Current host (e.g. mac-arm64)
+alex build desktop --target mac-arm64 mac-x64   # Multiple targets
+alex build android                        # arm64 (default)
+alex build android --target arm64 armv7   # Multiple Android ABIs
+alex build ios                            # Simulator for current arch
+alex build ios --target device            # iOS device (needs signing)
+alex build ios --target device sim-arm64  # Device + simulator
+
+# All platforms at once (uses host defaults for each)
+alex build all
+alex build all --debug
+
+# Debug builds (faster compile, larger binary)
+alex build desktop --debug
+alex build android --debug
+alex build ios --debug
+
+# Interactive wizard (prompts for platform, targets, profile)
+alex build platform
+
+# List all available build targets
+alex build list
+```
+
+**Available build targets:**
+
+| Platform | Target | Description | Rust triple |
+|----------|--------|-------------|-------------|
+| Desktop | `mac-arm64` | macOS Apple Silicon | `aarch64-apple-darwin` |
+| Desktop | `mac-x64` | macOS Intel | `x86_64-apple-darwin` |
+| Desktop | `mac-universal` | macOS Universal | `universal-apple-darwin` |
+| Desktop | `linux-x64` | Linux x86_64 | `x86_64-unknown-linux-gnu` |
+| Desktop | `win-x64` | Windows x86_64 | `x86_64-pc-windows-msvc` |
+| Android | `arm64` | arm64-v8a | `aarch64-linux-android` |
+| Android | `armv7` | armeabi-v7a | `armv7-linux-androideabi` |
+| Android | `x86_64` | x86_64 (emulator) | `x86_64-linux-android` |
+| iOS | `device` | iOS device | `aarch64-apple-ios` |
+| iOS | `sim-arm64` | Simulator (ARM) | `aarch64-apple-ios-sim` |
+| iOS | `sim-x64` | Simulator (Intel) | `x86_64-apple-ios` |
+
+Prerequisites are checked automatically before each build. Android requires `ANDROID_HOME`, NDK, and Java 21. iOS requires Xcode. Device builds require code signing.
+
+#### Database & Data
+
+```bash
 alex db status        # Table row counts, migration version, data sizes
 alex db reset --force # Delete all app data (SQLite + vault + iroh)
+```
 
-alex build check      # cargo check + vue-tsc
-alex build release    # cargo tauri build (full release bundle)
+#### Configuration
 
+```bash
 alex config show      # Project paths, Tauri config, tool versions
-alex config path      # Print app data directory
+alex config path      # Print app data directory (for scripting)
+```
 
-alex health           # Check if app process is running
+#### Health & Cleanup
+
+```bash
+alex health           # Check if the app process is running
 
 alex clean build      # Remove target/, dist/, .vite cache
 alex clean data --force  # Remove app data
