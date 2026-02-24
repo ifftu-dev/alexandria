@@ -73,7 +73,7 @@ pub fn handle_governance_message(
             members,
             on_chain_tx: _,
         } => {
-            handle_committee_updated(db, &announcement.dao_id, members)?;
+            handle_committee_updated(db, &announcement.dao_id, members, &message.stake_address)?;
         }
     }
 
@@ -183,11 +183,32 @@ fn handle_proposal_resolved(
     Ok(())
 }
 
+/// Check if the given stake address is a committee member or chair for a DAO.
+fn is_committee_authority(db: &Database, dao_id: &str, stake_address: &str) -> bool {
+    db.conn()
+        .query_row(
+            "SELECT COUNT(*) > 0 FROM governance_dao_members \
+             WHERE dao_id = ?1 AND stake_address = ?2 AND role IN ('committee', 'chair')",
+            params![dao_id, stake_address],
+            |row| row.get::<_, bool>(0),
+        )
+        .unwrap_or(false)
+}
+
 /// Handle a committee membership update.
 ///
 /// Replaces the current committee for the DAO with the new member list.
 /// This is critical — it controls who can sign taxonomy updates.
-fn handle_committee_updated(db: &Database, dao_id: &str, members: &[String]) -> Result<(), String> {
+///
+/// Security: the gossip sender must be a current committee member or
+/// chair of the DAO to authorize a committee change. Unauthenticated
+/// committee updates are rejected to prevent governance takeover.
+fn handle_committee_updated(
+    db: &Database,
+    dao_id: &str,
+    members: &[String],
+    sender_address: &str,
+) -> Result<(), String> {
     // Check if the DAO exists
     let dao_exists: bool = db
         .conn()
@@ -204,6 +225,14 @@ fn handle_committee_updated(db: &Database, dao_id: &str, members: &[String]) -> 
             dao_id,
         );
         return Ok(());
+    }
+
+    // Verify sender is authorized (current committee member or chair)
+    if !is_committee_authority(db, dao_id, sender_address) {
+        return Err(format!(
+            "unauthorized committee update: '{}' is not a committee member or chair of DAO '{}'",
+            sender_address, dao_id,
+        ));
     }
 
     // Remove existing committee members for this DAO
@@ -226,8 +255,9 @@ fn handle_committee_updated(db: &Database, dao_id: &str, members: &[String]) -> 
     }
 
     log::info!(
-        "Governance: DAO '{}' committee updated — {} members",
+        "Governance: DAO '{}' committee updated by '{}' — {} members",
         dao_id,
+        sender_address,
         members.len(),
     );
 
@@ -348,7 +378,14 @@ mod tests {
         let db = test_db();
         insert_test_dao(&db);
 
-        // Insert initial committee
+        // Insert initial committee — the sender must be among them
+        db.conn()
+            .execute(
+                "INSERT INTO governance_dao_members (dao_id, stake_address, role) \
+                 VALUES ('dao1', 'stake_test1proposer', 'committee')",
+                [],
+            )
+            .unwrap();
         db.conn()
             .execute(
                 "INSERT INTO governance_dao_members (dao_id, stake_address, role) \
@@ -366,9 +403,10 @@ mod tests {
             timestamp: 1_700_000_000,
         };
 
+        // make_message sets stake_address to "stake_test1proposer" (a committee member)
         handle_governance_message(&db, &make_message(&ann)).unwrap();
 
-        // Old member should be gone
+        // Old members should be gone
         let old_count: i64 = db
             .conn()
             .query_row(
@@ -389,6 +427,74 @@ mod tests {
             )
             .unwrap();
         assert_eq!(new_count, 2);
+    }
+
+    #[test]
+    fn handle_committee_update_rejects_unauthorized_sender() {
+        let db = test_db();
+        insert_test_dao(&db);
+
+        // Insert committee — sender is NOT a member
+        db.conn()
+            .execute(
+                "INSERT INTO governance_dao_members (dao_id, stake_address, role) \
+                 VALUES ('dao1', 'stake_test1chair', 'chair')",
+                [],
+            )
+            .unwrap();
+
+        let ann = GovernanceAnnouncement {
+            event_type: GovernanceEventType::CommitteeUpdated {
+                members: vec!["stake_test1attacker".into()],
+                on_chain_tx: None,
+            },
+            dao_id: "dao1".into(),
+            timestamp: 1_700_000_000,
+        };
+
+        // make_message sets stake_address to "stake_test1proposer" — NOT in committee
+        let result = handle_governance_message(&db, &make_message(&ann));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("unauthorized"));
+
+        // Committee should be unchanged
+        let count: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM governance_dao_members WHERE dao_id = 'dao1' AND stake_address = 'stake_test1chair'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1, "original committee should be unchanged");
+    }
+
+    #[test]
+    fn handle_committee_update_allows_chair() {
+        let db = test_db();
+        insert_test_dao(&db);
+
+        // Set the sender as chair
+        db.conn()
+            .execute(
+                "INSERT INTO governance_dao_members (dao_id, stake_address, role) \
+                 VALUES ('dao1', 'stake_test1proposer', 'chair')",
+                [],
+            )
+            .unwrap();
+
+        let ann = GovernanceAnnouncement {
+            event_type: GovernanceEventType::CommitteeUpdated {
+                members: vec!["stake_test1new1".into()],
+                on_chain_tx: None,
+            },
+            dao_id: "dao1".into(),
+            timestamp: 1_700_000_000,
+        };
+
+        // Should succeed — sender is the chair
+        let result = handle_governance_message(&db, &make_message(&ann));
+        assert!(result.is_ok());
     }
 
     #[test]

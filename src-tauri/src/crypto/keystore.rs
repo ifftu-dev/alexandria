@@ -1,12 +1,9 @@
 use std::path::{Path, PathBuf};
 
-use hmac::{Hmac, Mac};
+use argon2::Argon2;
 use iota_stronghold::{KeyProvider, SnapshotPath, Stronghold};
-use sha2::Sha512;
 use thiserror::Error;
 use zeroize::Zeroizing;
-
-type HmacSha512 = Hmac<Sha512>;
 
 /// Store record key for the mnemonic.
 const MNEMONIC_KEY: &[u8] = b"mnemonic";
@@ -49,7 +46,9 @@ pub enum KeystoreError {
 /// Threat model:
 /// - At rest: vault file is encrypted via Stronghold's snapshot mechanism
 /// - In memory: Stronghold uses memory guards and fragmented storage
-/// - Password: combined with a random salt via HMAC-SHA512 to derive the key
+/// - Password: combined with a random salt via Argon2id (memory-hard KDF)
+///   with 64 MB memory cost, 3 iterations, 4 lanes — resistant to GPU/ASIC
+///   brute-force attacks
 ///
 /// Future: biometric / OS keychain unlock will replace password entry.
 pub struct Keystore {
@@ -259,23 +258,30 @@ impl Keystore {
     }
 }
 
-/// Derive a 32-byte encryption key from password + salt using HMAC-SHA512.
+/// Derive a 32-byte encryption key from password + salt using Argon2id.
 ///
-/// The result is truncated to 32 bytes (256 bits) which is the key size
-/// Stronghold uses for snapshot encryption. We use HMAC-SHA512 because:
-/// - We already have the `hmac` and `sha2` crates
-/// - Combined with a random 32-byte salt, this provides strong at-rest security
-/// - Future: upgrade to argon2id for memory-hard KDF (brute-force resistance)
+/// Argon2id is a memory-hard KDF that resists GPU/ASIC brute-force attacks.
+/// Parameters: 64 MB memory, 3 iterations, 4 lanes — balances security
+/// against ~200ms derivation time on modern hardware.
+///
+/// The 32-byte output matches Stronghold's snapshot encryption key size.
 fn derive_key(password: &str, salt: &[u8]) -> Result<KeyProvider, KeystoreError> {
-    let mut mac = HmacSha512::new_from_slice(salt)
-        .map_err(|e| KeystoreError::Memory(format!("HMAC init failed: {e}")))?;
-    mac.update(password.as_bytes());
-    let result = mac.finalize().into_bytes();
+    let params = argon2::Params::new(
+        64 * 1024, // m_cost: 64 MB memory
+        3,         // t_cost: 3 iterations
+        4,         // p_cost: 4 parallel lanes
+        Some(32),  // output length: 32 bytes
+    )
+    .map_err(|e| KeystoreError::Memory(format!("Argon2 params error: {e}")))?;
 
-    // Take first 32 bytes as the key
-    let key_bytes = Zeroizing::new(result[..32].to_vec());
+    let argon2 = Argon2::new(argon2::Algorithm::Argon2id, argon2::Version::V0x13, params);
 
-    KeyProvider::try_from(key_bytes).map_err(|e| KeystoreError::Memory(format!("{e:?}")))
+    let mut key = Zeroizing::new(vec![0u8; 32]);
+    argon2
+        .hash_password_into(password.as_bytes(), salt, &mut key)
+        .map_err(|e| KeystoreError::Memory(format!("Argon2 hash failed: {e}")))?;
+
+    KeyProvider::try_from(key).map_err(|e| KeystoreError::Memory(format!("{e:?}")))
 }
 
 /// Generate a cryptographically random 32-byte salt.

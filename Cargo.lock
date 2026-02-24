@@ -103,6 +103,7 @@ name = "alexandria-node"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "argon2",
  "bip39",
  "blake2",
  "bytes",
@@ -110,12 +111,12 @@ dependencies = [
  "ed25519-dalek 2.2.0",
  "futures",
  "hex",
- "hmac",
  "iota_stronghold",
  "iroh",
  "iroh-blobs",
  "libp2p",
  "log",
+ "lru 0.12.5",
  "pallas-addresses",
  "pallas-codec",
  "pallas-crypto",
@@ -241,6 +242,18 @@ name = "anyhow"
 version = "1.0.102"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
+
+[[package]]
+name = "argon2"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3c3610892ee6e0cbce8ae2700349fcf8f98adb0dbfbee85aec3c9179d29cc072"
+dependencies = [
+ "base64ct",
+ "blake2",
+ "cpufeatures",
+ "password-hash",
+]
 
 [[package]]
 name = "arrayref"
@@ -2851,6 +2864,8 @@ version = "0.15.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9229cfe53dfd69f0609a49f65461bd93001ea1ef889cd5529dd176593f5338a1"
 dependencies = [
+ "allocator-api2",
+ "equivalent",
  "foldhash 0.1.5",
 ]
 
@@ -3732,7 +3747,7 @@ dependencies = [
  "iroh-metrics",
  "iroh-quinn",
  "iroh-quinn-proto",
- "lru",
+ "lru 0.16.3",
  "n0-error",
  "n0-future",
  "num_enum",
@@ -4588,6 +4603,15 @@ dependencies = [
  "scoped-tls",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "lru"
+version = "0.12.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "234cf4f4a04dc1f57e24b96cc0cd600cf2af460d4161ac5ecdd0af8e1f3b2a38"
+dependencies = [
+ "hashbrown 0.15.5",
 ]
 
 [[package]]
@@ -5715,6 +5739,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "password-hash"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "346f04948ba92c43e8469c1ee6736c7563d71012b17d40745260fe106aac2166"
+dependencies = [
+ "base64ct",
+ "rand_core 0.6.4",
+ "subtle",
+]
+
+[[package]]
 name = "paste"
 version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5948,7 +5983,7 @@ dependencies = [
  "futures-lite",
  "getrandom 0.4.1",
  "log",
- "lru",
+ "lru 0.16.3",
  "ntimestamp",
  "reqwest 0.13.2",
  "self_cell",

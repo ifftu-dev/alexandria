@@ -558,13 +558,15 @@ mod tests {
 
         for i in 0..50 {
             let key = test_key();
+            // Each signer has a unique stake address (identity binding requires 1:1)
+            let stake_address = format!("stake_test1usigner_{i}");
             // Each signer sends a unique payload (dedup is on payload hash)
             let payload = format!("{{\"signer\":{i},\"nonce\":\"{}\"}}", hex::encode(key.verifying_key().to_bytes()));
             let msg = sign_gossip_message(
                 "/alexandria/evidence/1.0",
                 payload.into_bytes(),
                 &key,
-                "stake_test1uqfu74w3wh4gfzu8m6e7j987h4lq9r3t7ef5gaw497uu8q0kd9u4",
+                &stake_address,
             );
             assert!(validator.validate(&msg).is_ok());
         }
@@ -583,13 +585,15 @@ mod tests {
             let v = Arc::clone(&validator);
             let handle = std::thread::spawn(move || {
                 let key = test_key();
+                // Each thread gets its own stake address (identity binding)
+                let stake_address = format!("stake_test1uthread_{t}");
                 let mut ok_count = 0;
                 for i in 0..100 {
                     let msg = sign_gossip_message(
                         "/alexandria/catalog/1.0",
                         format!("{{\"thread\":{t},\"msg\":{i}}}").into_bytes(),
                         &key,
-                        "stake_test1uqfu74w3wh4gfzu8m6e7j987h4lq9r3t7ef5gaw497uu8q0kd9u4",
+                        &stake_address,
                     );
                     if v.validate(&msg).is_ok() {
                         ok_count += 1;
@@ -603,7 +607,7 @@ mod tests {
         let total_ok: usize = handles.into_iter().map(|h| h.join().unwrap()).sum();
 
         // Each thread sends unique payloads (different thread+msg combo),
-        // but each thread uses its own key, so signatures differ → unique hashes.
+        // each with its own key and stake_address.
         assert_eq!(
             total_ok, 1000,
             "all 1000 unique messages should pass validation"

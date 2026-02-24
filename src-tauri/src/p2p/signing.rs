@@ -4,20 +4,47 @@
 //! sender's Cardano Ed25519 signing key. Every message published
 //! on the P2P network is wrapped in a signed envelope so receivers
 //! can verify authenticity and link the sender to an on-chain identity.
+//!
+//! The signature covers a canonical message that includes ALL envelope
+//! fields — topic, timestamp, stake_address, and the payload — preventing
+//! replay attacks with modified timestamps and identity field tampering.
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use ed25519_dalek::SigningKey;
+use sha2::{Digest, Sha256};
 
 use crate::crypto::signing as core_signing;
 
 use super::types::SignedGossipMessage;
 
+/// Build the canonical bytes that are signed/verified.
+///
+/// Format: `SHA-256(topic || timestamp_be_bytes || stake_address || payload)`
+///
+/// Using SHA-256 as a pre-hash keeps the signed message a fixed 32 bytes
+/// regardless of payload size, and ensures all fields are unambiguously
+/// committed to the signature.
+fn canonical_signed_bytes(
+    topic: &str,
+    timestamp: u64,
+    stake_address: &str,
+    payload: &[u8],
+) -> Vec<u8> {
+    let mut hasher = Sha256::new();
+    hasher.update(topic.as_bytes());
+    hasher.update(timestamp.to_be_bytes());
+    hasher.update(stake_address.as_bytes());
+    hasher.update(payload);
+    hasher.finalize().to_vec()
+}
+
 /// Create a signed gossip message envelope.
 ///
-/// Signs the raw `payload` bytes with the sender's Cardano signing key
-/// and populates all envelope fields (signature, public key, stake address,
-/// timestamp).
+/// Signs a canonical hash of ALL envelope fields (topic, timestamp,
+/// stake_address, payload) with the sender's Cardano signing key.
+/// This prevents replay attacks with modified timestamps and identity
+/// field tampering.
 ///
 /// The payload should already be JSON-serialized topic-specific data
 /// (e.g., a course announcement, evidence record, etc.).
@@ -27,12 +54,13 @@ pub fn sign_gossip_message(
     signing_key: &SigningKey,
     stake_address: &str,
 ) -> SignedGossipMessage {
-    let signed = core_signing::sign(&payload, signing_key);
-
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
+
+    let canonical = canonical_signed_bytes(topic, timestamp, stake_address, &payload);
+    let signed = core_signing::sign(&canonical, signing_key);
 
     SignedGossipMessage {
         topic: topic.to_string(),
@@ -46,15 +74,21 @@ pub fn sign_gossip_message(
 
 /// Verify the Ed25519 signature on a gossip message envelope.
 ///
-/// Returns `Ok(())` if the signature is valid, or an error describing
-/// why verification failed. This checks ONLY the cryptographic
-/// signature — freshness, dedup, schema, and authority checks are
-/// handled by the validation pipeline.
+/// Reconstructs the canonical signed bytes from the envelope fields
+/// and verifies the Ed25519 signature. This ensures that the topic,
+/// timestamp, stake_address, and payload are all authenticated —
+/// tampering with ANY field invalidates the signature.
 pub fn verify_gossip_signature(
     message: &SignedGossipMessage,
 ) -> Result<(), core_signing::SigningError> {
+    let canonical = canonical_signed_bytes(
+        &message.topic,
+        message.timestamp,
+        &message.stake_address,
+        &message.payload,
+    );
     let signed_msg = core_signing::SignedMessage {
-        payload: message.payload.clone(),
+        payload: canonical,
         signature: message.signature.clone(),
         public_key: message.public_key.clone(),
     };
@@ -106,6 +140,63 @@ mod tests {
         tampered.payload = b"tampered".to_vec();
 
         assert!(verify_gossip_signature(&tampered).is_err());
+    }
+
+    #[test]
+    fn tampered_timestamp_fails_verification() {
+        let key = test_key();
+        let msg = sign_gossip_message(
+            "/alexandria/catalog/1.0",
+            b"{\"test\":true}".to_vec(),
+            &key,
+            "stake_test1uqfu74w3wh4gfzu8m6e7j987h4lq9r3t7ef5gaw497uu8q0kd9u4",
+        );
+
+        let mut tampered = msg;
+        tampered.timestamp += 100; // modify timestamp
+
+        assert!(
+            verify_gossip_signature(&tampered).is_err(),
+            "modifying timestamp should invalidate signature"
+        );
+    }
+
+    #[test]
+    fn tampered_stake_address_fails_verification() {
+        let key = test_key();
+        let msg = sign_gossip_message(
+            "/alexandria/catalog/1.0",
+            b"{\"test\":true}".to_vec(),
+            &key,
+            "stake_test1uqfu74w3wh4gfzu8m6e7j987h4lq9r3t7ef5gaw497uu8q0kd9u4",
+        );
+
+        let mut tampered = msg;
+        tampered.stake_address = "stake_test1uattacker_address".to_string();
+
+        assert!(
+            verify_gossip_signature(&tampered).is_err(),
+            "modifying stake_address should invalidate signature"
+        );
+    }
+
+    #[test]
+    fn tampered_topic_fails_verification() {
+        let key = test_key();
+        let msg = sign_gossip_message(
+            "/alexandria/catalog/1.0",
+            b"{\"test\":true}".to_vec(),
+            &key,
+            "stake_test1uqfu74w3wh4gfzu8m6e7j987h4lq9r3t7ef5gaw497uu8q0kd9u4",
+        );
+
+        let mut tampered = msg;
+        tampered.topic = "/alexandria/taxonomy/1.0".to_string();
+
+        assert!(
+            verify_gossip_signature(&tampered).is_err(),
+            "modifying topic should invalidate signature"
+        );
     }
 
     #[test]
