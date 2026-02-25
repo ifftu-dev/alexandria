@@ -2,7 +2,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useLocalApi } from '@/composables/useLocalApi'
-import { AppButton, AppSpinner, AppBadge, EmptyState, StatusBadge, ConfirmDialog } from '@/components/ui'
+import { AppButton, AppBadge, StatusBadge, ConfirmDialog } from '@/components/ui'
 import type { Course, Chapter, Element, CreateChapterRequest, CreateElementRequest, PublishCourseResult, ElementSkillTag, SkillInfo } from '@/types'
 
 const { invoke } = useLocalApi()
@@ -62,6 +62,19 @@ const bloomColors: Record<string, string> = {
   create: '139 92 246',
 }
 
+// Stats
+const totalChapters = computed(() => chapters.value.length)
+const totalElements = computed(() => {
+  let count = 0
+  for (const elems of Object.values(elements.value)) count += elems.length
+  return count
+})
+const totalSkillTags = computed(() => {
+  let count = 0
+  for (const tags of Object.values(elementSkillTags.value)) count += tags.length
+  return count
+})
+
 onMounted(async () => {
   try {
     course.value = await invoke<Course>('get_course', { courseId })
@@ -91,7 +104,7 @@ async function addChapter() {
   creatingChapter.value = true
   try {
     const req: CreateChapterRequest = { title: newChapterTitle.value.trim() }
-    const chapter = await invoke<Chapter>('create_chapter', { courseId, request: req })
+    const chapter = await invoke<Chapter>('create_chapter', { courseId, req })
     chapters.value.push(chapter)
     elements.value[chapter.id] = []
     newChapterTitle.value = ''
@@ -111,7 +124,7 @@ async function addElement(chapterId: string) {
       title: newElementTitle.value.trim(),
       element_type: newElementType.value,
     }
-    const element = await invoke<Element>('create_element', { chapterId, request: req })
+    const element = await invoke<Element>('create_element', { chapterId, req })
     if (!elements.value[chapterId]) elements.value[chapterId] = []
     elements.value[chapterId].push(element)
     elementSkillTags.value[element.id] = []
@@ -181,27 +194,84 @@ async function deleteCourse() {
 const elementTypes = [
   { value: 'video', label: 'Video' },
   { value: 'text', label: 'Text' },
+  { value: 'pdf', label: 'PDF' },
+  { value: 'downloadable', label: 'Download' },
   { value: 'quiz', label: 'Quiz' },
+  { value: 'objective_single_mcq', label: 'Single MCQ' },
+  { value: 'objective_multi_mcq', label: 'Multi MCQ' },
+  { value: 'subjective_mcq', label: 'Subjective MCQ' },
+  { value: 'essay', label: 'Essay' },
   { value: 'interactive', label: 'Interactive' },
   { value: 'assessment', label: 'Assessment' },
 ]
+
+function elementTypeIcon(type: string): string {
+  switch (type) {
+    case 'video': return 'M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z'
+    case 'text': return 'M4 6h16M4 12h16M4 18h7'
+    case 'pdf': return 'M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z'
+    case 'downloadable': return 'M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4'
+    case 'quiz': case 'assessment': return 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2'
+    case 'objective_single_mcq': case 'objective_multi_mcq': case 'subjective_mcq': return 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z'
+    case 'essay': return 'M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z'
+    case 'interactive': return 'M13 10V3L4 14h7v7l9-11h-7z'
+    default: return 'M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z'
+  }
+}
 </script>
 
 <template>
-  <div>
-    <AppSpinner v-if="loading" label="Loading course..." />
+  <div class="py-8 px-4 sm:px-6 lg:px-8">
+    <!-- Skeleton -->
+    <div v-if="loading" class="space-y-6">
+      <div class="flex items-start justify-between">
+        <div class="space-y-2">
+          <div class="flex items-center gap-2">
+            <div class="h-5 w-14 animate-pulse rounded-full bg-[rgb(var(--color-muted-foreground)/0.15)]" />
+            <div class="h-4 w-8 animate-pulse rounded bg-[rgb(var(--color-muted-foreground)/0.1)]" />
+          </div>
+          <div class="h-7 w-64 animate-pulse rounded bg-[rgb(var(--color-muted-foreground)/0.2)]" />
+        </div>
+        <div class="flex gap-2">
+          <div class="h-9 w-28 animate-pulse rounded-lg bg-[rgb(var(--color-muted-foreground)/0.15)]" />
+        </div>
+      </div>
+      <div class="grid grid-cols-3 gap-4">
+        <div v-for="i in 3" :key="i" class="animate-pulse rounded-xl border border-[rgb(var(--color-border))] bg-[rgb(var(--color-card))] p-5">
+          <div class="h-3 w-16 rounded bg-[rgb(var(--color-muted-foreground)/0.15)] mb-2" />
+          <div class="h-7 w-8 rounded bg-[rgb(var(--color-muted-foreground)/0.2)]" />
+        </div>
+      </div>
+      <div v-for="i in 2" :key="i" class="animate-pulse rounded-xl border border-[rgb(var(--color-border))] bg-[rgb(var(--color-card))] p-5">
+        <div class="flex items-center gap-3 mb-3">
+          <div class="h-6 w-6 rounded bg-[rgb(var(--color-muted-foreground)/0.15)]" />
+          <div class="h-4 w-32 rounded bg-[rgb(var(--color-muted-foreground)/0.15)]" />
+        </div>
+        <div class="space-y-2">
+          <div v-for="j in 3" :key="j" class="h-10 rounded-lg bg-[rgb(var(--color-muted-foreground)/0.08)]" />
+        </div>
+      </div>
+    </div>
 
-    <EmptyState v-else-if="!course" title="Course not found" />
+    <!-- Not found -->
+    <div v-else-if="!course" class="py-16 text-center">
+      <div class="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-[rgb(var(--color-muted)/0.3)]">
+        <svg class="h-8 w-8 text-[rgb(var(--color-muted-foreground)/0.5)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+        </svg>
+      </div>
+      <h2 class="text-lg font-semibold">Course not found</h2>
+    </div>
 
-    <div v-else>
+    <div v-else class="space-y-6">
       <!-- Header -->
-      <div class="flex items-start justify-between mb-6">
+      <div class="flex items-start justify-between">
         <div>
-          <div class="flex items-center gap-2 mb-1">
+          <div class="flex items-center gap-2 mb-2">
             <StatusBadge :status="course.status" />
             <span class="text-xs text-[rgb(var(--color-muted-foreground))]">v{{ course.version }}</span>
           </div>
-          <h1 class="text-xl font-bold">{{ course.title }}</h1>
+          <h1 class="text-2xl font-bold text-[rgb(var(--color-foreground))]">{{ course.title }}</h1>
         </div>
         <div class="flex gap-2">
           <AppButton
@@ -221,21 +291,54 @@ const elementTypes = [
         </div>
       </div>
 
-      <!-- Publish result -->
-      <div v-if="publishResult" class="alert alert-success mb-6">
-        Published! Content hash: <code class="font-mono text-xs ml-1">{{ publishResult.content_hash }}</code>
-        ({{ publishResult.size }} bytes)
+      <!-- Stats -->
+      <div class="grid grid-cols-3 gap-4">
+        <div class="rounded-xl border border-[rgb(var(--color-border))] bg-[rgb(var(--color-card))] p-5">
+          <p class="text-xs text-[rgb(var(--color-muted-foreground))]">Chapters</p>
+          <p class="mt-1 text-2xl font-bold text-[rgb(var(--color-foreground))]">{{ totalChapters }}</p>
+        </div>
+        <div class="rounded-xl border border-[rgb(var(--color-border))] bg-[rgb(var(--color-card))] p-5">
+          <p class="text-xs text-[rgb(var(--color-muted-foreground))]">Elements</p>
+          <p class="mt-1 text-2xl font-bold text-[rgb(var(--color-primary))]">{{ totalElements }}</p>
+        </div>
+        <div class="rounded-xl border border-[rgb(var(--color-border))] bg-[rgb(var(--color-card))] p-5">
+          <p class="text-xs text-[rgb(var(--color-muted-foreground))]">Skill Tags</p>
+          <p class="mt-1 text-2xl font-bold text-[rgb(var(--color-foreground))]">{{ totalSkillTags }}</p>
+        </div>
       </div>
 
-      <p v-if="error" class="text-sm text-[rgb(var(--color-error))] mb-4">{{ error }}</p>
+      <!-- Publish result -->
+      <div v-if="publishResult" class="rounded-lg border border-emerald-500/20 bg-emerald-500/10 p-4 flex items-center gap-3">
+        <svg class="h-5 w-5 text-emerald-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+        <div>
+          <p class="text-sm font-medium text-emerald-700 dark:text-emerald-300">Published!</p>
+          <p class="text-xs text-emerald-600 dark:text-emerald-400">
+            Hash: <code class="font-mono">{{ publishResult.content_hash }}</code> ({{ publishResult.size }} bytes)
+          </p>
+        </div>
+      </div>
+
+      <p v-if="error" class="text-sm text-red-600 dark:text-red-400">{{ error }}</p>
 
       <!-- Chapters -->
       <div class="space-y-4">
-        <div v-for="chapter in chapters" :key="chapter.id" class="card p-4">
-          <div class="flex items-center justify-between mb-3">
-            <div class="flex items-center gap-2">
-              <span class="text-xs font-mono text-[rgb(var(--color-muted-foreground))]">{{ chapter.position }}</span>
-              <h3 class="text-sm font-semibold">{{ chapter.title }}</h3>
+        <div
+          v-for="(chapter, chIdx) in chapters"
+          :key="chapter.id"
+          class="rounded-xl border border-[rgb(var(--color-border))] bg-[rgb(var(--color-card))] p-5"
+        >
+          <!-- Chapter header -->
+          <div class="flex items-center justify-between mb-4">
+            <div class="flex items-center gap-3">
+              <span class="flex h-7 w-7 items-center justify-center rounded-lg bg-[rgb(var(--color-primary)/0.1)] text-xs font-bold text-[rgb(var(--color-primary))]">
+                {{ chIdx + 1 }}
+              </span>
+              <h3 class="text-sm font-semibold text-[rgb(var(--color-foreground))]">{{ chapter.title }}</h3>
+              <span class="text-xs text-[rgb(var(--color-muted-foreground))]">
+                {{ (elements[chapter.id] ?? []).length }} element{{ (elements[chapter.id] ?? []).length !== 1 ? 's' : '' }}
+              </span>
             </div>
             <AppButton
               variant="ghost"
@@ -247,22 +350,25 @@ const elementTypes = [
           </div>
 
           <!-- Elements -->
-          <div v-if="elements[chapter.id]?.length" class="space-y-2 mb-2">
+          <div v-if="elements[chapter.id]?.length" class="space-y-2 mb-3">
             <div
               v-for="el in elements[chapter.id]"
               :key="el.id"
-              class="p-2 rounded bg-[rgb(var(--color-muted)/0.3)]"
+              class="rounded-lg border border-[rgb(var(--color-border)/0.5)] bg-[rgb(var(--color-muted)/0.15)] p-3"
             >
-              <div class="flex items-center gap-2 text-sm">
+              <div class="flex items-center gap-2.5 text-sm">
+                <svg class="h-4 w-4 flex-shrink-0 text-[rgb(var(--color-muted-foreground))]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" :d="elementTypeIcon(el.element_type)" />
+                </svg>
+                <span class="font-medium text-[rgb(var(--color-foreground))]">{{ el.title }}</span>
                 <StatusBadge :status="el.element_type" />
-                <span>{{ el.title }}</span>
-                <span v-if="el.content_cid" class="text-xs font-mono text-[rgb(var(--color-muted-foreground))] ml-auto truncate max-w-40">
+                <span v-if="el.content_cid" class="ml-auto text-xs font-mono text-[rgb(var(--color-muted-foreground))] truncate max-w-40">
                   {{ el.content_cid }}
                 </span>
               </div>
 
               <!-- Skill tags row -->
-              <div class="flex flex-wrap items-center gap-1.5 mt-1.5">
+              <div class="flex flex-wrap items-center gap-1.5 mt-2">
                 <button
                   v-for="tag in elementSkillTags[el.id] || []"
                   :key="tag.skill_id"
@@ -279,13 +385,13 @@ const elementTypes = [
                 <div v-if="taggingElement === el.id" class="relative">
                   <input
                     v-model="skillSearch"
-                    class="input text-xs py-0.5 px-2 w-48"
+                    class="rounded-lg border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))] px-2 py-1 text-xs w-48"
                     placeholder="Search skills..."
                     @keydown.escape="taggingElement = null; skillSearch = ''"
                   >
                   <div
                     v-if="skillSearchResults.length"
-                    class="absolute z-20 top-full left-0 mt-1 w-64 max-h-48 overflow-y-auto rounded border border-[rgb(var(--color-border))] bg-[rgb(var(--color-card))] shadow-lg"
+                    class="absolute z-20 top-full left-0 mt-1 w-64 max-h-48 overflow-y-auto rounded-lg border border-[rgb(var(--color-border))] bg-[rgb(var(--color-card))] shadow-lg"
                   >
                     <button
                       v-for="skill in skillSearchResults"
@@ -312,17 +418,17 @@ const elementTypes = [
           </div>
 
           <!-- Add element form -->
-          <div v-if="addingToChapter === chapter.id" class="mt-2 p-3 rounded bg-[rgb(var(--color-muted)/0.2)]">
-            <div class="flex gap-2 mb-2">
+          <div v-if="addingToChapter === chapter.id" class="mt-3 rounded-lg border border-dashed border-[rgb(var(--color-border))] bg-[rgb(var(--color-muted)/0.1)] p-4">
+            <div class="flex gap-2 mb-3">
               <input
                 v-model="newElementTitle"
-                class="input flex-1"
+                class="flex-1 rounded-lg border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))] px-3 py-2 text-sm"
                 placeholder="Element title"
                 @keydown.enter="addElement(chapter.id)"
               >
               <select
                 v-model="newElementType"
-                class="input w-32"
+                class="rounded-lg border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))] px-3 py-2 text-sm"
               >
                 <option v-for="t in elementTypes" :key="t.value" :value="t.value">{{ t.label }}</option>
               </select>
@@ -339,11 +445,11 @@ const elementTypes = [
         </div>
 
         <!-- Add chapter -->
-        <div v-if="showNewChapter" class="card p-4">
+        <div v-if="showNewChapter" class="rounded-xl border border-dashed border-[rgb(var(--color-border))] bg-[rgb(var(--color-card))] p-5">
           <div class="flex gap-2">
             <input
               v-model="newChapterTitle"
-              class="input flex-1"
+              class="flex-1 rounded-lg border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))] px-3 py-2 text-sm"
               placeholder="Chapter title"
               @keydown.enter="addChapter"
             >
