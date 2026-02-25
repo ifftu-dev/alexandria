@@ -268,7 +268,6 @@ pub fn run() {
             commands::catalog::get_catalog_entry,
             // Governance
             commands::governance::list_daos,
-            commands::governance::create_dao,
             commands::governance::get_dao,
             commands::governance::open_election,
             commands::governance::list_elections,

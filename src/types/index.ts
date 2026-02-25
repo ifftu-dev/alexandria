@@ -326,15 +326,6 @@ export interface DaoMember {
   joined_at: string
 }
 
-export interface CreateDaoParams {
-  name: string
-  description?: string | null
-  scope_type: string
-  scope_id: string
-  committee_size?: number | null
-  election_interval_days?: number | null
-}
-
 export interface Election {
   id: string
   dao_id: string

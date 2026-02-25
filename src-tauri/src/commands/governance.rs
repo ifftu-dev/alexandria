@@ -13,7 +13,7 @@ use tauri::State;
 
 use crate::crypto::hash::entity_id;
 use crate::domain::governance::{
-    CreateDaoParams, DaoInfo, DaoMember, Election, ElectionNominee, ElectionVote,
+    DaoInfo, DaoMember, Election, ElectionNominee, ElectionVote,
     OpenElectionParams, Proposal, ProposalVote, SubmitProposalParams,
 };
 use crate::AppState;
@@ -97,51 +97,6 @@ pub async fn list_daos(
         .map_err(|e| e.to_string())?;
 
     Ok(daos)
-}
-
-/// Create a new DAO.
-#[tauri::command]
-pub async fn create_dao(
-    state: State<'_, AppState>,
-    params: CreateDaoParams,
-) -> Result<DaoInfo, String> {
-    let db = state.db.lock().await;
-    let conn = db.conn();
-
-    let id = entity_id(&[&params.name, &params.scope_type, &params.scope_id]);
-    let committee_size = params.committee_size.unwrap_or(5);
-    let election_interval = params.election_interval_days.unwrap_or(365);
-
-    conn.execute(
-        "INSERT INTO governance_daos \
-         (id, name, description, scope_type, scope_id, status, committee_size, election_interval_days) \
-         VALUES (?1, ?2, ?3, ?4, ?5, 'pending', ?6, ?7)",
-        params![
-            id,
-            params.name,
-            params.description,
-            params.scope_type,
-            params.scope_id,
-            committee_size,
-            election_interval,
-        ],
-    )
-    .map_err(|e| e.to_string())?;
-
-    Ok(DaoInfo {
-        id,
-        name: params.name,
-        description: params.description,
-        icon_emoji: None,
-        scope_type: params.scope_type,
-        scope_id: params.scope_id,
-        status: "pending".into(),
-        committee_size,
-        election_interval_days: election_interval,
-        on_chain_tx: None,
-        created_at: chrono::Utc::now().to_rfc3339(),
-        updated_at: chrono::Utc::now().to_rfc3339(),
-    })
 }
 
 /// Get a DAO by ID, including its members.
