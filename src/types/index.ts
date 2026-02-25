@@ -52,8 +52,10 @@ export interface Course {
   title: string
   description: string | null
   author_address: string
+  author_name: string | null
   content_cid: string | null
   thumbnail_cid: string | null
+  thumbnail_svg: string | null
   tags: string[] | null
   skill_ids: string[] | null
   version: number
@@ -306,6 +308,7 @@ export interface DaoInfo {
   id: string
   name: string
   description: string | null
+  icon_emoji: string | null
   scope_type: string
   scope_id: string
   status: string
@@ -649,6 +652,7 @@ export interface SubjectFieldInfo {
   id: string
   name: string
   description: string | null
+  icon_emoji: string | null
   subject_count: number
   skill_count: number
   created_at: string | null

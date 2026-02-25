@@ -28,16 +28,16 @@ pub async fn list_courses(
     let (sql, param_values): (String, Vec<Box<dyn rusqlite::types::ToSql>>) =
         if let Some(ref s) = status {
             (
-                "SELECT id, title, description, author_address, content_cid, thumbnail_cid, \
-                 tags, skill_ids, version, status, published_at, on_chain_tx, created_at, updated_at \
+                "SELECT id, title, description, author_address, author_name, content_cid, thumbnail_cid, \
+                 thumbnail_svg, tags, skill_ids, version, status, published_at, on_chain_tx, created_at, updated_at \
                  FROM courses WHERE status = ?1 ORDER BY updated_at DESC"
                     .to_string(),
                 vec![Box::new(s.clone())],
             )
         } else {
             (
-                "SELECT id, title, description, author_address, content_cid, thumbnail_cid, \
-                 tags, skill_ids, version, status, published_at, on_chain_tx, created_at, updated_at \
+                "SELECT id, title, description, author_address, author_name, content_cid, thumbnail_cid, \
+                 thumbnail_svg, tags, skill_ids, version, status, published_at, on_chain_tx, created_at, updated_at \
                  FROM courses ORDER BY updated_at DESC"
                     .to_string(),
                 vec![],
@@ -51,26 +51,28 @@ pub async fn list_courses(
 
     let courses = stmt
         .query_map(params_ref.as_slice(), |row| {
-            let tags_json: Option<String> = row.get(6)?;
-            let skill_ids_json: Option<String> = row.get(7)?;
+            let tags_json: Option<String> = row.get(8)?;
+            let skill_ids_json: Option<String> = row.get(9)?;
 
             Ok(Course {
                 id: row.get(0)?,
                 title: row.get(1)?,
                 description: row.get(2)?,
                 author_address: row.get(3)?,
-                content_cid: row.get(4)?,
-                thumbnail_cid: row.get(5)?,
+                author_name: row.get(4)?,
+                content_cid: row.get(5)?,
+                thumbnail_cid: row.get(6)?,
+                thumbnail_svg: row.get(7)?,
                 tags: tags_json
                     .and_then(|j| serde_json::from_str(&j).ok()),
                 skill_ids: skill_ids_json
                     .and_then(|j| serde_json::from_str(&j).ok()),
-                version: row.get(8)?,
-                status: row.get(9)?,
-                published_at: row.get(10)?,
-                on_chain_tx: row.get(11)?,
-                created_at: row.get(12)?,
-                updated_at: row.get(13)?,
+                version: row.get(10)?,
+                status: row.get(11)?,
+                published_at: row.get(12)?,
+                on_chain_tx: row.get(13)?,
+                created_at: row.get(14)?,
+                updated_at: row.get(15)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -89,31 +91,33 @@ pub async fn get_course(
     let db = state.db.lock().await;
 
     let result = db.conn().query_row(
-        "SELECT id, title, description, author_address, content_cid, thumbnail_cid, \
-         tags, skill_ids, version, status, published_at, on_chain_tx, created_at, updated_at \
+        "SELECT id, title, description, author_address, author_name, content_cid, thumbnail_cid, \
+         thumbnail_svg, tags, skill_ids, version, status, published_at, on_chain_tx, created_at, updated_at \
          FROM courses WHERE id = ?1",
         params![course_id],
         |row| {
-            let tags_json: Option<String> = row.get(6)?;
-            let skill_ids_json: Option<String> = row.get(7)?;
+            let tags_json: Option<String> = row.get(8)?;
+            let skill_ids_json: Option<String> = row.get(9)?;
 
             Ok(Course {
                 id: row.get(0)?,
                 title: row.get(1)?,
                 description: row.get(2)?,
                 author_address: row.get(3)?,
-                content_cid: row.get(4)?,
-                thumbnail_cid: row.get(5)?,
+                author_name: row.get(4)?,
+                content_cid: row.get(5)?,
+                thumbnail_cid: row.get(6)?,
+                thumbnail_svg: row.get(7)?,
                 tags: tags_json
                     .and_then(|j| serde_json::from_str(&j).ok()),
                 skill_ids: skill_ids_json
                     .and_then(|j| serde_json::from_str(&j).ok()),
-                version: row.get(8)?,
-                status: row.get(9)?,
-                published_at: row.get(10)?,
-                on_chain_tx: row.get(11)?,
-                created_at: row.get(12)?,
-                updated_at: row.get(13)?,
+                version: row.get(10)?,
+                status: row.get(11)?,
+                published_at: row.get(12)?,
+                on_chain_tx: row.get(13)?,
+                created_at: row.get(14)?,
+                updated_at: row.get(15)?,
             })
         },
     );
@@ -599,31 +603,33 @@ fn get_course_by_id(
     id: &str,
 ) -> Result<Course, String> {
     conn.query_row(
-        "SELECT id, title, description, author_address, content_cid, thumbnail_cid, \
-         tags, skill_ids, version, status, published_at, on_chain_tx, created_at, updated_at \
+        "SELECT id, title, description, author_address, author_name, content_cid, thumbnail_cid, \
+         thumbnail_svg, tags, skill_ids, version, status, published_at, on_chain_tx, created_at, updated_at \
          FROM courses WHERE id = ?1",
         params![id],
         |row| {
-            let tags_json: Option<String> = row.get(6)?;
-            let skill_ids_json: Option<String> = row.get(7)?;
+            let tags_json: Option<String> = row.get(8)?;
+            let skill_ids_json: Option<String> = row.get(9)?;
 
             Ok(Course {
                 id: row.get(0)?,
                 title: row.get(1)?,
                 description: row.get(2)?,
                 author_address: row.get(3)?,
-                content_cid: row.get(4)?,
-                thumbnail_cid: row.get(5)?,
+                author_name: row.get(4)?,
+                content_cid: row.get(5)?,
+                thumbnail_cid: row.get(6)?,
+                thumbnail_svg: row.get(7)?,
                 tags: tags_json
                     .and_then(|j| serde_json::from_str(&j).ok()),
                 skill_ids: skill_ids_json
                     .and_then(|j| serde_json::from_str(&j).ok()),
-                version: row.get(8)?,
-                status: row.get(9)?,
-                published_at: row.get(10)?,
-                on_chain_tx: row.get(11)?,
-                created_at: row.get(12)?,
-                updated_at: row.get(13)?,
+                version: row.get(10)?,
+                status: row.get(11)?,
+                published_at: row.get(12)?,
+                on_chain_tx: row.get(13)?,
+                created_at: row.get(14)?,
+                updated_at: row.get(15)?,
             })
         },
     )

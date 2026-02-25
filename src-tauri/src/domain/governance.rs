@@ -66,6 +66,7 @@ pub struct DaoInfo {
     pub id: String,
     pub name: String,
     pub description: Option<String>,
+    pub icon_emoji: Option<String>,
     pub scope_type: String,
     pub scope_id: String,
     pub status: String,

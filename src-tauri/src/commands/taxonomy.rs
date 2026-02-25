@@ -29,6 +29,7 @@ pub struct SubjectFieldInfo {
     pub id: String,
     pub name: String,
     pub description: Option<String>,
+    pub icon_emoji: Option<String>,
     pub subject_count: i64,
     pub skill_count: i64,
     pub created_at: Option<String>,
@@ -98,7 +99,7 @@ pub async fn list_subject_fields(
 
     let mut stmt = conn
         .prepare(
-            "SELECT sf.id, sf.name, sf.description, sf.created_at,
+            "SELECT sf.id, sf.name, sf.description, sf.icon_emoji, sf.created_at,
                     (SELECT COUNT(*) FROM subjects s WHERE s.subject_field_id = sf.id) as subject_count,
                     (SELECT COUNT(*) FROM skills sk
                      JOIN subjects s ON sk.subject_id = s.id
@@ -114,9 +115,10 @@ pub async fn list_subject_fields(
                 id: row.get(0)?,
                 name: row.get(1)?,
                 description: row.get(2)?,
-                created_at: row.get(3)?,
-                subject_count: row.get(4)?,
-                skill_count: row.get(5)?,
+                icon_emoji: row.get(3)?,
+                created_at: row.get(4)?,
+                subject_count: row.get(5)?,
+                skill_count: row.get(6)?,
             })
         })
         .map_err(|e| e.to_string())?
