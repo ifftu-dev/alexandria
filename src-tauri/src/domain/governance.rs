@@ -86,17 +86,6 @@ pub struct DaoMember {
     pub joined_at: String,
 }
 
-/// Parameters for creating a new DAO.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CreateDaoParams {
-    pub name: String,
-    pub description: Option<String>,
-    pub scope_type: String,
-    pub scope_id: String,
-    pub committee_size: Option<i64>,
-    pub election_interval_days: Option<i64>,
-}
-
 // ---- Election Types ----
 
 /// Election phase.
