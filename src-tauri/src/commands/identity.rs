@@ -84,7 +84,7 @@ pub async fn unlock_vault(
     .map_err(|e: String| e)?;
 
     emit_progress(&app, "db", "Loading identity from database...");
-    let db = state.db.write().await;
+    let db = state.db.lock().await;
     let exists: bool = db
         .conn()
         .query_row(
@@ -153,7 +153,7 @@ pub async fn generate_wallet(
     .map_err(|e: String| e)?;
 
     emit_progress(&app, "db", "Storing identity in local database...");
-    let db = state.db.write().await;
+    let db = state.db.lock().await;
 
     // Check if identity already exists
     let exists: bool = db
@@ -222,7 +222,7 @@ pub async fn restore_wallet(
     .map_err(|e: String| e)?;
 
     emit_progress(&app, "db", "Storing identity in local database...");
-    let db = state.db.write().await;
+    let db = state.db.lock().await;
 
     let exists: bool = db
         .conn()
@@ -292,7 +292,7 @@ pub async fn lock_vault(state: State<'_, AppState>) -> Result<(), String> {
 pub async fn get_wallet_info(
     state: State<'_, AppState>,
 ) -> Result<Option<WalletInfo>, String> {
-    let db = state.db.read().await;
+    let db = state.db.lock().await;
 
     let result = db.conn().query_row(
         "SELECT stake_address, payment_address FROM local_identity WHERE id = 1",
@@ -316,7 +316,7 @@ pub async fn get_wallet_info(
 /// Get the local user's profile.
 #[tauri::command]
 pub async fn get_profile(state: State<'_, AppState>) -> Result<Option<Identity>, String> {
-    let db = state.db.read().await;
+    let db = state.db.lock().await;
     Ok(read_profile(db.conn()))
 }
 
@@ -348,7 +348,7 @@ pub async fn update_profile(
     state: State<'_, AppState>,
     update: ProfileUpdate,
 ) -> Result<Identity, String> {
-    let db = state.db.write().await;
+    let db = state.db.lock().await;
 
     // Build dynamic UPDATE statement
     let mut set_clauses = Vec::new();
@@ -427,7 +427,7 @@ pub async fn publish_profile(
     let w = wallet::wallet_from_mnemonic(&mnemonic).map_err(|e| e.to_string())?;
 
     // Read the current profile from the database
-    let db = state.db.read().await;
+    let db = state.db.lock().await;
     let (stake_address, display_name, bio, avatar_cid, created_at_str): (
         String,
         Option<String>,
@@ -470,7 +470,7 @@ pub async fn publish_profile(
         .map_err(|e| e.to_string())?;
 
     // Save the profile_hash in the database
-    let db = state.db.write().await;
+    let db = state.db.lock().await;
     db.conn()
         .execute(
             "UPDATE local_identity SET profile_hash = ?1, updated_at = datetime('now') WHERE id = 1",

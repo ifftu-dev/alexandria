@@ -24,7 +24,7 @@ pub async fn get_reputation(
     state: State<'_, AppState>,
     query: ReputationQuery,
 ) -> Result<Vec<FullReputationAssertion>, String> {
-    let db = state.db.read().await;
+    let db = state.db.lock().await;
     let conn = db.conn();
 
     // Build dynamic WHERE clause
@@ -137,7 +137,7 @@ pub async fn get_reputation(
 pub async fn compute_reputation(
     state: State<'_, AppState>,
 ) -> Result<RecomputeResult, String> {
-    let db = state.db.write().await;
+    let db = state.db.lock().await;
 
     let start = std::time::Instant::now();
     let (assertions_updated, deltas_recomputed) = reputation::full_recompute(db.conn())?;
@@ -160,7 +160,7 @@ pub async fn get_instructor_ranking(
     proficiency_level: Option<String>,
     limit: Option<i64>,
 ) -> Result<Vec<InstructorRanking>, String> {
-    let db = state.db.read().await;
+    let db = state.db.lock().await;
 
     let max = limit.unwrap_or(50);
     let rankings = reputation::get_instructor_rankings(
@@ -199,7 +199,7 @@ pub async fn verify_reputation(
     state: State<'_, AppState>,
     assertion_id: String,
 ) -> Result<VerificationResult, String> {
-    let db = state.db.read().await;
+    let db = state.db.lock().await;
 
     let (score_matches, confidence_matches, recomputed_score, recomputed_confidence, claimed_score, claimed_confidence) =
         reputation::verify_assertion(db.conn(), &assertion_id)?;
