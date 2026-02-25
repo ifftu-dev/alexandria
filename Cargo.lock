@@ -92,6 +92,7 @@ dependencies = [
  "dialoguer",
  "dirs 6.0.0",
  "indicatif",
+ "log",
  "owo-colors",
  "rusqlite",
  "serde_json",
