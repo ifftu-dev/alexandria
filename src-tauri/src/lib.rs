@@ -22,7 +22,7 @@ pub mod crypto {
 use db::Database;
 use std::sync::Arc;
 use tauri::Manager;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::Mutex;
 
 #[cfg(desktop)]
 use std::path::PathBuf;
@@ -40,12 +40,13 @@ use p2p::network::P2pNode;
 
 /// Shared application state accessible from all Tauri commands.
 ///
-/// The database uses `RwLock` instead of `Mutex` to allow concurrent
-/// read access — most IPC commands (list, get, search) only need a
-/// read lock, so they can execute in parallel rather than being
-/// serialized behind a single mutex.
+/// The database uses `Mutex` because rusqlite's `Connection` is not
+/// safe for concurrent access — `prepare()` mutably borrows an internal
+/// `RefCell`, so even concurrent reads will panic. A `Mutex` serializes
+/// all database access, preventing the `RefCell already mutably borrowed`
+/// panic that occurs when multiple IPC commands run in parallel.
 pub struct AppState {
-    pub db: Arc<RwLock<Database>>,
+    pub db: Arc<Mutex<Database>>,
     #[cfg(desktop)]
     pub keystore: Arc<Mutex<Option<Keystore>>>,
     #[cfg(desktop)]
@@ -97,7 +98,7 @@ pub fn run() {
 
             log::info!("Database initialized successfully");
 
-            let db = Arc::new(RwLock::new(database));
+            let db = Arc::new(Mutex::new(database));
 
             #[cfg(desktop)]
             {

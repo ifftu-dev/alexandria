@@ -20,7 +20,7 @@ use crate::AppState;
 pub async fn sync_get_device_info(
     state: State<'_, AppState>,
 ) -> Result<DeviceInfo, String> {
-    let db = state.db.write().await;
+    let db = state.db.lock().await;
     let conn = db.conn();
 
     let platform = std::env::consts::OS;
@@ -34,7 +34,7 @@ pub async fn sync_set_device_name(
     state: State<'_, AppState>,
     name: String,
 ) -> Result<(), String> {
-    let db = state.db.write().await;
+    let db = state.db.lock().await;
     let conn = db.conn();
 
     let device_id = conn
@@ -59,7 +59,7 @@ pub async fn sync_set_device_name(
 pub async fn sync_list_devices(
     state: State<'_, AppState>,
 ) -> Result<Vec<DeviceInfo>, String> {
-    let db = state.db.read().await;
+    let db = state.db.lock().await;
     sync::list_devices(db.conn())
 }
 
@@ -71,7 +71,7 @@ pub async fn sync_remove_device(
     state: State<'_, AppState>,
     device_id: String,
 ) -> Result<(), String> {
-    let db = state.db.write().await;
+    let db = state.db.lock().await;
     sync::remove_device(db.conn(), &device_id)
 }
 
@@ -83,7 +83,7 @@ pub async fn sync_remove_device(
 pub async fn sync_status(
     state: State<'_, AppState>,
 ) -> Result<SyncStatus, String> {
-    let db = state.db.read().await;
+    let db = state.db.lock().await;
     sync::get_sync_status(db.conn())
 }
 
@@ -96,7 +96,7 @@ pub async fn sync_status(
 pub async fn sync_now(
     state: State<'_, AppState>,
 ) -> Result<SyncStatus, String> {
-    let db = state.db.write().await;
+    let db = state.db.lock().await;
     let conn = db.conn();
 
     // Prune already-delivered items
@@ -118,7 +118,7 @@ pub async fn sync_set_auto(
     state: State<'_, AppState>,
     enabled: bool,
 ) -> Result<(), String> {
-    let db = state.db.write().await;
+    let db = state.db.lock().await;
     let conn = db.conn();
 
     // Store the auto-sync preference in a simple key-value pattern
@@ -140,7 +140,7 @@ pub async fn sync_history(
     state: State<'_, AppState>,
     limit: Option<i64>,
 ) -> Result<Vec<SyncHistoryEntry>, String> {
-    let db = state.db.read().await;
+    let db = state.db.lock().await;
     sync::get_sync_history(db.conn(), limit.unwrap_or(50))
 }
 

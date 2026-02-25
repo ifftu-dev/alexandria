@@ -6,7 +6,7 @@
 //! has a `content_cid`.
 
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use tokio::sync::Mutex;
 
 use crate::db::Database;
 use crate::ipfs::content;
@@ -15,12 +15,12 @@ use crate::ipfs::node::ContentNode;
 /// Seed content into iroh for elements that lack a `content_cid`.
 /// Returns the number of elements updated, or 0 if skipped.
 pub async fn seed_content_if_needed(
-    db: &Arc<RwLock<Database>>,
+    db: &Arc<Mutex<Database>>,
     node: &Arc<ContentNode>,
 ) -> Result<u32, String> {
     // Check if any seed element already has content — if so, skip entirely.
     let needs_seed = {
-        let db = db.read().await;
+        let db = db.lock().await;
         let count: i64 = db
             .conn()
             .query_row(
@@ -51,7 +51,7 @@ pub async fn seed_content_if_needed(
 
     // Phase 2: Single DB write lock — batch-update all rows in a transaction.
     let updated = {
-        let db = db.write().await;
+        let db = db.lock().await;
         let conn = db.conn();
         conn.execute_batch("BEGIN")
             .map_err(|e| format!("begin tx: {e}"))?;
