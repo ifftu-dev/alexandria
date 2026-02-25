@@ -30,7 +30,7 @@ async function create() {
       tags: tags.value.trim() ? tags.value.split(',').map(t => t.trim()).filter(Boolean) : null,
     }
 
-    const course = await invoke<Course>('create_course', { request })
+    const course = await invoke<Course>('create_course', { req: request })
     router.push(`/instructor/courses/${course.id}`)
   } catch (e) {
     error.value = String(e)
@@ -41,42 +41,46 @@ async function create() {
 </script>
 
 <template>
-  <div class="max-w-2xl">
-    <h1 class="text-xl font-bold mb-1">Create Course</h1>
-    <p class="text-sm text-[rgb(var(--color-muted-foreground))] mb-6">
-      Create a new course on your local node. You can add chapters and elements after creation.
-    </p>
+  <div class="py-8 px-4 sm:px-6 lg:px-8">
+    <div class="max-w-2xl">
+      <div class="mb-8">
+        <h1 class="text-3xl font-bold text-[rgb(var(--color-foreground))]">Create Course</h1>
+        <p class="mt-2 text-[rgb(var(--color-muted-foreground))]">
+          Create a new course on your local node. You can add chapters and elements after creation.
+        </p>
+      </div>
 
-    <div class="card p-5">
-      <div class="space-y-4">
-        <AppInput
-          v-model="title"
-          label="Title"
-          placeholder="e.g., Introduction to Category Theory"
-        />
+      <div class="rounded-xl border border-[rgb(var(--color-border))] bg-[rgb(var(--color-card))] p-6">
+        <div class="space-y-5">
+          <AppInput
+            v-model="title"
+            label="Title"
+            placeholder="e.g., Introduction to Category Theory"
+          />
 
-        <AppTextarea
-          v-model="description"
-          label="Description"
-          placeholder="What will learners gain from this course?"
-          :rows="4"
-        />
+          <AppTextarea
+            v-model="description"
+            label="Description"
+            placeholder="What will learners gain from this course?"
+            :rows="4"
+          />
 
-        <AppInput
-          v-model="tags"
-          label="Tags (comma-separated)"
-          placeholder="e.g., mathematics, algebra, category-theory"
-        />
+          <AppInput
+            v-model="tags"
+            label="Tags (comma-separated)"
+            placeholder="e.g., mathematics, algebra, category-theory"
+          />
 
-        <p v-if="error" class="text-sm text-[rgb(var(--color-error))]">{{ error }}</p>
+          <p v-if="error" class="text-sm text-red-600 dark:text-red-400">{{ error }}</p>
 
-        <div class="flex gap-2">
-          <AppButton :loading="saving" @click="create">
-            Create Course
-          </AppButton>
-          <AppButton variant="ghost" @click="router.back()">
-            Cancel
-          </AppButton>
+          <div class="flex gap-3 pt-2">
+            <AppButton :loading="saving" @click="create">
+              Create Course
+            </AppButton>
+            <AppButton variant="ghost" @click="router.back()">
+              Cancel
+            </AppButton>
+          </div>
         </div>
       </div>
     </div>

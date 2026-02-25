@@ -3,10 +3,13 @@ import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { useSentinel } from '@/composables/useSentinel'
-import { AppButton, AppSpinner, EmptyState, StatusBadge } from '@/components/ui'
+import { AppButton } from '@/components/ui'
 import TextContent from '@/components/course/TextContent.vue'
 import VideoPlayer from '@/components/course/VideoPlayer.vue'
+import PdfViewer from '@/components/course/PdfViewer.vue'
 import QuizEngine from '@/components/course/QuizEngine.vue'
+import McqQuestion from '@/components/course/McqQuestion.vue'
+import EssayInput from '@/components/course/EssayInput.vue'
 import type { Course, Chapter, Element, Enrollment, ElementProgress, UpdateProgressRequest, QuizResult } from '@/types'
 
 const { invoke } = useLocalApi()
@@ -33,10 +36,32 @@ const currentElement = computed(() => {
   return elements.value[activeChapter.value]?.find(e => e.id === activeElement.value) ?? null
 })
 
+const currentChapter = computed(() => {
+  if (!activeChapter.value) return null
+  return chapters.value.find(c => c.id === activeChapter.value) ?? null
+})
+
 const isAssessment = computed(() => {
   if (!currentElement.value) return false
-  return sentinel.isAssessmentElement(currentElement.value.element_type)
+  return isAssessmentElement(currentElement.value.element_type)
 })
+
+// Whether the current element type supports "Mark Complete" manually
+const isContentElement = computed(() => {
+  if (!currentElement.value) return false
+  const t = currentElement.value.element_type
+  return t === 'video' || t === 'text' || t === 'pdf' || t === 'downloadable' || t === 'interactive'
+})
+
+// Check if an element type is MCQ
+function isMcqType(type: string): boolean {
+  return type === 'objective_single_mcq' || type === 'objective_multi_mcq' || type === 'subjective_mcq'
+}
+
+// Check if assessment element (Sentinel activates for these)
+function isAssessmentElement(type: string): boolean {
+  return isMcqType(type) || type === 'essay' || type === 'quiz' || type === 'assessment' || type === 'interactive'
+}
 
 // Total progress stats
 const totalElements = computed(() => {
@@ -58,6 +83,22 @@ const completedElements = computed(() => {
 const progressPercent = computed(() => {
   if (totalElements.value === 0) return 0
   return Math.round((completedElements.value / totalElements.value) * 100)
+})
+
+// Check if current element is the very last in the course
+const isLastElement = computed(() => {
+  if (!activeChapter.value || !activeElement.value) return false
+  const lastCh = chapters.value[chapters.value.length - 1]
+  if (!lastCh || lastCh.id !== activeChapter.value) return false
+  const chElems = elements.value[lastCh.id]
+  if (!chElems || chElems.length === 0) return false
+  return chElems[chElems.length - 1]?.id === activeElement.value
+})
+
+// Skill tags for current element (from Element.skills if available)
+const elementSkills = computed(() => {
+  if (!currentElement.value) return []
+  return (currentElement.value as any).skills ?? []
 })
 
 onMounted(async () => {
@@ -132,7 +173,7 @@ async function markComplete(score?: number) {
     }
     await invoke('update_progress', {
       enrollmentId: enrollment.value.id,
-      request: req,
+      req,
     })
     // Update local progress
     progress.value[activeElement.value] = {
@@ -146,19 +187,30 @@ async function markComplete(score?: number) {
       completed_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     }
-    // Auto-advance to next element
-    advanceToNext()
+    // Auto-advance to next element after a short delay
+    setTimeout(() => advanceToNext(), 500)
   } catch (e) {
     console.error('Failed to update progress:', e)
   }
 }
 
 function onQuizComplete(result: QuizResult) {
-  // Send score so the evidence pipeline triggers
   markComplete(result.score)
 }
 
+function onMcqComplete(score: number) {
+  markComplete(score)
+}
+
+function onEssayComplete(score: number) {
+  markComplete(score)
+}
+
 function onVideoComplete() {
+  markComplete()
+}
+
+function onDownloadClick() {
   markComplete()
 }
 
@@ -186,6 +238,28 @@ function advanceToNext() {
   }
 }
 
+function goToPrev() {
+  if (!activeChapter.value || !activeElement.value) return
+  const chElems = elements.value[activeChapter.value]
+  if (!chElems) return
+  const idx = chElems.findIndex(e => e.id === activeElement.value)
+  if (idx > 0) {
+    activeElement.value = chElems[idx - 1]!.id
+    return
+  }
+  // Go to last element of previous chapter
+  const chIdx = chapters.value.findIndex(c => c.id === activeChapter.value)
+  if (chIdx > 0) {
+    const prevCh = chapters.value[chIdx - 1]
+    if (!prevCh) return
+    const prevElems = elements.value[prevCh.id]
+    if (prevElems && prevElems.length > 0) {
+      activeChapter.value = prevCh.id
+      activeElement.value = prevElems[prevElems.length - 1]!.id
+    }
+  }
+}
+
 function elementStatus(elementId: string): string {
   return progress.value[elementId]?.status ?? 'not_started'
 }
@@ -194,193 +268,498 @@ function elementTypeIcon(elementType: string): string {
   switch (elementType) {
     case 'video': return 'M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z'
     case 'text': return 'M4 6h16M4 12h16M4 18h7'
+    case 'pdf': return 'M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z'
+    case 'downloadable': return 'M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4'
     case 'quiz': case 'assessment': return 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2'
+    case 'objective_single_mcq': case 'objective_multi_mcq': case 'subjective_mcq': return 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z'
+    case 'essay': return 'M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z'
     case 'interactive': return 'M13 10V3L4 14h7v7l9-11h-7z'
     default: return 'M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z'
   }
 }
+
+function elementTypeLabel(elementType: string): string {
+  switch (elementType) {
+    case 'video': return 'Video'
+    case 'text': return 'Reading'
+    case 'pdf': return 'PDF Document'
+    case 'downloadable': return 'Download'
+    case 'quiz': return 'Quiz'
+    case 'assessment': return 'Assessment'
+    case 'objective_single_mcq': return 'Single Choice'
+    case 'objective_multi_mcq': return 'Multiple Choice'
+    case 'subjective_mcq': return 'Subjective'
+    case 'essay': return 'Written Response'
+    case 'interactive': return 'Interactive'
+    default: return 'Content'
+  }
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
 </script>
 
 <template>
   <div>
-    <AppSpinner v-if="loading" label="Loading course..." />
-
-    <EmptyState v-else-if="!course" title="Course not found" />
-
-    <div v-else class="flex gap-0 h-[calc(100vh-8rem)]">
-      <!-- Sidebar: Chapter/Element navigation -->
-      <div class="w-72 shrink-0 overflow-y-auto border-r border-[rgb(var(--color-border))] p-4 space-y-4">
-        <button
-          class="text-sm text-[rgb(var(--color-muted-foreground))] hover:text-[rgb(var(--color-foreground))] transition-colors flex items-center gap-1"
-          @click="router.push(`/courses/${courseId}`)"
-        >
-          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
-          </svg>
-          Back to course
-        </button>
-
-        <div>
-          <h2 class="text-sm font-semibold mb-1">{{ course.title }}</h2>
-          <!-- Progress bar -->
-          <div class="flex items-center gap-2 mb-1">
-            <div class="flex-1 h-1.5 bg-[rgb(var(--color-muted)/0.3)] rounded-full overflow-hidden">
-              <div
-                class="h-full bg-[rgb(var(--color-success))] transition-all duration-500"
-                :style="{ width: `${progressPercent}%` }"
-              />
+    <!-- Loading skeleton -->
+    <div v-if="loading" class="flex gap-0 h-[calc(100vh-8rem)]">
+      <!-- Sidebar skeleton -->
+      <div class="w-72 shrink-0 border-r border-[rgb(var(--color-border))] p-4 space-y-4">
+        <div class="h-4 w-24 animate-pulse rounded bg-[rgb(var(--color-muted)/0.4)]" />
+        <div class="space-y-1">
+          <div class="h-5 w-48 animate-pulse rounded bg-[rgb(var(--color-muted)/0.4)]" />
+          <div class="h-1.5 w-full animate-pulse rounded-full bg-[rgb(var(--color-muted)/0.3)]" />
+        </div>
+        <div class="space-y-3 pt-2">
+          <div v-for="i in 3" :key="i" class="space-y-1">
+            <div class="h-3 w-20 animate-pulse rounded bg-[rgb(var(--color-muted)/0.3)]" />
+            <div v-for="j in 3" :key="j" class="flex items-center gap-2 px-2 py-1.5">
+              <div class="h-5 w-5 animate-pulse rounded-full bg-[rgb(var(--color-muted)/0.3)]" />
+              <div class="h-3.5 flex-1 animate-pulse rounded bg-[rgb(var(--color-muted)/0.3)]" />
             </div>
-            <span class="text-xs text-[rgb(var(--color-muted-foreground))] whitespace-nowrap">
-              {{ completedElements }}/{{ totalElements }}
-            </span>
           </div>
         </div>
+      </div>
+      <!-- Content skeleton -->
+      <div class="flex-1 p-6">
+        <div class="max-w-3xl mx-auto space-y-4">
+          <div class="flex items-center gap-2">
+            <div class="h-5 w-16 animate-pulse rounded-full bg-[rgb(var(--color-muted)/0.3)]" />
+            <div class="h-5 w-12 animate-pulse rounded bg-[rgb(var(--color-muted)/0.3)]" />
+          </div>
+          <div class="h-7 w-64 animate-pulse rounded bg-[rgb(var(--color-muted)/0.4)]" />
+          <div class="h-[400px] animate-pulse rounded-lg bg-[rgb(var(--color-muted)/0.2)]" />
+        </div>
+      </div>
+    </div>
 
-        <!-- Sentinel indicator -->
-        <div
-          v-if="sentinel.isActive.value"
-          class="flex items-center gap-2 px-2 py-1.5 rounded text-xs bg-[rgb(var(--color-muted)/0.2)]"
-        >
-          <span class="relative flex h-2 w-2">
-            <span class="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75"
-              :class="sentinel.integrityScore.value > 0.7 ? 'bg-[rgb(var(--color-success))]' : sentinel.integrityScore.value > 0.4 ? 'bg-amber-400' : 'bg-[rgb(var(--color-destructive))]'"
-            />
-            <span class="relative inline-flex rounded-full h-2 w-2"
-              :class="sentinel.integrityScore.value > 0.7 ? 'bg-[rgb(var(--color-success))]' : sentinel.integrityScore.value > 0.4 ? 'bg-amber-400' : 'bg-[rgb(var(--color-destructive))]'"
-            />
-          </span>
-          <span class="text-[rgb(var(--color-muted-foreground))]">
-            Sentinel {{ Math.round(sentinel.integrityScore.value * 100) }}%
-          </span>
+    <!-- Course not found -->
+    <div v-else-if="!course" class="flex items-center justify-center h-[calc(100vh-8rem)]">
+      <div class="text-center">
+        <div class="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-[rgb(var(--color-muted)/0.3)]">
+          <svg class="h-8 w-8 text-[rgb(var(--color-muted-foreground)/0.5)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+          </svg>
+        </div>
+        <h2 class="text-lg font-semibold text-[rgb(var(--color-foreground))]">Course not found</h2>
+        <p class="mt-1 text-sm text-[rgb(var(--color-muted-foreground))]">The course may have been removed or is unavailable.</p>
+        <AppButton variant="secondary" size="sm" class="mt-4" @click="router.push('/courses')">
+          Browse Courses
+        </AppButton>
+      </div>
+    </div>
+
+    <!-- Main Player Layout -->
+    <div v-else class="flex gap-0 h-[calc(100vh-8rem)]">
+      <!-- ============================== -->
+      <!-- SIDEBAR: Chapter/Element Nav   -->
+      <!-- ============================== -->
+      <div class="w-72 shrink-0 overflow-y-auto border-r border-[rgb(var(--color-border))] bg-[rgb(var(--color-card)/0.3)]">
+        <div class="p-4 space-y-4">
+          <!-- Back link -->
+          <button
+            class="flex items-center gap-1.5 text-xs text-[rgb(var(--color-muted-foreground))] transition-colors hover:text-[rgb(var(--color-foreground))]"
+            @click="router.push(`/courses/${courseId}`)"
+          >
+            <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
+            </svg>
+            Back to course
+          </button>
+
+          <!-- Course title + progress -->
+          <div class="space-y-2">
+            <h2 class="text-sm font-semibold text-[rgb(var(--color-foreground))] leading-snug">{{ course.title }}</h2>
+            <div class="space-y-1">
+              <div class="flex items-center justify-between text-xs text-[rgb(var(--color-muted-foreground))]">
+                <span>{{ completedElements }} of {{ totalElements }} complete</span>
+                <span class="font-medium">{{ progressPercent }}%</span>
+              </div>
+              <div class="h-1.5 overflow-hidden rounded-full bg-[rgb(var(--color-muted)/0.3)]">
+                <div
+                  class="h-full rounded-full transition-all duration-500"
+                  :class="progressPercent === 100 ? 'bg-emerald-500' : 'bg-[rgb(var(--color-primary))]'"
+                  :style="{ width: `${progressPercent}%` }"
+                />
+              </div>
+            </div>
+          </div>
+
+          <!-- Sentinel indicator -->
+          <div
+            v-if="sentinel.isActive.value"
+            class="flex items-center gap-2 rounded-lg border border-[rgb(var(--color-border)/0.5)] bg-[rgb(var(--color-card)/0.5)] px-3 py-2"
+          >
+            <span class="relative flex h-2 w-2">
+              <span
+                class="absolute inline-flex h-full w-full animate-ping rounded-full opacity-75"
+                :class="sentinel.integrityScore.value > 0.7 ? 'bg-emerald-500' : sentinel.integrityScore.value > 0.4 ? 'bg-amber-400' : 'bg-red-500'"
+              />
+              <span
+                class="relative inline-flex h-2 w-2 rounded-full"
+                :class="sentinel.integrityScore.value > 0.7 ? 'bg-emerald-500' : sentinel.integrityScore.value > 0.4 ? 'bg-amber-400' : 'bg-red-500'"
+              />
+            </span>
+            <span class="text-xs text-[rgb(var(--color-muted-foreground))]">
+              Sentinel {{ Math.round(sentinel.integrityScore.value * 100) }}%
+            </span>
+          </div>
         </div>
 
         <!-- Chapter list -->
-        <div v-for="ch in chapters" :key="ch.id" class="space-y-0.5">
-          <div class="text-xs font-medium text-[rgb(var(--color-muted-foreground))] uppercase tracking-wider px-2 py-1">
-            {{ ch.title }}
-          </div>
-          <button
-            v-for="el in elements[ch.id] ?? []"
-            :key="el.id"
-            class="flex items-center gap-2 w-full p-2 rounded text-sm transition-colors"
-            :class="activeElement === el.id
-              ? 'bg-[rgb(var(--color-primary)/0.1)] text-[rgb(var(--color-primary))] font-medium'
-              : 'text-[rgb(var(--color-muted-foreground))] hover:bg-[rgb(var(--color-muted)/0.5)]'"
-            @click="selectElement(ch.id, el.id)"
-          >
-            <span
-              class="w-5 h-5 rounded-full border flex items-center justify-center shrink-0"
-              :class="elementStatus(el.id) === 'completed'
-                ? 'bg-[rgb(var(--color-success))] border-[rgb(var(--color-success))] text-white'
-                : 'border-[rgb(var(--color-border))]'"
+        <div class="px-2 pb-4">
+          <div v-for="(ch, chIndex) in chapters" :key="ch.id" class="mb-1">
+            <!-- Chapter header -->
+            <div class="flex items-center gap-2 px-2 py-2">
+              <span
+                class="flex h-5 w-5 items-center justify-center rounded text-[10px] font-bold"
+                :class="(elements[ch.id] ?? []).every(el => elementStatus(el.id) === 'completed')
+                  ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
+                  : 'bg-[rgb(var(--color-muted)/0.4)] text-[rgb(var(--color-muted-foreground))]'"
+              >
+                <svg v-if="(elements[ch.id] ?? []).every(el => elementStatus(el.id) === 'completed')" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
+                <template v-else>{{ chIndex + 1 }}</template>
+              </span>
+              <span class="text-xs font-medium uppercase tracking-wider text-[rgb(var(--color-muted-foreground))]">
+                {{ ch.title }}
+              </span>
+            </div>
+
+            <!-- Element buttons -->
+            <button
+              v-for="el in elements[ch.id] ?? []"
+              :key="el.id"
+              class="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-sm transition-all"
+              :class="activeElement === el.id
+                ? 'bg-[rgb(var(--color-primary)/0.1)] text-[rgb(var(--color-primary))] font-medium'
+                : 'text-[rgb(var(--color-muted-foreground))] hover:bg-[rgb(var(--color-muted)/0.5)] hover:text-[rgb(var(--color-foreground))]'"
+              @click="selectElement(ch.id, el.id)"
             >
-              <svg v-if="elementStatus(el.id) === 'completed'" class="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
-              </svg>
-              <svg v-else class="w-2.5 h-2.5 text-[rgb(var(--color-muted-foreground)/0.5)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                <path stroke-linecap="round" stroke-linejoin="round" :d="elementTypeIcon(el.element_type)" />
-              </svg>
-            </span>
-            <span class="truncate text-left">{{ el.title }}</span>
-          </button>
+              <!-- Status/type indicator -->
+              <span
+                class="flex h-5 w-5 items-center justify-center rounded-full border flex-shrink-0"
+                :class="elementStatus(el.id) === 'completed'
+                  ? 'border-emerald-500 bg-emerald-500 text-white'
+                  : activeElement === el.id
+                    ? 'border-[rgb(var(--color-primary))] bg-[rgb(var(--color-primary)/0.1)]'
+                    : elementStatus(el.id) === 'in_progress'
+                      ? 'border-amber-400 bg-amber-400/10'
+                      : 'border-[rgb(var(--color-border))]'"
+              >
+                <svg v-if="elementStatus(el.id) === 'completed'" class="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
+                <svg v-else class="h-2.5 w-2.5" :class="activeElement === el.id ? '' : 'opacity-50'" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" :d="elementTypeIcon(el.element_type)" />
+                </svg>
+              </span>
+              <span class="truncate text-left text-[13px]">{{ el.title }}</span>
+            </button>
+          </div>
         </div>
       </div>
 
-      <!-- Main content area -->
-      <div class="flex-1 overflow-y-auto p-6">
-        <div v-if="currentElement" class="max-w-3xl mx-auto">
-          <!-- Element header -->
-          <div class="flex items-center gap-2 mb-2">
-            <StatusBadge :status="currentElement.element_type" />
-            <span v-if="currentElement.duration_seconds" class="text-xs text-[rgb(var(--color-muted-foreground))]">
-              {{ Math.round(currentElement.duration_seconds / 60) }} min
-            </span>
-            <span v-if="isAssessment" class="text-xs font-medium text-amber-600 dark:text-amber-400 bg-amber-100 dark:bg-amber-900/30 px-2 py-0.5 rounded">
-              Monitored
-            </span>
-          </div>
-          <h1 class="text-lg font-bold mb-6">{{ currentElement.title }}</h1>
+      <!-- ============================== -->
+      <!-- MAIN CONTENT AREA              -->
+      <!-- ============================== -->
+      <div class="flex-1 flex flex-col overflow-hidden">
+        <div v-if="currentElement" class="flex-1 overflow-y-auto">
+          <div class="max-w-3xl mx-auto px-6 py-6">
+            <!-- Element header -->
+            <div class="mb-6">
+              <!-- Breadcrumb -->
+              <div class="flex items-center gap-1.5 text-xs text-[rgb(var(--color-muted-foreground))] mb-3">
+                <span>{{ currentChapter?.title }}</span>
+                <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
+                </svg>
+                <span class="text-[rgb(var(--color-foreground))]">{{ currentElement.title }}</span>
+              </div>
 
-          <!-- Content renderers based on element_type -->
-          <div class="mb-6">
-            <!-- Video -->
-            <VideoPlayer
-              v-if="currentElement.element_type === 'video'"
-              :content-cid="currentElement.content_cid"
-              :title="currentElement.title"
-              @complete="onVideoComplete"
-            />
+              <!-- Title row -->
+              <div class="flex items-start justify-between gap-4">
+                <div class="min-w-0">
+                  <h1 class="text-xl font-bold text-[rgb(var(--color-foreground))] leading-tight">{{ currentElement.title }}</h1>
+                  <div class="mt-2 flex flex-wrap items-center gap-2">
+                    <!-- Element type badge -->
+                    <span class="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium"
+                      :class="{
+                        'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400': currentElement.element_type === 'video' || isMcqType(currentElement.element_type),
+                        'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-400': currentElement.element_type === 'text',
+                        'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400': currentElement.element_type === 'pdf',
+                        'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400': currentElement.element_type === 'downloadable',
+                        'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400': currentElement.element_type === 'quiz' || currentElement.element_type === 'assessment' || currentElement.element_type === 'interactive',
+                        'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400': currentElement.element_type === 'essay',
+                      }"
+                    >
+                      <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" :d="elementTypeIcon(currentElement.element_type)" />
+                      </svg>
+                      {{ elementTypeLabel(currentElement.element_type) }}
+                    </span>
+                    <!-- Duration -->
+                    <span v-if="currentElement.duration_seconds" class="text-xs text-[rgb(var(--color-muted-foreground))]">
+                      {{ Math.round(currentElement.duration_seconds / 60) }} min
+                    </span>
+                    <!-- Monitored badge -->
+                    <span v-if="isAssessment" class="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
+                      <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
+                      </svg>
+                      Monitored
+                    </span>
+                  </div>
+                </div>
 
-            <!-- Text/Reading -->
-            <TextContent
-              v-else-if="currentElement.element_type === 'text'"
-              :content-cid="currentElement.content_cid"
-              @complete="markComplete()"
-            />
+                <!-- Status -->
+                <div v-if="elementStatus(currentElement.id) === 'completed'" class="flex-shrink-0">
+                  <span class="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">
+                    <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
+                    </svg>
+                    Completed
+                    <span v-if="progress[currentElement.id]?.score != null" class="ml-0.5">
+                      {{ Math.round((progress[currentElement.id]!.score!) * 100) }}%
+                    </span>
+                  </span>
+                </div>
+                <div v-else-if="elementStatus(currentElement.id) === 'in_progress'" class="flex-shrink-0">
+                  <span class="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
+                    In Progress
+                  </span>
+                </div>
+              </div>
 
-            <!-- Quiz / Assessment -->
-            <QuizEngine
-              v-else-if="currentElement.element_type === 'quiz' || currentElement.element_type === 'assessment'"
-              :content-cid="currentElement.content_cid"
-              :element-id="currentElement.id"
-              @complete="onQuizComplete"
-            />
+              <!-- Skill tags -->
+              <div v-if="elementSkills.length > 0" class="mt-3 flex flex-wrap gap-1.5">
+                <router-link
+                  v-for="skill in elementSkills"
+                  :key="skill.skill_id || skill.id"
+                  :to="`/skills/${skill.skill_id || skill.id}`"
+                  class="inline-flex items-center rounded-full bg-[rgb(var(--color-primary)/0.08)] px-2 py-0.5 text-[10px] font-medium text-[rgb(var(--color-primary))] transition-colors hover:bg-[rgb(var(--color-primary)/0.15)]"
+                >
+                  {{ skill.skill_name || skill.name }}
+                </router-link>
+              </div>
+            </div>
 
-            <!-- Interactive (placeholder with content rendering) -->
-            <div v-else-if="currentElement.element_type === 'interactive'" class="space-y-4">
-              <TextContent
+            <!-- ============================== -->
+            <!-- CONTENT RENDERERS              -->
+            <!-- ============================== -->
+            <div class="mb-8">
+              <!-- Video -->
+              <VideoPlayer
+                v-if="currentElement.element_type === 'video'"
+                :key="`video-${activeChapter}-${activeElement}`"
                 :content-cid="currentElement.content_cid"
+                :title="currentElement.title"
+                @complete="onVideoComplete"
               />
-              <div class="text-xs text-[rgb(var(--color-muted-foreground))] italic">
-                Interactive simulation support coming in a future update.
-              </div>
-            </div>
 
-            <!-- Fallback for unknown types -->
-            <div v-else class="card p-8 text-center">
-              <div v-if="currentElement.content_cid" class="text-sm text-[rgb(var(--color-muted-foreground))]">
-                <p class="mb-2">Content CID:</p>
-                <code class="font-mono text-xs break-all">{{ currentElement.content_cid }}</code>
-              </div>
-              <div v-else class="text-sm text-[rgb(var(--color-muted-foreground))]">
-                No content attached to this element yet.
-              </div>
-            </div>
-          </div>
+              <!-- Text/Reading -->
+              <TextContent
+                v-else-if="currentElement.element_type === 'text'"
+                :key="`text-${activeChapter}-${activeElement}`"
+                :content-cid="currentElement.content_cid"
+                @complete="markComplete()"
+              />
 
-          <!-- Actions -->
-          <div v-if="enrollment" class="flex items-center gap-3 pt-4 border-t border-[rgb(var(--color-border))]">
-            <AppButton
-              v-if="elementStatus(currentElement.id) !== 'completed' && currentElement.element_type !== 'quiz' && currentElement.element_type !== 'assessment'"
-              @click="markComplete()"
-            >
-              Mark as Complete
-            </AppButton>
-            <div v-if="elementStatus(currentElement.id) === 'completed'" class="flex items-center gap-2 text-sm text-[rgb(var(--color-success))]">
-              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
-              </svg>
-              Completed
-              <span v-if="progress[currentElement.id]?.score != null" class="text-xs text-[rgb(var(--color-muted-foreground))]">
-                ({{ Math.round((progress[currentElement.id]!.score!) * 100) }}%)
-              </span>
+              <!-- PDF -->
+              <PdfViewer
+                v-else-if="currentElement.element_type === 'pdf'"
+                :key="`pdf-${activeChapter}-${activeElement}`"
+                :content-cid="currentElement.content_cid"
+                :page-count="(currentElement as any).page_count"
+                @complete="markComplete()"
+              />
+
+              <!-- Downloadable -->
+              <div
+                v-else-if="currentElement.element_type === 'downloadable'"
+                :key="`dl-${activeChapter}-${activeElement}`"
+                class="rounded-xl border border-[rgb(var(--color-border))] bg-[rgb(var(--color-card))] p-8"
+              >
+                <div class="flex items-start gap-5">
+                  <div class="flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-xl bg-green-100 dark:bg-green-900/30">
+                    <svg class="h-7 w-7 text-green-600 dark:text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                    </svg>
+                  </div>
+                  <div class="flex-1 min-w-0">
+                    <h3 class="text-base font-semibold text-[rgb(var(--color-foreground))]">
+                      {{ (currentElement as any).filename || currentElement.title }}
+                    </h3>
+                    <div class="mt-1 flex items-center gap-3 text-sm text-[rgb(var(--color-muted-foreground))]">
+                      <span v-if="(currentElement as any).mime_type">{{ (currentElement as any).mime_type }}</span>
+                      <span v-if="(currentElement as any).size_bytes">{{ formatFileSize((currentElement as any).size_bytes) }}</span>
+                    </div>
+                    <p v-if="(currentElement as any).description" class="mt-3 text-sm text-[rgb(var(--color-muted-foreground))]">
+                      {{ (currentElement as any).description }}
+                    </p>
+                    <div class="mt-4">
+                      <AppButton @click="onDownloadClick">
+                        <svg class="mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                          <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                        </svg>
+                        Download
+                      </AppButton>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Quiz / Assessment (old format) -->
+              <QuizEngine
+                v-else-if="currentElement.element_type === 'quiz' || currentElement.element_type === 'assessment'"
+                :key="`quiz-${activeChapter}-${activeElement}`"
+                :content-cid="currentElement.content_cid"
+                :element-id="currentElement.id"
+                @complete="onQuizComplete"
+              />
+
+              <!-- Objective Single MCQ -->
+              <McqQuestion
+                v-else-if="currentElement.element_type === 'objective_single_mcq'"
+                :key="`mcq-s-${activeChapter}-${activeElement}`"
+                :content-cid="currentElement.content_cid"
+                :element-id="currentElement.id"
+                type="objective_single_mcq"
+                :is-completed="elementStatus(currentElement.id) === 'completed'"
+                @complete="onMcqComplete"
+              />
+
+              <!-- Objective Multi MCQ -->
+              <McqQuestion
+                v-else-if="currentElement.element_type === 'objective_multi_mcq'"
+                :key="`mcq-m-${activeChapter}-${activeElement}`"
+                :content-cid="currentElement.content_cid"
+                :element-id="currentElement.id"
+                type="objective_multi_mcq"
+                :is-completed="elementStatus(currentElement.id) === 'completed'"
+                @complete="onMcqComplete"
+              />
+
+              <!-- Subjective MCQ -->
+              <McqQuestion
+                v-else-if="currentElement.element_type === 'subjective_mcq'"
+                :key="`mcq-sub-${activeChapter}-${activeElement}`"
+                :content-cid="currentElement.content_cid"
+                :element-id="currentElement.id"
+                type="subjective_mcq"
+                :is-completed="elementStatus(currentElement.id) === 'completed'"
+                @complete="onMcqComplete"
+              />
+
+              <!-- Essay -->
+              <EssayInput
+                v-else-if="currentElement.element_type === 'essay'"
+                :key="`essay-${activeChapter}-${activeElement}`"
+                :content-cid="currentElement.content_cid"
+                :element-id="currentElement.id"
+                :is-completed="elementStatus(currentElement.id) === 'completed'"
+                @complete="onEssayComplete"
+              />
+
+              <!-- Interactive (placeholder with content rendering) -->
+              <div v-else-if="currentElement.element_type === 'interactive'" class="space-y-4">
+                <TextContent
+                  :key="`interactive-${activeChapter}-${activeElement}`"
+                  :content-cid="currentElement.content_cid"
+                />
+                <div class="flex items-center gap-2 rounded-lg bg-amber-50 p-3 text-xs text-amber-700 dark:bg-amber-900/20 dark:text-amber-400">
+                  <svg class="h-4 w-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                  </svg>
+                  Interactive simulation support coming in a future update.
+                </div>
+              </div>
+
+              <!-- Fallback for unknown types -->
+              <div v-else class="rounded-xl border border-[rgb(var(--color-border))] bg-[rgb(var(--color-card))] p-8 text-center">
+                <div class="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-[rgb(var(--color-muted)/0.3)]">
+                  <svg class="h-6 w-6 text-[rgb(var(--color-muted-foreground))]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                  </svg>
+                </div>
+                <p class="text-sm font-medium text-[rgb(var(--color-foreground))]">
+                  {{ elementTypeLabel(currentElement.element_type) }}
+                </p>
+                <div v-if="currentElement.content_cid" class="mt-2 text-xs text-[rgb(var(--color-muted-foreground))]">
+                  <p class="mb-1">Content CID:</p>
+                  <code class="break-all font-mono text-[10px]">{{ currentElement.content_cid }}</code>
+                </div>
+                <div v-else class="mt-2 text-xs text-[rgb(var(--color-muted-foreground))]">
+                  No content attached to this element yet.
+                </div>
+              </div>
             </div>
-            <AppButton
-              v-if="elementStatus(currentElement.id) === 'completed'"
-              variant="secondary"
-              size="sm"
-              @click="advanceToNext"
-            >
-              Next
-            </AppButton>
           </div>
         </div>
 
-        <EmptyState
-          v-else
-          title="No element selected"
-          description="Select an element from the sidebar to start learning."
-        />
+        <!-- Empty state when no element selected -->
+        <div v-else class="flex-1 flex items-center justify-center">
+          <div class="text-center">
+            <div class="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-[rgb(var(--color-muted)/0.3)]">
+              <svg class="h-8 w-8 text-[rgb(var(--color-muted-foreground)/0.5)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h7" />
+              </svg>
+            </div>
+            <h3 class="text-sm font-medium text-[rgb(var(--color-foreground))]">No element selected</h3>
+            <p class="mt-1 text-xs text-[rgb(var(--color-muted-foreground))]">Select an element from the sidebar to start learning.</p>
+          </div>
+        </div>
+
+        <!-- ============================== -->
+        <!-- NAVIGATION FOOTER              -->
+        <!-- ============================== -->
+        <div v-if="currentElement && enrollment" class="flex-shrink-0 border-t border-[rgb(var(--color-border))] bg-[rgb(var(--color-card)/0.5)] px-6 py-3">
+          <div class="mx-auto flex max-w-3xl items-center justify-between">
+            <!-- Previous -->
+            <AppButton variant="secondary" size="sm" @click="goToPrev">
+              <svg class="mr-1.5 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
+              </svg>
+              Previous
+            </AppButton>
+
+            <!-- Mark Complete (content elements only, not quiz/mcq/essay which auto-complete) -->
+            <AppButton
+              v-if="isContentElement && elementStatus(currentElement.id) !== 'completed'"
+              class="bg-emerald-600 hover:bg-emerald-700 text-white"
+              size="sm"
+              @click="markComplete()"
+            >
+              <svg class="mr-1.5 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
+              </svg>
+              Mark Complete
+            </AppButton>
+
+            <!-- Next / Finish Course -->
+            <AppButton
+              v-if="isLastElement"
+              size="sm"
+              @click="router.push(`/courses/${courseId}`)"
+            >
+              Finish Course
+              <svg class="ml-1.5 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
+              </svg>
+            </AppButton>
+            <AppButton v-else size="sm" @click="advanceToNext">
+              Next
+              <svg class="ml-1.5 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
+              </svg>
+            </AppButton>
+          </div>
+        </div>
       </div>
     </div>
   </div>
