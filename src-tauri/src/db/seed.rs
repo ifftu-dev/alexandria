@@ -24,11 +24,97 @@ pub fn seed_if_empty(conn: &Connection) -> Result<bool, rusqlite::Error> {
 
     conn.execute_batch(SEED_SQL)?;
 
+    // Visual assets are applied via parameterized queries (not execute_batch)
+    // because sqlite3_exec can silently fail on long SVG strings or emoji.
+    seed_visual_assets(conn)?;
+
     log::info!("Seed data inserted successfully");
     Ok(true)
 }
 
-const SEED_SQL: &str = r#"
+/// Apply visual assets (emojis, author names, thumbnails) via parameterized queries.
+fn seed_visual_assets(conn: &Connection) -> Result<(), rusqlite::Error> {
+    use rusqlite::params;
+
+    // Subject field emojis
+    for (id, emoji) in [
+        ("sf_cs", "\u{1F4BB}"),     // 💻
+        ("sf_math", "\u{1F4D0}"),   // 📐
+        ("sf_data", "\u{1F4CA}"),   // 📊
+        ("sf_web", "\u{1F310}"),    // 🌐
+        ("sf_cyber", "\u{1F510}"),  // 🔐
+        ("sf_design", "\u{1F3A8}"), // 🎨
+    ] {
+        conn.execute(
+            "UPDATE subject_fields SET icon_emoji = ?1 WHERE id = ?2",
+            params![emoji, id],
+        )?;
+    }
+
+    // DAO emojis
+    for (id, emoji) in [
+        ("dao_cs", "\u{1F4BB}"),
+        ("dao_math", "\u{1F4D0}"),
+        ("dao_data", "\u{1F4CA}"),
+        ("dao_web", "\u{1F310}"),
+        ("dao_cyber", "\u{1F510}"),
+        ("dao_design", "\u{1F3A8}"),
+    ] {
+        conn.execute(
+            "UPDATE governance_daos SET icon_emoji = ?1 WHERE id = ?2",
+            params![emoji, id],
+        )?;
+    }
+
+    // Course author display names
+    for (id, name) in [
+        ("course_algo_101", "Dr. Elena Vasquez"),
+        ("course_web_fullstack", "Dr. Elena Vasquez"),
+        ("course_ml_foundations", "Marcus Chen"),
+        ("course_crypto_101", "Marcus Chen"),
+        ("course_ux_design", "Amara Osei"),
+    ] {
+        conn.execute(
+            "UPDATE courses SET author_name = ?1 WHERE id = ?2",
+            params![name, id],
+        )?;
+    }
+
+    // Course thumbnail SVGs
+    for (id, svg) in COURSE_THUMBNAILS {
+        conn.execute(
+            "UPDATE courses SET thumbnail_svg = ?1 WHERE id = ?2",
+            params![svg, id],
+        )?;
+    }
+
+    Ok(())
+}
+
+const COURSE_THUMBNAILS: &[(&str, &str)] = &[
+    (
+        "course_algo_101",
+        r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#6366f1"/><stop offset="100%" stop-color="#8b5cf6"/></linearGradient></defs><rect width="640" height="360" fill="url(#g)"/><g opacity="0.15" fill="none" stroke="#fff" stroke-width="2"><line x1="80" y1="280" x2="160" y2="200"/><line x1="160" y1="200" x2="240" y2="120"/><line x1="240" y1="120" x2="320" y2="180"/><line x1="320" y1="180" x2="400" y2="80"/><line x1="400" y1="80" x2="480" y2="160"/><line x1="480" y1="160" x2="560" y2="100"/><circle cx="80" cy="280" r="6" fill="#fff"/><circle cx="160" cy="200" r="6" fill="#fff"/><circle cx="240" cy="120" r="6" fill="#fff"/><circle cx="320" cy="180" r="6" fill="#fff"/><circle cx="400" cy="80" r="6" fill="#fff"/><circle cx="480" cy="160" r="6" fill="#fff"/><circle cx="560" cy="100" r="6" fill="#fff"/></g><g opacity="0.08" fill="#fff"><rect x="100" y="240" width="40" height="80" rx="4"/><rect x="160" y="200" width="40" height="120" rx="4"/><rect x="220" y="160" width="40" height="160" rx="4"/><rect x="280" y="180" width="40" height="140" rx="4"/><rect x="340" y="120" width="40" height="200" rx="4"/><rect x="400" y="100" width="40" height="220" rx="4"/><rect x="460" y="140" width="40" height="180" rx="4"/></g><text x="320" y="175" text-anchor="middle" fill="#fff" font-family="system-ui,sans-serif" font-size="28" font-weight="700" opacity="0.9">O(n log n)</text><text x="320" y="210" text-anchor="middle" fill="#fff" font-family="system-ui,sans-serif" font-size="14" opacity="0.6">Algorithms &amp; Data Structures</text></svg>"##,
+    ),
+    (
+        "course_web_fullstack",
+        r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#0ea5e9"/><stop offset="100%" stop-color="#6366f1"/></linearGradient></defs><rect width="640" height="360" fill="url(#g)"/><g opacity="0.1" fill="none" stroke="#fff" stroke-width="1.5"><rect x="60" y="40" width="200" height="280" rx="12"/><rect x="80" y="60" width="160" height="20" rx="4"/><rect x="80" y="90" width="120" height="12" rx="3"/><rect x="80" y="110" width="140" height="12" rx="3"/><rect x="80" y="130" width="100" height="12" rx="3"/><rect x="80" y="160" width="160" height="100" rx="6"/><rect x="80" y="270" width="70" height="28" rx="6"/><rect x="160" y="270" width="70" height="28" rx="6"/></g><g opacity="0.12" fill="#fff"><circle cx="440" cy="180" r="80"/><circle cx="440" cy="180" r="60" fill="none" stroke="#fff" stroke-width="2"/><path d="M420 160 L430 180 L460 180 L435 195 L445 215 L420 200 L395 215 L405 195 L380 180 L410 180Z"/></g><g opacity="0.07" fill="none" stroke="#fff" stroke-width="1"><line x1="340" y1="100" x2="540" y2="100"/><line x1="340" y1="130" x2="540" y2="130"/><line x1="340" y1="230" x2="540" y2="230"/><line x1="340" y1="260" x2="540" y2="260"/></g><text x="320" y="170" text-anchor="middle" fill="#fff" font-family="system-ui,sans-serif" font-size="24" font-weight="700" opacity="0.9">&lt;Vue /&gt; + Rust</text><text x="320" y="205" text-anchor="middle" fill="#fff" font-family="system-ui,sans-serif" font-size="14" opacity="0.6">Full-Stack Web Development</text></svg>"##,
+    ),
+    (
+        "course_ml_foundations",
+        r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#f59e0b"/><stop offset="100%" stop-color="#ef4444"/></linearGradient></defs><rect width="640" height="360" fill="url(#g)"/><g opacity="0.12" fill="none" stroke="#fff" stroke-width="2"><circle cx="200" cy="180" r="8"/><circle cx="280" cy="120" r="8"/><circle cx="360" cy="200" r="8"/><circle cx="440" cy="140" r="8"/><circle cx="320" cy="80" r="8"/><circle cx="160" cy="260" r="8"/><circle cx="480" cy="240" r="8"/><circle cx="400" cy="280" r="8"/><circle cx="240" cy="220" r="8"/><circle cx="520" cy="160" r="8"/><line x1="200" y1="180" x2="280" y2="120"/><line x1="280" y1="120" x2="360" y2="200"/><line x1="360" y1="200" x2="440" y2="140"/><line x1="280" y1="120" x2="320" y2="80"/><line x1="200" y1="180" x2="160" y2="260"/><line x1="440" y1="140" x2="480" y2="240"/><line x1="360" y1="200" x2="400" y2="280"/><line x1="200" y1="180" x2="240" y2="220"/><line x1="440" y1="140" x2="520" y2="160"/></g><g opacity="0.08" fill="#fff"><circle cx="320" cy="180" r="100"/><ellipse cx="320" cy="180" rx="140" ry="60" fill="none" stroke="#fff" stroke-width="1" stroke-dasharray="4,4"/></g><text x="320" y="170" text-anchor="middle" fill="#fff" font-family="system-ui,sans-serif" font-size="26" font-weight="700" opacity="0.9">f(x) = wx + b</text><text x="320" y="205" text-anchor="middle" fill="#fff" font-family="system-ui,sans-serif" font-size="14" opacity="0.6">Machine Learning Foundations</text></svg>"##,
+    ),
+    (
+        "course_crypto_101",
+        r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#10b981"/><stop offset="100%" stop-color="#0ea5e9"/></linearGradient></defs><rect width="640" height="360" fill="url(#g)"/><g opacity="0.1" fill="none" stroke="#fff" stroke-width="2"><rect x="180" y="80" width="280" height="200" rx="16"/><circle cx="320" cy="140" r="30"/><path d="M290 140 L320 110 L350 140" stroke-width="3"/><line x1="240" y1="200" x2="400" y2="200"/><rect x="240" y="220" width="60" height="8" rx="4"/><rect x="320" y="220" width="80" height="8" rx="4"/></g><g opacity="0.07" fill="#fff"><circle cx="120" cy="100" r="4"/><circle cx="520" cy="80" r="4"/><circle cx="100" cy="260" r="4"/><circle cx="540" cy="280" r="4"/><line x1="120" y1="100" x2="180" y2="80" stroke="#fff" stroke-width="1"/><line x1="460" y1="80" x2="520" y2="80" stroke="#fff" stroke-width="1"/><line x1="100" y1="260" x2="180" y2="280" stroke="#fff" stroke-width="1"/><line x1="460" y1="280" x2="540" y2="280" stroke="#fff" stroke-width="1"/></g><g opacity="0.06"><rect x="60" y="300" width="520" height="30" rx="4" fill="#fff"/><rect x="70" y="306" width="100" height="18" rx="3" fill="none" stroke="#fff" stroke-width="1"/><rect x="180" y="306" width="80" height="18" rx="3" fill="none" stroke="#fff" stroke-width="1"/></g><text x="320" y="170" text-anchor="middle" fill="#fff" font-family="system-ui,sans-serif" font-size="24" font-weight="700" opacity="0.9">AES-256 + Ed25519</text><text x="320" y="205" text-anchor="middle" fill="#fff" font-family="system-ui,sans-serif" font-size="14" opacity="0.6">Applied Cryptography</text></svg>"##,
+    ),
+    (
+        "course_ux_design",
+        r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#ec4899"/><stop offset="100%" stop-color="#f59e0b"/></linearGradient></defs><rect width="640" height="360" fill="url(#g)"/><g opacity="0.1" fill="none" stroke="#fff" stroke-width="1.5"><rect x="100" y="60" width="180" height="240" rx="12"/><circle cx="190" cy="120" r="24"/><rect x="130" y="160" width="120" height="8" rx="4"/><rect x="140" y="178" width="100" height="6" rx="3"/><rect x="130" y="200" width="120" height="40" rx="6"/><rect x="130" y="250" width="50" height="28" rx="14"/><rect x="200" y="250" width="50" height="28" rx="14"/></g><g opacity="0.1" fill="none" stroke="#fff" stroke-width="1.5"><rect x="360" y="60" width="180" height="240" rx="12"/><rect x="390" y="90" width="120" height="80" rx="8"/><rect x="390" y="185" width="80" height="8" rx="4"/><rect x="390" y="205" width="120" height="6" rx="3"/><rect x="390" y="225" width="100" height="6" rx="3"/><rect x="390" y="255" width="60" height="24" rx="12"/></g><g opacity="0.07" fill="#fff"><path d="M300 160 L320 140 L340 160" stroke="#fff" stroke-width="2" fill="none"/><line x1="320" y1="160" x2="320" y2="200" stroke="#fff" stroke-width="2"/><circle cx="320" cy="220" r="4"/></g><text x="320" y="170" text-anchor="middle" fill="#fff" font-family="system-ui,sans-serif" font-size="26" font-weight="700" opacity="0.9">UX Design</text><text x="320" y="205" text-anchor="middle" fill="#fff" font-family="system-ui,sans-serif" font-size="14" opacity="0.6">Research to Prototype</text></svg>"##,
+    ),
+];
+
+const SEED_SQL: &str = r##"
 -- ============================================================
 -- SUBJECT FIELDS (top-level knowledge domains)
 -- ============================================================
@@ -538,7 +624,8 @@ INSERT INTO element_skill_tags (element_id, skill_id, weight) VALUES
     ('el_ux_3_2',   'skill_wireframing',    1.0),
     ('el_ux_4_1',   'skill_color_theory',   1.0),
     ('el_ux_4_2',   'skill_typography',     1.0);
-"#;
+
+"##;
 
 #[cfg(test)]
 mod tests {
@@ -624,6 +711,50 @@ mod tests {
             tags >= 40,
             "expected >= 40 element-skill tags, got {}",
             tags
+        );
+    }
+
+    #[test]
+    fn seed_populates_visual_assets() {
+        let db = Database::open_in_memory().expect("open");
+        db.run_migrations().expect("migrate");
+        seed_if_empty(db.conn()).expect("seed");
+
+        // Check thumbnail_svg
+        let svg_count: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM courses WHERE thumbnail_svg IS NOT NULL AND thumbnail_svg != ''",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(svg_count, 5, "all 5 courses should have thumbnail_svg");
+
+        // Check author_name
+        let author_count: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM courses WHERE author_name IS NOT NULL AND author_name != ''",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(author_count, 5, "all 5 courses should have author_name");
+
+        // Check a specific SVG starts correctly
+        let svg: String = db
+            .conn()
+            .query_row(
+                "SELECT thumbnail_svg FROM courses WHERE id = 'course_algo_101'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(
+            svg.starts_with("<svg"),
+            "SVG should start with <svg, got: {}",
+            &svg[..40.min(svg.len())]
         );
     }
 

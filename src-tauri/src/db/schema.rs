@@ -20,6 +20,7 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (10, "cross_device_sync", MIGRATION_010),
     (11, "evidence_challenges", MIGRATION_011),
     (12, "multi_party_attestation", MIGRATION_012),
+    (13, "visual_assets", MIGRATION_013),
 ];
 
 const MIGRATION_001: &str = r#"
@@ -759,4 +760,27 @@ CREATE TABLE IF NOT EXISTS evidence_attestations (
 
 CREATE INDEX IF NOT EXISTS idx_attestations_evidence ON evidence_attestations(evidence_id);
 CREATE INDEX IF NOT EXISTS idx_attestations_attestor ON evidence_attestations(attestor_address);
+"#;
+
+const MIGRATION_013: &str = r#"
+-- ============================================================
+-- Migration 013: Visual Assets
+-- Adds columns for richer visual presentation:
+--   - Course author display name and thumbnail SVG
+--   - DAO and subject_field emoji icons
+-- ============================================================
+
+-- Course author display name (avoids showing raw addresses in the UI).
+ALTER TABLE courses ADD COLUMN author_name TEXT;
+
+-- Inline SVG thumbnail stored as a data URI string.
+-- Avoids the IPFS/iroh dependency for seed thumbnails while keeping
+-- the existing `thumbnail_cid` column for user-uploaded images.
+ALTER TABLE courses ADD COLUMN thumbnail_svg TEXT;
+
+-- Emoji icon for governance DAOs (displayed in cards and headers).
+ALTER TABLE governance_daos ADD COLUMN icon_emoji TEXT;
+
+-- Emoji icon for subject fields (displayed in taxonomy browser).
+ALTER TABLE subject_fields ADD COLUMN icon_emoji TEXT;
 "#;

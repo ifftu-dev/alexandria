@@ -65,7 +65,7 @@ pub async fn list_daos(
     };
 
     let sql = format!(
-        "SELECT id, name, description, scope_type, scope_id, status, \
+        "SELECT id, name, description, icon_emoji, scope_type, scope_id, status, \
          committee_size, election_interval_days, on_chain_tx, created_at, updated_at \
          FROM governance_daos {where_clause} ORDER BY name ASC"
     );
@@ -81,14 +81,15 @@ pub async fn list_daos(
                 id: row.get(0)?,
                 name: row.get(1)?,
                 description: row.get(2)?,
-                scope_type: row.get(3)?,
-                scope_id: row.get(4)?,
-                status: row.get(5)?,
-                committee_size: row.get(6)?,
-                election_interval_days: row.get(7)?,
-                on_chain_tx: row.get(8)?,
-                created_at: row.get(9)?,
-                updated_at: row.get(10)?,
+                icon_emoji: row.get(3)?,
+                scope_type: row.get(4)?,
+                scope_id: row.get(5)?,
+                status: row.get(6)?,
+                committee_size: row.get(7)?,
+                election_interval_days: row.get(8)?,
+                on_chain_tx: row.get(9)?,
+                created_at: row.get(10)?,
+                updated_at: row.get(11)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -131,6 +132,7 @@ pub async fn create_dao(
         id,
         name: params.name,
         description: params.description,
+        icon_emoji: None,
         scope_type: params.scope_type,
         scope_id: params.scope_id,
         status: "pending".into(),
@@ -153,7 +155,7 @@ pub async fn get_dao(
 
     let dao: DaoInfo = conn
         .query_row(
-            "SELECT id, name, description, scope_type, scope_id, status, \
+            "SELECT id, name, description, icon_emoji, scope_type, scope_id, status, \
              committee_size, election_interval_days, on_chain_tx, created_at, updated_at \
              FROM governance_daos WHERE id = ?1",
             params![dao_id],
@@ -162,14 +164,15 @@ pub async fn get_dao(
                     id: row.get(0)?,
                     name: row.get(1)?,
                     description: row.get(2)?,
-                    scope_type: row.get(3)?,
-                    scope_id: row.get(4)?,
-                    status: row.get(5)?,
-                    committee_size: row.get(6)?,
-                    election_interval_days: row.get(7)?,
-                    on_chain_tx: row.get(8)?,
-                    created_at: row.get(9)?,
-                    updated_at: row.get(10)?,
+                    icon_emoji: row.get(3)?,
+                    scope_type: row.get(4)?,
+                    scope_id: row.get(5)?,
+                    status: row.get(6)?,
+                    committee_size: row.get(7)?,
+                    election_interval_days: row.get(8)?,
+                    on_chain_tx: row.get(9)?,
+                    created_at: row.get(10)?,
+                    updated_at: row.get(11)?,
                 })
             },
         )
