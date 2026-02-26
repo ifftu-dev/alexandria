@@ -28,8 +28,27 @@ pub fn seed_if_empty(conn: &Connection) -> Result<bool, rusqlite::Error> {
     // because sqlite3_exec can silently fail on long SVG strings or emoji.
     seed_visual_assets(conn)?;
 
+    // Inline content for all seed elements — stored directly in the database
+    // so content is available on all platforms (including mobile without iroh).
+    seed_inline_content(conn)?;
+
     log::info!("Seed data inserted successfully");
     Ok(true)
+}
+
+/// Store element content directly in the `content_inline` column.
+/// This makes content available on all platforms (including mobile without iroh).
+fn seed_inline_content(conn: &Connection) -> Result<(), rusqlite::Error> {
+    use super::seed_content::SEED_CONTENT;
+    use rusqlite::params;
+
+    for (element_id, body) in SEED_CONTENT {
+        conn.execute(
+            "UPDATE course_elements SET content_inline = ?1 WHERE id = ?2",
+            params![body, element_id],
+        )?;
+    }
+    Ok(())
 }
 
 /// Apply visual assets (emojis, author names, thumbnails) via parameterized queries.
@@ -492,71 +511,120 @@ INSERT INTO course_chapters (id, course_id, title, description, position) VALUES
     ('ch_ux_4',   'course_ux_design', 'Visual Design Fundamentals',  'Color, typography, spacing, and design tokens',                3);
 
 -- ============================================================
--- ELEMENTS (a few per chapter to demonstrate the player)
+-- ELEMENTS (fair representation of all element types)
+-- Types: text, quiz, video, pdf, downloadable, assessment,
+--        objective_single_mcq, objective_multi_mcq,
+--        subjective_mcq, essay, interactive
 -- ============================================================
 INSERT INTO course_elements (id, chapter_id, title, element_type, position, duration_seconds) VALUES
-    -- Algo course - Chapter 1
+    -- Algo course - Chapter 1: Complexity Analysis
     ('el_algo_1_1', 'ch_algo_1', 'What is Big-O?',                       'text',  0, NULL),
     ('el_algo_1_2', 'ch_algo_1', 'Analyzing Loops',                      'text',  1, NULL),
     ('el_algo_1_3', 'ch_algo_1', 'Complexity Quiz',                      'quiz',  2, NULL),
-    -- Algo course - Chapter 2
+    ('el_algo_1_4', 'ch_algo_1', 'Complexity Lecture Video',              'video', 3, 720),
+    -- Algo course - Chapter 2: Linear Data Structures
     ('el_algo_2_1', 'ch_algo_2', 'Array Operations',                     'text',  0, NULL),
     ('el_algo_2_2', 'ch_algo_2', 'Linked List Implementation',           'text',  1, NULL),
     ('el_algo_2_3', 'ch_algo_2', 'Stack & Queue Patterns',               'text',  2, NULL),
     ('el_algo_2_4', 'ch_algo_2', 'Data Structures Quiz',                 'quiz',  3, NULL),
-    -- Algo course - Chapter 3
+    ('el_algo_2_5', 'ch_algo_2', 'Array vs Linked List Trade-offs',      'objective_single_mcq', 4, NULL),
+    -- Algo course - Chapter 3: Trees & Graphs
     ('el_algo_3_1', 'ch_algo_3', 'Binary Trees Explained',               'text',  0, NULL),
     ('el_algo_3_2', 'ch_algo_3', 'Graph Representations',                'text',  1, NULL),
     ('el_algo_3_3', 'ch_algo_3', 'BFS vs DFS',                           'text',  2, NULL),
     ('el_algo_3_4', 'ch_algo_3', 'Trees & Graphs Quiz',                  'quiz',  3, NULL),
-    -- Algo course - Chapter 4
+    ('el_algo_3_5', 'ch_algo_3', 'Graph Traversal Simulation',           'interactive', 4, NULL),
+    -- Algo course - Chapter 4: Sorting & Searching
     ('el_algo_4_1', 'ch_algo_4', 'Bubble Sort & Selection Sort',         'text',  0, NULL),
     ('el_algo_4_2', 'ch_algo_4', 'Merge Sort & Quick Sort',              'text',  1, NULL),
     ('el_algo_4_3', 'ch_algo_4', 'Sorting Quiz',                         'quiz',  2, NULL),
-    -- Algo course - Chapter 5
+    ('el_algo_4_4', 'ch_algo_4', 'Sorting Algorithm Comparison',         'objective_multi_mcq', 3, NULL),
+    -- Algo course - Chapter 5: Hash Tables
     ('el_algo_5_1', 'ch_algo_5', 'Hash Functions',                       'text',  0, NULL),
     ('el_algo_5_2', 'ch_algo_5', 'Collision Resolution',                 'text',  1, NULL),
     ('el_algo_5_3', 'ch_algo_5', 'Hash Tables Quiz',                     'quiz',  2, NULL),
+    ('el_algo_5_4', 'ch_algo_5', 'Algorithms Final Assessment',          'assessment', 3, NULL),
 
-    -- Web course - selected elements
+    -- Web course - Chapter 1: HTML & CSS Fundamentals
     ('el_web_1_1',  'ch_web_1', 'Semantic HTML',                         'text',  0, NULL),
     ('el_web_1_2',  'ch_web_1', 'Flexbox & Grid',                        'text',  1, NULL),
+    ('el_web_1_3',  'ch_web_1', 'CSS Layout Workshop',                   'interactive', 2, NULL),
+    ('el_web_1_4',  'ch_web_1', 'HTML & CSS Cheat Sheet',                'pdf',   3, NULL),
+    -- Web course - Chapter 2: JavaScript Essentials
     ('el_web_2_1',  'ch_web_2', 'ES6+ Features',                         'text',  0, NULL),
     ('el_web_2_2',  'ch_web_2', 'Async/Await Patterns',                  'text',  1, NULL),
+    ('el_web_2_3',  'ch_web_2', 'JavaScript Fundamentals Check',         'objective_single_mcq', 2, NULL),
+    ('el_web_2_4',  'ch_web_2', 'Build a Todo App',                      'essay', 3, NULL),
+    -- Web course - Chapter 3: TypeScript Deep Dive
     ('el_web_3_1',  'ch_web_3', 'TypeScript Type System',                'text',  0, NULL),
+    ('el_web_3_2',  'ch_web_3', 'TypeScript Generics Video',             'video', 1, 540),
+    -- Web course - Chapter 4: Vue 3 & Composition API
     ('el_web_4_1',  'ch_web_4', 'Vue Reactivity System',                 'text',  0, NULL),
     ('el_web_4_2',  'ch_web_4', 'Composables Pattern',                   'text',  1, NULL),
+    ('el_web_4_3',  'ch_web_4', 'Vue Component Design',                  'subjective_mcq', 2, NULL),
+    -- Web course - Chapter 5: Backend with Rust
     ('el_web_5_1',  'ch_web_5', 'Building REST APIs in Rust',            'text',  0, NULL),
     ('el_web_5_2',  'ch_web_5', 'Database Design & Migrations',          'text',  1, NULL),
     ('el_web_5_3',  'ch_web_5', 'Authentication with JWT',               'text',  2, NULL),
+    ('el_web_5_4',  'ch_web_5', 'Starter Project Template',              'downloadable', 3, NULL),
+    ('el_web_5_5',  'ch_web_5', 'Full-Stack Web Dev Final Assessment',   'assessment', 4, NULL),
 
-    -- ML course - selected elements
+    -- ML course - Chapter 1: Regression
     ('el_ml_1_1',   'ch_ml_1', 'Linear Regression from Scratch',         'text',  0, NULL),
     ('el_ml_1_2',   'ch_ml_1', 'Logistic Regression',                    'text',  1, NULL),
+    ('el_ml_1_3',   'ch_ml_1', 'Regression Intuition Video',             'video', 2, 600),
+    -- ML course - Chapter 2: Classification & Clustering
     ('el_ml_2_1',   'ch_ml_2', 'Decision Trees & Random Forests',        'text',  0, NULL),
     ('el_ml_2_2',   'ch_ml_2', 'K-Means Clustering',                     'text',  1, NULL),
+    ('el_ml_2_3',   'ch_ml_2', 'Classify or Cluster?',                   'objective_multi_mcq', 2, NULL),
+    ('el_ml_2_4',   'ch_ml_2', 'K-Means Interactive Visualization',      'interactive', 3, NULL),
+    -- ML course - Chapter 3: Neural Networks
     ('el_ml_3_1',   'ch_ml_3', 'Neural Network Architecture',            'text',  0, NULL),
     ('el_ml_3_2',   'ch_ml_3', 'Backpropagation',                        'text',  1, NULL),
+    ('el_ml_3_3',   'ch_ml_3', 'Design a Neural Network',                'essay', 2, NULL),
+    -- ML course - Chapter 4: Model Evaluation
     ('el_ml_4_1',   'ch_ml_4', 'Cross-Validation Techniques',            'text',  0, NULL),
     ('el_ml_4_2',   'ch_ml_4', 'Evaluation Metrics Quiz',                'quiz',  1, NULL),
+    ('el_ml_4_3',   'ch_ml_4', 'ML Foundations Final Assessment',        'assessment', 2, NULL),
+    ('el_ml_4_4',   'ch_ml_4', 'ML Research Paper Collection',           'pdf',   3, NULL),
 
-    -- Crypto course - selected elements
+    -- Crypto course - Chapter 1: Symmetric Cryptography
     ('el_cry_1_1',  'ch_cry_1', 'Block Ciphers & AES',                   'text',  0, NULL),
+    ('el_cry_1_2',  'ch_cry_1', 'AES Encryption Demo Video',             'video', 1, 480),
+    ('el_cry_1_3',  'ch_cry_1', 'AES Mode Selection',                    'objective_single_mcq', 2, NULL),
+    -- Crypto course - Chapter 2: Public-Key Cryptography
     ('el_cry_2_1',  'ch_cry_2', 'RSA Explained',                         'text',  0, NULL),
     ('el_cry_2_2',  'ch_cry_2', 'Elliptic Curve Cryptography',           'text',  1, NULL),
+    ('el_cry_2_3',  'ch_cry_2', 'RSA vs ECC Trade-offs',                 'subjective_mcq', 2, NULL),
+    -- Crypto course - Chapter 3: Hashing & Signatures
     ('el_cry_3_1',  'ch_cry_3', 'SHA-256 & BLAKE2',                      'text',  0, NULL),
     ('el_cry_3_2',  'ch_cry_3', 'Digital Signatures with Ed25519',       'text',  1, NULL),
+    ('el_cry_3_3',  'ch_cry_3', 'Hash Function Properties',              'objective_multi_mcq', 2, NULL),
+    ('el_cry_3_4',  'ch_cry_3', 'Crypto Toolkit Cheat Sheet',            'downloadable', 3, NULL),
+    -- Crypto course - Chapter 4: Zero-Knowledge Proofs
     ('el_cry_4_1',  'ch_cry_4', 'Introduction to ZK Proofs',             'text',  0, NULL),
+    ('el_cry_4_2',  'ch_cry_4', 'ZK Proof Interactive Demo',             'interactive', 1, NULL),
+    ('el_cry_4_3',  'ch_cry_4', 'Cryptography Final Assessment',         'assessment', 2, NULL),
 
-    -- UX course - selected elements
+    -- UX course - Chapter 1: User Research Methods
     ('el_ux_1_1',   'ch_ux_1', 'Planning User Interviews',               'text',  0, NULL),
     ('el_ux_1_2',   'ch_ux_1', 'Creating Personas',                      'text',  1, NULL),
+    ('el_ux_1_3',   'ch_ux_1', 'User Research Methods Video',            'video', 2, 660),
+    ('el_ux_1_4',   'ch_ux_1', 'Research Plan Essay',                    'essay', 3, NULL),
+    -- UX course - Chapter 2: Information Architecture
     ('el_ux_2_1',   'ch_ux_2', 'Card Sorting Workshop',                  'text',  0, NULL),
     ('el_ux_2_2',   'ch_ux_2', 'Navigation Patterns',                    'text',  1, NULL),
+    ('el_ux_2_3',   'ch_ux_2', 'IA Best Practices',                      'objective_single_mcq', 2, NULL),
+    -- UX course - Chapter 3: Wireframing & Prototyping
     ('el_ux_3_1',   'ch_ux_3', 'Low-Fidelity Wireframes',                'text',  0, NULL),
     ('el_ux_3_2',   'ch_ux_3', 'Interactive Prototyping',                 'text',  1, NULL),
+    ('el_ux_3_3',   'ch_ux_3', 'Wireframe Templates',                    'downloadable', 2, NULL),
+    ('el_ux_3_4',   'ch_ux_3', 'Prototype Fidelity Levels',              'subjective_mcq', 3, NULL),
+    -- UX course - Chapter 4: Visual Design Fundamentals
     ('el_ux_4_1',   'ch_ux_4', 'Color Theory for Screens',               'text',  0, NULL),
-    ('el_ux_4_2',   'ch_ux_4', 'Typography Best Practices',              'text',  1, NULL);
+    ('el_ux_4_2',   'ch_ux_4', 'Typography Best Practices',              'text',  1, NULL),
+    ('el_ux_4_3',   'ch_ux_4', 'Design System Reference',                'pdf',   2, NULL),
+    ('el_ux_4_4',   'ch_ux_4', 'UX Design Final Assessment',             'assessment', 3, NULL);
 
 -- ============================================================
 -- ELEMENT SKILL TAGS (link elements to skills for evidence)
@@ -566,64 +634,127 @@ INSERT INTO element_skill_tags (element_id, skill_id, weight) VALUES
     ('el_algo_1_1', 'skill_big_o',          1.0),
     ('el_algo_1_2', 'skill_big_o',          1.0),
     ('el_algo_1_3', 'skill_big_o',          1.0),
+    ('el_algo_1_4', 'skill_big_o',          0.5),
     ('el_algo_2_1', 'skill_arrays',         1.0),
     ('el_algo_2_2', 'skill_linked_lists',   1.0),
     ('el_algo_2_3', 'skill_stacks_queues',  1.0),
     ('el_algo_2_4', 'skill_arrays',         0.5),
     ('el_algo_2_4', 'skill_linked_lists',   0.5),
     ('el_algo_2_4', 'skill_stacks_queues',  0.5),
+    ('el_algo_2_5', 'skill_arrays',         1.0),
+    ('el_algo_2_5', 'skill_linked_lists',   0.5),
     ('el_algo_3_1', 'skill_trees',          1.0),
     ('el_algo_3_2', 'skill_graphs',         1.0),
     ('el_algo_3_3', 'skill_graphs',         1.0),
     ('el_algo_3_4', 'skill_trees',          0.5),
     ('el_algo_3_4', 'skill_graphs',         0.5),
+    ('el_algo_3_5', 'skill_graphs',         1.0),
+    ('el_algo_3_5', 'skill_trees',          0.5),
     ('el_algo_4_1', 'skill_sorting',        1.0),
     ('el_algo_4_2', 'skill_sorting',        1.0),
     ('el_algo_4_3', 'skill_sorting',        1.0),
+    ('el_algo_4_4', 'skill_sorting',        1.0),
     ('el_algo_5_1', 'skill_hashing',        1.0),
     ('el_algo_5_2', 'skill_hashing',        1.0),
     ('el_algo_5_3', 'skill_hashing',        1.0),
+    ('el_algo_5_4', 'skill_big_o',          0.5),
+    ('el_algo_5_4', 'skill_arrays',         0.5),
+    ('el_algo_5_4', 'skill_trees',          0.5),
+    ('el_algo_5_4', 'skill_sorting',        0.5),
+    ('el_algo_5_4', 'skill_hashing',        0.5),
 
     -- Web course
     ('el_web_1_1',  'skill_html_css',       1.0),
     ('el_web_1_2',  'skill_html_css',       1.0),
+    ('el_web_1_3',  'skill_html_css',       1.0),
+    ('el_web_1_4',  'skill_html_css',       0.5),
     ('el_web_2_1',  'skill_javascript',     1.0),
     ('el_web_2_2',  'skill_javascript',     1.0),
+    ('el_web_2_3',  'skill_javascript',     1.0),
+    ('el_web_2_4',  'skill_javascript',     1.0),
+    ('el_web_2_4',  'skill_html_css',       0.5),
     ('el_web_3_1',  'skill_typescript',     1.0),
+    ('el_web_3_2',  'skill_typescript',     1.0),
     ('el_web_4_1',  'skill_vue',            1.0),
     ('el_web_4_2',  'skill_vue',            1.0),
+    ('el_web_4_3',  'skill_vue',            1.0),
     ('el_web_5_1',  'skill_rest_api',       1.0),
     ('el_web_5_1',  'skill_rust',           0.5),
     ('el_web_5_2',  'skill_db_design',      1.0),
     ('el_web_5_3',  'skill_auth',           1.0),
+    ('el_web_5_4',  'skill_rest_api',       0.5),
+    ('el_web_5_4',  'skill_rust',           0.5),
+    ('el_web_5_5',  'skill_html_css',       0.5),
+    ('el_web_5_5',  'skill_javascript',     0.5),
+    ('el_web_5_5',  'skill_vue',            0.5),
+    ('el_web_5_5',  'skill_rest_api',       0.5),
+    ('el_web_5_5',  'skill_db_design',      0.5),
 
     -- ML course
     ('el_ml_1_1',   'skill_regression',     1.0),
     ('el_ml_1_2',   'skill_regression',     1.0),
+    ('el_ml_1_3',   'skill_regression',     0.5),
     ('el_ml_2_1',   'skill_supervised',     1.0),
     ('el_ml_2_2',   'skill_unsupervised',   1.0),
+    ('el_ml_2_3',   'skill_supervised',     0.5),
+    ('el_ml_2_3',   'skill_unsupervised',   0.5),
+    ('el_ml_2_4',   'skill_unsupervised',   1.0),
     ('el_ml_3_1',   'skill_neural_nets',    1.0),
     ('el_ml_3_2',   'skill_neural_nets',    1.0),
+    ('el_ml_3_3',   'skill_neural_nets',    1.0),
+    ('el_ml_3_3',   'skill_deep_learning',  0.5),
     ('el_ml_4_1',   'skill_ml_eval',        1.0),
     ('el_ml_4_2',   'skill_ml_eval',        1.0),
+    ('el_ml_4_3',   'skill_regression',     0.5),
+    ('el_ml_4_3',   'skill_supervised',     0.5),
+    ('el_ml_4_3',   'skill_neural_nets',    0.5),
+    ('el_ml_4_3',   'skill_ml_eval',        0.5),
+    ('el_ml_4_4',   'skill_ml_eval',        0.5),
 
     -- Crypto course
     ('el_cry_1_1',  'skill_symmetric',      1.0),
+    ('el_cry_1_2',  'skill_symmetric',      0.5),
+    ('el_cry_1_3',  'skill_symmetric',      1.0),
     ('el_cry_2_1',  'skill_asymmetric',     1.0),
     ('el_cry_2_2',  'skill_asymmetric',     1.0),
+    ('el_cry_2_3',  'skill_asymmetric',     1.0),
+    ('el_cry_2_3',  'skill_symmetric',      0.5),
     ('el_cry_3_1',  'skill_hash_crypto',    1.0),
     ('el_cry_3_2',  'skill_signatures',     1.0),
+    ('el_cry_3_3',  'skill_hash_crypto',    1.0),
+    ('el_cry_3_4',  'skill_symmetric',      0.5),
+    ('el_cry_3_4',  'skill_asymmetric',     0.5),
+    ('el_cry_3_4',  'skill_hash_crypto',    0.5),
     ('el_cry_4_1',  'skill_zk',            1.0),
+    ('el_cry_4_2',  'skill_zk',            1.0),
+    ('el_cry_4_3',  'skill_symmetric',      0.5),
+    ('el_cry_4_3',  'skill_asymmetric',     0.5),
+    ('el_cry_4_3',  'skill_hash_crypto',    0.5),
+    ('el_cry_4_3',  'skill_signatures',     0.5),
+    ('el_cry_4_3',  'skill_zk',            0.5),
 
     -- UX course
     ('el_ux_1_1',   'skill_user_research',  1.0),
     ('el_ux_1_2',   'skill_user_research',  1.0),
+    ('el_ux_1_3',   'skill_user_research',  0.5),
+    ('el_ux_1_4',   'skill_user_research',  1.0),
     ('el_ux_2_1',   'skill_ia',            1.0),
     ('el_ux_2_2',   'skill_ia',            1.0),
+    ('el_ux_2_3',   'skill_ia',            1.0),
     ('el_ux_3_1',   'skill_wireframing',    1.0),
     ('el_ux_3_2',   'skill_wireframing',    1.0),
+    ('el_ux_3_3',   'skill_wireframing',    0.5),
+    ('el_ux_3_4',   'skill_wireframing',    1.0),
     ('el_ux_4_1',   'skill_color_theory',   1.0),
-    ('el_ux_4_2',   'skill_typography',     1.0);
+    ('el_ux_4_2',   'skill_typography',     1.0),
+    ('el_ux_4_3',   'skill_design_systems', 1.0),
+    ('el_ux_4_3',   'skill_color_theory',   0.5),
+    ('el_ux_4_3',   'skill_typography',     0.5),
+    ('el_ux_4_4',   'skill_user_research',  0.5),
+    ('el_ux_4_4',   'skill_ia',            0.5),
+    ('el_ux_4_4',   'skill_wireframing',    0.5),
+    ('el_ux_4_4',   'skill_color_theory',   0.5),
+    ('el_ux_4_4',   'skill_typography',     0.5);
 
 "##;
 
@@ -701,15 +832,30 @@ mod tests {
             .conn()
             .query_row("SELECT COUNT(*) FROM course_elements", [], |r| r.get(0))
             .unwrap();
-        assert!(elements >= 40, "expected >= 40 elements, got {}", elements);
+        assert!(elements >= 80, "expected >= 80 elements, got {}", elements);
+
+        // Verify fair representation of element types
+        let element_types: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(DISTINCT element_type) FROM course_elements",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(
+            element_types >= 9,
+            "expected >= 9 distinct element types, got {}",
+            element_types
+        );
 
         let tags: i64 = db
             .conn()
             .query_row("SELECT COUNT(*) FROM element_skill_tags", [], |r| r.get(0))
             .unwrap();
         assert!(
-            tags >= 40,
-            "expected >= 40 element-skill tags, got {}",
+            tags >= 90,
+            "expected >= 90 element-skill tags, got {}",
             tags
         );
     }

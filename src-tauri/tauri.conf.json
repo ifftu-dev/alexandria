@@ -44,6 +44,9 @@
     "copyright": "Alexandria Contributors",
     "macOS": {
       "minimumSystemVersion": "10.15"
+    },
+    "iOS": {
+      "developmentTeam": "VLMNL3V44U"
     }
   }
 }

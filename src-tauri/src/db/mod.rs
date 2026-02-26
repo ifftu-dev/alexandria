@@ -1,6 +1,5 @@
 pub mod schema;
 pub mod seed;
-#[cfg(desktop)]
 pub mod seed_content;
 
 use rusqlite::Connection;

@@ -73,6 +73,7 @@ pub struct Element {
     pub title: String,
     pub element_type: String,
     pub content_cid: Option<String>,
+    pub content_inline: Option<String>,
     pub position: i64,
     pub duration_seconds: Option<i64>,
 }

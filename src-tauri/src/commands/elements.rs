@@ -21,7 +21,7 @@ pub async fn list_elements(
     let mut stmt = db
         .conn()
         .prepare(
-            "SELECT id, chapter_id, title, element_type, content_cid, position, duration_seconds \
+            "SELECT id, chapter_id, title, element_type, content_cid, content_inline, position, duration_seconds \
              FROM course_elements WHERE chapter_id = ?1 ORDER BY position ASC",
         )
         .map_err(|e| e.to_string())?;
@@ -34,8 +34,9 @@ pub async fn list_elements(
                 title: row.get(2)?,
                 element_type: row.get(3)?,
                 content_cid: row.get(4)?,
-                position: row.get(5)?,
-                duration_seconds: row.get(6)?,
+                content_inline: row.get(5)?,
+                position: row.get(6)?,
+                duration_seconds: row.get(7)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -90,6 +91,7 @@ pub async fn create_element(
         title: req.title,
         element_type: req.element_type,
         content_cid: req.content_hash,
+        content_inline: None,
         position: next_pos,
         duration_seconds: req.duration_seconds,
     })
@@ -152,7 +154,7 @@ pub async fn update_element(
 
     db.conn()
         .query_row(
-            "SELECT id, chapter_id, title, element_type, content_cid, position, duration_seconds \
+            "SELECT id, chapter_id, title, element_type, content_cid, content_inline, position, duration_seconds \
              FROM course_elements WHERE id = ?1",
             params![element_id],
             |row| {
@@ -162,8 +164,9 @@ pub async fn update_element(
                     title: row.get(2)?,
                     element_type: row.get(3)?,
                     content_cid: row.get(4)?,
-                    position: row.get(5)?,
-                    duration_seconds: row.get(6)?,
+                    content_inline: row.get(5)?,
+                    position: row.get(6)?,
+                    duration_seconds: row.get(7)?,
                 })
             },
         )
