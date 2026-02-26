@@ -868,11 +868,11 @@ export interface QuizResult {
 // ---- P2P ----
 
 export interface P2PStatus {
-  running: boolean
+  is_running: boolean
   peer_id: string | null
   listening_addresses: string[]
   connected_peers: number
-  gossipsub_topics: string[]
+  subscribed_topics: string[]
 }
 
 export interface PeerInfo {

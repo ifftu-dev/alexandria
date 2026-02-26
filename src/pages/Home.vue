@@ -67,7 +67,7 @@ onMounted(async () => {
         {{ greeting }}{{ firstName ? `, ${firstName}` : '' }}
       </h1>
       <p class="mt-1 text-sm text-[rgb(var(--color-muted-foreground))]">
-        Your decentralized learning node is {{ p2pStatus?.running ? 'online' : 'starting up' }}.
+        Your decentralized learning node is {{ p2pStatus?.is_running ? 'online' : p2pStatus != null ? 'offline' : 'starting up' }}.
       </p>
     </div>
 

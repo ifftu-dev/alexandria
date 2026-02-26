@@ -28,6 +28,6 @@ const sidebarCollapsed = ref(false)
     </div>
 
     <!-- Bottom tab bar — visible only on mobile -->
-    <MobileTabBar class="md:hidden" />
+    <MobileTabBar />
   </div>
 </template>

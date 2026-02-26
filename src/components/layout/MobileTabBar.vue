@@ -95,6 +95,7 @@ async function signOut() {
 </script>
 
 <template>
+  <div class="md:hidden">
   <!-- Backdrop -->
   <Transition name="fade">
     <div
@@ -208,6 +209,7 @@ async function signOut() {
       <span class="text-[0.6rem] font-medium leading-tight">More</span>
     </button>
   </nav>
+  </div>
 </template>
 
 <style scoped>

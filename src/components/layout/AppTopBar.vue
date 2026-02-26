@@ -35,13 +35,15 @@ function breadcrumb(): string {
     </div>
 
     <div class="flex items-center gap-3 md:gap-4">
-      <!-- P2P status — hidden on mobile (no P2P on mobile) -->
+      <!-- P2P status — hidden on mobile -->
       <div class="hidden md:flex items-center gap-1.5 text-xs text-[rgb(var(--color-muted-foreground))]">
         <span
           class="w-2 h-2 rounded-full"
-          :class="p2pStatus?.running ? 'bg-[rgb(var(--color-success))]' : 'bg-[rgb(var(--color-muted-foreground)/0.3)]'"
+          :class="p2pStatus?.is_running
+            ? 'bg-[rgb(var(--color-success))]'
+            : p2pStatus != null ? 'bg-[rgb(var(--color-muted-foreground)/0.4)]' : 'bg-amber-500 animate-pulse'"
         />
-        {{ p2pStatus?.running ? `${p2pStatus.connected_peers} peer${p2pStatus.connected_peers !== 1 ? 's' : ''}` : 'Offline' }}
+        {{ p2pStatus?.is_running ? `${p2pStatus.connected_peers} peer${p2pStatus.connected_peers !== 1 ? 's' : ''}` : p2pStatus != null ? 'Offline' : 'Starting...' }}
       </div>
 
       <!-- Theme toggle -->

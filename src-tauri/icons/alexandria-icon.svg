@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#4F46E5"/>
+      <stop offset="100%" stop-color="#4338CA"/>
+    </linearGradient>
+  </defs>
+  <!-- Rounded square background -->
+  <rect width="1024" height="1024" rx="224" fill="url(#bg)"/>
+  <!-- Hexagonal prism icon, centered -->
+  <g transform="translate(192, 172) scale(20)" fill="none" stroke="#ffffff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Outer hexagon -->
+    <path d="M16 2L4 8v16l12 6 12-6V8L16 2z"/>
+    <!-- Vertical center line from top face to bottom -->
+    <line x1="16" y1="8" x2="16" y2="24"/>
+    <!-- Chevron: two separate lines meeting at center -->
+    <line x1="8" y1="12" x2="16" y2="16"/>
+    <line x1="24" y1="12" x2="16" y2="16"/>
+  </g>
+</svg>

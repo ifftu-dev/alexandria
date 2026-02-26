@@ -2,7 +2,7 @@ pub mod schema;
 pub mod seed;
 pub mod seed_content;
 
-use rusqlite::Connection;
+use rusqlite::{Connection, OpenFlags};
 use std::path::Path;
 use thiserror::Error;
 
@@ -30,8 +30,17 @@ unsafe impl Sync for Database {}
 
 impl Database {
     /// Open (or create) a SQLite database at the given path.
+    ///
+    /// Uses SQLITE_OPEN_FULL_MUTEX (serialized mode) so that SQLite
+    /// internally serializes all operations. This is a safety net for
+    /// the `unsafe impl Sync` on Database — even if two tokio tasks
+    /// somehow call into SQLite concurrently, SQLite's own mutex will
+    /// prevent memory corruption.
     pub fn open(path: &Path) -> Result<Self, DbError> {
-        let conn = Connection::open(path)?;
+        let flags = OpenFlags::SQLITE_OPEN_READ_WRITE
+            | OpenFlags::SQLITE_OPEN_CREATE
+            | OpenFlags::SQLITE_OPEN_FULL_MUTEX;
+        let conn = Connection::open_with_flags(path, flags)?;
 
         // Enable WAL mode for better concurrent read performance.
         conn.pragma_update(None, "journal_mode", "WAL")?;

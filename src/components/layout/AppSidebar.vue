@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useP2P } from '@/composables/useP2P'
 import { useAuth } from '@/composables/useAuth'
@@ -18,9 +19,16 @@ defineProps<Props>()
 const emit = defineEmits<{ toggle: [] }>()
 const router = useRouter()
 const route = useRoute()
-const { status: p2pStatus } = useP2P()
+const { status: p2pStatus, startPolling } = useP2P()
 const { lockVault, displayName, stakeAddress } = useAuth()
 const { theme, toggleTheme } = useTheme()
+
+onMounted(() => {
+  // Start polling P2P status so the sidebar reflects node state.
+  // The singleton guard in useP2P prevents duplicate intervals if
+  // AppTopBar already started polling.
+  startPolling(15000)
+})
 
 const themeIcon: Record<string, string> = {
   light: 'M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z',
@@ -142,10 +150,12 @@ function navigate(path: string) {
       <div class="flex items-center gap-1.5">
         <span
           class="w-2 h-2 rounded-full shrink-0"
-          :class="p2pStatus?.running ? 'bg-[rgb(var(--color-success))]' : 'bg-[rgb(var(--color-muted-foreground)/0.3)]'"
+          :class="p2pStatus?.is_running
+            ? 'bg-[rgb(var(--color-success))]'
+            : p2pStatus != null ? 'bg-[rgb(var(--color-muted-foreground)/0.4)]' : 'bg-amber-500 animate-pulse'"
         />
         <span v-if="!collapsed" class="text-xs text-[rgb(var(--color-muted-foreground))]">
-          {{ p2pStatus?.running ? `${p2pStatus.connected_peers} peers` : 'Offline' }}
+          {{ p2pStatus?.is_running ? `${p2pStatus.connected_peers} peers` : p2pStatus != null ? 'Offline' : 'Starting...' }}
         </span>
       </div>
     </div>
