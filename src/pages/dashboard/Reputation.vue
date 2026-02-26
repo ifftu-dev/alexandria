@@ -42,7 +42,7 @@ function formatConfidence(n: number): string {
 </script>
 
 <template>
-  <div class="py-8 px-4 sm:px-6 lg:px-8">
+  <div>
     <!-- Header -->
     <div class="mb-8">
       <h1 class="text-3xl font-bold text-[rgb(var(--color-foreground))]">My Reputation</h1>
@@ -167,7 +167,7 @@ function formatConfidence(n: number): string {
           </div>
 
           <!-- Distribution metrics -->
-          <div v-if="assertion.distribution" class="mt-3 grid grid-cols-4 gap-3 border-t border-[rgb(var(--color-border)/0.5)] pt-3">
+          <div v-if="assertion.distribution" class="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-3 border-t border-[rgb(var(--color-border)/0.5)] pt-3">
             <div>
               <p class="text-[10px] uppercase tracking-wider text-[rgb(var(--color-muted-foreground))]">Median</p>
               <p class="text-sm font-medium font-mono text-[rgb(var(--color-foreground))]">{{ assertion.distribution.median_impact.toFixed(3) }}</p>

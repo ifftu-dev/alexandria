@@ -374,7 +374,7 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
             </AppButton>
           </div>
 
-          <div v-else class="grid grid-cols-3 gap-3">
+          <div v-else class="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div class="rounded-lg border border-[rgb(var(--color-border))] p-3 text-center">
               <svg class="mx-auto h-5 w-5 text-[rgb(var(--color-muted-foreground))]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5M12 17.25h8.25" />

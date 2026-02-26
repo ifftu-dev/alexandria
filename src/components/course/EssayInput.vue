@@ -13,6 +13,7 @@ interface EssayContent {
 
 const props = defineProps<{
   contentCid: string | null
+  contentInline?: string | null
   elementId: string
   isCompleted?: boolean
 }>()
@@ -79,6 +80,18 @@ const validationMessage = computed(() => {
 })
 
 async function loadContent() {
+  // Prefer inline content (works on all platforms including mobile)
+  if (props.contentInline) {
+    try {
+      essay.value = JSON.parse(props.contentInline) as EssayContent
+      text.value = ''
+      submitted.value = false
+    } catch (e: unknown) {
+      error.value = `Failed to parse essay prompt: ${e}`
+      essay.value = null
+    }
+    return
+  }
   if (!props.contentCid) { essay.value = null; return }
   loading.value = true
   error.value = null

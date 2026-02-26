@@ -311,7 +311,7 @@ const proposalCategories = ['policy', 'taxonomy', 'curriculum', 'technical', 'go
             <div class="h-7 w-64 rounded bg-[rgb(var(--color-muted))]" />
             <div class="h-5 w-16 rounded-full bg-[rgb(var(--color-muted))]" />
           </div>
-          <div class="h-4 w-96 rounded bg-[rgb(var(--color-muted)/0.5)]" />
+          <div class="h-4 w-96 max-w-full rounded bg-[rgb(var(--color-muted)/0.5)]" />
           <div class="flex gap-4">
             <div class="h-6 w-24 rounded-lg bg-[rgb(var(--color-muted)/0.3)]" />
             <div class="h-6 w-28 rounded-lg bg-[rgb(var(--color-muted)/0.3)]" />

@@ -110,7 +110,7 @@ async function lockWallet() {
 </script>
 
 <template>
-  <div class="py-8 px-4 sm:px-6 lg:px-8">
+  <div>
     <div class="max-w-2xl">
       <div class="mb-8">
         <h1 class="text-3xl font-bold text-[rgb(var(--color-foreground))]">Settings</h1>
@@ -256,7 +256,7 @@ async function lockWallet() {
 
         <!-- Mnemonic display -->
         <div v-else-if="exportedMnemonic">
-          <div class="grid grid-cols-3 gap-2 mb-4">
+          <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-4">
             <div
               v-for="(word, i) in exportedMnemonic.split(' ')"
               :key="i"

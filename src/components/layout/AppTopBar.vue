@@ -29,14 +29,14 @@ function breadcrumb(): string {
 </script>
 
 <template>
-  <header class="flex items-center justify-between h-14 px-6 border-b border-[rgb(var(--color-border))] bg-[rgb(var(--color-card))]">
-    <div class="text-sm text-[rgb(var(--color-muted-foreground))]">
+  <header class="flex items-center justify-between h-12 md:h-14 px-3 md:px-6 border-b border-[rgb(var(--color-border))] bg-[rgb(var(--color-card))]">
+    <div class="text-sm text-[rgb(var(--color-muted-foreground))] truncate">
       {{ breadcrumb() }}
     </div>
 
-    <div class="flex items-center gap-4">
-      <!-- P2P status -->
-      <div class="flex items-center gap-1.5 text-xs text-[rgb(var(--color-muted-foreground))]">
+    <div class="flex items-center gap-3 md:gap-4">
+      <!-- P2P status — hidden on mobile (no P2P on mobile) -->
+      <div class="hidden md:flex items-center gap-1.5 text-xs text-[rgb(var(--color-muted-foreground))]">
         <span
           class="w-2 h-2 rounded-full"
           :class="p2pStatus?.running ? 'bg-[rgb(var(--color-success))]' : 'bg-[rgb(var(--color-muted-foreground)/0.3)]'"

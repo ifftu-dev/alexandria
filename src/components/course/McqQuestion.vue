@@ -21,6 +21,7 @@ interface McqContent {
 
 const props = defineProps<{
   contentCid: string | null
+  contentInline?: string | null
   elementId: string
   type: McqType
   isCompleted?: boolean
@@ -50,7 +51,24 @@ const typeBadge = computed(() => {
   }
 })
 
+function parseAndReset(json: string) {
+  mcq.value = JSON.parse(json) as McqContent
+  selectedIndices.value = []
+  submitted.value = false
+  score.value = 0
+}
+
 async function loadContent() {
+  // Prefer inline content (works on all platforms including mobile)
+  if (props.contentInline) {
+    try {
+      parseAndReset(props.contentInline)
+    } catch (e: unknown) {
+      error.value = `Failed to parse question: ${e}`
+      mcq.value = null
+    }
+    return
+  }
   if (!props.contentCid) { mcq.value = null; return }
   loading.value = true
   error.value = null
@@ -58,11 +76,7 @@ async function loadContent() {
     const bytes = await invoke<number[]>('content_resolve_bytes', { identifier: props.contentCid })
     const decoder = new TextDecoder()
     const json = decoder.decode(new Uint8Array(bytes))
-    mcq.value = JSON.parse(json) as McqContent
-    // Reset state
-    selectedIndices.value = []
-    submitted.value = false
-    score.value = 0
+    parseAndReset(json)
   } catch (e: unknown) {
     error.value = `Failed to load question: ${e}`
     mcq.value = null

@@ -148,7 +148,7 @@ function enterApp() {
 </script>
 
 <template>
-  <div class="min-h-screen flex items-center justify-center bg-[rgb(var(--color-background))] p-8 relative overflow-hidden">
+  <div class="min-h-screen flex items-center justify-center bg-[rgb(var(--color-background))] p-4 sm:p-8 relative overflow-hidden">
     <Starfield />
 
     <div class="w-full max-w-lg relative z-10">
@@ -375,7 +375,7 @@ function enterApp() {
         </p>
 
         <div class="card p-5 mb-6">
-          <div class="grid grid-cols-3 gap-2">
+          <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
             <div
               v-for="(word, i) in mnemonic.split(' ')"
               :key="i"
