@@ -37,7 +37,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="py-8 px-4 sm:px-6 lg:px-8">
+  <div>
     <!-- Header -->
     <div class="mb-8 flex items-start justify-between">
       <div class="flex items-center gap-3">

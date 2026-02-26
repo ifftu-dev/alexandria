@@ -118,7 +118,7 @@ const bloomOrder = ['remember', 'understand', 'apply', 'analyze', 'evaluate', 'c
 </script>
 
 <template>
-  <div class="py-8 px-4 sm:px-6 lg:px-8">
+  <div>
     <!-- Header -->
     <div class="mb-8">
       <h1 class="text-3xl font-bold text-[rgb(var(--color-foreground))]">Skill Taxonomy</h1>
@@ -221,9 +221,9 @@ const bloomOrder = ['remember', 'understand', 'apply', 'analyze', 'evaluate', 'c
           </p>
         </div>
 
-        <div v-else class="flex gap-4">
-          <!-- Left: Hierarchy panel -->
-          <div class="w-64 flex-shrink-0 space-y-3">
+        <div v-else class="flex flex-col md:flex-row gap-4">
+          <!-- Left: Hierarchy panel — collapsible on mobile -->
+          <div class="w-full md:w-64 md:flex-shrink-0 space-y-3">
             <!-- Subject Fields -->
             <div class="rounded-xl border border-[rgb(var(--color-border))] bg-[rgb(var(--color-card))] p-4">
               <p class="text-[10px] font-semibold text-[rgb(var(--color-muted-foreground))] mb-3 tracking-wider uppercase">Subject Fields</p>

@@ -41,7 +41,7 @@ async function create() {
 </script>
 
 <template>
-  <div class="py-8 px-4 sm:px-6 lg:px-8">
+  <div>
     <div class="max-w-2xl">
       <div class="mb-8">
         <h1 class="text-3xl font-bold text-[rgb(var(--color-foreground))]">Create Course</h1>

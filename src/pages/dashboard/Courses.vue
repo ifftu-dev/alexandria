@@ -68,7 +68,7 @@ onMounted(async () => {
 <template>
   <div class="min-h-screen">
     <!-- Header -->
-    <div class="py-8 px-4 sm:px-6 lg:px-8">
+    <div>
       <h1 class="text-3xl font-bold">My Courses</h1>
       <p class="mt-2 text-[rgb(var(--color-muted-foreground))]">
         Track your learning progress and continue where you left off.

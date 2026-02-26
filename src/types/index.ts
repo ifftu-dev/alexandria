@@ -106,6 +106,7 @@ export interface Element {
   title: string
   element_type: string
   content_cid: string | null
+  content_inline: string | null
   position: number
   duration_seconds: number | null
 }

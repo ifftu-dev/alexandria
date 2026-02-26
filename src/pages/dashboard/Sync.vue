@@ -63,7 +63,7 @@ async function toggleAutoSync() {
     <!-- Skeleton loader -->
     <div v-if="loading" class="animate-pulse">
       <!-- Header skeleton -->
-      <div class="py-8 px-4 sm:px-6 lg:px-8">
+      <div>
         <div class="h-8 w-56 rounded bg-[rgb(var(--color-muted))]" />
         <div class="mt-2 h-4 w-80 rounded bg-[rgb(var(--color-muted)/0.6)]" />
       </div>
@@ -96,7 +96,7 @@ async function toggleAutoSync() {
     <!-- Loaded content -->
     <template v-else>
       <!-- Header -->
-      <div class="py-8 px-4 sm:px-6 lg:px-8">
+      <div>
         <div class="flex items-start justify-between gap-4">
           <div>
             <h1 class="text-3xl font-bold tracking-tight text-[rgb(var(--color-foreground))]">

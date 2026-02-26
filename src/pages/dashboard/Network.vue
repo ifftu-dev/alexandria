@@ -49,7 +49,7 @@ async function refreshPeers() {
 <template>
   <div>
     <!-- Header -->
-    <div class="py-8 px-4 sm:px-6 lg:px-8">
+    <div>
       <div class="flex items-center justify-between">
         <div class="flex items-center gap-3">
           <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-[rgb(var(--color-primary)/0.1)]">

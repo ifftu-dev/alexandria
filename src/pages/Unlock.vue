@@ -61,7 +61,7 @@ function handleKeydown(e: KeyboardEvent) {
 </script>
 
 <template>
-  <div class="min-h-screen flex items-center justify-center bg-[rgb(var(--color-background))] p-8 relative overflow-hidden">
+  <div class="min-h-screen flex items-center justify-center bg-[rgb(var(--color-background))] p-4 sm:p-8 relative overflow-hidden">
     <Starfield />
 
     <div class="w-full max-w-md relative z-10">

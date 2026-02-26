@@ -6,6 +6,7 @@ import type { QuizDefinition, QuizResult } from '@/types'
 
 const props = defineProps<{
   contentCid: string | null
+  contentInline?: string | null
   elementId: string
 }>()
 
@@ -34,7 +35,26 @@ const currentAnswer = computed(() => {
   return answers.value[currentQuestion.value.id]
 })
 
+function parseAndResetQuiz(json: string) {
+  quiz.value = JSON.parse(json) as QuizDefinition
+  currentIndex.value = 0
+  answers.value = {}
+  submitted.value = false
+  result.value = null
+  startTime.value = Date.now()
+}
+
 async function loadQuiz() {
+  // Prefer inline content (works on all platforms including mobile)
+  if (props.contentInline) {
+    try {
+      parseAndResetQuiz(props.contentInline)
+    } catch (e: unknown) {
+      error.value = `Failed to parse quiz: ${e}`
+      quiz.value = null
+    }
+    return
+  }
   if (!props.contentCid) { quiz.value = null; return }
   loading.value = true
   error.value = null
@@ -42,13 +62,7 @@ async function loadQuiz() {
     const bytes = await invoke<number[]>('content_resolve_bytes', { identifier: props.contentCid })
     const decoder = new TextDecoder()
     const json = decoder.decode(new Uint8Array(bytes))
-    quiz.value = JSON.parse(json) as QuizDefinition
-    // Reset state
-    currentIndex.value = 0
-    answers.value = {}
-    submitted.value = false
-    result.value = null
-    startTime.value = Date.now()
+    parseAndResetQuiz(json)
   } catch (e: unknown) {
     error.value = `Failed to load quiz: ${e}`
     quiz.value = null

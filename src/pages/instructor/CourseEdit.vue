@@ -221,7 +221,7 @@ function elementTypeIcon(type: string): string {
 </script>
 
 <template>
-  <div class="py-8 px-4 sm:px-6 lg:px-8">
+  <div>
     <!-- Skeleton -->
     <div v-if="loading" class="space-y-6">
       <div class="flex items-start justify-between">
@@ -236,7 +236,7 @@ function elementTypeIcon(type: string): string {
           <div class="h-9 w-28 animate-pulse rounded-lg bg-[rgb(var(--color-muted-foreground)/0.15)]" />
         </div>
       </div>
-      <div class="grid grid-cols-3 gap-4">
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div v-for="i in 3" :key="i" class="animate-pulse rounded-xl border border-[rgb(var(--color-border))] bg-[rgb(var(--color-card))] p-5">
           <div class="h-3 w-16 rounded bg-[rgb(var(--color-muted-foreground)/0.15)] mb-2" />
           <div class="h-7 w-8 rounded bg-[rgb(var(--color-muted-foreground)/0.2)]" />
@@ -292,7 +292,7 @@ function elementTypeIcon(type: string): string {
       </div>
 
       <!-- Stats -->
-      <div class="grid grid-cols-3 gap-4">
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div class="rounded-xl border border-[rgb(var(--color-border))] bg-[rgb(var(--color-card))] p-5">
           <p class="text-xs text-[rgb(var(--color-muted-foreground))]">Chapters</p>
           <p class="mt-1 text-2xl font-bold text-[rgb(var(--color-foreground))]">{{ totalChapters }}</p>

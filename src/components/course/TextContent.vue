@@ -5,6 +5,7 @@ import { AppSpinner } from '@/components/ui'
 
 const props = defineProps<{
   contentCid: string | null
+  contentInline?: string | null
 }>()
 
 const emit = defineEmits<{
@@ -17,6 +18,11 @@ const loading = ref(false)
 const error = ref<string | null>(null)
 
 async function loadContent() {
+  // Prefer inline content (works on all platforms including mobile)
+  if (props.contentInline) {
+    content.value = props.contentInline
+    return
+  }
   if (!props.contentCid) { content.value = ''; return }
   loading.value = true
   error.value = null
@@ -33,7 +39,7 @@ async function loadContent() {
 }
 
 onMounted(loadContent)
-watch(() => props.contentCid, loadContent)
+watch(() => [props.contentCid, props.contentInline], loadContent)
 </script>
 
 <template>
