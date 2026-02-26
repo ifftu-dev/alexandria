@@ -6,7 +6,9 @@ use libp2p::gossipsub::{self, IdentTopic, MessageAuthenticity, MessageId, Valida
 use libp2p::identity::Keypair;
 use libp2p::kad::store::MemoryStore;
 use libp2p::swarm::NetworkBehaviour;
-use libp2p::{autonat, dcutr, identify, kad, mdns, noise, relay, yamux, PeerId, Swarm, SwarmBuilder};
+use libp2p::{autonat, dcutr, identify, kad, noise, relay, yamux, PeerId, Swarm, SwarmBuilder};
+#[cfg(desktop)]
+use libp2p::mdns;
 use thiserror::Error;
 use tokio::sync::mpsc;
 
@@ -47,6 +49,7 @@ pub enum NetworkError {
 pub struct AlexandriaBehaviour {
     pub gossipsub: gossipsub::Behaviour,
     pub kademlia: kad::Behaviour<MemoryStore>,
+    #[cfg(desktop)]
     pub mdns: mdns::tokio::Behaviour,
     pub identify: identify::Behaviour,
     pub autonat: autonat::Behaviour,
@@ -216,7 +219,8 @@ fn build_behaviour(
     kademlia_config.set_query_timeout(Duration::from_secs(60));
     let kademlia = kad::Behaviour::new(peer_id, MemoryStore::new(peer_id));
 
-    // mDNS for local network discovery
+    // mDNS for local network discovery (desktop only — uses macOS-only SCDynamicStore)
+    #[cfg(desktop)]
     let mdns = mdns::tokio::Behaviour::new(
         mdns::Config::default(),
         peer_id,
@@ -244,6 +248,7 @@ fn build_behaviour(
     Ok(AlexandriaBehaviour {
         gossipsub,
         kademlia,
+        #[cfg(desktop)]
         mdns,
         identify,
         autonat,
@@ -367,6 +372,7 @@ async fn swarm_event_loop(
                     )) => {
                         log::debug!("Peer {peer_id} subscribed to {topic}");
                     }
+                    #[cfg(desktop)]
                     SwarmEvent::Behaviour(AlexandriaBehaviourEvent::Mdns(
                         mdns::Event::Discovered(peers)
                     )) => {
@@ -376,6 +382,7 @@ async fn swarm_event_loop(
                             swarm.behaviour_mut().kademlia.add_address(&peer_id, addr);
                         }
                     }
+                    #[cfg(desktop)]
                     SwarmEvent::Behaviour(AlexandriaBehaviourEvent::Mdns(
                         mdns::Event::Expired(peers)
                     )) => {

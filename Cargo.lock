@@ -103,11 +103,13 @@ dependencies = [
 name = "alexandria-node"
 version = "0.1.0"
 dependencies = [
+ "aes-gcm",
  "anyhow",
  "argon2",
  "bip39",
  "blake2",
  "bytes",
+ "cc",
  "chrono",
  "ed25519-dalek 2.2.0",
  "futures",

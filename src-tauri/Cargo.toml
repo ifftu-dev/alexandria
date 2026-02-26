@@ -14,6 +14,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2.5.4", features = [] }
+cc = "1"
 
 [dependencies]
 # Tauri
@@ -59,20 +60,25 @@ thiserror = "2"
 log = "0.4"
 hex = "0.4"
 
-# ── Desktop-only dependencies ────────────────────────────────────────
-# These are excluded on iOS/Android via target gating. The `cfg(desktop)`
-# alias is set by tauri-build based on the compile target.
-[target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
+# Portable vault encryption (all platforms — replaces Stronghold on mobile)
+argon2 = "0.5"
+zeroize = { version = "1", features = ["derive"] }
+aes-gcm = "0.10"
+
 # Content-addressed storage (iroh embedded BLAKE3 blob store)
 iroh = "0.96"
 iroh-blobs = { version = "0.98", features = ["fs-store"] }
-# Secure secret storage (IOTA Stronghold encrypted vault)
-iota_stronghold = "2"
-argon2 = "0.5"
-zeroize = { version = "1", features = ["derive"] }
-# P2P networking (libp2p swarm)
-libp2p = { version = "0.56.0", features = ["gossipsub", "kad", "mdns", "quic", "noise", "identify", "tokio", "ed25519", "macros", "autonat", "relay", "dcutr", "yamux"] }
+
+# P2P networking (libp2p swarm) — base features for all platforms
+libp2p = { version = "0.56.0", features = ["gossipsub", "kad", "quic", "noise", "identify", "tokio", "ed25519", "macros", "autonat", "relay", "dcutr", "yamux"] }
 futures = "0.3"
+
+# ── Desktop-only dependencies ────────────────────────────────────────
+[target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
+# Secure secret storage (IOTA Stronghold encrypted vault — desktop uses this instead of portable)
+iota_stronghold = "2"
+# mDNS for local network peer discovery (uses macOS SystemConfiguration — not available on iOS)
+libp2p = { version = "0.56.0", features = ["mdns"] }
 
 [dev-dependencies]
 tempfile = "3"

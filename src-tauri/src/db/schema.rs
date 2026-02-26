@@ -21,6 +21,7 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (11, "evidence_challenges", MIGRATION_011),
     (12, "multi_party_attestation", MIGRATION_012),
     (13, "visual_assets", MIGRATION_013),
+    (14, "inline_content", MIGRATION_014),
 ];
 
 const MIGRATION_001: &str = r#"
@@ -783,4 +784,16 @@ ALTER TABLE governance_daos ADD COLUMN icon_emoji TEXT;
 
 -- Emoji icon for subject fields (displayed in taxonomy browser).
 ALTER TABLE subject_fields ADD COLUMN icon_emoji TEXT;
+"#;
+
+const MIGRATION_014: &str = r#"
+-- ============================================================
+-- Migration 014: Inline Content
+-- Adds a content_inline column to course_elements for storing
+-- text/HTML/JSON content directly in the database. This allows
+-- content to be available without an iroh/IPFS node (essential
+-- for mobile and seed data).
+-- ============================================================
+
+ALTER TABLE course_elements ADD COLUMN content_inline TEXT;
 "#;

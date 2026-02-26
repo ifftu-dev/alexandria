@@ -1,9 +1,9 @@
 //! Seed content for dev/testnet course elements.
 //!
-//! Populates `content_cid` for seed elements by writing HTML (for text
-//! elements) and JSON (for quiz elements) into the iroh blob store.
-//! Runs once after iroh starts — skipped if any seed element already
-//! has a `content_cid`.
+//! Contains inline content for all seed elements (HTML for text,
+//! JSON for quizzes/MCQs/essays). Also provides
+//! `seed_content_if_needed()` which writes content into iroh blobs
+//! and populates `content_cid`.
 
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -84,7 +84,7 @@ pub async fn seed_content_if_needed(
 // This is dev/testnet data — short and functional, not a textbook.
 // ---------------------------------------------------------------------------
 
-const SEED_CONTENT: &[(&str, &str)] = &[
+pub const SEED_CONTENT: &[(&str, &str)] = &[
     // ======================================================================
     // ALGORITHMS COURSE
     // ======================================================================
@@ -622,6 +622,131 @@ b = b - lr * ∂MSE/∂b</code></pre>
   <li><strong>Font pairing</strong>: combine a serif and sans-serif, or two weights of the same family</li>
 </ul>
 <p>System font stacks (<code>system-ui, -apple-system, sans-serif</code>) load instantly and match the platform's native feel. For custom fonts, use <code>font-display: swap</code> to avoid invisible text during loading.</p>"#),
+
+    // ======================================================================
+    // INTERACTIVE ELEMENTS (HTML with embedded interactive descriptions)
+    // ======================================================================
+
+    ("el_algo_3_5", r#"<h2>Graph Traversal Simulation</h2>
+<p>This interactive simulation lets you visualize how BFS and DFS explore a graph step by step.</p>
+<h3>How It Works</h3>
+<ol>
+  <li><strong>Build the graph</strong>: Click to add nodes, drag between nodes to create edges</li>
+  <li><strong>Pick a start node</strong>: Click any node to begin the traversal</li>
+  <li><strong>Choose an algorithm</strong>: Toggle between BFS (breadth-first) and DFS (depth-first)</li>
+  <li><strong>Step through</strong>: Use the "Next Step" button to advance one step at a time, or "Auto-play" to animate</li>
+</ol>
+<h3>What to Observe</h3>
+<ul>
+  <li><strong>BFS</strong>: Nodes are visited level by level (concentric rings outward). The queue is shown below.</li>
+  <li><strong>DFS</strong>: Nodes are visited deeply along one branch before backtracking. The stack is shown below.</li>
+  <li>Notice how BFS finds shortest paths in unweighted graphs, while DFS explores as deep as possible first.</li>
+</ul>
+<p>Try creating a graph with cycles and observe how the <code>visited</code> set prevents infinite loops in both algorithms.</p>"#),
+
+    ("el_web_1_3", r#"<h2>CSS Layout Workshop</h2>
+<p>Practice building responsive layouts using Flexbox and CSS Grid in this hands-on workshop.</p>
+<h3>Exercise 1: Flexbox Navigation Bar</h3>
+<p>Create a horizontal navigation bar with the logo on the left and links on the right:</p>
+<pre><code>/* Your goal: */
+.navbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 2rem;
+}
+
+.nav-links {
+  display: flex;
+  gap: 1.5rem;
+}</code></pre>
+<h3>Exercise 2: Grid Product Cards</h3>
+<p>Build a responsive card grid that shows 1 column on mobile, 2 on tablet, 3 on desktop:</p>
+<pre><code>.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 1.5rem;
+}</code></pre>
+<h3>Exercise 3: Holy Grail Layout</h3>
+<p>Combine Grid and Flexbox to build the classic "holy grail" layout: header, footer, main content area with two sidebars. The main content should be fluid, sidebars fixed-width.</p>"#),
+
+    ("el_ml_2_4", r#"<h2>K-Means Interactive Visualization</h2>
+<p>Explore how the K-Means algorithm works by interacting with a 2D scatter plot.</p>
+<h3>Controls</h3>
+<ul>
+  <li><strong>Click on the canvas</strong> to place data points</li>
+  <li><strong>Set K</strong>: choose the number of clusters (2-6)</li>
+  <li><strong>Initialize</strong>: randomly place K centroids (shown as larger colored circles)</li>
+  <li><strong>Step</strong>: run one iteration — assign points to nearest centroid, then recompute centroids</li>
+  <li><strong>Run to convergence</strong>: auto-iterate until centroids stop moving</li>
+</ul>
+<h3>Experiments to Try</h3>
+<ol>
+  <li>Place 3 well-separated clusters and run K-Means with K=3. Does it find them?</li>
+  <li>Try K=2 on the same 3-cluster data. What happens?</li>
+  <li>Place points in a ring shape and try K=2. Does K-Means handle non-convex shapes?</li>
+  <li>Run the algorithm multiple times with the same data. Do you always get the same result?</li>
+</ol>
+<p>This demonstrates why K-Means is sensitive to initialization and why <strong>k-means++</strong> uses smarter initial centroid placement.</p>"#),
+
+    ("el_cry_4_2", r#"<h2>ZK Proof Interactive Demo</h2>
+<p>Experience the magic of zero-knowledge proofs through a classic example: the "Ali Baba Cave" protocol.</p>
+<h3>The Setup</h3>
+<p>There is a circular cave with a locked door in the middle. You (the prover) claim to know the secret word that opens the door. I (the verifier) want proof without learning the secret.</p>
+<h3>The Protocol</h3>
+<ol>
+  <li>You enter the cave and choose path A or path B (I don't watch)</li>
+  <li>I shout which path I want you to come out from</li>
+  <li>If you know the secret, you can always come out the correct path (through the door if needed)</li>
+  <li>If you DON'T know the secret, you can only come out the correct path 50% of the time</li>
+  <li>We repeat N times — after 20 rounds, I'm 99.9999% confident you know the secret</li>
+</ol>
+<h3>Interact</h3>
+<p>Click "Enter Cave" to start a round. Choose a path. The verifier will challenge you. Try both scenarios: knowing the secret and not knowing it. Observe how the probability of faking it drops exponentially with each round.</p>
+<p>This is exactly the structure of real ZK-SNARKs and ZK-STARKs, just with mathematical commitments instead of cave paths.</p>"#),
+
+    // ======================================================================
+    // ASSESSMENT ELEMENTS (QuizDefinition JSON — comprehensive end-of-course)
+    // ======================================================================
+
+    ("el_algo_5_4", ASSESSMENT_ALGO),
+    ("el_web_5_5",  ASSESSMENT_WEB),
+    ("el_ml_4_3",   ASSESSMENT_ML),
+    ("el_cry_4_3",  ASSESSMENT_CRYPTO),
+    ("el_ux_4_4",   ASSESSMENT_UX),
+
+    // ======================================================================
+    // OBJECTIVE SINGLE MCQ ELEMENTS
+    // ======================================================================
+
+    ("el_algo_2_5", MCQ_SINGLE_ALGO),
+    ("el_web_2_3",  MCQ_SINGLE_WEB),
+    ("el_cry_1_3",  MCQ_SINGLE_CRYPTO),
+    ("el_ux_2_3",   MCQ_SINGLE_UX),
+
+    // ======================================================================
+    // OBJECTIVE MULTI MCQ ELEMENTS
+    // ======================================================================
+
+    ("el_algo_4_4", MCQ_MULTI_ALGO),
+    ("el_ml_2_3",   MCQ_MULTI_ML),
+    ("el_cry_3_3",  MCQ_MULTI_CRYPTO),
+
+    // ======================================================================
+    // SUBJECTIVE MCQ ELEMENTS
+    // ======================================================================
+
+    ("el_web_4_3",  MCQ_SUBJ_WEB),
+    ("el_cry_2_3",  MCQ_SUBJ_CRYPTO),
+    ("el_ux_3_4",   MCQ_SUBJ_UX),
+
+    // ======================================================================
+    // ESSAY ELEMENTS
+    // ======================================================================
+
+    ("el_web_2_4",  ESSAY_WEB),
+    ("el_ml_3_3",   ESSAY_ML),
+    ("el_ux_1_4",   ESSAY_UX),
 ];
 
 // ---------------------------------------------------------------------------
@@ -847,5 +972,479 @@ const QUIZ_ML_EVAL: &str = r#"{
       "points": 1,
       "difficulty": 1
     }
+  ]
+}"#;
+
+// ---------------------------------------------------------------------------
+// Assessment content (QuizDefinition JSON — end-of-course comprehensive exams)
+// ---------------------------------------------------------------------------
+
+const ASSESSMENT_ALGO: &str = r#"{
+  "title": "Algorithms & Data Structures Final Assessment",
+  "description": "Comprehensive assessment covering all topics from the course.",
+  "pass_threshold": 0.7,
+  "time_limit_seconds": 1800,
+  "questions": [
+    {
+      "id": "a1",
+      "type": "single_choice",
+      "prompt": "What is the time complexity of inserting an element at the beginning of a dynamic array (Vec)?",
+      "options": ["O(1)", "O(log n)", "O(n)", "O(n²)"],
+      "correct_indices": [2],
+      "explanation": "Inserting at the beginning requires shifting all existing elements, which is O(n).",
+      "points": 2,
+      "difficulty": 2
+    },
+    {
+      "id": "a2",
+      "type": "single_choice",
+      "prompt": "Which traversal produces a topological ordering of a DAG?",
+      "options": ["BFS", "DFS post-order (reversed)", "In-order", "Level-order"],
+      "correct_indices": [1],
+      "explanation": "Reverse DFS post-order gives a valid topological sort of a directed acyclic graph.",
+      "points": 2,
+      "difficulty": 2
+    },
+    {
+      "id": "a3",
+      "type": "single_choice",
+      "prompt": "Which sorting algorithm has the best worst-case time complexity?",
+      "options": ["Quick Sort — O(n log n)", "Merge Sort — O(n log n)", "Bubble Sort — O(n²)", "Selection Sort — O(n²)"],
+      "correct_indices": [1],
+      "explanation": "Merge Sort always runs in O(n log n), while Quick Sort degrades to O(n²) in the worst case.",
+      "points": 2,
+      "difficulty": 2
+    },
+    {
+      "id": "a4",
+      "type": "true_false",
+      "prompt": "A hash table with chaining can have a load factor greater than 1.0.",
+      "options": ["True", "False"],
+      "correct_indices": [0],
+      "explanation": "With chaining, multiple entries can share a bucket, so the load factor (n/m) can exceed 1.0.",
+      "points": 2,
+      "difficulty": 2
+    },
+    {
+      "id": "a5",
+      "type": "single_choice",
+      "prompt": "What is the space complexity of a recursive DFS on a graph with V vertices?",
+      "options": ["O(1)", "O(log V)", "O(V)", "O(V + E)"],
+      "correct_indices": [2],
+      "explanation": "The recursion stack can grow up to O(V) in the worst case (e.g., a linear graph).",
+      "points": 2,
+      "difficulty": 3
+    }
+  ]
+}"#;
+
+const ASSESSMENT_WEB: &str = r#"{
+  "title": "Full-Stack Web Development Final Assessment",
+  "description": "End-of-course assessment covering HTML/CSS, JavaScript, TypeScript, Vue, and Rust backend.",
+  "pass_threshold": 0.7,
+  "time_limit_seconds": 1800,
+  "questions": [
+    {
+      "id": "a1",
+      "type": "single_choice",
+      "prompt": "Which CSS property creates a flex container?",
+      "options": ["flex: 1", "display: flex", "position: flex", "flex-direction: row"],
+      "correct_indices": [1],
+      "explanation": "display: flex turns an element into a flex container. The other properties configure flex behavior.",
+      "points": 2,
+      "difficulty": 1
+    },
+    {
+      "id": "a2",
+      "type": "single_choice",
+      "prompt": "What does 'await' do in an async function?",
+      "options": ["Blocks the entire JavaScript thread", "Pauses the function until the Promise resolves", "Creates a new thread", "Catches errors automatically"],
+      "correct_indices": [1],
+      "explanation": "await pauses the async function execution (not the thread) until the Promise settles, then resumes with the resolved value.",
+      "points": 2,
+      "difficulty": 2
+    },
+    {
+      "id": "a3",
+      "type": "single_choice",
+      "prompt": "In Vue 3, what is the purpose of ref()?",
+      "options": ["To reference a DOM element", "To create a reactive primitive value", "To define a component ref", "To import a module"],
+      "correct_indices": [1],
+      "explanation": "ref() creates a reactive wrapper around a value (accessed via .value), enabling Vue's reactivity tracking.",
+      "points": 2,
+      "difficulty": 2
+    },
+    {
+      "id": "a4",
+      "type": "true_false",
+      "prompt": "JWT tokens should be stored in localStorage for maximum security.",
+      "options": ["True", "False"],
+      "correct_indices": [1],
+      "explanation": "localStorage is vulnerable to XSS attacks. httpOnly cookies are the recommended storage for JWT tokens.",
+      "points": 2,
+      "difficulty": 2
+    },
+    {
+      "id": "a5",
+      "type": "single_choice",
+      "prompt": "In TypeScript, what does the 'unknown' type represent?",
+      "options": ["Same as 'any' — no type checking", "A type that must be narrowed before use", "An undefined variable", "A compile error"],
+      "correct_indices": [1],
+      "explanation": "unknown is the type-safe counterpart of any — you must narrow it (e.g., with type guards) before accessing properties.",
+      "points": 2,
+      "difficulty": 2
+    }
+  ]
+}"#;
+
+const ASSESSMENT_ML: &str = r#"{
+  "title": "Machine Learning Foundations Final Assessment",
+  "description": "Comprehensive assessment on regression, classification, neural networks, and evaluation.",
+  "pass_threshold": 0.7,
+  "time_limit_seconds": 1800,
+  "questions": [
+    {
+      "id": "a1",
+      "type": "single_choice",
+      "prompt": "What loss function is used for binary classification in logistic regression?",
+      "options": ["Mean Squared Error", "Binary Cross-Entropy", "Hinge Loss", "KL Divergence"],
+      "correct_indices": [1],
+      "explanation": "Binary cross-entropy (log loss) is the standard loss for logistic regression, as it's convex and well-suited for probability outputs.",
+      "points": 2,
+      "difficulty": 2
+    },
+    {
+      "id": "a2",
+      "type": "single_choice",
+      "prompt": "What does the 'k' in k-fold cross-validation represent?",
+      "options": ["Number of features", "Number of folds/splits", "Number of training epochs", "Number of classes"],
+      "correct_indices": [1],
+      "explanation": "k is the number of equal-sized folds the dataset is split into; the model is trained k times, each time using a different fold for validation.",
+      "points": 2,
+      "difficulty": 1
+    },
+    {
+      "id": "a3",
+      "type": "single_choice",
+      "prompt": "Which activation function is most commonly used in hidden layers of modern neural networks?",
+      "options": ["Sigmoid", "Tanh", "ReLU", "Softmax"],
+      "correct_indices": [2],
+      "explanation": "ReLU (max(0, x)) is preferred for hidden layers because it doesn't suffer from vanishing gradients like sigmoid/tanh.",
+      "points": 2,
+      "difficulty": 2
+    },
+    {
+      "id": "a4",
+      "type": "true_false",
+      "prompt": "Random Forests are less prone to overfitting than individual decision trees.",
+      "options": ["True", "False"],
+      "correct_indices": [0],
+      "explanation": "By averaging predictions from many trees trained on random subsets (bagging), Random Forests reduce overfitting compared to a single deep tree.",
+      "points": 2,
+      "difficulty": 2
+    },
+    {
+      "id": "a5",
+      "type": "single_choice",
+      "prompt": "What is the primary purpose of the Adam optimizer?",
+      "options": ["To prevent overfitting", "To adaptively adjust learning rates per parameter", "To initialize weights", "To normalize input data"],
+      "correct_indices": [1],
+      "explanation": "Adam combines momentum and RMSProp to maintain per-parameter adaptive learning rates, accelerating convergence.",
+      "points": 2,
+      "difficulty": 3
+    }
+  ]
+}"#;
+
+const ASSESSMENT_CRYPTO: &str = r#"{
+  "title": "Applied Cryptography Final Assessment",
+  "description": "End-of-course assessment covering symmetric, asymmetric, hashing, signatures, and ZK proofs.",
+  "pass_threshold": 0.7,
+  "time_limit_seconds": 1800,
+  "questions": [
+    {
+      "id": "a1",
+      "type": "single_choice",
+      "prompt": "Why is ECB mode considered insecure?",
+      "options": ["It's too slow", "Identical plaintext blocks produce identical ciphertext blocks", "It doesn't use a key", "It only works with small messages"],
+      "correct_indices": [1],
+      "explanation": "ECB encrypts each block independently, so identical input blocks produce identical output, revealing patterns in the data.",
+      "points": 2,
+      "difficulty": 2
+    },
+    {
+      "id": "a2",
+      "type": "single_choice",
+      "prompt": "What advantage does Ed25519 have over RSA for digital signatures?",
+      "options": ["Larger key sizes", "Smaller keys with equivalent security", "No mathematical basis", "Slower verification"],
+      "correct_indices": [1],
+      "explanation": "Ed25519 achieves comparable security to RSA-3072 with just 32-byte keys, plus it's faster and deterministic.",
+      "points": 2,
+      "difficulty": 2
+    },
+    {
+      "id": "a3",
+      "type": "true_false",
+      "prompt": "ZK-STARKs require a trusted setup ceremony.",
+      "options": ["True", "False"],
+      "correct_indices": [1],
+      "explanation": "ZK-STARKs are 'transparent' — they don't require a trusted setup, unlike ZK-SNARKs which do.",
+      "points": 2,
+      "difficulty": 2
+    },
+    {
+      "id": "a4",
+      "type": "single_choice",
+      "prompt": "What does 'authenticated encryption' provide that plain encryption does not?",
+      "options": ["Faster encryption", "Integrity verification (tamper detection)", "Smaller ciphertext", "Key generation"],
+      "correct_indices": [1],
+      "explanation": "Authenticated encryption (like AES-GCM) includes an authentication tag that detects any modification to the ciphertext.",
+      "points": 2,
+      "difficulty": 2
+    },
+    {
+      "id": "a5",
+      "type": "single_choice",
+      "prompt": "In a Merkle tree, what does changing a single leaf node affect?",
+      "options": ["Only that leaf's hash", "All hashes on the path to the root", "The entire tree must be recomputed", "Nothing — leaves are independent"],
+      "correct_indices": [1],
+      "explanation": "Changing a leaf updates its hash, which changes its parent, which changes its grandparent, all the way up to the root — but only O(log n) hashes total.",
+      "points": 2,
+      "difficulty": 3
+    }
+  ]
+}"#;
+
+const ASSESSMENT_UX: &str = r#"{
+  "title": "UX Design Final Assessment",
+  "description": "Comprehensive assessment on user research, IA, wireframing, and visual design.",
+  "pass_threshold": 0.7,
+  "time_limit_seconds": 1200,
+  "questions": [
+    {
+      "id": "a1",
+      "type": "single_choice",
+      "prompt": "How many users are typically sufficient for a qualitative usability test?",
+      "options": ["1-2", "5-8", "20-30", "100+"],
+      "correct_indices": [1],
+      "explanation": "Nielsen's research shows that 5-8 users uncover approximately 80-85% of usability issues in qualitative studies.",
+      "points": 2,
+      "difficulty": 1
+    },
+    {
+      "id": "a2",
+      "type": "single_choice",
+      "prompt": "What is the purpose of card sorting in UX design?",
+      "options": ["To test visual design", "To understand how users categorize information", "To measure page load time", "To conduct A/B tests"],
+      "correct_indices": [1],
+      "explanation": "Card sorting reveals users' mental models for content organization, informing information architecture decisions.",
+      "points": 2,
+      "difficulty": 1
+    },
+    {
+      "id": "a3",
+      "type": "single_choice",
+      "prompt": "What contrast ratio does WCAG 2.1 AA require for normal text?",
+      "options": ["2:1", "3:1", "4.5:1", "7:1"],
+      "correct_indices": [2],
+      "explanation": "WCAG 2.1 AA requires at least 4.5:1 for normal text and 3:1 for large text (18px+ or 14px+ bold).",
+      "points": 2,
+      "difficulty": 2
+    },
+    {
+      "id": "a4",
+      "type": "true_false",
+      "prompt": "Low-fidelity wireframes should include final colors and typography.",
+      "options": ["True", "False"],
+      "correct_indices": [1],
+      "explanation": "Low-fi wireframes deliberately omit visual design details to focus feedback on layout, structure, and content hierarchy.",
+      "points": 2,
+      "difficulty": 1
+    },
+    {
+      "id": "a5",
+      "type": "single_choice",
+      "prompt": "What is the recommended line length for body text readability?",
+      "options": ["20-30 characters", "45-75 characters", "100-120 characters", "No limit"],
+      "correct_indices": [1],
+      "explanation": "Research consistently shows 45-75 characters per line is optimal for comfortable reading speed and comprehension.",
+      "points": 2,
+      "difficulty": 2
+    }
+  ]
+}"#;
+
+// ---------------------------------------------------------------------------
+// Objective Single MCQ content (McqContent JSON)
+// ---------------------------------------------------------------------------
+
+const MCQ_SINGLE_ALGO: &str = r#"{
+  "question": "You need to frequently insert and remove elements from both ends of a collection. Which data structure is most appropriate?",
+  "options": [
+    { "id": "a", "text": "Array (Vec)" },
+    { "id": "b", "text": "Singly Linked List" },
+    { "id": "c", "text": "Double-ended Queue (VecDeque)" },
+    { "id": "d", "text": "Hash Map" }
+  ],
+  "correct_option_index": 2,
+  "explanation": "A VecDeque (double-ended queue) provides O(1) amortized insertion and removal at both the front and back, making it ideal for this use case."
+}"#;
+
+const MCQ_SINGLE_WEB: &str = r#"{
+  "question": "Which of the following is NOT a valid way to declare a variable in modern JavaScript (ES6+)?",
+  "options": [
+    { "id": "a", "text": "let count = 0" },
+    { "id": "b", "text": "const name = 'Alice'" },
+    { "id": "c", "text": "var total = 100" },
+    { "id": "d", "text": "def value = 42" }
+  ],
+  "correct_option_index": 3,
+  "explanation": "'def' is a keyword in Python and Ruby, not JavaScript. JavaScript uses 'let', 'const', and 'var' for variable declarations."
+}"#;
+
+const MCQ_SINGLE_CRYPTO: &str = r#"{
+  "question": "Which AES mode of operation provides authenticated encryption?",
+  "options": [
+    { "id": "a", "text": "ECB (Electronic Codebook)" },
+    { "id": "b", "text": "CBC (Cipher Block Chaining)" },
+    { "id": "c", "text": "CTR (Counter)" },
+    { "id": "d", "text": "GCM (Galois/Counter Mode)" }
+  ],
+  "correct_option_index": 3,
+  "explanation": "GCM combines CTR mode encryption with a Galois field MAC, providing both confidentiality and integrity (authenticated encryption). ECB, CBC, and CTR only provide confidentiality."
+}"#;
+
+const MCQ_SINGLE_UX: &str = r#"{
+  "question": "In information architecture, what does a 'closed card sort' test?",
+  "options": [
+    { "id": "a", "text": "Whether users can create their own categories" },
+    { "id": "b", "text": "Whether users can sort cards into predefined categories" },
+    { "id": "c", "text": "The visual design of navigation elements" },
+    { "id": "d", "text": "Page load performance metrics" }
+  ],
+  "correct_option_index": 1,
+  "explanation": "In a closed card sort, participants sort content into predefined categories you provide, testing whether your existing structure matches users' mental models."
+}"#;
+
+// ---------------------------------------------------------------------------
+// Objective Multi MCQ content (McqContent JSON)
+// ---------------------------------------------------------------------------
+
+const MCQ_MULTI_ALGO: &str = r#"{
+  "question": "Which of the following sorting algorithms are stable? (Select all that apply)",
+  "options": [
+    { "id": "a", "text": "Merge Sort" },
+    { "id": "b", "text": "Quick Sort" },
+    { "id": "c", "text": "Bubble Sort" },
+    { "id": "d", "text": "Selection Sort" },
+    { "id": "e", "text": "Insertion Sort" }
+  ],
+  "correct_option_indices": [0, 2, 4],
+  "explanation": "Merge Sort, Bubble Sort, and Insertion Sort are stable — they preserve the relative order of elements with equal keys. Quick Sort and Selection Sort are not stable by default."
+}"#;
+
+const MCQ_MULTI_ML: &str = r#"{
+  "question": "Which of the following are supervised learning algorithms? (Select all that apply)",
+  "options": [
+    { "id": "a", "text": "Linear Regression" },
+    { "id": "b", "text": "K-Means Clustering" },
+    { "id": "c", "text": "Random Forest" },
+    { "id": "d", "text": "DBSCAN" },
+    { "id": "e", "text": "Logistic Regression" }
+  ],
+  "correct_option_indices": [0, 2, 4],
+  "explanation": "Linear Regression, Random Forest, and Logistic Regression are supervised (they learn from labeled data). K-Means and DBSCAN are unsupervised clustering algorithms."
+}"#;
+
+const MCQ_MULTI_CRYPTO: &str = r#"{
+  "question": "Which properties must a cryptographic hash function satisfy? (Select all that apply)",
+  "options": [
+    { "id": "a", "text": "Preimage resistance" },
+    { "id": "b", "text": "Second preimage resistance" },
+    { "id": "c", "text": "Collision resistance" },
+    { "id": "d", "text": "Reversibility" },
+    { "id": "e", "text": "Fixed output size" }
+  ],
+  "correct_option_indices": [0, 1, 2, 4],
+  "explanation": "Cryptographic hash functions must be preimage resistant, second-preimage resistant, collision resistant, and produce fixed-size output. They must NOT be reversible — that's the whole point."
+}"#;
+
+// ---------------------------------------------------------------------------
+// Subjective MCQ content (McqContent JSON — no single correct answer)
+// ---------------------------------------------------------------------------
+
+const MCQ_SUBJ_WEB: &str = r#"{
+  "question": "You're building a complex dashboard application with deeply nested state. Which Vue state management approach would you recommend, and why?",
+  "options": [
+    { "id": "a", "text": "Provide/inject for all shared state" },
+    { "id": "b", "text": "Pinia store with modular stores per feature" },
+    { "id": "c", "text": "Props drilling through every component" },
+    { "id": "d", "text": "Global reactive object (reactive({}))" }
+  ],
+  "context": "Consider factors like developer experience, debugging, TypeScript support, and scalability. There is no single right answer — explain your reasoning."
+}"#;
+
+const MCQ_SUBJ_CRYPTO: &str = r#"{
+  "question": "Your team needs to implement encryption for a messaging app. Which approach would you choose?",
+  "options": [
+    { "id": "a", "text": "RSA for all messages" },
+    { "id": "b", "text": "AES-GCM with RSA key exchange" },
+    { "id": "c", "text": "ChaCha20-Poly1305 with X25519 key exchange" },
+    { "id": "d", "text": "Double Ratchet protocol (Signal Protocol)" }
+  ],
+  "context": "Consider: mobile performance, forward secrecy, message size, implementation complexity, and security guarantees. Explain the trade-offs of your choice."
+}"#;
+
+const MCQ_SUBJ_UX: &str = r#"{
+  "question": "A stakeholder requests a pixel-perfect high-fidelity prototype before any user research has been conducted. How do you handle this?",
+  "options": [
+    { "id": "a", "text": "Build the high-fidelity prototype as requested" },
+    { "id": "b", "text": "Propose low-fi wireframes first, then iterate to high-fi" },
+    { "id": "c", "text": "Conduct guerrilla user research before any prototyping" },
+    { "id": "d", "text": "Build a medium-fidelity prototype as a compromise" }
+  ],
+  "context": "Consider the risks of premature commitment to design details, the importance of stakeholder relationships, time constraints, and the value of early user feedback."
+}"#;
+
+// ---------------------------------------------------------------------------
+// Essay content (EssayContent JSON)
+// ---------------------------------------------------------------------------
+
+const ESSAY_WEB: &str = r#"{
+  "question": "Design and describe the architecture of a Todo application built with Vue 3 and a Rust backend. Include the component structure, state management approach, API endpoints, and database schema.",
+  "guidelines": "Your response should cover: 1) Vue component hierarchy (at least 3 components), 2) State management strategy, 3) At least 4 REST API endpoints with methods and paths, 4) SQLite table schema for todos. Include code snippets where helpful.",
+  "min_words": 200,
+  "max_words": 1000,
+  "rubric_criteria": [
+    "Component architecture is well-structured and follows Vue 3 best practices",
+    "API design follows RESTful conventions with appropriate HTTP methods",
+    "Database schema is properly normalized with appropriate types",
+    "State management approach is justified and appropriate for the complexity"
+  ]
+}"#;
+
+const ESSAY_ML: &str = r#"{
+  "question": "Design a neural network architecture for classifying handwritten digits (MNIST dataset). Describe the layer structure, activation functions, loss function, optimizer, and training strategy. Explain your choices.",
+  "guidelines": "Include: 1) Input dimensions and preprocessing, 2) At least 2 hidden layers with justification for neuron counts, 3) Output layer design for 10 classes, 4) Choice of activation functions per layer, 5) Training hyperparameters (learning rate, batch size, epochs). Discuss potential overfitting strategies.",
+  "min_words": 200,
+  "max_words": 800,
+  "rubric_criteria": [
+    "Network architecture is appropriate for the image classification task",
+    "Activation function choices are justified for each layer",
+    "Training strategy includes reasonable hyperparameters",
+    "Overfitting prevention techniques are discussed (dropout, regularization, etc.)"
+  ]
+}"#;
+
+const ESSAY_UX: &str = r#"{
+  "question": "You are redesigning the onboarding experience for a mobile banking app. Write a research plan that covers user interviews, personas, and a testing strategy for your proposed design.",
+  "guidelines": "Include: 1) Research objectives (what you want to learn), 2) Participant recruitment criteria, 3) At least 5 interview questions, 4) A persona template based on expected user segments, 5) Usability testing plan with success metrics.",
+  "min_words": 250,
+  "max_words": 1000,
+  "rubric_criteria": [
+    "Research objectives are clearly defined and actionable",
+    "Interview questions are open-ended and avoid leading bias",
+    "Persona includes demographics, goals, frustrations, and context",
+    "Testing plan includes measurable success criteria"
   ]
 }"#;
