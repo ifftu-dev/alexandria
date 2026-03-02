@@ -26,7 +26,7 @@
 
 ## Architecture
 
-Alexandria Mark 3 is a **Tauri v2 application** — a single binary that bundles a Rust backend with a Vue 3 frontend. It runs on macOS, Linux, Windows, and iOS. There are no servers, no Docker containers, and no external databases.
+Alexandria (Mark 3) is a **Tauri v2 application** — a single binary that bundles a Rust backend with a Vue 3 frontend. It runs on macOS, Linux, Windows, and iOS. There are no servers, no Docker containers, and no external databases.
 
 ```
 alexandria/

@@ -1,4 +1,4 @@
-# Alexandria Mark 3 — Architecture
+# Alexandria (Mark 3) — Architecture
 
 > Desktop-first, offline-first, trustless.
 
@@ -21,13 +21,13 @@
 10. [Frontend](#10-frontend)
 11. [IPC Boundary](#11-ipc-boundary)
 12. [Security Model](#12-security-model)
-13. [Key Differences from Mark 2](#13-key-differences-from-mark-2)
+13. [Key Differences from (Mark 2)](#13-key-differences-from-mark-2)
 
 ---
 
 ## 1. Design Philosophy
 
-Mark 3 eliminates all servers. Every user runs a full node — a native
+(Mark 3) eliminates all servers. Every user runs a full node — a native
 desktop application that contains the entire platform: database, content
 store, P2P networking, wallet, and UI. There is no central API, no
 hosted database, and no Docker infrastructure.
@@ -440,9 +440,9 @@ The frontend communicates with the Rust backend via **118 Tauri IPC commands** a
 
 ---
 
-## 13. Key Differences from Mark 2
+## 13. Key Differences from (Mark 2)
 
-| Aspect | Mark 2 | Mark 3 |
+| Aspect | (Mark 2) | (Mark 3) |
 |--------|--------|--------|
 | Architecture | Client-server (Go API + Nuxt frontend) | Single desktop binary (Tauri + Rust) |
 | Database | PostgreSQL 17 + Neo4j | SQLite (embedded) |

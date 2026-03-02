@@ -1,6 +1,6 @@
 # Database Schema
 
-> Alexandria Mark 3 — SQLite (local-first)
+> Alexandria (Mark 3) — SQLite (local-first)
 
 **Engine**: SQLite (rusqlite 0.38, bundled)
 **Tables**: 43

@@ -1,6 +1,6 @@
 # Project Structure
 
-> Alexandria Mark 3 — Tauri v2 desktop application
+> Alexandria (Mark 3) — Tauri v2 desktop application
 
 ---
 

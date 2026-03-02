@@ -1,4 +1,4 @@
-# Alexandria Mark 3 -- Security Audit
+# Alexandria (Mark 3) -- Security Audit
 
 **Date**: 2026-02-24
 **Scope**: Full Rust backend (`src-tauri/src/`), Tauri configuration, Cargo dependencies

@@ -1,7 +1,7 @@
-# Missing Features — Mark 3 vs Mark 2
+# Missing Features — (Mark 3) vs (Mark 2)
 
-> What exists in the Mark 2 documentation and codebase that has not yet been
-> implemented or documented in Mark 3.
+> What exists in the (Mark 2) documentation and codebase that has not yet been
+> implemented or documented in (Mark 3).
 
 **Last updated**: 2026-02-24
 
@@ -26,18 +26,18 @@
 
 ## 1. Documentation Gaps
 
-Mark 2 has 11 documentation files covering the full platform specification.
-Mark 3 now has 5 (after this session), but several mark2 documents have no
+(Mark 2) has 11 documentation files covering the full platform specification.
+(Mark 3) now has 5 (after this session), but several mark2 documents have no
 mark3 equivalent:
 
-| Mark 2 Document | Mark 3 Equivalent | Status |
+| (Mark 2) Document | (Mark 3) Equivalent | Status |
 |-----------------|-------------------|--------|
-| `whitepaper-consolidated-v0.0.3.md` | None | **Missing** — The whitepaper covers reputation formulas, governance rules, decentralisation criteria, sustainability model, threat model, and credential schemas. Mark 3 implements most of this but has no written spec. |
-| `api-reference.md` | None | **N/A** — Mark 3 has no REST API (IPC commands replace it). A command reference could be written. |
+| `whitepaper-consolidated-v0.0.3.md` | None | **Missing** — The whitepaper covers reputation formulas, governance rules, decentralisation criteria, sustainability model, threat model, and credential schemas. (Mark 3) implements most of this but has no written spec. |
+| `api-reference.md` | None | **N/A** — (Mark 3) has no REST API (IPC commands replace it). A command reference could be written. |
 | `skills-and-reputation.md` | None | **Missing** — RFC covering skill graph design, evidence model, reputation system, and query/consumption model. The implementation exists in mark3 but the design document doesn't. |
-| `sentinel.md` | None | **Missing** — Architecture doc for the Sentinel anti-cheat system. Mark 3 has `useSentinel.ts` and the ML model utilities, but no documentation. |
-| `security-audit-v0.0.1.md` | None | **Missing** — Mark 2 had a 66-finding security audit. Mark 3 has not been audited. |
-| `cloud-deployment.md` | None | **N/A** — Mark 3 is a desktop app; no cloud deployment. |
+| `sentinel.md` | None | **Missing** — Architecture doc for the Sentinel anti-cheat system. (Mark 3) has `useSentinel.ts` and the ML model utilities, but no documentation. |
+| `security-audit-v0.0.1.md` | None | **Missing** — (Mark 2) had a 66-finding security audit. (Mark 3) has not been audited. |
+| `cloud-deployment.md` | None | **N/A** — (Mark 3) is a desktop app; no cloud deployment. |
 | `database-architecture.md` | `database-schema.md` | **Created** (this session) |
 | `project-structure.md` | `project-structure.md` | **Created** (this session) |
 | `architecture-v2.md` | `architecture.md` | **Created** (this session) |
@@ -48,7 +48,7 @@ mark3 equivalent:
 
 ## 2. Smart Contracts
 
-Mark 2 had **7 Aiken/Plutus v3 validators** for on-chain governance enforcement:
+(Mark 2) had **7 Aiken/Plutus v3 validators** for on-chain governance enforcement:
 
 - DAO registration validator
 - Election validator (nomination, voting, finalization)
@@ -58,7 +58,7 @@ Mark 2 had **7 Aiken/Plutus v3 validators** for on-chain governance enforcement:
 - Reputation soulbound token validator
 - Credential NFT validator
 
-**Mark 3 status**: All governance and credential operations use **transaction metadata only** — no on-chain validators. Transactions are submitted to Cardano with metadata fields, but there is no smart contract enforcement. The `cardano/governance.rs` module builds metadata, not Plutus scripts.
+**(Mark 3) status**: All governance and credential operations use **transaction metadata only** — no on-chain validators. Transactions are submitted to Cardano with metadata fields, but there is no smart contract enforcement. The `cardano/governance.rs` module builds metadata, not Plutus scripts.
 
 **Impact**: Governance rules (supermajority, committee authority, election lifecycle) are enforced only at the application level and P2P validation level. A malicious node could bypass these checks by submitting raw transactions. On-chain enforcement would require porting the Aiken validators.
 
@@ -68,18 +68,18 @@ Mark 2 had **7 Aiken/Plutus v3 validators** for on-chain governance enforcement:
 
 ## 3. Authentication
 
-Mark 2 supported 4 authentication methods:
+(Mark 2) supported 4 authentication methods:
 
-| Method | Mark 2 | Mark 3 |
+| Method | (Mark 2) | (Mark 3) |
 |--------|--------|--------|
 | Email/password | Yes | No |
 | OAuth (Google, Apple, LinkedIn) | Yes | No |
 | CIP-30 wallet (browser extension) | Yes | No |
 | BIP-39 mnemonic (self-sovereign) | Yes (custodial) | **Yes** (only method) |
 
-**Mark 3 status**: The only authentication method is the BIP-39 mnemonic + password-protected Stronghold vault. There is no email, no OAuth, and no browser extension wallet support.
+**(Mark 3) status**: The only authentication method is the BIP-39 mnemonic + password-protected Stronghold vault. There is no email, no OAuth, and no browser extension wallet support.
 
-**Impact**: Lower barrier to entry was a mark2 design goal — non-crypto users could sign up with email and get a custodial wallet. Mark 3 requires users to understand and safeguard a 24-word mnemonic.
+**Impact**: Lower barrier to entry was a mark2 design goal — non-crypto users could sign up with email and get a custodial wallet. (Mark 3) requires users to understand and safeguard a 24-word mnemonic.
 
 **Priority**: Low for the desktop app (self-sovereign is the design goal), but important if a web companion is ever built.
 
@@ -87,14 +87,14 @@ Mark 2 supported 4 authentication methods:
 
 ## 4. API & Web Companion
 
-Mark 2 architecture planned for a web companion alongside the desktop app:
+(Mark 2) architecture planned for a web companion alongside the desktop app:
 
 - Lightweight web UI for credential verification
 - Public skill graph browser
 - Read-only course catalog
 - No sign-in required for verification
 
-**Mark 3 status**: No web companion exists. All functionality is in the desktop app.
+**(Mark 3) status**: No web companion exists. All functionality is in the desktop app.
 
 **Priority**: Low — the desktop app is the primary interface. A verification-only web page could be built later as a static site that reads from Cardano directly.
 
@@ -102,13 +102,13 @@ Mark 2 architecture planned for a web companion alongside the desktop app:
 
 ## 5. Monitoring & Observability
 
-Mark 2 had:
+(Mark 2) had:
 
 - **Grafana dashboards** for all services
 - **Prometheus alerting** with 25 alert rules across 3 severity levels
 - **Structured logging** across all Go services
 
-**Mark 3 status**: The app uses `tauri-plugin-log` for basic logging. There are no dashboards, no metrics collection, and no alerting. This is expected for a desktop app, but developer-facing diagnostics could be improved.
+**(Mark 3) status**: The app uses `tauri-plugin-log` for basic logging. There are no dashboards, no metrics collection, and no alerting. This is expected for a desktop app, but developer-facing diagnostics could be improved.
 
 **Priority**: Low — desktop apps don't need Prometheus. But a diagnostics/debug page in the Settings UI would be useful.
 
@@ -116,25 +116,25 @@ Mark 2 had:
 
 ## 6. Cloud Deployment
 
-Mark 2 had **Terraform configurations** for:
+(Mark 2) had **Terraform configurations** for:
 
 - AWS ECS Fargate
 - GCP Cloud Run
 - Azure ACI
 - 3 environments (dev, staging, prod)
 
-**Mark 3 status**: Not applicable. Mark 3 is a native desktop application distributed as a binary. Deployment is `cargo tauri build`.
+**(Mark 3) status**: Not applicable. (Mark 3) is a native desktop application distributed as a binary. Deployment is `cargo tauri build`.
 
 ---
 
 ## 7. Frontend Testing
 
-Mark 2 had:
+(Mark 2) had:
 
 - **Vitest** unit tests for Vue components
 - **Playwright** E2E tests for critical flows
 
-**Mark 3 status**: **No frontend tests exist.** The backend has 309 tests, but the Vue frontend has zero test coverage. There is no Vitest or Playwright configuration.
+**(Mark 3) status**: **No frontend tests exist.** The backend has 309 tests, but the Vue frontend has zero test coverage. There is no Vitest or Playwright configuration.
 
 **Priority**: Medium — the backend is well-tested, but the frontend has complex flows (onboarding, course player, quiz engine, governance UI) that would benefit from testing.
 
@@ -142,14 +142,14 @@ Mark 2 had:
 
 ## 8. Security Audit
 
-Mark 2 had a documented security audit (`security-audit-v0.0.1.md`) with 66 findings:
+(Mark 2) had a documented security audit (`security-audit-v0.0.1.md`) with 66 findings:
 
 - 13 Critical
 - 18 High
 - 20 Medium
 - 15 Low
 
-**Mark 3 status**: No security audit has been performed. Many of the mark2 findings (Apple OAuth unverified, default secrets, no rate limiting, CORS *) don't apply to a desktop app, but new threat vectors exist:
+**(Mark 3) status**: No security audit has been performed. Many of the mark2 findings (Apple OAuth unverified, default secrets, no rate limiting, CORS *) don't apply to a desktop app, but new threat vectors exist:
 
 - Stronghold vault password strength enforcement
 - Local file permission security (SQLite, vault, iroh store)
@@ -163,12 +163,12 @@ Mark 2 had a documented security audit (`security-audit-v0.0.1.md`) with 66 find
 
 ## 9. Content Moderation
 
-Mark 2's architecture-v2 doc identified content moderation as an open question:
+(Mark 2)'s architecture-v2 doc identified content moderation as an open question:
 
 > "Content Moderation — With no central authority, how are spam courses or
 > harmful content handled?"
 
-**Mark 3 status**: No content moderation system exists. Any peer can publish any course to the catalog topic. The peer scoring system penalizes invalid messages, but there is no mechanism for reporting or removing objectionable content.
+**(Mark 3) status**: No content moderation system exists. Any peer can publish any course to the catalog topic. The peer scoring system penalizes invalid messages, but there is no mechanism for reporting or removing objectionable content.
 
 **Priority**: Medium — important for a public network, but not blocking for development/testnet.
 
@@ -176,12 +176,12 @@ Mark 2's architecture-v2 doc identified content moderation as an open question:
 
 ## 10. Search
 
-Mark 2's architecture-v2 doc identified search as an open question:
+(Mark 2)'s architecture-v2 doc identified search as an open question:
 
 > "How do users discover courses and skills without a centralized search
 > index?"
 
-**Mark 3 status**: Course discovery relies on the P2P catalog topic (GossipSub). The frontend has a course listing page but no full-text search. Skills can be browsed by taxonomy but not searched.
+**(Mark 3) status**: Course discovery relies on the P2P catalog topic (GossipSub). The frontend has a course listing page but no full-text search. Skills can be browsed by taxonomy but not searched.
 
 **Priority**: Medium — a local SQLite FTS5 index could provide search without any server.
 
@@ -189,12 +189,12 @@ Mark 2's architecture-v2 doc identified search as an open question:
 
 ## 11. Sentinel Server-Side Models
 
-Mark 2's Sentinel used a dual architecture:
+(Mark 2)'s Sentinel used a dual architecture:
 
 - **Client-side**: Rule-based scoring (11 signals) — **implemented in mark3**
 - **Server-side**: Decision tree ensemble for final adjudication — **not implemented in mark3**
 
-Mark 3 has the client-side ML models (`keystroke-autoencoder.ts`, `mouse-trajectory-cnn.ts`, `face-embedder.ts`) but there is no server-side aggregation. In a P2P architecture, the "server-side" model would need to run locally or be replaced by peer consensus.
+(Mark 3) has the client-side ML models (`keystroke-autoencoder.ts`, `mouse-trajectory-cnn.ts`, `face-embedder.ts`) but there is no server-side aggregation. In a P2P architecture, the "server-side" model would need to run locally or be replaced by peer consensus.
 
 **Priority**: Low — the client-side models provide the core integrity signal. Server-side aggregation was mainly for a centralized architecture.
 
@@ -202,10 +202,10 @@ Mark 3 has the client-side ML models (`keystroke-autoencoder.ts`, `mouse-traject
 
 ## 12. Feature Comparison Matrix
 
-| Feature | Mark 2 | Mark 3 | Notes |
+| Feature | (Mark 2) | (Mark 3) | Notes |
 |---------|:------:|:------:|-------|
 | **Core Platform** | | | |
-| Course content (text, video, quiz) | Y | Y | Mark 3 uses iroh instead of IPFS |
+| Course content (text, video, quiz) | Y | Y | (Mark 3) uses iroh instead of IPFS |
 | Skill taxonomy (DAG) | Y | Y | Same model, SQLite instead of PostgreSQL+Neo4j |
 | Evidence pipeline | Y | Y | Fully implemented |
 | Skill proofs | Y | Y | Fully implemented |
