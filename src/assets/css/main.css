@@ -161,16 +161,18 @@ html {
   text-rendering: optimizeLegibility;
 }
 
+html, body, #app {
+  height: 100dvh;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
 body {
   background-color: var(--app-background);
   color: var(--app-foreground);
   line-height: 1.6;
-  margin: 0;
-  overflow-x: hidden;
-  /* iOS safe area insets */
-  padding-top: env(safe-area-inset-top);
-  padding-left: env(safe-area-inset-left);
-  padding-right: env(safe-area-inset-right);
 }
 
 /* ============================================
@@ -184,7 +186,6 @@ body {
     -webkit-user-select: none;
     user-select: none;
     touch-action: pan-x pan-y;
-    overscroll-behavior: none;
   }
 
   /* Re-enable text selection on content areas */
@@ -201,9 +202,18 @@ body {
     touch-action: manipulation;
   }
 
-  /* Bottom tab bar safe area spacer */
+  /* Safe area utility classes */
+  .safe-area-top {
+    padding-top: env(safe-area-inset-top);
+  }
+
   .safe-area-bottom {
     padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .safe-area-lr {
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
   }
 
   /* Main content area needs bottom padding for tab bar */
