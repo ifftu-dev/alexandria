@@ -168,6 +168,47 @@ pub fn run() {
                 p2p_node: Arc::new(Mutex::new(None)),
             });
 
+            // iOS: disable automatic scroll view content inset adjustment so the
+            // webview truly renders edge-to-edge.  Without this, WKWebView's
+            // UIScrollView adds content insets for the safe area (status bar,
+            // home indicator) which creates a visible gap at the bottom even
+            // though the webview frame itself covers the full screen.
+            // CSS `env(safe-area-inset-*)` handles the insets instead.
+            #[cfg(target_os = "ios")]
+            {
+                if let Some(wv) = app.get_webview_window("main") {
+                    wv.with_webview(|platform_wv| {
+                        use objc2::rc::Retained;
+                        use objc2::runtime::AnyObject;
+
+                        let wk_webview = platform_wv.inner();
+
+                        // Safety: wk_webview is a valid WKWebView pointer from WRY.
+                        // WKWebView responds to `scrollView` (inherited from UIView
+                        // category added by WebKit).
+                        unsafe {
+                            let wk: &AnyObject = &*(wk_webview as *const AnyObject);
+
+                            // UIScrollView *scrollView = [wkWebView scrollView];
+                            let scroll_view: Retained<AnyObject> =
+                                objc2::msg_send![wk, scrollView];
+
+                            // UIScrollViewContentInsetAdjustmentNever = 2
+                            let never: isize = 2;
+                            let _: () = objc2::msg_send![
+                                &*scroll_view,
+                                setContentInsetAdjustmentBehavior: never
+                            ];
+                        }
+
+                        log::info!("iOS: set scrollView.contentInsetAdjustmentBehavior = .never");
+                    })
+                    .unwrap_or_else(|e| {
+                        log::warn!("iOS: failed to configure webview scroll insets: {e}");
+                    });
+                }
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
