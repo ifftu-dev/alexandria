@@ -314,8 +314,10 @@ Use `alex config path` to print this directory on any platform.
 |----------|-------------|
 | [Architecture](docs/architecture.md) | System design — offline-first, trustless, multi-platform |
 | [Database Schema](docs/database-schema.md) | All 43 tables, 14 migrations, relationships |
-| [P2P Protocol](docs/protocol-spec-v1.md) | Wire formats, gossip topics, validation, peer scoring |
+| [P2P Protocol](docs/protocol-spec-v1.md) | Wire formats, 6 gossip topics, validation, peer scoring |
 | [Project Structure](docs/project-structure.md) | Directory layouts, module responsibilities |
+| [Security Audit](docs/security-audit.md) | 24 findings (1 critical, 4 high, 8 medium, 6 low, 5 info) |
+| [Performance Audit](docs/performance-audit.md) | 23 findings (2 critical, 5 high, 8 medium, 5 low, 3 info) |
 | [Missing Features](docs/missing-features.md) | Comparison with mark2 — what's not yet ported |
 
 ## License

@@ -1,13 +1,13 @@
 # Project Structure
 
-> Alexandria (Mark 3) — Tauri v2 desktop application
+> Alexandria (Mark 3) — Tauri v2 desktop and mobile application
 
 ---
 
 ## Top Level
 
 ```
-alexandria-mark3/
+alexandria/
 ├── Cargo.toml              # Workspace root (members: src-tauri, cli)
 ├── package.json            # npm scripts (dev, build, preview)
 ├── vite.config.ts          # Vite + Vue + Tailwind plugins
@@ -17,6 +17,7 @@ alexandria-mark3/
 ├── src-tauri/              # Rust backend (Tauri v2 app)
 ├── src/                    # Vue 3 frontend
 ├── cli/                    # Developer CLI (alex)
+├── patches/                # Local crate patches (if-watch iOS fix)
 ├── docs/                   # Documentation
 └── public/                 # Static assets
 ```
@@ -36,6 +37,7 @@ src-tauri/
 └── src/
     ├── main.rs             # Binary entry point (calls app_lib::run)
     ├── lib.rs              # Tauri setup, registers 118 IPC commands, startup tasks
+    ├── diag.rs             # File-based diagnostic logger + panic hook (iOS/desktop)
     │
     ├── commands/           # IPC command handlers (frontend ↔ backend)
     │   ├── mod.rs          # Re-exports all command modules
@@ -62,15 +64,17 @@ src-tauri/
     ├── crypto/             # Cryptographic primitives
     │   ├── mod.rs
     │   ├── wallet.rs       # BIP-39, CIP-1852, pallas key derivation
-    │   ├── keystore.rs     # IOTA Stronghold vault (create, open, lock, store, retrieve)
+    │   ├── keystore.rs     # IOTA Stronghold vault — desktop (#[cfg(desktop)])
+    │   ├── keystore_portable.rs  # AES-256-GCM + Argon2id vault — mobile (#[cfg(mobile)])
     │   ├── signing.rs      # Ed25519 sign/verify
     │   └── hash.rs         # Blake2b-256, SHA-256, entity_id
     │
     ├── db/                 # Database layer
     │   ├── mod.rs          # Database struct, migration runner
-    │   ├── schema.rs       # 12 migrations, 43 tables (full DDL)
+    │   ├── schema.rs       # 14 migrations, 43 tables (full DDL)
     │   ├── seed.rs         # Taxonomy, courses, governance seed data
-    │   └── seed_content.rs # HTML content + quiz JSON for all elements
+    │   ├── seed_content.rs # Uses include!() to load seed_content_data.rs
+    │   └── seed_content_data.rs  # HTML content + quiz JSON for all 82 seed elements
     │
     ├── domain/             # Business logic (pure, no I/O)
     │   ├── mod.rs
@@ -109,14 +113,14 @@ src-tauri/
     │
     ├── p2p/                # Peer-to-peer networking
     │   ├── mod.rs
-    │   ├── network.rs      # libp2p swarm (7 protocols), event loop
-    │   ├── types.rs        # Topics, SignedGossipMessage, PeerInfo, events
+    │   ├── network.rs      # libp2p swarm (7 protocols), relay logic, event loop
+    │   ├── types.rs        # 6 topics, SignedGossipMessage, PeerExchangeMessage, events
     │   ├── gossip.rs       # High-level publish methods
     │   ├── signing.rs      # Gossip envelope signing/verification
     │   ├── validation.rs   # 5-step validation pipeline
     │   ├── scoring.rs      # Per-topic GossipSub peer scoring
     │   ├── nat.rs          # AutoNAT configuration
-    │   ├── discovery.rs    # Bootstrap peer list
+    │   ├── discovery.rs    # Relay bootstrap addrs, namespace key, relay PeerId
     │   ├── catalog.rs      # Catalog topic handler
     │   ├── evidence.rs     # Evidence topic handler
     │   ├── taxonomy.rs     # Taxonomy topic handler (committee-gated)
@@ -155,29 +159,37 @@ src/
 │   └── useSentinel.ts      # Sentinel integrity sessions
 │
 ├── components/
-│   ├── ui/                 # Barrel-exported UI primitives
-│   │   ├── index.ts
-│   │   ├── AppButton.vue
-│   │   ├── AppBadge.vue
-│   │   ├── AppModal.vue
-│   │   ├── AppAlert.vue
-│   │   ├── AppSpinner.vue
-│   │   ├── AppInput.vue
-│   │   ├── AppTextarea.vue
-│   │   ├── AppTabs.vue
-│   │   ├── EmptyState.vue
-│   │   ├── StatusBadge.vue
-│   │   ├── ConfirmDialog.vue
-│   │   └── DataRow.vue
-│   ├── auth/
-│   │   └── Starfield.vue   # 3-layer parallax SVG starfield (onboarding/unlock bg)
-│   ├── course/
-│   │   ├── TextContent.vue # Rich HTML renderer
-│   │   ├── QuizEngine.vue  # Interactive quiz with scoring
-│   │   └── VideoPlayer.vue # Video element player
-│   └── layout/
-│       ├── AppSidebar.vue  # Navigation, P2P status, theme toggle, sign out
-│       └── AppTopBar.vue   # (Unused — theme toggle moved to sidebar)
+    │   ├── ui/                 # Barrel-exported UI primitives (12 components)
+    │   │   ├── index.ts
+    │   │   ├── AppButton.vue
+    │   │   ├── AppBadge.vue
+    │   │   ├── AppModal.vue
+    │   │   ├── AppAlert.vue
+    │   │   ├── AppSpinner.vue
+    │   │   ├── AppInput.vue
+    │   │   ├── AppTextarea.vue
+    │   │   ├── AppTabs.vue
+    │   │   ├── EmptyState.vue
+    │   │   ├── StatusBadge.vue
+    │   │   ├── ConfirmDialog.vue
+    │   │   └── DataRow.vue
+    │   ├── auth/
+    │   │   └── Starfield.vue   # 3-layer parallax SVG starfield (onboarding/unlock bg)
+    │   ├── course/
+    │   │   ├── TextContent.vue # Rich HTML renderer
+    │   │   ├── QuizEngine.vue  # Interactive quiz with scoring
+    │   │   ├── McqQuestion.vue # Multiple-choice question component
+    │   │   ├── EssayInput.vue  # Essay/long-form input component
+    │   │   ├── PdfViewer.vue   # PDF element viewer
+    │   │   └── VideoPlayer.vue # Video element player
+    │   ├── skills/
+    │   │   └── SkillGraph.vue  # Interactive skill prerequisite graph
+    │   ├── integrity/
+    │   │   └── SentinelTrainingWizard.vue  # 6-step integrity calibration wizard
+    │   └── layout/
+    │       ├── AppSidebar.vue    # Desktop navigation, P2P status, theme toggle, sign out
+    │       ├── AppTopBar.vue     # Top bar (responsive)
+    │       └── MobileTabBar.vue  # Bottom tab bar for mobile (iOS), "More" drawer
 │
 ├── layouts/
 │   ├── AppLayout.vue       # Sidebar + content area

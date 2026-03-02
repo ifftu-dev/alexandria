@@ -42,8 +42,8 @@ Layer 7  P2P Events      PeerConnected, GossipMessage, NatChanged
 Layer 6  Sync            Cross-device sync (encrypted, LWW/append-only)
 Layer 5  Domain          Catalog, Evidence, Taxonomy, Governance, Profiles
 Layer 4  Validation      Signature, Freshness, Dedup, Schema, Authority
-Layer 3  GossipSub       5 topics, peer scoring, signed envelopes
-Layer 2  Transport       QUIC, Kademlia, mDNS, AutoNAT, Relay, DCUtR
+Layer 3  GossipSub       6 topics, peer scoring, signed envelopes
+Layer 2  Transport       QUIC, TCP, Kademlia, AutoNAT, Relay, DCUtR
 Layer 1  Crypto          Ed25519, Blake2b-256, SHA-256
 ```
 
@@ -107,11 +107,12 @@ This creates a 1:1 cryptographic link: PeerId = f(Cardano signing key).
 
 ### 3.1 Transports
 
-| Transport | Address | Purpose |
-|-----------|---------|---------|
-| QUIC v1 | `/ip4/0.0.0.0/udp/0/quic-v1` | Primary (OS-assigned port) |
-| QUIC v1 (IPv6) | `/ip6/::/udp/0/quic-v1` | Best-effort, errors ignored |
-| Relay | noise + yamux over TCP/WebSocket | Circuit relay v2 behind NAT |
+| Transport | Address | Platform | Purpose |
+|-----------|---------|----------|---------|
+| QUIC v1 | `/ip4/0.0.0.0/udp/0/quic-v1` | Desktop | Primary (OS-assigned port) |
+| QUIC v1 (IPv6) | `/ip6/::/udp/0/quic-v1` | Desktop | Best-effort, errors ignored |
+| TCP + Noise + Yamux | `/ip4/0.0.0.0/tcp/0` | Mobile (iOS) | Primary on mobile (QUIC unavailable on iOS) |
+| Relay Circuit | Full relay multiaddr + `/p2p-circuit` | All | Circuit Relay v2 behind NAT |
 
 ### 3.2 Network Behaviour
 
@@ -120,11 +121,11 @@ Seven libp2p protocols compose `AlexandriaBehaviour`:
 | Protocol | Version | Purpose |
 |----------|---------|---------|
 | GossipSub v1.1 | — | Topic-based pub/sub with peer scoring |
-| Kademlia | `/alexandria/kad/1.0` | DHT peer discovery, 60s query timeout |
-| mDNS | — | Local network peer discovery |
+| Kademlia | `/alexandria/kad/1.0` | Private DHT — peer discovery via relay bootstrap |
 | Identify | `/alexandria/id/1.0` | Peer info exchange, push listen addr updates |
 | AutoNAT | — | NAT reachability detection |
-| Relay Client | — | Circuit relay v2 when behind NAT |
+| Relay Server | — | Circuit Relay v2 server (serve relay for other nodes) |
+| Relay Client | — | Circuit Relay v2 client (NAT traversal via relay) |
 | DCUtR | — | Upgrade relayed connections via hole punching |
 
 ### 3.3 Connection Parameters
@@ -141,13 +142,18 @@ Seven libp2p protocols compose `AlexandriaBehaviour`:
 
 ### 3.4 Bootstrap Peers
 
-Bootstrap peer multiaddress format:
+The Alexandria relay serves as the bootstrap node. Four multiaddrs are
+configured (DNS TCP, DNS QUIC, IPv4 TCP, IPv4 QUIC):
+
 ```
-/ip4/<IP>/udp/<PORT>/quic-v1/p2p/<PEER_ID>
+/dns4/alexandria-relay.fly.dev/tcp/4001/p2p/<RELAY_PEER_ID>
+/dns4/alexandria-relay.fly.dev/udp/4001/quic-v1/p2p/<RELAY_PEER_ID>
+/ip4/168.220.86.30/tcp/4001/p2p/<RELAY_PEER_ID>
+/ip4/168.220.86.30/udp/4001/quic-v1/p2p/<RELAY_PEER_ID>
 ```
 
 Bootstrap nodes have no special protocol authority. They serve only as
-initial contact points for Kademlia DHT bootstrapping.
+initial contact points for Kademlia DHT bootstrapping and Circuit Relay v2.
 
 ---
 
@@ -162,8 +168,9 @@ initial contact points for Kademlia DHT bootstrapping.
 | `TOPIC_TAXONOMY` | `/alexandria/taxonomy/1.0` | DAO-ratified skill graph updates |
 | `TOPIC_GOVERNANCE` | `/alexandria/governance/1.0` | Governance events |
 | `TOPIC_PROFILES` | `/alexandria/profiles/1.0` | User profile updates |
+| `TOPIC_PEER_EXCHANGE` | `/alexandria/peer-exchange/1.0` | Known peer address propagation |
 
-All 5 topics are subscribed on node startup.
+All 6 topics are subscribed on node startup.
 
 ---
 
@@ -633,6 +640,7 @@ SQL queries. Any table name not in `SYNCABLE_TABLES` is rejected.
 | **Taxonomy** | **1.0** | **5.0** | **-50.0** | **0.3** |
 | Governance | 0.8 | 3.0 | -30.0 | 0.3 |
 | Profiles | 0.3 | 1.0 | -5.0 | 0.5 |
+| Peer Exchange | 0.3 | 1.0 | -5.0 | 0.5 |
 
 **Design rationale**: Taxonomy has the highest weight and strongest
 invalid message penalty because unauthorized taxonomy updates are the
@@ -716,7 +724,7 @@ Taxonomy updates are the most sensitive message type:
 
 ### 16.4 Privacy
 
-- **Gossip is public**: All messages on the 5 gossip topics are visible
+- **Gossip is public**: All messages on the 6 gossip topics are visible
   to every peer. Evidence records, catalog entries, and governance
   events are inherently public.
 - **Sync is private**: Cross-device sync uses encryption derived from

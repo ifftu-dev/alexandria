@@ -4,7 +4,7 @@
 
 **Engine**: SQLite (rusqlite 0.38, bundled)
 **Tables**: 43
-**Migrations**: 12
+**Migrations**: 14
 
 ---
 
@@ -43,6 +43,8 @@
 | 10 | `cross_device_sync` | Devices, sync state, sync queue tables |
 | 11 | `evidence_challenges` | Stake-based evidence challenges and votes |
 | 12 | `multi_party_attestation` | Attestation requirements and attestation records |
+| 13 | `visual_assets` | Add `author_name`, `thumbnail_svg` to courses; `icon_emoji` to DAOs and subject_fields |
+| 14 | `inline_content` | Add `content_inline` column to `course_elements` for inline HTML storage |
 
 ---
 
@@ -90,7 +92,8 @@
 ### Courses (4 tables)
 
 **`courses`** — Course metadata.
-- Columns: `id`, `title`, `description`, `author_address`, `content_cid`, `thumbnail_cid`, `status`, `version`, `tags_json`, `skill_ids_json`
+- Columns: `id`, `title`, `description`, `author_address`, `author_name`, `content_cid`, `thumbnail_cid`, `thumbnail_svg`, `status`, `version`, `tags_json`, `skill_ids_json`
+- `author_name`, `thumbnail_svg` (migration 13): Display name cache and inline SVG thumbnail
 
 **`course_chapters`** — Ordered chapters within a course.
 - FK: `course_id` → `courses(id)` CASCADE
@@ -98,7 +101,8 @@
 
 **`course_elements`** — Content elements within chapters.
 - FK: `chapter_id` → `course_chapters(id)` CASCADE
-- Columns: `title`, `element_type` (text/video/quiz/essay/pdf), `content_ref`, `sort_order`, `duration_minutes`, `points`
+- Columns: `title`, `element_type` (text/video/quiz/essay/pdf), `content_ref`, `content_inline`, `sort_order`, `duration_minutes`, `points`
+- `content_inline` (migration 14): Optional inline HTML content stored directly in the DB, avoiding iroh lookup for small elements
 
 **`element_skill_tags`** — Maps elements to skills they assess.
 - FKs: `element_id` → `course_elements(id)` CASCADE, `skill_id` → `skills(id)`

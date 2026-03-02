@@ -1,9 +1,9 @@
 # Alexandria (Mark 3) — Architecture
 
-> Desktop-first, offline-first, trustless.
+> Offline-first, trustless, multi-platform.
 
 **Status**: Implementation-complete through Phase 5
-**Last updated**: 2026-02-24
+**Last updated**: 2026-03-02
 
 ---
 
@@ -28,9 +28,9 @@
 ## 1. Design Philosophy
 
 (Mark 3) eliminates all servers. Every user runs a full node — a native
-desktop application that contains the entire platform: database, content
-store, P2P networking, wallet, and UI. There is no central API, no
-hosted database, and no Docker infrastructure.
+application (desktop or mobile) that contains the entire platform:
+database, content store, P2P networking, wallet, and UI. There is no
+central API, no hosted database, and no Docker infrastructure.
 
 **Core principles**:
 
@@ -58,7 +58,7 @@ hosted database, and no Docker infrastructure.
 │  │              │ cmds  │  ┌──────────────┐  │  │
 │  │  19 pages    │       │  │   SQLite DB   │  │  │
 │  │  12 ui comps │       │  │  43 tables    │  │  │
-│  │  5 composable│       │  │  12 migrations│  │  │
+│  │  5 composable│       │  │  14 migrations│  │  │
 │  └──────────────┘       │  └──────────────┘  │  │
 │                         │                    │  │
 │                         │  ┌──────────────┐  │  │
@@ -67,9 +67,10 @@ hosted database, and no Docker infrastructure.
 │                         │  └──────────────┘  │  │
 │                         │                    │  │
 │                         │  ┌──────────────┐  │  │
-│                         │  │ Stronghold    │  │  │
 │                         │  │ Encrypted     │  │  │
 │                         │  │ Vault         │  │  │
+│                         │  │ (Stronghold   │  │  │
+│                         │  │  or portable) │  │  │
 │                         │  └──────────────┘  │  │
 │                         │                    │  │
 │                         │  ┌──────────────┐  │  │
@@ -90,7 +91,8 @@ All state lives on the user's machine in three locations:
 | Store | File/Directory | Purpose |
 |-------|----------------|---------|
 | SQLite | `alexandria.db` | Relational data (courses, skills, evidence, governance) |
-| Stronghold | `vault.stronghold` | Encrypted wallet keys and mnemonic |
+| Vault (desktop) | `vault.stronghold` | IOTA Stronghold encrypted wallet keys and mnemonic |
+| Vault (mobile) | `vault.enc` | AES-256-GCM + Argon2id encrypted wallet keys and mnemonic |
 | iroh | `iroh/` | Content-addressed blobs (course HTML, profiles) |
 
 Default data directory: `~/Library/Application Support/org.alexandria.node/` (macOS).
@@ -125,12 +127,19 @@ The same Ed25519 key serves as:
 
 ### Vault Storage
 
-Keys are stored in an **IOTA Stronghold** encrypted vault:
+Keys are stored in an encrypted vault. The implementation varies by platform:
 
+**Desktop (IOTA Stronghold)**:
 - Password → HMAC-SHA512 with random salt → derived key
 - Mnemonic stored encrypted at a fixed vault path
 - Vault file: `vault.stronghold` (binary, encrypted at rest)
-- Lock/unlock cycle: lock clears in-memory keys, unlock re-derives from mnemonic
+
+**Mobile (Portable AES-256-GCM + Argon2id)**:
+- Password → Argon2id (memory-hard KDF, 64 MB, 3 iterations) → 256-bit key
+- Mnemonic encrypted with AES-256-GCM (random 96-bit nonce)
+- Vault file: `vault.enc` (salt + nonce + ciphertext)
+
+Both share the same lock/unlock cycle: lock clears in-memory keys, unlock re-derives from mnemonic.
 
 ---
 
@@ -138,7 +147,7 @@ Keys are stored in an **IOTA Stronghold** encrypted vault:
 
 **Engine**: SQLite (rusqlite 0.38, bundled)
 
-**Tables**: 43 across 12 migrations
+**Tables**: 43 across 14 migrations
 
 | Domain | Tables |
 |--------|--------|
@@ -208,11 +217,11 @@ Both use Ed25519 signatures for authenticity verification.
 | Protocol | Purpose |
 |----------|---------|
 | GossipSub v1.1 | Topic-based pub/sub with peer scoring |
-| Kademlia | DHT-based peer discovery |
-| mDNS | Local network discovery |
-| Identify | Peer info exchange |
+| Kademlia | Private DHT (`/alexandria/kad/1.0`) — peer discovery via relay bootstrap |
+| Identify | Peer info exchange, agent version |
 | AutoNAT | NAT reachability detection |
-| Relay Client | Circuit relay v2 (NAT traversal) |
+| Relay Server | Circuit Relay v2 server (for nodes that can serve as relays) |
+| Relay Client | Circuit Relay v2 client (NAT traversal via relay) |
 | DCUtR | Direct connection upgrade (hole punching) |
 
 ### Topics
@@ -224,6 +233,7 @@ Both use Ed25519 signatures for authenticity verification.
 | Taxonomy | `/alexandria/taxonomy/1.0` | DAO-ratified skill graph updates |
 | Governance | `/alexandria/governance/1.0` | Proposals, elections, committee updates |
 | Profiles | `/alexandria/profiles/1.0` | User profile announcements |
+| Peer Exchange | `/alexandria/peer-exchange/1.0` | Known peer address propagation |
 
 ### Message Flow
 
@@ -423,7 +433,7 @@ The frontend communicates with the Rust backend via **118 Tauri IPC commands** a
 
 | Threat | Mitigation |
 |--------|-----------|
-| Key theft | Stronghold encrypted vault; password-derived key (HMAC-SHA512) |
+| Key theft | Encrypted vault — Stronghold (desktop) or AES-256-GCM + Argon2id (mobile) |
 | Message forgery | Ed25519 signatures on all gossip messages |
 | Sybil attacks | IP colocation scoring, stake-based challenges |
 | Taxonomy corruption | Committee authority verification, strongest peer scoring penalty |
@@ -444,12 +454,12 @@ The frontend communicates with the Rust backend via **118 Tauri IPC commands** a
 
 | Aspect | (Mark 2) | (Mark 3) |
 |--------|--------|--------|
-| Architecture | Client-server (Go API + Nuxt frontend) | Single desktop binary (Tauri + Rust) |
+| Architecture | Client-server (Go API + Nuxt frontend) | Single native binary (Tauri + Rust), desktop + iOS |
 | Database | PostgreSQL 17 + Neo4j | SQLite (embedded) |
 | Content storage | Blockfrost IPFS API | iroh (embedded BLAKE3 store) |
-| P2P | None (centralized API) | libp2p (GossipSub, Kademlia, mDNS, QUIC) |
+| P2P | None (centralized API) | libp2p (GossipSub, Kademlia, Relay, QUIC/TCP) |
 | Authentication | Email/password, OAuth, CIP-30 | BIP-39 mnemonic only (self-sovereign) |
-| Deployment | Docker Compose, Terraform, AWS/GCP/Azure | `cargo tauri build` → native binary |
+| Deployment | Docker Compose, Terraform, AWS/GCP/Azure | `cargo tauri build` → native binary; `cargo tauri ios build` → .ipa |
 | CLI | Go + Cobra (`alex`) | Rust + clap (`alex`) |
 | Smart contracts | Aiken/Plutus v3 (7 validators) | Transaction metadata only (no on-chain validators) |
 | Monitoring | Grafana + Prometheus | None (local app) |

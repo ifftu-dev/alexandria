@@ -3,7 +3,7 @@
 > What exists in the (Mark 2) documentation and codebase that has not yet been
 > implemented or documented in (Mark 3).
 
-**Last updated**: 2026-02-24
+**Last updated**: 2026-03-02
 
 ---
 
@@ -27,8 +27,9 @@
 ## 1. Documentation Gaps
 
 (Mark 2) has 11 documentation files covering the full platform specification.
-(Mark 3) now has 5 (after this session), but several mark2 documents have no
-mark3 equivalent:
+(Mark 3) now has 8 docs (architecture, database schema, P2P protocol, project
+structure, missing features, security audit, performance audit, README), but
+several mark2 documents have no mark3 equivalent:
 
 | (Mark 2) Document | (Mark 3) Equivalent | Status |
 |-----------------|-------------------|--------|
@@ -36,7 +37,7 @@ mark3 equivalent:
 | `api-reference.md` | None | **N/A** — (Mark 3) has no REST API (IPC commands replace it). A command reference could be written. |
 | `skills-and-reputation.md` | None | **Missing** — RFC covering skill graph design, evidence model, reputation system, and query/consumption model. The implementation exists in mark3 but the design document doesn't. |
 | `sentinel.md` | None | **Missing** — Architecture doc for the Sentinel anti-cheat system. (Mark 3) has `useSentinel.ts` and the ML model utilities, but no documentation. |
-| `security-audit-v0.0.1.md` | None | **Missing** — (Mark 2) had a 66-finding security audit. (Mark 3) has not been audited. |
+| `security-audit-v0.0.1.md` | `security-audit.md` | **Created** — 24 findings (1 critical, 4 high, 8 medium, 6 low, 5 info) |
 | `cloud-deployment.md` | None | **N/A** — (Mark 3) is a desktop app; no cloud deployment. |
 | `database-architecture.md` | `database-schema.md` | **Created** (this session) |
 | `project-structure.md` | `project-structure.md` | **Created** (this session) |
@@ -77,7 +78,7 @@ mark3 equivalent:
 | CIP-30 wallet (browser extension) | Yes | No |
 | BIP-39 mnemonic (self-sovereign) | Yes (custodial) | **Yes** (only method) |
 
-**(Mark 3) status**: The only authentication method is the BIP-39 mnemonic + password-protected Stronghold vault. There is no email, no OAuth, and no browser extension wallet support.
+**(Mark 3) status**: The only authentication method is the BIP-39 mnemonic + encrypted vault (Stronghold on desktop, AES-256-GCM + Argon2id on mobile). There is no email, no OAuth, and no browser extension wallet support.
 
 **Impact**: Lower barrier to entry was a mark2 design goal — non-crypto users could sign up with email and get a custodial wallet. (Mark 3) requires users to understand and safeguard a 24-word mnemonic.
 
@@ -94,7 +95,7 @@ mark3 equivalent:
 - Read-only course catalog
 - No sign-in required for verification
 
-**(Mark 3) status**: No web companion exists. All functionality is in the desktop app.
+**(Mark 3) status**: No web companion exists. All functionality is in the desktop and mobile app.
 
 **Priority**: Low — the desktop app is the primary interface. A verification-only web page could be built later as a static site that reads from Cardano directly.
 
@@ -149,7 +150,7 @@ mark3 equivalent:
 - 20 Medium
 - 15 Low
 
-**(Mark 3) status**: No security audit has been performed. Many of the mark2 findings (Apple OAuth unverified, default secrets, no rate limiting, CORS *) don't apply to a desktop app, but new threat vectors exist:
+**(Mark 3) status**: A security audit has been performed (`security-audit.md`) with 24 findings. Many of the mark2 findings (Apple OAuth unverified, default secrets, no rate limiting, CORS *) don't apply to a desktop app, but new threat vectors exist:
 
 - Stronghold vault password strength enforcement
 - Local file permission security (SQLite, vault, iroh store)
@@ -215,7 +216,7 @@ mark3 equivalent:
 | OAuth (Google, Apple, LinkedIn) | Y | - | Not applicable |
 | CIP-30 wallet auth | Y | - | Not applicable (embedded wallet) |
 | BIP-39 mnemonic wallet | Y | Y | Only auth method in mark3 |
-| Stronghold encrypted vault | - | Y | New in mark3 |
+| Encrypted vault (Stronghold / portable) | - | Y | Stronghold on desktop, AES-256-GCM + Argon2id on mobile |
 | **Blockchain** | | | |
 | Cardano transaction building | Y | Y | Conway era (pallas) |
 | NFT credential minting | Y | Y | NativeScript + CIP-25 |
@@ -224,10 +225,11 @@ mark3 equivalent:
 | **Networking** | | | |
 | REST/gRPC API | Y | - | Replaced by Tauri IPC |
 | libp2p P2P | - | Y | New in mark3 |
-| GossipSub (5 topics) | - | Y | New in mark3 |
+| GossipSub (6 topics) | - | Y | New in mark3 |
 | Cross-device sync | - | Y | New in mark3 |
-| mDNS local discovery | - | Y | New in mark3 |
+| Relay-based discovery (Kademlia DHT) | - | Y | New in mark3 (mDNS removed) |
 | NAT traversal (relay + DCUtR) | - | Y | New in mark3 |
+| iOS mobile node | - | Y | New in mark3 — full node on iPhone |
 | **Governance** | | | |
 | DAOs | Y | Y | |
 | Elections | Y | Y | |
@@ -256,6 +258,6 @@ mark3 equivalent:
 | API reference | Y | - | N/A (IPC replaces API) |
 | Skills & reputation RFC | Y | - | **Missing** |
 | Sentinel doc | Y | - | **Missing** |
-| Security audit | Y | - | **Missing** |
+| Security audit | Y | Y | Created (24 findings) |
 | Cloud deployment guide | Y | - | N/A |
 | Project structure | Y | Y | Created this session |

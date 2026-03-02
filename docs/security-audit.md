@@ -33,6 +33,8 @@ HMAC-SHA512 is a fast hash. An attacker with the `.stronghold` snapshot file and
 
 **Fix**: Replace `derive_key` with Argon2id (`argon2` crate). Recommended parameters: `m_cost = 65536` (64 MB), `t_cost = 3`, `p_cost = 4`. The salt and output size can remain unchanged.
 
+**Partial mitigation**: The mobile keystore (`keystore_portable.rs`) already uses Argon2id with 64 MB memory cost and 3 iterations. This finding applies only to the desktop Stronghold path (`keystore.rs`).
+
 ---
 
 ## HIGH
@@ -383,7 +385,7 @@ The capabilities file only grants `core:default` and `core:window:allow-show`. N
 
 **File**: `src-tauri/src/p2p/scoring.rs`
 
-All 5 topics have individually tuned scoring parameters. Taxonomy has the strongest invalid message penalty (`-50.0` with slow decay `0.3`). IP colocation penalty discourages Sybil attacks from the same IP. Thresholds are properly ordered (graylist < publish < gossip < 0). All parameters pass libp2p's built-in validation.
+All 6 topics have individually tuned scoring parameters. Taxonomy has the strongest invalid message penalty (`-50.0` with slow decay `0.3`). IP colocation penalty discourages Sybil attacks from the same IP. Thresholds are properly ordered (graylist < publish < gossip < 0). All parameters pass libp2p's built-in validation.
 
 ---
 
