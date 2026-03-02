@@ -19,9 +19,9 @@ const sizeMap = {
 <template>
   <div class="flex items-center gap-2">
     <div
-      class="rounded-full animate-spin border-[rgb(var(--color-primary))] border-t-transparent"
+      class="rounded-full animate-spin border-primary border-t-transparent"
       :class="sizeMap[size]"
     />
-    <span v-if="label" class="text-sm text-[rgb(var(--color-muted-foreground))]">{{ label }}</span>
+    <span v-if="label" class="text-sm text-muted-foreground">{{ label }}</span>
   </div>
 </template>

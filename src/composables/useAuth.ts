@@ -76,29 +76,18 @@ async function initialize(): Promise<'onboarding' | 'unlock' | 'ready'> {
 
   loading.value = true
   try {
-    // Fire both IPC calls in parallel — they're independent DB/filesystem reads
-    const [exists, info] = await Promise.all([
-      checkVaultExists(),
-      invoke<WalletInfo | null>('get_wallet_info').catch(() => null),
-    ])
+    const exists = await checkVaultExists()
 
     if (!exists) {
       initialized.value = true
       return 'onboarding'
     }
 
-    // Vault exists — check if we have wallet info (session might still be unlocked)
-    if (info) {
-      walletInfo.value = info
-      // Try to load profile to confirm we're truly unlocked
-      await refreshProfile()
-      if (identity.value) {
-        vaultUnlocked.value = true
-        initialized.value = true
-        return 'ready'
-      }
-    }
-
+    // Vault file exists — the user needs to unlock.
+    // We intentionally do NOT check get_wallet_info/get_profile here
+    // because those are DB reads that succeed even when the in-memory
+    // keystore is None. The only way to populate the keystore (required
+    // for P2P, export mnemonic, etc.) is via unlock_vault IPC.
     initialized.value = true
     return 'unlock'
   } finally {

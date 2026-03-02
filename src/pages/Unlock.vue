@@ -61,7 +61,7 @@ function handleKeydown(e: KeyboardEvent) {
 </script>
 
 <template>
-  <div class="min-h-screen flex items-center justify-center bg-[rgb(var(--color-background))] p-4 sm:p-8 relative overflow-hidden">
+  <div class="min-h-screen flex items-center justify-center bg-background p-4 sm:p-8 relative overflow-hidden">
     <Starfield />
 
     <div class="w-full max-w-md relative z-10">
@@ -73,23 +73,23 @@ function handleKeydown(e: KeyboardEvent) {
         <div class="text-center mb-8">
           <!-- Alexandria logo -->
           <div class="relative w-14 h-14 mx-auto mb-4">
-            <div class="absolute inset-0 rounded-full bg-[rgb(var(--color-primary)/0.05)] animate-ping" style="animation-duration: 4s;" />
+            <div class="absolute inset-0 rounded-full bg-primary/5 animate-ping" style="animation-duration: 4s;" />
             <div class="relative w-14 h-14 flex items-center justify-center">
-              <svg class="w-10 h-10 text-[rgb(var(--color-primary))]" viewBox="0 0 32 32" fill="none">
+              <svg class="w-10 h-10 text-primary" viewBox="0 0 32 32" fill="none">
                 <path d="M16 2L4 8v16l12 6 12-6V8L16 2z" stroke="currentColor" stroke-width="2" fill="none" />
                 <path d="M16 8v16M8 12l8 4 8-4" stroke="currentColor" stroke-width="2" />
               </svg>
             </div>
           </div>
-          <h1 class="text-2xl font-bold text-[rgb(var(--color-foreground))]">Welcome Back</h1>
-          <p class="text-sm text-[rgb(var(--color-muted-foreground))] mt-1">
+          <h1 class="text-2xl font-bold text-foreground">Welcome Back</h1>
+          <p class="text-sm text-muted-foreground mt-1">
             Enter your password to unlock Alexandria.
           </p>
         </div>
 
         <div class="card p-6">
           <div class="mb-4">
-            <label class="label text-xs text-[rgb(var(--color-muted-foreground))]">Password</label>
+            <label class="label text-xs text-muted-foreground">Password</label>
             <input
               v-model="password"
               type="password"
@@ -100,7 +100,7 @@ function handleKeydown(e: KeyboardEvent) {
             >
           </div>
 
-          <p v-if="error" class="text-sm text-[rgb(var(--color-error))] mb-4">{{ error }}</p>
+          <p v-if="error" class="text-sm text-error mb-4">{{ error }}</p>
 
           <AppButton
             class="w-full"
@@ -111,7 +111,7 @@ function handleKeydown(e: KeyboardEvent) {
           </AppButton>
         </div>
 
-        <p class="text-center text-xs text-[rgb(var(--color-muted-foreground))] mt-4 italic tracking-wide">
+        <p class="text-center text-xs text-muted-foreground mt-4 italic tracking-wide">
           I am, because we all are
         </p>
       </div>
@@ -122,25 +122,25 @@ function handleKeydown(e: KeyboardEvent) {
       <div v-else class="text-center">
         <!-- Orbital animation (same as onboarding) -->
         <div class="relative w-24 h-24 mx-auto mb-6">
-          <div class="absolute inset-0 rounded-full border border-[rgb(var(--color-border)/0.4)]" />
+          <div class="absolute inset-0 rounded-full border border-border/40" />
           <div class="absolute inset-0 animate-spin" style="animation-duration: 3s;">
-            <div class="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full bg-[rgb(var(--color-primary))]" />
+            <div class="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full bg-primary" />
           </div>
-          <div class="absolute inset-3 rounded-full border border-[rgb(var(--color-border)/0.3)]" />
+          <div class="absolute inset-3 rounded-full border border-border/30" />
           <div class="absolute inset-3 animate-spin" style="animation-duration: 2s; animation-direction: reverse;">
-            <div class="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-[rgb(var(--color-primary)/0.7)]" />
+            <div class="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-primary/70" />
           </div>
-          <div class="absolute inset-6 rounded-full bg-[rgb(var(--color-primary)/0.1)] flex items-center justify-center">
-            <svg class="w-6 h-6 text-[rgb(var(--color-primary))] animate-pulse" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+          <div class="absolute inset-6 rounded-full bg-primary/10 flex items-center justify-center">
+            <svg class="w-6 h-6 text-primary animate-pulse" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
               <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 10.5V6.75a4.5 4.5 0 119 0v3.75M3.75 21.75h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H3.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
             </svg>
           </div>
         </div>
 
-        <h2 class="text-xl font-bold mb-1 text-[rgb(var(--color-foreground))]">
+        <h2 class="text-xl font-bold mb-1 text-foreground">
           Unlocking Vault
         </h2>
-        <p class="text-sm text-[rgb(var(--color-muted-foreground))] mb-6">
+        <p class="text-sm text-muted-foreground mb-6">
           Decrypting your identity and deriving keys...
         </p>
 
@@ -150,23 +150,23 @@ function handleKeydown(e: KeyboardEvent) {
             <div
               v-for="(line, i) in progressLines"
               :key="i"
-              class="flex items-start gap-2 text-[rgb(var(--color-muted-foreground))]"
-              :class="{ 'text-[rgb(var(--color-primary))]': i === progressLines.length - 1 }"
+              class="flex items-start gap-2 text-muted-foreground"
+              :class="{ 'text-primary': i === progressLines.length - 1 }"
             >
-              <svg v-if="i < progressLines.length - 1" class="w-3 h-3 mt-0.5 shrink-0 text-[rgb(var(--color-success))]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
+              <svg v-if="i < progressLines.length - 1" class="w-3 h-3 mt-0.5 shrink-0 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
               </svg>
-              <div v-else class="w-3 h-3 mt-0.5 shrink-0 border-2 border-[rgb(var(--color-primary))] border-t-transparent rounded-full animate-spin" />
+              <div v-else class="w-3 h-3 mt-0.5 shrink-0 border-2 border-primary border-t-transparent rounded-full animate-spin" />
               <span>{{ line }}</span>
             </div>
-            <div v-if="progressLines.length === 0" class="flex items-start gap-2 text-[rgb(var(--color-primary))]">
-              <div class="w-3 h-3 mt-0.5 shrink-0 border-2 border-[rgb(var(--color-primary))] border-t-transparent rounded-full animate-spin" />
+            <div v-if="progressLines.length === 0" class="flex items-start gap-2 text-primary">
+              <div class="w-3 h-3 mt-0.5 shrink-0 border-2 border-primary border-t-transparent rounded-full animate-spin" />
               <span>Initializing...</span>
             </div>
           </div>
         </div>
 
-        <p class="text-xs text-[rgb(var(--color-muted-foreground))] italic tracking-wide">
+        <p class="text-xs text-muted-foreground italic tracking-wide">
           I am, because we all are
         </p>
       </div>

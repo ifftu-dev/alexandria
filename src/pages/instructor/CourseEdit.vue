@@ -227,36 +227,36 @@ function elementTypeIcon(type: string): string {
       <div class="flex items-start justify-between">
         <div class="space-y-2">
           <div class="flex items-center gap-2">
-            <div class="h-5 w-14 animate-pulse rounded-full bg-[rgb(var(--color-muted-foreground)/0.15)]" />
-            <div class="h-4 w-8 animate-pulse rounded bg-[rgb(var(--color-muted-foreground)/0.1)]" />
+            <div class="h-5 w-14 animate-pulse rounded-full bg-muted-foreground/15" />
+            <div class="h-4 w-8 animate-pulse rounded bg-muted-foreground/10" />
           </div>
-          <div class="h-7 w-64 animate-pulse rounded bg-[rgb(var(--color-muted-foreground)/0.2)]" />
+          <div class="h-7 w-64 animate-pulse rounded bg-muted-foreground/20" />
         </div>
         <div class="flex gap-2">
-          <div class="h-9 w-28 animate-pulse rounded-lg bg-[rgb(var(--color-muted-foreground)/0.15)]" />
+          <div class="h-9 w-28 animate-pulse rounded-lg bg-muted-foreground/15" />
         </div>
       </div>
       <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div v-for="i in 3" :key="i" class="animate-pulse rounded-xl border border-[rgb(var(--color-border))] bg-[rgb(var(--color-card))] p-5">
-          <div class="h-3 w-16 rounded bg-[rgb(var(--color-muted-foreground)/0.15)] mb-2" />
-          <div class="h-7 w-8 rounded bg-[rgb(var(--color-muted-foreground)/0.2)]" />
+        <div v-for="i in 3" :key="i" class="animate-pulse rounded-xl border border-border bg-card p-5">
+          <div class="h-3 w-16 rounded bg-muted-foreground/15 mb-2" />
+          <div class="h-7 w-8 rounded bg-muted-foreground/20" />
         </div>
       </div>
-      <div v-for="i in 2" :key="i" class="animate-pulse rounded-xl border border-[rgb(var(--color-border))] bg-[rgb(var(--color-card))] p-5">
+      <div v-for="i in 2" :key="i" class="animate-pulse rounded-xl border border-border bg-card p-5">
         <div class="flex items-center gap-3 mb-3">
-          <div class="h-6 w-6 rounded bg-[rgb(var(--color-muted-foreground)/0.15)]" />
-          <div class="h-4 w-32 rounded bg-[rgb(var(--color-muted-foreground)/0.15)]" />
+          <div class="h-6 w-6 rounded bg-muted-foreground/15" />
+          <div class="h-4 w-32 rounded bg-muted-foreground/15" />
         </div>
         <div class="space-y-2">
-          <div v-for="j in 3" :key="j" class="h-10 rounded-lg bg-[rgb(var(--color-muted-foreground)/0.08)]" />
+          <div v-for="j in 3" :key="j" class="h-10 rounded-lg bg-muted-foreground/8" />
         </div>
       </div>
     </div>
 
     <!-- Not found -->
     <div v-else-if="!course" class="py-16 text-center">
-      <div class="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-[rgb(var(--color-muted)/0.3)]">
-        <svg class="h-8 w-8 text-[rgb(var(--color-muted-foreground)/0.5)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+      <div class="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-muted/30">
+        <svg class="h-8 w-8 text-muted-foreground/50" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
           <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
         </svg>
       </div>
@@ -269,9 +269,9 @@ function elementTypeIcon(type: string): string {
         <div>
           <div class="flex items-center gap-2 mb-2">
             <StatusBadge :status="course.status" />
-            <span class="text-xs text-[rgb(var(--color-muted-foreground))]">v{{ course.version }}</span>
+            <span class="text-xs text-muted-foreground">v{{ course.version }}</span>
           </div>
-          <h1 class="text-2xl font-bold text-[rgb(var(--color-foreground))]">{{ course.title }}</h1>
+          <h1 class="text-2xl font-bold text-foreground">{{ course.title }}</h1>
         </div>
         <div class="flex gap-2">
           <AppButton
@@ -293,17 +293,17 @@ function elementTypeIcon(type: string): string {
 
       <!-- Stats -->
       <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div class="rounded-xl border border-[rgb(var(--color-border))] bg-[rgb(var(--color-card))] p-5">
-          <p class="text-xs text-[rgb(var(--color-muted-foreground))]">Chapters</p>
-          <p class="mt-1 text-2xl font-bold text-[rgb(var(--color-foreground))]">{{ totalChapters }}</p>
+        <div class="rounded-xl border border-border bg-card p-5">
+          <p class="text-xs text-muted-foreground">Chapters</p>
+          <p class="mt-1 text-2xl font-bold text-foreground">{{ totalChapters }}</p>
         </div>
-        <div class="rounded-xl border border-[rgb(var(--color-border))] bg-[rgb(var(--color-card))] p-5">
-          <p class="text-xs text-[rgb(var(--color-muted-foreground))]">Elements</p>
-          <p class="mt-1 text-2xl font-bold text-[rgb(var(--color-primary))]">{{ totalElements }}</p>
+        <div class="rounded-xl border border-border bg-card p-5">
+          <p class="text-xs text-muted-foreground">Elements</p>
+          <p class="mt-1 text-2xl font-bold text-primary">{{ totalElements }}</p>
         </div>
-        <div class="rounded-xl border border-[rgb(var(--color-border))] bg-[rgb(var(--color-card))] p-5">
-          <p class="text-xs text-[rgb(var(--color-muted-foreground))]">Skill Tags</p>
-          <p class="mt-1 text-2xl font-bold text-[rgb(var(--color-foreground))]">{{ totalSkillTags }}</p>
+        <div class="rounded-xl border border-border bg-card p-5">
+          <p class="text-xs text-muted-foreground">Skill Tags</p>
+          <p class="mt-1 text-2xl font-bold text-foreground">{{ totalSkillTags }}</p>
         </div>
       </div>
 
@@ -327,16 +327,16 @@ function elementTypeIcon(type: string): string {
         <div
           v-for="(chapter, chIdx) in chapters"
           :key="chapter.id"
-          class="rounded-xl border border-[rgb(var(--color-border))] bg-[rgb(var(--color-card))] p-5"
+          class="rounded-xl border border-border bg-card p-5"
         >
           <!-- Chapter header -->
           <div class="flex items-center justify-between mb-4">
             <div class="flex items-center gap-3">
-              <span class="flex h-7 w-7 items-center justify-center rounded-lg bg-[rgb(var(--color-primary)/0.1)] text-xs font-bold text-[rgb(var(--color-primary))]">
+              <span class="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/10 text-xs font-bold text-primary">
                 {{ chIdx + 1 }}
               </span>
-              <h3 class="text-sm font-semibold text-[rgb(var(--color-foreground))]">{{ chapter.title }}</h3>
-              <span class="text-xs text-[rgb(var(--color-muted-foreground))]">
+              <h3 class="text-sm font-semibold text-foreground">{{ chapter.title }}</h3>
+              <span class="text-xs text-muted-foreground">
                 {{ (elements[chapter.id] ?? []).length }} element{{ (elements[chapter.id] ?? []).length !== 1 ? 's' : '' }}
               </span>
             </div>
@@ -354,15 +354,15 @@ function elementTypeIcon(type: string): string {
             <div
               v-for="el in elements[chapter.id]"
               :key="el.id"
-              class="rounded-lg border border-[rgb(var(--color-border)/0.5)] bg-[rgb(var(--color-muted)/0.15)] p-3"
+              class="rounded-lg border border-border/50 bg-muted/15 p-3"
             >
               <div class="flex items-center gap-2.5 text-sm">
-                <svg class="h-4 w-4 flex-shrink-0 text-[rgb(var(--color-muted-foreground))]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <svg class="h-4 w-4 flex-shrink-0 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                   <path stroke-linecap="round" stroke-linejoin="round" :d="elementTypeIcon(el.element_type)" />
                 </svg>
-                <span class="font-medium text-[rgb(var(--color-foreground))]">{{ el.title }}</span>
+                <span class="font-medium text-foreground">{{ el.title }}</span>
                 <StatusBadge :status="el.element_type" />
-                <span v-if="el.content_cid" class="ml-auto text-xs font-mono text-[rgb(var(--color-muted-foreground))] truncate max-w-40">
+                <span v-if="el.content_cid" class="ml-auto text-xs font-mono text-muted-foreground truncate max-w-40">
                   {{ el.content_cid }}
                 </span>
               </div>
@@ -385,18 +385,18 @@ function elementTypeIcon(type: string): string {
                 <div v-if="taggingElement === el.id" class="relative">
                   <input
                     v-model="skillSearch"
-                    class="rounded-lg border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))] px-2 py-1 text-xs w-48"
+                    class="rounded-lg border border-border bg-background px-2 py-1 text-xs w-48"
                     placeholder="Search skills..."
                     @keydown.escape="taggingElement = null; skillSearch = ''"
                   >
                   <div
                     v-if="skillSearchResults.length"
-                    class="absolute z-20 top-full left-0 mt-1 w-64 max-h-48 overflow-y-auto rounded-lg border border-[rgb(var(--color-border))] bg-[rgb(var(--color-card))] shadow-lg"
+                    class="absolute z-20 top-full left-0 mt-1 w-64 max-h-48 overflow-y-auto rounded-lg border border-border bg-card shadow-lg"
                   >
                     <button
                       v-for="skill in skillSearchResults"
                       :key="skill.id"
-                      class="w-full text-left px-3 py-1.5 text-xs hover:bg-[rgb(var(--color-muted)/0.3)] flex items-center justify-between gap-2 disabled:opacity-40"
+                      class="w-full text-left px-3 py-1.5 text-xs hover:bg-muted/30 flex items-center justify-between gap-2 disabled:opacity-40"
                       :disabled="isSkillAlreadyTagged(el.id, skill.id)"
                       @click="tagSkill(el.id, skill)"
                     >
@@ -407,7 +407,7 @@ function elementTypeIcon(type: string): string {
                 </div>
                 <button
                   v-else
-                  class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-xs text-[rgb(var(--color-muted-foreground))] border border-dashed border-[rgb(var(--color-border))] hover:border-[rgb(var(--color-primary))] hover:text-[rgb(var(--color-primary))] transition-colors"
+                  class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-xs text-muted-foreground border border-dashed border-border hover:border-primary hover:text-primary transition-colors"
                   @click="taggingElement = el.id; skillSearch = ''"
                 >
                   <svg class="w-3 h-3" viewBox="0 0 20 20" fill="currentColor"><path d="M10.75 4.75a.75.75 0 00-1.5 0v4.5h-4.5a.75.75 0 000 1.5h4.5v4.5a.75.75 0 001.5 0v-4.5h4.5a.75.75 0 000-1.5h-4.5v-4.5z"/></svg>
@@ -418,17 +418,17 @@ function elementTypeIcon(type: string): string {
           </div>
 
           <!-- Add element form -->
-          <div v-if="addingToChapter === chapter.id" class="mt-3 rounded-lg border border-dashed border-[rgb(var(--color-border))] bg-[rgb(var(--color-muted)/0.1)] p-4">
+          <div v-if="addingToChapter === chapter.id" class="mt-3 rounded-lg border border-dashed border-border bg-muted/10 p-4">
             <div class="flex gap-2 mb-3">
               <input
                 v-model="newElementTitle"
-                class="flex-1 rounded-lg border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))] px-3 py-2 text-sm"
+                class="flex-1 rounded-lg border border-border bg-background px-3 py-2 text-sm"
                 placeholder="Element title"
                 @keydown.enter="addElement(chapter.id)"
               >
               <select
                 v-model="newElementType"
-                class="rounded-lg border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))] px-3 py-2 text-sm"
+                class="rounded-lg border border-border bg-background px-3 py-2 text-sm"
               >
                 <option v-for="t in elementTypes" :key="t.value" :value="t.value">{{ t.label }}</option>
               </select>
@@ -445,11 +445,11 @@ function elementTypeIcon(type: string): string {
         </div>
 
         <!-- Add chapter -->
-        <div v-if="showNewChapter" class="rounded-xl border border-dashed border-[rgb(var(--color-border))] bg-[rgb(var(--color-card))] p-5">
+        <div v-if="showNewChapter" class="rounded-xl border border-dashed border-border bg-card p-5">
           <div class="flex gap-2">
             <input
               v-model="newChapterTitle"
-              class="flex-1 rounded-lg border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))] px-3 py-2 text-sm"
+              class="flex-1 rounded-lg border border-border bg-background px-3 py-2 text-sm"
               placeholder="Chapter title"
               @keydown.enter="addChapter"
             >

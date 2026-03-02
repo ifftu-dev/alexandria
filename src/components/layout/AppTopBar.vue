@@ -29,26 +29,26 @@ function breadcrumb(): string {
 </script>
 
 <template>
-  <header class="flex items-center justify-between h-12 md:h-14 px-3 md:px-6 border-b border-[rgb(var(--color-border))] bg-[rgb(var(--color-card))]">
-    <div class="text-sm text-[rgb(var(--color-muted-foreground))] truncate">
+  <header class="flex items-center justify-between h-12 md:h-14 px-3 md:px-6 border-b border-border bg-card">
+    <div class="text-sm text-muted-foreground truncate">
       {{ breadcrumb() }}
     </div>
 
     <div class="flex items-center gap-3 md:gap-4">
       <!-- P2P status — hidden on mobile -->
-      <div class="hidden md:flex items-center gap-1.5 text-xs text-[rgb(var(--color-muted-foreground))]">
+      <div class="hidden md:flex items-center gap-1.5 text-xs text-muted-foreground">
         <span
           class="w-2 h-2 rounded-full"
           :class="p2pStatus?.is_running
-            ? 'bg-[rgb(var(--color-success))]'
-            : p2pStatus != null ? 'bg-[rgb(var(--color-muted-foreground)/0.4)]' : 'bg-amber-500 animate-pulse'"
+            ? 'bg-success'
+            : p2pStatus != null ? 'bg-muted-foreground/40' : 'bg-amber-500 animate-pulse'"
         />
         {{ p2pStatus?.is_running ? `${p2pStatus.connected_peers} peer${p2pStatus.connected_peers !== 1 ? 's' : ''}` : p2pStatus != null ? 'Offline' : 'Starting...' }}
       </div>
 
       <!-- Theme toggle -->
       <button
-        class="p-1.5 rounded-md text-[rgb(var(--color-muted-foreground))] hover:bg-[rgb(var(--color-muted)/0.5)] transition-colors"
+        class="p-1.5 rounded-md text-muted-foreground hover:bg-muted/50 transition-colors"
         :title="`Theme: ${theme}`"
         @click="toggleTheme"
       >
@@ -61,7 +61,7 @@ function breadcrumb(): string {
 
       <!-- User avatar -->
       <div
-        class="w-7 h-7 rounded-full bg-gradient-to-br from-[rgb(var(--color-primary))] to-[rgb(var(--color-accent))] flex items-center justify-center text-white text-xs font-bold"
+        class="w-7 h-7 rounded-full bg-gradient-to-br from-primary to-accent flex items-center justify-center text-white text-xs font-bold"
         :title="displayName ?? 'Profile'"
       >
         {{ displayName ? displayName.charAt(0).toUpperCase() : 'A' }}

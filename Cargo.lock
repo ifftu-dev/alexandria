@@ -3331,8 +3331,6 @@ dependencies = [
 [[package]]
 name = "if-watch"
 version = "3.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cdf9d64cfcf380606e64f9a0bcf493616b65331199f984151a6fa11a7b3cde38"
 dependencies = [
  "async-io",
  "core-foundation 0.9.4",

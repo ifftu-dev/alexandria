@@ -34,7 +34,7 @@ pub async fn list_daos(
     status: Option<String>,
     search: Option<String>,
 ) -> Result<Vec<DaoInfo>, String> {
-    let db = state.db.lock().await;
+    let db = state.db.lock().unwrap();
     let conn = db.conn();
 
     let mut conditions: Vec<String> = Vec::new();
@@ -105,7 +105,7 @@ pub async fn get_dao(
     state: State<'_, AppState>,
     dao_id: String,
 ) -> Result<(DaoInfo, Vec<DaoMember>), String> {
-    let db = state.db.lock().await;
+    let db = state.db.lock().unwrap();
     let conn = db.conn();
 
     let dao: DaoInfo = conn
@@ -164,7 +164,7 @@ pub async fn open_election(
     state: State<'_, AppState>,
     params: OpenElectionParams,
 ) -> Result<Election, String> {
-    let db = state.db.lock().await;
+    let db = state.db.lock().unwrap();
     let conn = db.conn();
 
     // Verify DAO exists and is active
@@ -216,7 +216,7 @@ pub async fn list_elections(
     dao_id: Option<String>,
     phase: Option<String>,
 ) -> Result<Vec<Election>, String> {
-    let db = state.db.lock().await;
+    let db = state.db.lock().unwrap();
     let conn = db.conn();
 
     let mut conditions: Vec<String> = Vec::new();
@@ -286,7 +286,7 @@ pub async fn get_election(
     state: State<'_, AppState>,
     election_id: String,
 ) -> Result<(Election, Vec<ElectionNominee>), String> {
-    let db = state.db.lock().await;
+    let db = state.db.lock().unwrap();
     let conn = db.conn();
 
     let election = query_election(conn, &election_id)?;
@@ -302,7 +302,7 @@ pub async fn nominate(
     election_id: String,
     stake_address: String,
 ) -> Result<ElectionNominee, String> {
-    let db = state.db.lock().await;
+    let db = state.db.lock().unwrap();
     let conn = db.conn();
 
     // Verify election is in nomination phase
@@ -344,7 +344,7 @@ pub async fn accept_nomination(
     state: State<'_, AppState>,
     nominee_id: String,
 ) -> Result<(), String> {
-    let db = state.db.lock().await;
+    let db = state.db.lock().unwrap();
     let conn = db.conn();
 
     let affected = conn
@@ -367,7 +367,7 @@ pub async fn start_election_voting(
     state: State<'_, AppState>,
     election_id: String,
 ) -> Result<(), String> {
-    let db = state.db.lock().await;
+    let db = state.db.lock().unwrap();
     let conn = db.conn();
 
     let phase: String = conn
@@ -417,7 +417,7 @@ pub async fn cast_election_vote(
     voter: String,
     nominee_id: String,
 ) -> Result<ElectionVote, String> {
-    let db = state.db.lock().await;
+    let db = state.db.lock().unwrap();
     let conn = db.conn();
 
     // Verify election is in voting phase
@@ -492,7 +492,7 @@ pub async fn finalize_election(
     state: State<'_, AppState>,
     election_id: String,
 ) -> Result<Vec<ElectionNominee>, String> {
-    let db = state.db.lock().await;
+    let db = state.db.lock().unwrap();
     let conn = db.conn();
 
     let (phase, seats): (String, i64) = conn
@@ -549,7 +549,7 @@ pub async fn install_committee(
     state: State<'_, AppState>,
     election_id: String,
 ) -> Result<Vec<DaoMember>, String> {
-    let db = state.db.lock().await;
+    let db = state.db.lock().unwrap();
     let conn = db.conn();
 
     let (phase, dao_id): (String, String) = conn
@@ -627,7 +627,7 @@ pub async fn submit_proposal(
     state: State<'_, AppState>,
     params: SubmitProposalParams,
 ) -> Result<Proposal, String> {
-    let db = state.db.lock().await;
+    let db = state.db.lock().unwrap();
     let conn = db.conn();
 
     // Verify DAO exists and is active
@@ -684,7 +684,7 @@ pub async fn list_proposals(
     status: Option<String>,
     category: Option<String>,
 ) -> Result<Vec<Proposal>, String> {
-    let db = state.db.lock().await;
+    let db = state.db.lock().unwrap();
     let conn = db.conn();
 
     let mut conditions: Vec<String> = Vec::new();
@@ -758,7 +758,7 @@ pub async fn approve_proposal(
     state: State<'_, AppState>,
     proposal_id: String,
 ) -> Result<Proposal, String> {
-    let db = state.db.lock().await;
+    let db = state.db.lock().unwrap();
     let conn = db.conn();
 
     let status: String = conn
@@ -792,7 +792,7 @@ pub async fn cancel_proposal(
     state: State<'_, AppState>,
     proposal_id: String,
 ) -> Result<(), String> {
-    let db = state.db.lock().await;
+    let db = state.db.lock().unwrap();
     let conn = db.conn();
 
     let status: String = conn
@@ -824,7 +824,7 @@ pub async fn cast_proposal_vote(
     voter: String,
     in_favor: bool,
 ) -> Result<ProposalVote, String> {
-    let db = state.db.lock().await;
+    let db = state.db.lock().unwrap();
     let conn = db.conn();
 
     // Verify proposal is published
@@ -895,7 +895,7 @@ pub async fn resolve_proposal(
     state: State<'_, AppState>,
     proposal_id: String,
 ) -> Result<Proposal, String> {
-    let db = state.db.lock().await;
+    let db = state.db.lock().unwrap();
     let conn = db.conn();
 
     let (status, votes_for, votes_against): (String, i64, i64) = conn

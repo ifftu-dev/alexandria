@@ -1,6 +1,12 @@
 fn main() {
     tauri_build::build();
 
+    // Emit a custom cfg so that files shared with the CLI crate
+    // (via #[path] includes) can gate test modules that depend on
+    // app_lib types (Database, etc.) which don't exist in the CLI.
+    println!("cargo::rustc-check-cfg=cfg(has_app_lib)");
+    println!("cargo:rustc-cfg=has_app_lib");
+
     // On iOS, the `if-watch` crate (pulled in by libp2p's QUIC transport)
     // references macOS-only SCDynamicStore symbols from SystemConfiguration.
     // These symbols don't exist in iOS's SystemConfiguration framework.

@@ -14,3 +14,9 @@ lto = true
 opt-level = "s"
 panic = "abort"
 strip = true
+
+# ── Crate patches ─────────────────────────────────────────────────────
+# if-watch 3.2.1 uses SCDynamicStore on iOS which returns NULL and panics.
+# Our patch routes iOS to the fallback (timer-based) backend instead.
+[patch.crates-io]
+if-watch = { path = "patches/if-watch" }

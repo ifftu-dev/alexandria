@@ -104,12 +104,12 @@ function navigate(path: string) {
 
 <template>
   <aside
-    class="flex flex-col border-r border-[rgb(var(--color-border))] bg-[rgb(var(--color-card))] transition-all duration-200 select-none"
+    class="flex flex-col border-r border-border bg-card transition-all duration-200 select-none"
     :class="collapsed ? 'w-16' : 'w-56'"
   >
     <!-- Logo -->
-    <div class="flex items-center gap-2 h-14 px-4 border-b border-[rgb(var(--color-border))]">
-      <svg class="w-6 h-6 text-[rgb(var(--color-primary))] shrink-0" viewBox="0 0 32 32" fill="none">
+    <div class="flex items-center gap-2 h-14 px-4 border-b border-border">
+      <svg class="w-6 h-6 text-primary shrink-0" viewBox="0 0 32 32" fill="none">
         <path d="M16 2L4 8v16l12 6 12-6V8L16 2z" stroke="currentColor" stroke-width="2" fill="none" />
         <path d="M16 8v16M8 12l8 4 8-4" stroke="currentColor" stroke-width="2" />
       </svg>
@@ -121,19 +121,19 @@ function navigate(path: string) {
       <div v-for="section in navSections" :key="section.title" class="mb-3">
         <div
           v-if="!collapsed"
-          class="px-2.5 py-1 text-[0.65rem] font-semibold tracking-wider uppercase text-[rgb(var(--color-muted-foreground)/0.6)]"
+          class="px-2.5 py-1 text-[0.65rem] font-semibold tracking-wider uppercase text-muted-foreground/60"
         >
           {{ section.title }}
         </div>
-        <div v-else class="h-px bg-[rgb(var(--color-border)/0.5)] mx-2 my-1" />
+        <div v-else class="h-px bg-border/50 mx-2 my-1" />
 
         <button
           v-for="item in section.items"
           :key="item.path"
           class="flex items-center w-full rounded-md px-2.5 py-2 text-sm transition-colors"
           :class="isActive(item.path)
-            ? 'bg-[rgb(var(--color-primary)/0.1)] text-[rgb(var(--color-primary))] font-medium'
-            : 'text-[rgb(var(--color-muted-foreground))] hover:bg-[rgb(var(--color-muted)/0.5)] hover:text-[rgb(var(--color-foreground))]'"
+            ? 'bg-primary/10 text-primary font-medium'
+            : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'"
           :title="collapsed ? item.label : undefined"
           @click="navigate(item.path)"
         >
@@ -146,24 +146,24 @@ function navigate(path: string) {
     </nav>
 
     <!-- P2P Status -->
-    <div class="px-3 py-2 border-t border-[rgb(var(--color-border))]">
+    <div class="px-3 py-2 border-t border-border">
       <div class="flex items-center gap-1.5">
         <span
           class="w-2 h-2 rounded-full shrink-0"
           :class="p2pStatus?.is_running
-            ? 'bg-[rgb(var(--color-success))]'
-            : p2pStatus != null ? 'bg-[rgb(var(--color-muted-foreground)/0.4)]' : 'bg-amber-500 animate-pulse'"
+            ? 'bg-success'
+            : p2pStatus != null ? 'bg-muted-foreground/40' : 'bg-amber-500 animate-pulse'"
         />
-        <span v-if="!collapsed" class="text-xs text-[rgb(var(--color-muted-foreground))]">
+        <span v-if="!collapsed" class="text-xs text-muted-foreground">
           {{ p2pStatus?.is_running ? `${p2pStatus.connected_peers} peers` : p2pStatus != null ? 'Offline' : 'Starting...' }}
         </span>
       </div>
     </div>
 
     <!-- Theme toggle -->
-    <div class="px-2 py-1 border-t border-[rgb(var(--color-border))]">
+    <div class="px-2 py-1 border-t border-border">
       <button
-        class="flex items-center w-full rounded-md px-2.5 py-2 text-sm text-[rgb(var(--color-muted-foreground))] hover:bg-[rgb(var(--color-muted)/0.5)] hover:text-[rgb(var(--color-foreground))] transition-colors"
+        class="flex items-center w-full rounded-md px-2.5 py-2 text-sm text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors"
         :title="collapsed ? `Theme: ${themeLabel[theme]}` : undefined"
         @click="toggleTheme"
       >
@@ -175,17 +175,17 @@ function navigate(path: string) {
     </div>
 
     <!-- User / Lock -->
-    <div class="px-2 py-2 border-t border-[rgb(var(--color-border))]">
+    <div class="px-2 py-2 border-t border-border">
       <div v-if="!collapsed" class="px-2.5 mb-1.5 truncate">
-        <p class="text-xs font-medium text-[rgb(var(--color-foreground))] truncate">
+        <p class="text-xs font-medium text-foreground truncate">
           {{ displayName ?? 'Anonymous' }}
         </p>
-        <p class="text-[0.6rem] text-[rgb(var(--color-muted-foreground))] truncate">
+        <p class="text-[0.6rem] text-muted-foreground truncate">
           {{ stakeAddress ? stakeAddress.slice(0, 20) + '...' : '' }}
         </p>
       </div>
       <button
-        class="flex items-center w-full rounded-md px-2.5 py-2 text-sm text-[rgb(var(--color-muted-foreground))] hover:bg-[rgb(var(--color-error)/0.1)] hover:text-[rgb(var(--color-error))] transition-colors"
+        class="flex items-center w-full rounded-md px-2.5 py-2 text-sm text-muted-foreground hover:bg-error/10 hover:text-error transition-colors"
         :title="collapsed ? 'Lock & Sign Out' : undefined"
         @click="signOut"
       >
@@ -197,9 +197,9 @@ function navigate(path: string) {
     </div>
 
     <!-- Collapse toggle -->
-    <div class="p-2 border-t border-[rgb(var(--color-border))]">
+    <div class="p-2 border-t border-border">
       <button
-        class="flex items-center justify-center w-full rounded-md p-2 text-xs text-[rgb(var(--color-muted-foreground))] hover:bg-[rgb(var(--color-muted)/0.5)]"
+        class="flex items-center justify-center w-full rounded-md p-2 text-xs text-muted-foreground hover:bg-muted/50"
         @click="emit('toggle')"
       >
         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">

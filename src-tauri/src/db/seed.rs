@@ -758,7 +758,10 @@ INSERT INTO element_skill_tags (element_id, skill_id, weight) VALUES
 
 "##;
 
-#[cfg(test)]
+// Gate tests behind `has_app_lib` because this file is shared with the CLI
+// crate via `#[path]`, and the tests depend on `crate::db::Database` which
+// only exists in the main Tauri crate.
+#[cfg(all(test, has_app_lib))]
 mod tests {
     use super::*;
     use crate::db::Database;

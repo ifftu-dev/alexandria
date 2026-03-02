@@ -1,18 +1,12 @@
-use std::sync::Arc;
-
 use rusqlite::params;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
-use tokio::sync::Mutex;
 
 use crate::crypto::keystore::Keystore;
-use crate::crypto::wallet::{self, Wallet};
-use crate::db::Database;
+use crate::crypto::wallet;
 use crate::domain::identity::{Identity, ProfileUpdate, WalletInfo};
 use crate::domain::profile::{ProfilePayload, PublishProfileResult, SignedProfile};
 use crate::ipfs::profile as ipfs_profile;
-use crate::p2p::network::{self, keypair_from_cardano_key, P2pNode};
-use crate::p2p::types::P2pEvent;
 use crate::AppState;
 
 /// Progress event payload sent to the frontend during wallet operations.
@@ -48,108 +42,6 @@ fn emit_progress(app: &AppHandle, step: &str, detail: &str) {
             detail: detail.to_string(),
         },
     );
-}
-
-/// Auto-start the P2P node in the background after wallet unlock.
-///
-/// This is fire-and-forget: failures are logged but never surface to the user.
-/// The wallet's payment key is used to derive the libp2p identity, creating
-/// a cryptographic link between the P2P PeerId and on-chain identity.
-#[cfg(desktop)]
-fn auto_start_p2p(
-    wallet: &Wallet,
-    p2p_node: Arc<Mutex<Option<P2pNode>>>,
-    db: Arc<Mutex<Database>>,
-) {
-    // Extract the Ed25519 scalar from the extended payment key
-    let mut payment_key_bytes = [0u8; 32];
-    payment_key_bytes.copy_from_slice(&wallet.payment_key_extended[..32]);
-
-    tauri::async_runtime::spawn(async move {
-        // Small delay to let the frontend navigate and avoid contention
-        // with the burst of IPC calls that follow wallet creation/unlock.
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-
-        // Skip if already running
-        {
-            let node = p2p_node.lock().await;
-            if node.is_some() {
-                log::debug!("P2P node already running, skipping auto-start");
-                return;
-            }
-        }
-
-        let keypair = match keypair_from_cardano_key(&payment_key_bytes) {
-            Ok(kp) => kp,
-            Err(e) => {
-                log::warn!("P2P auto-start: failed to derive keypair: {e}");
-                return;
-            }
-        };
-
-        let peer_id = keypair.public().to_peer_id().to_string();
-        let (event_tx, mut event_rx) = tokio::sync::mpsc::channel(256);
-
-        // Spawn the gossip event consumer
-        let db_for_events = db.clone();
-        tokio::spawn(async move {
-            use crate::p2p::{catalog as p2p_catalog, evidence as p2p_evidence, governance as p2p_governance, taxonomy as p2p_taxonomy};
-            use crate::p2p::types::{TOPIC_CATALOG, TOPIC_EVIDENCE, TOPIC_GOVERNANCE, TOPIC_TAXONOMY};
-
-            while let Some(event) = event_rx.recv().await {
-                match &event {
-                    P2pEvent::PeerConnected { peer_id } => {
-                        log::info!("P2P: peer connected — {peer_id}");
-                    }
-                    P2pEvent::PeerDisconnected { peer_id } => {
-                        log::info!("P2P: peer disconnected — {peer_id}");
-                    }
-                    P2pEvent::GossipMessage { topic, message } => {
-                        let db = db_for_events.lock().await;
-                        if topic == TOPIC_CATALOG {
-                            let _ = p2p_catalog::handle_catalog_message(&db, message);
-                        } else if topic == TOPIC_EVIDENCE {
-                            let _ = p2p_evidence::handle_evidence_message(&db, message);
-                        } else if topic == TOPIC_TAXONOMY {
-                            let _ = p2p_taxonomy::handle_taxonomy_message(&db, message);
-                        } else if topic == TOPIC_GOVERNANCE {
-                            let _ = p2p_governance::handle_governance_message(&db, message);
-                        }
-                    }
-                    P2pEvent::StatusChanged(status) => {
-                        log::debug!("P2P: {} peers", status.connected_peers);
-                    }
-                    _ => {}
-                }
-            }
-        });
-
-        match network::start_node(keypair, event_tx).await {
-            Ok(node) => {
-                *p2p_node.lock().await = Some(node);
-                log::info!("P2P node auto-started with PeerId: {peer_id}");
-            }
-            Err(e) => {
-                log::warn!("P2P auto-start failed (non-fatal): {e}");
-            }
-        }
-    });
-}
-
-/// Mobile: P2P auto-start is disabled.  libp2p's QUIC transport
-/// causes a SIGSEGV on iOS (memory corruption in sqlite3DbMallocRawNN
-/// triggered by concurrent tokio task scheduling during swarm startup).
-/// This is an unrecoverable segfault — catch_unwind cannot catch it.
-/// P2P on mobile requires switching to a TCP transport or an
-/// out-of-process networking layer.  For now the mobile app operates
-/// with iroh (content-addressed blobs) only.
-#[cfg(mobile)]
-fn auto_start_p2p(
-    _wallet: &Wallet,
-    _p2p_node: Arc<Mutex<Option<P2pNode>>>,
-    _db: Arc<Mutex<Database>>,
-) {
-    log::info!("P2P auto-start skipped on mobile (QUIC transport not yet supported on iOS)");
 }
 
 /// Check whether a Stronghold vault file exists.
@@ -192,37 +84,35 @@ pub async fn unlock_vault(
     .map_err(|e: String| e)?;
 
     emit_progress(&app, "db", "Loading identity from database...");
-    let db = state.db.lock().await;
-    let exists: bool = db
-        .conn()
-        .query_row(
-            "SELECT COUNT(*) > 0 FROM local_identity WHERE id = 1",
-            [],
-            |row| row.get(0),
-        )
-        .map_err(|e| e.to_string())?;
-
-    if !exists {
-        // Re-create identity row from the wallet (recovery scenario)
-        db.conn()
-            .execute(
-                "INSERT INTO local_identity (id, stake_address, payment_address) VALUES (1, ?1, ?2)",
-                params![w.stake_address, w.payment_address],
+    let profile = {
+        let db = state.db.lock().unwrap();
+        let exists: bool = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM local_identity WHERE id = 1",
+                [],
+                |row| row.get(0),
             )
             .map_err(|e| e.to_string())?;
-    }
 
-    // Read back the full profile in the same DB lock — no extra IPC needed
-    let profile = read_profile(db.conn());
-    drop(db);
+        if !exists {
+            // Re-create identity row from the wallet (recovery scenario)
+            db.conn()
+                .execute(
+                    "INSERT INTO local_identity (id, stake_address, payment_address) VALUES (1, ?1, ?2)",
+                    params![w.stake_address, w.payment_address],
+                )
+                .map_err(|e| e.to_string())?;
+        }
+
+        // Read back the full profile in the same DB lock — no extra IPC needed
+        read_profile(db.conn())
+    }; // db guard dropped here — before any .await
 
     // Store keystore in app state
     let mut keystore = state.keystore.lock().await;
     *keystore = Some(ks);
     drop(keystore);
-
-    emit_progress(&app, "p2p", "Starting peer-to-peer network...");
-    auto_start_p2p(&w, state.p2p_node.clone(), state.db.clone());
 
     emit_progress(&app, "done", "Vault unlocked successfully");
 
@@ -265,43 +155,41 @@ pub async fn generate_wallet(
     .map_err(|e: String| e)?;
 
     emit_progress(&app, "db", "Storing identity in local database...");
-    let db = state.db.lock().await;
+    {
+        let db = state.db.lock().unwrap();
 
-    // Check if identity already exists
-    let exists: bool = db
-        .conn()
-        .query_row(
-            "SELECT COUNT(*) > 0 FROM local_identity WHERE id = 1",
-            [],
-            |row| row.get(0),
-        )
-        .map_err(|e| e.to_string())?;
-
-    if exists {
-        // Update existing identity (e.g., re-onboarding after DB wipe recovery)
-        db.conn()
-            .execute(
-                "UPDATE local_identity SET stake_address = ?1, payment_address = ?2, updated_at = datetime('now') WHERE id = 1",
-                params![w.stake_address, w.payment_address],
+        // Check if identity already exists
+        let exists: bool = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM local_identity WHERE id = 1",
+                [],
+                |row| row.get(0),
             )
             .map_err(|e| e.to_string())?;
-    } else {
-        db.conn()
-            .execute(
-                "INSERT INTO local_identity (id, stake_address, payment_address) VALUES (1, ?1, ?2)",
-                params![w.stake_address, w.payment_address],
-            )
-            .map_err(|e| e.to_string())?;
-    }
-    drop(db);
+
+        if exists {
+            // Update existing identity (e.g., re-onboarding after DB wipe recovery)
+            db.conn()
+                .execute(
+                    "UPDATE local_identity SET stake_address = ?1, payment_address = ?2, updated_at = datetime('now') WHERE id = 1",
+                    params![w.stake_address, w.payment_address],
+                )
+                .map_err(|e| e.to_string())?;
+        } else {
+            db.conn()
+                .execute(
+                    "INSERT INTO local_identity (id, stake_address, payment_address) VALUES (1, ?1, ?2)",
+                    params![w.stake_address, w.payment_address],
+                )
+                .map_err(|e| e.to_string())?;
+        }
+    } // db guard dropped here — before any .await
 
     // Store keystore in app state
     let mut keystore = state.keystore.lock().await;
     *keystore = Some(ks);
     drop(keystore);
-
-    emit_progress(&app, "p2p", "Starting peer-to-peer network...");
-    auto_start_p2p(&w, state.p2p_node.clone(), state.db.clone());
 
     emit_progress(&app, "done", "Identity created successfully");
 
@@ -338,41 +226,39 @@ pub async fn restore_wallet(
     .map_err(|e: String| e)?;
 
     emit_progress(&app, "db", "Storing identity in local database...");
-    let db = state.db.lock().await;
+    {
+        let db = state.db.lock().unwrap();
 
-    let exists: bool = db
-        .conn()
-        .query_row(
-            "SELECT COUNT(*) > 0 FROM local_identity WHERE id = 1",
-            [],
-            |row| row.get(0),
-        )
-        .map_err(|e| e.to_string())?;
-
-    if exists {
-        db.conn()
-            .execute(
-                "UPDATE local_identity SET stake_address = ?1, payment_address = ?2, updated_at = datetime('now') WHERE id = 1",
-                params![w.stake_address, w.payment_address],
+        let exists: bool = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM local_identity WHERE id = 1",
+                [],
+                |row| row.get(0),
             )
             .map_err(|e| e.to_string())?;
-    } else {
-        db.conn()
-            .execute(
-                "INSERT INTO local_identity (id, stake_address, payment_address) VALUES (1, ?1, ?2)",
-                params![w.stake_address, w.payment_address],
-            )
-            .map_err(|e| e.to_string())?;
-    }
-    drop(db);
+
+        if exists {
+            db.conn()
+                .execute(
+                    "UPDATE local_identity SET stake_address = ?1, payment_address = ?2, updated_at = datetime('now') WHERE id = 1",
+                    params![w.stake_address, w.payment_address],
+                )
+                .map_err(|e| e.to_string())?;
+        } else {
+            db.conn()
+                .execute(
+                    "INSERT INTO local_identity (id, stake_address, payment_address) VALUES (1, ?1, ?2)",
+                    params![w.stake_address, w.payment_address],
+                )
+                .map_err(|e| e.to_string())?;
+        }
+    } // db guard dropped here — before any .await
 
     // Store keystore in app state
     let mut keystore = state.keystore.lock().await;
     *keystore = Some(ks);
     drop(keystore);
-
-    emit_progress(&app, "p2p", "Starting peer-to-peer network...");
-    auto_start_p2p(&w, state.p2p_node.clone(), state.db.clone());
 
     emit_progress(&app, "done", "Wallet restored successfully");
 
@@ -412,7 +298,7 @@ pub async fn lock_vault(state: State<'_, AppState>) -> Result<(), String> {
 pub async fn get_wallet_info(
     state: State<'_, AppState>,
 ) -> Result<Option<WalletInfo>, String> {
-    let db = state.db.lock().await;
+    let db = state.db.lock().unwrap();
 
     let result = db.conn().query_row(
         "SELECT stake_address, payment_address FROM local_identity WHERE id = 1",
@@ -436,7 +322,7 @@ pub async fn get_wallet_info(
 /// Get the local user's profile.
 #[tauri::command]
 pub async fn get_profile(state: State<'_, AppState>) -> Result<Option<Identity>, String> {
-    let db = state.db.lock().await;
+    let db = state.db.lock().unwrap();
     Ok(read_profile(db.conn()))
 }
 
@@ -468,7 +354,7 @@ pub async fn update_profile(
     state: State<'_, AppState>,
     update: ProfileUpdate,
 ) -> Result<Identity, String> {
-    let db = state.db.lock().await;
+    let db = state.db.lock().unwrap();
 
     // Build dynamic UPDATE statement
     let mut set_clauses = Vec::new();
@@ -547,23 +433,23 @@ pub async fn publish_profile(
     let w = wallet::wallet_from_mnemonic(&mnemonic).map_err(|e| e.to_string())?;
 
     // Read the current profile from the database
-    let db = state.db.lock().await;
     let (stake_address, display_name, bio, avatar_cid, created_at_str): (
         String,
         Option<String>,
         Option<String>,
         Option<String>,
         String,
-    ) = db
-        .conn()
-        .query_row(
-            "SELECT stake_address, display_name, bio, avatar_cid, created_at
-             FROM local_identity WHERE id = 1",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
-        )
-        .map_err(|e| e.to_string())?;
-    drop(db);
+    ) = {
+        let db = state.db.lock().unwrap();
+        db.conn()
+            .query_row(
+                "SELECT stake_address, display_name, bio, avatar_cid, created_at
+                 FROM local_identity WHERE id = 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+            )
+            .map_err(|e| e.to_string())?
+    }; // db guard dropped here — before any .await
 
     // Parse created_at to unix timestamp
     let created_at = parse_datetime_to_unix(&created_at_str);
@@ -590,7 +476,7 @@ pub async fn publish_profile(
         .map_err(|e| e.to_string())?;
 
     // Save the profile_hash in the database
-    let db = state.db.lock().await;
+    let db = state.db.lock().unwrap();
     db.conn()
         .execute(
             "UPDATE local_identity SET profile_hash = ?1, updated_at = datetime('now') WHERE id = 1",

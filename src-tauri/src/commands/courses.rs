@@ -19,7 +19,7 @@ pub async fn list_courses(
     state: State<'_, AppState>,
     status: Option<String>,
 ) -> Result<Vec<Course>, String> {
-    let db = state.db.lock().await;
+    let db = state.db.lock().unwrap();
 
     let (sql, param_values): (String, Vec<Box<dyn rusqlite::types::ToSql>>) =
         if let Some(ref s) = status {
@@ -84,7 +84,7 @@ pub async fn get_course(
     state: State<'_, AppState>,
     course_id: String,
 ) -> Result<Option<Course>, String> {
-    let db = state.db.lock().await;
+    let db = state.db.lock().unwrap();
 
     let result = db.conn().query_row(
         "SELECT id, title, description, author_address, author_name, content_cid, thumbnail_cid, \
@@ -131,7 +131,7 @@ pub async fn create_course(
     state: State<'_, AppState>,
     req: CreateCourseRequest,
 ) -> Result<Course, String> {
-    let db = state.db.lock().await;
+    let db = state.db.lock().unwrap();
 
     // Get the local user's stake address
     let author_address: String = db
@@ -178,7 +178,7 @@ pub async fn update_course(
     course_id: String,
     req: UpdateCourseRequest,
 ) -> Result<Course, String> {
-    let db = state.db.lock().await;
+    let db = state.db.lock().unwrap();
 
     let mut set_clauses = Vec::new();
     let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
@@ -240,7 +240,7 @@ pub async fn delete_course(
     state: State<'_, AppState>,
     course_id: String,
 ) -> Result<(), String> {
-    let db = state.db.lock().await;
+    let db = state.db.lock().unwrap();
 
     let rows = db
         .conn()
@@ -276,7 +276,7 @@ pub async fn publish_course(
 
     // Read course data from DB (scoped to release the lock before iroh calls)
     let payload = {
-        let db = state.db.lock().await;
+        let db = state.db.lock().unwrap();
         let course = get_course_by_id(db.conn(), &course_id)?;
 
         // Read chapters with their elements
@@ -363,59 +363,60 @@ pub async fn publish_course(
         .await
         .map_err(|e| e.to_string())?;
 
-    // Update the course in the database
-    let db = state.db.lock().await;
-    db.conn()
-        .execute(
-            "UPDATE courses SET content_cid = ?1, status = 'published', \
-             version = version + 1, published_at = datetime('now'), \
-             updated_at = datetime('now') WHERE id = ?2",
-            params![result.content_hash, course_id],
-        )
-        .map_err(|e| e.to_string())?;
+    // Update the course in the database and build catalog announcement
+    let (announcement, signed_ann, version) = {
+        let db = state.db.lock().unwrap();
+        db.conn()
+            .execute(
+                "UPDATE courses SET content_cid = ?1, status = 'published', \
+                 version = version + 1, published_at = datetime('now'), \
+                 updated_at = datetime('now') WHERE id = ?2",
+                params![result.content_hash, course_id],
+            )
+            .map_err(|e| e.to_string())?;
 
-    // Track the pin
-    db.conn()
-        .execute(
-            "INSERT OR REPLACE INTO pins (cid, pin_type, size_bytes, last_accessed, auto_unpin) \
-             VALUES (?1, 'course', ?2, datetime('now'), 0)",
-            params![result.content_hash, result.size as i64],
-        )
-        .map_err(|e| e.to_string())?;
+        // Track the pin
+        db.conn()
+            .execute(
+                "INSERT OR REPLACE INTO pins (cid, pin_type, size_bytes, last_accessed, auto_unpin) \
+                 VALUES (?1, 'course', ?2, datetime('now'), 0)",
+                params![result.content_hash, result.size as i64],
+            )
+            .map_err(|e| e.to_string())?;
 
-    // Read back the updated course to get the new version number
-    let updated_course = get_course_by_id(db.conn(), &course_id)?;
-    let version = updated_course.version;
+        // Read back the updated course to get the new version number
+        let updated_course = get_course_by_id(db.conn(), &course_id)?;
+        let version = updated_course.version;
 
-    // Build a catalog announcement for P2P discovery
-    let announcement = catalog::build_catalog_announcement(
-        &payload.author_address,
-        &payload.title,
-        payload.description.as_deref(),
-        &result.content_hash,
-        payload.thumbnail_hash.as_deref(),
-        &payload.tags,
-        &payload.skill_ids,
-        version,
-    );
-
-    // Sign the announcement payload to get the signature for the catalog entry
-    let ann_json = serde_json::to_vec(&announcement).map_err(|e| e.to_string())?;
-    let signed_ann =
-        crate::p2p::signing::sign_gossip_message(
-            crate::p2p::types::TOPIC_CATALOG,
-            ann_json,
-            &w.signing_key,
-            &w.stake_address,
+        // Build a catalog announcement for P2P discovery
+        let announcement = catalog::build_catalog_announcement(
+            &payload.author_address,
+            &payload.title,
+            payload.description.as_deref(),
+            &result.content_hash,
+            payload.thumbnail_hash.as_deref(),
+            &payload.tags,
+            &payload.skill_ids,
+            version,
         );
-    let signature_hex = hex::encode(&signed_ann.signature);
 
-    // Insert into local catalog table (author's own course, pinned=1)
-    catalog::insert_own_catalog_entry(&db, &announcement, &signature_hex)
-        .map_err(|e| format!("catalog insert: {e}"))?;
+        // Sign the announcement payload to get the signature for the catalog entry
+        let ann_json = serde_json::to_vec(&announcement).map_err(|e| e.to_string())?;
+        let signed_ann =
+            crate::p2p::signing::sign_gossip_message(
+                crate::p2p::types::TOPIC_CATALOG,
+                ann_json,
+                &w.signing_key,
+                &w.stake_address,
+            );
+        let signature_hex = hex::encode(&signed_ann.signature);
 
-    // Release DB lock before P2P publish (which is async and may take time)
-    drop(db);
+        // Insert into local catalog table (author's own course, pinned=1)
+        catalog::insert_own_catalog_entry(&db, &announcement, &signature_hex)
+            .map_err(|e| format!("catalog insert: {e}"))?;
+
+        (announcement, signed_ann, version)
+    }; // db guard dropped here — before any .await
 
     // Broadcast via P2P if the node is running (best-effort — don't fail publish)
     let p2p_node = state.p2p_node.lock().await;

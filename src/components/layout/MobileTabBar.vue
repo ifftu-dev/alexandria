@@ -100,7 +100,7 @@ async function signOut() {
   <Transition name="fade">
     <div
       v-if="moreOpen"
-      class="fixed inset-0 z-[60] bg-black/40 backdrop-blur-sm"
+      class="fixed inset-0 z-[60] bg-black/40"
       @click="moreOpen = false"
     />
   </Transition>
@@ -109,17 +109,17 @@ async function signOut() {
   <Transition name="slide-up">
     <div
       v-if="moreOpen"
-      class="fixed bottom-0 left-0 right-0 z-[70] bg-[rgb(var(--color-card))] shadow-lg safe-area-bottom"
+      class="fixed bottom-0 left-0 right-0 z-[70] bg-card shadow-lg safe-area-bottom"
     >
       <!-- Drag handle -->
       <div class="flex justify-center pt-3 pb-1">
-        <div class="w-10 h-1 rounded-full bg-[rgb(var(--color-border))]" />
+        <div class="w-10 h-1 rounded-full bg-border" />
       </div>
 
       <!-- Drawer content — pb-16 accounts for the tab bar underneath -->
       <div class="px-4 pb-16 max-h-[70vh] overflow-y-auto">
         <div v-for="section in drawerSections" :key="section.title" class="mb-4 last:mb-0">
-          <div class="px-1 pb-1.5 text-[0.65rem] font-semibold tracking-wider uppercase text-[rgb(var(--color-muted-foreground)/0.6)]">
+          <div class="px-1 pb-1.5 text-[0.65rem] font-semibold tracking-wider uppercase text-muted-foreground/60">
             {{ section.title }}
           </div>
           <button
@@ -127,8 +127,8 @@ async function signOut() {
             :key="item.path"
             class="flex items-center w-full gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors"
             :class="isActive(item.path)
-              ? 'bg-[rgb(var(--color-primary)/0.1)] text-[rgb(var(--color-primary))] font-medium'
-              : 'text-[rgb(var(--color-foreground))] active:bg-[rgb(var(--color-muted))]'"
+              ? 'bg-primary/10 text-primary font-medium'
+              : 'text-foreground active:bg-muted'"
             @click="navigate(item.path)"
           >
             <svg class="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
@@ -139,11 +139,11 @@ async function signOut() {
         </div>
 
         <!-- Divider -->
-        <div class="my-3 h-px bg-[rgb(var(--color-border))]" />
+        <div class="my-3 h-px bg-border" />
 
         <!-- Theme toggle -->
         <button
-          class="flex items-center w-full gap-3 rounded-lg px-3 py-2.5 text-sm text-[rgb(var(--color-foreground))] active:bg-[rgb(var(--color-muted))] transition-colors"
+          class="flex items-center w-full gap-3 rounded-lg px-3 py-2.5 text-sm text-foreground active:bg-muted transition-colors"
           @click="toggleTheme"
         >
           <svg class="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
@@ -155,15 +155,15 @@ async function signOut() {
         <!-- User info + Lock -->
         <div class="mt-2 flex items-center justify-between rounded-lg px-3 py-2.5">
           <div class="flex items-center gap-3 min-w-0">
-            <div class="w-8 h-8 rounded-full bg-gradient-to-br from-[rgb(var(--color-primary))] to-[rgb(var(--color-accent))] flex items-center justify-center text-white text-xs font-bold shrink-0">
+            <div class="w-8 h-8 rounded-full bg-gradient-to-br from-primary to-accent flex items-center justify-center text-white text-xs font-bold shrink-0">
               {{ displayName ? displayName.charAt(0).toUpperCase() : 'A' }}
             </div>
-            <span class="text-sm font-medium text-[rgb(var(--color-foreground))] truncate">
+            <span class="text-sm font-medium text-foreground truncate">
               {{ displayName ?? 'Anonymous' }}
             </span>
           </div>
           <button
-            class="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium text-[rgb(var(--color-error))] bg-[rgb(var(--color-error)/0.1)] active:bg-[rgb(var(--color-error)/0.2)] transition-colors"
+            class="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium text-error bg-error/10 active:bg-error/20 transition-colors"
             @click="signOut"
           >
             <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -178,15 +178,15 @@ async function signOut() {
 
   <!-- Tab bar -->
   <nav
-    class="fixed bottom-0 left-0 right-0 z-[70] flex items-stretch border-t border-[rgb(var(--color-border))] bg-[rgb(var(--color-card))] safe-area-bottom"
+    class="fixed bottom-0 left-0 right-0 z-[70] flex items-stretch border-t border-border bg-card safe-area-bottom"
   >
     <button
       v-for="tab in primaryTabs"
       :key="tab.path"
       class="flex flex-1 flex-col items-center justify-center gap-0.5 pt-2 pb-1 transition-colors"
       :class="isActive(tab.path)
-        ? 'text-[rgb(var(--color-primary))]'
-        : 'text-[rgb(var(--color-muted-foreground))]'"
+        ? 'text-primary'
+        : 'text-muted-foreground'"
       @click="navigate(tab.path)"
     >
       <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" :stroke-width="isActive(tab.path) ? 2.25 : 1.75">
@@ -199,8 +199,8 @@ async function signOut() {
     <button
       class="flex flex-1 flex-col items-center justify-center gap-0.5 pt-2 pb-1 transition-colors"
       :class="moreOpen || isMoreActive()
-        ? 'text-[rgb(var(--color-primary))]'
-        : 'text-[rgb(var(--color-muted-foreground))]'"
+        ? 'text-primary'
+        : 'text-muted-foreground'"
       @click="moreOpen = !moreOpen"
     >
       <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" :stroke-width="moreOpen || isMoreActive() ? 2.25 : 1.75">

@@ -873,13 +873,16 @@ export interface P2PStatus {
   listening_addresses: string[]
   connected_peers: number
   subscribed_topics: string[]
+  nat_status: string
+  relay_addresses: string[]
 }
 
-export interface PeerInfo {
-  peer_id: string
-  addresses: string[]
-  protocols: string[]
-}
+/// Connected peer info returned by `p2p_peers`.
+///
+/// Currently the backend returns just the peer ID string for each
+/// connected peer. Address and protocol info may be added later when
+/// the swarm command channel supports richer queries.
+export type PeerInfo = string
 
 // ---- Health ----
 

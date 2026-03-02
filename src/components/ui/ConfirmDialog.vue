@@ -23,7 +23,7 @@ defineEmits<{ confirm: []; cancel: [] }>()
 
 <template>
   <AppModal :open="open" :title="title" max-width="28rem" @close="$emit('cancel')">
-    <p v-if="message" class="text-sm text-[rgb(var(--color-muted-foreground))] mb-4">
+    <p v-if="message" class="text-sm text-muted-foreground mb-4">
       {{ message }}
     </p>
     <slot />

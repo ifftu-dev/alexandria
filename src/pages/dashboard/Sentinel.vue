@@ -172,14 +172,14 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
     <!-- ================================================================== -->
     <div class="flex items-center justify-between">
       <div class="flex items-center gap-4">
-        <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-[rgb(var(--color-primary)/0.1)]">
-          <svg class="h-5 w-5 text-[rgb(var(--color-primary))]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+        <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
+          <svg class="h-5 w-5 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
             <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
           </svg>
         </div>
         <div>
-          <h1 class="text-xl font-bold text-[rgb(var(--color-foreground))]">Sentinel</h1>
-          <p class="mt-0.5 text-sm text-[rgb(var(--color-muted-foreground))]">
+          <h1 class="text-xl font-bold text-foreground">Sentinel</h1>
+          <p class="mt-0.5 text-sm text-muted-foreground">
             Assessment integrity monitoring
           </p>
         </div>
@@ -238,15 +238,15 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
       <!-- ================================================================ -->
       <!-- TAB SWITCHER                                                     -->
       <!-- ================================================================ -->
-      <div class="rounded-lg bg-[rgb(var(--color-muted))] p-1">
+      <div class="rounded-lg bg-muted p-1">
         <div class="flex gap-1">
           <button
             v-for="tab in (['overview', 'sessions', 'signals', 'profile'] as const)"
             :key="tab"
             class="flex-1 rounded-md px-3 py-2 text-sm font-medium transition-colors"
             :class="activeTab === tab
-              ? 'bg-[rgb(var(--color-card))] text-[rgb(var(--color-foreground))] shadow-sm'
-              : 'text-[rgb(var(--color-muted-foreground))] hover:text-[rgb(var(--color-foreground))]'"
+              ? 'bg-card text-foreground shadow-sm'
+              : 'text-muted-foreground hover:text-foreground'"
             @click="activeTab = tab"
           >
             {{ tab === 'overview' ? 'Overview' : tab === 'sessions' ? 'Sessions' : tab === 'signals' ? 'Signals & Weights' : 'Profile & Flags' }}
@@ -260,17 +260,17 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
       <div v-if="loading" class="space-y-6">
         <!-- Stats skeleton -->
         <div class="grid grid-cols-2 gap-4 sm:grid-cols-4">
-          <div v-for="i in 4" :key="i" class="rounded-lg border border-[rgb(var(--color-border))] p-4">
-            <div class="mb-2 h-3 w-20 animate-pulse rounded bg-[rgb(var(--color-muted))]" />
-            <div class="h-7 w-16 animate-pulse rounded bg-[rgb(var(--color-muted))]" />
+          <div v-for="i in 4" :key="i" class="rounded-lg border border-border p-4">
+            <div class="mb-2 h-3 w-20 animate-pulse rounded bg-muted" />
+            <div class="h-7 w-16 animate-pulse rounded bg-muted" />
           </div>
         </div>
         <!-- Content skeleton -->
         <div class="space-y-3">
-          <div v-for="i in 3" :key="i" class="rounded-lg border border-[rgb(var(--color-border))] p-4">
-            <div class="mb-3 h-4 w-48 animate-pulse rounded bg-[rgb(var(--color-muted))]" />
-            <div class="h-3 w-full animate-pulse rounded bg-[rgb(var(--color-muted))]" />
-            <div class="mt-2 h-3 w-3/4 animate-pulse rounded bg-[rgb(var(--color-muted))]" />
+          <div v-for="i in 3" :key="i" class="rounded-lg border border-border p-4">
+            <div class="mb-3 h-4 w-48 animate-pulse rounded bg-muted" />
+            <div class="h-3 w-full animate-pulse rounded bg-muted" />
+            <div class="mt-2 h-3 w-3/4 animate-pulse rounded bg-muted" />
           </div>
         </div>
       </div>
@@ -282,32 +282,32 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
         <!-- Stats Grid -->
         <div class="grid grid-cols-2 gap-4 sm:grid-cols-4">
           <!-- Total Sessions -->
-          <div class="rounded-lg border border-[rgb(var(--color-border))] p-4">
-            <p class="text-xs font-medium text-[rgb(var(--color-muted-foreground))]">Total Sessions</p>
-            <p class="mt-1 text-2xl font-bold text-[rgb(var(--color-foreground))]">{{ sessions.length }}</p>
+          <div class="rounded-lg border border-border p-4">
+            <p class="text-xs font-medium text-muted-foreground">Total Sessions</p>
+            <p class="mt-1 text-2xl font-bold text-foreground">{{ sessions.length }}</p>
           </div>
           <!-- Avg Integrity -->
-          <div class="rounded-lg border border-[rgb(var(--color-border))] p-4">
-            <p class="text-xs font-medium text-[rgb(var(--color-muted-foreground))]">Avg Integrity</p>
-            <p class="mt-1 text-2xl font-bold text-[rgb(var(--color-foreground))]">{{ integrityPercent }}%</p>
+          <div class="rounded-lg border border-border p-4">
+            <p class="text-xs font-medium text-muted-foreground">Avg Integrity</p>
+            <p class="mt-1 text-2xl font-bold text-foreground">{{ integrityPercent }}%</p>
           </div>
           <!-- Avg Consistency -->
-          <div class="rounded-lg border border-[rgb(var(--color-border))] p-4">
-            <p class="text-xs font-medium text-[rgb(var(--color-muted-foreground))]">Avg Consistency</p>
-            <p class="mt-1 text-2xl font-bold text-[rgb(var(--color-foreground))]">{{ consistencyPercent }}%</p>
+          <div class="rounded-lg border border-border p-4">
+            <p class="text-xs font-medium text-muted-foreground">Avg Consistency</p>
+            <p class="mt-1 text-2xl font-bold text-foreground">{{ consistencyPercent }}%</p>
           </div>
           <!-- Clean Rate -->
-          <div class="rounded-lg border border-[rgb(var(--color-border))] p-4">
-            <p class="text-xs font-medium text-[rgb(var(--color-muted-foreground))]">Clean Rate</p>
-            <p class="mt-1 text-2xl font-bold text-[rgb(var(--color-foreground))]">{{ sessionBreakdown.cleanPct }}%</p>
+          <div class="rounded-lg border border-border p-4">
+            <p class="text-xs font-medium text-muted-foreground">Clean Rate</p>
+            <p class="mt-1 text-2xl font-bold text-foreground">{{ sessionBreakdown.cleanPct }}%</p>
           </div>
         </div>
 
         <!-- Session Outcome Breakdown -->
         <div class="card p-5">
-          <h2 class="mb-4 text-sm font-semibold text-[rgb(var(--color-foreground))]">Session Outcome Breakdown</h2>
+          <h2 class="mb-4 text-sm font-semibold text-foreground">Session Outcome Breakdown</h2>
 
-          <div v-if="sessions.length === 0" class="py-6 text-center text-sm text-[rgb(var(--color-muted-foreground))]">
+          <div v-if="sessions.length === 0" class="py-6 text-center text-sm text-muted-foreground">
             No sessions recorded yet. Outcomes will appear after you complete assessments.
           </div>
 
@@ -335,18 +335,18 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
             <div class="mt-3 flex items-center gap-6 text-xs">
               <div class="flex items-center gap-1.5">
                 <span class="inline-block h-2.5 w-2.5 rounded-full bg-emerald-500" />
-                <span class="text-[rgb(var(--color-muted-foreground))]">Clean</span>
-                <span class="font-medium text-[rgb(var(--color-foreground))]">{{ sessionBreakdown.clean }}</span>
+                <span class="text-muted-foreground">Clean</span>
+                <span class="font-medium text-foreground">{{ sessionBreakdown.clean }}</span>
               </div>
               <div class="flex items-center gap-1.5">
                 <span class="inline-block h-2.5 w-2.5 rounded-full bg-amber-500" />
-                <span class="text-[rgb(var(--color-muted-foreground))]">Flagged</span>
-                <span class="font-medium text-[rgb(var(--color-foreground))]">{{ sessionBreakdown.flagged }}</span>
+                <span class="text-muted-foreground">Flagged</span>
+                <span class="font-medium text-foreground">{{ sessionBreakdown.flagged }}</span>
               </div>
               <div class="flex items-center gap-1.5">
                 <span class="inline-block h-2.5 w-2.5 rounded-full bg-red-500" />
-                <span class="text-[rgb(var(--color-muted-foreground))]">Suspended</span>
-                <span class="font-medium text-[rgb(var(--color-foreground))]">{{ sessionBreakdown.suspended }}</span>
+                <span class="text-muted-foreground">Suspended</span>
+                <span class="font-medium text-foreground">{{ sessionBreakdown.suspended }}</span>
               </div>
             </div>
           </template>
@@ -355,18 +355,18 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
         <!-- Engine Status -->
         <div class="card p-5">
           <div class="mb-4 flex items-center justify-between">
-            <h2 class="text-sm font-semibold text-[rgb(var(--color-foreground))]">Engine Status</h2>
+            <h2 class="text-sm font-semibold text-foreground">Engine Status</h2>
             <AppBadge :variant="profile ? 'success' : 'warning'">
               {{ profile ? 'Calibrated' : 'Not Calibrated' }}
             </AppBadge>
           </div>
 
-          <div v-if="!profile" class="rounded-lg border border-dashed border-[rgb(var(--color-border))] p-6 text-center">
-            <svg class="mx-auto h-8 w-8 text-[rgb(var(--color-muted-foreground))]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+          <div v-if="!profile" class="rounded-lg border border-dashed border-border p-6 text-center">
+            <svg class="mx-auto h-8 w-8 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
               <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
             </svg>
-            <p class="mt-2 text-sm font-medium text-[rgb(var(--color-foreground))]">No profile calibrated</p>
-            <p class="mt-1 text-xs text-[rgb(var(--color-muted-foreground))]">
+            <p class="mt-2 text-sm font-medium text-foreground">No profile calibrated</p>
+            <p class="mt-1 text-xs text-muted-foreground">
               Run the training wizard to calibrate Sentinel to your behavioral patterns.
             </p>
             <AppButton variant="primary" size="sm" class="mt-4" @click="showWizard = true">
@@ -375,30 +375,30 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
           </div>
 
           <div v-else class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div class="rounded-lg border border-[rgb(var(--color-border))] p-3 text-center">
-              <svg class="mx-auto h-5 w-5 text-[rgb(var(--color-muted-foreground))]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+            <div class="rounded-lg border border-border p-3 text-center">
+              <svg class="mx-auto h-5 w-5 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5M12 17.25h8.25" />
               </svg>
-              <p class="mt-1 text-xs font-medium text-[rgb(var(--color-muted-foreground))]">Typing</p>
-              <p class="text-sm font-semibold text-[rgb(var(--color-foreground))]">
+              <p class="mt-1 text-xs font-medium text-muted-foreground">Typing</p>
+              <p class="text-sm font-semibold text-foreground">
                 {{ ((profile as any)?.typingPattern?.speedWpm ?? 0).toFixed(0) }} WPM
               </p>
             </div>
-            <div class="rounded-lg border border-[rgb(var(--color-border))] p-3 text-center">
-              <svg class="mx-auto h-5 w-5 text-[rgb(var(--color-muted-foreground))]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+            <div class="rounded-lg border border-border p-3 text-center">
+              <svg class="mx-auto h-5 w-5 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M15.042 21.672L13.684 16.6m0 0l-2.51 2.225.569-9.47 5.227 7.917-3.286-.672zM12 2.25V4.5m5.834.166l-1.591 1.591M20.25 10.5H18M7.757 14.743l-1.59 1.59M6 10.5H3.75m4.007-4.243l-1.59-1.59" />
               </svg>
-              <p class="mt-1 text-xs font-medium text-[rgb(var(--color-muted-foreground))]">Mouse</p>
-              <p class="text-sm font-semibold text-[rgb(var(--color-foreground))]">
+              <p class="mt-1 text-xs font-medium text-muted-foreground">Mouse</p>
+              <p class="text-sm font-semibold text-foreground">
                 {{ ((profile as any)?.mousePattern?.avgVelocity ?? 0).toFixed(1) }} px/ms
               </p>
             </div>
-            <div class="rounded-lg border border-[rgb(var(--color-border))] p-3 text-center">
-              <svg class="mx-auto h-5 w-5 text-[rgb(var(--color-muted-foreground))]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+            <div class="rounded-lg border border-border p-3 text-center">
+              <svg class="mx-auto h-5 w-5 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456z" />
               </svg>
-              <p class="mt-1 text-xs font-medium text-[rgb(var(--color-muted-foreground))]">AI Models</p>
-              <p class="text-sm font-semibold text-[rgb(var(--color-foreground))]">
+              <p class="mt-1 text-xs font-medium text-muted-foreground">AI Models</p>
+              <p class="text-sm font-semibold text-foreground">
                 {{ [aiStatus?.keystrokeAE?.trained, aiStatus?.mouseCNN?.trained, aiStatus?.faceEmbedder?.enrolled].filter(Boolean).length }}/3 Ready
               </p>
             </div>
@@ -417,10 +417,10 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
           >
             <template #action>
               <div class="flex flex-col items-center gap-2">
-                <svg class="h-10 w-10 text-[rgb(var(--color-muted-foreground))]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1">
+                <svg class="h-10 w-10 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
                 </svg>
-                <p class="text-xs text-[rgb(var(--color-muted-foreground))]">
+                <p class="text-xs text-muted-foreground">
                   Sentinel monitors integrity signals in real-time during assessments.
                 </p>
               </div>
@@ -432,13 +432,13 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
           <div
             v-for="session in sessions.slice(0, 30)"
             :key="session.id"
-            class="rounded-lg border border-[rgb(var(--color-border))] p-4 transition-colors hover:border-[rgb(var(--color-primary)/0.3)]"
+            class="rounded-lg border border-border p-4 transition-colors hover:border-primary/30"
           >
             <div class="flex items-start justify-between gap-4">
               <!-- Left: session info -->
               <div class="min-w-0 flex-1">
                 <div class="flex flex-wrap items-center gap-2">
-                  <p class="truncate font-mono text-sm font-medium text-[rgb(var(--color-foreground))]">
+                  <p class="truncate font-mono text-sm font-medium text-foreground">
                     {{ session.enrollment_id }}
                   </p>
                   <AppBadge
@@ -450,7 +450,7 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
                     {{ getOutcome(session) }}
                   </AppBadge>
                 </div>
-                <div class="mt-1.5 flex items-center gap-3 text-xs text-[rgb(var(--color-muted-foreground))]">
+                <div class="mt-1.5 flex items-center gap-3 text-xs text-muted-foreground">
                   <span class="flex items-center gap-1">
                     <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                       <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -468,16 +468,16 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
 
               <!-- Right: integrity score -->
               <div v-if="session.integrity_score !== null && session.integrity_score !== undefined" class="flex-shrink-0 text-right">
-                <p class="font-mono text-2xl font-bold text-[rgb(var(--color-foreground))]">
-                  {{ (session.integrity_score * 100).toFixed(0) }}<span class="text-sm font-normal text-[rgb(var(--color-muted-foreground))]">%</span>
+                <p class="font-mono text-2xl font-bold text-foreground">
+                  {{ (session.integrity_score * 100).toFixed(0) }}<span class="text-sm font-normal text-muted-foreground">%</span>
                 </p>
                 <AppBadge :variant="scoreColor(session.integrity_score)" class="mt-1">
                   {{ session.integrity_score >= 0.8 ? 'High' : session.integrity_score >= 0.5 ? 'Medium' : 'Low' }}
                 </AppBadge>
               </div>
               <div v-else class="flex-shrink-0 text-right">
-                <p class="font-mono text-lg text-[rgb(var(--color-muted-foreground))]">--</p>
-                <p class="text-[0.65rem] text-[rgb(var(--color-muted-foreground))]">In progress</p>
+                <p class="font-mono text-lg text-muted-foreground">--</p>
+                <p class="text-[0.65rem] text-muted-foreground">In progress</p>
               </div>
             </div>
           </div>
@@ -489,8 +489,8 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
       <!-- ================================================================ -->
       <template v-else-if="activeTab === 'signals'">
         <div class="card p-5">
-          <h2 class="mb-1 text-sm font-semibold text-[rgb(var(--color-foreground))]">Integrity Signal Weights</h2>
-          <p class="mb-5 text-xs text-[rgb(var(--color-muted-foreground))]">
+          <h2 class="mb-1 text-sm font-semibold text-foreground">Integrity Signal Weights</h2>
+          <p class="mb-5 text-xs text-muted-foreground">
             The composite integrity score is a weighted average of these 7 behavioral signals.
             All signals are computed entirely on-device.
           </p>
@@ -499,24 +499,24 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
             <div
               v-for="signal in signalWeights"
               :key="signal.key"
-              class="rounded-lg border border-[rgb(var(--color-border))] p-4"
+              class="rounded-lg border border-border p-4"
             >
               <div class="flex items-start justify-between gap-3">
                 <div class="min-w-0 flex-1">
                   <div class="flex items-center gap-2">
-                    <p class="text-sm font-medium text-[rgb(var(--color-foreground))]">{{ signal.name }}</p>
-                    <span class="rounded bg-[rgb(var(--color-muted))] px-1.5 py-0.5 font-mono text-xs font-bold text-[rgb(var(--color-foreground))]">
+                    <p class="text-sm font-medium text-foreground">{{ signal.name }}</p>
+                    <span class="rounded bg-muted px-1.5 py-0.5 font-mono text-xs font-bold text-foreground">
                       {{ signal.weight }}%
                     </span>
                   </div>
-                  <p class="mt-1 text-xs text-[rgb(var(--color-muted-foreground))]">{{ signal.description }}</p>
+                  <p class="mt-1 text-xs text-muted-foreground">{{ signal.description }}</p>
                 </div>
               </div>
 
               <!-- Weight bar -->
-              <div class="mt-3 h-1.5 overflow-hidden rounded-full bg-[rgb(var(--color-muted))]">
+              <div class="mt-3 h-1.5 overflow-hidden rounded-full bg-muted">
                 <div
-                  class="h-full rounded-full bg-[rgb(var(--color-primary))] transition-all duration-500"
+                  class="h-full rounded-full bg-primary transition-all duration-500"
                   :style="{ width: signal.weight + '%' }"
                 />
               </div>
@@ -526,7 +526,7 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
 
         <!-- Weight distribution visual -->
         <div class="card p-5">
-          <h2 class="mb-3 text-sm font-semibold text-[rgb(var(--color-foreground))]">Weight Distribution</h2>
+          <h2 class="mb-3 text-sm font-semibold text-foreground">Weight Distribution</h2>
           <div class="flex h-4 overflow-hidden rounded-full">
             <div
               v-for="(signal, idx) in signalWeights"
@@ -559,8 +559,8 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
                   idx === 6 ? 'bg-rose-500' : '',
                 ]"
               />
-              <span class="text-[rgb(var(--color-muted-foreground))]">{{ signal.name }}</span>
-              <span class="font-medium text-[rgb(var(--color-foreground))]">{{ signal.weight }}%</span>
+              <span class="text-muted-foreground">{{ signal.name }}</span>
+              <span class="font-medium text-foreground">{{ signal.weight }}%</span>
             </div>
           </div>
         </div>
@@ -573,7 +573,7 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
         <!-- Behavioral Profile -->
         <div class="card p-5">
           <div class="mb-4 flex items-center justify-between">
-            <h2 class="text-sm font-semibold text-[rgb(var(--color-foreground))]">Behavioral Profile</h2>
+            <h2 class="text-sm font-semibold text-foreground">Behavioral Profile</h2>
             <AppBadge :variant="profile ? 'success' : 'warning'">
               {{ profile ? 'Calibrated' : 'Not Calibrated' }}
             </AppBadge>
@@ -581,30 +581,30 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
 
           <div v-if="profile" class="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <!-- Typing -->
-            <div class="rounded-lg border border-[rgb(var(--color-border))] p-4">
-              <p class="mb-3 text-xs font-medium uppercase tracking-wider text-[rgb(var(--color-muted-foreground))]">Typing</p>
+            <div class="rounded-lg border border-border p-4">
+              <p class="mb-3 text-xs font-medium uppercase tracking-wider text-muted-foreground">Typing</p>
               <div class="space-y-2">
                 <div class="flex items-center justify-between">
-                  <span class="text-xs text-[rgb(var(--color-muted-foreground))]">Avg Dwell</span>
-                  <span class="font-mono text-xs font-medium text-[rgb(var(--color-foreground))]">
+                  <span class="text-xs text-muted-foreground">Avg Dwell</span>
+                  <span class="font-mono text-xs font-medium text-foreground">
                     {{ ((profile as any)?.typingPattern?.avgDwellTime ?? 0).toFixed(0) }}ms
                   </span>
                 </div>
                 <div class="flex items-center justify-between">
-                  <span class="text-xs text-[rgb(var(--color-muted-foreground))]">Avg Flight</span>
-                  <span class="font-mono text-xs font-medium text-[rgb(var(--color-foreground))]">
+                  <span class="text-xs text-muted-foreground">Avg Flight</span>
+                  <span class="font-mono text-xs font-medium text-foreground">
                     {{ ((profile as any)?.typingPattern?.avgFlightTime ?? (profile as any)?.typingPattern?.avgFlightMs ?? 0).toFixed(0) }}ms
                   </span>
                 </div>
                 <div class="flex items-center justify-between">
-                  <span class="text-xs text-[rgb(var(--color-muted-foreground))]">Speed</span>
-                  <span class="font-mono text-xs font-medium text-[rgb(var(--color-foreground))]">
+                  <span class="text-xs text-muted-foreground">Speed</span>
+                  <span class="font-mono text-xs font-medium text-foreground">
                     {{ ((profile as any)?.typingPattern?.speedWpm ?? 0).toFixed(0) }} WPM
                   </span>
                 </div>
                 <div class="flex items-center justify-between">
-                  <span class="text-xs text-[rgb(var(--color-muted-foreground))]">Samples</span>
-                  <span class="font-mono text-xs font-medium text-[rgb(var(--color-foreground))]">
+                  <span class="text-xs text-muted-foreground">Samples</span>
+                  <span class="font-mono text-xs font-medium text-foreground">
                     {{ (profile as any)?.typingPattern?.sampleCount ?? 0 }}
                   </span>
                 </div>
@@ -612,30 +612,30 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
             </div>
 
             <!-- Mouse -->
-            <div class="rounded-lg border border-[rgb(var(--color-border))] p-4">
-              <p class="mb-3 text-xs font-medium uppercase tracking-wider text-[rgb(var(--color-muted-foreground))]">Mouse</p>
+            <div class="rounded-lg border border-border p-4">
+              <p class="mb-3 text-xs font-medium uppercase tracking-wider text-muted-foreground">Mouse</p>
               <div class="space-y-2">
                 <div class="flex items-center justify-between">
-                  <span class="text-xs text-[rgb(var(--color-muted-foreground))]">Velocity</span>
-                  <span class="font-mono text-xs font-medium text-[rgb(var(--color-foreground))]">
+                  <span class="text-xs text-muted-foreground">Velocity</span>
+                  <span class="font-mono text-xs font-medium text-foreground">
                     {{ ((profile as any)?.mousePattern?.avgVelocity ?? 0).toFixed(2) }} px/ms
                   </span>
                 </div>
                 <div class="flex items-center justify-between">
-                  <span class="text-xs text-[rgb(var(--color-muted-foreground))]">Acceleration</span>
-                  <span class="font-mono text-xs font-medium text-[rgb(var(--color-foreground))]">
+                  <span class="text-xs text-muted-foreground">Acceleration</span>
+                  <span class="font-mono text-xs font-medium text-foreground">
                     {{ ((profile as any)?.mousePattern?.avgAcceleration ?? 0).toFixed(2) }} px/ms²
                   </span>
                 </div>
                 <div class="flex items-center justify-between">
-                  <span class="text-xs text-[rgb(var(--color-muted-foreground))]">Click Precision</span>
-                  <span class="font-mono text-xs font-medium text-[rgb(var(--color-foreground))]">
+                  <span class="text-xs text-muted-foreground">Click Precision</span>
+                  <span class="font-mono text-xs font-medium text-foreground">
                     {{ ((profile as any)?.mousePattern?.clickPrecision ?? 0).toFixed(2) }}
                   </span>
                 </div>
                 <div class="flex items-center justify-between">
-                  <span class="text-xs text-[rgb(var(--color-muted-foreground))]">Samples</span>
-                  <span class="font-mono text-xs font-medium text-[rgb(var(--color-foreground))]">
+                  <span class="text-xs text-muted-foreground">Samples</span>
+                  <span class="font-mono text-xs font-medium text-foreground">
                     {{ (profile as any)?.mousePattern?.sampleCount ?? 0 }}
                   </span>
                 </div>
@@ -643,57 +643,57 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
             </div>
 
             <!-- AI Models -->
-            <div class="rounded-lg border border-[rgb(var(--color-border))] p-4">
-              <p class="mb-3 text-xs font-medium uppercase tracking-wider text-[rgb(var(--color-muted-foreground))]">AI Models</p>
+            <div class="rounded-lg border border-border p-4">
+              <p class="mb-3 text-xs font-medium uppercase tracking-wider text-muted-foreground">AI Models</p>
               <div v-if="aiStatus" class="space-y-2.5">
                 <div class="flex items-center justify-between">
-                  <span class="text-xs text-[rgb(var(--color-muted-foreground))]">Keystroke AE</span>
+                  <span class="text-xs text-muted-foreground">Keystroke AE</span>
                   <AppBadge :variant="aiStatus.keystrokeAE?.trained ? 'success' : 'warning'" class="text-[0.6rem]">
                     {{ aiStatus.keystrokeAE?.trained ? 'Ready' : 'Pending' }}
                   </AppBadge>
                 </div>
                 <div v-if="aiStatus.keystrokeAE?.trained" class="flex items-center justify-between">
-                  <span class="pl-2 text-[0.65rem] text-[rgb(var(--color-muted-foreground))]">Loss / Samples</span>
-                  <span class="font-mono text-[0.65rem] text-[rgb(var(--color-muted-foreground))]">
+                  <span class="pl-2 text-[0.65rem] text-muted-foreground">Loss / Samples</span>
+                  <span class="font-mono text-[0.65rem] text-muted-foreground">
                     {{ aiStatus.keystrokeAE.loss.toFixed(4) }} / {{ aiStatus.keystrokeAE.samples }}
                   </span>
                 </div>
 
                 <div class="flex items-center justify-between">
-                  <span class="text-xs text-[rgb(var(--color-muted-foreground))]">Mouse CNN</span>
+                  <span class="text-xs text-muted-foreground">Mouse CNN</span>
                   <AppBadge :variant="aiStatus.mouseCNN?.trained ? 'success' : 'warning'" class="text-[0.6rem]">
                     {{ aiStatus.mouseCNN?.trained ? 'Ready' : 'Pending' }}
                   </AppBadge>
                 </div>
                 <div v-if="aiStatus.mouseCNN?.trained" class="flex items-center justify-between">
-                  <span class="pl-2 text-[0.65rem] text-[rgb(var(--color-muted-foreground))]">Loss / Samples</span>
-                  <span class="font-mono text-[0.65rem] text-[rgb(var(--color-muted-foreground))]">
+                  <span class="pl-2 text-[0.65rem] text-muted-foreground">Loss / Samples</span>
+                  <span class="font-mono text-[0.65rem] text-muted-foreground">
                     {{ aiStatus.mouseCNN.loss.toFixed(4) }} / {{ aiStatus.mouseCNN.samples }}
                   </span>
                 </div>
 
                 <div class="flex items-center justify-between">
-                  <span class="text-xs text-[rgb(var(--color-muted-foreground))]">Face LBP</span>
+                  <span class="text-xs text-muted-foreground">Face LBP</span>
                   <AppBadge :variant="aiStatus.faceEmbedder?.enrolled ? 'success' : 'secondary'" class="text-[0.6rem]">
                     {{ aiStatus.faceEmbedder?.enrolled ? 'Enrolled' : 'Not set' }}
                   </AppBadge>
                 </div>
                 <div v-if="aiStatus.faceEmbedder?.enrolled" class="flex items-center justify-between">
-                  <span class="pl-2 text-[0.65rem] text-[rgb(var(--color-muted-foreground))]">Enrollment Progress</span>
-                  <span class="font-mono text-[0.65rem] text-[rgb(var(--color-muted-foreground))]">
+                  <span class="pl-2 text-[0.65rem] text-muted-foreground">Enrollment Progress</span>
+                  <span class="font-mono text-[0.65rem] text-muted-foreground">
                     {{ Math.round(aiStatus.faceEmbedder.progress * 100) }}%
                   </span>
                 </div>
               </div>
-              <div v-else class="py-2 text-center text-xs text-[rgb(var(--color-muted-foreground))]">
+              <div v-else class="py-2 text-center text-xs text-muted-foreground">
                 No AI model data
               </div>
             </div>
           </div>
 
-          <div v-else class="rounded-lg border border-dashed border-[rgb(var(--color-border))] p-6 text-center">
-            <p class="text-sm font-medium text-[rgb(var(--color-foreground))]">No profile yet</p>
-            <p class="mt-1 text-xs text-[rgb(var(--color-muted-foreground))]">
+          <div v-else class="rounded-lg border border-dashed border-border p-6 text-center">
+            <p class="text-sm font-medium text-foreground">No profile yet</p>
+            <p class="mt-1 text-xs text-muted-foreground">
               Run the training wizard to calibrate Sentinel to your behavioral patterns.
             </p>
             <AppButton variant="primary" size="sm" class="mt-3" @click="showWizard = true">
@@ -704,8 +704,8 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
 
         <!-- Anomaly Flag Types -->
         <div class="card p-5">
-          <h2 class="mb-1 text-sm font-semibold text-[rgb(var(--color-foreground))]">Anomaly Flag Types</h2>
-          <p class="mb-5 text-xs text-[rgb(var(--color-muted-foreground))]">
+          <h2 class="mb-1 text-sm font-semibold text-foreground">Anomaly Flag Types</h2>
+          <p class="mb-5 text-xs text-muted-foreground">
             Flags are raised automatically when behavioral signals exceed thresholds.
             Session outcomes are determined by flag count and severity.
           </p>
@@ -714,19 +714,19 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
             <div
               v-for="flag in anomalyFlagTypes"
               :key="flag.type"
-              class="flex items-start gap-4 rounded-lg border border-[rgb(var(--color-border))] p-4"
+              class="flex items-start gap-4 rounded-lg border border-border p-4"
             >
               <div class="min-w-0 flex-1">
                 <div class="flex flex-wrap items-center gap-2">
-                  <code class="rounded bg-[rgb(var(--color-muted))] px-1.5 py-0.5 text-xs font-medium text-[rgb(var(--color-foreground))]">
+                  <code class="rounded bg-muted px-1.5 py-0.5 text-xs font-medium text-foreground">
                     {{ flag.type }}
                   </code>
                   <AppBadge :variant="severityBadgeVariant(flag.severity)">
                     {{ flag.severity }}
                   </AppBadge>
                 </div>
-                <p class="mt-1.5 text-xs text-[rgb(var(--color-foreground))]">{{ flag.description }}</p>
-                <p class="mt-0.5 text-[0.65rem] text-[rgb(var(--color-muted-foreground))]">
+                <p class="mt-1.5 text-xs text-foreground">{{ flag.description }}</p>
+                <p class="mt-0.5 text-[0.65rem] text-muted-foreground">
                   Trigger: {{ flag.trigger }}
                 </p>
               </div>
@@ -736,27 +736,27 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
 
         <!-- Outcome Rules -->
         <div class="card p-5">
-          <h2 class="mb-3 text-sm font-semibold text-[rgb(var(--color-foreground))]">Outcome Determination</h2>
+          <h2 class="mb-3 text-sm font-semibold text-foreground">Outcome Determination</h2>
           <div class="space-y-2">
-            <div class="flex items-start gap-3 rounded-lg border border-[rgb(var(--color-border))] p-3">
+            <div class="flex items-start gap-3 rounded-lg border border-border p-3">
               <span class="mt-0.5 inline-block h-2.5 w-2.5 flex-shrink-0 rounded-full bg-emerald-500" />
               <div>
-                <p class="text-xs font-medium text-[rgb(var(--color-foreground))]">Clean</p>
-                <p class="text-[0.65rem] text-[rgb(var(--color-muted-foreground))]">Default outcome — no critical flags, fewer than 3 warnings, integrity &ge; 0.40</p>
+                <p class="text-xs font-medium text-foreground">Clean</p>
+                <p class="text-[0.65rem] text-muted-foreground">Default outcome — no critical flags, fewer than 3 warnings, integrity &ge; 0.40</p>
               </div>
             </div>
-            <div class="flex items-start gap-3 rounded-lg border border-[rgb(var(--color-border))] p-3">
+            <div class="flex items-start gap-3 rounded-lg border border-border p-3">
               <span class="mt-0.5 inline-block h-2.5 w-2.5 flex-shrink-0 rounded-full bg-amber-500" />
               <div>
-                <p class="text-xs font-medium text-[rgb(var(--color-foreground))]">Flagged</p>
-                <p class="text-[0.65rem] text-[rgb(var(--color-muted-foreground))]">1 critical flag, OR 3+ warnings, OR integrity &lt; 0.40 — surfaces for admin review</p>
+                <p class="text-xs font-medium text-foreground">Flagged</p>
+                <p class="text-[0.65rem] text-muted-foreground">1 critical flag, OR 3+ warnings, OR integrity &lt; 0.40 — surfaces for admin review</p>
               </div>
             </div>
-            <div class="flex items-start gap-3 rounded-lg border border-[rgb(var(--color-border))] p-3">
+            <div class="flex items-start gap-3 rounded-lg border border-border p-3">
               <span class="mt-0.5 inline-block h-2.5 w-2.5 flex-shrink-0 rounded-full bg-red-500" />
               <div>
-                <p class="text-xs font-medium text-[rgb(var(--color-foreground))]">Suspended</p>
-                <p class="text-[0.65rem] text-[rgb(var(--color-muted-foreground))]">2+ critical flags, OR 1 critical + 2 warnings — assessment results may be invalidated</p>
+                <p class="text-xs font-medium text-foreground">Suspended</p>
+                <p class="text-[0.65rem] text-muted-foreground">2+ critical flags, OR 1 critical + 2 warnings — assessment results may be invalidated</p>
               </div>
             </div>
           </div>
@@ -766,8 +766,8 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
         <div v-if="profile" class="card p-5">
           <div class="flex items-center justify-between">
             <div>
-              <h2 class="text-sm font-semibold text-[rgb(var(--color-foreground))]">Reset Behavioral Profile</h2>
-              <p class="mt-1 text-xs text-[rgb(var(--color-muted-foreground))]">
+              <h2 class="text-sm font-semibold text-foreground">Reset Behavioral Profile</h2>
+              <p class="mt-1 text-xs text-muted-foreground">
                 Delete your stored behavioral profile and AI model weights from this device.
                 You will need to recalibrate before Sentinel can monitor future assessments.
               </p>
@@ -786,14 +786,14 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
       <!-- ================================================================ -->
       <!-- PRIVACY NOTICE (bottom)                                          -->
       <!-- ================================================================ -->
-      <div class="rounded-lg border border-[rgb(var(--color-border))] p-4">
+      <div class="rounded-lg border border-border p-4">
         <div class="flex gap-3">
-          <svg class="h-5 w-5 flex-shrink-0 text-[rgb(var(--color-muted-foreground))]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+          <svg class="h-5 w-5 flex-shrink-0 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
             <path stroke-linecap="round" stroke-linejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
           </svg>
           <div>
-            <p class="text-sm font-medium text-[rgb(var(--color-foreground))]">How Sentinel Works</p>
-            <p class="mt-1 text-xs text-[rgb(var(--color-muted-foreground))]">
+            <p class="text-sm font-medium text-foreground">How Sentinel Works</p>
+            <p class="mt-1 text-xs text-muted-foreground">
               Sentinel uses dual scoring: rule-based deterministic checks (authoritative) and AI-based per-user models (advisory).
               During assessments, behavioral snapshots are captured at random 15–45 second intervals.
               Integrity and consistency scores are computed from 7 weighted signals.

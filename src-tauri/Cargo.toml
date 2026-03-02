@@ -69,16 +69,16 @@ aes-gcm = "0.10"
 iroh = "0.96"
 iroh-blobs = { version = "0.98", features = ["fs-store"] }
 
-# P2P networking (libp2p swarm) — base features for all platforms
-libp2p = { version = "0.56.0", features = ["gossipsub", "kad", "quic", "noise", "identify", "tokio", "ed25519", "macros", "autonat", "relay", "dcutr", "yamux"] }
+# P2P networking (libp2p swarm) — all platforms
+# Uses private Alexandria DHT (/alexandria/kad/1.0) with relay bootstrap.
+# mDNS removed — not useful in production (no LAN discovery needed).
+libp2p = { version = "0.56.0", features = ["gossipsub", "kad", "quic", "tcp", "noise", "identify", "tokio", "ed25519", "macros", "autonat", "relay", "dcutr", "yamux"] }
 futures = "0.3"
 
 # ── Desktop-only dependencies ────────────────────────────────────────
 [target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
 # Secure secret storage (IOTA Stronghold encrypted vault — desktop uses this instead of portable)
 iota_stronghold = "2"
-# mDNS for local network peer discovery (uses macOS SystemConfiguration — not available on iOS)
-libp2p = { version = "0.56.0", features = ["mdns"] }
 
 [dev-dependencies]
 tempfile = "3"

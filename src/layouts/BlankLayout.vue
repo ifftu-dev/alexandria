@@ -1,5 +1,5 @@
 <template>
-  <div class="min-h-screen bg-[rgb(var(--color-background))]">
+  <div class="min-h-screen bg-background">
     <slot />
   </div>
 </template>

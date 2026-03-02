@@ -46,13 +46,13 @@ watch(() => [props.contentCid, props.contentInline], loadContent)
   <div class="text-content">
     <AppSpinner v-if="loading" label="Loading content..." />
 
-    <div v-else-if="error" class="text-sm text-[rgb(var(--color-destructive))]">
+    <div v-else-if="error" class="text-sm text-destructive">
       {{ error }}
     </div>
 
     <div v-else-if="content" class="prose max-w-none" v-html="content" />
 
-    <div v-else class="text-sm text-[rgb(var(--color-muted-foreground))] italic">
+    <div v-else class="text-sm text-muted-foreground italic">
       No content available.
     </div>
   </div>

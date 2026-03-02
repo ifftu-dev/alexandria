@@ -1,24 +1,30 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useP2P } from '@/composables/useP2P'
-import { AppButton } from '@/components/ui'
 import type { PeerInfo } from '@/types'
 
-const { status: p2pStatus, lastError: p2pError, peers: fetchPeers, startPolling, stopPolling } = useP2P()
+const { status: p2pStatus, lastError: p2pError, refreshStatus, peers: fetchPeers, startPolling, stopPolling } = useP2P()
 
 const peerList = ref<PeerInfo[]>([])
 const loading = ref(true)
+const mountError = ref<string | null>(null)
 
 const isRunning = computed(() => p2pStatus.value?.is_running ?? false)
 const peerCount = computed(() => p2pStatus.value?.connected_peers ?? 0)
 const topicCount = computed(() => p2pStatus.value?.subscribed_topics?.length ?? 0)
 
 onMounted(async () => {
-  startPolling(5000)
-  if (isRunning.value) {
-    peerList.value = await fetchPeers().catch(() => [])
+  try {
+    await refreshStatus()
+    startPolling(5000)
+    if (isRunning.value) {
+      peerList.value = await fetchPeers().catch(() => [])
+    }
+  } catch (e: unknown) {
+    mountError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    loading.value = false
   }
-  loading.value = false
 })
 
 onUnmounted(() => {
@@ -31,177 +37,143 @@ async function refreshPeers() {
 </script>
 
 <template>
-  <div>
+  <div class="space-y-4">
+    <!-- Mount error -->
+    <div v-if="mountError" style="background: #dc2626; color: white; padding: 16px; border-radius: 8px;">
+      Mount error: {{ mountError }}
+    </div>
+
     <!-- Header -->
-    <div>
-      <div class="flex items-center gap-3">
-        <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-[rgb(var(--color-primary)/0.1)]">
-          <svg class="h-5 w-5 text-[rgb(var(--color-primary))]" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M12 21a9.004 9.004 0 0 0 8.716-6.747M12 21a9.004 9.004 0 0 1-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 0 1 7.843 4.582M12 3a8.997 8.997 0 0 0-7.843 4.582m15.686 0A11.953 11.953 0 0 1 12 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0 1 21 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0 1 12 16.5a17.92 17.92 0 0 1-8.716-2.247m0 0A8.966 8.966 0 0 1 3 12c0-1.264.26-2.467.732-3.558" />
-          </svg>
+    <div class="flex items-center gap-3">
+      <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
+        <svg class="h-5 w-5 text-primary" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 21a9.004 9.004 0 0 0 8.716-6.747M12 21a9.004 9.004 0 0 1-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 0 1 7.843 4.582M12 3a8.997 8.997 0 0 0-7.843 4.582m15.686 0A11.953 11.953 0 0 1 12 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0 1 21 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0 1 12 16.5a17.92 17.92 0 0 1-8.716-2.247m0 0A8.966 8.966 0 0 1 3 12c0-1.264.26-2.467.732-3.558" />
+        </svg>
+      </div>
+      <div>
+        <h1 class="text-2xl font-bold text-foreground">P2P Network</h1>
+        <p class="text-sm text-muted-foreground">Your node's peer-to-peer network status.</p>
+      </div>
+    </div>
+
+    <!-- Loading skeleton -->
+    <div v-if="loading" class="grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <div v-for="i in 3" :key="i" class="animate-pulse rounded-xl border border-border bg-card p-5">
+        <div class="h-3 w-20 rounded bg-muted-foreground/15 mb-3" />
+        <div class="h-7 w-16 rounded bg-muted-foreground/15" />
+      </div>
+    </div>
+
+    <!-- Stats cards -->
+    <div v-else class="grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <!-- Status -->
+      <div class="rounded-xl border border-border bg-card p-5">
+        <div class="text-xs font-medium uppercase tracking-wider text-muted-foreground">Status</div>
+        <div class="mt-2 flex items-center gap-2">
+          <span
+            class="inline-block h-2.5 w-2.5 rounded-full"
+            :class="isRunning ? 'bg-emerald-500' : 'bg-amber-500 animate-pulse'"
+          />
+          <span class="text-xl font-bold text-foreground">
+            {{ isRunning ? 'Online' : p2pStatus != null ? 'Offline' : 'Starting...' }}
+          </span>
         </div>
-        <div>
-          <h1 class="text-3xl font-bold text-[rgb(var(--color-foreground))]">P2P Network</h1>
-          <p class="text-sm text-[rgb(var(--color-muted-foreground))] mt-1">
-            Your node's peer-to-peer network status.
-          </p>
+      </div>
+
+      <!-- Peers -->
+      <div class="rounded-xl border border-border bg-card p-5">
+        <div class="text-xs font-medium uppercase tracking-wider text-muted-foreground">Connected Peers</div>
+        <div class="mt-2">
+          <span class="text-xl font-bold text-foreground">{{ peerCount }}</span>
+        </div>
+      </div>
+
+      <!-- Topics -->
+      <div class="rounded-xl border border-border bg-card p-5">
+        <div class="text-xs font-medium uppercase tracking-wider text-muted-foreground">Topics</div>
+        <div class="mt-2">
+          <span class="text-xl font-bold text-foreground">{{ topicCount || '\u2014' }}</span>
         </div>
       </div>
     </div>
 
-    <!-- Skeleton loader -->
-    <div v-if="loading" class="space-y-6 mt-6">
-      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div v-for="i in 3" :key="i" class="rounded-xl border border-[rgb(var(--color-border))] bg-[rgb(var(--color-card))] p-6">
-          <div class="animate-pulse space-y-3">
-            <div class="h-3 w-20 rounded bg-[rgb(var(--color-muted-foreground)/0.15)]" />
-            <div class="h-7 w-16 rounded bg-[rgb(var(--color-muted-foreground)/0.15)]" />
+    <!-- Node details -->
+    <div class="rounded-xl border border-border bg-card p-5">
+      <h2 class="text-base font-semibold text-foreground mb-3">Node Details</h2>
+
+      <div class="divide-y divide-border/50">
+        <div class="flex items-center justify-between py-2.5">
+          <span class="text-sm text-muted-foreground">Peer ID</span>
+          <span class="text-xs font-mono text-foreground max-w-[60%] truncate">
+            {{ p2pStatus?.peer_id ?? '\u2014' }}
+          </span>
+        </div>
+        <div class="flex items-center justify-between py-2.5">
+          <span class="text-sm text-muted-foreground">Peers</span>
+          <span class="text-sm font-medium text-foreground">{{ peerCount }}</span>
+        </div>
+        <div class="flex items-center justify-between py-2.5">
+          <span class="text-sm text-muted-foreground">Topics</span>
+          <span class="text-xs font-mono text-foreground">
+            {{ p2pStatus?.subscribed_topics?.length ? p2pStatus.subscribed_topics.join(', ') : '\u2014' }}
+          </span>
+        </div>
+        <div class="flex items-start justify-between py-2.5">
+          <span class="text-sm text-muted-foreground shrink-0">Addresses</span>
+          <div v-if="p2pStatus?.listening_addresses?.length" class="text-right ml-4">
+            <div
+              v-for="addr in p2pStatus.listening_addresses"
+              :key="addr"
+              class="text-xs font-mono text-foreground break-all leading-relaxed"
+            >
+              {{ addr }}
+            </div>
           </div>
+          <span v-else class="text-sm text-foreground">&mdash;</span>
+        </div>
+        <div v-if="p2pStatus?.nat_status" class="flex items-center justify-between py-2.5">
+          <span class="text-sm text-muted-foreground">NAT Status</span>
+          <span class="text-sm font-medium text-foreground">{{ p2pStatus.nat_status }}</span>
         </div>
       </div>
     </div>
 
-    <!-- Loaded content -->
-    <div v-else class="space-y-6 mt-6">
-      <!-- Stats grid -->
-      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <!-- Status -->
-        <div class="rounded-xl border border-[rgb(var(--color-border))] bg-[rgb(var(--color-card))] p-6">
-          <div class="text-xs font-medium uppercase tracking-wider text-[rgb(var(--color-muted-foreground))]">Status</div>
-          <div class="mt-2 flex items-center gap-2">
-            <span
-              class="inline-block h-2.5 w-2.5 rounded-full"
-              :class="isRunning ? 'bg-emerald-500 shadow-[0_0_6px_rgb(16,185,129,0.4)]' : 'bg-amber-500 animate-pulse'"
-            />
-            <span class="text-2xl font-bold text-[rgb(var(--color-foreground))]">
-              {{ isRunning ? 'Online' : p2pStatus != null ? 'Offline' : 'Starting...' }}
-            </span>
-          </div>
-        </div>
+    <!-- Diagnostic (show when offline or error) -->
+    <div v-if="p2pError || !isRunning" class="rounded-xl border border-amber-500/30 bg-amber-50 dark:bg-amber-500/5 p-4">
+      <h3 class="text-sm font-semibold text-amber-700 dark:text-amber-400 mb-2">Diagnostic</h3>
+      <div v-if="p2pError" class="text-xs font-mono text-red-600 dark:text-red-400 mb-2">{{ p2pError }}</div>
+      <pre class="text-xs font-mono text-muted-foreground whitespace-pre-wrap break-all">{{ JSON.stringify(p2pStatus, null, 2) ?? 'null' }}</pre>
+    </div>
 
-        <!-- Connected Peers -->
-        <div class="rounded-xl border border-[rgb(var(--color-border))] bg-[rgb(var(--color-card))] p-6">
-          <div class="text-xs font-medium uppercase tracking-wider text-[rgb(var(--color-muted-foreground))]">Connected Peers</div>
-          <div class="mt-2">
-            <span class="text-2xl font-bold text-[rgb(var(--color-foreground))]">{{ peerCount }}</span>
-          </div>
-        </div>
-
-        <!-- Topics -->
-        <div class="rounded-xl border border-[rgb(var(--color-border))] bg-[rgb(var(--color-card))] p-6">
-          <div class="text-xs font-medium uppercase tracking-wider text-[rgb(var(--color-muted-foreground))]">Topics</div>
-          <div class="mt-2">
-            <span class="text-2xl font-bold text-[rgb(var(--color-foreground))]">{{ topicCount || '\u2014' }}</span>
-          </div>
-        </div>
+    <!-- Connected Peers list -->
+    <div class="rounded-xl border border-border bg-card p-5">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="text-base font-semibold text-foreground">Connected Peers</h2>
+        <button
+          class="text-sm text-primary hover:text-primary-hover font-medium"
+          @click="refreshPeers"
+        >
+          Refresh
+        </button>
       </div>
 
-      <!-- Node Status card -->
-      <div class="rounded-xl border border-[rgb(var(--color-border))] bg-[rgb(var(--color-card))] p-6">
-        <h2 class="text-base font-semibold text-[rgb(var(--color-foreground))] mb-4">Node Status</h2>
-
-        <div>
-          <!-- Peer ID -->
-          <div class="flex items-center justify-between py-2 border-b border-[rgb(var(--color-border)/0.5)] last:border-0">
-            <span class="text-sm text-[rgb(var(--color-muted-foreground))]">Peer ID</span>
-            <span class="text-sm font-medium text-[rgb(var(--color-foreground))] font-mono text-xs max-w-[60%] truncate" :title="p2pStatus?.peer_id ?? undefined">
-              {{ p2pStatus?.peer_id ?? '\u2014' }}
-            </span>
-          </div>
-
-          <!-- Connected Peers -->
-          <div class="flex items-center justify-between py-2 border-b border-[rgb(var(--color-border)/0.5)] last:border-0">
-            <span class="text-sm text-[rgb(var(--color-muted-foreground))]">Connected Peers</span>
-            <span class="text-sm font-medium text-[rgb(var(--color-foreground))]">{{ peerCount }}</span>
-          </div>
-
-          <!-- Topics -->
-          <div class="flex items-center justify-between py-2 border-b border-[rgb(var(--color-border)/0.5)] last:border-0">
-            <span class="text-sm text-[rgb(var(--color-muted-foreground))]">Topics</span>
-            <span class="text-sm font-medium text-[rgb(var(--color-foreground))] font-mono text-xs">
-              {{ p2pStatus?.subscribed_topics?.length ? p2pStatus.subscribed_topics.join(', ') : '\u2014' }}
-            </span>
-          </div>
-
-          <!-- Listening Addresses -->
-          <div class="flex items-start justify-between py-2 last:border-0">
-            <span class="text-sm text-[rgb(var(--color-muted-foreground))] shrink-0 pt-0.5">Listening Addresses</span>
-            <div v-if="p2pStatus?.listening_addresses?.length" class="text-right ml-4">
-              <div
-                v-for="addr in p2pStatus.listening_addresses"
-                :key="addr"
-                class="font-mono text-xs text-[rgb(var(--color-foreground))] break-all leading-relaxed"
-              >
-                {{ addr }}
-              </div>
-            </div>
-            <span v-else class="text-sm font-medium text-[rgb(var(--color-foreground))]">&mdash;</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- Debug panel (temporary diagnostic) -->
-      <div v-if="p2pError || !isRunning" class="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4">
-        <h3 class="text-sm font-semibold text-amber-600 dark:text-amber-400 mb-2">P2P Diagnostic</h3>
-        <div v-if="p2pError" class="text-xs font-mono text-red-500 mb-2">
-          Error: {{ p2pError }}
-        </div>
-        <div class="text-xs font-mono text-[rgb(var(--color-muted-foreground))] whitespace-pre-wrap break-all">
-          {{ JSON.stringify(p2pStatus, null, 2) ?? 'null (no status returned)' }}
-        </div>
-      </div>
-
-      <!-- Peers section -->
-      <div class="rounded-xl border border-[rgb(var(--color-border))] bg-[rgb(var(--color-card))] p-6">
-        <div class="flex items-center justify-between mb-4">
-          <h2 class="text-base font-semibold text-[rgb(var(--color-foreground))]">Connected Peers</h2>
-          <AppButton variant="ghost" size="sm" @click="refreshPeers">
-            <svg class="h-4 w-4 mr-1.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182" />
-            </svg>
-            Refresh
-          </AppButton>
-        </div>
-
-        <!-- Peer cards -->
-        <div v-if="peerList.length > 0" class="space-y-3">
-          <div
-            v-for="peer in peerList"
-            :key="peer.peer_id"
-            class="rounded-lg border border-[rgb(var(--color-border))] p-4 transition-colors hover:border-[rgb(var(--color-primary)/0.3)]"
-          >
-            <div class="flex items-start gap-3">
-              <span class="mt-1.5 inline-block h-2 w-2 shrink-0 rounded-full bg-emerald-500 shadow-[0_0_6px_rgb(16,185,129,0.4)]" />
-              <div class="min-w-0 flex-1">
-                <div class="font-mono text-sm text-[rgb(var(--color-foreground))] break-all leading-snug">
-                  {{ peer.peer_id }}
-                </div>
-                <div v-if="peer.addresses.length" class="mt-1.5 space-y-0.5">
-                  <div
-                    v-for="addr in peer.addresses"
-                    :key="addr"
-                    class="font-mono text-xs text-[rgb(var(--color-muted-foreground))] break-all"
-                  >
-                    {{ addr }}
-                  </div>
-                </div>
-              </div>
+      <div v-if="peerList.length > 0" class="space-y-3">
+        <div
+          v-for="peer in peerList"
+          :key="peer"
+          class="rounded-lg border border-border p-3"
+        >
+          <div class="flex items-start gap-2">
+            <span class="mt-1 inline-block h-2 w-2 shrink-0 rounded-full bg-emerald-500" />
+            <div class="min-w-0 flex-1">
+              <div class="text-sm font-mono text-foreground break-all">{{ peer }}</div>
             </div>
           </div>
         </div>
+      </div>
 
-        <!-- Empty state -->
-        <div v-else class="flex flex-col items-center justify-center py-12">
-          <div class="flex h-16 w-16 items-center justify-center rounded-full bg-[rgb(var(--color-muted)/0.3)] mb-4">
-            <svg class="h-8 w-8 text-[rgb(var(--color-muted-foreground)/0.5)]" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M12 21a9.004 9.004 0 0 0 8.716-6.747M12 21a9.004 9.004 0 0 1-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 0 1 7.843 4.582M12 3a8.997 8.997 0 0 0-7.843 4.582m15.686 0A11.953 11.953 0 0 1 12 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0 1 21 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0 1 12 16.5a17.92 17.92 0 0 1-8.716-2.247m0 0A8.966 8.966 0 0 1 3 12c0-1.264.26-2.467.732-3.558" />
-            </svg>
-          </div>
-          <p class="text-sm font-medium text-[rgb(var(--color-foreground))]">No peers connected</p>
-          <p class="text-sm text-[rgb(var(--color-muted-foreground))] mt-1 text-center max-w-xs">
-            Waiting for peer discovery via DHT...
-          </p>
-        </div>
+      <div v-else class="text-center py-8">
+        <p class="text-sm text-muted-foreground">No peers connected yet. Waiting for DHT discovery...</p>
       </div>
     </div>
   </div>

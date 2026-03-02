@@ -45,10 +45,10 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div v-if="!ready" class="flex items-center justify-center h-screen bg-[rgb(var(--color-background))]">
+  <div v-if="!ready" class="flex items-center justify-center h-screen bg-background">
     <div class="text-center">
-      <div class="w-8 h-8 border-2 border-[rgb(var(--color-primary))] border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-      <p class="text-sm text-[rgb(var(--color-muted-foreground))]">Initializing...</p>
+      <div class="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+      <p class="text-sm text-muted-foreground">Initializing...</p>
     </div>
   </div>
   <component v-else :is="layout">

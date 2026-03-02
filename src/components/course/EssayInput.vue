@@ -55,7 +55,7 @@ const wordCountColor = computed(() => {
     case 'short': return 'text-amber-600 dark:text-amber-400'
     case 'long': return 'text-red-600 dark:text-red-400'
     case 'valid': return 'text-emerald-600 dark:text-emerald-400'
-    default: return 'text-[rgb(var(--color-muted-foreground))]'
+    default: return 'text-muted-foreground'
   }
 })
 
@@ -160,7 +160,7 @@ watch(() => props.elementId, () => {
   <div class="essay-input">
     <!-- Loading -->
     <div v-if="loading" class="flex items-center justify-center py-12">
-      <div class="h-8 w-8 animate-spin rounded-full border-2 border-[rgb(var(--color-primary))] border-t-transparent" />
+      <div class="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
     </div>
 
     <!-- Error -->
@@ -169,7 +169,7 @@ watch(() => props.elementId, () => {
     </div>
 
     <!-- No content -->
-    <div v-else-if="!essay" class="py-8 text-center text-sm text-[rgb(var(--color-muted-foreground))]">
+    <div v-else-if="!essay" class="py-8 text-center text-sm text-muted-foreground">
       No essay prompt available.
     </div>
 
@@ -181,27 +181,27 @@ watch(() => props.elementId, () => {
       </span>
 
       <!-- Question -->
-      <p class="text-base font-medium leading-relaxed text-[rgb(var(--color-foreground))]">
+      <p class="text-base font-medium leading-relaxed text-foreground">
         {{ essay.question }}
       </p>
 
       <!-- Guidelines -->
-      <div v-if="essay.guidelines" class="flex gap-3 rounded-lg bg-[rgb(var(--color-muted)/0.2)] p-4">
-        <svg class="mt-0.5 h-4 w-4 flex-shrink-0 text-[rgb(var(--color-muted-foreground))]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+      <div v-if="essay.guidelines" class="flex gap-3 rounded-lg bg-muted/20 p-4">
+        <svg class="mt-0.5 h-4 w-4 flex-shrink-0 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
           <path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
         </svg>
         <div>
-          <p class="text-xs font-medium text-[rgb(var(--color-muted-foreground))]">Guidelines</p>
-          <p class="mt-1 text-sm text-[rgb(var(--color-foreground))]">{{ essay.guidelines }}</p>
+          <p class="text-xs font-medium text-muted-foreground">Guidelines</p>
+          <p class="mt-1 text-sm text-foreground">{{ essay.guidelines }}</p>
         </div>
       </div>
 
       <!-- Rubric criteria -->
       <div v-if="essay.rubric_criteria?.length" class="space-y-1.5">
-        <p class="text-xs font-medium text-[rgb(var(--color-muted-foreground))]">Assessment criteria</p>
+        <p class="text-xs font-medium text-muted-foreground">Assessment criteria</p>
         <ul class="space-y-1">
-          <li v-for="(criterion, idx) in essay.rubric_criteria" :key="idx" class="flex items-start gap-2 text-sm text-[rgb(var(--color-foreground))]">
-            <svg class="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-[rgb(var(--color-primary))]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <li v-for="(criterion, idx) in essay.rubric_criteria" :key="idx" class="flex items-start gap-2 text-sm text-foreground">
+            <svg class="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
             </svg>
             {{ criterion }}
@@ -216,7 +216,7 @@ watch(() => props.elementId, () => {
           rows="12"
           :placeholder="submitted ? '' : 'Write your response here...'"
           :disabled="submitted || isCompleted"
-          class="w-full resize-y rounded-lg border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))] px-4 py-3 text-sm text-[rgb(var(--color-foreground))] placeholder-[rgb(var(--color-muted-foreground)/0.5)] transition-colors focus:border-[rgb(var(--color-primary))] focus:outline-none focus:ring-1 focus:ring-[rgb(var(--color-primary))] disabled:opacity-60"
+          class="w-full resize-y rounded-lg border border-border bg-background px-4 py-3 text-sm text-foreground placeholder-muted-foreground/50 transition-colors focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-60"
           @input="onInput"
         />
 
@@ -226,15 +226,15 @@ watch(() => props.elementId, () => {
             <span :class="wordCountColor">
               {{ wordCount }} word{{ wordCount !== 1 ? 's' : '' }}
               <template v-if="minWords || (maxWords && maxWords !== Infinity)">
-                <span class="text-[rgb(var(--color-muted-foreground))]">
+                <span class="text-muted-foreground">
                   ({{ minWords ? `min ${minWords}` : '' }}{{ minWords && maxWords && maxWords !== Infinity ? ', ' : '' }}{{ maxWords && maxWords !== Infinity ? `max ${maxWords}` : '' }})
                 </span>
               </template>
             </span>
-            <span class="text-[rgb(var(--color-muted-foreground))]">{{ charCount }} characters</span>
+            <span class="text-muted-foreground">{{ charCount }} characters</span>
           </div>
-          <span v-if="saving" class="text-[rgb(var(--color-muted-foreground))]">Saving...</span>
-          <span v-else-if="lastSaved" class="text-[rgb(var(--color-muted-foreground))]">Saved at {{ lastSaved }}</span>
+          <span v-if="saving" class="text-muted-foreground">Saving...</span>
+          <span v-else-if="lastSaved" class="text-muted-foreground">Saved at {{ lastSaved }}</span>
         </div>
 
         <!-- Validation message -->

@@ -89,7 +89,7 @@ watch(() => props.contentCid, loadPdf)
   <div class="pdf-viewer">
     <!-- Loading -->
     <div v-if="loading" class="flex items-center justify-center py-16">
-      <div class="h-8 w-8 animate-spin rounded-full border-2 border-[rgb(var(--color-primary))] border-t-transparent" />
+      <div class="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
     </div>
 
     <!-- Error -->
@@ -99,7 +99,7 @@ watch(() => props.contentCid, loadPdf)
         v-if="pdfUrl"
         :href="pdfUrl"
         download
-        class="mt-2 inline-flex items-center text-sm text-[rgb(var(--color-primary))] hover:underline"
+        class="mt-2 inline-flex items-center text-sm text-primary hover:underline"
       >
         <svg class="mr-1.5 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
           <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
@@ -111,11 +111,11 @@ watch(() => props.contentCid, loadPdf)
     <!-- PDF Content -->
     <div v-else-if="pdfUrl" class="space-y-3">
       <!-- Toolbar -->
-      <div class="flex items-center justify-between rounded-lg border border-[rgb(var(--color-border))] bg-[rgb(var(--color-card))] px-4 py-2">
+      <div class="flex items-center justify-between rounded-lg border border-border bg-card px-4 py-2">
         <!-- Page navigation -->
         <div class="flex items-center gap-2">
           <button
-            class="rounded p-1 text-[rgb(var(--color-muted-foreground))] transition-colors hover:bg-[rgb(var(--color-muted))] hover:text-[rgb(var(--color-foreground))] disabled:opacity-30"
+            class="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-30"
             :disabled="currentPage <= 1"
             @click="prevPage"
           >
@@ -123,18 +123,18 @@ watch(() => props.contentCid, loadPdf)
               <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
             </svg>
           </button>
-          <span class="text-sm text-[rgb(var(--color-foreground))]">
+          <span class="text-sm text-foreground">
             <input
               v-model.number="currentPage"
               type="number"
               :min="1"
               :max="totalPages"
-              class="w-10 rounded border border-[rgb(var(--color-border))] bg-transparent px-1 py-0.5 text-center text-xs"
+              class="w-10 rounded border border-border bg-transparent px-1 py-0.5 text-center text-xs"
             />
-            <span class="text-[rgb(var(--color-muted-foreground))]"> / {{ totalPages }}</span>
+            <span class="text-muted-foreground"> / {{ totalPages }}</span>
           </span>
           <button
-            class="rounded p-1 text-[rgb(var(--color-muted-foreground))] transition-colors hover:bg-[rgb(var(--color-muted))] hover:text-[rgb(var(--color-foreground))] disabled:opacity-30"
+            class="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-30"
             :disabled="currentPage >= totalPages"
             @click="nextPage"
           >
@@ -147,7 +147,7 @@ watch(() => props.contentCid, loadPdf)
         <!-- Zoom controls -->
         <div class="flex items-center gap-2">
           <button
-            class="rounded p-1 text-[rgb(var(--color-muted-foreground))] transition-colors hover:bg-[rgb(var(--color-muted))] hover:text-[rgb(var(--color-foreground))]"
+            class="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             @click="zoomOut"
           >
             <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -155,24 +155,24 @@ watch(() => props.contentCid, loadPdf)
             </svg>
           </button>
           <button
-            class="text-xs text-[rgb(var(--color-muted-foreground))] hover:text-[rgb(var(--color-foreground))]"
+            class="text-xs text-muted-foreground hover:text-foreground"
             @click="resetZoom"
           >
             {{ zoom }}%
           </button>
           <button
-            class="rounded p-1 text-[rgb(var(--color-muted-foreground))] transition-colors hover:bg-[rgb(var(--color-muted))] hover:text-[rgb(var(--color-foreground))]"
+            class="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             @click="zoomIn"
           >
             <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
             </svg>
           </button>
-          <span class="mx-2 h-4 w-px bg-[rgb(var(--color-border))]" />
+          <span class="mx-2 h-4 w-px bg-border" />
           <a
             :href="pdfUrl"
             download
-            class="rounded p-1 text-[rgb(var(--color-muted-foreground))] transition-colors hover:bg-[rgb(var(--color-muted))] hover:text-[rgb(var(--color-foreground))]"
+            class="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             title="Download PDF"
           >
             <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -183,7 +183,7 @@ watch(() => props.contentCid, loadPdf)
       </div>
 
       <!-- PDF iframe -->
-      <div class="relative overflow-hidden rounded-lg border border-[rgb(var(--color-border))] bg-[rgb(var(--color-muted))]">
+      <div class="relative overflow-hidden rounded-lg border border-border bg-muted">
         <iframe
           :src="`${pdfUrl}#page=${currentPage}`"
           class="h-[600px] w-full border-0"
@@ -193,13 +193,13 @@ watch(() => props.contentCid, loadPdf)
 
       <!-- Progress bar -->
       <div class="space-y-1">
-        <div class="flex items-center justify-between text-xs text-[rgb(var(--color-muted-foreground))]">
+        <div class="flex items-center justify-between text-xs text-muted-foreground">
           <span>Reading progress</span>
           <span>{{ progressPercent }}%</span>
         </div>
-        <div class="h-1 overflow-hidden rounded-full bg-[rgb(var(--color-muted)/0.3)]">
+        <div class="h-1 overflow-hidden rounded-full bg-muted/30">
           <div
-            class="h-full rounded-full bg-[rgb(var(--color-primary))] transition-all duration-300"
+            class="h-full rounded-full bg-primary transition-all duration-300"
             :style="{ width: `${progressPercent}%` }"
           />
         </div>
@@ -207,7 +207,7 @@ watch(() => props.contentCid, loadPdf)
     </div>
 
     <!-- No content -->
-    <div v-else class="py-12 text-center text-sm text-[rgb(var(--color-muted-foreground))]">
+    <div v-else class="py-12 text-center text-sm text-muted-foreground">
       No PDF content available.
     </div>
   </div>

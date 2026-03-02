@@ -70,7 +70,7 @@ onMounted(async () => {
     <!-- Header -->
     <div>
       <h1 class="text-3xl font-bold">My Courses</h1>
-      <p class="mt-2 text-[rgb(var(--color-muted-foreground))]">
+      <p class="mt-2 text-muted-foreground">
         Track your learning progress and continue where you left off.
       </p>
     </div>
@@ -83,10 +83,10 @@ onMounted(async () => {
           <div
             v-for="i in 3"
             :key="i"
-            class="animate-pulse rounded-xl border border-[rgb(var(--color-border))] bg-[rgb(var(--color-card))] p-6"
+            class="animate-pulse rounded-xl border border-border bg-card p-6"
           >
-            <div class="h-3 w-24 rounded bg-[rgb(var(--color-muted-foreground)/0.15)] mb-3" />
-            <div class="h-8 w-12 rounded bg-[rgb(var(--color-muted-foreground)/0.2)]" />
+            <div class="h-3 w-24 rounded bg-muted-foreground/15 mb-3" />
+            <div class="h-8 w-12 rounded bg-muted-foreground/20" />
           </div>
         </div>
 
@@ -95,18 +95,18 @@ onMounted(async () => {
           <div
             v-for="i in 3"
             :key="i"
-            class="animate-pulse overflow-hidden rounded-xl border border-[rgb(var(--color-border))] bg-[rgb(var(--color-card))]"
+            class="animate-pulse overflow-hidden rounded-xl border border-border bg-card"
           >
             <div class="flex flex-col sm:flex-row">
-              <div class="h-32 sm:h-auto sm:w-48 bg-[rgb(var(--color-muted-foreground)/0.1)]" />
+              <div class="h-32 sm:h-auto sm:w-48 bg-muted-foreground/10" />
               <div class="flex-1 p-5 space-y-3">
-                <div class="h-4 w-48 rounded bg-[rgb(var(--color-muted-foreground)/0.15)]" />
-                <div class="h-3 w-full rounded bg-[rgb(var(--color-muted-foreground)/0.1)]" />
-                <div class="h-3 w-2/3 rounded bg-[rgb(var(--color-muted-foreground)/0.1)]" />
-                <div class="h-2 w-full rounded-full bg-[rgb(var(--color-muted-foreground)/0.1)] mt-4" />
+                <div class="h-4 w-48 rounded bg-muted-foreground/15" />
+                <div class="h-3 w-full rounded bg-muted-foreground/10" />
+                <div class="h-3 w-2/3 rounded bg-muted-foreground/10" />
+                <div class="h-2 w-full rounded-full bg-muted-foreground/10 mt-4" />
                 <div class="flex gap-4 mt-3">
-                  <div class="h-3 w-24 rounded bg-[rgb(var(--color-muted-foreground)/0.1)]" />
-                  <div class="h-3 w-20 rounded bg-[rgb(var(--color-muted-foreground)/0.1)]" />
+                  <div class="h-3 w-24 rounded bg-muted-foreground/10" />
+                  <div class="h-3 w-20 rounded bg-muted-foreground/10" />
                 </div>
               </div>
             </div>
@@ -118,16 +118,16 @@ onMounted(async () => {
       <template v-else>
         <!-- Stats grid -->
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div class="rounded-xl border border-[rgb(var(--color-border))] bg-[rgb(var(--color-card))] p-6">
-            <p class="text-sm text-[rgb(var(--color-muted-foreground))]">Total Enrolled</p>
+          <div class="rounded-xl border border-border bg-card p-6">
+            <p class="text-sm text-muted-foreground">Total Enrolled</p>
             <p class="text-3xl font-bold mt-1">{{ total }}</p>
           </div>
-          <div class="rounded-xl border border-[rgb(var(--color-border))] bg-[rgb(var(--color-card))] p-6">
-            <p class="text-sm text-[rgb(var(--color-muted-foreground))]">In Progress</p>
+          <div class="rounded-xl border border-border bg-card p-6">
+            <p class="text-sm text-muted-foreground">In Progress</p>
             <p class="text-3xl font-bold text-yellow-400 mt-1">{{ inProgress }}</p>
           </div>
-          <div class="rounded-xl border border-[rgb(var(--color-border))] bg-[rgb(var(--color-card))] p-6">
-            <p class="text-sm text-[rgb(var(--color-muted-foreground))]">Completed</p>
+          <div class="rounded-xl border border-border bg-card p-6">
+            <p class="text-sm text-muted-foreground">Completed</p>
             <p class="text-3xl font-bold text-green-400 mt-1">{{ completed }}</p>
           </div>
         </div>
@@ -137,8 +137,8 @@ onMounted(async () => {
           <button
             class="rounded-lg px-4 py-2 text-sm font-medium transition-colors"
             :class="!showCompleted
-              ? 'bg-[rgb(var(--color-primary))] text-white'
-              : 'bg-[rgb(var(--color-muted)/0.3)] text-[rgb(var(--color-muted-foreground))] hover:bg-[rgb(var(--color-muted)/0.5)]'"
+              ? 'bg-primary text-white'
+              : 'bg-muted/30 text-muted-foreground hover:bg-muted/50'"
             @click="showCompleted = false"
           >
             In Progress
@@ -146,8 +146,8 @@ onMounted(async () => {
           <button
             class="rounded-lg px-4 py-2 text-sm font-medium transition-colors"
             :class="showCompleted
-              ? 'bg-[rgb(var(--color-primary))] text-white'
-              : 'bg-[rgb(var(--color-muted)/0.3)] text-[rgb(var(--color-muted-foreground))] hover:bg-[rgb(var(--color-muted)/0.5)]'"
+              ? 'bg-primary text-white'
+              : 'bg-muted/30 text-muted-foreground hover:bg-muted/50'"
             @click="showCompleted = true"
           >
             All Courses
@@ -159,9 +159,9 @@ onMounted(async () => {
           v-if="filteredEnrollments.length === 0 && enrollments.length === 0"
           class="flex flex-col items-center justify-center py-20 text-center"
         >
-          <div class="flex h-20 w-20 items-center justify-center rounded-full bg-[rgb(var(--color-primary)/0.1)] mb-6">
+          <div class="flex h-20 w-20 items-center justify-center rounded-full bg-primary/10 mb-6">
             <svg
-              class="h-10 w-10 text-[rgb(var(--color-primary))]"
+              class="h-10 w-10 text-primary"
               fill="none"
               viewBox="0 0 24 24"
               stroke="currentColor"
@@ -175,7 +175,7 @@ onMounted(async () => {
             </svg>
           </div>
           <h3 class="text-lg font-semibold mb-2">No courses yet</h3>
-          <p class="text-sm text-[rgb(var(--color-muted-foreground))] max-w-sm mb-6">
+          <p class="text-sm text-muted-foreground max-w-sm mb-6">
             Browse available courses and enroll to start your learning journey.
           </p>
           <AppButton @click="$router.push('/courses')">
@@ -188,7 +188,7 @@ onMounted(async () => {
           v-else-if="filteredEnrollments.length === 0"
           class="flex flex-col items-center justify-center py-16 text-center"
         >
-          <p class="text-sm text-[rgb(var(--color-muted-foreground))]">
+          <p class="text-sm text-muted-foreground">
             No in-progress courses. Switch to "All Courses" to see completed ones.
           </p>
         </div>
@@ -199,7 +199,7 @@ onMounted(async () => {
             v-for="enrollment in filteredEnrollments"
             :key="enrollment.id"
             :to="enrollment.status === 'active' ? `/learn/${enrollment.course_id}` : `/courses/${enrollment.course_id}`"
-            class="group block overflow-hidden rounded-xl border border-[rgb(var(--color-border))] bg-[rgb(var(--color-card))] transition-all hover:border-[rgb(var(--color-primary)/0.5)]"
+            class="group block overflow-hidden rounded-xl border border-border bg-card transition-all hover:border-primary/50"
           >
             <div class="flex flex-col sm:flex-row">
               <!-- Thumbnail -->
@@ -207,9 +207,9 @@ onMounted(async () => {
                 class="relative h-32 sm:h-auto sm:w-48 flex-shrink-0 overflow-hidden"
               >
                 <div v-if="courseMap[enrollment.course_id]?.thumbnail_svg" class="w-full h-full" v-html="courseMap[enrollment.course_id]?.thumbnail_svg" />
-                <div v-else class="w-full h-full bg-gradient-to-br from-[rgb(var(--color-primary)/0.3)] via-[rgb(var(--color-primary)/0.15)] to-[rgb(var(--color-card))] flex items-center justify-center">
+                <div v-else class="w-full h-full bg-gradient-to-br from-primary/30 via-primary/15 to-card flex items-center justify-center">
                   <svg
-                    class="h-10 w-10 text-[rgb(var(--color-primary)/0.4)]"
+                    class="h-10 w-10 text-primary/40"
                     fill="none"
                     viewBox="0 0 24 24"
                     stroke="currentColor"
@@ -249,7 +249,7 @@ onMounted(async () => {
                     </h3>
                     <p
                       v-if="courseMap[enrollment.course_id]?.description"
-                      class="mt-1.5 text-sm text-[rgb(var(--color-muted-foreground))] line-clamp-2"
+                      class="mt-1.5 text-sm text-muted-foreground line-clamp-2"
                     >
                       {{ courseMap[enrollment.course_id]?.description }}
                     </p>
@@ -259,15 +259,15 @@ onMounted(async () => {
                 <!-- Progress bar -->
                 <div class="mt-4">
                   <div class="flex items-center justify-between text-xs mb-1.5">
-                    <span class="text-[rgb(var(--color-muted-foreground))]">Progress</span>
-                    <span class="font-medium" :class="enrollment.completed_at ? 'text-green-400' : 'text-[rgb(var(--color-primary))]'">
+                    <span class="text-muted-foreground">Progress</span>
+                    <span class="font-medium" :class="enrollment.completed_at ? 'text-green-400' : 'text-primary'">
                       {{ enrollment.completed_at ? '100' : '0' }}%
                     </span>
                   </div>
-                  <div class="h-1.5 w-full overflow-hidden rounded-full bg-[rgb(var(--color-muted)/0.3)]">
+                  <div class="h-1.5 w-full overflow-hidden rounded-full bg-muted/30">
                     <div
                       class="h-full rounded-full transition-all duration-500"
-                      :class="enrollment.completed_at ? 'bg-green-400' : 'bg-[rgb(var(--color-primary))]'"
+                      :class="enrollment.completed_at ? 'bg-green-400' : 'bg-primary'"
                       :style="{ width: enrollment.completed_at ? '100%' : '0%' }"
                     />
                   </div>
@@ -275,7 +275,7 @@ onMounted(async () => {
 
                 <!-- Meta info & action -->
                 <div class="mt-4 flex flex-wrap items-center justify-between gap-3">
-                  <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[rgb(var(--color-muted-foreground))]">
+                  <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
                     <span>
                       Started {{ formatDate(enrollment.enrolled_at) }}
                     </span>
@@ -289,8 +289,8 @@ onMounted(async () => {
                   <span
                     class="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors"
                     :class="enrollment.completed_at
-                      ? 'bg-[rgb(var(--color-muted)/0.3)] text-[rgb(var(--color-muted-foreground))] group-hover:bg-[rgb(var(--color-muted)/0.5)]'
-                      : 'bg-[rgb(var(--color-primary)/0.1)] text-[rgb(var(--color-primary))] group-hover:bg-[rgb(var(--color-primary)/0.2)]'"
+                      ? 'bg-muted/30 text-muted-foreground group-hover:bg-muted/50'
+                      : 'bg-primary/10 text-primary group-hover:bg-primary/20'"
                   >
                     {{ enrollment.completed_at ? 'Review Course' : 'Continue Learning' }}
                     <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">

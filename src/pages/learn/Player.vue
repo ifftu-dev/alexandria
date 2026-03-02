@@ -308,18 +308,18 @@ function formatFileSize(bytes: number): string {
     <!-- Loading skeleton -->
     <div v-if="loading" class="flex gap-0 h-[calc(100vh-8rem)] md:h-[calc(100vh-8rem)]">
       <!-- Sidebar skeleton — hidden on mobile -->
-      <div class="hidden md:block w-72 shrink-0 border-r border-[rgb(var(--color-border))] p-4 space-y-4">
-        <div class="h-4 w-24 animate-pulse rounded bg-[rgb(var(--color-muted)/0.4)]" />
+      <div class="hidden md:block w-72 shrink-0 border-r border-border p-4 space-y-4">
+        <div class="h-4 w-24 animate-pulse rounded bg-muted/40" />
         <div class="space-y-1">
-          <div class="h-5 w-48 animate-pulse rounded bg-[rgb(var(--color-muted)/0.4)]" />
-          <div class="h-1.5 w-full animate-pulse rounded-full bg-[rgb(var(--color-muted)/0.3)]" />
+          <div class="h-5 w-48 animate-pulse rounded bg-muted/40" />
+          <div class="h-1.5 w-full animate-pulse rounded-full bg-muted/30" />
         </div>
         <div class="space-y-3 pt-2">
           <div v-for="i in 3" :key="i" class="space-y-1">
-            <div class="h-3 w-20 animate-pulse rounded bg-[rgb(var(--color-muted)/0.3)]" />
+            <div class="h-3 w-20 animate-pulse rounded bg-muted/30" />
             <div v-for="j in 3" :key="j" class="flex items-center gap-2 px-2 py-1.5">
-              <div class="h-5 w-5 animate-pulse rounded-full bg-[rgb(var(--color-muted)/0.3)]" />
-              <div class="h-3.5 flex-1 animate-pulse rounded bg-[rgb(var(--color-muted)/0.3)]" />
+              <div class="h-5 w-5 animate-pulse rounded-full bg-muted/30" />
+              <div class="h-3.5 flex-1 animate-pulse rounded bg-muted/30" />
             </div>
           </div>
         </div>
@@ -328,11 +328,11 @@ function formatFileSize(bytes: number): string {
       <div class="flex-1 p-4 md:p-6">
         <div class="max-w-3xl mx-auto space-y-4">
           <div class="flex items-center gap-2">
-            <div class="h-5 w-16 animate-pulse rounded-full bg-[rgb(var(--color-muted)/0.3)]" />
-            <div class="h-5 w-12 animate-pulse rounded bg-[rgb(var(--color-muted)/0.3)]" />
+            <div class="h-5 w-16 animate-pulse rounded-full bg-muted/30" />
+            <div class="h-5 w-12 animate-pulse rounded bg-muted/30" />
           </div>
-          <div class="h-7 w-64 max-w-full animate-pulse rounded bg-[rgb(var(--color-muted)/0.4)]" />
-          <div class="h-[400px] animate-pulse rounded-lg bg-[rgb(var(--color-muted)/0.2)]" />
+          <div class="h-7 w-64 max-w-full animate-pulse rounded bg-muted/40" />
+          <div class="h-[400px] animate-pulse rounded-lg bg-muted/20" />
         </div>
       </div>
     </div>
@@ -340,13 +340,13 @@ function formatFileSize(bytes: number): string {
     <!-- Course not found -->
     <div v-else-if="!course" class="flex items-center justify-center h-[calc(100vh-8rem)] px-4">
       <div class="text-center">
-        <div class="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-[rgb(var(--color-muted)/0.3)]">
-          <svg class="h-8 w-8 text-[rgb(var(--color-muted-foreground)/0.5)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+        <div class="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-muted/30">
+          <svg class="h-8 w-8 text-muted-foreground/50" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
             <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
           </svg>
         </div>
-        <h2 class="text-lg font-semibold text-[rgb(var(--color-foreground))]">Course not found</h2>
-        <p class="mt-1 text-sm text-[rgb(var(--color-muted-foreground))]">The course may have been removed or is unavailable.</p>
+        <h2 class="text-lg font-semibold text-foreground">Course not found</h2>
+        <p class="mt-1 text-sm text-muted-foreground">The course may have been removed or is unavailable.</p>
         <AppButton variant="secondary" size="sm" class="mt-4" @click="router.push('/courses')">
           Browse Courses
         </AppButton>
@@ -358,9 +358,9 @@ function formatFileSize(bytes: number): string {
       <!-- ======================================= -->
       <!-- MOBILE: Compact chapter/element header  -->
       <!-- ======================================= -->
-      <div class="md:hidden flex items-center gap-2 px-3 py-2 border-b border-[rgb(var(--color-border))] bg-[rgb(var(--color-card)/0.5)] shrink-0">
+      <div class="md:hidden flex items-center gap-2 px-3 py-2 border-b border-border bg-card/50 shrink-0">
         <button
-          class="p-1 rounded-md text-[rgb(var(--color-muted-foreground))] active:bg-[rgb(var(--color-muted))]"
+          class="p-1 rounded-md text-muted-foreground active:bg-muted"
           @click="router.push(`/courses/${courseId}`)"
         >
           <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -369,7 +369,7 @@ function formatFileSize(bytes: number): string {
         </button>
         <div class="flex-1 min-w-0">
           <select
-            class="w-full text-xs font-medium bg-transparent text-[rgb(var(--color-foreground))] border-none outline-none truncate appearance-none"
+            class="w-full text-xs font-medium bg-transparent text-foreground border-none outline-none truncate appearance-none"
             :value="`${activeChapter}|${activeElement}`"
             @change="(e: Event) => {
               const val = (e.target as HTMLSelectElement).value;
@@ -387,7 +387,7 @@ function formatFileSize(bytes: number): string {
             </template>
           </select>
         </div>
-        <span class="text-[10px] text-[rgb(var(--color-muted-foreground))] shrink-0">
+        <span class="text-[10px] text-muted-foreground shrink-0">
           {{ completedElements }}/{{ totalElements }}
         </span>
       </div>
@@ -395,11 +395,11 @@ function formatFileSize(bytes: number): string {
       <!-- ============================== -->
       <!-- SIDEBAR: Chapter/Element Nav   -->
       <!-- ============================== -->
-      <div class="hidden md:block w-72 shrink-0 overflow-y-auto border-r border-[rgb(var(--color-border))] bg-[rgb(var(--color-card)/0.3)]">
+      <div class="hidden md:block w-72 shrink-0 overflow-y-auto border-r border-border bg-card/30">
         <div class="p-4 space-y-4">
           <!-- Back link -->
           <button
-            class="flex items-center gap-1.5 text-xs text-[rgb(var(--color-muted-foreground))] transition-colors hover:text-[rgb(var(--color-foreground))]"
+            class="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
             @click="router.push(`/courses/${courseId}`)"
           >
             <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -410,16 +410,16 @@ function formatFileSize(bytes: number): string {
 
           <!-- Course title + progress -->
           <div class="space-y-2">
-            <h2 class="text-sm font-semibold text-[rgb(var(--color-foreground))] leading-snug">{{ course.title }}</h2>
+            <h2 class="text-sm font-semibold text-foreground leading-snug">{{ course.title }}</h2>
             <div class="space-y-1">
-              <div class="flex items-center justify-between text-xs text-[rgb(var(--color-muted-foreground))]">
+              <div class="flex items-center justify-between text-xs text-muted-foreground">
                 <span>{{ completedElements }} of {{ totalElements }} complete</span>
                 <span class="font-medium">{{ progressPercent }}%</span>
               </div>
-              <div class="h-1.5 overflow-hidden rounded-full bg-[rgb(var(--color-muted)/0.3)]">
+              <div class="h-1.5 overflow-hidden rounded-full bg-muted/30">
                 <div
                   class="h-full rounded-full transition-all duration-500"
-                  :class="progressPercent === 100 ? 'bg-emerald-500' : 'bg-[rgb(var(--color-primary))]'"
+                  :class="progressPercent === 100 ? 'bg-emerald-500' : 'bg-primary'"
                   :style="{ width: `${progressPercent}%` }"
                 />
               </div>
@@ -429,7 +429,7 @@ function formatFileSize(bytes: number): string {
           <!-- Sentinel indicator -->
           <div
             v-if="sentinel.isActive.value"
-            class="flex items-center gap-2 rounded-lg border border-[rgb(var(--color-border)/0.5)] bg-[rgb(var(--color-card)/0.5)] px-3 py-2"
+            class="flex items-center gap-2 rounded-lg border border-border/50 bg-card/50 px-3 py-2"
           >
             <span class="relative flex h-2 w-2">
               <span
@@ -441,7 +441,7 @@ function formatFileSize(bytes: number): string {
                 :class="sentinel.integrityScore.value > 0.7 ? 'bg-emerald-500' : sentinel.integrityScore.value > 0.4 ? 'bg-amber-400' : 'bg-red-500'"
               />
             </span>
-            <span class="text-xs text-[rgb(var(--color-muted-foreground))]">
+            <span class="text-xs text-muted-foreground">
               Sentinel {{ Math.round(sentinel.integrityScore.value * 100) }}%
             </span>
           </div>
@@ -456,14 +456,14 @@ function formatFileSize(bytes: number): string {
                 class="flex h-5 w-5 items-center justify-center rounded text-[10px] font-bold"
                 :class="(elements[ch.id] ?? []).every(el => elementStatus(el.id) === 'completed')
                   ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
-                  : 'bg-[rgb(var(--color-muted)/0.4)] text-[rgb(var(--color-muted-foreground))]'"
+                  : 'bg-muted/40 text-muted-foreground'"
               >
                 <svg v-if="(elements[ch.id] ?? []).every(el => elementStatus(el.id) === 'completed')" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
                 </svg>
                 <template v-else>{{ chIndex + 1 }}</template>
               </span>
-              <span class="text-xs font-medium uppercase tracking-wider text-[rgb(var(--color-muted-foreground))]">
+              <span class="text-xs font-medium uppercase tracking-wider text-muted-foreground">
                 {{ ch.title }}
               </span>
             </div>
@@ -474,8 +474,8 @@ function formatFileSize(bytes: number): string {
               :key="el.id"
               class="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-sm transition-all"
               :class="activeElement === el.id
-                ? 'bg-[rgb(var(--color-primary)/0.1)] text-[rgb(var(--color-primary))] font-medium'
-                : 'text-[rgb(var(--color-muted-foreground))] hover:bg-[rgb(var(--color-muted)/0.5)] hover:text-[rgb(var(--color-foreground))]'"
+                ? 'bg-primary/10 text-primary font-medium'
+                : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'"
               @click="selectElement(ch.id, el.id)"
             >
               <!-- Status/type indicator -->
@@ -484,10 +484,10 @@ function formatFileSize(bytes: number): string {
                 :class="elementStatus(el.id) === 'completed'
                   ? 'border-emerald-500 bg-emerald-500 text-white'
                   : activeElement === el.id
-                    ? 'border-[rgb(var(--color-primary))] bg-[rgb(var(--color-primary)/0.1)]'
+                    ? 'border-primary bg-primary/10'
                     : elementStatus(el.id) === 'in_progress'
                       ? 'border-amber-400 bg-amber-400/10'
-                      : 'border-[rgb(var(--color-border))]'"
+                      : 'border-border'"
               >
                 <svg v-if="elementStatus(el.id) === 'completed'" class="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
@@ -511,18 +511,18 @@ function formatFileSize(bytes: number): string {
             <!-- Element header -->
             <div class="mb-6">
               <!-- Breadcrumb -->
-              <div class="flex items-center gap-1.5 text-xs text-[rgb(var(--color-muted-foreground))] mb-3">
+              <div class="flex items-center gap-1.5 text-xs text-muted-foreground mb-3">
                 <span>{{ currentChapter?.title }}</span>
                 <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
                 </svg>
-                <span class="text-[rgb(var(--color-foreground))]">{{ currentElement.title }}</span>
+                <span class="text-foreground">{{ currentElement.title }}</span>
               </div>
 
               <!-- Title row -->
               <div class="flex items-start justify-between gap-4">
                 <div class="min-w-0">
-                  <h1 class="text-xl font-bold text-[rgb(var(--color-foreground))] leading-tight">{{ currentElement.title }}</h1>
+                  <h1 class="text-xl font-bold text-foreground leading-tight">{{ currentElement.title }}</h1>
                   <div class="mt-2 flex flex-wrap items-center gap-2">
                     <!-- Element type badge -->
                     <span class="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium"
@@ -541,7 +541,7 @@ function formatFileSize(bytes: number): string {
                       {{ elementTypeLabel(currentElement.element_type) }}
                     </span>
                     <!-- Duration -->
-                    <span v-if="currentElement.duration_seconds" class="text-xs text-[rgb(var(--color-muted-foreground))]">
+                    <span v-if="currentElement.duration_seconds" class="text-xs text-muted-foreground">
                       {{ Math.round(currentElement.duration_seconds / 60) }} min
                     </span>
                     <!-- Monitored badge -->
@@ -579,7 +579,7 @@ function formatFileSize(bytes: number): string {
                   v-for="skill in elementSkills"
                   :key="skill.skill_id || skill.id"
                   :to="`/skills/${skill.skill_id || skill.id}`"
-                  class="inline-flex items-center rounded-full bg-[rgb(var(--color-primary)/0.08)] px-2 py-0.5 text-[10px] font-medium text-[rgb(var(--color-primary))] transition-colors hover:bg-[rgb(var(--color-primary)/0.15)]"
+                  class="inline-flex items-center rounded-full bg-primary/8 px-2 py-0.5 text-[10px] font-medium text-primary transition-colors hover:bg-primary/15"
                 >
                   {{ skill.skill_name || skill.name }}
                 </router-link>
@@ -621,7 +621,7 @@ function formatFileSize(bytes: number): string {
               <div
                 v-else-if="currentElement.element_type === 'downloadable'"
                 :key="`dl-${activeChapter}-${activeElement}`"
-                class="rounded-xl border border-[rgb(var(--color-border))] bg-[rgb(var(--color-card))] p-8"
+                class="rounded-xl border border-border bg-card p-8"
               >
                 <div class="flex items-start gap-5">
                   <div class="flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-xl bg-green-100 dark:bg-green-900/30">
@@ -630,14 +630,14 @@ function formatFileSize(bytes: number): string {
                     </svg>
                   </div>
                   <div class="flex-1 min-w-0">
-                    <h3 class="text-base font-semibold text-[rgb(var(--color-foreground))]">
+                    <h3 class="text-base font-semibold text-foreground">
                       {{ (currentElement as any).filename || currentElement.title }}
                     </h3>
-                    <div class="mt-1 flex items-center gap-3 text-sm text-[rgb(var(--color-muted-foreground))]">
+                    <div class="mt-1 flex items-center gap-3 text-sm text-muted-foreground">
                       <span v-if="(currentElement as any).mime_type">{{ (currentElement as any).mime_type }}</span>
                       <span v-if="(currentElement as any).size_bytes">{{ formatFileSize((currentElement as any).size_bytes) }}</span>
                     </div>
-                    <p v-if="(currentElement as any).description" class="mt-3 text-sm text-[rgb(var(--color-muted-foreground))]">
+                    <p v-if="(currentElement as any).description" class="mt-3 text-sm text-muted-foreground">
                       {{ (currentElement as any).description }}
                     </p>
                     <div class="mt-4">
@@ -725,20 +725,20 @@ function formatFileSize(bytes: number): string {
               </div>
 
               <!-- Fallback for unknown types -->
-              <div v-else class="rounded-xl border border-[rgb(var(--color-border))] bg-[rgb(var(--color-card))] p-8 text-center">
-                <div class="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-[rgb(var(--color-muted)/0.3)]">
-                  <svg class="h-6 w-6 text-[rgb(var(--color-muted-foreground))]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+              <div v-else class="rounded-xl border border-border bg-card p-8 text-center">
+                <div class="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-muted/30">
+                  <svg class="h-6 w-6 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
                   </svg>
                 </div>
-                <p class="text-sm font-medium text-[rgb(var(--color-foreground))]">
+                <p class="text-sm font-medium text-foreground">
                   {{ elementTypeLabel(currentElement.element_type) }}
                 </p>
-                <div v-if="currentElement.content_cid" class="mt-2 text-xs text-[rgb(var(--color-muted-foreground))]">
+                <div v-if="currentElement.content_cid" class="mt-2 text-xs text-muted-foreground">
                   <p class="mb-1">Content CID:</p>
                   <code class="break-all font-mono text-[10px]">{{ currentElement.content_cid }}</code>
                 </div>
-                <div v-else class="mt-2 text-xs text-[rgb(var(--color-muted-foreground))]">
+                <div v-else class="mt-2 text-xs text-muted-foreground">
                   No content attached to this element yet.
                 </div>
               </div>
@@ -749,20 +749,20 @@ function formatFileSize(bytes: number): string {
         <!-- Empty state when no element selected -->
         <div v-else class="flex-1 flex items-center justify-center">
           <div class="text-center">
-            <div class="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-[rgb(var(--color-muted)/0.3)]">
-              <svg class="h-8 w-8 text-[rgb(var(--color-muted-foreground)/0.5)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+            <div class="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-muted/30">
+              <svg class="h-8 w-8 text-muted-foreground/50" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h7" />
               </svg>
             </div>
-            <h3 class="text-sm font-medium text-[rgb(var(--color-foreground))]">No element selected</h3>
-            <p class="mt-1 text-xs text-[rgb(var(--color-muted-foreground))]">Select an element from the sidebar to start learning.</p>
+            <h3 class="text-sm font-medium text-foreground">No element selected</h3>
+            <p class="mt-1 text-xs text-muted-foreground">Select an element from the sidebar to start learning.</p>
           </div>
         </div>
 
         <!-- ============================== -->
         <!-- NAVIGATION FOOTER              -->
         <!-- ============================== -->
-        <div v-if="currentElement && enrollment" class="flex-shrink-0 border-t border-[rgb(var(--color-border))] bg-[rgb(var(--color-card)/0.5)] px-3 py-2 md:px-6 md:py-3">
+        <div v-if="currentElement && enrollment" class="flex-shrink-0 border-t border-border bg-card/50 px-3 py-2 md:px-6 md:py-3">
           <div class="mx-auto flex max-w-3xl items-center justify-between gap-2">
             <!-- Previous -->
             <AppButton variant="secondary" size="sm" @click="goToPrev">

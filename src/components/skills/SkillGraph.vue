@@ -186,19 +186,19 @@ function isEdgeHighlighted(e: LayoutEdge): boolean {
 
 <template>
   <div class="card overflow-hidden">
-    <div class="p-3 border-b border-[rgb(var(--color-border))] flex items-center justify-between">
-      <div class="text-xs text-[rgb(var(--color-muted-foreground))]">
+    <div class="p-3 border-b border-border flex items-center justify-between">
+      <div class="text-xs text-muted-foreground">
         {{ layout.nodes.length }} skills, {{ layout.edges.length }} prerequisite edges
       </div>
       <div class="flex items-center gap-3">
         <div v-for="(color, level) in bloomFills" :key="level" class="flex items-center gap-1">
           <span class="w-2.5 h-2.5 rounded-full" :style="{ backgroundColor: color }" />
-          <span class="text-[0.6rem] text-[rgb(var(--color-muted-foreground))]">{{ level }}</span>
+          <span class="text-[0.6rem] text-muted-foreground">{{ level }}</span>
         </div>
       </div>
     </div>
 
-    <div class="overflow-auto bg-[rgb(var(--color-muted)/0.15)]" style="max-height: 600px">
+    <div class="overflow-auto bg-muted/15" style="max-height: 600px">
       <svg
         :width="layout.width"
         :height="layout.height"
@@ -207,16 +207,16 @@ function isEdgeHighlighted(e: LayoutEdge): boolean {
         <!-- Grid pattern -->
         <defs>
           <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">
-            <circle cx="10" cy="10" r="0.5" fill="rgb(var(--color-border))" opacity="0.3" />
+            <circle cx="10" cy="10" r="0.5" fill="var(--app-border)" opacity="0.3" />
           </pattern>
           <!-- Arrow marker -->
           <marker id="arrow" viewBox="0 0 10 10" refX="10" refY="5"
             markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-            <path d="M 0 0 L 10 5 L 0 10 z" fill="rgb(var(--color-muted-foreground))" opacity="0.5" />
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--app-muted-foreground)" opacity="0.5" />
           </marker>
           <marker id="arrow-hl" viewBox="0 0 10 10" refX="10" refY="5"
             markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-            <path d="M 0 0 L 10 5 L 0 10 z" fill="rgb(var(--color-primary))" opacity="0.8" />
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--app-primary)" opacity="0.8" />
           </marker>
         </defs>
 
@@ -229,7 +229,7 @@ function isEdgeHighlighted(e: LayoutEdge): boolean {
             :key="`edge-${i}`"
             :d="edgePath(e)"
             fill="none"
-            :stroke="isEdgeHighlighted(e) ? 'rgb(var(--color-primary))' : 'rgb(var(--color-muted-foreground))'"
+            :stroke="isEdgeHighlighted(e) ? 'var(--app-primary)' : 'var(--app-muted-foreground)'"
             :stroke-width="isEdgeHighlighted(e) ? 2 : 1"
             :opacity="isEdgeHighlighted(e) ? 0.8 : 0.25"
             :marker-end="isEdgeHighlighted(e) ? 'url(#arrow-hl)' : 'url(#arrow)'"
@@ -255,7 +255,7 @@ function isEdgeHighlighted(e: LayoutEdge): boolean {
             :height="NODE_H + 6"
             rx="10"
             fill="none"
-            stroke="rgb(var(--color-primary))"
+            stroke="var(--app-primary)"
             stroke-width="2"
             opacity="0.6"
           />

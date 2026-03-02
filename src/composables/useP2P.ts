@@ -22,7 +22,14 @@ async function refreshStatus(): Promise<void> {
 }
 
 async function start(): Promise<void> {
-  await invoke('p2p_start')
+  // Skip if we already know the node is running
+  if (status.value?.is_running) return
+  try {
+    await invoke('p2p_start')
+  } catch {
+    // Fire-and-forget: the backend spawns startup in the background.
+    // Any error here (e.g. wallet locked) is non-fatal.
+  }
   await refreshStatus()
 }
 
@@ -32,7 +39,7 @@ async function stop(): Promise<void> {
 }
 
 async function peers(): Promise<PeerInfo[]> {
-  return invoke<PeerInfo[]>('p2p_peers')
+  return invoke<string[]>('p2p_peers')
 }
 
 function startPolling(intervalMs = 10000) {

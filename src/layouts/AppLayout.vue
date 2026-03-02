@@ -8,7 +8,7 @@ const sidebarCollapsed = ref(false)
 </script>
 
 <template>
-  <div class="flex h-screen overflow-hidden bg-[rgb(var(--color-background))]">
+  <div class="flex h-dvh overflow-hidden bg-background">
     <!-- Sidebar — hidden on mobile -->
     <AppSidebar
       class="hidden md:flex"

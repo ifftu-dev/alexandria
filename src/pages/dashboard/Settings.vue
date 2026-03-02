@@ -113,15 +113,15 @@ async function lockWallet() {
   <div>
     <div class="max-w-2xl">
       <div class="mb-8">
-        <h1 class="text-3xl font-bold text-[rgb(var(--color-foreground))]">Settings</h1>
-        <p class="mt-2 text-[rgb(var(--color-muted-foreground))]">
+        <h1 class="text-3xl font-bold text-foreground">Settings</h1>
+        <p class="mt-2 text-muted-foreground">
           Manage your profile, security, and node settings.
         </p>
       </div>
 
       <!-- Profile -->
-      <div class="rounded-xl border border-[rgb(var(--color-border))] bg-[rgb(var(--color-card))] p-6 mb-6">
-        <h2 class="text-lg font-semibold text-[rgb(var(--color-foreground))] mb-4">Profile</h2>
+      <div class="rounded-xl border border-border bg-card p-6 mb-6">
+        <h2 class="text-lg font-semibold text-foreground mb-4">Profile</h2>
 
         <div class="space-y-4">
           <AppInput
@@ -147,22 +147,22 @@ async function lockWallet() {
             <span v-if="publishMessage" class="text-xs text-emerald-600 dark:text-emerald-400">{{ publishMessage }}</span>
           </div>
 
-          <div v-if="identity?.profile_hash" class="pt-3 border-t border-[rgb(var(--color-border)/0.5)]">
-            <p class="text-xs text-[rgb(var(--color-muted-foreground))] mb-1">Published Profile Hash</p>
-            <code class="block font-mono text-xs break-all select-all text-[rgb(var(--color-muted-foreground))]">{{ identity.profile_hash }}</code>
+          <div v-if="identity?.profile_hash" class="pt-3 border-t border-border/50">
+            <p class="text-xs text-muted-foreground mb-1">Published Profile Hash</p>
+            <code class="block font-mono text-xs break-all select-all text-muted-foreground">{{ identity.profile_hash }}</code>
           </div>
         </div>
       </div>
 
       <!-- Security -->
-      <div class="rounded-xl border border-[rgb(var(--color-border))] bg-[rgb(var(--color-card))] p-6 mb-6">
-        <h2 class="text-lg font-semibold text-[rgb(var(--color-foreground))] mb-4">Security</h2>
+      <div class="rounded-xl border border-border bg-card p-6 mb-6">
+        <h2 class="text-lg font-semibold text-foreground mb-4">Security</h2>
 
-        <div class="divide-y divide-[rgb(var(--color-border)/0.5)]">
+        <div class="divide-y divide-border/50">
           <div class="flex items-center justify-between py-4 first:pt-0">
             <div>
-              <p class="text-sm font-medium text-[rgb(var(--color-foreground))]">Recovery Phrase</p>
-              <p class="text-xs text-[rgb(var(--color-muted-foreground))]">
+              <p class="text-sm font-medium text-foreground">Recovery Phrase</p>
+              <p class="text-xs text-muted-foreground">
                 Export your 24-word backup phrase
               </p>
             </div>
@@ -173,8 +173,8 @@ async function lockWallet() {
 
           <div class="flex items-center justify-between py-4">
             <div>
-              <p class="text-sm font-medium text-[rgb(var(--color-foreground))]">Lock Wallet</p>
-              <p class="text-xs text-[rgb(var(--color-muted-foreground))]">
+              <p class="text-sm font-medium text-foreground">Lock Wallet</p>
+              <p class="text-xs text-muted-foreground">
                 Clear secrets from memory and require password
               </p>
             </div>
@@ -186,12 +186,12 @@ async function lockWallet() {
       </div>
 
       <!-- Theme -->
-      <div class="rounded-xl border border-[rgb(var(--color-border))] bg-[rgb(var(--color-card))] p-6 mb-6">
-        <h2 class="text-lg font-semibold text-[rgb(var(--color-foreground))] mb-4">Appearance</h2>
+      <div class="rounded-xl border border-border bg-card p-6 mb-6">
+        <h2 class="text-lg font-semibold text-foreground mb-4">Appearance</h2>
         <div class="flex items-center justify-between">
           <div>
-            <p class="text-sm font-medium text-[rgb(var(--color-foreground))]">Theme</p>
-            <p class="text-xs text-[rgb(var(--color-muted-foreground))]">
+            <p class="text-sm font-medium text-foreground">Theme</p>
+            <p class="text-xs text-muted-foreground">
               Current: {{ theme }}
             </p>
           </div>
@@ -202,16 +202,16 @@ async function lockWallet() {
       </div>
 
       <!-- Identity (read-only) -->
-      <div v-if="identity" class="rounded-xl border border-[rgb(var(--color-border))] bg-[rgb(var(--color-card))] p-6">
-        <h2 class="text-lg font-semibold text-[rgb(var(--color-foreground))] mb-4">Identity</h2>
-        <div class="divide-y divide-[rgb(var(--color-border)/0.5)]">
+      <div v-if="identity" class="rounded-xl border border-border bg-card p-6">
+        <h2 class="text-lg font-semibold text-foreground mb-4">Identity</h2>
+        <div class="divide-y divide-border/50">
           <div class="py-3 first:pt-0">
-            <p class="text-xs text-[rgb(var(--color-muted-foreground))] mb-1">Stake Address</p>
-            <code class="block font-mono text-xs break-all select-all text-[rgb(var(--color-foreground))]">{{ identity.stake_address }}</code>
+            <p class="text-xs text-muted-foreground mb-1">Stake Address</p>
+            <code class="block font-mono text-xs break-all select-all text-foreground">{{ identity.stake_address }}</code>
           </div>
           <div class="py-3">
-            <p class="text-xs text-[rgb(var(--color-muted-foreground))] mb-1">Payment Address</p>
-            <code class="block font-mono text-xs break-all select-all text-[rgb(var(--color-foreground))]">{{ identity.payment_address }}</code>
+            <p class="text-xs text-muted-foreground mb-1">Payment Address</p>
+            <code class="block font-mono text-xs break-all select-all text-foreground">{{ identity.payment_address }}</code>
           </div>
         </div>
       </div>
@@ -242,8 +242,8 @@ async function lockWallet() {
 
         <!-- Loading -->
         <div v-else-if="exporting" class="text-center py-4">
-          <div class="w-6 h-6 border-2 border-[rgb(var(--color-primary))] border-t-transparent rounded-full animate-spin mx-auto mb-2" />
-          <p class="text-sm text-[rgb(var(--color-muted-foreground))]">Decrypting...</p>
+          <div class="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-2" />
+          <p class="text-sm text-muted-foreground">Decrypting...</p>
         </div>
 
         <!-- Error -->
@@ -260,9 +260,9 @@ async function lockWallet() {
             <div
               v-for="(word, i) in exportedMnemonic.split(' ')"
               :key="i"
-              class="flex items-center gap-2 text-sm py-1.5 px-2.5 rounded bg-[rgb(var(--color-muted)/0.3)]"
+              class="flex items-center gap-2 text-sm py-1.5 px-2.5 rounded bg-muted/30"
             >
-              <span class="text-xs text-[rgb(var(--color-muted-foreground))] w-5 text-right">{{ i + 1 }}.</span>
+              <span class="text-xs text-muted-foreground w-5 text-right">{{ i + 1 }}.</span>
               <span class="font-mono font-medium">{{ word }}</span>
             </div>
           </div>

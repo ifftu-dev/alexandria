@@ -152,7 +152,7 @@ watch(() => props.elementId, () => {
   <div class="mcq-question">
     <!-- Loading -->
     <div v-if="loading" class="flex items-center justify-center py-12">
-      <div class="h-8 w-8 animate-spin rounded-full border-2 border-[rgb(var(--color-primary))] border-t-transparent" />
+      <div class="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
     </div>
 
     <!-- Error -->
@@ -161,7 +161,7 @@ watch(() => props.elementId, () => {
     </div>
 
     <!-- No content -->
-    <div v-else-if="!mcq" class="py-8 text-center text-sm text-[rgb(var(--color-muted-foreground))]">
+    <div v-else-if="!mcq" class="py-8 text-center text-sm text-muted-foreground">
       No question content available.
     </div>
 
@@ -172,18 +172,18 @@ watch(() => props.elementId, () => {
         <span class="rounded-full px-2.5 py-0.5 text-xs font-medium" :class="typeBadge.color">
           {{ typeBadge.label }}
         </span>
-        <span v-if="isMulti" class="text-xs text-[rgb(var(--color-muted-foreground))]">
+        <span v-if="isMulti" class="text-xs text-muted-foreground">
           (Select all that apply)
         </span>
       </div>
 
       <!-- Question -->
-      <p class="text-base font-medium leading-relaxed text-[rgb(var(--color-foreground))]">
+      <p class="text-base font-medium leading-relaxed text-foreground">
         {{ mcq.question }}
       </p>
 
       <!-- Context (subjective only) -->
-      <div v-if="isSubjective && mcq.context" class="rounded-lg bg-[rgb(var(--color-muted)/0.3)] p-4 text-sm text-[rgb(var(--color-muted-foreground))]">
+      <div v-if="isSubjective && mcq.context" class="rounded-lg bg-muted/30 p-4 text-sm text-muted-foreground">
         {{ mcq.context }}
       </div>
 
@@ -195,8 +195,8 @@ watch(() => props.elementId, () => {
           class="flex w-full items-start gap-3 rounded-lg border p-4 text-left text-sm transition-all"
           :class="[
             selectedIndices.includes(idx) && !submitted
-              ? 'border-[rgb(var(--color-primary))] bg-[rgb(var(--color-primary)/0.06)]'
-              : 'border-[rgb(var(--color-border))] hover:border-[rgb(var(--color-primary)/0.4)]',
+              ? 'border-primary bg-primary/6'
+              : 'border-border hover:border-primary/40',
             submitted && !isSubjective && isCorrectOption(idx)
               ? 'border-emerald-500 bg-emerald-50 dark:border-emerald-500/50 dark:bg-emerald-900/20'
               : '',
@@ -213,8 +213,8 @@ watch(() => props.elementId, () => {
             :class="[
               isSingle ? 'rounded-full' : 'rounded',
               selectedIndices.includes(idx)
-                ? 'border-[rgb(var(--color-primary))] bg-[rgb(var(--color-primary))] text-white'
-                : 'border-[rgb(var(--color-border))]',
+                ? 'border-primary bg-primary text-white'
+                : 'border-border',
               submitted && !isSubjective && isCorrectOption(idx)
                 ? 'border-emerald-500 bg-emerald-500 text-white'
                 : '',
@@ -262,13 +262,13 @@ watch(() => props.elementId, () => {
       </div>
 
       <!-- Explanation -->
-      <div v-if="submitted && mcq.explanation && !isSubjective" class="flex gap-3 rounded-lg bg-[rgb(var(--color-muted)/0.2)] p-4">
-        <svg class="mt-0.5 h-4 w-4 flex-shrink-0 text-[rgb(var(--color-muted-foreground))]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+      <div v-if="submitted && mcq.explanation && !isSubjective" class="flex gap-3 rounded-lg bg-muted/20 p-4">
+        <svg class="mt-0.5 h-4 w-4 flex-shrink-0 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
           <path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
         </svg>
         <div>
-          <p class="text-xs font-medium text-[rgb(var(--color-muted-foreground))]">Explanation</p>
-          <p class="mt-1 text-sm text-[rgb(var(--color-foreground))]">{{ mcq.explanation }}</p>
+          <p class="text-xs font-medium text-muted-foreground">Explanation</p>
+          <p class="mt-1 text-sm text-foreground">{{ mcq.explanation }}</p>
         </div>
       </div>
 

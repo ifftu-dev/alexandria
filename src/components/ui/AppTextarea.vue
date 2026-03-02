@@ -23,7 +23,7 @@ defineEmits<{
 
 <template>
   <div>
-    <label v-if="label" class="label text-xs text-[rgb(var(--color-muted-foreground))]">
+    <label v-if="label" class="label text-xs text-muted-foreground">
       {{ label }}
     </label>
     <textarea
@@ -35,6 +35,6 @@ defineEmits<{
       :class="{ 'input-error': error }"
       @input="$emit('update:modelValue', ($event.target as HTMLTextAreaElement).value)"
     />
-    <p v-if="error" class="text-xs text-[rgb(var(--color-error))] mt-1">{{ error }}</p>
+    <p v-if="error" class="text-xs text-error mt-1">{{ error }}</p>
   </div>
 </template>

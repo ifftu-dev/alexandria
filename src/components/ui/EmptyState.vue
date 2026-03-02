@@ -15,8 +15,8 @@ withDefaults(defineProps<Props>(), {
 <template>
   <div class="card p-8 text-center">
     <div v-if="icon" class="text-2xl mb-3 opacity-50">{{ icon }}</div>
-    <p class="text-sm font-medium text-[rgb(var(--color-foreground))] mb-1">{{ title }}</p>
-    <p v-if="description" class="text-xs text-[rgb(var(--color-muted-foreground))]">{{ description }}</p>
+    <p class="text-sm font-medium text-foreground mb-1">{{ title }}</p>
+    <p v-if="description" class="text-xs text-muted-foreground">{{ description }}</p>
     <div v-if="$slots.action" class="mt-4">
       <slot name="action" />
     </div>

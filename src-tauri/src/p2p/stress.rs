@@ -1564,8 +1564,8 @@ mod tests {
         let (tx1, _rx1) = mpsc::channel::<P2pEvent>(256);
         let (tx2, mut rx2) = mpsc::channel::<P2pEvent>(256);
 
-        let mut node1 = start_node(kp1, tx1).await.expect("node1 should start");
-        let mut node2 = start_node(kp2, tx2).await.expect("node2 should start");
+        let mut node1 = start_node(kp1, tx1, vec![]).await.expect("node1 should start");
+        let mut node2 = start_node(kp2, tx2, vec![]).await.expect("node2 should start");
 
         // Wait for mDNS discovery (nodes on localhost discover each other)
         // Give them up to 10 seconds to connect
@@ -1653,8 +1653,8 @@ mod tests {
         let (tx1, _rx1) = mpsc::channel::<P2pEvent>(64);
         let (tx2, _rx2) = mpsc::channel::<P2pEvent>(64);
 
-        let mut node1 = start_node(kp1, tx1).await.unwrap();
-        let mut node2 = start_node(kp2, tx2).await.unwrap();
+        let mut node1 = start_node(kp1, tx1, vec![]).await.unwrap();
+        let mut node2 = start_node(kp2, tx2, vec![]).await.unwrap();
 
         // Wait for peer discovery
         let discovered = timeout(Duration::from_secs(10), async {

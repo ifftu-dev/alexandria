@@ -17,6 +17,14 @@ mod schema;
 #[path = "../../../src-tauri/src/db/seed.rs"]
 mod seed;
 
+// Provide the SEED_CONTENT constant that seed.rs references via
+// `super::seed_content::SEED_CONTENT`. In the main Tauri crate this
+// lives in `db::seed_content`; for the CLI we include only the
+// dependency-free data constant (the iroh seeding function is not
+// needed here).
+#[path = "../../../src-tauri/src/db/seed_content_data.rs"]
+mod seed_content;
+
 // ── CLI subcommands ─────────────────────────────────────────────────
 
 #[derive(Subcommand)]

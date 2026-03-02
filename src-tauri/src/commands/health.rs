@@ -14,7 +14,7 @@ pub struct HealthResponse {
 #[tauri::command]
 pub async fn check_health(state: State<'_, AppState>) -> Result<HealthResponse, String> {
     let db_status = {
-        let db = state.db.lock().await;
+        let db = state.db.lock().unwrap();
         match db.conn().query_row("SELECT 1", [], |_| Ok(())) {
             Ok(()) => "ok".to_string(),
             Err(e) => format!("error: {}", e),
@@ -26,4 +26,10 @@ pub async fn check_health(state: State<'_, AppState>) -> Result<HealthResponse, 
         version: env!("CARGO_PKG_VERSION").to_string(),
         database: db_status,
     })
+}
+
+/// Read the diagnostic log (for debugging P2P / iOS issues).
+#[tauri::command]
+pub async fn read_diag_log() -> Result<String, String> {
+    Ok(crate::diag::read())
 }

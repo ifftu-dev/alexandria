@@ -44,13 +44,13 @@ async function create() {
   <div>
     <div class="max-w-2xl">
       <div class="mb-8">
-        <h1 class="text-3xl font-bold text-[rgb(var(--color-foreground))]">Create Course</h1>
-        <p class="mt-2 text-[rgb(var(--color-muted-foreground))]">
+        <h1 class="text-3xl font-bold text-foreground">Create Course</h1>
+        <p class="mt-2 text-muted-foreground">
           Create a new course on your local node. You can add chapters and elements after creation.
         </p>
       </div>
 
-      <div class="rounded-xl border border-[rgb(var(--color-border))] bg-[rgb(var(--color-card))] p-6">
+      <div class="rounded-xl border border-border bg-card p-6">
         <div class="space-y-5">
           <AppInput
             v-model="title"

@@ -108,17 +108,17 @@ function elementTypeLabel(elementType: string): string {
       <div class="flex items-start justify-between">
         <div class="space-y-2">
           <div class="flex gap-2">
-            <div class="h-5 w-16 rounded-full bg-[rgb(var(--color-muted))]" />
-            <div class="h-5 w-10 rounded bg-[rgb(var(--color-muted))]" />
+            <div class="h-5 w-16 rounded-full bg-muted" />
+            <div class="h-5 w-10 rounded bg-muted" />
           </div>
-          <div class="h-7 w-80 rounded bg-[rgb(var(--color-muted))]" />
-          <div class="h-4 w-96 rounded bg-[rgb(var(--color-muted))]" />
+          <div class="h-7 w-80 rounded bg-muted" />
+          <div class="h-4 w-96 rounded bg-muted" />
         </div>
-        <div class="h-10 w-28 rounded-lg bg-[rgb(var(--color-muted))]" />
+        <div class="h-10 w-28 rounded-lg bg-muted" />
       </div>
       <div class="card p-5 space-y-3">
-        <div class="h-5 w-24 rounded bg-[rgb(var(--color-muted))]" />
-        <div v-for="i in 3" :key="i" class="h-16 rounded-lg bg-[rgb(var(--color-muted)/0.3)]" />
+        <div class="h-5 w-24 rounded bg-muted" />
+        <div v-for="i in 3" :key="i" class="h-16 rounded-lg bg-muted/30" />
       </div>
     </div>
 
@@ -134,28 +134,28 @@ function elementTypeLabel(elementType: string): string {
         <div class="min-w-0">
           <div class="flex items-center gap-2 mb-2">
             <StatusBadge :status="course.status" />
-            <span class="text-xs text-[rgb(var(--color-muted-foreground))]">v{{ course.version }}</span>
+            <span class="text-xs text-muted-foreground">v{{ course.version }}</span>
           </div>
           <h1 class="text-2xl font-bold tracking-tight">{{ course.title }}</h1>
-          <p v-if="course.description" class="text-sm text-[rgb(var(--color-muted-foreground))] mt-2 max-w-2xl">
+          <p v-if="course.description" class="text-sm text-muted-foreground mt-2 max-w-2xl">
             {{ course.description }}
           </p>
 
           <!-- Stats pills -->
           <div class="flex items-center gap-3 mt-4">
-            <span class="inline-flex items-center gap-1.5 text-xs text-[rgb(var(--color-muted-foreground))]">
+            <span class="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
               <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
               </svg>
               {{ chapters.length }} chapter{{ chapters.length !== 1 ? 's' : '' }}
             </span>
-            <span class="inline-flex items-center gap-1.5 text-xs text-[rgb(var(--color-muted-foreground))]">
+            <span class="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
               <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
               </svg>
               {{ totalElements }} element{{ totalElements !== 1 ? 's' : '' }}
             </span>
-            <span v-if="course.tags?.length" class="inline-flex items-center gap-1.5 text-xs text-[rgb(var(--color-muted-foreground))]">
+            <span v-if="course.tags?.length" class="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
               <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
               </svg>
@@ -215,7 +215,7 @@ function elementTypeLabel(elementType: string): string {
         <span
           v-for="(count, type) in elementTypeCounts"
           :key="type"
-          class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[rgb(var(--color-muted)/0.5)] text-xs text-[rgb(var(--color-muted-foreground))]"
+          class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-muted/50 text-xs text-muted-foreground"
         >
           <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" :d="elementTypeIcon(type as string)" />
@@ -233,30 +233,30 @@ function elementTypeLabel(elementType: string): string {
           class="card overflow-hidden"
         >
           <!-- Chapter header -->
-          <div class="flex items-center gap-3 px-5 py-4 bg-[rgb(var(--color-muted)/0.2)]">
-            <span class="flex h-7 w-7 items-center justify-center rounded-full bg-[rgb(var(--color-primary)/0.1)] text-xs font-semibold text-[rgb(var(--color-primary))]">
+          <div class="flex items-center gap-3 px-5 py-4 bg-muted/20">
+            <span class="flex h-7 w-7 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
               {{ index + 1 }}
             </span>
             <div class="min-w-0">
               <h3 class="text-sm font-semibold truncate">{{ chapter.title }}</h3>
-              <p v-if="chapter.description" class="text-xs text-[rgb(var(--color-muted-foreground))] truncate">
+              <p v-if="chapter.description" class="text-xs text-muted-foreground truncate">
                 {{ chapter.description }}
               </p>
             </div>
-            <span v-if="elements[chapter.id]?.length" class="ml-auto text-xs text-[rgb(var(--color-muted-foreground))] shrink-0">
+            <span v-if="elements[chapter.id]?.length" class="ml-auto text-xs text-muted-foreground shrink-0">
               {{ elements[chapter.id]?.length ?? 0 }} element{{ (elements[chapter.id]?.length ?? 0) !== 1 ? 's' : '' }}
             </span>
           </div>
 
           <!-- Elements list -->
-          <div v-if="elements[chapter.id]?.length" class="divide-y divide-[rgb(var(--color-border)/0.5)]">
+          <div v-if="elements[chapter.id]?.length" class="divide-y divide-border/50">
             <div
               v-for="el in elements[chapter.id]"
               :key="el.id"
               class="flex items-center gap-3 px-5 py-3"
             >
-              <span class="flex h-6 w-6 items-center justify-center rounded bg-[rgb(var(--color-muted))] shrink-0">
-                <svg class="w-3.5 h-3.5 text-[rgb(var(--color-muted-foreground))]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <span class="flex h-6 w-6 items-center justify-center rounded bg-muted shrink-0">
+                <svg class="w-3.5 h-3.5 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                   <path stroke-linecap="round" stroke-linejoin="round" :d="elementTypeIcon(el.element_type)" />
                 </svg>
               </span>
@@ -266,7 +266,7 @@ function elementTypeLabel(elementType: string): string {
               </span>
             </div>
           </div>
-          <div v-else class="px-5 py-3 text-xs text-[rgb(var(--color-muted-foreground))] italic">
+          <div v-else class="px-5 py-3 text-xs text-muted-foreground italic">
             No elements yet
           </div>
         </div>
@@ -277,30 +277,30 @@ function elementTypeLabel(elementType: string): string {
         <h2 class="text-base font-semibold mb-4">Details</h2>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
-            <div class="text-xs text-[rgb(var(--color-muted-foreground))] mb-0.5">Author</div>
-            <div class="text-sm text-[rgb(var(--color-foreground))]">
+            <div class="text-xs text-muted-foreground mb-0.5">Author</div>
+            <div class="text-sm text-foreground">
               <span v-if="course.author_name" class="font-medium">{{ course.author_name }}</span>
               <span v-else class="font-mono break-all">{{ course.author_address || 'Unknown' }}</span>
             </div>
-            <div v-if="course.author_name && course.author_address" class="text-xs font-mono text-[rgb(var(--color-muted-foreground))] mt-0.5 break-all">
+            <div v-if="course.author_name && course.author_address" class="text-xs font-mono text-muted-foreground mt-0.5 break-all">
               {{ course.author_address }}
             </div>
           </div>
           <div v-if="course.content_cid">
-            <div class="text-xs text-[rgb(var(--color-muted-foreground))] mb-0.5">Content CID</div>
-            <div class="text-sm font-mono text-[rgb(var(--color-foreground))] break-all">
+            <div class="text-xs text-muted-foreground mb-0.5">Content CID</div>
+            <div class="text-sm font-mono text-foreground break-all">
               {{ course.content_cid }}
             </div>
           </div>
           <div v-if="course.skill_ids?.length">
-            <div class="text-xs text-[rgb(var(--color-muted-foreground))] mb-0.5">Linked Skills</div>
-            <div class="text-sm text-[rgb(var(--color-foreground))]">
+            <div class="text-xs text-muted-foreground mb-0.5">Linked Skills</div>
+            <div class="text-sm text-foreground">
               {{ course.skill_ids.length }} skill{{ course.skill_ids.length !== 1 ? 's' : '' }}
             </div>
           </div>
           <div>
-            <div class="text-xs text-[rgb(var(--color-muted-foreground))] mb-0.5">Created</div>
-            <div class="text-sm text-[rgb(var(--color-foreground))]">
+            <div class="text-xs text-muted-foreground mb-0.5">Created</div>
+            <div class="text-sm text-foreground">
               {{ new Date(course.created_at).toLocaleDateString() }}
             </div>
           </div>

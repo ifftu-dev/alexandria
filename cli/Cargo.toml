@@ -5,6 +5,11 @@ description = "Alexandria developer CLI"
 edition = "2021"
 rust-version = "1.83.0"
 
+# Allow the `has_app_lib` cfg used by shared files (seed.rs) that gate
+# test modules requiring types only available in the main Tauri crate.
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(has_app_lib)'] }
+
 [[bin]]
 name = "alex"
 path = "src/main.rs"

@@ -174,11 +174,11 @@ watch(() => props.contentCid, loadQuiz)
   <div class="quiz-engine">
     <AppSpinner v-if="loading" label="Loading quiz..." />
 
-    <div v-else-if="error" class="text-sm text-[rgb(var(--color-destructive))]">
+    <div v-else-if="error" class="text-sm text-destructive">
       {{ error }}
     </div>
 
-    <div v-else-if="!quiz" class="text-sm text-[rgb(var(--color-muted-foreground))] italic">
+    <div v-else-if="!quiz" class="text-sm text-muted-foreground italic">
       No quiz content available.
     </div>
 
@@ -186,15 +186,15 @@ watch(() => props.contentCid, loadQuiz)
       <!-- Header -->
       <div class="flex items-center justify-between">
         <h3 class="text-base font-semibold">{{ quiz.title }}</h3>
-        <span class="text-xs text-[rgb(var(--color-muted-foreground))]">
+        <span class="text-xs text-muted-foreground">
           Question {{ currentIndex + 1 }} / {{ totalQuestions }}
         </span>
       </div>
 
       <!-- Progress bar -->
-      <div class="h-1 bg-[rgb(var(--color-muted)/0.3)] rounded-full overflow-hidden">
+      <div class="h-1 bg-muted/30 rounded-full overflow-hidden">
         <div
-          class="h-full bg-[rgb(var(--color-primary))] transition-all duration-300"
+          class="h-full bg-primary transition-all duration-300"
           :style="{ width: `${((currentIndex + 1) / totalQuestions) * 100}%` }"
         />
       </div>
@@ -211,11 +211,11 @@ watch(() => props.contentCid, loadQuiz)
         <div class="flex items-start gap-2">
           <span
             class="text-xs font-bold px-2 py-0.5 rounded"
-            :class="submitted ? (questionResult(currentQuestion.id) ? 'bg-[rgb(var(--color-success)/0.15)] text-[rgb(var(--color-success))]' : 'bg-[rgb(var(--color-destructive)/0.15)] text-[rgb(var(--color-destructive))]') : 'bg-[rgb(var(--color-muted)/0.3)] text-[rgb(var(--color-muted-foreground))]'"
+            :class="submitted ? (questionResult(currentQuestion.id) ? 'bg-success/15 text-success' : 'bg-destructive/15 text-destructive') : 'bg-muted/30 text-muted-foreground'"
           >
             {{ currentQuestion.type === 'multiple_choice' ? 'Multi' : currentQuestion.type === 'short_answer' ? 'Text' : 'MC' }}
           </span>
-          <span class="text-xs text-[rgb(var(--color-muted-foreground))]">
+          <span class="text-xs text-muted-foreground">
             {{ currentQuestion.points }} pt{{ currentQuestion.points !== 1 ? 's' : '' }}
           </span>
         </div>
@@ -230,13 +230,13 @@ watch(() => props.contentCid, loadQuiz)
             class="w-full text-left p-3 rounded-lg border text-sm transition-all"
             :class="[
               isOptionSelected(currentQuestion.id, idx)
-                ? 'border-[rgb(var(--color-primary))] bg-[rgb(var(--color-primary)/0.08)]'
-                : 'border-[rgb(var(--color-border))] hover:border-[rgb(var(--color-primary)/0.5)]',
+                ? 'border-primary bg-primary/8'
+                : 'border-border hover:border-primary/50',
               submitted && currentQuestion.correct_indices?.includes(idx)
-                ? 'border-[rgb(var(--color-success))] bg-[rgb(var(--color-success)/0.08)]'
+                ? 'border-success bg-success/8'
                 : '',
               submitted && isOptionSelected(currentQuestion.id, idx) && !currentQuestion.correct_indices?.includes(idx)
-                ? 'border-[rgb(var(--color-destructive))] bg-[rgb(var(--color-destructive)/0.08)]'
+                ? 'border-destructive bg-destructive/8'
                 : '',
             ]"
             :disabled="submitted"
@@ -244,7 +244,7 @@ watch(() => props.contentCid, loadQuiz)
           >
             <span class="inline-flex items-center gap-2">
               <span class="w-5 h-5 rounded-full border flex items-center justify-center text-xs shrink-0"
-                :class="isOptionSelected(currentQuestion.id, idx) ? 'bg-[rgb(var(--color-primary))] text-white border-[rgb(var(--color-primary))]' : 'border-[rgb(var(--color-border))]'"
+                :class="isOptionSelected(currentQuestion.id, idx) ? 'bg-primary text-white border-primary' : 'border-border'"
               >
                 {{ String.fromCharCode(65 + idx) }}
               </span>
@@ -266,7 +266,7 @@ watch(() => props.contentCid, loadQuiz)
         </div>
 
         <!-- Explanation (after submit) -->
-        <div v-if="submitted && currentQuestion.explanation" class="text-xs text-[rgb(var(--color-muted-foreground))] bg-[rgb(var(--color-muted)/0.2)] p-3 rounded">
+        <div v-if="submitted && currentQuestion.explanation" class="text-xs text-muted-foreground bg-muted/20 p-3 rounded">
           {{ currentQuestion.explanation }}
         </div>
       </div>

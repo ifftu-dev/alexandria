@@ -1,20 +1,20 @@
 <template>
   <div class="absolute inset-0 overflow-hidden" aria-hidden="true" style="transform: translateZ(0); contain: layout style paint;">
     <!-- Base gradient -->
-    <div class="absolute inset-0 bg-gradient-to-b from-[rgb(var(--color-primary)/0.04)] via-transparent to-[rgb(var(--color-muted)/0.3)]" />
+    <div class="absolute inset-0 bg-gradient-to-b from-primary/4 via-transparent to-muted/30" />
 
     <!-- Shared SVG gradient defs -->
     <svg class="absolute" width="0" height="0" aria-hidden="true">
       <defs>
         <radialGradient id="sf-glow-primary">
-          <stop offset="0%" stop-color="rgb(var(--color-primary))" stop-opacity="0.35" />
-          <stop offset="50%" stop-color="rgb(var(--color-primary))" stop-opacity="0.08" />
-          <stop offset="100%" stop-color="rgb(var(--color-primary))" stop-opacity="0" />
+          <stop offset="0%" stop-color="var(--app-primary)" stop-opacity="0.35" />
+          <stop offset="50%" stop-color="var(--app-primary)" stop-opacity="0.08" />
+          <stop offset="100%" stop-color="var(--app-primary)" stop-opacity="0" />
         </radialGradient>
         <radialGradient id="sf-glow-primary-soft">
-          <stop offset="0%" stop-color="rgb(var(--color-primary))" stop-opacity="0.2" />
-          <stop offset="60%" stop-color="rgb(var(--color-primary))" stop-opacity="0.04" />
-          <stop offset="100%" stop-color="rgb(var(--color-primary))" stop-opacity="0" />
+          <stop offset="0%" stop-color="var(--app-primary)" stop-opacity="0.2" />
+          <stop offset="60%" stop-color="var(--app-primary)" stop-opacity="0.04" />
+          <stop offset="100%" stop-color="var(--app-primary)" stop-opacity="0" />
         </radialGradient>
         <radialGradient id="sf-glow-cyan">
           <stop offset="0%" stop-color="rgb(34 211 238)" stop-opacity="0.25" />
@@ -43,21 +43,21 @@
         </radialGradient>
         <!-- Edge fades using background color -->
         <linearGradient id="sf-fade-left" x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0%" stop-color="rgb(var(--color-background))" stop-opacity="1" />
-          <stop offset="100%" stop-color="rgb(var(--color-background))" stop-opacity="0" />
+          <stop offset="0%" stop-color="var(--app-background)" stop-opacity="1" />
+          <stop offset="100%" stop-color="var(--app-background)" stop-opacity="0" />
         </linearGradient>
         <linearGradient id="sf-fade-right" x1="1" y1="0" x2="0" y2="0">
-          <stop offset="0%" stop-color="rgb(var(--color-background))" stop-opacity="1" />
-          <stop offset="100%" stop-color="rgb(var(--color-background))" stop-opacity="0" />
+          <stop offset="0%" stop-color="var(--app-background)" stop-opacity="1" />
+          <stop offset="100%" stop-color="var(--app-background)" stop-opacity="0" />
         </linearGradient>
         <linearGradient id="sf-fade-top" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="rgb(var(--color-background))" stop-opacity="0.8" />
-          <stop offset="100%" stop-color="rgb(var(--color-background))" stop-opacity="0" />
+          <stop offset="0%" stop-color="var(--app-background)" stop-opacity="0.8" />
+          <stop offset="100%" stop-color="var(--app-background)" stop-opacity="0" />
         </linearGradient>
         <linearGradient id="sf-fade-bottom" x1="0" y1="1" x2="0" y2="0">
-          <stop offset="0%" stop-color="rgb(var(--color-background))" stop-opacity="1" />
-          <stop offset="40%" stop-color="rgb(var(--color-background))" stop-opacity="0.6" />
-          <stop offset="100%" stop-color="rgb(var(--color-background))" stop-opacity="0" />
+          <stop offset="0%" stop-color="var(--app-background)" stop-opacity="1" />
+          <stop offset="40%" stop-color="var(--app-background)" stop-opacity="0.6" />
+          <stop offset="100%" stop-color="var(--app-background)" stop-opacity="0" />
         </linearGradient>
       </defs>
     </svg>
@@ -95,10 +95,10 @@
         <circle cx="1420" cy="380" r="60" fill="url(#sf-glow-primary-soft)" />
         <!-- Faint constellation bridges -->
         <g opacity="0.05">
-          <path d="M300,200 Q500,320 720,280" stroke="rgb(var(--color-primary))" stroke-width="0.75" fill="none" />
-          <path d="M720,280 Q940,240 1140,170" stroke="rgb(var(--color-primary))" stroke-width="0.75" fill="none" />
-          <path d="M280,600 Q540,530 760,570" stroke="rgb(var(--color-primary))" stroke-width="0.75" fill="none" />
-          <path d="M760,570 Q980,530 1100,610" stroke="rgb(var(--color-primary))" stroke-width="0.5" fill="none" />
+          <path d="M300,200 Q500,320 720,280" stroke="var(--app-primary)" stroke-width="0.75" fill="none" />
+          <path d="M720,280 Q940,240 1140,170" stroke="var(--app-primary)" stroke-width="0.75" fill="none" />
+          <path d="M280,600 Q540,530 760,570" stroke="var(--app-primary)" stroke-width="0.75" fill="none" />
+          <path d="M760,570 Q980,530 1100,610" stroke="var(--app-primary)" stroke-width="0.5" fill="none" />
         </g>
       </svg>
     </div>
@@ -108,21 +108,21 @@
       <svg class="absolute inset-0 h-full w-full sf-drift-mid" viewBox="0 0 1440 900" preserveAspectRatio="xMidYMid slice" fill="none">
         <!-- Cluster connection lines -->
         <g class="sf-line-draw" opacity="0.1">
-          <path d="M40,120 Q130,80 220,140" stroke="rgb(var(--color-primary))" stroke-width="1" fill="none" />
-          <path d="M220,140 Q310,200 180,260" stroke="rgb(var(--color-primary))" stroke-width="0.75" fill="none" />
-          <path d="M180,260 Q100,300 60,220" stroke="rgb(var(--color-primary))" stroke-width="0.75" fill="none" />
-          <path d="M1200,100 Q1300,60 1400,130" stroke="rgb(var(--color-primary))" stroke-width="1" fill="none" />
-          <path d="M1200,100 Q1140,170 1260,220" stroke="rgb(var(--color-primary))" stroke-width="0.75" fill="none" />
-          <path d="M1260,220 Q1360,190 1400,130" stroke="rgb(var(--color-primary))" stroke-width="0.75" fill="none" />
-          <path d="M520,50 Q600,90 680,60" stroke="rgb(var(--color-primary))" stroke-width="0.75" fill="none" />
-          <path d="M680,60 Q760,30 840,70" stroke="rgb(var(--color-primary))" stroke-width="0.75" fill="none" />
-          <path d="M80,540 Q200,480 280,570" stroke="rgb(var(--color-primary))" stroke-width="1" fill="none" />
-          <path d="M280,570 Q360,640 200,660" stroke="rgb(var(--color-primary))" stroke-width="0.75" fill="none" />
-          <path d="M200,660 Q100,640 80,540" stroke="rgb(var(--color-primary))" stroke-width="0.75" fill="none" />
-          <path d="M1100,580 Q1200,520 1320,590" stroke="rgb(var(--color-primary))" stroke-width="1" fill="none" />
-          <path d="M1320,590 Q1400,640 1280,680" stroke="rgb(var(--color-primary))" stroke-width="0.75" fill="none" />
-          <path d="M560,680 Q640,650 720,690" stroke="rgb(var(--color-primary))" stroke-width="0.75" fill="none" />
-          <path d="M720,690 Q800,720 880,680" stroke="rgb(var(--color-primary))" stroke-width="0.75" fill="none" />
+          <path d="M40,120 Q130,80 220,140" stroke="var(--app-primary)" stroke-width="1" fill="none" />
+          <path d="M220,140 Q310,200 180,260" stroke="var(--app-primary)" stroke-width="0.75" fill="none" />
+          <path d="M180,260 Q100,300 60,220" stroke="var(--app-primary)" stroke-width="0.75" fill="none" />
+          <path d="M1200,100 Q1300,60 1400,130" stroke="var(--app-primary)" stroke-width="1" fill="none" />
+          <path d="M1200,100 Q1140,170 1260,220" stroke="var(--app-primary)" stroke-width="0.75" fill="none" />
+          <path d="M1260,220 Q1360,190 1400,130" stroke="var(--app-primary)" stroke-width="0.75" fill="none" />
+          <path d="M520,50 Q600,90 680,60" stroke="var(--app-primary)" stroke-width="0.75" fill="none" />
+          <path d="M680,60 Q760,30 840,70" stroke="var(--app-primary)" stroke-width="0.75" fill="none" />
+          <path d="M80,540 Q200,480 280,570" stroke="var(--app-primary)" stroke-width="1" fill="none" />
+          <path d="M280,570 Q360,640 200,660" stroke="var(--app-primary)" stroke-width="0.75" fill="none" />
+          <path d="M200,660 Q100,640 80,540" stroke="var(--app-primary)" stroke-width="0.75" fill="none" />
+          <path d="M1100,580 Q1200,520 1320,590" stroke="var(--app-primary)" stroke-width="1" fill="none" />
+          <path d="M1320,590 Q1400,640 1280,680" stroke="var(--app-primary)" stroke-width="0.75" fill="none" />
+          <path d="M560,680 Q640,650 720,690" stroke="var(--app-primary)" stroke-width="0.75" fill="none" />
+          <path d="M720,690 Q800,720 880,680" stroke="var(--app-primary)" stroke-width="0.75" fill="none" />
         </g>
         <!-- Cyan connections -->
         <g class="sf-line-draw" opacity="0.06">
@@ -147,7 +147,7 @@
     <div class="absolute inset-0 pointer-events-none">
       <svg class="absolute inset-0 h-full w-full sf-drift-fast" viewBox="0 0 1440 900" preserveAspectRatio="xMidYMid slice" fill="none">
         <!-- Indigo primary stars -->
-        <g fill="rgb(var(--color-primary))">
+        <g fill="var(--app-primary)">
           <circle cx="220" cy="140" r="4" opacity="0.6" />
           <circle cx="1200" cy="100" r="4" opacity="0.55" />
           <circle cx="280" cy="600" r="4" opacity="0.55" />
@@ -243,14 +243,14 @@
           <circle cx="700" cy="420" r="0.5" opacity="0.06" />
         </g>
         <!-- Pulsing rings on anchor stars -->
-        <circle cx="220" cy="140" r="14" stroke="rgb(var(--color-primary))" stroke-width="0.5" fill="none" opacity="0.15" class="sf-pulse" />
-        <circle cx="1200" cy="100" r="12" stroke="rgb(var(--color-primary))" stroke-width="0.5" fill="none" opacity="0.12" class="sf-pulse" style="animation-delay: -2s" />
-        <circle cx="280" cy="600" r="12" stroke="rgb(var(--color-primary))" stroke-width="0.5" fill="none" opacity="0.1" class="sf-pulse" style="animation-delay: -3.5s" />
-        <circle cx="1320" cy="620" r="10" stroke="rgb(var(--color-primary))" stroke-width="0.5" fill="none" opacity="0.1" class="sf-pulse" style="animation-delay: -5s" />
+        <circle cx="220" cy="140" r="14" stroke="var(--app-primary)" stroke-width="0.5" fill="none" opacity="0.15" class="sf-pulse" />
+        <circle cx="1200" cy="100" r="12" stroke="var(--app-primary)" stroke-width="0.5" fill="none" opacity="0.12" class="sf-pulse" style="animation-delay: -2s" />
+        <circle cx="280" cy="600" r="12" stroke="var(--app-primary)" stroke-width="0.5" fill="none" opacity="0.1" class="sf-pulse" style="animation-delay: -3.5s" />
+        <circle cx="1320" cy="620" r="10" stroke="var(--app-primary)" stroke-width="0.5" fill="none" opacity="0.1" class="sf-pulse" style="animation-delay: -5s" />
         <circle cx="1120" cy="90" r="10" stroke="rgb(34 211 238)" stroke-width="0.5" fill="none" opacity="0.1" class="sf-pulse" style="animation-delay: -1s" />
         <circle cx="330" cy="680" r="8" stroke="rgb(34 211 238)" stroke-width="0.5" fill="none" opacity="0.08" class="sf-pulse" style="animation-delay: -4s" />
         <circle cx="380" cy="100" r="8" stroke="rgb(244 114 182)" stroke-width="0.5" fill="none" opacity="0.08" class="sf-pulse" style="animation-delay: -1.5s" />
-        <circle cx="600" cy="90" r="10" stroke="rgb(var(--color-primary))" stroke-width="0.5" fill="none" opacity="0.08" class="sf-pulse" style="animation-delay: -2.5s" />
+        <circle cx="600" cy="90" r="10" stroke="var(--app-primary)" stroke-width="0.5" fill="none" opacity="0.08" class="sf-pulse" style="animation-delay: -2.5s" />
         <circle cx="300" cy="370" r="6" stroke="rgb(251 191 36)" stroke-width="0.5" fill="none" opacity="0.06" class="sf-pulse" style="animation-delay: -0.5s" />
       </svg>
     </div>

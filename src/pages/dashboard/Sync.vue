@@ -64,31 +64,31 @@ async function toggleAutoSync() {
     <div v-if="loading" class="animate-pulse">
       <!-- Header skeleton -->
       <div>
-        <div class="h-8 w-56 rounded bg-[rgb(var(--color-muted))]" />
-        <div class="mt-2 h-4 w-80 rounded bg-[rgb(var(--color-muted)/0.6)]" />
+        <div class="h-8 w-56 rounded bg-muted" />
+        <div class="mt-2 h-4 w-80 rounded bg-muted/60" />
       </div>
       <!-- Stats skeleton -->
       <div class="px-4 sm:px-6 lg:px-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <div v-for="i in 4" :key="i" class="rounded-lg border border-[rgb(var(--color-border))] p-5">
-          <div class="h-3 w-16 rounded bg-[rgb(var(--color-muted)/0.5)]" />
-          <div class="mt-3 h-8 w-12 rounded bg-[rgb(var(--color-muted))]" />
+        <div v-for="i in 4" :key="i" class="rounded-lg border border-border p-5">
+          <div class="h-3 w-16 rounded bg-muted/50" />
+          <div class="mt-3 h-8 w-12 rounded bg-muted" />
         </div>
       </div>
       <!-- Card skeletons -->
       <div class="mt-8 px-4 sm:px-6 lg:px-8 space-y-6">
-        <div class="rounded-lg border border-[rgb(var(--color-border))] p-5 space-y-3">
-          <div class="h-5 w-28 rounded bg-[rgb(var(--color-muted))]" />
-          <div v-for="j in 3" :key="j" class="h-10 rounded bg-[rgb(var(--color-muted)/0.3)]" />
+        <div class="rounded-lg border border-border p-5 space-y-3">
+          <div class="h-5 w-28 rounded bg-muted" />
+          <div v-for="j in 3" :key="j" class="h-10 rounded bg-muted/30" />
         </div>
-        <div class="rounded-lg border border-[rgb(var(--color-border))] p-5 space-y-3">
-          <div class="h-5 w-32 rounded bg-[rgb(var(--color-muted))]" />
+        <div class="rounded-lg border border-border p-5 space-y-3">
+          <div class="h-5 w-32 rounded bg-muted" />
           <div class="grid gap-3 sm:grid-cols-2">
-            <div v-for="k in 2" :key="k" class="h-20 rounded-lg bg-[rgb(var(--color-muted)/0.2)]" />
+            <div v-for="k in 2" :key="k" class="h-20 rounded-lg bg-muted/20" />
           </div>
         </div>
-        <div class="rounded-lg border border-[rgb(var(--color-border))] p-5 space-y-3">
-          <div class="h-5 w-28 rounded bg-[rgb(var(--color-muted))]" />
-          <div v-for="l in 4" :key="l" class="h-12 rounded-lg bg-[rgb(var(--color-muted)/0.15)]" />
+        <div class="rounded-lg border border-border p-5 space-y-3">
+          <div class="h-5 w-28 rounded bg-muted" />
+          <div v-for="l in 4" :key="l" class="h-12 rounded-lg bg-muted/15" />
         </div>
       </div>
     </div>
@@ -99,16 +99,16 @@ async function toggleAutoSync() {
       <div>
         <div class="flex items-start justify-between gap-4">
           <div>
-            <h1 class="text-3xl font-bold tracking-tight text-[rgb(var(--color-foreground))]">
+            <h1 class="text-3xl font-bold tracking-tight text-foreground">
               Cross-Device Sync
             </h1>
-            <p class="mt-1.5 text-sm text-[rgb(var(--color-muted-foreground))]">
+            <p class="mt-1.5 text-sm text-muted-foreground">
               Keep your data synchronized across every device paired with the same recovery phrase.
             </p>
           </div>
           <button
             :disabled="syncing"
-            class="relative inline-flex items-center gap-2 rounded-lg bg-[rgb(var(--color-primary))] px-5 py-2.5 text-sm font-medium text-white shadow-sm transition-all hover:bg-[rgb(var(--color-primary)/0.9)] disabled:opacity-60 disabled:cursor-not-allowed"
+            class="relative inline-flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-medium text-white shadow-sm transition-all hover:bg-primary/90 disabled:opacity-60 disabled:cursor-not-allowed"
             @click="syncNow"
           >
             <svg
@@ -138,29 +138,29 @@ async function toggleAutoSync() {
       <!-- Stats grid -->
       <div class="px-4 sm:px-6 lg:px-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <!-- Devices -->
-        <div class="rounded-lg border border-[rgb(var(--color-border))] bg-[rgb(var(--color-card))] p-5">
-          <p class="text-xs font-medium uppercase tracking-wider text-[rgb(var(--color-muted-foreground))]">Devices</p>
-          <p class="mt-2 text-3xl font-bold tabular-nums text-[rgb(var(--color-foreground))]">{{ deviceCount }}</p>
+        <div class="rounded-lg border border-border bg-card p-5">
+          <p class="text-xs font-medium uppercase tracking-wider text-muted-foreground">Devices</p>
+          <p class="mt-2 text-3xl font-bold tabular-nums text-foreground">{{ deviceCount }}</p>
         </div>
 
         <!-- Queue -->
-        <div class="rounded-lg border border-[rgb(var(--color-border))] bg-[rgb(var(--color-card))] p-5">
-          <p class="text-xs font-medium uppercase tracking-wider text-[rgb(var(--color-muted-foreground))]">Queue</p>
-          <p class="mt-2 text-3xl font-bold tabular-nums text-[rgb(var(--color-foreground))]">
+        <div class="rounded-lg border border-border bg-card p-5">
+          <p class="text-xs font-medium uppercase tracking-wider text-muted-foreground">Queue</p>
+          <p class="mt-2 text-3xl font-bold tabular-nums text-foreground">
             {{ queueLength }}
-            <span class="text-sm font-normal text-[rgb(var(--color-muted-foreground))]">pending</span>
+            <span class="text-sm font-normal text-muted-foreground">pending</span>
           </p>
         </div>
 
         <!-- Auto-sync toggle -->
-        <div class="rounded-lg border border-[rgb(var(--color-border))] bg-[rgb(var(--color-card))] p-5">
-          <p class="text-xs font-medium uppercase tracking-wider text-[rgb(var(--color-muted-foreground))]">Auto-Sync</p>
+        <div class="rounded-lg border border-border bg-card p-5">
+          <p class="text-xs font-medium uppercase tracking-wider text-muted-foreground">Auto-Sync</p>
           <div class="mt-2 flex items-center gap-3">
             <button
               role="switch"
               :aria-checked="isAutoSync"
-              class="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgb(var(--color-primary))] focus-visible:ring-offset-2"
-              :class="isAutoSync ? 'bg-[rgb(var(--color-primary))]' : 'bg-[rgb(var(--color-muted)/0.4)]'"
+              class="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
+              :class="isAutoSync ? 'bg-primary' : 'bg-muted/40'"
               @click="toggleAutoSync"
             >
               <span
@@ -168,16 +168,16 @@ async function toggleAutoSync() {
                 :class="isAutoSync ? 'translate-x-5' : 'translate-x-0'"
               />
             </button>
-            <span class="text-lg font-semibold text-[rgb(var(--color-foreground))]">
+            <span class="text-lg font-semibold text-foreground">
               {{ isAutoSync ? 'On' : 'Off' }}
             </span>
           </div>
         </div>
 
         <!-- Last Sync -->
-        <div class="rounded-lg border border-[rgb(var(--color-border))] bg-[rgb(var(--color-card))] p-5">
-          <p class="text-xs font-medium uppercase tracking-wider text-[rgb(var(--color-muted-foreground))]">Last Sync</p>
-          <p class="mt-2 text-lg font-semibold text-[rgb(var(--color-foreground))]">
+        <div class="rounded-lg border border-border bg-card p-5">
+          <p class="text-xs font-medium uppercase tracking-wider text-muted-foreground">Last Sync</p>
+          <p class="mt-2 text-lg font-semibold text-foreground">
             {{ status?.last_sync ?? 'Never' }}
           </p>
         </div>
@@ -212,32 +212,32 @@ async function toggleAutoSync() {
 
       <!-- Device Info card -->
       <div class="mt-8 px-4 sm:px-6 lg:px-8">
-        <div class="rounded-lg border border-[rgb(var(--color-border))] bg-[rgb(var(--color-card))] p-5">
-          <h2 class="text-sm font-semibold uppercase tracking-wider text-[rgb(var(--color-muted-foreground))] mb-4">
+        <div class="rounded-lg border border-border bg-card p-5">
+          <h2 class="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-4">
             This Device
           </h2>
 
-          <div class="divide-y divide-[rgb(var(--color-border)/0.5)]">
+          <div class="divide-y divide-border/50">
             <!-- Device ID -->
             <div class="flex items-center justify-between py-2.5">
-              <span class="text-sm text-[rgb(var(--color-muted-foreground))]">Device ID</span>
-              <span class="font-mono text-sm text-[rgb(var(--color-foreground))] select-all">
+              <span class="text-sm text-muted-foreground">Device ID</span>
+              <span class="font-mono text-sm text-foreground select-all">
                 {{ device?.id ?? '...' }}
               </span>
             </div>
 
             <!-- Name -->
             <div v-if="device?.device_name" class="flex items-center justify-between py-2.5">
-              <span class="text-sm text-[rgb(var(--color-muted-foreground))]">Name</span>
-              <span class="text-sm font-medium text-[rgb(var(--color-foreground))]">
+              <span class="text-sm text-muted-foreground">Name</span>
+              <span class="text-sm font-medium text-foreground">
                 {{ device.device_name }}
               </span>
             </div>
 
             <!-- Platform -->
             <div class="flex items-center justify-between py-2.5">
-              <span class="text-sm text-[rgb(var(--color-muted-foreground))]">Platform</span>
-              <span class="text-sm text-[rgb(var(--color-foreground))]">
+              <span class="text-sm text-muted-foreground">Platform</span>
+              <span class="text-sm text-foreground">
                 {{ device?.platform ?? 'Unknown' }}
               </span>
             </div>
@@ -247,18 +247,18 @@ async function toggleAutoSync() {
 
       <!-- Paired Devices -->
       <div class="mt-6 px-4 sm:px-6 lg:px-8">
-        <h2 class="text-sm font-semibold uppercase tracking-wider text-[rgb(var(--color-muted-foreground))] mb-4">
+        <h2 class="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-4">
           Paired Devices
         </h2>
 
         <!-- Rich empty state -->
         <div
           v-if="!status?.devices?.length"
-          class="rounded-xl border border-[rgb(var(--color-border))] bg-[rgb(var(--color-card))] p-12 text-center"
+          class="rounded-xl border border-border bg-card p-12 text-center"
         >
-          <div class="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-[rgb(var(--color-muted)/0.15)]">
+          <div class="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-muted/15">
             <svg
-              class="h-7 w-7 text-[rgb(var(--color-muted-foreground))]"
+              class="h-7 w-7 text-muted-foreground"
               fill="none"
               viewBox="0 0 24 24"
               stroke="currentColor"
@@ -267,8 +267,8 @@ async function toggleAutoSync() {
               <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 1.5H8.25A2.25 2.25 0 006 3.75v16.5a2.25 2.25 0 002.25 2.25h7.5A2.25 2.25 0 0018 20.25V3.75a2.25 2.25 0 00-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-3 18.75h3" />
             </svg>
           </div>
-          <p class="text-sm font-medium text-[rgb(var(--color-foreground))]">No other devices paired</p>
-          <p class="mt-1 text-xs text-[rgb(var(--color-muted-foreground))] max-w-sm mx-auto">
+          <p class="text-sm font-medium text-foreground">No other devices paired</p>
+          <p class="mt-1 text-xs text-muted-foreground max-w-sm mx-auto">
             Import the same recovery phrase on another device to pair it with this node and start syncing automatically.
           </p>
         </div>
@@ -278,14 +278,14 @@ async function toggleAutoSync() {
           <div
             v-for="d in status.devices"
             :key="d.device_id"
-            class="rounded-lg border border-[rgb(var(--color-border))] bg-[rgb(var(--color-card))] p-4 transition-all hover:border-[rgb(var(--color-border)/0.8)] hover:shadow-sm"
+            class="rounded-lg border border-border bg-card p-4 transition-all hover:border-border/80 hover:shadow-sm"
           >
             <div class="flex items-start justify-between gap-3">
               <div class="min-w-0">
-                <p class="truncate text-sm font-medium text-[rgb(var(--color-foreground))]">
+                <p class="truncate text-sm font-medium text-foreground">
                   {{ d.device_name ?? d.device_id }}
                 </p>
-                <p class="mt-0.5 text-xs text-[rgb(var(--color-muted-foreground))]">
+                <p class="mt-0.5 text-xs text-muted-foreground">
                   {{ d.tables_synced }} tables synced
                   <template v-if="d.last_synced">
                     &middot; last {{ d.last_synced }}
@@ -295,9 +295,9 @@ async function toggleAutoSync() {
               <span class="flex items-center gap-1.5 shrink-0">
                 <span
                   class="h-2 w-2 rounded-full"
-                  :class="d.is_online ? 'bg-emerald-500' : 'bg-[rgb(var(--color-muted-foreground)/0.3)]'"
+                  :class="d.is_online ? 'bg-emerald-500' : 'bg-muted-foreground/30'"
                 />
-                <span class="text-xs text-[rgb(var(--color-muted-foreground))]">
+                <span class="text-xs text-muted-foreground">
                   {{ d.is_online ? 'Online' : 'Offline' }}
                 </span>
               </span>
@@ -308,18 +308,18 @@ async function toggleAutoSync() {
 
       <!-- Sync History -->
       <div class="mt-8 mb-8 px-4 sm:px-6 lg:px-8">
-        <h2 class="text-sm font-semibold uppercase tracking-wider text-[rgb(var(--color-muted-foreground))] mb-4">
+        <h2 class="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-4">
           Sync History
         </h2>
 
         <!-- Empty history -->
         <div
           v-if="history.length === 0"
-          class="rounded-xl border border-[rgb(var(--color-border))] bg-[rgb(var(--color-card))] p-12 text-center"
+          class="rounded-xl border border-border bg-card p-12 text-center"
         >
-          <div class="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-[rgb(var(--color-muted)/0.15)]">
+          <div class="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-muted/15">
             <svg
-              class="h-7 w-7 text-[rgb(var(--color-muted-foreground))]"
+              class="h-7 w-7 text-muted-foreground"
               fill="none"
               viewBox="0 0 24 24"
               stroke="currentColor"
@@ -328,8 +328,8 @@ async function toggleAutoSync() {
               <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
           </div>
-          <p class="text-sm font-medium text-[rgb(var(--color-foreground))]">No sync history</p>
-          <p class="mt-1 text-xs text-[rgb(var(--color-muted-foreground))]">
+          <p class="text-sm font-medium text-foreground">No sync history</p>
+          <p class="mt-1 text-xs text-muted-foreground">
             Sync history will appear here after your first sync.
           </p>
         </div>
@@ -339,11 +339,11 @@ async function toggleAutoSync() {
           <div
             v-for="(entry, i) in history.slice(0, 20)"
             :key="i"
-            class="rounded-lg bg-[rgb(var(--color-muted)/0.15)] px-4 py-3"
+            class="rounded-lg bg-muted/15 px-4 py-3"
           >
             <div class="flex items-center justify-between gap-4">
               <div class="flex items-center gap-3 min-w-0">
-                <span class="text-sm font-semibold text-[rgb(var(--color-foreground))] truncate">
+                <span class="text-sm font-semibold text-foreground truncate">
                   {{ entry.device_name ?? entry.device_id }}
                 </span>
                 <span
@@ -353,20 +353,20 @@ async function toggleAutoSync() {
                       ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400'
                       : entry.direction === 'pull'
                         ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
-                        : 'bg-[rgb(var(--color-muted)/0.3)] text-[rgb(var(--color-muted-foreground))]'
+                        : 'bg-muted/30 text-muted-foreground'
                   "
                 >
                   {{ entry.direction }}
                 </span>
               </div>
-              <div class="flex items-center gap-3 shrink-0 text-xs text-[rgb(var(--color-muted-foreground))]">
+              <div class="flex items-center gap-3 shrink-0 text-xs text-muted-foreground">
                 <span class="tabular-nums">{{ entry.rows_sent }}&uarr;</span>
                 <span class="tabular-nums">{{ entry.rows_received }}&darr;</span>
                 <span class="hidden sm:inline">&middot;</span>
                 <span class="hidden sm:inline">{{ entry.synced_at }}</span>
               </div>
             </div>
-            <p class="mt-0.5 text-xs text-[rgb(var(--color-muted-foreground))] sm:hidden">
+            <p class="mt-0.5 text-xs text-muted-foreground sm:hidden">
               {{ entry.synced_at }}
             </p>
           </div>

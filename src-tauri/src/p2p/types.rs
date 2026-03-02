@@ -8,6 +8,9 @@ pub const TOPIC_EVIDENCE: &str = "/alexandria/evidence/1.0";
 pub const TOPIC_TAXONOMY: &str = "/alexandria/taxonomy/1.0";
 pub const TOPIC_GOVERNANCE: &str = "/alexandria/governance/1.0";
 pub const TOPIC_PROFILES: &str = "/alexandria/profiles/1.0";
+/// Peer exchange topic — nodes broadcast their PeerId + listen addresses
+/// so that peers-of-peers can discover each other transitively.
+pub const TOPIC_PEER_EXCHANGE: &str = "/alexandria/peer-exchange/1.0";
 
 /// All gossip topics the node subscribes to.
 pub const ALL_TOPICS: &[&str] = &[
@@ -16,7 +19,20 @@ pub const ALL_TOPICS: &[&str] = &[
     TOPIC_TAXONOMY,
     TOPIC_GOVERNANCE,
     TOPIC_PROFILES,
+    TOPIC_PEER_EXCHANGE,
 ];
+
+/// Peer exchange message — broadcast on TOPIC_PEER_EXCHANGE.
+///
+/// Contains the sender's PeerId and all known listen addresses so
+/// other nodes can dial them directly.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PeerExchangeMessage {
+    /// The PeerId of the broadcasting node.
+    pub peer_id: String,
+    /// Multiaddresses the node is listening on.
+    pub addresses: Vec<String>,
+}
 
 /// A signed gossip message envelope.
 ///

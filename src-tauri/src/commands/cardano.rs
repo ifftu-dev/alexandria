@@ -64,7 +64,7 @@ pub async fn mint_skill_proof_nft(
     result.tx_hash = submitted_hash;
 
     // 5. Update the skill_proofs table with NFT details
-    let db = state.db.lock().await;
+    let db = state.db.lock().unwrap();
     db.conn()
         .execute(
             "UPDATE skill_proofs SET nft_policy_id = ?1, nft_asset_name = ?2, nft_tx_hash = ?3, updated_at = datetime('now') WHERE id = ?4",
@@ -110,7 +110,7 @@ pub async fn register_course_onchain(
 
     // 2. Look up course details
     let (title, content_cid) = {
-        let db = state.db.lock().await;
+        let db = state.db.lock().unwrap();
         let (title, cid): (String, Option<String>) = db
             .conn()
             .query_row(
@@ -147,7 +147,7 @@ pub async fn register_course_onchain(
     result.tx_hash = submitted_hash;
 
     // 6. Update the courses table with on_chain_tx
-    let db = state.db.lock().await;
+    let db = state.db.lock().unwrap();
     db.conn()
         .execute(
             "UPDATE courses SET on_chain_tx = ?1, updated_at = datetime('now') WHERE id = ?2",

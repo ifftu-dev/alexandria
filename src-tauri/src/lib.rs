@@ -3,6 +3,7 @@ pub mod commands;
 #[cfg(desktop)]
 pub mod crypto;
 pub mod db;
+pub mod diag;
 pub mod domain;
 pub mod evidence;
 pub mod ipfs;
@@ -33,13 +34,16 @@ use p2p::network::P2pNode;
 
 /// Shared application state accessible from all Tauri commands.
 ///
-/// The database uses `Mutex` because rusqlite's `Connection` is not
-/// safe for concurrent access — `prepare()` mutably borrows an internal
-/// `RefCell`, so even concurrent reads will panic. A `Mutex` serializes
-/// all database access, preventing the `RefCell already mutably borrowed`
-/// panic that occurs when multiple IPC commands run in parallel.
+/// The database uses `std::sync::Mutex` (not `tokio::sync::Mutex`)
+/// because rusqlite's `Connection` is `!Sync`.  A blocking mutex
+/// ensures that the OS thread holding the lock is the *only* thread
+/// touching the `Connection`'s internal `RefCell`.  With tokio's async
+/// mutex, a `MutexGuard` can migrate between OS threads across
+/// `.await` points, and two concurrent tasks could end up calling into
+/// the `RefCell` from different OS threads — causing a SIGSEGV on iOS
+/// where the tokio thread pool is more aggressive about work-stealing.
 pub struct AppState {
-    pub db: Arc<Mutex<Database>>,
+    pub db: Arc<std::sync::Mutex<Database>>,
     pub keystore: Arc<Mutex<Option<Keystore>>>,
     pub vault_dir: PathBuf,
     pub content_node: Arc<ContentNode>,
@@ -51,14 +55,12 @@ pub struct AppState {
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
-            // Initialize logging
-            if cfg!(debug_assertions) {
-                app.handle().plugin(
-                    tauri_plugin_log::Builder::default()
-                        .level(log::LevelFilter::Debug)
-                        .build(),
-                )?;
-            }
+            // Initialize logging (always enabled so we can diagnose mobile crashes)
+            app.handle().plugin(
+                tauri_plugin_log::Builder::default()
+                    .level(log::LevelFilter::Info)
+                    .build(),
+            )?;
 
             // Initialize database
             let app_dir = app
@@ -67,6 +69,11 @@ pub fn run() {
                 .expect("failed to resolve app data directory");
             std::fs::create_dir_all(&app_dir)
                 .expect("failed to create app data directory");
+
+            // Initialize diagnostic file logger + panic hook (for iOS debugging)
+            diag::init(&app_dir);
+            diag::install_panic_hook();
+            diag::log("app setup started");
 
             let db_path = app_dir.join("alexandria.db");
             log::info!("Database path: {}", db_path.display());
@@ -86,7 +93,7 @@ pub fn run() {
 
             log::info!("Database initialized successfully");
 
-            let db = Arc::new(Mutex::new(database));
+            let db = Arc::new(std::sync::Mutex::new(database));
 
             // Vault directory (Stronghold on desktop, AES-GCM portable vault on mobile)
             #[cfg(desktop)]
@@ -165,6 +172,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::health::check_health,
+            commands::health::read_diag_log,
             // Identity / Wallet (all platforms — portable keystore)
             commands::identity::check_vault_exists,
             commands::identity::unlock_vault,

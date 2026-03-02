@@ -45,7 +45,7 @@ watch(() => props.open, (val) => {
       <div
         v-if="open"
         data-backdrop
-        class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
         @click="onBackdropClick"
       >
         <Transition
@@ -68,7 +68,7 @@ watch(() => props.open, (val) => {
                 <h2 class="text-base font-semibold">{{ title }}</h2>
               </slot>
               <button
-                class="p-1 rounded-md text-[rgb(var(--color-muted-foreground))] hover:bg-[rgb(var(--color-muted)/0.5)] transition-colors"
+                class="p-1 rounded-md text-muted-foreground hover:bg-muted/50 transition-colors"
                 @click="emit('close')"
                 aria-label="Close"
               >
@@ -80,7 +80,7 @@ watch(() => props.open, (val) => {
 
             <slot />
 
-            <div v-if="$slots.footer" class="mt-4 pt-4 border-t border-[rgb(var(--color-border))]">
+            <div v-if="$slots.footer" class="mt-4 pt-4 border-t border-border">
               <slot name="footer" />
             </div>
           </div>
