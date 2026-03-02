@@ -22,11 +22,11 @@
 - **Assessment Integrity** — Sentinel anti-cheat with keystroke autoencoder, mouse trajectory CNN, and face embedder. All processing client-side — only derived scores cross the network.
 - **Peer-to-Peer** — Fully decentralized via libp2p with a private Alexandria Kademlia DHT, GossipSub, Circuit Relay v2, AutoNAT, and DCUtR. Devices discover each other through a relay bootstrap node — no central server required.
 - **Offline-First** — Local SQLite database, iroh content store, and encrypted vault (Stronghold on desktop, AES-256-GCM + Argon2id on mobile). Everything works without connectivity.
-- **Mobile Node** — iOS is a first-class target. The mobile app is a fully functional node — same P2P networking, content storage, and wallet as desktop. Multi-device support via shared BIP-39 mnemonic.
+- **Mobile Node** — iOS and Android are first-class targets. The mobile app is a fully functional node — same P2P networking, content storage, and wallet as desktop. Multi-device support via shared BIP-39 mnemonic.
 
 ## Architecture
 
-Alexandria (Mark 3) is a **Tauri v2 application** — a single binary that bundles a Rust backend with a Vue 3 frontend. It runs on macOS, Linux, Windows, and iOS. There are no servers, no Docker containers, and no external databases.
+Alexandria (Mark 3) is a **Tauri v2 application** — a single binary that bundles a Rust backend with a Vue 3 frontend. It runs on macOS, Linux, Windows, iOS, and Android. There are no servers, no Docker containers, and no external databases.
 
 ```
 alexandria/
@@ -53,7 +53,7 @@ alexandria/
 
 | Layer | Technology |
 |-------|------------|
-| Shell | Tauri 2.10, WebKit (macOS/iOS) / WebView2 (Windows) |
+| Shell | Tauri 2.10, WebKit (macOS/iOS) / WebView2 (Windows) / Android WebView (Chromium) |
 | Backend | Rust (2021 edition), tokio async runtime |
 | Frontend | Vue 3, TypeScript, Vite, Tailwind CSS 4 |
 | Database | SQLite (rusqlite, bundled) |
@@ -101,6 +101,12 @@ For iOS builds:
 - **Rust iOS targets**: `rustup target add aarch64-apple-ios aarch64-apple-ios-sim`
 - **Apple Development Team** configured in `src-tauri/tauri.conf.json`
 
+For Android builds:
+
+- **Android Studio** with SDK, NDK 26+, and Build Tools 34+
+- **Rust Android targets**: `rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android`
+- **Environment variables**: `ANDROID_HOME`, `NDK_HOME`, `JAVA_HOME` (pointing to Android Studio's bundled JDK)
+
 ### Development (Desktop)
 
 ```bash
@@ -145,6 +151,35 @@ Clean build artifacts before rebuilding to avoid "Directory not empty" errors:
 ```bash
 rm -rf src-tauri/gen/apple/build
 ```
+
+### Building for Android
+
+**Debug APK (for emulator or sideloading):**
+
+```bash
+cargo tauri android build --debug --target aarch64
+```
+
+**Release APK (unsigned — requires signing for distribution):**
+
+```bash
+cargo tauri android build --target aarch64
+```
+
+**Deploy to emulator:**
+
+```bash
+adb install src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk
+adb shell am start -n org.alexandria.node/.MainActivity
+```
+
+Clean build artifacts:
+
+```bash
+rm -rf src-tauri/gen/android/app/build
+```
+
+> **Note:** Android safe area insets (`env(safe-area-inset-*)`) are not natively supported by Android WebView. `MainActivity.kt` reads actual `WindowInsets` and injects them as CSS custom properties (`--sat`, `--sab`, `--sal`, `--sar`).
 
 ### Developer CLI (`alex`)
 
