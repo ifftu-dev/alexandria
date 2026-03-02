@@ -75,6 +75,11 @@ iroh-blobs = { version = "0.98", features = ["fs-store"] }
 libp2p = { version = "0.56.0", features = ["gossipsub", "kad", "quic", "tcp", "noise", "identify", "tokio", "ed25519", "macros", "autonat", "relay", "dcutr", "yamux"] }
 futures = "0.3"
 
+# ── iOS-only dependencies ────────────────────────────────────────────
+[target.'cfg(target_os = "ios")'.dependencies]
+# ObjC runtime — for configuring WKWebView scrollView insets at startup
+objc2 = "0.6"
+
 # ── Desktop-only dependencies ────────────────────────────────────────
 [target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
 # Secure secret storage (IOTA Stronghold encrypted vault — desktop uses this instead of portable)

@@ -120,6 +120,7 @@ dependencies = [
  "libp2p",
  "log",
  "lru 0.12.5",
+ "objc2",
  "pallas-addresses",
  "pallas-codec",
  "pallas-crypto",
