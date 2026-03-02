@@ -202,23 +202,28 @@ body {
     touch-action: manipulation;
   }
 
-  /* Safe area utility classes */
+  /* Safe area utility classes.
+     On iOS, env(safe-area-inset-*) works natively.
+     On Android, the WebView doesn't populate env() values, so
+     MainActivity.kt injects --sat/--sab/--sal/--sar as CSS custom
+     properties from the real WindowInsets.  var() with env() fallback
+     ensures both platforms work. */
   .safe-area-top {
-    padding-top: env(safe-area-inset-top);
+    padding-top: var(--sat, env(safe-area-inset-top));
   }
 
   .safe-area-bottom {
-    padding-bottom: env(safe-area-inset-bottom);
+    padding-bottom: var(--sab, env(safe-area-inset-bottom));
   }
 
   .safe-area-lr {
-    padding-left: env(safe-area-inset-left);
-    padding-right: env(safe-area-inset-right);
+    padding-left: var(--sal, env(safe-area-inset-left));
+    padding-right: var(--sar, env(safe-area-inset-right));
   }
 
   /* Main content area needs bottom padding for tab bar */
   .mobile-content-padding {
-    padding-bottom: calc(5rem + env(safe-area-inset-bottom));
+    padding-bottom: calc(5rem + var(--sab, env(safe-area-inset-bottom)));
   }
 }
 
