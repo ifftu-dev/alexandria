@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { onMounted, ref, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useP2P } from '@/composables/useP2P'
 import { useAuth } from '@/composables/useAuth'
@@ -23,12 +23,23 @@ const { status: p2pStatus, startPolling } = useP2P()
 const { lockVault, displayName, stakeAddress } = useAuth()
 const { theme, toggleTheme } = useTheme()
 
+const menuOpen = ref(false)
+const menuRef = ref<HTMLElement | null>(null)
+
 onMounted(() => {
-  // Start polling P2P status so the sidebar reflects node state.
-  // The singleton guard in useP2P prevents duplicate intervals if
-  // AppTopBar already started polling.
   startPolling(15000)
+  document.addEventListener('click', onClickOutside)
 })
+
+onUnmounted(() => {
+  document.removeEventListener('click', onClickOutside)
+})
+
+function onClickOutside(e: MouseEvent) {
+  if (menuOpen.value && menuRef.value && !menuRef.value.contains(e.target as Node)) {
+    menuOpen.value = false
+  }
+}
 
 const themeIcon: Record<string, string> = {
   light: 'M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z',
@@ -42,6 +53,7 @@ const themeLabel: Record<string, string> = {
 }
 
 async function signOut() {
+  menuOpen.value = false
   try {
     await lockVault()
   } catch (e) {
@@ -107,14 +119,45 @@ function navigate(path: string) {
     class="flex flex-col border-r border-border bg-card transition-all duration-200 select-none"
     :class="collapsed ? 'w-16' : 'w-56'"
   >
-    <!-- Logo -->
-    <div class="flex items-center gap-2 h-14 px-4 border-b border-border">
-      <svg class="w-6 h-6 text-primary shrink-0" viewBox="0 0 32 32" fill="none">
-        <path d="M16 2L4 8v16l12 6 12-6V8L16 2z" stroke="currentColor" stroke-width="2" fill="none" />
-        <path d="M16 8v16M8 12l8 4 8-4" stroke="currentColor" stroke-width="2" />
-      </svg>
-      <span v-if="!collapsed" class="font-semibold text-sm tracking-tight">Alexandria</span>
+    <!-- Logo + collapse toggle -->
+    <div class="flex items-center h-14 px-4 border-b border-border"
+         :class="collapsed ? 'justify-center' : 'justify-between'">
+      <div class="flex items-center gap-2">
+        <svg class="w-6 h-6 text-primary shrink-0" viewBox="0 0 32 32" fill="none">
+          <path d="M16 2L4 8v16l12 6 12-6V8L16 2z" stroke="currentColor" stroke-width="2" fill="none" />
+          <path d="M16 8v16M8 12l8 4 8-4" stroke="currentColor" stroke-width="2" />
+        </svg>
+        <span v-if="!collapsed" class="font-semibold text-sm tracking-tight">Alexandria</span>
+      </div>
+      <button
+        v-if="!collapsed"
+        class="p-1 rounded-md text-muted-foreground hover:bg-muted/50 transition-colors"
+        title="Collapse sidebar"
+        @click="emit('toggle')"
+      >
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M11 19l-7-7 7-7" />
+        </svg>
+      </button>
+      <button
+        v-if="collapsed"
+        class="absolute -right-0 top-4 p-1 rounded-md text-muted-foreground hover:bg-muted/50 transition-colors sr-only focus:not-sr-only"
+        title="Expand sidebar"
+        @click="emit('toggle')"
+      />
     </div>
+
+    <!-- Expand button when collapsed (replaces the old bottom toggle) -->
+    <button
+      v-if="collapsed"
+      class="flex items-center justify-center py-2 text-muted-foreground hover:bg-muted/50 transition-colors"
+      title="Expand sidebar"
+      @click="emit('toggle')"
+    >
+      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M13 5l7 7-7 7" />
+      </svg>
+    </button>
 
     <!-- Navigation -->
     <nav class="flex-1 py-2 px-2 overflow-y-auto">
@@ -145,67 +188,118 @@ function navigate(path: string) {
       </div>
     </nav>
 
-    <!-- P2P Status -->
-    <div class="px-3 py-2 border-t border-border">
-      <div class="flex items-center gap-1.5">
-        <span
-          class="w-2 h-2 rounded-full shrink-0"
-          :class="p2pStatus?.is_running
-            ? 'bg-success'
-            : p2pStatus != null ? 'bg-muted-foreground/40' : 'bg-amber-500 animate-pulse'"
-        />
-        <span v-if="!collapsed" class="text-xs text-muted-foreground">
-          {{ p2pStatus?.is_running ? `${p2pStatus.connected_peers} peers` : p2pStatus != null ? 'Offline' : 'Starting...' }}
-        </span>
-      </div>
-    </div>
+    <!-- Bottom: user menu trigger -->
+    <div ref="menuRef" class="relative px-2 py-2 border-t border-border">
+      <!-- Popover menu (opens upward) -->
+      <Transition name="menu">
+        <div
+          v-if="menuOpen"
+          class="absolute bottom-full left-2 right-2 mb-1 rounded-lg border border-border bg-card shadow-lg z-50"
+          :class="collapsed ? 'left-0 w-52' : ''"
+        >
+          <!-- User info -->
+          <div class="px-3 py-2.5 border-b border-border">
+            <p class="text-sm font-medium text-foreground truncate">
+              {{ displayName ?? 'Anonymous' }}
+            </p>
+            <p v-if="stakeAddress" class="text-[0.65rem] text-muted-foreground truncate mt-0.5">
+              {{ stakeAddress.slice(0, 28) }}...
+            </p>
+          </div>
 
-    <!-- Theme toggle -->
-    <div class="px-2 py-1 border-t border-border">
-      <button
-        class="flex items-center w-full rounded-md px-2.5 py-2 text-sm text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors"
-        :title="collapsed ? `Theme: ${themeLabel[theme]}` : undefined"
-        @click="toggleTheme"
-      >
-        <svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
-          <path stroke-linecap="round" stroke-linejoin="round" :d="themeIcon[theme]" />
-        </svg>
-        <span v-if="!collapsed" class="ml-2.5">{{ themeLabel[theme] }}</span>
-      </button>
-    </div>
+          <!-- Menu items -->
+          <div class="py-1">
+            <!-- P2P status -->
+            <div class="flex items-center gap-2.5 px-3 py-2 text-sm text-muted-foreground">
+              <span
+                class="w-2 h-2 rounded-full shrink-0"
+                :class="p2pStatus?.is_running
+                  ? 'bg-success'
+                  : p2pStatus != null ? 'bg-muted-foreground/40' : 'bg-amber-500 animate-pulse'"
+              />
+              <span class="text-xs">
+                {{ p2pStatus?.is_running ? `${p2pStatus.connected_peers} peer${p2pStatus.connected_peers !== 1 ? 's' : ''} connected` : p2pStatus != null ? 'Offline' : 'Starting...' }}
+              </span>
+            </div>
 
-    <!-- User / Lock -->
-    <div class="px-2 py-2 border-t border-border">
-      <div v-if="!collapsed" class="px-2.5 mb-1.5 truncate">
-        <p class="text-xs font-medium text-foreground truncate">
-          {{ displayName ?? 'Anonymous' }}
-        </p>
-        <p class="text-[0.6rem] text-muted-foreground truncate">
-          {{ stakeAddress ? stakeAddress.slice(0, 20) + '...' : '' }}
-        </p>
-      </div>
-      <button
-        class="flex items-center w-full rounded-md px-2.5 py-2 text-sm text-muted-foreground hover:bg-error/10 hover:text-error transition-colors"
-        :title="collapsed ? 'Lock & Sign Out' : undefined"
-        @click="signOut"
-      >
-        <svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9" />
-        </svg>
-        <span v-if="!collapsed" class="ml-2.5">Lock & Sign Out</span>
-      </button>
-    </div>
+            <div class="h-px bg-border mx-2" />
 
-    <!-- Collapse toggle -->
-    <div class="p-2 border-t border-border">
+            <!-- Theme toggle -->
+            <button
+              class="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors"
+              @click="toggleTheme"
+            >
+              <svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
+                <path stroke-linecap="round" stroke-linejoin="round" :d="themeIcon[theme]" />
+              </svg>
+              Theme: {{ themeLabel[theme] }}
+            </button>
+
+            <div class="h-px bg-border mx-2" />
+
+            <!-- Lock -->
+            <button
+              class="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-error/80 hover:bg-error/10 hover:text-error transition-colors"
+              @click="signOut"
+            >
+              <svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9" />
+              </svg>
+              Lock
+            </button>
+          </div>
+        </div>
+      </Transition>
+
+      <!-- Trigger button -->
       <button
-        class="flex items-center justify-center w-full rounded-md p-2 text-xs text-muted-foreground hover:bg-muted/50"
-        @click="emit('toggle')"
+        class="flex items-center w-full rounded-md px-2 py-1.5 transition-colors"
+        :class="menuOpen
+          ? 'bg-muted/60 text-foreground'
+          : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'"
+        :title="collapsed ? (displayName ?? 'Menu') : undefined"
+        @click.stop="menuOpen = !menuOpen"
       >
-        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-          <path stroke-linecap="round" stroke-linejoin="round" :d="collapsed ? 'M13 5l7 7-7 7' : 'M11 19l-7-7 7-7'" />
-        </svg>
+        <!-- Avatar -->
+        <div class="w-7 h-7 rounded-full bg-gradient-to-br from-primary to-accent flex items-center justify-center text-white text-xs font-bold shrink-0">
+          {{ displayName ? displayName.charAt(0).toUpperCase() : 'A' }}
+        </div>
+
+        <template v-if="!collapsed">
+          <div class="ml-2.5 flex-1 text-left min-w-0">
+            <p class="text-sm font-medium leading-tight truncate">{{ displayName ?? 'Anonymous' }}</p>
+            <div class="flex items-center gap-1 mt-0.5">
+              <span
+                class="w-1.5 h-1.5 rounded-full shrink-0"
+                :class="p2pStatus?.is_running
+                  ? 'bg-success'
+                  : p2pStatus != null ? 'bg-muted-foreground/40' : 'bg-amber-500 animate-pulse'"
+              />
+              <span class="text-[0.65rem] text-muted-foreground leading-tight">
+                {{ p2pStatus?.is_running ? `${p2pStatus.connected_peers} peers` : p2pStatus != null ? 'Offline' : 'Starting...' }}
+              </span>
+            </div>
+          </div>
+
+          <!-- Kebab icon -->
+          <svg class="w-4 h-4 shrink-0 text-muted-foreground/60" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 12.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 18.75a.75.75 0 110-1.5.75.75 0 010 1.5z" />
+          </svg>
+        </template>
       </button>
     </div>
   </aside>
 </template>
+
+<style scoped>
+.menu-enter-active {
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+.menu-leave-active {
+  transition: opacity 80ms ease, transform 80ms ease;
+}
+.menu-enter-from, .menu-leave-to {
+  opacity: 0;
+  transform: translateY(4px);
+}
+</style>
