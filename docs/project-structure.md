@@ -1,6 +1,6 @@
 # Project Structure
 
-> Alexandria (Mark 3) — Tauri v2 desktop and mobile application
+> Alexandria (Mark 3) — Tauri v2 desktop and mobile application (macOS, iOS, Android)
 
 ---
 
@@ -17,7 +17,7 @@ alexandria/
 ├── src-tauri/              # Rust backend (Tauri v2 app)
 ├── src/                    # Vue 3 frontend
 ├── cli/                    # Developer CLI (alex)
-├── patches/                # Local crate patches (if-watch iOS fix)
+├── patches/                # Local crate patches (if-watch iOS/Android fix)
 ├── docs/                   # Documentation
 └── public/                 # Static assets
 ```
@@ -65,7 +65,7 @@ src-tauri/
     │   ├── mod.rs
     │   ├── wallet.rs       # BIP-39, CIP-1852, pallas key derivation
     │   ├── keystore.rs     # IOTA Stronghold vault — desktop (#[cfg(desktop)])
-    │   ├── keystore_portable.rs  # AES-256-GCM + Argon2id vault — mobile (#[cfg(mobile)])
+    │   ├── keystore_portable.rs  # AES-256-GCM + Argon2id vault — iOS/Android (#[cfg(mobile)])
     │   ├── signing.rs      # Ed25519 sign/verify
     │   └── hash.rs         # Blake2b-256, SHA-256, entity_id
     │
@@ -189,7 +189,7 @@ src/
     │   └── layout/
     │       ├── AppSidebar.vue    # Desktop navigation, P2P status, theme toggle, sign out
     │       ├── AppTopBar.vue     # Top bar (responsive)
-    │       └── MobileTabBar.vue  # Bottom tab bar for mobile (iOS), "More" drawer
+    │       └── MobileTabBar.vue  # Bottom tab bar for mobile (iOS/Android), "More" drawer
 │
 ├── layouts/
 │   ├── AppLayout.vue       # Sidebar + content area

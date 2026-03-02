@@ -454,12 +454,12 @@ The frontend communicates with the Rust backend via **118 Tauri IPC commands** a
 
 | Aspect | (Mark 2) | (Mark 3) |
 |--------|--------|--------|
-| Architecture | Client-server (Go API + Nuxt frontend) | Single native binary (Tauri + Rust), desktop + iOS |
+| Architecture | Client-server (Go API + Nuxt frontend) | Single native binary (Tauri + Rust), desktop + iOS + Android |
 | Database | PostgreSQL 17 + Neo4j | SQLite (embedded) |
 | Content storage | Blockfrost IPFS API | iroh (embedded BLAKE3 store) |
 | P2P | None (centralized API) | libp2p (GossipSub, Kademlia, Relay, QUIC/TCP) |
 | Authentication | Email/password, OAuth, CIP-30 | BIP-39 mnemonic only (self-sovereign) |
-| Deployment | Docker Compose, Terraform, AWS/GCP/Azure | `cargo tauri build` → native binary; `cargo tauri ios build` → .ipa |
+| Deployment | Docker Compose, Terraform, AWS/GCP/Azure | `cargo tauri build` → native binary; `cargo tauri ios build` → .ipa; `cargo tauri android build` → .apk |
 | CLI | Go + Cobra (`alex`) | Rust + clap (`alex`) |
 | Smart contracts | Aiken/Plutus v3 (7 validators) | Transaction metadata only (no on-chain validators) |
 | Monitoring | Grafana + Prometheus | None (local app) |
