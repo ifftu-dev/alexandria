@@ -92,6 +92,7 @@ fn seed_visual_assets(conn: &Connection) -> Result<(), rusqlite::Error> {
         ("course_ml_foundations", "Marcus Chen"),
         ("course_crypto_101", "Marcus Chen"),
         ("course_ux_design", "Amara Osei"),
+        ("course_math_discrete", "Prof. Imani Okafor"),
     ] {
         conn.execute(
             "UPDATE courses SET author_name = ?1 WHERE id = ?2",
@@ -130,6 +131,10 @@ const COURSE_THUMBNAILS: &[(&str, &str)] = &[
     (
         "course_ux_design",
         r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#ec4899"/><stop offset="100%" stop-color="#f59e0b"/></linearGradient></defs><rect width="640" height="360" fill="url(#g)"/><g opacity="0.1" fill="none" stroke="#fff" stroke-width="1.5"><rect x="100" y="60" width="180" height="240" rx="12"/><circle cx="190" cy="120" r="24"/><rect x="130" y="160" width="120" height="8" rx="4"/><rect x="140" y="178" width="100" height="6" rx="3"/><rect x="130" y="200" width="120" height="40" rx="6"/><rect x="130" y="250" width="50" height="28" rx="14"/><rect x="200" y="250" width="50" height="28" rx="14"/></g><g opacity="0.1" fill="none" stroke="#fff" stroke-width="1.5"><rect x="360" y="60" width="180" height="240" rx="12"/><rect x="390" y="90" width="120" height="80" rx="8"/><rect x="390" y="185" width="80" height="8" rx="4"/><rect x="390" y="205" width="120" height="6" rx="3"/><rect x="390" y="225" width="100" height="6" rx="3"/><rect x="390" y="255" width="60" height="24" rx="12"/></g><g opacity="0.07" fill="#fff"><path d="M300 160 L320 140 L340 160" stroke="#fff" stroke-width="2" fill="none"/><line x1="320" y1="160" x2="320" y2="200" stroke="#fff" stroke-width="2"/><circle cx="320" cy="220" r="4"/></g><text x="320" y="170" text-anchor="middle" fill="#fff" font-family="system-ui,sans-serif" font-size="26" font-weight="700" opacity="0.9">UX Design</text><text x="320" y="205" text-anchor="middle" fill="#fff" font-family="system-ui,sans-serif" font-size="14" opacity="0.6">Research to Prototype</text></svg>"##,
+    ),
+    (
+        "course_math_discrete",
+        r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#14b8a6"/><stop offset="100%" stop-color="#0ea5e9"/></linearGradient></defs><rect width="640" height="360" fill="url(#g)"/><g opacity="0.12" fill="none" stroke="#fff" stroke-width="2"><circle cx="160" cy="90" r="6"/><circle cx="250" cy="140" r="6"/><circle cx="350" cy="100" r="6"/><circle cx="450" cy="170" r="6"/><circle cx="540" cy="120" r="6"/><line x1="160" y1="90" x2="250" y2="140"/><line x1="250" y1="140" x2="350" y2="100"/><line x1="350" y1="100" x2="450" y2="170"/><line x1="450" y1="170" x2="540" y2="120"/></g><g opacity="0.08" fill="#fff"><rect x="90" y="220" width="460" height="90" rx="12"/><rect x="120" y="245" width="120" height="16" rx="4"/><rect x="260" y="245" width="120" height="16" rx="4"/><rect x="400" y="245" width="120" height="16" rx="4"/></g><text x="320" y="165" text-anchor="middle" fill="#fff" font-family="system-ui,sans-serif" font-size="26" font-weight="700" opacity="0.92">Discrete Math</text><text x="320" y="200" text-anchor="middle" fill="#fff" font-family="system-ui,sans-serif" font-size="14" opacity="0.65">Logic, Sets, Graphs, Probability</text></svg>"##,
     ),
 ];
 
@@ -469,6 +474,14 @@ INSERT INTO courses (id, title, description, author_address, tags, skill_ids, st
      'addr_seed_author_3',
      '["design","UX","UI","accessibility","research"]',
      '["skill_user_research","skill_ia","skill_wireframing","skill_color_theory","skill_typography","skill_design_systems"]',
+     'published'),
+
+    ('course_math_discrete',
+     'Discrete Mathematics for Computing',
+     'A practical discrete math course for software and data workflows: logic, set theory, combinatorics, graph fundamentals, and probability intuition.',
+     'addr_seed_author_4',
+     '["mathematics","discrete-math","proofs","logic","probability"]',
+     '["skill_logic","skill_sets","skill_combinatorics","skill_graph_theory","skill_probability"]',
      'published');
 
 -- ============================================================
@@ -509,6 +522,13 @@ INSERT INTO course_chapters (id, course_id, title, description, position) VALUES
     ('ch_ux_2',   'course_ux_design', 'Information Architecture',    'Sitemaps, card sorting, and navigation patterns',              1),
     ('ch_ux_3',   'course_ux_design', 'Wireframing & Prototyping',   'From sketches to interactive prototypes',                      2),
     ('ch_ux_4',   'course_ux_design', 'Visual Design Fundamentals',  'Color, typography, spacing, and design tokens',                3);
+
+-- CHAPTERS (for the discrete math course)
+INSERT INTO course_chapters (id, course_id, title, description, position) VALUES
+    ('ch_math_1', 'course_math_discrete', 'Logic & Proof Basics',      'Propositions, implications, predicates, and proof patterns',      0),
+    ('ch_math_2', 'course_math_discrete', 'Sets & Combinatorics',      'Set operations, counting principles, permutations, combinations',  1),
+    ('ch_math_3', 'course_math_discrete', 'Graph Foundations',          'Graph terminology, traversals, and modeling real systems',         2),
+    ('ch_math_4', 'course_math_discrete', 'Probability for Engineers',  'Random variables, expected value, and practical probability',      3);
 
 -- ============================================================
 -- ELEMENTS (fair representation of all element types)
@@ -624,7 +644,18 @@ INSERT INTO course_elements (id, chapter_id, title, element_type, position, dura
     ('el_ux_4_1',   'ch_ux_4', 'Color Theory for Screens',               'text',  0, NULL),
     ('el_ux_4_2',   'ch_ux_4', 'Typography Best Practices',              'text',  1, NULL),
     ('el_ux_4_3',   'ch_ux_4', 'Design System Reference',                'pdf',   2, NULL),
-    ('el_ux_4_4',   'ch_ux_4', 'UX Design Final Assessment',             'assessment', 3, NULL);
+    ('el_ux_4_4',   'ch_ux_4', 'UX Design Final Assessment',             'assessment', 3, NULL),
+
+    -- Discrete Math course
+    ('el_math_1_1', 'ch_math_1', 'Propositional Logic Essentials',       'text',  0, NULL),
+    ('el_math_1_2', 'ch_math_1', 'Proof Strategies in Practice',         'text',  1, NULL),
+    ('el_math_1_3', 'ch_math_1', 'Logic Foundations Quiz',               'quiz',  2, NULL),
+    ('el_math_2_1', 'ch_math_2', 'Set Operations & Counting Rules',      'text',  0, NULL),
+    ('el_math_2_2', 'ch_math_2', 'Choosing Counting Techniques',         'objective_single_mcq', 1, NULL),
+    ('el_math_3_1', 'ch_math_3', 'Graph Models for Real Systems',        'text',  0, NULL),
+    ('el_math_3_2', 'ch_math_3', 'Graph Thinking Interactive',           'interactive', 1, NULL),
+    ('el_math_4_1', 'ch_math_4', 'Expected Value & Risk',                'text',  0, NULL),
+    ('el_math_4_2', 'ch_math_4', 'Discrete Math Final Assessment',       'assessment', 1, NULL);
 
 -- ============================================================
 -- ELEMENT SKILL TAGS (link elements to skills for evidence)
@@ -754,7 +785,40 @@ INSERT INTO element_skill_tags (element_id, skill_id, weight) VALUES
     ('el_ux_4_4',   'skill_ia',            0.5),
     ('el_ux_4_4',   'skill_wireframing',    0.5),
     ('el_ux_4_4',   'skill_color_theory',   0.5),
-    ('el_ux_4_4',   'skill_typography',     0.5);
+    ('el_ux_4_4',   'skill_typography',     0.5),
+
+    -- Discrete Math course
+    ('el_math_1_1', 'skill_logic',          1.0),
+    ('el_math_1_2', 'skill_logic',          1.0),
+    ('el_math_1_3', 'skill_logic',          1.0),
+    ('el_math_2_1', 'skill_sets',           1.0),
+    ('el_math_2_1', 'skill_combinatorics',  0.5),
+    ('el_math_2_2', 'skill_combinatorics',  1.0),
+    ('el_math_3_1', 'skill_graph_theory',   1.0),
+    ('el_math_3_2', 'skill_graph_theory',   1.0),
+    ('el_math_4_1', 'skill_probability',    1.0),
+    ('el_math_4_2', 'skill_logic',          0.5),
+    ('el_math_4_2', 'skill_sets',           0.5),
+    ('el_math_4_2', 'skill_combinatorics',  0.5),
+    ('el_math_4_2', 'skill_graph_theory',   0.5),
+    ('el_math_4_2', 'skill_probability',    0.5);
+
+-- ============================================================
+-- SEEDED SKILL PROOFS (ensures earned/available/locked graph states)
+-- ============================================================
+INSERT INTO skill_proofs (id, skill_id, proficiency_level, confidence, evidence_count) VALUES
+    ('proof_001', 'skill_arrays',        'apply',      0.93, 4),
+    ('proof_002', 'skill_big_o',         'analyze',    0.88, 3),
+    ('proof_003', 'skill_linked_lists',  'apply',      0.90, 3),
+    ('proof_004', 'skill_stacks_queues', 'apply',      0.85, 2),
+    ('proof_005', 'skill_html_css',      'apply',      0.92, 4),
+    ('proof_006', 'skill_javascript',    'apply',      0.89, 3),
+    ('proof_007', 'skill_typescript',    'apply',      0.81, 2),
+    ('proof_008', 'skill_sql',           'apply',      0.86, 3),
+    ('proof_009', 'skill_symmetric',     'apply',      0.83, 2),
+    ('proof_010', 'skill_user_research', 'evaluate',   0.84, 2),
+    ('proof_011', 'skill_ia',            'create',     0.80, 2),
+    ('proof_012', 'skill_wireframing',   'create',     0.82, 2);
 
 "##;
 
@@ -823,7 +887,7 @@ mod tests {
             .conn()
             .query_row("SELECT COUNT(*) FROM courses", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(courses, 5);
+        assert_eq!(courses, 6);
 
         let chapters: i64 = db
             .conn()
@@ -878,7 +942,7 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(svg_count, 5, "all 5 courses should have thumbnail_svg");
+        assert_eq!(svg_count, 6, "all 6 courses should have thumbnail_svg");
 
         // Check author_name
         let author_count: i64 = db
@@ -889,7 +953,7 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(author_count, 5, "all 5 courses should have author_name");
+        assert_eq!(author_count, 6, "all 6 courses should have author_name");
 
         // Check a specific SVG starts correctly
         let svg: String = db
