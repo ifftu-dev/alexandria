@@ -7,7 +7,8 @@
   <a href="docs/database-schema.md">Database Schema</a> &middot;
   <a href="docs/protocol-spec-v1.md">P2P Protocol</a> &middot;
   <a href="docs/project-structure.md">Project Structure</a> &middot;
-  <a href="docs/missing-features.md">Roadmap / Missing Features</a>
+  <a href="docs/missing-features.md">Roadmap / Missing Features</a> &middot;
+  <a href="CHANGELOG.md">Changelog</a>
 </p>
 
 > **This software is in active development. It is NOT production-ready. Do not use with real credentials, real funds, or sensitive data.**
