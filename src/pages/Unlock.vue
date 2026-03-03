@@ -97,19 +97,35 @@ async function unlockWithBiometric(auto = false) {
   if (!auto) error.value = ''
   progressLines.value = []
   try {
-    const biometricPassword = await getVaultPasswordViaBiometric('Authenticate to unlock Alexandria vault')
-    await unlockVault(biometricPassword)
-    router.replace('/home')
-  } catch (e) {
-    hasBiometricCredential.value = await biometricCredentialExists()
-    const msg = String(e)
-    if (msg.includes('itemNotFound') || msg.includes('not found')) {
-      error.value = 'Biometric unlock is not enabled on this device yet. Unlock once with password to enable it.'
-    } else if (msg.includes('-34018')) {
-      error.value = 'Biometric credential could not be stored due to macOS keychain entitlement (-34018). Run a bundled/signed app build and enable biometrics in Settings.'
-    } else if (!auto || (!msg.includes('userCancel') && !msg.includes('cancel'))) {
-      error.value = `Biometric unlock failed: ${msg}`
+    let biometricPassword: string
+    try {
+      biometricPassword = await getVaultPasswordViaBiometric('Authenticate to unlock Alexandria vault')
+    } catch (e) {
+      hasBiometricCredential.value = await biometricCredentialExists()
+      const msg = String(e)
+      if (msg.includes('itemNotFound') || msg.includes('not found')) {
+        error.value = 'Biometric unlock is not enabled on this device yet. Unlock once with password to enable it.'
+      } else if (msg.includes('-34018')) {
+        error.value = 'Biometric credential could not be stored due to macOS keychain entitlement (-34018). Run a bundled/signed app build and enable biometrics in Settings.'
+      } else if (!auto || (!msg.includes('userCancel') && !msg.includes('cancel'))) {
+        error.value = `Biometric unlock failed: ${msg}`
+      }
+      return
     }
+
+    try {
+      await unlockVault(biometricPassword)
+    } catch (e) {
+      const msg = String(e)
+      if (msg.includes('incorrect password') || msg.includes('IncorrectPassword')) {
+        error.value = 'Biometric unlock credential is out of date. Unlock with password once to refresh it.'
+      } else {
+        error.value = `Biometric unlock failed: ${msg}`
+      }
+      return
+    }
+
+    router.replace('/home')
   } finally {
     biometricLoading.value = false
   }
