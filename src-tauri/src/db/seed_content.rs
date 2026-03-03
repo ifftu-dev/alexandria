@@ -51,6 +51,7 @@ pub async fn seed_content_if_needed(
     // Phase 1: Add all blobs to iroh WITHOUT holding the DB lock.
     // This is the slow part and must not block other DB consumers.
     let mut pending: Vec<(&str, String)> = Vec::new();
+    let mut mappings: Vec<(&str, String, u64)> = Vec::new();
     for (element_id, body) in SEED_CONTENT {
         if !needs_seed.contains(*element_id) {
             continue;
@@ -101,7 +102,11 @@ pub async fn seed_content_if_needed(
         let result = content::add_bytes(node, &bytes)
             .await
             .map_err(|e| format!("failed to add downloaded media for {}: {e}", asset.element_id))?;
-        pending.push((asset.element_id, result.hash.clone()));
+
+        // Store globally resolvable URL for public media, and keep a local
+        // URL->BLAKE3 cache mapping for fast future lookups.
+        pending.push((asset.element_id, asset.url.to_string()));
+        mappings.push((asset.url, result.hash.clone(), result.size));
     }
 
     // Phase 2: Single DB write lock — batch-update all rows in a transaction.
@@ -119,6 +124,14 @@ pub async fn seed_content_if_needed(
             )
             .map_err(|e| format!("failed to update {element_id}: {e}"))?;
             count += 1;
+        }
+
+        for (public_id, blake3_hash, size) in &mappings {
+            conn.execute(
+                "INSERT OR REPLACE INTO content_mappings (ipfs_cid, blake3_hash, size_bytes) VALUES (?1, ?2, ?3)",
+                rusqlite::params![public_id, blake3_hash, *size as i64],
+            )
+            .map_err(|e| format!("failed to map public content ID {public_id}: {e}"))?;
         }
 
         conn.execute_batch("COMMIT")

@@ -102,6 +102,11 @@ impl GatewayClient {
         })
     }
 
+    /// Fetch content directly from an HTTP(S) URL.
+    pub async fn fetch_by_url(&self, url: &str) -> Result<Vec<u8>, GatewayError> {
+        self.fetch_url(url).await
+    }
+
     /// Fetch raw bytes from a URL.
     async fn fetch_url(&self, url: &str) -> Result<Vec<u8>, GatewayError> {
         let response = self

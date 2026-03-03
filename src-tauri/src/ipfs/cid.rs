@@ -22,6 +22,8 @@ pub enum ContentId {
     Blake3Hex(String),
     /// IPFS CID string (CIDv0 or CIDv1).
     IpfsCid(String),
+    /// Public HTTPS/HTTP URL.
+    Url(String),
 }
 
 impl ContentId {
@@ -30,6 +32,7 @@ impl ContentId {
         match self {
             ContentId::Blake3Hex(s) => s,
             ContentId::IpfsCid(s) => s,
+            ContentId::Url(s) => s,
         }
     }
 }
@@ -41,6 +44,7 @@ impl ContentId {
 ///   - Starts with `Qm` and is 46 chars (CIDv0 base58) → `IpfsCid`
 ///   - Starts with `bafy` (CIDv1 base32) → `IpfsCid`
 ///   - Starts with `bafk` (CIDv1 base32, dag-cbor) → `IpfsCid`
+///   - Starts with `http://` or `https://` → `Url`
 ///   - Otherwise → error
 pub fn parse_content_id(id: &str) -> Result<ContentId, CidError> {
     let id = id.trim();
@@ -53,7 +57,16 @@ pub fn parse_content_id(id: &str) -> Result<ContentId, CidError> {
         return Ok(ContentId::IpfsCid(id.to_string()));
     }
 
+    if is_http_url(id) {
+        return Ok(ContentId::Url(id.to_string()));
+    }
+
     Err(CidError::Unrecognised(id.to_string()))
+}
+
+/// Check if the string is an HTTP(S) URL.
+pub fn is_http_url(s: &str) -> bool {
+    s.starts_with("https://") || s.starts_with("http://")
 }
 
 /// Check if the string looks like a 64-char hex-encoded BLAKE3 hash.
@@ -157,5 +170,19 @@ mod tests {
         let cid = "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG";
         let id = ContentId::IpfsCid(cid.to_string());
         assert_eq!(id.as_str(), cid);
+
+        let url = "https://example.org/file.bin";
+        let id = ContentId::Url(url.to_string());
+        assert_eq!(id.as_str(), url);
+    }
+
+    #[test]
+    fn detects_http_url() {
+        let url = "https://example.org/ipfs/file";
+        assert!(is_http_url(url));
+        assert_eq!(
+            parse_content_id(url).unwrap(),
+            ContentId::Url(url.to_string())
+        );
     }
 }
