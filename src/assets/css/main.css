@@ -1,4 +1,6 @@
-@import "tailwindcss";
+@import "tailwindcss" source(none);
+@source "../../**/*.{vue,ts,tsx,js,jsx}";
+@source "../../../index.html";
 
 /* Use .dark class on <html> instead of prefers-color-scheme media query */
 @custom-variant dark (&:is(.dark *));
@@ -33,14 +35,21 @@
   --app-accent: rgb(79, 70, 229);
   --app-accent-foreground: rgb(255, 255, 255);
 
-  /* Semantic */
-  --app-success: rgb(22, 163, 74);
+  /* Semantic (Sidebar status palette) */
+  --app-success: rgb(34, 197, 94);
   --app-success-foreground: rgb(255, 255, 255);
-  --app-warning: rgb(202, 138, 4);
+  --app-warning: rgb(245, 158, 11);
   --app-warning-foreground: rgb(255, 255, 255);
   --app-error: rgb(220, 38, 38);
   --app-error-foreground: rgb(255, 255, 255);
   --app-destructive: rgb(220, 38, 38);
+
+  /* Status bar (Sidebar status palette) */
+  --app-status-active: rgb(34, 197, 94);
+  --app-status-online: rgb(34, 197, 94);
+  --app-status-starting: rgb(245, 158, 11);
+  --app-status-offline: rgb(220, 38, 38);
+  --app-status-foreground: rgb(255, 255, 255);
 
   /* Governance — Warm Amber/Gold */
   --app-governance: rgb(180, 83, 9);
@@ -96,13 +105,21 @@
   --app-accent: rgb(129, 140, 248);
   --app-accent-foreground: rgb(17, 24, 39);
 
+  /* Semantic (Sidebar status palette) */
   --app-success: rgb(34, 197, 94);
   --app-success-foreground: rgb(255, 255, 255);
-  --app-warning: rgb(234, 179, 8);
+  --app-warning: rgb(245, 158, 11);
   --app-warning-foreground: rgb(255, 255, 255);
-  --app-error: rgb(239, 68, 68);
+  --app-error: rgb(220, 38, 38);
   --app-error-foreground: rgb(255, 255, 255);
-  --app-destructive: rgb(239, 68, 68);
+  --app-destructive: rgb(220, 38, 38);
+
+  /* Status bar (Sidebar status palette) */
+  --app-status-active: rgb(34, 197, 94);
+  --app-status-online: rgb(34, 197, 94);
+  --app-status-starting: rgb(245, 158, 11);
+  --app-status-offline: rgb(220, 38, 38);
+  --app-status-foreground: rgb(255, 255, 255);
 
   /* Governance — Amber for dark */
   --app-governance: rgb(245, 158, 11);

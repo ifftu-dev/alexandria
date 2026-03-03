@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuth } from '@/composables/useAuth'
+import { biometricSupported, storeVaultPasswordForBiometric } from '@/composables/useBiometricVault'
 import { listen } from '@tauri-apps/api/event'
 import type { UnlistenFn } from '@tauri-apps/api/event'
 import Starfield from '@/components/auth/Starfield.vue'
@@ -21,6 +22,9 @@ const importMnemonic = ref('')
 const password = ref('')
 const confirmPassword = ref('')
 const error = ref('')
+const biometricHint = ref('')
+const biometricAvailable = ref(false)
+const enableBiometricOnSetup = ref(false)
 
 const copied = ref(false)
 
@@ -38,8 +42,10 @@ onMounted(async () => {
   // Check if a vault already exists (user may want to sign in instead)
   try {
     vaultExists.value = await checkVaultExists()
+    biometricAvailable.value = await biometricSupported()
   } catch {
     // ignore
+    biometricAvailable.value = false
   }
 })
 
@@ -99,6 +105,16 @@ async function createWallet() {
   try {
     const result = await authGenerate(password.value)
     mnemonic.value = result.mnemonic
+    try {
+      if (enableBiometricOnSetup.value && biometricAvailable.value) {
+        const mode = await storeVaultPasswordForBiometric(password.value)
+        biometricHint.value = mode === 'secure'
+          ? 'Biometric unlock enabled on this device.'
+          : 'Biometric unlock enabled for this app session (dev runtime keychain limitation).'
+      }
+    } catch {
+      biometricHint.value = 'Biometric unlock setup skipped. You can still unlock with password.'
+    }
     step.value = 'backup'
   } catch (e) {
     error.value = String(e)
@@ -125,6 +141,16 @@ async function restoreWallet() {
 
   try {
     await authRestore(phrase, password.value)
+    try {
+      if (enableBiometricOnSetup.value && biometricAvailable.value) {
+        const mode = await storeVaultPasswordForBiometric(password.value)
+        biometricHint.value = mode === 'secure'
+          ? 'Biometric unlock enabled on this device.'
+          : 'Biometric unlock enabled for this app session (dev runtime keychain limitation).'
+      }
+    } catch {
+      biometricHint.value = 'Biometric unlock setup skipped. You can still unlock with password.'
+    }
     step.value = 'done'
   } catch (e) {
     error.value = String(e)
@@ -298,6 +324,22 @@ function enterApp() {
           </p>
         </div>
 
+        <div v-if="biometricAvailable" class="card p-4 mb-4">
+          <label class="flex items-start gap-3 cursor-pointer">
+            <input
+              v-model="enableBiometricOnSetup"
+              type="checkbox"
+              class="mt-0.5 h-4 w-4 rounded border-border"
+            >
+            <span>
+              <span class="block text-sm font-medium text-foreground">Enable biometric unlock on this device</span>
+              <span class="block text-xs text-muted-foreground mt-0.5">
+                Use Touch ID / Face ID after setup. You can change this later in Settings.
+              </span>
+            </span>
+          </label>
+        </div>
+
         <p v-if="error" class="text-sm text-error mb-3">{{ error }}</p>
 
         <button
@@ -436,6 +478,9 @@ function enterApp() {
         </p>
         <p class="text-sm text-muted-foreground mb-6">
           All your data stays on this device, protected by your password.
+        </p>
+        <p v-if="biometricHint" class="text-xs text-muted-foreground mb-4">
+          {{ biometricHint }}
         </p>
 
         <button

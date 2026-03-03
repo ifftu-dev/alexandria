@@ -7,6 +7,11 @@ license = "TBD"
 repository = "https://github.com/ifftu-dev/alexandria"
 edition = "2021"
 rust-version = "1.83.0"
+default-run = "alexandria-node"
+
+[features]
+default = []
+dev-seed = []
 
 [lib]
 name = "app_lib"
@@ -20,6 +25,7 @@ cc = "1"
 # Tauri
 tauri = { version = "2.10.0", features = [] }
 tauri-plugin-log = "2"
+tauri-plugin-biometry = "0.2"
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
@@ -87,3 +93,8 @@ iota_stronghold = "2"
 
 [dev-dependencies]
 tempfile = "3"
+
+[[bin]]
+name = "dev_seed"
+path = "src/bin/dev_seed.rs"
+required-features = ["dev-seed"]

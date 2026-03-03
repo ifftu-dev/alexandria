@@ -14,6 +14,12 @@
       {
         "title": "Alexandria",
         "label": "main",
+        "hiddenTitle": true,
+        "titleBarStyle": "Overlay",
+        "trafficLightPosition": {
+          "x": 20,
+          "y": 24
+        },
         "width": 1280,
         "height": 800,
         "minWidth": 900,
@@ -43,7 +49,8 @@
     "longDescription": "Alexandria is a free, open-source, decentralized learning platform. Earn blockchain-verified credentials. Study offline. Own your education.",
     "copyright": "Alexandria Contributors",
     "macOS": {
-      "minimumSystemVersion": "10.15"
+      "minimumSystemVersion": "10.15",
+      "entitlements": "./Entitlements.plist"
     },
     "iOS": {
       "developmentTeam": "VLMNL3V44U"
