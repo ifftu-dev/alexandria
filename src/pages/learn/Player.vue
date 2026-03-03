@@ -26,7 +26,10 @@ const elements = ref<Record<string, Element[]>>({})
 const enrollment = ref<Enrollment | null>(null)
 const progress = ref<Record<string, ElementProgress>>({})
 const loading = ref(true)
+const enrolling = ref(false)
 const sentinelStarted = ref(false)
+const downloadingElementId = ref<string | null>(null)
+const downloadError = ref<string | null>(null)
 
 const activeChapter = ref<string | null>(null)
 const activeElement = ref<string | null>(null)
@@ -40,6 +43,30 @@ const currentChapter = computed(() => {
   if (!activeChapter.value) return null
   return chapters.value.find(c => c.id === activeChapter.value) ?? null
 })
+
+type FlatCourseElement = {
+  chapterId: string
+  chapterTitle: string
+  element: Element
+}
+
+const flatElements = computed<FlatCourseElement[]>(() => {
+  const out: FlatCourseElement[] = []
+  for (const ch of chapters.value) {
+    for (const el of elements.value[ch.id] ?? []) {
+      out.push({ chapterId: ch.id, chapterTitle: ch.title, element: el })
+    }
+  }
+  return out
+})
+
+const activeFlatIndex = computed(() => {
+  if (!activeElement.value) return -1
+  return flatElements.value.findIndex(item => item.element.id === activeElement.value)
+})
+
+const hasPrevElement = computed(() => activeFlatIndex.value > 0)
+const hasNextElement = computed(() => activeFlatIndex.value >= 0 && activeFlatIndex.value < flatElements.value.length - 1)
 
 const isAssessment = computed(() => {
   if (!currentElement.value) return false
@@ -102,6 +129,7 @@ const elementSkills = computed(() => {
 })
 
 onMounted(async () => {
+  window.addEventListener('keydown', onGlobalKeydown)
   try {
     const [c, chs, enrollments] = await Promise.all([
       invoke<Course>('get_course', { courseId }),
@@ -131,12 +159,19 @@ onMounted(async () => {
       sentinelStarted.value = true
     }
 
-    // Select first element
-    const firstCh = chs[0]
-    const firstChElems = firstCh ? elements.value[firstCh.id] : undefined
-    if (firstCh && firstChElems && firstChElems.length > 0) {
-      activeChapter.value = firstCh.id
-      activeElement.value = firstChElems[0]!.id
+    // Select resume point: first incomplete element, fallback to first element
+    const flattened: FlatCourseElement[] = []
+    for (const ch of chs) {
+      for (const el of elements.value[ch.id] ?? []) {
+        flattened.push({ chapterId: ch.id, chapterTitle: ch.title, element: el })
+      }
+    }
+
+    const firstIncomplete = flattened.find(item => (progress.value[item.element.id]?.status ?? 'not_started') !== 'completed')
+    const firstItem = firstIncomplete ?? flattened[0]
+    if (firstItem) {
+      activeChapter.value = firstItem.chapterId
+      activeElement.value = firstItem.element.id
     }
   } catch (e) {
     console.error('Failed to load course:', e)
@@ -150,9 +185,12 @@ watch([activeChapter, activeElement], () => {
   if (currentElement.value && sentinelStarted.value) {
     sentinel.setElement(currentElement.value.id, currentElement.value.element_type)
   }
+  downloadError.value = null
+  void markInProgress()
 })
 
 onUnmounted(async () => {
+  window.removeEventListener('keydown', onGlobalKeydown)
   if (sentinelStarted.value) {
     await sentinel.stop()
   }
@@ -161,6 +199,55 @@ onUnmounted(async () => {
 function selectElement(chapterId: string, elementId: string) {
   activeChapter.value = chapterId
   activeElement.value = elementId
+}
+
+async function enrollFromPlayer() {
+  if (!course.value || enrollment.value) return
+  enrolling.value = true
+  try {
+    enrollment.value = await invoke<Enrollment>('enroll', { courseId: course.value.id })
+    if (enrollment.value && !sentinelStarted.value) {
+      await sentinel.start(enrollment.value.id)
+      sentinelStarted.value = true
+      if (currentElement.value) {
+        sentinel.setElement(currentElement.value.id, currentElement.value.element_type)
+      }
+    }
+  } catch (e) {
+    console.error('Failed to enroll from player:', e)
+  } finally {
+    enrolling.value = false
+  }
+}
+
+async function markInProgress() {
+  if (!enrollment.value || !activeElement.value) return
+  const current = progress.value[activeElement.value]
+  if (current?.status === 'completed' || current?.status === 'in_progress') return
+  try {
+    const req: UpdateProgressRequest = {
+      element_id: activeElement.value,
+      status: 'in_progress',
+      score: current?.score ?? null,
+    }
+    await invoke('update_progress', {
+      enrollmentId: enrollment.value.id,
+      req,
+    })
+    progress.value[activeElement.value] = {
+      ...current,
+      id: current?.id ?? '',
+      enrollment_id: enrollment.value.id,
+      element_id: activeElement.value,
+      status: 'in_progress',
+      score: current?.score ?? null,
+      time_spent: current?.time_spent ?? 0,
+      completed_at: current?.completed_at ?? null,
+      updated_at: new Date().toISOString(),
+    }
+  } catch (e) {
+    console.error('Failed to mark in progress:', e)
+  }
 }
 
 async function markComplete(score?: number) {
@@ -210,8 +297,75 @@ function onVideoComplete() {
   markComplete()
 }
 
-function onDownloadClick() {
-  markComplete()
+function sanitizeFileName(name: string): string {
+  const trimmed = name.trim()
+  const safe = trimmed.replace(/[\\/:*?"<>|]/g, '-').replace(/\s+/g, ' ')
+  return safe || 'download'
+}
+
+function inferMimeFromName(fileName: string | null | undefined): string | null {
+  if (!fileName) return null
+  const lower = fileName.toLowerCase()
+  if (lower.endsWith('.pdf')) return 'application/pdf'
+  if (lower.endsWith('.txt')) return 'text/plain'
+  if (lower.endsWith('.zip')) return 'application/zip'
+  if (lower.endsWith('.json')) return 'application/json'
+  if (lower.endsWith('.csv')) return 'text/csv'
+  return null
+}
+
+function extensionForMime(mime: string): string {
+  if (mime === 'application/pdf') return 'pdf'
+  if (mime === 'text/plain') return 'txt'
+  if (mime === 'application/zip') return 'zip'
+  if (mime === 'application/json') return 'json'
+  if (mime === 'text/csv') return 'csv'
+  return 'bin'
+}
+
+function buildDownloadFileName(rawName: string | null | undefined, mimeType: string): string {
+  const base = sanitizeFileName(rawName || 'download')
+  if (/\.[a-z0-9]+$/i.test(base)) return base
+  return `${base}.${extensionForMime(mimeType)}`
+}
+
+async function onDownloadClick() {
+  if (!currentElement.value) return
+  const element = currentElement.value as any
+  downloadError.value = null
+
+  if (!element.content_cid) {
+    downloadError.value = 'No file attached to this element yet.'
+    return
+  }
+
+  downloadingElementId.value = currentElement.value.id
+
+  try {
+    const bytes = await invoke<number[]>('content_resolve_bytes', {
+      identifier: element.content_cid,
+    })
+
+    const mimeType = element.mime_type || inferMimeFromName(element.filename) || 'application/octet-stream'
+    const fileName = buildDownloadFileName(element.filename || element.title, mimeType)
+    const blob = new Blob([new Uint8Array(bytes)], { type: mimeType })
+    const objectUrl = URL.createObjectURL(blob)
+
+    const anchor = document.createElement('a')
+    anchor.href = objectUrl
+    anchor.download = fileName
+    document.body.appendChild(anchor)
+    anchor.click()
+    anchor.remove()
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 1500)
+
+    await markComplete()
+  } catch (e) {
+    console.error('Failed to download content:', e)
+    downloadError.value = `Download failed: ${String(e)}`
+  } finally {
+    downloadingElementId.value = null
+  }
 }
 
 function advanceToNext() {
@@ -238,6 +392,11 @@ function advanceToNext() {
   }
 }
 
+function goToNext() {
+  if (!hasNextElement.value) return
+  advanceToNext()
+}
+
 function goToPrev() {
   if (!activeChapter.value || !activeElement.value) return
   const chElems = elements.value[activeChapter.value]
@@ -257,6 +416,15 @@ function goToPrev() {
       activeChapter.value = prevCh.id
       activeElement.value = prevElems[prevElems.length - 1]!.id
     }
+  }
+}
+
+function onGlobalKeydown(event: KeyboardEvent) {
+  if (event.key === 'ArrowRight') {
+    goToNext()
+  }
+  if (event.key === 'ArrowLeft') {
+    goToPrev()
   }
 }
 
@@ -354,11 +522,11 @@ function formatFileSize(bytes: number): string {
     </div>
 
     <!-- Main Player Layout -->
-    <div v-else class="flex flex-col md:flex-row gap-0 h-[calc(100dvh-7rem)] md:h-[calc(100vh-8rem)]">
+    <div v-else class="flex flex-col md:flex-row gap-0 min-h-[calc(100dvh-9rem)] md:h-[calc(100vh-8rem)]">
       <!-- ======================================= -->
       <!-- MOBILE: Compact chapter/element header  -->
       <!-- ======================================= -->
-      <div class="md:hidden flex items-center gap-2 px-3 py-2 border-b border-border bg-card/50 shrink-0">
+      <div class="md:hidden flex items-center gap-2 px-3 py-2 border-b border-border bg-card/70 backdrop-blur shrink-0">
         <button
           class="p-1 rounded-md text-muted-foreground active:bg-muted"
           @click="router.push(`/courses/${courseId}`)"
@@ -395,7 +563,7 @@ function formatFileSize(bytes: number): string {
       <!-- ============================== -->
       <!-- SIDEBAR: Chapter/Element Nav   -->
       <!-- ============================== -->
-      <div class="hidden md:block w-72 shrink-0 overflow-y-auto border-r border-border bg-card/30">
+      <div class="hidden md:block w-80 shrink-0 overflow-y-auto border-r border-border bg-card/30">
         <div class="p-4 space-y-4">
           <!-- Back link -->
           <button
@@ -418,7 +586,7 @@ function formatFileSize(bytes: number): string {
               </div>
               <div class="h-1.5 overflow-hidden rounded-full bg-muted/30">
                 <div
-                  class="h-full rounded-full transition-all duration-500"
+                  class="progress-fill h-full rounded-full"
                   :class="progressPercent === 100 ? 'bg-emerald-500' : 'bg-primary'"
                   :style="{ width: `${progressPercent}%` }"
                 />
@@ -472,9 +640,9 @@ function formatFileSize(bytes: number): string {
             <button
               v-for="el in elements[ch.id] ?? []"
               :key="el.id"
-              class="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-sm transition-all"
+              class="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-sm transition-all duration-200 md:hover:-translate-y-px md:hover:shadow-sm"
               :class="activeElement === el.id
-                ? 'bg-primary/10 text-primary font-medium'
+                ? 'bg-primary/10 text-primary font-medium shadow-sm ring-1 ring-primary/20'
                 : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'"
               @click="selectElement(ch.id, el.id)"
             >
@@ -506,10 +674,10 @@ function formatFileSize(bytes: number): string {
       <!-- MAIN CONTENT AREA              -->
       <!-- ============================== -->
       <div class="flex-1 flex flex-col overflow-hidden">
-        <div v-if="currentElement" class="flex-1 overflow-y-auto">
-          <div class="max-w-3xl mx-auto px-6 py-6">
+        <div v-if="currentElement" :key="currentElement.id" class="lesson-body flex-1 overflow-y-auto bg-gradient-to-b from-muted/20 via-transparent to-transparent">
+          <div class="max-w-4xl mx-auto px-4 md:px-6 py-4 md:py-6">
             <!-- Element header -->
-            <div class="mb-6">
+            <div class="sticky top-0 z-10 mb-6 rounded-xl border border-border/70 bg-background/90 px-4 py-4 backdrop-blur supports-[backdrop-filter]:bg-background/70">
               <!-- Breadcrumb -->
               <div class="flex items-center gap-1.5 text-xs text-muted-foreground mb-3">
                 <span>{{ currentChapter?.title }}</span>
@@ -522,7 +690,7 @@ function formatFileSize(bytes: number): string {
               <!-- Title row -->
               <div class="flex items-start justify-between gap-4">
                 <div class="min-w-0">
-                  <h1 class="text-xl font-bold text-foreground leading-tight">{{ currentElement.title }}</h1>
+                  <h1 class="text-xl md:text-2xl font-bold text-foreground leading-tight">{{ currentElement.title }}</h1>
                   <div class="mt-2 flex flex-wrap items-center gap-2">
                     <!-- Element type badge -->
                     <span class="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium"
@@ -573,6 +741,20 @@ function formatFileSize(bytes: number): string {
                 </div>
               </div>
 
+              <div class="mt-3">
+                <div class="flex items-center justify-between text-[11px] text-muted-foreground mb-1">
+                  <span>Course progress</span>
+                  <span>{{ completedElements }} / {{ totalElements }}</span>
+                </div>
+                <div class="h-1.5 overflow-hidden rounded-full bg-muted/40">
+                  <div
+                    class="progress-fill h-full rounded-full"
+                    :class="progressPercent === 100 ? 'bg-success' : 'bg-primary'"
+                    :style="{ width: `${progressPercent}%` }"
+                  />
+                </div>
+              </div>
+
               <!-- Skill tags -->
               <div v-if="elementSkills.length > 0" class="mt-3 flex flex-wrap gap-1.5">
                 <router-link
@@ -589,7 +771,7 @@ function formatFileSize(bytes: number): string {
             <!-- ============================== -->
             <!-- CONTENT RENDERERS              -->
             <!-- ============================== -->
-            <div class="mb-8">
+            <div class="mb-8 rounded-2xl border border-border/70 bg-card/60 p-4 md:p-6 shadow-[0_1px_0_rgba(255,255,255,0.04),0_8px_28px_rgba(0,0,0,0.08)]">
               <!-- Video -->
               <VideoPlayer
                 v-if="currentElement.element_type === 'video'"
@@ -641,12 +823,19 @@ function formatFileSize(bytes: number): string {
                       {{ (currentElement as any).description }}
                     </p>
                     <div class="mt-4">
-                      <AppButton @click="onDownloadClick">
+                      <AppButton
+                        :loading="downloadingElementId === currentElement.id"
+                        :disabled="downloadingElementId !== null"
+                        @click="onDownloadClick"
+                      >
                         <svg class="mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                           <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                         </svg>
                         Download
                       </AppButton>
+                      <p v-if="downloadError" class="mt-2 text-xs text-destructive">
+                        {{ downloadError }}
+                      </p>
                     </div>
                   </div>
                 </div>
@@ -762,20 +951,28 @@ function formatFileSize(bytes: number): string {
         <!-- ============================== -->
         <!-- NAVIGATION FOOTER              -->
         <!-- ============================== -->
-        <div v-if="currentElement && enrollment" class="flex-shrink-0 border-t border-border bg-card/50 px-3 py-2 md:px-6 md:py-3">
-          <div class="mx-auto flex max-w-3xl items-center justify-between gap-2">
+        <div v-if="currentElement" class="flex-shrink-0 border-t border-border bg-card/60 px-3 pt-2 pb-[calc(0.5rem+var(--sab,env(safe-area-inset-bottom)))] md:px-6 md:py-3">
+          <div class="mx-auto flex max-w-4xl items-center justify-between gap-2">
             <!-- Previous -->
-            <AppButton variant="secondary" size="sm" @click="goToPrev">
+            <AppButton variant="secondary" size="sm" :disabled="!hasPrevElement" @click="goToPrev">
               <svg class="mr-1.5 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
               </svg>
               Previous
             </AppButton>
 
-            <!-- Mark Complete (content elements only, not quiz/mcq/essay which auto-complete) -->
+            <!-- Center action -->
             <AppButton
-              v-if="isContentElement && elementStatus(currentElement.id) !== 'completed'"
-              class="bg-emerald-600 hover:bg-emerald-700 text-white"
+              v-if="!enrollment"
+              size="sm"
+              :loading="enrolling"
+              @click="enrollFromPlayer"
+            >
+              Enroll to Track Progress
+            </AppButton>
+            <AppButton
+              v-else-if="isContentElement && elementStatus(currentElement.id) !== 'completed'"
+              class="bg-success text-success-foreground hover:opacity-90"
               size="sm"
               @click="markComplete()"
             >
@@ -784,6 +981,9 @@ function formatFileSize(bytes: number): string {
               </svg>
               Mark Complete
             </AppButton>
+            <span v-else class="text-xs text-muted-foreground">
+              {{ activeFlatIndex + 1 }} / {{ flatElements.length }}
+            </span>
 
             <!-- Next / Finish Course -->
             <AppButton
@@ -796,7 +996,7 @@ function formatFileSize(bytes: number): string {
                 <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
               </svg>
             </AppButton>
-            <AppButton v-else size="sm" @click="advanceToNext">
+            <AppButton v-else size="sm" :disabled="!hasNextElement" @click="goToNext">
               Next
               <svg class="ml-1.5 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
@@ -808,3 +1008,30 @@ function formatFileSize(bytes: number): string {
     </div>
   </div>
 </template>
+
+<style scoped>
+.lesson-body {
+  animation: lesson-body-in 0.22s ease;
+}
+
+.progress-fill {
+  transition: width 560ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes lesson-body-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lesson-body {
+    animation: none;
+  }
+}
+</style>

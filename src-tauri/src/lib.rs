@@ -84,13 +84,6 @@ pub fn run() {
                 .run_migrations()
                 .expect("failed to run database migrations");
 
-            // Seed demo data on first launch (skips if tables already populated)
-            match db::seed::seed_if_empty(database.conn()) {
-                Ok(true) => log::info!("Demo seed data inserted"),
-                Ok(false) => log::info!("Database already populated — seed skipped"),
-                Err(e) => log::warn!("Seed data failed (non-fatal): {e}"),
-            }
-
             log::info!("Database initialized successfully");
 
             let db = Arc::new(std::sync::Mutex::new(database));
@@ -122,22 +115,6 @@ pub fn run() {
                 match content_node_clone.start().await {
                     Ok(()) => {
                         log::info!("iroh content node started successfully");
-
-                        // Seed content blobs for dev/testnet elements (idempotent)
-                        match db::seed_content::seed_content_if_needed(
-                            &db_clone,
-                            &content_node_clone,
-                        )
-                        .await
-                        {
-                            Ok(n) if n > 0 => {
-                                log::info!("seeded content for {n} elements");
-                            }
-                            Ok(_) => {}
-                            Err(e) => {
-                                log::warn!("content seed failed (non-fatal): {e}");
-                            }
-                        }
 
                         // Initialize the content resolver with gateway fallback
                         match GatewayClient::with_defaults() {
@@ -211,6 +188,7 @@ pub fn run() {
 
             Ok(())
         })
+        .plugin(tauri_plugin_biometry::init())
         .invoke_handler(tauri::generate_handler![
             commands::health::check_health,
             commands::health::read_diag_log,

@@ -4,6 +4,13 @@ import { useRouter } from 'vue-router'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { useAuth } from '@/composables/useAuth'
 import { useTheme } from '@/composables/useTheme'
+import {
+  biometricCredentialExists,
+  biometricSupported,
+  clearBiometricVaultPassword,
+  getBiometricStatus,
+  storeVaultPasswordForBiometric,
+} from '@/composables/useBiometricVault'
 import { AppButton, AppInput, AppTextarea, AppModal, AppAlert } from '@/components/ui'
 import type { Identity } from '@/types'
 
@@ -26,13 +33,39 @@ const exportedMnemonic = ref('')
 const exportError = ref('')
 const exporting = ref(false)
 const locking = ref(false)
+const biometricAvailable = ref(false)
+const biometricEnabled = ref(false)
+const biometricBusy = ref(false)
+const biometricPassword = ref('')
+const biometricMessage = ref('')
+const biometricDiagnostics = ref('')
 
 onMounted(() => {
   if (identity.value) {
     displayName.value = identity.value.display_name ?? ''
     bio.value = identity.value.bio ?? ''
   }
+
+  void refreshBiometricState()
 })
+
+async function refreshBiometricState() {
+  try {
+    const [status, enabled] = await Promise.all([
+      getBiometricStatus(),
+      biometricCredentialExists(),
+    ])
+    biometricAvailable.value = status.isAvailable
+    biometricEnabled.value = enabled
+    biometricDiagnostics.value = status.error
+      ? `Status error${status.errorCode ? ` (${status.errorCode})` : ''}: ${status.error}`
+      : ''
+  } catch {
+    biometricAvailable.value = false
+    biometricEnabled.value = false
+    biometricDiagnostics.value = ''
+  }
+}
 
 async function saveProfile() {
   saving.value = true
@@ -105,6 +138,54 @@ async function lockWallet() {
     console.error('Failed to lock:', e)
   } finally {
     locking.value = false
+  }
+}
+
+async function enableBiometric() {
+  if (!biometricPassword.value) {
+    biometricMessage.value = 'Enter your vault password to enable biometric unlock.'
+    return
+  }
+
+  biometricBusy.value = true
+  biometricMessage.value = ''
+  try {
+    const supported = await biometricSupported()
+    if (!supported) {
+      biometricMessage.value = 'Biometric support is unavailable right now on this runtime.'
+      return
+    }
+    const mode = await storeVaultPasswordForBiometric(biometricPassword.value)
+    biometricEnabled.value = true
+    biometricPassword.value = ''
+    biometricMessage.value = mode === 'secure'
+      ? 'Biometric unlock enabled.'
+      : 'Biometric unlock enabled for this app session only (dev runtime keychain entitlement limitation).'
+  } catch (e) {
+    const msg = String(e)
+    if (msg.includes('-34018')) {
+      biometricMessage.value = 'macOS keychain entitlement is missing for this runtime (-34018). Use a bundled/signed app build, then enable biometrics again.'
+    } else {
+      biometricMessage.value = `Failed to enable biometric unlock: ${msg}`
+    }
+  } finally {
+    biometricBusy.value = false
+    await refreshBiometricState()
+  }
+}
+
+async function disableBiometric() {
+  biometricBusy.value = true
+  biometricMessage.value = ''
+  try {
+    await clearBiometricVaultPassword()
+    biometricEnabled.value = false
+    biometricMessage.value = 'Biometric credential cleared for this device.'
+  } catch (e) {
+    biometricMessage.value = `Failed to clear biometric credential: ${String(e)}`
+  } finally {
+    biometricBusy.value = false
+    await refreshBiometricState()
   }
 }
 </script>
@@ -181,6 +262,55 @@ async function lockWallet() {
             <AppButton variant="outline" size="sm" :loading="locking" @click="lockWallet">
               Lock
             </AppButton>
+          </div>
+
+          <div class="py-4">
+            <div class="flex items-center justify-between gap-3">
+              <div>
+                <p class="text-sm font-medium text-foreground">Biometric Unlock</p>
+                <p class="text-xs text-muted-foreground">
+                  Use Touch ID/Face ID to unlock this device vault
+                </p>
+              </div>
+              <AppButton
+                v-if="biometricEnabled"
+                variant="outline"
+                size="sm"
+                :loading="biometricBusy"
+                @click="disableBiometric"
+              >
+                Disable
+              </AppButton>
+            </div>
+
+            <div v-if="!biometricAvailable" class="mt-2 text-xs text-muted-foreground">
+              Biometrics are not available on this device/runtime.
+            </div>
+
+            <div v-else-if="!biometricEnabled" class="mt-3 flex items-end gap-2">
+              <div class="flex-1">
+                <AppInput
+                  v-model="biometricPassword"
+                  label="Vault Password"
+                  type="password"
+                  placeholder="Enter current vault password"
+                />
+              </div>
+              <AppButton size="sm" :loading="biometricBusy" @click="enableBiometric">
+                Enable
+              </AppButton>
+            </div>
+
+            <div v-else class="mt-2 text-xs text-emerald-600 dark:text-emerald-400">
+              Biometric unlock is enabled.
+            </div>
+
+            <p v-if="biometricMessage" class="mt-2 text-xs text-muted-foreground">
+              {{ biometricMessage }}
+            </p>
+            <p v-if="biometricDiagnostics" class="mt-1 text-xs text-muted-foreground/80">
+              {{ biometricDiagnostics }}
+            </p>
           </div>
         </div>
       </div>

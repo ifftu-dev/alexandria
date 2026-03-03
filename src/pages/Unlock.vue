@@ -2,6 +2,12 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuth } from '@/composables/useAuth'
+import {
+  biometricCredentialExists,
+  biometricSupported,
+  getVaultPasswordViaBiometric,
+  storeVaultPasswordForBiometric,
+} from '@/composables/useBiometricVault'
 import { AppButton } from '@/components/ui'
 import { listen } from '@tauri-apps/api/event'
 import type { UnlistenFn } from '@tauri-apps/api/event'
@@ -13,6 +19,10 @@ const { unlockVault } = useAuth()
 const password = ref('')
 const error = ref('')
 const unlocking = ref(false)
+const biometricAvailable = ref(false)
+const hasBiometricCredential = ref(false)
+const biometricLoading = ref(false)
+const autoBiometricTried = ref(false)
 
 // Progress tracking from Rust events
 const progressLines = ref<string[]>([])
@@ -22,6 +32,23 @@ onMounted(async () => {
   unlisten = await listen<{ step: string; detail: string }>('vault-progress', (event) => {
     progressLines.value.push(event.payload.detail)
   })
+
+  try {
+    const [supported, hasCredential] = await Promise.all([
+      biometricSupported(),
+      biometricCredentialExists(),
+    ])
+    biometricAvailable.value = supported
+    hasBiometricCredential.value = hasCredential
+
+    if (supported && hasCredential && !autoBiometricTried.value) {
+      autoBiometricTried.value = true
+      await unlockWithBiometric(true)
+    }
+  } catch {
+    biometricAvailable.value = false
+    hasBiometricCredential.value = false
+  }
 })
 
 onUnmounted(() => {
@@ -40,6 +67,16 @@ async function unlock() {
 
   try {
     await unlockVault(password.value)
+    try {
+      const mode = await storeVaultPasswordForBiometric(password.value)
+      hasBiometricCredential.value = true
+      if (mode === 'session') {
+        console.info('Biometric unlock running in session-only mode (macOS entitlement missing).')
+      }
+    } catch (setupError) {
+      hasBiometricCredential.value = false
+      console.warn('Biometric credential setup failed after password unlock:', setupError)
+    }
     router.replace('/home')
   } catch (e) {
     const msg = String(e)
@@ -52,6 +89,29 @@ async function unlock() {
     progressLines.value = []
   } finally {
     unlocking.value = false
+  }
+}
+
+async function unlockWithBiometric(auto = false) {
+  biometricLoading.value = true
+  if (!auto) error.value = ''
+  progressLines.value = []
+  try {
+    const biometricPassword = await getVaultPasswordViaBiometric('Authenticate to unlock Alexandria vault')
+    await unlockVault(biometricPassword)
+    router.replace('/home')
+  } catch (e) {
+    hasBiometricCredential.value = await biometricCredentialExists()
+    const msg = String(e)
+    if (msg.includes('itemNotFound') || msg.includes('not found')) {
+      error.value = 'Biometric unlock is not enabled on this device yet. Unlock once with password to enable it.'
+    } else if (msg.includes('-34018')) {
+      error.value = 'Biometric credential could not be stored due to macOS keychain entitlement (-34018). Run a bundled/signed app build and enable biometrics in Settings.'
+    } else if (!auto || (!msg.includes('userCancel') && !msg.includes('cancel'))) {
+      error.value = `Biometric unlock failed: ${msg}`
+    }
+  } finally {
+    biometricLoading.value = false
   }
 }
 
@@ -109,6 +169,21 @@ function handleKeydown(e: KeyboardEvent) {
           >
             Unlock
           </AppButton>
+
+          <AppButton
+            v-if="biometricAvailable"
+            class="w-full mt-2"
+            variant="secondary"
+            :loading="biometricLoading"
+            :disabled="unlocking"
+            @click="unlockWithBiometric"
+          >
+            Unlock with Biometrics
+          </AppButton>
+
+          <p v-if="biometricAvailable && !hasBiometricCredential" class="mt-2 text-xs text-muted-foreground">
+            Touch ID is available. Unlock once with password to enable biometric unlock.
+          </p>
         </div>
 
         <p class="text-center text-xs text-muted-foreground mt-4 italic tracking-wide">

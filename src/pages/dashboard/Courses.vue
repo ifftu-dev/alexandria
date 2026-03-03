@@ -2,12 +2,14 @@
 import { ref, computed, onMounted } from 'vue'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { AppButton } from '@/components/ui'
-import type { Enrollment, Course } from '@/types'
+import type { Enrollment, Course, Chapter, Element, ElementProgress } from '@/types'
 
 const { invoke } = useLocalApi()
 
 const enrollments = ref<Enrollment[]>([])
 const courseMap = ref<Record<string, Course>>({})
+const enrollmentProgress = ref<Record<string, number>>({})
+const progressLoading = ref(false)
 const loading = ref(true)
 const showCompleted = ref(false)
 
@@ -48,6 +50,33 @@ function formatRelativeTime(dateStr: string | null): string {
   return `${months}mo ago`
 }
 
+async function computeEnrollmentProgressPercent(enrollment: Enrollment): Promise<number> {
+  try {
+    const chapters = await invoke<Chapter[]>('list_chapters', { courseId: enrollment.course_id })
+    const elementLists = await Promise.all(
+      chapters.map((chapter) => invoke<Element[]>('list_elements', { chapterId: chapter.id }).catch(() => [])),
+    )
+
+    const totalElements = elementLists.reduce((sum, items) => sum + items.length, 0)
+    if (totalElements === 0) return enrollment.completed_at ? 100 : 0
+
+    const progressRows = await invoke<ElementProgress[]>('get_progress', { enrollmentId: enrollment.id })
+    const completedCount = progressRows.filter((row) => row.status === 'completed').length
+    if (enrollment.completed_at) return 100
+    return Math.round((completedCount / totalElements) * 100)
+  } catch {
+    return enrollment.completed_at ? 100 : 0
+  }
+}
+
+function progressPercentFor(enrollment: Enrollment): number {
+  return enrollmentProgress.value[enrollment.id] ?? (enrollment.completed_at ? 100 : 0)
+}
+
+function isProgressReady(enrollment: Enrollment): boolean {
+  return enrollment.completed_at !== null || enrollmentProgress.value[enrollment.id] !== undefined
+}
+
 onMounted(async () => {
   try {
     enrollments.value = await invoke<Enrollment[]>('list_enrollments')
@@ -57,9 +86,21 @@ onMounted(async () => {
     for (const c of courses) {
       courseMap.value[c.id] = c
     }
+
+    progressLoading.value = true
+    const progressEntries = await Promise.all(
+      enrollments.value.map(async (enrollment) => {
+        const percent = await computeEnrollmentProgressPercent(enrollment)
+        return [enrollment.id, percent] as const
+      }),
+    )
+
+    enrollmentProgress.value = Object.fromEntries(progressEntries)
+    progressLoading.value = false
   } catch (e) {
     console.error('Failed to load enrollments:', e)
   } finally {
+    progressLoading.value = false
     loading.value = false
   }
 })
@@ -260,16 +301,23 @@ onMounted(async () => {
                 <div class="mt-4">
                   <div class="flex items-center justify-between text-xs mb-1.5">
                     <span class="text-muted-foreground">Progress</span>
-                    <span class="font-medium" :class="enrollment.completed_at ? 'text-green-400' : 'text-primary'">
-                      {{ enrollment.completed_at ? '100' : '0' }}%
+                    <span
+                      v-if="!progressLoading || isProgressReady(enrollment)"
+                      class="font-medium"
+                      :class="enrollment.completed_at ? 'text-green-400' : 'text-primary'"
+                    >
+                      {{ progressPercentFor(enrollment) }}%
                     </span>
+                    <span v-else class="h-3 w-10 animate-pulse rounded bg-muted/40" />
                   </div>
                   <div class="h-1.5 w-full overflow-hidden rounded-full bg-muted/30">
                     <div
+                      v-if="!progressLoading || isProgressReady(enrollment)"
                       class="h-full rounded-full transition-all duration-500"
                       :class="enrollment.completed_at ? 'bg-green-400' : 'bg-primary'"
-                      :style="{ width: enrollment.completed_at ? '100%' : '0%' }"
+                      :style="{ width: `${progressPercentFor(enrollment)}%` }"
                     />
+                    <div v-else class="h-full w-2/5 animate-pulse rounded-full bg-muted/40" />
                   </div>
                 </div>
 

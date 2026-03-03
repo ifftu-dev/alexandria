@@ -6,9 +6,13 @@
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "seed:up": "cargo run --manifest-path src-tauri/Cargo.toml --features dev-seed --bin dev_seed -- up",
+    "seed:down": "cargo run --manifest-path src-tauri/Cargo.toml --features dev-seed --bin dev_seed -- down",
+    "seed:reset": "cargo run --manifest-path src-tauri/Cargo.toml --features dev-seed --bin dev_seed -- reset"
   },
   "dependencies": {
+    "@choochmeque/tauri-plugin-biometry-api": "^0.2.3",
     "@tauri-apps/api": "^2.10.1",
     "@tauri-apps/plugin-log": "^2.8.0",
     "force-graph": "^1.51.1",
