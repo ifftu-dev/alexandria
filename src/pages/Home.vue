@@ -4,6 +4,7 @@ import { useLocalApi } from '@/composables/useLocalApi'
 import { useAuth } from '@/composables/useAuth'
 import { useP2P } from '@/composables/useP2P'
 import { StatusBadge } from '@/components/ui'
+import CourseCard from '@/components/course/CourseCard.vue'
 import type { Course, Enrollment } from '@/types'
 
 const { invoke } = useLocalApi()
@@ -25,8 +26,6 @@ onMounted(() => {
 })
 
 // Start P2P after a short delay so the Home page renders first.
-// The delay lets the initial DB queries (list_courses, list_enrollments)
-// settle before we hit the keystore/p2p locks.
 onMounted(() => {
   setTimeout(() => {
     startP2P().catch(() => {})
@@ -72,7 +71,7 @@ onMounted(async () => {
 <template>
   <div>
     <!-- Greeting -->
-    <div class="mb-8">
+    <div class="mb-6">
       <h1 class="home-greeting">
         {{ greeting }}{{ firstName ? `, ${firstName}` : '' }}
       </h1>
@@ -97,9 +96,9 @@ onMounted(async () => {
         </div>
       </div>
 
-      <!-- Recommended skeleton -->
+      <!-- Recommended skeleton (Mark 2 style: shadow only, no border) -->
       <div class="mb-4 h-5 w-48 animate-pulse rounded bg-muted" />
-      <div class="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+      <div class="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         <div v-for="i in 8" :key="i" class="animate-pulse overflow-hidden rounded-xl bg-card shadow-sm">
           <div class="aspect-[16/9] bg-muted" />
           <div class="p-4 space-y-2">
@@ -121,7 +120,9 @@ onMounted(async () => {
     <template v-else>
       <!-- Continue Learning -->
       <section v-if="enrollments.length > 0" class="mb-10">
-        <h2 class="text-base font-semibold text-foreground mb-4">Continue Learning</h2>
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-base font-semibold text-foreground">Continue Learning</h2>
+        </div>
         <div class="flex gap-4 overflow-x-auto pb-2 scrollbar-thin">
           <router-link
             v-for="enrollment in enrollments"
@@ -139,11 +140,11 @@ onMounted(async () => {
                   </svg>
                 </div>
                 <!-- Progress bar overlay at bottom -->
-                <div class="absolute bottom-0 left-0 right-0 h-1 bg-muted/50">
+                <div class="absolute bottom-0 left-0 right-0 h-1.5 bg-black/30">
                   <div class="h-full bg-primary" style="width: 0%" />
                 </div>
               </div>
-              <div class="p-3.5">
+              <div class="p-4">
                 <h3 class="text-sm font-medium text-foreground truncate group-hover:text-primary transition-colors">
                   {{ enrolledCourseMap[enrollment.course_id]?.title ?? 'Loading...' }}
                 </h3>
@@ -163,17 +164,17 @@ onMounted(async () => {
       <section>
         <div class="flex items-center justify-between mb-4">
           <h2 class="text-base font-semibold text-foreground">
-            {{ enrollments.length > 0 ? 'Explore More Courses' : 'Available Courses' }}
+            {{ enrollments.length > 0 ? 'Recommended For You' : 'Available Courses' }}
           </h2>
           <span v-if="recommendedCourses.length > 0" class="text-xs text-muted-foreground">
             {{ recommendedCourses.length }} course{{ recommendedCourses.length !== 1 ? 's' : '' }}
           </span>
         </div>
 
-        <!-- Empty state -->
+        <!-- Empty state (Mark 2 style: shadow, no border) -->
         <div
           v-if="courses.length === 0"
-          class="rounded-xl bg-card border border-border p-12 text-center"
+          class="rounded-xl bg-card p-12 text-center shadow-sm"
         >
           <svg class="mx-auto mb-3 h-10 w-10 text-muted-foreground/30" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
             <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
@@ -190,124 +191,13 @@ onMounted(async () => {
           </router-link>
         </div>
 
-        <!-- Course grid -->
-        <div v-else class="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          <router-link
+        <!-- Course grid (Mark 2 style: gap-6, 4 columns) -->
+        <div v-else class="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          <CourseCard
             v-for="course in (recommendedCourses.length > 0 ? recommendedCourses : courses)"
             :key="course.id"
-            :to="`/courses/${course.id}`"
-            class="group"
-          >
-            <div class="card card-interactive overflow-hidden h-full flex flex-col">
-              <!-- Thumbnail -->
-              <div class="aspect-[16/9] overflow-hidden">
-                <div v-if="course.thumbnail_svg" class="w-full h-full" v-html="course.thumbnail_svg" />
-                <div v-else class="w-full h-full bg-gradient-to-br from-primary/10 to-accent/5 flex items-center justify-center">
-                  <svg class="w-8 h-8 text-primary/30" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-                  </svg>
-                </div>
-              </div>
-              <div class="p-4 flex-1 flex flex-col">
-                <!-- Tags -->
-                <div v-if="course.tags?.length" class="flex flex-wrap gap-1.5 mb-2">
-                  <span
-                    v-for="tag in course.tags.slice(0, 3)"
-                    :key="tag"
-                    class="text-[10px] font-medium px-1.5 py-0.5 rounded bg-muted text-muted-foreground"
-                  >
-                    {{ tag }}
-                  </span>
-                </div>
-                <!-- Title -->
-                <h3 class="text-sm font-medium text-foreground line-clamp-2 group-hover:text-primary transition-colors">
-                  {{ course.title }}
-                </h3>
-                <!-- Description -->
-                <p v-if="course.description" class="text-xs text-muted-foreground line-clamp-2 mt-1 flex-1">
-                  {{ course.description }}
-                </p>
-                <!-- Footer -->
-                <div class="flex items-center gap-2 mt-3 pt-3 border-t border-border/50">
-                  <div v-if="course.author_name" class="flex items-center gap-1.5 flex-1 min-w-0">
-                    <div class="w-4 h-4 rounded-full bg-gradient-to-br from-primary to-accent flex items-center justify-center shrink-0">
-                      <span class="text-[7px] font-bold text-white">{{ course.author_name.charAt(0) }}</span>
-                    </div>
-                    <span class="text-[10px] text-muted-foreground truncate">{{ course.author_name }}</span>
-                  </div>
-                  <StatusBadge :status="course.status" />
-                  <span class="text-[10px] text-muted-foreground">v{{ course.version }}</span>
-                </div>
-              </div>
-            </div>
-          </router-link>
-        </div>
-      </section>
-
-      <!-- Quick Actions -->
-      <section class="mt-10">
-        <h2 class="text-base font-semibold mb-4">Quick Actions</h2>
-        <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <router-link
-            to="/courses"
-            class="card card-interactive p-4 flex items-center gap-3"
-          >
-            <div class="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
-              <svg class="w-4.5 h-4.5 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-              </svg>
-            </div>
-            <div>
-              <div class="text-sm font-medium">Browse Courses</div>
-              <div class="text-xs text-muted-foreground">Explore the catalog</div>
-            </div>
-          </router-link>
-
-          <router-link
-            to="/skills"
-            class="card card-interactive p-4 flex items-center gap-3"
-          >
-            <div class="w-9 h-9 rounded-lg bg-success/10 flex items-center justify-center shrink-0">
-              <svg class="w-4.5 h-4.5 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" />
-              </svg>
-            </div>
-            <div>
-              <div class="text-sm font-medium">Skills</div>
-              <div class="text-xs text-muted-foreground">Taxonomy & proofs</div>
-            </div>
-          </router-link>
-
-          <router-link
-            to="/governance"
-            class="card card-interactive p-4 flex items-center gap-3"
-          >
-            <div class="w-9 h-9 rounded-lg bg-governance/10 flex items-center justify-center shrink-0">
-              <svg class="w-4.5 h-4.5 text-governance" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3" />
-              </svg>
-            </div>
-            <div>
-              <div class="text-sm font-medium">Governance</div>
-              <div class="text-xs text-muted-foreground">DAOs & proposals</div>
-            </div>
-          </router-link>
-
-          <router-link
-            to="/dashboard/settings"
-            class="card card-interactive p-4 flex items-center gap-3"
-          >
-            <div class="w-9 h-9 rounded-lg bg-muted flex items-center justify-center shrink-0">
-              <svg class="w-4.5 h-4.5 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-              </svg>
-            </div>
-            <div>
-              <div class="text-sm font-medium">Settings</div>
-              <div class="text-xs text-muted-foreground">Profile & node config</div>
-            </div>
-          </router-link>
+            :course="course"
+          />
         </div>
       </section>
     </template>
@@ -316,7 +206,7 @@ onMounted(async () => {
 
 <style scoped>
 .home-greeting {
-  font-family: 'Libre Baskerville', Georgia, serif;
+  font-family: 'Libre Baskerville', 'DM Serif Display', Georgia, serif;
   font-size: 1.5rem;
   font-weight: 400;
   line-height: 1.3;
