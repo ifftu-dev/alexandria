@@ -75,13 +75,13 @@ async function mintNft(proof: SkillProof) {
     <!-- Skeleton -->
     <div v-if="loading" class="space-y-6">
       <div class="grid gap-4 sm:grid-cols-3">
-        <div v-for="i in 3" :key="i" class="animate-pulse rounded-xl border border-border bg-card p-6">
+        <div v-for="i in 3" :key="i" class="animate-pulse rounded-xl bg-card shadow-sm p-6">
           <div class="h-3 w-20 rounded bg-muted-foreground/15 mb-3" />
           <div class="h-8 w-12 rounded bg-muted-foreground/20" />
         </div>
       </div>
       <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <div v-for="i in 3" :key="i" class="animate-pulse rounded-xl border border-border bg-card p-5">
+        <div v-for="i in 3" :key="i" class="animate-pulse rounded-xl bg-card shadow-sm p-5">
           <div class="h-4 w-36 rounded bg-muted-foreground/15 mb-3" />
           <div class="h-5 w-16 rounded-full bg-muted-foreground/10 mb-3" />
           <div class="h-1.5 w-full rounded-full bg-muted-foreground/10" />
@@ -92,15 +92,15 @@ async function mintNft(proof: SkillProof) {
     <template v-else>
       <!-- Stats -->
       <div class="mb-8 grid gap-4 sm:grid-cols-3">
-        <div class="rounded-xl border border-border bg-card p-6">
+        <div class="rounded-xl bg-card shadow-sm p-6">
           <p class="text-sm text-muted-foreground">Total Credentials</p>
           <p class="mt-2 text-3xl font-bold text-foreground">{{ totalProofs }}</p>
         </div>
-        <div class="rounded-xl border border-border bg-card p-6">
+        <div class="rounded-xl bg-card shadow-sm p-6">
           <p class="text-sm text-muted-foreground">Avg. Confidence</p>
           <p class="mt-2 text-3xl font-bold text-primary">{{ Math.round(avgConfidence * 100) }}%</p>
         </div>
-        <div class="rounded-xl border border-border bg-card p-6">
+        <div class="rounded-xl bg-card shadow-sm p-6">
           <p class="text-sm text-muted-foreground">Evidence Records</p>
           <p class="mt-2 text-3xl font-bold text-foreground">{{ proofs.reduce((s, p) => s + p.evidence_count, 0) }}</p>
         </div>
@@ -124,7 +124,7 @@ async function mintNft(proof: SkillProof) {
         <div
           v-for="proof in proofs"
           :key="proof.id"
-          class="rounded-xl border border-border bg-card p-5 transition-colors hover:border-primary/30"
+          class="rounded-xl bg-card shadow-sm p-5 transition-shadow hover:shadow-md"
         >
           <div class="flex items-start justify-between mb-3">
             <div class="min-w-0 flex-1">

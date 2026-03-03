@@ -120,7 +120,7 @@ async function lockWallet() {
       </div>
 
       <!-- Profile -->
-      <div class="rounded-xl border border-border bg-card p-6 mb-6">
+      <div class="rounded-xl bg-card shadow-sm p-6 mb-6">
         <h2 class="text-lg font-semibold text-foreground mb-4">Profile</h2>
 
         <div class="space-y-4">
@@ -155,7 +155,7 @@ async function lockWallet() {
       </div>
 
       <!-- Security -->
-      <div class="rounded-xl border border-border bg-card p-6 mb-6">
+      <div class="rounded-xl bg-card shadow-sm p-6 mb-6">
         <h2 class="text-lg font-semibold text-foreground mb-4">Security</h2>
 
         <div class="divide-y divide-border/50">
@@ -186,7 +186,7 @@ async function lockWallet() {
       </div>
 
       <!-- Theme -->
-      <div class="rounded-xl border border-border bg-card p-6 mb-6">
+      <div class="rounded-xl bg-card shadow-sm p-6 mb-6">
         <h2 class="text-lg font-semibold text-foreground mb-4">Appearance</h2>
         <div class="flex items-center justify-between">
           <div>
@@ -202,7 +202,7 @@ async function lockWallet() {
       </div>
 
       <!-- Identity (read-only) -->
-      <div v-if="identity" class="rounded-xl border border-border bg-card p-6">
+      <div v-if="identity" class="rounded-xl bg-card shadow-sm p-6">
         <h2 class="text-lg font-semibold text-foreground mb-4">Identity</h2>
         <div class="divide-y divide-border/50">
           <div class="py-3 first:pt-0">

@@ -260,14 +260,14 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
       <div v-if="loading" class="space-y-6">
         <!-- Stats skeleton -->
         <div class="grid grid-cols-2 gap-4 sm:grid-cols-4">
-          <div v-for="i in 4" :key="i" class="rounded-lg border border-border p-4">
+          <div v-for="i in 4" :key="i" class="rounded-lg shadow-sm p-4">
             <div class="mb-2 h-3 w-20 animate-pulse rounded bg-muted" />
             <div class="h-7 w-16 animate-pulse rounded bg-muted" />
           </div>
         </div>
         <!-- Content skeleton -->
         <div class="space-y-3">
-          <div v-for="i in 3" :key="i" class="rounded-lg border border-border p-4">
+          <div v-for="i in 3" :key="i" class="rounded-lg shadow-sm p-4">
             <div class="mb-3 h-4 w-48 animate-pulse rounded bg-muted" />
             <div class="h-3 w-full animate-pulse rounded bg-muted" />
             <div class="mt-2 h-3 w-3/4 animate-pulse rounded bg-muted" />
@@ -282,22 +282,22 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
         <!-- Stats Grid -->
         <div class="grid grid-cols-2 gap-4 sm:grid-cols-4">
           <!-- Total Sessions -->
-          <div class="rounded-lg border border-border p-4">
+          <div class="rounded-lg shadow-sm p-4">
             <p class="text-xs font-medium text-muted-foreground">Total Sessions</p>
             <p class="mt-1 text-2xl font-bold text-foreground">{{ sessions.length }}</p>
           </div>
           <!-- Avg Integrity -->
-          <div class="rounded-lg border border-border p-4">
+          <div class="rounded-lg shadow-sm p-4">
             <p class="text-xs font-medium text-muted-foreground">Avg Integrity</p>
             <p class="mt-1 text-2xl font-bold text-foreground">{{ integrityPercent }}%</p>
           </div>
           <!-- Avg Consistency -->
-          <div class="rounded-lg border border-border p-4">
+          <div class="rounded-lg shadow-sm p-4">
             <p class="text-xs font-medium text-muted-foreground">Avg Consistency</p>
             <p class="mt-1 text-2xl font-bold text-foreground">{{ consistencyPercent }}%</p>
           </div>
           <!-- Clean Rate -->
-          <div class="rounded-lg border border-border p-4">
+          <div class="rounded-lg shadow-sm p-4">
             <p class="text-xs font-medium text-muted-foreground">Clean Rate</p>
             <p class="mt-1 text-2xl font-bold text-foreground">{{ sessionBreakdown.cleanPct }}%</p>
           </div>
@@ -375,7 +375,7 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
           </div>
 
           <div v-else class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div class="rounded-lg border border-border p-3 text-center">
+            <div class="rounded-lg shadow-sm p-3 text-center">
               <svg class="mx-auto h-5 w-5 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5M12 17.25h8.25" />
               </svg>
@@ -384,7 +384,7 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
                 {{ ((profile as any)?.typingPattern?.speedWpm ?? 0).toFixed(0) }} WPM
               </p>
             </div>
-            <div class="rounded-lg border border-border p-3 text-center">
+            <div class="rounded-lg shadow-sm p-3 text-center">
               <svg class="mx-auto h-5 w-5 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M15.042 21.672L13.684 16.6m0 0l-2.51 2.225.569-9.47 5.227 7.917-3.286-.672zM12 2.25V4.5m5.834.166l-1.591 1.591M20.25 10.5H18M7.757 14.743l-1.59 1.59M6 10.5H3.75m4.007-4.243l-1.59-1.59" />
               </svg>
@@ -393,7 +393,7 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
                 {{ ((profile as any)?.mousePattern?.avgVelocity ?? 0).toFixed(1) }} px/ms
               </p>
             </div>
-            <div class="rounded-lg border border-border p-3 text-center">
+            <div class="rounded-lg shadow-sm p-3 text-center">
               <svg class="mx-auto h-5 w-5 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456z" />
               </svg>
@@ -432,7 +432,7 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
           <div
             v-for="session in sessions.slice(0, 30)"
             :key="session.id"
-            class="rounded-lg border border-border p-4 transition-colors hover:border-primary/30"
+            class="rounded-lg shadow-sm p-4 transition-shadow hover:shadow-md"
           >
             <div class="flex items-start justify-between gap-4">
               <!-- Left: session info -->
@@ -499,7 +499,7 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
             <div
               v-for="signal in signalWeights"
               :key="signal.key"
-              class="rounded-lg border border-border p-4"
+              class="rounded-lg shadow-sm p-4"
             >
               <div class="flex items-start justify-between gap-3">
                 <div class="min-w-0 flex-1">
@@ -581,7 +581,7 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
 
           <div v-if="profile" class="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <!-- Typing -->
-            <div class="rounded-lg border border-border p-4">
+            <div class="rounded-lg shadow-sm p-4">
               <p class="mb-3 text-xs font-medium uppercase tracking-wider text-muted-foreground">Typing</p>
               <div class="space-y-2">
                 <div class="flex items-center justify-between">
@@ -612,7 +612,7 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
             </div>
 
             <!-- Mouse -->
-            <div class="rounded-lg border border-border p-4">
+            <div class="rounded-lg shadow-sm p-4">
               <p class="mb-3 text-xs font-medium uppercase tracking-wider text-muted-foreground">Mouse</p>
               <div class="space-y-2">
                 <div class="flex items-center justify-between">
@@ -643,7 +643,7 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
             </div>
 
             <!-- AI Models -->
-            <div class="rounded-lg border border-border p-4">
+            <div class="rounded-lg shadow-sm p-4">
               <p class="mb-3 text-xs font-medium uppercase tracking-wider text-muted-foreground">AI Models</p>
               <div v-if="aiStatus" class="space-y-2.5">
                 <div class="flex items-center justify-between">
@@ -714,7 +714,7 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
             <div
               v-for="flag in anomalyFlagTypes"
               :key="flag.type"
-              class="flex items-start gap-4 rounded-lg border border-border p-4"
+              class="flex items-start gap-4 rounded-lg shadow-sm p-4"
             >
               <div class="min-w-0 flex-1">
                 <div class="flex flex-wrap items-center gap-2">
@@ -738,21 +738,21 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
         <div class="card p-5">
           <h2 class="mb-3 text-sm font-semibold text-foreground">Outcome Determination</h2>
           <div class="space-y-2">
-            <div class="flex items-start gap-3 rounded-lg border border-border p-3">
+            <div class="flex items-start gap-3 rounded-lg shadow-sm p-3">
               <span class="mt-0.5 inline-block h-2.5 w-2.5 flex-shrink-0 rounded-full bg-emerald-500" />
               <div>
                 <p class="text-xs font-medium text-foreground">Clean</p>
                 <p class="text-[0.65rem] text-muted-foreground">Default outcome — no critical flags, fewer than 3 warnings, integrity &ge; 0.40</p>
               </div>
             </div>
-            <div class="flex items-start gap-3 rounded-lg border border-border p-3">
+            <div class="flex items-start gap-3 rounded-lg shadow-sm p-3">
               <span class="mt-0.5 inline-block h-2.5 w-2.5 flex-shrink-0 rounded-full bg-amber-500" />
               <div>
                 <p class="text-xs font-medium text-foreground">Flagged</p>
                 <p class="text-[0.65rem] text-muted-foreground">1 critical flag, OR 3+ warnings, OR integrity &lt; 0.40 — surfaces for admin review</p>
               </div>
             </div>
-            <div class="flex items-start gap-3 rounded-lg border border-border p-3">
+            <div class="flex items-start gap-3 rounded-lg shadow-sm p-3">
               <span class="mt-0.5 inline-block h-2.5 w-2.5 flex-shrink-0 rounded-full bg-red-500" />
               <div>
                 <p class="text-xs font-medium text-foreground">Suspended</p>
@@ -786,7 +786,7 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
       <!-- ================================================================ -->
       <!-- PRIVACY NOTICE (bottom)                                          -->
       <!-- ================================================================ -->
-      <div class="rounded-lg border border-border p-4">
+      <div class="rounded-lg shadow-sm p-4">
         <div class="flex gap-3">
           <svg class="h-5 w-5 flex-shrink-0 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
             <path stroke-linecap="round" stroke-linejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />

@@ -58,14 +58,14 @@ onMounted(async () => {
     <!-- Skeleton -->
     <div v-if="loading" class="space-y-6">
       <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div v-for="i in 3" :key="i" class="animate-pulse rounded-xl border border-border bg-card p-6">
+        <div v-for="i in 3" :key="i" class="animate-pulse rounded-xl bg-card shadow-sm p-6">
           <div class="h-3 w-20 rounded bg-muted-foreground/15 mb-3" />
           <div class="h-8 w-10 rounded bg-muted-foreground/20" />
         </div>
       </div>
       <div class="h-10 w-72 animate-pulse rounded-lg bg-muted-foreground/10" />
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div v-for="i in 4" :key="i" class="animate-pulse rounded-xl border border-border bg-card p-5">
+        <div v-for="i in 4" :key="i" class="animate-pulse rounded-xl bg-card shadow-sm p-5">
           <div class="flex items-start gap-3">
             <div class="h-10 w-10 rounded-lg bg-muted-foreground/15" />
             <div class="flex-1 space-y-2">
@@ -80,15 +80,15 @@ onMounted(async () => {
     <template v-else>
       <!-- Stats -->
       <div class="mb-8 grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div class="rounded-xl border border-border bg-card p-6">
+        <div class="rounded-xl bg-card shadow-sm p-6">
           <p class="text-sm text-muted-foreground">Total DAOs</p>
           <p class="mt-2 text-3xl font-bold text-foreground">{{ totalDaos }}</p>
         </div>
-        <div class="rounded-xl border border-border bg-card p-6">
+        <div class="rounded-xl bg-card shadow-sm p-6">
           <p class="text-sm text-muted-foreground">Active</p>
           <p class="mt-2 text-3xl font-bold text-emerald-500">{{ activeDaos }}</p>
         </div>
-        <div class="rounded-xl border border-border bg-card p-6">
+        <div class="rounded-xl bg-card shadow-sm p-6">
           <p class="text-sm text-muted-foreground">Total Committee Seats</p>
           <p class="mt-2 text-3xl font-bold text-amber-500">{{ totalSeats }}</p>
         </div>
@@ -124,7 +124,7 @@ onMounted(async () => {
           v-for="dao in filtered"
           :key="dao.id"
           :to="`/governance/${dao.id}`"
-          class="group rounded-xl border border-border bg-card p-5 transition-all hover:border-amber-500/30 hover:shadow-sm"
+          class="group rounded-xl bg-card shadow-sm p-5 transition-shadow hover:shadow-md"
         >
           <div class="flex items-start gap-3">
             <div class="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-amber-500/10 text-lg">
