@@ -744,6 +744,90 @@ b = b - lr * ∂MSE/∂b</code></pre>
     ("el_web_2_4", ESSAY_WEB),
     ("el_ml_3_3", ESSAY_ML),
     ("el_ux_1_4", ESSAY_UX),
+    // ======================================================================
+    // DISCRETE MATH COURSE
+    // ======================================================================
+    (
+        "el_math_1_1",
+        r#"<h2>Propositional Logic Essentials</h2>
+<p>Propositional logic models statements that are either true or false. We combine propositions using operators:</p>
+<ul>
+  <li><strong>AND</strong> (<code>p ∧ q</code>): true when both are true</li>
+  <li><strong>OR</strong> (<code>p ∨ q</code>): true when at least one is true</li>
+  <li><strong>NOT</strong> (<code>¬p</code>): flips truth value</li>
+  <li><strong>IMPLIES</strong> (<code>p → q</code>): false only when p is true and q is false</li>
+</ul>
+<p>In engineering, logic appears in query filters, access rules, conditionals, and circuit design. Mastering truth tables helps you reason rigorously about complex conditions.</p>"#,
+    ),
+    (
+        "el_math_1_2",
+        r#"<h2>Proof Strategies in Practice</h2>
+<p>Proofs are structured arguments that establish truth from definitions and prior results. Three common strategies:</p>
+<ol>
+  <li><strong>Direct proof</strong>: assume premises, derive conclusion step by step</li>
+  <li><strong>Proof by contradiction</strong>: assume the opposite, derive an impossibility</li>
+  <li><strong>Proof by induction</strong>: prove base case and inductive step for all n</li>
+</ol>
+<p>Example pattern (contradiction): to prove <code>√2</code> is irrational, assume it is rational, reduce to both numerator and denominator being even, and contradict lowest terms.</p>"#,
+    ),
+    ("el_math_1_3", QUIZ_LOGIC_FOUNDATIONS),
+    (
+        "el_math_2_1",
+        r#"<h2>Set Operations &amp; Counting Rules</h2>
+<p>Sets represent collections of distinct elements. Core operations:</p>
+<ul>
+  <li><strong>Union</strong> <code>A ∪ B</code>: elements in A or B</li>
+  <li><strong>Intersection</strong> <code>A ∩ B</code>: elements in both A and B</li>
+  <li><strong>Difference</strong> <code>A \ B</code>: elements in A but not B</li>
+</ul>
+<p>Counting basics:</p>
+<ul>
+  <li><strong>Product rule</strong>: if task has <code>a</code> choices then <code>b</code> choices, total is <code>a × b</code></li>
+  <li><strong>Sum rule</strong>: mutually exclusive options add</li>
+  <li><strong>Combinations</strong>: <code>C(n,k) = n! / (k!(n-k)!)</code></li>
+</ul>
+<p>These are foundational for probability, algorithm analysis, and capacity planning.</p>"#,
+    ),
+    ("el_math_2_2", MCQ_SINGLE_MATH),
+    (
+        "el_math_3_1",
+        r#"<h2>Graph Models for Real Systems</h2>
+<p>Graphs model relationships: users and follows, services and dependencies, cities and roads. Nodes are entities; edges are relationships.</p>
+<p>Practical mappings:</p>
+<ul>
+  <li>Build systems: nodes = tasks, edges = prerequisites (DAG)</li>
+  <li>Social apps: nodes = users, edges = follows/friends</li>
+  <li>Routing: nodes = routers, edges = links with weights</li>
+</ul>
+<p>Once modeled as a graph, we can apply BFS/DFS, shortest paths, connectivity checks, and topological sort to answer product and operations questions.</p>"#,
+    ),
+    (
+        "el_math_3_2",
+        r#"<h2>Graph Thinking Interactive</h2>
+<p>Use this exercise to model a real workflow as a graph and reason about bottlenecks.</p>
+<ol>
+  <li>List 8-10 tasks from a software release pipeline.</li>
+  <li>Draw dependencies as directed edges.</li>
+  <li>Find tasks with zero in-degree (can start immediately).</li>
+  <li>Run a topological ordering and identify the critical path.</li>
+</ol>
+<p>Then ask: what single edge removal would increase parallelism the most?</p>"#,
+    ),
+    (
+        "el_math_4_1",
+        r#"<h2>Expected Value &amp; Risk</h2>
+<p>Expected value is the probability-weighted average outcome:</p>
+<pre><code>E[X] = Σ xᵢ P(X = xᵢ)</code></pre>
+<p>Engineering uses expected value for trade-off decisions (latency, retries, queue times, failure costs). Two systems can share the same expected value but have different risk profiles due to variance.</p>
+<p>When evaluating choices, combine:</p>
+<ul>
+  <li><strong>Expected outcome</strong> (average)</li>
+  <li><strong>Variance</strong> (how spread outcomes are)</li>
+  <li><strong>Tail risk</strong> (rare but expensive failures)</li>
+</ul>
+<p>This mindset leads to better reliability and incident-response planning.</p>"#,
+    ),
+    ("el_math_4_2", ASSESSMENT_MATH),
 ];
 
 // ---------------------------------------------------------------------------
@@ -1443,5 +1527,106 @@ const ESSAY_UX: &str = r#"{
     "Interview questions are open-ended and avoid leading bias",
     "Persona includes demographics, goals, frustrations, and context",
     "Testing plan includes measurable success criteria"
+  ]
+}"#;
+
+const QUIZ_LOGIC_FOUNDATIONS: &str = r#"{
+  "title": "Logic Foundations Quiz",
+  "pass_threshold": 0.66,
+  "questions": [
+    {
+      "id": "q1",
+      "type": "single_choice",
+      "prompt": "Which expression is equivalent to 'if p then q'?",
+      "options": ["q -> p", "!p OR q", "p AND q", "!q OR p"],
+      "correct_indices": [1],
+      "explanation": "Implication p -> q is logically equivalent to !p OR q.",
+      "points": 1,
+      "difficulty": 1
+    },
+    {
+      "id": "q2",
+      "type": "true_false",
+      "prompt": "In proof by contradiction, you assume the negation of the statement you want to prove.",
+      "options": ["True", "False"],
+      "correct_indices": [0],
+      "explanation": "You assume the opposite and derive a contradiction.",
+      "points": 1,
+      "difficulty": 1
+    },
+    {
+      "id": "q3",
+      "type": "single_choice",
+      "prompt": "Which proof technique is naturally suited to statements about all positive integers n?",
+      "options": ["Contradiction", "Induction", "Case analysis", "Counterexample"],
+      "correct_indices": [1],
+      "explanation": "Mathematical induction is the standard approach for statements over n >= 1.",
+      "points": 1,
+      "difficulty": 1
+    }
+  ]
+}"#;
+
+const MCQ_SINGLE_MATH: &str = r#"{
+  "question": "You need to count the number of ways to choose 3 reviewers from 10 candidates, where order does not matter. Which method applies?",
+  "options": [
+    { "id": "a", "text": "Permutation: P(10,3)" },
+    { "id": "b", "text": "Combination: C(10,3)" },
+    { "id": "c", "text": "Inclusion-exclusion" },
+    { "id": "d", "text": "Bayes' theorem" }
+  ],
+  "correct_option_index": 1,
+  "explanation": "When order does not matter, use combinations. C(10,3) counts unordered selections of 3 items from 10."
+}"#;
+
+const ASSESSMENT_MATH: &str = r#"{
+  "title": "Discrete Math Final Assessment",
+  "pass_threshold": 0.7,
+  "questions": [
+    {
+      "id": "q1",
+      "type": "single_choice",
+      "prompt": "Which statement correctly describes a DAG?",
+      "options": [
+        "An undirected graph with no cycles",
+        "A directed graph with no cycles",
+        "A directed graph where every node has out-degree 1",
+        "A weighted graph with positive edges"
+      ],
+      "correct_indices": [1],
+      "explanation": "DAG stands for Directed Acyclic Graph.",
+      "points": 1,
+      "difficulty": 2
+    },
+    {
+      "id": "q2",
+      "type": "single_choice",
+      "prompt": "How many 2-element subsets can be formed from a 5-element set?",
+      "options": ["5", "8", "10", "20"],
+      "correct_indices": [2],
+      "explanation": "C(5,2) = 5! / (2!3!) = 10.",
+      "points": 1,
+      "difficulty": 1
+    },
+    {
+      "id": "q3",
+      "type": "true_false",
+      "prompt": "Two events with high expected value always imply low risk.",
+      "options": ["True", "False"],
+      "correct_indices": [1],
+      "explanation": "Expected value alone does not capture variance or tail risk.",
+      "points": 1,
+      "difficulty": 1
+    },
+    {
+      "id": "q4",
+      "type": "single_choice",
+      "prompt": "Which operation gives elements common to both sets A and B?",
+      "options": ["A U B", "A - B", "A ∩ B", "A XOR B"],
+      "correct_indices": [2],
+      "explanation": "Intersection A ∩ B returns shared elements.",
+      "points": 1,
+      "difficulty": 1
+    }
   ]
 }"#;
