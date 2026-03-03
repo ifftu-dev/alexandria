@@ -13,6 +13,16 @@ const route = useRoute()
 const { theme, setTheme } = useTheme()
 const { status: p2pStatus, startPolling } = useP2P()
 const { displayName, lockVault } = useAuth()
+const isMac = typeof navigator !== 'undefined' && /Mac/.test(navigator.userAgent)
+const canGoBack = ref(false)
+const canGoForward = ref(false)
+
+function syncNavButtons() {
+  if (typeof window === 'undefined') return
+  const state = (window.history.state ?? {}) as { back?: string | null; forward?: string | null }
+  canGoBack.value = Boolean(state.back)
+  canGoForward.value = Boolean(state.forward)
+}
 
 // --- Search ---
 const searchQuery = ref('')
@@ -37,10 +47,13 @@ function onGlobalKeydown(e: KeyboardEvent) {
 onMounted(() => {
   startPolling(15000)
   document.addEventListener('keydown', onGlobalKeydown)
+  window.addEventListener('popstate', syncNavButtons)
+  syncNavButtons()
 })
 
 onUnmounted(() => {
   document.removeEventListener('keydown', onGlobalKeydown)
+  window.removeEventListener('popstate', syncNavButtons)
 })
 
 // --- Theme toggle dropdown ---
@@ -74,6 +87,7 @@ function onClickOutsideUser(e: MouseEvent) {
 // Close dropdown on route change
 import { watch } from 'vue'
 watch(() => route.path, () => { userMenuOpen.value = false })
+watch(() => route.fullPath, () => { syncNavButtons() })
 
 onMounted(() => document.addEventListener('click', onClickOutsideUser))
 onUnmounted(() => document.removeEventListener('click', onClickOutsideUser))
@@ -93,17 +107,50 @@ const userInitial = () => displayName.value ? displayName.value.charAt(0).toUppe
 </script>
 
 <template>
-  <header class="flex items-center h-14 px-4 border-b border-border bg-background gap-3 shrink-0">
-    <!-- Left: Hamburger (mobile only) -->
-    <button
-      class="md:hidden flex items-center justify-center w-10 h-10 rounded-lg text-muted-foreground hover:bg-muted transition-colors"
-      aria-label="Open sidebar"
-      @click="emit('toggleSidebar')"
-    >
-      <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16" />
-      </svg>
-    </button>
+  <header :class="['topbar', isMac ? 'topbar--macos' : '']" data-tauri-drag-region>
+    <!-- Left: Sidebar toggle -->
+    <div class="topbar-left">
+      <!-- Sidebar toggle (visible on all screen sizes) -->
+      <button
+        class="topbar-icon-btn"
+        :aria-label="sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'"
+        :title="sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'"
+        @click="emit('toggleSidebar')"
+      >
+        <svg class="h-[1.125rem] w-[1.125rem]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
+          <rect x="3" y="3" width="18" height="18" rx="3" stroke-linecap="round" stroke-linejoin="round" />
+          <path d="M9 3v18" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+      </button>
+
+      <button
+        class="topbar-icon-btn"
+        :class="{ 'topbar-icon-btn--disabled': !canGoBack }"
+        :disabled="!canGoBack"
+        :aria-disabled="!canGoBack"
+        aria-label="Go back"
+        title="Back"
+        @click="router.back()"
+      >
+        <svg class="h-[1.05rem] w-[1.05rem]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
+        </svg>
+      </button>
+
+      <button
+        class="topbar-icon-btn"
+        :class="{ 'topbar-icon-btn--disabled': !canGoForward }"
+        :disabled="!canGoForward"
+        :aria-disabled="!canGoForward"
+        aria-label="Go forward"
+        title="Forward"
+        @click="router.forward()"
+      >
+        <svg class="h-[1.05rem] w-[1.05rem]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
+        </svg>
+      </button>
+    </div>
 
     <!-- Center: Omni-search -->
     <div class="topbar-search-wrapper">
@@ -137,28 +184,28 @@ const userInitial = () => displayName.value ? displayName.value.charAt(0).toUppe
     </div>
 
     <!-- Right: P2P + theme + avatar -->
-    <div class="flex shrink-0 items-center gap-2">
+    <div class="topbar-right">
       <!-- P2P status — hidden on mobile -->
       <div class="hidden md:flex items-center gap-1.5 text-xs text-muted-foreground">
         <span
           class="w-2 h-2 rounded-full"
           :class="p2pStatus?.is_running
             ? 'bg-success'
-            : p2pStatus != null ? 'bg-muted-foreground/40' : 'bg-amber-500 animate-pulse'"
+            : p2pStatus != null ? 'bg-muted-foreground/40' : 'bg-warning animate-pulse'"
         />
-        {{ p2pStatus?.is_running ? `${p2pStatus.connected_peers} peer${p2pStatus.connected_peers !== 1 ? 's' : ''}` : p2pStatus != null ? 'Offline' : 'Starting...' }}
+        {{ p2pStatus?.is_running ? 'Connected' : p2pStatus != null ? 'Offline' : 'Starting...' }}
       </div>
 
-      <!-- Theme toggle dropdown (Mark 2 style) -->
+      <!-- Theme toggle dropdown -->
       <div ref="themeMenuRef" class="theme-toggle relative">
         <button
-          class="flex items-center justify-center w-10 h-10 rounded-lg text-foreground hover:bg-muted transition-colors"
+          class="topbar-icon-btn"
           aria-haspopup="listbox"
           :aria-expanded="themeMenuOpen"
           :aria-label="`Current theme: ${theme}. Click to change.`"
           @click.stop="themeMenuOpen = !themeMenuOpen"
         >
-          <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <svg class="w-[1.125rem] h-[1.125rem]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path v-if="theme === 'dark'" stroke-linecap="round" stroke-linejoin="round" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
             <path v-else-if="theme === 'light'" stroke-linecap="round" stroke-linejoin="round" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
             <path v-else stroke-linecap="round" stroke-linejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
@@ -200,10 +247,10 @@ const userInitial = () => displayName.value ? displayName.value.charAt(0).toUppe
         </Transition>
       </div>
 
-      <!-- User avatar with dropdown (Mark 2 style) -->
+      <!-- User avatar with dropdown -->
       <div ref="userMenuRef" class="user-menu relative">
         <button
-          class="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-primary to-accent text-sm font-bold text-white transition-shadow hover:shadow-md"
+          class="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-primary to-accent text-xs font-bold text-white transition-shadow hover:shadow-md"
           :aria-label="`User menu for ${displayName || 'User'}`"
           aria-haspopup="true"
           :aria-expanded="userMenuOpen"
@@ -278,6 +325,14 @@ const userInitial = () => displayName.value ? displayName.value.charAt(0).toUppe
                 Sentinel
               </button>
 
+              <!-- Governance -->
+              <button class="flex items-center gap-2 rounded-lg px-3 py-2 w-full text-sm text-foreground transition-colors hover:bg-muted" @click="navigateFromMenu('/governance')">
+                <svg class="h-4 w-4 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M3 21h18M3 10h18M5 6l7-3 7 3M4 10v11m16-11v11M8 14v3m4-3v3m4-3v3" />
+                </svg>
+                Governance
+              </button>
+
               <!-- Settings -->
               <button class="flex items-center gap-2 rounded-lg px-3 py-2 w-full text-sm text-foreground transition-colors hover:bg-muted" @click="navigateFromMenu('/dashboard/settings')">
                 <svg class="h-4 w-4 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -288,7 +343,6 @@ const userInitial = () => displayName.value ? displayName.value.charAt(0).toUppe
               </button>
             </div>
 
-            <!-- Lock & Sign Out -->
             <div class="border-t border-border p-1">
               <button
                 class="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-error transition-colors hover:bg-error/10"
@@ -300,6 +354,7 @@ const userInitial = () => displayName.value ? displayName.value.charAt(0).toUppe
                 Lock &amp; Sign Out
               </button>
             </div>
+
           </div>
         </Transition>
       </div>
@@ -309,7 +364,76 @@ const userInitial = () => displayName.value ? displayName.value.charAt(0).toUppe
 
 <style scoped>
 /* =========================================
-   Topbar Omni-search (Mark 2 style)
+   Topbar Layout
+   ========================================= */
+
+.topbar {
+  display: flex;
+  align-items: center;
+  height: 3rem;
+  padding: 0 0.75rem;
+  border-bottom: 1px solid var(--app-border);
+  background: var(--app-background);
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.topbar--macos {
+  padding-left: 5rem;
+}
+
+.topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  flex-shrink: 0;
+}
+
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+/* Icon buttons (sidebar toggle, app icon) */
+.topbar-icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2rem;
+  border-radius: 0.5rem;
+  color: var(--app-muted-foreground);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+}
+
+.topbar button,
+.topbar input,
+.topbar [role='option'],
+.topbar .user-menu,
+.topbar .theme-toggle {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+.topbar-icon-btn:hover {
+  color: var(--app-foreground);
+  background: color-mix(in srgb, var(--app-muted) 50%, transparent);
+}
+
+.topbar-icon-btn--disabled,
+.topbar-icon-btn:disabled {
+  opacity: 0.42;
+  cursor: default;
+  pointer-events: none;
+}
+
+/* =========================================
+   Topbar Omni-search
    ========================================= */
 
 .topbar-search-wrapper {

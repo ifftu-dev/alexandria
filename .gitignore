@@ -44,6 +44,9 @@ src-tauri/gen/schemas/
 # ── Android (Tauri gen) ──────────────────────────────────────────────
 # Build outputs and caches (the gen/android/ scaffold itself IS tracked)
 src-tauri/gen/android/.gradle/
+src-tauri/gen/android/.idea/
+src-tauri/gen/android/.cxx/
+src-tauri/gen/android/captures/
 src-tauri/gen/android/build/
 src-tauri/gen/android/app/build/
 src-tauri/gen/android/buildSrc/.gradle/
@@ -62,8 +65,10 @@ src-tauri/gen/android/.tauri/
 # ── iOS / Xcode (Tauri gen) ──────────────────────────────────────────
 # Build outputs and caches (the gen/apple/ scaffold itself IS tracked)
 src-tauri/gen/apple/build/
+src-tauri/gen/apple/.build/
 src-tauri/gen/apple/Externals/
 src-tauri/gen/apple/Pods/
+src-tauri/gen/apple/**/DerivedData/
 xcuserdata/
 *.xcuserstate
 

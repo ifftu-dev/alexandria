@@ -1,16 +1,12 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { useP2P } from '@/composables/useP2P'
-import { useAuth } from '@/composables/useAuth'
 import SidebarSkillGraph from '@/components/layout/SidebarSkillGraph.vue'
 
 defineProps<{ collapsed: boolean }>()
 const emit = defineEmits<{ toggle: [] }>()
 const router = useRouter()
 const route = useRoute()
-const { status: p2pStatus, startPolling } = useP2P()
-const { lockVault } = useAuth()
 
 // Keyboard shortcut: Cmd+\ (macOS) / Ctrl+\ (Windows)
 function onKeyDown(e: KeyboardEvent) {
@@ -21,18 +17,12 @@ function onKeyDown(e: KeyboardEvent) {
 }
 
 onMounted(() => {
-  startPolling(15000)
   document.addEventListener('keydown', onKeyDown)
 })
 
 onUnmounted(() => {
   document.removeEventListener('keydown', onKeyDown)
 })
-
-async function signOut() {
-  try { await lockVault() } catch (e) { console.warn('lock failed:', e) }
-  router.replace('/unlock')
-}
 
 const isActive = (path: string) => {
   if (path === '/home') return route.path === '/home'
@@ -89,27 +79,9 @@ const classroomPreviews = [
   <aside
     :class="[
       'relative flex h-full flex-col overflow-hidden border-r border-border bg-background transition-all duration-300',
-      collapsed ? 'w-16' : 'w-64 md:overflow-visible',
+      collapsed ? 'w-16' : 'w-64',
     ]"
   >
-    <!-- Logo -->
-    <div class="flex h-14 items-center border-b border-border px-4 shrink-0">
-      <button class="flex items-center gap-2 text-foreground transition-opacity hover:opacity-80" @click="navigate('/home')">
-        <svg class="h-7 w-7 shrink-0 text-primary" viewBox="0 0 32 32" fill="none">
-          <path d="M16 2L4 8v16l12 6 12-6V8L16 2z" stroke="currentColor" stroke-width="2" fill="none" />
-          <path d="M16 8v16M8 12l8 4 8-4" stroke="currentColor" stroke-width="2" />
-        </svg>
-        <span :class="['text-lg font-semibold transition-opacity duration-300 whitespace-nowrap', collapsed ? 'opacity-0 w-0 overflow-hidden' : 'opacity-100']">Alexandria</span>
-      </button>
-    </div>
-
-    <!-- Edge toggle -->
-    <button type="button" class="sb-edge-toggle" :title="collapsed ? 'Expand sidebar' : 'Collapse sidebar'" @click="emit('toggle')">
-      <svg :class="['h-3 w-3 transition-transform duration-200', collapsed ? 'rotate-180' : '']" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
-      </svg>
-    </button>
-
     <!-- Scrollable nav area -->
     <nav class="flex-1 overflow-y-auto overflow-x-hidden px-2 py-3">
 
@@ -304,107 +276,10 @@ const classroomPreviews = [
       <SidebarSkillGraph />
     </div>
 
-    <!-- ========================================= -->
-    <!-- Fixed bottom — Governance, Sentinel, Network, Settings, Lock & Sign Out -->
-    <!-- ========================================= -->
-    <div class="border-t border-border px-2 py-2 shrink-0">
-      <!-- P2P status row (expanded only) -->
-      <div v-if="!collapsed" class="flex items-center gap-2 px-3 py-1.5 mb-1 text-xs text-muted-foreground">
-        <span class="w-2 h-2 rounded-full shrink-0" :class="p2pStatus?.is_running ? 'bg-success' : p2pStatus != null ? 'bg-muted-foreground/40' : 'bg-amber-500 animate-pulse'" />
-        {{ p2pStatus?.is_running ? `${p2pStatus.connected_peers} peer${p2pStatus.connected_peers !== 1 ? 's' : ''} connected` : p2pStatus != null ? 'Offline' : 'Starting...' }}
-      </div>
-
-      <!-- Governance -->
-      <button :class="['group relative flex items-center gap-3 w-full rounded-lg px-3 py-2 text-sm font-medium transition-colors', isActive('/governance') ? 'text-primary' : 'text-muted-foreground hover:bg-muted hover:text-foreground']" @click="navigate('/governance')">
-        <div v-if="isActive('/governance')" class="absolute left-0 top-1 bottom-1 w-0.5 rounded-full bg-primary" />
-        <svg class="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 21h18M3 10h18M5 6l7-3 7 3M4 10v11m16-11v11M8 14v3m4-3v3m4-3v3" /></svg>
-        <span :class="['transition-opacity duration-300 whitespace-nowrap', collapsed ? 'opacity-0 w-0 overflow-hidden' : 'opacity-100']">Community Proposals</span>
-        <div v-if="collapsed" class="sb-collapsed-tooltip">Governance</div>
-      </button>
-
-      <!-- Sentinel -->
-      <button :class="['group relative flex items-center gap-3 w-full rounded-lg px-3 py-2 text-sm font-medium transition-colors', isActive('/dashboard/sentinel') ? 'text-primary' : 'text-muted-foreground hover:bg-muted hover:text-foreground']" @click="navigate('/dashboard/sentinel')">
-        <div v-if="isActive('/dashboard/sentinel')" class="absolute left-0 top-1 bottom-1 w-0.5 rounded-full bg-primary" />
-        <svg class="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" /></svg>
-        <span :class="['transition-opacity duration-300 whitespace-nowrap', collapsed ? 'opacity-0 w-0 overflow-hidden' : 'opacity-100']">Sentinel</span>
-        <div v-if="collapsed" class="sb-collapsed-tooltip">Sentinel</div>
-      </button>
-
-      <!-- Network -->
-      <button :class="['group relative flex items-center gap-3 w-full rounded-lg px-3 py-2 text-sm font-medium transition-colors', isActive('/dashboard/network') ? 'text-primary' : 'text-muted-foreground hover:bg-muted hover:text-foreground']" @click="navigate('/dashboard/network')">
-        <div v-if="isActive('/dashboard/network')" class="absolute left-0 top-1 bottom-1 w-0.5 rounded-full bg-primary" />
-        <svg class="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" /></svg>
-        <span :class="['transition-opacity duration-300 whitespace-nowrap', collapsed ? 'opacity-0 w-0 overflow-hidden' : 'opacity-100']">Network</span>
-        <div v-if="collapsed" class="sb-collapsed-tooltip">Network</div>
-      </button>
-
-      <!-- Settings -->
-      <button :class="['group relative flex items-center gap-3 w-full rounded-lg px-3 py-2 text-sm font-medium transition-colors', isActive('/dashboard/settings') ? 'text-primary' : 'text-muted-foreground hover:bg-muted hover:text-foreground']" @click="navigate('/dashboard/settings')">
-        <div v-if="isActive('/dashboard/settings')" class="absolute left-0 top-1 bottom-1 w-0.5 rounded-full bg-primary" />
-        <svg class="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-        <span :class="['transition-opacity duration-300 whitespace-nowrap', collapsed ? 'opacity-0 w-0 overflow-hidden' : 'opacity-100']">Settings</span>
-        <div v-if="collapsed" class="sb-collapsed-tooltip">Settings</div>
-      </button>
-
-      <!-- Lock & Sign Out -->
-      <button class="group relative flex items-center gap-3 w-full rounded-lg px-3 py-2 text-sm font-medium text-error/80 hover:bg-error/10 hover:text-error transition-colors" @click="signOut">
-        <svg class="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9" /></svg>
-        <span :class="['transition-opacity duration-300 whitespace-nowrap', collapsed ? 'opacity-0 w-0 overflow-hidden' : 'opacity-100']">Lock &amp; Sign Out</span>
-        <div v-if="collapsed" class="sb-collapsed-tooltip">Lock</div>
-      </button>
-    </div>
   </aside>
 </template>
 
 <style scoped>
-/* =========================================
-   Edge Toggle
-   ========================================= */
-
-.sb-edge-toggle {
-  display: none;
-  position: absolute;
-  right: -0.6875rem;
-  top: 1.75rem;
-  transform: translateY(-50%);
-  z-index: 60;
-  width: 1.375rem;
-  height: 1.375rem;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--app-primary) 6%, transparent);
-  border: 1px solid color-mix(in srgb, var(--app-primary) 30%, transparent);
-  color: var(--app-primary);
-  cursor: pointer;
-  transition: color 0.2s ease, background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
-  box-shadow: 0 1px 3px rgb(0 0 0 / 0.06);
-}
-
-@media (min-width: 768px) {
-  .sb-edge-toggle { display: flex; }
-}
-
-.sb-edge-toggle:hover {
-  border-color: color-mix(in srgb, var(--app-primary) 50%, transparent);
-  background: var(--app-card);
-  box-shadow: 0 1px 3px rgb(0 0 0 / 0.06), 0 0 0 2px color-mix(in srgb, var(--app-primary) 10%, transparent);
-}
-
-.sb-edge-toggle:active { transform: translateY(-50%) scale(0.88); }
-
-:is(.dark *) .sb-edge-toggle {
-  background: rgb(24 24 28);
-  border-color: rgb(255 255 255 / 0.1);
-  box-shadow: 0 1px 4px rgb(0 0 0 / 0.4);
-}
-
-:is(.dark *) .sb-edge-toggle:hover {
-  background: rgb(32 32 38);
-  border-color: color-mix(in srgb, var(--app-primary) 50%, transparent);
-  box-shadow: 0 1px 4px rgb(0 0 0 / 0.4), 0 0 0 2px color-mix(in srgb, var(--app-primary) 15%, transparent);
-}
-
 /* =========================================
    Collapsed Tooltip
    ========================================= */
