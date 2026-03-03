@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
 import { useP2P } from '@/composables/useP2P'
+import { useContentSync } from '@/composables/useContentSync'
 
 const { status: p2pStatus, startPolling } = useP2P()
+const { visible: contentSyncVisible, statusMessage: contentSyncMessage } = useContentSync()
 
 onMounted(() => {
   startPolling(15000)
@@ -34,6 +36,10 @@ const networkIconClass = computed(() => {
         {{ networkStatusLabel }} | {{ peerCount }} peer{{ peerCount !== 1 ? 's' : '' }}
       </span>
     </div>
+
+    <div v-if="contentSyncVisible && contentSyncMessage" class="bottom-bar__right" :title="contentSyncMessage">
+      {{ contentSyncMessage }}
+    </div>
   </footer>
 </template>
 
@@ -42,6 +48,7 @@ const networkIconClass = computed(() => {
   height: 1.75rem;
   align-items: center;
   justify-content: flex-start;
+  gap: 1rem;
   padding: 0 0.5rem;
   border-top: 1px solid var(--app-border);
   background: color-mix(in srgb, var(--app-muted) 78%, var(--app-background));
@@ -55,5 +62,15 @@ const networkIconClass = computed(() => {
   gap: 0.5rem;
   min-width: 0;
   color: var(--app-foreground);
+}
+
+.bottom-bar__right {
+  margin-left: auto;
+  min-width: 0;
+  max-width: 65%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--app-muted-foreground);
 }
 </style>
