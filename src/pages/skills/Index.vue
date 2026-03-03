@@ -130,7 +130,7 @@ const bloomOrder = ['remember', 'understand', 'apply', 'analyze', 'evaluate', 'c
     <!-- Skeleton -->
     <div v-if="loading" class="space-y-6">
       <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <div v-for="i in 4" :key="i" class="animate-pulse rounded-xl border border-border bg-card p-5 text-center">
+        <div v-for="i in 4" :key="i" class="animate-pulse rounded-xl bg-card shadow-sm p-5 text-center">
           <div class="h-7 w-10 mx-auto rounded bg-muted-foreground/20 mb-2" />
           <div class="h-3 w-16 mx-auto rounded bg-muted-foreground/10" />
         </div>
@@ -138,13 +138,13 @@ const bloomOrder = ['remember', 'understand', 'apply', 'analyze', 'evaluate', 'c
       <div class="h-10 w-full animate-pulse rounded-lg bg-muted-foreground/8" />
       <div class="flex gap-4">
         <div class="w-64 space-y-3">
-          <div v-for="i in 2" :key="i" class="animate-pulse rounded-xl border border-border bg-card p-4">
+          <div v-for="i in 2" :key="i" class="animate-pulse rounded-xl bg-card shadow-sm p-4">
             <div class="h-3 w-20 rounded bg-muted-foreground/15 mb-3" />
             <div v-for="j in 4" :key="j" class="h-7 w-full rounded bg-muted-foreground/8 mb-1.5" />
           </div>
         </div>
         <div class="flex-1 space-y-2">
-          <div v-for="i in 5" :key="i" class="animate-pulse rounded-xl border border-border bg-card p-4">
+          <div v-for="i in 5" :key="i" class="animate-pulse rounded-xl bg-card shadow-sm p-4">
             <div class="flex items-start justify-between">
               <div class="space-y-2 flex-1">
                 <div class="h-4 w-48 rounded bg-muted-foreground/15" />
@@ -159,7 +159,7 @@ const bloomOrder = ['remember', 'understand', 'apply', 'analyze', 'evaluate', 'c
     <template v-else>
       <!-- Stats bar -->
       <div class="mb-6 grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <div class="rounded-xl border border-border bg-card p-5 text-center">
+        <div class="rounded-xl bg-card shadow-sm p-5 text-center">
           <p class="font-mono text-2xl font-bold text-foreground">{{ totalFields }}</p>
           <p class="text-xs text-muted-foreground flex items-center justify-center gap-1 mt-1">
             <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -168,7 +168,7 @@ const bloomOrder = ['remember', 'understand', 'apply', 'analyze', 'evaluate', 'c
             Fields
           </p>
         </div>
-        <div class="rounded-xl border border-border bg-card p-5 text-center">
+        <div class="rounded-xl bg-card shadow-sm p-5 text-center">
           <p class="font-mono text-2xl font-bold text-foreground">{{ totalSubjects }}</p>
           <p class="text-xs text-muted-foreground flex items-center justify-center gap-1 mt-1">
             <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -177,7 +177,7 @@ const bloomOrder = ['remember', 'understand', 'apply', 'analyze', 'evaluate', 'c
             Subjects
           </p>
         </div>
-        <div class="rounded-xl border border-border bg-card p-5 text-center">
+        <div class="rounded-xl bg-card shadow-sm p-5 text-center">
           <p class="font-mono text-2xl font-bold text-primary">{{ totalSkills }}</p>
           <p class="text-xs text-muted-foreground flex items-center justify-center gap-1 mt-1">
             <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -186,7 +186,7 @@ const bloomOrder = ['remember', 'understand', 'apply', 'analyze', 'evaluate', 'c
             Skills
           </p>
         </div>
-        <div class="rounded-xl border border-border bg-card p-5 text-center">
+        <div class="rounded-xl bg-card shadow-sm p-5 text-center">
           <p class="font-mono text-2xl font-bold text-foreground">{{ totalEdges }}</p>
           <p class="text-xs text-muted-foreground flex items-center justify-center gap-1 mt-1">
             <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -225,7 +225,7 @@ const bloomOrder = ['remember', 'understand', 'apply', 'analyze', 'evaluate', 'c
           <!-- Left: Hierarchy panel — collapsible on mobile -->
           <div class="w-full md:w-64 md:flex-shrink-0 space-y-3">
             <!-- Subject Fields -->
-            <div class="rounded-xl border border-border bg-card p-4">
+            <div class="rounded-xl bg-card shadow-sm p-4">
               <p class="text-[10px] font-semibold text-muted-foreground mb-3 tracking-wider uppercase">Subject Fields</p>
               <button
                 v-if="selectedField"
@@ -256,7 +256,7 @@ const bloomOrder = ['remember', 'understand', 'apply', 'analyze', 'evaluate', 'c
             </div>
 
             <!-- Subjects -->
-            <div class="rounded-xl border border-border bg-card p-4">
+            <div class="rounded-xl bg-card shadow-sm p-4">
               <p class="text-[10px] font-semibold text-muted-foreground mb-3 tracking-wider uppercase">Subjects</p>
               <button
                 v-if="selectedSubject"
@@ -285,7 +285,7 @@ const bloomOrder = ['remember', 'understand', 'apply', 'analyze', 'evaluate', 'c
             </div>
 
             <!-- Bloom level legend -->
-            <div class="rounded-xl border border-border bg-card p-4">
+            <div class="rounded-xl bg-card shadow-sm p-4">
               <p class="text-[10px] font-semibold text-muted-foreground mb-3 tracking-wider uppercase">Bloom's Levels</p>
               <div class="space-y-1.5">
                 <div v-for="level in bloomOrder" :key="level" class="flex items-center gap-2 text-xs">
@@ -299,7 +299,7 @@ const bloomOrder = ['remember', 'understand', 'apply', 'analyze', 'evaluate', 'c
 
           <!-- Right: Skill list -->
           <div class="flex-1 min-w-0">
-            <div v-if="filteredSkills.length === 0" class="rounded-xl border border-border bg-card p-8 text-center">
+            <div v-if="filteredSkills.length === 0" class="rounded-xl bg-card shadow-sm p-8 text-center">
               <p class="text-sm text-muted-foreground">
                 No skills match the current filters.
               </p>
@@ -313,7 +313,7 @@ const bloomOrder = ['remember', 'understand', 'apply', 'analyze', 'evaluate', 'c
               <div
                 v-for="skill in filteredSkills"
                 :key="skill.id"
-                class="rounded-xl border border-border bg-card p-4 cursor-pointer transition-all hover:border-primary/30"
+                class="rounded-xl bg-card shadow-sm p-4 cursor-pointer transition-shadow hover:shadow-md"
                 @click="goToSkill(skill.id)"
               >
                 <div class="flex items-start justify-between gap-3">
@@ -390,7 +390,7 @@ const bloomOrder = ['remember', 'understand', 'apply', 'analyze', 'evaluate', 'c
           <div
             v-for="proof in proofs"
             :key="proof.id"
-            class="rounded-xl border border-border bg-card p-5 cursor-pointer transition-all hover:border-primary/30"
+            class="rounded-xl bg-card shadow-sm p-5 cursor-pointer transition-shadow hover:shadow-md"
             @click="goToSkill(proof.skill_id)"
           >
             <div class="flex items-start justify-between mb-3">

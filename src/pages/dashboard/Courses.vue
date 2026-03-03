@@ -83,7 +83,7 @@ onMounted(async () => {
           <div
             v-for="i in 3"
             :key="i"
-            class="animate-pulse rounded-xl border border-border bg-card p-6"
+            class="animate-pulse rounded-xl bg-card shadow-sm p-6"
           >
             <div class="h-3 w-24 rounded bg-muted-foreground/15 mb-3" />
             <div class="h-8 w-12 rounded bg-muted-foreground/20" />
@@ -95,7 +95,7 @@ onMounted(async () => {
           <div
             v-for="i in 3"
             :key="i"
-            class="animate-pulse overflow-hidden rounded-xl border border-border bg-card"
+            class="animate-pulse overflow-hidden rounded-xl bg-card shadow-sm"
           >
             <div class="flex flex-col sm:flex-row">
               <div class="h-32 sm:h-auto sm:w-48 bg-muted-foreground/10" />
@@ -118,15 +118,15 @@ onMounted(async () => {
       <template v-else>
         <!-- Stats grid -->
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div class="rounded-xl border border-border bg-card p-6">
+          <div class="rounded-xl bg-card shadow-sm p-6">
             <p class="text-sm text-muted-foreground">Total Enrolled</p>
             <p class="text-3xl font-bold mt-1">{{ total }}</p>
           </div>
-          <div class="rounded-xl border border-border bg-card p-6">
+          <div class="rounded-xl bg-card shadow-sm p-6">
             <p class="text-sm text-muted-foreground">In Progress</p>
             <p class="text-3xl font-bold text-yellow-400 mt-1">{{ inProgress }}</p>
           </div>
-          <div class="rounded-xl border border-border bg-card p-6">
+          <div class="rounded-xl bg-card shadow-sm p-6">
             <p class="text-sm text-muted-foreground">Completed</p>
             <p class="text-3xl font-bold text-green-400 mt-1">{{ completed }}</p>
           </div>
@@ -199,7 +199,7 @@ onMounted(async () => {
             v-for="enrollment in filteredEnrollments"
             :key="enrollment.id"
             :to="enrollment.status === 'active' ? `/learn/${enrollment.course_id}` : `/courses/${enrollment.course_id}`"
-            class="group block overflow-hidden rounded-xl border border-border bg-card transition-all hover:border-primary/50"
+            class="group block overflow-hidden rounded-xl bg-card shadow-sm transition-all hover:shadow-md hover:-translate-y-0.5"
           >
             <div class="flex flex-col sm:flex-row">
               <!-- Thumbnail -->

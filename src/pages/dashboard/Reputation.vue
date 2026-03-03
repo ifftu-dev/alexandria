@@ -54,13 +54,13 @@ function formatConfidence(n: number): string {
     <!-- Skeleton -->
     <div v-if="loading" class="space-y-6">
       <div class="grid gap-4 sm:grid-cols-3">
-        <div v-for="i in 3" :key="i" class="animate-pulse rounded-xl border border-border bg-card p-6">
+        <div v-for="i in 3" :key="i" class="animate-pulse rounded-xl bg-card shadow-sm p-6">
           <div class="h-3 w-24 rounded bg-muted-foreground/15 mb-3" />
           <div class="h-8 w-16 rounded bg-muted-foreground/20" />
         </div>
       </div>
       <div class="space-y-3">
-        <div v-for="i in 3" :key="i" class="animate-pulse rounded-lg border border-border bg-card p-4">
+        <div v-for="i in 3" :key="i" class="animate-pulse rounded-lg bg-card shadow-sm p-4">
           <div class="flex items-center justify-between mb-3">
             <div class="h-4 w-32 rounded bg-muted-foreground/15" />
             <div class="h-6 w-12 rounded bg-muted-foreground/20" />
@@ -95,15 +95,15 @@ function formatConfidence(n: number): string {
 
       <!-- Stats -->
       <div class="mb-8 grid gap-4" :class="activeTab === 'instructor' ? 'sm:grid-cols-3' : 'sm:grid-cols-2'">
-        <div v-if="activeTab === 'instructor'" class="rounded-xl border border-border bg-card p-6">
+        <div v-if="activeTab === 'instructor'" class="rounded-xl bg-card shadow-sm p-6">
           <p class="text-sm text-muted-foreground">Total Impact</p>
           <p class="mt-2 text-3xl font-bold text-primary">{{ totalImpact.toFixed(2) }}</p>
         </div>
-        <div class="rounded-xl border border-border bg-card p-6">
+        <div class="rounded-xl bg-card shadow-sm p-6">
           <p class="text-sm text-muted-foreground">{{ activeTab === 'instructor' ? 'Skills Taught' : 'Skills Demonstrated' }}</p>
           <p class="mt-2 text-3xl font-bold text-foreground">{{ currentAssertions.length }}</p>
         </div>
-        <div class="rounded-xl border border-border bg-card p-6">
+        <div class="rounded-xl bg-card shadow-sm p-6">
           <p class="text-sm text-muted-foreground">Average Confidence</p>
           <p class="mt-2 text-3xl font-bold text-primary">{{ formatConfidence(avgConfidence) }}</p>
         </div>
@@ -131,7 +131,7 @@ function formatConfidence(n: number): string {
         <div
           v-for="assertion in currentAssertions"
           :key="assertion.id"
-          class="rounded-lg border border-border bg-card p-4 transition-colors hover:border-primary/30"
+          class="rounded-lg bg-card shadow-sm p-4 transition-shadow hover:shadow-md"
         >
           <div class="flex items-center justify-between">
             <div>
