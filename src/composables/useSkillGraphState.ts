@@ -21,6 +21,7 @@ const availableCount = ref(0)
 const lockedCount = ref(0)
 const totalCount = ref(0)
 const loaded = ref(false)
+const isModalOpen = ref(false)
 
 export type SkillStatus = 'earned' | 'available' | 'locked'
 
@@ -35,5 +36,6 @@ export function useSkillGraphState() {
     lockedCount,
     totalCount,
     loaded,
+    isModalOpen,
   }
 }

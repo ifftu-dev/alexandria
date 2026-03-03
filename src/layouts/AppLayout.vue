@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import AppSidebar from '@/components/layout/AppSidebar.vue'
 import AppTopBar from '@/components/layout/AppTopBar.vue'
+import AppBottomBar from '@/components/layout/AppBottomBar.vue'
 import MobileTabBar from '@/components/layout/MobileTabBar.vue'
 import { ref, onMounted } from 'vue'
 
@@ -20,25 +21,29 @@ function toggleSidebar() {
 </script>
 
 <template>
-  <div class="flex h-full overflow-hidden bg-background safe-area-top safe-area-lr">
-    <!-- Sidebar — hidden on mobile, overflow-visible for edge toggle -->
-    <div class="hidden md:flex relative h-full" style="overflow: visible;">
-      <AppSidebar
-        :collapsed="sidebarCollapsed"
-        @toggle="toggleSidebar"
-      />
-    </div>
+  <div class="flex flex-col h-full overflow-hidden bg-background safe-area-top safe-area-lr">
+    <!-- Topbar — spans full width above everything -->
+    <AppTopBar :sidebar-collapsed="sidebarCollapsed" @toggle-sidebar="toggleSidebar" />
 
-    <!-- Main column: topbar + content -->
-    <div class="flex flex-1 flex-col overflow-hidden">
-      <AppTopBar :sidebar-collapsed="sidebarCollapsed" @toggle-sidebar="toggleSidebar" />
+    <!-- Below topbar: sidebar + content side by side -->
+    <div class="flex flex-1 overflow-hidden">
+      <!-- Sidebar — hidden on mobile -->
+      <div class="hidden md:flex relative h-full">
+        <AppSidebar
+          :collapsed="sidebarCollapsed"
+          @toggle="toggleSidebar"
+        />
+      </div>
 
+      <!-- Content area -->
       <main class="flex-1 overflow-y-auto mobile-content-padding">
         <div class="px-4 pt-6 pb-8 sm:px-6 lg:px-8">
           <slot />
         </div>
       </main>
     </div>
+
+    <AppBottomBar />
 
     <!-- Bottom tab bar — visible only on mobile -->
     <MobileTabBar />
