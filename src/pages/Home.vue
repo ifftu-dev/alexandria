@@ -3,6 +3,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { useAuth } from '@/composables/useAuth'
 import { useP2P } from '@/composables/useP2P'
+import { useContentSync } from '@/composables/useContentSync'
 import { StatusBadge } from '@/components/ui'
 import CourseCard from '@/components/course/CourseCard.vue'
 import type { Course, Enrollment } from '@/types'
@@ -10,6 +11,7 @@ import type { Course, Enrollment } from '@/types'
 const { invoke } = useLocalApi()
 const { displayName } = useAuth()
 const { status: p2pStatus, start: startP2P, startPolling } = useP2P()
+const { startContentSync, completeContentSync, failContentSync } = useContentSync()
 
 const loading = ref(true)
 const enrollments = ref<Enrollment[]>([])
@@ -46,6 +48,22 @@ const recommendedCourses = computed(() =>
 
 onMounted(async () => {
   try {
+    const syncStartedAt = performance.now()
+    startContentSync()
+
+    const coursesBeforeSync = await invoke<Course[]>('list_courses').catch(() => [])
+    const beforeCount = coursesBeforeSync.length
+
+    const bootstrapped = await invoke<number>('bootstrap_public_catalog').catch((e) => {
+      console.warn('Public catalog bootstrap skipped on Home:', e)
+      return 0
+    })
+
+    const hydrated = await invoke<number>('hydrate_catalog_courses', { limit: 200 }).catch((e) => {
+      console.warn('Catalog hydration skipped on Home:', e)
+      return 0
+    })
+
     const [allCourses, allEnrollments] = await Promise.all([
       invoke<Course[]>('list_courses').catch(() => []),
       invoke<Enrollment[]>('list_enrollments').catch(() => []),
@@ -60,8 +78,17 @@ onMounted(async () => {
         enrolledCourseMap.value[enrollment.course_id] = course
       }
     }
+
+    completeContentSync({
+      bootstrapped,
+      hydrated,
+      beforeCourses: beforeCount,
+      afterCourses: allCourses.length,
+      durationMs: Math.round(performance.now() - syncStartedAt),
+    })
   } catch (e) {
     console.error('Failed to load home data:', e)
+    failContentSync(String(e))
   } finally {
     loading.value = false
   }

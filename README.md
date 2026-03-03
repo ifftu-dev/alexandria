@@ -15,6 +15,7 @@
 ## What Alexandria Does
 
 - **Courses & Assessments** — Rich HTML, video, and interactive quiz content with per-element progress tracking, notes, and skill tagging.
+- **Public Content Availability** — Published course media can resolve from public URLs (with local BLAKE3 caching), and fresh installs bootstrap a bundled public catalog before network discovery catches up.
 - **Skill Proofs** — Learners earn verifiable credentials scoped to individual skills at Bloom's taxonomy levels (remember through create), aggregated from weighted evidence.
 - **Reputation** — Instructor impact derived from learner outcomes, scoped to `(subject, role, skill, proficiency_level)`. Distribution-based with confidence bounds — no global scores.
 - **Blockchain Credentials** — NFTs minted on Cardano (Conway era) with CIP-25 metadata. Independently verifiable on-chain without the platform.
@@ -83,7 +84,7 @@ After connecting to the relay, each node:
 
 Known peer addresses are persisted to a `peers` table in SQLite and reloaded on subsequent launches. GossipSub peer exchange messages propagate addresses across the mesh.
 
-The P2P node auto-starts after wallet unlock — users see only the live peer count.
+The P2P node auto-starts after wallet unlock. Home also attempts a content sync (bootstrap + hydrate) after unlock and surfaces completion stats in the bottom status bar.
 
 The relay server lives in a [separate repository](https://github.com/ifftu-dev/alexandria-relay).
 
