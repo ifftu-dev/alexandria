@@ -44,5 +44,7 @@
 	<string>Alexandria uses your camera for optional face verification during assessments. All processing happens on-device — no images or video are ever transmitted.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Alexandria may use your microphone for oral assessments. All processing happens on-device — no audio is ever transmitted.</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>Alexandria uses Face ID or Touch ID to unlock your encrypted vault on this device.</string>
 </dict>
 </plist>

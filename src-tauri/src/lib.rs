@@ -250,6 +250,8 @@ pub fn run() {
             // Catalog
             commands::catalog::search_catalog,
             commands::catalog::get_catalog_entry,
+            commands::catalog::bootstrap_public_catalog,
+            commands::catalog::hydrate_catalog_courses,
             // Governance
             commands::governance::list_daos,
             commands::governance::get_dao,

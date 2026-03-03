@@ -12,6 +12,14 @@ const loading = ref(true)
 
 onMounted(async () => {
   try {
+    await invoke<number>('bootstrap_public_catalog').catch((e) => {
+      console.warn('Public catalog bootstrap skipped:', e)
+      return 0
+    })
+    await invoke<number>('hydrate_catalog_courses', { limit: 200 }).catch((e) => {
+      console.warn('Catalog hydration skipped:', e)
+      return 0
+    })
     courses.value = await invoke<Course[]>('list_courses')
   } catch (e) {
     console.error('Failed to load courses:', e)

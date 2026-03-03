@@ -48,6 +48,8 @@ pub enum ResolveSource {
     MappedLocal,
     /// Fetched from an IPFS gateway and cached locally.
     Gateway,
+    /// Fetched from a public URL and cached locally.
+    Url,
 }
 
 /// Result of resolving content.
@@ -98,6 +100,7 @@ impl ContentResolver {
         match &content_id {
             ContentId::Blake3Hex(hash) => self.resolve_blake3(hash).await,
             ContentId::IpfsCid(cid_str) => self.resolve_cid(cid_str).await,
+            ContentId::Url(url) => self.resolve_url(url).await,
         }
     }
 
@@ -159,6 +162,28 @@ impl ContentResolver {
         self.fetch_and_cache(cid_str).await
     }
 
+    /// Resolve by URL: mapping -> local first, then fetch URL and cache.
+    async fn resolve_url(&self, url: &str) -> Result<ResolveResult, ResolveError> {
+        if let Some(mapped_hash) = self.lookup_blake3_for_cid(url).await {
+            match content::get_bytes(&self.node, &mapped_hash).await {
+                Ok(bytes) => {
+                    let size = bytes.len() as u64;
+                    return Ok(ResolveResult {
+                        bytes,
+                        blake3_hash: mapped_hash,
+                        ipfs_cid: Some(url.to_string()),
+                        source: ResolveSource::MappedLocal,
+                        size,
+                    });
+                }
+                Err(content::ContentError::NotFound(_)) => {}
+                Err(e) => return Err(ResolveError::Store(e.to_string())),
+            }
+        }
+
+        self.fetch_url_and_cache(url).await
+    }
+
     /// Fetch content from IPFS gateways, store in iroh, record mapping.
     async fn fetch_and_cache(&self, cid_str: &str) -> Result<ResolveResult, ResolveError> {
         let bytes = self
@@ -188,6 +213,37 @@ impl ContentResolver {
             blake3_hash: add_result.hash,
             ipfs_cid: Some(cid_str.to_string()),
             source: ResolveSource::Gateway,
+            size: add_result.size,
+        })
+    }
+
+    /// Fetch content from a direct URL, store in iroh, record mapping.
+    async fn fetch_url_and_cache(&self, url: &str) -> Result<ResolveResult, ResolveError> {
+        let bytes = self
+            .gateway
+            .fetch_by_url(url)
+            .await
+            .map_err(|e| ResolveError::Gateway(e.to_string()))?;
+
+        let add_result = content::add_bytes(&self.node, &bytes)
+            .await
+            .map_err(|e| ResolveError::Store(e.to_string()))?;
+
+        self.save_mapping(url, &add_result.hash, add_result.size)
+            .await;
+
+        log::info!(
+            "cached URL {} → blake3:{} ({} bytes)",
+            url,
+            add_result.hash,
+            add_result.size
+        );
+
+        Ok(ResolveResult {
+            bytes,
+            blake3_hash: add_result.hash,
+            ipfs_cid: Some(url.to_string()),
+            source: ResolveSource::Url,
             size: add_result.size,
         })
     }
