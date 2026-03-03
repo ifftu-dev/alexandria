@@ -153,9 +153,10 @@ src/
 │
 ├── composables/            # Shared reactive state
 │   ├── useAuth.ts          # Wallet/vault lifecycle, identity state
-│   ├── useTheme.ts         # Theme toggle (light/dark/system), localStorage persistence
+│   ├── useTheme.ts         # Theme toggle (light/dark/system), localStorage persistence, setTheme()
 │   ├── useLocalApi.ts      # Tauri invoke wrapper
 │   ├── useP2P.ts           # P2P status polling
+│   ├── useSkillGraphState.ts # Module-level reactive singleton for shared skill graph state
 │   └── useSentinel.ts      # Sentinel integrity sessions
 │
 ├── components/
@@ -176,6 +177,7 @@ src/
     │   ├── auth/
     │   │   └── Starfield.vue   # 3-layer parallax SVG starfield (onboarding/unlock bg)
     │   ├── course/
+    │   │   ├── CourseCard.vue  # Borderless shadow card with glassmorphism stats, hover lift
     │   │   ├── TextContent.vue # Rich HTML renderer
     │   │   ├── QuizEngine.vue  # Interactive quiz with scoring
     │   │   ├── McqQuestion.vue # Multiple-choice question component
@@ -187,9 +189,10 @@ src/
     │   ├── integrity/
     │   │   └── SentinelTrainingWizard.vue  # 6-step integrity calibration wizard
     │   └── layout/
-    │       ├── AppSidebar.vue    # Desktop navigation, P2P status, theme toggle, sign out
-    │       ├── AppTopBar.vue     # Top bar (responsive)
-    │       └── MobileTabBar.vue  # Bottom tab bar for mobile (iOS/Android), "More" drawer
+    │       ├── AppSidebar.vue       # Desktop sidebar — collapsible Live Tutoring/Classrooms previews, skill graph, edge toggle
+    │       ├── AppTopBar.vue        # Top bar with Mark 2-style user menu dropdown (role badge, icon SVGs)
+    │       ├── MobileTabBar.vue     # Bottom tab bar for mobile (iOS/Android), backdrop blur, active indicator
+    │       └── SidebarSkillGraph.vue # force-graph canvas widget — earned/available/locked skill nodes with glow
 │
 ├── layouts/
 │   ├── AppLayout.vue       # Sidebar + content area

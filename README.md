@@ -44,7 +44,7 @@ alexandria/
 ├── src/              # Vue 3 + TypeScript frontend
 │   ├── pages/        # 19 pages (onboarding, courses, skills, governance, ...)
 │   ├── components/   # UI components + auth + course + layout
-│   ├── composables/  # useAuth, useTheme, useP2P, useSentinel, useLocalApi
+│   ├── composables/  # useAuth, useTheme, useP2P, useSentinel, useSkillGraphState, useLocalApi
 │   └── assets/       # Tailwind CSS v4 design system
 ├── cli/              # Developer CLI (alex) — Rust + clap
 ├── patches/          # Local crate patches (if-watch iOS fix)

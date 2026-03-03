@@ -3,7 +3,7 @@
 > What exists in the (Mark 2) documentation and codebase that has not yet been
 > implemented or documented in (Mark 3).
 
-**Last updated**: 2026-03-02
+**Last updated**: 2026-03-03
 
 ---
 
@@ -240,6 +240,15 @@ several mark2 documents have no mark3 equivalent:
 | Client-side rule engine | Y | Y | |
 | Client-side ML models | Y | Y | Autoencoder, CNN, LBP embedder |
 | Server-side decision tree | Y | - | **Missing** — no server |
+| **UI / Design** | | | |
+| Refined Editorial design system | Y | Y | Shadow-only cards, glassmorphism stats, serif greetings, off-white bg |
+| Sidebar (collapsible, Live Tutoring, Classrooms) | Y | Y | Inline previews with status dots, marquee, unread badges |
+| Sidebar skill graph widget | Y | Y | force-graph canvas with earned/available/locked nodes |
+| Course cards (hover lift, thumbnail zoom) | Y | Y | CourseCard component with glassmorphism stats pills |
+| TopBar user menu (role badge, icon SVGs) | Y | Y | Mark 2-style rounded-xl dropdown |
+| Mobile tab bar (backdrop blur, active indicator) | Y | Y | bg-black/50 backdrop, left bar active indicator |
+| Live Tutoring pages | Y | - | **Missing** — preview cards link to /courses placeholder |
+| Classrooms pages | Y | - | **Missing** — preview cards link to /courses placeholder |
 | **Infrastructure** | | | |
 | Docker Compose | Y | - | Not applicable |
 | Terraform (AWS/GCP/Azure) | Y | - | Not applicable |
