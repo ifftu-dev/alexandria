@@ -96,16 +96,16 @@ async function signOut() {
 
 <template>
   <div class="md:hidden">
-  <!-- Backdrop -->
+  <!-- Backdrop (Mark 2 style: bg-black/50) -->
   <Transition name="fade">
     <div
       v-if="moreOpen"
-      class="fixed inset-0 z-[60] bg-black/40"
+      class="fixed inset-0 z-[60] bg-black/50"
       @click="moreOpen = false"
     />
   </Transition>
 
-  <!-- Slide-up drawer — visually connected to the tab bar -->
+  <!-- Slide-up drawer -->
   <Transition name="slide-up">
     <div
       v-if="moreOpen"
@@ -116,22 +116,28 @@ async function signOut() {
         <div class="w-10 h-1 rounded-full bg-border" />
       </div>
 
-      <!-- Drawer content — pb-16 accounts for the tab bar underneath -->
+      <!-- Drawer content -->
       <div class="px-4 pb-16 max-h-[70vh] overflow-y-auto">
         <div v-for="section in drawerSections" :key="section.title" class="mb-4 last:mb-0">
-          <div class="px-1 pb-1.5 text-[0.65rem] font-semibold tracking-wider uppercase text-muted-foreground/60">
+          <!-- Section header (Mark 2 style: larger, full opacity) -->
+          <div class="px-3 pb-1.5 text-[0.8125rem] font-semibold tracking-wider uppercase text-muted-foreground">
             {{ section.title }}
           </div>
           <button
             v-for="item in section.items"
             :key="item.path"
-            class="flex items-center w-full gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors"
+            class="relative flex items-center w-full gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors"
             :class="isActive(item.path)
-              ? 'bg-primary/10 text-primary font-medium'
+              ? 'text-primary'
               : 'text-foreground active:bg-muted'"
             @click="navigate(item.path)"
           >
-            <svg class="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
+            <!-- Active indicator — left bar (Mark 2 style) -->
+            <span
+              v-if="isActive(item.path)"
+              class="absolute left-0 top-1 bottom-1 w-0.5 rounded-full bg-primary"
+            />
+            <svg class="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" :d="item.icon" />
             </svg>
             {{ item.label }}
@@ -143,10 +149,10 @@ async function signOut() {
 
         <!-- Theme toggle -->
         <button
-          class="flex items-center w-full gap-3 rounded-lg px-3 py-2.5 text-sm text-foreground active:bg-muted transition-colors"
+          class="flex items-center w-full gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-foreground active:bg-muted transition-colors"
           @click="toggleTheme"
         >
-          <svg class="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
+          <svg class="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" :d="themeIcons[theme]" />
           </svg>
           Theme: {{ theme.charAt(0).toUpperCase() + theme.slice(1) }}
@@ -214,14 +220,14 @@ async function signOut() {
 
 <style scoped>
 .fade-enter-active, .fade-leave-active {
-  transition: opacity 200ms ease;
+  transition: opacity 300ms ease;
 }
 .fade-enter-from, .fade-leave-to {
   opacity: 0;
 }
 
 .slide-up-enter-active, .slide-up-leave-active {
-  transition: transform 250ms cubic-bezier(0.4, 0, 0.2, 1);
+  transition: transform 300ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 .slide-up-enter-from, .slide-up-leave-to {
   transform: translateY(100%);
