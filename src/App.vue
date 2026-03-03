@@ -45,7 +45,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div v-if="!ready" class="flex items-center justify-center h-dvh bg-background safe-area-top">
+  <div v-if="!ready" class="flex items-center justify-center h-full bg-background safe-area-top">
     <div class="text-center">
       <div class="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-3" />
       <p class="text-sm text-muted-foreground">Initializing...</p>

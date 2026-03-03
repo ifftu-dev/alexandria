@@ -56,5 +56,9 @@ export function useTheme() {
     theme.value = order[(idx + 1) % order.length] as Theme
   }
 
-  return { theme, toggleTheme }
+  function setTheme(t: Theme) {
+    theme.value = t
+  }
+
+  return { theme, toggleTheme, setTheme }
 }

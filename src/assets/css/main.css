@@ -162,7 +162,7 @@ html {
 }
 
 html, body, #app {
-  height: 100dvh;
+  height: 100%;
   margin: 0;
   padding: 0;
   overflow: hidden;
@@ -173,6 +173,7 @@ body {
   background-color: var(--app-background);
   color: var(--app-foreground);
   line-height: 1.6;
+  transition: background-color var(--transition-base), color var(--transition-base);
 }
 
 /* ============================================
@@ -366,6 +367,17 @@ body {
   box-shadow: 0 4px 14px color-mix(in srgb, var(--app-error) 25%, transparent);
 }
 
+.btn-glow {
+  background: linear-gradient(135deg, var(--app-primary), rgb(79 70 229));
+  color: white;
+  border: none;
+}
+
+.btn-glow:hover:not(:disabled) {
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--app-primary) 30%, transparent);
+  transform: translateY(-1px);
+}
+
 .btn-lg {
   padding: 1rem 2rem;
   font-size: 1rem;
@@ -397,7 +409,7 @@ body {
 .input {
   width: 100%;
   padding: 0.625rem 0.875rem;
-  font-size: 0.875rem;
+  font-size: 1rem;
   line-height: 1.5;
   background-color: var(--app-background);
   border: 1px solid var(--app-input);
@@ -435,6 +447,10 @@ body {
   background-color: color-mix(in srgb, var(--app-success) 5%, transparent);
 }
 
+.input-success:focus {
+  box-shadow: 0 0 0 2px var(--app-background), 0 0 0 4px var(--app-success);
+}
+
 /* Labels */
 .label {
   display: block;
@@ -464,6 +480,10 @@ body {
 .card-elevated {
   box-shadow: var(--shadow-md);
   border: none;
+}
+
+.card-elevated:hover {
+  box-shadow: var(--shadow-lg);
 }
 
 /* Alerts */
