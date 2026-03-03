@@ -23,6 +23,11 @@ function isMissingEntitlementError(message: string): boolean {
   return message.includes('-34018') || message.includes('missing entitlement')
 }
 
+function isNotFoundError(message: string): boolean {
+  const lower = message.toLowerCase()
+  return lower.includes('itemnotfound') || lower.includes('not found')
+}
+
 export async function getBiometricStatus(): Promise<BiometricStatus> {
   try {
     const status = await checkStatus()
@@ -65,7 +70,9 @@ export async function storeVaultPasswordForBiometric(password: string): Promise<
       name: VAULT_PASSWORD_KEY,
       data: password,
     })
-    sessionBiometricPassword = null
+    // Keep an in-memory copy for this app session as a resilience fallback
+    // in case keychain retrieval is flaky in some runtime configurations.
+    sessionBiometricPassword = password
     return 'secure'
   } catch (error) {
     const message = messageFromError(error)
@@ -100,7 +107,7 @@ export async function getVaultPasswordViaBiometric(reason = 'Authenticate to unl
     return result.data
   } catch (error) {
     const message = messageFromError(error)
-    if (sessionBiometricPassword && isMissingEntitlementError(message)) {
+    if (sessionBiometricPassword && (isMissingEntitlementError(message) || isNotFoundError(message))) {
       await authenticate(reason, { allowDeviceCredential: true })
       return sessionBiometricPassword
     }
