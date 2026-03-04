@@ -14,6 +14,7 @@ const { theme, setTheme } = useTheme()
 const { status: p2pStatus, startPolling } = useP2P()
 const { displayName, lockVault } = useAuth()
 const isMac = typeof navigator !== 'undefined' && /Mac/.test(navigator.userAgent)
+const isMobilePlatform = typeof navigator !== 'undefined' && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
 const canGoBack = ref(false)
 const canGoForward = ref(false)
 
@@ -110,8 +111,9 @@ const userInitial = () => displayName.value ? displayName.value.charAt(0).toUppe
   <header :class="['topbar', isMac ? 'topbar--macos' : '']" data-tauri-drag-region>
     <!-- Left: Sidebar toggle -->
     <div class="topbar-left">
-      <!-- Sidebar toggle (visible on all screen sizes) -->
+      <!-- Sidebar toggle (desktop only) -->
       <button
+        v-if="!isMobilePlatform"
         class="topbar-icon-btn"
         :aria-label="sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'"
         :title="sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'"

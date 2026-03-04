@@ -55,6 +55,33 @@ onUnmounted(() => {
 
 const passwordsMatch = computed(() => password.value === confirmPassword.value)
 const passwordValid = computed(() => password.value.length >= 8)
+const mnemonicWords = computed(() => mnemonic.value.trim().split(/\s+/).filter(Boolean))
+
+const createWizardSteps: { id: Step; label: string }[] = [
+  { id: 'welcome', label: 'Welcome' },
+  { id: 'password', label: 'Secure Vault' },
+  { id: 'generating', label: 'Generate Keys' },
+  { id: 'backup', label: 'Backup Phrase' },
+  { id: 'done', label: 'Complete' },
+]
+
+const importWizardSteps: { id: Step; label: string }[] = [
+  { id: 'welcome', label: 'Welcome' },
+  { id: 'password', label: 'Secure Vault' },
+  { id: 'generating', label: 'Restore Keys' },
+  { id: 'done', label: 'Complete' },
+]
+
+const wizardSteps = computed(() => (mode.value === 'create' ? createWizardSteps : importWizardSteps))
+const activeStepIndex = computed(() => {
+  const idx = wizardSteps.value.findIndex((s) => s.id === step.value)
+  return idx >= 0 ? idx : 0
+})
+const progressPercent = computed(() => {
+  const maxIndex = wizardSteps.value.length - 1
+  if (maxIndex <= 0) return 0
+  return Math.round((activeStepIndex.value / maxIndex) * 100)
+})
 
 function startCreate() {
   mode.value = 'create'
@@ -174,10 +201,58 @@ function enterApp() {
 </script>
 
 <template>
-  <div class="min-h-screen flex items-center justify-center bg-background p-4 sm:p-8 relative overflow-hidden">
+  <div class="min-h-screen bg-background p-4 sm:p-6 lg:p-8 relative overflow-hidden">
     <Starfield />
 
-    <div class="w-full max-w-lg relative z-10">
+    <div class="w-full max-w-6xl mx-auto relative z-10">
+      <div class="grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)] lg:gap-6 xl:gap-8">
+        <aside class="hidden lg:flex lg:flex-col rounded-2xl border border-border/70 bg-card/70 backdrop-blur p-6">
+          <div class="mb-6">
+            <div class="relative w-12 h-12 mb-4">
+              <div class="absolute inset-0 rounded-full bg-primary/10 animate-ping" style="animation-duration: 3s;" />
+              <div class="relative w-12 h-12 flex items-center justify-center">
+                <svg class="w-9 h-9 text-primary" viewBox="0 0 32 32" fill="none">
+                  <path d="M16 2L4 8v16l12 6 12-6V8L16 2z" stroke="currentColor" stroke-width="2" fill="none" />
+                  <path d="M16 8v16M8 12l8 4 8-4" stroke="currentColor" stroke-width="2" />
+                </svg>
+              </div>
+            </div>
+            <h2 class="text-xl font-semibold text-foreground">Welcome to Alexandria</h2>
+            <p class="mt-1 text-sm text-muted-foreground">Set up your sovereign learning identity in a few guided steps.</p>
+          </div>
+
+          <div class="space-y-2.5">
+            <div
+              v-for="(wizardStep, index) in wizardSteps"
+              :key="wizardStep.id"
+              class="flex items-center gap-3 rounded-lg px-2.5 py-2"
+              :class="index === activeStepIndex ? 'bg-primary/10 text-primary' : index < activeStepIndex ? 'text-foreground' : 'text-muted-foreground'"
+            >
+              <span
+                class="flex h-6 w-6 items-center justify-center rounded-full border text-xs font-semibold"
+                :class="index <= activeStepIndex ? 'border-primary/50 bg-primary/10' : 'border-border/70 bg-background/70'"
+              >
+                {{ index + 1 }}
+              </span>
+              <span class="text-sm font-medium">{{ wizardStep.label }}</span>
+            </div>
+          </div>
+
+          <div class="mt-auto pt-6 text-xs text-muted-foreground italic tracking-wide">
+            I am, because we all are
+          </div>
+        </aside>
+
+        <div class="rounded-2xl border border-border/70 bg-card/80 backdrop-blur px-4 py-5 sm:px-6 sm:py-6 lg:px-8 lg:py-8">
+          <div class="mb-5">
+            <div class="flex items-center justify-between text-xs text-muted-foreground mb-2">
+              <span>{{ wizardSteps[activeStepIndex]?.label }}</span>
+              <span>{{ progressPercent }}%</span>
+            </div>
+            <div class="h-1.5 rounded-full bg-muted/50 overflow-hidden">
+              <div class="h-full bg-primary transition-all duration-500" :style="{ width: `${progressPercent}%` }" />
+            </div>
+          </div>
 
       <!-- ============================================ -->
       <!-- WELCOME                                      -->
@@ -419,7 +494,7 @@ function enterApp() {
         <div class="card p-5 mb-6">
           <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
             <div
-              v-for="(word, i) in mnemonic.split(' ')"
+              v-for="(word, i) in mnemonicWords"
               :key="i"
               class="flex items-center gap-2 text-sm py-1.5 px-2.5 rounded bg-muted/30"
             >
@@ -495,6 +570,8 @@ function enterApp() {
         </p>
       </div>
 
+        </div>
+      </div>
     </div>
   </div>
 </template>
