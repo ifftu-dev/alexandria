@@ -97,12 +97,12 @@ objc2 = "0.6"
 iota_stronghold = "2"
 
 # Live tutoring — Media over QUIC (iroh-live)
-# Desktop-only Phase 1: camera + audio + screen share via iroh P2P rooms.
+# Desktop: full video + audio + screen share via iroh P2P rooms.
 # Uses patched fork with firewheel 0.10 (cpal 0.17.x) to fix CoreAudio
-# SIGSEGV on macOS Sequoia. Depends on system ffmpeg which isn't
-# available for iOS/Android cross-compilation.
+# SIGSEGV on macOS Sequoia. The 'video' feature (default) includes
+# ffmpeg, nokhwa, xcap for camera/screen capture and H.264 encoding.
 iroh-gossip = "0.96"
-iroh-live = { git = "https://github.com/ifftu-dev/iroh-live", rev = "27cd1cd" }
+iroh-live = { git = "https://github.com/ifftu-dev/iroh-live", rev = "422d418" }
 
 # Device enumeration for pre-join device checks (camera listing via nokhwa)
 nokhwa = { version = "0.10", default-features = false, features = ["input-native"] }
@@ -110,6 +110,16 @@ nokhwa = { version = "0.10", default-features = false, features = ["input-native
 # Image encoding (JPEG) for bridging video frames to webview
 image = { version = "0.25", default-features = false, features = ["jpeg"] }
 base64 = "0.21"
+postcard = { version = "1", features = ["alloc"] }
+blake3 = "1"
+
+# ── Mobile-only dependencies ────────────────────────────────────────
+[target.'cfg(any(target_os = "ios", target_os = "android"))'.dependencies]
+# Live tutoring — audio-only mode (no ffmpeg, nokhwa, xcap)
+# Phase 2: audio-only tutoring on mobile via pure Opus codec (audiopus).
+# Firewheel already supports iOS (CoreAudio) and Android (Oboe/AAudio).
+iroh-gossip = "0.96"
+iroh-live = { git = "https://github.com/ifftu-dev/iroh-live", rev = "422d418", default-features = false }
 postcard = { version = "1", features = ["alloc"] }
 blake3 = "1"
 
