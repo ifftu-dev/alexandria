@@ -20,15 +20,17 @@ const search = ref('')
 const selectedField = ref<string | null>(null)
 const selectedSubject = ref<string | null>(null)
 
-const activeTab = ref('browse')
+const activeTab = ref('graph')
 const tabs = [
-  { key: 'browse', label: 'Browse' },
-  { key: 'graph', label: 'Graph' },
+  { key: 'graph', label: 'My Graph' },
+  { key: 'browse', label: 'Browse Taxonomy' },
   { key: 'proofs', label: 'My Proofs' },
 ]
 
 onMounted(async () => {
   try {
+    await invoke<number>('bootstrap_public_taxonomy', {}).catch(() => 0)
+
     const [f, s, sk, edges, p] = await Promise.all([
       invoke<SubjectFieldInfo[]>('list_subject_fields', {}),
       invoke<SubjectInfo[]>('list_subjects', {}),
@@ -88,9 +90,6 @@ const proofMap = computed(() => {
 
 // Stats
 const totalSkills = computed(() => skills.value.length)
-const totalSubjects = computed(() => subjects.value.length)
-const totalFields = computed(() => fields.value.length)
-const totalEdges = computed(() => graphEdges.value.length)
 
 function selectField(id: string | null) {
   selectedField.value = selectedField.value === id ? null : id
@@ -115,15 +114,71 @@ const bloomColors: Record<string, string> = {
 }
 
 const bloomOrder = ['remember', 'understand', 'apply', 'analyze', 'evaluate', 'create']
+
+const earnedSkillIdSet = computed(() => new Set(proofs.value.map((p) => p.skill_id)))
+
+const prereqMap = computed(() => {
+  const map = new Map<string, string[]>()
+  for (const edge of graphEdges.value) {
+    if (!map.has(edge.skill_id)) map.set(edge.skill_id, [])
+    map.get(edge.skill_id)!.push(edge.prerequisite_id)
+  }
+  return map
+})
+
+const availableSkillIdSet = computed(() => {
+  const earned = earnedSkillIdSet.value
+  const set = new Set<string>()
+  for (const skill of skills.value) {
+    if (earned.has(skill.id)) continue
+    const prereqs = prereqMap.value.get(skill.id) ?? []
+    if (prereqs.length === 0 || prereqs.every((id) => earned.has(id))) {
+      set.add(skill.id)
+    }
+  }
+  return set
+})
+
+const personalSkillIdSet = computed(() => {
+  const include = new Set<string>()
+  const earned = earnedSkillIdSet.value
+
+  function includePrereqClosure(skillId: string, seen = new Set<string>()) {
+    if (seen.has(skillId)) return
+    seen.add(skillId)
+    include.add(skillId)
+    const prereqs = prereqMap.value.get(skillId) ?? []
+    for (const p of prereqs) includePrereqClosure(p, seen)
+  }
+
+  for (const id of earned) includePrereqClosure(id)
+  for (const id of availableSkillIdSet.value) include.add(id)
+  return include
+})
+
+const personalGraphSkills = computed(() =>
+  skills.value.filter((skill) => personalSkillIdSet.value.has(skill.id))
+)
+
+const personalGraphEdges = computed(() => {
+  const ids = personalSkillIdSet.value
+  return graphEdges.value.filter((e) => ids.has(e.skill_id) && ids.has(e.prerequisite_id))
+})
+
+const earnedSkillsCount = computed(() => earnedSkillIdSet.value.size)
+const availableSkillsCount = computed(() => availableSkillIdSet.value.size)
+const lockedSkillsCount = computed(() =>
+  Math.max(0, skills.value.length - earnedSkillsCount.value - availableSkillsCount.value)
+)
 </script>
 
 <template>
   <div>
     <!-- Header -->
     <div class="mb-8">
-      <h1 class="text-3xl font-bold text-foreground">Skill Taxonomy</h1>
+      <h1 class="text-3xl font-bold text-foreground">My Skill Graph</h1>
       <p class="mt-2 text-muted-foreground">
-        Browse the knowledge graph: subject fields, subjects, and skills with prerequisite relationships.
+        Your personal skill progression graph derived from your proofs, unlocked skills, and prerequisite chains.
       </p>
     </div>
 
@@ -160,39 +215,39 @@ const bloomOrder = ['remember', 'understand', 'apply', 'analyze', 'evaluate', 'c
       <!-- Stats bar -->
       <div class="mb-6 grid grid-cols-2 sm:grid-cols-4 gap-4">
         <div class="rounded-xl bg-card shadow-sm p-5 text-center">
-          <p class="font-mono text-2xl font-bold text-foreground">{{ totalFields }}</p>
+          <p class="font-mono text-2xl font-bold text-success">{{ earnedSkillsCount }}</p>
           <p class="text-xs text-muted-foreground flex items-center justify-center gap-1 mt-1">
             <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" />
             </svg>
-            Fields
+            Earned
           </p>
         </div>
         <div class="rounded-xl bg-card shadow-sm p-5 text-center">
-          <p class="font-mono text-2xl font-bold text-foreground">{{ totalSubjects }}</p>
+          <p class="font-mono text-2xl font-bold text-warning">{{ availableSkillsCount }}</p>
           <p class="text-xs text-muted-foreground flex items-center justify-center gap-1 mt-1">
             <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
             </svg>
-            Subjects
+            Available
           </p>
         </div>
         <div class="rounded-xl bg-card shadow-sm p-5 text-center">
-          <p class="font-mono text-2xl font-bold text-primary">{{ totalSkills }}</p>
+          <p class="font-mono text-2xl font-bold text-muted-foreground">{{ lockedSkillsCount }}</p>
           <p class="text-xs text-muted-foreground flex items-center justify-center gap-1 mt-1">
             <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456z" />
             </svg>
-            Skills
+            Locked
           </p>
         </div>
         <div class="rounded-xl bg-card shadow-sm p-5 text-center">
-          <p class="font-mono text-2xl font-bold text-foreground">{{ totalEdges }}</p>
+          <p class="font-mono text-2xl font-bold text-foreground">{{ totalSkills }}</p>
           <p class="text-xs text-muted-foreground flex items-center justify-center gap-1 mt-1">
             <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" />
             </svg>
-            Prerequisites
+            Taxonomy Skills
           </p>
         </div>
       </div>
@@ -352,21 +407,21 @@ const bloomOrder = ['remember', 'understand', 'apply', 'analyze', 'evaluate', 'c
 
       <!-- ============ GRAPH TAB ============ -->
       <div v-if="activeTab === 'graph'">
-        <div v-if="skills.length === 0" class="py-16 text-center">
+        <div v-if="personalGraphSkills.length === 0" class="py-16 text-center">
           <div class="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-muted/30">
             <svg class="h-8 w-8 text-muted-foreground/50" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
               <path stroke-linecap="round" stroke-linejoin="round" d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" />
             </svg>
           </div>
-          <h3 class="text-sm font-medium text-foreground">No skills to graph</h3>
+          <h3 class="text-sm font-medium text-foreground">No personal skills to graph yet</h3>
           <p class="mt-1 text-xs text-muted-foreground">
-            Add skills through the governance taxonomy proposal workflow to see the prerequisite graph.
+            Complete course assessments to earn proofs; unlocked and prerequisite skills will appear here.
           </p>
         </div>
         <SkillGraph
           v-else
-          :skills="skills"
-          :edges="graphEdges"
+          :skills="personalGraphSkills"
+          :edges="personalGraphEdges"
           :proofs="proofMap"
           @select="goToSkill"
         />

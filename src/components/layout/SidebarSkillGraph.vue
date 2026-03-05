@@ -67,6 +67,8 @@ async function loadData() {
   if (loaded.value) return
 
   try {
+    await invoke<number>('bootstrap_public_taxonomy').catch(() => 0)
+
     const [sk, edgeList, proofList] = await Promise.all([
       invoke<SkillInfo[]>('list_skills', {}),
       invoke<SkillGraphEdge[]>('list_skill_graph_edges', {}),
