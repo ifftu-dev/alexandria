@@ -18,3 +18,4 @@ pub mod taxonomy;
 pub mod content;
 pub mod p2p;
 pub mod sync;
+pub mod tutoring;

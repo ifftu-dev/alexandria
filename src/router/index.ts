@@ -65,6 +65,20 @@ const router = createRouter({
       meta: { layout: 'app' },
     },
 
+    // Live Tutoring
+    {
+      path: '/tutoring',
+      name: 'tutoring',
+      component: () => import('@/pages/tutoring/Index.vue'),
+      meta: { layout: 'app' },
+    },
+    {
+      path: '/tutoring/:id',
+      name: 'tutoring-session',
+      component: () => import('@/pages/tutoring/Session.vue'),
+      meta: { layout: 'app' },
+    },
+
     // Skills & Taxonomy
     {
       path: '/skills',

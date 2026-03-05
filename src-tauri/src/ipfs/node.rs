@@ -4,8 +4,14 @@
 //! The node starts at app launch and provides content-addressed storage
 //! via BLAKE3 hashing. Content is persisted to disk via `FsStore`.
 //!
+//! The router also registers gossip and MoQ (Media over QUIC) ALPNs
+//! so the same QUIC endpoint can be shared with live tutoring.
+//!
 //! Architecture:
-//!   Endpoint (QUIC + relay) → BlobsProtocol (iroh-blobs) → Router (accept loop)
+//!   Endpoint (QUIC + relay) → BlobsProtocol (iroh-blobs)
+//!                            → Gossip (iroh-gossip, for room peer discovery)
+//!                            → MoQ (iroh-moq, for media streaming)
+//!                            → Router (accept loop)
 //!                                    ↕
 //!                              FsStore (redb on disk)
 
@@ -16,6 +22,8 @@ use iroh::protocol::Router;
 use iroh::{Endpoint, SecretKey};
 use iroh_blobs::store::fs::FsStore;
 use iroh_blobs::BlobsProtocol;
+use iroh_gossip::Gossip;
+use iroh_live::Live;
 use thiserror::Error;
 use tokio::sync::Mutex;
 
@@ -40,11 +48,13 @@ pub enum NodeError {
 
 /// Handle to the running iroh node.
 ///
-/// Wraps the router (which owns the endpoint) and the blob store.
-/// The store is exposed for direct content operations via `content.rs`.
+/// Wraps the router (which owns the endpoint), the blob store,
+/// and the gossip + live instances needed for tutoring.
 struct RunningNode {
     router: Router,
     store: FsStore,
+    gossip: Gossip,
+    live: Live,
 }
 
 /// The embedded iroh content node.
@@ -98,15 +108,29 @@ impl ContentNode {
         let node_id = endpoint.id();
         log::info!("iroh endpoint bound, node ID: {node_id}");
 
-        // Register blobs protocol and start accept loop
+        // Create gossip (peer discovery for tutoring rooms) and live (MoQ media)
+        let gossip = Gossip::builder().spawn(endpoint.clone());
+        let live = Live::new(endpoint.clone());
+
+        // Register all protocols on the shared router:
+        // - iroh-blobs: content-addressed storage
+        // - iroh-gossip: room peer discovery
+        // - iroh-moq: media streaming (video/audio)
         let blobs = BlobsProtocol::new(&store, None);
         let router = Router::builder(endpoint)
             .accept(iroh_blobs::ALPN, blobs)
+            .accept(iroh_gossip::ALPN, gossip.clone())
+            .accept(iroh_live::ALPN, live.protocol_handler())
             .spawn();
 
-        log::info!("iroh router started, accepting connections");
+        log::info!("iroh router started, accepting blobs + gossip + moq connections");
 
-        *inner = Some(RunningNode { router, store });
+        *inner = Some(RunningNode {
+            router,
+            store,
+            gossip,
+            live,
+        });
         Ok(())
     }
 
@@ -141,6 +165,30 @@ impl ContentNode {
         inner
             .as_ref()
             .map(|n| n.router.endpoint().id().to_string())
+    }
+
+    /// Get a clone of the running Endpoint for use by other protocols.
+    ///
+    /// Returns `None` if the node is not running.
+    pub async fn endpoint(&self) -> Option<Endpoint> {
+        let inner = self.inner.lock().await;
+        inner.as_ref().map(|n| n.router.endpoint().clone())
+    }
+
+    /// Get a clone of the Gossip instance for tutoring room peer discovery.
+    ///
+    /// Returns `None` if the node is not running.
+    pub async fn gossip(&self) -> Option<Gossip> {
+        let inner = self.inner.lock().await;
+        inner.as_ref().map(|n| n.gossip.clone())
+    }
+
+    /// Get a clone of the Live instance for MoQ media streaming.
+    ///
+    /// Returns `None` if the node is not running.
+    pub async fn live(&self) -> Option<Live> {
+        let inner = self.inner.lock().await;
+        inner.as_ref().map(|n| n.live.clone())
     }
 
     /// Access the blob store for content operations.

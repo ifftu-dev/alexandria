@@ -2,11 +2,13 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import SidebarSkillGraph from '@/components/layout/SidebarSkillGraph.vue'
+import { useTutoringRoom } from '@/composables/useTutoringRoom'
 
 defineProps<{ collapsed: boolean }>()
 const emit = defineEmits<{ toggle: [] }>()
 const router = useRouter()
 const route = useRoute()
+const { sessions: tutoringSessionsList, refreshSessions } = useTutoringRoom()
 
 // Keyboard shortcut: Cmd+\ (macOS) / Ctrl+\ (Windows)
 function onKeyDown(e: KeyboardEvent) {
@@ -55,14 +57,23 @@ function toggleSection(key: SectionKey) {
 const isSectionOpen = (key: SectionKey) => sectionState.value[key] !== false
 
 // =========================================
-// Mock data: Live Tutoring sessions
+// Tutoring sessions (real data from backend)
 // =========================================
-const tutoringPreviews = [
-  { id: '1', title: 'Graph Algorithms Deep Dive', tutor_name: 'Prof. Sarah Chen', tutor_initials: 'SC', status: 'live' as const },
-  { id: '2', title: 'Intro to Smart Contracts', tutor_name: 'Dr. Marcus Webb', tutor_initials: 'MW', status: 'starting-soon' as const },
-  { id: '3', title: 'Database Optimization Patterns', tutor_name: 'Prof. Lena Okafor', tutor_initials: 'LO', status: 'scheduled' as const },
-  { id: '4', title: 'Functional Programming in Haskell', tutor_name: 'Dr. Raj Patel', tutor_initials: 'RP', status: 'ended' as const },
-]
+const tutoringPreviews = ref<{ id: string; title: string; initials: string; status: string }[]>([])
+
+onMounted(async () => {
+  await refreshSessions()
+  updateTutoringPreviews()
+})
+
+function updateTutoringPreviews() {
+  tutoringPreviews.value = tutoringSessionsList.value.slice(0, 4).map(s => ({
+    id: s.id,
+    title: s.title,
+    initials: s.title.split(' ').slice(0, 2).map(w => w[0] || '').join('').toUpperCase() || 'T',
+    status: s.status,
+  }))
+}
 
 // =========================================
 // Mock data: Classrooms
@@ -109,7 +120,7 @@ const classroomPreviews = [
           <button
             v-if="collapsed"
             :class="['group relative flex items-center justify-center rounded-lg px-3 py-2.5 transition-colors', isActive('/tutoring') ? 'text-primary' : 'text-muted-foreground hover:bg-muted hover:text-foreground']"
-            @click="navigate('/courses')"
+            @click="navigate('/tutoring')"
           >
             <svg class="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
@@ -121,7 +132,7 @@ const classroomPreviews = [
           <div :class="['flex items-center gap-1', collapsed ? 'hidden' : '']">
             <button
               :class="['flex flex-1 items-center gap-2 rounded-lg px-3 py-2 text-[0.8125rem] font-semibold uppercase tracking-wider transition-colors', isActive('/tutoring') ? 'text-primary' : 'text-muted-foreground hover:text-foreground']"
-              @click="navigate('/courses')"
+              @click="navigate('/tutoring')"
             >
               <svg class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
@@ -154,32 +165,25 @@ const classroomPreviews = [
               v-for="session in tutoringPreviews"
               :key="session.id"
               class="sb-preview-card group"
-              @click="navigate('/courses')"
+              @click="navigate(`/tutoring/${session.id}`)"
             >
-              <div class="sb-avatar">{{ session.tutor_initials }}</div>
+              <div class="sb-avatar">{{ session.initials }}</div>
               <div class="min-w-0 flex-1">
-                <div class="flex items-center gap-1.5">
-                  <span class="sb-preview-title">{{ session.tutor_name }}</span>
-                </div>
-                <span class="sb-preview-meta sb-marquee-wrap">
-                  <span class="sb-marquee-text">{{ session.title }}</span>
-                </span>
+                <span class="sb-preview-title">{{ session.title }}</span>
               </div>
-              <!-- Live: pulsing red dot -->
-              <span v-if="session.status === 'live'" class="sb-status-icon" title="Live now"><span class="sb-live-dot" /></span>
-              <!-- Starting soon: amber dot -->
-              <span v-else-if="session.status === 'starting-soon'" class="sb-status-icon" title="Starting soon"><span class="sb-starting-dot" /></span>
-              <!-- Scheduled: clock icon -->
-              <span v-else-if="session.status === 'scheduled'" class="sb-status-icon sb-status-scheduled" title="Scheduled">
-                <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6l4 2m6-2a10 10 0 11-20 0 10 10 0 0120 0z" /></svg>
-              </span>
+              <!-- Active: pulsing green dot -->
+              <span v-if="session.status === 'active'" class="sb-status-icon" title="Active"><span class="sb-live-dot" style="background: #22c55e" /><span class="sb-live-dot-ping" style="background: #22c55e" /></span>
               <!-- Ended: checkmark -->
               <span v-else-if="session.status === 'ended'" class="sb-status-icon sb-status-ended" title="Ended">
                 <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
               </span>
+              <!-- Cancelled: X -->
+              <span v-else class="sb-status-icon sb-status-ended" title="Cancelled">
+                <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+              </span>
             </button>
 
-            <button class="sb-view-all" @click="navigate('/courses')">
+            <button class="sb-view-all" @click="navigate('/tutoring')">
               View all sessions
               <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" /></svg>
             </button>

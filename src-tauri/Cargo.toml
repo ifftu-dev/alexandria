@@ -76,6 +76,11 @@ aes-gcm = "0.10"
 iroh = "0.96"
 iroh-blobs = { version = "0.98", features = ["fs-store"] }
 
+# Live tutoring — Media over QUIC (iroh-live)
+# Desktop-only Phase 1: camera + audio + screen share via iroh P2P rooms.
+iroh-gossip = "0.96"
+iroh-live = { git = "https://github.com/n0-computer/iroh-live" }
+
 # P2P networking (libp2p swarm) — all platforms
 # Uses private Alexandria DHT (/alexandria/kad/1.0) with relay bootstrap.
 # mDNS removed — not useful in production (no LAN discovery needed).
