@@ -101,6 +101,9 @@ async function handleCreateConfirm() {
     const session = await createRoom(
       newRoomTitle.value.trim(),
       createDisplayName.value.trim() || undefined,
+      selectedCamera.value,
+      selectedMicInput.value,
+      selectedAudioOutput.value,
     )
     resetCreateModal()
     router.push(`/tutoring/${session.id}`)
@@ -134,6 +137,9 @@ async function handleJoinConfirm() {
       joinTicket.value.trim(),
       joinTitle.value.trim() || undefined,
       joinDisplayName.value.trim() || undefined,
+      selectedCamera.value,
+      selectedMicInput.value,
+      selectedAudioOutput.value,
     )
     resetJoinModal()
     router.push(`/tutoring/${session.id}`)

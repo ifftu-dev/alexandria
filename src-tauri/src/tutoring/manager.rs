@@ -17,9 +17,9 @@ use bytes::Bytes;
 use image::ImageEncoder;
 use iroh::Endpoint;
 use iroh_gossip::net::Gossip;
-use iroh_live::media::audio::{AudioBackend, InputStream, OutputStream};
+use iroh_live::media::audio::{AudioBackend, DeviceId, InputStream, OutputStream};
 use iroh_live::media::av::{AudioPreset, AudioSinkHandle, DecodeConfig, VideoPreset};
-use iroh_live::media::capture::{CameraCapturer, ScreenCapturer};
+use iroh_live::media::capture::{CameraIndex, CameraCapturer, ScreenCapturer};
 use iroh_live::media::ffmpeg::{FfmpegDecoders, FfmpegVideoDecoder, H264Encoder, OpusEncoder};
 use iroh_live::media::publish::{AudioRenditions, PublishBroadcast, VideoRenditions};
 use iroh_live::media::subscribe::WatchTrack;
@@ -107,6 +107,35 @@ struct PeerNameEvent {
 /// Name used for our broadcast in every room.
 const BROADCAST_NAME: &str = "cam";
 
+/// User-selected devices for a tutoring session.
+///
+/// All fields are optional — `None` means "use the system default".
+#[derive(Debug, Clone, Default)]
+pub struct DeviceSelection {
+    /// Camera index string (as returned by `list_devices` — e.g. "Index(0)").
+    pub camera_index: Option<String>,
+    /// Audio input device ID string (from `DeviceId::to_string()`).
+    pub mic_device_id: Option<String>,
+    /// Audio output device ID string (from `DeviceId::to_string()`).
+    pub speaker_device_id: Option<String>,
+}
+
+/// Parse a camera index string (Debug-formatted `CameraIndex`) back to the enum.
+///
+/// Accepts formats: "Index(0)", "String(\"FaceTime HD Camera\")", or a plain
+/// number like "0" as a fallback.
+fn parse_camera_index(s: &str) -> Option<CameraIndex> {
+    if let Some(inner) = s.strip_prefix("Index(").and_then(|s| s.strip_suffix(')')) {
+        inner.parse::<u32>().ok().map(CameraIndex::Index)
+    } else if let Some(inner) = s.strip_prefix("String(\"").and_then(|s| s.strip_suffix("\")")) {
+        Some(CameraIndex::String(inner.to_string()))
+    } else if let Ok(n) = s.parse::<u32>() {
+        Some(CameraIndex::Index(n))
+    } else {
+        None
+    }
+}
+
 /// Peer info as seen from room gossip events.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TutoringPeer {
@@ -170,6 +199,8 @@ struct ActiveSession {
     app_handle: AppHandle,
     /// Handle for the self-preview task (aborted on toggle).
     self_preview_task: Option<JoinHandle<()>>,
+    /// User's selected devices — preserved for toggle_video/toggle_audio re-creation.
+    device_selection: DeviceSelection,
     /// Background tasks to abort on leave.
     _tasks: Vec<JoinHandle<()>>,
 }
@@ -192,10 +223,19 @@ impl TutoringManager {
 
     /// Try to create the audio backend (Firewheel + cpal).
     ///
+    /// Optionally accepts specific input/output device IDs. Pass `None`
+    /// for either to use the system default.
+    ///
     /// Returns `None` only if initialization panics (shouldn't happen
     /// with the cpal 0.17.x fix for macOS Sequoia).
-    fn try_create_audio_backend() -> Option<AudioBackend> {
-        match std::panic::catch_unwind(AudioBackend::new) {
+    fn try_create_audio_backend(
+        input_device_id: Option<DeviceId>,
+        output_device_id: Option<DeviceId>,
+    ) -> Option<AudioBackend> {
+        let result = std::panic::catch_unwind(move || {
+            AudioBackend::new_with_devices(input_device_id, output_device_id)
+        });
+        match result {
             Ok(backend) => {
                 log::info!("tutoring: audio backend initialized");
                 Some(backend)
@@ -205,6 +245,11 @@ impl TutoringManager {
                 None
             }
         }
+    }
+
+    /// Parse an optional device ID string into a `DeviceId`.
+    fn parse_device_id(s: &Option<String>) -> Option<DeviceId> {
+        s.as_ref().and_then(|id| id.parse::<DeviceId>().ok())
     }
 
     fn now_millis() -> u64 {
@@ -226,6 +271,7 @@ impl TutoringManager {
         gossip: Gossip,
         live: Live,
         app_handle: AppHandle,
+        devices: DeviceSelection,
     ) -> Result<String, String> {
         let mut inner = self.inner.lock().await;
         if inner.is_some() {
@@ -241,16 +287,19 @@ impl TutoringManager {
 
         let ticket_str = room.ticket().to_string();
 
-        // Try to initialize audio
-        let audio_ctx = Self::try_create_audio_backend();
+        // Try to initialize audio with user-selected devices
+        let mic_id = Self::parse_device_id(&devices.mic_device_id);
+        let speaker_id = Self::parse_device_id(&devices.speaker_device_id);
+        let audio_ctx = Self::try_create_audio_backend(mic_id, speaker_id);
         let has_audio = audio_ctx.is_some();
         if !has_audio {
             log::warn!("tutoring: proceeding without audio (CoreAudio init failed)");
         }
 
-        // Start publishing local media
+        // Start publishing local media (using selected camera if any)
+        let camera_idx = devices.camera_index.as_deref().and_then(parse_camera_index);
         let (mut broadcast, mic_input) =
-            Self::create_broadcast(audio_ctx.as_ref(), true, has_audio).await?;
+            Self::create_broadcast(audio_ctx.as_ref(), true, has_audio, camera_idx).await?;
         room.publish(BROADCAST_NAME, broadcast.producer())
             .await
             .map_err(|e| format!("failed to publish broadcast: {e}"))?;
@@ -314,6 +363,7 @@ impl TutoringManager {
             last_chat_sent: Instant::now() - Duration::from_secs(10),
             app_handle: app_handle.clone(),
             self_preview_task,
+            device_selection: devices,
             _tasks: tasks,
         });
 
@@ -340,6 +390,7 @@ impl TutoringManager {
         gossip: Gossip,
         live: Live,
         app_handle: AppHandle,
+        devices: DeviceSelection,
     ) -> Result<String, String> {
         let mut inner = self.inner.lock().await;
         if inner.is_some() {
@@ -358,16 +409,19 @@ impl TutoringManager {
 
         let ticket_str = room.ticket().to_string();
 
-        // Try to initialize audio
-        let audio_ctx = Self::try_create_audio_backend();
+        // Try to initialize audio with user-selected devices
+        let mic_id = Self::parse_device_id(&devices.mic_device_id);
+        let speaker_id = Self::parse_device_id(&devices.speaker_device_id);
+        let audio_ctx = Self::try_create_audio_backend(mic_id, speaker_id);
         let has_audio = audio_ctx.is_some();
         if !has_audio {
             log::warn!("tutoring: proceeding without audio (CoreAudio init failed)");
         }
 
-        // Start publishing local media
+        // Start publishing local media (using selected camera if any)
+        let camera_idx = devices.camera_index.as_deref().and_then(parse_camera_index);
         let (mut broadcast, mic_input) =
-            Self::create_broadcast(audio_ctx.as_ref(), true, has_audio).await?;
+            Self::create_broadcast(audio_ctx.as_ref(), true, has_audio, camera_idx).await?;
         room.publish(BROADCAST_NAME, broadcast.producer())
             .await
             .map_err(|e| format!("failed to publish broadcast: {e}"))?;
@@ -430,6 +484,7 @@ impl TutoringManager {
             last_chat_sent: Instant::now() - Duration::from_secs(10),
             app_handle: app_handle.clone(),
             self_preview_task,
+            device_selection: devices,
             _tasks: tasks,
         });
 
@@ -484,7 +539,8 @@ impl TutoringManager {
             if session.screen_sharing {
                 session.screen_sharing = false;
             }
-            match CameraCapturer::new() {
+            let camera_idx = session.device_selection.camera_index.as_deref().and_then(parse_camera_index);
+            match CameraCapturer::with_index(camera_idx) {
                 Ok(camera) => {
                     let renditions =
                         VideoRenditions::new::<H264Encoder>(camera, VideoPreset::all());
@@ -602,9 +658,10 @@ impl TutoringManager {
                 }
             }
         } else {
-            // Stop screen share, restore camera
+            // Stop screen share, restore camera (using stored device selection)
             session.screen_sharing = false;
-            match CameraCapturer::new() {
+            let camera_idx = session.device_selection.camera_index.as_deref().and_then(parse_camera_index);
+            match CameraCapturer::with_index(camera_idx) {
                 Ok(camera) => {
                     let renditions =
                         VideoRenditions::new::<H264Encoder>(camera, VideoPreset::all());
@@ -722,10 +779,13 @@ impl TutoringManager {
     ///
     /// Returns `(broadcast, mic_input)` — the mic_input is a clone of the
     /// InputStream that can be used for peak metering (VU meters).
+    ///
+    /// `camera_index` selects a specific camera; `None` uses the default.
     async fn create_broadcast(
         audio_ctx: Option<&AudioBackend>,
         video: bool,
         audio: bool,
+        camera_index: Option<CameraIndex>,
     ) -> Result<(PublishBroadcast, Option<InputStream>), String> {
         let mut broadcast = PublishBroadcast::new();
         let mut mic_input: Option<InputStream> = None;
@@ -752,7 +812,7 @@ impl TutoringManager {
         }
 
         if video {
-            match CameraCapturer::new() {
+            match CameraCapturer::with_index(camera_index) {
                 Ok(camera) => {
                     let video_renditions =
                         VideoRenditions::new::<H264Encoder>(camera, VideoPreset::all());

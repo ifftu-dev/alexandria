@@ -55,6 +55,9 @@ const UNSUPPORTED: &str = "Live tutoring is not yet available on mobile";
 pub async fn tutoring_create_room(
     _title: String,
     _display_name: Option<String>,
+    _camera_id: Option<String>,
+    _mic_id: Option<String>,
+    _speaker_id: Option<String>,
     _app: AppHandle,
     _state: State<'_, AppState>,
 ) -> Result<TutoringSessionInfo, String> {
@@ -66,6 +69,9 @@ pub async fn tutoring_join_room(
     _ticket: String,
     _title: Option<String>,
     _display_name: Option<String>,
+    _camera_id: Option<String>,
+    _mic_id: Option<String>,
+    _speaker_id: Option<String>,
     _app: AppHandle,
     _state: State<'_, AppState>,
 ) -> Result<TutoringSessionInfo, String> {
