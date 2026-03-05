@@ -140,11 +140,21 @@ impl TutoringManager {
         }
     }
 
-    /// Audio is currently disabled (Phase 1.0) due to a CoreAudio
-    /// segfault in cpal's device enumeration on macOS Sequoia+.
+    /// Try to create the audio backend (Firewheel + cpal).
+    ///
+    /// Returns `None` only if initialization panics (shouldn't happen
+    /// with the cpal 0.17.x fix for macOS Sequoia).
     fn try_create_audio_backend() -> Option<AudioBackend> {
-        log::info!("tutoring: audio disabled (CoreAudio segfault workaround)");
-        None
+        match std::panic::catch_unwind(AudioBackend::new) {
+            Ok(backend) => {
+                log::info!("tutoring: audio backend initialized");
+                Some(backend)
+            }
+            Err(e) => {
+                log::error!("tutoring: audio backend panicked during init: {e:?}");
+                None
+            }
+        }
     }
 
     fn now_millis() -> u64 {
