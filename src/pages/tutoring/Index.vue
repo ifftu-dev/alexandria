@@ -16,6 +16,8 @@ const {
   listDevices,
 } = useTutoringRoom()
 
+const isMobilePlatform = typeof navigator !== 'undefined' && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
+
 const showCreateModal = ref(false)
 const showJoinModal = ref(false)
 const newRoomTitle = ref('')
@@ -182,6 +184,24 @@ function formatDate(iso: string) {
       {{ lastError }}
     </div>
 
+    <!-- Mobile notice -->
+    <div v-if="isMobilePlatform" class="rounded-xl border border-amber-500/30 bg-amber-500/5 p-5">
+      <div class="flex items-start gap-3">
+        <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-amber-500/10 shrink-0">
+          <svg class="h-5 w-5 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 1.5H8.25A2.25 2.25 0 006 3.75v16.5a2.25 2.25 0 002.25 2.25h7.5A2.25 2.25 0 0018 20.25V3.75a2.25 2.25 0 00-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-3 18.75h3" />
+          </svg>
+        </div>
+        <div>
+          <h3 class="text-sm font-semibold text-foreground">Desktop Only (for now)</h3>
+          <p class="mt-1 text-sm text-muted-foreground">
+            Live tutoring requires camera and audio encoding that isn't available on mobile yet.
+            Start or join sessions from the desktop app. Mobile audio-only sessions are coming in Phase 2.
+          </p>
+        </div>
+      </div>
+    </div>
+
     <!-- Active session banner -->
     <div
       v-if="activeSession"
@@ -207,7 +227,8 @@ function formatDate(iso: string) {
     <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
       <!-- Create Room -->
       <button
-        class="group rounded-xl border border-border bg-card p-6 text-left transition-all hover:border-primary/40 hover:shadow-md"
+        class="group rounded-xl border border-border bg-card p-6 text-left transition-all hover:border-primary/40 hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:border-border disabled:hover:shadow-none"
+        :disabled="isMobilePlatform"
         @click="showCreateModal = true; createStep = 'form'"
       >
         <div class="flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10 transition-colors group-hover:bg-primary/20">
@@ -221,7 +242,8 @@ function formatDate(iso: string) {
 
       <!-- Join Room -->
       <button
-        class="group rounded-xl border border-border bg-card p-6 text-left transition-all hover:border-primary/40 hover:shadow-md"
+        class="group rounded-xl border border-border bg-card p-6 text-left transition-all hover:border-primary/40 hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:border-border disabled:hover:shadow-none"
+        :disabled="isMobilePlatform"
         @click="showJoinModal = true; joinStep = 'form'"
       >
         <div class="flex h-12 w-12 items-center justify-center rounded-lg bg-accent/10 transition-colors group-hover:bg-accent/20">

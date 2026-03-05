@@ -18,4 +18,11 @@ pub mod taxonomy;
 pub mod content;
 pub mod p2p;
 pub mod sync;
+
+#[cfg(desktop)]
 pub mod tutoring;
+
+#[cfg(mobile)]
+pub mod tutoring_stubs;
+#[cfg(mobile)]
+pub use tutoring_stubs as tutoring;

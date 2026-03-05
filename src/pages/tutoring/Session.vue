@@ -26,6 +26,8 @@ const {
   setChatOpen,
 } = useTutoringRoom()
 
+const isMobilePlatform = typeof navigator !== 'undefined' && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
+
 const sessionId = computed(() => route.params.id as string)
 const ticketCopied = ref(false)
 const showLeaveConfirm = ref(false)
@@ -40,6 +42,10 @@ const elapsedSeconds = ref(0)
 let durationInterval: ReturnType<typeof setInterval> | null = null
 
 onMounted(async () => {
+  if (isMobilePlatform) {
+    router.replace('/tutoring')
+    return
+  }
   await setupEventListeners()
   refreshStatus()
   startPolling(2000)
