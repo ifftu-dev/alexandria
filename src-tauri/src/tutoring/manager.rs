@@ -1225,6 +1225,10 @@ impl TutoringManager {
         handle.set_viewport(640, 480);
 
         tokio::spawn(async move {
+            // IMPORTANT: Keep `handle` alive for the duration of this task.
+            // It holds the shutdown token guard and thread handle — dropping
+            // it cancels the video source thread and closes the frame channel.
+            let _handle = handle;
             log::info!("tutoring: frame bridge started for {node_id}");
 
             // Target ~15 fps to avoid overwhelming the webview with events
