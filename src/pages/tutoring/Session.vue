@@ -28,14 +28,28 @@ const showChat = ref(false)
 const chatInput = ref('')
 const chatScrollRef = ref<HTMLElement | null>(null)
 
+// Duration timer
+const elapsedSeconds = ref(0)
+let durationInterval: ReturnType<typeof setInterval> | null = null
+
 onMounted(async () => {
   await setupEventListeners()
   refreshStatus()
   startPolling(2000)
+  // Update elapsed time every second
+  durationInterval = setInterval(() => {
+    if (sessionStatus.value?.started_at) {
+      elapsedSeconds.value = Math.floor((Date.now() - sessionStatus.value.started_at) / 1000)
+    }
+  }, 1000)
 })
 
 onUnmounted(() => {
   stopPolling()
+  if (durationInterval) {
+    clearInterval(durationInterval)
+    durationInterval = null
+  }
 })
 
 const isActive = computed(() => sessionStatus.value?.session_id === sessionId.value)
@@ -45,6 +59,19 @@ const connectedPeerCount = computed(() => peers.value.filter(p => p.connected).l
 const videoEnabled = computed(() => sessionStatus.value?.video_enabled ?? false)
 const audioEnabled = computed(() => sessionStatus.value?.audio_enabled ?? false)
 const screenSharing = computed(() => sessionStatus.value?.screen_sharing ?? false)
+const selfVideoSrc = computed(() => videoFrames.value['self'] ?? null)
+
+const formattedDuration = computed(() => {
+  const s = elapsedSeconds.value
+  const hours = Math.floor(s / 3600)
+  const mins = Math.floor((s % 3600) / 60)
+  const secs = s % 60
+  if (hours > 0) {
+    return `${hours}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
+  }
+  return `${mins}:${String(secs).padStart(2, '0')}`
+})
+
 const unreadChat = computed(() => {
   if (showChat.value) return 0
   return chatMessages.value.length
@@ -150,6 +177,10 @@ function shortNodeId(id: string) {
           <span class="text-sm font-medium text-foreground truncate">
             {{ isActive ? 'Session Active' : 'Session Ended' }}
           </span>
+          <!-- Duration timer -->
+          <span v-if="isActive" class="rounded bg-muted px-1.5 py-0.5 text-xs font-mono text-muted-foreground tabular-nums">
+            {{ formattedDuration }}
+          </span>
         </div>
       </div>
 
@@ -219,17 +250,26 @@ function shortNodeId(id: string) {
           <div class="mx-auto max-w-5xl space-y-4">
             <!-- Self video / camera status -->
             <div class="relative mx-auto aspect-video w-full max-w-3xl overflow-hidden rounded-2xl border border-border bg-card">
-              <div class="absolute inset-0 flex flex-col items-center justify-center gap-3 text-muted-foreground">
+              <!-- Live self-preview from camera/screen -->
+              <img
+                v-if="selfVideoSrc"
+                :src="selfVideoSrc"
+                class="absolute inset-0 h-full w-full object-cover"
+                :class="screenSharing ? '' : 'scale-x-[-1]'"
+                alt="Self preview"
+              />
+              <!-- Fallback placeholder when no video frames -->
+              <div v-else class="absolute inset-0 flex flex-col items-center justify-center gap-3 text-muted-foreground">
                 <svg class="h-12 w-12 opacity-30" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1">
                   <path v-if="!screenSharing" stroke-linecap="round" stroke-linejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
                   <path v-else stroke-linecap="round" stroke-linejoin="round" d="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25m18 0A2.25 2.25 0 0018.75 3H5.25A2.25 2.25 0 003 5.25m18 0V12a9 9 0 01-9 9m9-15V12a9 9 0 01-9 9m0 0a9 9 0 01-9-9V5.25" />
                 </svg>
                 <div class="text-center">
                   <p class="text-sm font-medium">
-                    {{ screenSharing ? 'Screen Sharing Active' : videoEnabled ? 'Camera Active' : 'Camera Off' }}
+                    {{ screenSharing ? 'Screen Sharing Active' : videoEnabled ? 'Starting camera...' : 'Camera Off' }}
                   </p>
                   <p class="text-xs opacity-70">
-                    {{ screenSharing ? 'Your screen is being shared with peers' : videoEnabled ? 'Broadcasting to connected peers' : 'Click the camera button to enable' }}
+                    {{ screenSharing ? 'Your screen is being shared with peers' : videoEnabled ? 'Waiting for first frame' : 'Click the camera button to enable' }}
                   </p>
                 </div>
               </div>

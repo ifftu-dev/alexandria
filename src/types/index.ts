@@ -908,6 +908,7 @@ export interface TutoringSessionStatus {
   video_enabled: boolean
   audio_enabled: boolean
   screen_sharing: boolean
+  started_at: number
 }
 
 export interface TutoringVideoFrame {
