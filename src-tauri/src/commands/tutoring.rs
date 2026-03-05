@@ -278,36 +278,25 @@ pub async fn tutoring_list_sessions(
 
 /// Check device availability (camera + audio) before joining a session.
 ///
-/// Enumerates cameras via nokhwa and tests the audio backend without
-/// opening a stream. Returns a lightweight result the frontend can use
-/// to show a pre-join device preview.
+/// Uses lightweight enumeration only — does NOT start audio streams or
+/// camera capture. Camera check runs on a blocking thread with timeout.
 #[tauri::command]
 pub async fn tutoring_check_devices() -> Result<DeviceCheckResult, String> {
-    // Check camera
-    let (has_camera, camera_name) = match nokhwa::query(nokhwa::utils::ApiBackend::Auto) {
-        Ok(cameras) => {
-            let name = cameras.first().map(|c| c.human_name().to_string());
+    // Check audio via cpal device enumeration (no streams started)
+    let has_audio = !AudioBackend::list_input_devices().is_empty();
+
+    // Check camera on blocking thread with timeout
+    let (has_camera, camera_name) = match tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        tokio::task::spawn_blocking(|| CameraCapturer::list_cameras()),
+    )
+    .await
+    {
+        Ok(Ok(Ok(cameras))) => {
+            let name = cameras.first().map(|(_, n)| n.clone());
             (!cameras.is_empty(), name)
         }
-        Err(e) => {
-            log::warn!("tutoring: camera enumeration failed: {e}");
-            (false, None)
-        }
-    };
-
-    // Check audio
-    let has_audio = match std::panic::catch_unwind(iroh_live::media::audio::AudioBackend::new) {
-        Ok(backend) => {
-            // Try to open default input to verify mic is accessible
-            match backend.default_input().await {
-                Ok(_) => true,
-                Err(e) => {
-                    log::warn!("tutoring: mic test failed: {e}");
-                    false
-                }
-            }
-        }
-        Err(_) => false,
+        _ => (false, None),
     };
 
     Ok(DeviceCheckResult {
@@ -349,9 +338,13 @@ pub struct DeviceList {
 }
 
 /// List all available audio and camera devices.
+///
+/// Camera enumeration via nokhwa uses AVFoundation on macOS which can
+/// block waiting for the permission dialog. We run it on a blocking
+/// thread with a timeout to avoid hanging the UI.
 #[tauri::command]
 pub async fn tutoring_list_devices() -> Result<DeviceList, String> {
-    // Audio devices
+    // Audio devices (cpal enumeration — lightweight, no streams started)
     let audio_inputs: Vec<AudioDeviceInfo> = AudioBackend::list_input_devices()
         .into_iter()
         .map(|d| AudioDeviceInfo {
@@ -370,17 +363,31 @@ pub async fn tutoring_list_devices() -> Result<DeviceList, String> {
         })
         .collect();
 
-    // Camera devices
-    let cameras = match CameraCapturer::list_cameras() {
-        Ok(cams) => cams
+    // Camera devices — run on blocking thread with timeout since
+    // nokhwa_initialize can block on the macOS permission dialog.
+    let cameras = match tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        tokio::task::spawn_blocking(|| CameraCapturer::list_cameras()),
+    )
+    .await
+    {
+        Ok(Ok(Ok(cams))) => cams
             .into_iter()
             .map(|(idx, name)| CameraDeviceInfo {
                 index: format!("{idx:?}"),
                 name,
             })
             .collect(),
-        Err(e) => {
+        Ok(Ok(Err(e))) => {
             log::warn!("tutoring: camera enumeration failed: {e}");
+            Vec::new()
+        }
+        Ok(Err(e)) => {
+            log::warn!("tutoring: camera enumeration task panicked: {e}");
+            Vec::new()
+        }
+        Err(_) => {
+            log::warn!("tutoring: camera enumeration timed out (5s) — may need camera permission");
             Vec::new()
         }
     };

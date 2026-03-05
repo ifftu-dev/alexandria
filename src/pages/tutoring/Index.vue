@@ -12,7 +12,6 @@ const {
   refreshSessions,
   createRoom,
   joinRoom,
-  checkDevices,
   listDevices,
 } = useTutoringRoom()
 
@@ -82,9 +81,16 @@ async function handleCreatePreview() {
   deviceCheck.value = null
   devices.value = null
   try {
-    const [check, devList] = await Promise.all([checkDevices(), listDevices()])
-    deviceCheck.value = check
+    // Single call — derive device check from the device list to avoid
+    // concurrent nokhwa_initialize calls that deadlock on macOS.
+    const devList = await listDevices()
     devices.value = devList
+    deviceCheck.value = {
+      has_camera: devList.cameras.length > 0,
+      camera_name: devList.cameras[0]?.name ?? null,
+      has_audio: devList.audio_inputs.length > 0,
+      error: null,
+    }
     // Pre-select default devices
     selectedCamera.value = devList.cameras[0]?.index ?? null
     selectedMicInput.value = devList.audio_inputs.find(d => d.is_default)?.id ?? devList.audio_inputs[0]?.id ?? null
@@ -118,9 +124,14 @@ async function handleJoinPreview() {
   deviceCheck.value = null
   devices.value = null
   try {
-    const [check, devList] = await Promise.all([checkDevices(), listDevices()])
-    deviceCheck.value = check
+    const devList = await listDevices()
     devices.value = devList
+    deviceCheck.value = {
+      has_camera: devList.cameras.length > 0,
+      camera_name: devList.cameras[0]?.name ?? null,
+      has_audio: devList.audio_inputs.length > 0,
+      error: null,
+    }
     selectedCamera.value = devList.cameras[0]?.index ?? null
     selectedMicInput.value = devList.audio_inputs.find(d => d.is_default)?.id ?? devList.audio_inputs[0]?.id ?? null
     selectedAudioOutput.value = devList.audio_outputs.find(d => d.is_default)?.id ?? devList.audio_outputs[0]?.id ?? null
