@@ -8,6 +8,7 @@ pub mod domain;
 pub mod evidence;
 pub mod ipfs;
 pub mod p2p;
+pub mod tutoring;
 
 // Mobile crypto: same modules as desktop but with portable keystore
 // (AES-256-GCM + Argon2id instead of IOTA Stronghold)
@@ -31,6 +32,7 @@ use ipfs::gateway::GatewayClient;
 use ipfs::node::ContentNode;
 use ipfs::resolver::ContentResolver;
 use p2p::network::P2pNode;
+use tutoring::TutoringManager;
 
 /// Shared application state accessible from all Tauri commands.
 ///
@@ -49,6 +51,7 @@ pub struct AppState {
     pub content_node: Arc<ContentNode>,
     pub resolver: Arc<Mutex<Option<ContentResolver>>>,
     pub p2p_node: Arc<Mutex<Option<P2pNode>>>,
+    pub tutoring: Arc<TutoringManager>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -143,6 +146,7 @@ pub fn run() {
                 content_node,
                 resolver,
                 p2p_node: Arc::new(Mutex::new(None)),
+                tutoring: Arc::new(TutoringManager::new()),
             });
 
             // iOS: disable automatic scroll view content inset adjustment so the
@@ -329,6 +333,13 @@ pub fn run() {
             commands::integrity::integrity_get_session,
             commands::integrity::integrity_list_sessions,
             commands::integrity::integrity_list_snapshots,
+            // Live Tutoring (iroh-live rooms)
+            commands::tutoring::tutoring_create_room,
+            commands::tutoring::tutoring_join_room,
+            commands::tutoring::tutoring_leave_room,
+            commands::tutoring::tutoring_status,
+            commands::tutoring::tutoring_peers,
+            commands::tutoring::tutoring_list_sessions,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

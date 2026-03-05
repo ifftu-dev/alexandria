@@ -884,6 +884,32 @@ export interface P2PStatus {
 /// the swarm command channel supports richer queries.
 export type PeerInfo = string
 
+// ---- Tutoring ----
+
+export interface TutoringSessionInfo {
+  id: string
+  title: string
+  ticket: string | null
+  status: 'active' | 'ended' | 'cancelled'
+  created_at: string
+  ended_at: string | null
+}
+
+export interface TutoringPeer {
+  node_id: string
+  broadcasts: string[]
+  connected: boolean
+}
+
+export interface TutoringSessionStatus {
+  session_id: string
+  ticket: string
+  peers: TutoringPeer[]
+  video_enabled: boolean
+  audio_enabled: boolean
+  screen_sharing: boolean
+}
+
 // ---- Health ----
 
 export interface HealthResponse {

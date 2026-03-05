@@ -22,6 +22,7 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (12, "multi_party_attestation", MIGRATION_012),
     (13, "visual_assets", MIGRATION_013),
     (14, "inline_content", MIGRATION_014),
+    (15, "tutoring_sessions", MIGRATION_015),
 ];
 
 const MIGRATION_001: &str = r#"
@@ -796,4 +797,22 @@ const MIGRATION_014: &str = r#"
 -- ============================================================
 
 ALTER TABLE course_elements ADD COLUMN content_inline TEXT;
+"#;
+
+const MIGRATION_015: &str = r#"
+-- ============================================================
+-- Migration 015: Tutoring Sessions
+-- Stores live tutoring session metadata. The iroh-live room
+-- ticket is persisted so sessions can be re-joined (while the
+-- gossip topic is still alive) and for history/analytics.
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS tutoring_sessions (
+    id          TEXT PRIMARY KEY,
+    title       TEXT NOT NULL,
+    ticket      TEXT,
+    status      TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'ended', 'cancelled')),
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    ended_at    TEXT
+);
 "#;
