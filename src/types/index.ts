@@ -897,12 +897,14 @@ export interface TutoringSessionInfo {
 
 export interface TutoringPeer {
   node_id: string
+  display_name: string | null
   broadcasts: string[]
   connected: boolean
 }
 
 export interface TutoringSessionStatus {
   session_id: string
+  session_title: string
   ticket: string
   peers: TutoringPeer[]
   video_enabled: boolean

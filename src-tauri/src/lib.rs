@@ -139,15 +139,36 @@ pub fn run() {
                 }
             });
 
-            app.manage(AppState {
+            let tutoring = Arc::new(TutoringManager::new());
+
+            let app_state = AppState {
                 db,
                 keystore: Arc::new(Mutex::new(None)),
                 vault_dir,
                 content_node,
                 resolver,
                 p2p_node: Arc::new(Mutex::new(None)),
-                tutoring: Arc::new(TutoringManager::new()),
-            });
+                tutoring,
+            };
+
+            // Clean up any sessions stuck as 'active' from a previous crash
+            {
+                let db = app_state.db.lock().unwrap();
+                match db.conn().execute(
+                    "UPDATE tutoring_sessions SET status = 'ended', ended_at = datetime('now') WHERE status = 'active'",
+                    [],
+                ) {
+                    Ok(count) if count > 0 => {
+                        log::info!("tutoring: cleaned up {count} orphaned session(s) from previous run");
+                    }
+                    Ok(_) => {}
+                    Err(e) => {
+                        log::warn!("tutoring: failed to clean up orphaned sessions: {e}");
+                    }
+                }
+            }
+
+            app.manage(app_state);
 
             // iOS: disable automatic scroll view content inset adjustment so the
             // webview truly renders edge-to-edge.  Without this, WKWebView's

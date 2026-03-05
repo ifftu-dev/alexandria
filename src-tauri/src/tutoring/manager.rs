@@ -1,15 +1,16 @@
 //! TutoringManager — room lifecycle, media controls, video frame
-//! bridge, and session chat.
+//! bridge, session chat, and peer identity.
 //!
 //! Manages creation/joining of iroh-live rooms, local media publishing
 //! (camera, mic, screen share), bridges decoded remote video frames
-//! to the webview via Tauri events, and text chat via a gossip topic
-//! derived from the room topic.
+//! to the webview via Tauri events, text chat via a gossip topic
+//! derived from the room topic, and peer display name exchange via
+//! a separate gossip `/names` topic.
 
 use std::collections::HashMap;
 use std::io::Cursor;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use base64::Engine;
 use bytes::Bytes;
@@ -29,6 +30,17 @@ use tauri::{AppHandle, Emitter};
 use tokio::sync::{Mutex, mpsc};
 use tokio::task::JoinHandle;
 
+// ── Constants ──────────────────────────────────────────────────────
+
+/// Maximum chat message text length (bytes).
+const CHAT_MAX_LENGTH: usize = 2000;
+
+/// Minimum interval between chat messages from the local user (ms).
+const CHAT_RATE_LIMIT_MS: u64 = 200;
+
+/// Interval for re-broadcasting our display name (seconds).
+const NAME_BROADCAST_INTERVAL_SECS: u64 = 15;
+
 // ── Chat message protocol ──────────────────────────────────────────
 
 /// Chat message sent over the gossip channel.
@@ -42,6 +54,17 @@ pub struct ChatMessage {
     pub text: String,
     /// Unix timestamp (millis since epoch).
     pub timestamp: u64,
+}
+
+// ── Name announcement protocol ─────────────────────────────────────
+
+/// A display name announcement broadcast over the `/names` gossip topic.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct NameAnnouncement {
+    /// Sender's iroh node ID (hex).
+    node_id: String,
+    /// Human-readable display name.
+    display_name: String,
 }
 
 /// Tauri event payload for a video frame.
@@ -72,6 +95,13 @@ struct PeerVideoEndedEvent {
     node_id: String,
 }
 
+/// Tauri event payload when a peer's display name is learned.
+#[derive(Debug, Clone, Serialize)]
+struct PeerNameEvent {
+    node_id: String,
+    display_name: String,
+}
+
 // ── Public types ───────────────────────────────────────────────────
 
 /// Name used for our broadcast in every room.
@@ -81,6 +111,7 @@ const BROADCAST_NAME: &str = "cam";
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TutoringPeer {
     pub node_id: String,
+    pub display_name: Option<String>,
     pub broadcasts: Vec<String>,
     pub connected: bool,
 }
@@ -89,6 +120,7 @@ pub struct TutoringPeer {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionStatus {
     pub session_id: String,
+    pub session_title: String,
     pub ticket: String,
     pub peers: Vec<TutoringPeer>,
     pub video_enabled: bool,
@@ -103,6 +135,7 @@ pub struct SessionStatus {
 /// Internal state for an active room.
 struct ActiveSession {
     session_id: String,
+    session_title: String,
     handle: RoomHandle,
     broadcast: PublishBroadcast,
     audio_ctx: Option<AudioBackend>,
@@ -114,8 +147,12 @@ struct ActiveSession {
     chat_sender: Option<iroh_gossip::api::GossipSender>,
     /// Our node ID (for attributing chat messages).
     our_node_id: String,
+    /// Our display name (sent to peers via `/names` gossip).
+    our_display_name: String,
     /// Session start time (millis since epoch).
     started_at: u64,
+    /// Timestamp of last sent chat message (for rate limiting).
+    last_chat_sent: Instant,
     /// AppHandle for emitting Tauri events from toggle methods.
     app_handle: AppHandle,
     /// Handle for the self-preview task (aborted on toggle).
@@ -170,6 +207,8 @@ impl TutoringManager {
     pub async fn create_room(
         &self,
         session_id: String,
+        title: String,
+        display_name: String,
         endpoint: &Endpoint,
         gossip: Gossip,
         live: Live,
@@ -210,10 +249,22 @@ impl TutoringManager {
             Self::start_self_preview(&mut broadcast, app_handle.clone());
 
         // Set up chat on a derived gossip topic
+        let topic_seed = room_topic_bytes(&ticket_str);
         let chat_sender = Self::setup_chat(
             &gossip,
-            &room_topic_bytes(&ticket_str),
+            &topic_seed,
             &our_node_id,
+            app_handle.clone(),
+        )
+        .await;
+
+        // Set up name announcements on a derived /names gossip topic
+        let names_task = Self::setup_names(
+            &gossip,
+            &topic_seed,
+            &our_node_id,
+            &display_name,
+            self.inner.clone(),
             app_handle.clone(),
         )
         .await;
@@ -226,8 +277,14 @@ impl TutoringManager {
             Self::event_loop(events, inner_clone, audio_ctx_clone, app_handle_clone).await;
         });
 
+        let mut tasks = vec![event_task];
+        if let Some(t) = names_task {
+            tasks.push(t);
+        }
+
         *inner = Some(ActiveSession {
             session_id,
+            session_title: title,
             handle,
             broadcast,
             audio_ctx,
@@ -237,10 +294,12 @@ impl TutoringManager {
             screen_sharing: false,
             chat_sender,
             our_node_id,
+            our_display_name: display_name,
             started_at: Self::now_millis(),
+            last_chat_sent: Instant::now() - Duration::from_secs(10),
             app_handle,
             self_preview_task,
-            _tasks: vec![event_task],
+            _tasks: tasks,
         });
 
         Ok(ticket_str)
@@ -250,6 +309,8 @@ impl TutoringManager {
     pub async fn join_room(
         &self,
         session_id: String,
+        title: String,
+        display_name: String,
         ticket_str: &str,
         endpoint: &Endpoint,
         gossip: Gossip,
@@ -294,10 +355,22 @@ impl TutoringManager {
             Self::start_self_preview(&mut broadcast, app_handle.clone());
 
         // Set up chat on a derived gossip topic
+        let topic_seed = room_topic_bytes(&ticket_str);
         let chat_sender = Self::setup_chat(
             &gossip,
-            &room_topic_bytes(&ticket_str),
+            &topic_seed,
             &our_node_id,
+            app_handle.clone(),
+        )
+        .await;
+
+        // Set up name announcements on a derived /names gossip topic
+        let names_task = Self::setup_names(
+            &gossip,
+            &topic_seed,
+            &our_node_id,
+            &display_name,
+            self.inner.clone(),
             app_handle.clone(),
         )
         .await;
@@ -309,8 +382,14 @@ impl TutoringManager {
             Self::event_loop(events, inner_clone, audio_ctx_clone, app_handle_clone).await;
         });
 
+        let mut tasks = vec![event_task];
+        if let Some(t) = names_task {
+            tasks.push(t);
+        }
+
         *inner = Some(ActiveSession {
             session_id,
+            session_title: title,
             handle,
             broadcast,
             audio_ctx,
@@ -320,10 +399,12 @@ impl TutoringManager {
             screen_sharing: false,
             chat_sender,
             our_node_id,
+            our_display_name: display_name,
             started_at: Self::now_millis(),
+            last_chat_sent: Instant::now() - Duration::from_secs(10),
             app_handle,
             self_preview_task,
-            _tasks: vec![event_task],
+            _tasks: tasks,
         });
 
         Ok(ticket_str)
@@ -519,9 +600,27 @@ impl TutoringManager {
     // ── Chat ───────────────────────────────────────────────────────
 
     /// Send a text chat message to all peers in the room.
+    ///
+    /// Enforces a maximum message length and a minimum interval between
+    /// sends to prevent accidental spam.
     pub async fn send_chat(&self, text: String) -> Result<(), String> {
-        let inner = self.inner.lock().await;
-        let session = inner.as_ref().ok_or("not in a tutoring session")?;
+        if text.len() > CHAT_MAX_LENGTH {
+            return Err(format!(
+                "message too long ({} bytes, max {CHAT_MAX_LENGTH})",
+                text.len()
+            ));
+        }
+
+        let mut inner = self.inner.lock().await;
+        let session = inner.as_mut().ok_or("not in a tutoring session")?;
+
+        // Rate limit
+        let now = Instant::now();
+        let elapsed = now.duration_since(session.last_chat_sent).as_millis() as u64;
+        if elapsed < CHAT_RATE_LIMIT_MS {
+            return Err("sending too fast, please wait".into());
+        }
+        session.last_chat_sent = now;
 
         let sender = session
             .chat_sender
@@ -530,7 +629,7 @@ impl TutoringManager {
 
         let msg = ChatMessage {
             sender: session.our_node_id.clone(),
-            sender_name: None,
+            sender_name: Some(session.our_display_name.clone()),
             text,
             timestamp: Self::now_millis(),
         };
@@ -555,6 +654,7 @@ impl TutoringManager {
 
         Some(SessionStatus {
             session_id: session.session_id.clone(),
+            session_title: session.session_title.clone(),
             ticket: session.handle.ticket().to_string(),
             peers: session.peers.values().cloned().collect(),
             video_enabled: session.video_enabled,
@@ -701,6 +801,126 @@ impl TutoringManager {
         }
     }
 
+    /// Set up a display name exchange channel on a `/names` gossip topic.
+    ///
+    /// Periodically broadcasts our display name so new joiners learn it,
+    /// and listens for name announcements from other peers, updating the
+    /// peers map and emitting `tutoring:peer-name` events.
+    async fn setup_names(
+        gossip: &Gossip,
+        topic_seed: &[u8],
+        our_node_id: &str,
+        our_display_name: &str,
+        inner: Arc<Mutex<Option<ActiveSession>>>,
+        app_handle: AppHandle,
+    ) -> Option<JoinHandle<()>> {
+        use iroh_gossip::proto::TopicId;
+
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(topic_seed);
+        hasher.update(b"/names");
+        let hash = hasher.finalize();
+        let topic_id = TopicId::from_bytes(*hash.as_bytes());
+
+        match gossip.subscribe(topic_id, vec![]).await {
+            Ok(topic) => {
+                let (sender, mut receiver) = topic.split();
+                let our_id = our_node_id.to_string();
+                let our_name = our_display_name.to_string();
+
+                // Spawn a task that:
+                // 1. Broadcasts our name immediately and every N seconds
+                // 2. Listens for name announcements from peers
+                let task = tokio::spawn(async move {
+                    // Broadcast our name immediately
+                    let announce = NameAnnouncement {
+                        node_id: our_id.clone(),
+                        display_name: our_name.clone(),
+                    };
+                    if let Ok(encoded) = postcard::to_stdvec(&announce) {
+                        let _ = sender.broadcast(Bytes::from(encoded)).await;
+                    }
+
+                    let mut broadcast_interval =
+                        tokio::time::interval(Duration::from_secs(NAME_BROADCAST_INTERVAL_SECS));
+                    broadcast_interval.tick().await; // consume first immediate tick
+
+                    loop {
+                        tokio::select! {
+                            _ = broadcast_interval.tick() => {
+                                let announce = NameAnnouncement {
+                                    node_id: our_id.clone(),
+                                    display_name: our_name.clone(),
+                                };
+                                if let Ok(encoded) = postcard::to_stdvec(&announce) {
+                                    let _ = sender.broadcast(Bytes::from(encoded)).await;
+                                }
+                            }
+                            msg = async {
+                                use futures::StreamExt;
+                                receiver.next().await
+                            } => {
+                                match msg {
+                                    Some(Ok(iroh_gossip::api::Event::Received(msg))) => {
+                                        if let Ok(announce) = postcard::from_bytes::<NameAnnouncement>(&msg.content) {
+                                            // Skip our own announcements
+                                            if announce.node_id == our_id {
+                                                continue;
+                                            }
+                                            log::info!(
+                                                "tutoring: learned peer name: {} = {}",
+                                                &announce.node_id[..8.min(announce.node_id.len())],
+                                                announce.display_name
+                                            );
+
+                                            // Update the peers map
+                                            let mut guard = inner.lock().await;
+                                            if let Some(session) = guard.as_mut() {
+                                                session
+                                                    .peers
+                                                    .entry(announce.node_id.clone())
+                                                    .and_modify(|p| {
+                                                        p.display_name = Some(announce.display_name.clone());
+                                                    })
+                                                    .or_insert(TutoringPeer {
+                                                        node_id: announce.node_id.clone(),
+                                                        display_name: Some(announce.display_name.clone()),
+                                                        broadcasts: vec![],
+                                                        connected: false,
+                                                    });
+                                            }
+
+                                            // Emit to frontend
+                                            let _ = app_handle.emit(
+                                                "tutoring:peer-name",
+                                                PeerNameEvent {
+                                                    node_id: announce.node_id,
+                                                    display_name: announce.display_name,
+                                                },
+                                            );
+                                        }
+                                    }
+                                    Some(Ok(_)) => {} // other gossip events
+                                    Some(Err(e)) => {
+                                        log::warn!("tutoring: names gossip error: {e}");
+                                    }
+                                    None => break, // topic closed
+                                }
+                            }
+                        }
+                    }
+                    log::info!("tutoring: names loop ended");
+                });
+
+                Some(task)
+            }
+            Err(e) => {
+                log::warn!("tutoring: failed to set up names gossip topic: {e}");
+                None
+            }
+        }
+    }
+
     /// Event loop that processes room events (peer announcements,
     /// connections, broadcast subscriptions) and spawns video frame
     /// bridge tasks for each subscribed remote broadcast.
@@ -729,6 +949,7 @@ impl TutoringManager {
                             })
                             .or_insert(TutoringPeer {
                                 node_id,
+                                display_name: None,
                                 broadcasts,
                                 connected: false,
                             });
@@ -750,6 +971,7 @@ impl TutoringManager {
                             })
                             .or_insert(TutoringPeer {
                                 node_id,
+                                display_name: None,
                                 broadcasts: vec![],
                                 connected: true,
                             });

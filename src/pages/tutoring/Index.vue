@@ -16,8 +16,10 @@ const {
 const showCreateModal = ref(false)
 const showJoinModal = ref(false)
 const newRoomTitle = ref('')
+const createDisplayName = ref('')
 const joinTicket = ref('')
 const joinTitle = ref('')
+const joinDisplayName = ref('')
 
 onMounted(() => {
   refreshSessions()
@@ -34,9 +36,13 @@ const activeSession = computed(() =>
 async function handleCreate() {
   if (!newRoomTitle.value.trim()) return
   try {
-    const session = await createRoom(newRoomTitle.value.trim())
+    const session = await createRoom(
+      newRoomTitle.value.trim(),
+      createDisplayName.value.trim() || undefined,
+    )
     showCreateModal.value = false
     newRoomTitle.value = ''
+    createDisplayName.value = ''
     router.push(`/tutoring/${session.id}`)
   } catch {
     // error is in lastError
@@ -46,10 +52,15 @@ async function handleCreate() {
 async function handleJoin() {
   if (!joinTicket.value.trim()) return
   try {
-    const session = await joinRoom(joinTicket.value.trim(), joinTitle.value.trim() || undefined)
+    const session = await joinRoom(
+      joinTicket.value.trim(),
+      joinTitle.value.trim() || undefined,
+      joinDisplayName.value.trim() || undefined,
+    )
     showJoinModal.value = false
     joinTicket.value = ''
     joinTitle.value = ''
+    joinDisplayName.value = ''
     router.push(`/tutoring/${session.id}`)
   } catch {
     // error is in lastError
@@ -215,6 +226,16 @@ function formatDate(iso: string) {
                   @keydown.enter="handleCreate"
                 />
               </div>
+              <div>
+                <label class="text-sm font-medium text-foreground" for="create-display-name">Your Name (optional)</label>
+                <input
+                  id="create-display-name"
+                  v-model="createDisplayName"
+                  type="text"
+                  placeholder="e.g. Alice"
+                  class="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                />
+              </div>
             </div>
             <div class="mt-6 flex justify-end gap-2">
               <button
@@ -262,12 +283,22 @@ function formatDate(iso: string) {
                 />
               </div>
               <div>
-                <label class="text-sm font-medium text-foreground" for="join-title">Display Name (optional)</label>
+                <label class="text-sm font-medium text-foreground" for="join-title">Session Label (optional)</label>
                 <input
                   id="join-title"
                   v-model="joinTitle"
                   type="text"
                   placeholder="e.g. My Study Session"
+                  class="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                />
+              </div>
+              <div>
+                <label class="text-sm font-medium text-foreground" for="join-display-name">Your Name (optional)</label>
+                <input
+                  id="join-display-name"
+                  v-model="joinDisplayName"
+                  type="text"
+                  placeholder="e.g. Bob"
                   class="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                 />
               </div>
