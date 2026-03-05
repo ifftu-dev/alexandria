@@ -36,6 +36,174 @@ pub enum NetworkError {
     Identity(String),
 }
 
+fn identify_agent_version() -> String {
+    let version = env!("CARGO_PKG_VERSION");
+    format!("alexandria-node/{version} ({})", device_label())
+}
+
+fn device_label() -> String {
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(model) = apple_sysctl("hw.model") {
+            return humanize_apple_model(&model);
+        }
+        return "Mac".to_string();
+    }
+
+    #[cfg(target_os = "ios")]
+    {
+        if let Some(model) = apple_sysctl("hw.machine") {
+            return humanize_apple_model(&model);
+        }
+        if let Ok(sim_model) = std::env::var("SIMULATOR_MODEL_IDENTIFIER") {
+            if !sim_model.trim().is_empty() {
+                return humanize_apple_model(sim_model.trim());
+            }
+        }
+        return "iPhone or iPad".to_string();
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(label) = std::env::var("ALEXANDRIA_DEVICE_LABEL") {
+            let label = label.trim();
+            if !label.is_empty() {
+                return label.to_string();
+            }
+        }
+        if let Ok(product) = std::fs::read_to_string("/sys/devices/virtual/dmi/id/product_name") {
+            let product = product.trim();
+            if !product.is_empty() {
+                return product.to_string();
+            }
+        }
+        return "Linux device".to_string();
+    }
+
+    #[cfg(target_os = "android")]
+    {
+        if let Ok(label) = std::env::var("ALEXANDRIA_DEVICE_LABEL") {
+            let label = label.trim();
+            if !label.is_empty() {
+                return label.to_string();
+            }
+        }
+        return "Android device".to_string();
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(label) = std::env::var("ALEXANDRIA_DEVICE_LABEL") {
+            let label = label.trim();
+            if !label.is_empty() {
+                return label.to_string();
+            }
+        }
+        return "Windows device".to_string();
+    }
+
+    #[cfg(not(any(
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "linux",
+        target_os = "android",
+        target_os = "windows"
+    )))]
+    {
+        "Unknown device".to_string()
+    }
+}
+
+fn humanize_apple_model(model: &str) -> String {
+    let model = model.trim();
+    if model.is_empty() {
+        return "Apple device".to_string();
+    }
+
+    if model.starts_with("MacBookPro") {
+        return format!("MacBook Pro ({model})");
+    }
+    if model.starts_with("MacBookAir") {
+        return format!("MacBook Air ({model})");
+    }
+    if model.starts_with("MacBook") {
+        return format!("MacBook ({model})");
+    }
+    if model.starts_with("Macmini") {
+        return format!("Mac mini ({model})");
+    }
+    if model.starts_with("MacStudio") {
+        return format!("Mac Studio ({model})");
+    }
+    if model.starts_with("MacPro") {
+        return format!("Mac Pro ({model})");
+    }
+    if model.starts_with("iPhone") {
+        if let Some(gen) = extract_apple_generation(model, "iPhone") {
+            return format!("iPhone {gen} ({model})");
+        }
+        return format!("iPhone ({model})");
+    }
+    if model.starts_with("iPad") {
+        if let Some(gen) = extract_apple_generation(model, "iPad") {
+            return format!("iPad {gen} ({model})");
+        }
+        return format!("iPad ({model})");
+    }
+
+    format!("Apple device ({model})")
+}
+
+fn extract_apple_generation(model: &str, prefix: &str) -> Option<u32> {
+    let tail = model.strip_prefix(prefix)?;
+    let digits: String = tail.chars().take_while(|c| c.is_ascii_digit()).collect();
+    digits.parse::<u32>().ok()
+}
+
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+fn apple_sysctl(name: &str) -> Option<String> {
+    use std::ffi::CString;
+    use std::os::raw::c_void;
+
+    let key = CString::new(name).ok()?;
+    let mut size: usize = 0;
+
+    unsafe {
+        if libc::sysctlbyname(
+            key.as_ptr(),
+            std::ptr::null_mut(),
+            &mut size,
+            std::ptr::null_mut(),
+            0,
+        ) != 0
+        {
+            return None;
+        }
+
+        if size == 0 {
+            return None;
+        }
+
+        let mut buffer = vec![0u8; size];
+        if libc::sysctlbyname(
+            key.as_ptr(),
+            buffer.as_mut_ptr() as *mut c_void,
+            &mut size,
+            std::ptr::null_mut(),
+            0,
+        ) != 0
+        {
+            return None;
+        }
+
+        if let Some(end) = buffer.iter().position(|b| *b == 0) {
+            buffer.truncate(end);
+        }
+
+        String::from_utf8(buffer).ok()
+    }
+}
+
 /// Composed network behaviour for the Alexandria P2P node.
 ///
 /// Combines seven libp2p protocols:
@@ -412,6 +580,7 @@ fn build_behaviour(
             "/alexandria/id/1.0".to_string(),
             keypair.public(),
         )
+        .with_agent_version(identify_agent_version())
         .with_push_listen_addr_updates(true),
     );
 

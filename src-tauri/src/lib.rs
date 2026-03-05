@@ -287,6 +287,7 @@ pub fn run() {
             commands::taxonomy::get_taxonomy_version,
             commands::taxonomy::list_taxonomy_versions,
             commands::taxonomy::validate_taxonomy_changes,
+            commands::taxonomy::bootstrap_public_taxonomy,
             commands::taxonomy::list_subject_fields,
             commands::taxonomy::list_subjects,
             commands::taxonomy::list_skills,

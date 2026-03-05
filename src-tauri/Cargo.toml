@@ -65,6 +65,7 @@ chrono = { version = "0.4", features = ["serde"] }
 thiserror = "2"
 log = "0.4"
 hex = "0.4"
+libc = "0.2"
 
 # Portable vault encryption (all platforms — replaces Stronghold on mobile)
 argon2 = "0.5"
