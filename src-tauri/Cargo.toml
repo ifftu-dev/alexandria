@@ -76,21 +76,9 @@ aes-gcm = "0.10"
 iroh = "0.96"
 iroh-blobs = { version = "0.98", features = ["fs-store"] }
 
-# Live tutoring — Media over QUIC (iroh-live)
-# Desktop-only Phase 1: camera + audio + screen share via iroh P2P rooms.
-# Using patched fork with firewheel 0.10 (cpal 0.17.x) to fix CoreAudio
-# SIGSEGV on macOS Sequoia (RustAudio/cpal#1028, fixed in cpal 0.17.0).
-iroh-gossip = "0.96"
-iroh-live = { git = "https://github.com/ifftu-dev/iroh-live", rev = "27cd1cd" }
-
-# Device enumeration for pre-join device checks (camera listing via nokhwa)
-nokhwa = { version = "0.10", default-features = false, features = ["input-native"] }
-
-# Image encoding (JPEG) for bridging video frames to webview
-image = { version = "0.25", default-features = false, features = ["jpeg"] }
-base64 = "0.21"
-postcard = { version = "1", features = ["alloc"] }
-blake3 = "1"
+# Image encoding (JPEG) — used for tutoring video frame bridge (desktop only uses this,
+# but the dep itself is platform-agnostic; gated at module level)
+# NOTE: iroh-live, iroh-gossip, nokhwa, and media deps are desktop-only (see below)
 
 # P2P networking (libp2p swarm) — all platforms
 # Uses private Alexandria DHT (/alexandria/kad/1.0) with relay bootstrap.
@@ -107,6 +95,23 @@ objc2 = "0.6"
 [target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
 # Secure secret storage (IOTA Stronghold encrypted vault — desktop uses this instead of portable)
 iota_stronghold = "2"
+
+# Live tutoring — Media over QUIC (iroh-live)
+# Desktop-only Phase 1: camera + audio + screen share via iroh P2P rooms.
+# Uses patched fork with firewheel 0.10 (cpal 0.17.x) to fix CoreAudio
+# SIGSEGV on macOS Sequoia. Depends on system ffmpeg which isn't
+# available for iOS/Android cross-compilation.
+iroh-gossip = "0.96"
+iroh-live = { git = "https://github.com/ifftu-dev/iroh-live", rev = "27cd1cd" }
+
+# Device enumeration for pre-join device checks (camera listing via nokhwa)
+nokhwa = { version = "0.10", default-features = false, features = ["input-native"] }
+
+# Image encoding (JPEG) for bridging video frames to webview
+image = { version = "0.25", default-features = false, features = ["jpeg"] }
+base64 = "0.21"
+postcard = { version = "1", features = ["alloc"] }
+blake3 = "1"
 
 [dev-dependencies]
 tempfile = "3"

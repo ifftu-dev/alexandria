@@ -22,7 +22,9 @@ use iroh::protocol::Router;
 use iroh::{Endpoint, SecretKey};
 use iroh_blobs::store::fs::FsStore;
 use iroh_blobs::BlobsProtocol;
+#[cfg(desktop)]
 use iroh_gossip::Gossip;
+#[cfg(desktop)]
 use iroh_live::Live;
 use thiserror::Error;
 use tokio::sync::Mutex;
@@ -53,7 +55,9 @@ pub enum NodeError {
 struct RunningNode {
     router: Router,
     store: FsStore,
+    #[cfg(desktop)]
     gossip: Gossip,
+    #[cfg(desktop)]
     live: Live,
 }
 
@@ -108,27 +112,39 @@ impl ContentNode {
         let node_id = endpoint.id();
         log::info!("iroh endpoint bound, node ID: {node_id}");
 
-        // Create gossip (peer discovery for tutoring rooms) and live (MoQ media)
+        // Register protocols on the shared router.
+        // Desktop: blobs + gossip (room peer discovery) + MoQ (media streaming)
+        // Mobile: blobs only (tutoring requires ffmpeg which isn't available)
+        let blobs = BlobsProtocol::new(&store, None);
+
+        #[cfg(desktop)]
         let gossip = Gossip::builder().spawn(endpoint.clone());
+        #[cfg(desktop)]
         let live = Live::new(endpoint.clone());
 
-        // Register all protocols on the shared router:
-        // - iroh-blobs: content-addressed storage
-        // - iroh-gossip: room peer discovery
-        // - iroh-moq: media streaming (video/audio)
-        let blobs = BlobsProtocol::new(&store, None);
+        #[cfg(desktop)]
         let router = Router::builder(endpoint)
             .accept(iroh_blobs::ALPN, blobs)
             .accept(iroh_gossip::ALPN, gossip.clone())
             .accept(iroh_live::ALPN, live.protocol_handler())
             .spawn();
 
+        #[cfg(mobile)]
+        let router = Router::builder(endpoint)
+            .accept(iroh_blobs::ALPN, blobs)
+            .spawn();
+
+        #[cfg(desktop)]
         log::info!("iroh router started, accepting blobs + gossip + moq connections");
+        #[cfg(mobile)]
+        log::info!("iroh router started, accepting blobs connections (mobile mode)");
 
         *inner = Some(RunningNode {
             router,
             store,
+            #[cfg(desktop)]
             gossip,
+            #[cfg(desktop)]
             live,
         });
         Ok(())
@@ -178,6 +194,8 @@ impl ContentNode {
     /// Get a clone of the Gossip instance for tutoring room peer discovery.
     ///
     /// Returns `None` if the node is not running.
+    /// Desktop-only (gossip is not registered on mobile).
+    #[cfg(desktop)]
     pub async fn gossip(&self) -> Option<Gossip> {
         let inner = self.inner.lock().await;
         inner.as_ref().map(|n| n.gossip.clone())
@@ -186,6 +204,8 @@ impl ContentNode {
     /// Get a clone of the Live instance for MoQ media streaming.
     ///
     /// Returns `None` if the node is not running.
+    /// Desktop-only (MoQ requires ffmpeg which isn't available on mobile).
+    #[cfg(desktop)]
     pub async fn live(&self) -> Option<Live> {
         let inner = self.inner.lock().await;
         inner.as_ref().map(|n| n.live.clone())
