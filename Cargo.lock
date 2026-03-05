@@ -4814,7 +4814,7 @@ dependencies = [
 [[package]]
 name = "iroh-live"
 version = "0.1.0"
-source = "git+https://github.com/ifftu-dev/iroh-live#9e7d5bf31b382599cb8a1c87dec9046a30c1697e"
+source = "git+https://github.com/ifftu-dev/iroh-live?rev=27cd1cd#27cd1cdce63003f8923d6c313bd9456328666fce"
 dependencies = [
  "anyhow",
  "byte-unit",
@@ -4872,7 +4872,7 @@ dependencies = [
 [[package]]
 name = "iroh-moq"
 version = "0.1.0"
-source = "git+https://github.com/ifftu-dev/iroh-live#9e7d5bf31b382599cb8a1c87dec9046a30c1697e"
+source = "git+https://github.com/ifftu-dev/iroh-live?rev=27cd1cd#27cd1cdce63003f8923d6c313bd9456328666fce"
 dependencies = [
  "iroh",
  "moq-lite",
@@ -6280,7 +6280,7 @@ dependencies = [
 [[package]]
 name = "moq-media"
 version = "0.1.0"
-source = "git+https://github.com/ifftu-dev/iroh-live#9e7d5bf31b382599cb8a1c87dec9046a30c1697e"
+source = "git+https://github.com/ifftu-dev/iroh-live?rev=27cd1cd#27cd1cdce63003f8923d6c313bd9456328666fce"
 dependencies = [
  "anyhow",
  "buf-list",

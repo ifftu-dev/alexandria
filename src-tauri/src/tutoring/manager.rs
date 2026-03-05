@@ -17,7 +17,7 @@ use bytes::Bytes;
 use image::ImageEncoder;
 use iroh::Endpoint;
 use iroh_gossip::net::Gossip;
-use iroh_live::media::audio::AudioBackend;
+use iroh_live::media::audio::{AudioBackend, InputStream};
 use iroh_live::media::av::{AudioPreset, DecodeConfig, VideoPreset};
 use iroh_live::media::capture::{CameraCapturer, ScreenCapturer};
 use iroh_live::media::ffmpeg::{FfmpegDecoders, FfmpegVideoDecoder, H264Encoder, OpusEncoder};
@@ -132,6 +132,15 @@ pub struct SessionStatus {
 
 // ── Internal state ─────────────────────────────────────────────────
 
+/// Tauri event payload for audio level updates.
+#[derive(Debug, Clone, Serialize)]
+struct AudioLevelEvent {
+    /// Mic input level 0.0–1.0.
+    mic_level: f32,
+    /// Output level 0.0–1.0 (if available from output stream).
+    output_level: f32,
+}
+
 /// Internal state for an active room.
 struct ActiveSession {
     session_id: String,
@@ -139,6 +148,8 @@ struct ActiveSession {
     handle: RoomHandle,
     broadcast: PublishBroadcast,
     audio_ctx: Option<AudioBackend>,
+    /// Clone of the mic InputStream — kept for peak metering (VU meter).
+    mic_input: Option<InputStream>,
     peers: HashMap<String, TutoringPeer>,
     video_enabled: bool,
     audio_enabled: bool,
@@ -236,7 +247,7 @@ impl TutoringManager {
         }
 
         // Start publishing local media
-        let mut broadcast =
+        let (mut broadcast, mic_input) =
             Self::create_broadcast(audio_ctx.as_ref(), true, has_audio).await?;
         room.publish(BROADCAST_NAME, broadcast.producer())
             .await
@@ -277,8 +288,17 @@ impl TutoringManager {
             Self::event_loop(events, inner_clone, audio_ctx_clone, app_handle_clone).await;
         });
 
+        // Spawn audio level emitter (VU meter events every ~50ms)
+        let audio_level_task = Self::start_audio_level_emitter(
+            mic_input.clone(),
+            app_handle.clone(),
+        );
+
         let mut tasks = vec![event_task];
         if let Some(t) = names_task {
+            tasks.push(t);
+        }
+        if let Some(t) = audio_level_task {
             tasks.push(t);
         }
 
@@ -288,6 +308,7 @@ impl TutoringManager {
             handle,
             broadcast,
             audio_ctx,
+            mic_input,
             peers: HashMap::new(),
             video_enabled: true,
             audio_enabled: has_audio,
@@ -342,7 +363,7 @@ impl TutoringManager {
         }
 
         // Start publishing local media
-        let mut broadcast =
+        let (mut broadcast, mic_input) =
             Self::create_broadcast(audio_ctx.as_ref(), true, has_audio).await?;
         room.publish(BROADCAST_NAME, broadcast.producer())
             .await
@@ -382,8 +403,17 @@ impl TutoringManager {
             Self::event_loop(events, inner_clone, audio_ctx_clone, app_handle_clone).await;
         });
 
+        // Spawn audio level emitter (VU meter events every ~50ms)
+        let audio_level_task = Self::start_audio_level_emitter(
+            mic_input.clone(),
+            app_handle.clone(),
+        );
+
         let mut tasks = vec![event_task];
         if let Some(t) = names_task {
+            tasks.push(t);
+        }
+        if let Some(t) = audio_level_task {
             tasks.push(t);
         }
 
@@ -393,6 +423,7 @@ impl TutoringManager {
             handle,
             broadcast,
             audio_ctx,
+            mic_input,
             peers: HashMap::new(),
             video_enabled: true,
             audio_enabled: has_audio,
@@ -500,6 +531,7 @@ impl TutoringManager {
             if let Some(ref ctx) = session.audio_ctx {
                 match ctx.default_input().await {
                     Ok(mic) => {
+                        session.mic_input = Some(mic.clone());
                         let renditions =
                             AudioRenditions::new::<OpusEncoder>(mic, [AudioPreset::Hq]);
                         session
@@ -521,6 +553,7 @@ impl TutoringManager {
                 .set_audio(None)
                 .map_err(|e| format!("failed to disable audio: {e}"))?;
             session.audio_enabled = false;
+            session.mic_input = None;
         }
 
         Ok(session.audio_enabled)
@@ -681,17 +714,24 @@ impl TutoringManager {
 
     // ── Internal helpers ───────────────────────────────────────────
 
+    /// Create a PublishBroadcast with camera + mic.
+    ///
+    /// Returns `(broadcast, mic_input)` — the mic_input is a clone of the
+    /// InputStream that can be used for peak metering (VU meters).
     async fn create_broadcast(
         audio_ctx: Option<&AudioBackend>,
         video: bool,
         audio: bool,
-    ) -> Result<PublishBroadcast, String> {
+    ) -> Result<(PublishBroadcast, Option<InputStream>), String> {
         let mut broadcast = PublishBroadcast::new();
+        let mut mic_input: Option<InputStream> = None;
 
         if audio {
             if let Some(ctx) = audio_ctx {
                 match ctx.default_input().await {
                     Ok(mic) => {
+                        // Clone the input stream so we can monitor peak levels
+                        mic_input = Some(mic.clone());
                         let audio_renditions =
                             AudioRenditions::new::<OpusEncoder>(mic, [AudioPreset::Hq]);
                         broadcast
@@ -722,7 +762,7 @@ impl TutoringManager {
             }
         }
 
-        Ok(broadcast)
+        Ok((broadcast, mic_input))
     }
 
     /// Start a self-preview from the broadcast's local video source.
@@ -739,6 +779,38 @@ impl TutoringManager {
 
         log::info!("tutoring: starting self-preview");
         Some(Self::spawn_frame_bridge(watch, "self".into(), app_handle))
+    }
+
+    /// Spawn a background task that periodically reads the mic peak level
+    /// and emits `tutoring:audio-level` Tauri events for the frontend VU meter.
+    fn start_audio_level_emitter(
+        mic_input: Option<InputStream>,
+        app_handle: AppHandle,
+    ) -> Option<JoinHandle<()>> {
+        let mic = mic_input?;
+        Some(tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_millis(50));
+            loop {
+                interval.tick().await;
+                let mic_level = mic.smoothed_peak_normalized();
+                let _ = app_handle.emit(
+                    "tutoring:audio-level",
+                    AudioLevelEvent {
+                        mic_level,
+                        output_level: 0.0, // TODO: output peak from OutputStream
+                    },
+                );
+            }
+        }))
+    }
+
+    /// Get the current mic peak level (0.0–1.0) if in a session with audio.
+    pub async fn get_mic_level(&self) -> f32 {
+        let inner = self.inner.lock().await;
+        match inner.as_ref().and_then(|s| s.mic_input.as_ref()) {
+            Some(mic) => mic.smoothed_peak_normalized(),
+            None => 0.0,
+        }
     }
 
     /// Set up a chat channel on a gossip topic derived from the room.

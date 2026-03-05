@@ -6,6 +6,8 @@ import type {
   TutoringVideoFrame,
   TutoringChatMessage,
   DeviceCheckResult,
+  DeviceList,
+  AudioLevelEvent,
 } from '@/types'
 import { useLocalApi } from './useLocalApi'
 
@@ -33,6 +35,9 @@ const unreadChatCount = ref(0)
 /** Whether the chat panel is currently visible (set by the session page). */
 const chatOpen = ref(false)
 
+/** Current mic input level (0.0–1.0) for the VU meter. Updated ~20x/s via Tauri events. */
+const micLevel = ref(0)
+
 let pollInterval: ReturnType<typeof setInterval> | null = null
 
 // ── Tauri event listeners (set up once globally) ───────────────────
@@ -41,6 +46,7 @@ let videoUnlisten: (() => void) | null = null
 let chatUnlisten: (() => void) | null = null
 let peerEndedUnlisten: (() => void) | null = null
 let peerNameUnlisten: (() => void) | null = null
+let audioLevelUnlisten: (() => void) | null = null
 
 async function setupEventListeners() {
   if (videoUnlisten) return // already set up
@@ -78,6 +84,10 @@ async function setupEventListeners() {
         [node_id]: display_name,
       }
     })
+
+    audioLevelUnlisten = await listen<AudioLevelEvent>('tutoring:audio-level', (event) => {
+      micLevel.value = event.payload.mic_level
+    })
   } catch (e) {
     console.warn('Failed to set up Tauri event listeners:', e)
   }
@@ -100,6 +110,11 @@ function teardownEventListeners() {
     peerNameUnlisten()
     peerNameUnlisten = null
   }
+  if (audioLevelUnlisten) {
+    audioLevelUnlisten()
+    audioLevelUnlisten = null
+  }
+  micLevel.value = 0
 }
 
 // ── API functions ──────────────────────────────────────────────────
@@ -251,6 +266,16 @@ async function getPeers(): Promise<TutoringPeer[]> {
   }
 }
 
+/** List all available audio and camera devices. */
+async function listDevices(): Promise<DeviceList> {
+  try {
+    return await invoke<DeviceList>('tutoring_list_devices')
+  } catch (e: unknown) {
+    console.warn('Failed to list devices:', e)
+    return { audio_inputs: [], audio_outputs: [], cameras: [] }
+  }
+}
+
 /** Check device availability (camera + mic) before joining a session. */
 async function checkDevices(): Promise<DeviceCheckResult> {
   try {
@@ -296,6 +321,7 @@ export function useTutoringRoom() {
     chatMessages: readonly(chatMessages),
     peerNames: readonly(peerNames),
     unreadChatCount: readonly(unreadChatCount),
+    micLevel: readonly(micLevel),
     refreshStatus,
     refreshSessions,
     createRoom,
@@ -307,6 +333,7 @@ export function useTutoringRoom() {
     sendChat,
     getPeers,
     checkDevices,
+    listDevices,
     startPolling,
     stopPolling,
     setupEventListeners,
