@@ -1,8 +1,13 @@
 //! Mobile stub commands for live tutoring.
 //!
-//! Live tutoring requires iroh-live (ffmpeg, nokhwa) which are
-//! desktop-only. These stubs return clear errors so the frontend
-//! can gracefully disable tutoring features on mobile.
+//! Phase 2 (in progress): audio-only tutoring on mobile.
+//! iroh-live is now available without ffmpeg via the pure Opus codec,
+//! and gossip + MoQ protocols are registered on mobile.
+//! These stubs will be replaced with real audio-only implementations.
+//!
+//! Currently stubbed: create/join/leave room, toggle video/audio,
+//! screen share, chat, status, peers. Device enumeration returns
+//! audio-only capabilities.
 
 use serde::Serialize;
 use tauri::{AppHandle, State};
@@ -49,7 +54,7 @@ pub struct DeviceList {
     pub cameras: Vec<CameraDeviceInfo>,
 }
 
-const UNSUPPORTED: &str = "Live tutoring is not yet available on mobile";
+const UNSUPPORTED: &str = "Audio-only tutoring on mobile is coming soon";
 
 #[tauri::command]
 pub async fn tutoring_create_room(
