@@ -13,6 +13,7 @@ const {
   peerNames,
   unreadChatCount,
   micLevel,
+  outputLevel,
   refreshStatus,
   leaveRoom,
   toggleVideo,
@@ -78,6 +79,27 @@ const videoEnabled = computed(() => sessionStatus.value?.video_enabled ?? false)
 const audioEnabled = computed(() => sessionStatus.value?.audio_enabled ?? false)
 const screenSharing = computed(() => sessionStatus.value?.screen_sharing ?? false)
 const selfVideoSrc = computed(() => videoFrames.value['self'] ?? null)
+
+/** Connection quality: 'good' | 'fair' | 'poor' | 'none' based on peer connectivity. */
+const connectionQuality = computed(() => {
+  if (!isActive.value) return 'none'
+  const total = peers.value.length
+  if (total === 0) return 'good' // no peers yet, but we're connected
+  const connected = peers.value.filter(p => p.connected).length
+  const ratio = connected / total
+  if (ratio >= 1) return 'good'
+  if (ratio >= 0.5) return 'fair'
+  return 'poor'
+})
+
+const connectionQualityColor = computed(() => {
+  switch (connectionQuality.value) {
+    case 'good': return 'text-success'
+    case 'fair': return 'text-warning'
+    case 'poor': return 'text-destructive'
+    default: return 'text-muted-foreground'
+  }
+})
 
 const formattedDuration = computed(() => {
   const s = elapsedSeconds.value
@@ -213,6 +235,15 @@ function peerInitials(nodeId: string): string {
           <span v-if="isActive" class="rounded bg-muted px-1 sm:px-1.5 py-0.5 text-[0.65rem] sm:text-xs font-mono text-muted-foreground tabular-nums">
             {{ formattedDuration }}
           </span>
+          <!-- Connection quality indicator -->
+          <div v-if="isActive" class="flex items-center gap-0.5" :title="`Connection: ${connectionQuality}`">
+            <svg class="h-3.5 w-3.5" :class="connectionQualityColor" viewBox="0 0 20 20" fill="currentColor">
+              <rect x="2" y="14" width="3" height="4" rx="0.5" :opacity="connectionQuality !== 'none' ? 1 : 0.3" />
+              <rect x="7" y="10" width="3" height="8" rx="0.5" :opacity="connectionQuality === 'good' || connectionQuality === 'fair' ? 1 : 0.3" />
+              <rect x="12" y="6" width="3" height="12" rx="0.5" :opacity="connectionQuality === 'good' || connectionQuality === 'fair' ? 1 : 0.3" />
+              <rect x="17" y="2" width="3" height="16" rx="0.5" :opacity="connectionQuality === 'good' ? 1 : 0.3" />
+            </svg>
+          </div>
         </div>
       </div>
 
@@ -376,6 +407,25 @@ function peerInitials(nodeId: string): string {
                     {{ peer.connected ? peerDisplayName(peer.node_id) : 'Connecting...' }}
                   </span>
                 </div>
+                <!-- Speaker VU indicator on peer card -->
+                <div v-if="outputLevel > 0.05" class="absolute bottom-2 right-2 flex items-center gap-1 rounded bg-black/60 px-1.5 py-1 backdrop-blur-sm">
+                  <svg class="h-3 w-3 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" />
+                  </svg>
+                  <div class="flex items-end gap-[2px] h-3">
+                    <div
+                      v-for="i in 4"
+                      :key="i"
+                      class="w-[2px] rounded-[1px] transition-[height,background-color] duration-75"
+                      :style="{ height: outputLevel >= (i * 0.2) ? `${2 + i * 1.5}px` : '2px' }"
+                      :class="[
+                        outputLevel >= (i * 0.2)
+                          ? (i <= 2 ? 'bg-blue-400' : i === 3 ? 'bg-warning' : 'bg-destructive')
+                          : 'bg-white/20',
+                      ]"
+                    />
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -477,6 +527,33 @@ function peerInitials(nodeId: string): string {
               <path stroke-linecap="round" stroke-linejoin="round" d="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25m18 0A2.25 2.25 0 0018.75 3H5.25A2.25 2.25 0 003 5.25m18 0V12a9 9 0 01-9 9m9-15V12a9 9 0 01-9 9m0 0a9 9 0 01-9-9V5.25" />
             </svg>
           </button>
+
+          <!-- Speaker output level indicator -->
+          <div class="relative" v-if="outputLevel > 0.02">
+            <div
+              class="flex h-11 w-11 items-center justify-center rounded-full border border-border bg-muted text-foreground"
+              title="Speaker output level"
+            >
+              <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" />
+              </svg>
+            </div>
+            <!-- Circular VU ring around speaker indicator -->
+            <svg
+              class="absolute inset-0 h-11 w-11 -rotate-90 pointer-events-none"
+              viewBox="0 0 44 44"
+            >
+              <circle
+                cx="22" cy="22" r="20"
+                fill="none"
+                :stroke="outputLevel > 0.8 ? '#f97316' : '#3b82f6'"
+                stroke-width="2.5"
+                :stroke-dasharray="`${outputLevel * 125.6} 125.6`"
+                stroke-linecap="round"
+                class="transition-[stroke-dasharray,stroke] duration-75"
+              />
+            </svg>
+          </div>
 
           <!-- Divider -->
           <div class="h-6 w-px bg-border" />
