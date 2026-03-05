@@ -28,6 +28,7 @@ pub struct TutoringSessionInfo {
 #[tauri::command]
 pub async fn tutoring_create_room(
     title: String,
+    display_name: Option<String>,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<TutoringSessionInfo, String> {
@@ -47,10 +48,11 @@ pub async fn tutoring_create_room(
         .ok_or("live not available")?;
 
     let session_id = uuid::Uuid::new_v4().to_string();
+    let name = display_name.unwrap_or_else(|| title.clone());
 
     let ticket = state
         .tutoring
-        .create_room(session_id.clone(), &endpoint, gossip, live, app)
+        .create_room(session_id.clone(), title.clone(), name, &endpoint, gossip, live, app)
         .await?;
 
     // Persist to database
@@ -79,6 +81,7 @@ pub async fn tutoring_create_room(
 pub async fn tutoring_join_room(
     ticket: String,
     title: Option<String>,
+    display_name: Option<String>,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<TutoringSessionInfo, String> {
@@ -99,10 +102,11 @@ pub async fn tutoring_join_room(
 
     let session_id = uuid::Uuid::new_v4().to_string();
     let title = title.unwrap_or_else(|| "Joined session".into());
+    let name = display_name.unwrap_or_else(|| title.clone());
 
     let resolved_ticket = state
         .tutoring
-        .join_room(session_id.clone(), &ticket, &endpoint, gossip, live, app)
+        .join_room(session_id.clone(), title.clone(), name, &ticket, &endpoint, gossip, live, app)
         .await?;
 
     // Persist to database

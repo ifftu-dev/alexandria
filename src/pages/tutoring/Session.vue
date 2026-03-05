@@ -10,6 +10,8 @@ const {
   lastError,
   videoFrames,
   chatMessages,
+  peerNames,
+  unreadChatCount,
   refreshStatus,
   leaveRoom,
   toggleVideo,
@@ -19,6 +21,7 @@ const {
   startPolling,
   stopPolling,
   setupEventListeners,
+  setChatOpen,
 } = useTutoringRoom()
 
 const sessionId = computed(() => route.params.id as string)
@@ -27,6 +30,8 @@ const showLeaveConfirm = ref(false)
 const showChat = ref(false)
 const chatInput = ref('')
 const chatScrollRef = ref<HTMLElement | null>(null)
+const showTicketFallback = ref(false)
+const dismissedError = ref(false)
 
 // Duration timer
 const elapsedSeconds = ref(0)
@@ -46,13 +51,25 @@ onMounted(async () => {
 
 onUnmounted(() => {
   stopPolling()
+  setChatOpen(false)
   if (durationInterval) {
     clearInterval(durationInterval)
     durationInterval = null
   }
 })
 
+// Sync chat panel state with the composable's unread counter
+watch(showChat, (open) => {
+  setChatOpen(open)
+})
+
+// Reset dismissed error when a new error occurs
+watch(() => lastError.value, () => {
+  dismissedError.value = false
+})
+
 const isActive = computed(() => sessionStatus.value?.session_id === sessionId.value)
+const sessionTitle = computed(() => sessionStatus.value?.session_title || 'Session')
 const peers = computed(() => sessionStatus.value?.peers ?? [])
 const peerCount = computed(() => peers.value.length)
 const connectedPeerCount = computed(() => peers.value.filter(p => p.connected).length)
@@ -72,11 +89,6 @@ const formattedDuration = computed(() => {
   return `${mins}:${String(secs).padStart(2, '0')}`
 })
 
-const unreadChat = computed(() => {
-  if (showChat.value) return 0
-  return chatMessages.value.length
-})
-
 // Auto-scroll chat
 watch(chatMessages, () => {
   nextTick(() => {
@@ -93,7 +105,8 @@ async function copyTicket() {
     ticketCopied.value = true
     setTimeout(() => { ticketCopied.value = false }, 2000)
   } catch {
-    // fallback
+    // Clipboard API failed (e.g., insecure context) — show fallback
+    showTicketFallback.value = true
   }
 }
 
@@ -146,8 +159,26 @@ function formatChatTime(ts: number) {
   return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
 }
 
-function shortNodeId(id: string) {
-  return id === 'self' ? 'You' : id.slice(0, 8) + '...'
+/** Resolve peer display name: gossip name > status name > short node ID. */
+function peerDisplayName(nodeId: string): string {
+  if (nodeId === 'self') return 'You'
+  // Prefer real-time gossip name, then status-reported name
+  const gossipName = peerNames.value[nodeId]
+  if (gossipName) return gossipName
+  const peer = peers.value.find(p => p.node_id === nodeId)
+  if (peer?.display_name) return peer.display_name
+  return nodeId.slice(0, 8) + '...'
+}
+
+/** Get initials from a display name (or first 2 chars of node ID). */
+function peerInitials(nodeId: string): string {
+  const name = peerNames.value[nodeId] || peers.value.find(p => p.node_id === nodeId)?.display_name
+  if (name) {
+    const parts = name.trim().split(/\s+/)
+    if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase()
+    return name.slice(0, 2).toUpperCase()
+  }
+  return nodeId.slice(0, 2).toUpperCase()
 }
 </script>
 
@@ -174,8 +205,8 @@ function shortNodeId(id: string) {
             <span class="relative inline-flex h-2.5 w-2.5 rounded-full bg-success" />
           </span>
           <span v-else class="h-2.5 w-2.5 rounded-full bg-muted-foreground/30 shrink-0" />
-          <span class="text-sm font-medium text-foreground truncate">
-            {{ isActive ? 'Session Active' : 'Session Ended' }}
+          <span class="text-sm font-medium text-foreground truncate max-w-[200px]" :title="sessionTitle">
+            {{ isActive ? sessionTitle : 'Session Ended' }}
           </span>
           <!-- Duration timer -->
           <span v-if="isActive" class="rounded bg-muted px-1.5 py-0.5 text-xs font-mono text-muted-foreground tabular-nums">
@@ -221,10 +252,10 @@ function shortNodeId(id: string) {
           Chat
           <!-- Unread badge -->
           <span
-            v-if="unreadChat > 0 && !showChat"
+            v-if="unreadChatCount > 0 && !showChat"
             class="absolute -top-1.5 -right-1.5 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-destructive px-1 text-[0.6rem] font-bold text-destructive-foreground"
           >
-            {{ unreadChat > 99 ? '99+' : unreadChat }}
+            {{ unreadChatCount > 99 ? '99+' : unreadChatCount }}
           </span>
         </button>
 
@@ -311,14 +342,14 @@ function shortNodeId(id: string) {
                   v-if="videoFrames[peer.node_id]"
                   :src="videoFrames[peer.node_id]"
                   class="absolute inset-0 h-full w-full object-cover"
-                  :alt="`Video from ${peer.node_id.slice(0, 8)}`"
+                  :alt="`Video from ${peerDisplayName(peer.node_id)}`"
                 />
                 <!-- Placeholder when no video -->
                 <div v-else class="absolute inset-0 flex flex-col items-center justify-center gap-2 text-muted-foreground">
                   <div class="flex h-14 w-14 items-center justify-center rounded-full bg-muted text-xl font-bold">
-                    {{ peer.node_id.slice(0, 2).toUpperCase() }}
+                    {{ peerInitials(peer.node_id) }}
                   </div>
-                  <span class="text-xs font-mono opacity-60">{{ peer.node_id.slice(0, 12) }}...</span>
+                  <span class="text-xs opacity-60">{{ peerDisplayName(peer.node_id) }}</span>
                 </div>
                 <!-- Peer status overlay -->
                 <div class="absolute bottom-2 left-2 flex items-center gap-1.5 rounded bg-black/60 px-2 py-1 backdrop-blur-sm">
@@ -327,7 +358,7 @@ function shortNodeId(id: string) {
                     :class="peer.connected ? 'bg-success' : 'bg-warning'"
                   />
                   <span class="text-[0.6rem] font-medium text-white">
-                    {{ peer.connected ? peer.node_id.slice(0, 8) : 'Connecting...' }}
+                    {{ peer.connected ? peerDisplayName(peer.node_id) : 'Connecting...' }}
                   </span>
                 </div>
               </div>
@@ -476,7 +507,7 @@ function shortNodeId(id: string) {
               >
                 <div class="flex items-center gap-2 mb-0.5">
                   <span class="text-[0.65rem] font-semibold" :class="msg.sender === 'self' ? 'text-primary' : 'text-foreground'">
-                    {{ msg.sender_name || shortNodeId(msg.sender) }}
+                    {{ msg.sender === 'self' ? 'You' : (msg.sender_name || peerDisplayName(msg.sender)) }}
                   </span>
                   <span class="text-[0.6rem] text-muted-foreground/60">
                     {{ formatChatTime(msg.timestamp) }}
@@ -494,6 +525,7 @@ function shortNodeId(id: string) {
                 v-model="chatInput"
                 type="text"
                 placeholder="Type a message..."
+                maxlength="2000"
                 class="flex-1 rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                 @keydown.enter="handleSendChat"
               />
@@ -512,9 +544,21 @@ function shortNodeId(id: string) {
       </Transition>
     </div>
 
-    <!-- Error bar -->
-    <div v-if="lastError" class="shrink-0 border-t border-destructive/30 bg-destructive/5 px-4 py-2 text-xs text-destructive">
-      {{ lastError }}
+    <!-- Error bar (dismissible) -->
+    <div
+      v-if="lastError && !dismissedError"
+      class="shrink-0 border-t border-destructive/30 bg-destructive/5 px-4 py-2 flex items-center gap-2"
+    >
+      <span class="flex-1 text-xs text-destructive">{{ lastError }}</span>
+      <button
+        class="rounded p-0.5 text-destructive/60 hover:text-destructive hover:bg-destructive/10 transition-colors"
+        @click="dismissedError = true"
+        title="Dismiss"
+      >
+        <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+        </svg>
+      </button>
     </div>
 
     <!-- Leave confirmation modal -->
@@ -543,6 +587,40 @@ function shortNodeId(id: string) {
                 @click="handleLeave"
               >
                 Leave Session
+              </button>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
+
+    <!-- Ticket fallback modal (when clipboard API fails) -->
+    <Teleport to="body">
+      <Transition
+        enter-active-class="transition-all duration-200"
+        enter-from-class="opacity-0"
+        enter-to-class="opacity-100"
+        leave-active-class="transition-all duration-150"
+        leave-from-class="opacity-100"
+        leave-to-class="opacity-0"
+      >
+        <div v-if="showTicketFallback" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" @click.self="showTicketFallback = false">
+          <div class="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-xl mx-4">
+            <h2 class="text-lg font-semibold text-foreground">Room Ticket</h2>
+            <p class="mt-1 text-sm text-muted-foreground">Select and copy the ticket below to share with participants.</p>
+            <textarea
+              readonly
+              :value="sessionStatus?.ticket ?? ''"
+              rows="4"
+              class="mt-3 w-full rounded-lg border border-border bg-muted px-3 py-2 text-sm font-mono text-foreground select-all focus:outline-none"
+              @focus="($event.target as HTMLTextAreaElement).select()"
+            />
+            <div class="mt-4 flex justify-end">
+              <button
+                class="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+                @click="showTicketFallback = false"
+              >
+                Done
               </button>
             </div>
           </div>

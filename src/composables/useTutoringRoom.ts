@@ -23,6 +23,15 @@ const videoFrames = ref<Record<string, string>>({})
 /** Chat message history for the current session. */
 const chatMessages = ref<TutoringChatMessage[]>([])
 
+/** Map of node_id → display name (learned via gossip /names topic). */
+const peerNames = ref<Record<string, string>>({})
+
+/** Number of chat messages received while the chat panel was closed. */
+const unreadChatCount = ref(0)
+
+/** Whether the chat panel is currently visible (set by the session page). */
+const chatOpen = ref(false)
+
 let pollInterval: ReturnType<typeof setInterval> | null = null
 
 // ── Tauri event listeners (set up once globally) ───────────────────
@@ -30,6 +39,7 @@ let pollInterval: ReturnType<typeof setInterval> | null = null
 let videoUnlisten: (() => void) | null = null
 let chatUnlisten: (() => void) | null = null
 let peerEndedUnlisten: (() => void) | null = null
+let peerNameUnlisten: (() => void) | null = null
 
 async function setupEventListeners() {
   if (videoUnlisten) return // already set up
@@ -48,6 +58,9 @@ async function setupEventListeners() {
 
     chatUnlisten = await listen<TutoringChatMessage>('tutoring:chat', (event) => {
       chatMessages.value = [...chatMessages.value, event.payload]
+      if (!chatOpen.value) {
+        unreadChatCount.value++
+      }
     })
 
     peerEndedUnlisten = await listen<{ node_id: string }>('tutoring:peer-video-ended', (event) => {
@@ -55,6 +68,14 @@ async function setupEventListeners() {
       const updated = { ...videoFrames.value }
       delete updated[node_id]
       videoFrames.value = updated
+    })
+
+    peerNameUnlisten = await listen<{ node_id: string; display_name: string }>('tutoring:peer-name', (event) => {
+      const { node_id, display_name } = event.payload
+      peerNames.value = {
+        ...peerNames.value,
+        [node_id]: display_name,
+      }
     })
   } catch (e) {
     console.warn('Failed to set up Tauri event listeners:', e)
@@ -73,6 +94,10 @@ function teardownEventListeners() {
   if (peerEndedUnlisten) {
     peerEndedUnlisten()
     peerEndedUnlisten = null
+  }
+  if (peerNameUnlisten) {
+    peerNameUnlisten()
+    peerNameUnlisten = null
   }
 }
 
@@ -95,14 +120,19 @@ async function refreshSessions(): Promise<void> {
   }
 }
 
-async function createRoom(title: string): Promise<TutoringSessionInfo> {
+async function createRoom(title: string, displayName?: string): Promise<TutoringSessionInfo> {
   loading.value = true
   lastError.value = null
   try {
-    const session = await invoke<TutoringSessionInfo>('tutoring_create_room', { title })
+    const session = await invoke<TutoringSessionInfo>('tutoring_create_room', {
+      title,
+      displayName: displayName || null,
+    })
     await setupEventListeners()
     chatMessages.value = []
     videoFrames.value = {}
+    peerNames.value = {}
+    unreadChatCount.value = 0
     await refreshStatus()
     await refreshSessions()
     return session
@@ -115,14 +145,20 @@ async function createRoom(title: string): Promise<TutoringSessionInfo> {
   }
 }
 
-async function joinRoom(ticket: string, title?: string): Promise<TutoringSessionInfo> {
+async function joinRoom(ticket: string, title?: string, displayName?: string): Promise<TutoringSessionInfo> {
   loading.value = true
   lastError.value = null
   try {
-    const session = await invoke<TutoringSessionInfo>('tutoring_join_room', { ticket, title })
+    const session = await invoke<TutoringSessionInfo>('tutoring_join_room', {
+      ticket,
+      title: title || null,
+      displayName: displayName || null,
+    })
     await setupEventListeners()
     chatMessages.value = []
     videoFrames.value = {}
+    peerNames.value = {}
+    unreadChatCount.value = 0
     await refreshStatus()
     await refreshSessions()
     return session
@@ -143,6 +179,8 @@ async function leaveRoom(): Promise<void> {
     sessionStatus.value = null
     videoFrames.value = {}
     chatMessages.value = []
+    peerNames.value = {}
+    unreadChatCount.value = 0
     teardownEventListeners()
     await refreshSessions()
   } catch (e: unknown) {
@@ -225,6 +263,14 @@ function stopPolling() {
   }
 }
 
+/** Set the chat panel open state (controls unread counter). */
+function setChatOpen(open: boolean) {
+  chatOpen.value = open
+  if (open) {
+    unreadChatCount.value = 0
+  }
+}
+
 export function useTutoringRoom() {
   return {
     sessionStatus: readonly(sessionStatus),
@@ -233,6 +279,8 @@ export function useTutoringRoom() {
     loading: readonly(loading),
     videoFrames: readonly(videoFrames),
     chatMessages: readonly(chatMessages),
+    peerNames: readonly(peerNames),
+    unreadChatCount: readonly(unreadChatCount),
     refreshStatus,
     refreshSessions,
     createRoom,
@@ -247,5 +295,6 @@ export function useTutoringRoom() {
     stopPolling,
     setupEventListeners,
     teardownEventListeners,
+    setChatOpen,
   }
 }
