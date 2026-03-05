@@ -5,6 +5,7 @@ import type {
   TutoringPeer,
   TutoringVideoFrame,
   TutoringChatMessage,
+  DeviceCheckResult,
 } from '@/types'
 import { useLocalApi } from './useLocalApi'
 
@@ -250,6 +251,20 @@ async function getPeers(): Promise<TutoringPeer[]> {
   }
 }
 
+/** Check device availability (camera + mic) before joining a session. */
+async function checkDevices(): Promise<DeviceCheckResult> {
+  try {
+    return await invoke<DeviceCheckResult>('tutoring_check_devices')
+  } catch (e: unknown) {
+    return {
+      has_camera: false,
+      camera_name: null,
+      has_audio: false,
+      error: e instanceof Error ? e.message : String(e),
+    }
+  }
+}
+
 function startPolling(intervalMs = 3000) {
   if (pollInterval) return
   refreshStatus()
@@ -291,6 +306,7 @@ export function useTutoringRoom() {
     toggleScreenShare,
     sendChat,
     getPeers,
+    checkDevices,
     startPolling,
     stopPolling,
     setupEventListeners,
