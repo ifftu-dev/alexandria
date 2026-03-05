@@ -15,7 +15,7 @@ const { theme, setTheme } = useTheme()
 const { status: p2pStatus, startPolling } = useP2P()
 const { displayName, lockVault } = useAuth()
 const isMobilePlatform = typeof navigator !== 'undefined' && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
-const isMac = typeof navigator !== 'undefined' && /Mac/.test(navigator.userAgent)
+const isMac = typeof navigator !== 'undefined' && /Mac/.test(navigator.userAgent) && !/iPhone|iPad|iPod/i.test(navigator.userAgent)
 const canGoBack = ref(false)
 const canGoForward = ref(false)
 
