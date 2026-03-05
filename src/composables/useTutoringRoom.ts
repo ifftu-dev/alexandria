@@ -141,13 +141,22 @@ async function refreshSessions(): Promise<void> {
   }
 }
 
-async function createRoom(title: string, displayName?: string): Promise<TutoringSessionInfo> {
+async function createRoom(
+  title: string,
+  displayName?: string,
+  cameraId?: string | null,
+  micId?: string | null,
+  speakerId?: string | null,
+): Promise<TutoringSessionInfo> {
   loading.value = true
   lastError.value = null
   try {
     const session = await invoke<TutoringSessionInfo>('tutoring_create_room', {
       title,
       displayName: displayName || null,
+      cameraId: cameraId || null,
+      micId: micId || null,
+      speakerId: speakerId || null,
     })
     await setupEventListeners()
     chatMessages.value = []
@@ -166,7 +175,14 @@ async function createRoom(title: string, displayName?: string): Promise<Tutoring
   }
 }
 
-async function joinRoom(ticket: string, title?: string, displayName?: string): Promise<TutoringSessionInfo> {
+async function joinRoom(
+  ticket: string,
+  title?: string,
+  displayName?: string,
+  cameraId?: string | null,
+  micId?: string | null,
+  speakerId?: string | null,
+): Promise<TutoringSessionInfo> {
   loading.value = true
   lastError.value = null
   try {
@@ -174,6 +190,9 @@ async function joinRoom(ticket: string, title?: string, displayName?: string): P
       ticket,
       title: title || null,
       displayName: displayName || null,
+      cameraId: cameraId || null,
+      micId: micId || null,
+      speakerId: speakerId || null,
     })
     await setupEventListeners()
     chatMessages.value = []

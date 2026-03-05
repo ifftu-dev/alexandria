@@ -11,6 +11,7 @@ use serde::Serialize;
 use tauri::{AppHandle, State};
 
 use crate::AppState;
+use crate::tutoring::manager::DeviceSelection;
 
 /// Result of a pre-join device availability check.
 #[derive(Debug, Clone, Serialize)]
@@ -44,6 +45,9 @@ pub struct TutoringSessionInfo {
 pub async fn tutoring_create_room(
     title: String,
     display_name: Option<String>,
+    camera_id: Option<String>,
+    mic_id: Option<String>,
+    speaker_id: Option<String>,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<TutoringSessionInfo, String> {
@@ -65,9 +69,15 @@ pub async fn tutoring_create_room(
     let session_id = uuid::Uuid::new_v4().to_string();
     let name = display_name.unwrap_or_else(|| title.clone());
 
+    let devices = DeviceSelection {
+        camera_index: camera_id,
+        mic_device_id: mic_id,
+        speaker_device_id: speaker_id,
+    };
+
     let ticket = state
         .tutoring
-        .create_room(session_id.clone(), title.clone(), name, &endpoint, gossip, live, app)
+        .create_room(session_id.clone(), title.clone(), name, &endpoint, gossip, live, app, devices)
         .await?;
 
     // Persist to database
@@ -97,6 +107,9 @@ pub async fn tutoring_join_room(
     ticket: String,
     title: Option<String>,
     display_name: Option<String>,
+    camera_id: Option<String>,
+    mic_id: Option<String>,
+    speaker_id: Option<String>,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<TutoringSessionInfo, String> {
@@ -119,9 +132,15 @@ pub async fn tutoring_join_room(
     let title = title.unwrap_or_else(|| "Joined session".into());
     let name = display_name.unwrap_or_else(|| title.clone());
 
+    let devices = DeviceSelection {
+        camera_index: camera_id,
+        mic_device_id: mic_id,
+        speaker_device_id: speaker_id,
+    };
+
     let resolved_ticket = state
         .tutoring
-        .join_room(session_id.clone(), title.clone(), name, &ticket, &endpoint, gossip, live, app)
+        .join_room(session_id.clone(), title.clone(), name, &ticket, &endpoint, gossip, live, app, devices)
         .await?;
 
     // Persist to database
