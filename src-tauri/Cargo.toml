@@ -81,6 +81,12 @@ iroh-blobs = { version = "0.98", features = ["fs-store"] }
 iroh-gossip = "0.96"
 iroh-live = { git = "https://github.com/n0-computer/iroh-live" }
 
+# Image encoding (JPEG) for bridging video frames to webview
+image = { version = "0.25", default-features = false, features = ["jpeg"] }
+base64 = "0.21"
+postcard = { version = "1", features = ["alloc"] }
+blake3 = "1"
+
 # P2P networking (libp2p swarm) — all platforms
 # Uses private Alexandria DHT (/alexandria/kad/1.0) with relay bootstrap.
 # mDNS removed — not useful in production (no LAN discovery needed).

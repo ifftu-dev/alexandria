@@ -6,7 +6,7 @@
 
 use rusqlite::params;
 use serde::Serialize;
-use tauri::State;
+use tauri::{AppHandle, State};
 
 use crate::AppState;
 
@@ -28,6 +28,7 @@ pub struct TutoringSessionInfo {
 #[tauri::command]
 pub async fn tutoring_create_room(
     title: String,
+    app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<TutoringSessionInfo, String> {
     let content_node = &state.content_node;
@@ -49,7 +50,7 @@ pub async fn tutoring_create_room(
 
     let ticket = state
         .tutoring
-        .create_room(session_id.clone(), &endpoint, gossip, live)
+        .create_room(session_id.clone(), &endpoint, gossip, live, app)
         .await?;
 
     // Persist to database
@@ -78,6 +79,7 @@ pub async fn tutoring_create_room(
 pub async fn tutoring_join_room(
     ticket: String,
     title: Option<String>,
+    app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<TutoringSessionInfo, String> {
     let content_node = &state.content_node;
@@ -100,7 +102,7 @@ pub async fn tutoring_join_room(
 
     let resolved_ticket = state
         .tutoring
-        .join_room(session_id.clone(), &ticket, &endpoint, gossip, live)
+        .join_room(session_id.clone(), &ticket, &endpoint, gossip, live, app)
         .await?;
 
     // Persist to database
@@ -148,6 +150,42 @@ pub async fn tutoring_leave_room(state: State<'_, AppState>) -> Result<(), Strin
     }
 
     Ok(())
+}
+
+/// Toggle camera on/off.
+#[tauri::command]
+pub async fn tutoring_toggle_video(
+    enable: bool,
+    state: State<'_, AppState>,
+) -> Result<bool, String> {
+    state.tutoring.toggle_video(enable).await
+}
+
+/// Toggle microphone on/off.
+#[tauri::command]
+pub async fn tutoring_toggle_audio(
+    enable: bool,
+    state: State<'_, AppState>,
+) -> Result<bool, String> {
+    state.tutoring.toggle_audio(enable).await
+}
+
+/// Toggle screen sharing on/off.
+#[tauri::command]
+pub async fn tutoring_toggle_screen_share(
+    enable: bool,
+    state: State<'_, AppState>,
+) -> Result<bool, String> {
+    state.tutoring.toggle_screen_share(enable).await
+}
+
+/// Send a chat message to all peers in the current room.
+#[tauri::command]
+pub async fn tutoring_send_chat(
+    text: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    state.tutoring.send_chat(text).await
 }
 
 /// Get the current session status (or null if not in a session).

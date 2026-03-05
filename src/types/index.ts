@@ -910,6 +910,20 @@ export interface TutoringSessionStatus {
   screen_sharing: boolean
 }
 
+export interface TutoringVideoFrame {
+  node_id: string
+  jpeg_b64: string
+  width: number
+  height: number
+}
+
+export interface TutoringChatMessage {
+  sender: string
+  sender_name: string | null
+  text: string
+  timestamp: number
+}
+
 // ---- Health ----
 
 export interface HealthResponse {
