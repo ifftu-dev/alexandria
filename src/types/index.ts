@@ -927,6 +927,13 @@ export interface TutoringChatMessage {
   timestamp: number
 }
 
+export interface DeviceCheckResult {
+  has_camera: boolean
+  camera_name: string | null
+  has_audio: boolean
+  error: string | null
+}
+
 // ---- Health ----
 
 export interface HealthResponse {

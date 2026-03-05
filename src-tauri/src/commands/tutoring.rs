@@ -10,6 +10,19 @@ use tauri::{AppHandle, State};
 
 use crate::AppState;
 
+/// Result of a pre-join device availability check.
+#[derive(Debug, Clone, Serialize)]
+pub struct DeviceCheckResult {
+    /// Whether at least one camera was found.
+    pub has_camera: bool,
+    /// Name of the first camera (e.g. "FaceTime HD Camera").
+    pub camera_name: Option<String>,
+    /// Whether the audio backend initialized successfully.
+    pub has_audio: bool,
+    /// Error message if something failed (informational).
+    pub error: Option<String>,
+}
+
 /// Summary of a tutoring session from the database.
 #[derive(Debug, Clone, Serialize)]
 pub struct TutoringSessionInfo {
@@ -240,4 +253,46 @@ pub async fn tutoring_list_sessions(
         .map_err(|e| e.to_string())?;
 
     Ok(sessions)
+}
+
+/// Check device availability (camera + audio) before joining a session.
+///
+/// Enumerates cameras via nokhwa and tests the audio backend without
+/// opening a stream. Returns a lightweight result the frontend can use
+/// to show a pre-join device preview.
+#[tauri::command]
+pub async fn tutoring_check_devices() -> Result<DeviceCheckResult, String> {
+    // Check camera
+    let (has_camera, camera_name) = match nokhwa::query(nokhwa::utils::ApiBackend::Auto) {
+        Ok(cameras) => {
+            let name = cameras.first().map(|c| c.human_name().to_string());
+            (!cameras.is_empty(), name)
+        }
+        Err(e) => {
+            log::warn!("tutoring: camera enumeration failed: {e}");
+            (false, None)
+        }
+    };
+
+    // Check audio
+    let has_audio = match std::panic::catch_unwind(iroh_live::media::audio::AudioBackend::new) {
+        Ok(backend) => {
+            // Try to open default input to verify mic is accessible
+            match backend.default_input().await {
+                Ok(_) => true,
+                Err(e) => {
+                    log::warn!("tutoring: mic test failed: {e}");
+                    false
+                }
+            }
+        }
+        Err(_) => false,
+    };
+
+    Ok(DeviceCheckResult {
+        has_camera,
+        camera_name,
+        has_audio,
+        error: None,
+    })
 }

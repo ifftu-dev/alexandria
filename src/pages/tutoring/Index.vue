@@ -2,6 +2,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useTutoringRoom } from '@/composables/useTutoringRoom'
+import type { DeviceCheckResult } from '@/types'
 
 const router = useRouter()
 const {
@@ -11,6 +12,7 @@ const {
   refreshSessions,
   createRoom,
   joinRoom,
+  checkDevices,
 } = useTutoringRoom()
 
 const showCreateModal = ref(false)
@@ -20,6 +22,13 @@ const createDisplayName = ref('')
 const joinTicket = ref('')
 const joinTitle = ref('')
 const joinDisplayName = ref('')
+
+// Device check state (shared between create and join flows)
+const deviceCheck = ref<DeviceCheckResult | null>(null)
+const checkingDevices = ref(false)
+// 'form' | 'preview' — which step the modal is on
+const createStep = ref<'form' | 'preview'>('form')
+const joinStep = ref<'form' | 'preview'>('form')
 
 onMounted(() => {
   refreshSessions()
@@ -33,23 +42,62 @@ const activeSession = computed(() =>
   sessions.value.find(s => s.status === 'active')
 )
 
-async function handleCreate() {
+function resetCreateModal() {
+  showCreateModal.value = false
+  createStep.value = 'form'
+  newRoomTitle.value = ''
+  createDisplayName.value = ''
+  deviceCheck.value = null
+}
+
+function resetJoinModal() {
+  showJoinModal.value = false
+  joinStep.value = 'form'
+  joinTicket.value = ''
+  joinTitle.value = ''
+  joinDisplayName.value = ''
+  deviceCheck.value = null
+}
+
+async function handleCreatePreview() {
+  if (!newRoomTitle.value.trim()) return
+  checkingDevices.value = true
+  deviceCheck.value = null
+  try {
+    deviceCheck.value = await checkDevices()
+    createStep.value = 'preview'
+  } finally {
+    checkingDevices.value = false
+  }
+}
+
+async function handleCreateConfirm() {
   if (!newRoomTitle.value.trim()) return
   try {
     const session = await createRoom(
       newRoomTitle.value.trim(),
       createDisplayName.value.trim() || undefined,
     )
-    showCreateModal.value = false
-    newRoomTitle.value = ''
-    createDisplayName.value = ''
+    resetCreateModal()
     router.push(`/tutoring/${session.id}`)
   } catch {
     // error is in lastError
   }
 }
 
-async function handleJoin() {
+async function handleJoinPreview() {
+  if (!joinTicket.value.trim()) return
+  checkingDevices.value = true
+  deviceCheck.value = null
+  try {
+    deviceCheck.value = await checkDevices()
+    joinStep.value = 'preview'
+  } finally {
+    checkingDevices.value = false
+  }
+}
+
+async function handleJoinConfirm() {
   if (!joinTicket.value.trim()) return
   try {
     const session = await joinRoom(
@@ -57,10 +105,7 @@ async function handleJoin() {
       joinTitle.value.trim() || undefined,
       joinDisplayName.value.trim() || undefined,
     )
-    showJoinModal.value = false
-    joinTicket.value = ''
-    joinTitle.value = ''
-    joinDisplayName.value = ''
+    resetJoinModal()
     router.push(`/tutoring/${session.id}`)
   } catch {
     // error is in lastError
@@ -135,7 +180,7 @@ function formatDate(iso: string) {
       <!-- Create Room -->
       <button
         class="group rounded-xl border border-border bg-card p-6 text-left transition-all hover:border-primary/40 hover:shadow-md"
-        @click="showCreateModal = true"
+        @click="showCreateModal = true; createStep = 'form'"
       >
         <div class="flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10 transition-colors group-hover:bg-primary/20">
           <svg class="h-6 w-6 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
@@ -149,7 +194,7 @@ function formatDate(iso: string) {
       <!-- Join Room -->
       <button
         class="group rounded-xl border border-border bg-card p-6 text-left transition-all hover:border-primary/40 hover:shadow-md"
-        @click="showJoinModal = true"
+        @click="showJoinModal = true; joinStep = 'form'"
       >
         <div class="flex h-12 w-12 items-center justify-center rounded-lg bg-accent/10 transition-colors group-hover:bg-accent/20">
           <svg class="h-6 w-6 text-accent-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
@@ -210,48 +255,132 @@ function formatDate(iso: string) {
         leave-from-class="opacity-100"
         leave-to-class="opacity-0"
       >
-        <div v-if="showCreateModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" @click.self="showCreateModal = false">
+        <div v-if="showCreateModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" @click.self="resetCreateModal">
           <div class="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-xl mx-4">
-            <h2 class="text-lg font-semibold text-foreground">Start a Tutoring Session</h2>
-            <p class="mt-1 text-sm text-muted-foreground">Give your session a name. Participants will join using the ticket you share.</p>
-            <div class="mt-4 space-y-3">
-              <div>
-                <label class="text-sm font-medium text-foreground" for="room-title">Session Title</label>
-                <input
-                  id="room-title"
-                  v-model="newRoomTitle"
-                  type="text"
-                  placeholder="e.g. Graph Algorithms Review"
-                  class="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
-                  @keydown.enter="handleCreate"
-                />
+            <!-- Step 1: Form -->
+            <template v-if="createStep === 'form'">
+              <h2 class="text-lg font-semibold text-foreground">Start a Tutoring Session</h2>
+              <p class="mt-1 text-sm text-muted-foreground">Give your session a name. Participants will join using the ticket you share.</p>
+              <div class="mt-4 space-y-3">
+                <div>
+                  <label class="text-sm font-medium text-foreground" for="room-title">Session Title</label>
+                  <input
+                    id="room-title"
+                    v-model="newRoomTitle"
+                    type="text"
+                    placeholder="e.g. Graph Algorithms Review"
+                    class="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                    @keydown.enter="handleCreatePreview"
+                  />
+                </div>
+                <div>
+                  <label class="text-sm font-medium text-foreground" for="create-display-name">Your Name (optional)</label>
+                  <input
+                    id="create-display-name"
+                    v-model="createDisplayName"
+                    type="text"
+                    placeholder="e.g. Alice"
+                    class="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                  />
+                </div>
               </div>
-              <div>
-                <label class="text-sm font-medium text-foreground" for="create-display-name">Your Name (optional)</label>
-                <input
-                  id="create-display-name"
-                  v-model="createDisplayName"
-                  type="text"
-                  placeholder="e.g. Alice"
-                  class="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
-                />
+              <div class="mt-6 flex justify-end gap-2">
+                <button
+                  class="rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+                  @click="resetCreateModal"
+                >
+                  Cancel
+                </button>
+                <button
+                  class="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+                  :disabled="!newRoomTitle.trim() || checkingDevices"
+                  @click="handleCreatePreview"
+                >
+                  {{ checkingDevices ? 'Checking...' : 'Next' }}
+                </button>
               </div>
-            </div>
-            <div class="mt-6 flex justify-end gap-2">
-              <button
-                class="rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
-                @click="showCreateModal = false"
-              >
-                Cancel
-              </button>
-              <button
-                class="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
-                :disabled="!newRoomTitle.trim() || loading"
-                @click="handleCreate"
-              >
-                {{ loading ? 'Starting...' : 'Start Session' }}
-              </button>
-            </div>
+            </template>
+
+            <!-- Step 2: Device preview -->
+            <template v-else>
+              <h2 class="text-lg font-semibold text-foreground">Device Check</h2>
+              <p class="mt-1 text-sm text-muted-foreground">Verify your camera and microphone before starting.</p>
+
+              <div class="mt-4 space-y-3">
+                <!-- Camera status -->
+                <div class="flex items-center gap-3 rounded-lg border border-border p-3">
+                  <div
+                    class="flex h-9 w-9 items-center justify-center rounded-lg"
+                    :class="deviceCheck?.has_camera ? 'bg-success/10' : 'bg-destructive/10'"
+                  >
+                    <svg class="h-4.5 w-4.5" :class="deviceCheck?.has_camera ? 'text-success' : 'text-destructive'" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                    </svg>
+                  </div>
+                  <div class="flex-1 min-w-0">
+                    <p class="text-sm font-medium text-foreground">
+                      {{ deviceCheck?.has_camera ? 'Camera detected' : 'No camera found' }}
+                    </p>
+                    <p class="text-xs text-muted-foreground truncate">
+                      {{ deviceCheck?.camera_name || (deviceCheck?.has_camera ? 'Default camera' : 'Session will be audio-only') }}
+                    </p>
+                  </div>
+                  <svg v-if="deviceCheck?.has_camera" class="h-4 w-4 text-success shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                  </svg>
+                  <svg v-else class="h-4 w-4 text-warning shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                  </svg>
+                </div>
+
+                <!-- Mic status -->
+                <div class="flex items-center gap-3 rounded-lg border border-border p-3">
+                  <div
+                    class="flex h-9 w-9 items-center justify-center rounded-lg"
+                    :class="deviceCheck?.has_audio ? 'bg-success/10' : 'bg-destructive/10'"
+                  >
+                    <svg class="h-4.5 w-4.5" :class="deviceCheck?.has_audio ? 'text-success' : 'text-destructive'" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
+                    </svg>
+                  </div>
+                  <div class="flex-1 min-w-0">
+                    <p class="text-sm font-medium text-foreground">
+                      {{ deviceCheck?.has_audio ? 'Microphone ready' : 'No microphone found' }}
+                    </p>
+                    <p class="text-xs text-muted-foreground">
+                      {{ deviceCheck?.has_audio ? 'Audio will be enabled' : 'Session will be video-only' }}
+                    </p>
+                  </div>
+                  <svg v-if="deviceCheck?.has_audio" class="h-4 w-4 text-success shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                  </svg>
+                  <svg v-else class="h-4 w-4 text-warning shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                  </svg>
+                </div>
+
+                <!-- Info text -->
+                <p v-if="!deviceCheck?.has_camera && !deviceCheck?.has_audio" class="text-xs text-muted-foreground text-center mt-1">
+                  You can still join — the session will use text chat only.
+                </p>
+              </div>
+
+              <div class="mt-6 flex justify-end gap-2">
+                <button
+                  class="rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+                  @click="createStep = 'form'"
+                >
+                  Back
+                </button>
+                <button
+                  class="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+                  :disabled="loading"
+                  @click="handleCreateConfirm"
+                >
+                  {{ loading ? 'Starting...' : 'Start Session' }}
+                </button>
+              </div>
+            </template>
           </div>
         </div>
       </Transition>
@@ -267,57 +396,138 @@ function formatDate(iso: string) {
         leave-from-class="opacity-100"
         leave-to-class="opacity-0"
       >
-        <div v-if="showJoinModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" @click.self="showJoinModal = false">
+        <div v-if="showJoinModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" @click.self="resetJoinModal">
           <div class="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-xl mx-4">
-            <h2 class="text-lg font-semibold text-foreground">Join a Tutoring Session</h2>
-            <p class="mt-1 text-sm text-muted-foreground">Paste the room ticket shared by the host.</p>
-            <div class="mt-4 space-y-3">
-              <div>
-                <label class="text-sm font-medium text-foreground" for="join-ticket">Room Ticket</label>
-                <textarea
-                  id="join-ticket"
-                  v-model="joinTicket"
-                  rows="3"
-                  placeholder="Paste room ticket here..."
-                  class="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground font-mono placeholder-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary resize-none"
-                />
+            <!-- Step 1: Form -->
+            <template v-if="joinStep === 'form'">
+              <h2 class="text-lg font-semibold text-foreground">Join a Tutoring Session</h2>
+              <p class="mt-1 text-sm text-muted-foreground">Paste the room ticket shared by the host.</p>
+              <div class="mt-4 space-y-3">
+                <div>
+                  <label class="text-sm font-medium text-foreground" for="join-ticket">Room Ticket</label>
+                  <textarea
+                    id="join-ticket"
+                    v-model="joinTicket"
+                    rows="3"
+                    placeholder="Paste room ticket here..."
+                    class="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground font-mono placeholder-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary resize-none"
+                  />
+                </div>
+                <div>
+                  <label class="text-sm font-medium text-foreground" for="join-title">Session Label (optional)</label>
+                  <input
+                    id="join-title"
+                    v-model="joinTitle"
+                    type="text"
+                    placeholder="e.g. My Study Session"
+                    class="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                  />
+                </div>
+                <div>
+                  <label class="text-sm font-medium text-foreground" for="join-display-name">Your Name (optional)</label>
+                  <input
+                    id="join-display-name"
+                    v-model="joinDisplayName"
+                    type="text"
+                    placeholder="e.g. Bob"
+                    class="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                  />
+                </div>
               </div>
-              <div>
-                <label class="text-sm font-medium text-foreground" for="join-title">Session Label (optional)</label>
-                <input
-                  id="join-title"
-                  v-model="joinTitle"
-                  type="text"
-                  placeholder="e.g. My Study Session"
-                  class="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
-                />
+              <div class="mt-6 flex justify-end gap-2">
+                <button
+                  class="rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+                  @click="resetJoinModal"
+                >
+                  Cancel
+                </button>
+                <button
+                  class="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+                  :disabled="!joinTicket.trim() || checkingDevices"
+                  @click="handleJoinPreview"
+                >
+                  {{ checkingDevices ? 'Checking...' : 'Next' }}
+                </button>
               </div>
-              <div>
-                <label class="text-sm font-medium text-foreground" for="join-display-name">Your Name (optional)</label>
-                <input
-                  id="join-display-name"
-                  v-model="joinDisplayName"
-                  type="text"
-                  placeholder="e.g. Bob"
-                  class="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
-                />
+            </template>
+
+            <!-- Step 2: Device preview (reused from create) -->
+            <template v-else>
+              <h2 class="text-lg font-semibold text-foreground">Device Check</h2>
+              <p class="mt-1 text-sm text-muted-foreground">Verify your camera and microphone before joining.</p>
+
+              <div class="mt-4 space-y-3">
+                <div class="flex items-center gap-3 rounded-lg border border-border p-3">
+                  <div
+                    class="flex h-9 w-9 items-center justify-center rounded-lg"
+                    :class="deviceCheck?.has_camera ? 'bg-success/10' : 'bg-destructive/10'"
+                  >
+                    <svg class="h-4.5 w-4.5" :class="deviceCheck?.has_camera ? 'text-success' : 'text-destructive'" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                    </svg>
+                  </div>
+                  <div class="flex-1 min-w-0">
+                    <p class="text-sm font-medium text-foreground">
+                      {{ deviceCheck?.has_camera ? 'Camera detected' : 'No camera found' }}
+                    </p>
+                    <p class="text-xs text-muted-foreground truncate">
+                      {{ deviceCheck?.camera_name || (deviceCheck?.has_camera ? 'Default camera' : 'Session will be audio-only') }}
+                    </p>
+                  </div>
+                  <svg v-if="deviceCheck?.has_camera" class="h-4 w-4 text-success shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                  </svg>
+                  <svg v-else class="h-4 w-4 text-warning shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                  </svg>
+                </div>
+
+                <div class="flex items-center gap-3 rounded-lg border border-border p-3">
+                  <div
+                    class="flex h-9 w-9 items-center justify-center rounded-lg"
+                    :class="deviceCheck?.has_audio ? 'bg-success/10' : 'bg-destructive/10'"
+                  >
+                    <svg class="h-4.5 w-4.5" :class="deviceCheck?.has_audio ? 'text-success' : 'text-destructive'" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
+                    </svg>
+                  </div>
+                  <div class="flex-1 min-w-0">
+                    <p class="text-sm font-medium text-foreground">
+                      {{ deviceCheck?.has_audio ? 'Microphone ready' : 'No microphone found' }}
+                    </p>
+                    <p class="text-xs text-muted-foreground">
+                      {{ deviceCheck?.has_audio ? 'Audio will be enabled' : 'Session will be video-only' }}
+                    </p>
+                  </div>
+                  <svg v-if="deviceCheck?.has_audio" class="h-4 w-4 text-success shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                  </svg>
+                  <svg v-else class="h-4 w-4 text-warning shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                  </svg>
+                </div>
+
+                <p v-if="!deviceCheck?.has_camera && !deviceCheck?.has_audio" class="text-xs text-muted-foreground text-center mt-1">
+                  You can still join — the session will use text chat only.
+                </p>
               </div>
-            </div>
-            <div class="mt-6 flex justify-end gap-2">
-              <button
-                class="rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
-                @click="showJoinModal = false"
-              >
-                Cancel
-              </button>
-              <button
-                class="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
-                :disabled="!joinTicket.trim() || loading"
-                @click="handleJoin"
-              >
-                {{ loading ? 'Joining...' : 'Join Session' }}
-              </button>
-            </div>
+
+              <div class="mt-6 flex justify-end gap-2">
+                <button
+                  class="rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+                  @click="joinStep = 'form'"
+                >
+                  Back
+                </button>
+                <button
+                  class="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+                  :disabled="loading"
+                  @click="handleJoinConfirm"
+                >
+                  {{ loading ? 'Joining...' : 'Join Session' }}
+                </button>
+              </div>
+            </template>
           </div>
         </div>
       </Transition>

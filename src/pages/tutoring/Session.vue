@@ -183,52 +183,54 @@ function peerInitials(nodeId: string): string {
 </script>
 
 <template>
-  <div class="flex h-[calc(100vh-4rem)] flex-col">
+  <div class="flex flex-col" style="height: calc(100vh - 4rem); height: calc(100dvh - 4rem);">
     <!-- Top bar -->
-    <div class="flex items-center justify-between border-b border-border px-4 py-3 shrink-0">
-      <div class="flex items-center gap-3 min-w-0">
+    <div class="flex items-center justify-between border-b border-border px-3 py-2.5 sm:px-4 sm:py-3 shrink-0 gap-2">
+      <div class="flex items-center gap-2 sm:gap-3 min-w-0">
         <button
-          class="flex items-center gap-1 rounded-lg px-2 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          class="flex items-center gap-1 rounded-lg px-1.5 py-1 sm:px-2 sm:py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           @click="router.push('/tutoring')"
         >
           <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
           </svg>
-          Back
+          <span class="hidden sm:inline">Back</span>
         </button>
 
-        <div class="h-4 w-px bg-border" />
+        <div class="h-4 w-px bg-border hidden sm:block" />
 
-        <div class="flex items-center gap-2 min-w-0">
+        <div class="flex items-center gap-1.5 sm:gap-2 min-w-0">
           <span class="relative flex h-2.5 w-2.5 shrink-0" v-if="isActive">
             <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-success opacity-75" />
             <span class="relative inline-flex h-2.5 w-2.5 rounded-full bg-success" />
           </span>
           <span v-else class="h-2.5 w-2.5 rounded-full bg-muted-foreground/30 shrink-0" />
-          <span class="text-sm font-medium text-foreground truncate max-w-[200px]" :title="sessionTitle">
+          <span class="text-xs sm:text-sm font-medium text-foreground truncate max-w-[120px] sm:max-w-[200px]" :title="sessionTitle">
             {{ isActive ? sessionTitle : 'Session Ended' }}
           </span>
           <!-- Duration timer -->
-          <span v-if="isActive" class="rounded bg-muted px-1.5 py-0.5 text-xs font-mono text-muted-foreground tabular-nums">
+          <span v-if="isActive" class="rounded bg-muted px-1 sm:px-1.5 py-0.5 text-[0.65rem] sm:text-xs font-mono text-muted-foreground tabular-nums">
             {{ formattedDuration }}
           </span>
         </div>
       </div>
 
-      <div class="flex items-center gap-2 shrink-0">
+      <div class="flex items-center gap-1.5 sm:gap-2 shrink-0">
         <!-- Peer count -->
-        <div class="flex items-center gap-1.5 rounded-lg bg-muted px-2.5 py-1.5 text-xs font-medium text-muted-foreground">
+        <div class="flex items-center gap-1 sm:gap-1.5 rounded-lg bg-muted px-2 sm:px-2.5 py-1.5 text-xs font-medium text-muted-foreground">
           <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128H9m6 0a5.97 5.97 0 00-.786-3.07M9 19.128v-.003c0-1.113.285-2.16.786-3.07M9 19.128H3.375a4.125 4.125 0 01-.003-8.25 4.125 4.125 0 017.533-2.493M9 19.128a5.97 5.97 0 01.786-3.07" />
           </svg>
-          {{ connectedPeerCount }}/{{ peerCount }} peers
+          <span class="hidden sm:inline">{{ connectedPeerCount }}/{{ peerCount }} peers</span>
+          <span class="sm:hidden">{{ connectedPeerCount }}</span>
         </div>
 
         <!-- Copy ticket -->
         <button
           v-if="isActive && sessionStatus?.ticket"
-          class="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+          class="flex items-center gap-1.5 rounded-lg border border-border px-2 sm:px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
           @click="copyTicket"
+          :title="ticketCopied ? 'Copied!' : 'Copy invite ticket'"
         >
           <svg v-if="!ticketCopied" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9.75a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184" />
@@ -236,20 +238,20 @@ function peerInitials(nodeId: string): string {
           <svg v-else class="h-3.5 w-3.5 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
           </svg>
-          {{ ticketCopied ? 'Copied!' : 'Copy Invite' }}
+          <span class="hidden sm:inline">{{ ticketCopied ? 'Copied!' : 'Copy Invite' }}</span>
         </button>
 
         <!-- Chat toggle -->
         <button
           v-if="isActive"
-          class="relative flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium transition-colors"
+          class="relative flex items-center gap-1 sm:gap-1.5 rounded-lg border border-border px-2 sm:px-2.5 py-1.5 text-xs font-medium transition-colors"
           :class="showChat ? 'bg-primary text-primary-foreground border-primary' : 'text-foreground hover:bg-muted'"
           @click="showChat = !showChat"
         >
           <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M8.625 9.75a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375m-13.5 3.01c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.184-4.183a1.14 1.14 0 01.778-.332 48.294 48.294 0 005.83-.498c1.585-.233 2.708-1.626 2.708-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z" />
           </svg>
-          Chat
+          <span class="hidden sm:inline">Chat</span>
           <!-- Unread badge -->
           <span
             v-if="unreadChatCount > 0 && !showChat"
@@ -262,13 +264,13 @@ function peerInitials(nodeId: string): string {
         <!-- Leave -->
         <button
           v-if="isActive"
-          class="flex items-center gap-1.5 rounded-lg bg-destructive px-3 py-1.5 text-xs font-medium text-destructive-foreground transition-colors hover:bg-destructive/90"
+          class="flex items-center gap-1 sm:gap-1.5 rounded-lg bg-destructive px-2.5 sm:px-3 py-1.5 text-xs font-medium text-destructive-foreground transition-colors hover:bg-destructive/90"
           @click="showLeaveConfirm = true"
         >
           <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75" />
           </svg>
-          Leave
+          <span class="hidden sm:inline">Leave</span>
         </button>
       </div>
     </div>
@@ -461,16 +463,16 @@ function peerInitials(nodeId: string): string {
         </div>
       </div>
 
-      <!-- Chat sidebar -->
+      <!-- Chat sidebar (full overlay on mobile, side panel on desktop) -->
       <Transition
         enter-active-class="transition-all duration-200 ease-out"
-        enter-from-class="w-0 opacity-0"
-        enter-to-class="w-80 opacity-100"
+        enter-from-class="translate-x-full sm:translate-x-0 sm:w-0 opacity-0"
+        enter-to-class="translate-x-0 sm:w-80 opacity-100"
         leave-active-class="transition-all duration-150 ease-in"
-        leave-from-class="w-80 opacity-100"
-        leave-to-class="w-0 opacity-0"
+        leave-from-class="translate-x-0 sm:w-80 opacity-100"
+        leave-to-class="translate-x-full sm:translate-x-0 sm:w-0 opacity-0"
       >
-        <div v-if="showChat && isActive" class="flex w-80 flex-col bg-card shrink-0 overflow-hidden">
+        <div v-if="showChat && isActive" class="absolute inset-0 z-30 sm:relative sm:inset-auto sm:z-auto flex w-full sm:w-80 flex-col bg-card shrink-0 overflow-hidden">
           <!-- Chat header -->
           <div class="flex items-center justify-between border-b border-border px-4 py-3 shrink-0">
             <h3 class="text-sm font-semibold text-foreground">Session Chat</h3>
