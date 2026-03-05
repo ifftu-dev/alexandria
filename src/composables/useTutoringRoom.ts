@@ -38,6 +38,9 @@ const chatOpen = ref(false)
 /** Current mic input level (0.0–1.0) for the VU meter. Updated ~20x/s via Tauri events. */
 const micLevel = ref(0)
 
+/** Current output level (0.0–1.0) from remote audio playback. Updated ~20x/s via Tauri events. */
+const outputLevel = ref(0)
+
 let pollInterval: ReturnType<typeof setInterval> | null = null
 
 // ── Tauri event listeners (set up once globally) ───────────────────
@@ -87,6 +90,7 @@ async function setupEventListeners() {
 
     audioLevelUnlisten = await listen<AudioLevelEvent>('tutoring:audio-level', (event) => {
       micLevel.value = event.payload.mic_level
+      outputLevel.value = event.payload.output_level
     })
   } catch (e) {
     console.warn('Failed to set up Tauri event listeners:', e)
@@ -115,6 +119,7 @@ function teardownEventListeners() {
     audioLevelUnlisten = null
   }
   micLevel.value = 0
+  outputLevel.value = 0
 }
 
 // ── API functions ──────────────────────────────────────────────────
@@ -322,6 +327,7 @@ export function useTutoringRoom() {
     peerNames: readonly(peerNames),
     unreadChatCount: readonly(unreadChatCount),
     micLevel: readonly(micLevel),
+    outputLevel: readonly(outputLevel),
     refreshStatus,
     refreshSessions,
     createRoom,

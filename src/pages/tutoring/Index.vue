@@ -2,7 +2,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useTutoringRoom } from '@/composables/useTutoringRoom'
-import type { DeviceCheckResult } from '@/types'
+import type { DeviceCheckResult, DeviceList } from '@/types'
 
 const router = useRouter()
 const {
@@ -13,6 +13,7 @@ const {
   createRoom,
   joinRoom,
   checkDevices,
+  listDevices,
 } = useTutoringRoom()
 
 const showCreateModal = ref(false)
@@ -29,6 +30,12 @@ const checkingDevices = ref(false)
 // 'form' | 'preview' — which step the modal is on
 const createStep = ref<'form' | 'preview'>('form')
 const joinStep = ref<'form' | 'preview'>('form')
+
+// Device selection state
+const devices = ref<DeviceList | null>(null)
+const selectedCamera = ref<string | null>(null)
+const selectedMicInput = ref<string | null>(null)
+const selectedAudioOutput = ref<string | null>(null)
 
 onMounted(() => {
   refreshSessions()
@@ -48,6 +55,10 @@ function resetCreateModal() {
   newRoomTitle.value = ''
   createDisplayName.value = ''
   deviceCheck.value = null
+  devices.value = null
+  selectedCamera.value = null
+  selectedMicInput.value = null
+  selectedAudioOutput.value = null
 }
 
 function resetJoinModal() {
@@ -57,14 +68,25 @@ function resetJoinModal() {
   joinTitle.value = ''
   joinDisplayName.value = ''
   deviceCheck.value = null
+  devices.value = null
+  selectedCamera.value = null
+  selectedMicInput.value = null
+  selectedAudioOutput.value = null
 }
 
 async function handleCreatePreview() {
   if (!newRoomTitle.value.trim()) return
   checkingDevices.value = true
   deviceCheck.value = null
+  devices.value = null
   try {
-    deviceCheck.value = await checkDevices()
+    const [check, devList] = await Promise.all([checkDevices(), listDevices()])
+    deviceCheck.value = check
+    devices.value = devList
+    // Pre-select default devices
+    selectedCamera.value = devList.cameras[0]?.index ?? null
+    selectedMicInput.value = devList.audio_inputs.find(d => d.is_default)?.id ?? devList.audio_inputs[0]?.id ?? null
+    selectedAudioOutput.value = devList.audio_outputs.find(d => d.is_default)?.id ?? devList.audio_outputs[0]?.id ?? null
     createStep.value = 'preview'
   } finally {
     checkingDevices.value = false
@@ -89,8 +111,14 @@ async function handleJoinPreview() {
   if (!joinTicket.value.trim()) return
   checkingDevices.value = true
   deviceCheck.value = null
+  devices.value = null
   try {
-    deviceCheck.value = await checkDevices()
+    const [check, devList] = await Promise.all([checkDevices(), listDevices()])
+    deviceCheck.value = check
+    devices.value = devList
+    selectedCamera.value = devList.cameras[0]?.index ?? null
+    selectedMicInput.value = devList.audio_inputs.find(d => d.is_default)?.id ?? devList.audio_inputs[0]?.id ?? null
+    selectedAudioOutput.value = devList.audio_outputs.find(d => d.is_default)?.id ?? devList.audio_outputs[0]?.id ?? null
     joinStep.value = 'preview'
   } finally {
     checkingDevices.value = false
@@ -304,59 +332,100 @@ function formatDate(iso: string) {
             <!-- Step 2: Device preview -->
             <template v-else>
               <h2 class="text-lg font-semibold text-foreground">Device Check</h2>
-              <p class="mt-1 text-sm text-muted-foreground">Verify your camera and microphone before starting.</p>
+              <p class="mt-1 text-sm text-muted-foreground">Verify your devices before starting.</p>
 
               <div class="mt-4 space-y-3">
-                <!-- Camera status -->
-                <div class="flex items-center gap-3 rounded-lg border border-border p-3">
-                  <div
-                    class="flex h-9 w-9 items-center justify-center rounded-lg"
-                    :class="deviceCheck?.has_camera ? 'bg-success/10' : 'bg-destructive/10'"
-                  >
-                    <svg class="h-4.5 w-4.5" :class="deviceCheck?.has_camera ? 'text-success' : 'text-destructive'" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                      <path stroke-linecap="round" stroke-linejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                <!-- Camera selector -->
+                <div class="rounded-lg border border-border p-3 space-y-2">
+                  <div class="flex items-center gap-3">
+                    <div
+                      class="flex h-9 w-9 items-center justify-center rounded-lg shrink-0"
+                      :class="deviceCheck?.has_camera ? 'bg-success/10' : 'bg-destructive/10'"
+                    >
+                      <svg class="h-4.5 w-4.5" :class="deviceCheck?.has_camera ? 'text-success' : 'text-destructive'" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                      </svg>
+                    </div>
+                    <div class="flex-1 min-w-0">
+                      <p class="text-sm font-medium text-foreground">Camera</p>
+                    </div>
+                    <svg v-if="deviceCheck?.has_camera" class="h-4 w-4 text-success shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                    </svg>
+                    <svg v-else class="h-4 w-4 text-warning shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
                     </svg>
                   </div>
-                  <div class="flex-1 min-w-0">
-                    <p class="text-sm font-medium text-foreground">
-                      {{ deviceCheck?.has_camera ? 'Camera detected' : 'No camera found' }}
-                    </p>
-                    <p class="text-xs text-muted-foreground truncate">
-                      {{ deviceCheck?.camera_name || (deviceCheck?.has_camera ? 'Default camera' : 'Session will be audio-only') }}
-                    </p>
-                  </div>
-                  <svg v-if="deviceCheck?.has_camera" class="h-4 w-4 text-success shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                  </svg>
-                  <svg v-else class="h-4 w-4 text-warning shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
-                  </svg>
+                  <select
+                    v-if="devices && devices.cameras.length > 0"
+                    v-model="selectedCamera"
+                    class="w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                  >
+                    <option v-for="cam in devices.cameras" :key="cam.index" :value="cam.index">
+                      {{ cam.name }}
+                    </option>
+                  </select>
+                  <p v-else class="text-xs text-muted-foreground">No cameras detected — session will be audio-only</p>
                 </div>
 
-                <!-- Mic status -->
-                <div class="flex items-center gap-3 rounded-lg border border-border p-3">
-                  <div
-                    class="flex h-9 w-9 items-center justify-center rounded-lg"
-                    :class="deviceCheck?.has_audio ? 'bg-success/10' : 'bg-destructive/10'"
-                  >
-                    <svg class="h-4.5 w-4.5" :class="deviceCheck?.has_audio ? 'text-success' : 'text-destructive'" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                      <path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
+                <!-- Microphone selector -->
+                <div class="rounded-lg border border-border p-3 space-y-2">
+                  <div class="flex items-center gap-3">
+                    <div
+                      class="flex h-9 w-9 items-center justify-center rounded-lg shrink-0"
+                      :class="deviceCheck?.has_audio ? 'bg-success/10' : 'bg-destructive/10'"
+                    >
+                      <svg class="h-4.5 w-4.5" :class="deviceCheck?.has_audio ? 'text-success' : 'text-destructive'" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
+                      </svg>
+                    </div>
+                    <div class="flex-1 min-w-0">
+                      <p class="text-sm font-medium text-foreground">Microphone</p>
+                    </div>
+                    <svg v-if="deviceCheck?.has_audio" class="h-4 w-4 text-success shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                    </svg>
+                    <svg v-else class="h-4 w-4 text-warning shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
                     </svg>
                   </div>
-                  <div class="flex-1 min-w-0">
-                    <p class="text-sm font-medium text-foreground">
-                      {{ deviceCheck?.has_audio ? 'Microphone ready' : 'No microphone found' }}
-                    </p>
-                    <p class="text-xs text-muted-foreground">
-                      {{ deviceCheck?.has_audio ? 'Audio will be enabled' : 'Session will be video-only' }}
-                    </p>
+                  <select
+                    v-if="devices && devices.audio_inputs.length > 0"
+                    v-model="selectedMicInput"
+                    class="w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                  >
+                    <option v-for="mic in devices.audio_inputs" :key="mic.id" :value="mic.id">
+                      {{ mic.name || mic.id }}{{ mic.is_default ? ' (Default)' : '' }}
+                    </option>
+                  </select>
+                  <p v-else class="text-xs text-muted-foreground">No microphones detected</p>
+                </div>
+
+                <!-- Speaker output selector -->
+                <div class="rounded-lg border border-border p-3 space-y-2">
+                  <div class="flex items-center gap-3">
+                    <div class="flex h-9 w-9 items-center justify-center rounded-lg bg-muted shrink-0">
+                      <svg class="h-4.5 w-4.5 text-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" />
+                      </svg>
+                    </div>
+                    <div class="flex-1 min-w-0">
+                      <p class="text-sm font-medium text-foreground">Speaker</p>
+                    </div>
+                    <svg v-if="devices && devices.audio_outputs.length > 0" class="h-4 w-4 text-success shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                    </svg>
                   </div>
-                  <svg v-if="deviceCheck?.has_audio" class="h-4 w-4 text-success shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                  </svg>
-                  <svg v-else class="h-4 w-4 text-warning shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
-                  </svg>
+                  <select
+                    v-if="devices && devices.audio_outputs.length > 0"
+                    v-model="selectedAudioOutput"
+                    class="w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                  >
+                    <option v-for="spk in devices.audio_outputs" :key="spk.id" :value="spk.id">
+                      {{ spk.name || spk.id }}{{ spk.is_default ? ' (Default)' : '' }}
+                    </option>
+                  </select>
+                  <p v-else class="text-xs text-muted-foreground">No speakers detected</p>
                 </div>
 
                 <!-- Info text -->
@@ -451,62 +520,106 @@ function formatDate(iso: string) {
               </div>
             </template>
 
-            <!-- Step 2: Device preview (reused from create) -->
+            <!-- Step 2: Device preview -->
             <template v-else>
               <h2 class="text-lg font-semibold text-foreground">Device Check</h2>
-              <p class="mt-1 text-sm text-muted-foreground">Verify your camera and microphone before joining.</p>
+              <p class="mt-1 text-sm text-muted-foreground">Verify your devices before joining.</p>
 
               <div class="mt-4 space-y-3">
-                <div class="flex items-center gap-3 rounded-lg border border-border p-3">
-                  <div
-                    class="flex h-9 w-9 items-center justify-center rounded-lg"
-                    :class="deviceCheck?.has_camera ? 'bg-success/10' : 'bg-destructive/10'"
-                  >
-                    <svg class="h-4.5 w-4.5" :class="deviceCheck?.has_camera ? 'text-success' : 'text-destructive'" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                      <path stroke-linecap="round" stroke-linejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                <!-- Camera selector -->
+                <div class="rounded-lg border border-border p-3 space-y-2">
+                  <div class="flex items-center gap-3">
+                    <div
+                      class="flex h-9 w-9 items-center justify-center rounded-lg shrink-0"
+                      :class="deviceCheck?.has_camera ? 'bg-success/10' : 'bg-destructive/10'"
+                    >
+                      <svg class="h-4.5 w-4.5" :class="deviceCheck?.has_camera ? 'text-success' : 'text-destructive'" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                      </svg>
+                    </div>
+                    <div class="flex-1 min-w-0">
+                      <p class="text-sm font-medium text-foreground">Camera</p>
+                    </div>
+                    <svg v-if="deviceCheck?.has_camera" class="h-4 w-4 text-success shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                    </svg>
+                    <svg v-else class="h-4 w-4 text-warning shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
                     </svg>
                   </div>
-                  <div class="flex-1 min-w-0">
-                    <p class="text-sm font-medium text-foreground">
-                      {{ deviceCheck?.has_camera ? 'Camera detected' : 'No camera found' }}
-                    </p>
-                    <p class="text-xs text-muted-foreground truncate">
-                      {{ deviceCheck?.camera_name || (deviceCheck?.has_camera ? 'Default camera' : 'Session will be audio-only') }}
-                    </p>
-                  </div>
-                  <svg v-if="deviceCheck?.has_camera" class="h-4 w-4 text-success shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                  </svg>
-                  <svg v-else class="h-4 w-4 text-warning shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
-                  </svg>
+                  <select
+                    v-if="devices && devices.cameras.length > 0"
+                    v-model="selectedCamera"
+                    class="w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                  >
+                    <option v-for="cam in devices.cameras" :key="cam.index" :value="cam.index">
+                      {{ cam.name }}
+                    </option>
+                  </select>
+                  <p v-else class="text-xs text-muted-foreground">No cameras detected — session will be audio-only</p>
                 </div>
 
-                <div class="flex items-center gap-3 rounded-lg border border-border p-3">
-                  <div
-                    class="flex h-9 w-9 items-center justify-center rounded-lg"
-                    :class="deviceCheck?.has_audio ? 'bg-success/10' : 'bg-destructive/10'"
-                  >
-                    <svg class="h-4.5 w-4.5" :class="deviceCheck?.has_audio ? 'text-success' : 'text-destructive'" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                      <path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
+                <!-- Microphone selector -->
+                <div class="rounded-lg border border-border p-3 space-y-2">
+                  <div class="flex items-center gap-3">
+                    <div
+                      class="flex h-9 w-9 items-center justify-center rounded-lg shrink-0"
+                      :class="deviceCheck?.has_audio ? 'bg-success/10' : 'bg-destructive/10'"
+                    >
+                      <svg class="h-4.5 w-4.5" :class="deviceCheck?.has_audio ? 'text-success' : 'text-destructive'" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
+                      </svg>
+                    </div>
+                    <div class="flex-1 min-w-0">
+                      <p class="text-sm font-medium text-foreground">Microphone</p>
+                    </div>
+                    <svg v-if="deviceCheck?.has_audio" class="h-4 w-4 text-success shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                    </svg>
+                    <svg v-else class="h-4 w-4 text-warning shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
                     </svg>
                   </div>
-                  <div class="flex-1 min-w-0">
-                    <p class="text-sm font-medium text-foreground">
-                      {{ deviceCheck?.has_audio ? 'Microphone ready' : 'No microphone found' }}
-                    </p>
-                    <p class="text-xs text-muted-foreground">
-                      {{ deviceCheck?.has_audio ? 'Audio will be enabled' : 'Session will be video-only' }}
-                    </p>
-                  </div>
-                  <svg v-if="deviceCheck?.has_audio" class="h-4 w-4 text-success shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                  </svg>
-                  <svg v-else class="h-4 w-4 text-warning shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
-                  </svg>
+                  <select
+                    v-if="devices && devices.audio_inputs.length > 0"
+                    v-model="selectedMicInput"
+                    class="w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                  >
+                    <option v-for="mic in devices.audio_inputs" :key="mic.id" :value="mic.id">
+                      {{ mic.name || mic.id }}{{ mic.is_default ? ' (Default)' : '' }}
+                    </option>
+                  </select>
+                  <p v-else class="text-xs text-muted-foreground">No microphones detected</p>
                 </div>
 
+                <!-- Speaker output selector -->
+                <div class="rounded-lg border border-border p-3 space-y-2">
+                  <div class="flex items-center gap-3">
+                    <div class="flex h-9 w-9 items-center justify-center rounded-lg bg-muted shrink-0">
+                      <svg class="h-4.5 w-4.5 text-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" />
+                      </svg>
+                    </div>
+                    <div class="flex-1 min-w-0">
+                      <p class="text-sm font-medium text-foreground">Speaker</p>
+                    </div>
+                    <svg v-if="devices && devices.audio_outputs.length > 0" class="h-4 w-4 text-success shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                    </svg>
+                  </div>
+                  <select
+                    v-if="devices && devices.audio_outputs.length > 0"
+                    v-model="selectedAudioOutput"
+                    class="w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                  >
+                    <option v-for="spk in devices.audio_outputs" :key="spk.id" :value="spk.id">
+                      {{ spk.name || spk.id }}{{ spk.is_default ? ' (Default)' : '' }}
+                    </option>
+                  </select>
+                  <p v-else class="text-xs text-muted-foreground">No speakers detected</p>
+                </div>
+
+                <!-- Info text -->
                 <p v-if="!deviceCheck?.has_camera && !deviceCheck?.has_audio" class="text-xs text-muted-foreground text-center mt-1">
                   You can still join — the session will use text chat only.
                 </p>

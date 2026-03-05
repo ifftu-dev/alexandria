@@ -17,8 +17,8 @@ use bytes::Bytes;
 use image::ImageEncoder;
 use iroh::Endpoint;
 use iroh_gossip::net::Gossip;
-use iroh_live::media::audio::{AudioBackend, InputStream};
-use iroh_live::media::av::{AudioPreset, DecodeConfig, VideoPreset};
+use iroh_live::media::audio::{AudioBackend, InputStream, OutputStream};
+use iroh_live::media::av::{AudioPreset, AudioSinkHandle, DecodeConfig, VideoPreset};
 use iroh_live::media::capture::{CameraCapturer, ScreenCapturer};
 use iroh_live::media::ffmpeg::{FfmpegDecoders, FfmpegVideoDecoder, H264Encoder, OpusEncoder};
 use iroh_live::media::publish::{AudioRenditions, PublishBroadcast, VideoRenditions};
@@ -150,6 +150,8 @@ struct ActiveSession {
     audio_ctx: Option<AudioBackend>,
     /// Clone of the mic InputStream — kept for peak metering (VU meter).
     mic_input: Option<InputStream>,
+    /// Clone of the OutputStream — kept for output peak metering.
+    output_stream: Option<OutputStream>,
     peers: HashMap<String, TutoringPeer>,
     video_enabled: bool,
     audio_enabled: bool,
@@ -288,17 +290,8 @@ impl TutoringManager {
             Self::event_loop(events, inner_clone, audio_ctx_clone, app_handle_clone).await;
         });
 
-        // Spawn audio level emitter (VU meter events every ~50ms)
-        let audio_level_task = Self::start_audio_level_emitter(
-            mic_input.clone(),
-            app_handle.clone(),
-        );
-
         let mut tasks = vec![event_task];
         if let Some(t) = names_task {
-            tasks.push(t);
-        }
-        if let Some(t) = audio_level_task {
             tasks.push(t);
         }
 
@@ -309,6 +302,7 @@ impl TutoringManager {
             broadcast,
             audio_ctx,
             mic_input,
+            output_stream: None, // Set when first remote broadcast is subscribed
             peers: HashMap::new(),
             video_enabled: true,
             audio_enabled: has_audio,
@@ -318,10 +312,19 @@ impl TutoringManager {
             our_display_name: display_name,
             started_at: Self::now_millis(),
             last_chat_sent: Instant::now() - Duration::from_secs(10),
-            app_handle,
+            app_handle: app_handle.clone(),
             self_preview_task,
             _tasks: tasks,
         });
+
+        // Spawn audio level emitter after session is stored (reads from inner)
+        let audio_level_task = Self::start_audio_level_emitter(
+            self.inner.clone(),
+            app_handle,
+        );
+        if let Some(session) = inner.as_mut() {
+            session._tasks.push(audio_level_task);
+        }
 
         Ok(ticket_str)
     }
@@ -403,17 +406,8 @@ impl TutoringManager {
             Self::event_loop(events, inner_clone, audio_ctx_clone, app_handle_clone).await;
         });
 
-        // Spawn audio level emitter (VU meter events every ~50ms)
-        let audio_level_task = Self::start_audio_level_emitter(
-            mic_input.clone(),
-            app_handle.clone(),
-        );
-
         let mut tasks = vec![event_task];
         if let Some(t) = names_task {
-            tasks.push(t);
-        }
-        if let Some(t) = audio_level_task {
             tasks.push(t);
         }
 
@@ -424,6 +418,7 @@ impl TutoringManager {
             broadcast,
             audio_ctx,
             mic_input,
+            output_stream: None, // Set when first remote broadcast is subscribed
             peers: HashMap::new(),
             video_enabled: true,
             audio_enabled: has_audio,
@@ -433,10 +428,19 @@ impl TutoringManager {
             our_display_name: display_name,
             started_at: Self::now_millis(),
             last_chat_sent: Instant::now() - Duration::from_secs(10),
-            app_handle,
+            app_handle: app_handle.clone(),
             self_preview_task,
             _tasks: tasks,
         });
+
+        // Spawn audio level emitter after session is stored (reads from inner)
+        let audio_level_task = Self::start_audio_level_emitter(
+            self.inner.clone(),
+            app_handle,
+        );
+        if let Some(session) = inner.as_mut() {
+            session._tasks.push(audio_level_task);
+        }
 
         Ok(ticket_str)
     }
@@ -781,27 +785,44 @@ impl TutoringManager {
         Some(Self::spawn_frame_bridge(watch, "self".into(), app_handle))
     }
 
-    /// Spawn a background task that periodically reads the mic peak level
-    /// and emits `tutoring:audio-level` Tauri events for the frontend VU meter.
+    /// Spawn a background task that periodically reads mic + output peak levels
+    /// and emits `tutoring:audio-level` Tauri events for the frontend VU meters.
     fn start_audio_level_emitter(
-        mic_input: Option<InputStream>,
+        inner: Arc<Mutex<Option<ActiveSession>>>,
         app_handle: AppHandle,
-    ) -> Option<JoinHandle<()>> {
-        let mic = mic_input?;
-        Some(tokio::spawn(async move {
+    ) -> JoinHandle<()> {
+        tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_millis(50));
             loop {
                 interval.tick().await;
-                let mic_level = mic.smoothed_peak_normalized();
+                let (mic_level, output_level) = {
+                    let guard = inner.lock().await;
+                    match guard.as_ref() {
+                        Some(session) => {
+                            let mic = session
+                                .mic_input
+                                .as_ref()
+                                .map(|m| m.smoothed_peak_normalized())
+                                .unwrap_or(0.0);
+                            let out = session
+                                .output_stream
+                                .as_ref()
+                                .and_then(|o| o.smoothed_peak_normalized())
+                                .unwrap_or(0.0);
+                            (mic, out)
+                        }
+                        None => break, // Session ended, stop emitting
+                    }
+                };
                 let _ = app_handle.emit(
                     "tutoring:audio-level",
                     AudioLevelEvent {
                         mic_level,
-                        output_level: 0.0, // TODO: output peak from OutputStream
+                        output_level,
                     },
                 );
             }
-        }))
+        })
     }
 
     /// Get the current mic peak level (0.0–1.0) if in a session with audio.
@@ -1070,6 +1091,9 @@ impl TutoringManager {
                     };
 
                     if let Some(audio_out) = audio_out {
+                        // Clone the output stream for peak metering before passing to watch_and_listen
+                        let output_clone = audio_out.clone();
+
                         // Audio + video: use watch_and_listen
                         match broadcast
                             .watch_and_listen::<FfmpegDecoders>(audio_out, Default::default())
@@ -1078,6 +1102,13 @@ impl TutoringManager {
                                 log::info!(
                                     "tutoring: watching + listening to {node_id}:{name}"
                                 );
+                                // Store output stream clone for peak metering
+                                {
+                                    let mut guard = inner.lock().await;
+                                    if let Some(session) = guard.as_mut() {
+                                        session.output_stream = Some(output_clone);
+                                    }
+                                }
                                 if let Some(video) = av_track.video {
                                     Self::spawn_frame_bridge(
                                         video,
