@@ -17,7 +17,7 @@ use image::ImageEncoder;
 use iroh::Endpoint;
 use iroh_gossip::net::Gossip;
 use iroh_live::media::audio::AudioBackend;
-use iroh_live::media::av::{AudioPreset, VideoPreset};
+use iroh_live::media::av::{AudioPreset, DecodeConfig, VideoPreset};
 use iroh_live::media::capture::{CameraCapturer, ScreenCapturer};
 use iroh_live::media::ffmpeg::{FfmpegDecoders, FfmpegVideoDecoder, H264Encoder, OpusEncoder};
 use iroh_live::media::publish::{AudioRenditions, PublishBroadcast, VideoRenditions};
@@ -66,6 +66,12 @@ struct ChatMessageEvent {
     timestamp: u64,
 }
 
+/// Tauri event payload when a peer's video track closes.
+#[derive(Debug, Clone, Serialize)]
+struct PeerVideoEndedEvent {
+    node_id: String,
+}
+
 // ── Public types ───────────────────────────────────────────────────
 
 /// Name used for our broadcast in every room.
@@ -88,6 +94,8 @@ pub struct SessionStatus {
     pub video_enabled: bool,
     pub audio_enabled: bool,
     pub screen_sharing: bool,
+    /// Session start time (millis since Unix epoch).
+    pub started_at: u64,
 }
 
 // ── Internal state ─────────────────────────────────────────────────
@@ -106,6 +114,12 @@ struct ActiveSession {
     chat_sender: Option<iroh_gossip::api::GossipSender>,
     /// Our node ID (for attributing chat messages).
     our_node_id: String,
+    /// Session start time (millis since epoch).
+    started_at: u64,
+    /// AppHandle for emitting Tauri events from toggle methods.
+    app_handle: AppHandle,
+    /// Handle for the self-preview task (aborted on toggle).
+    self_preview_task: Option<JoinHandle<()>>,
     /// Background tasks to abort on leave.
     _tasks: Vec<JoinHandle<()>>,
 }
@@ -131,6 +145,13 @@ impl TutoringManager {
     fn try_create_audio_backend() -> Option<AudioBackend> {
         log::info!("tutoring: audio disabled (CoreAudio segfault workaround)");
         None
+    }
+
+    fn now_millis() -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64
     }
 
     // ── Room lifecycle ─────────────────────────────────────────────
@@ -166,13 +187,17 @@ impl TutoringManager {
         }
 
         // Start publishing local media
-        let broadcast =
+        let mut broadcast =
             Self::create_broadcast(audio_ctx.as_ref(), true, has_audio).await?;
         room.publish(BROADCAST_NAME, broadcast.producer())
             .await
             .map_err(|e| format!("failed to publish broadcast: {e}"))?;
 
         let (events, handle) = room.split();
+
+        // Start self-preview from local camera source
+        let self_preview_task =
+            Self::start_self_preview(&mut broadcast, app_handle.clone());
 
         // Set up chat on a derived gossip topic
         let chat_sender = Self::setup_chat(
@@ -202,6 +227,9 @@ impl TutoringManager {
             screen_sharing: false,
             chat_sender,
             our_node_id,
+            started_at: Self::now_millis(),
+            app_handle,
+            self_preview_task,
             _tasks: vec![event_task],
         });
 
@@ -243,13 +271,17 @@ impl TutoringManager {
         }
 
         // Start publishing local media
-        let broadcast =
+        let mut broadcast =
             Self::create_broadcast(audio_ctx.as_ref(), true, has_audio).await?;
         room.publish(BROADCAST_NAME, broadcast.producer())
             .await
             .map_err(|e| format!("failed to publish broadcast: {e}"))?;
 
         let (events, handle) = room.split();
+
+        // Start self-preview from local camera source
+        let self_preview_task =
+            Self::start_self_preview(&mut broadcast, app_handle.clone());
 
         // Set up chat on a derived gossip topic
         let chat_sender = Self::setup_chat(
@@ -278,6 +310,9 @@ impl TutoringManager {
             screen_sharing: false,
             chat_sender,
             our_node_id,
+            started_at: Self::now_millis(),
+            app_handle,
+            self_preview_task,
             _tasks: vec![event_task],
         });
 
@@ -289,7 +324,10 @@ impl TutoringManager {
         let mut inner = self.inner.lock().await;
         let session = inner.take().ok_or("not in a tutoring session")?;
 
-        // Abort background tasks
+        // Abort all background tasks
+        if let Some(t) = &session.self_preview_task {
+            t.abort();
+        }
         for task in &session._tasks {
             task.abort();
         }
@@ -310,6 +348,11 @@ impl TutoringManager {
             return Ok(session.video_enabled);
         }
 
+        // Abort old self-preview
+        if let Some(t) = session.self_preview_task.take() {
+            t.abort();
+        }
+
         if enable {
             // If screen sharing is active, switch back to camera
             if session.screen_sharing {
@@ -324,6 +367,11 @@ impl TutoringManager {
                         .set_video(Some(renditions))
                         .map_err(|e| format!("failed to enable video: {e}"))?;
                     session.video_enabled = true;
+                    // Restart self-preview
+                    session.self_preview_task = Self::start_self_preview(
+                        &mut session.broadcast,
+                        session.app_handle.clone(),
+                    );
                 }
                 Err(e) => {
                     log::warn!("tutoring: camera unavailable: {e}");
@@ -336,6 +384,13 @@ impl TutoringManager {
                 .set_video(None)
                 .map_err(|e| format!("failed to disable video: {e}"))?;
             session.video_enabled = false;
+            // Emit a "self" video ended so frontend can show placeholder
+            let _ = session.app_handle.emit(
+                "tutoring:peer-video-ended",
+                PeerVideoEndedEvent {
+                    node_id: "self".into(),
+                },
+            );
         }
 
         Ok(session.video_enabled)
@@ -392,6 +447,11 @@ impl TutoringManager {
             return Ok(session.screen_sharing);
         }
 
+        // Abort old self-preview
+        if let Some(t) = session.self_preview_task.take() {
+            t.abort();
+        }
+
         if enable {
             match ScreenCapturer::new() {
                 Ok(screen) => {
@@ -402,16 +462,20 @@ impl TutoringManager {
                         .set_video(Some(renditions))
                         .map_err(|e| format!("failed to start screen share: {e}"))?;
                     session.screen_sharing = true;
-                    session.video_enabled = true; // video track is now screen
+                    session.video_enabled = true;
+                    // Self-preview now shows screen share
+                    session.self_preview_task = Self::start_self_preview(
+                        &mut session.broadcast,
+                        session.app_handle.clone(),
+                    );
                 }
                 Err(e) => {
                     return Err(format!("screen capture unavailable: {e}"));
                 }
             }
         } else {
-            // Stop screen share, restore camera if it was on before
+            // Stop screen share, restore camera
             session.screen_sharing = false;
-            // Try to restore camera
             match CameraCapturer::new() {
                 Ok(camera) => {
                     let renditions =
@@ -421,11 +485,20 @@ impl TutoringManager {
                         .set_video(Some(renditions))
                         .map_err(|e| format!("failed to restore camera: {e}"))?;
                     session.video_enabled = true;
+                    session.self_preview_task = Self::start_self_preview(
+                        &mut session.broadcast,
+                        session.app_handle.clone(),
+                    );
                 }
                 Err(_) => {
-                    // Camera not available, disable video entirely
                     let _ = session.broadcast.set_video(None);
                     session.video_enabled = false;
+                    let _ = session.app_handle.emit(
+                        "tutoring:peer-video-ended",
+                        PeerVideoEndedEvent {
+                            node_id: "self".into(),
+                        },
+                    );
                 }
             }
         }
@@ -449,10 +522,7 @@ impl TutoringManager {
             sender: session.our_node_id.clone(),
             sender_name: None,
             text,
-            timestamp: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis() as u64,
+            timestamp: Self::now_millis(),
         };
 
         let encoded = postcard::to_stdvec(&msg)
@@ -480,6 +550,7 @@ impl TutoringManager {
             video_enabled: session.video_enabled,
             audio_enabled: session.audio_enabled,
             screen_sharing: session.screen_sharing,
+            started_at: session.started_at,
         })
     }
 
@@ -542,6 +613,22 @@ impl TutoringManager {
         }
 
         Ok(broadcast)
+    }
+
+    /// Start a self-preview from the broadcast's local video source.
+    ///
+    /// Uses `PublishBroadcast::watch_local()` which taps the shared
+    /// camera source directly (no encode/decode round-trip). Frames
+    /// are emitted as `tutoring:video-frame` events with `node_id = "self"`.
+    fn start_self_preview(
+        broadcast: &mut PublishBroadcast,
+        app_handle: AppHandle,
+    ) -> Option<JoinHandle<()>> {
+        let config = DecodeConfig::default();
+        let watch = broadcast.watch_local(config)?;
+
+        log::info!("tutoring: starting self-preview");
+        Some(Self::spawn_frame_bridge(watch, "self".into(), app_handle))
     }
 
     /// Set up a chat channel on a gossip topic derived from the room.
@@ -678,9 +765,6 @@ impl TutoringManager {
                         None => None,
                     };
 
-                    // Start video watching
-                    // We use watch() for video-only, since audio is handled
-                    // separately and watch_and_listen consumes the broadcast.
                     if let Some(audio_out) = audio_out {
                         // Audio + video: use watch_and_listen
                         match broadcast
@@ -690,7 +774,6 @@ impl TutoringManager {
                                 log::info!(
                                     "tutoring: watching + listening to {node_id}:{name}"
                                 );
-                                // Spawn video frame bridge if video track exists
                                 if let Some(video) = av_track.video {
                                     Self::spawn_frame_bridge(
                                         video,
@@ -732,13 +815,16 @@ impl TutoringManager {
     }
 
     /// Spawn a background task that polls decoded video frames from a
-    /// remote peer's `WatchTrack`, encodes them as JPEG, and emits
-    /// them to the webview via a Tauri event.
+    /// `WatchTrack` (either remote peer or local preview), encodes
+    /// them as JPEG, and emits them to the webview via a Tauri event.
+    ///
+    /// When the track closes (peer left or video disabled), emits a
+    /// `tutoring:peer-video-ended` event so the frontend can clean up.
     fn spawn_frame_bridge(
         watch: WatchTrack,
         node_id: String,
         app_handle: AppHandle,
-    ) {
+    ) -> JoinHandle<()> {
         let (mut frames, handle) = watch.split();
         // Set a reasonable viewport — the decoder will scale down if needed
         handle.set_viewport(640, 480);
@@ -796,11 +882,18 @@ impl TutoringManager {
                     }
                     None => {
                         log::info!("tutoring: frame bridge ended for {node_id} (track closed)");
+                        // Notify frontend that this peer's video has ended
+                        let _ = app_handle.emit(
+                            "tutoring:peer-video-ended",
+                            PeerVideoEndedEvent {
+                                node_id: node_id.clone(),
+                            },
+                        );
                         break;
                     }
                 }
             }
-        });
+        })
     }
 }
 

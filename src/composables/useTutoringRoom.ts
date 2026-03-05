@@ -1,4 +1,4 @@
-import { ref, readonly, onUnmounted, getCurrentInstance } from 'vue'
+import { ref, readonly } from 'vue'
 import type {
   TutoringSessionInfo,
   TutoringSessionStatus,
@@ -29,6 +29,7 @@ let pollInterval: ReturnType<typeof setInterval> | null = null
 
 let videoUnlisten: (() => void) | null = null
 let chatUnlisten: (() => void) | null = null
+let peerEndedUnlisten: (() => void) | null = null
 
 async function setupEventListeners() {
   if (videoUnlisten) return // already set up
@@ -48,6 +49,13 @@ async function setupEventListeners() {
     chatUnlisten = await listen<TutoringChatMessage>('tutoring:chat', (event) => {
       chatMessages.value = [...chatMessages.value, event.payload]
     })
+
+    peerEndedUnlisten = await listen<{ node_id: string }>('tutoring:peer-video-ended', (event) => {
+      const { node_id } = event.payload
+      const updated = { ...videoFrames.value }
+      delete updated[node_id]
+      videoFrames.value = updated
+    })
   } catch (e) {
     console.warn('Failed to set up Tauri event listeners:', e)
   }
@@ -61,6 +69,10 @@ function teardownEventListeners() {
   if (chatUnlisten) {
     chatUnlisten()
     chatUnlisten = null
+  }
+  if (peerEndedUnlisten) {
+    peerEndedUnlisten()
+    peerEndedUnlisten = null
   }
 }
 
