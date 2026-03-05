@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useTheme } from '@/composables/useTheme'
 import { useP2P } from '@/composables/useP2P'
 import { useAuth } from '@/composables/useAuth'
@@ -13,8 +14,8 @@ const route = useRoute()
 const { theme, setTheme } = useTheme()
 const { status: p2pStatus, startPolling } = useP2P()
 const { displayName, lockVault } = useAuth()
-const isMac = typeof navigator !== 'undefined' && /Mac/.test(navigator.userAgent)
 const isMobilePlatform = typeof navigator !== 'undefined' && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
+const isMac = typeof navigator !== 'undefined' && /Mac/.test(navigator.userAgent)
 const canGoBack = ref(false)
 const canGoForward = ref(false)
 
@@ -42,6 +43,26 @@ function onGlobalKeydown(e: KeyboardEvent) {
   if (e.key === '/' && !['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement).tagName) && !(e.target as HTMLElement)?.isContentEditable) {
     e.preventDefault()
     searchInput.value?.focus()
+  }
+}
+
+async function onTopbarMouseDown(e: MouseEvent) {
+  if (e.button !== 0) return
+  if (isMobilePlatform) return
+
+  const target = e.target as HTMLElement | null
+  if (!target) return
+
+  const interactiveTarget = target.closest('button, input, textarea, select, a, [role="option"], [data-no-drag]')
+  if (interactiveTarget) return
+
+  const inTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
+  if (!inTauri) return
+
+  try {
+    await getCurrentWindow().startDragging()
+  } catch (err) {
+    console.warn('Failed to start window drag:', err)
   }
 }
 
@@ -108,7 +129,7 @@ const userInitial = () => displayName.value ? displayName.value.charAt(0).toUppe
 </script>
 
 <template>
-  <header :class="['topbar', isMac ? 'topbar--macos' : '']" data-tauri-drag-region>
+  <header :class="['topbar', isMac ? 'topbar--macos' : '']" data-tauri-drag-region @mousedown="onTopbarMouseDown">
     <!-- Left: Sidebar toggle -->
     <div class="topbar-left">
       <!-- Sidebar toggle (desktop only) -->
