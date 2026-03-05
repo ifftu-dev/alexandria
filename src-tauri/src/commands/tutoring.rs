@@ -4,6 +4,8 @@
 //! Room creation/joining requires the iroh content node to be running
 //! (it provides the shared QUIC endpoint, gossip, and live instances).
 
+use iroh_live::media::audio::AudioBackend;
+use iroh_live::media::capture::CameraCapturer;
 use rusqlite::params;
 use serde::Serialize;
 use tauri::{AppHandle, State};
@@ -295,4 +297,89 @@ pub async fn tutoring_check_devices() -> Result<DeviceCheckResult, String> {
         has_audio,
         error: None,
     })
+}
+
+// ── Device listing & audio levels ─────────────────────────────────
+
+/// Info about an available audio device.
+#[derive(Debug, Clone, Serialize)]
+pub struct AudioDeviceInfo {
+    /// Device ID string (stable across restarts, can be passed back for selection).
+    pub id: String,
+    /// Human-readable name.
+    pub name: Option<String>,
+    /// Whether this is the system default device.
+    pub is_default: bool,
+}
+
+/// Info about an available camera.
+#[derive(Debug, Clone, Serialize)]
+pub struct CameraDeviceInfo {
+    /// Camera index (numeric or string key).
+    pub index: String,
+    /// Human-readable name.
+    pub name: String,
+}
+
+/// Available devices for audio and video.
+#[derive(Debug, Clone, Serialize)]
+pub struct DeviceList {
+    pub audio_inputs: Vec<AudioDeviceInfo>,
+    pub audio_outputs: Vec<AudioDeviceInfo>,
+    pub cameras: Vec<CameraDeviceInfo>,
+}
+
+/// List all available audio and camera devices.
+#[tauri::command]
+pub async fn tutoring_list_devices() -> Result<DeviceList, String> {
+    // Audio devices
+    let audio_inputs: Vec<AudioDeviceInfo> = AudioBackend::list_input_devices()
+        .into_iter()
+        .map(|d| AudioDeviceInfo {
+            id: d.id.to_string(),
+            name: d.name,
+            is_default: d.is_default,
+        })
+        .collect();
+
+    let audio_outputs: Vec<AudioDeviceInfo> = AudioBackend::list_output_devices()
+        .into_iter()
+        .map(|d| AudioDeviceInfo {
+            id: d.id.to_string(),
+            name: d.name,
+            is_default: d.is_default,
+        })
+        .collect();
+
+    // Camera devices
+    let cameras = match CameraCapturer::list_cameras() {
+        Ok(cams) => cams
+            .into_iter()
+            .map(|(idx, name)| CameraDeviceInfo {
+                index: format!("{idx:?}"),
+                name,
+            })
+            .collect(),
+        Err(e) => {
+            log::warn!("tutoring: camera enumeration failed: {e}");
+            Vec::new()
+        }
+    };
+
+    Ok(DeviceList {
+        audio_inputs,
+        audio_outputs,
+        cameras,
+    })
+}
+
+/// Get current mic audio level (0.0–1.0) for the VU meter.
+///
+/// This is a poll-based alternative to the `tutoring:audio-level` Tauri event.
+/// The frontend can use either mechanism.
+#[tauri::command]
+pub async fn tutoring_get_audio_level(
+    state: State<'_, AppState>,
+) -> Result<f32, String> {
+    Ok(state.tutoring.get_mic_level().await)
 }

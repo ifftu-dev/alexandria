@@ -934,6 +934,28 @@ export interface DeviceCheckResult {
   error: string | null
 }
 
+export interface AudioDeviceInfo {
+  id: string
+  name: string | null
+  is_default: boolean
+}
+
+export interface CameraDeviceInfo {
+  index: string
+  name: string
+}
+
+export interface DeviceList {
+  audio_inputs: AudioDeviceInfo[]
+  audio_outputs: AudioDeviceInfo[]
+  cameras: CameraDeviceInfo[]
+}
+
+export interface AudioLevelEvent {
+  mic_level: number
+  output_level: number
+}
+
 // ---- Health ----
 
 export interface HealthResponse {

@@ -81,7 +81,7 @@ iroh-blobs = { version = "0.98", features = ["fs-store"] }
 # Using patched fork with firewheel 0.10 (cpal 0.17.x) to fix CoreAudio
 # SIGSEGV on macOS Sequoia (RustAudio/cpal#1028, fixed in cpal 0.17.0).
 iroh-gossip = "0.96"
-iroh-live = { git = "https://github.com/ifftu-dev/iroh-live" }
+iroh-live = { git = "https://github.com/ifftu-dev/iroh-live", rev = "27cd1cd" }
 
 # Device enumeration for pre-join device checks (camera listing via nokhwa)
 nokhwa = { version = "0.10", default-features = false, features = ["input-native"] }

@@ -12,6 +12,7 @@ const {
   chatMessages,
   peerNames,
   unreadChatCount,
+  micLevel,
   refreshStatus,
   leaveRoom,
   toggleVideo,
@@ -175,7 +176,7 @@ function peerInitials(nodeId: string): string {
   const name = peerNames.value[nodeId] || peers.value.find(p => p.node_id === nodeId)?.display_name
   if (name) {
     const parts = name.trim().split(/\s+/)
-    if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase()
+    if (parts.length >= 2 && parts[0]?.[0] && parts[1]?.[0]) return (parts[0][0] + parts[1][0]).toUpperCase()
     return name.slice(0, 2).toUpperCase()
   }
   return nodeId.slice(0, 2).toUpperCase()
@@ -317,7 +318,7 @@ function peerInitials(nodeId: string): string {
                 <span class="text-xs font-medium text-white">You</span>
               </div>
 
-              <!-- Audio indicator -->
+              <!-- Audio indicator with VU meter -->
               <div class="absolute bottom-3 right-3 flex items-center gap-1.5 rounded-lg bg-black/60 px-2 py-1 backdrop-blur-sm">
                 <svg v-if="audioEnabled" class="h-3 w-3 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
@@ -326,9 +327,21 @@ function peerInitials(nodeId: string): string {
                   <path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
                   <line x1="3" y1="3" x2="21" y2="21" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
                 </svg>
-                <span class="text-[0.6rem] font-medium text-white">
-                  {{ audioEnabled ? 'Mic On' : 'Muted' }}
-                </span>
+                <!-- VU meter bars -->
+                <div v-if="audioEnabled" class="flex items-end gap-[2px] h-3">
+                  <div
+                    v-for="i in 5"
+                    :key="i"
+                    class="w-[2.5px] rounded-[1px] transition-[height,background-color] duration-75"
+                    :style="{ height: micLevel >= (i * 0.18) ? `${3 + i * 1.8}px` : '2px' }"
+                    :class="[
+                      micLevel >= (i * 0.18)
+                        ? (i <= 3 ? 'bg-success' : i === 4 ? 'bg-warning' : 'bg-destructive')
+                        : 'bg-white/20',
+                    ]"
+                  />
+                </div>
+                <span v-else class="text-[0.6rem] font-medium text-white">Muted</span>
               </div>
             </div>
 
@@ -398,23 +411,41 @@ function peerInitials(nodeId: string): string {
 
         <!-- Control bar (bottom) -->
         <div v-if="isActive" class="flex items-center justify-center gap-3 border-t border-border px-4 py-3 bg-card shrink-0">
-          <!-- Mic toggle -->
-          <button
-            class="flex h-11 w-11 items-center justify-center rounded-full border transition-all"
-            :class="audioEnabled
-              ? 'border-border bg-muted text-foreground hover:bg-muted/80'
-              : 'border-destructive/50 bg-destructive/10 text-destructive hover:bg-destructive/20'"
-            :title="audioEnabled ? 'Mute microphone' : 'Unmute microphone'"
-            @click="handleToggleAudio"
-          >
-            <svg v-if="audioEnabled" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
+          <!-- Mic toggle with VU meter ring -->
+          <div class="relative">
+            <button
+              class="flex h-11 w-11 items-center justify-center rounded-full border transition-all"
+              :class="audioEnabled
+                ? 'border-border bg-muted text-foreground hover:bg-muted/80'
+                : 'border-destructive/50 bg-destructive/10 text-destructive hover:bg-destructive/20'"
+              :title="audioEnabled ? 'Mute microphone' : 'Unmute microphone'"
+              @click="handleToggleAudio"
+            >
+              <svg v-if="audioEnabled" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
+              </svg>
+              <svg v-else class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
+                <line x1="4" y1="4" x2="20" y2="20" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" />
+              </svg>
+            </button>
+            <!-- Circular VU ring around mic button -->
+            <svg
+              v-if="audioEnabled && micLevel > 0.02"
+              class="absolute inset-0 h-11 w-11 -rotate-90 pointer-events-none"
+              viewBox="0 0 44 44"
+            >
+              <circle
+                cx="22" cy="22" r="20"
+                fill="none"
+                :stroke="micLevel > 0.8 ? '#f97316' : '#22c55e'"
+                stroke-width="2.5"
+                :stroke-dasharray="`${micLevel * 125.6} 125.6`"
+                stroke-linecap="round"
+                class="transition-[stroke-dasharray,stroke] duration-75"
+              />
             </svg>
-            <svg v-else class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
-              <line x1="4" y1="4" x2="20" y2="20" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" />
-            </svg>
-          </button>
+          </div>
 
           <!-- Camera toggle -->
           <button

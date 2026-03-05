@@ -366,6 +366,8 @@ pub fn run() {
             commands::tutoring::tutoring_peers,
             commands::tutoring::tutoring_list_sessions,
             commands::tutoring::tutoring_check_devices,
+            commands::tutoring::tutoring_list_devices,
+            commands::tutoring::tutoring_get_audio_level,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
