@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		AA1234560001000000000001 /* AudioToolbox.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AA1234560001000000000002 /* AudioToolbox.framework */; };
 		008CE7C004EB82B57B628D80 /* UIKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = DFF22CCDC2BFA28D20CF8873 /* UIKit.framework */; };
 		166B0650D13C6418AC0F12CF /* MetalKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 79A464779C8A46E2D2135DC6 /* MetalKit.framework */; };
 		707D24F4F5FFAD10034C2CEF /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 6561142FEE4BEE2448B81A2C /* LaunchScreen.storyboard */; };
@@ -32,6 +33,7 @@
 		174FFC398F85EC531EAF7D08 /* sync.rs */ = {isa = PBXFileReference; lastKnownFileType = text; path = sync.rs; sourceTree = "<group>"; };
 		18DAD4A0C365F59B831458E2 /* enrollment.rs */ = {isa = PBXFileReference; lastKnownFileType = text; path = enrollment.rs; sourceTree = "<group>"; };
 		1A669C5CDA3C372D5E03A303 /* QuartzCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = QuartzCore.framework; path = System/Library/Frameworks/QuartzCore.framework; sourceTree = SDKROOT; };
+		AA1234560001000000000002 /* AudioToolbox.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AudioToolbox.framework; path = System/Library/Frameworks/AudioToolbox.framework; sourceTree = SDKROOT; };
 		1A999A1154B356F6EBF8FC82 /* seed_content.rs */ = {isa = PBXFileReference; lastKnownFileType = text; path = seed_content.rs; sourceTree = "<group>"; };
 		1BE110A8C982F0852EDC8721 /* resolver.rs */ = {isa = PBXFileReference; lastKnownFileType = text; path = resolver.rs; sourceTree = "<group>"; };
 		1D2B2CF98537A0CD91DEF6D7 /* signing.rs */ = {isa = PBXFileReference; lastKnownFileType = text; path = signing.rs; sourceTree = "<group>"; };
@@ -128,6 +130,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				FBFE455178939BB8A104CD74 /* libapp.a in Frameworks */,
+				AA1234560001000000000001 /* AudioToolbox.framework in Frameworks */,
 				9E11B6103A48172FCFE7A684 /* CoreGraphics.framework in Frameworks */,
 				E1C6D6EC45C27C55563E07DB /* Metal.framework in Frameworks */,
 				166B0650D13C6418AC0F12CF /* MetalKit.framework in Frameworks */,
@@ -168,6 +171,7 @@
 				12E7F95254D2BDD28F88F616 /* libapp.a */,
 				F74A4C0C8F7D2FCA5D106691 /* Metal.framework */,
 				79A464779C8A46E2D2135DC6 /* MetalKit.framework */,
+				AA1234560001000000000002 /* AudioToolbox.framework */,
 				1A669C5CDA3C372D5E03A303 /* QuartzCore.framework */,
 				B9377126C877ACEA070565C3 /* Security.framework */,
 				DFF22CCDC2BFA28D20CF8873 /* UIKit.framework */,

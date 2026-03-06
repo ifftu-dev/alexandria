@@ -51,5 +51,8 @@ uint32_t kSCDynamicStoreUseSessionKeys = 0;
         .expect("failed to write SC stubs");
 
         cc::Build::new().file(&stub_path).compile("sc_stubs");
+
+        // Link AudioToolbox framework for cpal/coreaudio audio I/O on iOS.
+        println!("cargo:rustc-link-lib=framework=AudioToolbox");
     }
 }

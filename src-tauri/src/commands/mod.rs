@@ -23,6 +23,6 @@ pub mod sync;
 pub mod tutoring;
 
 #[cfg(mobile)]
-pub mod tutoring_stubs;
+pub mod tutoring_mobile;
 #[cfg(mobile)]
-pub use tutoring_stubs as tutoring;
+pub use tutoring_mobile as tutoring;

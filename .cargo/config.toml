@@ -1,0 +1,7 @@
+# Cargo configuration for Alexandria
+#
+# CMAKE_POLICY_VERSION_MINIMUM: Required because audiopus_sys bundles an
+# older Opus CMakeLists.txt that uses cmake_minimum_required(VERSION 3.1)
+# which is incompatible with CMake 4.x.
+[env]
+CMAKE_POLICY_VERSION_MINIMUM = "3.5"
