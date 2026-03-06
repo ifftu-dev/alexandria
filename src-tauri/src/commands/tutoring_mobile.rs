@@ -1,10 +1,11 @@
-//! Mobile Tauri commands for live tutoring sessions (audio-only).
+//! Mobile Tauri commands for live tutoring sessions (audio + video).
 //!
-//! Phase 2: real audio-only tutoring on mobile via the mobile
-//! TutoringManager. Uses PureOpusEncoder/Decoder (no ffmpeg).
+//! Phase 3: full audio+video tutoring on mobile via the mobile
+//! TutoringManager. Uses PureOpusEncoder/Decoder for audio and
+//! VtEncoder/VtDecoder (VideoToolbox) for video. Camera capture via
+//! AVCaptureSession (IosCameraSource).
 //!
-//! Video and screen share commands return errors explaining they
-//! are not available on mobile.
+//! Screen share remains unavailable on mobile.
 
 use iroh_live::media::audio::AudioBackend;
 use rusqlite::params;
@@ -205,13 +206,13 @@ pub async fn tutoring_leave_room(state: State<'_, AppState>) -> Result<(), Strin
     Ok(())
 }
 
-/// Toggle camera on/off — not available on mobile.
+/// Toggle camera on/off.
 #[tauri::command]
 pub async fn tutoring_toggle_video(
-    _enable: bool,
-    _state: State<'_, AppState>,
+    enable: bool,
+    state: State<'_, AppState>,
 ) -> Result<bool, String> {
-    Err("Video is not available on mobile (audio-only mode)".into())
+    state.tutoring.toggle_video(enable).await
 }
 
 /// Toggle microphone on/off.
@@ -291,14 +292,19 @@ pub async fn tutoring_list_sessions(
     Ok(sessions)
 }
 
-/// Check device availability — audio only on mobile (no camera).
+/// Check device availability — audio + camera on mobile.
 #[tauri::command]
 pub async fn tutoring_check_devices() -> Result<DeviceCheckResult, String> {
     let has_audio = !AudioBackend::list_input_devices().is_empty();
 
+    // Camera is always available on real iOS devices (AVCaptureSession).
+    // On simulator it may not produce frames, but the session can still be created.
+    let has_camera = true;
+    let camera_name = Some("iOS Camera".into());
+
     Ok(DeviceCheckResult {
-        has_camera: false,
-        camera_name: None,
+        has_camera,
+        camera_name,
         has_audio,
         error: if !has_audio {
             Some("No microphone detected".into())
@@ -308,7 +314,7 @@ pub async fn tutoring_check_devices() -> Result<DeviceCheckResult, String> {
     })
 }
 
-/// List available audio devices (no cameras on mobile).
+/// List available audio devices and camera.
 #[tauri::command]
 pub async fn tutoring_list_devices() -> Result<DeviceList, String> {
     let audio_inputs: Vec<AudioDeviceInfo> = AudioBackend::list_input_devices()
@@ -332,7 +338,12 @@ pub async fn tutoring_list_devices() -> Result<DeviceList, String> {
     Ok(DeviceList {
         audio_inputs,
         audio_outputs,
-        cameras: vec![], // No cameras on mobile (Phase 2 = audio-only)
+        cameras: vec![
+            CameraDeviceInfo {
+                index: "front".into(),
+                name: "Front Camera".into(),
+            },
+        ],
     })
 }
 
