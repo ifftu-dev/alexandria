@@ -2,6 +2,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useTutoringRoom } from '@/composables/useTutoringRoom'
+import { usePlatform } from '@/composables/usePlatform'
 import type { DeviceCheckResult, DeviceList } from '@/types'
 
 const router = useRouter()
@@ -15,7 +16,7 @@ const {
   listDevices,
 } = useTutoringRoom()
 
-const isMobilePlatform = typeof navigator !== 'undefined' && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
+const { isMobilePlatform } = usePlatform()
 
 const showCreateModal = ref(false)
 const showJoinModal = ref(false)
