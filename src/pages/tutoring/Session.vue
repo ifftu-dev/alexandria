@@ -317,25 +317,35 @@ function peerInitials(nodeId: string): string {
         <div v-if="isActive" class="flex-1 overflow-auto p-4">
           <div class="mx-auto max-w-5xl space-y-4">
 
-            <!-- ═══ MOBILE: Audio-only self indicator ═══ -->
+            <!-- ═══ MOBILE: Video + audio UI ═══ -->
             <template v-if="isMobilePlatform">
-              <div class="relative mx-auto w-full rounded-2xl border border-border bg-card p-6">
-                <div class="flex flex-col items-center gap-4">
-                  <!-- Circular mic indicator with VU ring -->
+              <!-- Self video / camera preview -->
+              <div class="relative mx-auto w-full aspect-[3/4] max-h-[50vh] overflow-hidden rounded-2xl border border-border bg-card">
+                <!-- Live self-preview from camera -->
+                <img
+                  v-if="selfVideoSrc"
+                  :src="selfVideoSrc"
+                  class="absolute inset-0 h-full w-full object-cover scale-x-[-1]"
+                  alt="Self preview"
+                />
+                <!-- Fallback: audio-only circular indicator -->
+                <div v-else class="absolute inset-0 flex flex-col items-center justify-center gap-4">
                   <div class="relative">
                     <div
                       class="flex h-20 w-20 items-center justify-center rounded-full border-2 transition-colors"
-                      :class="audioEnabled ? 'border-success/40 bg-success/5' : 'border-destructive/40 bg-destructive/5'"
+                      :class="videoEnabled ? 'border-primary/40 bg-primary/5' : audioEnabled ? 'border-success/40 bg-success/5' : 'border-destructive/40 bg-destructive/5'"
                     >
-                      <svg v-if="audioEnabled" class="h-8 w-8 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                      <svg v-if="videoEnabled" class="h-8 w-8 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                      </svg>
+                      <svg v-else-if="audioEnabled" class="h-8 w-8 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
                         <path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
                       </svg>
                       <svg v-else class="h-8 w-8 text-destructive" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
-                        <line x1="3" y1="3" x2="21" y2="21" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M12 18.75H4.5a2.25 2.25 0 01-2.25-2.25V9m12.841 9.091L16.5 19.5m-1.409-1.409c.407-.407.659-.97.659-1.591v-9a2.25 2.25 0 00-2.25-2.25h-9c-.621 0-1.184.252-1.591.659m12.182 12.182L2.909 5.909M1.5 4.5l1.409 1.409" />
                       </svg>
                     </div>
-                    <!-- Circular VU ring -->
+                    <!-- VU ring on fallback -->
                     <svg
                       v-if="audioEnabled && micLevel > 0.02"
                       class="absolute inset-0 h-20 w-20 -rotate-90 pointer-events-none"
@@ -354,45 +364,95 @@ function peerInitials(nodeId: string): string {
                   </div>
                   <div class="text-center">
                     <p class="text-sm font-medium text-foreground">You</p>
-                    <p class="text-xs text-muted-foreground">{{ audioEnabled ? 'Microphone on' : 'Microphone muted' }}</p>
+                    <p class="text-xs text-muted-foreground">
+                      {{ videoEnabled ? 'Starting camera...' : 'Camera off' }}
+                    </p>
                   </div>
-                  <!-- VU meter bar (horizontal) -->
-                  <div v-if="audioEnabled" class="w-full max-w-[200px] h-2 rounded-full bg-muted overflow-hidden">
+                </div>
+
+                <!-- Status overlay -->
+                <div class="absolute bottom-3 left-3 flex items-center gap-2 rounded-lg bg-black/60 px-3 py-1.5 backdrop-blur-sm">
+                  <span class="relative flex h-2 w-2" v-if="videoEnabled">
+                    <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-success opacity-75" />
+                    <span class="relative inline-flex h-2 w-2 rounded-full bg-success" />
+                  </span>
+                  <span v-else class="h-2 w-2 rounded-full bg-muted-foreground/50" />
+                  <span class="text-xs font-medium text-white">You</span>
+                </div>
+
+                <!-- Audio indicator overlay -->
+                <div class="absolute bottom-3 right-3 flex items-center gap-1.5 rounded-lg bg-black/60 px-2 py-1 backdrop-blur-sm">
+                  <svg v-if="audioEnabled" class="h-3 w-3 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
+                  </svg>
+                  <svg v-else class="h-3 w-3 text-destructive" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
+                    <line x1="3" y1="3" x2="21" y2="21" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                  </svg>
+                  <div v-if="audioEnabled" class="flex items-end gap-[2px] h-3">
                     <div
-                      class="h-full rounded-full transition-all duration-75"
-                      :class="micLevel > 0.8 ? 'bg-warning' : micLevel > 0.5 ? 'bg-success' : 'bg-success/70'"
-                      :style="{ width: `${Math.min(micLevel * 100, 100)}%` }"
+                      v-for="i in 5"
+                      :key="i"
+                      class="w-[2.5px] rounded-[1px] transition-[height,background-color] duration-75"
+                      :style="{ height: micLevel >= (i * 0.18) ? `${3 + i * 1.8}px` : '2px' }"
+                      :class="[
+                        micLevel >= (i * 0.18)
+                          ? (i <= 3 ? 'bg-success' : i === 4 ? 'bg-warning' : 'bg-destructive')
+                          : 'bg-white/20',
+                      ]"
                     />
                   </div>
+                  <span v-else class="text-[0.6rem] font-medium text-white">Muted</span>
                 </div>
               </div>
 
-              <!-- Mobile peer list (audio-only cards) -->
+              <!-- Mobile peer grid (video + audio) -->
               <div v-if="peers.length > 0" class="space-y-3">
                 <div
                   v-for="peer in peers"
                   :key="peer.node_id"
-                  class="flex items-center gap-3 rounded-xl border border-border bg-card p-4"
+                  class="relative overflow-hidden rounded-xl border border-border bg-card"
+                  :class="videoFrames[peer.node_id] ? 'aspect-video' : ''"
                 >
-                  <div class="flex h-12 w-12 items-center justify-center rounded-full bg-muted text-lg font-bold text-foreground shrink-0">
-                    {{ peerInitials(peer.node_id) }}
-                  </div>
-                  <div class="flex-1 min-w-0">
-                    <p class="text-sm font-medium text-foreground truncate">
-                      {{ peer.connected ? peerDisplayName(peer.node_id) : 'Connecting...' }}
-                    </p>
-                    <div class="flex items-center gap-1.5 mt-0.5">
-                      <span
-                        class="h-1.5 w-1.5 rounded-full shrink-0"
-                        :class="peer.connected ? 'bg-success' : 'bg-warning'"
-                      />
-                      <span class="text-xs text-muted-foreground">
-                        {{ peer.connected ? 'Connected' : 'Connecting' }}
-                      </span>
+                  <!-- Rendered video frame from Rust bridge -->
+                  <img
+                    v-if="videoFrames[peer.node_id]"
+                    :src="videoFrames[peer.node_id]"
+                    class="absolute inset-0 h-full w-full object-cover"
+                    :alt="`Video from ${peerDisplayName(peer.node_id)}`"
+                  />
+                  <!-- Audio-only peer card (no video frames) -->
+                  <div v-else class="flex items-center gap-3 p-4">
+                    <div class="flex h-12 w-12 items-center justify-center rounded-full bg-muted text-lg font-bold text-foreground shrink-0">
+                      {{ peerInitials(peer.node_id) }}
+                    </div>
+                    <div class="flex-1 min-w-0">
+                      <p class="text-sm font-medium text-foreground truncate">
+                        {{ peer.connected ? peerDisplayName(peer.node_id) : 'Connecting...' }}
+                      </p>
+                      <div class="flex items-center gap-1.5 mt-0.5">
+                        <span
+                          class="h-1.5 w-1.5 rounded-full shrink-0"
+                          :class="peer.connected ? 'bg-success' : 'bg-warning'"
+                        />
+                        <span class="text-xs text-muted-foreground">
+                          {{ peer.connected ? 'Connected' : 'Connecting' }}
+                        </span>
+                      </div>
                     </div>
                   </div>
+                  <!-- Peer status overlay (shown over video) -->
+                  <div v-if="videoFrames[peer.node_id]" class="absolute bottom-2 left-2 flex items-center gap-1.5 rounded bg-black/60 px-2 py-1 backdrop-blur-sm">
+                    <span
+                      class="h-1.5 w-1.5 rounded-full"
+                      :class="peer.connected ? 'bg-success' : 'bg-warning'"
+                    />
+                    <span class="text-[0.6rem] font-medium text-white">
+                      {{ peer.connected ? peerDisplayName(peer.node_id) : 'Connecting...' }}
+                    </span>
+                  </div>
                   <!-- Speaker VU indicator -->
-                  <div v-if="outputLevel > 0.05" class="flex items-center gap-1 shrink-0">
+                  <div v-if="outputLevel > 0.05" class="flex items-center gap-1 shrink-0" :class="videoFrames[peer.node_id] ? 'absolute bottom-2 right-2 rounded bg-black/60 px-1.5 py-1 backdrop-blur-sm' : 'absolute right-4 top-1/2 -translate-y-1/2'">
                     <svg class="h-4 w-4 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                       <path stroke-linecap="round" stroke-linejoin="round" d="M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" />
                     </svg>
@@ -610,9 +670,8 @@ function peerInitials(nodeId: string): string {
             </svg>
           </div>
 
-          <!-- Camera toggle (desktop only) -->
+          <!-- Camera toggle (all platforms) -->
           <button
-            v-if="!isMobilePlatform"
             class="flex h-11 w-11 items-center justify-center rounded-full border transition-all"
             :class="videoEnabled && !screenSharing
               ? 'border-border bg-muted text-foreground hover:bg-muted/80'

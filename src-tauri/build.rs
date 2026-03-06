@@ -54,5 +54,15 @@ uint32_t kSCDynamicStoreUseSessionKeys = 0;
 
         // Link AudioToolbox framework for cpal/coreaudio audio I/O on iOS.
         println!("cargo:rustc-link-lib=framework=AudioToolbox");
+
+        // Link VideoToolbox + CoreMedia + CoreVideo for H.264 encoding/decoding
+        // via VTCompressionSession / VTDecompressionSession (Phase 3: mobile video).
+        println!("cargo:rustc-link-lib=framework=VideoToolbox");
+        println!("cargo:rustc-link-lib=framework=CoreMedia");
+        println!("cargo:rustc-link-lib=framework=CoreVideo");
+
+        // Link AVFoundation for camera capture (AVCaptureSession).
+        println!("cargo:rustc-link-lib=framework=AVFoundation");
+        println!("cargo:rustc-link-lib=framework=CoreFoundation");
     }
 }

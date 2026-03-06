@@ -1,27 +1,33 @@
-//! Mobile audio-only TutoringManager.
+//! Mobile TutoringManager with video support (Phase 3).
 //!
-//! Slimmed-down version of the desktop TutoringManager that operates
-//! in audio-only mode. No camera/screen capture, no video encoding or
-//! decoding, no ffmpeg — uses `PureOpusEncoder`/`PureOpusDecoder`
-//! from the `moq-media::opus` module (wrapping libopus via audiopus).
+//! Uses `VtEncoder` (VideoToolbox H.264) for encoding camera frames,
+//! `IosCameraSource` (AVCaptureSession) for camera capture, and
+//! `IosDecoders` (`PureOpusDecoder` + `VtDecoder`) for decoding
+//! remote audio+video streams.
 //!
-//! Receive side uses `broadcast.listen::<PureOpusDecoder>(audio_out)`
-//! instead of `broadcast.watch_and_listen::<FfmpegDecoders>()`.
+//! Video frames from remote peers (and local preview) are encoded as
+//! JPEG, base64'd, and emitted to the webview via Tauri events —
+//! same bridge pattern as the desktop manager.
 //!
-//! Phase 2: Audio-only P2P tutoring on iOS/Android.
+//! Phase 3: Full audio+video P2P tutoring on iOS.
 
 use std::collections::HashMap;
+use std::io::Cursor;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use base64::Engine;
 use bytes::Bytes;
+use image::ImageEncoder;
 use iroh::Endpoint;
 use iroh_gossip::net::Gossip;
 use iroh_live::media::audio::{AudioBackend, DeviceId, InputStream, OutputStream};
-use iroh_live::media::av::AudioPreset;
+use iroh_live::media::av::{AudioPreset, AudioSinkHandle, VideoPreset};
 use iroh_live::media::opus::PureOpusDecoder;
 use iroh_live::media::opus::PureOpusEncoder;
-use iroh_live::media::publish::{AudioRenditions, PublishBroadcast};
+use iroh_live::media::publish::{AudioRenditions, PublishBroadcast, VideoRenditions};
+use iroh_live::media::subscribe::WatchTrack;
+use iroh_live::media::videotoolbox::{IosCameraSource, VtDecoder, VtEncoder};
 use iroh_live::rooms::{Room, RoomEvent, RoomHandle, RoomTicket};
 use iroh_live::Live;
 use serde::{Deserialize, Serialize};
@@ -39,6 +45,9 @@ const CHAT_RATE_LIMIT_MS: u64 = 200;
 
 /// Interval for re-broadcasting our display name (seconds).
 const NAME_BROADCAST_INTERVAL_SECS: u64 = 15;
+
+/// Mobile video presets — use lower resolutions to save battery/bandwidth.
+const MOBILE_VIDEO_PRESETS: [VideoPreset; 2] = [VideoPreset::P180, VideoPreset::P360];
 
 // ── Chat message protocol ──────────────────────────────────────────
 
@@ -66,6 +75,19 @@ struct NameAnnouncement {
     display_name: String,
 }
 
+/// Tauri event payload for a video frame.
+#[derive(Debug, Clone, Serialize)]
+struct VideoFrameEvent {
+    /// Node ID of the peer (or "self" for local preview).
+    node_id: String,
+    /// Base64-encoded JPEG image data.
+    jpeg_b64: String,
+    /// Frame width in pixels.
+    width: u32,
+    /// Frame height in pixels.
+    height: u32,
+}
+
 /// Tauri event payload for an incoming chat message.
 #[derive(Debug, Clone, Serialize)]
 struct ChatMessageEvent {
@@ -73,6 +95,12 @@ struct ChatMessageEvent {
     sender_name: Option<String>,
     text: String,
     timestamp: u64,
+}
+
+/// Tauri event payload when a peer's video track closes.
+#[derive(Debug, Clone, Serialize)]
+struct PeerVideoEndedEvent {
+    node_id: String,
 }
 
 /// Tauri event payload when a peer's display name is learned.
@@ -89,7 +117,7 @@ const BROADCAST_NAME: &str = "cam";
 
 /// User-selected audio devices for a tutoring session.
 ///
-/// Mobile: no camera — only mic and speaker.
+/// Mobile: camera is always the default device camera (front preferred).
 #[derive(Debug, Clone, Default)]
 pub struct DeviceSelection {
     /// Audio input device ID string (from `DeviceId::to_string()`).
@@ -132,7 +160,7 @@ struct AudioLevelEvent {
     output_level: f32,
 }
 
-/// Internal state for an active room (mobile: audio-only).
+/// Internal state for an active room (mobile: audio + video).
 struct ActiveSession {
     session_id: String,
     session_title: String,
@@ -144,6 +172,7 @@ struct ActiveSession {
     /// Clone of the OutputStream — kept for output peak metering.
     output_stream: Option<OutputStream>,
     peers: HashMap<String, TutoringPeer>,
+    video_enabled: bool,
     audio_enabled: bool,
     /// Chat sender for the derived gossip topic.
     chat_sender: Option<iroh_gossip::api::GossipSender>,
@@ -165,7 +194,7 @@ struct ActiveSession {
 
 // ── TutoringManager ────────────────────────────────────────────────
 
-/// Manages live tutoring rooms (mobile: audio-only).
+/// Manages live tutoring rooms (mobile: audio + video via VideoToolbox).
 ///
 /// Thread-safe via `Arc<Mutex<>>`. Stored in Tauri `AppState`.
 pub struct TutoringManager {
@@ -213,7 +242,7 @@ impl TutoringManager {
 
     // ── Room lifecycle ─────────────────────────────────────────────
 
-    /// Create a new tutoring room (host mode, audio-only).
+    /// Create a new tutoring room (host mode, audio + video).
     pub async fn create_room(
         &self,
         session_id: String,
@@ -248,8 +277,8 @@ impl TutoringManager {
             log::warn!("tutoring: proceeding without audio (CoreAudio init failed)");
         }
 
-        // Start publishing local audio (no video on mobile)
-        let (broadcast, mic_input) =
+        // Start publishing local audio + video
+        let (broadcast, mic_input, has_video) =
             Self::create_broadcast(audio_ctx.as_ref(), has_audio).await?;
         room.publish(BROADCAST_NAME, broadcast.producer())
             .await
@@ -278,7 +307,7 @@ impl TutoringManager {
         )
         .await;
 
-        // Spawn event loop to track peers and subscribe to audio
+        // Spawn event loop to track peers and subscribe to audio+video
         let inner_clone = self.inner.clone();
         let audio_ctx_clone = audio_ctx.clone();
         let app_handle_clone = app_handle.clone();
@@ -300,6 +329,7 @@ impl TutoringManager {
             mic_input,
             output_stream: None,
             peers: HashMap::new(),
+            video_enabled: has_video,
             audio_enabled: has_audio,
             chat_sender,
             our_node_id,
@@ -323,7 +353,7 @@ impl TutoringManager {
         Ok(ticket_str)
     }
 
-    /// Join an existing tutoring room using a ticket string (audio-only).
+    /// Join an existing tutoring room using a ticket string (audio + video).
     pub async fn join_room(
         &self,
         session_id: String,
@@ -362,8 +392,8 @@ impl TutoringManager {
             log::warn!("tutoring: proceeding without audio (CoreAudio init failed)");
         }
 
-        // Start publishing local audio (no video on mobile)
-        let (broadcast, mic_input) =
+        // Start publishing local audio + video
+        let (broadcast, mic_input, has_video) =
             Self::create_broadcast(audio_ctx.as_ref(), has_audio).await?;
         room.publish(BROADCAST_NAME, broadcast.producer())
             .await
@@ -413,6 +443,7 @@ impl TutoringManager {
             mic_input,
             output_stream: None,
             peers: HashMap::new(),
+            video_enabled: has_video,
             audio_enabled: has_audio,
             chat_sender,
             our_node_id,
@@ -494,6 +525,51 @@ impl TutoringManager {
         Ok(session.audio_enabled)
     }
 
+    /// Toggle local camera on/off.
+    pub async fn toggle_video(&self, enable: bool) -> Result<bool, String> {
+        let mut inner = self.inner.lock().await;
+        let session = inner.as_mut().ok_or("not in a tutoring session")?;
+
+        if enable == session.video_enabled {
+            return Ok(session.video_enabled);
+        }
+
+        if enable {
+            // Try to create camera and video renditions
+            match IosCameraSource::front() {
+                Ok(camera) => {
+                    let renditions =
+                        VideoRenditions::new::<VtEncoder>(camera, MOBILE_VIDEO_PRESETS);
+                    session
+                        .broadcast
+                        .set_video(Some(renditions))
+                        .map_err(|e| format!("failed to enable video: {e}"))?;
+                    session.video_enabled = true;
+                    log::info!("tutoring: camera enabled");
+                }
+                Err(e) => {
+                    return Err(format!("camera unavailable: {e}"));
+                }
+            }
+        } else {
+            session
+                .broadcast
+                .set_video(None)
+                .map_err(|e| format!("failed to disable video: {e}"))?;
+            session.video_enabled = false;
+            // Notify frontend that self-video ended
+            let _ = session.app_handle.emit(
+                "tutoring:peer-video-ended",
+                PeerVideoEndedEvent {
+                    node_id: "self".into(),
+                },
+            );
+            log::info!("tutoring: camera disabled");
+        }
+
+        Ok(session.video_enabled)
+    }
+
     // ── Chat ───────────────────────────────────────────────────────
 
     /// Send a text chat message to all peers in the room.
@@ -551,9 +627,9 @@ impl TutoringManager {
             session_title: session.session_title.clone(),
             ticket: session.handle.ticket().to_string(),
             peers: session.peers.values().cloned().collect(),
-            video_enabled: false, // Always false on mobile
+            video_enabled: session.video_enabled,
             audio_enabled: session.audio_enabled,
-            screen_sharing: false, // Always false on mobile
+            screen_sharing: false, // No screen sharing on mobile
             started_at: session.started_at,
         })
     }
@@ -584,15 +660,17 @@ impl TutoringManager {
 
     // ── Internal helpers ───────────────────────────────────────────
 
-    /// Create a PublishBroadcast with mic only (no camera).
+    /// Create a PublishBroadcast with mic + camera.
     ///
-    /// Uses `PureOpusEncoder` instead of ffmpeg's `OpusEncoder`.
+    /// Uses `PureOpusEncoder` for audio and `VtEncoder` (VideoToolbox) for video.
+    /// Returns `(broadcast, mic_input, has_video)`.
     async fn create_broadcast(
         audio_ctx: Option<&AudioBackend>,
         audio: bool,
-    ) -> Result<(PublishBroadcast, Option<InputStream>), String> {
+    ) -> Result<(PublishBroadcast, Option<InputStream>, bool), String> {
         let mut broadcast = PublishBroadcast::new();
         let mut mic_input: Option<InputStream> = None;
+        let mut has_video = false;
 
         if audio {
             if let Some(ctx) = audio_ctx {
@@ -614,9 +692,23 @@ impl TutoringManager {
             }
         }
 
-        // No video on mobile
+        // Try to set up video from the front camera
+        match IosCameraSource::front() {
+            Ok(camera) => {
+                let video_renditions =
+                    VideoRenditions::new::<VtEncoder>(camera, MOBILE_VIDEO_PRESETS);
+                broadcast
+                    .set_video(Some(video_renditions))
+                    .map_err(|e| format!("failed to set video: {e}"))?;
+                has_video = true;
+                log::info!("tutoring: camera initialized (front, 640x480)");
+            }
+            Err(e) => {
+                log::warn!("tutoring: camera unavailable, continuing without video: {e}");
+            }
+        }
 
-        Ok((broadcast, mic_input))
+        Ok((broadcast, mic_input, has_video))
     }
 
     /// Spawn a background task that periodically reads mic + output peak levels
@@ -828,12 +920,12 @@ impl TutoringManager {
 
     /// Event loop that processes room events (peer announcements,
     /// connections, broadcast subscriptions) and subscribes to
-    /// audio-only streams from remote peers.
+    /// audio+video streams from remote peers.
     async fn event_loop(
         mut events: mpsc::Receiver<RoomEvent>,
         inner: Arc<Mutex<Option<ActiveSession>>>,
         audio_ctx: Option<AudioBackend>,
-        _app_handle: AppHandle,
+        app_handle: AppHandle,
     ) {
         while let Some(event) = events.recv().await {
             match event {
@@ -890,7 +982,7 @@ impl TutoringManager {
                     let name = broadcast.broadcast_name().to_string();
                     log::info!("tutoring: subscribed to {node_id}:{name}");
 
-                    // Audio-only: use listen() instead of watch_and_listen()
+                    // Get audio output for playback
                     let audio_out = match &audio_ctx {
                         Some(ctx) => match ctx.default_output().await {
                             Ok(out) => Some(out),
@@ -905,7 +997,7 @@ impl TutoringManager {
                     if let Some(audio_out) = audio_out {
                         let output_clone = audio_out.clone();
 
-                        // Audio-only receive: listen() subscribes to audio tracks only
+                        // Subscribe to audio (borrows broadcast)
                         match broadcast.listen::<PureOpusDecoder>(audio_out) {
                             Ok(_audio_track) => {
                                 log::info!(
@@ -920,8 +1012,27 @@ impl TutoringManager {
                                 }
                             }
                             Err(e) => {
-                                log::error!(
-                                    "tutoring: failed to listen to {node_id}:{name}: {e}"
+                                log::warn!(
+                                    "tutoring: no audio track for {node_id}:{name}: {e}"
+                                );
+                            }
+                        }
+
+                        // Subscribe to video if available (borrows broadcast)
+                        match broadcast.watch::<VtDecoder>() {
+                            Ok(video_track) => {
+                                log::info!(
+                                    "tutoring: watching video from {node_id}:{name}"
+                                );
+                                Self::spawn_frame_bridge(
+                                    video_track,
+                                    node_id.clone(),
+                                    app_handle.clone(),
+                                );
+                            }
+                            Err(e) => {
+                                log::info!(
+                                    "tutoring: no video track for {node_id}:{name}: {e}"
                                 );
                             }
                         }
@@ -934,6 +1045,87 @@ impl TutoringManager {
             }
         }
         log::info!("tutoring: event loop ended");
+    }
+
+    /// Spawn a background task that polls decoded video frames from a
+    /// `WatchTrack` (remote peer), encodes them as JPEG, and emits them
+    /// to the webview via a Tauri event.
+    ///
+    /// Same pattern as the desktop manager's `spawn_frame_bridge`.
+    fn spawn_frame_bridge(
+        watch: WatchTrack,
+        node_id: String,
+        app_handle: AppHandle,
+    ) -> JoinHandle<()> {
+        let (mut frames, handle) = watch.split();
+        // Set a reasonable viewport for mobile
+        handle.set_viewport(360, 480);
+
+        tokio::spawn(async move {
+            let _handle = handle;
+            log::info!("tutoring: frame bridge started for {node_id}");
+
+            // Target ~12 fps on mobile to save battery
+            let frame_interval = Duration::from_millis(83);
+            let mut last_emit = std::time::Instant::now();
+
+            loop {
+                match frames.next_frame().await {
+                    Some(frame) => {
+                        // Rate-limit
+                        let now = std::time::Instant::now();
+                        if now.duration_since(last_emit) < frame_interval {
+                            continue;
+                        }
+                        last_emit = now;
+
+                        let img = frame.img();
+                        let (width, height) = img.dimensions();
+
+                        // Encode to JPEG (quality 50 for mobile — smaller payloads)
+                        let mut jpeg_buf = Vec::with_capacity((width * height) as usize / 4);
+                        let mut cursor = Cursor::new(&mut jpeg_buf);
+                        let encoder =
+                            image::codecs::jpeg::JpegEncoder::new_with_quality(&mut cursor, 50);
+                        match encoder.write_image(
+                            img.as_raw(),
+                            width,
+                            height,
+                            image::ExtendedColorType::Rgba8,
+                        ) {
+                            Ok(()) => {}
+                            Err(e) => {
+                                log::warn!("tutoring: JPEG encode failed for {node_id}: {e}");
+                                continue;
+                            }
+                        }
+
+                        let jpeg_b64 =
+                            base64::engine::general_purpose::STANDARD.encode(&jpeg_buf);
+
+                        let _ = app_handle.emit(
+                            "tutoring:video-frame",
+                            VideoFrameEvent {
+                                node_id: node_id.clone(),
+                                jpeg_b64,
+                                width,
+                                height,
+                            },
+                        );
+                    }
+                    None => {
+                        log::info!("tutoring: frame bridge ended for {node_id} (track closed)");
+                        let _ = app_handle.emit(
+                            "tutoring:peer-video-ended",
+                            PeerVideoEndedEvent {
+                                node_id: node_id.clone(),
+                            },
+                        );
+                        break;
+                    }
+                }
+            }
+        })
     }
 }
 
