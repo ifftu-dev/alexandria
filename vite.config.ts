@@ -16,8 +16,13 @@ export default defineConfig({
   },
   // Tauri expects a fixed port in dev mode
   server: {
+    host: process.env.TAURI_DEV_HOST || 'localhost',
     port: 5173,
     strictPort: true,
+    watch: {
+      // Exclude cargo build directory to avoid ELOOP from symlinks
+      ignored: ['**/target/**'],
+    },
   },
   // Prevent Vite from obscuring Rust errors
   clearScreen: false,
