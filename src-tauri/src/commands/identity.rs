@@ -145,7 +145,8 @@ pub async fn generate_wallet(
     // - ks.store_mnemonic() encrypts + commits to disk (single write)
     let vault_dir = state.vault_dir.clone();
     let (ks, w) = tokio::task::spawn_blocking(move || {
-        let ks = Keystore::create(&vault_dir, &password).map_err(|e| e.to_string())?;
+        #[allow(unused_mut)] // portable keystore (mobile) needs mut; desktop stronghold does not
+        let mut ks = Keystore::create(&vault_dir, &password).map_err(|e| e.to_string())?;
         let w = wallet::generate_wallet().map_err(|e| e.to_string())?;
         ks.store_mnemonic(&w.mnemonic).map_err(|e| e.to_string())?;
         Ok::<_, String>((ks, w))
@@ -217,7 +218,8 @@ pub async fn restore_wallet(
     let vault_dir = state.vault_dir.clone();
     let (ks, w) = tokio::task::spawn_blocking(move || {
         let w = wallet::wallet_from_mnemonic(&mnemonic).map_err(|e| e.to_string())?;
-        let ks = Keystore::create(&vault_dir, &password).map_err(|e| e.to_string())?;
+        #[allow(unused_mut)] // portable keystore (mobile) needs mut; desktop stronghold does not
+        let mut ks = Keystore::create(&vault_dir, &password).map_err(|e| e.to_string())?;
         ks.store_mnemonic(&mnemonic).map_err(|e| e.to_string())?;
         Ok::<_, String>((ks, w))
     })
