@@ -5,6 +5,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useTheme } from '@/composables/useTheme'
 import { useP2P } from '@/composables/useP2P'
 import { useAuth } from '@/composables/useAuth'
+import { usePlatform } from '@/composables/usePlatform'
 
 defineProps<{ sidebarCollapsed: boolean }>()
 const emit = defineEmits<{ toggleSidebar: [] }>()
@@ -14,8 +15,7 @@ const route = useRoute()
 const { theme, setTheme } = useTheme()
 const { status: p2pStatus, startPolling } = useP2P()
 const { displayName, lockVault } = useAuth()
-const isMobilePlatform = typeof navigator !== 'undefined' && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
-const isMac = typeof navigator !== 'undefined' && /Mac/.test(navigator.userAgent) && !/iPhone|iPad|iPod/i.test(navigator.userAgent)
+const { isMobilePlatform, isMac } = usePlatform()
 const canGoBack = ref(false)
 const canGoForward = ref(false)
 

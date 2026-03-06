@@ -18,7 +18,6 @@ use bytes::Bytes;
 use iroh::Endpoint;
 use iroh_gossip::net::Gossip;
 use iroh_live::media::audio::{AudioBackend, DeviceId, InputStream, OutputStream};
-use iroh_live::media::av::AudioSinkHandle;
 use iroh_live::media::av::AudioPreset;
 use iroh_live::media::opus::PureOpusDecoder;
 use iroh_live::media::opus::PureOpusEncoder;

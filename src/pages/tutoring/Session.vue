@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useTutoringRoom } from '@/composables/useTutoringRoom'
+import { usePlatform } from '@/composables/usePlatform'
 
 const route = useRoute()
 const router = useRouter()
@@ -26,7 +27,7 @@ const {
   setChatOpen,
 } = useTutoringRoom()
 
-const isMobilePlatform = typeof navigator !== 'undefined' && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
+const { isMobilePlatform } = usePlatform()
 
 const sessionId = computed(() => route.params.id as string)
 const ticketCopied = ref(false)

@@ -15,6 +15,7 @@
     "@choochmeque/tauri-plugin-biometry-api": "^0.2.3",
     "@tauri-apps/api": "^2.10.1",
     "@tauri-apps/plugin-log": "^2.8.0",
+    "@tauri-apps/plugin-os": "^2.3.2",
     "force-graph": "^1.51.1",
     "vue": "^3.5.25",
     "vue-router": "^4.6.4"
