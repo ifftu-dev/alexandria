@@ -42,10 +42,6 @@ const elapsedSeconds = ref(0)
 let durationInterval: ReturnType<typeof setInterval> | null = null
 
 onMounted(async () => {
-  if (isMobilePlatform) {
-    router.replace('/tutoring')
-    return
-  }
   await setupEventListeners()
   refreshStatus()
   startPolling(2000)
@@ -315,134 +311,244 @@ function peerInitials(nodeId: string): string {
 
     <!-- Main content area with optional chat sidebar -->
     <div class="flex flex-1 overflow-hidden">
-      <!-- Video area -->
+      <!-- Video / Audio area -->
       <div class="flex-1 flex flex-col" :class="showChat ? 'border-r border-border' : ''">
         <div v-if="isActive" class="flex-1 overflow-auto p-4">
           <div class="mx-auto max-w-5xl space-y-4">
-            <!-- Self video / camera status -->
-            <div class="relative mx-auto aspect-video w-full max-w-3xl overflow-hidden rounded-2xl border border-border bg-card">
-              <!-- Live self-preview from camera/screen -->
-              <img
-                v-if="selfVideoSrc"
-                :src="selfVideoSrc"
-                class="absolute inset-0 h-full w-full object-cover"
-                :class="screenSharing ? '' : 'scale-x-[-1]'"
-                alt="Self preview"
-              />
-              <!-- Fallback placeholder when no video frames -->
-              <div v-else class="absolute inset-0 flex flex-col items-center justify-center gap-3 text-muted-foreground">
-                <svg class="h-12 w-12 opacity-30" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1">
-                  <path v-if="!screenSharing" stroke-linecap="round" stroke-linejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                  <path v-else stroke-linecap="round" stroke-linejoin="round" d="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25m18 0A2.25 2.25 0 0018.75 3H5.25A2.25 2.25 0 003 5.25m18 0V12a9 9 0 01-9 9m9-15V12a9 9 0 01-9 9m0 0a9 9 0 01-9-9V5.25" />
-                </svg>
-                <div class="text-center">
-                  <p class="text-sm font-medium">
-                    {{ screenSharing ? 'Screen Sharing Active' : videoEnabled ? 'Starting camera...' : 'Camera Off' }}
-                  </p>
-                  <p class="text-xs opacity-70">
-                    {{ screenSharing ? 'Your screen is being shared with peers' : videoEnabled ? 'Waiting for first frame' : 'Click the camera button to enable' }}
-                  </p>
-                </div>
-              </div>
 
-              <!-- Status overlay -->
-              <div class="absolute bottom-3 left-3 flex items-center gap-2 rounded-lg bg-black/60 px-3 py-1.5 backdrop-blur-sm">
-                <span class="relative flex h-2 w-2" v-if="videoEnabled || screenSharing">
-                  <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-success opacity-75" />
-                  <span class="relative inline-flex h-2 w-2 rounded-full bg-success" />
-                </span>
-                <span v-else class="h-2 w-2 rounded-full bg-muted-foreground/50" />
-                <span class="text-xs font-medium text-white">You</span>
-              </div>
-
-              <!-- Audio indicator with VU meter -->
-              <div class="absolute bottom-3 right-3 flex items-center gap-1.5 rounded-lg bg-black/60 px-2 py-1 backdrop-blur-sm">
-                <svg v-if="audioEnabled" class="h-3 w-3 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
-                </svg>
-                <svg v-else class="h-3 w-3 text-destructive" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
-                  <line x1="3" y1="3" x2="21" y2="21" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-                </svg>
-                <!-- VU meter bars -->
-                <div v-if="audioEnabled" class="flex items-end gap-[2px] h-3">
-                  <div
-                    v-for="i in 5"
-                    :key="i"
-                    class="w-[2.5px] rounded-[1px] transition-[height,background-color] duration-75"
-                    :style="{ height: micLevel >= (i * 0.18) ? `${3 + i * 1.8}px` : '2px' }"
-                    :class="[
-                      micLevel >= (i * 0.18)
-                        ? (i <= 3 ? 'bg-success' : i === 4 ? 'bg-warning' : 'bg-destructive')
-                        : 'bg-white/20',
-                    ]"
-                  />
-                </div>
-                <span v-else class="text-[0.6rem] font-medium text-white">Muted</span>
-              </div>
-            </div>
-
-            <!-- Peer video grid -->
-            <div v-if="peers.length > 0" class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              <div
-                v-for="peer in peers"
-                :key="peer.node_id"
-                class="relative aspect-video overflow-hidden rounded-xl border border-border bg-card"
-              >
-                <!-- Rendered video frame from Rust bridge -->
-                <img
-                  v-if="videoFrames[peer.node_id]"
-                  :src="videoFrames[peer.node_id]"
-                  class="absolute inset-0 h-full w-full object-cover"
-                  :alt="`Video from ${peerDisplayName(peer.node_id)}`"
-                />
-                <!-- Placeholder when no video -->
-                <div v-else class="absolute inset-0 flex flex-col items-center justify-center gap-2 text-muted-foreground">
-                  <div class="flex h-14 w-14 items-center justify-center rounded-full bg-muted text-xl font-bold">
-                    {{ peerInitials(peer.node_id) }}
-                  </div>
-                  <span class="text-xs opacity-60">{{ peerDisplayName(peer.node_id) }}</span>
-                </div>
-                <!-- Peer status overlay -->
-                <div class="absolute bottom-2 left-2 flex items-center gap-1.5 rounded bg-black/60 px-2 py-1 backdrop-blur-sm">
-                  <span
-                    class="h-1.5 w-1.5 rounded-full"
-                    :class="peer.connected ? 'bg-success' : 'bg-warning'"
-                  />
-                  <span class="text-[0.6rem] font-medium text-white">
-                    {{ peer.connected ? peerDisplayName(peer.node_id) : 'Connecting...' }}
-                  </span>
-                </div>
-                <!-- Speaker VU indicator on peer card -->
-                <div v-if="outputLevel > 0.05" class="absolute bottom-2 right-2 flex items-center gap-1 rounded bg-black/60 px-1.5 py-1 backdrop-blur-sm">
-                  <svg class="h-3 w-3 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" />
-                  </svg>
-                  <div class="flex items-end gap-[2px] h-3">
+            <!-- ═══ MOBILE: Audio-only self indicator ═══ -->
+            <template v-if="isMobilePlatform">
+              <div class="relative mx-auto w-full rounded-2xl border border-border bg-card p-6">
+                <div class="flex flex-col items-center gap-4">
+                  <!-- Circular mic indicator with VU ring -->
+                  <div class="relative">
                     <div
-                      v-for="i in 4"
-                      :key="i"
-                      class="w-[2px] rounded-[1px] transition-[height,background-color] duration-75"
-                      :style="{ height: outputLevel >= (i * 0.2) ? `${2 + i * 1.5}px` : '2px' }"
-                      :class="[
-                        outputLevel >= (i * 0.2)
-                          ? (i <= 2 ? 'bg-blue-400' : i === 3 ? 'bg-warning' : 'bg-destructive')
-                          : 'bg-white/20',
-                      ]"
+                      class="flex h-20 w-20 items-center justify-center rounded-full border-2 transition-colors"
+                      :class="audioEnabled ? 'border-success/40 bg-success/5' : 'border-destructive/40 bg-destructive/5'"
+                    >
+                      <svg v-if="audioEnabled" class="h-8 w-8 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
+                      </svg>
+                      <svg v-else class="h-8 w-8 text-destructive" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
+                        <line x1="3" y1="3" x2="21" y2="21" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                      </svg>
+                    </div>
+                    <!-- Circular VU ring -->
+                    <svg
+                      v-if="audioEnabled && micLevel > 0.02"
+                      class="absolute inset-0 h-20 w-20 -rotate-90 pointer-events-none"
+                      viewBox="0 0 80 80"
+                    >
+                      <circle
+                        cx="40" cy="40" r="38"
+                        fill="none"
+                        :stroke="micLevel > 0.8 ? '#f97316' : '#22c55e'"
+                        stroke-width="3"
+                        :stroke-dasharray="`${micLevel * 238.8} 238.8`"
+                        stroke-linecap="round"
+                        class="transition-[stroke-dasharray,stroke] duration-75"
+                      />
+                    </svg>
+                  </div>
+                  <div class="text-center">
+                    <p class="text-sm font-medium text-foreground">You</p>
+                    <p class="text-xs text-muted-foreground">{{ audioEnabled ? 'Microphone on' : 'Microphone muted' }}</p>
+                  </div>
+                  <!-- VU meter bar (horizontal) -->
+                  <div v-if="audioEnabled" class="w-full max-w-[200px] h-2 rounded-full bg-muted overflow-hidden">
+                    <div
+                      class="h-full rounded-full transition-all duration-75"
+                      :class="micLevel > 0.8 ? 'bg-warning' : micLevel > 0.5 ? 'bg-success' : 'bg-success/70'"
+                      :style="{ width: `${Math.min(micLevel * 100, 100)}%` }"
                     />
                   </div>
                 </div>
               </div>
-            </div>
 
-            <!-- No peers yet -->
-            <div v-else class="rounded-xl border border-dashed border-border/60 bg-muted/10 p-8 text-center">
-              <svg class="mx-auto h-8 w-8 text-muted-foreground/30" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z" />
-              </svg>
-              <p class="mt-3 text-sm text-muted-foreground">Waiting for peers to join...</p>
-              <p class="mt-1 text-xs text-muted-foreground/70">Share the invite ticket using the button above.</p>
-            </div>
+              <!-- Mobile peer list (audio-only cards) -->
+              <div v-if="peers.length > 0" class="space-y-3">
+                <div
+                  v-for="peer in peers"
+                  :key="peer.node_id"
+                  class="flex items-center gap-3 rounded-xl border border-border bg-card p-4"
+                >
+                  <div class="flex h-12 w-12 items-center justify-center rounded-full bg-muted text-lg font-bold text-foreground shrink-0">
+                    {{ peerInitials(peer.node_id) }}
+                  </div>
+                  <div class="flex-1 min-w-0">
+                    <p class="text-sm font-medium text-foreground truncate">
+                      {{ peer.connected ? peerDisplayName(peer.node_id) : 'Connecting...' }}
+                    </p>
+                    <div class="flex items-center gap-1.5 mt-0.5">
+                      <span
+                        class="h-1.5 w-1.5 rounded-full shrink-0"
+                        :class="peer.connected ? 'bg-success' : 'bg-warning'"
+                      />
+                      <span class="text-xs text-muted-foreground">
+                        {{ peer.connected ? 'Connected' : 'Connecting' }}
+                      </span>
+                    </div>
+                  </div>
+                  <!-- Speaker VU indicator -->
+                  <div v-if="outputLevel > 0.05" class="flex items-center gap-1 shrink-0">
+                    <svg class="h-4 w-4 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" />
+                    </svg>
+                    <div class="flex items-end gap-[2px] h-4">
+                      <div
+                        v-for="i in 4"
+                        :key="i"
+                        class="w-[2.5px] rounded-[1px] transition-[height,background-color] duration-75"
+                        :style="{ height: outputLevel >= (i * 0.2) ? `${3 + i * 2}px` : '2px' }"
+                        :class="[
+                          outputLevel >= (i * 0.2)
+                            ? (i <= 2 ? 'bg-blue-400' : i === 3 ? 'bg-warning' : 'bg-destructive')
+                            : 'bg-muted-foreground/20',
+                        ]"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- No peers yet (mobile) -->
+              <div v-else class="rounded-xl border border-dashed border-border/60 bg-muted/10 p-8 text-center">
+                <svg class="mx-auto h-8 w-8 text-muted-foreground/30" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z" />
+                </svg>
+                <p class="mt-3 text-sm text-muted-foreground">Waiting for peers to join...</p>
+                <p class="mt-1 text-xs text-muted-foreground/70">Share the invite ticket using the button above.</p>
+              </div>
+            </template>
+
+            <!-- ═══ DESKTOP: Full video + audio UI ═══ -->
+            <template v-else>
+              <!-- Self video / camera status -->
+              <div class="relative mx-auto aspect-video w-full max-w-3xl overflow-hidden rounded-2xl border border-border bg-card">
+                <!-- Live self-preview from camera/screen -->
+                <img
+                  v-if="selfVideoSrc"
+                  :src="selfVideoSrc"
+                  class="absolute inset-0 h-full w-full object-cover"
+                  :class="screenSharing ? '' : 'scale-x-[-1]'"
+                  alt="Self preview"
+                />
+                <!-- Fallback placeholder when no video frames -->
+                <div v-else class="absolute inset-0 flex flex-col items-center justify-center gap-3 text-muted-foreground">
+                  <svg class="h-12 w-12 opacity-30" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1">
+                    <path v-if="!screenSharing" stroke-linecap="round" stroke-linejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                    <path v-else stroke-linecap="round" stroke-linejoin="round" d="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25m18 0A2.25 2.25 0 0018.75 3H5.25A2.25 2.25 0 003 5.25m18 0V12a9 9 0 01-9 9m9-15V12a9 9 0 01-9 9m0 0a9 9 0 01-9-9V5.25" />
+                  </svg>
+                  <div class="text-center">
+                    <p class="text-sm font-medium">
+                      {{ screenSharing ? 'Screen Sharing Active' : videoEnabled ? 'Starting camera...' : 'Camera Off' }}
+                    </p>
+                    <p class="text-xs opacity-70">
+                      {{ screenSharing ? 'Your screen is being shared with peers' : videoEnabled ? 'Waiting for first frame' : 'Click the camera button to enable' }}
+                    </p>
+                  </div>
+                </div>
+
+                <!-- Status overlay -->
+                <div class="absolute bottom-3 left-3 flex items-center gap-2 rounded-lg bg-black/60 px-3 py-1.5 backdrop-blur-sm">
+                  <span class="relative flex h-2 w-2" v-if="videoEnabled || screenSharing">
+                    <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-success opacity-75" />
+                    <span class="relative inline-flex h-2 w-2 rounded-full bg-success" />
+                  </span>
+                  <span v-else class="h-2 w-2 rounded-full bg-muted-foreground/50" />
+                  <span class="text-xs font-medium text-white">You</span>
+                </div>
+
+                <!-- Audio indicator with VU meter -->
+                <div class="absolute bottom-3 right-3 flex items-center gap-1.5 rounded-lg bg-black/60 px-2 py-1 backdrop-blur-sm">
+                  <svg v-if="audioEnabled" class="h-3 w-3 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
+                  </svg>
+                  <svg v-else class="h-3 w-3 text-destructive" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
+                    <line x1="3" y1="3" x2="21" y2="21" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                  </svg>
+                  <!-- VU meter bars -->
+                  <div v-if="audioEnabled" class="flex items-end gap-[2px] h-3">
+                    <div
+                      v-for="i in 5"
+                      :key="i"
+                      class="w-[2.5px] rounded-[1px] transition-[height,background-color] duration-75"
+                      :style="{ height: micLevel >= (i * 0.18) ? `${3 + i * 1.8}px` : '2px' }"
+                      :class="[
+                        micLevel >= (i * 0.18)
+                          ? (i <= 3 ? 'bg-success' : i === 4 ? 'bg-warning' : 'bg-destructive')
+                          : 'bg-white/20',
+                      ]"
+                    />
+                  </div>
+                  <span v-else class="text-[0.6rem] font-medium text-white">Muted</span>
+                </div>
+              </div>
+
+              <!-- Peer video grid -->
+              <div v-if="peers.length > 0" class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                <div
+                  v-for="peer in peers"
+                  :key="peer.node_id"
+                  class="relative aspect-video overflow-hidden rounded-xl border border-border bg-card"
+                >
+                  <!-- Rendered video frame from Rust bridge -->
+                  <img
+                    v-if="videoFrames[peer.node_id]"
+                    :src="videoFrames[peer.node_id]"
+                    class="absolute inset-0 h-full w-full object-cover"
+                    :alt="`Video from ${peerDisplayName(peer.node_id)}`"
+                  />
+                  <!-- Placeholder when no video -->
+                  <div v-else class="absolute inset-0 flex flex-col items-center justify-center gap-2 text-muted-foreground">
+                    <div class="flex h-14 w-14 items-center justify-center rounded-full bg-muted text-xl font-bold">
+                      {{ peerInitials(peer.node_id) }}
+                    </div>
+                    <span class="text-xs opacity-60">{{ peerDisplayName(peer.node_id) }}</span>
+                  </div>
+                  <!-- Peer status overlay -->
+                  <div class="absolute bottom-2 left-2 flex items-center gap-1.5 rounded bg-black/60 px-2 py-1 backdrop-blur-sm">
+                    <span
+                      class="h-1.5 w-1.5 rounded-full"
+                      :class="peer.connected ? 'bg-success' : 'bg-warning'"
+                    />
+                    <span class="text-[0.6rem] font-medium text-white">
+                      {{ peer.connected ? peerDisplayName(peer.node_id) : 'Connecting...' }}
+                    </span>
+                  </div>
+                  <!-- Speaker VU indicator on peer card -->
+                  <div v-if="outputLevel > 0.05" class="absolute bottom-2 right-2 flex items-center gap-1 rounded bg-black/60 px-1.5 py-1 backdrop-blur-sm">
+                    <svg class="h-3 w-3 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" />
+                    </svg>
+                    <div class="flex items-end gap-[2px] h-3">
+                      <div
+                        v-for="i in 4"
+                        :key="i"
+                        class="w-[2px] rounded-[1px] transition-[height,background-color] duration-75"
+                        :style="{ height: outputLevel >= (i * 0.2) ? `${2 + i * 1.5}px` : '2px' }"
+                        :class="[
+                          outputLevel >= (i * 0.2)
+                            ? (i <= 2 ? 'bg-blue-400' : i === 3 ? 'bg-warning' : 'bg-destructive')
+                            : 'bg-white/20',
+                        ]"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- No peers yet -->
+              <div v-else class="rounded-xl border border-dashed border-border/60 bg-muted/10 p-8 text-center">
+                <svg class="mx-auto h-8 w-8 text-muted-foreground/30" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z" />
+                </svg>
+                <p class="mt-3 text-sm text-muted-foreground">Waiting for peers to join...</p>
+                <p class="mt-1 text-xs text-muted-foreground/70">Share the invite ticket using the button above.</p>
+              </div>
+            </template>
           </div>
         </div>
 
@@ -503,8 +609,9 @@ function peerInitials(nodeId: string): string {
             </svg>
           </div>
 
-          <!-- Camera toggle -->
+          <!-- Camera toggle (desktop only) -->
           <button
+            v-if="!isMobilePlatform"
             class="flex h-11 w-11 items-center justify-center rounded-full border transition-all"
             :class="videoEnabled && !screenSharing
               ? 'border-border bg-muted text-foreground hover:bg-muted/80'
@@ -520,8 +627,9 @@ function peerInitials(nodeId: string): string {
             </svg>
           </button>
 
-          <!-- Screen share toggle -->
+          <!-- Screen share toggle (desktop only) -->
           <button
+            v-if="!isMobilePlatform"
             class="flex h-11 w-11 items-center justify-center rounded-full border transition-all"
             :class="screenSharing
               ? 'border-primary/50 bg-primary/10 text-primary hover:bg-primary/20'

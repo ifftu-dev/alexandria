@@ -15,6 +15,14 @@
 //! Phase 2 (mobile): audio-only (firewheel supports iOS/Android).
 //! Phase 3 (mobile): video via platform camera FFI.
 
+#[cfg(desktop)]
 pub mod manager;
 
+#[cfg(mobile)]
+pub mod manager_mobile;
+
+#[cfg(desktop)]
 pub use manager::TutoringManager;
+
+#[cfg(mobile)]
+pub use manager_mobile::TutoringManager;

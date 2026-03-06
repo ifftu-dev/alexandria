@@ -191,7 +191,7 @@ function formatDate(iso: string) {
         </div>
         <div>
           <h1 class="text-2xl font-bold text-foreground">Live Tutoring</h1>
-          <p class="text-sm text-muted-foreground">P2P video sessions powered by iroh — no servers, no limits.</p>
+          <p class="text-sm text-muted-foreground">{{ isMobilePlatform ? 'P2P audio sessions powered by iroh — no servers, no limits.' : 'P2P video sessions powered by iroh — no servers, no limits.' }}</p>
         </div>
       </div>
     </div>
@@ -201,19 +201,18 @@ function formatDate(iso: string) {
       {{ lastError }}
     </div>
 
-    <!-- Mobile notice -->
-    <div v-if="isMobilePlatform" class="rounded-xl border border-amber-500/30 bg-amber-500/5 p-5">
+    <!-- Mobile audio-only notice -->
+    <div v-if="isMobilePlatform" class="rounded-xl border border-primary/30 bg-primary/5 p-5">
       <div class="flex items-start gap-3">
-        <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-amber-500/10 shrink-0">
-          <svg class="h-5 w-5 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 1.5H8.25A2.25 2.25 0 006 3.75v16.5a2.25 2.25 0 002.25 2.25h7.5A2.25 2.25 0 0018 20.25V3.75a2.25 2.25 0 00-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-3 18.75h3" />
+        <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 shrink-0">
+          <svg class="h-5 w-5 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
           </svg>
         </div>
         <div>
-          <h3 class="text-sm font-semibold text-foreground">Desktop Only (for now)</h3>
+          <h3 class="text-sm font-semibold text-foreground">Audio-Only Mode</h3>
           <p class="mt-1 text-sm text-muted-foreground">
-            Live tutoring requires camera and audio encoding that isn't available on mobile yet.
-            Start or join sessions from the desktop app. Mobile audio-only sessions are coming in Phase 2.
+            Mobile sessions use audio-only P2P connections with text chat. Video and screen share are available on desktop.
           </p>
         </div>
       </div>
@@ -244,8 +243,7 @@ function formatDate(iso: string) {
     <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
       <!-- Create Room -->
       <button
-        class="group rounded-xl border border-border bg-card p-6 text-left transition-all hover:border-primary/40 hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:border-border disabled:hover:shadow-none"
-        :disabled="isMobilePlatform"
+        class="group rounded-xl border border-border bg-card p-6 text-left transition-all hover:border-primary/40 hover:shadow-md"
         @click="showCreateModal = true; createStep = 'form'"
       >
         <div class="flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10 transition-colors group-hover:bg-primary/20">
@@ -254,13 +252,14 @@ function formatDate(iso: string) {
           </svg>
         </div>
         <h3 class="mt-4 text-lg font-semibold text-foreground">Start a Session</h3>
-        <p class="mt-1 text-sm text-muted-foreground">Create a new tutoring room with camera and microphone. Share the invite ticket with participants.</p>
+        <p class="mt-1 text-sm text-muted-foreground">
+          {{ isMobilePlatform ? 'Create a new audio-only tutoring room. Share the invite ticket with participants.' : 'Create a new tutoring room with camera and microphone. Share the invite ticket with participants.' }}
+        </p>
       </button>
 
       <!-- Join Room -->
       <button
-        class="group rounded-xl border border-border bg-card p-6 text-left transition-all hover:border-primary/40 hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:border-border disabled:hover:shadow-none"
-        :disabled="isMobilePlatform"
+        class="group rounded-xl border border-border bg-card p-6 text-left transition-all hover:border-primary/40 hover:shadow-md"
         @click="showJoinModal = true; joinStep = 'form'"
       >
         <div class="flex h-12 w-12 items-center justify-center rounded-lg bg-accent/10 transition-colors group-hover:bg-accent/20">
@@ -269,7 +268,9 @@ function formatDate(iso: string) {
           </svg>
         </div>
         <h3 class="mt-4 text-lg font-semibold text-foreground">Join a Session</h3>
-        <p class="mt-1 text-sm text-muted-foreground">Enter a room ticket to join an existing tutoring session. Your camera and mic will activate on join.</p>
+        <p class="mt-1 text-sm text-muted-foreground">
+          {{ isMobilePlatform ? 'Enter a room ticket to join an existing session. Audio and chat will activate on join.' : 'Enter a room ticket to join an existing tutoring session. Your camera and mic will activate on join.' }}
+        </p>
       </button>
     </div>
 

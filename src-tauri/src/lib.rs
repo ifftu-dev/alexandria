@@ -8,7 +8,6 @@ pub mod domain;
 pub mod evidence;
 pub mod ipfs;
 pub mod p2p;
-#[cfg(desktop)]
 pub mod tutoring;
 
 // Mobile crypto: same modules as desktop but with portable keystore
@@ -33,7 +32,6 @@ use ipfs::gateway::GatewayClient;
 use ipfs::node::ContentNode;
 use ipfs::resolver::ContentResolver;
 use p2p::network::P2pNode;
-#[cfg(desktop)]
 use tutoring::TutoringManager;
 
 /// Shared application state accessible from all Tauri commands.
@@ -53,7 +51,6 @@ pub struct AppState {
     pub content_node: Arc<ContentNode>,
     pub resolver: Arc<Mutex<Option<ContentResolver>>>,
     pub p2p_node: Arc<Mutex<Option<P2pNode>>>,
-    #[cfg(desktop)]
     pub tutoring: Arc<TutoringManager>,
 }
 
@@ -142,7 +139,6 @@ pub fn run() {
                 }
             });
 
-            #[cfg(desktop)]
             let tutoring = Arc::new(TutoringManager::new());
 
             let app_state = AppState {
@@ -152,12 +148,10 @@ pub fn run() {
                 content_node,
                 resolver,
                 p2p_node: Arc::new(Mutex::new(None)),
-                #[cfg(desktop)]
                 tutoring,
             };
 
             // Clean up any sessions stuck as 'active' from a previous crash
-            #[cfg(desktop)]
             {
                 let db = app_state.db.lock().unwrap();
                 match db.conn().execute(
