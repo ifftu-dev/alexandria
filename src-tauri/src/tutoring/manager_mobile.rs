@@ -187,7 +187,7 @@ struct ActiveSession {
     /// AppHandle for emitting Tauri events from toggle methods.
     app_handle: AppHandle,
     /// User's selected devices — preserved for toggle_audio re-creation.
-    device_selection: DeviceSelection,
+    _device_selection: DeviceSelection,
     /// Background tasks to abort on leave.
     _tasks: Vec<JoinHandle<()>>,
 }
@@ -337,7 +337,7 @@ impl TutoringManager {
             started_at: Self::now_millis(),
             last_chat_sent: Instant::now() - Duration::from_secs(10),
             app_handle: app_handle.clone(),
-            device_selection: devices,
+            _device_selection: devices,
             _tasks: tasks,
         });
 
@@ -451,7 +451,7 @@ impl TutoringManager {
             started_at: Self::now_millis(),
             last_chat_sent: Instant::now() - Duration::from_secs(10),
             app_handle: app_handle.clone(),
-            device_selection: devices,
+            _device_selection: devices,
             _tasks: tasks,
         });
 
