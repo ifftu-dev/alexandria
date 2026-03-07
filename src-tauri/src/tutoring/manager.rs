@@ -298,7 +298,7 @@ impl TutoringManager {
 
         // Start publishing local media (using selected camera if any)
         let camera_idx = devices.camera_index.as_deref().and_then(parse_camera_index);
-        let (mut broadcast, mic_input) =
+        let (mut broadcast, mic_input, has_video) =
             Self::create_broadcast(audio_ctx.as_ref(), true, has_audio, camera_idx).await?;
         room.publish(BROADCAST_NAME, broadcast.producer())
             .await
@@ -353,7 +353,7 @@ impl TutoringManager {
             mic_input,
             output_stream: None, // Set when first remote broadcast is subscribed
             peers: HashMap::new(),
-            video_enabled: true,
+            video_enabled: has_video,
             audio_enabled: has_audio,
             screen_sharing: false,
             chat_sender,
@@ -375,6 +375,11 @@ impl TutoringManager {
         if let Some(session) = inner.as_mut() {
             session._tasks.push(audio_level_task);
         }
+
+        log::info!(
+            "tutoring: room created — audio={has_audio}, video={has_video}, ticket={}...",
+            &ticket_str[..ticket_str.len().min(20)]
+        );
 
         Ok(ticket_str)
     }
@@ -420,7 +425,7 @@ impl TutoringManager {
 
         // Start publishing local media (using selected camera if any)
         let camera_idx = devices.camera_index.as_deref().and_then(parse_camera_index);
-        let (mut broadcast, mic_input) =
+        let (mut broadcast, mic_input, has_video) =
             Self::create_broadcast(audio_ctx.as_ref(), true, has_audio, camera_idx).await?;
         room.publish(BROADCAST_NAME, broadcast.producer())
             .await
@@ -474,7 +479,7 @@ impl TutoringManager {
             mic_input,
             output_stream: None, // Set when first remote broadcast is subscribed
             peers: HashMap::new(),
-            video_enabled: true,
+            video_enabled: has_video,
             audio_enabled: has_audio,
             screen_sharing: false,
             chat_sender,
@@ -777,8 +782,9 @@ impl TutoringManager {
 
     /// Create a PublishBroadcast with camera + mic.
     ///
-    /// Returns `(broadcast, mic_input)` — the mic_input is a clone of the
-    /// InputStream that can be used for peak metering (VU meters).
+    /// Returns `(broadcast, mic_input, has_video)` — the mic_input is a clone
+    /// of the InputStream for peak metering, and `has_video` reflects whether
+    /// camera initialization actually succeeded.
     ///
     /// `camera_index` selects a specific camera; `None` uses the default.
     async fn create_broadcast(
@@ -786,9 +792,10 @@ impl TutoringManager {
         video: bool,
         audio: bool,
         camera_index: Option<CameraIndex>,
-    ) -> Result<(PublishBroadcast, Option<InputStream>), String> {
+    ) -> Result<(PublishBroadcast, Option<InputStream>, bool), String> {
         let mut broadcast = PublishBroadcast::new();
         let mut mic_input: Option<InputStream> = None;
+        let mut has_video = false;
 
         if audio {
             if let Some(ctx) = audio_ctx {
@@ -801,6 +808,7 @@ impl TutoringManager {
                         broadcast
                             .set_audio(Some(audio_renditions))
                             .map_err(|e| format!("failed to set audio: {e}"))?;
+                        log::info!("tutoring: microphone initialized");
                     }
                     Err(e) => {
                         log::warn!(
@@ -819,6 +827,8 @@ impl TutoringManager {
                     broadcast
                         .set_video(Some(video_renditions))
                         .map_err(|e| format!("failed to set video: {e}"))?;
+                    has_video = true;
+                    log::info!("tutoring: camera initialized");
                 }
                 Err(e) => {
                     log::warn!("tutoring: camera unavailable, continuing without video: {e}");
@@ -826,7 +836,7 @@ impl TutoringManager {
             }
         }
 
-        Ok((broadcast, mic_input))
+        Ok((broadcast, mic_input, has_video))
     }
 
     /// Start a self-preview from the broadcast's local video source.

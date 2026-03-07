@@ -315,8 +315,15 @@ pub async fn tutoring_check_devices() -> Result<DeviceCheckResult, String> {
 }
 
 /// List available audio devices and camera.
+///
+/// On iOS, the AVAudioSession must be configured before device enumeration
+/// so that Bluetooth devices (AirPods, etc.) are visible to CoreAudio/cpal.
 #[tauri::command]
 pub async fn tutoring_list_devices() -> Result<DeviceList, String> {
+    // Configure AVAudioSession first so Bluetooth devices appear in enumeration.
+    // This is idempotent — calling it multiple times is safe.
+    crate::tutoring::manager_mobile::TutoringManager::configure_ios_audio_session_for_devices();
+
     let audio_inputs: Vec<AudioDeviceInfo> = AudioBackend::list_input_devices()
         .into_iter()
         .map(|d| AudioDeviceInfo {
