@@ -286,6 +286,13 @@ impl TutoringManager {
         }
     }
 
+    /// Configure the iOS AVAudioSession so Bluetooth devices appear in
+    /// cpal enumeration. Called from `tutoring_list_devices` before
+    /// device enumeration so AirPods etc. are visible. Idempotent.
+    pub fn configure_ios_audio_session_for_devices() {
+        Self::configure_ios_audio_session();
+    }
+
     /// Configure the iOS AVAudioSession for play-and-record.
     ///
     /// Must be called before any CoreAudio / AVCaptureSession usage,
@@ -360,9 +367,9 @@ impl TutoringManager {
                     return;
                 }
 
-                // [session setCategory:category withOptions:(DefaultToSpeaker|AllowBluetooth) error:nil]
-                // Options: DefaultToSpeaker (0x02) | AllowBluetooth (0x04)
-                let options: u64 = 0x02 | 0x04;
+                // [session setCategory:category withOptions:(DefaultToSpeaker|AllowBluetooth|AllowBluetoothA2DP) error:nil]
+                // Options: DefaultToSpeaker (0x02) | AllowBluetooth (0x04) | AllowBluetoothA2DP (0x20)
+                let options: u64 = 0x02 | 0x04 | 0x20;
                 let set_cat_sel = sel_registerName(b"setCategory:withOptions:error:\0".as_ptr());
                 let nil: Id = std::ptr::null_mut();
                 let _ok: i8 = send_cat(session, set_cat_sel, category, options, nil);
@@ -527,6 +534,11 @@ impl TutoringManager {
         if let Some(session) = inner.as_mut() {
             session._tasks.push(audio_level_task);
         }
+
+        log::info!(
+            "tutoring: room created — audio={has_audio}, video={has_video}, ticket={}...",
+            &ticket_str[..ticket_str.len().min(20)]
+        );
 
         Ok(ticket_str)
     }
@@ -1183,10 +1195,10 @@ impl TutoringManager {
                         None => None,
                     };
 
+                    // Subscribe to audio if output is available
                     if let Some(audio_out) = audio_out {
                         let output_clone = audio_out.clone();
 
-                        // Subscribe to audio (borrows broadcast)
                         match broadcast.listen::<PureOpusDecoder>(audio_out) {
                             Ok(_audio_track) => {
                                 log::info!(
@@ -1206,29 +1218,29 @@ impl TutoringManager {
                                 );
                             }
                         }
-
-                        // Subscribe to video if available (borrows broadcast)
-                        match broadcast.watch::<VtDecoder>() {
-                            Ok(video_track) => {
-                                log::info!(
-                                    "tutoring: watching video from {node_id}:{name}"
-                                );
-                                Self::spawn_frame_bridge(
-                                    video_track,
-                                    node_id.clone(),
-                                    app_handle.clone(),
-                                );
-                            }
-                            Err(e) => {
-                                log::info!(
-                                    "tutoring: no video track for {node_id}:{name}: {e}"
-                                );
-                            }
-                        }
                     } else {
                         log::warn!(
-                            "tutoring: no audio output available, cannot listen to {node_id}:{name}"
+                            "tutoring: no audio output available, skipping audio for {node_id}:{name}"
                         );
+                    }
+
+                    // Subscribe to video independently of audio
+                    match broadcast.watch::<VtDecoder>() {
+                        Ok(video_track) => {
+                            log::info!(
+                                "tutoring: watching video from {node_id}:{name}"
+                            );
+                            Self::spawn_frame_bridge(
+                                video_track,
+                                node_id.clone(),
+                                app_handle.clone(),
+                            );
+                        }
+                        Err(e) => {
+                            log::info!(
+                                "tutoring: no video track for {node_id}:{name}: {e}"
+                            );
+                        }
                     }
                 }
             }
