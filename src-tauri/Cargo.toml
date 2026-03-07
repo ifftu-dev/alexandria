@@ -97,7 +97,7 @@ futures = "0.3"
 # activated by the "tutoring-video" cargo feature which the build script
 # enables for desktop targets only.
 iroh-gossip = "0.96"
-iroh-live = { git = "https://github.com/ifftu-dev/iroh-live", rev = "cede1b8", default-features = false }
+iroh-live = { git = "https://github.com/ifftu-dev/iroh-live", rev = "0d20896", default-features = false }
 postcard = { version = "1", features = ["alloc"] }
 blake3 = "1"
 

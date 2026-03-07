@@ -9,6 +9,14 @@
 //! JPEG, base64'd, and emitted to the webview via Tauri events —
 //! same bridge pattern as the desktop manager.
 //!
+//! ## Main-thread requirement
+//!
+//! AVFoundation (AVCaptureSession, AVAudioSession) and CoreAudio APIs
+//! must be called from the main thread (or a thread with an active run
+//! loop). Since Tauri commands execute on a tokio worker thread, we use
+//! GCD's `dispatch_sync_f(dispatch_get_main_queue(), ...)` to forward
+//! these calls to the main thread, blocking until they complete.
+//!
 //! Phase 3: Full audio+video P2P tutoring on iOS.
 
 use std::collections::HashMap;
@@ -34,6 +42,76 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 use tokio::sync::{Mutex, mpsc};
 use tokio::task::JoinHandle;
+
+// ── GCD main-thread dispatch ───────────────────────────────────────
+
+unsafe extern "C" {
+    /// The real symbol behind `dispatch_get_main_queue()` macro.
+    /// `dispatch_get_main_queue()` is `#define dispatch_get_main_queue() (&_dispatch_main_q)`
+    static _dispatch_main_q: std::ffi::c_void;
+
+    fn dispatch_sync_f(
+        queue: *const std::ffi::c_void,
+        context: *mut std::ffi::c_void,
+        work: unsafe extern "C" fn(*mut std::ffi::c_void),
+    );
+}
+
+unsafe extern "C" {
+    /// Returns 1 if the calling thread is the main thread, 0 otherwise.
+    fn pthread_main_np() -> std::ffi::c_int;
+}
+
+/// Execute a closure synchronously on the main thread via GCD.
+///
+/// This blocks the calling thread until `f` completes on the main queue.
+/// Required for AVFoundation, AVAudioSession, and CoreAudio APIs on iOS.
+///
+/// # Safety
+/// The closure must not panic. If it does, the process will abort.
+fn run_on_main_thread<F, R>(f: F) -> R
+where
+    F: FnOnce() -> R + Send,
+    R: Send,
+{
+    // If we're already on the main thread, just run directly.
+    // (Calling dispatch_sync on the main queue from the main thread deadlocks.)
+    if unsafe { pthread_main_np() } != 0 {
+        return f();
+    }
+
+    // Pack the closure and result slot into a context struct on the stack.
+    struct Context<F, R> {
+        f: Option<F>,
+        result: Option<R>,
+    }
+
+    let mut ctx = Context {
+        f: Some(f),
+        result: None,
+    };
+
+    unsafe extern "C" fn trampoline<F, R>(raw: *mut std::ffi::c_void)
+    where
+        F: FnOnce() -> R,
+    {
+        let ctx = &mut *(raw as *mut Context<F, R>);
+        if let Some(f) = ctx.f.take() {
+            ctx.result = Some(f());
+        }
+    }
+
+    unsafe {
+        let main_queue = &_dispatch_main_q as *const std::ffi::c_void;
+        dispatch_sync_f(
+            main_queue,
+            &mut ctx as *mut Context<F, R> as *mut std::ffi::c_void,
+            trampoline::<F, R>,
+        );
+    }
+
+    ctx.result.expect("main-thread closure did not produce a result")
+}
 
 // ── Constants ──────────────────────────────────────────────────────
 
@@ -208,13 +286,113 @@ impl TutoringManager {
         }
     }
 
+    /// Configure the iOS AVAudioSession for play-and-record.
+    ///
+    /// Must be called before any CoreAudio / AVCaptureSession usage,
+    /// otherwise iOS will crash when the mic or speaker is accessed.
+    ///
+    /// Dispatches to the **main thread** via GCD because AVAudioSession
+    /// APIs require it.
+    fn configure_ios_audio_session() {
+        run_on_main_thread(|| {
+            unsafe {
+                // ObjC: [[AVAudioSession sharedInstance] setCategory:AVAudioSessionCategoryPlayAndRecord
+                //         withOptions:AVAudioSessionCategoryOptionDefaultToSpeaker|AllowBluetooth
+                //         error:nil]
+                // Then: [[AVAudioSession sharedInstance] setActive:YES error:nil]
+                //
+                // IMPORTANT: On arm64 iOS, objc_msgSend with C variadic `...` passes
+                // extra arguments in different registers than ObjC methods expect.
+                // We MUST cast objc_msgSend to the exact function pointer type for
+                // each call signature. This is the standard pattern for raw ObjC FFI
+                // on arm64.
+                type Id = *mut std::ffi::c_void;
+                type Sel = *mut std::ffi::c_void;
+                unsafe extern "C" {
+                    fn objc_getClass(name: *const u8) -> Id;
+                    fn sel_registerName(name: *const u8) -> Sel;
+                    fn objc_msgSend(receiver: Id, sel: Sel, ...) -> Id;
+                }
+
+                // Type aliases for specific objc_msgSend signatures.
+                // Each matches the exact parameter list of the ObjC method being called.
+                type MsgSendNoArgs = unsafe extern "C" fn(Id, Sel) -> Id;
+                type MsgSendOnePtr = unsafe extern "C" fn(Id, Sel, *const u8) -> Id;
+                type MsgSendCatOpts =
+                    unsafe extern "C" fn(Id, Sel, Id, u64, Id) -> i8; // BOOL return
+                type MsgSendActivate =
+                    unsafe extern "C" fn(Id, Sel, i8, Id) -> i8; // BOOL return
+
+                let send: MsgSendNoArgs =
+                    std::mem::transmute(objc_msgSend as unsafe extern "C" fn(Id, Sel, ...) -> Id);
+                let send_ptr: MsgSendOnePtr =
+                    std::mem::transmute(objc_msgSend as unsafe extern "C" fn(Id, Sel, ...) -> Id);
+                let send_cat: MsgSendCatOpts =
+                    std::mem::transmute(objc_msgSend as unsafe extern "C" fn(Id, Sel, ...) -> Id);
+                let send_act: MsgSendActivate =
+                    std::mem::transmute(objc_msgSend as unsafe extern "C" fn(Id, Sel, ...) -> Id);
+
+                let cls = objc_getClass(b"AVAudioSession\0".as_ptr());
+                if cls.is_null() {
+                    log::error!("tutoring: AVAudioSession class not found");
+                    return;
+                }
+
+                // [AVAudioSession sharedInstance]
+                let shared_sel = sel_registerName(b"sharedInstance\0".as_ptr());
+                let session: Id = send(cls, shared_sel);
+                if session.is_null() {
+                    log::error!("tutoring: AVAudioSession.sharedInstance returned nil");
+                    return;
+                }
+
+                // Create NSString @"AVAudioSessionCategoryPlayAndRecord"
+                // via [NSString stringWithUTF8String:"AVAudioSessionCategoryPlayAndRecord"]
+                let nsstring_cls = objc_getClass(b"NSString\0".as_ptr());
+                let utf8_sel = sel_registerName(b"stringWithUTF8String:\0".as_ptr());
+                let category: Id = send_ptr(
+                    nsstring_cls,
+                    utf8_sel,
+                    b"AVAudioSessionCategoryPlayAndRecord\0".as_ptr(),
+                );
+                if category.is_null() {
+                    log::error!("tutoring: failed to create category NSString");
+                    return;
+                }
+
+                // [session setCategory:category withOptions:(DefaultToSpeaker|AllowBluetooth) error:nil]
+                // Options: DefaultToSpeaker (0x02) | AllowBluetooth (0x04)
+                let options: u64 = 0x02 | 0x04;
+                let set_cat_sel = sel_registerName(b"setCategory:withOptions:error:\0".as_ptr());
+                let nil: Id = std::ptr::null_mut();
+                let _ok: i8 = send_cat(session, set_cat_sel, category, options, nil);
+
+                // [session setActive:YES error:nil]
+                let set_active_sel = sel_registerName(b"setActive:error:\0".as_ptr());
+                let _ok: i8 = send_act(session, set_active_sel, 1i8, nil);
+
+                log::info!("tutoring: AVAudioSession configured for PlayAndRecord");
+            }
+        });
+    }
+
     /// Try to create the audio backend (Firewheel + cpal).
+    ///
+    /// Both AVAudioSession configuration and CoreAudio/cpal init are
+    /// dispatched to the main thread — iOS requires it.
     fn try_create_audio_backend(
         input_device_id: Option<DeviceId>,
         output_device_id: Option<DeviceId>,
     ) -> Option<AudioBackend> {
-        let result = std::panic::catch_unwind(move || {
-            AudioBackend::new_with_devices(input_device_id, output_device_id)
+        // Configure iOS audio session first — required before any CoreAudio usage.
+        // Already runs on main thread internally.
+        Self::configure_ios_audio_session();
+
+        // CoreAudio (cpal) init also needs the main thread on iOS.
+        let result = run_on_main_thread(move || {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+                AudioBackend::new_with_devices(input_device_id, output_device_id)
+            }))
         });
         match result {
             Ok(backend) => {
@@ -535,8 +713,10 @@ impl TutoringManager {
         }
 
         if enable {
-            // Try to create camera and video renditions
-            match IosCameraSource::front() {
+            // Try to create camera and video renditions.
+            // Dispatch to main thread — AVCaptureSession requires it on iOS.
+            let camera_result = run_on_main_thread(|| IosCameraSource::front());
+            match camera_result {
                 Ok(camera) => {
                     let renditions =
                         VideoRenditions::new::<VtEncoder>(camera, MOBILE_VIDEO_PRESETS);
@@ -692,9 +872,15 @@ impl TutoringManager {
             }
         }
 
-        // Try to set up video from the front camera
-        match IosCameraSource::front() {
-            Ok(camera) => {
+        // Try to set up video from the front camera.
+        // Dispatch to main thread — AVCaptureSession requires it on iOS.
+        // Also wrap in catch_unwind because the camera uses raw ObjC FFI
+        // that could panic on permission denial or missing hardware.
+        let camera_result = run_on_main_thread(|| {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| IosCameraSource::front()))
+        });
+        match camera_result {
+            Ok(Ok(camera)) => {
                 let video_renditions =
                     VideoRenditions::new::<VtEncoder>(camera, MOBILE_VIDEO_PRESETS);
                 broadcast
@@ -703,8 +889,11 @@ impl TutoringManager {
                 has_video = true;
                 log::info!("tutoring: camera initialized (front, 640x480)");
             }
-            Err(e) => {
+            Ok(Err(e)) => {
                 log::warn!("tutoring: camera unavailable, continuing without video: {e}");
+            }
+            Err(panic_info) => {
+                log::error!("tutoring: camera init panicked: {panic_info:?}");
             }
         }
 
