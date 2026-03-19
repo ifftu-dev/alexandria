@@ -192,9 +192,10 @@ jobs:
   build-linux-arm64:
     name: Build Linux (ARM64)
     needs: create-release
+    # Only runs on public repos (ubuntu-22.04-arm is free for public repos only)
     if: github.event.repository.visibility == 'public'
     runs-on: ubuntu-22.04-arm
-    timeout-minutes: 120
+    timeout-minutes: 90
     steps:
       - name: Maximize build space
         uses: easimon/maximize-build-space@v10
