@@ -5,3 +5,12 @@
 # which is incompatible with CMake 4.x.
 [env]
 CMAKE_POLICY_VERSION_MINIMUM = "3.5"
+
+# Android targets — linker is managed by cargo-ndk / Tauri Android build toolchain.
+# Do not hardcode NDK paths here; let `cargo tauri android build` handle NDK detection.
+# These target sections are needed for build configurations but do not specify linker overrides.
+[target.aarch64-linux-android]
+rustflags = []
+
+[target.armv7-linux-androideabi]
+rustflags = []
