@@ -32,7 +32,7 @@ jobs:
       - name: Checkout iroh-live-patched
         uses: actions/checkout@v4
         with:
-          repository: ifftu-dev/iroh-live-patched
+          repository: ifftu-dev/iroh-live
           path: iroh-live-patched
           token: ${{ secrets.CROSS_REPO_PAT }}
 
