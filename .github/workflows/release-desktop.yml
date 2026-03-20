@@ -101,6 +101,9 @@ jobs:
             -s -k "$KEYCHAIN_PASSWORD" build.keychain
           rm certificate.p12
 
+      - name: Install nasm (required for static FFmpeg build on macOS)
+        run: brew install nasm
+
       - name: Write Apple API Key
         run: |
           echo "${{ secrets.APPLE_API_KEY_CONTENT }}" > $RUNNER_TEMP/AuthKey.p8
@@ -121,7 +124,7 @@ jobs:
         with:
           projectPath: alexandria
           releaseId: ${{ needs.create-release.outputs.release_id }}
-          args: --target universal-apple-darwin --bundles dmg
+          args: --target universal-apple-darwin --bundles dmg --features tutoring-video-static
           includeUpdaterJson: false
 
   build-linux-x64:
@@ -138,6 +141,18 @@ jobs:
             /usr/local/go /opt/az /usr/local/aws-cli /usr/local/bin/aws
           sudo docker system prune -af || true
           df -h
+
+      - name: Install Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            nasm \
+            libclang-dev \
+            pkg-config
 
       - name: Maximize build space
         uses: easimon/maximize-build-space@v10
@@ -159,18 +174,6 @@ jobs:
           repository: ifftu-dev/iroh-live
           path: iroh-live-patched
           token: ${{ secrets.CROSS_REPO_PAT }}
-
-      - name: Install Linux system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            libappindicator3-dev \
-            librsvg2-dev \
-            patchelf \
-            nasm \
-            libclang-dev \
-            pkg-config
 
       - name: Setup Rust 1.83.0 (MSRV)
         uses: dtolnay/rust-toolchain@1.89.0
@@ -224,6 +227,18 @@ jobs:
           sudo docker system prune -af || true
           df -h
 
+      - name: Install Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            nasm \
+            libclang-dev \
+            pkg-config
+
       - name: Maximize build space
         uses: easimon/maximize-build-space@v10
         with:
@@ -244,18 +259,6 @@ jobs:
           repository: ifftu-dev/iroh-live
           path: iroh-live-patched
           token: ${{ secrets.CROSS_REPO_PAT }}
-
-      - name: Install Linux system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            libappindicator3-dev \
-            librsvg2-dev \
-            patchelf \
-            nasm \
-            libclang-dev \
-            pkg-config
 
       - name: Setup Rust 1.83.0 (MSRV)
         uses: dtolnay/rust-toolchain@1.89.0
@@ -308,6 +311,17 @@ jobs:
           repository: ifftu-dev/iroh-live
           path: iroh-live-patched
           token: ${{ secrets.CROSS_REPO_PAT }}
+
+      - name: Setup MSVC developer environment
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Add MSYS2 POSIX tools to PATH (bash/make for FFmpeg configure)
+        shell: pwsh
+        run: |
+          # FFmpeg's configure script requires POSIX bash + make.
+          # Add MSYS2 usr/bin (provides bash, make, awk, sed, etc.) to PATH.
+          # cl.exe + link.exe come from MSVC (set up above) and take precedence.
+          "C:\msys64\usr\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Setup Rust 1.83.0 (MSRV)
         uses: dtolnay/rust-toolchain@1.89.0
