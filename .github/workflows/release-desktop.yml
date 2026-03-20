@@ -42,7 +42,7 @@ jobs:
           generate_release_notes: false
 
   build-macos:
-    name: Build macOS (Universal)
+    name: Build macOS (ARM64)
     needs: create-release
     runs-on: macos-latest
     timeout-minutes: 90
@@ -62,8 +62,8 @@ jobs:
       - name: Setup Rust 1.83.0 (MSRV)
         uses: dtolnay/rust-toolchain@1.89.0
 
-      - name: Add Universal Apple targets
-        run: rustup target add x86_64-apple-darwin aarch64-apple-darwin
+      - name: Add ARM64 Apple target
+        run: rustup target add aarch64-apple-darwin
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -101,8 +101,8 @@ jobs:
             -s -k "$KEYCHAIN_PASSWORD" build.keychain
           rm certificate.p12
 
-      - name: Install nasm (required for static FFmpeg build on macOS)
-        run: brew install nasm
+      - name: Install build dependencies (nasm + FFmpeg codec deps)
+        run: brew install nasm opus x264
 
       - name: Write Apple API Key
         run: |
@@ -124,7 +124,7 @@ jobs:
         with:
           projectPath: alexandria
           releaseId: ${{ needs.create-release.outputs.release_id }}
-          args: --target universal-apple-darwin --bundles dmg --features tutoring-video-static
+          args: --target aarch64-apple-darwin --bundles dmg --features tutoring-video-static
           includeUpdaterJson: false
 
   build-linux-x64:
@@ -132,6 +132,12 @@ jobs:
     needs: create-release
     runs-on: ubuntu-22.04
     timeout-minutes: 90
+    env:
+      # Redirect Rust toolchain + build artifacts to /mnt (expanded by maximize-build-space)
+      # so root filesystem (used by apt) doesn't run out of space.
+      RUSTUP_HOME: /mnt/rustup
+      CARGO_HOME: /mnt/cargo
+      CARGO_TARGET_DIR: /mnt/target
     steps:
       - name: Free root filesystem space
         run: |
@@ -152,7 +158,10 @@ jobs:
             patchelf \
             nasm \
             libclang-dev \
-            pkg-config
+            pkg-config \
+            libopus-dev \
+            libssl-dev \
+            libx264-dev
 
       - name: Maximize build space
         uses: easimon/maximize-build-space@v10
@@ -217,6 +226,10 @@ jobs:
       inputs.include_linux_arm64 == true
     runs-on: ubuntu-22.04-arm
     timeout-minutes: 90
+    env:
+      RUSTUP_HOME: /mnt/rustup
+      CARGO_HOME: /mnt/cargo
+      CARGO_TARGET_DIR: /mnt/target
     steps:
       - name: Free root filesystem space
         run: |
@@ -237,7 +250,10 @@ jobs:
             patchelf \
             nasm \
             libclang-dev \
-            pkg-config
+            pkg-config \
+            libopus-dev \
+            libssl-dev \
+            libx264-dev
 
       - name: Maximize build space
         uses: easimon/maximize-build-space@v10
@@ -314,14 +330,6 @@ jobs:
 
       - name: Setup MSVC developer environment
         uses: ilammy/msvc-dev-cmd@v1
-
-      - name: Add MSYS2 POSIX tools to PATH (bash/make for FFmpeg configure)
-        shell: pwsh
-        run: |
-          # FFmpeg's configure script requires POSIX bash + make.
-          # Add MSYS2 usr/bin (provides bash, make, awk, sed, etc.) to PATH.
-          # cl.exe + link.exe come from MSVC (set up above) and take precedence.
-          "C:\msys64\usr\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Setup Rust 1.83.0 (MSRV)
         uses: dtolnay/rust-toolchain@1.89.0
@@ -450,7 +458,7 @@ jobs:
               ".\"$key\" = {signature: \$sig, url: \$url}")
           }
 
-          add_platform "darwin-universal"  "$MACOS_SIG_FILE"
+          add_platform "darwin-aarch64"    "$MACOS_SIG_FILE"
           add_platform "linux-x86_64"      "$LINUX_X64_SIG_FILE"
           add_platform "windows-x86_64"    "$WINDOWS_SIG_FILE"
 

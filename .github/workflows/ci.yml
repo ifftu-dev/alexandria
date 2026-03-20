@@ -53,7 +53,10 @@ jobs:
             libxcb1-dev \
             libxcb-randr0-dev \
             libpipewire-0.3-dev \
-            libdbus-1-dev
+            libdbus-1-dev \
+            libopus-dev \
+            libssl-dev \
+            libx264-dev
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
