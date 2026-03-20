@@ -130,6 +130,15 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 90
     steps:
+      - name: Free root filesystem space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /opt/hostedtoolcache/CodeQL /usr/local/share/boost /usr/share/swift \
+            /usr/local/share/chromium /usr/share/mysql /usr/share/php* \
+            /usr/local/go /opt/az /usr/local/aws-cli /usr/local/bin/aws
+          sudo docker system prune -af || true
+          df -h
+
       - name: Maximize build space
         uses: easimon/maximize-build-space@v10
         with:
@@ -206,6 +215,15 @@ jobs:
     runs-on: ubuntu-22.04-arm
     timeout-minutes: 90
     steps:
+      - name: Free root filesystem space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /opt/hostedtoolcache/CodeQL /usr/local/share/boost /usr/share/swift \
+            /usr/local/share/chromium /usr/share/mysql /usr/share/php* \
+            /usr/local/go /opt/az /usr/local/aws-cli /usr/local/bin/aws
+          sudo docker system prune -af || true
+          df -h
+
       - name: Maximize build space
         uses: easimon/maximize-build-space@v10
         with:
