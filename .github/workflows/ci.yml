@@ -54,7 +54,7 @@ jobs:
           cache-dependency-path: alexandria/package-lock.json
 
       - name: Setup Rust 1.83.0 (MSRV)
-        uses: dtolnay/rust-toolchain@1.83.0
+        uses: dtolnay/rust-toolchain@1.85.0
         with:
           components: rustfmt, clippy
 
