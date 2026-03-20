@@ -12,8 +12,7 @@ use tauri::State;
 use crate::cardano::snapshot;
 use crate::crypto::hash::entity_id;
 use crate::domain::reputation::{
-    cip68, CreateSnapshotParams, OnChainSkillScore, ReputationRole, SnapshotRecord,
-    SnapshotStatus,
+    cip68, CreateSnapshotParams, OnChainSkillScore, ReputationRole, SnapshotRecord, SnapshotStatus,
 };
 use crate::AppState;
 
@@ -252,8 +251,8 @@ pub async fn update_snapshot_status(
     let conn = db.conn();
 
     // Validate status
-    let _status_enum = SnapshotStatus::from_str(&status)
-        .ok_or_else(|| format!("invalid status: {status}"))?;
+    let _status_enum =
+        SnapshotStatus::from_str(&status).ok_or_else(|| format!("invalid status: {status}"))?;
 
     let confirmed_at = if status == "confirmed" {
         Some(chrono::Utc::now().to_rfc3339())
@@ -337,10 +336,8 @@ mod tests {
         let conn = db.conn();
 
         let now = chrono::Utc::now().to_rfc3339();
-        let snapshot_id =
-            entity_id(&["stake_test1ulearner", "sub1", "instructor", &now]);
-        let base_name =
-            snapshot::reputation_base_name("sub1", &ReputationRole::Instructor);
+        let snapshot_id = entity_id(&["stake_test1ulearner", "sub1", "instructor", &now]);
+        let base_name = snapshot::reputation_base_name("sub1", &ReputationRole::Instructor);
         let ref_name = snapshot::reference_asset_name(&base_name);
         let usr_name = snapshot::user_asset_name(&base_name);
 
@@ -363,11 +360,9 @@ mod tests {
         .unwrap();
 
         let count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM reputation_snapshots",
-                [],
-                |row| row.get(0),
-            )
+            .query_row("SELECT COUNT(*) FROM reputation_snapshots", [], |row| {
+                row.get(0)
+            })
             .unwrap();
         assert_eq!(count, 1);
     }
@@ -455,10 +450,8 @@ mod tests {
                     ),
                     proficiency: snapshot::proficiency_to_index(&prof_level),
                     impact_score: (score * cip68::IMPACT_SCALE as f64) as i64,
-                    confidence: (evidence_count as f64
-                        / (evidence_count as f64 + 5.0)
-                        * cip68::CONFIDENCE_SCALE as f64)
-                        as i64,
+                    confidence: (evidence_count as f64 / (evidence_count as f64 + 5.0)
+                        * cip68::CONFIDENCE_SCALE as f64) as i64,
                     evidence_count,
                 })
             })

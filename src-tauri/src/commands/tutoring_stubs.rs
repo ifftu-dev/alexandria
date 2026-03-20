@@ -113,10 +113,7 @@ pub async fn tutoring_toggle_screen_share(
 }
 
 #[tauri::command]
-pub async fn tutoring_send_chat(
-    _text: String,
-    _state: State<'_, AppState>,
-) -> Result<(), String> {
+pub async fn tutoring_send_chat(_text: String, _state: State<'_, AppState>) -> Result<(), String> {
     Err(UNSUPPORTED.into())
 }
 
@@ -128,9 +125,7 @@ pub async fn tutoring_status(
 }
 
 #[tauri::command]
-pub async fn tutoring_peers(
-    _state: State<'_, AppState>,
-) -> Result<Vec<serde_json::Value>, String> {
+pub async fn tutoring_peers(_state: State<'_, AppState>) -> Result<Vec<serde_json::Value>, String> {
     Ok(vec![])
 }
 
@@ -188,9 +183,7 @@ pub async fn tutoring_list_devices() -> Result<DeviceList, String> {
 }
 
 #[tauri::command]
-pub async fn tutoring_get_audio_level(
-    _state: State<'_, AppState>,
-) -> Result<f32, String> {
+pub async fn tutoring_get_audio_level(_state: State<'_, AppState>) -> Result<f32, String> {
     Ok(0.0)
 }
 

@@ -74,13 +74,7 @@ pub async fn vote_on_challenge(
     let db = state.db.lock().unwrap();
     let conn = db.conn();
 
-    challenge_logic::vote_on_challenge(
-        conn,
-        &challenge_id,
-        &voter,
-        upheld,
-        reason.as_deref(),
-    )
+    challenge_logic::vote_on_challenge(conn, &challenge_id, &voter, upheld, reason.as_deref())
 }
 
 /// Resolve a challenge after voting.

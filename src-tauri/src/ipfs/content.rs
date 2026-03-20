@@ -47,7 +47,10 @@ pub struct ContentInfo {
 /// Returns the BLAKE3 hash of the content. The content is stored
 /// persistently and will survive app restarts.
 pub async fn add_bytes(node: &ContentNode, data: &[u8]) -> Result<AddResult, ContentError> {
-    let store = node.store().await.map_err(|_| ContentError::NodeNotRunning)?;
+    let store = node
+        .store()
+        .await
+        .map_err(|_| ContentError::NodeNotRunning)?;
     let size = data.len() as u64;
 
     let tag = store
@@ -69,7 +72,10 @@ pub async fn add_bytes(node: &ContentNode, data: &[u8]) -> Result<AddResult, Con
 /// Returns the raw bytes. Returns `ContentError::NotFound` if the
 /// content is not available locally.
 pub async fn get_bytes(node: &ContentNode, hash_hex: &str) -> Result<Vec<u8>, ContentError> {
-    let store = node.store().await.map_err(|_| ContentError::NodeNotRunning)?;
+    let store = node
+        .store()
+        .await
+        .map_err(|_| ContentError::NodeNotRunning)?;
     let hash = parse_hash(hash_hex)?;
 
     let exists = store
@@ -91,7 +97,10 @@ pub async fn get_bytes(node: &ContentNode, hash_hex: &str) -> Result<Vec<u8>, Co
 
 /// Check if content exists in the local store.
 pub async fn has(node: &ContentNode, hash_hex: &str) -> Result<bool, ContentError> {
-    let store = node.store().await.map_err(|_| ContentError::NodeNotRunning)?;
+    let store = node
+        .store()
+        .await
+        .map_err(|_| ContentError::NodeNotRunning)?;
     let hash = parse_hash(hash_hex)?;
 
     store
@@ -102,7 +111,10 @@ pub async fn has(node: &ContentNode, hash_hex: &str) -> Result<bool, ContentErro
 
 /// Get information about content in the local store.
 pub async fn info(node: &ContentNode, hash_hex: &str) -> Result<ContentInfo, ContentError> {
-    let store = node.store().await.map_err(|_| ContentError::NodeNotRunning)?;
+    let store = node
+        .store()
+        .await
+        .map_err(|_| ContentError::NodeNotRunning)?;
     let hash = parse_hash(hash_hex)?;
 
     let is_local = store

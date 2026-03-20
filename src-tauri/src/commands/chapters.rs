@@ -245,12 +245,19 @@ mod tests {
             .unwrap();
 
         db.conn()
-            .execute("UPDATE course_chapters SET title = 'New' WHERE id = 'ch1'", [])
+            .execute(
+                "UPDATE course_chapters SET title = 'New' WHERE id = 'ch1'",
+                [],
+            )
             .unwrap();
 
         let title: String = db
             .conn()
-            .query_row("SELECT title FROM course_chapters WHERE id = 'ch1'", [], |r| r.get(0))
+            .query_row(
+                "SELECT title FROM course_chapters WHERE id = 'ch1'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(title, "New");
     }
@@ -275,7 +282,11 @@ mod tests {
 
         let count: i64 = db
             .conn()
-            .query_row("SELECT COUNT(*) FROM course_chapters WHERE course_id = 'c1'", [], |r| r.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM course_chapters WHERE course_id = 'c1'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(count, 0);
     }
@@ -293,10 +304,7 @@ mod tests {
 
 /// Delete a chapter and all its elements.
 #[tauri::command]
-pub async fn delete_chapter(
-    state: State<'_, AppState>,
-    chapter_id: String,
-) -> Result<(), String> {
+pub async fn delete_chapter(state: State<'_, AppState>, chapter_id: String) -> Result<(), String> {
     let db = state.db.lock().unwrap();
 
     let rows = db

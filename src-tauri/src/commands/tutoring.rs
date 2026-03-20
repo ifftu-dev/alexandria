@@ -10,8 +10,8 @@ use rusqlite::params;
 use serde::Serialize;
 use tauri::{AppHandle, State};
 
-use crate::AppState;
 use crate::tutoring::manager::DeviceSelection;
+use crate::AppState;
 
 /// Result of a pre-join device availability check.
 #[derive(Debug, Clone, Serialize)]
@@ -58,14 +58,8 @@ pub async fn tutoring_create_room(
         .endpoint()
         .await
         .ok_or("iroh node not running")?;
-    let gossip = content_node
-        .gossip()
-        .await
-        .ok_or("gossip not available")?;
-    let live = content_node
-        .live()
-        .await
-        .ok_or("live not available")?;
+    let gossip = content_node.gossip().await.ok_or("gossip not available")?;
+    let live = content_node.live().await.ok_or("live not available")?;
 
     log::info!("[cmd] tutoring_create_room: got endpoint/gossip/live, calling create_room...");
     let session_id = uuid::Uuid::new_v4().to_string();
@@ -79,7 +73,16 @@ pub async fn tutoring_create_room(
 
     let ticket = state
         .tutoring
-        .create_room(session_id.clone(), title.clone(), name, &endpoint, gossip, live, app, devices)
+        .create_room(
+            session_id.clone(),
+            title.clone(),
+            name,
+            &endpoint,
+            gossip,
+            live,
+            app,
+            devices,
+        )
         .await?;
 
     log::info!("[cmd] tutoring_create_room: create_room returned, inserting into DB...");
@@ -127,14 +130,8 @@ pub async fn tutoring_join_room(
         .endpoint()
         .await
         .ok_or("iroh node not running")?;
-    let gossip = content_node
-        .gossip()
-        .await
-        .ok_or("gossip not available")?;
-    let live = content_node
-        .live()
-        .await
-        .ok_or("live not available")?;
+    let gossip = content_node.gossip().await.ok_or("gossip not available")?;
+    let live = content_node.live().await.ok_or("live not available")?;
 
     log::info!("[cmd] tutoring_join_room: got endpoint/gossip/live, calling join_room...");
     let session_id = uuid::Uuid::new_v4().to_string();
@@ -149,7 +146,17 @@ pub async fn tutoring_join_room(
 
     let resolved_ticket = state
         .tutoring
-        .join_room(session_id.clone(), title.clone(), name, &ticket, &endpoint, gossip, live, app, devices)
+        .join_room(
+            session_id.clone(),
+            title.clone(),
+            name,
+            &ticket,
+            &endpoint,
+            gossip,
+            live,
+            app,
+            devices,
+        )
         .await?;
 
     log::info!("[cmd] tutoring_join_room: join_room returned, inserting into DB...");
@@ -182,11 +189,7 @@ pub async fn tutoring_join_room(
 #[tauri::command]
 pub async fn tutoring_leave_room(state: State<'_, AppState>) -> Result<(), String> {
     // Get session ID before leaving
-    let session_id = state
-        .tutoring
-        .status()
-        .await
-        .map(|s| s.session_id);
+    let session_id = state.tutoring.status().await.map(|s| s.session_id);
 
     state.tutoring.leave_room().await?;
 
@@ -233,10 +236,7 @@ pub async fn tutoring_toggle_screen_share(
 
 /// Send a chat message to all peers in the current room.
 #[tauri::command]
-pub async fn tutoring_send_chat(
-    text: String,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
+pub async fn tutoring_send_chat(text: String, state: State<'_, AppState>) -> Result<(), String> {
     state.tutoring.send_chat(text).await
 }
 
@@ -418,9 +418,7 @@ pub async fn tutoring_list_devices() -> Result<DeviceList, String> {
 /// This is a poll-based alternative to the `tutoring:audio-level` Tauri event.
 /// The frontend can use either mechanism.
 #[tauri::command]
-pub async fn tutoring_get_audio_level(
-    state: State<'_, AppState>,
-) -> Result<f32, String> {
+pub async fn tutoring_get_audio_level(state: State<'_, AppState>) -> Result<f32, String> {
     Ok(state.tutoring.get_mic_level().await)
 }
 

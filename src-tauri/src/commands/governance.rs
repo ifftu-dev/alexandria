@@ -13,8 +13,8 @@ use tauri::State;
 
 use crate::crypto::hash::entity_id;
 use crate::domain::governance::{
-    DaoInfo, DaoMember, Election, ElectionNominee, ElectionVote,
-    OpenElectionParams, Proposal, ProposalVote, SubmitProposalParams,
+    DaoInfo, DaoMember, Election, ElectionNominee, ElectionVote, OpenElectionParams, Proposal,
+    ProposalVote, SubmitProposalParams,
 };
 use crate::AppState;
 
@@ -180,10 +180,18 @@ pub async fn open_election(
         return Err(format!("DAO is not active (status: {dao_status})"));
     }
 
-    let id = entity_id(&[&params.dao_id, &params.title, &chrono::Utc::now().to_rfc3339()]);
+    let id = entity_id(&[
+        &params.dao_id,
+        &params.title,
+        &chrono::Utc::now().to_rfc3339(),
+    ]);
     let seats = params.seats.unwrap_or(5);
-    let nominee_prof = params.nominee_min_proficiency.unwrap_or_else(|| "apply".into());
-    let voter_prof = params.voter_min_proficiency.unwrap_or_else(|| "remember".into());
+    let nominee_prof = params
+        .nominee_min_proficiency
+        .unwrap_or_else(|| "apply".into());
+    let voter_prof = params
+        .voter_min_proficiency
+        .unwrap_or_else(|| "remember".into());
 
     conn.execute(
         "INSERT INTO governance_elections \
@@ -315,7 +323,9 @@ pub async fn nominate(
         .map_err(|e| format!("election not found: {e}"))?;
 
     if phase != "nomination" {
-        return Err(format!("election is not in nomination phase (phase: {phase})"));
+        return Err(format!(
+            "election is not in nomination phase (phase: {phase})"
+        ));
     }
 
     let id = entity_id(&[&election_id, &stake_address]);
@@ -379,7 +389,9 @@ pub async fn start_election_voting(
         .map_err(|e| format!("election not found: {e}"))?;
 
     if phase != "nomination" {
-        return Err(format!("election must be in nomination phase to start voting (phase: {phase})"));
+        return Err(format!(
+            "election must be in nomination phase to start voting (phase: {phase})"
+        ));
     }
 
     // Verify at least `seats` accepted nominees
@@ -504,7 +516,9 @@ pub async fn finalize_election(
         .map_err(|e| format!("election not found: {e}"))?;
 
     if phase != "voting" {
-        return Err(format!("election must be in voting phase to finalize (phase: {phase})"));
+        return Err(format!(
+            "election must be in voting phase to finalize (phase: {phase})"
+        ));
     }
 
     // Get top N accepted nominees by votes_received
@@ -561,7 +575,9 @@ pub async fn install_committee(
         .map_err(|e| format!("election not found: {e}"))?;
 
     if phase != "finalized" {
-        return Err(format!("election must be finalized to install committee (phase: {phase})"));
+        return Err(format!(
+            "election must be finalized to install committee (phase: {phase})"
+        ));
     }
 
     // Get winner stake addresses
@@ -653,7 +669,9 @@ pub async fn submit_proposal(
         .map_err(|e| format!("no local identity: {e}"))?;
 
     let id = entity_id(&[&params.dao_id, &params.title, &proposer]);
-    let min_prof = params.min_vote_proficiency.unwrap_or_else(|| "remember".into());
+    let min_prof = params
+        .min_vote_proficiency
+        .unwrap_or_else(|| "remember".into());
 
     conn.execute(
         "INSERT INTO governance_proposals \
@@ -770,11 +788,12 @@ pub async fn approve_proposal(
         .map_err(|e| format!("proposal not found: {e}"))?;
 
     if status != "draft" {
-        return Err(format!("proposal must be in draft status to approve (status: {status})"));
+        return Err(format!(
+            "proposal must be in draft status to approve (status: {status})"
+        ));
     }
 
-    let deadline = chrono::Utc::now()
-        + chrono::Duration::days(DEFAULT_VOTING_DAYS);
+    let deadline = chrono::Utc::now() + chrono::Duration::days(DEFAULT_VOTING_DAYS);
 
     conn.execute(
         "UPDATE governance_proposals SET status = 'published', voting_deadline = ?1 WHERE id = ?2",
@@ -804,7 +823,9 @@ pub async fn cancel_proposal(
         .map_err(|e| format!("proposal not found: {e}"))?;
 
     if status == "approved" || status == "rejected" {
-        return Err(format!("cannot cancel a resolved proposal (status: {status})"));
+        return Err(format!(
+            "cannot cancel a resolved proposal (status: {status})"
+        ));
     }
 
     conn.execute(
@@ -837,7 +858,9 @@ pub async fn cast_proposal_vote(
         .map_err(|e| format!("proposal not found: {e}"))?;
 
     if status != "published" {
-        return Err(format!("proposal is not open for voting (status: {status})"));
+        return Err(format!(
+            "proposal is not open for voting (status: {status})"
+        ));
     }
 
     // Check double-vote
@@ -907,7 +930,9 @@ pub async fn resolve_proposal(
         .map_err(|e| format!("proposal not found: {e}"))?;
 
     if status != "published" {
-        return Err(format!("proposal must be published to resolve (status: {status})"));
+        return Err(format!(
+            "proposal must be published to resolve (status: {status})"
+        ));
     }
 
     let total_votes = votes_for + votes_against;
@@ -1180,7 +1205,10 @@ mod tests {
              (id, election_id, voter, nominee_id) VALUES (?1, ?2, 'voter1', ?3)",
             params![vote2_id, elec_id, nom_id],
         );
-        assert!(result.is_err(), "double vote should be rejected by UNIQUE constraint");
+        assert!(
+            result.is_err(),
+            "double vote should be rejected by UNIQUE constraint"
+        );
     }
 
     #[test]
@@ -1330,6 +1358,6 @@ mod tests {
 
         assert_eq!(winners.len(), 2);
         assert_eq!(winners[0].1, 10); // nominee1 with 10 votes
-        assert_eq!(winners[1].1, 8);  // nominee3 with 8 votes
+        assert_eq!(winners[1].1, 8); // nominee3 with 8 votes
     }
 }

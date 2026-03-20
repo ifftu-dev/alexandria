@@ -91,7 +91,10 @@ impl ContentNode {
         }
 
         // Create persistent blob store
-        crate::diag::log(&format!("node.start: FsStore::load at {}...", self.data_dir.display()));
+        crate::diag::log(&format!(
+            "node.start: FsStore::load at {}...",
+            self.data_dir.display()
+        ));
         let store = FsStore::load(&self.data_dir)
             .await
             .map_err(|e| NodeError::StoreInit(e.to_string()))?;
@@ -126,7 +129,10 @@ impl ContentNode {
             .map_err(|e| NodeError::EndpointBind(e.to_string()))?;
 
         let node_id = endpoint.id();
-        crate::diag::log(&format!("node.start: endpoint bound, node_id={}", &node_id.to_string()[..12]));
+        crate::diag::log(&format!(
+            "node.start: endpoint bound, node_id={}",
+            &node_id.to_string()[..12]
+        ));
         log::info!("iroh endpoint bound, node ID: {node_id}");
 
         // Register protocols on the shared router.
@@ -184,9 +190,7 @@ impl ContentNode {
     /// Returns `None` if the node is not running.
     pub async fn node_id(&self) -> Option<String> {
         let inner = self.inner.lock().await;
-        inner
-            .as_ref()
-            .map(|n| n.router.endpoint().id().to_string())
+        inner.as_ref().map(|n| n.router.endpoint().id().to_string())
     }
 
     /// Get a clone of the running Endpoint for use by other protocols.
@@ -305,20 +309,14 @@ mod tests {
         assert!(node.node_id().await.is_some());
 
         // Can't start twice
-        assert!(matches!(
-            node.start().await,
-            Err(NodeError::AlreadyRunning)
-        ));
+        assert!(matches!(node.start().await, Err(NodeError::AlreadyRunning)));
 
         // Shutdown
         node.shutdown().await.expect("shutdown failed");
         assert!(!node.is_running().await);
 
         // Can't shutdown twice
-        assert!(matches!(
-            node.shutdown().await,
-            Err(NodeError::NotRunning)
-        ));
+        assert!(matches!(node.shutdown().await, Err(NodeError::NotRunning)));
     }
 
     #[tokio::test]

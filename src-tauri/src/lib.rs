@@ -85,7 +85,11 @@ pub fn run() {
             // Format the event message + fields
             struct Visitor(String);
             impl tracing::field::Visit for Visitor {
-                fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+                fn record_debug(
+                    &mut self,
+                    field: &tracing::field::Field,
+                    value: &dyn std::fmt::Debug,
+                ) {
                     if field.name() == "message" {
                         self.0.push_str(&format!("{:?}", value));
                     } else {
@@ -103,11 +107,13 @@ pub fn run() {
             // Also write iroh-live / moq-media diagnostic events to diag.log
             // so they appear in the in-app diagnostics modal alongside our own logs.
             let target = meta.target();
-            if matches!(*meta.level(), tracing::Level::ERROR | tracing::Level::WARN | tracing::Level::INFO)
-                && (target.starts_with("moq_media")
-                    || target.starts_with("iroh_live")
-                    || target.starts_with("hang")
-                    || target.starts_with("moq_lite"))
+            if matches!(
+                *meta.level(),
+                tracing::Level::ERROR | tracing::Level::WARN | tracing::Level::INFO
+            ) && (target.starts_with("moq_media")
+                || target.starts_with("iroh_live")
+                || target.starts_with("hang")
+                || target.starts_with("moq_lite"))
             {
                 crate::diag::log(&format!("[{target}] {}", visitor.0));
             }

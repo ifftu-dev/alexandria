@@ -69,7 +69,10 @@ fn build_skill_proof_metadata(
     let mut asset_fields = vec![
         (
             Metadatum::Text("name".into()),
-            Metadatum::Text(format!("Alexandria SkillProof - {}", &proof_id[..8.min(proof_id.len())])),
+            Metadatum::Text(format!(
+                "Alexandria SkillProof - {}",
+                &proof_id[..8.min(proof_id.len())]
+            )),
         ),
         (
             Metadatum::Text("description".into()),
@@ -98,10 +101,7 @@ fn build_skill_proof_metadata(
             Metadatum::Text("confidence".into()),
             Metadatum::Text(format!("{:.4}", confidence)),
         ),
-        (
-            Metadatum::Text("version".into()),
-            Metadatum::Int(1.into()),
-        ),
+        (Metadatum::Text("version".into()), Metadatum::Int(1.into())),
     ];
 
     if let Some(hash) = content_hash {
@@ -140,7 +140,10 @@ fn build_course_metadata(
     let mut asset_fields = vec![
         (
             Metadatum::Text("name".into()),
-            Metadatum::Text(format!("Alexandria Course - {}", &course_id[..8.min(course_id.len())])),
+            Metadatum::Text(format!(
+                "Alexandria Course - {}",
+                &course_id[..8.min(course_id.len())]
+            )),
         ),
         (
             Metadatum::Text("description".into()),
@@ -158,10 +161,7 @@ fn build_course_metadata(
             Metadatum::Text("title".into()),
             Metadatum::Text(course_title.into()),
         ),
-        (
-            Metadatum::Text("version".into()),
-            Metadatum::Int(1.into()),
-        ),
+        (Metadatum::Text("version".into()), Metadatum::Int(1.into())),
     ];
 
     if let Some(cid) = content_cid {
@@ -197,8 +197,8 @@ fn inject_metadata(
     tx_bytes: &[u8],
     metadata: KeyValuePairs<MetadatumLabel, Metadatum>,
 ) -> Result<(Vec<u8>, [u8; 32]), TxBuildError> {
-    let mut tx = Tx::decode_fragment(tx_bytes)
-        .map_err(|e| TxBuildError::TxDecode(e.to_string()))?;
+    let mut tx =
+        Tx::decode_fragment(tx_bytes).map_err(|e| TxBuildError::TxDecode(e.to_string()))?;
 
     // Use the simplest AuxiliaryData variant — just a metadata map
     let aux_data = AuxiliaryData::Shelley(metadata);
@@ -207,7 +207,8 @@ fn inject_metadata(
     tx.transaction_body.auxiliary_data_hash = Some(aux_data_hash.to_vec().into());
 
     // Re-encode the full transaction
-    let new_tx_bytes = tx.encode_fragment()
+    let new_tx_bytes = tx
+        .encode_fragment()
         .map_err(|e| TxBuildError::Cbor(e.to_string()))?;
 
     // Recalculate the tx hash from the modified body
@@ -253,11 +254,12 @@ pub async fn build_skill_proof_mint(
     if utxos.is_empty() {
         return Err(TxBuildError::NoUtxos);
     }
-    let selected = BlockfrostClient::select_utxo(&utxos, MIN_UTXO_LOVELACE)
-        .ok_or(TxBuildError::InsufficientFunds {
+    let selected = BlockfrostClient::select_utxo(&utxos, MIN_UTXO_LOVELACE).ok_or(
+        TxBuildError::InsufficientFunds {
             needed: MIN_UTXO_LOVELACE,
             available: utxos.iter().map(|u| u.lovelace()).sum(),
-        })?;
+        },
+    )?;
 
     let params = blockfrost.get_protocol_params().await?;
     let tip_slot = blockfrost.get_tip_slot().await?;
@@ -371,11 +373,12 @@ pub async fn build_course_registration(
     if utxos.is_empty() {
         return Err(TxBuildError::NoUtxos);
     }
-    let selected = BlockfrostClient::select_utxo(&utxos, MIN_UTXO_LOVELACE)
-        .ok_or(TxBuildError::InsufficientFunds {
+    let selected = BlockfrostClient::select_utxo(&utxos, MIN_UTXO_LOVELACE).ok_or(
+        TxBuildError::InsufficientFunds {
             needed: MIN_UTXO_LOVELACE,
             available: utxos.iter().map(|u| u.lovelace()).sum(),
-        })?;
+        },
+    )?;
 
     let params = blockfrost.get_protocol_params().await?;
     let tip_slot = blockfrost.get_tip_slot().await?;
@@ -474,8 +477,8 @@ fn parse_tx_hash(hex_str: &str) -> Result<Hash<32>, TxBuildError> {
 /// Decodes the tx, computes the body hash, signs it, adds the
 /// VKeyWitness to the witness set, and re-encodes.
 fn sign_raw_tx(tx_bytes: &[u8], private_key: &PrivateKey) -> Result<Vec<u8>, TxBuildError> {
-    let mut tx = Tx::decode_fragment(tx_bytes)
-        .map_err(|e| TxBuildError::TxDecode(e.to_string()))?;
+    let mut tx =
+        Tx::decode_fragment(tx_bytes).map_err(|e| TxBuildError::TxDecode(e.to_string()))?;
 
     let tx_hash = tx.transaction_body.compute_hash();
     let signature = private_key.sign(*tx_hash);
@@ -493,8 +496,7 @@ fn sign_raw_tx(tx_bytes: &[u8], private_key: &PrivateKey) -> Result<Vec<u8>, TxB
         .unwrap_or_default();
     witnesses.push(vkey_witness);
 
-    tx.transaction_witness_set.vkeywitness =
-        pallas_primitives::NonEmptySet::from_vec(witnesses);
+    tx.transaction_witness_set.vkeywitness = pallas_primitives::NonEmptySet::from_vec(witnesses);
 
     tx.encode_fragment()
         .map_err(|e| TxBuildError::Cbor(e.to_string()))
@@ -504,8 +506,8 @@ fn sign_raw_tx(tx_bytes: &[u8], private_key: &PrivateKey) -> Result<Vec<u8>, TxB
 ///
 /// This is the hash that Blockfrost returns after successful submission.
 pub fn compute_tx_hash(signed_tx_bytes: &[u8]) -> Result<String, TxBuildError> {
-    let tx = Tx::decode_fragment(signed_tx_bytes)
-        .map_err(|e| TxBuildError::TxDecode(e.to_string()))?;
+    let tx =
+        Tx::decode_fragment(signed_tx_bytes).map_err(|e| TxBuildError::TxDecode(e.to_string()))?;
     let hash = tx.transaction_body.compute_hash();
     Ok(hex::encode(hash.as_ref()))
 }
@@ -609,13 +611,10 @@ mod tests {
 
         let built = staging.build_conway_raw().expect("build should succeed");
 
-        let metadata = KeyValuePairs::from(vec![(
-            721u64,
-            Metadatum::Text("test".into()),
-        )]);
+        let metadata = KeyValuePairs::from(vec![(721u64, Metadatum::Text("test".into()))]);
 
-        let (new_bytes, new_hash) = inject_metadata(&built.tx_bytes.0, metadata)
-            .expect("inject should succeed");
+        let (new_bytes, new_hash) =
+            inject_metadata(&built.tx_bytes.0, metadata).expect("inject should succeed");
 
         // Verify the new bytes are valid CBOR containing a Tx
         let decoded = Tx::decode_fragment(&new_bytes).expect("should decode");

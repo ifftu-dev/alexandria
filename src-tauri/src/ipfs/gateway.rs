@@ -175,7 +175,9 @@ mod tests {
             timeout: Duration::from_millis(100),
         };
         let client = GatewayClient::new(config).unwrap();
-        let result = client.fetch_by_cid("QmInvalidCid12345678901234567890123456789012").await;
+        let result = client
+            .fetch_by_cid("QmInvalidCid12345678901234567890123456789012")
+            .await;
         assert!(result.is_err());
     }
 }

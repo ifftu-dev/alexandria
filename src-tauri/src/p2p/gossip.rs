@@ -90,10 +90,7 @@ impl P2pNode {
 
     /// Publish a pre-signed envelope (for advanced use cases where
     /// the caller has already constructed and signed the message).
-    pub async fn publish_signed(
-        &self,
-        message: &SignedGossipMessage,
-    ) -> Result<(), NetworkError> {
+    pub async fn publish_signed(&self, message: &SignedGossipMessage) -> Result<(), NetworkError> {
         let data = serde_json::to_vec(message)
             .map_err(|e| NetworkError::Publish(format!("serialize: {e}")))?;
         self.publish(&message.topic, data).await

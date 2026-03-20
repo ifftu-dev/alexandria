@@ -48,10 +48,7 @@ pub async fn content_add(
 ///
 /// Returns the raw bytes. Errors if the content is not available locally.
 #[tauri::command]
-pub async fn content_get(
-    state: State<'_, AppState>,
-    hash: String,
-) -> Result<Vec<u8>, String> {
+pub async fn content_get(state: State<'_, AppState>, hash: String) -> Result<Vec<u8>, String> {
     content::get_bytes(&state.content_node, &hash)
         .await
         .map_err(|e| e.to_string())
@@ -59,10 +56,7 @@ pub async fn content_get(
 
 /// Check if content exists in the local blob store.
 #[tauri::command]
-pub async fn content_has(
-    state: State<'_, AppState>,
-    hash: String,
-) -> Result<bool, String> {
+pub async fn content_has(state: State<'_, AppState>, hash: String) -> Result<bool, String> {
     content::has(&state.content_node, &hash)
         .await
         .map_err(|e| e.to_string())

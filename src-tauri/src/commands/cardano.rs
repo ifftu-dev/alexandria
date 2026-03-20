@@ -29,9 +29,7 @@ pub async fn mint_skill_proof_nft(
 ) -> Result<MintResult, String> {
     // 1. Get wallet from unlocked vault
     let ks_guard = state.keystore.lock().await;
-    let ks = ks_guard
-        .as_ref()
-        .ok_or("vault is locked — unlock first")?;
+    let ks = ks_guard.as_ref().ok_or("vault is locked — unlock first")?;
     let mnemonic = ks.retrieve_mnemonic().map_err(|e| e.to_string())?;
     let w = wallet::wallet_from_mnemonic(&mnemonic).map_err(|e| e.to_string())?;
     drop(ks_guard);
@@ -101,9 +99,7 @@ pub async fn register_course_onchain(
 ) -> Result<CourseRegistrationResult, String> {
     // 1. Get wallet from unlocked vault
     let ks_guard = state.keystore.lock().await;
-    let ks = ks_guard
-        .as_ref()
-        .ok_or("vault is locked — unlock first")?;
+    let ks = ks_guard.as_ref().ok_or("vault is locked — unlock first")?;
     let mnemonic = ks.retrieve_mnemonic().map_err(|e| e.to_string())?;
     let w = wallet::wallet_from_mnemonic(&mnemonic).map_err(|e| e.to_string())?;
     drop(ks_guard);

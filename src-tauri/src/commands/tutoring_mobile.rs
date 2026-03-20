@@ -12,8 +12,8 @@ use rusqlite::params;
 use serde::Serialize;
 use tauri::{AppHandle, State};
 
-use crate::AppState;
 use crate::tutoring::manager_mobile::DeviceSelection;
+use crate::AppState;
 
 /// Result of a pre-join device availability check.
 #[derive(Debug, Clone, Serialize)]
@@ -84,14 +84,8 @@ pub async fn tutoring_create_room(
         .endpoint()
         .await
         .ok_or("iroh node not running")?;
-    let gossip = content_node
-        .gossip()
-        .await
-        .ok_or("gossip not available")?;
-    let live = content_node
-        .live()
-        .await
-        .ok_or("live not available")?;
+    let gossip = content_node.gossip().await.ok_or("gossip not available")?;
+    let live = content_node.live().await.ok_or("live not available")?;
 
     let session_id = uuid::Uuid::new_v4().to_string();
     let name = display_name.unwrap_or_else(|| title.clone());
@@ -103,7 +97,16 @@ pub async fn tutoring_create_room(
 
     let ticket = state
         .tutoring
-        .create_room(session_id.clone(), title.clone(), name, &endpoint, gossip, live, app, devices)
+        .create_room(
+            session_id.clone(),
+            title.clone(),
+            name,
+            &endpoint,
+            gossip,
+            live,
+            app,
+            devices,
+        )
         .await?;
 
     // Persist to database
@@ -145,14 +148,8 @@ pub async fn tutoring_join_room(
         .endpoint()
         .await
         .ok_or("iroh node not running")?;
-    let gossip = content_node
-        .gossip()
-        .await
-        .ok_or("gossip not available")?;
-    let live = content_node
-        .live()
-        .await
-        .ok_or("live not available")?;
+    let gossip = content_node.gossip().await.ok_or("gossip not available")?;
+    let live = content_node.live().await.ok_or("live not available")?;
 
     let session_id = uuid::Uuid::new_v4().to_string();
     let title = title.unwrap_or_else(|| "Joined session".into());
@@ -165,7 +162,17 @@ pub async fn tutoring_join_room(
 
     let resolved_ticket = state
         .tutoring
-        .join_room(session_id.clone(), title.clone(), name, &ticket, &endpoint, gossip, live, app, devices)
+        .join_room(
+            session_id.clone(),
+            title.clone(),
+            name,
+            &ticket,
+            &endpoint,
+            gossip,
+            live,
+            app,
+            devices,
+        )
         .await?;
 
     // Persist to database
@@ -193,11 +200,7 @@ pub async fn tutoring_join_room(
 #[tauri::command]
 pub async fn tutoring_leave_room(state: State<'_, AppState>) -> Result<(), String> {
     // Get session ID before leaving
-    let session_id = state
-        .tutoring
-        .status()
-        .await
-        .map(|s| s.session_id);
+    let session_id = state.tutoring.status().await.map(|s| s.session_id);
 
     state.tutoring.leave_room().await?;
 
@@ -244,10 +247,7 @@ pub async fn tutoring_toggle_screen_share(
 
 /// Send a chat message to all peers in the current room.
 #[tauri::command]
-pub async fn tutoring_send_chat(
-    text: String,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
+pub async fn tutoring_send_chat(text: String, state: State<'_, AppState>) -> Result<(), String> {
     state.tutoring.send_chat(text).await
 }
 
@@ -355,20 +355,16 @@ pub async fn tutoring_list_devices() -> Result<DeviceList, String> {
     Ok(DeviceList {
         audio_inputs,
         audio_outputs,
-        cameras: vec![
-            CameraDeviceInfo {
-                index: "front".into(),
-                name: "Front Camera".into(),
-            },
-        ],
+        cameras: vec![CameraDeviceInfo {
+            index: "front".into(),
+            name: "Front Camera".into(),
+        }],
     })
 }
 
 /// Get current mic audio level (0.0–1.0) for the VU meter.
 #[tauri::command]
-pub async fn tutoring_get_audio_level(
-    state: State<'_, AppState>,
-) -> Result<f32, String> {
+pub async fn tutoring_get_audio_level(state: State<'_, AppState>) -> Result<f32, String> {
     Ok(state.tutoring.get_mic_level().await)
 }
 

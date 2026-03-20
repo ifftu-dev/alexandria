@@ -169,7 +169,14 @@ pub async fn bootstrap_public_taxonomy(state: State<'_, AppState>) -> Result<i64
             "INSERT OR REPLACE INTO subject_fields
              (id, name, description, icon_emoji, created_at, updated_at)
              VALUES (?1, ?2, ?3, ?4, COALESCE(?5, datetime('now')), COALESCE(?6, datetime('now')))",
-            params![f.id, f.name, f.description, f.icon_emoji, f.created_at, f.updated_at],
+            params![
+                f.id,
+                f.name,
+                f.description,
+                f.icon_emoji,
+                f.created_at,
+                f.updated_at
+            ],
         )
         .map_err(|e| e.to_string())?;
     }
@@ -732,12 +739,7 @@ pub async fn publish_taxonomy_ratification(
     signature: String,
 ) -> Result<TaxonomyPublishResult, String> {
     let db = state.db.lock().unwrap();
-    taxonomy::publish_taxonomy_ratification(
-        db.conn(),
-        &proposal_id,
-        &ratified_by,
-        &signature,
-    )
+    taxonomy::publish_taxonomy_ratification(db.conn(), &proposal_id, &ratified_by, &signature)
 }
 
 /// Get the current (latest) taxonomy version.

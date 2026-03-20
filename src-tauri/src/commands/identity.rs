@@ -297,9 +297,7 @@ pub async fn lock_vault(state: State<'_, AppState>) -> Result<(), String> {
 
 /// Get the current wallet info (no secrets).
 #[tauri::command]
-pub async fn get_wallet_info(
-    state: State<'_, AppState>,
-) -> Result<Option<WalletInfo>, String> {
+pub async fn get_wallet_info(state: State<'_, AppState>) -> Result<Option<WalletInfo>, String> {
     let db = state.db.lock().unwrap();
 
     let result = db.conn().query_row(
@@ -386,8 +384,7 @@ pub async fn update_profile(
         set_clauses.join(", ")
     );
 
-    let params: Vec<&dyn rusqlite::types::ToSql> =
-        values.iter().map(|v| v.as_ref()).collect();
+    let params: Vec<&dyn rusqlite::types::ToSql> = values.iter().map(|v| v.as_ref()).collect();
 
     db.conn()
         .execute(&sql, params.as_slice())
@@ -423,9 +420,7 @@ pub async fn update_profile(
 ///
 /// Requires the vault to be unlocked (wallet key needed for signing).
 #[tauri::command]
-pub async fn publish_profile(
-    state: State<'_, AppState>,
-) -> Result<PublishProfileResult, String> {
+pub async fn publish_profile(state: State<'_, AppState>) -> Result<PublishProfileResult, String> {
     // Get the wallet signing key from the vault
     let keystore = state.keystore.lock().await;
     let ks = keystore.as_ref().ok_or("vault is locked — unlock first")?;
@@ -448,7 +443,15 @@ pub async fn publish_profile(
                 "SELECT stake_address, display_name, bio, avatar_cid, created_at
                  FROM local_identity WHERE id = 1",
                 [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
             )
             .map_err(|e| e.to_string())?
     }; // db guard dropped here — before any .await
@@ -469,8 +472,7 @@ pub async fn publish_profile(
     };
 
     // Sign the profile
-    let signed = ipfs_profile::sign_profile(&payload, &w.signing_key)
-        .map_err(|e| e.to_string())?;
+    let signed = ipfs_profile::sign_profile(&payload, &w.signing_key).map_err(|e| e.to_string())?;
 
     // Publish to iroh
     let result = ipfs_profile::publish_profile(&state.content_node, &signed)

@@ -9,8 +9,8 @@
 use tauri::State;
 
 use crate::domain::reputation::{
-    FullReputationAssertion, DistributionMetrics, InstructorRanking,
-    RecomputeResult, ReputationQuery, VerificationResult,
+    DistributionMetrics, FullReputationAssertion, InstructorRanking, RecomputeResult,
+    ReputationQuery, VerificationResult,
 };
 use crate::evidence::reputation;
 use crate::AppState;
@@ -134,9 +134,7 @@ pub async fn get_reputation(
 /// Clears all reputation state and replays every proof event
 /// chronologically. This is the v2 "any node can reproduce" guarantee.
 #[tauri::command]
-pub async fn compute_reputation(
-    state: State<'_, AppState>,
-) -> Result<RecomputeResult, String> {
+pub async fn compute_reputation(state: State<'_, AppState>) -> Result<RecomputeResult, String> {
     let db = state.db.lock().unwrap();
 
     let start = std::time::Instant::now();
@@ -173,8 +171,8 @@ pub async fn get_instructor_ranking(
     let result: Vec<InstructorRanking> = rankings
         .into_iter()
         .enumerate()
-        .map(|(i, (addr, score, ev_count, learner_count, median))| {
-            InstructorRanking {
+        .map(
+            |(i, (addr, score, ev_count, learner_count, median))| InstructorRanking {
                 actor_address: addr,
                 skill_id: skill_id.clone(),
                 proficiency_level: proficiency_level.clone().unwrap_or_default(),
@@ -183,8 +181,8 @@ pub async fn get_instructor_ranking(
                 learner_count,
                 median_impact: median,
                 rank: (i + 1) as i64,
-            }
-        })
+            },
+        )
         .collect();
 
     Ok(result)
@@ -201,8 +199,14 @@ pub async fn verify_reputation(
 ) -> Result<VerificationResult, String> {
     let db = state.db.lock().unwrap();
 
-    let (score_matches, confidence_matches, recomputed_score, recomputed_confidence, claimed_score, claimed_confidence) =
-        reputation::verify_assertion(db.conn(), &assertion_id)?;
+    let (
+        score_matches,
+        confidence_matches,
+        recomputed_score,
+        recomputed_confidence,
+        claimed_score,
+        claimed_confidence,
+    ) = reputation::verify_assertion(db.conn(), &assertion_id)?;
 
     let max_diff = (claimed_score - recomputed_score)
         .abs()

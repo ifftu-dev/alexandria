@@ -38,9 +38,7 @@ impl BlockfrostClient {
         if project_id.is_empty() {
             return Err(BlockfrostError::MissingProjectId);
         }
-        let client = Client::builder()
-            .build()
-            .map_err(BlockfrostError::Http)?;
+        let client = Client::builder().build().map_err(BlockfrostError::Http)?;
 
         Ok(Self {
             client,
@@ -55,9 +53,7 @@ impl BlockfrostClient {
         if project_id.is_empty() {
             return Err(BlockfrostError::MissingProjectId);
         }
-        let client = Client::builder()
-            .build()
-            .map_err(BlockfrostError::Http)?;
+        let client = Client::builder().build().map_err(BlockfrostError::Http)?;
 
         Ok(Self {
             client,
@@ -182,7 +178,10 @@ mod tests {
     fn missing_project_id_is_error() {
         let result = BlockfrostClient::new(String::new());
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), BlockfrostError::MissingProjectId));
+        assert!(matches!(
+            result.unwrap_err(),
+            BlockfrostError::MissingProjectId
+        ));
     }
 
     #[test]

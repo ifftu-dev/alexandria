@@ -17,9 +17,7 @@ use crate::AppState;
 /// Returns the device record for this node. Creates one if it
 /// doesn't exist yet (auto-registers on first call).
 #[tauri::command]
-pub async fn sync_get_device_info(
-    state: State<'_, AppState>,
-) -> Result<DeviceInfo, String> {
+pub async fn sync_get_device_info(state: State<'_, AppState>) -> Result<DeviceInfo, String> {
     let db = state.db.lock().unwrap();
     let conn = db.conn();
 
@@ -30,19 +28,14 @@ pub async fn sync_get_device_info(
 
 /// Set a user-friendly name for the local device.
 #[tauri::command]
-pub async fn sync_set_device_name(
-    state: State<'_, AppState>,
-    name: String,
-) -> Result<(), String> {
+pub async fn sync_set_device_name(state: State<'_, AppState>, name: String) -> Result<(), String> {
     let db = state.db.lock().unwrap();
     let conn = db.conn();
 
     let device_id = conn
-        .query_row(
-            "SELECT id FROM devices WHERE is_local = 1",
-            [],
-            |row| row.get::<_, String>(0),
-        )
+        .query_row("SELECT id FROM devices WHERE is_local = 1", [], |row| {
+            row.get::<_, String>(0)
+        })
         .map_err(|e| format!("no local device registered: {e}"))?;
 
     conn.execute(
@@ -56,9 +49,7 @@ pub async fn sync_set_device_name(
 
 /// List all known devices (local + remote).
 #[tauri::command]
-pub async fn sync_list_devices(
-    state: State<'_, AppState>,
-) -> Result<Vec<DeviceInfo>, String> {
+pub async fn sync_list_devices(state: State<'_, AppState>) -> Result<Vec<DeviceInfo>, String> {
     let db = state.db.lock().unwrap();
     sync::list_devices(db.conn())
 }
@@ -80,9 +71,7 @@ pub async fn sync_remove_device(
 /// Returns device count, queue length, last sync time, and
 /// per-device sync summaries.
 #[tauri::command]
-pub async fn sync_status(
-    state: State<'_, AppState>,
-) -> Result<SyncStatus, String> {
+pub async fn sync_status(state: State<'_, AppState>) -> Result<SyncStatus, String> {
     let db = state.db.lock().unwrap();
     sync::get_sync_status(db.conn())
 }
@@ -93,9 +82,7 @@ pub async fn sync_status(
 /// request-response protocol with each online peer. For now
 /// it processes the local queue and returns what would be sent.
 #[tauri::command]
-pub async fn sync_now(
-    state: State<'_, AppState>,
-) -> Result<SyncStatus, String> {
+pub async fn sync_now(state: State<'_, AppState>) -> Result<SyncStatus, String> {
     let db = state.db.lock().unwrap();
     let conn = db.conn();
 
@@ -114,10 +101,7 @@ pub async fn sync_now(
 /// When enabled, the node will periodically sync with all known
 /// remote devices (every 60 seconds when peers are online).
 #[tauri::command]
-pub async fn sync_set_auto(
-    state: State<'_, AppState>,
-    enabled: bool,
-) -> Result<(), String> {
+pub async fn sync_set_auto(state: State<'_, AppState>, enabled: bool) -> Result<(), String> {
     let db = state.db.lock().unwrap();
     let conn = db.conn();
 

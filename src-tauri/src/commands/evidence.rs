@@ -10,9 +10,7 @@ use crate::AppState;
 
 /// List all skill proofs for the local user.
 #[tauri::command]
-pub async fn list_skill_proofs(
-    state: State<'_, AppState>,
-) -> Result<Vec<SkillProof>, String> {
+pub async fn list_skill_proofs(state: State<'_, AppState>) -> Result<Vec<SkillProof>, String> {
     let db = state.db.lock().unwrap();
 
     let mut stmt = db

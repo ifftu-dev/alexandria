@@ -44,7 +44,8 @@ fn ensure_parent(path: &Path) -> Result<(), String> {
 
 fn remove_file_if_exists(path: &Path) -> Result<(), String> {
     if path.exists() {
-        std::fs::remove_file(path).map_err(|e| format!("failed to remove {}: {e}", path.display()))?;
+        std::fs::remove_file(path)
+            .map_err(|e| format!("failed to remove {}: {e}", path.display()))?;
         println!("Removed {}", path.display());
     }
     Ok(())
@@ -95,7 +96,11 @@ async fn main() -> Result<(), String> {
     let seeded = seed::seed_if_empty(database.conn()).map_err(|e| e.to_string())?;
     println!(
         "Database seed: {}",
-        if seeded { "inserted" } else { "already present" }
+        if seeded {
+            "inserted"
+        } else {
+            "already present"
+        }
     );
 
     let db = Arc::new(std::sync::Mutex::new(database));

@@ -16,8 +16,8 @@
 use std::sync::Arc;
 
 use rusqlite::params;
-use thiserror::Error;
 use std::sync::Mutex;
+use thiserror::Error;
 
 use crate::db::Database;
 use crate::ipfs::cid::{self, ContentId};
@@ -72,16 +72,12 @@ pub struct ResolveResult {
 pub struct ContentResolver {
     node: Arc<ContentNode>,
     gateway: GatewayClient,
-        db: Arc<Mutex<Database>>,
+    db: Arc<Mutex<Database>>,
 }
 
 impl ContentResolver {
     /// Create a new resolver.
-    pub fn new(
-        node: Arc<ContentNode>,
-        gateway: GatewayClient,
-    db: Arc<Mutex<Database>>,
-    ) -> Self {
+    pub fn new(node: Arc<ContentNode>, gateway: GatewayClient, db: Arc<Mutex<Database>>) -> Self {
         Self { node, gateway, db }
     }
 
@@ -320,9 +316,7 @@ mod tests {
 
         // Add content directly to iroh
         let data = b"test content for resolver";
-        let add = content::add_bytes(&resolver.node, data)
-            .await
-            .expect("add");
+        let add = content::add_bytes(&resolver.node, data).await.expect("add");
 
         // Resolve by BLAKE3 hash
         let result = resolver.resolve(&add.hash).await.expect("resolve");
@@ -353,15 +347,11 @@ mod tests {
 
         // Add content to iroh
         let data = b"mapped content";
-        let add = content::add_bytes(&resolver.node, data)
-            .await
-            .expect("add");
+        let add = content::add_bytes(&resolver.node, data).await.expect("add");
 
         // Insert a fake CID→BLAKE3 mapping
         let fake_cid = "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG";
-        resolver
-            .save_mapping(fake_cid, &add.hash, add.size)
-            .await;
+        resolver.save_mapping(fake_cid, &add.hash, add.size).await;
 
         // Resolve by CID should find it via mapping
         let result = resolver.resolve(fake_cid).await.expect("resolve");
@@ -388,14 +378,10 @@ mod tests {
         let (resolver, _tmp) = make_resolver().await;
 
         let data = b"bidirectional mapping test";
-        let add = content::add_bytes(&resolver.node, data)
-            .await
-            .expect("add");
+        let add = content::add_bytes(&resolver.node, data).await.expect("add");
 
         let fake_cid = "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG";
-        resolver
-            .save_mapping(fake_cid, &add.hash, add.size)
-            .await;
+        resolver.save_mapping(fake_cid, &add.hash, add.size).await;
 
         // Lookup CID → BLAKE3
         let hash = resolver.lookup_blake3_for_cid(fake_cid).await;
@@ -413,9 +399,7 @@ mod tests {
         let (resolver, _tmp) = make_resolver().await;
 
         let data = b"content with mapping";
-        let add = content::add_bytes(&resolver.node, data)
-            .await
-            .expect("add");
+        let add = content::add_bytes(&resolver.node, data).await.expect("add");
 
         // Without mapping: no CID
         let result = resolver.resolve(&add.hash).await.expect("resolve");
@@ -423,9 +407,7 @@ mod tests {
 
         // Add mapping
         let fake_cid = "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG";
-        resolver
-            .save_mapping(fake_cid, &add.hash, add.size)
-            .await;
+        resolver.save_mapping(fake_cid, &add.hash, add.size).await;
 
         // With mapping: CID is included
         let result = resolver.resolve(&add.hash).await.expect("resolve 2");

@@ -80,7 +80,12 @@ pub async fn seed_content_if_needed(
                 .get(asset.url)
                 .send()
                 .await
-                .map_err(|e| format!("failed to download {} for {}: {e}", asset.url, asset.element_id))?
+                .map_err(|e| {
+                    format!(
+                        "failed to download {} for {}: {e}",
+                        asset.url, asset.element_id
+                    )
+                })?
                 .error_for_status()
                 .map_err(|e| {
                     format!(
@@ -99,9 +104,12 @@ pub async fn seed_content_if_needed(
             body
         };
 
-        let result = content::add_bytes(node, &bytes)
-            .await
-            .map_err(|e| format!("failed to add downloaded media for {}: {e}", asset.element_id))?;
+        let result = content::add_bytes(node, &bytes).await.map_err(|e| {
+            format!(
+                "failed to add downloaded media for {}: {e}",
+                asset.element_id
+            )
+        })?;
 
         // Store globally resolvable URL for public media, and keep a local
         // URL->BLAKE3 cache mapping for fast future lookups.

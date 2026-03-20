@@ -6,7 +6,7 @@ authors = ["Alexandria Contributors"]
 license = "TBD"
 repository = "https://github.com/ifftu-dev/alexandria"
 edition = "2021"
-rust-version = "1.83.0"
+rust-version = "1.85.0"
 default-run = "alexandria-node"
 
 [features]

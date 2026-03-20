@@ -67,7 +67,12 @@ pub async fn create_element(
         )
         .map_err(|e| e.to_string())?;
 
-    let id = entity_id(&[&chapter_id, &req.title, &req.element_type, &next_pos.to_string()]);
+    let id = entity_id(&[
+        &chapter_id,
+        &req.title,
+        &req.element_type,
+        &next_pos.to_string(),
+    ]);
 
     db.conn()
         .execute(
@@ -261,11 +266,18 @@ mod tests {
 
         // Update
         db.conn()
-            .execute("UPDATE course_elements SET title = 'Final Quiz' WHERE id = ?1", params![id])
+            .execute(
+                "UPDATE course_elements SET title = 'Final Quiz' WHERE id = ?1",
+                params![id],
+            )
             .unwrap();
         let new_title: String = db
             .conn()
-            .query_row("SELECT title FROM course_elements WHERE id = ?1", params![id], |r| r.get(0))
+            .query_row(
+                "SELECT title FROM course_elements WHERE id = ?1",
+                params![id],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(new_title, "Final Quiz");
 
@@ -305,10 +317,7 @@ mod tests {
 
 /// Delete an element.
 #[tauri::command]
-pub async fn delete_element(
-    state: State<'_, AppState>,
-    element_id: String,
-) -> Result<(), String> {
+pub async fn delete_element(state: State<'_, AppState>, element_id: String) -> Result<(), String> {
     let db = state.db.lock().unwrap();
 
     let rows = db

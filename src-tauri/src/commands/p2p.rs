@@ -62,11 +62,12 @@ pub async fn p2p_start(state: State<'_, AppState>) -> Result<String, String> {
     diag::log("p2p_start: deriving keypair...");
 
     // Derive libp2p keypair from Cardano key
-    let keypair =
-        keypair_from_cardano_key(&payment_key_bytes).map_err(|e| e.to_string())?;
+    let keypair = keypair_from_cardano_key(&payment_key_bytes).map_err(|e| e.to_string())?;
     let peer_id = keypair.public().to_peer_id().to_string();
 
-    diag::log(&format!("p2p_start: PeerId={peer_id}, spawning background task..."));
+    diag::log(&format!(
+        "p2p_start: PeerId={peer_id}, spawning background task..."
+    ));
 
     // Load known peers from the database so we can reconnect to them.
     let known_peers: Vec<network::KnownPeer> = {
@@ -91,7 +92,10 @@ pub async fn p2p_start(state: State<'_, AppState>) -> Result<String, String> {
             }
         }
     };
-    diag::log(&format!("p2p_start: loaded {} known peers from DB", known_peers.len()));
+    diag::log(&format!(
+        "p2p_start: loaded {} known peers from DB",
+        known_peers.len()
+    ));
 
     // Clone handles for the spawned task
     let p2p_node = state.p2p_node.clone();
@@ -227,7 +231,5 @@ pub async fn p2p_publish(
     let node = node_lock
         .as_ref()
         .ok_or_else(|| "P2P node is not running".to_string())?;
-    node.publish(&topic, data)
-        .await
-        .map_err(|e| e.to_string())
+    node.publish(&topic, data).await.map_err(|e| e.to_string())
 }

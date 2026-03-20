@@ -19,7 +19,7 @@ use iroh::{Endpoint, EndpointId};
 use iroh_gossip::net::Gossip;
 use iroh_live::media::audio::{AudioBackend, DeviceId, InputStream, OutputStream};
 use iroh_live::media::av::{AudioPreset, AudioSinkHandle, DecodeConfig, VideoPreset};
-use iroh_live::media::capture::{CameraIndex, CameraCapturer, ScreenCapturer};
+use iroh_live::media::capture::{CameraCapturer, CameraIndex, ScreenCapturer};
 use iroh_live::media::ffmpeg::{FfmpegDecoders, FfmpegVideoDecoder, H264Encoder, OpusEncoder};
 use iroh_live::media::publish::{AudioRenditions, PublishBroadcast, VideoRenditions};
 use iroh_live::media::subscribe::{SubscribeBroadcast, WatchTrack};
@@ -27,7 +27,7 @@ use iroh_live::rooms::{Room, RoomEvent, RoomHandle, RoomTicket};
 use iroh_live::Live;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
-use tokio::sync::{Mutex, mpsc};
+use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinHandle;
 
 // ── Constants ──────────────────────────────────────────────────────
@@ -127,7 +127,10 @@ pub struct DeviceSelection {
 fn parse_camera_index(s: &str) -> Option<CameraIndex> {
     if let Some(inner) = s.strip_prefix("Index(").and_then(|s| s.strip_suffix(')')) {
         inner.parse::<u32>().ok().map(CameraIndex::Index)
-    } else if let Some(inner) = s.strip_prefix("String(\"").and_then(|s| s.strip_suffix("\")")) {
+    } else if let Some(inner) = s
+        .strip_prefix("String(\"")
+        .and_then(|s| s.strip_suffix("\")"))
+    {
         Some(CameraIndex::String(inner.to_string()))
     } else if let Ok(n) = s.parse::<u32>() {
         Some(CameraIndex::Index(n))
@@ -348,18 +351,12 @@ impl TutoringManager {
         let (events, handle) = room.split();
 
         // Start self-preview from local camera source
-        let self_preview_task =
-            Self::start_self_preview(&mut broadcast, app_handle.clone());
+        let self_preview_task = Self::start_self_preview(&mut broadcast, app_handle.clone());
 
         // Set up chat on a derived gossip topic
         let topic_seed = room_topic_bytes(&ticket_str);
-        let chat_sender = Self::setup_chat(
-            &gossip,
-            &topic_seed,
-            &our_node_id,
-            app_handle.clone(),
-        )
-        .await;
+        let chat_sender =
+            Self::setup_chat(&gossip, &topic_seed, &our_node_id, app_handle.clone()).await;
 
         // Set up name announcements on a derived /names gossip topic
         let names_task = Self::setup_names(
@@ -418,10 +415,7 @@ impl TutoringManager {
         });
 
         // Spawn audio level emitter after session is stored (reads from inner)
-        let audio_level_task = Self::start_audio_level_emitter(
-            self.inner.clone(),
-            app_handle,
-        );
+        let audio_level_task = Self::start_audio_level_emitter(self.inner.clone(), app_handle);
         if let Some(session) = inner.as_mut() {
             session._tasks.push(audio_level_task);
         }
@@ -485,18 +479,12 @@ impl TutoringManager {
         let (events, handle) = room.split();
 
         // Start self-preview from local camera source
-        let self_preview_task =
-            Self::start_self_preview(&mut broadcast, app_handle.clone());
+        let self_preview_task = Self::start_self_preview(&mut broadcast, app_handle.clone());
 
         // Set up chat on a derived gossip topic
         let topic_seed = room_topic_bytes(&ticket_str);
-        let chat_sender = Self::setup_chat(
-            &gossip,
-            &topic_seed,
-            &our_node_id,
-            app_handle.clone(),
-        )
-        .await;
+        let chat_sender =
+            Self::setup_chat(&gossip, &topic_seed, &our_node_id, app_handle.clone()).await;
 
         // Set up name announcements on a derived /names gossip topic
         let names_task = Self::setup_names(
@@ -554,10 +542,7 @@ impl TutoringManager {
         });
 
         // Spawn audio level emitter after session is stored (reads from inner)
-        let audio_level_task = Self::start_audio_level_emitter(
-            self.inner.clone(),
-            app_handle,
-        );
+        let audio_level_task = Self::start_audio_level_emitter(self.inner.clone(), app_handle);
         if let Some(session) = inner.as_mut() {
             session._tasks.push(audio_level_task);
         }
@@ -604,7 +589,11 @@ impl TutoringManager {
             if session.screen_sharing {
                 session.screen_sharing = false;
             }
-            let camera_idx = session.device_selection.camera_index.as_deref().and_then(parse_camera_index);
+            let camera_idx = session
+                .device_selection
+                .camera_index
+                .as_deref()
+                .and_then(parse_camera_index);
             match CameraCapturer::with_index(camera_idx) {
                 Ok(camera) => {
                     let renditions =
@@ -725,7 +714,11 @@ impl TutoringManager {
         } else {
             // Stop screen share, restore camera (using stored device selection)
             session.screen_sharing = false;
-            let camera_idx = session.device_selection.camera_index.as_deref().and_then(parse_camera_index);
+            let camera_idx = session
+                .device_selection
+                .camera_index
+                .as_deref()
+                .and_then(parse_camera_index);
             match CameraCapturer::with_index(camera_idx) {
                 Ok(camera) => {
                     let renditions =
@@ -781,10 +774,7 @@ impl TutoringManager {
         }
         session.last_chat_sent = now;
 
-        let sender = session
-            .chat_sender
-            .as_ref()
-            .ok_or("chat not available")?;
+        let sender = session.chat_sender.as_ref().ok_or("chat not available")?;
 
         let msg = ChatMessage {
             sender: session.our_node_id.clone(),
@@ -793,8 +783,8 @@ impl TutoringManager {
             timestamp: Self::now_millis(),
         };
 
-        let encoded = postcard::to_stdvec(&msg)
-            .map_err(|e| format!("failed to encode chat: {e}"))?;
+        let encoded =
+            postcard::to_stdvec(&msg).map_err(|e| format!("failed to encode chat: {e}"))?;
 
         sender
             .broadcast(Bytes::from(encoded))
@@ -853,12 +843,16 @@ impl TutoringManager {
             has_output_stream: session.output_stream.is_some(),
             has_self_preview: session.self_preview_task.is_some(),
             peer_count: session.peers.len(),
-            peers: session.peers.values().map(|p| PeerDiagnostics {
-                node_id: p.node_id.clone(),
-                display_name: p.display_name.clone(),
-                broadcasts: p.broadcasts.clone(),
-                connected: p.connected,
-            }).collect(),
+            peers: session
+                .peers
+                .values()
+                .map(|p| PeerDiagnostics {
+                    node_id: p.node_id.clone(),
+                    display_name: p.display_name.clone(),
+                    broadcasts: p.broadcasts.clone(),
+                    connected: p.connected,
+                })
+                .collect(),
             task_count: session._tasks.len(),
             recent_logs: session.recent_logs.clone(),
             home_relay: session.home_relay.clone(),
@@ -919,11 +913,10 @@ impl TutoringManager {
 
         if video {
             log::info!("tutoring: initializing camera (spawn_blocking)...");
-            let camera_result = tokio::task::spawn_blocking(move || {
-                CameraCapturer::with_index(camera_index)
-            })
-            .await
-            .map_err(|e| format!("camera task panicked: {e}"))?;
+            let camera_result =
+                tokio::task::spawn_blocking(move || CameraCapturer::with_index(camera_index))
+                    .await
+                    .map_err(|e| format!("camera task panicked: {e}"))?;
 
             match camera_result {
                 Ok(camera) => {
@@ -957,7 +950,14 @@ impl TutoringManager {
         let watch = broadcast.watch_local(config)?;
 
         log::info!("tutoring: starting self-preview");
-        Some(Self::spawn_frame_bridge(watch, "self".into(), app_handle, (320, 240), 50, 24))
+        Some(Self::spawn_frame_bridge(
+            watch,
+            "self".into(),
+            app_handle,
+            (320, 240),
+            50,
+            24,
+        ))
     }
 
     /// Spawn a background task that periodically reads mic + output peak levels
@@ -1200,10 +1200,7 @@ impl TutoringManager {
     ) {
         while let Some(event) = events.recv().await {
             match event {
-                RoomEvent::RemoteAnnounced {
-                    remote,
-                    broadcasts,
-                } => {
+                RoomEvent::RemoteAnnounced { remote, broadcasts } => {
                     let node_id = remote.to_string();
                     let short_id = node_id[..node_id.len().min(12)].to_string();
                     log::info!("tutoring: peer announced: {short_id} with {broadcasts:?}");
@@ -1408,7 +1405,14 @@ impl TutoringManager {
                                                 let mut guard = inner_audio.lock().await;
                                                 if let Some(session) = guard.as_mut() {
                                                     session._subscribed_keys.remove(&sub_key_audio);
-                                                    if let Err(e) = session.handle.force_resubscribe(remote_endpoint, bname_audio.as_str()).await {
+                                                    if let Err(e) = session
+                                                        .handle
+                                                        .force_resubscribe(
+                                                            remote_endpoint,
+                                                            bname_audio.as_str(),
+                                                        )
+                                                        .await
+                                                    {
                                                         log::warn!("tutoring: audio force_resubscribe failed: {e}");
                                                     }
                                                 }
@@ -1422,17 +1426,23 @@ impl TutoringManager {
                                 log::error!(
                                     "tutoring: failed to watch_and_listen {short_id}:{name}: {e}"
                                 );
-                                Self::push_log(&inner, format!("ERR watch_and_listen: {short_id}:{name}: {e}")).await;
+                                Self::push_log(
+                                    &inner,
+                                    format!("ERR watch_and_listen: {short_id}:{name}: {e}"),
+                                )
+                                .await;
                             }
                         }
                     } else {
                         // Video only: use watch()
                         match broadcast.watch::<FfmpegVideoDecoder>() {
                             Ok(video) => {
-                                log::info!(
-                                    "tutoring: watching video from {short_id}:{name}"
-                                );
-                                Self::push_log(&inner, format!("video_watch OK: {short_id}:{name}")).await;
+                                log::info!("tutoring: watching video from {short_id}:{name}");
+                                Self::push_log(
+                                    &inner,
+                                    format!("video_watch OK: {short_id}:{name}"),
+                                )
+                                .await;
                                 let sub_key = format!("{node_id}:{name}");
                                 Self::spawn_frame_bridge_with_resubscribe(
                                     video,
@@ -1448,10 +1458,12 @@ impl TutoringManager {
                                 );
                             }
                             Err(e) => {
-                                log::error!(
-                                    "tutoring: failed to watch {short_id}:{name}: {e}"
-                                );
-                                Self::push_log(&inner, format!("ERR video_watch: {short_id}:{name}: {e}")).await;
+                                log::error!("tutoring: failed to watch {short_id}:{name}: {e}");
+                                Self::push_log(
+                                    &inner,
+                                    format!("ERR video_watch: {short_id}:{name}: {e}"),
+                                )
+                                .await;
                             }
                         }
                         // Store broadcast to keep the MoQ subscription alive
@@ -1482,7 +1494,9 @@ impl TutoringManager {
         quality: u8,
         fps: u32,
     ) -> JoinHandle<()> {
-        Self::spawn_frame_bridge_with_resubscribe(watch, node_id, app_handle, viewport, quality, fps, None, None, None, None)
+        Self::spawn_frame_bridge_with_resubscribe(
+            watch, node_id, app_handle, viewport, quality, fps, None, None, None, None,
+        )
     }
 
     fn spawn_frame_bridge_with_resubscribe(
@@ -1502,7 +1516,11 @@ impl TutoringManager {
 
         tokio::spawn(async move {
             let _handle = handle;
-            log::info!("tutoring: frame bridge started for {node_id} ({}x{} q={quality} fps={fps})", viewport.0, viewport.1);
+            log::info!(
+                "tutoring: frame bridge started for {node_id} ({}x{} q={quality} fps={fps})",
+                viewport.0,
+                viewport.1
+            );
 
             let frame_interval = Duration::from_millis(1000 / fps as u64);
             let mut last_emit = std::time::Instant::now();
@@ -1512,7 +1530,11 @@ impl TutoringManager {
             let stall_timeout = Duration::from_secs(30);
 
             loop {
-                let timeout = if frame_count == 0 { initial_timeout } else { stall_timeout };
+                let timeout = if frame_count == 0 {
+                    initial_timeout
+                } else {
+                    stall_timeout
+                };
                 let maybe_frame = match tokio::time::timeout(timeout, frames.next_frame()).await {
                     Ok(f) => f,
                     Err(_) => {
@@ -1543,7 +1565,8 @@ impl TutoringManager {
                             );
                             if frame_count == 1 {
                                 let raw = img.as_raw();
-                                let first_px: Vec<String> = raw.iter().take(8).map(|b| format!("{b:02x}")).collect();
+                                let first_px: Vec<String> =
+                                    raw.iter().take(8).map(|b| format!("{b:02x}")).collect();
                                 log::info!(
                                     "tutoring: frame bridge {node_id}: first 2 pixels (RGBA): [{}]",
                                     first_px.join(" ")
@@ -1570,8 +1593,10 @@ impl TutoringManager {
                         // Encode to JPEG (quality 60 for good size/quality tradeoff)
                         let mut jpeg_buf = Vec::with_capacity((width * height) as usize / 4);
                         let mut cursor = Cursor::new(&mut jpeg_buf);
-                        let encoder =
-                            image::codecs::jpeg::JpegEncoder::new_with_quality(&mut cursor, quality);
+                        let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(
+                            &mut cursor,
+                            quality,
+                        );
                         match encoder.write_image(
                             &rgb_data,
                             width,
@@ -1585,8 +1610,7 @@ impl TutoringManager {
                             }
                         }
 
-                        let jpeg_b64 =
-                            base64::engine::general_purpose::STANDARD.encode(&jpeg_buf);
+                        let jpeg_b64 = base64::engine::general_purpose::STANDARD.encode(&jpeg_buf);
 
                         let _ = app_handle.emit(
                             "tutoring:video-frame",

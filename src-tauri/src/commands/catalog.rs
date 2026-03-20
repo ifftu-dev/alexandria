@@ -13,8 +13,7 @@ use crate::domain::course_document::SignedCourseDocument;
 use crate::ipfs::course as ipfs_course;
 use crate::AppState;
 
-const BOOTSTRAP_PUBLIC_COURSES_JSON: &str =
-    include_str!("../../../bootstrap/public_courses.json");
+const BOOTSTRAP_PUBLIC_COURSES_JSON: &str = include_str!("../../../bootstrap/public_courses.json");
 
 #[derive(Debug, Deserialize)]
 struct BootstrapPayload {
@@ -323,13 +322,14 @@ pub async fn hydrate_catalog_courses(
             )
             .map_err(|e| e.to_string())?;
 
-        let mapped = stmt.query_map(params![max as i64], |row| {
-            Ok(CatalogHydrateRow {
-                content_cid: row.get(0)?,
-                version: row.get(1)?,
+        let mapped = stmt
+            .query_map(params![max as i64], |row| {
+                Ok(CatalogHydrateRow {
+                    content_cid: row.get(0)?,
+                    version: row.get(1)?,
+                })
             })
-        })
-        .map_err(|e| e.to_string())?;
+            .map_err(|e| e.to_string())?;
 
         mapped
             .collect::<Result<Vec<_>, _>>()
@@ -364,7 +364,8 @@ pub async fn hydrate_catalog_courses(
         conn.execute_batch("BEGIN")
             .map_err(|e| format!("hydrate tx begin failed: {e}"))?;
 
-        let tags_json = serde_json::to_string(&signed_doc.tags).unwrap_or_else(|_| "[]".to_string());
+        let tags_json =
+            serde_json::to_string(&signed_doc.tags).unwrap_or_else(|_| "[]".to_string());
         let skill_ids_json =
             serde_json::to_string(&signed_doc.skill_ids).unwrap_or_else(|_| "[]".to_string());
 
@@ -447,9 +448,7 @@ pub async fn hydrate_catalog_courses(
 /// so new devices have immediate access to public/demo content before P2P
 /// discovery has propagated.
 #[tauri::command]
-pub async fn bootstrap_public_catalog(
-    state: State<'_, AppState>,
-) -> Result<u32, String> {
+pub async fn bootstrap_public_catalog(state: State<'_, AppState>) -> Result<u32, String> {
     let payload: BootstrapPayload = serde_json::from_str(BOOTSTRAP_PUBLIC_COURSES_JSON)
         .map_err(|e| format!("invalid bootstrap payload: {e}"))?;
 

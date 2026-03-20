@@ -108,7 +108,11 @@ pub async fn integrity_submit_snapshot(
         return Err("session not found or not active".into());
     }
 
-    let snapshot_id = entity_id(&[&req.session_id, &req.element_id, &chrono::Utc::now().to_rfc3339()]);
+    let snapshot_id = entity_id(&[
+        &req.session_id,
+        &req.element_id,
+        &chrono::Utc::now().to_rfc3339(),
+    ]);
 
     // Composite score is the weighted integrity score from the client
     let composite = req.integrity_score;
@@ -260,14 +264,16 @@ pub async fn integrity_list_sessions(
             (
                 "SELECT id, enrollment_id, status, integrity_score, started_at, ended_at
                  FROM integrity_sessions WHERE status = ?1
-                 ORDER BY started_at DESC".to_string(),
+                 ORDER BY started_at DESC"
+                    .to_string(),
                 vec![Box::new(s.clone())],
             )
         } else {
             (
                 "SELECT id, enrollment_id, status, integrity_score, started_at, ended_at
                  FROM integrity_sessions
-                 ORDER BY started_at DESC".to_string(),
+                 ORDER BY started_at DESC"
+                    .to_string(),
                 vec![],
             )
         };

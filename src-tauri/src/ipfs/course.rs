@@ -40,8 +40,8 @@ pub fn sign_course_document(
     payload: &CourseDocumentPayload,
     key: &SigningKey,
 ) -> Result<SignedCourseDocument, CourseDocError> {
-    let payload_json = serde_json::to_vec(payload)
-        .map_err(|e| CourseDocError::Serialization(e.to_string()))?;
+    let payload_json =
+        serde_json::to_vec(payload).map_err(|e| CourseDocError::Serialization(e.to_string()))?;
 
     let signature = key.sign(&payload_json);
     let public_key = key.verifying_key();
@@ -69,8 +69,8 @@ pub fn sign_course_document(
 /// the included public key.
 pub fn verify_course_document(signed: &SignedCourseDocument) -> Result<(), CourseDocError> {
     let payload = signed.payload();
-    let payload_json = serde_json::to_vec(&payload)
-        .map_err(|e| CourseDocError::Serialization(e.to_string()))?;
+    let payload_json =
+        serde_json::to_vec(&payload).map_err(|e| CourseDocError::Serialization(e.to_string()))?;
 
     let sig_bytes: [u8; 64] = hex::decode(&signed.signature)
         .map_err(|e| CourseDocError::InvalidPublicKey(format!("bad signature hex: {e}")))?
@@ -99,8 +99,8 @@ pub async fn publish_course_document(
     node: &ContentNode,
     signed: &SignedCourseDocument,
 ) -> Result<PublishCourseResult, CourseDocError> {
-    let doc_json = serde_json::to_vec(signed)
-        .map_err(|e| CourseDocError::Serialization(e.to_string()))?;
+    let doc_json =
+        serde_json::to_vec(signed).map_err(|e| CourseDocError::Serialization(e.to_string()))?;
 
     let result = content::add_bytes(node, &doc_json)
         .await
@@ -166,7 +166,8 @@ mod tests {
         CourseDocumentPayload {
             version: 1,
             course_id: "test_course_001".to_string(),
-            author_address: "stake_test1uqfu74w3wh4gfzu8m6e7j987h4lq9r3t7ef5gaw497uu85qsqfy".to_string(),
+            author_address: "stake_test1uqfu74w3wh4gfzu8m6e7j987h4lq9r3t7ef5gaw497uu85qsqfy"
+                .to_string(),
             title: "Algorithm Design and Analysis".to_string(),
             description: Some("A comprehensive course on algorithms".to_string()),
             thumbnail_hash: None,

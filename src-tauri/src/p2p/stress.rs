@@ -354,7 +354,10 @@ mod tests {
             .conn()
             .query_row("SELECT COUNT(*) FROM catalog", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(count, 1, "repeated announcements should not create duplicates");
+        assert_eq!(
+            count, 1,
+            "repeated announcements should not create duplicates"
+        );
     }
 
     /// Monotonic version enforcement under rapid version progression.
@@ -561,7 +564,10 @@ mod tests {
             // Each signer has a unique stake address (identity binding requires 1:1)
             let stake_address = format!("stake_test1usigner_{i}");
             // Each signer sends a unique payload (dedup is on payload hash)
-            let payload = format!("{{\"signer\":{i},\"nonce\":\"{}\"}}", hex::encode(key.verifying_key().to_bytes()));
+            let payload = format!(
+                "{{\"signer\":{i},\"nonce\":\"{}\"}}",
+                hex::encode(key.verifying_key().to_bytes())
+            );
             let msg = sign_gossip_message(
                 "/alexandria/evidence/1.0",
                 payload.into_bytes(),
@@ -653,7 +659,10 @@ mod tests {
 
         // 200/3 = 67 invalid (i%3==0 for i=0,3,6,...,198 → 67 messages)
         // 200 - 67 = 133 valid
-        assert_eq!(invalid_count, 67, "all tampered messages should be rejected");
+        assert_eq!(
+            invalid_count, 67,
+            "all tampered messages should be rejected"
+        );
         assert_eq!(valid_count, 133, "all properly signed messages should pass");
     }
 
@@ -765,7 +774,10 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(status, "ts_100", "highest timestamp should win regardless of arrival order");
+        assert_eq!(
+            status, "ts_100",
+            "highest timestamp should win regardless of arrival order"
+        );
     }
 
     /// Append-only merge handles 200 unique evidence records without duplicates.
@@ -870,8 +882,8 @@ mod tests {
         // Enqueue 100 changes
         let ts_str = chrono::Utc::now().to_rfc3339();
         for i in 0..100 {
-            let row_data = serde_json::to_string(&serde_json::json!({"id": format!("enr_{i}")}))
-                .unwrap();
+            let row_data =
+                serde_json::to_string(&serde_json::json!({"id": format!("enr_{i}")})).unwrap();
             enqueue_change(
                 conn,
                 "enrollments",
@@ -920,7 +932,10 @@ mod tests {
 
         // Prune — all delivered to all devices
         let pruned = prune_delivered_queue(conn).unwrap();
-        assert_eq!(pruned, 100, "all 100 items should be pruned after full delivery");
+        assert_eq!(
+            pruned, 100,
+            "all 100 items should be pruned after full delivery"
+        );
 
         // Queue should be empty now
         let remaining: i64 = conn
@@ -956,11 +971,9 @@ mod tests {
         }
 
         let count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM evidence_challenges",
-                [],
-                |row| row.get(0),
-            )
+            .query_row("SELECT COUNT(*) FROM evidence_challenges", [], |row| {
+                row.get(0)
+            })
             .unwrap();
         assert_eq!(count, 50, "all 50 challenges should be created");
     }
@@ -1001,13 +1014,8 @@ mod tests {
         assert_eq!(vote_count, 5);
 
         // Attempt double vote — should fail
-        let double_vote = challenge::vote_on_challenge(
-            conn,
-            &ch.id,
-            "stake_test1ucommittee1",
-            false,
-            None,
-        );
+        let double_vote =
+            challenge::vote_on_challenge(conn, &ch.id, "stake_test1ucommittee1", false, None);
         assert!(double_vote.is_err());
         assert!(double_vote.unwrap_err().contains("already voted"));
 
@@ -1062,11 +1070,9 @@ mod tests {
 
         // 6 evidence records should be deleted (3 upheld × 2 per challenge)
         let remaining: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM evidence_records",
-                [],
-                |row| row.get(0),
-            )
+            .query_row("SELECT COUNT(*) FROM evidence_records", [], |row| {
+                row.get(0)
+            })
             .unwrap();
         assert_eq!(remaining, 4, "6 of 10 evidence records should be deleted");
     }
@@ -1278,7 +1284,10 @@ mod tests {
 
         // No more unattested evidence
         let remaining = attestation::list_unattested_evidence(conn).unwrap();
-        assert!(remaining.is_empty(), "all evidence should be fully attested now");
+        assert!(
+            remaining.is_empty(),
+            "all evidence should be fully attested now"
+        );
     }
 
     // ===================================================================
@@ -1301,7 +1310,10 @@ mod tests {
         msg.stake_address = String::new();
 
         let result = validator.validate(&msg);
-        assert!(result.is_err(), "empty stake_address should be rejected for taxonomy");
+        assert!(
+            result.is_err(),
+            "empty stake_address should be rejected for taxonomy"
+        );
     }
 
     /// Non-JSON payload is rejected by schema validation.
@@ -1319,7 +1331,10 @@ mod tests {
         );
 
         let result = validator.validate(&msg);
-        assert!(result.is_err(), "binary garbage payload should fail schema check");
+        assert!(
+            result.is_err(),
+            "binary garbage payload should fail schema check"
+        );
     }
 
     /// Message with timestamp far in the future is rejected.
@@ -1564,8 +1579,12 @@ mod tests {
         let (tx1, _rx1) = mpsc::channel::<P2pEvent>(256);
         let (tx2, mut rx2) = mpsc::channel::<P2pEvent>(256);
 
-        let mut node1 = start_node(kp1, tx1, vec![]).await.expect("node1 should start");
-        let mut node2 = start_node(kp2, tx2, vec![]).await.expect("node2 should start");
+        let mut node1 = start_node(kp1, tx1, vec![])
+            .await
+            .expect("node1 should start");
+        let mut node2 = start_node(kp2, tx2, vec![])
+            .await
+            .expect("node2 should start");
 
         // Wait for mDNS discovery (nodes on localhost discover each other)
         // Give them up to 10 seconds to connect
@@ -1681,7 +1700,8 @@ mod tests {
                     n1_sees_n2 || n2_sees_n1,
                     "at least one node should discover the other. \
                      node1 peers: {:?}, node2 peers: {:?}",
-                    peers1, peers2
+                    peers1,
+                    peers2
                 );
             }
             Err(_) => {

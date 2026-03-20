@@ -21,24 +21,25 @@ pub async fn list_courses(
 ) -> Result<Vec<Course>, String> {
     let db = state.db.lock().unwrap();
 
-    let (sql, param_values): (String, Vec<Box<dyn rusqlite::types::ToSql>>) =
-        if let Some(ref s) = status {
-            (
+    let (sql, param_values): (String, Vec<Box<dyn rusqlite::types::ToSql>>) = if let Some(ref s) =
+        status
+    {
+        (
                 "SELECT id, title, description, author_address, author_name, content_cid, thumbnail_cid, \
                  thumbnail_svg, tags, skill_ids, version, status, published_at, on_chain_tx, created_at, updated_at \
                  FROM courses WHERE status = ?1 ORDER BY updated_at DESC"
                     .to_string(),
                 vec![Box::new(s.clone())],
             )
-        } else {
-            (
+    } else {
+        (
                 "SELECT id, title, description, author_address, author_name, content_cid, thumbnail_cid, \
                  thumbnail_svg, tags, skill_ids, version, status, published_at, on_chain_tx, created_at, updated_at \
                  FROM courses ORDER BY updated_at DESC"
                     .to_string(),
                 vec![],
             )
-        };
+    };
 
     let params_ref: Vec<&dyn rusqlite::types::ToSql> =
         param_values.iter().map(|v| v.as_ref()).collect();
@@ -59,10 +60,8 @@ pub async fn list_courses(
                 content_cid: row.get(5)?,
                 thumbnail_cid: row.get(6)?,
                 thumbnail_svg: row.get(7)?,
-                tags: tags_json
-                    .and_then(|j| serde_json::from_str(&j).ok()),
-                skill_ids: skill_ids_json
-                    .and_then(|j| serde_json::from_str(&j).ok()),
+                tags: tags_json.and_then(|j| serde_json::from_str(&j).ok()),
+                skill_ids: skill_ids_json.and_then(|j| serde_json::from_str(&j).ok()),
                 version: row.get(10)?,
                 status: row.get(11)?,
                 published_at: row.get(12)?,
@@ -144,7 +143,11 @@ pub async fn create_course(
         .map_err(|e| format!("no identity found — generate a wallet first: {}", e))?;
 
     // Generate deterministic ID
-    let id = entity_id(&[&author_address, &req.title, &chrono::Utc::now().to_rfc3339()]);
+    let id = entity_id(&[
+        &author_address,
+        &req.title,
+        &chrono::Utc::now().to_rfc3339(),
+    ]);
 
     let tags_json = req.tags.as_ref().map(|t| serde_json::to_string(t).unwrap());
     let skill_ids_json = req
@@ -214,13 +217,9 @@ pub async fn update_course(
     set_clauses.push("updated_at = datetime('now')");
     values.push(Box::new(course_id.clone()));
 
-    let sql = format!(
-        "UPDATE courses SET {} WHERE id = ?",
-        set_clauses.join(", ")
-    );
+    let sql = format!("UPDATE courses SET {} WHERE id = ?", set_clauses.join(", "));
 
-    let params: Vec<&dyn rusqlite::types::ToSql> =
-        values.iter().map(|v| v.as_ref()).collect();
+    let params: Vec<&dyn rusqlite::types::ToSql> = values.iter().map(|v| v.as_ref()).collect();
 
     let rows = db
         .conn()
@@ -236,10 +235,7 @@ pub async fn update_course(
 
 /// Delete a course.
 #[tauri::command]
-pub async fn delete_course(
-    state: State<'_, AppState>,
-    course_id: String,
-) -> Result<(), String> {
+pub async fn delete_course(state: State<'_, AppState>, course_id: String) -> Result<(), String> {
     let db = state.db.lock().unwrap();
 
     let rows = db
@@ -289,12 +285,13 @@ pub async fn publish_course(
                 )
                 .map_err(|e| e.to_string())?;
 
-            let rows = stmt.query_map(params![course_id], |row| {
-                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
-            })
-            .map_err(|e| e.to_string())?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())?;
+            let rows = stmt
+                .query_map(params![course_id], |row| {
+                    Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+                })
+                .map_err(|e| e.to_string())?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| e.to_string())?;
             rows
         };
 
@@ -355,8 +352,8 @@ pub async fn publish_course(
     };
 
     // Sign the document
-    let signed = ipfs_course::sign_course_document(&payload, &w.signing_key)
-        .map_err(|e| e.to_string())?;
+    let signed =
+        ipfs_course::sign_course_document(&payload, &w.signing_key).map_err(|e| e.to_string())?;
 
     // Publish to iroh
     let result = ipfs_course::publish_course_document(&state.content_node, &signed)
@@ -402,13 +399,12 @@ pub async fn publish_course(
 
         // Sign the announcement payload to get the signature for the catalog entry
         let ann_json = serde_json::to_vec(&announcement).map_err(|e| e.to_string())?;
-        let signed_ann =
-            crate::p2p::signing::sign_gossip_message(
-                crate::p2p::types::TOPIC_CATALOG,
-                ann_json,
-                &w.signing_key,
-                &w.stake_address,
-            );
+        let signed_ann = crate::p2p::signing::sign_gossip_message(
+            crate::p2p::types::TOPIC_CATALOG,
+            ann_json,
+            &w.signing_key,
+            &w.stake_address,
+        );
         let signature_hex = hex::encode(&signed_ann.signature);
 
         // Insert into local catalog table (author's own course, pinned=1)
@@ -592,10 +588,7 @@ mod tests {
 }
 
 /// Internal helper: fetch a course by ID from the connection.
-fn get_course_by_id(
-    conn: &rusqlite::Connection,
-    id: &str,
-) -> Result<Course, String> {
+fn get_course_by_id(conn: &rusqlite::Connection, id: &str) -> Result<Course, String> {
     conn.query_row(
         "SELECT id, title, description, author_address, author_name, content_cid, thumbnail_cid, \
          thumbnail_svg, tags, skill_ids, version, status, published_at, on_chain_tx, created_at, updated_at \

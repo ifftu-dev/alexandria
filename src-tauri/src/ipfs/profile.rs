@@ -34,12 +34,15 @@ pub enum ProfileError {
 /// Sign a profile payload with the given Ed25519 signing key.
 ///
 /// The signature covers the canonical JSON serialization of the payload.
-pub fn sign_profile(payload: &ProfilePayload, key: &SigningKey) -> Result<SignedProfile, ProfileError> {
+pub fn sign_profile(
+    payload: &ProfilePayload,
+    key: &SigningKey,
+) -> Result<SignedProfile, ProfileError> {
     // Canonical JSON serialization (serde_json with sorted keys would be
     // ideal, but the struct field order is deterministic, which is sufficient
     // for our use case since we always serialize the same struct).
-    let payload_json = serde_json::to_vec(payload)
-        .map_err(|e| ProfileError::Serialization(e.to_string()))?;
+    let payload_json =
+        serde_json::to_vec(payload).map_err(|e| ProfileError::Serialization(e.to_string()))?;
 
     let signature = key.sign(&payload_json);
     let public_key = key.verifying_key();
@@ -63,8 +66,8 @@ pub fn sign_profile(payload: &ProfilePayload, key: &SigningKey) -> Result<Signed
 /// the included public key.
 pub fn verify_profile(signed: &SignedProfile) -> Result<(), ProfileError> {
     let payload = signed.payload();
-    let payload_json = serde_json::to_vec(&payload)
-        .map_err(|e| ProfileError::Serialization(e.to_string()))?;
+    let payload_json =
+        serde_json::to_vec(&payload).map_err(|e| ProfileError::Serialization(e.to_string()))?;
 
     let sig_bytes: [u8; 64] = hex::decode(&signed.signature)
         .map_err(|e| ProfileError::InvalidPublicKey(format!("bad signature hex: {e}")))?
@@ -119,8 +122,8 @@ pub async fn resolve_profile(
         .await
         .map_err(|e| ProfileError::NotFound(e.to_string()))?;
 
-    let signed: SignedProfile = serde_json::from_slice(&bytes)
-        .map_err(|e| ProfileError::Deserialization(e.to_string()))?;
+    let signed: SignedProfile =
+        serde_json::from_slice(&bytes).map_err(|e| ProfileError::Deserialization(e.to_string()))?;
 
     // Verify the signature before returning
     verify_profile(&signed)?;
@@ -218,8 +221,7 @@ mod tests {
         assert!(json.contains("\"public_key\""));
 
         // Verify it round-trips
-        let deserialized: SignedProfile =
-            serde_json::from_str(&json).expect("deserialize");
+        let deserialized: SignedProfile = serde_json::from_str(&json).expect("deserialize");
         assert!(verify_profile(&deserialized).is_ok());
     }
 

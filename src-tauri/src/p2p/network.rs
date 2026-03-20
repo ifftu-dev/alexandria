@@ -247,13 +247,9 @@ pub enum SwarmCommand {
         reply: mpsc::Sender<Result<(), NetworkError>>,
     },
     /// Get the current network status.
-    Status {
-        reply: mpsc::Sender<NetworkStatus>,
-    },
+    Status { reply: mpsc::Sender<NetworkStatus> },
     /// Get the list of connected peers.
-    Peers {
-        reply: mpsc::Sender<Vec<PeerId>>,
-    },
+    Peers { reply: mpsc::Sender<Vec<PeerId>> },
     /// Shutdown the node.
     Shutdown,
 }
@@ -313,9 +309,7 @@ pub async fn start_node(
         .with_quic()
         .with_relay_client(noise::Config::new, yamux::Config::default)
         .map_err(|e| NetworkError::SwarmBuild(format!("relay client: {e}")))?
-        .with_behaviour(|key, relay_behaviour| {
-            build_behaviour(key, peer_id, relay_behaviour)
-        })
+        .with_behaviour(|key, relay_behaviour| build_behaviour(key, peer_id, relay_behaviour))
         .map_err(|e| NetworkError::SwarmBuild(e.to_string()))?
         .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(300)))
         .build();
@@ -372,9 +366,7 @@ pub async fn start_node(
             .behaviour_mut()
             .gossipsub
             .subscribe(&topic)
-            .map_err(|e| NetworkError::Subscribe(
-                format!("topic '{}': {}", topic_str, e),
-            ))?;
+            .map_err(|e| NetworkError::Subscribe(format!("topic '{}': {}", topic_str, e)))?;
     }
 
     diag::log("start_node: topics subscribed, binding listener...");
@@ -384,9 +376,7 @@ pub async fn start_node(
     #[cfg(desktop)]
     {
         // Listen on both TCP and QUIC so desktop can connect to mobile (TCP) and other desktops (QUIC)
-        let tcp_addr: libp2p::Multiaddr = "/ip4/0.0.0.0/tcp/0"
-            .parse()
-            .expect("valid multiaddr");
+        let tcp_addr: libp2p::Multiaddr = "/ip4/0.0.0.0/tcp/0".parse().expect("valid multiaddr");
         swarm
             .listen_on(tcp_addr)
             .map_err(|e| NetworkError::Listen(e.to_string()))?;
@@ -409,15 +399,11 @@ pub async fn start_node(
     #[cfg(mobile)]
     {
         diag::log("start_node: listen_on /ip4/0.0.0.0/tcp/0...");
-        let listen_addr: libp2p::Multiaddr = "/ip4/0.0.0.0/tcp/0"
-            .parse()
-            .expect("valid multiaddr");
-        swarm
-            .listen_on(listen_addr)
-            .map_err(|e| {
-                diag::log(&format!("start_node: listen_on FAILED: {e}"));
-                NetworkError::Listen(e.to_string())
-            })?;
+        let listen_addr: libp2p::Multiaddr = "/ip4/0.0.0.0/tcp/0".parse().expect("valid multiaddr");
+        swarm.listen_on(listen_addr).map_err(|e| {
+            diag::log(&format!("start_node: listen_on FAILED: {e}"));
+            NetworkError::Listen(e.to_string())
+        })?;
         diag::log("start_node: listen_on OK");
 
         if let Ok(ipv6_addr) = "/ip6/::/tcp/0".parse::<libp2p::Multiaddr>() {
@@ -454,7 +440,10 @@ pub async fn start_node(
     // by any means (DHT, peer exchange, relay), they remember each other
     // and reconnect on next startup.
     if !known_peers.is_empty() {
-        diag::log(&format!("start_node: dialing {} known peers...", known_peers.len()));
+        diag::log(&format!(
+            "start_node: dialing {} known peers...",
+            known_peers.len()
+        ));
         for kp in &known_peers {
             if let Ok(pid) = kp.peer_id.parse::<PeerId>() {
                 if pid == peer_id {
@@ -464,8 +453,13 @@ pub async fn start_node(
                     if let Ok(addr) = addr_str.parse::<libp2p::Multiaddr>() {
                         let dial_addr = addr.with(libp2p::multiaddr::Protocol::P2p(pid));
                         match swarm.dial(dial_addr.clone()) {
-                            Ok(_) => diag::log(&format!("start_node: dialing known peer {}", kp.peer_id)),
-                            Err(e) => diag::log(&format!("start_node: known peer dial failed {}: {e}", kp.peer_id)),
+                            Ok(_) => {
+                                diag::log(&format!("start_node: dialing known peer {}", kp.peer_id))
+                            }
+                            Err(e) => diag::log(&format!(
+                                "start_node: known peer dial failed {}: {e}",
+                                kp.peer_id
+                            )),
                         }
                     }
                 }
@@ -482,7 +476,9 @@ pub async fn start_node(
     let validator = Arc::new(MessageValidator::new());
 
     // Spawn the swarm event loop
-    tokio::spawn(swarm_event_loop(swarm, command_rx, event_tx, validator, None));
+    tokio::spawn(swarm_event_loop(
+        swarm, command_rx, event_tx, validator, None,
+    ));
 
     diag::log("start_node: event loop spawned, node running");
 
@@ -557,13 +553,10 @@ fn build_behaviour(
     // Using `/alexandria/kad/1.0` isolates us from the public IPFS DHT.
     // All nodes on this DHT are Alexandria nodes. The relay server is
     // the bootstrap node and always runs in Kademlia server mode.
-    let mut kademlia_config =
-        kad::Config::new(libp2p::StreamProtocol::new("/alexandria/kad/1.0"));
+    let mut kademlia_config = kad::Config::new(libp2p::StreamProtocol::new("/alexandria/kad/1.0"));
     kademlia_config.set_query_timeout(Duration::from_secs(60));
     // Lower replication factor for small-network friendliness (default is 20)
-    kademlia_config.set_replication_factor(
-        std::num::NonZeroUsize::new(8).unwrap(),
-    );
+    kademlia_config.set_replication_factor(std::num::NonZeroUsize::new(8).unwrap());
     // Provider records expire after 24h (default). Re-publication every
     // 3 min in the event loop keeps them alive. This ensures stale peers
     // are cleaned up if they go offline without graceful shutdown.
@@ -576,21 +569,15 @@ fn build_behaviour(
 
     // Identify protocol (needed by GossipSub and Kademlia)
     let identify = identify::Behaviour::new(
-        identify::Config::new(
-            "/alexandria/id/1.0".to_string(),
-            keypair.public(),
-        )
-        .with_agent_version(identify_agent_version())
-        .with_push_listen_addr_updates(true),
+        identify::Config::new("/alexandria/id/1.0".to_string(), keypair.public())
+            .with_agent_version(identify_agent_version())
+            .with_push_listen_addr_updates(true),
     );
 
     diag::log("build_behaviour: creating autonat...");
 
     // AutoNAT — peer-assisted NAT detection (spec §7.5)
-    let autonat = autonat::Behaviour::new(
-        peer_id,
-        build_autonat_config(),
-    );
+    let autonat = autonat::Behaviour::new(peer_id, build_autonat_config());
 
     diag::log("build_behaviour: creating relay server...");
 
@@ -679,9 +666,7 @@ async fn swarm_event_loop(
             let topic = IdentTopic::new(TOPIC_PEER_EXCHANGE);
             match swarm.behaviour_mut().gossipsub.publish(topic, data) {
                 Ok(_) => {
-                    diag::log(&format!(
-                        "Peer exchange: broadcast {addr_count} addresses"
-                    ));
+                    diag::log(&format!("Peer exchange: broadcast {addr_count} addresses"));
                 }
                 Err(e) => {
                     // InsufficientPeers is expected when no gossipsub peers are
@@ -728,7 +713,11 @@ async fn swarm_event_loop(
     }
 
     /// Helper: persist a peer's addresses to the DB so we can reconnect on next startup.
-    fn save_peer_to_db(db: &Option<Arc<std::sync::Mutex<Database>>>, peer_id: &str, addresses: &[String]) {
+    fn save_peer_to_db(
+        db: &Option<Arc<std::sync::Mutex<Database>>>,
+        peer_id: &str,
+        addresses: &[String],
+    ) {
         if addresses.is_empty() {
             return;
         }
@@ -1130,7 +1119,10 @@ impl P2pNode {
             })
             .await
             .map_err(|_| NetworkError::NotRunning)?;
-        reply_rx.recv().await.unwrap_or(Err(NetworkError::NotRunning))
+        reply_rx
+            .recv()
+            .await
+            .unwrap_or(Err(NetworkError::NotRunning))
     }
 
     /// Get the current network status.

@@ -60,10 +60,7 @@ pub async fn list_enrollments(
 
 /// Enroll in a course.
 #[tauri::command]
-pub async fn enroll(
-    state: State<'_, AppState>,
-    course_id: String,
-) -> Result<Enrollment, String> {
+pub async fn enroll(state: State<'_, AppState>, course_id: String) -> Result<Enrollment, String> {
     let db = state.db.lock().unwrap();
 
     // Get the local user's stake address for deterministic ID
@@ -324,11 +321,8 @@ pub async fn update_progress(
                         let sig_hex = hex::encode(&signed.signature);
 
                         // Mark as sent in sync_log
-                        let _ = p2p_evidence::mark_evidence_broadcast(
-                            &db,
-                            &ann.evidence_id,
-                            &sig_hex,
-                        );
+                        let _ =
+                            p2p_evidence::mark_evidence_broadcast(&db, &ann.evidence_id, &sig_hex);
 
                         Some((signed, ann.evidence_id.clone(), ann.skill_id.clone()))
                     })
