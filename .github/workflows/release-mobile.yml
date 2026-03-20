@@ -38,7 +38,7 @@ jobs:
           token: ${{ secrets.CROSS_REPO_PAT }}
 
       - name: Setup Rust 1.83.0 (MSRV)
-        uses: dtolnay/rust-toolchain@1.85.0
+        uses: dtolnay/rust-toolchain@1.89.0
         with:
           targets: aarch64-apple-ios
 
@@ -61,6 +61,9 @@ jobs:
       - name: Install Tauri CLI
         working-directory: alexandria
         run: npm install --save-dev @tauri-apps/cli@latest
+
+      - name: Install cargo-tauri (required by Xcode pre-build script)
+        run: cargo install tauri-cli --version "^2" --locked
 
       - name: Write Apple API Key
         run: echo "${{ secrets.APPLE_API_KEY_CONTENT }}" > $RUNNER_TEMP/AuthKey.p8
@@ -114,7 +117,7 @@ jobs:
           echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/26.3.11579264" >> $GITHUB_ENV
 
       - name: Setup Rust 1.83.0 (MSRV)
-        uses: dtolnay/rust-toolchain@1.85.0
+        uses: dtolnay/rust-toolchain@1.89.0
         with:
           targets: aarch64-linux-android
 
@@ -138,6 +141,9 @@ jobs:
         working-directory: alexandria
         run: npm install --save-dev @tauri-apps/cli@latest
 
+      - name: Install cargo-tauri (required by Tauri Android build internals)
+        run: cargo install tauri-cli --version "^2" --locked
+
       - name: Decode Android keystore
         run: |
           echo "${{ secrets.ANDROID_KEYSTORE }}" | base64 --decode > $RUNNER_TEMP/release.jks
@@ -155,12 +161,10 @@ jobs:
         env:
           ANDROID_NDK_HOME: ${{ env.ANDROID_NDK_HOME }}
         run: |
-          # Build via Tauri; pass Gradle signing properties to sign the APK
-          npx tauri android build -- \
-            -Pandroid.injected.signing.store.file=${{ runner.temp }}/release.jks \
-            -Pandroid.injected.signing.store.password=${{ secrets.ANDROID_KEYSTORE_PASSWORD }} \
-            -Pandroid.injected.signing.key.alias=${{ secrets.ANDROID_KEY_ALIAS }} \
-            -Pandroid.injected.signing.key.password=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          # Signing is configured via keystore.properties written above.
+          # Tauri v2 reads that file automatically; do not pass -P flags here
+          # as Tauri forwards unknown args to cargo, not Gradle.
+          npx tauri android build
 
       - name: Upload Android artifacts
         uses: softprops/action-gh-release@v2

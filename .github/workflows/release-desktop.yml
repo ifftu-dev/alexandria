@@ -60,7 +60,7 @@ jobs:
           token: ${{ secrets.CROSS_REPO_PAT }}
 
       - name: Setup Rust 1.83.0 (MSRV)
-        uses: dtolnay/rust-toolchain@1.85.0
+        uses: dtolnay/rust-toolchain@1.89.0
 
       - name: Add Universal Apple targets
         run: rustup target add x86_64-apple-darwin aarch64-apple-darwin
@@ -164,7 +164,7 @@ jobs:
             pkg-config
 
       - name: Setup Rust 1.83.0 (MSRV)
-        uses: dtolnay/rust-toolchain@1.85.0
+        uses: dtolnay/rust-toolchain@1.89.0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -240,7 +240,7 @@ jobs:
             pkg-config
 
       - name: Setup Rust 1.83.0 (MSRV)
-        uses: dtolnay/rust-toolchain@1.85.0
+        uses: dtolnay/rust-toolchain@1.89.0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -292,7 +292,7 @@ jobs:
           token: ${{ secrets.CROSS_REPO_PAT }}
 
       - name: Setup Rust 1.83.0 (MSRV)
-        uses: dtolnay/rust-toolchain@1.85.0
+        uses: dtolnay/rust-toolchain@1.89.0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
