@@ -274,6 +274,8 @@ jobs:
     needs: create-release
     runs-on: windows-latest
     timeout-minutes: 90
+    env:
+      HAS_WINDOWS_CERT: ${{ secrets.WINDOWS_CERTIFICATE != '' }}
     steps:
       - name: Checkout alexandria
         uses: actions/checkout@v4
@@ -320,7 +322,7 @@ jobs:
           includeUpdaterJson: false
 
       - name: Sign Windows installer (Authenticode)
-        if: ${{ secrets.WINDOWS_CERTIFICATE != '' }}
+        if: env.HAS_WINDOWS_CERT == 'true'
         shell: powershell
         env:
           WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
@@ -343,7 +345,7 @@ jobs:
           Remove-Item -Force $certPath
 
       - name: Re-upload signed installer
-        if: ${{ secrets.WINDOWS_CERTIFICATE != '' }}
+        if: env.HAS_WINDOWS_CERT == 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name || inputs.tag }}
