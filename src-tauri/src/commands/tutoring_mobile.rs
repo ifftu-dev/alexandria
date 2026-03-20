@@ -58,6 +58,15 @@ pub struct DeviceList {
     pub cameras: Vec<CameraDeviceInfo>,
 }
 
+/// Helper: lock the database, handling poisoned mutex gracefully.
+fn lock_db(state: &AppState) -> Result<std::sync::MutexGuard<'_, crate::db::Database>, String> {
+    state.db.lock().map_err(|e| {
+        let msg = format!("database mutex poisoned: {e}");
+        crate::diag::log(&msg);
+        msg
+    })
+}
+
 /// Create a new tutoring room (host, audio-only).
 #[tauri::command]
 pub async fn tutoring_create_room(
@@ -99,7 +108,7 @@ pub async fn tutoring_create_room(
 
     // Persist to database
     {
-        let db = state.db.lock().unwrap();
+        let db = lock_db(&state)?;
         db.conn()
             .execute(
                 "INSERT INTO tutoring_sessions (id, title, ticket, status) VALUES (?1, ?2, ?3, 'active')",
@@ -161,7 +170,7 @@ pub async fn tutoring_join_room(
 
     // Persist to database
     {
-        let db = state.db.lock().unwrap();
+        let db = lock_db(&state)?;
         db.conn()
             .execute(
                 "INSERT INTO tutoring_sessions (id, title, ticket, status) VALUES (?1, ?2, ?3, 'active')",
@@ -194,7 +203,7 @@ pub async fn tutoring_leave_room(state: State<'_, AppState>) -> Result<(), Strin
 
     // Update database
     if let Some(id) = session_id {
-        let db = state.db.lock().unwrap();
+        let db = lock_db(&state)?;
         db.conn()
             .execute(
                 "UPDATE tutoring_sessions SET status = 'ended', ended_at = datetime('now') WHERE id = ?1",
@@ -263,7 +272,8 @@ pub async fn tutoring_peers(
 pub async fn tutoring_list_sessions(
     state: State<'_, AppState>,
 ) -> Result<Vec<TutoringSessionInfo>, String> {
-    let db = state.db.lock().unwrap();
+    crate::diag::log("tutoring_list_sessions: called");
+    let db = lock_db(&state)?;
     let mut stmt = db
         .conn()
         .prepare(
@@ -360,4 +370,12 @@ pub async fn tutoring_get_audio_level(
     state: State<'_, AppState>,
 ) -> Result<f32, String> {
     Ok(state.tutoring.get_mic_level().await)
+}
+
+/// Get diagnostic info about the current A/V pipeline state for debugging.
+#[tauri::command]
+pub async fn tutoring_diagnostics(
+    state: State<'_, AppState>,
+) -> Result<Option<crate::tutoring::manager_mobile::SessionDiagnostics>, String> {
+    Ok(state.tutoring.diagnostics().await)
 }

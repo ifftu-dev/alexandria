@@ -51,6 +51,7 @@ pub async fn tutoring_create_room(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<TutoringSessionInfo, String> {
+    log::info!("[cmd] tutoring_create_room: start");
     let content_node = &state.content_node;
 
     let endpoint = content_node
@@ -66,6 +67,7 @@ pub async fn tutoring_create_room(
         .await
         .ok_or("live not available")?;
 
+    log::info!("[cmd] tutoring_create_room: got endpoint/gossip/live, calling create_room...");
     let session_id = uuid::Uuid::new_v4().to_string();
     let name = display_name.unwrap_or_else(|| title.clone());
 
@@ -80,6 +82,7 @@ pub async fn tutoring_create_room(
         .create_room(session_id.clone(), title.clone(), name, &endpoint, gossip, live, app, devices)
         .await?;
 
+    log::info!("[cmd] tutoring_create_room: create_room returned, inserting into DB...");
     // Persist to database
     {
         let db = state.db.lock().unwrap();
@@ -88,9 +91,13 @@ pub async fn tutoring_create_room(
                 "INSERT INTO tutoring_sessions (id, title, ticket, status) VALUES (?1, ?2, ?3, 'active')",
                 params![session_id, title, ticket],
             )
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| {
+                log::error!("[cmd] tutoring_create_room: DB insert failed: {e}");
+                e.to_string()
+            })?;
     }
 
+    log::info!("[cmd] tutoring_create_room: done, returning to frontend");
     Ok(TutoringSessionInfo {
         id: session_id,
         title,
@@ -113,6 +120,7 @@ pub async fn tutoring_join_room(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<TutoringSessionInfo, String> {
+    log::info!("[cmd] tutoring_join_room: start");
     let content_node = &state.content_node;
 
     let endpoint = content_node
@@ -128,6 +136,7 @@ pub async fn tutoring_join_room(
         .await
         .ok_or("live not available")?;
 
+    log::info!("[cmd] tutoring_join_room: got endpoint/gossip/live, calling join_room...");
     let session_id = uuid::Uuid::new_v4().to_string();
     let title = title.unwrap_or_else(|| "Joined session".into());
     let name = display_name.unwrap_or_else(|| title.clone());
@@ -143,6 +152,7 @@ pub async fn tutoring_join_room(
         .join_room(session_id.clone(), title.clone(), name, &ticket, &endpoint, gossip, live, app, devices)
         .await?;
 
+    log::info!("[cmd] tutoring_join_room: join_room returned, inserting into DB...");
     // Persist to database
     {
         let db = state.db.lock().unwrap();
@@ -151,9 +161,13 @@ pub async fn tutoring_join_room(
                 "INSERT INTO tutoring_sessions (id, title, ticket, status) VALUES (?1, ?2, ?3, 'active')",
                 params![session_id, title, resolved_ticket],
             )
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| {
+                log::error!("[cmd] tutoring_join_room: DB insert failed: {e}");
+                e.to_string()
+            })?;
     }
 
+    log::info!("[cmd] tutoring_join_room: done, returning to frontend");
     Ok(TutoringSessionInfo {
         id: session_id,
         title,
@@ -408,4 +422,12 @@ pub async fn tutoring_get_audio_level(
     state: State<'_, AppState>,
 ) -> Result<f32, String> {
     Ok(state.tutoring.get_mic_level().await)
+}
+
+/// Get diagnostic info about the current A/V pipeline state for debugging.
+#[tauri::command]
+pub async fn tutoring_diagnostics(
+    state: State<'_, AppState>,
+) -> Result<Option<crate::tutoring::manager::SessionDiagnostics>, String> {
+    Ok(state.tutoring.diagnostics().await)
 }

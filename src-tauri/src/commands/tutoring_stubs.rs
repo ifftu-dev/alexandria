@@ -193,3 +193,10 @@ pub async fn tutoring_get_audio_level(
 ) -> Result<f32, String> {
     Ok(0.0)
 }
+
+#[tauri::command]
+pub async fn tutoring_diagnostics(
+    _state: State<'_, AppState>,
+) -> Result<Option<serde_json::Value>, String> {
+    Ok(None)
+}

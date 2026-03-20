@@ -13,12 +13,12 @@ pub struct HealthResponse {
 /// Check the health of the Alexandria node.
 #[tauri::command]
 pub async fn check_health(state: State<'_, AppState>) -> Result<HealthResponse, String> {
-    let db_status = {
-        let db = state.db.lock().unwrap();
-        match db.conn().query_row("SELECT 1", [], |_| Ok(())) {
+    let db_status = match state.db.lock() {
+        Ok(db) => match db.conn().query_row("SELECT 1", [], |_| Ok(())) {
             Ok(()) => "ok".to_string(),
             Err(e) => format!("error: {}", e),
-        }
+        },
+        Err(e) => format!("mutex poisoned: {}", e),
     };
 
     Ok(HealthResponse {

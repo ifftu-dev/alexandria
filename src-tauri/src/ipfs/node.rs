@@ -17,7 +17,9 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
+use iroh::endpoint::QuicTransportConfig;
 use iroh::protocol::Router;
 use iroh::{Endpoint, SecretKey};
 use iroh_blobs::store::fs::FsStore;
@@ -89,23 +91,42 @@ impl ContentNode {
         }
 
         // Create persistent blob store
+        crate::diag::log(&format!("node.start: FsStore::load at {}...", self.data_dir.display()));
         let store = FsStore::load(&self.data_dir)
             .await
             .map_err(|e| NodeError::StoreInit(e.to_string()))?;
+        crate::diag::log("node.start: FsStore loaded OK");
 
         log::info!("iroh blob store loaded at {}", self.data_dir.display());
 
         // Load or generate the node's persistent identity key
         let secret_key = load_or_generate_secret_key(&self.data_dir)?;
 
+        // QUIC transport: aggressive timeouts for real-time media.
+        // keep_alive=2s ensures the connection stays active during audio DTX gaps.
+        // idle_timeout=10s forces fast teardown of zombie connections — critical
+        // because a 120s timeout causes the mobile's MoQ publisher to deadlock on
+        // socket backpressure, preventing it from serving new subscriptions.
+        let transport_config = QuicTransportConfig::builder()
+            .keep_alive_interval(Duration::from_secs(2))
+            .max_idle_timeout(Some(
+                Duration::from_secs(10)
+                    .try_into()
+                    .expect("10s fits IdleTimeout"),
+            ))
+            .build();
+
         // Create QUIC endpoint with persistent identity
+        crate::diag::log("node.start: Endpoint::bind()...");
         let endpoint = Endpoint::builder()
             .secret_key(secret_key)
+            .transport_config(transport_config)
             .bind()
             .await
             .map_err(|e| NodeError::EndpointBind(e.to_string()))?;
 
         let node_id = endpoint.id();
+        crate::diag::log(&format!("node.start: endpoint bound, node_id={}", &node_id.to_string()[..12]));
         log::info!("iroh endpoint bound, node ID: {node_id}");
 
         // Register protocols on the shared router.
@@ -116,11 +137,13 @@ impl ContentNode {
         let gossip = Gossip::builder().spawn(endpoint.clone());
         let live = Live::new(endpoint.clone());
 
+        crate::diag::log("node.start: Router::builder().spawn()...");
         let router = Router::builder(endpoint)
             .accept(iroh_blobs::ALPN, blobs)
             .accept(iroh_gossip::ALPN, gossip.clone())
             .accept(iroh_live::ALPN, live.protocol_handler())
             .spawn();
+        crate::diag::log("node.start: router spawned OK");
 
         log::info!("iroh router started, accepting blobs + gossip + moq connections");
 

@@ -70,18 +70,26 @@ pub async fn p2p_start(state: State<'_, AppState>) -> Result<String, String> {
 
     // Load known peers from the database so we can reconnect to them.
     let known_peers: Vec<network::KnownPeer> = {
-        let db = state.db.lock().unwrap();
-        let mut stmt = db.conn().prepare(
-            "SELECT peer_id, addresses FROM peers WHERE addresses IS NOT NULL AND addresses != '[]'"
-        ).unwrap_or_else(|_| db.conn().prepare("SELECT 1, '[]' WHERE 0").unwrap());
-        stmt.query_map([], |row| {
-            let peer_id: String = row.get(0)?;
-            let addrs_json: String = row.get(1)?;
-            let addresses: Vec<String> = serde_json::from_str(&addrs_json).unwrap_or_default();
-            Ok(network::KnownPeer { peer_id, addresses })
-        })
-        .map(|rows| rows.filter_map(|r| r.ok()).collect())
-        .unwrap_or_default()
+        match state.db.lock() {
+            Ok(db) => {
+                db.conn().prepare(
+                    "SELECT peer_id, addresses FROM peers WHERE addresses IS NOT NULL AND addresses != '[]'"
+                ).ok().map(|mut stmt| {
+                    stmt.query_map([], |row| {
+                        let peer_id: String = row.get(0)?;
+                        let addrs_json: String = row.get(1)?;
+                        let addresses: Vec<String> = serde_json::from_str(&addrs_json).unwrap_or_default();
+                        Ok(network::KnownPeer { peer_id, addresses })
+                    })
+                    .map(|rows| rows.filter_map(|r| r.ok()).collect())
+                    .unwrap_or_default()
+                }).unwrap_or_default()
+            }
+            Err(e) => {
+                diag::log(&format!("p2p_start: DB mutex poisoned, skipping known peers: {e}"));
+                vec![]
+            }
+        }
     };
     diag::log(&format!("p2p_start: loaded {} known peers from DB", known_peers.len()));
 
@@ -119,17 +127,20 @@ pub async fn p2p_start(state: State<'_, AppState>) -> Result<String, String> {
                     }
                     crate::p2p::types::P2pEvent::GossipMessage { topic, message } => {
                         log::debug!("P2P event: gossip message on {topic}");
+                        let db = match db_events.lock() {
+                            Ok(db) => db,
+                            Err(e) => {
+                                log::error!("P2P gossip handler: DB mutex poisoned: {e}");
+                                continue;
+                            }
+                        };
                         if topic == TOPIC_CATALOG {
-                            let db = db_events.lock().unwrap();
                             let _ = p2p_catalog::handle_catalog_message(&db, message);
                         } else if topic == TOPIC_EVIDENCE {
-                            let db = db_events.lock().unwrap();
                             let _ = p2p_evidence::handle_evidence_message(&db, message);
                         } else if topic == TOPIC_TAXONOMY {
-                            let db = db_events.lock().unwrap();
                             let _ = p2p_taxonomy::handle_taxonomy_message(&db, message);
                         } else if topic == TOPIC_GOVERNANCE {
-                            let db = db_events.lock().unwrap();
                             let _ = p2p_governance::handle_governance_message(&db, message);
                         }
                     }

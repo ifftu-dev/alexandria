@@ -4,6 +4,7 @@ import { useLocalApi } from '@/composables/useLocalApi'
 import { useAuth } from '@/composables/useAuth'
 import { useP2P } from '@/composables/useP2P'
 import { useContentSync } from '@/composables/useContentSync'
+import { usePlatform } from '@/composables/usePlatform'
 import { StatusBadge } from '@/components/ui'
 import CourseCard from '@/components/course/CourseCard.vue'
 import type { Course, Enrollment } from '@/types'
@@ -12,11 +13,24 @@ const { invoke } = useLocalApi()
 const { displayName } = useAuth()
 const { status: p2pStatus, start: startP2P, startPolling } = useP2P()
 const { startContentSync, completeContentSync, failContentSync } = useContentSync()
+const { isMobilePlatform } = usePlatform()
 
 const loading = ref(true)
 const enrollments = ref<Enrollment[]>([])
 const courses = ref<Course[]>([])
 const enrolledCourseMap = ref<Record<string, Course>>({})
+
+// Diagnostic log viewer (for iOS debugging)
+const showDiag = ref(false)
+const diagLog = ref<string | null>(null)
+async function readDiagLog() {
+  try {
+    diagLog.value = await invoke<string>('read_diag_log')
+  } catch (e) {
+    diagLog.value = `ERROR: ${e}`
+  }
+  showDiag.value = true
+}
 
 // Time-based greeting
 const greeting = ref('')
@@ -228,6 +242,29 @@ onMounted(async () => {
         </div>
       </section>
     </template>
+
+    <!-- Floating diagnostic button (mobile only, for iOS freeze debugging) -->
+    <button
+      v-if="isMobilePlatform"
+      class="fixed bottom-20 right-3 z-50 flex h-8 w-8 items-center justify-center rounded-full bg-destructive/80 text-white shadow-lg text-xs font-bold"
+      @click="readDiagLog"
+      title="Read diag.log"
+    >
+      D
+    </button>
+
+    <!-- Diagnostic overlay -->
+    <Teleport to="body">
+      <div v-if="showDiag" class="fixed inset-0 z-[100] bg-black/80 p-4 overflow-y-auto" @click.self="showDiag = false">
+        <div class="bg-card rounded-xl p-4 max-w-lg mx-auto mt-12">
+          <div class="flex items-center justify-between mb-2">
+            <h3 class="text-sm font-semibold text-foreground">diag.log</h3>
+            <button class="text-xs text-muted-foreground" @click="showDiag = false">Close</button>
+          </div>
+          <pre class="text-[0.55rem] text-muted-foreground whitespace-pre-wrap leading-tight max-h-[70vh] overflow-y-auto">{{ diagLog ?? 'Loading...' }}</pre>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 

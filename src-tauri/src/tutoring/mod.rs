@@ -18,11 +18,17 @@
 #[cfg(desktop)]
 pub mod manager;
 
-#[cfg(mobile)]
+#[cfg(target_os = "ios")]
 pub mod manager_mobile;
+
+#[cfg(target_os = "android")]
+pub mod manager_android;
 
 #[cfg(desktop)]
 pub use manager::TutoringManager;
 
-#[cfg(mobile)]
+#[cfg(target_os = "ios")]
 pub use manager_mobile::TutoringManager;
+
+#[cfg(target_os = "android")]
+pub use manager_android::TutoringManager;

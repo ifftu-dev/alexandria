@@ -22,7 +22,12 @@ pub mod sync;
 #[cfg(desktop)]
 pub mod tutoring;
 
-#[cfg(mobile)]
+#[cfg(target_os = "ios")]
 pub mod tutoring_mobile;
-#[cfg(mobile)]
+#[cfg(target_os = "ios")]
 pub use tutoring_mobile as tutoring;
+
+#[cfg(target_os = "android")]
+pub mod tutoring_stubs;
+#[cfg(target_os = "android")]
+pub use tutoring_stubs as tutoring;

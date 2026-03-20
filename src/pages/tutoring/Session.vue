@@ -25,6 +25,7 @@ const {
   stopPolling,
   setupEventListeners,
   setChatOpen,
+  getDiagnostics,
 } = useTutoringRoom()
 
 const { isMobilePlatform } = usePlatform()
@@ -33,9 +34,13 @@ const sessionId = computed(() => route.params.id as string)
 const ticketCopied = ref(false)
 const showLeaveConfirm = ref(false)
 const showChat = ref(false)
+const showDiagnostics = ref(false)
+const diagnosticsData = ref<Record<string, unknown> | null>(null)
 const chatInput = ref('')
 const chatScrollRef = ref<HTMLElement | null>(null)
 const showTicketFallback = ref(false)
+const diagnosticsCopied = ref(false)
+const showDiagFallback = ref(false)
 const dismissedError = ref(false)
 
 // Duration timer
@@ -180,6 +185,25 @@ async function handleSendChat() {
   }
 }
 
+async function handleShowDiagnostics() {
+  diagnosticsData.value = await getDiagnostics()
+  showDiagnostics.value = true
+  diagnosticsCopied.value = false
+  showDiagFallback.value = false
+}
+
+async function copyDiagnostics() {
+  if (!diagnosticsData.value) return
+  const json = JSON.stringify(diagnosticsData.value, null, 2)
+  try {
+    await navigator.clipboard.writeText(json)
+    diagnosticsCopied.value = true
+    setTimeout(() => { diagnosticsCopied.value = false }, 2000)
+  } catch {
+    showDiagFallback.value = true
+  }
+}
+
 function formatChatTime(ts: number) {
   const d = new Date(ts)
   return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
@@ -259,6 +283,18 @@ function peerInitials(nodeId: string): string {
           <span class="hidden sm:inline">{{ connectedPeerCount }}/{{ peerCount }} peers</span>
           <span class="sm:hidden">{{ connectedPeerCount }}</span>
         </div>
+
+        <!-- Diagnostics button -->
+        <button
+          v-if="isActive"
+          class="flex items-center gap-1 rounded-lg border border-border px-1.5 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          @click="handleShowDiagnostics"
+          title="Show diagnostics"
+        >
+          <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15.3M14.25 3.104c.251.023.501.05.75.082M19.8 15.3l-1.57.393A9.065 9.065 0 0112 15a9.065 9.065 0 00-6.23.693L5 14.5m14.8.8l1.402 1.402c1.232 1.232.65 3.318-1.067 3.611l-.772.13c-1.687.282-3.404.418-5.129.418s-3.442-.136-5.129-.418l-.772-.131c-1.716-.293-2.299-2.379-1.067-3.61L5 14.5" />
+          </svg>
+        </button>
 
         <!-- Copy ticket -->
         <button
@@ -905,6 +941,59 @@ function peerInitials(nodeId: string): string {
                 @click="showTicketFallback = false"
               >
                 Done
+              </button>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
+
+    <!-- Diagnostics modal -->
+    <Teleport to="body">
+      <Transition
+        enter-active-class="transition-all duration-200"
+        enter-from-class="opacity-0"
+        enter-to-class="opacity-100"
+        leave-active-class="transition-all duration-150"
+        leave-from-class="opacity-100"
+        leave-to-class="opacity-0"
+      >
+        <div v-if="showDiagnostics" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" @click.self="showDiagnostics = false">
+          <div class="w-full max-w-lg rounded-xl border border-border bg-card p-6 shadow-xl mx-4 max-h-[80vh] overflow-auto">
+            <h2 class="text-lg font-semibold text-foreground">A/V Pipeline Diagnostics</h2>
+            <pre v-if="diagnosticsData && !showDiagFallback" class="mt-3 rounded-lg bg-muted p-3 text-xs font-mono text-foreground overflow-auto max-h-[50vh] whitespace-pre-wrap break-all select-all">{{ JSON.stringify(diagnosticsData, null, 2) }}</pre>
+            <!-- Fallback textarea for iOS where clipboard API is blocked -->
+            <textarea
+              v-if="diagnosticsData && showDiagFallback"
+              readonly
+              class="mt-3 w-full rounded-lg bg-muted p-3 text-xs font-mono text-foreground max-h-[50vh] resize-none border border-border"
+              :rows="12"
+              :value="JSON.stringify(diagnosticsData, null, 2)"
+              @focus="($event.target as HTMLTextAreaElement).select()"
+            />
+            <p v-if="showDiagFallback" class="mt-1 text-xs text-muted-foreground">Select all text above and copy manually</p>
+            <p v-if="!diagnosticsData" class="mt-3 text-sm text-muted-foreground">No active session</p>
+            <div class="mt-4 flex gap-2">
+              <button
+                class="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+                @click="handleShowDiagnostics"
+              >
+                Refresh
+              </button>
+              <button
+                v-if="diagnosticsData"
+                class="rounded-lg border border-border px-3 py-1.5 text-xs font-medium transition-colors hover:bg-muted"
+                :class="diagnosticsCopied ? 'text-success border-success' : 'text-foreground'"
+                @click="copyDiagnostics"
+              >
+                {{ diagnosticsCopied ? 'Copied!' : 'Copy JSON' }}
+              </button>
+              <div class="flex-1" />
+              <button
+                class="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+                @click="showDiagnostics = false"
+              >
+                Close
               </button>
             </div>
           </div>

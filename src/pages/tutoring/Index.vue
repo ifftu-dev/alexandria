@@ -3,7 +3,10 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useTutoringRoom } from '@/composables/useTutoringRoom'
 import { usePlatform } from '@/composables/usePlatform'
+import { useLocalApi } from '@/composables/useLocalApi'
 import type { DeviceCheckResult, DeviceList } from '@/types'
+
+console.log('[tutoring/Index] <script setup> executing')
 
 const router = useRouter()
 const {
@@ -17,6 +20,7 @@ const {
 } = useTutoringRoom()
 
 const { isMobilePlatform } = usePlatform()
+const { invoke: rawInvoke } = useLocalApi()
 
 const showCreateModal = ref(false)
 const showJoinModal = ref(false)
@@ -39,8 +43,30 @@ const selectedCamera = ref<string | null>(null)
 const selectedMicInput = ref<string | null>(null)
 const selectedAudioOutput = ref<string | null>(null)
 
-onMounted(() => {
-  refreshSessions()
+// Diagnostic log state (for debugging iOS freeze)
+const diagLog = ref<string | null>(null)
+const diagError = ref<string | null>(null)
+
+async function fetchDiagLog() {
+  try {
+    diagLog.value = await rawInvoke<string>('read_diag_log')
+    diagError.value = null
+  } catch (e: unknown) {
+    diagError.value = e instanceof Error ? e.message : String(e)
+  }
+}
+
+onMounted(async () => {
+  console.log('[tutoring/Index] onMounted: about to refreshSessions')
+  try {
+    await Promise.race([
+      refreshSessions(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('refreshSessions timed out after 5s')), 5000)),
+    ])
+    console.log('[tutoring/Index] onMounted: refreshSessions completed')
+  } catch (e) {
+    console.error('[tutoring/Index] onMounted: refreshSessions error/timeout:', e)
+  }
 })
 
 const pastSessions = computed(() =>
@@ -105,6 +131,7 @@ async function handleCreatePreview() {
 async function handleCreateConfirm() {
   if (!newRoomTitle.value.trim()) return
   try {
+    console.log('[tutoring] handleCreateConfirm: starting...')
     const session = await createRoom(
       newRoomTitle.value.trim(),
       createDisplayName.value.trim() || undefined,
@@ -112,10 +139,11 @@ async function handleCreateConfirm() {
       selectedMicInput.value,
       selectedAudioOutput.value,
     )
+    console.log('[tutoring] handleCreateConfirm: createRoom returned, navigating to', `/tutoring/${session.id}`)
     resetCreateModal()
     router.push(`/tutoring/${session.id}`)
-  } catch {
-    // error is in lastError
+  } catch (e) {
+    console.error('[tutoring] handleCreateConfirm: caught error:', e)
   }
 }
 
@@ -145,6 +173,7 @@ async function handleJoinPreview() {
 async function handleJoinConfirm() {
   if (!joinTicket.value.trim()) return
   try {
+    console.log('[tutoring] handleJoinConfirm: starting...')
     const session = await joinRoom(
       joinTicket.value.trim(),
       joinTitle.value.trim() || undefined,
@@ -153,10 +182,11 @@ async function handleJoinConfirm() {
       selectedMicInput.value,
       selectedAudioOutput.value,
     )
+    console.log('[tutoring] handleJoinConfirm: joinRoom returned, navigating to', `/tutoring/${session.id}`)
     resetJoinModal()
     router.push(`/tutoring/${session.id}`)
-  } catch {
-    // error is in lastError
+  } catch (e) {
+    console.error('[tutoring] handleJoinConfirm: caught error:', e)
   }
 }
 
@@ -200,6 +230,21 @@ function formatDate(iso: string) {
     <!-- Error banner -->
     <div v-if="lastError" class="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
       {{ lastError }}
+    </div>
+
+    <!-- Diagnostic section (for debugging iOS freeze — remove once resolved) -->
+    <div v-if="isMobilePlatform" class="rounded-lg border border-border bg-muted/30 p-3 space-y-2">
+      <div class="flex items-center justify-between">
+        <span class="text-xs font-medium text-muted-foreground">Diagnostics</span>
+        <button
+          class="rounded px-2 py-0.5 text-[0.65rem] font-medium bg-primary/10 text-primary"
+          @click="fetchDiagLog"
+        >
+          Read diag.log
+        </button>
+      </div>
+      <div v-if="diagError" class="text-[0.6rem] text-destructive">{{ diagError }}</div>
+      <pre v-if="diagLog" class="text-[0.55rem] text-muted-foreground whitespace-pre-wrap max-h-48 overflow-y-auto leading-tight">{{ diagLog }}</pre>
     </div>
 
     <!-- Mobile video info notice -->
@@ -475,6 +520,11 @@ function formatDate(iso: string) {
                 </p>
               </div>
 
+              <!-- Error inside modal -->
+              <div v-if="lastError" class="mt-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+                {{ lastError }}
+              </div>
+
               <div class="mt-6 flex justify-end gap-2">
                 <button
                   class="rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
@@ -664,6 +714,11 @@ function formatDate(iso: string) {
                 <p v-if="!deviceCheck?.has_camera && !deviceCheck?.has_audio" class="text-xs text-muted-foreground text-center mt-1">
                   You can still join — the session will use text chat only.
                 </p>
+              </div>
+
+              <!-- Error inside modal -->
+              <div v-if="lastError" class="mt-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+                {{ lastError }}
               </div>
 
               <div class="mt-6 flex justify-end gap-2">

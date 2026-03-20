@@ -56,6 +56,67 @@ pub struct AppState {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Bridge tracing → log so that tracing events from iroh / iroh-live
+    // are forwarded to tauri_plugin_log and become visible in the console.
+    // We install a tracing Subscriber that converts tracing events into
+    // log::log!() calls.  tauri_plugin_log then picks those up as normal
+    // `log` crate records.
+    use tracing_log::NormalizeEvent;
+    struct TracingToLog;
+    impl tracing::Subscriber for TracingToLog {
+        fn enabled(&self, _meta: &tracing::Metadata<'_>) -> bool {
+            true
+        }
+        fn new_span(&self, _attrs: &tracing::span::Attributes<'_>) -> tracing::span::Id {
+            tracing::span::Id::from_u64(1)
+        }
+        fn record(&self, _span: &tracing::span::Id, _values: &tracing::span::Record<'_>) {}
+        fn record_follows_from(&self, _span: &tracing::span::Id, _follows: &tracing::span::Id) {}
+        fn event(&self, event: &tracing::Event<'_>) {
+            let normalized = event.normalized_metadata();
+            let meta = normalized.as_ref().unwrap_or_else(|| event.metadata());
+            let level = match *meta.level() {
+                tracing::Level::ERROR => log::Level::Error,
+                tracing::Level::WARN => log::Level::Warn,
+                tracing::Level::INFO => log::Level::Info,
+                tracing::Level::DEBUG => log::Level::Debug,
+                tracing::Level::TRACE => log::Level::Trace,
+            };
+            // Format the event message + fields
+            struct Visitor(String);
+            impl tracing::field::Visit for Visitor {
+                fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+                    if field.name() == "message" {
+                        self.0.push_str(&format!("{:?}", value));
+                    } else {
+                        if !self.0.is_empty() {
+                            self.0.push(' ');
+                        }
+                        self.0.push_str(&format!("{}={:?}", field.name(), value));
+                    }
+                }
+            }
+            let mut visitor = Visitor(String::new());
+            event.record(&mut visitor);
+            log::log!(target: meta.target(), level, "{}", visitor.0);
+
+            // Also write iroh-live / moq-media diagnostic events to diag.log
+            // so they appear in the in-app diagnostics modal alongside our own logs.
+            let target = meta.target();
+            if matches!(*meta.level(), tracing::Level::ERROR | tracing::Level::WARN | tracing::Level::INFO)
+                && (target.starts_with("moq_media")
+                    || target.starts_with("iroh_live")
+                    || target.starts_with("hang")
+                    || target.starts_with("moq_lite"))
+            {
+                crate::diag::log(&format!("[{target}] {}", visitor.0));
+            }
+        }
+        fn enter(&self, _span: &tracing::span::Id) {}
+        fn exit(&self, _span: &tracing::span::Id) {}
+    }
+    tracing::subscriber::set_global_default(TracingToLog).ok();
+
     tauri::Builder::default()
         .setup(|app| {
             // Initialize logging (always enabled so we can diagnose mobile crashes)
@@ -77,6 +138,7 @@ pub fn run() {
             diag::init(&app_dir);
             diag::install_panic_hook();
             diag::log("app setup started");
+            diag::log(&format!("app_dir={}", app_dir.display()));
 
             let db_path = app_dir.join("alexandria.db");
             log::info!("Database path: {}", db_path.display());
@@ -114,9 +176,12 @@ pub fn run() {
             let content_node_clone = content_node.clone();
             let db_clone = db.clone();
             let resolver_clone = resolver.clone();
+            diag::log("spawning iroh node startup task");
             tauri::async_runtime::spawn(async move {
+                crate::diag::log("iroh startup: calling content_node.start()...");
                 match content_node_clone.start().await {
                     Ok(()) => {
+                        crate::diag::log("iroh startup: content_node started OK");
                         log::info!("iroh content node started successfully");
 
                         // Initialize the content resolver with gateway fallback
@@ -135,10 +200,14 @@ pub fn run() {
                             }
                         }
                     }
-                    Err(e) => log::error!("failed to start iroh content node: {e}"),
+                    Err(e) => {
+                        crate::diag::log(&format!("iroh startup: FAILED: {e}"));
+                        log::error!("failed to start iroh content node: {e}");
+                    }
                 }
             });
 
+            diag::log("creating TutoringManager");
             let tutoring = Arc::new(TutoringManager::new());
 
             let app_state = AppState {
@@ -152,23 +221,37 @@ pub fn run() {
             };
 
             // Clean up any sessions stuck as 'active' from a previous crash
+            diag::log("cleaning up orphaned tutoring sessions");
             {
-                let db = app_state.db.lock().unwrap();
-                match db.conn().execute(
-                    "UPDATE tutoring_sessions SET status = 'ended', ended_at = datetime('now') WHERE status = 'active'",
-                    [],
-                ) {
-                    Ok(count) if count > 0 => {
-                        log::info!("tutoring: cleaned up {count} orphaned session(s) from previous run");
+                match app_state.db.lock() {
+                    Ok(db) => {
+                        match db.conn().execute(
+                            "UPDATE tutoring_sessions SET status = 'ended', ended_at = datetime('now') WHERE status = 'active'",
+                            [],
+                        ) {
+                            Ok(count) if count > 0 => {
+                                log::info!("tutoring: cleaned up {count} orphaned session(s) from previous run");
+                                diag::log(&format!("cleaned up {count} orphaned session(s)"));
+                            }
+                            Ok(_) => {
+                                diag::log("no orphaned sessions to clean up");
+                            }
+                            Err(e) => {
+                                log::warn!("tutoring: failed to clean up orphaned sessions: {e}");
+                                diag::log(&format!("orphan cleanup error: {e}"));
+                            }
+                        }
                     }
-                    Ok(_) => {}
                     Err(e) => {
-                        log::warn!("tutoring: failed to clean up orphaned sessions: {e}");
+                        log::error!("tutoring: db mutex poisoned during orphan cleanup: {e}");
+                        diag::log(&format!("CRITICAL: db mutex poisoned: {e}"));
                     }
                 }
             }
 
+            diag::log("managing app state in Tauri");
             app.manage(app_state);
+            diag::log("app setup complete — webview should be loading");
 
             // iOS: disable automatic scroll view content inset adjustment so the
             // webview truly renders edge-to-edge.  Without this, WKWebView's
@@ -369,6 +452,7 @@ pub fn run() {
             commands::tutoring::tutoring_check_devices,
             commands::tutoring::tutoring_list_devices,
             commands::tutoring::tutoring_get_audio_level,
+            commands::tutoring::tutoring_diagnostics,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

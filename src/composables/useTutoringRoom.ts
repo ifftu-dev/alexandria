@@ -51,18 +51,33 @@ let peerEndedUnlisten: (() => void) | null = null
 let peerNameUnlisten: (() => void) | null = null
 let audioLevelUnlisten: (() => void) | null = null
 
+/** Pending video frames batched via rAF to avoid overwhelming Vue reactivity. */
+const pendingFrames: Record<string, string> = {}
+let rafId: number | null = null
+
+function flushVideoFrames() {
+  rafId = null
+  const keys = Object.keys(pendingFrames)
+  if (keys.length === 0) return
+  const updated = { ...videoFrames.value }
+  for (const key of keys) {
+    updated[key] = pendingFrames[key]!
+    delete pendingFrames[key]
+  }
+  videoFrames.value = updated
+}
+
 async function setupEventListeners() {
   if (videoUnlisten) return // already set up
 
   try {
-    // Dynamic import to avoid SSR issues and to get the listen function
     const { listen } = await import('@tauri-apps/api/event')
 
     videoUnlisten = await listen<TutoringVideoFrame>('tutoring:video-frame', (event) => {
       const { node_id, jpeg_b64 } = event.payload
-      videoFrames.value = {
-        ...videoFrames.value,
-        [node_id]: `data:image/jpeg;base64,${jpeg_b64}`,
+      pendingFrames[node_id] = `data:image/jpeg;base64,${jpeg_b64}`
+      if (rafId === null) {
+        rafId = requestAnimationFrame(flushVideoFrames)
       }
     })
 
@@ -118,6 +133,13 @@ function teardownEventListeners() {
     audioLevelUnlisten()
     audioLevelUnlisten = null
   }
+  if (rafId !== null) {
+    cancelAnimationFrame(rafId)
+    rafId = null
+  }
+  for (const key of Object.keys(pendingFrames)) {
+    delete pendingFrames[key]
+  }
   micLevel.value = 0
   outputLevel.value = 0
 }
@@ -151,6 +173,7 @@ async function createRoom(
   loading.value = true
   lastError.value = null
   try {
+    console.log('[tutoring] createRoom: invoking tutoring_create_room...')
     const session = await invoke<TutoringSessionInfo>('tutoring_create_room', {
       title,
       displayName: displayName || null,
@@ -158,16 +181,21 @@ async function createRoom(
       micId: micId || null,
       speakerId: speakerId || null,
     })
+    console.log('[tutoring] createRoom: invoke returned, session id =', session.id)
     await setupEventListeners()
     chatMessages.value = []
     videoFrames.value = {}
     peerNames.value = {}
     unreadChatCount.value = 0
+    console.log('[tutoring] createRoom: refreshing status...')
     await refreshStatus()
+    console.log('[tutoring] createRoom: refreshing sessions...')
     await refreshSessions()
+    console.log('[tutoring] createRoom: done, returning session')
     return session
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e)
+    console.error('[tutoring] createRoom: error:', msg)
     lastError.value = msg
     throw new Error(msg)
   } finally {
@@ -186,6 +214,7 @@ async function joinRoom(
   loading.value = true
   lastError.value = null
   try {
+    console.log('[tutoring] joinRoom: invoking tutoring_join_room...')
     const session = await invoke<TutoringSessionInfo>('tutoring_join_room', {
       ticket,
       title: title || null,
@@ -194,16 +223,21 @@ async function joinRoom(
       micId: micId || null,
       speakerId: speakerId || null,
     })
+    console.log('[tutoring] joinRoom: invoke returned, session id =', session.id)
     await setupEventListeners()
     chatMessages.value = []
     videoFrames.value = {}
     peerNames.value = {}
     unreadChatCount.value = 0
+    console.log('[tutoring] joinRoom: refreshing status...')
     await refreshStatus()
+    console.log('[tutoring] joinRoom: refreshing sessions...')
     await refreshSessions()
+    console.log('[tutoring] joinRoom: done, returning session')
     return session
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e)
+    console.error('[tutoring] joinRoom: error:', msg)
     lastError.value = msg
     throw new Error(msg)
   } finally {
@@ -290,6 +324,16 @@ async function getPeers(): Promise<TutoringPeer[]> {
   }
 }
 
+/** Get diagnostic info about the current A/V pipeline state. */
+async function getDiagnostics(): Promise<Record<string, unknown> | null> {
+  try {
+    return await invoke<Record<string, unknown> | null>('tutoring_diagnostics')
+  } catch (e: unknown) {
+    console.warn('Failed to get diagnostics:', e)
+    return null
+  }
+}
+
 /** List all available audio and camera devices. */
 async function listDevices(): Promise<DeviceList> {
   try {
@@ -359,6 +403,7 @@ export function useTutoringRoom() {
     getPeers,
     checkDevices,
     listDevices,
+    getDiagnostics,
     startPolling,
     stopPolling,
     setupEventListeners,

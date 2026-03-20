@@ -201,10 +201,10 @@ function enterApp() {
 </script>
 
 <template>
-  <div class="min-h-screen bg-background p-4 sm:p-6 lg:p-8 relative overflow-hidden">
+  <div class="min-h-full bg-background relative overflow-y-auto flex items-center justify-center p-4 sm:p-6 lg:p-8">
     <Starfield />
 
-    <div class="w-full max-w-6xl mx-auto relative z-10">
+    <div class="w-full max-w-6xl relative z-10">
       <div class="grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)] lg:gap-6 xl:gap-8">
         <aside class="hidden lg:flex lg:flex-col rounded-2xl border border-border/70 bg-card/70 backdrop-blur p-6">
           <div class="mb-6">
