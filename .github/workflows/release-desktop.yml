@@ -11,6 +11,11 @@ name: Release (Desktop)
         description: 'Tag to build (e.g. v1.0.0)'
         required: false
         type: string
+      include_linux_arm64:
+        description: 'Build Linux ARM64 (free only on public repos; enable if you have a paid plan or self-hosted runner)'
+        required: false
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -192,8 +197,11 @@ jobs:
   build-linux-arm64:
     name: Build Linux (ARM64)
     needs: create-release
-    # Only runs on public repos (ubuntu-22.04-arm is free for public repos only)
-    if: github.event.repository.visibility == 'public'
+    # ubuntu-22.04-arm is free for public repos; for private repos enable via
+    # workflow_dispatch input (requires GitHub Team/Enterprise or self-hosted runner).
+    if: >-
+      github.event.repository.visibility == 'public' ||
+      inputs.include_linux_arm64 == true
     runs-on: ubuntu-22.04-arm
     timeout-minutes: 90
     steps:
@@ -311,6 +319,37 @@ jobs:
           args: --features tutoring-video-static --bundles nsis
           includeUpdaterJson: false
 
+      - name: Sign Windows installer (Authenticode)
+        if: ${{ secrets.WINDOWS_CERTIFICATE != '' }}
+        shell: powershell
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          $certBytes = [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE)
+          $certPath = Join-Path $env:RUNNER_TEMP "certificate.pfx"
+          [IO.File]::WriteAllBytes($certPath, $certBytes)
+          $installers = Get-ChildItem `
+            -Path "alexandria\src-tauri\target\release\bundle\nsis" `
+            -Filter "*_x64-setup.exe" -Recurse
+          foreach ($installer in $installers) {
+            & signtool sign `
+              /fd SHA256 /td SHA256 `
+              /tr http://timestamp.digicert.com `
+              /f $certPath /p $env:WINDOWS_CERTIFICATE_PASSWORD `
+              $installer.FullName
+            Write-Host "Signed: $($installer.Name)"
+          }
+          Remove-Item -Force $certPath
+
+      - name: Re-upload signed installer
+        if: ${{ secrets.WINDOWS_CERTIFICATE != '' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name || inputs.tag }}
+          files: alexandria/src-tauri/target/release/bundle/nsis/*_x64-setup.exe
+          fail_on_unmatched_files: true
+
   finalize:
     name: Finalize Release
     needs:
@@ -336,82 +375,54 @@ jobs:
       - name: Generate latest.json for auto-updater
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
+          RELEASE_TAG: ${{ github.ref_name || inputs.tag }}
           BUILD_LINUX_ARM64_RESULT: ${{ needs.build-linux-arm64.result }}
         run: |
-          # Get release info to build download URLs
-          RELEASE_TAG="${{ github.ref_name }}"
+          set -euo pipefail
           REPO="${{ github.repository }}"
           BASE_URL="https://github.com/${REPO}/releases/download/${RELEASE_TAG}"
 
-          # Find .sig files for each platform
-          MACOS_SIG=$(cat artifacts/*.dmg.sig 2>/dev/null | head -1 || echo "")
-          LINUX_X64_SIG=$(
-            cat artifacts/*_amd64.AppImage.sig 2>/dev/null | head -1 || echo ""
-          )
-          WINDOWS_SIG=$(
-            cat artifacts/*_x64-setup.nsis.zip.sig \
-              2>/dev/null | head -1 || echo ""
-          )
+          # Find the first file matching a glob under artifacts/; prints path or empty.
+          find_artifact() { find artifacts -name "$1" -type f 2>/dev/null | head -1; }
 
-          # Build platforms JSON
+          # Locate .sig files for required platforms
+          MACOS_SIG_FILE=$(find_artifact "*.dmg.sig")
+          LINUX_X64_SIG_FILE=$(find_artifact "*_amd64.AppImage.sig")
+          WINDOWS_SIG_FILE=$(find_artifact "*_x64-setup.nsis.zip.sig")
+
+          # Validate all required platform artifacts are present
+          MISSING=""
+          [ -z "$MACOS_SIG_FILE" ]     && MISSING="${MISSING}  macOS .dmg.sig\n"
+          [ -z "$LINUX_X64_SIG_FILE" ] && MISSING="${MISSING}  Linux x64 .AppImage.sig\n"
+          [ -z "$WINDOWS_SIG_FILE" ]   && MISSING="${MISSING}  Windows .nsis.zip.sig\n"
+          if [ -n "$MISSING" ]; then
+            echo "ERROR: Missing required platform signatures:"
+            printf "$MISSING"
+            exit 1
+          fi
+
+          # Build platforms JSON; derive package filename by stripping .sig suffix.
           PLATFORMS="{}"
+          add_platform() {
+            local key="$1" sig_file="$2"
+            local sig pkg url
+            sig=$(cat "$sig_file")
+            pkg=$(basename "$sig_file" .sig)
+            url="$BASE_URL/$pkg"
+            PLATFORMS=$(echo "$PLATFORMS" | jq \
+              --arg sig "$sig" --arg url "$url" \
+              ".\"$key\" = {signature: \$sig, url: \$url}")
+          }
 
-          if [ -n "$MACOS_SIG" ]; then
-            MACOS_PKG=$(
-              ls artifacts/*.dmg 2>/dev/null | head -1 | xargs basename
-            )
-            PLATFORMS=$(
-              echo "$PLATFORMS" | jq \
-                --arg sig "$MACOS_SIG" \
-                --arg url "$BASE_URL/$MACOS_PKG" \
-                '."darwin-universal" = {signature: $sig, url: $url}'
-            )
-          fi
-
-          if [ -n "$LINUX_X64_SIG" ]; then
-            LINUX_PKG=$(
-              ls artifacts/*_amd64.AppImage \
-                2>/dev/null | head -1 | xargs basename
-            )
-            PLATFORMS=$(
-              echo "$PLATFORMS" | jq \
-                --arg sig "$LINUX_X64_SIG" \
-                --arg url "$BASE_URL/$LINUX_PKG" \
-                '."linux-x86_64" = {signature: $sig, url: $url}'
-            )
-          fi
-
-          if [ -n "$WINDOWS_SIG" ]; then
-            WIN_PKG=$(
-              ls artifacts/*_x64-setup.nsis.zip \
-                2>/dev/null | head -1 | xargs basename
-            )
-            PLATFORMS=$(
-              echo "$PLATFORMS" | jq \
-                --arg sig "$WINDOWS_SIG" \
-                --arg url "$BASE_URL/$WIN_PKG" \
-                '."windows-x86_64" = {signature: $sig, url: $url}'
-            )
-          fi
+          add_platform "darwin-universal"  "$MACOS_SIG_FILE"
+          add_platform "linux-x86_64"      "$LINUX_X64_SIG_FILE"
+          add_platform "windows-x86_64"    "$WINDOWS_SIG_FILE"
 
           # Conditionally add ARM64 Linux
           if [ "$BUILD_LINUX_ARM64_RESULT" = "success" ]; then
-            LINUX_ARM64_SIG=$(
-              cat artifacts/*_arm64.AppImage.sig \
-                2>/dev/null | head -1 || echo ""
-            )
-            if [ -n "$LINUX_ARM64_SIG" ]; then
-              LINUX_ARM64_PKG=$(
-                ls artifacts/*_arm64.AppImage \
-                  2>/dev/null | head -1 | xargs basename
-              )
-              PLATFORMS=$(
-                echo "$PLATFORMS" | jq \
-                  --arg sig "$LINUX_ARM64_SIG" \
-                  --arg url "$BASE_URL/$LINUX_ARM64_PKG" \
-                  '."linux-aarch64" = {signature: $sig, url: $url}'
-              )
+            LINUX_ARM64_SIG_FILE=$(find_artifact "*_arm64.AppImage.sig")
+            if [ -n "$LINUX_ARM64_SIG_FILE" ]; then
+              add_platform "linux-aarch64" "$LINUX_ARM64_SIG_FILE"
             fi
           fi
 
@@ -421,24 +432,19 @@ jobs:
             --arg version "$VERSION" \
             --arg pub_date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --argjson platforms "$PLATFORMS" \
-            '{
-              version: $version,
-              notes: "",
-              pub_date: $pub_date,
-              platforms: $platforms
-            }' \
+            '{version: $version, notes: "", pub_date: $pub_date, platforms: $platforms}' \
             > latest.json
           cat latest.json
 
       - name: Upload latest.json to release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name || inputs.tag }}
           files: latest.json
           fail_on_unmatched_files: false
 
       - name: Publish release (draft → public)
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name || inputs.tag }}
           draft: false
