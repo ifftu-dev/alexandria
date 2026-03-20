@@ -9,6 +9,7 @@
     "core:default",
     "core:window:allow-show",
     "core:window:allow-start-dragging",
-    "biometry:default"
+    "biometry:default",
+    "updater:default"
   ]
 }

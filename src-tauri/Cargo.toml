@@ -18,7 +18,8 @@ dev-seed = []
 # automatically enables it for desktop targets.
 tutoring-video = ["iroh-live/video", "iroh-live/aec"]
 
-# Enable video with statically-linked ffmpeg (for Windows/Linux builds without system ffmpeg).
+# Enable video with statically-linked ffmpeg (for Windows/Linux CI builds without system ffmpeg).
+# Activated for Linux and Windows in CI via --features tutoring-video-static.
 tutoring-video-static = ["iroh-live/static", "iroh-live/aec"]
 
 # Enable iOS video support (VideoToolbox H264 encoder/decoder, no ffmpeg).
@@ -39,6 +40,7 @@ tauri = { version = "2.10.0", features = [] }
 tauri-plugin-log = "2"
 tauri-plugin-biometry = "0.2"
 tauri-plugin-os = "2"
+tauri-plugin-updater = "2"
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }

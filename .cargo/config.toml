@@ -6,10 +6,11 @@
 [env]
 CMAKE_POLICY_VERSION_MINIMUM = "3.5"
 
-# Android: use API 28+ (Android 9 Pie) for AAudio support (required by cpal).
-# This tells the NDK clang to link against API 28 sysroot.
+# Android targets — linker is managed by cargo-ndk / Tauri Android build toolchain.
+# Do not hardcode NDK paths here; let `cargo tauri android build` handle NDK detection.
+# These target sections are needed for build configurations but do not specify linker overrides.
 [target.aarch64-linux-android]
-linker = "/Users/hack/Library/Android/sdk/ndk/26.3.11579264/toolchains/llvm/prebuilt/darwin-x86_64/bin/aarch64-linux-android28-clang"
+rustflags = []
 
 [target.armv7-linux-androideabi]
-linker = "/Users/hack/Library/Android/sdk/ndk/26.3.11579264/toolchains/llvm/prebuilt/darwin-x86_64/bin/armv7a-linux-androideabi28-clang"
+rustflags = []

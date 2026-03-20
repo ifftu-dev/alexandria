@@ -298,6 +298,7 @@ pub fn run() {
         })
         .plugin(tauri_plugin_biometry::init())
         .plugin(tauri_plugin_os::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             commands::health::check_health,
             commands::health::read_diag_log,

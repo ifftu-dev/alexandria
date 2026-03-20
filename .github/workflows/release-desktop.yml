@@ -1,0 +1,450 @@
+---
+name: Release (Desktop)
+
+'on':
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to build (e.g. v1.0.0)'
+        required: false
+        type: string
+      include_linux_arm64:
+        description: 'Build Linux ARM64 (free only on public repos; enable if you have a paid plan or self-hosted runner)'
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  create-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    outputs:
+      release_id: ${{ steps.create.outputs.id }}
+      release_upload_url: ${{ steps.create.outputs.upload_url }}
+    steps:
+      - name: Create draft release
+        id: create
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name || inputs.tag }}
+          name: Alexandria ${{ github.ref_name || inputs.tag }}
+          draft: true
+          generate_release_notes: false
+
+  build-macos:
+    name: Build macOS (Universal)
+    needs: create-release
+    runs-on: macos-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout alexandria
+        uses: actions/checkout@v4
+        with:
+          path: alexandria
+
+      - name: Checkout iroh-live-patched
+        uses: actions/checkout@v4
+        with:
+          repository: ifftu-dev/iroh-live-patched
+          path: iroh-live-patched
+          token: ${{ secrets.CROSS_REPO_PAT }}
+
+      - name: Setup Rust 1.83.0 (MSRV)
+        uses: dtolnay/rust-toolchain@1.83.0
+
+      - name: Add Universal Apple targets
+        run: rustup target add x86_64-apple-darwin aarch64-apple-darwin
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+          cache: npm
+          cache-dependency-path: alexandria/package-lock.json
+
+      - name: Cache Rust artifacts
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: alexandria/src-tauri -> target
+
+      - name: Install frontend dependencies
+        working-directory: alexandria
+        run: npm ci
+
+      - name: Import Apple Certificate
+        working-directory: alexandria
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          echo "$APPLE_CERTIFICATE" | base64 --decode > certificate.p12
+          security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security import certificate.p12 \
+            -k build.keychain \
+            -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" build.keychain
+          rm certificate.p12
+
+      - name: Write Apple API Key
+        run: |
+          echo "${{ secrets.APPLE_API_KEY_CONTENT }}" > $RUNNER_TEMP/AuthKey.p8
+
+      - name: Build macOS (Universal)
+        uses: tauri-apps/tauri-action@v0
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_PATH: ${{ runner.temp }}/AuthKey.p8
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: >-
+            ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: alexandria
+          releaseId: ${{ needs.create-release.outputs.release_id }}
+          args: --target universal-apple-darwin --bundles dmg
+          includeUpdaterJson: false
+
+  build-linux-x64:
+    name: Build Linux (x86_64)
+    needs: create-release
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    steps:
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@v10
+        with:
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+
+      - name: Checkout alexandria
+        uses: actions/checkout@v4
+        with:
+          path: alexandria
+
+      - name: Checkout iroh-live-patched
+        uses: actions/checkout@v4
+        with:
+          repository: ifftu-dev/iroh-live-patched
+          path: iroh-live-patched
+          token: ${{ secrets.CROSS_REPO_PAT }}
+
+      - name: Install Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            nasm \
+            libclang-dev \
+            pkg-config
+
+      - name: Setup Rust 1.83.0 (MSRV)
+        uses: dtolnay/rust-toolchain@1.83.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+          cache: npm
+          cache-dependency-path: alexandria/package-lock.json
+
+      - name: Cache Rust artifacts
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: alexandria/src-tauri -> target
+
+      - name: Install frontend dependencies
+        working-directory: alexandria
+        run: npm ci
+
+      - name: Build Linux x86_64
+        uses: tauri-apps/tauri-action@v0
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: >-
+            ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: alexandria
+          releaseId: ${{ needs.create-release.outputs.release_id }}
+          args: --features tutoring-video-static --bundles appimage,deb
+          includeUpdaterJson: false
+
+  build-linux-arm64:
+    name: Build Linux (ARM64)
+    needs: create-release
+    # ubuntu-22.04-arm is free for public repos; for private repos enable via
+    # workflow_dispatch input (requires GitHub Team/Enterprise or self-hosted runner).
+    if: >-
+      github.event.repository.visibility == 'public' ||
+      inputs.include_linux_arm64 == true
+    runs-on: ubuntu-22.04-arm
+    timeout-minutes: 90
+    steps:
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@v10
+        with:
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+
+      - name: Checkout alexandria
+        uses: actions/checkout@v4
+        with:
+          path: alexandria
+
+      - name: Checkout iroh-live-patched
+        uses: actions/checkout@v4
+        with:
+          repository: ifftu-dev/iroh-live-patched
+          path: iroh-live-patched
+          token: ${{ secrets.CROSS_REPO_PAT }}
+
+      - name: Install Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            nasm \
+            libclang-dev \
+            pkg-config
+
+      - name: Setup Rust 1.83.0 (MSRV)
+        uses: dtolnay/rust-toolchain@1.83.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+          cache: npm
+          cache-dependency-path: alexandria/package-lock.json
+
+      - name: Cache Rust artifacts
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: alexandria/src-tauri -> target
+
+      - name: Install frontend dependencies
+        working-directory: alexandria
+        run: npm ci
+
+      - name: Build Linux ARM64
+        uses: tauri-apps/tauri-action@v0
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: >-
+            ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: alexandria
+          releaseId: ${{ needs.create-release.outputs.release_id }}
+          args: --features tutoring-video-static --bundles appimage,deb
+          includeUpdaterJson: false
+
+  build-windows:
+    name: Build Windows (x86_64)
+    needs: create-release
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout alexandria
+        uses: actions/checkout@v4
+        with:
+          path: alexandria
+
+      - name: Checkout iroh-live-patched
+        uses: actions/checkout@v4
+        with:
+          repository: ifftu-dev/iroh-live-patched
+          path: iroh-live-patched
+          token: ${{ secrets.CROSS_REPO_PAT }}
+
+      - name: Setup Rust 1.83.0 (MSRV)
+        uses: dtolnay/rust-toolchain@1.83.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+          cache: npm
+          cache-dependency-path: alexandria/package-lock.json
+
+      - name: Cache Rust artifacts
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: alexandria/src-tauri -> target
+
+      - name: Install frontend dependencies
+        working-directory: alexandria
+        run: npm ci
+
+      - name: Build Windows x86_64
+        uses: tauri-apps/tauri-action@v0
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: >-
+            ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: alexandria
+          releaseId: ${{ needs.create-release.outputs.release_id }}
+          args: --features tutoring-video-static --bundles nsis
+          includeUpdaterJson: false
+
+      - name: Sign Windows installer (Authenticode)
+        if: ${{ secrets.WINDOWS_CERTIFICATE != '' }}
+        shell: powershell
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          $certBytes = [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE)
+          $certPath = Join-Path $env:RUNNER_TEMP "certificate.pfx"
+          [IO.File]::WriteAllBytes($certPath, $certBytes)
+          $installers = Get-ChildItem `
+            -Path "alexandria\src-tauri\target\release\bundle\nsis" `
+            -Filter "*_x64-setup.exe" -Recurse
+          foreach ($installer in $installers) {
+            & signtool sign `
+              /fd SHA256 /td SHA256 `
+              /tr http://timestamp.digicert.com `
+              /f $certPath /p $env:WINDOWS_CERTIFICATE_PASSWORD `
+              $installer.FullName
+            Write-Host "Signed: $($installer.Name)"
+          }
+          Remove-Item -Force $certPath
+
+      - name: Re-upload signed installer
+        if: ${{ secrets.WINDOWS_CERTIFICATE != '' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name || inputs.tag }}
+          files: alexandria/src-tauri/target/release/bundle/nsis/*_x64-setup.exe
+          fail_on_unmatched_files: true
+
+  finalize:
+    name: Finalize Release
+    needs:
+      - create-release
+      - build-macos
+      - build-linux-x64
+      - build-linux-arm64
+      - build-windows
+    runs-on: ubuntu-latest
+    if: |
+      always() &&
+      !cancelled() &&
+      needs.build-macos.result == 'success' &&
+      needs.build-linux-x64.result == 'success' &&
+      needs.build-windows.result == 'success'
+    steps:
+      - name: Download all release assets
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Generate latest.json for auto-updater
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.ref_name || inputs.tag }}
+          BUILD_LINUX_ARM64_RESULT: ${{ needs.build-linux-arm64.result }}
+        run: |
+          set -euo pipefail
+          REPO="${{ github.repository }}"
+          BASE_URL="https://github.com/${REPO}/releases/download/${RELEASE_TAG}"
+
+          # Find the first file matching a glob under artifacts/; prints path or empty.
+          find_artifact() { find artifacts -name "$1" -type f 2>/dev/null | head -1; }
+
+          # Locate .sig files for required platforms
+          MACOS_SIG_FILE=$(find_artifact "*.dmg.sig")
+          LINUX_X64_SIG_FILE=$(find_artifact "*_amd64.AppImage.sig")
+          WINDOWS_SIG_FILE=$(find_artifact "*_x64-setup.nsis.zip.sig")
+
+          # Validate all required platform artifacts are present
+          MISSING=""
+          [ -z "$MACOS_SIG_FILE" ]     && MISSING="${MISSING}  macOS .dmg.sig\n"
+          [ -z "$LINUX_X64_SIG_FILE" ] && MISSING="${MISSING}  Linux x64 .AppImage.sig\n"
+          [ -z "$WINDOWS_SIG_FILE" ]   && MISSING="${MISSING}  Windows .nsis.zip.sig\n"
+          if [ -n "$MISSING" ]; then
+            echo "ERROR: Missing required platform signatures:"
+            printf "$MISSING"
+            exit 1
+          fi
+
+          # Build platforms JSON; derive package filename by stripping .sig suffix.
+          PLATFORMS="{}"
+          add_platform() {
+            local key="$1" sig_file="$2"
+            local sig pkg url
+            sig=$(cat "$sig_file")
+            pkg=$(basename "$sig_file" .sig)
+            url="$BASE_URL/$pkg"
+            PLATFORMS=$(echo "$PLATFORMS" | jq \
+              --arg sig "$sig" --arg url "$url" \
+              ".\"$key\" = {signature: \$sig, url: \$url}")
+          }
+
+          add_platform "darwin-universal"  "$MACOS_SIG_FILE"
+          add_platform "linux-x86_64"      "$LINUX_X64_SIG_FILE"
+          add_platform "windows-x86_64"    "$WINDOWS_SIG_FILE"
+
+          # Conditionally add ARM64 Linux
+          if [ "$BUILD_LINUX_ARM64_RESULT" = "success" ]; then
+            LINUX_ARM64_SIG_FILE=$(find_artifact "*_arm64.AppImage.sig")
+            if [ -n "$LINUX_ARM64_SIG_FILE" ]; then
+              add_platform "linux-aarch64" "$LINUX_ARM64_SIG_FILE"
+            fi
+          fi
+
+          # Write latest.json
+          VERSION="${RELEASE_TAG#v}"
+          jq -n \
+            --arg version "$VERSION" \
+            --arg pub_date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --argjson platforms "$PLATFORMS" \
+            '{version: $version, notes: "", pub_date: $pub_date, platforms: $platforms}' \
+            > latest.json
+          cat latest.json
+
+      - name: Upload latest.json to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name || inputs.tag }}
+          files: latest.json
+          fail_on_unmatched_files: false
+
+      - name: Publish release (draft → public)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name || inputs.tag }}
+          draft: false
