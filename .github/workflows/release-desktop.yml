@@ -104,11 +104,14 @@ jobs:
       - name: Install build dependencies (nasm + FFmpeg codec deps)
         run: brew install nasm opus x264
 
+      - name: Export SDKROOT (FFmpeg configure needs it to compile test programs)
+        run: echo "SDKROOT=$(xcrun --sdk macosx --show-sdk-path)" >> "$GITHUB_ENV"
+
       - name: Write Apple API Key
         run: |
           echo "${{ secrets.APPLE_API_KEY_CONTENT }}" > $RUNNER_TEMP/AuthKey.p8
 
-      - name: Build macOS (Universal)
+      - name: Build macOS (ARM64)
         uses: tauri-apps/tauri-action@v0
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
@@ -121,6 +124,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: >-
             ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PKG_CONFIG_PATH: /opt/homebrew/lib/pkgconfig
         with:
           projectPath: alexandria
           releaseId: ${{ needs.create-release.outputs.release_id }}
@@ -161,7 +165,10 @@ jobs:
             pkg-config \
             libopus-dev \
             libssl-dev \
-            libx264-dev
+            libx264-dev \
+            libva-dev \
+            libdrm-dev \
+            libvdpau-dev
 
       - name: Maximize build space
         uses: easimon/maximize-build-space@v10
@@ -171,6 +178,11 @@ jobs:
           remove-haskell: 'true'
           remove-codeql: 'true'
           remove-docker-images: 'true'
+
+      - name: Prepare /mnt directories (maximize-build-space mounts as root)
+        run: |
+          sudo mkdir -p /mnt/rustup /mnt/cargo /mnt/target
+          sudo chown -R "$(id -un):$(id -gn)" /mnt/rustup /mnt/cargo /mnt/target
 
       - name: Checkout alexandria
         uses: actions/checkout@v4
@@ -253,7 +265,10 @@ jobs:
             pkg-config \
             libopus-dev \
             libssl-dev \
-            libx264-dev
+            libx264-dev \
+            libva-dev \
+            libdrm-dev \
+            libvdpau-dev
 
       - name: Maximize build space
         uses: easimon/maximize-build-space@v10
@@ -263,6 +278,11 @@ jobs:
           remove-haskell: 'true'
           remove-codeql: 'true'
           remove-docker-images: 'true'
+
+      - name: Prepare /mnt directories (maximize-build-space mounts as root)
+        run: |
+          sudo mkdir -p /mnt/rustup /mnt/cargo /mnt/target
+          sudo chown -R "$(id -un):$(id -gn)" /mnt/rustup /mnt/cargo /mnt/target
 
       - name: Checkout alexandria
         uses: actions/checkout@v4
@@ -327,6 +347,13 @@ jobs:
           repository: ifftu-dev/iroh-live
           path: iroh-live-patched
           token: ${{ secrets.CROSS_REPO_PAT }}
+
+      - name: Add MSYS2 bash/make to PATH (before MSVC so link.exe wins)
+        # FFmpeg configure requires POSIX bash and make; MSYS2 provides them.
+        # Added BEFORE ilammy so MSVC's link.exe appears earlier in PATH and
+        # takes priority over MSYS2's POSIX hard-link utility of the same name.
+        shell: pwsh
+        run: echo "C:\msys64\usr\bin" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
 
       - name: Setup MSVC developer environment
         uses: ilammy/msvc-dev-cmd@v1
