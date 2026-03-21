@@ -569,7 +569,7 @@ fn run_platform_build(
 ) -> Result<()> {
     let all = all_targets();
     let selected = resolve_targets(platform, requested_targets, &all)?;
-    let selected_refs: Vec<&Target> = selected.iter().copied().collect();
+    let selected_refs: Vec<&Target> = selected.to_vec();
 
     let profile_label = if is_debug { "debug" } else { "release" };
     output::header(&format!(
@@ -807,7 +807,7 @@ fn run_platform_wizard(ctx: &ProjectContext) -> Result<()> {
     ];
     let platform_sel = Select::with_theme(&theme)
         .with_prompt("Select platform")
-        .items(&platforms)
+        .items(platforms)
         .default(0)
         .interact_opt()?;
 
@@ -864,7 +864,7 @@ fn run_platform_wizard(ctx: &ProjectContext) -> Result<()> {
     ];
     let profile_sel = Select::with_theme(&theme)
         .with_prompt("Build profile")
-        .items(&profiles)
+        .items(profiles)
         .default(0)
         .interact_opt()?;
 
