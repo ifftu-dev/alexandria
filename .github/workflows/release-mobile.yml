@@ -86,7 +86,7 @@ jobs:
 
   build-android:
     name: Build Android
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-8vcpu-ubuntu-2204
     timeout-minutes: 90
 
     steps:
@@ -122,7 +122,7 @@ jobs:
           targets: aarch64-linux-android
 
       - name: Cache Rust artifacts
-        uses: swatinem/rust-cache@v2
+        uses: useblacksmith/rust-cache@v3
         with:
           workspaces: 'alexandria/src-tauri -> target'
 
