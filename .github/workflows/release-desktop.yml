@@ -101,8 +101,8 @@ jobs:
             -s -k "$KEYCHAIN_PASSWORD" build.keychain
           rm certificate.p12
 
-      - name: Install FFmpeg (dynamic — avoids building from source on macOS)
-        run: brew install ffmpeg
+      - name: Install FFmpeg and libtool (libtool provides glibtoolize for webrtc-audio-processing-sys/AEC)
+        run: brew install ffmpeg libtool
 
       - name: Write Apple API Key
         run: |
@@ -337,6 +337,15 @@ jobs:
         # ilammy prepends MSVC dirs to PATH; MSYS2 (already on the runner's default PATH)
         # ends up after MSVC, so MSVC link.exe wins over MSYS2's POSIX hard-link tool.
         uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Expose MSYS2 tools for webrtc-audio-processing-sys (libtoolize/autotools)
+        # webrtc-audio-processing-sys build.rs requires libtoolize. MSYS2 provides it but
+        # its usr/bin also contains a POSIX link.exe (hard-link tool) that breaks MSVC.
+        # Delete MSYS2 link.exe first, then add MSYS2 usr/bin — MSVC link.exe wins.
+        shell: pwsh
+        run: |
+          Remove-Item "C:\msys64\usr\bin\link.exe" -Force -ErrorAction SilentlyContinue
+          echo "C:\msys64\usr\bin" >> $env:GITHUB_PATH
 
       - name: Download pre-built FFmpeg for Windows
         # Build-from-source (tutoring-video-static) fails on Windows due to MSVC/MinGW
