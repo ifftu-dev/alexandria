@@ -62,11 +62,11 @@ jobs:
         working-directory: alexandria
         run: npm install --save-dev @tauri-apps/cli@latest
 
-      - name: Install cargo-tauri (required by Xcode pre-build script)
+      - name: Install cargo-binstall
         uses: cargo-bins/cargo-binstall@main
-        with:
-          crate: tauri-cli
-          version: '^2'
+
+      - name: Install cargo-tauri (required by Xcode pre-build script)
+        run: cargo binstall tauri-cli --version '^2' --no-confirm --locked
 
       - name: Write Apple API Key
         run: echo "${{ secrets.APPLE_API_KEY_CONTENT }}" > $RUNNER_TEMP/AuthKey.p8
@@ -144,11 +144,11 @@ jobs:
         working-directory: alexandria
         run: npm install --save-dev @tauri-apps/cli@latest
 
-      - name: Install cargo-tauri (required by Tauri Android build internals)
+      - name: Install cargo-binstall
         uses: cargo-bins/cargo-binstall@main
-        with:
-          crate: tauri-cli
-          version: '^2'
+
+      - name: Install cargo-tauri (required by Tauri Android build internals)
+        run: cargo binstall tauri-cli --version '^2' --no-confirm --locked
 
       - name: Decode Android keystore
         run: |
