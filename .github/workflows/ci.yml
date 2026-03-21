@@ -56,7 +56,10 @@ jobs:
             libdbus-1-dev \
             libopus-dev \
             libssl-dev \
-            libx264-dev
+            libx264-dev \
+            libva-dev \
+            libdrm-dev \
+            libvdpau-dev
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
