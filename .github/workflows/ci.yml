@@ -20,7 +20,7 @@ env:
 jobs:
   check:
     name: Lint & Test
-    runs-on: blacksmith-8vcpu-ubuntu-2204
+    runs-on: ubuntu-latest
     timeout-minutes: 90
 
     steps:
@@ -74,7 +74,7 @@ jobs:
           components: rustfmt, clippy
 
       - name: Cache Rust artifacts
-        uses: useblacksmith/rust-cache@v3
+        uses: swatinem/rust-cache@v2
         with:
           workspaces: 'alexandria/src-tauri -> target'
 
