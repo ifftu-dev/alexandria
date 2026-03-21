@@ -63,7 +63,10 @@ jobs:
         run: npm install --save-dev @tauri-apps/cli@latest
 
       - name: Install cargo-tauri (required by Xcode pre-build script)
-        run: cargo install tauri-cli --version "^2" --locked
+        uses: cargo-bins/cargo-binstall@main
+        with:
+          crate: tauri-cli
+          version: '^2'
 
       - name: Write Apple API Key
         run: echo "${{ secrets.APPLE_API_KEY_CONTENT }}" > $RUNNER_TEMP/AuthKey.p8
@@ -86,7 +89,7 @@ jobs:
 
   build-android:
     name: Build Android
-    runs-on: blacksmith-8vcpu-ubuntu-2204
+    runs-on: ubuntu-latest
     timeout-minutes: 90
 
     steps:
@@ -122,7 +125,7 @@ jobs:
           targets: aarch64-linux-android
 
       - name: Cache Rust artifacts
-        uses: useblacksmith/rust-cache@v3
+        uses: swatinem/rust-cache@v2
         with:
           workspaces: 'alexandria/src-tauri -> target'
 
@@ -142,7 +145,10 @@ jobs:
         run: npm install --save-dev @tauri-apps/cli@latest
 
       - name: Install cargo-tauri (required by Tauri Android build internals)
-        run: cargo install tauri-cli --version "^2" --locked
+        uses: cargo-bins/cargo-binstall@main
+        with:
+          crate: tauri-cli
+          version: '^2'
 
       - name: Decode Android keystore
         run: |
