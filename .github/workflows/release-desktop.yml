@@ -101,8 +101,10 @@ jobs:
             -s -k "$KEYCHAIN_PASSWORD" build.keychain
           rm certificate.p12
 
-      - name: Install FFmpeg and libtool (libtool provides glibtoolize for webrtc-audio-processing-sys/AEC)
-        run: brew install ffmpeg libtool
+      - name: Install FFmpeg and autotools (for webrtc-audio-processing-sys/AEC build)
+        # glibtoolize (libtool), aclocal/automake, autoconf are all required by the
+        # webrtc-audio-processing-sys build script when compiling the AEC module.
+        run: brew install ffmpeg libtool automake autoconf
 
       - name: Write Apple API Key
         run: |
@@ -338,14 +340,17 @@ jobs:
         # ends up after MSVC, so MSVC link.exe wins over MSYS2's POSIX hard-link tool.
         uses: ilammy/msvc-dev-cmd@v1
 
-      - name: Expose MSYS2 tools for webrtc-audio-processing-sys (libtoolize/autotools)
-        # webrtc-audio-processing-sys build.rs requires libtoolize. MSYS2 provides it but
-        # its usr/bin also contains a POSIX link.exe (hard-link tool) that breaks MSVC.
-        # Delete MSYS2 link.exe first, then add MSYS2 usr/bin — MSVC link.exe wins.
-        shell: pwsh
+      - name: Install autotools via MSYS2 for webrtc-audio-processing-sys (AEC build)
+        # webrtc-audio-processing-sys requires libtoolize, aclocal, automake, autoconf.
+        # These are not pre-installed in MSYS2 on GitHub runners — install via pacman.
+        # Remove MSYS2 usr/bin/link.exe (POSIX hard-link tool) before adding to PATH
+        # so MSVC link.exe is not shadowed. GITHUB_PATH prepends, so MSYS2 would win
+        # over ilammy's MSVC PATH without the link.exe removal.
+        shell: cmd
         run: |
-          Remove-Item "C:\msys64\usr\bin\link.exe" -Force -ErrorAction SilentlyContinue
-          echo "C:\msys64\usr\bin" >> $env:GITHUB_PATH
+          C:\msys64\usr\bin\bash.exe -lc "pacman -S --noconfirm libtool automake autoconf"
+          del /f /q C:\msys64\usr\bin\link.exe 2>nul || true
+          echo C:\msys64\usr\bin>> %GITHUB_PATH%
 
       - name: Download pre-built FFmpeg for Windows
         # Build-from-source (tutoring-video-static) fails on Windows due to MSVC/MinGW
