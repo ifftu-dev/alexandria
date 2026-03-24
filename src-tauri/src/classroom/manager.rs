@@ -20,11 +20,17 @@ pub struct ClassroomManager {
     subscriptions: Mutex<HashSet<String>>,
 }
 
-impl ClassroomManager {
-    pub fn new() -> Self {
+impl Default for ClassroomManager {
+    fn default() -> Self {
         Self {
             subscriptions: Mutex::new(HashSet::new()),
         }
+    }
+}
+
+impl ClassroomManager {
+    pub fn new() -> Self {
+        Self::default()
     }
 
     pub async fn mark_subscribed(&self, classroom_id: &str) {

@@ -639,15 +639,11 @@ fn apply_row_update(
 /// Only allows alphanumeric characters and underscores, must start with
 /// a letter or underscore, and must be at most 64 characters.
 fn sanitize_column_name(name: &str) -> Result<&str, String> {
+    let first = name.as_bytes().first().copied().unwrap_or(0);
     if !name.is_empty()
         && name.len() <= 64
-        && name
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b == b'_')
-        && name
-            .bytes()
-            .next()
-            .map_or(false, |b| b.is_ascii_alphabetic() || b == b'_')
+        && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+        && (first.is_ascii_alphabetic() || first == b'_')
     {
         Ok(name)
     } else {

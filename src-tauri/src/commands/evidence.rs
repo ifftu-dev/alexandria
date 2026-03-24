@@ -11,7 +11,10 @@ use crate::AppState;
 /// List all skill proofs for the local user.
 #[tauri::command]
 pub async fn list_skill_proofs(state: State<'_, AppState>) -> Result<Vec<SkillProof>, String> {
-    let db = state.db.lock().map_err(|_| "database lock poisoned".to_string())?;
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
 
     let mut stmt = db
         .conn()
@@ -46,7 +49,10 @@ pub async fn list_evidence(
     state: State<'_, AppState>,
     skill_id: Option<String>,
 ) -> Result<Vec<EvidenceRecord>, String> {
-    let db = state.db.lock().map_err(|_| "database lock poisoned".to_string())?;
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
 
     let (sql, param_values): (String, Vec<Box<dyn rusqlite::types::ToSql>>) =
         if let Some(ref sid) = skill_id {
@@ -100,7 +106,10 @@ pub async fn list_reputation(
     state: State<'_, AppState>,
     role: Option<String>,
 ) -> Result<Vec<ReputationAssertion>, String> {
-    let db = state.db.lock().map_err(|_| "database lock poisoned".to_string())?;
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
 
     let (sql, param_values): (String, Vec<Box<dyn rusqlite::types::ToSql>>) =
         if let Some(ref r) = role {

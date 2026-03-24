@@ -229,4 +229,3 @@ pub async fn p2p_peers(state: State<'_, AppState>) -> Result<Vec<String>, String
         None => Ok(vec![]),
     }
 }
-

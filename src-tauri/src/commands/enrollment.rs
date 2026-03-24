@@ -16,7 +16,10 @@ pub async fn list_enrollments(
     state: State<'_, AppState>,
     status: Option<String>,
 ) -> Result<Vec<Enrollment>, String> {
-    let db = state.db.lock().map_err(|_| "database lock poisoned".to_string())?;
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
 
     let (sql, param_values): (String, Vec<Box<dyn rusqlite::types::ToSql>>) =
         if let Some(ref s) = status {
@@ -61,7 +64,10 @@ pub async fn list_enrollments(
 /// Enroll in a course.
 #[tauri::command]
 pub async fn enroll(state: State<'_, AppState>, course_id: String) -> Result<Enrollment, String> {
-    let db = state.db.lock().map_err(|_| "database lock poisoned".to_string())?;
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
 
     // Get the local user's stake address for deterministic ID
     let stake_address: String = db
@@ -138,7 +144,10 @@ pub async fn update_progress(
 ) -> Result<ElementProgress, String> {
     // All DB work in a block so the guard is dropped before any .await
     let (progress, broadcast_data) = {
-        let db = state.db.lock().map_err(|_| "database lock poisoned".to_string())?;
+        let db = state
+            .db
+            .lock()
+            .map_err(|_| "database lock poisoned".to_string())?;
 
         let id = entity_id(&[&enrollment_id, &req.element_id]);
 
@@ -300,7 +309,10 @@ pub async fn update_progress(
         if let Ok(w) = signing_key_result {
             // Sign all messages and mark as sent in DB (synchronous, with DB lock)
             let signed_messages: Vec<_> = {
-                let db = state.db.lock().map_err(|_| "database lock poisoned".to_string())?;
+                let db = state
+                    .db
+                    .lock()
+                    .map_err(|_| "database lock poisoned".to_string())?;
                 broadcast_data
                     .iter()
                     .filter_map(|(ann, stake_addr)| {
@@ -560,7 +572,10 @@ pub async fn get_progress(
     state: State<'_, AppState>,
     enrollment_id: String,
 ) -> Result<Vec<ElementProgress>, String> {
-    let db = state.db.lock().map_err(|_| "database lock poisoned".to_string())?;
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
 
     let mut stmt = db
         .conn()

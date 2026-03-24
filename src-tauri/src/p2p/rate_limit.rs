@@ -13,15 +13,14 @@ const REFILL_INTERVAL_SECS: u64 = 3;
 /// Each peer starts with `MAX_TOKENS` tokens. Consuming a token allows
 /// one message through. Tokens are replenished at a rate of 1 per
 /// `REFILL_INTERVAL_SECS`, up to `MAX_TOKENS`.
+#[derive(Default)]
 pub struct PeerRateLimiter {
     peers: HashMap<PeerId, (u32, Instant)>,
 }
 
 impl PeerRateLimiter {
     pub fn new() -> Self {
-        Self {
-            peers: HashMap::new(),
-        }
+        Self::default()
     }
 
     /// Returns `true` if the peer is within rate limits (message allowed).
@@ -29,10 +28,7 @@ impl PeerRateLimiter {
     pub fn check(&mut self, peer: &PeerId) -> bool {
         let now = Instant::now();
 
-        let (tokens, last_refill) = self
-            .peers
-            .entry(*peer)
-            .or_insert((MAX_TOKENS, now));
+        let (tokens, last_refill) = self.peers.entry(*peer).or_insert((MAX_TOKENS, now));
 
         // Refill tokens based on elapsed time
         let elapsed = now.duration_since(*last_refill).as_secs();
