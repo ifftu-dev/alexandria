@@ -133,7 +133,7 @@ base64 = "0.21"
 [dev-dependencies]
 tempfile = "3"
 
-[[bin]]
+[[example]]
 name = "dev_seed"
-path = "src/bin/dev_seed.rs"
+path = "examples/dev_seed.rs"
 required-features = ["dev-seed"]

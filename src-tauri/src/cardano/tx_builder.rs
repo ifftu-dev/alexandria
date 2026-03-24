@@ -226,6 +226,7 @@ fn inject_metadata(
 /// 4. Includes CIP-25 metadata (label 721)
 ///
 /// Returns the signed transaction CBOR bytes and metadata.
+#[allow(clippy::too_many_arguments)]
 pub async fn build_skill_proof_mint(
     blockfrost: &BlockfrostClient,
     payment_address: &str,

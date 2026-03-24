@@ -20,7 +20,7 @@ async fn detect_camera() -> (bool, Option<String>) {
 
     match tokio::time::timeout(
         std::time::Duration::from_secs(5),
-        tokio::task::spawn_blocking(|| CameraCapturer::list_cameras()),
+        tokio::task::spawn_blocking(CameraCapturer::list_cameras),
     )
     .await
     {
@@ -43,7 +43,7 @@ async fn list_cameras() -> Vec<CameraDeviceInfo> {
 
     match tokio::time::timeout(
         std::time::Duration::from_secs(5),
-        tokio::task::spawn_blocking(|| CameraCapturer::list_cameras()),
+        tokio::task::spawn_blocking(CameraCapturer::list_cameras),
     )
     .await
     {
@@ -177,6 +177,7 @@ pub async fn tutoring_create_room(
 
 /// Join an existing tutoring room using a ticket.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn tutoring_join_room(
     ticket: String,
     title: Option<String>,

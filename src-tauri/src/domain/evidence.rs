@@ -39,6 +39,7 @@ impl ProficiencyLevel {
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<ProficiencyLevel> {
         match s {
             "remember" => Some(ProficiencyLevel::Remember),

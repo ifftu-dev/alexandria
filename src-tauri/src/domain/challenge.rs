@@ -28,6 +28,7 @@ impl ChallengeTargetType {
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
             "evidence" => Some(Self::Evidence),
@@ -59,6 +60,7 @@ impl ChallengeStatus {
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
             "pending" => Some(Self::Pending),

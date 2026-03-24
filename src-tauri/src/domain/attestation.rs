@@ -48,6 +48,7 @@ impl AttestorRole {
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
             "assessor" => Some(Self::Assessor),
@@ -75,6 +76,7 @@ impl AttestationType {
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
             "co_sign" => Some(Self::CoSign),
