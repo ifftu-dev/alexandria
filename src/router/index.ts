@@ -65,6 +65,32 @@ const router = createRouter({
       meta: { layout: 'app' },
     },
 
+    // Classrooms
+    {
+      path: '/classrooms',
+      name: 'classrooms',
+      component: () => import('@/pages/classrooms/Index.vue'),
+      meta: { layout: 'app' },
+    },
+    {
+      path: '/classrooms/:id',
+      name: 'classroom',
+      component: () => import('@/pages/classrooms/Classroom.vue'),
+      meta: { layout: 'app' },
+    },
+    {
+      path: '/classrooms/:id/settings',
+      name: 'classroom-settings',
+      component: () => import('@/pages/classrooms/Settings.vue'),
+      meta: { layout: 'app' },
+    },
+    {
+      path: '/classrooms/:id/requests',
+      name: 'classroom-requests',
+      component: () => import('@/pages/classrooms/JoinRequests.vue'),
+      meta: { layout: 'app' },
+    },
+
     // Live Tutoring
     {
       path: '/tutoring',

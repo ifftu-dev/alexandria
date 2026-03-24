@@ -87,10 +87,13 @@ pub async fn content_resolve(
     state: State<'_, AppState>,
     identifier: String,
 ) -> Result<ResolveResponse, String> {
-    let resolver = state.resolver.lock().await;
-    let resolver = resolver
-        .as_ref()
-        .ok_or_else(|| "content resolver not initialized".to_string())?;
+    let resolver = {
+        let guard = state.resolver.lock().await;
+        guard
+            .as_ref()
+            .cloned()
+            .ok_or_else(|| "content resolver not initialized".to_string())?
+    };
 
     let result = resolver
         .resolve(&identifier)
@@ -114,10 +117,13 @@ pub async fn content_resolve_bytes(
     state: State<'_, AppState>,
     identifier: String,
 ) -> Result<Vec<u8>, String> {
-    let resolver = state.resolver.lock().await;
-    let resolver = resolver
-        .as_ref()
-        .ok_or_else(|| "content resolver not initialized".to_string())?;
+    let resolver = {
+        let guard = state.resolver.lock().await;
+        guard
+            .as_ref()
+            .cloned()
+            .ok_or_else(|| "content resolver not initialized".to_string())?
+    };
 
     let result = resolver
         .resolve(&identifier)

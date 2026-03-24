@@ -1,4 +1,5 @@
 pub mod cardano;
+pub mod classroom;
 pub mod commands;
 #[cfg(desktop)]
 pub mod crypto;
@@ -27,6 +28,7 @@ use std::sync::Arc;
 use tauri::Manager;
 use tokio::sync::Mutex;
 
+use classroom::ClassroomManager;
 use crypto::keystore::Keystore;
 use ipfs::gateway::GatewayClient;
 use ipfs::node::ContentNode;
@@ -52,6 +54,7 @@ pub struct AppState {
     pub resolver: Arc<Mutex<Option<ContentResolver>>>,
     pub p2p_node: Arc<Mutex<Option<P2pNode>>>,
     pub tutoring: Arc<TutoringManager>,
+    pub classroom: Arc<ClassroomManager>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -216,6 +219,9 @@ pub fn run() {
             diag::log("creating TutoringManager");
             let tutoring = Arc::new(TutoringManager::new());
 
+            diag::log("creating ClassroomManager");
+            let classroom = Arc::new(ClassroomManager::new());
+
             let app_state = AppState {
                 db,
                 keystore: Arc::new(Mutex::new(None)),
@@ -224,6 +230,7 @@ pub fn run() {
                 resolver,
                 p2p_node: Arc::new(Mutex::new(None)),
                 tutoring,
+                classroom,
             };
 
             // Clean up any sessions stuck as 'active' from a previous crash
@@ -251,6 +258,22 @@ pub fn run() {
                     Err(e) => {
                         log::error!("tutoring: db mutex poisoned during orphan cleanup: {e}");
                         diag::log(&format!("CRITICAL: db mutex poisoned: {e}"));
+                    }
+                }
+            }
+
+            // Clean up classroom calls stuck as 'active' from a previous crash
+            diag::log("cleaning up orphaned classroom calls");
+            {
+                match app_state.db.lock() {
+                    Ok(db) => {
+                        let _ = db.conn().execute(
+                            "UPDATE classroom_calls SET status = 'ended', ended_at = datetime('now') WHERE status = 'active'",
+                            [],
+                        );
+                    }
+                    Err(e) => {
+                        log::warn!("classroom: failed to clean up orphaned calls: {e}");
                     }
                 }
             }
@@ -362,7 +385,6 @@ pub fn run() {
             commands::p2p::p2p_stop,
             commands::p2p::p2p_status,
             commands::p2p::p2p_peers,
-            commands::p2p::p2p_publish,
             // Catalog
             commands::catalog::search_catalog,
             commands::catalog::get_catalog_entry,
@@ -460,6 +482,31 @@ pub fn run() {
             commands::tutoring::tutoring_list_devices,
             commands::tutoring::tutoring_get_audio_level,
             commands::tutoring::tutoring_diagnostics,
+            // Classrooms
+            commands::classroom::classroom_create,
+            commands::classroom::classroom_list,
+            commands::classroom::classroom_get,
+            commands::classroom::classroom_archive,
+            commands::classroom::classroom_list_members,
+            commands::classroom::classroom_request_join,
+            commands::classroom::classroom_approve_member,
+            commands::classroom::classroom_deny_member,
+            commands::classroom::classroom_leave,
+            commands::classroom::classroom_kick_member,
+            commands::classroom::classroom_set_role,
+            commands::classroom::classroom_list_join_requests,
+            commands::classroom::classroom_list_channels,
+            commands::classroom::classroom_create_channel,
+            commands::classroom::classroom_delete_channel,
+            commands::classroom::classroom_get_messages,
+            commands::classroom::classroom_send_message,
+            commands::classroom::classroom_delete_message,
+            commands::classroom::classroom_subscribe,
+            commands::classroom::classroom_unsubscribe,
+            commands::classroom::classroom_start_call,
+            commands::classroom::classroom_join_call,
+            commands::classroom::classroom_end_call,
+            commands::classroom::classroom_get_active_call,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

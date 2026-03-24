@@ -3,6 +3,7 @@ pub mod cardano;
 pub mod catalog;
 pub mod challenge;
 pub mod chapters;
+pub mod classroom;
 pub mod courses;
 pub mod elements;
 pub mod enrollment;

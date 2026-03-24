@@ -963,3 +963,103 @@ export interface HealthResponse {
   version: string
   database: string
 }
+
+// ---- Classrooms ----
+
+export interface Classroom {
+  id: string
+  name: string
+  description: string | null
+  icon_emoji: string | null
+  owner_address: string
+  invite_code: string | null
+  status: 'active' | 'archived'
+  created_at: string
+  updated_at: string
+  member_count: number | null
+  my_role: 'owner' | 'moderator' | 'member' | null
+}
+
+export interface ClassroomMember {
+  classroom_id: string
+  stake_address: string
+  role: 'owner' | 'moderator' | 'member'
+  display_name: string | null
+  joined_at: string
+}
+
+export interface ClassroomChannel {
+  id: string
+  classroom_id: string
+  name: string
+  description: string | null
+  channel_type: 'text' | 'announcement'
+  position: number
+  created_at: string
+}
+
+export interface ClassroomMessage {
+  id: string
+  channel_id: string
+  classroom_id: string
+  sender_address: string
+  sender_name: string | null
+  content: string
+  deleted: boolean
+  edited_at: string | null
+  sent_at: string
+  received_at: string
+}
+
+export interface JoinRequest {
+  id: string
+  classroom_id: string
+  stake_address: string
+  display_name: string | null
+  message: string | null
+  status: 'pending' | 'approved' | 'denied'
+  reviewed_by: string | null
+  requested_at: string
+  reviewed_at: string | null
+}
+
+export interface ClassroomCall {
+  id: string
+  classroom_id: string
+  channel_id: string | null
+  title: string
+  ticket: string | null
+  started_by: string
+  status: 'active' | 'ended'
+  started_at: string
+  ended_at: string | null
+}
+
+// Tauri event payloads
+export interface ClassroomMessageEvent {
+  classroom_id: string
+  channel_id: string
+  message: {
+    id: string
+    channel_id: string
+    classroom_id: string
+    sender_address: string
+    sender_name: string | null
+    content: string
+    sent_at: string
+  }
+}
+
+export interface ClassroomMetaEvent {
+  classroom_id: string
+  event_type:
+    | 'JoinRequest'
+    | 'MemberApproved'
+    | 'MemberDenied'
+    | 'MemberLeft'
+    | 'MemberKicked'
+    | 'RoleChanged'
+    | 'CallStarted'
+    | 'CallEnded'
+  data: Record<string, unknown>
+}

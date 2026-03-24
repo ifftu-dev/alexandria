@@ -8,6 +8,7 @@ use rusqlite::params;
 use serde::Deserialize;
 use tauri::State;
 
+use crate::crypto::hash::entity_id;
 use crate::domain::catalog::CatalogEntry;
 use crate::domain::course_document::SignedCourseDocument;
 use crate::ipfs::course as ipfs_course;
@@ -72,7 +73,10 @@ pub async fn search_catalog(
     author: Option<String>,
     limit: Option<u32>,
 ) -> Result<Vec<CatalogEntry>, String> {
-    let db = state.db.lock().unwrap();
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
     let max = limit.unwrap_or(50).min(200) as usize;
 
     // Build dynamic WHERE clause
@@ -255,7 +259,10 @@ pub async fn get_catalog_entry(
     state: State<'_, AppState>,
     course_id: String,
 ) -> Result<Option<CatalogEntry>, String> {
-    let db = state.db.lock().unwrap();
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
 
     let result = db.conn().query_row(
         "SELECT course_id, title, description, author_address, content_cid, \
@@ -295,6 +302,8 @@ pub async fn get_catalog_entry(
 
 #[derive(Debug)]
 struct CatalogHydrateRow {
+    course_id: String,
+    author_address: String,
     content_cid: String,
     version: i64,
 }
@@ -314,19 +323,25 @@ pub async fn hydrate_catalog_courses(
     let max = limit.unwrap_or(200).min(500) as usize;
 
     let rows: Vec<CatalogHydrateRow> = {
-        let db = state.db.lock().unwrap();
+        let db = state
+            .db
+            .lock()
+            .map_err(|_| "database lock poisoned".to_string())?;
         let mut stmt = db
             .conn()
             .prepare(
-                "SELECT content_cid, version FROM catalog ORDER BY version DESC, published_at DESC LIMIT ?1",
+                "SELECT course_id, author_address, content_cid, version \
+                 FROM catalog ORDER BY version DESC, published_at DESC LIMIT ?1",
             )
             .map_err(|e| e.to_string())?;
 
         let mapped = stmt
             .query_map(params![max as i64], |row| {
                 Ok(CatalogHydrateRow {
-                    content_cid: row.get(0)?,
-                    version: row.get(1)?,
+                    course_id: row.get(0)?,
+                    author_address: row.get(1)?,
+                    content_cid: row.get(2)?,
+                    version: row.get(3)?,
                 })
             })
             .map_err(|e| e.to_string())?;
@@ -343,7 +358,9 @@ pub async fn hydrate_catalog_courses(
             let resolver_guard = state.resolver.lock().await;
             let resolver = resolver_guard
                 .as_ref()
+                .cloned()
                 .ok_or_else(|| "content resolver not initialized".to_string())?;
+            drop(resolver_guard);
 
             let resolved = resolver
                 .resolve(&row.content_cid)
@@ -355,13 +372,36 @@ pub async fn hydrate_catalog_courses(
 
             ipfs_course::verify_course_document(&doc)
                 .map_err(|e| format!("invalid signature for {}: {e}", row.content_cid))?;
+            let expected_course_id = entity_id(&[&row.author_address, &row.content_cid]);
+            if row.course_id != expected_course_id {
+                return Err(format!(
+                    "catalog entry for {} has invalid deterministic course_id",
+                    row.content_cid
+                ));
+            }
+            if doc.author_address != row.author_address {
+                return Err(format!(
+                    "hydrated course document author mismatch for {}",
+                    row.content_cid
+                ));
+            }
+            if doc.course_id != row.course_id {
+                return Err(format!(
+                    "hydrated course document course_id mismatch for {}",
+                    row.content_cid
+                ));
+            }
 
             doc
         };
 
-        let db = state.db.lock().unwrap();
+        let db = state
+            .db
+            .lock()
+            .map_err(|_| "database lock poisoned".to_string())?;
         let conn = db.conn();
-        conn.execute_batch("BEGIN")
+        let tx = conn
+            .unchecked_transaction()
             .map_err(|e| format!("hydrate tx begin failed: {e}"))?;
 
         let tags_json =
@@ -369,7 +409,7 @@ pub async fn hydrate_catalog_courses(
         let skill_ids_json =
             serde_json::to_string(&signed_doc.skill_ids).unwrap_or_else(|_| "[]".to_string());
 
-        conn.execute(
+        tx.execute(
             "INSERT INTO courses (id, title, description, author_address, content_cid, thumbnail_cid, tags, skill_ids, version, status, published_at, updated_at) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'published', datetime('now'), datetime('now')) \
              ON CONFLICT(id) DO UPDATE SET \
@@ -398,14 +438,14 @@ pub async fn hydrate_catalog_courses(
         )
         .map_err(|e| format!("upsert course failed: {e}"))?;
 
-        conn.execute(
+        tx.execute(
             "DELETE FROM course_chapters WHERE course_id = ?1",
             params![signed_doc.course_id],
         )
         .map_err(|e| format!("clear chapters failed: {e}"))?;
 
         for chapter in &signed_doc.chapters {
-            conn.execute(
+            tx.execute(
                 "INSERT INTO course_chapters (id, course_id, title, description, position) VALUES (?1, ?2, ?3, ?4, ?5)",
                 params![
                     chapter.id,
@@ -418,7 +458,7 @@ pub async fn hydrate_catalog_courses(
             .map_err(|e| format!("insert chapter failed: {e}"))?;
 
             for element in &chapter.elements {
-                conn.execute(
+                tx.execute(
                     "INSERT INTO course_elements (id, chapter_id, title, element_type, content_cid, position, duration_seconds) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                     params![
                         element.id,
@@ -434,7 +474,7 @@ pub async fn hydrate_catalog_courses(
             }
         }
 
-        conn.execute_batch("COMMIT")
+        tx.commit()
             .map_err(|e| format!("hydrate tx commit failed: {e}"))?;
         hydrated += 1;
     }
@@ -452,9 +492,13 @@ pub async fn bootstrap_public_catalog(state: State<'_, AppState>) -> Result<u32,
     let payload: BootstrapPayload = serde_json::from_str(BOOTSTRAP_PUBLIC_COURSES_JSON)
         .map_err(|e| format!("invalid bootstrap payload: {e}"))?;
 
-    let db = state.db.lock().unwrap();
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
     let conn = db.conn();
-    conn.execute_batch("BEGIN")
+    let tx = conn
+        .unchecked_transaction()
         .map_err(|e| format!("bootstrap tx begin failed: {e}"))?;
 
     let mut imported = 0u32;
@@ -463,7 +507,7 @@ pub async fn bootstrap_public_catalog(state: State<'_, AppState>) -> Result<u32,
         let skill_ids_json =
             serde_json::to_string(&course.skill_ids).unwrap_or_else(|_| "[]".to_string());
 
-        conn.execute(
+        tx.execute(
             "INSERT INTO courses (id, title, description, author_address, author_name, content_cid, thumbnail_cid, thumbnail_svg, tags, skill_ids, version, status, published_at, on_chain_tx, created_at, updated_at) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16) \
              ON CONFLICT(id) DO UPDATE SET \
@@ -502,14 +546,14 @@ pub async fn bootstrap_public_catalog(state: State<'_, AppState>) -> Result<u32,
         )
         .map_err(|e| format!("bootstrap upsert course failed: {e}"))?;
 
-        conn.execute(
+        tx.execute(
             "DELETE FROM course_chapters WHERE course_id = ?1",
             params![course.id],
         )
         .map_err(|e| format!("bootstrap clear chapters failed: {e}"))?;
 
         for chapter in &course.chapters {
-            conn.execute(
+            tx.execute(
                 "INSERT INTO course_chapters (id, course_id, title, description, position) VALUES (?1, ?2, ?3, ?4, ?5)",
                 params![
                     chapter.id,
@@ -522,7 +566,7 @@ pub async fn bootstrap_public_catalog(state: State<'_, AppState>) -> Result<u32,
             .map_err(|e| format!("bootstrap insert chapter failed: {e}"))?;
 
             for element in &chapter.elements {
-                conn.execute(
+                tx.execute(
                     "INSERT INTO course_elements (id, chapter_id, title, element_type, content_cid, content_inline, position, duration_seconds) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
                     params![
                         element.id,
@@ -544,7 +588,7 @@ pub async fn bootstrap_public_catalog(state: State<'_, AppState>) -> Result<u32,
             .clone()
             .unwrap_or_else(|| format!("bootstrap:{}", course.id));
 
-        conn.execute(
+        tx.execute(
             "INSERT INTO catalog (course_id, title, description, author_address, content_cid, thumbnail_cid, tags, skill_ids, version, published_at, signature, pinned) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, COALESCE(?10, datetime('now')), 'bootstrap_v1', 1) \
              ON CONFLICT(course_id) DO UPDATE SET \
@@ -577,7 +621,7 @@ pub async fn bootstrap_public_catalog(state: State<'_, AppState>) -> Result<u32,
         imported += 1;
     }
 
-    conn.execute_batch("COMMIT")
+    tx.commit()
         .map_err(|e| format!("bootstrap tx commit failed: {e}"))?;
     Ok(imported)
 }

@@ -23,6 +23,7 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (13, "visual_assets", MIGRATION_013),
     (14, "inline_content", MIGRATION_014),
     (15, "tutoring_sessions", MIGRATION_015),
+    (16, "classrooms", MIGRATION_016),
 ];
 
 const MIGRATION_001: &str = r#"
@@ -797,6 +798,118 @@ const MIGRATION_014: &str = r#"
 -- ============================================================
 
 ALTER TABLE course_elements ADD COLUMN content_inline TEXT;
+"#;
+
+const MIGRATION_016: &str = r#"
+-- ============================================================
+-- Migration 016: Classrooms
+-- Persistent group spaces (like Discord servers) with text
+-- channels, message history, membership management, join
+-- requests, and live A/V calls via iroh-live.
+-- ============================================================
+
+-- ---- Classrooms ----
+
+CREATE TABLE IF NOT EXISTS classrooms (
+    id              TEXT PRIMARY KEY,  -- blake2b(owner_address + name + created_at_ms)
+    name            TEXT NOT NULL,
+    description     TEXT,
+    icon_emoji      TEXT,
+    owner_address   TEXT NOT NULL,     -- Cardano stake address (bech32)
+    invite_code     TEXT UNIQUE,       -- 8-char alphanumeric join code (optional)
+    status          TEXT NOT NULL DEFAULT 'active'
+                        CHECK (status IN ('active', 'archived')),
+    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- ---- Classroom Members ----
+
+CREATE TABLE IF NOT EXISTS classroom_members (
+    classroom_id    TEXT NOT NULL REFERENCES classrooms(id) ON DELETE CASCADE,
+    stake_address   TEXT NOT NULL,
+    role            TEXT NOT NULL DEFAULT 'member'
+                        CHECK (role IN ('owner', 'moderator', 'member')),
+    display_name    TEXT,
+    joined_at       TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (classroom_id, stake_address)
+);
+
+-- ---- Join Requests ----
+
+CREATE TABLE IF NOT EXISTS classroom_join_requests (
+    id              TEXT PRIMARY KEY,
+    classroom_id    TEXT NOT NULL REFERENCES classrooms(id) ON DELETE CASCADE,
+    stake_address   TEXT NOT NULL,
+    display_name    TEXT,
+    message         TEXT,
+    status          TEXT NOT NULL DEFAULT 'pending'
+                        CHECK (status IN ('pending', 'approved', 'denied')),
+    reviewed_by     TEXT,
+    requested_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    reviewed_at     TEXT
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_join_requests_unique_pending
+    ON classroom_join_requests(classroom_id, stake_address)
+    WHERE status = 'pending';
+
+-- ---- Channels ----
+
+CREATE TABLE IF NOT EXISTS classroom_channels (
+    id              TEXT PRIMARY KEY,  -- blake2b(classroom_id + name)
+    classroom_id    TEXT NOT NULL REFERENCES classrooms(id) ON DELETE CASCADE,
+    name            TEXT NOT NULL,
+    description     TEXT,
+    channel_type    TEXT NOT NULL DEFAULT 'text'
+                        CHECK (channel_type IN ('text', 'announcement')),
+    position        INTEGER NOT NULL DEFAULT 0,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (classroom_id, name)
+);
+
+-- ---- Messages ----
+
+CREATE TABLE IF NOT EXISTS classroom_messages (
+    id              TEXT PRIMARY KEY,
+    channel_id      TEXT NOT NULL REFERENCES classroom_channels(id) ON DELETE CASCADE,
+    classroom_id    TEXT NOT NULL,
+    sender_address  TEXT NOT NULL,
+    sender_name     TEXT,
+    content         TEXT NOT NULL,
+    edited_at       TEXT,
+    deleted         INTEGER NOT NULL DEFAULT 0,
+    sent_at         TEXT NOT NULL,
+    received_at     TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- ---- Calls ----
+
+CREATE TABLE IF NOT EXISTS classroom_calls (
+    id              TEXT PRIMARY KEY,
+    classroom_id    TEXT NOT NULL REFERENCES classrooms(id) ON DELETE CASCADE,
+    channel_id      TEXT REFERENCES classroom_channels(id),
+    title           TEXT NOT NULL,
+    ticket          TEXT,
+    started_by      TEXT NOT NULL,
+    status          TEXT NOT NULL DEFAULT 'active'
+                        CHECK (status IN ('active', 'ended')),
+    started_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    ended_at        TEXT
+);
+
+-- ---- Indexes ----
+
+CREATE INDEX IF NOT EXISTS idx_classrooms_owner     ON classrooms(owner_address);
+CREATE INDEX IF NOT EXISTS idx_classrooms_status    ON classrooms(status);
+CREATE INDEX IF NOT EXISTS idx_members_address      ON classroom_members(stake_address);
+CREATE INDEX IF NOT EXISTS idx_members_classroom    ON classroom_members(classroom_id);
+CREATE INDEX IF NOT EXISTS idx_join_req_classroom   ON classroom_join_requests(classroom_id, status);
+CREATE INDEX IF NOT EXISTS idx_join_req_address     ON classroom_join_requests(stake_address);
+CREATE INDEX IF NOT EXISTS idx_channels_classroom   ON classroom_channels(classroom_id, position);
+CREATE INDEX IF NOT EXISTS idx_messages_channel     ON classroom_messages(channel_id, sent_at);
+CREATE INDEX IF NOT EXISTS idx_messages_classroom   ON classroom_messages(classroom_id, sent_at);
+CREATE INDEX IF NOT EXISTS idx_calls_classroom      ON classroom_calls(classroom_id, status);
 "#;
 
 const MIGRATION_015: &str = r#"
