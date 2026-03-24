@@ -139,6 +139,7 @@ fn device_label() -> String {
     }
 }
 
+#[cfg(any(target_os = "macos", target_os = "ios"))]
 fn humanize_apple_model(model: &str) -> String {
     let model = model.trim();
     if model.is_empty() {
@@ -179,6 +180,7 @@ fn humanize_apple_model(model: &str) -> String {
     format!("Apple device ({model})")
 }
 
+#[cfg(any(target_os = "macos", target_os = "ios"))]
 fn extract_apple_generation(model: &str, prefix: &str) -> Option<u32> {
     let tail = model.strip_prefix(prefix)?;
     let digits: String = tail.chars().take_while(|c| c.is_ascii_digit()).collect();
