@@ -1179,6 +1179,7 @@ pub async fn classroom_unsubscribe(
 /// via the meta gossip topic so they can join.
 #[tauri::command]
 #[cfg(desktop)]
+#[allow(clippy::too_many_arguments)]
 pub async fn classroom_start_call(
     classroom_id: String,
     channel_id: Option<String>,

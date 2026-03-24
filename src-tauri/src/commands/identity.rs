@@ -98,7 +98,10 @@ pub async fn unlock_vault(
 
     emit_progress(&app, "db", "Loading identity from database...");
     let profile = {
-        let db = state.db.lock().map_err(|_| "database lock poisoned".to_string())?;
+        let db = state
+            .db
+            .lock()
+            .map_err(|_| "database lock poisoned".to_string())?;
         let exists: bool = db
             .conn()
             .query_row(
@@ -171,7 +174,10 @@ pub async fn generate_wallet(
 
     emit_progress(&app, "db", "Storing identity in local database...");
     {
-        let db = state.db.lock().map_err(|_| "database lock poisoned".to_string())?;
+        let db = state
+            .db
+            .lock()
+            .map_err(|_| "database lock poisoned".to_string())?;
 
         // Check if identity already exists
         let exists: bool = db
@@ -244,7 +250,10 @@ pub async fn restore_wallet(
 
     emit_progress(&app, "db", "Storing identity in local database...");
     {
-        let db = state.db.lock().map_err(|_| "database lock poisoned".to_string())?;
+        let db = state
+            .db
+            .lock()
+            .map_err(|_| "database lock poisoned".to_string())?;
 
         let exists: bool = db
             .conn()
@@ -313,7 +322,10 @@ pub async fn lock_vault(state: State<'_, AppState>) -> Result<(), String> {
 /// Get the current wallet info (no secrets).
 #[tauri::command]
 pub async fn get_wallet_info(state: State<'_, AppState>) -> Result<Option<WalletInfo>, String> {
-    let db = state.db.lock().map_err(|_| "database lock poisoned".to_string())?;
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
 
     let result = db.conn().query_row(
         "SELECT stake_address, payment_address FROM local_identity WHERE id = 1",
@@ -337,7 +349,10 @@ pub async fn get_wallet_info(state: State<'_, AppState>) -> Result<Option<Wallet
 /// Get the local user's profile.
 #[tauri::command]
 pub async fn get_profile(state: State<'_, AppState>) -> Result<Option<Identity>, String> {
-    let db = state.db.lock().map_err(|_| "database lock poisoned".to_string())?;
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
     Ok(read_profile(db.conn()))
 }
 
@@ -369,7 +384,10 @@ pub async fn update_profile(
     state: State<'_, AppState>,
     update: ProfileUpdate,
 ) -> Result<Identity, String> {
-    let db = state.db.lock().map_err(|_| "database lock poisoned".to_string())?;
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
 
     // Build dynamic UPDATE statement
     let mut set_clauses = Vec::new();
@@ -452,7 +470,10 @@ pub async fn publish_profile(state: State<'_, AppState>) -> Result<PublishProfil
         Option<String>,
         String,
     ) = {
-        let db = state.db.lock().map_err(|_| "database lock poisoned".to_string())?;
+        let db = state
+            .db
+            .lock()
+            .map_err(|_| "database lock poisoned".to_string())?;
         db.conn()
             .query_row(
                 "SELECT stake_address, display_name, bio, avatar_cid, created_at
@@ -495,7 +516,10 @@ pub async fn publish_profile(state: State<'_, AppState>) -> Result<PublishProfil
         .map_err(|e| e.to_string())?;
 
     // Save the profile_hash in the database
-    let db = state.db.lock().map_err(|_| "database lock poisoned".to_string())?;
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
     db.conn()
         .execute(
             "UPDATE local_identity SET profile_hash = ?1, updated_at = datetime('now') WHERE id = 1",

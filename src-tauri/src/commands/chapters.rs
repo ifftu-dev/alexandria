@@ -16,7 +16,10 @@ pub async fn list_chapters(
     state: State<'_, AppState>,
     course_id: String,
 ) -> Result<Vec<Chapter>, String> {
-    let db = state.db.lock().map_err(|_| "database lock poisoned".to_string())?;
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
 
     let mut stmt = db
         .conn()
@@ -52,7 +55,10 @@ pub async fn create_chapter(
     course_id: String,
     req: CreateChapterRequest,
 ) -> Result<Chapter, String> {
-    let db = state.db.lock().map_err(|_| "database lock poisoned".to_string())?;
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
 
     // Get the next position
     let next_pos: i64 = db
@@ -98,7 +104,10 @@ pub async fn update_chapter(
     chapter_id: String,
     req: UpdateChapterRequest,
 ) -> Result<Chapter, String> {
-    let db = state.db.lock().map_err(|_| "database lock poisoned".to_string())?;
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
 
     let mut set_clauses = Vec::new();
     let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
@@ -305,7 +314,10 @@ mod tests {
 /// Delete a chapter and all its elements.
 #[tauri::command]
 pub async fn delete_chapter(state: State<'_, AppState>, chapter_id: String) -> Result<(), String> {
-    let db = state.db.lock().map_err(|_| "database lock poisoned".to_string())?;
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
 
     let rows = db
         .conn()
