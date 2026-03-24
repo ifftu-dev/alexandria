@@ -24,6 +24,10 @@ env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
 
+concurrency:
+  group: ${{ github.workflow }}-${{ inputs.tag || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   create-release:
     name: Create GitHub Release
@@ -104,7 +108,7 @@ jobs:
       - name: Install FFmpeg and autotools (for webrtc-audio-processing-sys/AEC build)
         # glibtoolize (libtool), aclocal/automake, autoconf are all required by the
         # webrtc-audio-processing-sys build script when compiling the AEC module.
-        run: brew install ffmpeg libtool automake autoconf
+        run: brew install cmake ffmpeg libtool automake autoconf
 
       - name: Write Apple API Key
         run: |
@@ -165,6 +169,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
+            cmake \
             libwebkit2gtk-4.1-dev \
             libappindicator3-dev \
             librsvg2-dev \
@@ -257,6 +262,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
+            cmake \
             libwebkit2gtk-4.1-dev \
             libappindicator3-dev \
             librsvg2-dev \

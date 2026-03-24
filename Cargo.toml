@@ -20,6 +20,7 @@ strip = true
 # Our patch routes iOS to the fallback (timer-based) backend instead.
 [patch.crates-io]
 if-watch = { path = "patches/if-watch" }
+audiopus_sys = { path = "patches/audiopus_sys" }
 
 [patch."https://github.com/ifftu-dev/iroh-live"]
 iroh-live = { path = "../iroh-live-patched/iroh-live" }

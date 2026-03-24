@@ -8,22 +8,36 @@
 //! a separate gossip `/names` topic.
 
 use std::collections::{HashMap, HashSet};
-use std::io::Cursor;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+#[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
+use std::io::Cursor;
+
+#[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
 use base64::Engine;
 use bytes::Bytes;
+#[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
 use image::ImageEncoder;
-use iroh::{Endpoint, EndpointId};
+use iroh::Endpoint;
+#[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
+use iroh::EndpointId;
 use iroh_gossip::net::Gossip;
 use iroh_live::media::audio::{AudioBackend, DeviceId, InputStream, OutputStream};
-use iroh_live::media::av::{AudioPreset, AudioSinkHandle, DecodeConfig, VideoPreset};
+use iroh_live::media::av::{AudioPreset, AudioSinkHandle};
+#[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
+use iroh_live::media::av::{DecodeConfig, VideoPreset};
+#[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
 use iroh_live::media::capture::{CameraCapturer, CameraIndex, ScreenCapturer};
+#[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
 use iroh_live::media::ffmpeg::{FfmpegVideoDecoder, H264Encoder};
 use iroh_live::media::opus::{PureOpusDecoder, PureOpusEncoder};
-use iroh_live::media::publish::{AudioRenditions, PublishBroadcast, VideoRenditions};
-use iroh_live::media::subscribe::{SubscribeBroadcast, WatchTrack};
+#[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
+use iroh_live::media::publish::VideoRenditions;
+use iroh_live::media::publish::{AudioRenditions, PublishBroadcast};
+use iroh_live::media::subscribe::SubscribeBroadcast;
+#[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
+use iroh_live::media::subscribe::WatchTrack;
 use iroh_live::rooms::{Room, RoomEvent, RoomHandle, RoomTicket};
 use iroh_live::Live;
 use serde::{Deserialize, Serialize};
@@ -41,6 +55,8 @@ const CHAT_RATE_LIMIT_MS: u64 = 200;
 
 /// Interval for re-broadcasting our display name (seconds).
 const NAME_BROADCAST_INTERVAL_SECS: u64 = 15;
+#[cfg(not(any(feature = "tutoring-video", feature = "tutoring-video-static")))]
+const VIDEO_DISABLED_ERROR: &str = "video support is disabled in this build";
 
 // ── Chat message protocol ──────────────────────────────────────────
 
@@ -69,6 +85,7 @@ struct NameAnnouncement {
 }
 
 /// Tauri event payload for a video frame.
+#[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
 #[derive(Debug, Clone, Serialize)]
 struct VideoFrameEvent {
     /// Node ID of the peer (or "self" for local preview).
@@ -91,6 +108,7 @@ struct ChatMessageEvent {
 }
 
 /// Tauri event payload when a peer's video track closes.
+#[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
 #[derive(Debug, Clone, Serialize)]
 struct PeerVideoEndedEvent {
     node_id: String,
@@ -125,6 +143,7 @@ pub struct DeviceSelection {
 ///
 /// Accepts formats: "Index(0)", "String(\"FaceTime HD Camera\")", or a plain
 /// number like "0" as a fallback.
+#[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
 fn parse_camera_index(s: &str) -> Option<CameraIndex> {
     if let Some(inner) = s.strip_prefix("Index(").and_then(|s| s.strip_suffix(')')) {
         inner.parse::<u32>().ok().map(CameraIndex::Index)
@@ -237,10 +256,12 @@ struct ActiveSession {
     /// Timestamp of last sent chat message (for rate limiting).
     last_chat_sent: Instant,
     /// AppHandle for emitting Tauri events from toggle methods.
+    #[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
     app_handle: AppHandle,
     /// Handle for the self-preview task (aborted on toggle).
     self_preview_task: Option<JoinHandle<()>>,
     /// User's selected devices — preserved for toggle_video/toggle_audio re-creation.
+    #[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
     device_selection: DeviceSelection,
     /// Background tasks to abort on leave.
     _tasks: Vec<JoinHandle<()>>,
@@ -348,9 +369,13 @@ impl TutoringManager {
         }
 
         // Start publishing local media (using selected camera if any)
-        let camera_idx = devices.camera_index.as_deref().and_then(parse_camera_index);
-        let (mut broadcast, mic_input, has_video) =
-            Self::create_broadcast(audio_ctx.as_ref(), true, has_audio, camera_idx).await?;
+        let (mut broadcast, mic_input, has_video) = Self::create_broadcast(
+            audio_ctx.as_ref(),
+            true,
+            has_audio,
+            devices.camera_index.clone(),
+        )
+        .await?;
         room.publish(BROADCAST_NAME, broadcast.producer())
             .await
             .map_err(|e| format!("failed to publish broadcast: {e}"))?;
@@ -412,8 +437,10 @@ impl TutoringManager {
             our_display_name: display_name,
             started_at: Self::now_millis(),
             last_chat_sent: Instant::now() - Duration::from_secs(10),
+            #[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
             app_handle: app_handle.clone(),
             self_preview_task,
+            #[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
             device_selection: devices,
             _tasks: tasks,
             recent_logs: init_logs,
@@ -478,9 +505,13 @@ impl TutoringManager {
         }
 
         // Start publishing local media (using selected camera if any)
-        let camera_idx = devices.camera_index.as_deref().and_then(parse_camera_index);
-        let (mut broadcast, mic_input, has_video) =
-            Self::create_broadcast(audio_ctx.as_ref(), true, has_audio, camera_idx).await?;
+        let (mut broadcast, mic_input, has_video) = Self::create_broadcast(
+            audio_ctx.as_ref(),
+            true,
+            has_audio,
+            devices.camera_index.clone(),
+        )
+        .await?;
         room.publish(BROADCAST_NAME, broadcast.producer())
             .await
             .map_err(|e| format!("failed to publish broadcast: {e}"))?;
@@ -541,8 +572,10 @@ impl TutoringManager {
             our_display_name: display_name,
             started_at: Self::now_millis(),
             last_chat_sent: Instant::now() - Duration::from_secs(10),
+            #[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
             app_handle: app_handle.clone(),
             self_preview_task,
+            #[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
             device_selection: devices,
             _tasks: tasks,
             recent_logs: init_logs,
@@ -582,6 +615,7 @@ impl TutoringManager {
     // ── Media controls ─────────────────────────────────────────────
 
     /// Toggle local camera on/off.
+    #[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
     pub async fn toggle_video(&self, enable: bool) -> Result<bool, String> {
         let mut inner = self.inner.lock().await;
         let session = inner.as_mut().ok_or("not in a tutoring session")?;
@@ -643,6 +677,16 @@ impl TutoringManager {
         Ok(session.video_enabled)
     }
 
+    #[cfg(not(any(feature = "tutoring-video", feature = "tutoring-video-static")))]
+    pub async fn toggle_video(&self, enable: bool) -> Result<bool, String> {
+        let inner = self.inner.lock().await;
+        let session = inner.as_ref().ok_or("not in a tutoring session")?;
+        if !enable {
+            return Ok(session.video_enabled);
+        }
+        Err(VIDEO_DISABLED_ERROR.into())
+    }
+
     /// Toggle local microphone on/off.
     pub async fn toggle_audio(&self, enable: bool) -> Result<bool, String> {
         let mut inner = self.inner.lock().await;
@@ -688,6 +732,7 @@ impl TutoringManager {
     ///
     /// Screen sharing replaces the camera video track. When disabled,
     /// the camera is restored if it was previously enabled.
+    #[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
     pub async fn toggle_screen_share(&self, enable: bool) -> Result<bool, String> {
         let mut inner = self.inner.lock().await;
         let session = inner.as_mut().ok_or("not in a tutoring session")?;
@@ -758,6 +803,16 @@ impl TutoringManager {
         }
 
         Ok(session.screen_sharing)
+    }
+
+    #[cfg(not(any(feature = "tutoring-video", feature = "tutoring-video-static")))]
+    pub async fn toggle_screen_share(&self, enable: bool) -> Result<bool, String> {
+        let inner = self.inner.lock().await;
+        let session = inner.as_ref().ok_or("not in a tutoring session")?;
+        if !enable {
+            return Ok(session.screen_sharing);
+        }
+        Err(VIDEO_DISABLED_ERROR.into())
     }
 
     // ── Chat ───────────────────────────────────────────────────────
@@ -942,11 +997,14 @@ impl TutoringManager {
         audio_ctx: Option<&AudioBackend>,
         video: bool,
         audio: bool,
-        camera_index: Option<CameraIndex>,
+        camera_index: Option<String>,
     ) -> Result<(PublishBroadcast, Option<InputStream>, bool), String> {
         let mut broadcast = PublishBroadcast::new();
         let mut mic_input: Option<InputStream> = None;
+        #[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
         let mut has_video = false;
+        #[cfg(not(any(feature = "tutoring-video", feature = "tutoring-video-static")))]
+        let has_video = false;
 
         if audio {
             if let Some(ctx) = audio_ctx {
@@ -970,12 +1028,15 @@ impl TutoringManager {
             }
         }
 
+        #[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
         if video {
             log::info!("tutoring: initializing camera (spawn_blocking)...");
-            let camera_result =
-                tokio::task::spawn_blocking(move || CameraCapturer::with_index(camera_index))
-                    .await
-                    .map_err(|e| format!("camera task panicked: {e}"))?;
+            let parsed_camera_index = camera_index.as_deref().and_then(parse_camera_index);
+            let camera_result = tokio::task::spawn_blocking(move || {
+                CameraCapturer::with_index(parsed_camera_index)
+            })
+            .await
+            .map_err(|e| format!("camera task panicked: {e}"))?;
 
             match camera_result {
                 Ok(camera) => {
@@ -993,6 +1054,11 @@ impl TutoringManager {
             }
         }
 
+        #[cfg(not(any(feature = "tutoring-video", feature = "tutoring-video-static")))]
+        if video && camera_index.is_some() {
+            log::info!("tutoring: ignoring requested camera — {VIDEO_DISABLED_ERROR}");
+        }
+
         Ok((broadcast, mic_input, has_video))
     }
 
@@ -1001,6 +1067,7 @@ impl TutoringManager {
     /// Uses `PublishBroadcast::watch_local()` which taps the shared
     /// camera source directly (no encode/decode round-trip). Frames
     /// are emitted as `tutoring:video-frame` events with `node_id = "self"`.
+    #[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
     fn start_self_preview(
         broadcast: &mut PublishBroadcast,
         app_handle: AppHandle,
@@ -1017,6 +1084,14 @@ impl TutoringManager {
             76,
             18,
         ))
+    }
+
+    #[cfg(not(any(feature = "tutoring-video", feature = "tutoring-video-static")))]
+    fn start_self_preview(
+        _broadcast: &mut PublishBroadcast,
+        _app_handle: AppHandle,
+    ) -> Option<JoinHandle<()>> {
+        None
     }
 
     /// Spawn a background task that periodically reads mic + output peak levels
@@ -1257,6 +1332,9 @@ impl TutoringManager {
         audio_ctx: Option<AudioBackend>,
         app_handle: AppHandle,
     ) {
+        #[cfg(not(any(feature = "tutoring-video", feature = "tutoring-video-static")))]
+        let _ = &app_handle;
+
         while let Some(event) = events.recv().await {
             match event {
                 RoomEvent::RemoteAnnounced { remote, broadcasts } => {
@@ -1475,49 +1553,62 @@ impl TutoringManager {
                         }
                     }
 
-                    if video_duplicate {
-                        log::info!(
-                            "tutoring: video already active for {short_id}:{name}, skipping duplicate subscribe"
-                        );
-                    } else {
-                        match broadcast.watch_with::<FfmpegVideoDecoder>(
-                            &DecodeConfig::default(),
-                            iroh_live::media::av::Quality::Highest,
-                        ) {
-                            Ok(video) => {
-                                log::info!("tutoring: watching video from {short_id}:{name}");
-                                Self::push_log(
-                                    &inner,
-                                    format!("video_watch OK: {short_id}:{name}"),
-                                )
-                                .await;
-                                Self::spawn_frame_bridge_with_resubscribe(
-                                    video,
-                                    node_id.clone(),
-                                    app_handle.clone(),
-                                    (1280, 720),
-                                    76,
-                                    18,
-                                    Some(inner.clone()),
-                                    Some(video_key.clone()),
-                                    Some(remote_endpoint),
-                                    Some(name.clone()),
-                                );
-                            }
-                            Err(e) => {
-                                log::error!("tutoring: failed to watch {short_id}:{name}: {e}");
-                                let mut guard = inner.lock().await;
-                                if let Some(session) = guard.as_mut() {
-                                    session._subscribed_video_keys.remove(&video_key);
+                    #[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
+                    {
+                        if video_duplicate {
+                            log::info!(
+                                "tutoring: video already active for {short_id}:{name}, skipping duplicate subscribe"
+                            );
+                        } else {
+                            match broadcast.watch_with::<FfmpegVideoDecoder>(
+                                &DecodeConfig::default(),
+                                iroh_live::media::av::Quality::Highest,
+                            ) {
+                                Ok(video) => {
+                                    log::info!("tutoring: watching video from {short_id}:{name}");
+                                    Self::push_log(
+                                        &inner,
+                                        format!("video_watch OK: {short_id}:{name}"),
+                                    )
+                                    .await;
+                                    Self::spawn_frame_bridge_with_resubscribe(
+                                        video,
+                                        node_id.clone(),
+                                        app_handle.clone(),
+                                        (1280, 720),
+                                        76,
+                                        18,
+                                        Some(inner.clone()),
+                                        Some(video_key.clone()),
+                                        Some(remote_endpoint),
+                                        Some(name.clone()),
+                                    );
                                 }
-                                drop(guard);
-                                Self::push_log(
-                                    &inner,
-                                    format!("ERR video_watch: {short_id}:{name}: {e}"),
-                                )
-                                .await;
+                                Err(e) => {
+                                    log::error!("tutoring: failed to watch {short_id}:{name}: {e}");
+                                    let mut guard = inner.lock().await;
+                                    if let Some(session) = guard.as_mut() {
+                                        session._subscribed_video_keys.remove(&video_key);
+                                    }
+                                    drop(guard);
+                                    Self::push_log(
+                                        &inner,
+                                        format!("ERR video_watch: {short_id}:{name}: {e}"),
+                                    )
+                                    .await;
+                                }
                             }
                         }
+                    }
+
+                    #[cfg(not(any(
+                        feature = "tutoring-video",
+                        feature = "tutoring-video-static"
+                    )))]
+                    if !video_duplicate {
+                        log::info!(
+                            "tutoring: skipping remote video subscribe for {short_id}:{name} — {VIDEO_DISABLED_ERROR}"
+                        );
                     }
 
                     {
@@ -1538,6 +1629,7 @@ impl TutoringManager {
     ///
     /// When the track closes (peer left or video disabled), emits a
     /// `tutoring:peer-video-ended` event so the frontend can clean up.
+    #[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
     fn spawn_frame_bridge(
         watch: WatchTrack,
         node_id: String,
@@ -1551,6 +1643,7 @@ impl TutoringManager {
         )
     }
 
+    #[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
     fn spawn_frame_bridge_with_resubscribe(
         watch: WatchTrack,
         node_id: String,

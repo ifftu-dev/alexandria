@@ -11,9 +11,9 @@ pub enum DevCommand {
     Run,
     /// Type-check the Vue frontend (vue-tsc -b)
     Check,
-    /// Run all Rust tests (cargo test)
+    /// Run Rust tests with the host tutoring media feature enabled
     Test,
-    /// Run clippy linter on Rust code
+    /// Run clippy with the host tutoring media feature enabled
     Clippy,
     /// Check Rust formatting (cargo fmt --check)
     Fmt,
@@ -29,6 +29,22 @@ pub fn execute(cmd: &DevCommand, ctx: &ProjectContext) -> Result<()> {
         DevCommand::Clippy => run_clippy(ctx),
         DevCommand::Fmt => run_fmt(ctx),
         DevCommand::All => run_all(ctx),
+    }
+}
+
+fn host_tutoring_feature() -> Option<&'static str> {
+    if cfg!(target_os = "linux") {
+        Some("tutoring-video-static")
+    } else if cfg!(any(target_os = "macos", target_os = "windows")) {
+        Some("tutoring-video")
+    } else {
+        None
+    }
+}
+
+fn extend_with_host_tutoring_feature(args: &mut Vec<&'static str>) {
+    if let Some(feature) = host_tutoring_feature() {
+        args.extend(["--features", feature]);
     }
 }
 
@@ -58,14 +74,19 @@ fn run_check(ctx: &ProjectContext) -> Result<()> {
 
 fn run_test(ctx: &ProjectContext) -> Result<()> {
     output::header("Running Rust tests");
-    runner::run_step(&ctx.tauri_dir, "cargo", &["test"])?;
+    let mut args = vec!["test"];
+    extend_with_host_tutoring_feature(&mut args);
+    runner::run_step(&ctx.tauri_dir, "cargo", &args)?;
     output::success("All tests passed");
     Ok(())
 }
 
 fn run_clippy(ctx: &ProjectContext) -> Result<()> {
     output::header("Running clippy");
-    runner::run_step(&ctx.tauri_dir, "cargo", &["clippy", "--", "-D", "warnings"])?;
+    let mut args = vec!["clippy"];
+    extend_with_host_tutoring_feature(&mut args);
+    args.extend(["--", "-D", "warnings"]);
+    runner::run_step(&ctx.tauri_dir, "cargo", &args)?;
     output::success("Clippy passed (no warnings)");
     Ok(())
 }

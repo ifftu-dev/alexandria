@@ -11,9 +11,9 @@
 //!               → PublishBroadcast (local camera/mic → H264/Opus → MoQ)
 //!               → SubscribeBroadcast (remote MoQ → decode → frames)
 //!
-//! Phase 1 (desktop): full video + audio + screen share.
-//! Phase 2 (mobile): audio-only (firewheel supports iOS/Android).
-//! Phase 3 (mobile): video via platform camera FFI.
+//! Desktop: full video + audio + screen share.
+//! iOS: full video + audio via platform camera + VideoToolbox.
+//! Android: tutoring manager stub; live video is not wired yet.
 
 #[cfg(desktop)]
 pub mod manager;

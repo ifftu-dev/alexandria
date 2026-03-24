@@ -5,13 +5,74 @@
 //! (it provides the shared QUIC endpoint, gossip, and live instances).
 
 use iroh_live::media::audio::AudioBackend;
-use iroh_live::media::capture::CameraCapturer;
 use rusqlite::params;
 use serde::Serialize;
 use tauri::{AppHandle, State};
 
 use crate::tutoring::manager::DeviceSelection;
 use crate::AppState;
+
+const VIDEO_DISABLED_ERROR: &str = "video support is disabled in this build";
+
+#[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
+async fn detect_camera() -> (bool, Option<String>) {
+    use iroh_live::media::capture::CameraCapturer;
+
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        tokio::task::spawn_blocking(|| CameraCapturer::list_cameras()),
+    )
+    .await
+    {
+        Ok(Ok(Ok(cameras))) => {
+            let name = cameras.first().map(|(_, n)| n.clone());
+            (!cameras.is_empty(), name)
+        }
+        _ => (false, None),
+    }
+}
+
+#[cfg(not(any(feature = "tutoring-video", feature = "tutoring-video-static")))]
+async fn detect_camera() -> (bool, Option<String>) {
+    (false, None)
+}
+
+#[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
+async fn list_cameras() -> Vec<CameraDeviceInfo> {
+    use iroh_live::media::capture::CameraCapturer;
+
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        tokio::task::spawn_blocking(|| CameraCapturer::list_cameras()),
+    )
+    .await
+    {
+        Ok(Ok(Ok(cams))) => cams
+            .into_iter()
+            .map(|(idx, name)| CameraDeviceInfo {
+                index: format!("{idx:?}"),
+                name,
+            })
+            .collect(),
+        Ok(Ok(Err(e))) => {
+            log::warn!("tutoring: camera enumeration failed: {e}");
+            Vec::new()
+        }
+        Ok(Err(e)) => {
+            log::warn!("tutoring: camera enumeration task panicked: {e}");
+            Vec::new()
+        }
+        Err(_) => {
+            log::warn!("tutoring: camera enumeration timed out (5s) — may need camera permission");
+            Vec::new()
+        }
+    }
+}
+
+#[cfg(not(any(feature = "tutoring-video", feature = "tutoring-video-static")))]
+async fn list_cameras() -> Vec<CameraDeviceInfo> {
+    Vec::new()
+}
 
 /// Result of a pre-join device availability check.
 #[derive(Debug, Clone, Serialize)]
@@ -88,7 +149,10 @@ pub async fn tutoring_create_room(
     log::info!("[cmd] tutoring_create_room: create_room returned, inserting into DB...");
     // Persist to database
     {
-        let db = state.db.lock().map_err(|_| "database lock poisoned".to_string())?;
+        let db = state
+            .db
+            .lock()
+            .map_err(|_| "database lock poisoned".to_string())?;
         db.conn()
             .execute(
                 "INSERT INTO tutoring_sessions (id, title, ticket, status) VALUES (?1, ?2, ?3, 'active')",
@@ -162,7 +226,10 @@ pub async fn tutoring_join_room(
     log::info!("[cmd] tutoring_join_room: join_room returned, inserting into DB...");
     // Persist to database
     {
-        let db = state.db.lock().map_err(|_| "database lock poisoned".to_string())?;
+        let db = state
+            .db
+            .lock()
+            .map_err(|_| "database lock poisoned".to_string())?;
         db.conn()
             .execute(
                 "INSERT INTO tutoring_sessions (id, title, ticket, status) VALUES (?1, ?2, ?3, 'active')",
@@ -195,7 +262,10 @@ pub async fn tutoring_leave_room(state: State<'_, AppState>) -> Result<(), Strin
 
     // Update database
     if let Some(id) = session_id {
-        let db = state.db.lock().map_err(|_| "database lock poisoned".to_string())?;
+        let db = state
+            .db
+            .lock()
+            .map_err(|_| "database lock poisoned".to_string())?;
         db.conn()
             .execute(
                 "UPDATE tutoring_sessions SET status = 'ended', ended_at = datetime('now') WHERE id = ?1",
@@ -261,7 +331,10 @@ pub async fn tutoring_peers(
 pub async fn tutoring_list_sessions(
     state: State<'_, AppState>,
 ) -> Result<Vec<TutoringSessionInfo>, String> {
-    let db = state.db.lock().map_err(|_| "database lock poisoned".to_string())?;
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
     let mut stmt = db
         .conn()
         .prepare(
@@ -298,26 +371,20 @@ pub async fn tutoring_list_sessions(
 pub async fn tutoring_check_devices() -> Result<DeviceCheckResult, String> {
     // Check audio via cpal device enumeration (no streams started)
     let has_audio = !AudioBackend::list_input_devices().is_empty();
-
-    // Check camera on blocking thread with timeout
-    let (has_camera, camera_name) = match tokio::time::timeout(
-        std::time::Duration::from_secs(5),
-        tokio::task::spawn_blocking(|| CameraCapturer::list_cameras()),
-    )
-    .await
-    {
-        Ok(Ok(Ok(cameras))) => {
-            let name = cameras.first().map(|(_, n)| n.clone());
-            (!cameras.is_empty(), name)
-        }
-        _ => (false, None),
-    };
+    let (has_camera, camera_name) = detect_camera().await;
 
     Ok(DeviceCheckResult {
         has_camera,
         camera_name,
         has_audio,
-        error: None,
+        error: if cfg!(any(
+            feature = "tutoring-video",
+            feature = "tutoring-video-static"
+        )) {
+            None
+        } else {
+            Some(VIDEO_DISABLED_ERROR.into())
+        },
     })
 }
 
@@ -377,34 +444,7 @@ pub async fn tutoring_list_devices() -> Result<DeviceList, String> {
         })
         .collect();
 
-    // Camera devices — run on blocking thread with timeout since
-    // nokhwa_initialize can block on the macOS permission dialog.
-    let cameras = match tokio::time::timeout(
-        std::time::Duration::from_secs(5),
-        tokio::task::spawn_blocking(|| CameraCapturer::list_cameras()),
-    )
-    .await
-    {
-        Ok(Ok(Ok(cams))) => cams
-            .into_iter()
-            .map(|(idx, name)| CameraDeviceInfo {
-                index: format!("{idx:?}"),
-                name,
-            })
-            .collect(),
-        Ok(Ok(Err(e))) => {
-            log::warn!("tutoring: camera enumeration failed: {e}");
-            Vec::new()
-        }
-        Ok(Err(e)) => {
-            log::warn!("tutoring: camera enumeration task panicked: {e}");
-            Vec::new()
-        }
-        Err(_) => {
-            log::warn!("tutoring: camera enumeration timed out (5s) — may need camera permission");
-            Vec::new()
-        }
-    };
+    let cameras = list_cameras().await;
 
     Ok(DeviceList {
         audio_inputs,

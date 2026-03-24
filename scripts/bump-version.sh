@@ -19,6 +19,11 @@ jq --arg v "$VERSION" '.version = $v' "$ROOT/package.json" \
   > "$ROOT/package.json.tmp" && mv "$ROOT/package.json.tmp" "$ROOT/package.json"
 echo "  Updated package.json"
 
+# package-lock.json
+jq --arg v "$VERSION" '.version = $v | .packages[""].version = $v' "$ROOT/package-lock.json" \
+  > "$ROOT/package-lock.json.tmp" && mv "$ROOT/package-lock.json.tmp" "$ROOT/package-lock.json"
+echo "  Updated package-lock.json"
+
 # src-tauri/tauri.conf.json
 jq --arg v "$VERSION" '.version = $v' "$ROOT/src-tauri/tauri.conf.json" \
   > "$ROOT/src-tauri/tauri.conf.json.tmp" \
@@ -35,7 +40,7 @@ echo ""
 echo "Done. Version is now $VERSION."
 echo ""
 echo "Next steps:"
-echo "  git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml"
+echo "  git add package.json package-lock.json src-tauri/tauri.conf.json src-tauri/Cargo.toml"
 echo "  git commit -m 'chore: bump version to $VERSION'"
 echo "  git tag v$VERSION"
 echo "  git push && git push --tags"

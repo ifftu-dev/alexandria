@@ -53,7 +53,12 @@ pub struct Wallet {
 impl Drop for Wallet {
     fn drop(&mut self) {
         self.mnemonic.zeroize();
-        self.signing_key.zeroize();
+        // `SigningKey` no longer implements `Zeroize`, so overwrite it in
+        // place with a deterministic zero key instead of dropping the
+        // original secret bytes untouched.
+        unsafe {
+            std::ptr::addr_of_mut!(self.signing_key).write(SigningKey::from_bytes(&[0u8; 32]));
+        }
         self.payment_key_extended.zeroize();
         self.payment_key_hash.zeroize();
     }

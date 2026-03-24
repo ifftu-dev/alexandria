@@ -38,6 +38,8 @@ struct Target {
     platform: Platform,
     /// Rust triple (for display / prerequisite checks)
     rust_target: &'static str,
+    /// Cargo feature needed for full tutoring media support on this target.
+    cargo_feature: Option<&'static str>,
     /// Arguments passed to `cargo tauri build` or `cargo tauri <platform> build`
     build_args: &'static [&'static str],
 }
@@ -51,6 +53,7 @@ fn all_targets() -> Vec<Target> {
             short_name: "mac-arm64",
             platform: Platform::Desktop,
             rust_target: "aarch64-apple-darwin",
+            cargo_feature: Some("tutoring-video"),
             build_args: &["tauri", "build", "--target", "aarch64-apple-darwin"],
         },
         Target {
@@ -58,6 +61,7 @@ fn all_targets() -> Vec<Target> {
             short_name: "mac-x64",
             platform: Platform::Desktop,
             rust_target: "x86_64-apple-darwin",
+            cargo_feature: Some("tutoring-video"),
             build_args: &["tauri", "build", "--target", "x86_64-apple-darwin"],
         },
         Target {
@@ -65,6 +69,7 @@ fn all_targets() -> Vec<Target> {
             short_name: "mac-universal",
             platform: Platform::Desktop,
             rust_target: "universal-apple-darwin",
+            cargo_feature: Some("tutoring-video"),
             build_args: &["tauri", "build", "--target", "universal-apple-darwin"],
         },
         Target {
@@ -72,6 +77,7 @@ fn all_targets() -> Vec<Target> {
             short_name: "linux-x64",
             platform: Platform::Desktop,
             rust_target: "x86_64-unknown-linux-gnu",
+            cargo_feature: Some("tutoring-video-static"),
             build_args: &["tauri", "build"],
         },
         Target {
@@ -79,6 +85,7 @@ fn all_targets() -> Vec<Target> {
             short_name: "win-x64",
             platform: Platform::Desktop,
             rust_target: "x86_64-pc-windows-msvc",
+            cargo_feature: Some("tutoring-video"),
             build_args: &["tauri", "build"],
         },
         // Android
@@ -87,6 +94,7 @@ fn all_targets() -> Vec<Target> {
             short_name: "arm64",
             platform: Platform::Android,
             rust_target: "aarch64-linux-android",
+            cargo_feature: None,
             build_args: &["tauri", "android", "build", "--target", "aarch64"],
         },
         Target {
@@ -94,6 +102,7 @@ fn all_targets() -> Vec<Target> {
             short_name: "armv7",
             platform: Platform::Android,
             rust_target: "armv7-linux-androideabi",
+            cargo_feature: None,
             build_args: &["tauri", "android", "build", "--target", "armv7"],
         },
         Target {
@@ -101,6 +110,7 @@ fn all_targets() -> Vec<Target> {
             short_name: "x86_64",
             platform: Platform::Android,
             rust_target: "x86_64-linux-android",
+            cargo_feature: None,
             build_args: &["tauri", "android", "build", "--target", "x86_64"],
         },
         // iOS (Tauri uses short target names: aarch64, aarch64-sim, x86_64)
@@ -109,6 +119,7 @@ fn all_targets() -> Vec<Target> {
             short_name: "device",
             platform: Platform::Ios,
             rust_target: "aarch64-apple-ios",
+            cargo_feature: Some("tutoring-video-ios"),
             build_args: &["tauri", "ios", "build", "--target", "aarch64"],
         },
         Target {
@@ -116,6 +127,7 @@ fn all_targets() -> Vec<Target> {
             short_name: "sim-arm64",
             platform: Platform::Ios,
             rust_target: "aarch64-apple-ios-sim",
+            cargo_feature: Some("tutoring-video-ios"),
             build_args: &["tauri", "ios", "build", "--target", "aarch64-sim"],
         },
         Target {
@@ -123,9 +135,20 @@ fn all_targets() -> Vec<Target> {
             short_name: "sim-x64",
             platform: Platform::Ios,
             rust_target: "x86_64-apple-ios",
+            cargo_feature: Some("tutoring-video-ios"),
             build_args: &["tauri", "ios", "build", "--target", "x86_64"],
         },
     ]
+}
+
+fn host_desktop_tutoring_feature() -> Option<&'static str> {
+    if cfg!(target_os = "linux") {
+        Some("tutoring-video-static")
+    } else if cfg!(any(target_os = "macos", target_os = "windows")) {
+        Some("tutoring-video")
+    } else {
+        None
+    }
 }
 
 /// Return the default target for a platform based on the current host.
@@ -393,10 +416,10 @@ fn display_prereqs(checks: &[PrereqStatus]) -> bool {
 
 #[derive(Subcommand)]
 pub enum BuildCommand {
-    /// Run cargo check + vue-tsc (fast compile check, no codegen)
+    /// Run cargo check + vue-tsc for the host tutoring media build
     Check,
 
-    /// Full release build for the current host (cargo tauri build)
+    /// Full release build for the current host with tutoring media enabled
     Release,
 
     /// Interactive platform build wizard (prompts for platform, targets, profile)
@@ -692,6 +715,9 @@ fn execute_builds(ctx: &ProjectContext, targets: &[&Target], is_debug: bool) -> 
         output::blank();
 
         let mut args: Vec<&str> = target.build_args.to_vec();
+        if let Some(feature) = target.cargo_feature {
+            args.extend(["--features", feature]);
+        }
         if is_debug {
             args.push("--debug");
         }
@@ -754,21 +780,18 @@ fn execute_builds(ctx: &ProjectContext, targets: &[&Target], is_debug: bool) -> 
 // ── Existing commands (check / release) ──────────────────────────────
 
 fn run_check(ctx: &ProjectContext) -> Result<()> {
-    let steps: &[(&str, &str, &[&str])] = &[
-        ("Rust cargo check", "cargo", &["check"]),
-        ("Frontend type check", "npx", &["vue-tsc", "-b"]),
-    ];
-
-    for (i, (label, prog, args)) in steps.iter().enumerate() {
-        output::step(i + 1, steps.len(), label);
-        let dir = if *prog == "cargo" {
-            &ctx.tauri_dir
-        } else {
-            &ctx.root
-        };
-        runner::run_step(dir, prog, args)?;
-        output::success(&format!("{} passed", label));
+    let mut cargo_args = vec!["check"];
+    if let Some(feature) = host_desktop_tutoring_feature() {
+        cargo_args.extend(["--features", feature]);
     }
+
+    output::step(1, 2, "Rust cargo check");
+    runner::run_step(&ctx.tauri_dir, "cargo", &cargo_args)?;
+    output::success("Rust cargo check passed");
+
+    output::step(2, 2, "Frontend type check");
+    runner::run_step(&ctx.root, "npx", &["vue-tsc", "-b"])?;
+    output::success("Frontend type check passed");
 
     output::blank();
     output::success("All checks passed!");
@@ -781,7 +804,11 @@ fn run_release(ctx: &ProjectContext) -> Result<()> {
     output::faint("(includes vue-tsc + vite build + cargo build --release)");
     output::blank();
 
-    runner::run_step(&ctx.root, "cargo", &["tauri", "build"])?;
+    let mut args = vec!["tauri", "build"];
+    if let Some(feature) = host_desktop_tutoring_feature() {
+        args.extend(["--features", feature]);
+    }
+    runner::run_step(&ctx.root, "cargo", &args)?;
 
     output::blank();
     output::success("Release build complete!");
