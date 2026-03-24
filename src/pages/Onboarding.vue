@@ -51,10 +51,16 @@ onMounted(async () => {
 
 onUnmounted(() => {
   if (unlisten) unlisten()
+  // Clear sensitive data from memory (JS strings are GC'd, not truly zeroed,
+  // but dropping references allows collection sooner)
+  mnemonic.value = ''
+  importMnemonic.value = ''
+  password.value = ''
+  confirmPassword.value = ''
 })
 
 const passwordsMatch = computed(() => password.value === confirmPassword.value)
-const passwordValid = computed(() => password.value.length >= 8)
+const passwordValid = computed(() => password.value.length >= 12)
 const mnemonicWords = computed(() => mnemonic.value.trim().split(/\s+/).filter(Boolean))
 
 const createWizardSteps: { id: Step; label: string }[] = [
@@ -109,7 +115,7 @@ async function proceedFromPassword() {
   error.value = ''
 
   if (!passwordValid.value) {
-    error.value = 'Password must be at least 8 characters.'
+    error.value = 'Password must be at least 12 characters.'
     return
   }
   if (!passwordsMatch.value) {
@@ -369,7 +375,7 @@ function enterApp() {
               <input
                 v-model="password"
                 type="password"
-                placeholder="At least 8 characters"
+                placeholder="At least 12 characters"
                 class="w-full px-3 py-2 text-sm rounded-md border border-border bg-background focus:outline-none focus:ring-2 focus:ring-ring"
               >
             </div>

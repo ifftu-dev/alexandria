@@ -134,7 +134,7 @@ pub async fn tutoring_list_sessions(
     state: State<'_, AppState>,
 ) -> Result<Vec<TutoringSessionInfo>, String> {
     // Still read from DB on mobile (past sessions from desktop sync)
-    let db = state.db.lock().unwrap();
+    let db = state.db.lock().map_err(|_| "database lock poisoned".to_string())?;
     let mut stmt = db
         .conn()
         .prepare(

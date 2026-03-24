@@ -7,6 +7,7 @@ use pallas_crypto::hash::Hasher;
 use pallas_crypto::key::ed25519::SecretKeyExtended;
 use pallas_wallet::hd::Bip32PrivateKey;
 use thiserror::Error;
+use zeroize::Zeroize;
 
 #[derive(Error, Debug)]
 pub enum WalletError {
@@ -28,7 +29,9 @@ pub enum WalletError {
 ///
 /// Uses pallas for proper Icarus-style BIP32-Ed25519 derivation and
 /// bech32 address encoding (addr_test1... / stake_test1... for preprod).
-#[derive(Debug, Clone)]
+/// Note: `Clone` intentionally not derived — prevents accidental duplication
+/// of secret key material in memory. `Drop` zeros all sensitive fields.
+#[derive(Debug)]
 pub struct Wallet {
     /// The BIP-39 mnemonic phrase (24 words).
     pub mnemonic: String,
@@ -45,6 +48,15 @@ pub struct Wallet {
     /// Blake2b-224 hash of the payment public key (28 bytes).
     /// Used for NativeScript policy creation and disclosed signers.
     pub payment_key_hash: [u8; 28],
+}
+
+impl Drop for Wallet {
+    fn drop(&mut self) {
+        self.mnemonic.zeroize();
+        self.signing_key.zeroize();
+        self.payment_key_extended.zeroize();
+        self.payment_key_hash.zeroize();
+    }
 }
 
 /// The Cardano network to use for address generation.

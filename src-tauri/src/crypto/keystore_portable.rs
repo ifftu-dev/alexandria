@@ -88,7 +88,7 @@ impl Keystore {
         std::fs::create_dir_all(vault_dir)?;
 
         let salt = generate_salt();
-        std::fs::write(vault_dir.join(SALT_FILENAME), &salt)?;
+        write_salt_with_hmac(vault_dir, &salt, password)?;
 
         log::info!("Portable keystore created at {}", vault_dir.display());
 
@@ -109,10 +109,7 @@ impl Keystore {
             return Err(KeystoreError::VaultNotFound(vault_file));
         }
 
-        let salt_path = vault_dir.join(SALT_FILENAME);
-        let salt = std::fs::read(&salt_path).map_err(|_| {
-            KeystoreError::Crypto(format!("salt file missing at {}", salt_path.display()))
-        })?;
+        let salt = read_and_verify_salt(vault_dir, password)?;
 
         let key = derive_key(password, &salt)?;
         let ciphertext = std::fs::read(&vault_file)?;
@@ -219,18 +216,77 @@ fn derive_key(password: &str, salt: &[u8]) -> Result<[u8; 32], KeystoreError> {
 
 /// Generate a cryptographically random 32-byte salt.
 fn generate_salt() -> [u8; SALT_LEN] {
+    use rand::rngs::OsRng;
     use rand::RngCore;
     let mut salt = [0u8; SALT_LEN];
-    rand::thread_rng().fill_bytes(&mut salt);
+    OsRng.fill_bytes(&mut salt);
     salt
 }
 
 /// Generate a cryptographically random 12-byte nonce.
 fn generate_nonce() -> [u8; NONCE_LEN] {
+    use rand::rngs::OsRng;
     use rand::RngCore;
     let mut nonce = [0u8; NONCE_LEN];
-    rand::thread_rng().fill_bytes(&mut nonce);
+    OsRng.fill_bytes(&mut nonce);
     nonce
+}
+
+/// HMAC-SHA256 tag length for salt integrity verification.
+const HMAC_LEN: usize = 32;
+
+/// Compute HMAC-SHA256 of the salt, keyed by the password.
+fn compute_salt_hmac(password: &str, salt: &[u8]) -> [u8; HMAC_LEN] {
+    use hmac::{Hmac, Mac};
+    use sha2::Sha256;
+
+    let mut mac = Hmac::<Sha256>::new_from_slice(password.as_bytes())
+        .expect("HMAC can take key of any size");
+    mac.update(salt);
+    let result = mac.finalize();
+    let mut out = [0u8; HMAC_LEN];
+    out.copy_from_slice(&result.into_bytes());
+    out
+}
+
+/// Write salt + HMAC tag to the salt file.
+fn write_salt_with_hmac(vault_dir: &Path, salt: &[u8], password: &str) -> Result<(), KeystoreError> {
+    let tag = compute_salt_hmac(password, salt);
+    let mut data = Vec::with_capacity(SALT_LEN + HMAC_LEN);
+    data.extend_from_slice(salt);
+    data.extend_from_slice(&tag);
+    std::fs::write(vault_dir.join(SALT_FILENAME), &data)?;
+    Ok(())
+}
+
+/// Read salt file and verify its integrity HMAC.
+///
+/// Supports both the new format (salt + HMAC = 64 bytes) and the legacy
+/// format (salt only = 32 bytes) for backward compatibility.
+fn read_and_verify_salt(vault_dir: &Path, password: &str) -> Result<Vec<u8>, KeystoreError> {
+    let salt_path = vault_dir.join(SALT_FILENAME);
+    let data = std::fs::read(&salt_path).map_err(|_| {
+        KeystoreError::Crypto(format!("salt file missing at {}", salt_path.display()))
+    })?;
+
+    if data.len() == SALT_LEN + HMAC_LEN {
+        let (salt, stored_tag) = data.split_at(SALT_LEN);
+        let expected_tag = compute_salt_hmac(password, salt);
+        if stored_tag != expected_tag {
+            return Err(KeystoreError::Crypto(
+                "salt file corrupted or tampered — integrity check failed".into(),
+            ));
+        }
+        Ok(salt.to_vec())
+    } else if data.len() == SALT_LEN {
+        log::warn!("Salt file uses legacy format (no integrity HMAC) — will upgrade on next save");
+        Ok(data)
+    } else {
+        Err(KeystoreError::Crypto(format!(
+            "salt file has unexpected size: {} bytes",
+            data.len()
+        )))
+    }
 }
 
 #[cfg(test)]

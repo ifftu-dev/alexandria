@@ -37,6 +37,71 @@ pub enum ResolveError {
     Gateway(String),
     #[error("database error: {0}")]
     Database(String),
+    #[error("blocked URL: {0}")]
+    BlockedUrl(String),
+}
+
+/// Reject URLs that point to private/loopback/link-local IP addresses (SSRF defense).
+fn reject_private_url(url: &str) -> Result<(), ResolveError> {
+    // Extract host from URL (skip scheme, take authority up to / or ?)
+    let authority = url
+        .split("://")
+        .nth(1)
+        .unwrap_or("")
+        .split('/')
+        .next()
+        .unwrap_or("")
+        .split('?')
+        .next()
+        .unwrap_or("");
+
+    // Handle IPv6 bracket notation: [::1]:port → ::1
+    // Handle IPv4/hostname: host:port → host
+    let host = if authority.starts_with('[') {
+        // IPv6 bracket notation: extract between [ and ]
+        authority
+            .trim_start_matches('[')
+            .split(']')
+            .next()
+            .unwrap_or("")
+    } else {
+        // IPv4 or hostname: strip port
+        authority.split(':').next().unwrap_or("")
+    };
+
+    // Block known private/loopback hostnames
+    let blocked_hosts = ["localhost", "0.0.0.0"];
+    if blocked_hosts.contains(&host) {
+        return Err(ResolveError::BlockedUrl(
+            "URL points to loopback address".into(),
+        ));
+    }
+
+    // Block private IP ranges (now correctly parses both IPv4 and bracket-stripped IPv6)
+    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+        let is_private = match ip {
+            std::net::IpAddr::V4(v4) => {
+                v4.is_loopback()
+                    || v4.is_private()
+                    || v4.is_link_local()
+                    || v4.is_broadcast()
+                    || v4.is_unspecified()
+            }
+            std::net::IpAddr::V6(v6) => {
+                v6.is_loopback()
+                    || v6.is_unspecified()
+                    // ULA (fc00::/7)
+                    || (v6.segments()[0] & 0xfe00) == 0xfc00
+            }
+        };
+        if is_private {
+            return Err(ResolveError::BlockedUrl(
+                "URL points to private/reserved IP address".into(),
+            ));
+        }
+    }
+
+    Ok(())
 }
 
 /// Where the content was resolved from.
@@ -69,6 +134,7 @@ pub struct ResolveResult {
 }
 
 /// Content resolver with local cache and gateway fallback.
+#[derive(Clone)]
 pub struct ContentResolver {
     node: Arc<ContentNode>,
     gateway: GatewayClient,
@@ -215,6 +281,8 @@ impl ContentResolver {
 
     /// Fetch content from a direct URL, store in iroh, record mapping.
     async fn fetch_url_and_cache(&self, url: &str) -> Result<ResolveResult, ResolveError> {
+        reject_private_url(url)?;
+
         let bytes = self
             .gateway
             .fetch_by_url(url)
@@ -246,7 +314,7 @@ impl ContentResolver {
 
     /// Look up the BLAKE3 hash for a given IPFS CID in the mapping table.
     async fn lookup_blake3_for_cid(&self, cid_str: &str) -> Option<String> {
-        let db = self.db.lock().unwrap();
+        let db = self.db.lock().ok()?;
         db.conn()
             .query_row(
                 "SELECT blake3_hash FROM content_mappings WHERE ipfs_cid = ?1",
@@ -258,7 +326,7 @@ impl ContentResolver {
 
     /// Look up the IPFS CID for a given BLAKE3 hash in the mapping table.
     async fn lookup_cid_for_blake3(&self, blake3_hash: &str) -> Option<String> {
-        let db = self.db.lock().unwrap();
+        let db = self.db.lock().ok()?;
         db.conn()
             .query_row(
                 "SELECT ipfs_cid FROM content_mappings WHERE blake3_hash = ?1",
@@ -270,7 +338,10 @@ impl ContentResolver {
 
     /// Save a CID↔BLAKE3 mapping to the database.
     async fn save_mapping(&self, cid_str: &str, blake3_hash: &str, size: u64) {
-        let db = self.db.lock().unwrap();
+        let Ok(db) = self.db.lock() else {
+            log::warn!("database lock poisoned — skipping content mapping save");
+            return;
+        };
         if let Err(e) = db.conn().execute(
             "INSERT OR REPLACE INTO content_mappings (ipfs_cid, blake3_hash, size_bytes) VALUES (?1, ?2, ?3)",
             params![cid_str, blake3_hash, size as i64],

@@ -2,6 +2,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { AppButton } from '@/components/ui'
+import { sanitizeSvg } from '@/utils/sanitize'
 import type { Enrollment, Course, Chapter, Element, ElementProgress } from '@/types'
 
 const { invoke } = useLocalApi()
@@ -247,7 +248,7 @@ onMounted(async () => {
               <div
                 class="relative h-32 sm:h-auto sm:w-48 flex-shrink-0 overflow-hidden"
               >
-                <div v-if="courseMap[enrollment.course_id]?.thumbnail_svg" class="w-full h-full" v-html="courseMap[enrollment.course_id]?.thumbnail_svg" />
+                <div v-if="courseMap[enrollment.course_id]?.thumbnail_svg" class="w-full h-full" v-html="sanitizeSvg(courseMap[enrollment.course_id]?.thumbnail_svg ?? '')" />
                 <div v-else class="w-full h-full bg-gradient-to-br from-primary/30 via-primary/15 to-card flex items-center justify-center">
                   <svg
                     class="h-10 w-10 text-primary/40"

@@ -18,7 +18,7 @@ use crate::AppState;
 /// doesn't exist yet (auto-registers on first call).
 #[tauri::command]
 pub async fn sync_get_device_info(state: State<'_, AppState>) -> Result<DeviceInfo, String> {
-    let db = state.db.lock().unwrap();
+    let db = state.db.lock().map_err(|_| "database lock poisoned".to_string())?;
     let conn = db.conn();
 
     let platform = std::env::consts::OS;
@@ -29,7 +29,7 @@ pub async fn sync_get_device_info(state: State<'_, AppState>) -> Result<DeviceIn
 /// Set a user-friendly name for the local device.
 #[tauri::command]
 pub async fn sync_set_device_name(state: State<'_, AppState>, name: String) -> Result<(), String> {
-    let db = state.db.lock().unwrap();
+    let db = state.db.lock().map_err(|_| "database lock poisoned".to_string())?;
     let conn = db.conn();
 
     let device_id = conn
@@ -50,7 +50,7 @@ pub async fn sync_set_device_name(state: State<'_, AppState>, name: String) -> R
 /// List all known devices (local + remote).
 #[tauri::command]
 pub async fn sync_list_devices(state: State<'_, AppState>) -> Result<Vec<DeviceInfo>, String> {
-    let db = state.db.lock().unwrap();
+    let db = state.db.lock().map_err(|_| "database lock poisoned".to_string())?;
     sync::list_devices(db.conn())
 }
 
@@ -62,7 +62,7 @@ pub async fn sync_remove_device(
     state: State<'_, AppState>,
     device_id: String,
 ) -> Result<(), String> {
-    let db = state.db.lock().unwrap();
+    let db = state.db.lock().map_err(|_| "database lock poisoned".to_string())?;
     sync::remove_device(db.conn(), &device_id)
 }
 
@@ -72,7 +72,7 @@ pub async fn sync_remove_device(
 /// per-device sync summaries.
 #[tauri::command]
 pub async fn sync_status(state: State<'_, AppState>) -> Result<SyncStatus, String> {
-    let db = state.db.lock().unwrap();
+    let db = state.db.lock().map_err(|_| "database lock poisoned".to_string())?;
     sync::get_sync_status(db.conn())
 }
 
@@ -83,7 +83,7 @@ pub async fn sync_status(state: State<'_, AppState>) -> Result<SyncStatus, Strin
 /// it processes the local queue and returns what would be sent.
 #[tauri::command]
 pub async fn sync_now(state: State<'_, AppState>) -> Result<SyncStatus, String> {
-    let db = state.db.lock().unwrap();
+    let db = state.db.lock().map_err(|_| "database lock poisoned".to_string())?;
     let conn = db.conn();
 
     // Prune already-delivered items
@@ -102,7 +102,7 @@ pub async fn sync_now(state: State<'_, AppState>) -> Result<SyncStatus, String> 
 /// remote devices (every 60 seconds when peers are online).
 #[tauri::command]
 pub async fn sync_set_auto(state: State<'_, AppState>, enabled: bool) -> Result<(), String> {
-    let db = state.db.lock().unwrap();
+    let db = state.db.lock().map_err(|_| "database lock poisoned".to_string())?;
     let conn = db.conn();
 
     // Store the auto-sync preference in a simple key-value pattern
@@ -124,7 +124,7 @@ pub async fn sync_history(
     state: State<'_, AppState>,
     limit: Option<i64>,
 ) -> Result<Vec<SyncHistoryEntry>, String> {
-    let db = state.db.lock().unwrap();
+    let db = state.db.lock().map_err(|_| "database lock poisoned".to_string())?;
     sync::get_sync_history(db.conn(), limit.unwrap_or(50))
 }
 
