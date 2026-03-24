@@ -19,6 +19,12 @@ pub enum GatewayError {
     Http(String),
     #[error("gateway returned non-success status {status} from {url}")]
     BadStatus { status: u16, url: String },
+    #[error("response too large from {url}: {size} bytes exceeds {max_bytes}")]
+    TooLarge {
+        url: String,
+        size: usize,
+        max_bytes: usize,
+    },
 }
 
 /// Configuration for the IPFS gateway client.
@@ -45,7 +51,10 @@ impl Default for GatewayConfig {
     }
 }
 
+const MAX_FETCH_BYTES: usize = 64 * 1024 * 1024;
+
 /// HTTP client that fetches IPFS content by CID from gateway endpoints.
+#[derive(Clone)]
 pub struct GatewayClient {
     config: GatewayConfig,
     http: reqwest::Client,
@@ -123,12 +132,35 @@ impl GatewayClient {
                 url: url.to_string(),
             });
         }
+        if let Some(content_length) = response.content_length() {
+            if content_length > MAX_FETCH_BYTES as u64 {
+                return Err(GatewayError::TooLarge {
+                    url: url.to_string(),
+                    size: content_length as usize,
+                    max_bytes: MAX_FETCH_BYTES,
+                });
+            }
+        }
 
-        response
-            .bytes()
+        let mut bytes = Vec::new();
+        let mut response = response;
+        while let Some(chunk) = response
+            .chunk()
             .await
-            .map(|b| b.to_vec())
-            .map_err(|e| GatewayError::Http(e.to_string()))
+            .map_err(|e| GatewayError::Http(e.to_string()))?
+        {
+            let new_len = bytes.len().saturating_add(chunk.len());
+            if new_len > MAX_FETCH_BYTES {
+                return Err(GatewayError::TooLarge {
+                    url: url.to_string(),
+                    size: new_len,
+                    max_bytes: MAX_FETCH_BYTES,
+                });
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+
+        Ok(bytes)
     }
 
     /// Get the list of configured gateway base URLs.

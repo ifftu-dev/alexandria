@@ -11,8 +11,9 @@
 //! 4. Record the new version in `taxonomy_versions`
 //! 5. Record in `sync_log`
 //!
-//! **Authority**: The validation pipeline (§7.3) checks that taxonomy
-//! messages are signed by a DAO committee member BEFORE this handler runs.
+//! **Authority**: The validation pipeline (§7.3) screens taxonomy messages,
+//! and this handler re-checks committee membership and chain continuity
+//! before applying any update.
 
 use rusqlite::params;
 
@@ -22,8 +23,9 @@ use crate::p2p::types::SignedGossipMessage;
 
 /// Handle an incoming taxonomy update from the P2P network.
 ///
-/// The message has already passed the validation pipeline (including
-/// the authority check verifying the signer is a DAO committee member).
+/// The message is expected to have passed the validation pipeline, but this
+/// handler still enforces committee authority and previous_cid continuity
+/// before mutating local state.
 ///
 /// Applies the taxonomy changes to local skill tables if the version
 /// is newer than what we have.
@@ -41,16 +43,28 @@ pub fn handle_taxonomy_message(
     if update.version < 1 {
         return Err("taxonomy update version must be >= 1".into());
     }
+    if !is_committee_member(db, &message.stake_address) {
+        return Err("taxonomy update signer is not a committee member".into());
+    }
+    if !update
+        .ratified_by
+        .iter()
+        .any(|addr| addr == &message.stake_address)
+    {
+        return Err("taxonomy update signer is not listed in ratified_by".into());
+    }
 
     // Check local version — only apply if newer
-    let local_version: i64 = db
+    let (local_version, current_cid): (i64, Option<String>) = db
         .conn()
         .query_row(
-            "SELECT COALESCE(MAX(version), 0) FROM taxonomy_versions",
+            "SELECT COALESCE(MAX(version), 0), \
+             (SELECT cid FROM taxonomy_versions ORDER BY version DESC LIMIT 1) \
+             FROM taxonomy_versions",
             [],
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
-        .unwrap_or(0);
+        .unwrap_or((0, None));
 
     if update.version <= local_version {
         log::debug!(
@@ -59,6 +73,13 @@ pub fn handle_taxonomy_message(
             local_version,
         );
         return Ok(update);
+    }
+    if local_version == 0 {
+        if update.previous_cid.is_some() {
+            return Err("taxonomy update has previous_cid but no local taxonomy exists".into());
+        }
+    } else if update.previous_cid.as_deref() != current_cid.as_deref() {
+        return Err("taxonomy update previous_cid does not match local head".into());
     }
 
     // Apply changes to local skill tables
@@ -265,9 +286,33 @@ mod tests {
         }
     }
 
+    fn seed_committee(db: &Database) {
+        db.conn()
+            .execute(
+                "INSERT INTO subject_fields (id, name) VALUES ('sf1', 'Test Field')",
+                [],
+            )
+            .unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO governance_daos (id, name, scope_type, scope_id, status) \
+                 VALUES ('dao1', 'Test DAO', 'subject_field', 'sf1', 'active')",
+                [],
+            )
+            .unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO governance_dao_members (dao_id, stake_address, role) \
+                 VALUES ('dao1', 'stake_test1committee', 'committee')",
+                [],
+            )
+            .unwrap();
+    }
+
     #[test]
     fn handle_taxonomy_applies_changes() {
         let db = test_db();
+        seed_committee(&db);
         let update = sample_update();
         let msg = sample_message(&update);
 
@@ -309,6 +354,7 @@ mod tests {
     #[test]
     fn handle_taxonomy_skips_older_version() {
         let db = test_db();
+        seed_committee(&db);
 
         // Apply v1 first
         let update = sample_update();
@@ -332,6 +378,7 @@ mod tests {
     #[test]
     fn handle_taxonomy_applies_v2_after_v1() {
         let db = test_db();
+        seed_committee(&db);
 
         // Apply v1
         let v1 = sample_update();
@@ -390,6 +437,33 @@ mod tests {
     }
 
     #[test]
+    fn handle_taxonomy_rejects_non_committee_sender() {
+        let db = test_db();
+        let msg = sample_message(&sample_update());
+
+        assert!(handle_taxonomy_message(&db, &msg).is_err());
+    }
+
+    #[test]
+    fn handle_taxonomy_rejects_wrong_previous_cid() {
+        let db = test_db();
+        seed_committee(&db);
+        db.conn()
+            .execute(
+                "INSERT INTO taxonomy_versions (version, cid) VALUES (1, 'existing_head')",
+                [],
+            )
+            .unwrap();
+
+        let mut update = sample_update();
+        update.version = 2;
+        update.previous_cid = Some("wrong_head".into());
+        let msg = sample_message(&update);
+
+        assert!(handle_taxonomy_message(&db, &msg).is_err());
+    }
+
+    #[test]
     fn is_committee_member_returns_false_when_empty() {
         let db = test_db();
         assert!(!is_committee_member(&db, "stake_test1nobody"));
@@ -398,28 +472,7 @@ mod tests {
     #[test]
     fn is_committee_member_returns_true_for_committee() {
         let db = test_db();
-
-        // Insert a DAO and a committee member
-        db.conn()
-            .execute(
-                "INSERT INTO subject_fields (id, name) VALUES ('sf1', 'Test Field')",
-                [],
-            )
-            .unwrap();
-        db.conn()
-            .execute(
-                "INSERT INTO governance_daos (id, name, scope_type, scope_id, status) \
-                 VALUES ('dao1', 'Test DAO', 'subject_field', 'sf1', 'active')",
-                [],
-            )
-            .unwrap();
-        db.conn()
-            .execute(
-                "INSERT INTO governance_dao_members (dao_id, stake_address, role) \
-                 VALUES ('dao1', 'stake_test1committee', 'committee')",
-                [],
-            )
-            .unwrap();
+        seed_committee(&db);
 
         assert!(is_committee_member(&db, "stake_test1committee"));
         assert!(!is_committee_member(&db, "stake_test1regular"));

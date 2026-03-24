@@ -46,6 +46,13 @@ pub fn handle_catalog_message(
     if announcement.author_address.is_empty() {
         return Err("catalog announcement missing author_address".into());
     }
+    if announcement.author_address != message.stake_address {
+        return Err("catalog announcement author does not match envelope signer".into());
+    }
+    let expected_course_id = entity_id(&[&announcement.author_address, &announcement.content_cid]);
+    if announcement.course_id != expected_course_id {
+        return Err("catalog announcement has invalid deterministic course_id".into());
+    }
 
     // Check if we already have a newer version
     let existing_version: Option<i64> = db
@@ -428,6 +435,43 @@ mod tests {
             public_key: vec![],
             stake_address: String::new(),
             timestamp: 0,
+        };
+
+        assert!(handle_catalog_message(&db, &msg).is_err());
+    }
+
+    #[test]
+    fn handle_catalog_message_rejects_mismatched_author() {
+        let db = test_db();
+        let ann = sample_announcement();
+        let payload = serde_json::to_vec(&ann).unwrap();
+
+        let msg = SignedGossipMessage {
+            topic: "/alexandria/catalog/1.0".into(),
+            payload,
+            signature: vec![0xDE, 0xAD],
+            public_key: vec![0; 32],
+            stake_address: "stake_test1someoneelse".into(),
+            timestamp: 1_700_000_000,
+        };
+
+        assert!(handle_catalog_message(&db, &msg).is_err());
+    }
+
+    #[test]
+    fn handle_catalog_message_rejects_invalid_course_id() {
+        let db = test_db();
+        let mut ann = sample_announcement();
+        ann.course_id = "tampered".into();
+        let payload = serde_json::to_vec(&ann).unwrap();
+
+        let msg = SignedGossipMessage {
+            topic: "/alexandria/catalog/1.0".into(),
+            payload,
+            signature: vec![0xDE, 0xAD],
+            public_key: vec![0; 32],
+            stake_address: ann.author_address.clone(),
+            timestamp: 1_700_000_000,
         };
 
         assert!(handle_catalog_message(&db, &msg).is_err());

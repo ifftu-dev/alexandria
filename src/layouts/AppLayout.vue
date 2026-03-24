@@ -3,6 +3,7 @@ import AppSidebar from '@/components/layout/AppSidebar.vue'
 import AppTopBar from '@/components/layout/AppTopBar.vue'
 import AppBottomBar from '@/components/layout/AppBottomBar.vue'
 import MobileTabBar from '@/components/layout/MobileTabBar.vue'
+import TutoringPiP from '@/components/layout/TutoringPiP.vue'
 import { ref, onMounted } from 'vue'
 
 // Persist sidebar state to localStorage (Mark 2 uses a cookie)
@@ -44,6 +45,8 @@ function toggleSidebar() {
     </div>
 
     <AppBottomBar />
+
+    <TutoringPiP />
 
     <!-- Bottom tab bar — visible only on mobile -->
     <MobileTabBar />

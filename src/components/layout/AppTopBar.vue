@@ -38,9 +38,36 @@ function onSearchKeydown(e: KeyboardEvent) {
   }
 }
 
+function isEditableTarget(target: EventTarget | null) {
+  const element = target as HTMLElement | null
+  if (!element) return false
+  if (element.isContentEditable) return true
+  return ['INPUT', 'TEXTAREA', 'SELECT'].includes(element.tagName)
+}
+
 // Global "/" shortcut to focus search
 function onGlobalKeydown(e: KeyboardEvent) {
-  if (e.key === '/' && !['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement).tagName) && !(e.target as HTMLElement)?.isContentEditable) {
+  if (isMac && e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+    if (e.key === ',' || e.key === ';') {
+      e.preventDefault()
+      if (route.path !== '/dashboard/settings') {
+        void router.push('/dashboard/settings')
+      }
+      return
+    }
+    if (e.key === '[' && !isEditableTarget(e.target)) {
+      e.preventDefault()
+      router.back()
+      return
+    }
+    if (e.key === ']' && !isEditableTarget(e.target)) {
+      e.preventDefault()
+      router.forward()
+      return
+    }
+  }
+
+  if (e.key === '/' && !isEditableTarget(e.target)) {
     e.preventDefault()
     searchInput.value?.focus()
   }

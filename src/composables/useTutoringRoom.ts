@@ -42,6 +42,7 @@ const micLevel = ref(0)
 const outputLevel = ref(0)
 
 let pollInterval: ReturnType<typeof setInterval> | null = null
+let pollSubscribers = 0
 
 // ── Tauri event listeners (set up once globally) ───────────────────
 
@@ -359,13 +360,17 @@ async function checkDevices(): Promise<DeviceCheckResult> {
 }
 
 function startPolling(intervalMs = 3000) {
+  pollSubscribers += 1
   if (pollInterval) return
   refreshStatus()
   pollInterval = setInterval(refreshStatus, intervalMs)
 }
 
 function stopPolling() {
-  if (pollInterval) {
+  if (pollSubscribers > 0) {
+    pollSubscribers -= 1
+  }
+  if (pollSubscribers === 0 && pollInterval) {
     clearInterval(pollInterval)
     pollInterval = null
   }

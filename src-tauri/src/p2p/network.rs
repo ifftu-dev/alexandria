@@ -16,6 +16,7 @@ use crate::crypto::hash::blake2b_256;
 use crate::diag;
 
 use super::nat::build_autonat_config;
+use super::rate_limit::PeerRateLimiter;
 use super::scoring::{build_peer_score_params, build_peer_score_thresholds};
 use super::types::{NatState, NetworkStatus, P2pEvent, SignedGossipMessage, ALL_TOPICS};
 use super::validation::MessageValidator;
@@ -244,6 +245,16 @@ pub enum SwarmCommand {
     Publish {
         topic: String,
         data: Vec<u8>,
+        reply: mpsc::Sender<Result<(), NetworkError>>,
+    },
+    /// Dynamically subscribe to a gossip topic.
+    Subscribe {
+        topic: String,
+        reply: mpsc::Sender<Result<(), NetworkError>>,
+    },
+    /// Dynamically unsubscribe from a gossip topic.
+    Unsubscribe {
+        topic: String,
         reply: mpsc::Sender<Result<(), NetworkError>>,
     },
     /// Get the current network status.
@@ -621,6 +632,9 @@ async fn swarm_event_loop(
 
     use super::types::{PeerExchangeMessage, TOPIC_PEER_EXCHANGE};
 
+    // Per-peer gossip rate limiter (token bucket: 20 msgs, 1 refill/3s)
+    let mut rate_limiter = PeerRateLimiter::new();
+
     // Track NAT state locally for the Status command
     let mut current_nat_state = NatState::Unknown;
     let mut relay_addrs: Vec<String> = Vec::new();
@@ -771,6 +785,24 @@ async fn swarm_event_loop(
                             .map_err(|e| NetworkError::Publish(e.to_string()));
                         let _ = reply.send(result).await;
                     }
+                    Some(SwarmCommand::Subscribe { topic, reply }) => {
+                        let t = IdentTopic::new(&topic);
+                        let result = swarm
+                            .behaviour_mut()
+                            .gossipsub
+                            .subscribe(&t)
+                            .map(|_| ())
+                            .map_err(|e| NetworkError::Subscribe(e.to_string()));
+                        let _ = reply.send(result).await;
+                    }
+                    Some(SwarmCommand::Unsubscribe { topic, reply }) => {
+                        let t = IdentTopic::new(&topic);
+                        swarm
+                            .behaviour_mut()
+                            .gossipsub
+                            .unsubscribe(&t);
+                        let _ = reply.send(Ok(())).await;
+                    }
                     Some(SwarmCommand::Status { reply }) => {
                         let peer_id = *swarm.local_peer_id();
                         let connected = swarm.connected_peers().count();
@@ -819,6 +851,16 @@ async fn swarm_event_loop(
                             message.source,
                             message.data.len()
                         );
+
+                        // Rate-limit incoming gossip per source peer
+                        if let Some(source) = message.source {
+                            if !rate_limiter.check(&source) {
+                                log::debug!(
+                                    "Rate-limited gossip from {source} on {topic} — dropping"
+                                );
+                                continue;
+                            }
+                        }
 
                         // Peer exchange messages are NOT signed envelopes —
                         // handle them separately before the validation pipeline.
@@ -1088,6 +1130,7 @@ async fn swarm_event_loop(
                     SwarmEvent::ConnectionClosed { peer_id, .. } => {
                         log::debug!("Disconnected from peer: {peer_id}");
                         diag::log(&format!("P2P event: peer disconnected — {peer_id}"));
+                        rate_limiter.remove_peer(&peer_id);
                         let _ = event_tx.send(P2pEvent::PeerDisconnected {
                             peer_id: peer_id.to_string(),
                         }).await;
@@ -1158,6 +1201,44 @@ impl P2pNode {
             .map_err(|_| NetworkError::NotRunning)?;
         let peers = reply_rx.recv().await.ok_or(NetworkError::NotRunning)?;
         Ok(peers.iter().map(|p| p.to_string()).collect())
+    }
+
+    /// Dynamically subscribe to a gossip topic (e.g., a per-classroom topic).
+    pub async fn subscribe_topic(&self, topic: &str) -> Result<(), NetworkError> {
+        if !self.running {
+            return Err(NetworkError::NotRunning);
+        }
+        let (reply_tx, mut reply_rx) = mpsc::channel(1);
+        self.command_tx
+            .send(SwarmCommand::Subscribe {
+                topic: topic.to_string(),
+                reply: reply_tx,
+            })
+            .await
+            .map_err(|_| NetworkError::NotRunning)?;
+        reply_rx
+            .recv()
+            .await
+            .unwrap_or(Err(NetworkError::NotRunning))
+    }
+
+    /// Dynamically unsubscribe from a gossip topic.
+    pub async fn unsubscribe_topic(&self, topic: &str) -> Result<(), NetworkError> {
+        if !self.running {
+            return Err(NetworkError::NotRunning);
+        }
+        let (reply_tx, mut reply_rx) = mpsc::channel(1);
+        self.command_tx
+            .send(SwarmCommand::Unsubscribe {
+                topic: topic.to_string(),
+                reply: reply_tx,
+            })
+            .await
+            .map_err(|_| NetworkError::NotRunning)?;
+        reply_rx
+            .recv()
+            .await
+            .unwrap_or(Err(NetworkError::NotRunning))
     }
 
     /// Shutdown the node.

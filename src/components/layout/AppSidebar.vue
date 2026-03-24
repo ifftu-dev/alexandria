@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import SidebarSkillGraph from '@/components/layout/SidebarSkillGraph.vue'
 import { useTutoringRoom } from '@/composables/useTutoringRoom'
+import { useClassroom } from '@/composables/useClassroom'
 
 defineProps<{ collapsed: boolean }>()
 const emit = defineEmits<{ toggle: [] }>()
@@ -76,14 +77,22 @@ function updateTutoringPreviews() {
 }
 
 // =========================================
-// Mock data: Classrooms
+// Classrooms (real data)
 // =========================================
-const classroomPreviews = [
-  { id: '1', name: 'Advanced Algorithms', initial: 'A', member_count: 24, active: true, unread_count: 3 },
-  { id: '2', name: 'Cardano Dev Cohort #7', initial: 'C', member_count: 18, active: true, unread_count: 0 },
-  { id: '3', name: 'ML Study Group', initial: 'M', member_count: 31, active: false, unread_count: 12 },
-  { id: '4', name: 'Web3 Builders', initial: 'W', member_count: 9, active: false, unread_count: 0 },
-]
+const { classrooms, loadClassrooms } = useClassroom()
+
+onMounted(async () => {
+  try { await loadClassrooms() } catch { /* not logged in yet */ }
+})
+
+const classroomPreviews = computed(() =>
+  classrooms.value.slice(0, 4).map(c => ({
+    id: c.id,
+    name: c.name,
+    initial: (c.icon_emoji ?? c.name.charAt(0)).toUpperCase(),
+    member_count: c.member_count,
+  }))
+)
 </script>
 
 <template>
@@ -200,7 +209,7 @@ const classroomPreviews = [
           <button
             v-if="collapsed"
             :class="['group relative flex items-center justify-center rounded-lg px-3 py-2.5 transition-colors', isActive('/classrooms') ? 'text-primary' : 'text-muted-foreground hover:bg-muted hover:text-foreground']"
-            @click="navigate('/courses')"
+            @click="navigate('/classrooms')"
           >
             <svg class="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
@@ -212,7 +221,7 @@ const classroomPreviews = [
           <div :class="['flex items-center gap-1', collapsed ? 'hidden' : '']">
             <button
               :class="['flex flex-1 items-center gap-2 rounded-lg px-3 py-2 text-[0.8125rem] font-semibold uppercase tracking-wider transition-colors', isActive('/classrooms') ? 'text-primary' : 'text-muted-foreground hover:text-foreground']"
-              @click="navigate('/courses')"
+              @click="navigate('/classrooms')"
             >
               <svg class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
@@ -245,20 +254,18 @@ const classroomPreviews = [
               v-for="classroom in classroomPreviews"
               :key="classroom.id"
               class="sb-preview-card group"
-              @click="navigate('/courses')"
+              @click="navigate(`/classrooms/${classroom.id}`)"
             >
               <div class="sb-avatar sb-avatar--classroom">{{ classroom.initial }}</div>
               <div class="min-w-0 flex-1">
                 <div class="flex items-center gap-1.5">
                   <span class="sb-preview-title">{{ classroom.name }}</span>
-                  <span v-if="classroom.unread_count > 0" class="sb-unread-badge">{{ classroom.unread_count }}</span>
                 </div>
                 <span class="sb-preview-meta">{{ classroom.member_count }} members</span>
               </div>
-              <span v-if="classroom.active" class="sb-status-icon" title="Active"><span class="sb-active-dot" /></span>
             </button>
 
-            <button class="sb-view-all" @click="navigate('/courses')">
+            <button class="sb-view-all" @click="navigate('/classrooms')">
               View all classrooms
               <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" /></svg>
             </button>

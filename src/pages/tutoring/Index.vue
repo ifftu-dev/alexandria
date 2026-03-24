@@ -247,23 +247,6 @@ function formatDate(iso: string) {
       <pre v-if="diagLog" class="text-[0.55rem] text-muted-foreground whitespace-pre-wrap max-h-48 overflow-y-auto leading-tight">{{ diagLog }}</pre>
     </div>
 
-    <!-- Mobile video info notice -->
-    <div v-if="isMobilePlatform" class="rounded-xl border border-primary/30 bg-primary/5 p-5">
-      <div class="flex items-start gap-3">
-        <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 shrink-0">
-          <svg class="h-5 w-5 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-          </svg>
-        </div>
-        <div>
-          <h3 class="text-sm font-semibold text-foreground">Video + Audio</h3>
-          <p class="mt-1 text-sm text-muted-foreground">
-            Mobile sessions support camera, microphone, and text chat via P2P connections. Screen share is available on desktop.
-          </p>
-        </div>
-      </div>
-    </div>
-
     <!-- Active session banner -->
     <div
       v-if="activeSession"
