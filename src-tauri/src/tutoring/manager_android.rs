@@ -21,4 +21,8 @@ impl TutoringManager {
             _inner: Arc::new(Mutex::new(())),
         }
     }
+
+    pub async fn leave_room(&self) -> Result<(), String> {
+        Ok(())
+    }
 }

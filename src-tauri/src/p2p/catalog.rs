@@ -139,6 +139,7 @@ pub fn handle_catalog_message(
 ///
 /// Called after `publish_course` stores the course document on iroh.
 /// The announcement is a lightweight summary for gossip discovery.
+#[allow(clippy::too_many_arguments)]
 pub fn build_catalog_announcement(
     author_address: &str,
     title: &str,

@@ -6,7 +6,7 @@ use app_lib::ipfs::node::ContentNode;
 
 fn usage() {
     eprintln!(
-        "Usage:\n  cargo run --manifest-path src-tauri/Cargo.toml --features dev-seed --bin dev_seed -- <up|down|reset> [--db PATH] [--iroh PATH]\n\nDefaults:\n  --db   ./dev-data/alexandria.db\n  --iroh ./dev-data/iroh"
+        "Usage:\n  cargo run --manifest-path src-tauri/Cargo.toml --features dev-seed --example dev_seed -- <up|down|reset> [--db PATH] [--iroh PATH]\n\nDefaults:\n  --db   ./dev-data/alexandria.db\n  --iroh ./dev-data/iroh"
     );
 }
 

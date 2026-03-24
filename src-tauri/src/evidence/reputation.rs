@@ -32,6 +32,8 @@ const VARIANCE_PENALTY_SCALE: f64 = 2.0;
 /// Maximum variance penalty (60% confidence reduction).
 const MAX_VARIANCE_PENALTY: f64 = 0.60;
 
+type InstructorRankingRow = (String, f64, i64, i64, f64);
+
 /// Called after a skill proof is created or updated.
 ///
 /// Computes:
@@ -667,7 +669,7 @@ pub fn get_instructor_rankings(
     skill_id: &str,
     proficiency_level: Option<&str>,
     limit: i64,
-) -> Result<Vec<(String, f64, i64, i64, f64)>, String> {
+) -> Result<Vec<InstructorRankingRow>, String> {
     let (sql, param_values): (String, Vec<Box<dyn rusqlite::types::ToSql>>) =
         if let Some(level) = proficiency_level {
             (

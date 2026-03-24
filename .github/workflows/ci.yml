@@ -137,10 +137,17 @@ jobs:
     timeout-minutes: 15
 
     steps:
-      - name: Checkout
+      - name: Checkout alexandria
         uses: actions/checkout@v4
         with:
           path: alexandria
+
+      - name: Checkout iroh-live-patched
+        uses: actions/checkout@v4
+        with:
+          repository: ifftu-dev/iroh-live
+          path: iroh-live-patched
+          token: ${{ secrets.CROSS_REPO_PAT }}
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -149,8 +156,8 @@ jobs:
         run: cargo install cargo-audit
 
       - name: Run cargo audit
-        working-directory: alexandria/src-tauri
-        run: cargo audit
+        working-directory: alexandria
+        run: cargo audit --manifest-path src-tauri/Cargo.toml
 
       - name: Check updater key is not placeholder
         working-directory: alexandria

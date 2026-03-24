@@ -285,6 +285,12 @@ pub struct TutoringManager {
     inner: Arc<Mutex<Option<ActiveSession>>>,
 }
 
+impl Default for TutoringManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TutoringManager {
     pub fn new() -> Self {
         Self {
@@ -333,6 +339,7 @@ impl TutoringManager {
     // ── Room lifecycle ─────────────────────────────────────────────
 
     /// Create a new tutoring room (host mode).
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_room(
         &self,
         session_id: String,
@@ -465,6 +472,7 @@ impl TutoringManager {
     }
 
     /// Join an existing tutoring room using a ticket string.
+    #[allow(clippy::too_many_arguments)]
     pub async fn join_room(
         &self,
         session_id: String,
@@ -1644,6 +1652,7 @@ impl TutoringManager {
     }
 
     #[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
+    #[allow(clippy::too_many_arguments)]
     fn spawn_frame_bridge_with_resubscribe(
         watch: WatchTrack,
         node_id: String,

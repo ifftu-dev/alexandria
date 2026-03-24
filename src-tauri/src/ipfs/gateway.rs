@@ -126,7 +126,7 @@ impl GatewayClient {
             .map_err(|e| GatewayError::Http(e.to_string()))?;
 
         let status = response.status().as_u16();
-        if status < 200 || status >= 300 {
+        if !(200..300).contains(&status) {
             return Err(GatewayError::BadStatus {
                 status,
                 url: url.to_string(),

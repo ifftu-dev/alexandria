@@ -18,24 +18,20 @@ use libp2p::autonat;
 /// requesting other peers to dial back to them. The result determines
 /// whether we listen for relay reservations or attempt direct connections.
 pub fn build_autonat_config() -> autonat::Config {
-    let mut config = autonat::Config::default();
-
-    // Probe every 60 seconds to detect NAT changes
-    // (default is 15s, but we don't need aggressive probing)
-    config.retry_interval = Duration::from_secs(60);
-
-    // After 2 successful probes, consider ourselves public
-    // (default is 3, lowered for faster convergence in small networks)
-    config.confidence_max = 2;
-
-    // Throttle inbound probe requests: max 2 per peer per minute
-    // (prevents abuse as an amplification vector)
-    config.throttle_server_period = Duration::from_secs(30);
-
-    // Only probe 3 servers maximum per cycle
-    config.max_peer_addresses = 3;
-
-    config
+    autonat::Config {
+        // Probe every 60 seconds to detect NAT changes
+        // (default is 15s, but we don't need aggressive probing)
+        retry_interval: Duration::from_secs(60),
+        // After 2 successful probes, consider ourselves public
+        // (default is 3, lowered for faster convergence in small networks)
+        confidence_max: 2,
+        // Throttle inbound probe requests: max 2 per peer per minute
+        // (prevents abuse as an amplification vector)
+        throttle_server_period: Duration::from_secs(30),
+        // Only probe 3 servers maximum per cycle
+        max_peer_addresses: 3,
+        ..Default::default()
+    }
 }
 
 #[cfg(test)]

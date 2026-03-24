@@ -108,6 +108,7 @@ impl ElectionPhase {
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<ElectionPhase> {
         match s {
             "nomination" => Some(ElectionPhase::Nomination),
@@ -198,6 +199,7 @@ impl ProposalStatus {
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<ProposalStatus> {
         match s {
             "draft" => Some(ProposalStatus::Draft),

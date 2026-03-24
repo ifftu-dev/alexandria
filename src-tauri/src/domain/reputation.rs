@@ -34,6 +34,7 @@ impl ReputationRole {
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<ReputationRole> {
         match s {
             "instructor" => Some(ReputationRole::Instructor),
@@ -370,6 +371,7 @@ impl SnapshotStatus {
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<SnapshotStatus> {
         match s {
             "pending" => Some(SnapshotStatus::Pending),

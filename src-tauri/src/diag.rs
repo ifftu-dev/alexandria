@@ -20,7 +20,7 @@ static DIAG_PATH: OnceLock<PathBuf> = OnceLock::new();
 pub fn init(app_data_dir: &std::path::Path) {
     let path = app_data_dir.join("diag.log");
     // Truncate previous log on each app launch
-    let _ = std::fs::write(&path, format!("=== diag.log started ===\n"));
+    let _ = std::fs::write(&path, "=== diag.log started ===\n");
     let _ = DIAG_PATH.set(path);
 }
 

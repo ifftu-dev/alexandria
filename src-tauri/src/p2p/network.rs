@@ -46,22 +46,25 @@ fn device_label() -> String {
     #[cfg(target_os = "macos")]
     {
         if let Some(model) = apple_sysctl("hw.model") {
-            return humanize_apple_model(&model);
+            humanize_apple_model(&model)
+        } else {
+            "Mac".to_string()
         }
-        return "Mac".to_string();
     }
 
     #[cfg(target_os = "ios")]
     {
         if let Some(model) = apple_sysctl("hw.machine") {
-            return humanize_apple_model(&model);
-        }
-        if let Ok(sim_model) = std::env::var("SIMULATOR_MODEL_IDENTIFIER") {
+            humanize_apple_model(&model)
+        } else if let Ok(sim_model) = std::env::var("SIMULATOR_MODEL_IDENTIFIER") {
             if !sim_model.trim().is_empty() {
-                return humanize_apple_model(sim_model.trim());
+                humanize_apple_model(sim_model.trim())
+            } else {
+                "iPhone or iPad".to_string()
             }
+        } else {
+            "iPhone or iPad".to_string()
         }
-        return "iPhone or iPad".to_string();
     }
 
     #[cfg(target_os = "linux")]
@@ -69,16 +72,31 @@ fn device_label() -> String {
         if let Ok(label) = std::env::var("ALEXANDRIA_DEVICE_LABEL") {
             let label = label.trim();
             if !label.is_empty() {
-                return label.to_string();
+                label.to_string()
+            } else if let Ok(product) =
+                std::fs::read_to_string("/sys/devices/virtual/dmi/id/product_name")
+            {
+                let product = product.trim();
+                if !product.is_empty() {
+                    product.to_string()
+                } else {
+                    "Linux device".to_string()
+                }
+            } else {
+                "Linux device".to_string()
             }
-        }
-        if let Ok(product) = std::fs::read_to_string("/sys/devices/virtual/dmi/id/product_name") {
+        } else if let Ok(product) =
+            std::fs::read_to_string("/sys/devices/virtual/dmi/id/product_name")
+        {
             let product = product.trim();
             if !product.is_empty() {
-                return product.to_string();
+                product.to_string()
+            } else {
+                "Linux device".to_string()
             }
+        } else {
+            "Linux device".to_string()
         }
-        return "Linux device".to_string();
     }
 
     #[cfg(target_os = "android")]
@@ -86,10 +104,13 @@ fn device_label() -> String {
         if let Ok(label) = std::env::var("ALEXANDRIA_DEVICE_LABEL") {
             let label = label.trim();
             if !label.is_empty() {
-                return label.to_string();
+                label.to_string()
+            } else {
+                "Android device".to_string()
             }
+        } else {
+            "Android device".to_string()
         }
-        return "Android device".to_string();
     }
 
     #[cfg(target_os = "windows")]
@@ -97,10 +118,13 @@ fn device_label() -> String {
         if let Ok(label) = std::env::var("ALEXANDRIA_DEVICE_LABEL") {
             let label = label.trim();
             if !label.is_empty() {
-                return label.to_string();
+                label.to_string()
+            } else {
+                "Windows device".to_string()
             }
+        } else {
+            "Windows device".to_string()
         }
-        return "Windows device".to_string();
     }
 
     #[cfg(not(any(

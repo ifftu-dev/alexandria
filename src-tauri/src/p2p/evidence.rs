@@ -204,6 +204,7 @@ pub fn handle_evidence_message(
 ///
 /// Called after `create_evidence_for_element` stores evidence locally.
 /// The announcement is a lightweight summary for gossip broadcast.
+#[allow(clippy::too_many_arguments)]
 pub fn build_evidence_announcement(
     evidence_id: &str,
     learner_address: &str,
