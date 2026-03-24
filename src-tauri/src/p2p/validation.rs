@@ -51,6 +51,8 @@ pub enum ValidationError {
     InvalidPayload(String),
     #[error("unauthorized: {0}")]
     Unauthorized(String),
+    #[error("internal error: {0}")]
+    Internal(String),
 }
 
 /// Validation result with the rejection reason (for logging/metrics).
@@ -115,7 +117,9 @@ impl MessageValidator {
     /// this TOFU model is the best available local defense.
     fn check_identity_binding(&self, message: &SignedGossipMessage) -> ValidationResult {
         let pubkey_hex = hex::encode(&message.public_key);
-        let mut bindings = self.identity_bindings.lock().unwrap();
+        let mut bindings = self.identity_bindings.lock().map_err(|_| {
+            ValidationError::Internal("identity bindings lock poisoned".into())
+        })?;
 
         match bindings.get(&message.stake_address) {
             Some(existing_key) if *existing_key != pubkey_hex => {
@@ -171,7 +175,9 @@ impl MessageValidator {
     fn check_dedup(&self, message: &SignedGossipMessage) -> ValidationResult {
         let hash = hex::encode(blake2b_256(&message.payload));
 
-        let mut seen = self.seen.lock().unwrap();
+        let mut seen = self.seen.lock().map_err(|_| {
+            ValidationError::Internal("dedup cache lock poisoned".into())
+        })?;
 
         if seen.contains(&hash) {
             return Err(ValidationError::Duplicate { hash });

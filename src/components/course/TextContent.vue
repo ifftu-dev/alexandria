@@ -2,6 +2,7 @@
 import { ref, onMounted, watch } from 'vue'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { AppSpinner } from '@/components/ui'
+import { sanitizeHtml } from '@/utils/sanitize'
 
 const props = defineProps<{
   contentCid: string | null
@@ -20,7 +21,7 @@ const error = ref<string | null>(null)
 async function loadContent() {
   // Prefer inline content (works on all platforms including mobile)
   if (props.contentInline) {
-    content.value = props.contentInline
+    content.value = sanitizeHtml(props.contentInline)
     return
   }
   if (!props.contentCid) { content.value = ''; return }
@@ -29,7 +30,7 @@ async function loadContent() {
   try {
     const bytes = await invoke<number[]>('content_resolve_bytes', { identifier: props.contentCid })
     const decoder = new TextDecoder()
-    content.value = decoder.decode(new Uint8Array(bytes))
+    content.value = sanitizeHtml(decoder.decode(new Uint8Array(bytes)))
   } catch (e: unknown) {
     error.value = `Failed to load content: ${e}`
     content.value = ''

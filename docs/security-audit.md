@@ -1,10 +1,42 @@
 # Alexandria (Mark 3) -- Security Audit
 
-**Date**: 2026-02-24
-**Scope**: Full Rust backend (`src-tauri/src/`), Tauri configuration, Cargo dependencies
-**Files audited**: Every file in `crypto/`, `p2p/`, `commands/`, `db/`, `cardano/`, `evidence/`, `ipfs/`, plus `lib.rs`, `tauri.conf.json`, `capabilities/default.json`, both `Cargo.toml` files
+**Date**: 2026-02-24 (updated 2026-03-23)
+**Scope**: Full Rust backend (`src-tauri/src/`), Tauri configuration, Cargo dependencies, Vue frontend (`src/`), CI/CD workflows
+**Files audited**: Every file in `crypto/`, `p2p/`, `commands/`, `db/`, `cardano/`, `evidence/`, `ipfs/`, plus `lib.rs`, `tauri.conf.json`, `capabilities/default.json`, both `Cargo.toml` files, all Vue components and composables
 
-**Summary**: 1 critical, 4 high, 8 medium, 6 low, 5 informational findings.
+**Summary**: 1 critical, 7 high, 10 medium, 9 low, 5 informational findings.
+
+### Remediation status (2026-03-23)
+
+| Finding | Status | Notes |
+|---------|--------|-------|
+| C-1 | **FIXED** | `keystore.rs` now uses Argon2id (64MB/3iter/4lanes) |
+| H-1 | **FIXED** | `signing.rs` now signs SHA-256(topic\|\|timestamp\|\|stake_address\|\|payload) |
+| H-2 | **FIXED** | `governance.rs` verifies sender is committee/chair + transaction-wrapped |
+| H-3 | DEFERRED | Requires identity attestation protocol; TOFU mitigates partially |
+| H-4 | **FIXED** | `validation.rs` uses LRU cache with capacity eviction |
+| H-5 | **FIXED** | All v-html sites sanitized with DOMPurify |
+| H-6 | PARTIAL | CI warns on placeholder; keypair must be generated manually |
+| H-7 | **FIXED** | `p2p_publish` command removed from IPC surface |
+| M-1 | **FIXED** | Salt file now includes HMAC-SHA256 integrity tag |
+| M-2 | **FIXED** | Wallet implements Drop with zeroization; Clone removed |
+| M-3 | **FIXED** | 12-char minimum password enforced in generate/restore |
+| M-4 | **FIXED** | Mnemonic cleared in onUnmounted + timeout |
+| M-5 | **FIXED** | Proposal status validated against allowlist |
+| M-6 | **FIXED** | Per-peer token-bucket rate limiter added (20msg/60s) |
+| M-7 | **FIXED** | Column names validated via `sanitize_column_name()` |
+| M-8 | **FIXED** | Restrictive CSP enabled in tauri.conf.json |
+| M-9 | **FIXED** | Session password auto-clears after 15min timeout |
+| M-10 | DEFERRED | Safety comment adequate; Mutex invariant maintained |
+| L-1 | DEFERRED | Env var is standard practice |
+| L-2 | DEFERRED | Architectural limitation |
+| L-3 | **FIXED** | Salt generation uses OsRng directly |
+| L-4 | **FIXED** | cargo-audit added to CI workflow |
+| L-5 | N/A | Test-only code, no action needed |
+| L-6 | DEFERRED | Needs integration test with Stronghold |
+| L-7 | **FIXED** | SSRF blocklist rejects private/loopback IPs |
+| L-8 | **FIXED** | Fonts bundled locally, CDN links removed |
+| L-9 | **FIXED** | `.unwrap()` replaced with `.map_err()` across all commands |
 
 ---
 
@@ -127,6 +159,46 @@ This creates an instant replay window where ALL previously-seen messages become 
 
 ---
 
+### H-5: Cross-Site Scripting (XSS) via `v-html` with untrusted content
+
+**Files**:
+- `src/components/course/TextContent.vue:53` — `v-html="content"` renders HTML loaded from IPFS/inline content
+- `src/components/course/CourseCard.vue:19` — `v-html="course.thumbnail_svg"`
+- `src/pages/dashboard/Courses.vue:250` — `v-html="courseMap[enrollment.course_id]?.thumbnail_svg"`
+- `src/pages/Home.vue:177` — `v-html="enrolledCourseMap[enrollment.course_id]?.thumbnail_svg"`
+
+`TextContent.vue` renders raw HTML fetched from IPFS gateways or inline content via `v-html`. SVG thumbnails stored in the database are also rendered with `v-html`. Any course author can embed `<script>`, `<iframe>`, `<svg onload="...">`, or other XSS payloads. Since CSP is disabled (M-8), this runs with full Tauri IPC privileges.
+
+**Impact**: Full Tauri IPC access. A malicious course author could steal the user's mnemonic via `invoke('export_mnemonic')`, mint NFTs, publish to the P2P network, or perform any other privileged operation. This is the primary exploitation vector for the disabled CSP (M-8).
+
+**Fix**: Sanitize all HTML before rendering with `v-html`. Use DOMPurify. For SVG thumbnails, use a strict SVG sanitizer that strips `<script>`, event handlers, and `<foreignObject>`.
+
+---
+
+### H-6: Updater public key is a placeholder
+
+**File**: `src-tauri/tauri.conf.json:62`
+
+The Tauri updater signature verification key is set to `"pubkey": "PLACEHOLDER_PUBKEY"`. If the updater is activated before this is replaced with a real key, the app may accept unsigned updates or fail to verify updates.
+
+**Impact**: Potential malicious update injection if the updater endpoint is compromised or MITM'd.
+
+**Fix**: Generate a proper signing keypair and replace the placeholder before any release.
+
+---
+
+### H-7: `p2p_publish` allows raw unsigned message publishing
+
+**File**: `src-tauri/src/commands/p2p.rs:238-249`
+
+The `p2p_publish` command publishes raw bytes to any gossip topic without signing. While the receiving peers validate signatures, a compromised frontend (via XSS from H-5) could publish arbitrary data to the P2P network, potentially disrupting the gossip protocol or exploiting parsing bugs in other nodes.
+
+**Impact**: Network abuse, reputation damage to the user's PeerId.
+
+**Fix**: Remove or restrict `p2p_publish` to only accept pre-signed envelopes, or require that the topic/payload pass through the same signing pipeline used by `publish_catalog`, `publish_evidence`, etc.
+
+---
+
 ## MEDIUM
 
 ### M-1: Salt file has no integrity protection
@@ -141,24 +213,17 @@ The random salt is written to `vault_salt.bin` as a plain file (line 97). When l
 
 ---
 
-### M-2: Mnemonic field in Wallet struct not zeroized on drop
+### M-2: Wallet struct does not zeroize secret key material on drop
 
-**File**: `src-tauri/src/crypto/wallet.rs:34`
+**File**: `src-tauri/src/crypto/wallet.rs:31-48`
 
-The `Wallet` struct stores the mnemonic as a plain `String`:
+The `Wallet` struct contains `mnemonic: String`, `signing_key: SigningKey`, and `payment_key_extended: [u8; 64]`. The struct derives `Clone` (line 31) and does not implement `Zeroize` or `Drop`. When `Wallet` instances are dropped, the secret key material is not guaranteed to be zeroed in memory. The `Keystore` correctly uses `Zeroizing<String>` for the password (line 63), but `Wallet` does not follow this pattern.
 
-```rust
-pub struct Wallet {
-    pub mnemonic: String,  // Plain String, not Zeroizing<String>
-    ...
-}
-```
+Additionally, `leak_into_bytes` calls in `wallet.rs:161,168` extract raw key material. The returned byte arrays are stored in the struct which does NOT implement `Zeroize`.
 
-When the `Wallet` is dropped, Rust deallocates the memory but does not zero it. The mnemonic may persist in freed memory until overwritten by a subsequent allocation. The `Keystore` correctly uses `Zeroizing<String>` for the password (line 63), but `Wallet.mnemonic` does not follow this pattern.
+**Impact**: The mnemonic, signing key, and payment key (which control all funds and identity) may be recoverable from a memory dump, core dump, or swap file after the wallet is dropped.
 
-**Impact**: The mnemonic (which controls all funds and identity) may be recoverable from a memory dump, core dump, or swap file after the wallet is dropped.
-
-**Fix**: Change `pub mnemonic: String` to `pub mnemonic: Zeroizing<String>`. Ensure all intermediate `String` copies during derivation also use `Zeroizing`.
+**Fix**: Wrap sensitive fields in `Zeroizing<>`, remove the `Clone` derive, and implement `Drop` with explicit zeroization. Ensure all intermediate `String` copies during derivation also use `Zeroizing`.
 
 ---
 
@@ -261,9 +326,33 @@ The Content Security Policy is explicitly disabled:
 
 This means the webview can load scripts from any source, make network requests to any origin, and execute inline scripts without restriction.
 
-**Impact**: If an XSS vulnerability exists in the frontend (or in any loaded content), the attacker has unrestricted access to the Tauri IPC bridge. Given that the IPC bridge exposes sensitive operations (vault unlock, mnemonic export, NFT minting), this significantly amplifies the impact of any frontend vulnerability.
+**Impact**: If an XSS vulnerability exists in the frontend (or in any loaded content), the attacker has unrestricted access to the Tauri IPC bridge. Given that the IPC bridge exposes sensitive operations (vault unlock, mnemonic export, NFT minting), this significantly amplifies the impact of any frontend vulnerability. **Note**: Specific XSS vectors have been identified -- see H-5.
 
-**Fix**: Set a restrictive CSP: `"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' https://cardano-preprod.blockfrost.io"`. Adjust as needed for the frontend framework.
+**Fix**: Set a restrictive CSP: `"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src ipc: http://ipc.localhost https://cardano-preprod.blockfrost.io; img-src 'self' data:"`. Adjust as needed for the frontend framework.
+
+---
+
+### M-9: Biometric password stored as plain string in frontend session
+
+**File**: `src/composables/useBiometricVault.ts:5`
+
+`let sessionBiometricPassword: string | null = null` stores the vault password as a plain JavaScript string in module scope for the entire app session. This is the session-based fallback when keychain entitlements are missing.
+
+**Impact**: Any XSS attack (see H-5) can trivially read this variable. Even without XSS, JavaScript heap snapshots or debugging tools can extract it.
+
+**Fix**: Minimize the window this value is held. Clear it after a timeout. Fixing CSP (M-8) and sanitizing v-html (H-5) mitigates the XSS vector.
+
+---
+
+### M-10: `unsafe impl Send + Sync for Database`
+
+**File**: `src-tauri/src/db/mod.rs:30-31`
+
+Manual `unsafe impl Send for Database {}` and `unsafe impl Sync for Database {}`. The safety relies on external Mutex synchronization + SQLite FULL_MUTEX mode, and `lib.rs` wraps `Database` in `Arc<std::sync::Mutex<Database>>`.
+
+**Impact**: If the Mutex discipline is ever broken (e.g., refactoring that exposes `Database` without the mutex), this could cause undefined behavior.
+
+**Fix**: Document the invariant more prominently. Consider a newtype wrapper that enforces the mutex at the type level.
 
 ---
 
@@ -355,6 +444,42 @@ If Stronghold changes its error message format in a future version, the wrong pa
 
 ---
 
+### L-7: IPFS content resolver accepts arbitrary URLs (SSRF risk)
+
+**File**: `src-tauri/src/ipfs/resolver.rs:162-181`, `src-tauri/src/ipfs/cid.rs:68-69`
+
+The content resolver accepts `http://` and `https://` URLs as identifiers and fetches them via the gateway client. A course author could embed a URL pointing to an internal/private IP.
+
+**Impact**: The reqwest client will attempt to connect to any URL, potentially probing internal networks (SSRF).
+
+**Fix**: Validate that URLs point to expected IPFS gateways, or add a blocklist for private IP ranges (127.0.0.0/8, 10.0.0.0/8, 192.168.0.0/16, etc.).
+
+---
+
+### L-8: Google Fonts loaded from external CDN
+
+**File**: `index.html:8-9`
+
+Fonts are loaded from `fonts.googleapis.com` / `fonts.gstatic.com` at runtime.
+
+**Impact**: Privacy concern (Google sees each user's IP on app launch). Availability concern (app typography degrades without network). Minor attack surface if the CDN is compromised.
+
+**Fix**: Bundle the fonts locally in the app.
+
+---
+
+### L-9: `.unwrap()` on Mutex lock throughout command handlers
+
+**Files**: Pervasive across `src-tauri/src/commands/` -- at least 20+ instances of `state.db.lock().unwrap()`.
+
+If any thread panics while holding the database mutex, the mutex becomes poisoned and all subsequent `.unwrap()` calls will panic, crashing the app.
+
+**Impact**: Denial of service (app crash). No data loss since SQLite WAL mode ensures durability.
+
+**Fix**: Replace `.unwrap()` with `.map_err()` to return a user-facing error instead of crashing.
+
+---
+
 ## INFO (Positive findings)
 
 ### I-1: All SQL queries use parameterized statements
@@ -402,14 +527,18 @@ Evidence announcements validate that `score` is in `[0.0, 1.0]` before storing. 
 | # | Finding | Effort | Impact |
 |---|---------|--------|--------|
 | 1 | C-1: Replace HMAC-SHA512 KDF with Argon2id | Low | Eliminates offline brute-force |
-| 2 | H-1: Sign timestamp+topic+stake_address in gossip | Medium | Prevents replay and field tampering |
-| 3 | H-2: Add authority verification for committee updates | Medium | Prevents governance takeover |
-| 4 | H-3: Verify public_key to stake_address binding | Medium | Prevents identity spoofing |
-| 5 | H-4: Replace dedup cache clear with LRU eviction | Low | Eliminates replay window |
-| 6 | M-8: Set restrictive CSP | Low | Limits XSS blast radius |
-| 7 | M-3: Add password strength requirements | Low | Prevents trivially weak passwords |
-| 8 | M-2: Zeroize mnemonic in Wallet struct | Low | Protects secrets in memory |
-| 9 | M-5: Validate proposal status from gossip | Low | Prevents governance manipulation |
-| 10 | M-7: Validate sync JSON column names | Low | Prevents SQL injection via column names |
-| 11 | M-6: Add per-peer rate limiting | Medium | Prevents resource exhaustion |
-| 12 | M-1: Protect salt file integrity | Low | Prevents DoS and precomputation |
+| 2 | H-5+M-8: Sanitize v-html content AND set restrictive CSP | Low | **Blocks XSS-to-RCE chain (wallet theft)** |
+| 3 | H-1: Sign timestamp+topic+stake_address in gossip | Medium | Prevents replay and field tampering |
+| 4 | H-2: Add authority verification for committee updates | Medium | Prevents governance takeover |
+| 5 | H-3: Verify public_key to stake_address binding | Medium | Prevents identity spoofing |
+| 6 | H-4: Replace dedup cache clear with LRU eviction | Low | Eliminates replay window |
+| 7 | H-6: Replace updater placeholder pubkey | Low | Prevents unsigned update injection |
+| 8 | H-7: Restrict p2p_publish to signed envelopes | Low | Prevents network abuse via XSS |
+| 9 | M-3: Add password strength requirements | Low | Prevents trivially weak passwords |
+| 10 | M-2: Zeroize all secret material in Wallet struct | Low | Protects secrets in memory |
+| 11 | M-9: Clear biometric session password after timeout | Low | Reduces XSS exposure window |
+| 12 | M-5: Validate proposal status from gossip | Low | Prevents governance manipulation |
+| 13 | M-7: Validate sync JSON column names | Low | Prevents SQL injection via column names |
+| 14 | M-6: Add per-peer rate limiting | Medium | Prevents resource exhaustion |
+| 15 | M-1: Protect salt file integrity | Low | Prevents DoS and precomputation |
+| 16 | L-7: Add SSRF blocklist to IPFS resolver | Low | Prevents internal network probing |

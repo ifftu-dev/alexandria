@@ -5,6 +5,7 @@ pub mod gossip;
 pub mod governance;
 pub mod nat;
 pub mod network;
+pub mod rate_limit;
 pub mod scoring;
 pub mod signing;
 pub mod stress;

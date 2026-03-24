@@ -119,3 +119,31 @@ jobs:
       - name: TypeScript type-check
         working-directory: alexandria
         run: npx vue-tsc -b --noEmit
+
+  security:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          path: alexandria
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit
+
+      - name: Run cargo audit
+        working-directory: alexandria/src-tauri
+        run: cargo audit
+
+      - name: Check updater key is not placeholder
+        working-directory: alexandria
+        run: |
+          if grep -q 'PLACEHOLDER_PUBKEY' src-tauri/tauri.conf.json; then
+            echo "::warning::Updater public key is still a placeholder — replace before release"
+          fi

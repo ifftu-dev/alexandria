@@ -6,8 +6,10 @@
 
 use std::sync::Arc;
 
-use tauri::State;
+use tauri::{AppHandle, State};
 
+use crate::classroom::manager as classroom_manager;
+use crate::classroom::types::is_classroom_topic;
 use crate::crypto::wallet;
 use crate::db::Database;
 use crate::diag;
@@ -31,7 +33,7 @@ use crate::AppState;
 /// background task so it never blocks the IPC handler (and cannot crash
 /// it). The frontend detects the node coming online via `p2p_status` polling.
 #[tauri::command]
-pub async fn p2p_start(state: State<'_, AppState>) -> Result<String, String> {
+pub async fn p2p_start(app: AppHandle, state: State<'_, AppState>) -> Result<String, String> {
     diag::log("p2p_start called");
     log::info!("[p2p_start] called");
 
@@ -101,6 +103,7 @@ pub async fn p2p_start(state: State<'_, AppState>) -> Result<String, String> {
     let p2p_node = state.p2p_node.clone();
     let db_for_events: Arc<std::sync::Mutex<Database>> = state.db.clone();
     let peer_id_for_return = peer_id.clone();
+    let app_for_events = app.clone();
 
     // Spawn the heavy work (node startup + event loop) in a background task.
     tokio::spawn(async move {
@@ -120,6 +123,7 @@ pub async fn p2p_start(state: State<'_, AppState>) -> Result<String, String> {
 
         // Spawn event consumer
         let db_events = db_for_events.clone();
+        let app_events = app_for_events.clone();
         tokio::spawn(async move {
             while let Some(event) = event_rx.recv().await {
                 match &event {
@@ -146,6 +150,16 @@ pub async fn p2p_start(state: State<'_, AppState>) -> Result<String, String> {
                             let _ = p2p_taxonomy::handle_taxonomy_message(&db, message);
                         } else if topic == TOPIC_GOVERNANCE {
                             let _ = p2p_governance::handle_governance_message(&db, message);
+                        } else if is_classroom_topic(topic) {
+                            if topic.ends_with("/meta/1.0") {
+                                classroom_manager::handle_classroom_meta(&db, message, &app_events);
+                            } else {
+                                classroom_manager::handle_classroom_message(
+                                    &db,
+                                    message,
+                                    &app_events,
+                                );
+                            }
                         }
                     }
                     crate::p2p::types::P2pEvent::StatusChanged(status) => {
@@ -216,20 +230,3 @@ pub async fn p2p_peers(state: State<'_, AppState>) -> Result<Vec<String>, String
     }
 }
 
-/// Publish a raw message to a gossip topic.
-///
-/// This is a low-level command. Higher-level typed publish commands
-/// (catalog, evidence, etc.) will be added in subsequent PRs with
-/// proper message signing and validation.
-#[tauri::command]
-pub async fn p2p_publish(
-    state: State<'_, AppState>,
-    topic: String,
-    data: Vec<u8>,
-) -> Result<(), String> {
-    let node_lock = state.p2p_node.lock().await;
-    let node = node_lock
-        .as_ref()
-        .ok_or_else(|| "P2P node is not running".to_string())?;
-    node.publish(&topic, data).await.map_err(|e| e.to_string())
-}

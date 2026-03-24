@@ -534,6 +534,7 @@ fn apply_row_insert(
         if key == "id" {
             continue; // Already handled
         }
+        sanitize_column_name(key)?;
         columns.push(key.clone());
         placeholders.push(format!("?{idx}"));
         match val {
@@ -592,7 +593,8 @@ fn apply_row_update(
         if key == "id" {
             continue;
         }
-        set_clauses.push(format!("{key} = ?{idx}"));
+        let safe_col = sanitize_column_name(key)?;
+        set_clauses.push(format!("{safe_col} = ?{idx}"));
         match val {
             serde_json::Value::String(s) => values.push(Box::new(s.clone())),
             serde_json::Value::Number(n) => {
@@ -630,6 +632,27 @@ fn apply_row_update(
         .map_err(|e| format!("sync update on {table_name} failed: {e}"))?;
 
     Ok(())
+}
+
+/// Sanitize a column name to prevent SQL injection via crafted JSON keys.
+///
+/// Only allows alphanumeric characters and underscores, must start with
+/// a letter or underscore, and must be at most 64 characters.
+fn sanitize_column_name(name: &str) -> Result<&str, String> {
+    if !name.is_empty()
+        && name.len() <= 64
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_')
+        && name
+            .bytes()
+            .next()
+            .map_or(false, |b| b.is_ascii_alphabetic() || b == b'_')
+    {
+        Ok(name)
+    } else {
+        Err(format!("invalid column name for sync: '{name}'"))
+    }
 }
 
 /// Sanitize a table name to prevent SQL injection.

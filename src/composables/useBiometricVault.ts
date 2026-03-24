@@ -2,7 +2,18 @@ import { authenticate, checkStatus, getData, hasData, removeData, setData } from
 
 const BIOMETRY_DOMAIN = 'org.alexandria.node'
 const VAULT_PASSWORD_KEY = 'vault_password'
+/** Auto-clear session password after 15 minutes of inactivity. */
+const SESSION_TIMEOUT_MS = 15 * 60 * 1000
 let sessionBiometricPassword: string | null = null
+let sessionTimeout: ReturnType<typeof setTimeout> | null = null
+
+function resetSessionTimeout() {
+  if (sessionTimeout) clearTimeout(sessionTimeout)
+  sessionTimeout = setTimeout(() => {
+    sessionBiometricPassword = null
+    sessionTimeout = null
+  }, SESSION_TIMEOUT_MS)
+}
 
 export interface BiometricStatus {
   isAvailable: boolean
@@ -73,11 +84,13 @@ export async function storeVaultPasswordForBiometric(password: string): Promise<
     // Keep an in-memory copy for this app session as a resilience fallback
     // in case keychain retrieval is flaky in some runtime configurations.
     sessionBiometricPassword = password
+    resetSessionTimeout()
     return 'secure'
   } catch (error) {
     const message = messageFromError(error)
     if (isMissingEntitlementError(message)) {
       sessionBiometricPassword = password
+      resetSessionTimeout()
       return 'session'
     }
     throw new Error(message)
@@ -94,6 +107,10 @@ export async function clearBiometricVaultPassword(): Promise<void> {
     }
   } finally {
     sessionBiometricPassword = null
+    if (sessionTimeout) {
+      clearTimeout(sessionTimeout)
+      sessionTimeout = null
+    }
   }
 }
 
@@ -104,11 +121,13 @@ export async function getVaultPasswordViaBiometric(reason = 'Authenticate to unl
       name: VAULT_PASSWORD_KEY,
       reason,
     })
+    resetSessionTimeout()
     return result.data
   } catch (error) {
     const message = messageFromError(error)
     if (sessionBiometricPassword && (isMissingEntitlementError(message) || isNotFoundError(message))) {
       await authenticate(reason, { allowDeviceCredential: true })
+      resetSessionTimeout()
       return sessionBiometricPassword
     }
     throw new Error(message)

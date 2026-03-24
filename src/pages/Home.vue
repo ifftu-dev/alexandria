@@ -6,6 +6,7 @@ import { useP2P } from '@/composables/useP2P'
 import { useContentSync } from '@/composables/useContentSync'
 import { usePlatform } from '@/composables/usePlatform'
 import { StatusBadge } from '@/components/ui'
+import { sanitizeSvg } from '@/utils/sanitize'
 import CourseCard from '@/components/course/CourseCard.vue'
 import type { Course, Enrollment } from '@/types'
 
@@ -174,7 +175,7 @@ onMounted(async () => {
             <div class="card card-interactive overflow-hidden">
               <!-- Thumbnail -->
               <div class="relative aspect-[16/9] overflow-hidden">
-                <div v-if="enrolledCourseMap[enrollment.course_id]?.thumbnail_svg" class="w-full h-full" v-html="enrolledCourseMap[enrollment.course_id]?.thumbnail_svg" />
+                <div v-if="enrolledCourseMap[enrollment.course_id]?.thumbnail_svg" class="w-full h-full" v-html="sanitizeSvg(enrolledCourseMap[enrollment.course_id]?.thumbnail_svg ?? '')" />
                 <div v-else class="w-full h-full bg-gradient-to-br from-primary/15 to-accent/8 flex items-center justify-center">
                   <svg class="w-8 h-8 text-primary/40" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />

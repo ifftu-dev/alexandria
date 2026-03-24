@@ -9,6 +9,19 @@ use crate::domain::profile::{ProfilePayload, PublishProfileResult, SignedProfile
 use crate::ipfs::profile as ipfs_profile;
 use crate::AppState;
 
+/// Minimum password length for vault encryption (NIST SP 800-63B guidance).
+const MIN_PASSWORD_LENGTH: usize = 12;
+
+/// Validate password meets minimum strength requirements.
+fn validate_password(password: &str) -> Result<(), String> {
+    if password.len() < MIN_PASSWORD_LENGTH {
+        return Err(format!(
+            "Password must be at least {MIN_PASSWORD_LENGTH} characters"
+        ));
+    }
+    Ok(())
+}
+
 /// Progress event payload sent to the frontend during wallet operations.
 #[derive(Clone, Serialize)]
 struct VaultProgress {
@@ -85,7 +98,7 @@ pub async fn unlock_vault(
 
     emit_progress(&app, "db", "Loading identity from database...");
     let profile = {
-        let db = state.db.lock().unwrap();
+        let db = state.db.lock().map_err(|_| "database lock poisoned".to_string())?;
         let exists: bool = db
             .conn()
             .query_row(
@@ -100,7 +113,7 @@ pub async fn unlock_vault(
             db.conn()
                 .execute(
                     "INSERT INTO local_identity (id, stake_address, payment_address) VALUES (1, ?1, ?2)",
-                    params![w.stake_address, w.payment_address],
+                    params![w.stake_address.clone(), w.payment_address],
                 )
                 .map_err(|e| e.to_string())?;
         }
@@ -118,8 +131,8 @@ pub async fn unlock_vault(
 
     Ok(UnlockResponse {
         wallet: WalletInfo {
-            stake_address: w.stake_address,
-            payment_address: w.payment_address,
+            stake_address: w.stake_address.clone(),
+            payment_address: w.payment_address.clone(),
             has_mnemonic_backup: true,
         },
         profile,
@@ -137,6 +150,7 @@ pub async fn generate_wallet(
     state: State<'_, AppState>,
     password: String,
 ) -> Result<GenerateWalletResponse, String> {
+    validate_password(&password)?;
     emit_progress(&app, "vault", "Creating encrypted vault...");
 
     // Move all CPU-bound crypto to a blocking thread:
@@ -157,7 +171,7 @@ pub async fn generate_wallet(
 
     emit_progress(&app, "db", "Storing identity in local database...");
     {
-        let db = state.db.lock().unwrap();
+        let db = state.db.lock().map_err(|_| "database lock poisoned".to_string())?;
 
         // Check if identity already exists
         let exists: bool = db
@@ -174,14 +188,14 @@ pub async fn generate_wallet(
             db.conn()
                 .execute(
                     "UPDATE local_identity SET stake_address = ?1, payment_address = ?2, updated_at = datetime('now') WHERE id = 1",
-                    params![w.stake_address, w.payment_address],
+                    params![w.stake_address.clone(), w.payment_address],
                 )
                 .map_err(|e| e.to_string())?;
         } else {
             db.conn()
                 .execute(
                     "INSERT INTO local_identity (id, stake_address, payment_address) VALUES (1, ?1, ?2)",
-                    params![w.stake_address, w.payment_address],
+                    params![w.stake_address.clone(), w.payment_address],
                 )
                 .map_err(|e| e.to_string())?;
         }
@@ -195,9 +209,9 @@ pub async fn generate_wallet(
     emit_progress(&app, "done", "Identity created successfully");
 
     Ok(GenerateWalletResponse {
-        mnemonic: w.mnemonic,
-        stake_address: w.stake_address,
-        payment_address: w.payment_address,
+        mnemonic: w.mnemonic.clone(),
+        stake_address: w.stake_address.clone(),
+        payment_address: w.payment_address.clone(),
     })
 }
 
@@ -212,6 +226,7 @@ pub async fn restore_wallet(
     mnemonic: String,
     password: String,
 ) -> Result<WalletInfo, String> {
+    validate_password(&password)?;
     emit_progress(&app, "validate", "Validating recovery phrase...");
 
     // Move all CPU-bound crypto to a blocking thread
@@ -229,7 +244,7 @@ pub async fn restore_wallet(
 
     emit_progress(&app, "db", "Storing identity in local database...");
     {
-        let db = state.db.lock().unwrap();
+        let db = state.db.lock().map_err(|_| "database lock poisoned".to_string())?;
 
         let exists: bool = db
             .conn()
@@ -244,14 +259,14 @@ pub async fn restore_wallet(
             db.conn()
                 .execute(
                     "UPDATE local_identity SET stake_address = ?1, payment_address = ?2, updated_at = datetime('now') WHERE id = 1",
-                    params![w.stake_address, w.payment_address],
+                    params![w.stake_address.clone(), w.payment_address],
                 )
                 .map_err(|e| e.to_string())?;
         } else {
             db.conn()
                 .execute(
                     "INSERT INTO local_identity (id, stake_address, payment_address) VALUES (1, ?1, ?2)",
-                    params![w.stake_address, w.payment_address],
+                    params![w.stake_address.clone(), w.payment_address],
                 )
                 .map_err(|e| e.to_string())?;
         }
@@ -265,8 +280,8 @@ pub async fn restore_wallet(
     emit_progress(&app, "done", "Wallet restored successfully");
 
     Ok(WalletInfo {
-        stake_address: w.stake_address,
-        payment_address: w.payment_address,
+        stake_address: w.stake_address.clone(),
+        payment_address: w.payment_address.clone(),
         has_mnemonic_backup: true,
     })
 }
@@ -298,7 +313,7 @@ pub async fn lock_vault(state: State<'_, AppState>) -> Result<(), String> {
 /// Get the current wallet info (no secrets).
 #[tauri::command]
 pub async fn get_wallet_info(state: State<'_, AppState>) -> Result<Option<WalletInfo>, String> {
-    let db = state.db.lock().unwrap();
+    let db = state.db.lock().map_err(|_| "database lock poisoned".to_string())?;
 
     let result = db.conn().query_row(
         "SELECT stake_address, payment_address FROM local_identity WHERE id = 1",
@@ -322,7 +337,7 @@ pub async fn get_wallet_info(state: State<'_, AppState>) -> Result<Option<Wallet
 /// Get the local user's profile.
 #[tauri::command]
 pub async fn get_profile(state: State<'_, AppState>) -> Result<Option<Identity>, String> {
-    let db = state.db.lock().unwrap();
+    let db = state.db.lock().map_err(|_| "database lock poisoned".to_string())?;
     Ok(read_profile(db.conn()))
 }
 
@@ -354,7 +369,7 @@ pub async fn update_profile(
     state: State<'_, AppState>,
     update: ProfileUpdate,
 ) -> Result<Identity, String> {
-    let db = state.db.lock().unwrap();
+    let db = state.db.lock().map_err(|_| "database lock poisoned".to_string())?;
 
     // Build dynamic UPDATE statement
     let mut set_clauses = Vec::new();
@@ -437,7 +452,7 @@ pub async fn publish_profile(state: State<'_, AppState>) -> Result<PublishProfil
         Option<String>,
         String,
     ) = {
-        let db = state.db.lock().unwrap();
+        let db = state.db.lock().map_err(|_| "database lock poisoned".to_string())?;
         db.conn()
             .query_row(
                 "SELECT stake_address, display_name, bio, avatar_cid, created_at
@@ -480,7 +495,7 @@ pub async fn publish_profile(state: State<'_, AppState>) -> Result<PublishProfil
         .map_err(|e| e.to_string())?;
 
     // Save the profile_hash in the database
-    let db = state.db.lock().unwrap();
+    let db = state.db.lock().map_err(|_| "database lock poisoned".to_string())?;
     db.conn()
         .execute(
             "UPDATE local_identity SET profile_hash = ?1, updated_at = datetime('now') WHERE id = 1",

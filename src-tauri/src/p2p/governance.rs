@@ -154,6 +154,11 @@ fn handle_proposal_resolved(
     votes_against: i64,
     on_chain_tx: Option<&str>,
 ) -> Result<(), String> {
+    const ALLOWED_STATUSES: &[&str] = &["approved", "rejected", "expired", "withdrawn"];
+    if !ALLOWED_STATUSES.contains(&status) {
+        return Err(format!("invalid proposal status: '{status}'"));
+    }
+
     let rows = db
         .conn()
         .execute(
@@ -235,24 +240,31 @@ fn handle_committee_updated(
         ));
     }
 
+    // Wrap in a transaction so the committee is never left empty on partial failure
+    let tx = db
+        .conn()
+        .unchecked_transaction()
+        .map_err(|e| format!("failed to begin transaction: {e}"))?;
+
     // Remove existing committee members for this DAO
-    db.conn()
-        .execute(
-            "DELETE FROM governance_dao_members WHERE dao_id = ?1",
-            params![dao_id],
-        )
-        .map_err(|e| format!("failed to clear committee: {e}"))?;
+    tx.execute(
+        "DELETE FROM governance_dao_members WHERE dao_id = ?1",
+        params![dao_id],
+    )
+    .map_err(|e| format!("failed to clear committee: {e}"))?;
 
     // Insert new committee members
     for addr in members {
-        db.conn()
-            .execute(
-                "INSERT INTO governance_dao_members (dao_id, stake_address, role) \
-                 VALUES (?1, ?2, 'committee')",
-                params![dao_id, addr],
-            )
-            .map_err(|e| format!("failed to insert committee member: {e}"))?;
+        tx.execute(
+            "INSERT INTO governance_dao_members (dao_id, stake_address, role) \
+             VALUES (?1, ?2, 'committee')",
+            params![dao_id, addr],
+        )
+        .map_err(|e| format!("failed to insert committee member: {e}"))?;
     }
+
+    tx.commit()
+        .map_err(|e| format!("failed to commit committee update: {e}"))?;
 
     log::info!(
         "Governance: DAO '{}' committee updated by '{}' — {} members",
