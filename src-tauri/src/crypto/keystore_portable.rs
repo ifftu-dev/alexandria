@@ -240,7 +240,7 @@ fn compute_salt_hmac(password: &str, salt: &[u8]) -> [u8; HMAC_LEN] {
     use hmac::{Hmac, Mac};
     use sha2::Sha256;
 
-    let mut mac = Hmac::<Sha256>::new_from_slice(password.as_bytes())
+    let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(password.as_bytes())
         .expect("HMAC can take key of any size");
     mac.update(salt);
     let result = mac.finalize();
@@ -250,7 +250,11 @@ fn compute_salt_hmac(password: &str, salt: &[u8]) -> [u8; HMAC_LEN] {
 }
 
 /// Write salt + HMAC tag to the salt file.
-fn write_salt_with_hmac(vault_dir: &Path, salt: &[u8], password: &str) -> Result<(), KeystoreError> {
+fn write_salt_with_hmac(
+    vault_dir: &Path,
+    salt: &[u8],
+    password: &str,
+) -> Result<(), KeystoreError> {
     let tag = compute_salt_hmac(password, salt);
     let mut data = Vec::with_capacity(SALT_LEN + HMAC_LEN);
     data.extend_from_slice(salt);

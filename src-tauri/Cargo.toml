@@ -14,8 +14,8 @@ default = []
 dev-seed = []
 # Enable video support for tutoring (desktop only).
 # This activates iroh-live's "video" feature which pulls in ffmpeg, nokhwa, xcap.
-# On mobile builds, this feature MUST NOT be enabled — the build script
-# automatically enables it for desktop targets.
+# On mobile builds, this feature MUST NOT be enabled. Desktop Tauri config and
+# desktop build/release commands enable it explicitly where needed.
 tutoring-video = ["iroh-live/video", "iroh-live/aec"]
 
 # Enable video with statically-linked ffmpeg (for Windows/Linux CI builds without system ffmpeg).
@@ -102,8 +102,8 @@ futures = "0.3"
 
 # Live tutoring — Media over QUIC (iroh-live) — ALL platforms
 # Base: audio-only (default-features = false). The "video" feature is
-# activated by the "tutoring-video" cargo feature which the build script
-# enables for desktop targets only.
+# activated by the "tutoring-video" cargo feature which desktop Tauri config
+# and desktop build/release commands enable explicitly.
 iroh-gossip = "0.96"
 iroh-live = { git = "https://github.com/ifftu-dev/iroh-live", rev = "6e17f09", default-features = false }
 postcard = { version = "1", features = ["alloc"] }

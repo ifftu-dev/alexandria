@@ -97,6 +97,14 @@ The relay server lives in a [separate repository](https://github.com/ifftu-dev/a
 - **Node.js 22+** with `npm`
 - **Tauri CLI**: `cargo install tauri-cli`
 
+For fresh desktop builds with full audio-video live tutoring:
+
+- **macOS**: `brew install cmake ffmpeg libtool automake autoconf`
+- **Linux**: `sudo apt-get install -y cmake libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf nasm libclang-dev pkg-config libopus-dev libssl-dev libx264-dev libva-dev libdrm-dev libvdpau-dev`
+- **Windows**: install CMake, install MSYS2 autotools (`pacman -S --noconfirm libtool automake autoconf`), download a shared FFmpeg build, set `FFMPEG_DIR`, and add `FFMPEG_DIR\\bin` to `PATH`
+
+Desktop builds use `tutoring-video` on macOS/Windows and `tutoring-video-static` on Linux. iOS builds use `tutoring-video-ios`. Android does not yet ship live video tutoring.
+
 For iOS builds:
 
 - **Xcode 15+** with command-line tools
@@ -214,19 +222,23 @@ alex run ios --release
 #### Code Quality
 
 ```bash
-alex dev test         # cargo test (309 tests)
-alex dev clippy       # cargo clippy -- -D warnings
+alex dev test         # cargo test with host tutoring media feature
+alex dev clippy       # cargo clippy with host tutoring media feature
 alex dev fmt          # cargo fmt --check
 alex dev check        # vue-tsc type check
 alex dev all          # fmt + clippy + test + check (full CI pass)
 ```
 
+`alex dev test`, `alex dev clippy`, and `alex build check` automatically enable the host tutoring media feature:
+- macOS / Windows: `tutoring-video`
+- Linux: `tutoring-video-static`
+
 #### Building
 
 ```bash
 # Quick builds
-alex build check      # cargo check + vue-tsc (fast, no codegen)
-alex build release    # Full desktop release (cargo tauri build)
+alex build check      # cargo check + vue-tsc with host tutoring feature
+alex build release    # Full desktop release (cargo tauri build + host tutoring feature)
 
 # Platform-specific builds
 alex build desktop                        # Current host (e.g. mac-arm64)
@@ -315,13 +327,20 @@ alex db reset --force   # Or manually: rm -rf ~/Library/Application\ Support/org
 ## Testing
 
 ```bash
-# All 309 Rust tests (unit + integration + stress)
-cargo test -p alexandria-node
+# Full desktop tutoring test surface
+cargo test -p alexandria-node --features tutoring-video        # macOS / Windows
+cargo test -p alexandria-node --features tutoring-video-static # Linux
 
 # Individual module tests
-cargo test -p alexandria-node wallet
-cargo test -p alexandria-node p2p
-cargo test -p alexandria-node evidence
+cargo test -p alexandria-node --features tutoring-video wallet        # macOS / Windows
+cargo test -p alexandria-node --features tutoring-video-static wallet # Linux
+cargo test -p alexandria-node --features tutoring-video p2p           # macOS / Windows
+cargo test -p alexandria-node --features tutoring-video evidence      # macOS / Windows
+cargo test -p alexandria-node --features tutoring-video-static p2p    # Linux
+cargo test -p alexandria-node --features tutoring-video-static evidence # Linux
+
+# iOS simulator compile check (full mobile A/V tutoring path)
+cargo check -p alexandria-node --target aarch64-apple-ios-sim --features tutoring-video-ios
 
 # Frontend type check
 npx vue-tsc -b

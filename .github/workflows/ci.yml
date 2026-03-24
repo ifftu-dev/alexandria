@@ -4,7 +4,12 @@ on:
   push:
     branches: [main]
     paths:
+      - '.github/workflows/**'
+      - 'cli/**'
+      - 'patches/**'
+      - 'scripts/**'
       - 'src-tauri/**'
+      - 'src-tauri/tauri*.json'
       - 'src/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
@@ -17,7 +22,12 @@ on:
   pull_request:
     branches: [main]
     paths:
+      - '.github/workflows/**'
+      - 'cli/**'
+      - 'patches/**'
+      - 'scripts/**'
       - 'src-tauri/**'
+      - 'src-tauri/tauri*.json'
       - 'src/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
@@ -63,6 +73,7 @@ jobs:
           sudo add-apt-repository universe -y
           sudo apt-get update
           sudo apt-get install -y \
+            cmake \
             libwebkit2gtk-4.1-dev \
             libappindicator3-dev \
             librsvg2-dev \
