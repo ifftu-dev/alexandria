@@ -285,55 +285,52 @@
 
 ## Entity Relationship Summary
 
-```
-subject_fields
-  └── subjects
-        └── skills ──── skill_prerequisites (DAG)
-              │         skill_relations
-              │
-              ├── element_skill_tags ── course_elements
-              │                            └── course_chapters
-              │                                  └── courses
-              │
-              ├── evidence_records ── skill_assessments
-              │     │                       └── attestation_requirements
-              │     ├── skill_proof_evidence ── skill_proofs
-              │     ├── reputation_impact_deltas
-              │     ├── evidence_challenges ── challenge_votes
-              │     └── evidence_attestations
-              │
-              └── reputation_assertions ── reputation_evidence
-                                           reputation_snapshots
+```mermaid
+erDiagram
+    subject_fields ||--o{ subjects : contains
+    subjects ||--o{ skills : contains
+    skills ||--o{ skill_prerequisites : "DAG edges"
+    skills ||--o{ skill_relations : relates
 
-governance_daos
-  ├── governance_proposals ── governance_proposal_votes
-  ├── governance_dao_members
-  └── governance_elections
-        ├── governance_election_nominees
-        └── governance_election_votes
+    courses ||--o{ course_chapters : contains
+    course_chapters ||--o{ course_elements : contains
+    course_elements ||--o{ element_skill_tags : tagged
+    skills ||--o{ element_skill_tags : tagged
 
-enrollments
-  ├── element_progress
-  └── course_notes
+    enrollments ||--o{ element_progress : tracks
+    enrollments ||--o{ course_notes : has
 
-classrooms
-  ├── classroom_members
-  ├── classroom_join_requests
-  ├── classroom_channels ── classroom_messages
-  └── classroom_calls ── classroom_call_peers
+    skill_assessments ||--o{ evidence_records : produces
+    skill_assessments ||--o{ attestation_requirements : requires
+    evidence_records ||--o{ skill_proof_evidence : supports
+    skill_proofs ||--o{ skill_proof_evidence : aggregates
+    evidence_records ||--o{ reputation_impact_deltas : impacts
+    evidence_records ||--o{ evidence_challenges : challenged
+    evidence_challenges ||--o{ challenge_votes : votes
+    evidence_records ||--o{ evidence_attestations : attested
 
-tutoring_sessions
-  ├── tutoring_peers
-  └── tutoring_chat
+    reputation_assertions ||--o{ reputation_evidence : backed
+    reputation_assertions ||--o{ reputation_snapshots : anchored
 
-local_identity (singleton)
-peers
-catalog
-content_mappings
-devices
-  ├── sync_state
-  └── sync_queue
-sync_log
-pins
-integrity_sessions ── integrity_snapshots
+    governance_daos ||--o{ governance_proposals : has
+    governance_daos ||--o{ governance_dao_members : members
+    governance_daos ||--o{ governance_elections : runs
+    governance_proposals ||--o{ governance_proposal_votes : votes
+    governance_elections ||--o{ governance_election_nominees : nominees
+    governance_elections ||--o{ governance_election_votes : votes
+
+    classrooms ||--o{ classroom_members : members
+    classrooms ||--o{ classroom_join_requests : requests
+    classrooms ||--o{ classroom_channels : channels
+    classrooms ||--o{ classroom_calls : calls
+    classroom_channels ||--o{ classroom_messages : messages
+    classroom_calls ||--o{ classroom_call_peers : peers
+
+    tutoring_sessions ||--o{ tutoring_peers : peers
+    tutoring_sessions ||--o{ tutoring_chat : messages
+
+    integrity_sessions ||--o{ integrity_snapshots : snapshots
+
+    devices ||--o{ sync_state : tracks
+    devices ||--o{ sync_queue : queues
 ```

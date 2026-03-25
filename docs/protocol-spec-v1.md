@@ -36,16 +36,16 @@
 Alexandria uses libp2p 0.56 to build a fully decentralized P2P network
 where every user runs a local node. The protocol has 8 logical layers:
 
-```
-Layer 8  Application     Tauri IPC commands, frontend events
-Layer 7  P2P Events      PeerConnected, GossipMessage, NatChanged
-Layer 6  Sync            Cross-device sync (encrypted, LWW/append-only)
-Layer 5  Domain          Catalog, Evidence, Taxonomy, Governance, Profiles, Classrooms
-Layer 4  Validation      Signature, Identity, Freshness, Dedup, Schema, Authority
-Layer 3  GossipSub       6 global + per-classroom topics, peer scoring, rate limiting
-Layer 2  Transport       QUIC, TCP, Kademlia, AutoNAT, Relay, DCUtR
-Layer 1  Crypto          Ed25519, Blake2b-256, SHA-256
-```
+| Layer | Name | Description |
+|:-----:|------|-------------|
+| 8 | Application | Tauri IPC commands, frontend events |
+| 7 | P2P Events | PeerConnected, GossipMessage, NatChanged |
+| 6 | Sync | Cross-device sync (encrypted, LWW/append-only) |
+| 5 | Domain | Catalog, Evidence, Taxonomy, Governance, Profiles, Classrooms |
+| 4 | Validation | Signature, Identity, Freshness, Dedup, Schema, Authority |
+| 3 | GossipSub | 6 global + per-classroom topics, peer scoring, rate limiting |
+| 2 | Transport | QUIC, TCP, Kademlia, AutoNAT, Relay, DCUtR |
+| 1 | Crypto | Ed25519, Blake2b-256, SHA-256 |
 
 All messages are JSON-encoded, wrapped in a signed envelope, and
 published via GossipSub v1.1. Every sender is identified by their
@@ -86,17 +86,12 @@ Example: `entity_id(["stake1u8abc", "cid123"])` = `hex(blake2b("stake1u8abc|cid1
 
 The libp2p PeerId is derived from the Cardano payment signing key:
 
-```
-cardano_payment_key: [u8; 32]  (Ed25519 scalar from BIP32 derivation)
-        │
-        ▼
-libp2p_keypair = Keypair::ed25519_from_bytes(payment_key)
-        │
-        ▼
-peer_id = keypair.public().to_peer_id()
-        │
-        ▼
-PeerId: base58, prefix "12D3KooW" (Ed25519 multicodec)
+```mermaid
+graph TD
+    Key["cardano_payment_key: [u8; 32]\n(Ed25519 scalar from BIP32 derivation)"]
+    Key --> KP["Keypair::ed25519_from_bytes(payment_key)"]
+    KP --> PID["keypair.public().to_peer_id()"]
+    PID --> Result["PeerId: base58, prefix 12D3KooW\n(Ed25519 multicodec)"]
 ```
 
 This creates a 1:1 cryptographic link: PeerId = f(Cardano signing key).
@@ -468,19 +463,20 @@ joined with `governance_daos` to verify the sender has role
 ### 10.4 State Machines
 
 **Election lifecycle**:
-```
-nomination ──▶ voting ──▶ finalized
-                  │
-                  └──────▶ cancelled
+```mermaid
+stateDiagram-v2
+    nomination --> voting
+    voting --> finalized
+    voting --> cancelled
 ```
 
 **Proposal lifecycle**:
-```
-draft ──▶ published ──▶ approved
-              │
-              ├────────▶ rejected
-              │
-              └────────▶ cancelled
+```mermaid
+stateDiagram-v2
+    draft --> published
+    published --> approved
+    published --> rejected
+    published --> cancelled
 ```
 
 **Supermajority threshold**: 2/3 of votes for approval.
@@ -670,11 +666,12 @@ Governance is second-most sensitive. Profiles are most permissive.
 
 ### 14.2 NAT State Machine
 
-```
-Unknown ──[2 successful probes]──▶ Public(address)
-Unknown ──[probes fail]──────────▶ Private
-Public  ──[re-probe fails]──────▶ Private
-Private ──[re-probe succeeds]───▶ Public(address)
+```mermaid
+stateDiagram-v2
+    Unknown --> Public : 2 successful probes
+    Unknown --> Private : probes fail
+    Public --> Private : re-probe fails
+    Private --> Public : re-probe succeeds
 ```
 
 ### 14.3 Fallback Strategy
