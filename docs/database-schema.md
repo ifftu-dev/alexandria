@@ -305,29 +305,35 @@ subject_fields
               └── reputation_assertions ── reputation_evidence
                                            reputation_snapshots
 
-governance_daos ── governance_proposals ── governance_proposal_votes
-                   governance_dao_members
-                   governance_elections ── governance_election_nominees
-                                          governance_election_votes
+governance_daos
+  ├── governance_proposals ── governance_proposal_votes
+  ├── governance_dao_members
+  └── governance_elections
+        ├── governance_election_nominees
+        └── governance_election_votes
 
-enrollments ── element_progress
-               course_notes
+enrollments
+  ├── element_progress
+  └── course_notes
+
+classrooms
+  ├── classroom_members
+  ├── classroom_join_requests
+  ├── classroom_channels ── classroom_messages
+  └── classroom_calls ── classroom_call_peers
+
+tutoring_sessions
+  ├── tutoring_peers
+  └── tutoring_chat
 
 local_identity (singleton)
 peers
 catalog
 content_mappings
-devices ── sync_state
-           sync_queue
+devices
+  ├── sync_state
+  └── sync_queue
 sync_log
 pins
 integrity_sessions ── integrity_snapshots
-
-tutoring_sessions ── tutoring_peers
-                     tutoring_chat
-
-classrooms ── classroom_members
-              classroom_join_requests
-              classroom_channels ── classroom_messages
-              classroom_calls ── classroom_call_peers
 ```
