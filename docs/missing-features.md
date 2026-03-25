@@ -135,7 +135,7 @@ several mark2 documents have no mark3 equivalent:
 - **Vitest** unit tests for Vue components
 - **Playwright** E2E tests for critical flows
 
-**(Mark 3) status**: **No frontend tests exist.** The backend has 309 tests, but the Vue frontend has zero test coverage. There is no Vitest or Playwright configuration.
+**(Mark 3) status**: **No frontend tests exist.** The backend has 407 tests, but the Vue frontend has zero test coverage. There is no Vitest or Playwright configuration.
 
 **Priority**: Medium — the backend is well-tested, but the frontend has complex flows (onboarding, course player, quiz engine, governance UI) that would benefit from testing.
 
@@ -150,15 +150,16 @@ several mark2 documents have no mark3 equivalent:
 - 20 Medium
 - 15 Low
 
-**(Mark 3) status**: A security audit has been performed (`security-audit.md`) with 24 findings. Many of the mark2 findings (Apple OAuth unverified, default secrets, no rate limiting, CORS *) don't apply to a desktop app, but new threat vectors exist:
+**(Mark 3) status**: A security audit has been performed (`security-audit.md`) with 27 findings (1 critical, 7 high, 10 medium, 9 low, 5 info). **21 findings have been fixed.** Remaining items are deferred (stake address verification, unsafe Send+Sync documentation, env var storage) or architectural limitations.
 
-- Stronghold vault password strength enforcement
-- Local file permission security (SQLite, vault, iroh store)
-- IPC command authorization (any frontend code can call any command)
-- P2P message flooding / resource exhaustion
-- Mnemonic exposure in memory
+Remediated threat areas include:
+- KDF upgraded to Argon2id, salt integrity HMAC added
+- XSS sanitization (DOMPurify) and CSP enabled
+- Per-peer gossip rate limiting
+- Wallet memory zeroization, password strength enforcement
+- SSRF blocklist, mutex panic prevention
 
-**Priority**: High before any mainnet deployment.
+**Priority**: Remaining items (H-3 stake address verification, H-6 updater key) should be addressed before mainnet.
 
 ---
 
@@ -217,6 +218,8 @@ several mark2 documents have no mark3 equivalent:
 | CIP-30 wallet auth | Y | - | Not applicable (embedded wallet) |
 | BIP-39 mnemonic wallet | Y | Y | Only auth method in mark3 |
 | Encrypted vault (Stronghold / portable) | - | Y | Stronghold on desktop, AES-256-GCM + Argon2id on mobile |
+| Biometric unlock (Face ID / Touch ID) | - | Y | New in mark3 via tauri-plugin-biometry |
+| Auto-updater | - | Y | New in mark3 via tauri-plugin-updater |
 | **Blockchain** | | | |
 | Cardano transaction building | Y | Y | Conway era (pallas) |
 | NFT credential minting | Y | Y | NativeScript + CIP-25 |
@@ -225,11 +228,11 @@ several mark2 documents have no mark3 equivalent:
 | **Networking** | | | |
 | REST/gRPC API | Y | - | Replaced by Tauri IPC |
 | libp2p P2P | - | Y | New in mark3 |
-| GossipSub (6 topics) | - | Y | New in mark3 |
+| GossipSub (6 global + per-classroom topics) | - | Y | New in mark3 |
 | Cross-device sync | - | Y | New in mark3 |
 | Relay-based discovery (Kademlia DHT) | - | Y | New in mark3 (mDNS removed) |
 | NAT traversal (relay + DCUtR) | - | Y | New in mark3 |
-| iOS mobile node | - | Y | New in mark3 — full node on iPhone |
+| Mobile nodes (iOS + Android) | - | Y | New in mark3 — full node on iPhone and Android |
 | **Governance** | | | |
 | DAOs | Y | Y | |
 | Elections | Y | Y | |
@@ -255,7 +258,7 @@ several mark2 documents have no mark3 equivalent:
 | Grafana + Prometheus | Y | - | Not applicable |
 | Developer CLI | Y | Y | Go→Rust, different commands |
 | **Testing** | | | |
-| Backend tests | Y | Y | 309 tests (mark3), Go tests (mark2) |
+| Backend tests | Y | Y | 407 tests (mark3), Go tests (mark2) |
 | Frontend unit tests (Vitest) | Y | - | **Missing** |
 | E2E tests (Playwright) | Y | - | **Missing** |
 | Stress tests | - | Y | New in mark3 (~1500 lines) |
@@ -267,6 +270,6 @@ several mark2 documents have no mark3 equivalent:
 | API reference | Y | - | N/A (IPC replaces API) |
 | Skills & reputation RFC | Y | - | **Missing** |
 | Sentinel doc | Y | - | **Missing** |
-| Security audit | Y | Y | Created (24 findings) |
+| Security audit | Y | Y | 27 findings, 21 fixed |
 | Cloud deployment guide | Y | - | N/A |
 | Project structure | Y | Y | Created this session |
