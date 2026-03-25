@@ -91,6 +91,7 @@ jobs:
             libssl-dev \
             libx264-dev \
             libva-dev \
+            libgbm-dev \
             libdrm-dev \
             libvdpau-dev
 
