@@ -40,9 +40,9 @@ where every user runs a local node. The protocol has 8 logical layers:
 Layer 8  Application     Tauri IPC commands, frontend events
 Layer 7  P2P Events      PeerConnected, GossipMessage, NatChanged
 Layer 6  Sync            Cross-device sync (encrypted, LWW/append-only)
-Layer 5  Domain          Catalog, Evidence, Taxonomy, Governance, Profiles
-Layer 4  Validation      Signature, Freshness, Dedup, Schema, Authority
-Layer 3  GossipSub       6 topics, peer scoring, signed envelopes
+Layer 5  Domain          Catalog, Evidence, Taxonomy, Governance, Profiles, Classrooms
+Layer 4  Validation      Signature, Identity, Freshness, Dedup, Schema, Authority
+Layer 3  GossipSub       6 global + per-classroom topics, peer scoring, rate limiting
 Layer 2  Transport       QUIC, TCP, Kademlia, AutoNAT, Relay, DCUtR
 Layer 1  Crypto          Ed25519, Blake2b-256, SHA-256
 ```
@@ -88,14 +88,14 @@ The libp2p PeerId is derived from the Cardano payment signing key:
 
 ```
 cardano_payment_key: [u8; 32]  (Ed25519 scalar from BIP32 derivation)
-        |
-        v
+        │
+        ▼
 libp2p_keypair = Keypair::ed25519_from_bytes(payment_key)
-        |
-        v
+        │
+        ▼
 peer_id = keypair.public().to_peer_id()
-        |
-        v
+        │
+        ▼
 PeerId: base58, prefix "12D3KooW" (Ed25519 multicodec)
 ```
 
@@ -469,15 +469,18 @@ joined with `governance_daos` to verify the sender has role
 
 **Election lifecycle**:
 ```
-nomination --> voting --> finalized
-                     \--> cancelled
+nomination ──▶ voting ──▶ finalized
+                  │
+                  └──────▶ cancelled
 ```
 
 **Proposal lifecycle**:
 ```
-draft --> published --> approved
-                   \--> rejected
-                   \--> cancelled
+draft ──▶ published ──▶ approved
+              │
+              ├────────▶ rejected
+              │
+              └────────▶ cancelled
 ```
 
 **Supermajority threshold**: 2/3 of votes for approval.
@@ -668,10 +671,10 @@ Governance is second-most sensitive. Profiles are most permissive.
 ### 14.2 NAT State Machine
 
 ```
-Unknown ──[2 successful probes]──> Public(address)
-Unknown ──[probes fail]──────────> Private
-Public  ──[re-probe fails]──────> Private
-Private ──[re-probe succeeds]───> Public(address)
+Unknown ──[2 successful probes]──▶ Public(address)
+Unknown ──[probes fail]──────────▶ Private
+Public  ──[re-probe fails]──────▶ Private
+Private ──[re-probe succeeds]───▶ Public(address)
 ```
 
 ### 14.3 Fallback Strategy
