@@ -3,8 +3,8 @@
 > Alexandria (Mark 3) — SQLite (local-first)
 
 **Engine**: SQLite (rusqlite 0.38, bundled)
-**Tables**: 43
-**Migrations**: 14
+**Tables**: 50
+**Migrations**: 16
 
 ---
 
@@ -45,6 +45,8 @@
 | 12 | `multi_party_attestation` | Attestation requirements and attestation records |
 | 13 | `visual_assets` | Add `author_name`, `thumbnail_svg` to courses; `icon_emoji` to DAOs and subject_fields |
 | 14 | `inline_content` | Add `content_inline` column to `course_elements` for inline HTML storage |
+| 15 | `tutoring_sessions` | Live tutoring tables: sessions, peers, chat messages |
+| 16 | `classrooms` | Classroom tables: classrooms, members, join requests, channels, messages, calls |
 
 ---
 
@@ -62,7 +64,7 @@
 | `display_name` | TEXT | |
 | `bio` | TEXT | |
 | `avatar_cid` | TEXT | iroh BLAKE3 hash |
-| `profile_cid` | TEXT | Signed profile document hash |
+| `profile_hash` | TEXT | Signed profile document BLAKE3 hash |
 | `mnemonic_enc` | BLOB | Encrypted mnemonic (Stronghold fallback) |
 | `created_at` | TEXT | |
 | `updated_at` | TEXT | |
@@ -97,11 +99,11 @@
 
 **`course_chapters`** — Ordered chapters within a course.
 - FK: `course_id` → `courses(id)` CASCADE
-- Columns: `title`, `description`, `sort_order`
+- Columns: `title`, `description`, `position`
 
 **`course_elements`** — Content elements within chapters.
 - FK: `chapter_id` → `course_chapters(id)` CASCADE
-- Columns: `title`, `element_type` (text/video/quiz/essay/pdf), `content_ref`, `content_inline`, `sort_order`, `duration_minutes`, `points`
+- Columns: `title`, `element_type` (text/video/quiz/essay/pdf), `content_ref`, `content_inline`, `position`, `duration_minutes`, `points`
 - `content_inline` (migration 14): Optional inline HTML content stored directly in the DB, avoiding iroh lookup for small elements
 
 **`element_skill_tags`** — Maps elements to skills they assess.
@@ -234,6 +236,51 @@
 - FK: `evidence_id` → `evidence_records(id)`
 - Columns: `attestor_address`, `attestor_role`, `status` (pending/approved/rejected), `notes`
 
+### Tutoring (3 tables)
+
+**`tutoring_sessions`** — Live tutoring session metadata.
+- Columns: `id` (UUID), `title`, `topic`, `host_address`, `status` (active/ended/cancelled), `started_at`, `ended_at`
+
+**`tutoring_peers`** — Participants in tutoring sessions.
+- FK: `session_id` → `tutoring_sessions(id)` CASCADE
+- Columns: `peer_id`, `display_name`, `role` (host/participant), `joined_at`, `left_at`
+
+**`tutoring_chat`** — Chat messages within tutoring sessions.
+- FK: `session_id` → `tutoring_sessions(id)` CASCADE
+- Columns: `sender_address`, `sender_name`, `content`, `sent_at`
+
+### Classrooms (7 tables)
+
+**`classrooms`** — Classroom/cohort metadata.
+- Columns: `id` (blake2b-based), `name`, `description`, `icon_emoji`, `owner_address`, `invite_code` (8-char unique), `status` (active/archived), `created_at`, `updated_at`
+
+**`classroom_members`** — Classroom membership.
+- PK: `(classroom_id, stake_address)`
+- FK: `classroom_id` → `classrooms(id)` CASCADE
+- Columns: `role` (owner/moderator/member), `display_name`, `joined_at`
+
+**`classroom_join_requests`** — Pending join requests.
+- FK: `classroom_id` → `classrooms(id)` CASCADE
+- Columns: `stake_address`, `display_name`, `message`, `status` (pending/approved/denied), `reviewed_by`, `requested_at`, `reviewed_at`
+- Unique: `(classroom_id, stake_address)` WHERE `status = 'pending'`
+
+**`classroom_channels`** — Text/announcement channels within classrooms.
+- FK: `classroom_id` → `classrooms(id)` CASCADE
+- Columns: `name`, `description`, `channel_type` (text/announcement), `position`
+- Unique: `(classroom_id, name)`
+
+**`classroom_messages`** — Messages within channels.
+- FK: `channel_id` → `classroom_channels(id)` CASCADE
+- Columns: `classroom_id`, `sender_address`, `sender_name`, `content`, `deleted` (flag), `edited_at`, `sent_at`, `received_at`
+
+**`classroom_calls`** — Voice/video calls in classrooms (iroh-live integration).
+- FK: `classroom_id` → `classrooms(id)` CASCADE, `channel_id` → `classroom_channels(id)`
+- Columns: `title`, `ticket` (iroh-live), `started_by`, `status` (active/ended), `started_at`, `ended_at`
+
+**`classroom_call_peers`** — Participants in classroom calls.
+- FK: `call_id` → `classroom_calls(id)` CASCADE
+- Columns: `peer_id`, `display_name`, `joined_at`, `left_at`
+
 ---
 
 ## Entity Relationship Summary
@@ -275,4 +322,12 @@ devices ── sync_state
 sync_log
 pins
 integrity_sessions ── integrity_snapshots
+
+tutoring_sessions ── tutoring_peers
+                     tutoring_chat
+
+classrooms ── classroom_members
+              classroom_join_requests
+              classroom_channels ── classroom_messages
+              classroom_calls ── classroom_call_peers
 ```

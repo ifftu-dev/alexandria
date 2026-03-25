@@ -19,7 +19,8 @@ alexandria/
 ├── cli/                    # Developer CLI (alex)
 ├── patches/                # Local crate patches (if-watch iOS/Android fix)
 ├── docs/                   # Documentation
-└── public/                 # Static assets
+├── bootstrap/              # Seed data (public_courses.json)
+└── scripts/                # Build/dev scripts
 ```
 
 ---
@@ -36,7 +37,7 @@ src-tauri/
 │
 └── src/
     ├── main.rs             # Binary entry point (calls app_lib::run)
-    ├── lib.rs              # Tauri setup, registers 118 IPC commands, startup tasks
+    ├── lib.rs              # Tauri setup, registers ~160 IPC commands, startup tasks
     ├── diag.rs             # File-based diagnostic logger + panic hook (iOS/desktop)
     │
     ├── commands/           # IPC command handlers (frontend ↔ backend)
@@ -50,16 +51,19 @@ src-tauri/
     │   ├── content.rs      #  6 cmds — iroh blob operations
     │   ├── integrity.rs    #  6 cmds — Sentinel sessions, snapshots
     │   ├── sync.rs         #  8 cmds — cross-device sync
-    │   ├── p2p.rs          #  5 cmds — network status, peers
+    │   ├── p2p.rs          #  4 cmds — network status, peers
     │   ├── enrollment.rs   #  4 cmds — enroll, progress
     │   ├── reputation.rs   #  4 cmds — assertions, impact
     │   ├── snapshot.rs     #  4 cmds — CIP-68 reputation anchoring
     │   ├── chapters.rs     #  4 cmds — chapter CRUD
     │   ├── elements.rs     #  4 cmds — element CRUD
     │   ├── evidence.rs     #  3 cmds — submit, query, broadcast
-    │   ├── catalog.rs      #  2 cmds — publish, browse
+    │   ├── classroom.rs    # 26 cmds — classrooms, members, channels, messages, calls
+    │   ├── tutoring.rs     # 14 cmds — rooms, video/audio toggle, chat (desktop)
+    │   ├── tutoring_stubs.rs # 14 cmds — mobile stubs (not-yet-supported errors)
+    │   ├── catalog.rs      #  4 cmds — search, browse, bootstrap, hydrate
     │   ├── cardano.rs      #  2 cmds — UTxOs, tx submit
-    │   └── health.rs       #  1 cmd  — health check
+    │   └── health.rs       #  2 cmds — health check, diag log
     │
     ├── crypto/             # Cryptographic primitives
     │   ├── mod.rs
@@ -71,7 +75,7 @@ src-tauri/
     │
     ├── db/                 # Database layer
     │   ├── mod.rs          # Database struct, migration runner
-    │   ├── schema.rs       # 14 migrations, 43 tables (full DDL)
+    │   ├── schema.rs       # 16 migrations, 50 tables (full DDL)
     │   ├── seed.rs         # Taxonomy, courses, governance seed data
     │   ├── seed_content.rs # Uses include!() to load seed_content_data.rs
     │   └── seed_content_data.rs  # HTML content + quiz JSON for all 82 seed elements
@@ -90,7 +94,8 @@ src-tauri/
     │   ├── sync.rs         # Sync message types
     │   ├── taxonomy.rs     # Skill, subject, taxonomy update types
     │   ├── challenge.rs    # Challenge, vote types
-    │   └── attestation.rs  # Attestation requirement types
+    │   ├── attestation.rs  # Attestation requirement types
+    │   └── classroom.rs    # Classroom, member, channel, message, call types
     │
     ├── evidence/           # Evidence processing pipeline
     │   ├── mod.rs
@@ -117,7 +122,7 @@ src-tauri/
     │   ├── types.rs        # 6 topics, SignedGossipMessage, PeerExchangeMessage, events
     │   ├── gossip.rs       # High-level publish methods
     │   ├── signing.rs      # Gossip envelope signing/verification
-    │   ├── validation.rs   # 5-step validation pipeline
+    │   ├── validation.rs   # 6-step validation pipeline (signature, identity, freshness, dedup, schema, authority)
     │   ├── scoring.rs      # Per-topic GossipSub peer scoring
     │   ├── nat.rs          # AutoNAT configuration
     │   ├── discovery.rs    # Relay bootstrap addrs, namespace key, relay PeerId
@@ -126,7 +131,20 @@ src-tauri/
     │   ├── taxonomy.rs     # Taxonomy topic handler (committee-gated)
     │   ├── governance.rs   # Governance topic handler
     │   ├── sync.rs         # Cross-device sync (encrypted, LWW + append-only)
+    │   ├── rate_limit.rs   # Per-peer token-bucket gossip rate limiter
     │   └── stress.rs       # Stress tests (~1500 lines)
+    │
+    ├── classroom/          # Classroom feature
+    │   ├── mod.rs
+    │   ├── manager.rs      # ClassroomManager, message/meta handlers, authz gates
+    │   ├── gossip.rs       # Per-classroom gossip publish (message + meta topics)
+    │   └── types.rs        # ClassroomMessagePayload, ClassroomMetaEvent
+    │
+    ├── tutoring/           # Live tutoring (iroh-live integration)
+    │   ├── mod.rs
+    │   ├── manager.rs      # TutoringManager — desktop (video/audio/screenshare)
+    │   ├── manager_mobile.rs  # Mobile variant (audio-only)
+    │   └── manager_android.rs # Android variant
     │
     └── cardano/            # Cardano blockchain integration
         ├── mod.rs
@@ -148,16 +166,26 @@ src/
 ├── App.vue                 # Root component (auth init, theme init, window show)
 │
 ├── assets/
-│   └── css/
-│       └── main.css        # Tailwind CSS v4 + design system (light/dark vars, components)
+│   ├── css/
+│   │   └── main.css        # Tailwind CSS v4 + design system (light/dark vars, components)
+│   ├── fonts.css            # @font-face declarations for bundled fonts
+│   └── fonts/
+│       ├── Inter.woff2      # Inter variable font (400-700)
+│       └── JetBrainsMono.woff2  # JetBrains Mono (400-500)
 │
-├── composables/            # Shared reactive state
+├── composables/            # Shared reactive state (12 composables)
 │   ├── useAuth.ts          # Wallet/vault lifecycle, identity state
-│   ├── useTheme.ts         # Theme toggle (light/dark/system), localStorage persistence, setTheme()
+│   ├── useTheme.ts         # Theme toggle (light/dark/system), localStorage persistence
 │   ├── useLocalApi.ts      # Tauri invoke wrapper
 │   ├── useP2P.ts           # P2P status polling
 │   ├── useSkillGraphState.ts # Module-level reactive singleton for shared skill graph state
-│   └── useSentinel.ts      # Sentinel integrity sessions
+│   ├── useSkillGraphHover.ts # Skill graph hover state
+│   ├── useSentinel.ts      # Sentinel integrity sessions
+│   ├── useContentSync.ts   # Content sync status and progress
+│   ├── usePlatform.ts      # Platform detection (iOS, Android, macOS)
+│   ├── useBiometricVault.ts # Biometric unlock with session timeout
+│   ├── useClassroom.ts     # Classroom state, real-time message/meta listeners
+│   └── useTutoringRoom.ts  # Tutoring session management
 │
 ├── components/
     │   ├── ui/                 # Barrel-exported UI primitives (12 components)
@@ -189,16 +217,17 @@ src/
     │   ├── integrity/
     │   │   └── SentinelTrainingWizard.vue  # 6-step integrity calibration wizard
     │   └── layout/
-    │       ├── AppSidebar.vue       # Desktop sidebar — collapsible Live Tutoring/Classrooms previews, skill graph, edge toggle
+    │       ├── AppSidebar.vue       # Desktop sidebar — collapsible Live Tutoring/Classrooms previews, skill graph
     │       ├── AppTopBar.vue        # Top bar with Mark 2-style user menu dropdown (role badge, icon SVGs)
     │       ├── MobileTabBar.vue     # Bottom tab bar for mobile (iOS/Android), backdrop blur, active indicator
-    │       └── SidebarSkillGraph.vue # force-graph canvas widget — earned/available/locked skill nodes with glow
+    │       ├── SidebarSkillGraph.vue # force-graph canvas widget — earned/available/locked skill nodes with glow
+    │       └── TutoringPiP.vue      # Picture-in-picture call overlay
 │
 ├── layouts/
 │   ├── AppLayout.vue       # Sidebar + content area
 │   └── BlankLayout.vue     # Full-screen (onboarding, unlock)
 │
-├── pages/                  # 19 route views
+├── pages/                  # 26 route views
 │   ├── Home.vue
 │   ├── Onboarding.vue      # Multi-step wallet creation + mnemonic backup
 │   ├── Unlock.vue          # Password entry + vault progress
@@ -216,6 +245,14 @@ src/
 │   ├── governance/
 │   │   ├── Index.vue       # DAO list
 │   │   └── DaoDetail.vue   # DAO detail + proposals + elections
+│   ├── classrooms/
+│   │   ├── Index.vue       # Classroom list (joined classrooms)
+│   │   ├── Classroom.vue   # Channels, messages, active calls
+│   │   ├── Settings.vue    # Role management, archive
+│   │   └── JoinRequests.vue # Review pending join requests
+│   ├── tutoring/
+│   │   ├── Index.vue       # Tutoring sessions list
+│   │   └── Session.vue     # Active video/audio session
 │   └── dashboard/
 │       ├── Courses.vue     # My enrolled courses
 │       ├── Credentials.vue # Minted NFT credentials
@@ -232,7 +269,8 @@ src/
 │   └── index.ts            # All TypeScript types
 │
 └── utils/
-    └── sentinel/           # Client-side ML models
+    ├── sanitize.ts          # DOMPurify wrappers for HTML and SVG sanitization
+    └── sentinel/            # Client-side ML models
         ├── keystroke-autoencoder.ts  # 4→8→4→8→4 autoencoder
         ├── mouse-trajectory-cnn.ts   # Trajectory analysis CNN
         └── face-embedder.ts          # LBP face embedding

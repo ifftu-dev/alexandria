@@ -1,6 +1,6 @@
 # Alexandria (Mark 3) -- Performance Audit
 
-**Date**: 2026-02-24
+**Date**: 2026-02-24 (updated 2026-03-25)
 **Scope**: Full Rust backend (`src-tauri/src/`), CLI (`cli/`), frontend config, Cargo workspace
 **Files audited**: Every file in `commands/` (20), `db/` (4), `evidence/` (7), `p2p/` (15), `ipfs/` (8), plus `lib.rs`, both `Cargo.toml` files, `package.json`, `vite.config.ts`
 
@@ -14,7 +14,7 @@
 
 **File**: `src-tauri/src/lib.rs:43`
 
-`AppState.db` is `Arc<Mutex<Database>>` (tokio Mutex):
+`AppState.db` is `Arc<std::sync::Mutex<Database>>` (blocking mutex, not tokio):
 
 ```rust
 pub struct AppState {
@@ -123,15 +123,9 @@ for (ch_id, ch_title, ch_desc, ch_pos) in &chapter_rows {
 
 ---
 
-### H-5: Dedup cache full-clear creates reprocessing window
+### ~~H-5: Dedup cache full-clear creates reprocessing window~~ — **FIXED**
 
-**File**: `src-tauri/src/p2p/validation.rs:130-133`
-
-When the dedup `HashSet` reaches 100K entries, `seen.clear()` wipes all entries. The +/-5 minute freshness window means messages within that window could be reprocessed.
-
-**Impact**: After a clear, the node re-accepts up to 5 minutes of previously-seen messages. On an active network, this triggers redundant DB writes and event processing.
-
-**Fix**: Use an LRU cache (`lru::LruCache`) or partition by time buckets. When clearing, only evict entries older than the freshness window.
+**Status**: Resolved. The dedup cache now uses `lru::LruCache` with capacity 100,000. Least-recently-used entries are evicted individually — no full-clear replay window.
 
 ---
 
@@ -352,6 +346,6 @@ The content seeding function acquires the DB lock, reads what is needed, drops t
 | 7 | H-4: Cache derived wallet | Low | Eliminates repeated PBKDF2 |
 | 8 | H-3: ContentNode lock scoping | Medium | Parallel blob operations |
 | 9 | M-6: opt-level = 3 | Trivial | 5-15% faster CPU-bound code |
-| 10 | H-5: LRU dedup cache | Low | Eliminates reprocessing window |
+| ~~10~~ | ~~H-5: LRU dedup cache~~ | ~~Low~~ | **FIXED** |
 | 11 | M-5: Fix sequential lock acquisitions | Low | Reduces lock contention |
 | 12 | M-7: Spawn reputation computation | Medium | Prevents UI blocking on recompute |

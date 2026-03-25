@@ -5,8 +5,8 @@
 > decentralized learning platform.
 
 **Protocol version**: 1.0
-**Last updated**: 2026-02-21
-**Status**: Implementation-complete (Phase 4)
+**Last updated**: 2026-03-25
+**Status**: Implementation-complete (Phase 7)
 
 ---
 
@@ -193,52 +193,57 @@ Every message on the network is wrapped in a `SignedGossipMessage`:
 |-------|------|------|-------------|
 | `topic` | String | variable | GossipSub topic this was published on |
 | `payload` | `Vec<u8>` | variable | JSON-encoded, topic-specific data |
-| `signature` | `Vec<u8>` | 64 bytes | Ed25519 signature over `payload` |
+| `signature` | `Vec<u8>` | 64 bytes | Ed25519 signature over `SHA-256(topic \|\| timestamp_be \|\| stake_address \|\| payload)` |
 | `public_key` | `Vec<u8>` | 32 bytes | Sender's Cardano payment verification key |
 | `stake_address` | String | ~60 chars | Sender's Cardano stake address (bech32) |
 | `timestamp` | u64 | 8 bytes | Unix timestamp (seconds) of message creation |
 
 **Publishing flow**:
 1. Serialize domain-specific payload to JSON bytes
-2. Sign payload with Cardano Ed25519 signing key
-3. Capture current Unix timestamp
-4. Construct `SignedGossipMessage` envelope
-5. Serialize envelope to JSON
-6. Publish via GossipSub
+2. Capture current Unix timestamp
+3. Construct canonical bytes: `SHA-256(topic || timestamp_be_bytes || stake_address || payload)`
+4. Sign canonical bytes with Cardano Ed25519 signing key
+5. Construct `SignedGossipMessage` envelope
+6. Serialize envelope to JSON
+7. Publish via GossipSub
 
-**Important**: The `public_key` is the Cardano payment verification key,
-NOT the libp2p peer key. This links messages to on-chain identity.
+**Important**: The signature covers ALL envelope fields (topic, timestamp,
+stake_address, payload), not just the payload. This prevents field
+tampering attacks. The `public_key` is the Cardano payment verification
+key, NOT the libp2p peer key. This links messages to on-chain identity.
 
 ---
 
 ## 6. Validation Pipeline
 
-Every incoming gossip message passes through a 5-step validation
-pipeline. The first failing step rejects the message.
+Every incoming gossip message passes through a 6-step validation
+pipeline. The first failing step rejects the message. A per-peer
+token-bucket rate limiter (20 msgs/60s) is applied before the pipeline.
 
 ### 6.1 Pipeline Steps
 
 | Step | Check | Rejection Error |
 |------|-------|-----------------|
-| 1. Signature | Ed25519 verify(`payload`, `signature`, `public_key`) | `InvalidSignature` |
-| 2. Freshness | `\|timestamp - now\| <= 300s` | `TooOld` or `FromFuture` |
-| 3. Dedup | `blake2b_256(payload)` not in seen cache | `Duplicate` |
-| 4. Schema | `payload` is valid JSON | `InvalidPayload` |
-| 5. Authority | For taxonomy: `stake_address` non-empty | `Unauthorized` |
+| 1. Signature | Reconstruct canonical bytes `SHA-256(topic \|\| timestamp_be \|\| stake_address \|\| payload)`, Ed25519 verify | `InvalidSignature` |
+| 2. Identity Binding | TOFU: first encounter binds `stake_address` → `public_key`; subsequent messages must use the same key | `IdentityMismatch` |
+| 3. Freshness | `\|timestamp - now\| <= 300s` | `TooOld` or `FromFuture` |
+| 4. Dedup | `blake2b_256(payload)` not in LRU cache | `Duplicate` |
+| 5. Schema | `payload` is valid JSON | `InvalidPayload` |
+| 6. Authority | For taxonomy: `stake_address` non-empty | `Unauthorized` |
 
 ### 6.2 Constants
 
 | Constant | Value | Description |
 |----------|-------|-------------|
 | `FRESHNESS_WINDOW_SECS` | 300 (5 min) | Max clock skew tolerance |
-| `DEDUP_CACHE_MAX` | 100,000 | Cache entries before full clear (~6.4 MB) |
+| `DEDUP_CACHE_MAX` | 100,000 | LRU cache capacity (least-recently-used eviction) |
 
 ### 6.3 Dedup Cache Behavior
 
-The dedup cache stores `hex(blake2b_256(payload))` strings in a
-`HashSet`. When the cache reaches 100,000 entries, the entire cache is
-cleared (simple strategy — the freshness window already limits relevant
-messages to +/-5 minutes).
+The dedup cache stores `hex(blake2b_256(payload))` strings in an
+LRU cache (`lru::LruCache`) with capacity 100,000. When the cache
+is full, the least-recently-used entry is evicted — there is no
+full-clear replay window.
 
 ### 6.4 Authority Check
 
@@ -457,8 +462,8 @@ joined with `governance_daos` to verify the sender has role
 ### 10.3 Handling Rules
 
 - `ProposalCreated`: `INSERT OR IGNORE` into `governance_proposals` (skip if DAO not in local DB)
-- `ProposalResolved`: `UPDATE` status/votes/on_chain_tx (skip if proposal not found)
-- `CommitteeUpdated`: **DELETE all existing members** for the DAO, **INSERT new members** (critical: controls taxonomy authority)
+- `ProposalResolved`: Validate status against allowlist (`approved`, `rejected`, `expired`, `withdrawn`), then `UPDATE` status/votes/on_chain_tx (skip if proposal not found)
+- `CommitteeUpdated`: Verify sender is committee/chair member, then **DELETE + INSERT** new members within a transaction (critical: controls taxonomy authority)
 
 ### 10.4 State Machines
 
@@ -701,9 +706,9 @@ The swarm event loop forwards events to the application via
 ### 16.1 Message Authenticity
 
 All messages are Ed25519-signed with the sender's Cardano payment key.
-The signature covers only the `payload` bytes. The `timestamp` and
-`stake_address` are not signed — they serve as metadata for freshness
-and routing, but cannot be relied upon for authentication.
+The signature covers all envelope fields: `topic`, `timestamp`,
+`stake_address`, and `payload` (via SHA-256 pre-hash). This prevents
+timestamp tampering and stake_address impersonation.
 
 ### 16.2 Sybil Resistance
 
@@ -740,10 +745,9 @@ The freshness window of +/-5 minutes tolerates reasonable clock skew.
 Messages outside this window are silently dropped. NTP synchronization
 is recommended but not enforced.
 
-### 16.6 Dedup Cache Limitations
+### 16.6 Dedup Cache
 
-The dedup cache uses a simple clear-all strategy at 100,000 entries.
-This means a message that was previously seen could be re-accepted
-after a cache clear. The freshness window (5 minutes) limits the
-practical impact — messages older than 5 minutes are rejected
-regardless of dedup cache state.
+The dedup cache uses an LRU eviction strategy with 100,000 entry
+capacity. When full, the least-recently-used entry is evicted. There
+is no full-clear replay window. The freshness window (5 minutes)
+provides a second layer of defense against replays.

@@ -3,7 +3,7 @@
 > What exists in the (Mark 2) documentation and codebase that has not yet been
 > implemented or documented in (Mark 3).
 
-**Last updated**: 2026-03-03
+**Last updated**: 2026-03-25
 
 ---
 
@@ -37,7 +37,7 @@ several mark2 documents have no mark3 equivalent:
 | `api-reference.md` | None | **N/A** — (Mark 3) has no REST API (IPC commands replace it). A command reference could be written. |
 | `skills-and-reputation.md` | None | **Missing** — RFC covering skill graph design, evidence model, reputation system, and query/consumption model. The implementation exists in mark3 but the design document doesn't. |
 | `sentinel.md` | None | **Missing** — Architecture doc for the Sentinel anti-cheat system. (Mark 3) has `useSentinel.ts` and the ML model utilities, but no documentation. |
-| `security-audit-v0.0.1.md` | `security-audit.md` | **Created** — 24 findings (1 critical, 4 high, 8 medium, 6 low, 5 info) |
+| `security-audit-v0.0.1.md` | `security-audit.md` | **Created** — 27 findings (1 critical, 7 high, 10 medium, 9 low, 5 info). 21 fixed. |
 | `cloud-deployment.md` | None | **N/A** — (Mark 3) is a desktop app; no cloud deployment. |
 | `database-architecture.md` | `database-schema.md` | **Created** (this session) |
 | `project-structure.md` | `project-structure.md` | **Created** (this session) |
@@ -247,8 +247,8 @@ several mark2 documents have no mark3 equivalent:
 | Course cards (hover lift, thumbnail zoom) | Y | Y | CourseCard component with glassmorphism stats pills |
 | TopBar user menu (role badge, icon SVGs) | Y | Y | Mark 2-style rounded-xl dropdown |
 | Mobile tab bar (backdrop blur, active indicator) | Y | Y | bg-black/50 backdrop, left bar active indicator |
-| Live Tutoring pages | Y | - | **Missing** — preview cards link to /courses placeholder |
-| Classrooms pages | Y | - | **Missing** — preview cards link to /courses placeholder |
+| Live Tutoring pages | Y | Y | **Implemented** — iroh-live video/audio/screenshare with desktop + mobile variants |
+| Classrooms pages | Y | Y | **Implemented** — 26 commands, channels, messages, calls, role-based auth |
 | **Infrastructure** | | | |
 | Docker Compose | Y | - | Not applicable |
 | Terraform (AWS/GCP/Azure) | Y | - | Not applicable |
