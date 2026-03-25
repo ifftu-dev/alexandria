@@ -78,4 +78,4 @@ The Linux builds use `maximize-build-space` to ensure enough room for the heavy 
 ARM64 builds for Linux run on `ubuntu-22.04-arm` runners. These are only available for public repositories on GitHub's free tier. If your repository is private, you must use a self-hosted runner or a paid GitHub runner plan.
 
 ### iroh-live-patched Repository
-The workflows assume the patched library is at `ifftu-dev/iroh-live-patched`. If your repository uses a different slug, update the `repository` field in the checkout steps of all workflow files.
+The workflows assume the patched library is at `ifftu-dev/iroh-live`. If your repository uses a different slug, update the `repository` field in the checkout steps of all workflow files.

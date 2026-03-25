@@ -2,8 +2,8 @@
 
 > Offline-first, trustless, multi-platform.
 
-**Status**: Implementation-complete through Phase 5
-**Last updated**: 2026-03-02
+**Status**: Implementation-complete through Phase 7 (Live Tutoring, Classrooms)
+**Last updated**: 2026-03-25
 
 ---
 
@@ -54,11 +54,11 @@ central API, no hosted database, and no Docker infrastructure.
 │                                                 │
 │  ┌──────────────┐       ┌────────────────────┐  │
 │  │   Vue 3 UI   │──IPC──│    Rust Backend     │  │
-│  │  (WebView)   │ 118   │                    │  │
+│  │  (WebView)   │ ~160  │                    │  │
 │  │              │ cmds  │  ┌──────────────┐  │  │
-│  │  19 pages    │       │  │   SQLite DB   │  │  │
-│  │  12 ui comps │       │  │  43 tables    │  │  │
-│  │  5 composable│       │  │  14 migrations│  │  │
+│  │  26 routes   │       │  │   SQLite DB   │  │  │
+│  │  29 comps    │       │  │  50 tables    │  │  │
+│  │  12 composble│       │  │  16 migrations│  │  │
 │  └──────────────┘       │  └──────────────┘  │  │
 │                         │                    │  │
 │                         │  ┌──────────────┐  │  │
@@ -130,7 +130,8 @@ The same Ed25519 key serves as:
 Keys are stored in an encrypted vault. The implementation varies by platform:
 
 **Desktop (IOTA Stronghold)**:
-- Password → HMAC-SHA512 with random salt → derived key
+- Password → Argon2id (64 MB, 3 iterations, 4 lanes) with random salt → derived key
+- Salt file includes HMAC-SHA256 integrity tag
 - Mnemonic stored encrypted at a fixed vault path
 - Vault file: `vault.stronghold` (binary, encrypted at rest)
 
@@ -147,7 +148,7 @@ Both share the same lock/unlock cycle: lock clears in-memory keys, unlock re-der
 
 **Engine**: SQLite (rusqlite 0.38, bundled)
 
-**Tables**: 43 across 14 migrations
+**Tables**: 50 across 16 migrations
 
 | Domain | Tables |
 |--------|--------|
@@ -164,6 +165,8 @@ Both share the same lock/unlock cycle: lock clears in-memory keys, unlock re-der
 | Sync | `devices`, `sync_state`, `sync_queue` |
 | Challenges | `evidence_challenges`, `challenge_votes` |
 | Attestation | `attestation_requirements`, `evidence_attestations` |
+| Tutoring | `tutoring_sessions`, `tutoring_peers`, `tutoring_chat` |
+| Classrooms | `classrooms`, `classroom_members`, `classroom_join_requests`, `classroom_channels`, `classroom_messages`, `classroom_calls`, `classroom_call_peers` |
 
 ### Key Design Decisions
 
@@ -242,13 +245,26 @@ Both use Ed25519 signatures for authenticity verification.
 3. Wrap in `SignedGossipMessage` envelope (payload + signature + public_key + stake_address + timestamp)
 4. Publish to GossipSub topic
 
-### Validation Pipeline (5 steps)
+### Validation Pipeline (6 steps)
 
-1. **Signature** — Ed25519 verify
-2. **Freshness** — within ±5 minutes
-3. **Dedup** — Blake2b-256 hash not in seen cache (100K entries)
-4. **Schema** — valid JSON
-5. **Authority** — taxonomy messages require committee membership
+1. **Signature** — Ed25519 verify (covers all envelope fields: topic, timestamp, stake_address, payload)
+2. **Identity Binding** — TOFU: binds stake_address to public_key on first encounter, rejects mismatches
+3. **Freshness** — within ±5 minutes
+4. **Dedup** — Blake2b-256 hash in LRU cache (100K entries, least-recently-used eviction)
+5. **Schema** — valid JSON
+6. **Authority** — taxonomy messages require committee membership
+
+### Rate Limiting
+
+Per-peer token-bucket rate limiter (20 messages per 60 seconds, 1 refill per 3 seconds) applied before the validation pipeline. Peer state is cleaned up on disconnect.
+
+### Dynamic Topics
+
+In addition to the 6 global topics, classrooms use per-classroom dynamic topics:
+- Message topic: `/alexandria/classroom/{id}/1.0`
+- Meta topic: `/alexandria/classroom/{id}/meta/1.0`
+
+Nodes subscribe/unsubscribe as they join/leave classrooms.
 
 ### Cross-Device Sync
 
@@ -364,7 +380,7 @@ Optional: mint SkillProof NFT on Cardano
 
 **Stack**: Vue 3 + TypeScript + Vite + Tailwind CSS v4
 
-### Pages (19)
+### Pages (26 routes)
 
 | Page | Route | Description |
 |------|-------|-------------|
@@ -374,12 +390,18 @@ Optional: mint SkillProof NFT on Cardano
 | Courses Index | `/courses` | Browse course catalog |
 | Course Detail | `/courses/:id` | Course info, chapters, enrollment |
 | Course Player | `/learn/:id` | Content player (text, video, quiz) |
-| Course New | `/instructor/new` | Create a new course |
-| Course Edit | `/instructor/:id/edit` | Edit existing course |
+| Course New | `/instructor/courses/new` | Create a new course |
+| Course Edit | `/instructor/courses/:id` | Edit existing course |
 | Skills Index | `/skills` | Browse skill taxonomy |
 | Skill Detail | `/skills/:id` | Skill info, prerequisites, proofs |
 | Governance Index | `/governance` | Browse DAOs |
 | DAO Detail | `/governance/:id` | DAO info, proposals, elections |
+| Classrooms Index | `/classrooms` | List joined classrooms |
+| Classroom Detail | `/classrooms/:id` | Channels, messages, active calls |
+| Classroom Settings | `/classrooms/:id/settings` | Role management, archive |
+| Join Requests | `/classrooms/:id/requests` | Review pending join requests |
+| Tutoring Index | `/tutoring` | Live tutoring sessions list |
+| Tutoring Session | `/tutoring/:id` | Active video/audio/screen session |
 | My Courses | `/dashboard/courses` | Enrolled courses, progress |
 | Credentials | `/dashboard/credentials` | Minted NFT credentials |
 | Reputation | `/dashboard/reputation` | Reputation assertions, impact |
@@ -401,29 +423,33 @@ CSS custom properties with light/dark mode via `.dark` class on `<html>`:
 
 ## 11. IPC Boundary
 
-The frontend communicates with the Rust backend via **118 Tauri IPC commands** across 19 modules:
+The frontend communicates with the Rust backend via **~160 Tauri IPC commands** across 22 modules:
 
 | Module | Commands | Examples |
 |--------|----------|---------|
+| classroom | 26 | `classroom_create`, `classroom_send_message`, `classroom_start_call` |
+| governance | 17 | `create_dao`, `submit_proposal`, `cast_vote`, `run_election` |
+| taxonomy | 15 | `get_skills`, `get_subjects`, `update_taxonomy`, `get_skill_graph` |
+| tutoring | 14 | `tutoring_create_room`, `tutoring_join_room`, `tutoring_toggle_video` |
 | identity | 11 | `generate_wallet`, `unlock_vault`, `lock_vault`, `get_profile` |
-| governance | 18 | `create_dao`, `submit_proposal`, `cast_vote`, `run_election` |
-| taxonomy | 14 | `get_skills`, `get_subjects`, `update_taxonomy`, `get_skill_graph` |
-| courses | 7 | `create_course`, `get_course`, `list_courses` |
 | attestation | 8 | `create_attestation_requirement`, `submit_attestation` |
-| challenge | 7 | `submit_challenge`, `cast_challenge_vote`, `resolve_challenge` |
-| content | 6 | `store_content`, `get_content`, `resolve_cid` |
 | sync | 8 | `register_device`, `trigger_sync`, `get_sync_status` |
+| challenge | 7 | `submit_challenge`, `cast_challenge_vote`, `resolve_challenge` |
+| courses | 7 | `create_course`, `get_course`, `list_courses` |
+| content | 6 | `store_content`, `get_content`, `resolve_cid` |
 | integrity | 6 | `start_session`, `submit_snapshot`, `get_session_score` |
-| p2p | 5 | `get_p2p_status`, `get_connected_peers`, `publish_message` |
-| evidence | 3 | `submit_evidence`, `get_evidence`, `broadcast_evidence` |
+| catalog | 4 | `search_catalog`, `get_catalog_entry`, `bootstrap_public_catalog` |
 | enrollment | 4 | `enroll`, `update_progress`, `get_enrollment` |
+| p2p | 4 | `p2p_start`, `p2p_stop`, `p2p_status`, `p2p_peers` |
 | reputation | 4 | `get_reputation`, `compute_impact`, `get_assertions` |
 | snapshot | 4 | `build_snapshot_tx`, `submit_snapshot_tx` |
 | chapters | 4 | `get_chapters`, `create_chapter`, `update_chapter` |
 | elements | 4 | `get_elements`, `create_element`, `update_element` |
-| catalog | 2 | `publish_to_catalog`, `get_catalog` |
+| evidence | 3 | `submit_evidence`, `get_evidence`, `broadcast_evidence` |
 | cardano | 2 | `get_utxos`, `submit_transaction` |
-| health | 1 | `health_check` |
+| health | 2 | `health_check`, `read_diag_log` |
+
+Note: tutoring has platform-specific variants (desktop with video, mobile stubs). The ~160 count reflects unique commands registered per platform.
 
 ---
 
@@ -463,4 +489,4 @@ The frontend communicates with the Rust backend via **118 Tauri IPC commands** a
 | CLI | Go + Cobra (`alex`) | Rust + clap (`alex`) |
 | Smart contracts | Aiken/Plutus v3 (7 validators) | Transaction metadata only (no on-chain validators) |
 | Monitoring | Grafana + Prometheus | None (local app) |
-| API | gRPC + REST (grpc-gateway) | Tauri IPC (118 commands) |
+| API | gRPC + REST (grpc-gateway) | Tauri IPC (~160 commands) |
