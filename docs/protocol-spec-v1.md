@@ -86,12 +86,17 @@ Example: `entity_id(["stake1u8abc", "cid123"])` = `hex(blake2b("stake1u8abc|cid1
 
 The libp2p PeerId is derived from the Cardano payment signing key:
 
-```mermaid
-graph TD
-    Key["cardano_payment_key: [u8; 32]\n(Ed25519 scalar from BIP32 derivation)"]
-    Key --> KP["Keypair::ed25519_from_bytes(payment_key)"]
-    KP --> PID["keypair.public().to_peer_id()"]
-    PID --> Result["PeerId: base58, prefix 12D3KooW\n(Ed25519 multicodec)"]
+```
+cardano_payment_key: [u8; 32]  (Ed25519 scalar from BIP32 derivation)
+    |
+    v
+libp2p_keypair = Keypair::ed25519_from_bytes(payment_key)
+    |
+    v
+peer_id = keypair.public().to_peer_id()
+    |
+    v
+PeerId: base58, prefix "12D3KooW" (Ed25519 multicodec)
 ```
 
 This creates a 1:1 cryptographic link: PeerId = f(Cardano signing key).
@@ -463,20 +468,19 @@ joined with `governance_daos` to verify the sender has role
 ### 10.4 State Machines
 
 **Election lifecycle**:
-```mermaid
-stateDiagram-v2
-    nomination --> voting
-    voting --> finalized
-    voting --> cancelled
+```
+nomination --> voting --> finalized
+                  |
+                  +-----> cancelled
 ```
 
 **Proposal lifecycle**:
-```mermaid
-stateDiagram-v2
-    draft --> published
-    published --> approved
-    published --> rejected
-    published --> cancelled
+```
+draft --> published --> approved
+              |
+              +-------> rejected
+              |
+              +-------> cancelled
 ```
 
 **Supermajority threshold**: 2/3 of votes for approval.
@@ -666,12 +670,11 @@ Governance is second-most sensitive. Profiles are most permissive.
 
 ### 14.2 NAT State Machine
 
-```mermaid
-stateDiagram-v2
-    Unknown --> Public : 2 successful probes
-    Unknown --> Private : probes fail
-    Public --> Private : re-probe fails
-    Private --> Public : re-probe succeeds
+```
+Unknown --[2 successful probes]--> Public(address)
+Unknown --[probes fail]----------> Private
+Public  --[re-probe fails]-------> Private
+Private --[re-probe succeeds]----> Public(address)
 ```
 
 ### 14.3 Fallback Strategy

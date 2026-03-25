@@ -48,23 +48,39 @@ central API, no hosted database, and no Docker infrastructure.
 
 ## 2. System Overview
 
-```mermaid
-graph LR
-    subgraph Tauri["Tauri v2 Shell"]
-        subgraph Frontend["Vue 3 UI (WebView)"]
-            FR["26 routes\n29 components\n12 composables"]
-        end
-        subgraph Backend["Rust Backend"]
-            DB["SQLite DB\n50 tables\n16 migrations"]
-            Iroh["iroh store\nBLAKE3 blobs"]
-            Vault["Encrypted Vault\nStronghold / portable"]
-            P2P["libp2p swarm"]
-            BF["Blockfrost client"]
-        end
-        Frontend -- "~160 IPC cmds" --> Backend
-    end
-    P2P <--> Net((P2P Network))
-    BF --> Cardano((Cardano\npreprod))
+```
++-------------------------------------------------------+
+|                    Tauri v2 Shell                      |
+|                                                       |
+|  +----------------+         +----------------------+  |
+|  |   Vue 3 UI     |--IPC--->|    Rust Backend      |  |
+|  |   (WebView)    | ~160    |                      |  |
+|  |                | cmds    |  +----------------+  |  |
+|  |  26 routes     |         |  |   SQLite DB    |  |  |
+|  |  29 components |         |  |   50 tables    |  |  |
+|  |  12 composables|         |  |   16 migrations|  |  |
+|  +----------------+         |  +----------------+  |  |
+|                             |                      |  |
+|                             |  +----------------+  |  |
+|                             |  |  iroh store    |  |  |
+|                             |  |  BLAKE3 blobs  |  |  |
+|                             |  +----------------+  |  |
+|                             |                      |  |
+|                             |  +----------------+  |  |
+|                             |  | Encrypted Vault|  |  |
+|                             |  | (Stronghold or |  |  |
+|                             |  |  portable)     |  |  |
+|                             |  +----------------+  |  |
+|                             |                      |  |
+|                             |  +----------------+  |  |
+|                             |  | libp2p swarm   |--+-->  P2P Network
+|                             |  +----------------+  |  |
+|                             |                      |  |
+|                             |  +----------------+  |  |
+|                             |  | Blockfrost     |--+-->  Cardano (preprod)
+|                             |  +----------------+  |  |
+|                             +----------------------+  |
++-------------------------------------------------------+
 ```
 
 All state lives on the user's machine in three locations:
@@ -84,14 +100,19 @@ Default data directory: `~/Library/Application Support/org.alexandria.node/` (ma
 
 ### Key Derivation
 
-```mermaid
-graph TD
-    M["24-word BIP-39 mnemonic"] --> Master["BIP32-Ed25519 master key\n(Icarus / CIP-1852 via pallas-wallet)"]
-    Master --> Pay["m/1852'/1815'/0'/0/0\npayment key (signing + verification)"]
-    Master --> Stake["m/1852'/1815'/0'/2/0\nstake key"]
-    Pay --> Addr["bech32: addr_test1..."]
-    Stake --> StakeAddr["bech32: stake_test1..."]
-    Pay --> Libp2p["libp2p Ed25519 keypair\nPeerId: 12D3KooW..."]
+```
+24-word BIP-39 mnemonic
+    |
+    v
+BIP32-Ed25519 master key (Icarus / CIP-1852 via pallas-wallet)
+    |
+    +-- m/1852'/1815'/0'/0/0 --> payment key (signing + verification)
+    |                              +-- bech32: addr_test1...
+    |                              +-- libp2p Ed25519 keypair
+    |                                    +-- PeerId: 12D3KooW...
+    |
+    +-- m/1852'/1815'/0'/2/0 --> stake key
+                                   +-- bech32: stake_test1...
 ```
 
 The same Ed25519 key serves as:
@@ -287,16 +308,23 @@ See [P2P Protocol Specification](protocol-spec-v1.md) for full wire formats.
 
 ### Flow
 
-```mermaid
-graph TD
-    A["Assessment completion"] --> B["Evidence record created\n(score, difficulty, trust_factor, bloom level)"]
-    B --> C["Aggregation: weighted confidence\nper (skill, proficiency_level)"]
-    C --> D["Skill proof updated\n(if threshold met)"]
-    D --> E["Reputation impact computed\n(instructor attribution)"]
-    E --> F["Broadcast via P2P\nevidence topic"]
-    E --> G["Mint SkillProof NFT\non Cardano"]
-    style F stroke-dasharray: 5 5
-    style G stroke-dasharray: 5 5
+```
+Assessment completion
+    |
+    v
+Evidence record created (score, difficulty, trust_factor, bloom level)
+    |
+    v
+Aggregation: weighted confidence per (skill, proficiency_level)
+    |
+    v
+Skill proof updated (if threshold met)
+    |
+    v
+Reputation impact computed (instructor attribution)
+    |
+    +---> (optional) Broadcast via P2P evidence topic
+    +---> (optional) Mint SkillProof NFT on Cardano
 ```
 
 ### Components
