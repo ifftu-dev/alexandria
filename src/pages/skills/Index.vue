@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { useLocalApi } from '@/composables/useLocalApi'
+import { useSkillGraphHover } from '@/composables/useSkillGraphHover'
 import { AppBadge, AppTabs } from '@/components/ui'
-import SkillGraph from '@/components/skills/SkillGraph.vue'
 import type { SubjectFieldInfo, SubjectInfo, SkillInfo, SkillGraphEdge, SkillProof } from '@/types'
 
 const { invoke } = useLocalApi()
@@ -156,20 +156,123 @@ const personalSkillIdSet = computed(() => {
   return include
 })
 
-const personalGraphSkills = computed(() =>
-  skills.value.filter((skill) => personalSkillIdSet.value.has(skill.id))
-)
-
-const personalGraphEdges = computed(() => {
-  const ids = personalSkillIdSet.value
-  return graphEdges.value.filter((e) => ids.has(e.skill_id) && ids.has(e.prerequisite_id))
-})
-
 const earnedSkillsCount = computed(() => earnedSkillIdSet.value.size)
 const availableSkillsCount = computed(() => availableSkillIdSet.value.size)
 const lockedSkillsCount = computed(() =>
   Math.max(0, skills.value.length - earnedSkillsCount.value - availableSkillsCount.value)
 )
+
+// ============ Force-graph (same renderer as sidebar/modal) ============
+const graphContainerRef = ref<HTMLElement | null>(null)
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const forceGraphInstance = ref<any>(null)
+let graphResizeObserver: ResizeObserver | null = null
+const { buildAdjacency, createHoverHandler, renderNode, renderLink } = useSkillGraphHover()
+
+const forceGraphNodes = computed(() => {
+  const earned = earnedSkillIdSet.value
+  const ids = personalSkillIdSet.value
+  return skills.value
+    .filter(s => ids.has(s.id))
+    .map(skill => {
+      const prereqs = prereqMap.value.get(skill.id) ?? []
+      const status = earned.has(skill.id)
+        ? 'earned'
+        : (prereqs.length === 0 || prereqs.every(p => earned.has(p)))
+            ? 'available'
+            : 'locked'
+      return { id: skill.id, name: skill.name, routeId: skill.id, status, prerequisites: prereqs }
+    })
+})
+
+function destroyForceGraph() {
+  graphResizeObserver?.disconnect()
+  graphResizeObserver = null
+  if (forceGraphInstance.value) {
+    forceGraphInstance.value._destructor?.()
+    forceGraphInstance.value = null
+  }
+}
+
+async function initForceGraph() {
+  if (!graphContainerRef.value || !forceGraphNodes.value.length) return
+  destroyForceGraph()
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const ForceGraph = (await import('force-graph')).default as any
+
+  const links: Array<{ source: string; target: string }> = []
+  for (const node of forceGraphNodes.value) {
+    for (const prereqId of node.prerequisites) {
+      if (personalSkillIdSet.value.has(prereqId)) {
+        links.push({ source: prereqId, target: node.id })
+      }
+    }
+  }
+  buildAdjacency(links)
+
+  const width = graphContainerRef.value.clientWidth
+  const height = graphContainerRef.value.clientHeight
+
+  const graph = ForceGraph()(graphContainerRef.value)
+    .width(width)
+    .height(height)
+    .graphData({ nodes: forceGraphNodes.value, links })
+    .autoPauseRedraw(false)
+    .nodeLabel(() => '')
+    .onNodeHover(createHoverHandler())
+    .nodeCanvasObject((node: Record<string, unknown>, ctx: CanvasRenderingContext2D, globalScale: number) => {
+      renderNode(node, ctx, globalScale)
+    })
+    .linkCanvasObject((link: Record<string, unknown>, ctx: CanvasRenderingContext2D) => {
+      renderLink(link, ctx)
+    })
+    .linkCanvasObjectMode(() => 'replace' as const)
+    .backgroundColor('transparent')
+    .onNodeClick((node: Record<string, unknown>) => {
+      const routeId = String(node.routeId ?? node.id ?? '')
+      if (routeId) router.push(`/skills/${routeId}`)
+    })
+    .cooldownTicks(100)
+    .onEngineStop(() => {
+      graph.zoomToFit(400, 40)
+    })
+
+  graph.d3Force('charge')?.strength(-80)
+  graph.d3Force('link')?.distance(50)
+
+  forceGraphInstance.value = graph
+
+  graphResizeObserver = new ResizeObserver((entries) => {
+    for (const entry of entries) {
+      graph.width(entry.contentRect.width)
+      graph.height(entry.contentRect.height)
+    }
+  })
+  graphResizeObserver.observe(graphContainerRef.value)
+}
+
+// Init/destroy the force graph when switching to/from the graph tab
+watch(activeTab, async (tab) => {
+  if (tab === 'graph' && !loading.value) {
+    await nextTick()
+    initForceGraph()
+  } else {
+    destroyForceGraph()
+  }
+})
+
+// Also init if data loads while graph tab is already active
+watch(loading, async (isLoading) => {
+  if (!isLoading && activeTab.value === 'graph') {
+    await nextTick()
+    initForceGraph()
+  }
+})
+
+onBeforeUnmount(() => {
+  destroyForceGraph()
+})
 </script>
 
 <template>
@@ -407,7 +510,7 @@ const lockedSkillsCount = computed(() =>
 
       <!-- ============ GRAPH TAB ============ -->
       <div v-if="activeTab === 'graph'">
-        <div v-if="personalGraphSkills.length === 0" class="py-16 text-center">
+        <div v-if="forceGraphNodes.length === 0" class="py-16 text-center">
           <div class="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-muted/30">
             <svg class="h-8 w-8 text-muted-foreground/50" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
               <path stroke-linecap="round" stroke-linejoin="round" d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" />
@@ -418,13 +521,25 @@ const lockedSkillsCount = computed(() =>
             Complete course assessments to earn proofs; unlocked and prerequisite skills will appear here.
           </p>
         </div>
-        <SkillGraph
-          v-else
-          :skills="personalGraphSkills"
-          :edges="personalGraphEdges"
-          :proofs="proofMap"
-          @select="goToSkill"
-        />
+        <div v-else class="rounded-2xl border border-border overflow-hidden bg-slate-950">
+          <div ref="graphContainerRef" class="h-[600px] w-full" />
+
+          <!-- Legend overlay -->
+          <div class="flex items-center justify-center gap-6 border-t border-border bg-card px-4 py-3 text-xs">
+            <span class="flex items-center gap-1.5">
+              <span class="inline-block h-2.5 w-2.5 rounded-full bg-success" />
+              <span class="text-muted-foreground">Earned ({{ earnedSkillsCount }})</span>
+            </span>
+            <span v-if="availableSkillsCount > 0" class="flex items-center gap-1.5">
+              <span class="inline-block h-2.5 w-2.5 rounded-full bg-warning" />
+              <span class="text-muted-foreground">Available ({{ availableSkillsCount }})</span>
+            </span>
+            <span class="flex items-center gap-1.5">
+              <span class="inline-block h-2 w-2 rounded-full" style="background: rgba(148, 163, 184, 0.4)" />
+              <span class="text-muted-foreground">Locked ({{ lockedSkillsCount }})</span>
+            </span>
+          </div>
+        </div>
       </div>
 
       <!-- ============ PROOFS TAB ============ -->
