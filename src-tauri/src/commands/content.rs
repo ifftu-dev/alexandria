@@ -10,6 +10,7 @@ use tauri::State;
 
 use crate::ipfs::content;
 use crate::ipfs::resolver;
+use crate::ipfs::storage;
 use crate::AppState;
 
 /// Status of the content node.
@@ -34,24 +35,43 @@ pub async fn content_node_status(state: State<'_, AppState>) -> Result<NodeStatu
 ///
 /// Accepts base64-encoded data from the frontend.
 /// Returns the BLAKE3 hash (hex) and size in bytes.
+/// Tracks the content as a pin and triggers eviction if over quota.
 #[tauri::command]
 pub async fn content_add(
     state: State<'_, AppState>,
     data: Vec<u8>,
 ) -> Result<content::AddResult, String> {
-    content::add_bytes(&state.content_node, &data)
+    let result = content::add_bytes(&state.content_node, &data)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+
+    // Track as a cache pin (auto_unpin = true) by default
+    if let Ok(db) = state.db.lock() {
+        storage::upsert_pin(db.conn(), &result.hash, "cache", result.size, true);
+    }
+
+    // Trigger eviction if over quota
+    storage::maybe_evict(&state.content_node, &state.db).await;
+
+    Ok(result)
 }
 
 /// Fetch content from the local blob store by BLAKE3 hash.
 ///
 /// Returns the raw bytes. Errors if the content is not available locally.
+/// Updates the pin's last_accessed timestamp.
 #[tauri::command]
 pub async fn content_get(state: State<'_, AppState>, hash: String) -> Result<Vec<u8>, String> {
-    content::get_bytes(&state.content_node, &hash)
+    let bytes = content::get_bytes(&state.content_node, &hash)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+
+    // Touch last_accessed so frequently-read content is evicted last
+    if let Ok(db) = state.db.lock() {
+        storage::touch_pin(db.conn(), &hash);
+    }
+
+    Ok(bytes)
 }
 
 /// Check if content exists in the local blob store.
@@ -100,6 +120,20 @@ pub async fn content_resolve(
         .await
         .map_err(|e| e.to_string())?;
 
+    // Track resolved content as a cache pin
+    if result.source != resolver::ResolveSource::Local {
+        if let Ok(db) = state.db.lock() {
+            storage::upsert_pin(db.conn(), &result.blake3_hash, "cache", result.size, true);
+        }
+        // Trigger eviction if over quota
+        storage::maybe_evict(&state.content_node, &state.db).await;
+    } else {
+        // Touch existing pin on local hit
+        if let Ok(db) = state.db.lock() {
+            storage::touch_pin(db.conn(), &result.blake3_hash);
+        }
+    }
+
     Ok(ResolveResponse {
         blake3_hash: result.blake3_hash,
         ipfs_cid: result.ipfs_cid,
@@ -129,6 +163,18 @@ pub async fn content_resolve_bytes(
         .resolve(&identifier)
         .await
         .map_err(|e| e.to_string())?;
+
+    // Track resolved content as a cache pin
+    if result.source != resolver::ResolveSource::Local {
+        if let Ok(db) = state.db.lock() {
+            storage::upsert_pin(db.conn(), &result.blake3_hash, "cache", result.size, true);
+        }
+        storage::maybe_evict(&state.content_node, &state.db).await;
+    } else {
+        if let Ok(db) = state.db.lock() {
+            storage::touch_pin(db.conn(), &result.blake3_hash);
+        }
+    }
 
     Ok(result.bytes)
 }
