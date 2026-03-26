@@ -4,11 +4,13 @@ import AppTopBar from '@/components/layout/AppTopBar.vue'
 import AppBottomBar from '@/components/layout/AppBottomBar.vue'
 import MobileTabBar from '@/components/layout/MobileTabBar.vue'
 import TutoringPiP from '@/components/layout/TutoringPiP.vue'
+import { usePlatform } from '@/composables/usePlatform'
 import { ref, onMounted } from 'vue'
 
 // Persist sidebar state to localStorage (Mark 2 uses a cookie)
 const STORAGE_KEY = 'alexandria-sidebar'
 const sidebarCollapsed = ref(false)
+const { isMobilePlatform } = usePlatform()
 
 onMounted(() => {
   const stored = localStorage.getItem(STORAGE_KEY)
@@ -29,7 +31,7 @@ function toggleSidebar() {
     <!-- Below topbar: sidebar + content side by side -->
     <div class="flex flex-1 overflow-hidden">
       <!-- Sidebar — hidden on mobile -->
-      <div class="hidden md:flex relative h-full">
+      <div v-if="!isMobilePlatform" class="hidden md:flex relative h-full">
         <AppSidebar
           :collapsed="sidebarCollapsed"
           @toggle="toggleSidebar"
