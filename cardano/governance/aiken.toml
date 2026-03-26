@@ -1,0 +1,16 @@
+name = "alexandria/governance"
+version = "0.1.0"
+compiler = "v1.1.21"
+plutus = "v3"
+license = "Apache-2.0"
+description = "On-chain governance for Alexandria: soulbound reputation tokens (CIP-68), DAO registry, elections, proposals, and skill-gated voting."
+
+[repository]
+user = "ifftu-dev"
+project = "alexandria"
+platform = "github"
+
+[[dependencies]]
+name = "aiken-lang/stdlib"
+version = "v3.0.0"
+source = "github"
