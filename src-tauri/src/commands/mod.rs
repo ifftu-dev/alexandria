@@ -18,6 +18,7 @@ pub mod taxonomy;
 
 pub mod content;
 pub mod p2p;
+pub mod storage;
 pub mod sync;
 
 #[cfg(desktop)]
