@@ -7,6 +7,9 @@ import {
   AppButton, AppBadge, AppInput, AppModal, AppTabs,
   EmptyState, StatusBadge,
 } from '@/components/ui'
+import OnChainBadge from '@/components/governance/OnChainBadge.vue'
+import DeadlineCountdown from '@/components/governance/DeadlineCountdown.vue'
+import ProficiencyGate from '@/components/governance/ProficiencyGate.vue'
 import type {
   DaoInfo, DaoMember, Election, ElectionNominee, Proposal,
   OpenElectionParams, SubmitProposalParams,
@@ -366,6 +369,7 @@ const proposalCategories = ['policy', 'taxonomy', 'curriculum', 'technical', 'go
           <div class="flex items-center gap-3 mb-1.5">
             <h1 class="text-2xl font-bold tracking-tight">{{ dao.name }}</h1>
             <StatusBadge :status="dao.status" />
+            <OnChainBadge :tx-hash="dao.on_chain_tx" />
           </div>
           <p v-if="dao.description" class="text-sm text-muted-foreground mb-4 max-w-2xl">
             {{ dao.description }}
@@ -657,6 +661,17 @@ const proposalCategories = ['policy', 'taxonomy', 'curriculum', 'technical', 'go
                 </p>
               </div>
               <StatusBadge :status="election.phase" />
+              <OnChainBadge :tx-hash="election.on_chain_tx" />
+              <DeadlineCountdown
+                v-if="election.phase === 'nomination'"
+                :deadline="election.nomination_end"
+                label="Nomination"
+              />
+              <DeadlineCountdown
+                v-if="election.phase === 'voting'"
+                :deadline="election.voting_end"
+                label="Voting"
+              />
             </div>
             <div class="flex items-center flex-wrap gap-3">
               <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-muted/30 text-xs text-muted-foreground">
@@ -741,6 +756,12 @@ const proposalCategories = ['policy', 'taxonomy', 'curriculum', 'technical', 'go
 
             <!-- Meta -->
             <div class="flex items-center flex-wrap gap-3 text-xs text-muted-foreground mb-4">
+              <OnChainBadge :tx-hash="proposal.on_chain_tx" />
+              <DeadlineCountdown
+                v-if="proposal.status === 'published'"
+                :deadline="proposal.voting_deadline"
+                label="Voting"
+              />
               <span v-if="proposal.voting_deadline" class="inline-flex items-center gap-1.5">
                 <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -762,6 +783,7 @@ const proposalCategories = ['policy', 'taxonomy', 'curriculum', 'technical', 'go
                 <AppButton size="xs" variant="danger" @click="cancelProposal(proposal.id)">Cancel</AppButton>
               </template>
               <template v-else-if="proposal.status === 'published'">
+                <ProficiencyGate :required-level="proposal.min_vote_proficiency || 'remember'" :met="true" />
                 <AppButton size="xs" variant="outline" @click="voteOnProposal(proposal.id, true)">
                   <svg class="w-3 h-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />

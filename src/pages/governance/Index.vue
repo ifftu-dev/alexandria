@@ -2,6 +2,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { StatusBadge } from '@/components/ui'
+import OnChainBadge from '@/components/governance/OnChainBadge.vue'
 import type { DaoInfo } from '@/types'
 
 const { invoke } = useLocalApi()
@@ -137,6 +138,7 @@ onMounted(async () => {
                   {{ dao.name }}
                 </h3>
                 <StatusBadge :status="dao.status" />
+                <OnChainBadge :tx-hash="dao.on_chain_tx" />
               </div>
               <p v-if="dao.description" class="text-xs text-muted-foreground line-clamp-2 mb-2">
                 {{ dao.description }}
