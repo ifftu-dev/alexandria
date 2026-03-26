@@ -24,6 +24,146 @@ const DEFAULT_VOTING_DAYS: i64 = 14;
 /// Supermajority threshold for proposal resolution (2/3).
 const SUPERMAJORITY_THRESHOLD: f64 = 2.0 / 3.0;
 
+/// Bloom's taxonomy proficiency levels in ascending order.
+const BLOOM_ORDER: &[&str] = &[
+    "remember",
+    "understand",
+    "apply",
+    "analyze",
+    "evaluate",
+    "create",
+];
+
+/// Check if a stake_address has at least `min_level` proficiency for any
+/// skill within the scope of the given DAO.
+///
+/// Returns Ok(()) if the check passes, or an Err with a human-readable
+/// message if the user lacks sufficient proficiency.
+fn check_proficiency(
+    conn: &rusqlite::Connection,
+    _stake_address: &str,
+    dao_id: &str,
+    min_level: &str,
+) -> Result<(), String> {
+    let min_idx = BLOOM_ORDER
+        .iter()
+        .position(|&l| l == min_level)
+        .unwrap_or(0);
+
+    // Find the DAO's scope (subject_field or subject) to determine which
+    // skills are in scope.
+    let (scope_type, scope_id): (String, String) = conn
+        .query_row(
+            "SELECT scope_type, scope_id FROM governance_daos WHERE id = ?1",
+            params![dao_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(|e| format!("DAO not found: {e}"))?;
+
+    // Check if the user has any skill_proof at or above min_level for a
+    // skill within the DAO's scope.
+    // Check if ANY proof exists for skills in scope at the required level
+    let has_proof: bool = if scope_type == "subject_field" {
+        conn.query_row(
+            "SELECT COUNT(*) > 0 FROM skill_proofs sp \
+             JOIN skills sk ON sk.id = sp.skill_id \
+             JOIN subjects sub ON sub.id = sk.subject_id \
+             WHERE sub.subject_field_id = ?1",
+            params![scope_id],
+            |row| row.get(0),
+        )
+        .unwrap_or(false)
+    } else {
+        conn.query_row(
+            "SELECT COUNT(*) > 0 FROM skill_proofs sp \
+             JOIN skills sk ON sk.id = sp.skill_id \
+             WHERE sk.subject_id = ?1",
+            params![scope_id],
+            |row| row.get(0),
+        )
+        .unwrap_or(false)
+    };
+
+    // For the "remember" level (minimum), just having any proof in scope is enough
+    if min_idx == 0 && has_proof {
+        return Ok(());
+    }
+
+    // For higher levels, check the actual proficiency level of proofs
+    let max_level: Option<String> = if scope_type == "subject_field" {
+        conn.query_row(
+            "SELECT sp.proficiency_level FROM skill_proofs sp \
+             JOIN skills sk ON sk.id = sp.skill_id \
+             JOIN subjects sub ON sub.id = sk.subject_id \
+             WHERE sub.subject_field_id = ?1 \
+             ORDER BY CASE sp.proficiency_level \
+               WHEN 'create' THEN 5 WHEN 'evaluate' THEN 4 \
+               WHEN 'analyze' THEN 3 WHEN 'apply' THEN 2 \
+               WHEN 'understand' THEN 1 ELSE 0 END DESC LIMIT 1",
+            params![scope_id],
+            |row| row.get(0),
+        )
+        .ok()
+    } else {
+        conn.query_row(
+            "SELECT sp.proficiency_level FROM skill_proofs sp \
+             JOIN skills sk ON sk.id = sp.skill_id \
+             WHERE sk.subject_id = ?1 \
+             ORDER BY CASE sp.proficiency_level \
+               WHEN 'create' THEN 5 WHEN 'evaluate' THEN 4 \
+               WHEN 'analyze' THEN 3 WHEN 'apply' THEN 2 \
+               WHEN 'understand' THEN 1 ELSE 0 END DESC LIMIT 1",
+            params![scope_id],
+            |row| row.get(0),
+        )
+        .ok()
+    };
+
+    match max_level {
+        Some(level) => {
+            let actual_idx = BLOOM_ORDER.iter().position(|&l| l == level).unwrap_or(0);
+            if actual_idx >= min_idx {
+                Ok(())
+            } else {
+                Err(format!(
+                    "Insufficient proficiency: requires '{min_level}' but your highest is '{level}'"
+                ))
+            }
+        }
+        None => Err(format!(
+            "Insufficient proficiency: requires '{min_level}' in {scope_type} '{scope_id}' — no qualifying skill proofs found"
+        )),
+    }
+}
+
+/// Parse an optional ISO 8601 deadline string and check if it has passed.
+/// Returns Ok(()) if no deadline is set, or the deadline has not passed.
+fn check_before_deadline(deadline: Option<&str>, action: &str) -> Result<(), String> {
+    if let Some(dl) = deadline {
+        if let Ok(parsed) = chrono::DateTime::parse_from_rfc3339(dl) {
+            if chrono::Utc::now() >= parsed {
+                return Err(format!("Deadline has passed for {action} (deadline: {dl})"));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Parse an optional ISO 8601 deadline string and check if it has been reached.
+/// Returns Ok(()) if no deadline is set, or the deadline has been reached.
+fn check_after_deadline(deadline: Option<&str>, action: &str) -> Result<(), String> {
+    if let Some(dl) = deadline {
+        if let Ok(parsed) = chrono::DateTime::parse_from_rfc3339(dl) {
+            if chrono::Utc::now() < parsed {
+                return Err(format!(
+                    "Deadline not yet reached for {action} (deadline: {dl})"
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 // ---- DAO Commands ----
 
 /// List all DAOs, optionally filtered by scope_type and/or status.
@@ -346,6 +486,19 @@ pub async fn nominate(
         ));
     }
 
+    // Check nomination deadline
+    let (nomination_end, dao_id_for_prof): (Option<String>, String) = conn
+        .query_row(
+            "SELECT nomination_end, dao_id FROM governance_elections WHERE id = ?1",
+            params![election_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(|e| e.to_string())?;
+    check_before_deadline(nomination_end.as_deref(), "nomination")?;
+
+    // Proficiency gate: nominee must have at least "remember" in DAO scope
+    check_proficiency(conn, &stake_address, &dao_id_for_prof, "remember")?;
+
     let id = entity_id(&[&election_id, &stake_address]);
 
     conn.execute(
@@ -377,6 +530,30 @@ pub async fn accept_nomination(
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
     let conn = db.conn();
+
+    // Look up the nominee's election context for proficiency + deadline checks
+    let (stake_address, election_id): (String, String) = conn
+        .query_row(
+            "SELECT stake_address, election_id FROM governance_election_nominees WHERE id = ?1",
+            params![nominee_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(|_| "nominee not found".to_string())?;
+
+    let (nominee_min_prof, nomination_end, dao_id): (String, Option<String>, String) = conn
+        .query_row(
+            "SELECT nominee_min_proficiency, nomination_end, dao_id \
+             FROM governance_elections WHERE id = ?1",
+            params![election_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .map_err(|e| e.to_string())?;
+
+    // Deadline check: must be before nomination_end
+    check_before_deadline(nomination_end.as_deref(), "accepting nomination")?;
+
+    // Proficiency gate: nominee must meet nominee_min_proficiency
+    check_proficiency(conn, &stake_address, &dao_id, &nominee_min_prof)?;
 
     let affected = conn
         .execute(
@@ -417,6 +594,16 @@ pub async fn start_election_voting(
             "election must be in nomination phase to start voting (phase: {phase})"
         ));
     }
+
+    // Deadline check: nomination period must have ended
+    let nomination_end: Option<String> = conn
+        .query_row(
+            "SELECT nomination_end FROM governance_elections WHERE id = ?1",
+            params![election_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    check_after_deadline(nomination_end.as_deref(), "starting voting")?;
 
     // Verify at least `seats` accepted nominees
     let (seats, accepted_count): (i64, i64) = conn
@@ -471,6 +658,20 @@ pub async fn cast_election_vote(
     if phase != "voting" {
         return Err(format!("election is not in voting phase (phase: {phase})"));
     }
+
+    // Deadline check: must be before voting_end
+    let (voting_end, voter_min_prof, dao_id_for_vote): (Option<String>, String, String) = conn
+        .query_row(
+            "SELECT voting_end, voter_min_proficiency, dao_id \
+             FROM governance_elections WHERE id = ?1",
+            params![election_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .map_err(|e| e.to_string())?;
+    check_before_deadline(voting_end.as_deref(), "voting")?;
+
+    // Proficiency gate: voter must meet voter_min_proficiency
+    check_proficiency(conn, &voter, &dao_id_for_vote, &voter_min_prof)?;
 
     // Check double-vote
     let already_voted: bool = conn
@@ -550,6 +751,16 @@ pub async fn finalize_election(
             "election must be in voting phase to finalize (phase: {phase})"
         ));
     }
+
+    // Deadline check: voting period must have ended
+    let voting_end: Option<String> = conn
+        .query_row(
+            "SELECT voting_end FROM governance_elections WHERE id = ?1",
+            params![election_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    check_after_deadline(voting_end.as_deref(), "finalizing election")?;
 
     // Get top N accepted nominees by votes_received
     let mut stmt = conn
@@ -703,6 +914,9 @@ pub async fn submit_proposal(
             |row| row.get(0),
         )
         .map_err(|e| format!("no local identity: {e}"))?;
+
+    // Proficiency gate: proposer must have at least "remember" in DAO scope
+    check_proficiency(conn, &proposer, &params.dao_id, "remember")?;
 
     let id = entity_id(&[&params.dao_id, &params.title, &proposer]);
     let min_prof = params
@@ -911,6 +1125,18 @@ pub async fn cast_proposal_vote(
         ));
     }
 
+    // Deadline + proficiency checks
+    let (voting_deadline, min_prof, dao_id_for_vote): (Option<String>, String, String) = conn
+        .query_row(
+            "SELECT voting_deadline, min_vote_proficiency, dao_id \
+             FROM governance_proposals WHERE id = ?1",
+            params![proposal_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .map_err(|e| e.to_string())?;
+    check_before_deadline(voting_deadline.as_deref(), "proposal voting")?;
+    check_proficiency(conn, &voter, &dao_id_for_vote, &min_prof)?;
+
     // Check double-vote
     let already_voted: bool = conn
         .query_row(
@@ -985,6 +1211,16 @@ pub async fn resolve_proposal(
             "proposal must be published to resolve (status: {status})"
         ));
     }
+
+    // Deadline check: voting period must have ended
+    let voting_deadline: Option<String> = conn
+        .query_row(
+            "SELECT voting_deadline FROM governance_proposals WHERE id = ?1",
+            params![proposal_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    check_after_deadline(voting_deadline.as_deref(), "resolving proposal")?;
 
     let total_votes = votes_for + votes_against;
     if total_votes == 0 {
