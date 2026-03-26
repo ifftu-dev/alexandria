@@ -177,6 +177,7 @@ jobs:
 
       - name: Install Linux system dependencies
         run: |
+          sudo add-apt-repository universe -y
           sudo env TMPDIR="$TMPDIR" apt-get update
           sudo env TMPDIR="$TMPDIR" apt-get install -y --no-install-recommends \
             cmake \
@@ -273,6 +274,7 @@ jobs:
 
       - name: Install Linux system dependencies
         run: |
+          sudo add-apt-repository universe -y
           sudo env TMPDIR="$TMPDIR" apt-get update
           sudo env TMPDIR="$TMPDIR" apt-get install -y --no-install-recommends \
             cmake \
