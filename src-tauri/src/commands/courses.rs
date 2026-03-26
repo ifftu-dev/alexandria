@@ -393,14 +393,14 @@ pub async fn publish_course(
             )
             .map_err(|e| e.to_string())?;
 
-        // Track the pin
-        db.conn()
-            .execute(
-                "INSERT OR REPLACE INTO pins (cid, pin_type, size_bytes, last_accessed, auto_unpin) \
-                 VALUES (?1, 'course', ?2, datetime('now'), 0)",
-                params![result.content_hash, result.size as i64],
-            )
-            .map_err(|e| e.to_string())?;
+        // Track as a non-evictable pin (authored content)
+        crate::ipfs::storage::upsert_pin(
+            db.conn(),
+            &result.content_hash,
+            "course",
+            result.size,
+            false, // auto_unpin = false: authored content is never evicted
+        );
 
         // Read back the updated course to get the new version number
         let updated_course = get_course_by_id(db.conn(), &course_id)?;

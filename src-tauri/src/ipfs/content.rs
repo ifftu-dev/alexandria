@@ -46,6 +46,9 @@ pub struct ContentInfo {
 ///
 /// Returns the BLAKE3 hash of the content. The content is stored
 /// persistently and will survive app restarts.
+///
+/// Uses a named tag (the BLAKE3 hex hash) so the tag can be found
+/// and deleted during eviction.
 pub async fn add_bytes(node: &ContentNode, data: &[u8]) -> Result<AddResult, ContentError> {
     let store = node
         .store()
@@ -53,12 +56,22 @@ pub async fn add_bytes(node: &ContentNode, data: &[u8]) -> Result<AddResult, Con
         .map_err(|_| ContentError::NodeNotRunning)?;
     let size = data.len() as u64;
 
-    let tag = store
+    // Use a temp tag first to get the hash, then promote to named tag
+    let temp = store
         .add_slice(data)
+        .temp_tag()
         .await
         .map_err(|e| ContentError::Store(e.to_string()))?;
 
-    let hash_hex = tag.hash.to_hex().to_string();
+    let hash_hex = temp.hash().to_hex().to_string();
+
+    // Create a named tag using the BLAKE3 hex as the name (predictable for eviction)
+    store
+        .tags()
+        .set(&hash_hex, temp.hash_and_format())
+        .await
+        .map_err(|e| ContentError::Store(e.to_string()))?;
+
     log::debug!("added {} bytes, hash: {}", size, hash_hex);
 
     Ok(AddResult {
