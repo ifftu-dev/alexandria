@@ -235,6 +235,38 @@ pub fn run() {
                 }
             });
 
+            // Spawn governance on-chain queue processor (runs every 60s)
+            {
+                let db_for_queue = db.clone();
+                diag::log("spawning governance on-chain queue processor");
+                tauri::async_runtime::spawn(async move {
+                    // Wait for app to fully initialize before processing
+                    tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+
+                    loop {
+                        // Try to create a Blockfrost client from env
+                        let bf = std::env::var("BLOCKFROST_PROJECT_ID")
+                            .ok()
+                            .and_then(|id| {
+                                cardano::blockfrost::BlockfrostClient::new(id).ok()
+                            });
+
+                        match cardano::onchain_queue::process_queue(&db_for_queue, &bf).await
+                        {
+                            Ok(n) if n > 0 => {
+                                log::info!("governance queue: processed {n} items");
+                            }
+                            Err(e) => {
+                                log::debug!("governance queue: {e}");
+                            }
+                            _ => {}
+                        }
+
+                        tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                    }
+                });
+            }
+
             diag::log("creating TutoringManager");
             let tutoring = Arc::new(TutoringManager::new());
 
