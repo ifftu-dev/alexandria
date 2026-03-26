@@ -216,7 +216,9 @@ impl BlockfrostClient {
         if let Some(first) = addrs.first() {
             let utxos = self.get_utxos(&first.address).await?;
             // Find the specific UTxO holding this asset
-            Ok(utxos.into_iter().find(|u| u.has_asset(policy_id, asset_name_hex)))
+            Ok(utxos
+                .into_iter()
+                .find(|u| u.has_asset(policy_id, asset_name_hex)))
         } else {
             Ok(None)
         }

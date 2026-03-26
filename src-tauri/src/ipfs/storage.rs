@@ -116,11 +116,9 @@ pub fn touch_pin(conn: &Connection, blake3_hash: &str) {
 
 /// Total bytes tracked across all pins.
 pub fn total_pinned_bytes(conn: &Connection) -> u64 {
-    conn.query_row(
-        "SELECT COALESCE(SUM(size_bytes), 0) FROM pins",
-        [],
-        |row| row.get::<_, i64>(0),
-    )
+    conn.query_row("SELECT COALESCE(SUM(size_bytes), 0) FROM pins", [], |row| {
+        row.get::<_, i64>(0)
+    })
     .unwrap_or(0) as u64
 }
 
@@ -136,7 +134,8 @@ fn evictable_bytes(conn: &Connection) -> u64 {
 
 /// Number of pinned items.
 fn pin_count(conn: &Connection) -> u64 {
-    conn.query_row("SELECT COUNT(*) FROM pins", [], |row| row.get::<_, i64>(0)).unwrap_or(0) as u64
+    conn.query_row("SELECT COUNT(*) FROM pins", [], |row| row.get::<_, i64>(0))
+        .unwrap_or(0) as u64
 }
 
 /// Build a `StorageStats` snapshot.

@@ -63,8 +63,10 @@ pub fn inject_plutus_fields(
                 index: *idx,
             })
             .collect();
-        tx.transaction_body.reference_inputs =
-            Some(pallas_primitives::NonEmptySet::from_vec(ref_inputs).ok_or_else(|| TxBuildError::Cbor("empty reference inputs".into()))?);
+        tx.transaction_body.reference_inputs = Some(
+            pallas_primitives::NonEmptySet::from_vec(ref_inputs)
+                .ok_or_else(|| TxBuildError::Cbor("empty reference inputs".into()))?,
+        );
     }
 
     // Set collateral inputs
@@ -241,8 +243,7 @@ pub async fn build_install_committee_tx(
     _payment_key_extended: &[u8; 64],
     _election_ref: (&[u8], u64),
 ) -> Result<GovTxResult, TxBuildError> {
-    let _redeemer =
-        plutus_data::encode_dao_redeemer("install_committee", Some((&[0u8; 32], 0)))?;
+    let _redeemer = plutus_data::encode_dao_redeemer("install_committee", Some((&[0u8; 32], 0)))?;
 
     Err(TxBuildError::Cbor(
         "InstallCommittee: datum/redeemer encoding ready, awaiting deployment".into(),

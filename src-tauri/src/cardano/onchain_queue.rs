@@ -35,7 +35,8 @@ pub fn enqueue(
     target_table: &str,
     target_id: &str,
 ) -> Result<String, String> {
-    let id = crate::crypto::hash::entity_id(&[action_type, target_id, &chrono::Utc::now().to_rfc3339()]);
+    let id =
+        crate::crypto::hash::entity_id(&[action_type, target_id, &chrono::Utc::now().to_rfc3339()]);
 
     db.conn()
         .execute(
@@ -279,11 +280,7 @@ pub async fn process_queue(
             Ok(tx_hash) => {
                 let db_guard = db.lock().map_err(|_| "db lock poisoned".to_string())?;
                 mark_submitted(&db_guard, &item.id, &tx_hash)?;
-                log::info!(
-                    "On-chain tx submitted: {} -> {}",
-                    item.action_type,
-                    tx_hash
-                );
+                log::info!("On-chain tx submitted: {} -> {}", item.action_type, tx_hash);
             }
             Err(e) => {
                 let db_guard = db.lock().map_err(|_| "db lock poisoned".to_string())?;
