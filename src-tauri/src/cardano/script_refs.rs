@@ -19,12 +19,10 @@ pub const DAO_MINTING_SCRIPT_HASH: &str =
     "4e1e127580699d82a90a919b0b9c875e9f4cacc3fef93ef3a6ed4594";
 
 /// Script hash for the election spending validator.
-pub const ELECTION_SCRIPT_HASH: &str =
-    "b292f0e842766af40a800d0c53cbe7a7f9faab7b85f68802e6468d25";
+pub const ELECTION_SCRIPT_HASH: &str = "b292f0e842766af40a800d0c53cbe7a7f9faab7b85f68802e6468d25";
 
 /// Script hash for the proposal spending validator.
-pub const PROPOSAL_SCRIPT_HASH: &str =
-    "7888035da181d26498ebe1b6fbe4c515007155e120e30fc3fcdf2c0d";
+pub const PROPOSAL_SCRIPT_HASH: &str = "7888035da181d26498ebe1b6fbe4c515007155e120e30fc3fcdf2c0d";
 
 /// Script hash for the vote receipt minting policy.
 pub const VOTE_MINTING_SCRIPT_HASH: &str =
@@ -35,8 +33,7 @@ pub const REPUTATION_MINTING_SCRIPT_HASH: &str =
     "315a6b7ca4d2df46af9956a24a3f31b7b9670c5115c76642776ac88f";
 
 /// Script hash for the soulbound spending validator.
-pub const SOULBOUND_SCRIPT_HASH: &str =
-    "2700722e5fb56941388a7813f416a0d1e76ee251dbb3ea248d41890a";
+pub const SOULBOUND_SCRIPT_HASH: &str = "2700722e5fb56941388a7813f416a0d1e76ee251dbb3ea248d41890a";
 
 // ---- Reference UTxO Locations (populated after deployment) ----
 // These are the UTxOs where each validator's compiled script is stored

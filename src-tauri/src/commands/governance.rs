@@ -727,7 +727,12 @@ pub async fn cast_election_vote(
     )
     .map_err(|e| e.to_string())?;
 
-    try_enqueue(&db, "cast_election_vote", "governance_election_votes", &vote_id);
+    try_enqueue(
+        &db,
+        "cast_election_vote",
+        "governance_election_votes",
+        &vote_id,
+    );
     Ok(ElectionVote {
         id: vote_id,
         election_id,
@@ -807,7 +812,12 @@ pub async fn finalize_election(
     .map_err(|e| e.to_string())?;
 
     let nominees = query_nominees(conn, &election_id)?;
-    try_enqueue(&db, "finalize_election", "governance_elections", &election_id);
+    try_enqueue(
+        &db,
+        "finalize_election",
+        "governance_elections",
+        &election_id,
+    );
     Ok(nominees)
 }
 
@@ -889,7 +899,12 @@ pub async fn install_committee(
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
 
-    try_enqueue(&db, "install_committee", "governance_elections", &election_id);
+    try_enqueue(
+        &db,
+        "install_committee",
+        "governance_elections",
+        &election_id,
+    );
     Ok(members)
 }
 
@@ -1073,7 +1088,12 @@ pub async fn approve_proposal(
     .map_err(|e| e.to_string())?;
 
     let proposal = query_proposal(conn, &proposal_id)?;
-    try_enqueue(&db, "approve_proposal", "governance_proposals", &proposal_id);
+    try_enqueue(
+        &db,
+        "approve_proposal",
+        "governance_proposals",
+        &proposal_id,
+    );
     Ok(proposal)
 }
 
@@ -1192,7 +1212,12 @@ pub async fn cast_proposal_vote(
         .map_err(|e| e.to_string())?;
     }
 
-    try_enqueue(&db, "cast_proposal_vote", "governance_proposal_votes", &vote_id);
+    try_enqueue(
+        &db,
+        "cast_proposal_vote",
+        "governance_proposal_votes",
+        &vote_id,
+    );
     Ok(ProposalVote {
         id: vote_id,
         proposal_id,
@@ -1258,7 +1283,12 @@ pub async fn resolve_proposal(
     .map_err(|e| e.to_string())?;
 
     let proposal = query_proposal(conn, &proposal_id)?;
-    try_enqueue(&db, "resolve_proposal", "governance_proposals", &proposal_id);
+    try_enqueue(
+        &db,
+        "resolve_proposal",
+        "governance_proposals",
+        &proposal_id,
+    );
     Ok(proposal)
 }
 

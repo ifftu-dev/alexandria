@@ -119,7 +119,11 @@ pub fn encode_dao_datum(
     }
 
     // Field 3: min_membership_proficiency
-    begin_constr(&mut encoder, proficiency_to_tag(min_membership_proficiency), 0)?;
+    begin_constr(
+        &mut encoder,
+        proficiency_to_tag(min_membership_proficiency),
+        0,
+    )?;
 
     // Field 4: state_token_policy (28 bytes)
     encode_bytes(&mut encoder, state_token_policy)?;
@@ -142,7 +146,10 @@ pub fn encode_dao_datum(
 }
 
 /// Encode a `DaoRedeemer` as Plutus Data CBOR.
-pub fn encode_dao_redeemer(action: &str, election_ref: Option<(&[u8], u64)>) -> Result<Vec<u8>, TxBuildError> {
+pub fn encode_dao_redeemer(
+    action: &str,
+    election_ref: Option<(&[u8], u64)>,
+) -> Result<Vec<u8>, TxBuildError> {
     let mut buf = Vec::new();
     let mut encoder = pallas_codec::minicbor::Encoder::new(&mut buf);
 
@@ -161,7 +168,11 @@ pub fn encode_dao_redeemer(action: &str, election_ref: Option<(&[u8], u64)>) -> 
             encode_bytes(&mut encoder, tx_hash)?;
             encode_int(&mut encoder, idx as i64)?;
         }
-        _ => return Err(TxBuildError::Cbor(format!("unknown dao redeemer: {action}"))),
+        _ => {
+            return Err(TxBuildError::Cbor(format!(
+                "unknown dao redeemer: {action}"
+            )))
+        }
     }
 
     Ok(buf)
@@ -248,13 +259,19 @@ pub fn encode_election_redeemer(action: &str, extra: Option<i64>) -> Result<Vec<
     match action {
         "open" => begin_constr(&mut encoder, 0, 0)?,
         "accept_nomination" => {
-            let idx = extra.ok_or_else(|| TxBuildError::Cbor("accept_nomination requires nominee_index".into()))?;
+            let idx = extra.ok_or_else(|| {
+                TxBuildError::Cbor("accept_nomination requires nominee_index".into())
+            })?;
             begin_constr(&mut encoder, 1, 1)?;
             encode_int(&mut encoder, idx)?;
         }
         "start_voting" => begin_constr(&mut encoder, 2, 0)?,
         "finalize" => begin_constr(&mut encoder, 3, 0)?,
-        _ => return Err(TxBuildError::Cbor(format!("unknown election redeemer: {action}"))),
+        _ => {
+            return Err(TxBuildError::Cbor(format!(
+                "unknown election redeemer: {action}"
+            )))
+        }
     }
 
     Ok(buf)
@@ -339,7 +356,10 @@ pub fn encode_proposal_datum(
 }
 
 /// Encode a `ProposalRedeemer` as Plutus Data CBOR.
-pub fn encode_proposal_redeemer(action: &str, vote_for: Option<bool>) -> Result<Vec<u8>, TxBuildError> {
+pub fn encode_proposal_redeemer(
+    action: &str,
+    vote_for: Option<bool>,
+) -> Result<Vec<u8>, TxBuildError> {
     let mut buf = Vec::new();
     let mut encoder = pallas_codec::minicbor::Encoder::new(&mut buf);
 
@@ -348,12 +368,17 @@ pub fn encode_proposal_redeemer(action: &str, vote_for: Option<bool>) -> Result<
         "approve" => begin_constr(&mut encoder, 1, 0)?,
         "cancel" => begin_constr(&mut encoder, 2, 0)?,
         "vote" => {
-            let in_favor = vote_for.ok_or_else(|| TxBuildError::Cbor("vote requires vote_for".into()))?;
+            let in_favor =
+                vote_for.ok_or_else(|| TxBuildError::Cbor("vote requires vote_for".into()))?;
             begin_constr(&mut encoder, 3, 1)?;
             encode_bool(&mut encoder, in_favor)?;
         }
         "resolve" => begin_constr(&mut encoder, 4, 0)?,
-        _ => return Err(TxBuildError::Cbor(format!("unknown proposal redeemer: {action}"))),
+        _ => {
+            return Err(TxBuildError::Cbor(format!(
+                "unknown proposal redeemer: {action}"
+            )))
+        }
     }
 
     Ok(buf)
@@ -369,7 +394,11 @@ pub fn encode_vote_receipt_redeemer(action: &str) -> Result<Vec<u8>, TxBuildErro
     match action {
         "mint" => begin_constr(&mut encoder, 0, 0)?,
         "burn" => begin_constr(&mut encoder, 1, 0)?,
-        _ => return Err(TxBuildError::Cbor(format!("unknown vote receipt redeemer: {action}"))),
+        _ => {
+            return Err(TxBuildError::Cbor(format!(
+                "unknown vote receipt redeemer: {action}"
+            )))
+        }
     }
 
     Ok(buf)
@@ -385,7 +414,11 @@ pub fn encode_soulbound_redeemer(action: &str) -> Result<Vec<u8>, TxBuildError> 
     match action {
         "update" => begin_constr(&mut encoder, 0, 0)?,
         "revoke" => begin_constr(&mut encoder, 1, 0)?,
-        _ => return Err(TxBuildError::Cbor(format!("unknown soulbound redeemer: {action}"))),
+        _ => {
+            return Err(TxBuildError::Cbor(format!(
+                "unknown soulbound redeemer: {action}"
+            )))
+        }
     }
 
     Ok(buf)
@@ -401,7 +434,11 @@ pub fn encode_reputation_mint_redeemer(action: &str) -> Result<Vec<u8>, TxBuildE
     match action {
         "mint" => begin_constr(&mut encoder, 0, 0)?,
         "burn" => begin_constr(&mut encoder, 1, 0)?,
-        _ => return Err(TxBuildError::Cbor(format!("unknown reputation mint redeemer: {action}"))),
+        _ => {
+            return Err(TxBuildError::Cbor(format!(
+                "unknown reputation mint redeemer: {action}"
+            )))
+        }
     }
 
     Ok(buf)
