@@ -1,6 +1,7 @@
 pub mod blockfrost;
 pub mod gov_tx_builder;
 pub mod governance;
+pub mod onchain_queue;
 pub mod plutus_data;
 pub mod policy;
 pub mod script_refs;

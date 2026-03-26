@@ -24,6 +24,8 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (14, "inline_content", MIGRATION_014),
     (15, "tutoring_sessions", MIGRATION_015),
     (16, "classrooms", MIGRATION_016),
+    (17, "storage_settings", MIGRATION_017),
+    (18, "onchain_governance_queue", MIGRATION_018),
 ];
 
 const MIGRATION_001: &str = r#"
@@ -912,6 +914,23 @@ CREATE INDEX IF NOT EXISTS idx_messages_classroom   ON classroom_messages(classr
 CREATE INDEX IF NOT EXISTS idx_calls_classroom      ON classroom_calls(classroom_id, status);
 "#;
 
+const MIGRATION_017: &str = r#"
+-- ============================================================
+-- Migration 017: App Settings & Storage Management
+-- Key-value store for persistent backend settings.
+-- Seeds the storage_quota_bytes default (0 = unlimited).
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS app_settings (
+    key        TEXT PRIMARY KEY,
+    value      TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+INSERT OR IGNORE INTO app_settings (key, value)
+VALUES ('storage_quota_bytes', '0');
+"#;
+
 const MIGRATION_015: &str = r#"
 -- ============================================================
 -- Migration 015: Tutoring Sessions
@@ -928,4 +947,31 @@ CREATE TABLE IF NOT EXISTS tutoring_sessions (
     created_at  TEXT NOT NULL DEFAULT (datetime('now')),
     ended_at    TEXT
 );
+"#;
+
+const MIGRATION_018: &str = r#"
+-- ============================================================
+-- Migration 018: On-Chain Governance Queue
+-- Persistent queue for async Plutus governance transactions.
+-- Local DB writes happen instantly; on-chain submissions are
+-- queued and retried until confirmed on Cardano.
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS onchain_governance_queue (
+    id            TEXT PRIMARY KEY,
+    action_type   TEXT NOT NULL,
+    payload_json  TEXT NOT NULL,
+    target_table  TEXT NOT NULL,
+    target_id     TEXT NOT NULL,
+    status        TEXT NOT NULL DEFAULT 'pending'
+                  CHECK (status IN ('pending', 'submitted', 'confirmed', 'failed')),
+    tx_hash       TEXT,
+    attempts      INTEGER NOT NULL DEFAULT 0,
+    last_error    TEXT,
+    created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_onchain_queue_status
+    ON onchain_governance_queue(status);
 "#;

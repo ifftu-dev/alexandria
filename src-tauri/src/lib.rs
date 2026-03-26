@@ -193,13 +193,18 @@ pub fn run() {
                         crate::diag::log("iroh startup: content_node started OK");
                         log::info!("iroh content node started successfully");
 
+                        // Backfill pins table for users upgrading from older versions
+                        if let Ok(db) = db_clone.lock() {
+                            ipfs::storage::backfill_pins(db.conn());
+                        }
+
                         // Initialize the content resolver with gateway fallback
                         match GatewayClient::with_defaults() {
                             Ok(gateway) => {
                                 let r = ContentResolver::new(
-                                    content_node_clone,
+                                    content_node_clone.clone(),
                                     gateway,
-                                    db_clone,
+                                    db_clone.clone(),
                                 );
                                 *resolver_clone.lock().await = Some(r);
                                 log::info!("content resolver initialized with IPFS gateway fallback");
@@ -207,6 +212,20 @@ pub fn run() {
                             Err(e) => {
                                 log::error!("failed to create gateway client: {e}");
                             }
+                        }
+
+                        // Run eviction at startup to catch incomplete evictions
+                        let result = ipfs::storage::maybe_evict(
+                            &content_node_clone,
+                            &db_clone,
+                        )
+                        .await;
+                        if result.blobs_evicted > 0 {
+                            log::info!(
+                                "startup eviction: freed {} bytes from {} blobs",
+                                result.bytes_freed,
+                                result.blobs_evicted
+                            );
                         }
                     }
                     Err(e) => {
@@ -408,6 +427,8 @@ pub fn run() {
             commands::governance::cancel_proposal,
             commands::governance::cast_proposal_vote,
             commands::governance::resolve_proposal,
+            commands::governance::get_onchain_queue_status,
+            commands::governance::retry_onchain_submission,
             // Reputation
             commands::reputation::get_reputation,
             commands::reputation::compute_reputation,
@@ -507,6 +528,11 @@ pub fn run() {
             commands::classroom::classroom_join_call,
             commands::classroom::classroom_end_call,
             commands::classroom::classroom_get_active_call,
+            // Storage management
+            commands::storage::storage_get_quota,
+            commands::storage::storage_set_quota,
+            commands::storage::storage_stats,
+            commands::storage::storage_evict_now,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

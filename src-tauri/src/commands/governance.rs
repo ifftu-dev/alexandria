@@ -1244,6 +1244,33 @@ pub async fn resolve_proposal(
     Ok(proposal)
 }
 
+// ---- On-Chain Queue Commands ----
+
+/// Get the status of all on-chain governance transaction submissions.
+#[tauri::command]
+pub async fn get_onchain_queue_status(
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::cardano::onchain_queue::QueueItem>, String> {
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
+    crate::cardano::onchain_queue::get_all(&db)
+}
+
+/// Retry a failed on-chain governance transaction.
+#[tauri::command]
+pub async fn retry_onchain_submission(
+    state: State<'_, AppState>,
+    queue_id: String,
+) -> Result<(), String> {
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
+    crate::cardano::onchain_queue::retry_item(&db, &queue_id)
+}
+
 // ---- Internal Helpers ----
 
 fn query_election(conn: &rusqlite::Connection, election_id: &str) -> Result<Election, String> {
