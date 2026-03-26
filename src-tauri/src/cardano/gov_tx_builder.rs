@@ -103,6 +103,7 @@ pub fn inject_plutus_fields(
 ///
 /// Mints a DAO state token via the dao_minting policy and creates the
 /// initial DAO UTxO at the dao_registry script address with inline datum.
+#[allow(clippy::too_many_arguments)]
 pub async fn build_create_dao_tx(
     _blockfrost: &BlockfrostClient,
     _payment_address: &str,
@@ -149,6 +150,7 @@ pub async fn build_create_dao_tx(
 }
 
 /// Build an OpenElection transaction.
+#[allow(clippy::too_many_arguments)]
 pub async fn build_open_election_tx(
     _blockfrost: &BlockfrostClient,
     _payment_address: &str,
