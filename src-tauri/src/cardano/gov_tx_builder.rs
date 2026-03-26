@@ -249,9 +249,10 @@ pub async fn build_install_committee_tx(
     ))
 }
 
-/// Check if governance validators have been deployed.
+/// Check if governance validators have been deployed as reference scripts.
 ///
-/// Returns false if any script hash is still the placeholder value.
+/// Script hashes are always available (computed from plutus.json).
+/// Returns false only if reference UTxOs haven't been deployed yet.
 pub fn validators_deployed() -> bool {
-    script_refs::DAO_REGISTRY_SCRIPT_HASH != "TODO_DEPLOY_AND_SET"
+    script_refs::ref_utxos_deployed()
 }

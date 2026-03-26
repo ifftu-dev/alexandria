@@ -105,7 +105,7 @@ futures = "0.3"
 # activated by the "tutoring-video" cargo feature which desktop Tauri config
 # and desktop build/release commands enable explicitly.
 iroh-gossip = "0.96"
-iroh-live = { git = "https://github.com/ifftu-dev/iroh-live", rev = "6e17f09", default-features = false }
+iroh-live = { git = "https://github.com/ifftu-dev/iroh-live", rev = "a7e3e0fa8c073021d7e140813197705eb0f670fd", default-features = false }
 postcard = { version = "1", features = ["alloc"] }
 blake3 = "1"
 

@@ -221,3 +221,120 @@ fn get_item(db: &Database, queue_id: &str) -> Result<Option<QueueItem>, String> 
         .optional()
         .map_err(|e| e.to_string())
 }
+
+/// Process pending queue items: attempt to build and submit on-chain transactions.
+///
+/// Called periodically from a background task. For each pending item:
+/// 1. Check if validators are deployed (skip all if not)
+/// 2. Attempt to build the Plutus transaction via gov_tx_builder
+/// 3. Submit via Blockfrost
+/// 4. Mark as submitted/failed accordingly
+///
+/// Returns the number of items processed.
+pub async fn process_queue(
+    db: &std::sync::Arc<std::sync::Mutex<crate::db::Database>>,
+    blockfrost: &Option<super::blockfrost::BlockfrostClient>,
+) -> Result<usize, String> {
+    // Skip if validators not deployed yet
+    if !super::gov_tx_builder::validators_deployed() {
+        return Ok(0);
+    }
+
+    // Skip if no Blockfrost client available
+    let bf = match blockfrost {
+        Some(ref client) => client,
+        None => return Ok(0),
+    };
+
+    // Get pending items
+    let items = {
+        let db_guard = db.lock().map_err(|_| "db lock poisoned".to_string())?;
+        get_pending(&db_guard)?
+    };
+
+    if items.is_empty() {
+        return Ok(0);
+    }
+
+    let mut processed = 0;
+
+    for item in &items {
+        // Skip items that have been attempted too many times
+        if item.attempts >= 5 {
+            let db_guard = db.lock().map_err(|_| "db lock poisoned".to_string())?;
+            mark_failed(&db_guard, &item.id, "max attempts (5) reached")?;
+            processed += 1;
+            continue;
+        }
+
+        log::info!(
+            "Processing on-chain queue item: {} ({}) attempt {}",
+            item.action_type,
+            item.id,
+            item.attempts + 1
+        );
+
+        // Attempt to build and submit the transaction
+        match build_and_submit(&item.action_type, bf).await {
+            Ok(tx_hash) => {
+                let db_guard = db.lock().map_err(|_| "db lock poisoned".to_string())?;
+                mark_submitted(&db_guard, &item.id, &tx_hash)?;
+                log::info!(
+                    "On-chain tx submitted: {} -> {}",
+                    item.action_type,
+                    tx_hash
+                );
+            }
+            Err(e) => {
+                let db_guard = db.lock().map_err(|_| "db lock poisoned".to_string())?;
+                mark_failed(&db_guard, &item.id, &e)?;
+                log::warn!("On-chain tx failed for {}: {}", item.action_type, e);
+            }
+        }
+
+        processed += 1;
+    }
+
+    Ok(processed)
+}
+
+/// Build and submit an on-chain transaction for a specific governance action.
+///
+/// Dispatches to the appropriate gov_tx_builder function based on action_type.
+/// Returns the transaction hash on success.
+async fn build_and_submit(
+    action_type: &str,
+    _blockfrost: &super::blockfrost::BlockfrostClient,
+) -> Result<String, String> {
+    // Each action type maps to a specific tx builder.
+    // Currently the builders return errors pending full Plutus implementation.
+    // Once reference scripts are deployed and the builders are complete,
+    // they will construct, sign, and submit the transaction.
+    match action_type {
+        "open_election" => {
+            Err("open_election tx builder awaiting reference script deployment".into())
+        }
+        "cast_election_vote" => {
+            Err("cast_election_vote tx builder awaiting reference script deployment".into())
+        }
+        "finalize_election" => {
+            Err("finalize_election tx builder awaiting reference script deployment".into())
+        }
+        "install_committee" => {
+            Err("install_committee tx builder awaiting reference script deployment".into())
+        }
+        "submit_proposal" => {
+            Err("submit_proposal tx builder awaiting reference script deployment".into())
+        }
+        "approve_proposal" => {
+            Err("approve_proposal tx builder awaiting reference script deployment".into())
+        }
+        "cast_proposal_vote" => {
+            Err("cast_proposal_vote tx builder awaiting reference script deployment".into())
+        }
+        "resolve_proposal" => {
+            Err("resolve_proposal tx builder awaiting reference script deployment".into())
+        }
+        other => Err(format!("unknown governance action type: {other}")),
+    }
+}

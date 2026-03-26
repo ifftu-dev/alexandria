@@ -31,7 +31,7 @@ use image::ImageEncoder;
 use iroh::{Endpoint, EndpointId};
 use iroh_gossip::net::Gossip;
 use iroh_live::media::audio::{AudioBackend, DeviceId, InputStream, OutputStream};
-use iroh_live::media::av::{AudioFormat, AudioPreset, AudioSinkHandle, VideoPreset};
+use iroh_live::media::av::{AudioPreset, AudioSinkHandle, VideoPreset};
 use iroh_live::media::opus::PureOpusDecoder;
 use iroh_live::media::opus::PureOpusEncoder;
 use iroh_live::media::publish::{AudioRenditions, PublishBroadcast, VideoRenditions};
@@ -415,6 +415,7 @@ struct ActiveSession {
     /// SubscribeBroadcast handles — kept alive so the BroadcastConsumer doesn't
     /// drop and close the MoQ track subscriptions (audio/video).
     _subscribe_broadcasts: Vec<SubscribeBroadcast>,
+    _repair_broadcast_keys: HashSet<String>,
     _subscribed_audio_keys: HashSet<String>,
     _subscribed_video_keys: HashSet<String>,
     remote_broadcasts: Vec<(EndpointId, String)>,
@@ -771,9 +772,11 @@ impl TutoringManager {
                     return;
                 }
 
-                // [session setCategory:category withOptions:(DefaultToSpeaker|AllowBluetooth|AllowBluetoothA2DP) error:nil]
-                // Options: DefaultToSpeaker (0x02) | AllowBluetooth (0x04) | AllowBluetoothA2DP (0x20)
-                let options: u64 = 0x02 | 0x04 | 0x20;
+                // [session setCategory:category withOptions:(DefaultToSpeaker|AllowBluetooth) error:nil]
+                //
+                // Do not request AllowBluetoothA2DP here. For two-way tutoring/call audio we
+                // want the system's voice route selection, not high-quality output-only A2DP.
+                let options: u64 = 0x02 | 0x04;
                 let set_cat_sel =
                     sel_registerName(b"setCategory:withOptions:error:\0".as_ptr() as *const i8);
                 let nil: Id = std::ptr::null_mut();
@@ -812,7 +815,7 @@ impl TutoringManager {
 
                 log::info!("tutoring: AVAudioSession configured for PlayAndRecord");
                 crate::diag::log(
-                    "iOS audio session configured: PlayAndRecord + VideoChat + DefaultToSpeaker",
+                    "iOS audio session configured: PlayAndRecord + VideoChat + DefaultToSpeaker + AllowBluetooth",
                 );
 
                 register_audio_session_observer();
@@ -826,8 +829,8 @@ impl TutoringManager {
     /// dispatched to the main thread — iOS requires it.
     /// Uses spawn_blocking + timeout to prevent indefinite hangs.
     async fn try_create_audio_backend(
-        input_device_id: Option<DeviceId>,
-        output_device_id: Option<DeviceId>,
+        _input_device_id: Option<DeviceId>,
+        _output_device_id: Option<DeviceId>,
     ) -> Option<AudioBackend> {
         crate::diag::log("try_create_audio_backend: starting...");
 
@@ -838,11 +841,14 @@ impl TutoringManager {
             tokio::task::spawn_blocking(move || {
                 // Configure iOS audio session first — required before any CoreAudio usage.
                 Self::configure_ios_audio_session();
+                crate::diag::log(
+                    "try_create_audio_backend: using system-selected iOS audio route (device IDs ignored)",
+                );
 
                 // CoreAudio (cpal) init also needs the main thread on iOS.
                 run_on_main_thread(move || {
                     std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
-                        AudioBackend::new_with_devices(input_device_id, output_device_id)
+                        AudioBackend::new_with_devices(None, None)
                     }))
                 })
             }),
@@ -935,6 +941,16 @@ impl TutoringManager {
         {
             let mut guard = inner.lock().await;
             if let Some(session) = guard.as_mut() {
+                if let Some(existing) = session.output_stream.clone() {
+                    existing.resume();
+                    if existing.is_active() {
+                        session
+                            .remote_output_streams
+                            .insert(remote_key.to_string(), existing.clone());
+                        return Some(existing);
+                    }
+                    session.output_stream = None;
+                }
                 if let Some(existing) = session.remote_output_streams.get(remote_key).cloned() {
                     existing.resume();
                     if existing.is_active() {
@@ -950,7 +966,7 @@ impl TutoringManager {
         }
 
         let ctx = audio_ctx.as_ref()?;
-        let output = match ctx.output(AudioFormat::mono_48k()).await {
+        let output = match ctx.default_output().await {
             Ok(output) => output,
             Err(err) => {
                 log::warn!("tutoring: audio output unavailable for {remote_key}: {err}");
@@ -962,13 +978,19 @@ impl TutoringManager {
 
         let mut guard = inner.lock().await;
         if let Some(session) = guard.as_mut() {
+            if session.output_stream.is_none() {
+                session.output_stream = Some(output.clone());
+            }
             let entry = session
                 .remote_output_streams
                 .entry(remote_key.to_string())
                 .or_insert_with(|| output.clone())
                 .clone();
+            if let Some(shared) = session.output_stream.clone() {
+                shared.resume();
+                return Some(shared);
+            }
             entry.resume();
-            session.output_stream = Some(entry.clone());
             Some(entry)
         } else {
             None
@@ -978,7 +1000,7 @@ impl TutoringManager {
     async fn create_session_output(audio_ctx: &Option<AudioBackend>) -> Option<OutputStream> {
         Self::configure_ios_audio_session();
         let ctx = audio_ctx.as_ref()?;
-        match ctx.output(AudioFormat::mono_48k()).await {
+        match ctx.default_output().await {
             Ok(output) => {
                 output.resume();
                 Some(output)
@@ -988,6 +1010,228 @@ impl TutoringManager {
                 None
             }
         }
+    }
+
+    async fn clear_remote_audio_subscription(
+        inner: &Arc<Mutex<Option<ActiveSession>>>,
+        audio_key: &str,
+        remote_key: &str,
+    ) {
+        let mut guard = inner.lock().await;
+        if let Some(session) = guard.as_mut() {
+            session._subscribed_audio_keys.remove(audio_key);
+            session.remote_output_streams.remove(remote_key);
+        }
+    }
+
+    async fn clear_remote_video_subscription(
+        inner: &Arc<Mutex<Option<ActiveSession>>>,
+        video_key: &str,
+    ) {
+        let mut guard = inner.lock().await;
+        if let Some(session) = guard.as_mut() {
+            session._subscribed_video_keys.remove(video_key);
+        }
+    }
+
+    async fn repair_remote_audio_subscription(
+        inner: &Arc<Mutex<Option<ActiveSession>>>,
+        audio_ctx: &Option<AudioBackend>,
+        broadcast: &SubscribeBroadcast,
+        node_id: &str,
+        name: &str,
+    ) {
+        if broadcast.catalog().audio.is_none() {
+            return;
+        }
+
+        let short_id = node_id[..node_id.len().min(12)].to_string();
+        let audio_key = format!("{node_id}:{name}:audio");
+        let remote_audio_key = format!("{node_id}:{name}");
+        let should_subscribe = {
+            let mut guard = inner.lock().await;
+            if let Some(session) = guard.as_mut() {
+                session._subscribed_audio_keys.insert(audio_key.clone())
+            } else {
+                false
+            }
+        };
+
+        if !should_subscribe {
+            return;
+        }
+
+        crate::diag::log(&format!("  [{short_id}] audio repair: getting output"));
+        let Some(audio_out) =
+            Self::get_or_create_remote_output(inner, audio_ctx, &remote_audio_key).await
+        else {
+            crate::diag::log(&format!("  [{short_id}] audio repair: no output"));
+            Self::clear_remote_audio_subscription(inner, &audio_key, &remote_audio_key).await;
+            return;
+        };
+
+        match broadcast.listen::<PureOpusDecoder>(audio_out) {
+            Ok(audio_track) => {
+                log::info!("tutoring: listening to audio from {short_id}:{name}");
+                crate::diag::log(&format!("  [{short_id}] audio repair: listen OK"));
+                Self::push_log(inner, format!("audio_listen OK: {short_id}:{name}")).await;
+                let inner_audio = inner.clone();
+                let nid_audio = node_id.to_string();
+                let bname_audio = name.to_string();
+                let sub_key_audio = audio_key.clone();
+                let remote_audio_key_for_cleanup = remote_audio_key.clone();
+                let audio_keepalive = tokio::spawn(async move {
+                    audio_track.stopped().await;
+                    log::warn!("tutoring: audio track stopped for {nid_audio}:{bname_audio}");
+                    crate::diag::log(&format!(
+                        "audio_track[{nid_audio}]: STOPPED for {bname_audio}"
+                    ));
+                    Self::clear_remote_audio_subscription(
+                        &inner_audio,
+                        &sub_key_audio,
+                        &remote_audio_key_for_cleanup,
+                    )
+                    .await;
+                });
+                let mut guard = inner.lock().await;
+                if let Some(session) = guard.as_mut() {
+                    session._tasks.push(audio_keepalive);
+                }
+            }
+            Err(e) => {
+                log::warn!("tutoring: no audio track for {short_id}:{name}: {e}");
+                crate::diag::log(&format!("  [{short_id}] audio repair ERR: {e}"));
+                Self::clear_remote_audio_subscription(inner, &audio_key, &remote_audio_key).await;
+                Self::push_log(inner, format!("ERR audio_listen: {short_id}:{name}: {e}")).await;
+            }
+        }
+    }
+
+    async fn repair_remote_video_subscription(
+        inner: &Arc<Mutex<Option<ActiveSession>>>,
+        broadcast: &SubscribeBroadcast,
+        node_id: &str,
+        name: &str,
+        app_handle: &AppHandle,
+    ) {
+        let catalog = broadcast.catalog();
+        if catalog.video.is_none() {
+            return;
+        }
+
+        let short_id = node_id[..node_id.len().min(12)].to_string();
+        let video_key = format!("{node_id}:{name}:video");
+        let should_watch = {
+            let mut guard = inner.lock().await;
+            if let Some(session) = guard.as_mut() {
+                session._subscribed_video_keys.insert(video_key.clone())
+            } else {
+                false
+            }
+        };
+
+        if !should_watch {
+            return;
+        }
+
+        crate::diag::log(&format!(
+            "  [{short_id}] video repair: subscribing (VtDecoder, quality=High)..."
+        ));
+        match catalog.select_video_rendition(iroh_live::media::av::Quality::High) {
+            Ok(selected) => {
+                crate::diag::log(&format!(
+                    "  [{short_id}] video repair: selected rendition {selected}"
+                ));
+            }
+            Err(e) => {
+                crate::diag::log(&format!(
+                    "  [{short_id}] video repair: rendition selection failed: {e:#}"
+                ));
+            }
+        }
+
+        match broadcast.watch_with::<VtDecoder>(
+            &iroh_live::media::av::DecodeConfig::default(),
+            iroh_live::media::av::Quality::High,
+        ) {
+            Ok(video_track) => {
+                log::info!("tutoring: watching video from {short_id}:{name}");
+                crate::diag::log(&format!("  [{short_id}] video repair: watch OK"));
+                Self::push_log(inner, format!("video_watch OK: {short_id}:{name}")).await;
+                Self::spawn_frame_bridge_inner(
+                    video_track,
+                    node_id.to_string(),
+                    app_handle.clone(),
+                    Some(inner.clone()),
+                    Some(video_key),
+                    None,
+                    None,
+                );
+            }
+            Err(e) => {
+                log::info!("tutoring: no video track for {short_id}:{name}: {e:#}");
+                crate::diag::log(&format!("  [{short_id}] video repair ERR: {e:#}"));
+                Self::clear_remote_video_subscription(inner, &video_key).await;
+                Self::push_log(inner, format!("ERR video_watch: {short_id}:{name}: {e:#}")).await;
+            }
+        }
+    }
+
+    fn spawn_remote_broadcast_repair_task(
+        inner: Arc<Mutex<Option<ActiveSession>>>,
+        audio_ctx: Option<AudioBackend>,
+        broadcast: SubscribeBroadcast,
+        node_id: String,
+        name: String,
+        app_handle: AppHandle,
+    ) -> JoinHandle<()> {
+        tokio::spawn(async move {
+            let repair_key = format!("{node_id}:{name}:repair");
+            let closed = broadcast.closed();
+            tokio::pin!(closed);
+            let mut interval = tokio::time::interval(Duration::from_secs(2));
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+
+            loop {
+                tokio::select! {
+                    _ = &mut closed => {
+                        crate::diag::log(&format!("repair[{node_id}:{name}]: broadcast closed"));
+                        break;
+                    }
+                    _ = interval.tick() => {
+                        let active = {
+                            let guard = inner.lock().await;
+                            guard.is_some()
+                        };
+                        if !active {
+                            break;
+                        }
+
+                        Self::repair_remote_audio_subscription(
+                            &inner,
+                            &audio_ctx,
+                            &broadcast,
+                            &node_id,
+                            &name,
+                        )
+                        .await;
+                        Self::repair_remote_video_subscription(
+                            &inner,
+                            &broadcast,
+                            &node_id,
+                            &name,
+                            &app_handle,
+                        )
+                        .await;
+                    }
+                }
+            }
+
+            let mut guard = inner.lock().await;
+            if let Some(session) = guard.as_mut() {
+                session._repair_broadcast_keys.remove(&repair_key);
+            }
+        })
     }
 
     fn now_millis() -> u64 {
@@ -1139,6 +1383,7 @@ impl TutoringManager {
             home_relay,
             _moq_sessions: Vec::new(),
             _subscribe_broadcasts: Vec::new(),
+            _repair_broadcast_keys: HashSet::new(),
             _subscribed_audio_keys: HashSet::new(),
             _subscribed_video_keys: HashSet::new(),
             remote_broadcasts: Vec::new(),
@@ -1301,6 +1546,7 @@ impl TutoringManager {
             home_relay,
             _moq_sessions: Vec::new(),
             _subscribe_broadcasts: Vec::new(),
+            _repair_broadcast_keys: HashSet::new(),
             _subscribed_audio_keys: HashSet::new(),
             _subscribed_video_keys: HashSet::new(),
             remote_broadcasts: Vec::new(),
@@ -1722,53 +1968,42 @@ impl TutoringManager {
                     log::info!("tutoring: app returning to foreground, waiting 1s for connections to stabilize");
                     tokio::time::sleep(Duration::from_secs(1)).await;
                     log::info!("tutoring: restarting camera after foreground return");
-                    let mut remotes_to_resubscribe: Vec<(EndpointId, String)> = Vec::new();
-                    let mut guard = manager_inner.lock().await;
-                    if let Some(session) = guard.as_mut() {
-                        if !session.video_enabled {
-                            let camera_result = run_on_main_thread(|| IosCameraSource::front());
-                            match camera_result {
-                                Ok(camera) => {
-                                    let renditions = VideoRenditions::new::<VtEncoder>(
-                                        camera,
-                                        MOBILE_VIDEO_PRESETS,
-                                    );
-                                    if session.broadcast.set_video(Some(renditions)).is_ok() {
-                                        session.video_enabled = true;
-                                        let preview = Self::start_self_preview(
-                                            &mut session.broadcast,
-                                            session.app_handle.clone(),
-                                        );
-                                        session.self_preview_task = preview;
-                                        log::info!("tutoring: camera restarted (foreground)");
-                                    }
-                                }
-                                Err(e) => {
-                                    log::warn!(
-                                        "tutoring: failed to restart camera after unlock: {e}"
-                                    );
-                                }
-                            }
-                        }
-                        remotes_to_resubscribe = session.remote_broadcasts.clone();
-                        session._subscribed_video_keys.clear();
-                    } else {
-                        break;
-                    }
-                    drop(guard);
-                    for (endpoint, name) in remotes_to_resubscribe {
+                    let should_continue = {
                         let mut guard = manager_inner.lock().await;
                         if let Some(session) = guard.as_mut() {
-                            if let Err(e) = session
-                                .handle
-                                .force_resubscribe(endpoint, name.as_str())
-                                .await
-                            {
-                                log::warn!("tutoring: force_resubscribe failed for {name}: {e}");
+                            if !session.video_enabled {
+                                let camera_result = run_on_main_thread(|| IosCameraSource::front());
+                                match camera_result {
+                                    Ok(camera) => {
+                                        let renditions = VideoRenditions::new::<VtEncoder>(
+                                            camera,
+                                            MOBILE_VIDEO_PRESETS,
+                                        );
+                                        if session.broadcast.set_video(Some(renditions)).is_ok() {
+                                            session.video_enabled = true;
+                                            let preview = Self::start_self_preview(
+                                                &mut session.broadcast,
+                                                session.app_handle.clone(),
+                                            );
+                                            session.self_preview_task = preview;
+                                            log::info!("tutoring: camera restarted (foreground)");
+                                        }
+                                    }
+                                    Err(e) => {
+                                        log::warn!(
+                                            "tutoring: failed to restart camera after unlock: {e}"
+                                        );
+                                    }
+                                }
                             }
+                            session._subscribed_video_keys.clear();
+                            true
                         } else {
-                            break;
+                            false
                         }
+                    };
+                    if !should_continue {
+                        break;
                     }
                 }
 
@@ -2027,20 +2262,13 @@ impl TutoringManager {
                     log::info!("tutoring: subscribed to {short_id}:{name}");
                     crate::diag::log(&format!("BroadcastSubscribed: {short_id}:{name}"));
 
-                    let audio_key = format!("{node_id}:{name}:audio");
-                    let video_key = format!("{node_id}:{name}:video");
-                    let (audio_duplicate, video_duplicate) = {
+                    let repair_key = format!("{node_id}:{name}:repair");
+                    let spawn_repair_task = {
                         let mut guard = inner.lock().await;
                         if let Some(session) = guard.as_mut() {
-                            let audio_dup =
-                                !session._subscribed_audio_keys.insert(audio_key.clone());
-                            let video_dup =
-                                !session._subscribed_video_keys.insert(video_key.clone());
-                            if (!audio_dup || !video_dup)
-                                && !session.remote_broadcasts.iter().any(|(endpoint, bname)| {
-                                    *endpoint == remote_endpoint && *bname == name
-                                })
-                            {
+                            if !session.remote_broadcasts.iter().any(|(endpoint, bname)| {
+                                *endpoint == remote_endpoint && *bname == name
+                            }) {
                                 session
                                     .remote_broadcasts
                                     .push((remote_endpoint, name.clone()));
@@ -2066,37 +2294,10 @@ impl TutoringManager {
                                 session.recent_logs.remove(0);
                             }
                             session.recent_logs.push(msg);
-                            (audio_dup, video_dup)
+                            session._repair_broadcast_keys.insert(repair_key)
                         } else {
-                            (true, true)
+                            false
                         }
-                    };
-
-                    // ── Audio subscription ──────────────────────────
-                    let remote_audio_key = format!("{node_id}:{name}");
-                    let audio_out = if audio_duplicate {
-                        crate::diag::log(&format!(
-                            "  [{short_id}] audio already active, skipping duplicate subscribe"
-                        ));
-                        None
-                    } else {
-                        crate::diag::log(&format!(
-                            "  [{short_id}] step 1: getting audio output..."
-                        ));
-                        let output = Self::get_or_create_remote_output(
-                            &inner,
-                            &audio_ctx,
-                            &remote_audio_key,
-                        )
-                        .await;
-                        if output.is_some() {
-                            crate::diag::log(&format!("  [{short_id}] audio output OK"));
-                        } else {
-                            crate::diag::log(&format!(
-                                "  [{short_id}] no audio output available, skipping audio"
-                            ));
-                        }
-                        output
                     };
 
                     let catalog_has_audio = broadcast.catalog().audio.is_some();
@@ -2106,89 +2307,10 @@ impl TutoringManager {
                             "tutoring: catalog from {short_id}:{name} has NO audio renditions"
                         );
                     }
-                    if let Some(audio_out) = audio_out {
-                        crate::diag::log(&format!(
-                            "  [{short_id}] step 2: subscribing to audio..."
-                        ));
-                        match broadcast.listen::<PureOpusDecoder>(audio_out) {
-                            Ok(audio_track) => {
-                                log::info!("tutoring: listening to audio from {short_id}:{name}");
-                                crate::diag::log(&format!("  [{short_id}] audio_listen OK"));
-                                Self::push_log(
-                                    &inner,
-                                    format!("audio_listen OK: {short_id}:{name}"),
-                                )
-                                .await;
-                                let inner_audio = inner.clone();
-                                let nid_audio = node_id.clone();
-                                let bname_audio = name.clone();
-                                let sub_key_audio = audio_key.clone();
-                                let remote_audio_key_for_cleanup = remote_audio_key.clone();
-                                let remote_endpoint_audio = remote_endpoint;
-                                let audio_keepalive = tokio::spawn(async move {
-                                    audio_track.stopped().await;
-                                    log::warn!("tutoring: audio track stopped for {nid_audio}:{bname_audio}");
-                                    crate::diag::log(&format!(
-                                        "audio_track[{nid_audio}]: STOPPED for {bname_audio}"
-                                    ));
-                                    tokio::time::sleep(Duration::from_secs(3)).await;
-                                    let handle = {
-                                        let mut guard = inner_audio.lock().await;
-                                        if let Some(session) = guard.as_mut() {
-                                            session._subscribed_audio_keys.remove(&sub_key_audio);
-                                            session
-                                                .remote_output_streams
-                                                .remove(&remote_audio_key_for_cleanup);
-                                            Some(session.handle.clone())
-                                        } else {
-                                            None
-                                        }
-                                    };
-                                    if let Some(handle) = handle {
-                                        if let Err(e) = handle
-                                            .force_resubscribe(
-                                                remote_endpoint_audio,
-                                                bname_audio.as_str(),
-                                            )
-                                            .await
-                                        {
-                                            log::warn!(
-                                                "tutoring: audio force_resubscribe failed: {e}"
-                                            );
-                                        }
-                                    }
-                                });
-                                {
-                                    let mut guard = inner.lock().await;
-                                    if let Some(session) = guard.as_mut() {
-                                        session._tasks.push(audio_keepalive);
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                log::warn!("tutoring: no audio track for {short_id}:{name}: {e}");
-                                crate::diag::log(&format!("  [{short_id}] audio_listen ERR: {e}"));
-                                let mut guard = inner.lock().await;
-                                if let Some(session) = guard.as_mut() {
-                                    session._subscribed_audio_keys.remove(&audio_key);
-                                }
-                                drop(guard);
-                                Self::push_log(
-                                    &inner,
-                                    format!("ERR audio_listen: {short_id}:{name}: {e}"),
-                                )
-                                .await;
-                            }
-                        }
-                    } else if !audio_duplicate {
-                        log::warn!(
-                            "tutoring: no audio output available, skipping audio for {short_id}:{name}"
-                        );
-                        let mut guard = inner.lock().await;
-                        if let Some(session) = guard.as_mut() {
-                            session._subscribed_audio_keys.remove(&audio_key);
-                        }
-                    }
+                    Self::repair_remote_audio_subscription(
+                        &inner, &audio_ctx, &broadcast, &node_id, &name,
+                    )
+                    .await;
 
                     // ── Video subscription ──────────────────────────
                     // Log catalog contents for debugging
@@ -2211,66 +2333,16 @@ impl TutoringManager {
                         }
                     }
 
-                    if video_duplicate {
-                        crate::diag::log(&format!(
-                            "  [{short_id}] video already active, skipping duplicate subscribe"
-                        ));
-                    } else {
-                        crate::diag::log(&format!(
-                            "  [{short_id}] step 4: subscribing to video (VtDecoder, quality=High)..."
-                        ));
-                        match catalog.select_video_rendition(iroh_live::media::av::Quality::High) {
-                            Ok(selected) => {
-                                crate::diag::log(&format!(
-                                    "  [{short_id}] selected video rendition for High: {selected}"
-                                ));
-                            }
-                            Err(e) => {
-                                crate::diag::log(&format!(
-                                    "  [{short_id}] failed to select video rendition for High: {e:#}"
-                                ));
-                            }
-                        }
-                        match broadcast.watch_with::<VtDecoder>(
-                            &iroh_live::media::av::DecodeConfig::default(),
-                            iroh_live::media::av::Quality::High,
-                        ) {
-                            Ok(video_track) => {
-                                log::info!("tutoring: watching video from {short_id}:{name}");
-                                crate::diag::log(&format!(
-                                    "  [{short_id}] video_watch OK, spawning frame bridge"
-                                ));
-                                Self::push_log(
-                                    &inner,
-                                    format!("video_watch OK: {short_id}:{name}"),
-                                )
-                                .await;
-                                Self::spawn_frame_bridge_inner(
-                                    video_track,
-                                    node_id.clone(),
-                                    app_handle.clone(),
-                                    Some(inner.clone()),
-                                    Some(video_key.clone()),
-                                    Some(remote_endpoint),
-                                    Some(name.clone()),
-                                );
-                            }
-                            Err(e) => {
-                                log::info!("tutoring: no video track for {short_id}:{name}: {e:#}");
-                                crate::diag::log(&format!("  [{short_id}] video_watch ERR: {e:#}"));
-                                let mut guard = inner.lock().await;
-                                if let Some(session) = guard.as_mut() {
-                                    session._subscribed_video_keys.remove(&video_key);
-                                }
-                                drop(guard);
-                                Self::push_log(
-                                    &inner,
-                                    format!("ERR video_watch: {short_id}:{name}: {e:#}"),
-                                )
-                                .await;
-                            }
-                        }
-                    }
+                    Self::repair_remote_video_subscription(
+                        &inner,
+                        &broadcast,
+                        &node_id,
+                        &name,
+                        &app_handle,
+                    )
+                    .await;
+
+                    let broadcast_for_repair = broadcast.clone();
 
                     // Keep SubscribeBroadcast alive — dropping it closes the
                     // BroadcastConsumer which kills all subscribed tracks.
@@ -2278,6 +2350,21 @@ impl TutoringManager {
                         let mut guard = inner.lock().await;
                         if let Some(session) = guard.as_mut() {
                             session._subscribe_broadcasts.push(broadcast);
+                        }
+                    }
+
+                    if spawn_repair_task {
+                        let repair_task = Self::spawn_remote_broadcast_repair_task(
+                            inner.clone(),
+                            audio_ctx.clone(),
+                            broadcast_for_repair,
+                            node_id,
+                            name,
+                            app_handle.clone(),
+                        );
+                        let mut guard = inner.lock().await;
+                        if let Some(session) = guard.as_mut() {
+                            session._tasks.push(repair_task);
                         }
                     }
 
@@ -2316,8 +2403,8 @@ impl TutoringManager {
         app_handle: AppHandle,
         session_inner: Option<Arc<Mutex<Option<ActiveSession>>>>,
         subscription_key: Option<String>,
-        remote_endpoint: Option<EndpointId>,
-        broadcast_name: Option<String>,
+        _remote_endpoint: Option<EndpointId>,
+        _broadcast_name: Option<String>,
     ) -> JoinHandle<()> {
         let (mut frames, handle) = watch.split();
         let is_self_preview = node_id == "self";
@@ -2439,33 +2526,10 @@ impl TutoringManager {
                             },
                         );
                         if let (Some(inner_ref), Some(key)) = (&session_inner, &subscription_key) {
-                            let handle = {
-                                let mut guard = inner_ref.lock().await;
-                                if let Some(session) = guard.as_mut() {
-                                    session._subscribed_video_keys.remove(key);
-                                    crate::diag::log(&format!(
-                                        "frame_bridge[{node_id}]: cleared video key {key}"
-                                    ));
-                                    if let (Some(endpoint), Some(name)) =
-                                        (remote_endpoint, broadcast_name.clone())
-                                    {
-                                        Some((session.handle.clone(), endpoint, name))
-                                    } else {
-                                        None
-                                    }
-                                } else {
-                                    None
-                                }
-                            };
-                            if let Some((handle, endpoint, name)) = handle {
-                                tokio::time::sleep(Duration::from_millis(500)).await;
-                                if let Err(e) = handle.force_resubscribe(endpoint, name).await {
-                                    log::warn!("tutoring: video force_resubscribe failed: {e}");
-                                    crate::diag::log(&format!(
-                                        "frame_bridge[{node_id}]: video force_resubscribe failed: {e}"
-                                    ));
-                                }
-                            }
+                            Self::clear_remote_video_subscription(inner_ref, key).await;
+                            crate::diag::log(&format!(
+                                "frame_bridge[{node_id}]: cleared video key {key}"
+                            ));
                         }
                         break;
                     }
