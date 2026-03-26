@@ -162,7 +162,7 @@ jobs:
       - name: Maximize build space
         uses: easimon/maximize-build-space@v10
         with:
-          root-reserve-mb: 3072
+          root-reserve-mb: 10240
           remove-dotnet: 'true'
           remove-android: 'true'
           remove-haskell: 'true'
@@ -259,7 +259,7 @@ jobs:
       - name: Maximize build space
         uses: easimon/maximize-build-space@v10
         with:
-          root-reserve-mb: 3072
+          root-reserve-mb: 10240
           remove-dotnet: 'true'
           remove-android: 'true'
           remove-haskell: 'true'
@@ -372,6 +372,7 @@ jobs:
           & 'C:\msys64\usr\bin\bash.exe' -lc "pacman -S --noconfirm --needed libtool automake autoconf make m4"
           Remove-Item 'C:\msys64\usr\bin\link.exe' -Force -ErrorAction SilentlyContinue
           $env:PATH = "C:\msys64\usr\bin;$env:PATH"
+          Add-Content -Path $env:GITHUB_ENV -Value "PATH=$env:PATH"
           Add-Content -Path $env:GITHUB_PATH -Value 'C:\msys64\usr\bin'
           Get-Command libtoolize
 
