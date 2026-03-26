@@ -23,14 +23,27 @@ env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
   TAURI_CLI_VERSION: 2.10.0
+  RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || inputs.tag }}
 
 concurrency:
   group: ${{ github.workflow }}-${{ inputs.tag || github.ref }}
   cancel-in-progress: true
 
 jobs:
+  validate-release-tag:
+    name: Validate release tag
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ensure a release tag is available
+        run: |
+          if [ -z "${RELEASE_TAG}" ]; then
+            echo "workflow_dispatch runs must set the tag input (for example: v1.0.0)." >&2
+            exit 1
+          fi
+
   build-ios:
     name: Build iOS
+    needs: validate-release-tag
     if: vars.ENABLE_IOS_RELEASE == 'true' || inputs.include_ios == true
     runs-on: macos-latest
     timeout-minutes: 90
@@ -96,13 +109,14 @@ jobs:
       - name: Upload iOS artifact
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name || inputs.tag }}
+          tag_name: ${{ env.RELEASE_TAG }}
           files: |
             alexandria/src-tauri/gen/apple/build/**/*.ipa
           fail_on_unmatched_files: false
 
   build-android:
     name: Build Android
+    needs: validate-release-tag
     runs-on: ubuntu-latest
     timeout-minutes: 90
 
@@ -202,7 +216,7 @@ jobs:
       - name: Upload Android artifacts
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name || inputs.tag }}
+          tag_name: ${{ env.RELEASE_TAG }}
           files: |
             alexandria/src-tauri/gen/android/app/build/outputs/apk/universal/release/*.apk
             alexandria/src-tauri/gen/android/app/build/outputs/bundle/universalRelease/*.aab

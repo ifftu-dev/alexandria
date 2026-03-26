@@ -23,6 +23,7 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || inputs.tag }}
 
 concurrency:
   group: ${{ github.workflow }}-${{ inputs.tag || github.ref }}
@@ -36,12 +37,19 @@ jobs:
       release_id: ${{ steps.create.outputs.id }}
       release_upload_url: ${{ steps.create.outputs.upload_url }}
     steps:
+      - name: Validate release tag
+        run: |
+          if [ -z "${RELEASE_TAG}" ]; then
+            echo "workflow_dispatch runs must set the tag input (for example: v1.0.0)." >&2
+            exit 1
+          fi
+
       - name: Create draft release
         id: create
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name || inputs.tag }}
-          name: Alexandria ${{ github.ref_name || inputs.tag }}
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: Alexandria ${{ env.RELEASE_TAG }}
           draft: true
           generate_release_notes: false
 
@@ -435,7 +443,7 @@ jobs:
         if: env.HAS_WINDOWS_CERT == 'true'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name || inputs.tag }}
+          tag_name: ${{ env.RELEASE_TAG }}
           files: alexandria/src-tauri/target/release/bundle/nsis/*_x64-setup.exe
           fail_on_unmatched_files: true
 
@@ -464,7 +472,7 @@ jobs:
       - name: Generate latest.json for auto-updater
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_TAG: ${{ github.ref_name || inputs.tag }}
+          RELEASE_TAG: ${{ env.RELEASE_TAG }}
           BUILD_LINUX_ARM64_RESULT: ${{ needs.build-linux-arm64.result }}
         run: |
           set -euo pipefail
@@ -528,12 +536,12 @@ jobs:
       - name: Upload latest.json to release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name || inputs.tag }}
+          tag_name: ${{ env.RELEASE_TAG }}
           files: latest.json
           fail_on_unmatched_files: false
 
       - name: Publish release (draft → public)
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name || inputs.tag }}
+          tag_name: ${{ env.RELEASE_TAG }}
           draft: false
