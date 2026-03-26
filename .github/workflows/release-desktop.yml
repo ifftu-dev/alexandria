@@ -80,7 +80,15 @@ jobs:
               --notes ""
           fi
 
-          release_json=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}")
+          release_json=$(
+            gh api "repos/${GITHUB_REPOSITORY}/releases" --paginate |
+              jq -c --arg tag "${RELEASE_TAG}" 'map(select(.tag_name == $tag)) | first'
+          )
+          if [ "${release_json}" = "null" ] || [ -z "${release_json}" ]; then
+            echo "Could not locate draft release for tag ${RELEASE_TAG} after create/edit." >&2
+            exit 1
+          fi
+
           echo "id=$(echo "${release_json}" | jq -r .id)" >> "${GITHUB_OUTPUT}"
           echo "upload_url=$(echo "${release_json}" | jq -r .upload_url)" >> "${GITHUB_OUTPUT}"
 
