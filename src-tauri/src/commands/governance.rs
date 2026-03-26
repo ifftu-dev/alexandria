@@ -11,6 +11,7 @@
 use rusqlite::params;
 use tauri::State;
 
+use crate::cardano::onchain_queue;
 use crate::crypto::hash::entity_id;
 use crate::domain::governance::{
     DaoInfo, DaoMember, Election, ElectionNominee, ElectionVote, OpenElectionParams, Proposal,
@@ -162,6 +163,15 @@ fn check_after_deadline(deadline: Option<&str>, action: &str) -> Result<(), Stri
         }
     }
     Ok(())
+}
+
+/// Fire-and-forget enqueue for on-chain governance transactions.
+/// Logs a warning if enqueue fails but never fails the parent command.
+fn try_enqueue(db: &crate::db::Database, action: &str, target_table: &str, target_id: &str) {
+    let payload = serde_json::json!({ "action": action, "target_id": target_id }).to_string();
+    if let Err(e) = onchain_queue::enqueue(db, action, &payload, target_table, target_id) {
+        log::warn!("Failed to enqueue on-chain tx for {action}: {e}");
+    }
 }
 
 // ---- DAO Commands ----
@@ -363,6 +373,7 @@ pub async fn open_election(
     .map_err(|e| e.to_string())?;
 
     let election = query_election(conn, &id)?;
+    try_enqueue(&db, "open_election", "governance_elections", &id);
     Ok(election)
 }
 
@@ -716,6 +727,7 @@ pub async fn cast_election_vote(
     )
     .map_err(|e| e.to_string())?;
 
+    try_enqueue(&db, "cast_election_vote", "governance_election_votes", &vote_id);
     Ok(ElectionVote {
         id: vote_id,
         election_id,
@@ -795,6 +807,7 @@ pub async fn finalize_election(
     .map_err(|e| e.to_string())?;
 
     let nominees = query_nominees(conn, &election_id)?;
+    try_enqueue(&db, "finalize_election", "governance_elections", &election_id);
     Ok(nominees)
 }
 
@@ -876,6 +889,7 @@ pub async fn install_committee(
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
 
+    try_enqueue(&db, "install_committee", "governance_elections", &election_id);
     Ok(members)
 }
 
@@ -941,6 +955,7 @@ pub async fn submit_proposal(
     .map_err(|e| e.to_string())?;
 
     let proposal = query_proposal(conn, &id)?;
+    try_enqueue(&db, "submit_proposal", "governance_proposals", &id);
     Ok(proposal)
 }
 
@@ -1058,6 +1073,7 @@ pub async fn approve_proposal(
     .map_err(|e| e.to_string())?;
 
     let proposal = query_proposal(conn, &proposal_id)?;
+    try_enqueue(&db, "approve_proposal", "governance_proposals", &proposal_id);
     Ok(proposal)
 }
 
@@ -1176,6 +1192,7 @@ pub async fn cast_proposal_vote(
         .map_err(|e| e.to_string())?;
     }
 
+    try_enqueue(&db, "cast_proposal_vote", "governance_proposal_votes", &vote_id);
     Ok(ProposalVote {
         id: vote_id,
         proposal_id,
@@ -1241,6 +1258,7 @@ pub async fn resolve_proposal(
     .map_err(|e| e.to_string())?;
 
     let proposal = query_proposal(conn, &proposal_id)?;
+    try_enqueue(&db, "resolve_proposal", "governance_proposals", &proposal_id);
     Ok(proposal)
 }
 
