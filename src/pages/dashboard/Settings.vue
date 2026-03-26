@@ -40,6 +40,81 @@ const biometricPassword = ref('')
 const biometricMessage = ref('')
 const biometricDiagnostics = ref('')
 
+// Storage management
+interface StorageStats {
+  total_pinned_bytes: number
+  quota_bytes: number
+  evictable_bytes: number
+  pin_count: number
+  usage_percent: number | null
+}
+
+const QUOTA_OPTIONS = [
+  { label: '1 GB', bytes: 1_073_741_824 },
+  { label: '2 GB', bytes: 2_147_483_648 },
+  { label: '5 GB', bytes: 5_368_709_120 },
+  { label: '10 GB', bytes: 10_737_418_240 },
+  { label: '25 GB', bytes: 26_843_545_600 },
+  { label: 'Unlimited', bytes: 0 },
+]
+
+const storageStats = ref<StorageStats | null>(null)
+const quotaBytes = ref(0)
+const evicting = ref(false)
+const storageMessage = ref('')
+
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  const i = Math.floor(Math.log(bytes) / Math.log(1024))
+  return `${(bytes / Math.pow(1024, i)).toFixed(i > 0 ? 1 : 0)} ${units[i]}`
+}
+
+function usageColor(percent: number | null): string {
+  if (percent === null) return 'bg-primary'
+  if (percent < 70) return 'bg-emerald-500'
+  if (percent < 90) return 'bg-amber-500'
+  return 'bg-red-500'
+}
+
+async function loadStorageStats() {
+  try {
+    storageStats.value = await invoke<StorageStats>('storage_stats')
+    quotaBytes.value = await invoke<number>('storage_get_quota')
+  } catch (e) {
+    console.error('Failed to load storage stats:', e)
+  }
+}
+
+async function setQuota(bytes: number) {
+  try {
+    await invoke('storage_set_quota', { bytes })
+    quotaBytes.value = bytes
+    storageMessage.value = ''
+    await loadStorageStats()
+  } catch (e) {
+    storageMessage.value = `Error: ${e}`
+  }
+}
+
+async function freeSpace() {
+  evicting.value = true
+  storageMessage.value = ''
+  try {
+    const result = await invoke<{ blobs_evicted: number; bytes_freed: number }>('storage_evict_now')
+    if (result.blobs_evicted > 0) {
+      storageMessage.value = `Freed ${formatBytes(result.bytes_freed)} from ${result.blobs_evicted} item${result.blobs_evicted === 1 ? '' : 's'}.`
+    } else {
+      storageMessage.value = 'Nothing to free.'
+    }
+    await loadStorageStats()
+  } catch (e) {
+    storageMessage.value = `Error: ${e}`
+  } finally {
+    evicting.value = false
+  }
+}
+
 onMounted(() => {
   if (identity.value) {
     displayName.value = identity.value.display_name ?? ''
@@ -47,6 +122,7 @@ onMounted(() => {
   }
 
   void refreshBiometricState()
+  void loadStorageStats()
 })
 
 async function refreshBiometricState() {
@@ -328,6 +404,78 @@ async function disableBiometric() {
           <AppButton variant="outline" size="sm" @click="toggleTheme">
             Toggle ({{ theme === 'light' ? 'Dark' : theme === 'dark' ? 'System' : 'Light' }})
           </AppButton>
+        </div>
+      </div>
+
+      <!-- Storage -->
+      <div class="rounded-xl bg-card shadow-sm p-6 mb-6">
+        <h2 class="text-lg font-semibold text-foreground mb-4">Storage</h2>
+
+        <div v-if="storageStats" class="space-y-4">
+          <!-- Usage bar -->
+          <div>
+            <div class="flex items-center justify-between mb-1.5">
+              <p class="text-sm font-medium text-foreground">Content Cache</p>
+              <p class="text-xs text-muted-foreground">
+                {{ formatBytes(storageStats.total_pinned_bytes) }}
+                <template v-if="storageStats.quota_bytes > 0">
+                  of {{ formatBytes(storageStats.quota_bytes) }}
+                </template>
+                <template v-else>
+                  (unlimited)
+                </template>
+              </p>
+            </div>
+            <div class="h-2 rounded-full bg-muted/50 overflow-hidden">
+              <div
+                class="h-full rounded-full transition-all duration-300"
+                :class="usageColor(storageStats.usage_percent)"
+                :style="{ width: storageStats.usage_percent !== null ? `${Math.min(storageStats.usage_percent, 100)}%` : '0%' }"
+              />
+            </div>
+            <p class="mt-1 text-xs text-muted-foreground">
+              {{ storageStats.pin_count }} item{{ storageStats.pin_count === 1 ? '' : 's' }} cached
+              <template v-if="storageStats.evictable_bytes > 0">
+                &middot; {{ formatBytes(storageStats.evictable_bytes) }} can be freed
+              </template>
+            </p>
+          </div>
+
+          <!-- Quota selector -->
+          <div>
+            <p class="text-sm font-medium text-foreground mb-2">Disk Quota</p>
+            <div class="flex flex-wrap gap-2">
+              <button
+                v-for="option in QUOTA_OPTIONS"
+                :key="option.bytes"
+                class="px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors"
+                :class="quotaBytes === option.bytes
+                  ? 'bg-primary text-primary-foreground border-primary'
+                  : 'bg-background text-foreground border-border hover:bg-muted/50'"
+                @click="setQuota(option.bytes)"
+              >
+                {{ option.label }}
+              </button>
+            </div>
+          </div>
+
+          <!-- Free space button -->
+          <div class="flex items-center gap-3">
+            <AppButton
+              variant="outline"
+              size="sm"
+              :loading="evicting"
+              :disabled="storageStats.evictable_bytes === 0"
+              @click="freeSpace"
+            >
+              Free Space
+            </AppButton>
+            <span v-if="storageMessage" class="text-xs text-muted-foreground">{{ storageMessage }}</span>
+          </div>
+        </div>
+
+        <div v-else class="text-sm text-muted-foreground">
+          Loading storage information...
         </div>
       </div>
 
