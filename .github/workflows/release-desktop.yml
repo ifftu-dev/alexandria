@@ -457,6 +457,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: >-
             ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PATH: C:\msys64\usr\bin;${{ env.PATH }}
         with:
           projectPath: alexandria
           releaseId: ${{ needs.create-release.outputs.release_id }}
