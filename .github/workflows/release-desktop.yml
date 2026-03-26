@@ -59,14 +59,30 @@ jobs:
             exit 1
           fi
 
-      - name: Create draft release
+      - name: Create or reuse draft release
         id: create
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ env.RELEASE_TAG }}
-          name: Alexandria ${{ env.RELEASE_TAG }}
-          draft: true
-          generate_release_notes: false
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            gh release edit "${RELEASE_TAG}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --title "Alexandria ${RELEASE_TAG}" \
+              --draft
+          else
+            gh release create "${RELEASE_TAG}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --title "Alexandria ${RELEASE_TAG}" \
+              --draft \
+              --verify-tag \
+              --notes ""
+          fi
+
+          release_json=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}")
+          echo "id=$(echo "${release_json}" | jq -r .id)" >> "${GITHUB_OUTPUT}"
+          echo "upload_url=$(echo "${release_json}" | jq -r .upload_url)" >> "${GITHUB_OUTPUT}"
 
   build-macos:
     name: Build macOS (ARM64)
