@@ -170,10 +170,8 @@ pub async fn content_resolve_bytes(
             storage::upsert_pin(db.conn(), &result.blake3_hash, "cache", result.size, true);
         }
         storage::maybe_evict(&state.content_node, &state.db).await;
-    } else {
-        if let Ok(db) = state.db.lock() {
-            storage::touch_pin(db.conn(), &result.blake3_hash);
-        }
+    } else if let Ok(db) = state.db.lock() {
+        storage::touch_pin(db.conn(), &result.blake3_hash);
     }
 
     Ok(result.bytes)
