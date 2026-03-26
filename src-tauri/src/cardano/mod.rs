@@ -1,4 +1,5 @@
 pub mod blockfrost;
+pub mod gov_tx_builder;
 pub mod governance;
 pub mod plutus_data;
 pub mod policy;
