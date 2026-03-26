@@ -30,6 +30,12 @@ impl UTxO {
             .and_then(|a| a.quantity.parse::<u64>().ok())
             .unwrap_or(0)
     }
+
+    /// Check if this UTxO holds a specific asset (policy_id + asset_name_hex).
+    pub fn has_asset(&self, policy_id: &str, asset_name_hex: &str) -> bool {
+        let full = format!("{policy_id}{asset_name_hex}");
+        self.amount.iter().any(|a| a.unit == full)
+    }
 }
 
 /// Protocol parameters from Blockfrost `/epochs/latest/parameters`.

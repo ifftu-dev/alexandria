@@ -168,6 +168,98 @@ impl BlockfrostClient {
     pub fn select_utxo(utxos: &[UTxO], min_lovelace: u64) -> Option<&UTxO> {
         utxos.iter().find(|u| u.lovelace() >= min_lovelace)
     }
+
+    // ---- Governance-specific endpoints ----
+
+    /// Fetch UTxOs at a script address. Used to find DAO/election/proposal
+    /// state UTxOs holding governance state tokens.
+    pub async fn get_script_utxos(&self, address: &str) -> Result<Vec<UTxO>, BlockfrostError> {
+        // Same endpoint as get_utxos — script addresses are regular addresses
+        self.get_utxos(address).await
+    }
+
+    /// Find the UTxO holding a specific asset (policy_id + hex asset_name).
+    /// Used to locate the current state UTxO for a DAO/election/proposal.
+    pub async fn get_utxo_by_asset(
+        &self,
+        policy_id: &str,
+        asset_name_hex: &str,
+    ) -> Result<Option<UTxO>, BlockfrostError> {
+        let asset = format!("{policy_id}{asset_name_hex}");
+        let url = format!("{}/assets/{}/addresses", self.base_url, asset);
+        let resp = self
+            .client
+            .get(&url)
+            .header("project_id", &self.project_id)
+            .send()
+            .await?;
+
+        let status = resp.status().as_u16();
+        if status == 404 {
+            return Ok(None);
+        }
+        if status != 200 {
+            let body = resp.text().await.unwrap_or_default();
+            return Err(BlockfrostError::Api { status, body });
+        }
+
+        #[derive(serde::Deserialize)]
+        struct AssetAddress {
+            address: String,
+        }
+
+        let addrs: Vec<AssetAddress> = resp
+            .json()
+            .await
+            .map_err(|e| BlockfrostError::Deserialize(e.to_string()))?;
+
+        if let Some(first) = addrs.first() {
+            let utxos = self.get_utxos(&first.address).await?;
+            // Find the specific UTxO holding this asset
+            Ok(utxos.into_iter().find(|u| u.has_asset(policy_id, asset_name_hex)))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Evaluate a transaction to get execution unit estimates for Plutus scripts.
+    /// Calls Blockfrost's `/utils/txs/evaluate` endpoint with the unsigned tx CBOR.
+    pub async fn evaluate_tx(&self, tx_cbor: &[u8]) -> Result<Vec<(u64, u64)>, BlockfrostError> {
+        let url = format!("{}/utils/txs/evaluate", self.base_url);
+        let resp = self
+            .client
+            .post(&url)
+            .header("project_id", &self.project_id)
+            .header("Content-Type", "application/cbor")
+            .body(tx_cbor.to_vec())
+            .send()
+            .await?;
+
+        let status = resp.status().as_u16();
+        if status != 200 {
+            let body = resp.text().await.unwrap_or_default();
+            return Err(BlockfrostError::Api { status, body });
+        }
+
+        // Blockfrost returns: { "result": { "EvaluationResult": { "spend:0": { "memory": N, "steps": N }, ... } } }
+        let body: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| BlockfrostError::Deserialize(e.to_string()))?;
+
+        let mut units = Vec::new();
+        if let Some(result) = body.get("result").and_then(|r| r.get("EvaluationResult")) {
+            if let Some(obj) = result.as_object() {
+                for (_key, val) in obj {
+                    let mem = val.get("memory").and_then(|v| v.as_u64()).unwrap_or(0);
+                    let steps = val.get("steps").and_then(|v| v.as_u64()).unwrap_or(0);
+                    units.push((mem, steps));
+                }
+            }
+        }
+
+        Ok(units)
+    }
 }
 
 #[cfg(test)]
