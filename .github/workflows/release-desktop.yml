@@ -229,9 +229,14 @@ jobs:
             libappindicator3-dev \
             librsvg2-dev \
             patchelf \
+            libasound2-dev \
             nasm \
             libclang-dev \
             pkg-config \
+            libv4l-dev \
+            libxcb1-dev \
+            libxcb-randr0-dev \
+            libdbus-1-dev \
             libopus-dev \
             libssl-dev \
             libx264-dev \
@@ -323,9 +328,14 @@ jobs:
             libappindicator3-dev \
             librsvg2-dev \
             patchelf \
+            libasound2-dev \
             nasm \
             libclang-dev \
             pkg-config \
+            libv4l-dev \
+            libxcb1-dev \
+            libxcb-randr0-dev \
+            libdbus-1-dev \
             libopus-dev \
             libssl-dev \
             libx264-dev \
@@ -407,15 +417,26 @@ jobs:
 
       - name: Install autotools via MSYS2 for webrtc-audio-processing-sys (AEC build)
         # webrtc-audio-processing-sys requires libtoolize, aclocal, automake, autoconf.
-        # These are not pre-installed in MSYS2 on GitHub runners. Persist the Windows
-        # Path variant via GITHUB_ENV and GITHUB_PATH so the later Node-based tauri
-        # action inherits the MSYS2 tools as real process-searchable commands.
+        # On Windows these are shell scripts without .exe extensions, so cargo build
+        # scripts cannot launch them reliably even if MSYS2's bin directory is on Path.
+        # Create .bat shims that invoke the MSYS2 tools through bash and add those shims
+        # to the Windows process PATH seen by the later Node-based tauri action.
         shell: pwsh
         run: |
           & 'C:\msys64\usr\bin\bash.exe' -lc "pacman -S --noconfirm --needed libtool automake autoconf make m4"
           Remove-Item 'C:\msys64\usr\bin\link.exe' -Force -ErrorAction SilentlyContinue
-          $env:Path = "C:\msys64\usr\bin;$env:Path"
+          $shimDir = Join-Path $env:RUNNER_TEMP 'msys2-shims'
+          New-Item -ItemType Directory -Force -Path $shimDir | Out-Null
+          foreach ($tool in @('libtoolize', 'aclocal', 'automake', 'autoconf', 'autoheader', 'autoreconf')) {
+            $shimPath = Join-Path $shimDir "$tool.bat"
+            Set-Content -Path $shimPath -Encoding ascii -Value @(
+              '@echo off'
+              """C:\msys64\usr\bin\bash.exe"" -lc ""/usr/bin/$tool %*"""
+            )
+          }
+          $env:Path = "$shimDir;C:\msys64\usr\bin;$env:Path"
           Add-Content -Path $env:GITHUB_ENV -Value "Path=$env:Path"
+          Add-Content -Path $env:GITHUB_PATH -Value $shimDir
           Add-Content -Path $env:GITHUB_PATH -Value 'C:\msys64\usr\bin'
           Get-Command libtoolize
 
