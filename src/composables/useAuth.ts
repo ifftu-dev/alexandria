@@ -65,8 +65,8 @@ async function lockVault(): Promise<void> {
   initialized.value = false
 }
 
-async function exportMnemonic(): Promise<string> {
-  return invoke<string>('export_mnemonic')
+async function exportMnemonic(password: string): Promise<string> {
+  return invoke<string>('export_mnemonic', { password })
 }
 
 async function initialize(): Promise<'onboarding' | 'unlock' | 'ready'> {
