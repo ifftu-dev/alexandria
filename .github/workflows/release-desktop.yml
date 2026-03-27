@@ -416,6 +416,7 @@ jobs:
         uses: ilammy/msvc-dev-cmd@v1
 
       - name: Install autotools via MSYS2 for webrtc-audio-processing-sys (AEC build)
+        id: windows-msys2
         # webrtc-audio-processing-sys requires libtoolize, aclocal, automake, autoconf.
         # On Windows these are shell scripts without .exe extensions, so cargo build
         # scripts cannot launch them reliably even if MSYS2's bin directory is on Path.
@@ -435,12 +436,14 @@ jobs:
             )
           }
           $env:Path = "$shimDir;C:\msys64\usr\bin;$env:Path"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "shim_dir=$shimDir"
           Add-Content -Path $env:GITHUB_ENV -Value "Path=$env:Path"
           Add-Content -Path $env:GITHUB_PATH -Value $shimDir
           Add-Content -Path $env:GITHUB_PATH -Value 'C:\msys64\usr\bin'
           Get-Command libtoolize
 
       - name: Download pre-built FFmpeg for Windows
+        id: windows-ffmpeg
         # Build-from-source (tutoring-video-static) fails on Windows due to MSVC/MinGW
         # toolchain conflicts in FFmpeg configure. Use BtbN's pre-built shared libs instead.
         shell: pwsh
@@ -449,6 +452,8 @@ jobs:
           Invoke-WebRequest -Uri $url -OutFile "$env:RUNNER_TEMP\ffmpeg.zip"
           Expand-Archive -Path "$env:RUNNER_TEMP\ffmpeg.zip" -DestinationPath "$env:RUNNER_TEMP\ffmpeg-extracted"
           $ffmpegDir = (Get-ChildItem "$env:RUNNER_TEMP\ffmpeg-extracted" -Directory | Select-Object -First 1).FullName
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "root_dir=$ffmpegDir"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "bin_dir=$ffmpegDir\bin"
           echo "FFMPEG_DIR=$ffmpegDir" >> $env:GITHUB_ENV
           echo "$ffmpegDir\bin" >> $env:GITHUB_PATH
 
@@ -471,6 +476,23 @@ jobs:
         working-directory: alexandria
         run: npm ci
 
+      - name: Prepare Windows build environment
+        id: windows-build-env
+        shell: pwsh
+        run: |
+          $pathEntries = @(
+            '${{ steps.windows-msys2.outputs.shim_dir }}'
+            'C:\msys64\usr\bin'
+            '${{ steps.windows-ffmpeg.outputs.bin_dir }}'
+          ) + ($env:Path -split ';' | Where-Object { $_ })
+          $effectivePath = ($pathEntries | Select-Object -Unique) -join ';'
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "path=$effectivePath"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "ffmpeg_dir=${{ steps.windows-ffmpeg.outputs.root_dir }}"
+          Get-Command cargo
+          Get-Command node
+          Get-Command libtoolize
+          Get-Command bash
+
       - name: Build Windows x86_64
         uses: tauri-apps/tauri-action@v0
         env:
@@ -478,6 +500,8 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: >-
             ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PATH: ${{ steps.windows-build-env.outputs.path }}
+          FFMPEG_DIR: ${{ steps.windows-build-env.outputs.ffmpeg_dir }}
         with:
           projectPath: alexandria
           releaseId: ${{ needs.create-release.outputs.release_id }}
