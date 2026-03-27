@@ -396,15 +396,15 @@ jobs:
 
       - name: Install autotools via MSYS2 for webrtc-audio-processing-sys (AEC build)
         # webrtc-audio-processing-sys requires libtoolize, aclocal, automake, autoconf.
-        # These are not pre-installed in MSYS2 on GitHub runners — install via pacman,
-        # then append MSYS2 to PATH using PowerShell so the path update survives into
-        # the Node-based tauri action step.
+        # These are not pre-installed in MSYS2 on GitHub runners. Persist the Windows
+        # Path variant via GITHUB_ENV and GITHUB_PATH so the later Node-based tauri
+        # action inherits the MSYS2 tools as real process-searchable commands.
         shell: pwsh
         run: |
           & 'C:\msys64\usr\bin\bash.exe' -lc "pacman -S --noconfirm --needed libtool automake autoconf make m4"
           Remove-Item 'C:\msys64\usr\bin\link.exe' -Force -ErrorAction SilentlyContinue
-          $env:PATH = "C:\msys64\usr\bin;$env:PATH"
-          Add-Content -Path $env:GITHUB_ENV -Value "PATH=$env:PATH"
+          $env:Path = "C:\msys64\usr\bin;$env:Path"
+          Add-Content -Path $env:GITHUB_ENV -Value "Path=$env:Path"
           Add-Content -Path $env:GITHUB_PATH -Value 'C:\msys64\usr\bin'
           Get-Command libtoolize
 
@@ -446,7 +446,6 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: >-
             ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PATH: C:\msys64\usr\bin;${{ env.PATH }}
         with:
           projectPath: alexandria
           releaseId: ${{ needs.create-release.outputs.release_id }}
