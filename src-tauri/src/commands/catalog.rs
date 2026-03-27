@@ -73,10 +73,11 @@ pub async fn search_catalog(
     author: Option<String>,
     limit: Option<u32>,
 ) -> Result<Vec<CatalogEntry>, String> {
-    let db = state
+    let db_guard = state
         .db
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
     let max = limit.unwrap_or(50).min(200) as usize;
 
     // Build dynamic WHERE clause
@@ -259,10 +260,11 @@ pub async fn get_catalog_entry(
     state: State<'_, AppState>,
     course_id: String,
 ) -> Result<Option<CatalogEntry>, String> {
-    let db = state
+    let db_guard = state
         .db
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
 
     let result = db.conn().query_row(
         "SELECT course_id, title, description, author_address, content_cid, \
@@ -323,10 +325,11 @@ pub async fn hydrate_catalog_courses(
     let max = limit.unwrap_or(200).min(500) as usize;
 
     let rows: Vec<CatalogHydrateRow> = {
-        let db = state
-            .db
-            .lock()
-            .map_err(|_| "database lock poisoned".to_string())?;
+        let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
         let mut stmt = db
             .conn()
             .prepare(
@@ -395,10 +398,11 @@ pub async fn hydrate_catalog_courses(
             doc
         };
 
-        let db = state
-            .db
-            .lock()
-            .map_err(|_| "database lock poisoned".to_string())?;
+        let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
         let conn = db.conn();
         let tx = conn
             .unchecked_transaction()
@@ -492,10 +496,11 @@ pub async fn bootstrap_public_catalog(state: State<'_, AppState>) -> Result<u32,
     let payload: BootstrapPayload = serde_json::from_str(BOOTSTRAP_PUBLIC_COURSES_JSON)
         .map_err(|e| format!("invalid bootstrap payload: {e}"))?;
 
-    let db = state
+    let db_guard = state
         .db
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
     let conn = db.conn();
     let tx = conn
         .unchecked_transaction()

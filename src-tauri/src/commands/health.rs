@@ -14,9 +14,12 @@ pub struct HealthResponse {
 #[tauri::command]
 pub async fn check_health(state: State<'_, AppState>) -> Result<HealthResponse, String> {
     let db_status = match state.db.lock() {
-        Ok(db) => match db.conn().query_row("SELECT 1", [], |_| Ok(())) {
-            Ok(()) => "ok".to_string(),
-            Err(e) => format!("error: {}", e),
+        Ok(guard) => match guard.as_ref() {
+            Some(db) => match db.conn().query_row("SELECT 1", [], |_| Ok(())) {
+                Ok(()) => "ok".to_string(),
+                Err(e) => format!("error: {}", e),
+            },
+            None => "not initialized".to_string(),
         },
         Err(e) => format!("mutex poisoned: {}", e),
     };

@@ -58,8 +58,8 @@ pub struct DeviceList {
     pub cameras: Vec<CameraDeviceInfo>,
 }
 
-/// Helper: lock the database, handling poisoned mutex gracefully.
-fn lock_db(state: &AppState) -> Result<std::sync::MutexGuard<'_, crate::db::Database>, String> {
+/// Helper: lock the database, handling poisoned mutex and uninitialized DB gracefully.
+fn lock_db(state: &AppState) -> Result<std::sync::MutexGuard<'_, Option<crate::db::Database>>, String> {
     state.db.lock().map_err(|e| {
         let msg = format!("database mutex poisoned: {e}");
         crate::diag::log(&msg);
@@ -111,7 +111,8 @@ pub async fn tutoring_create_room(
 
     // Persist to database
     {
-        let db = lock_db(&state)?;
+        let db_guard = lock_db(&state)?;
+        let db = db_guard.as_ref().ok_or("database not initialized")?;
         db.conn()
             .execute(
                 "INSERT INTO tutoring_sessions (id, title, ticket, status) VALUES (?1, ?2, ?3, 'active')",
@@ -177,7 +178,8 @@ pub async fn tutoring_join_room(
 
     // Persist to database
     {
-        let db = lock_db(&state)?;
+        let db_guard = lock_db(&state)?;
+        let db = db_guard.as_ref().ok_or("database not initialized")?;
         db.conn()
             .execute(
                 "INSERT INTO tutoring_sessions (id, title, ticket, status) VALUES (?1, ?2, ?3, 'active')",
@@ -206,7 +208,8 @@ pub async fn tutoring_leave_room(state: State<'_, AppState>) -> Result<(), Strin
 
     // Update database
     if let Some(id) = session_id {
-        let db = lock_db(&state)?;
+        let db_guard = lock_db(&state)?;
+        let db = db_guard.as_ref().ok_or("database not initialized")?;
         db.conn()
             .execute(
                 "UPDATE tutoring_sessions SET status = 'ended', ended_at = datetime('now') WHERE id = ?1",
@@ -273,7 +276,8 @@ pub async fn tutoring_list_sessions(
     state: State<'_, AppState>,
 ) -> Result<Vec<TutoringSessionInfo>, String> {
     crate::diag::log("tutoring_list_sessions: called");
-    let db = lock_db(&state)?;
+    let db_guard = lock_db(&state)?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
     let mut stmt = db
         .conn()
         .prepare(

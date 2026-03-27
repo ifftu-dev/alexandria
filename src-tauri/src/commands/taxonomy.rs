@@ -150,10 +150,11 @@ pub struct SkillRelation {
 /// This only writes when the local taxonomy is empty.
 #[tauri::command]
 pub async fn bootstrap_public_taxonomy(state: State<'_, AppState>) -> Result<i64, String> {
-    let db = state
+    let db_guard = state
         .db
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
     let conn = db.conn();
 
     let existing_skills: i64 = conn
@@ -245,10 +246,11 @@ pub async fn bootstrap_public_taxonomy(state: State<'_, AppState>) -> Result<i64
 pub async fn list_subject_fields(
     state: State<'_, AppState>,
 ) -> Result<Vec<SubjectFieldInfo>, String> {
-    let db = state
+    let db_guard = state
         .db
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
     let conn = db.conn();
 
     let mut stmt = conn
@@ -288,10 +290,11 @@ pub async fn list_subjects(
     state: State<'_, AppState>,
     subject_field_id: Option<String>,
 ) -> Result<Vec<SubjectInfo>, String> {
-    let db = state
+    let db_guard = state
         .db
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
     let conn = db.conn();
 
     let sql = if subject_field_id.is_some() {
@@ -354,10 +357,11 @@ pub async fn list_skills(
     search: Option<String>,
     bloom_level: Option<String>,
 ) -> Result<Vec<SkillInfo>, String> {
-    let db = state
+    let db_guard = state
         .db
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
     let conn = db.conn();
 
     // Build dynamic query
@@ -436,10 +440,11 @@ pub async fn get_skill(
     state: State<'_, AppState>,
     skill_id: String,
 ) -> Result<SkillDetail, String> {
-    let db = state
+    let db_guard = state
         .db
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
     let conn = db.conn();
 
     // Main skill info
@@ -566,10 +571,11 @@ pub async fn get_skill(
 pub async fn list_skill_graph_edges(
     state: State<'_, AppState>,
 ) -> Result<Vec<SkillGraphEdge>, String> {
-    let db = state
+    let db_guard = state
         .db
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
     let conn = db.conn();
 
     let mut stmt = conn
@@ -623,10 +629,11 @@ pub async fn tag_element_skill(
     skill_id: String,
     weight: Option<f64>,
 ) -> Result<(), String> {
-    let db = state
+    let db_guard = state
         .db
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
     db.conn()
         .execute(
             "INSERT OR REPLACE INTO element_skill_tags (element_id, skill_id, weight)
@@ -644,10 +651,11 @@ pub async fn untag_element_skill(
     element_id: String,
     skill_id: String,
 ) -> Result<(), String> {
-    let db = state
+    let db_guard = state
         .db
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
     db.conn()
         .execute(
             "DELETE FROM element_skill_tags WHERE element_id = ?1 AND skill_id = ?2",
@@ -663,10 +671,11 @@ pub async fn list_element_skill_tags(
     state: State<'_, AppState>,
     element_id: String,
 ) -> Result<Vec<ElementSkillTag>, String> {
-    let db = state
+    let db_guard = state
         .db
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
     let conn = db.conn();
 
     let mut stmt = conn
@@ -713,10 +722,11 @@ pub async fn propose_taxonomy_change(
     state: State<'_, AppState>,
     params: ProposeTaxonomyParams,
 ) -> Result<String, String> {
-    let db = state
+    let db_guard = state
         .db
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
     let conn = db.conn();
 
     // Get proposer address from local identity
@@ -752,10 +762,11 @@ pub async fn preview_taxonomy_change(
     state: State<'_, AppState>,
     params: ProposeTaxonomyParams,
 ) -> Result<TaxonomyPreview, String> {
-    let db = state
+    let db_guard = state
         .db
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
     taxonomy::preview_taxonomy_change(db.conn(), &params.changes)
 }
 
@@ -771,10 +782,11 @@ pub async fn publish_taxonomy_ratification(
     ratified_by: Vec<String>,
     signature: String,
 ) -> Result<TaxonomyPublishResult, String> {
-    let db = state
+    let db_guard = state
         .db
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
     taxonomy::publish_taxonomy_ratification(db.conn(), &proposal_id, &ratified_by, &signature)
 }
 
@@ -783,10 +795,11 @@ pub async fn publish_taxonomy_ratification(
 pub async fn get_taxonomy_version(
     state: State<'_, AppState>,
 ) -> Result<Option<TaxonomyVersion>, String> {
-    let db = state
+    let db_guard = state
         .db
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
     taxonomy::get_current_version(db.conn())
 }
 
@@ -796,10 +809,11 @@ pub async fn list_taxonomy_versions(
     state: State<'_, AppState>,
     limit: Option<i64>,
 ) -> Result<Vec<TaxonomyVersion>, String> {
-    let db = state
+    let db_guard = state
         .db
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
     taxonomy::list_versions(db.conn(), limit.unwrap_or(50))
 }
 
@@ -811,9 +825,10 @@ pub async fn validate_taxonomy_changes(
     state: State<'_, AppState>,
     params: ProposeTaxonomyParams,
 ) -> Result<Vec<String>, String> {
-    let db = state
+    let db_guard = state
         .db
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
     taxonomy::validate_changes(db.conn(), &params.changes)
 }

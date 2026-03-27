@@ -46,8 +46,10 @@ pub async fn content_add(
         .map_err(|e| e.to_string())?;
 
     // Track as a cache pin (auto_unpin = true) by default
-    if let Ok(db) = state.db.lock() {
-        storage::upsert_pin(db.conn(), &result.hash, "cache", result.size, true);
+    if let Ok(guard) = state.db.lock() {
+        if let Some(db) = guard.as_ref() {
+            storage::upsert_pin(db.conn(), &result.hash, "cache", result.size, true);
+        }
     }
 
     // Trigger eviction if over quota
@@ -67,8 +69,10 @@ pub async fn content_get(state: State<'_, AppState>, hash: String) -> Result<Vec
         .map_err(|e| e.to_string())?;
 
     // Touch last_accessed so frequently-read content is evicted last
-    if let Ok(db) = state.db.lock() {
-        storage::touch_pin(db.conn(), &hash);
+    if let Ok(guard) = state.db.lock() {
+        if let Some(db) = guard.as_ref() {
+            storage::touch_pin(db.conn(), &hash);
+        }
     }
 
     Ok(bytes)
@@ -122,15 +126,19 @@ pub async fn content_resolve(
 
     // Track resolved content as a cache pin
     if result.source != resolver::ResolveSource::Local {
-        if let Ok(db) = state.db.lock() {
-            storage::upsert_pin(db.conn(), &result.blake3_hash, "cache", result.size, true);
+        if let Ok(guard) = state.db.lock() {
+            if let Some(db) = guard.as_ref() {
+                storage::upsert_pin(db.conn(), &result.blake3_hash, "cache", result.size, true);
+            }
         }
         // Trigger eviction if over quota
         storage::maybe_evict(&state.content_node, &state.db).await;
     } else {
         // Touch existing pin on local hit
-        if let Ok(db) = state.db.lock() {
-            storage::touch_pin(db.conn(), &result.blake3_hash);
+        if let Ok(guard) = state.db.lock() {
+            if let Some(db) = guard.as_ref() {
+                storage::touch_pin(db.conn(), &result.blake3_hash);
+            }
         }
     }
 
@@ -166,12 +174,16 @@ pub async fn content_resolve_bytes(
 
     // Track resolved content as a cache pin
     if result.source != resolver::ResolveSource::Local {
-        if let Ok(db) = state.db.lock() {
-            storage::upsert_pin(db.conn(), &result.blake3_hash, "cache", result.size, true);
+        if let Ok(guard) = state.db.lock() {
+            if let Some(db) = guard.as_ref() {
+                storage::upsert_pin(db.conn(), &result.blake3_hash, "cache", result.size, true);
+            }
         }
         storage::maybe_evict(&state.content_node, &state.db).await;
-    } else if let Ok(db) = state.db.lock() {
-        storage::touch_pin(db.conn(), &result.blake3_hash);
+    } else if let Ok(guard) = state.db.lock() {
+        if let Some(db) = guard.as_ref() {
+            storage::touch_pin(db.conn(), &result.blake3_hash);
+        }
     }
 
     Ok(result.bytes)

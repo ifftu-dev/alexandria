@@ -14,6 +14,8 @@ pub enum DbError {
     Sqlite(#[from] rusqlite::Error),
     #[error("migration failed: {0}")]
     Migration(String),
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
 }
 
 /// Wraps a SQLite connection with Alexandria-specific operations.
@@ -52,12 +54,89 @@ impl Database {
         Ok(Self { conn })
     }
 
+    /// Open (or create) a SQLCipher-encrypted database at the given path.
+    ///
+    /// The key MUST be set as the very first statement after open.
+    /// Uses hex-encoded key format for SQLCipher: `PRAGMA key = "x'...'";`
+    pub fn open_encrypted(path: &Path, key: &[u8; 32]) -> Result<Self, DbError> {
+        let flags = OpenFlags::SQLITE_OPEN_READ_WRITE
+            | OpenFlags::SQLITE_OPEN_CREATE
+            | OpenFlags::SQLITE_OPEN_FULL_MUTEX;
+        let conn = Connection::open_with_flags(path, flags)?;
+
+        // Set the encryption key — MUST be the first PRAGMA after open.
+        let key_hex = hex::encode(key);
+        conn.pragma_update(None, "key", &format!("x'{key_hex}'"))?;
+
+        // Enable WAL mode for better concurrent read performance.
+        conn.pragma_update(None, "journal_mode", "WAL")?;
+        // Enable foreign keys.
+        conn.pragma_update(None, "foreign_keys", "ON")?;
+
+        Ok(Self { conn })
+    }
+
     /// Open an in-memory database (for tests).
     #[cfg(test)]
     pub fn open_in_memory() -> Result<Self, DbError> {
         let conn = Connection::open_in_memory()?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
         Ok(Self { conn })
+    }
+
+    /// Detect whether a database file is unencrypted (legacy).
+    ///
+    /// Tries to open the file without a key and read `sqlite_master`.
+    /// Returns `true` if the database is readable without encryption.
+    pub fn is_plaintext(path: &Path) -> bool {
+        if !path.exists() {
+            return false;
+        }
+        let flags = OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_FULL_MUTEX;
+        let conn = match Connection::open_with_flags(path, flags) {
+            Ok(c) => c,
+            Err(_) => return false,
+        };
+        conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .is_ok()
+    }
+
+    /// Migrate an existing unencrypted database to SQLCipher encryption.
+    ///
+    /// Uses SQLCipher's ATTACH + sqlcipher_export mechanism:
+    /// 1. Open the plaintext DB
+    /// 2. ATTACH a new encrypted DB
+    /// 3. Export all data from plaintext → encrypted
+    /// 4. Swap files
+    pub fn migrate_to_encrypted(path: &Path, key: &[u8; 32]) -> Result<(), DbError> {
+        let enc_path = path.with_extension("db.enc");
+        let key_hex = hex::encode(key);
+
+        // Open the plaintext database
+        let flags = OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_FULL_MUTEX;
+        let conn = Connection::open_with_flags(path, flags)?;
+
+        // Attach an encrypted database and export
+        conn.execute_batch(&format!(
+            "ATTACH DATABASE '{}' AS encrypted KEY \"x'{key_hex}'\";",
+            enc_path.display()
+        ))?;
+        conn.execute_batch("SELECT sqlcipher_export('encrypted');")?;
+        conn.execute_batch("DETACH DATABASE encrypted;")?;
+        drop(conn);
+
+        // Swap files: encrypted → main, delete plaintext
+        let backup_path = path.with_extension("db.bak");
+        std::fs::rename(path, &backup_path)?;
+        std::fs::rename(&enc_path, path)?;
+        std::fs::remove_file(&backup_path).ok(); // best-effort cleanup
+
+        log::info!("database migrated to SQLCipher encryption");
+        Ok(())
     }
 
     /// Run all schema migrations.

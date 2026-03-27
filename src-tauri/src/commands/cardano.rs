@@ -27,6 +27,11 @@ pub async fn mint_skill_proof_nft(
     confidence: f64,
     content_hash: Option<String>,
 ) -> Result<MintResult, String> {
+    // Rate limit check
+    {
+        let mut limiter = state.ipc_limiter.lock().map_err(|e| e.to_string())?;
+        limiter.check("mint_skill_proof_nft")?;
+    }
     // 1. Get wallet from unlocked vault
     let ks_guard = state.keystore.lock().await;
     let ks = ks_guard.as_ref().ok_or("vault is locked — unlock first")?;
@@ -62,10 +67,11 @@ pub async fn mint_skill_proof_nft(
     result.tx_hash = submitted_hash;
 
     // 5. Update the skill_proofs table with NFT details
-    let db = state
+    let db_guard = state
         .db
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
     db.conn()
         .execute(
             "UPDATE skill_proofs SET nft_policy_id = ?1, nft_asset_name = ?2, nft_tx_hash = ?3, updated_at = datetime('now') WHERE id = ?4",
@@ -100,6 +106,11 @@ pub async fn register_course_onchain(
     state: State<'_, AppState>,
     course_id: String,
 ) -> Result<CourseRegistrationResult, String> {
+    // Rate limit check
+    {
+        let mut limiter = state.ipc_limiter.lock().map_err(|e| e.to_string())?;
+        limiter.check("register_course_onchain")?;
+    }
     // 1. Get wallet from unlocked vault
     let ks_guard = state.keystore.lock().await;
     let ks = ks_guard.as_ref().ok_or("vault is locked — unlock first")?;
@@ -109,10 +120,11 @@ pub async fn register_course_onchain(
 
     // 2. Look up course details
     let (title, content_cid) = {
-        let db = state
-            .db
-            .lock()
-            .map_err(|_| "database lock poisoned".to_string())?;
+        let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
         let (title, cid): (String, Option<String>) = db
             .conn()
             .query_row(
@@ -149,10 +161,11 @@ pub async fn register_course_onchain(
     result.tx_hash = submitted_hash;
 
     // 6. Update the courses table with on_chain_tx
-    let db = state
+    let db_guard = state
         .db
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
     db.conn()
         .execute(
             "UPDATE courses SET on_chain_tx = ?1, updated_at = datetime('now') WHERE id = ?2",

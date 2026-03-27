@@ -96,12 +96,18 @@ pub async fn unlock_vault(
     .map_err(|e| format!("blocking task failed: {e}"))?
     .map_err(|e: String| e)?;
 
+    // Derive the DB encryption key and open/migrate the database
+    emit_progress(&app, "db", "Opening encrypted database...");
+    let db_key = ks.derive_db_key();
+    state.open_database(&db_key)?;
+
     emit_progress(&app, "db", "Loading identity from database...");
     let profile = {
-        let db = state
+        let db_guard = state
             .db
             .lock()
             .map_err(|_| "database lock poisoned".to_string())?;
+        let db = db_guard.as_ref().ok_or("database not initialized")?;
         let exists: bool = db
             .conn()
             .query_row(
@@ -172,12 +178,18 @@ pub async fn generate_wallet(
     .map_err(|e| format!("blocking task failed: {e}"))?
     .map_err(|e: String| e)?;
 
+    // Derive the DB encryption key and open/migrate the database
+    emit_progress(&app, "db", "Opening encrypted database...");
+    let db_key = ks.derive_db_key();
+    state.open_database(&db_key)?;
+
     emit_progress(&app, "db", "Storing identity in local database...");
     {
-        let db = state
+        let db_guard = state
             .db
             .lock()
             .map_err(|_| "database lock poisoned".to_string())?;
+        let db = db_guard.as_ref().ok_or("database not initialized")?;
 
         // Check if identity already exists
         let exists: bool = db
@@ -250,10 +262,11 @@ pub async fn restore_wallet(
 
     emit_progress(&app, "db", "Storing identity in local database...");
     {
-        let db = state
-            .db
-            .lock()
-            .map_err(|_| "database lock poisoned".to_string())?;
+        let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
 
         let exists: bool = db
             .conn()
@@ -297,13 +310,41 @@ pub async fn restore_wallet(
 
 /// Export the mnemonic phrase from the vault.
 ///
-/// Requires the vault to be unlocked. Returns the plaintext mnemonic
-/// for the user to write down again.
+/// Requires the vault to be unlocked **and** re-authentication via
+/// the vault password. This prevents a compromised WebView from
+/// extracting the mnemonic without user interaction.
+///
+/// Rate-limited: 3 attempts per 5 minutes.
 #[tauri::command]
-pub async fn export_mnemonic(state: State<'_, AppState>) -> Result<String, String> {
+pub async fn export_mnemonic(
+    state: State<'_, AppState>,
+    password: String,
+) -> Result<String, String> {
+    // Rate limit check
+    {
+        let mut limiter = state.ipc_limiter.lock().map_err(|e| e.to_string())?;
+        limiter.check("export_mnemonic")?;
+    }
+    // Touch activity timestamp
+    if let Ok(mut ts) = state.last_activity.lock() {
+        *ts = std::time::Instant::now();
+    }
     let keystore = state.keystore.lock().await;
     let ks = keystore.as_ref().ok_or("vault is locked")?;
+    ks.check_password(&password)
+        .map_err(|_| "incorrect password".to_string())?;
     ks.retrieve_mnemonic().map_err(|e| e.to_string())
+}
+
+/// Check if biometric credentials are enrolled (frontend-side check).
+///
+/// This is a convenience command — the actual biometric check happens
+/// in the frontend via tauri-plugin-biometry. This just checks if the
+/// vault is unlocked (a prerequisite for biometric enrollment).
+#[tauri::command]
+pub async fn is_biometric_available(state: State<'_, AppState>) -> Result<bool, String> {
+    let keystore = state.keystore.lock().await;
+    Ok(keystore.is_some())
 }
 
 /// Lock the vault, clearing in-memory secrets.
@@ -322,10 +363,11 @@ pub async fn lock_vault(state: State<'_, AppState>) -> Result<(), String> {
 /// Get the current wallet info (no secrets).
 #[tauri::command]
 pub async fn get_wallet_info(state: State<'_, AppState>) -> Result<Option<WalletInfo>, String> {
-    let db = state
+    let db_guard = state
         .db
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
 
     let result = db.conn().query_row(
         "SELECT stake_address, payment_address FROM local_identity WHERE id = 1",
@@ -349,10 +391,11 @@ pub async fn get_wallet_info(state: State<'_, AppState>) -> Result<Option<Wallet
 /// Get the local user's profile.
 #[tauri::command]
 pub async fn get_profile(state: State<'_, AppState>) -> Result<Option<Identity>, String> {
-    let db = state
+    let db_guard = state
         .db
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
     Ok(read_profile(db.conn()))
 }
 
@@ -384,10 +427,11 @@ pub async fn update_profile(
     state: State<'_, AppState>,
     update: ProfileUpdate,
 ) -> Result<Identity, String> {
-    let db = state
+    let db_guard = state
         .db
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
 
     // Build dynamic UPDATE statement
     let mut set_clauses = Vec::new();
@@ -470,10 +514,11 @@ pub async fn publish_profile(state: State<'_, AppState>) -> Result<PublishProfil
         Option<String>,
         String,
     ) = {
-        let db = state
-            .db
-            .lock()
-            .map_err(|_| "database lock poisoned".to_string())?;
+        let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
         db.conn()
             .query_row(
                 "SELECT stake_address, display_name, bio, avatar_cid, created_at
@@ -516,10 +561,11 @@ pub async fn publish_profile(state: State<'_, AppState>) -> Result<PublishProfil
         .map_err(|e| e.to_string())?;
 
     // Save the profile_hash in the database
-    let db = state
+    let db_guard = state
         .db
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
     db.conn()
         .execute(
             "UPDATE local_identity SET profile_hash = ?1, updated_at = datetime('now') WHERE id = 1",

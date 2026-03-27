@@ -24,10 +24,11 @@ pub async fn get_reputation(
     state: State<'_, AppState>,
     query: ReputationQuery,
 ) -> Result<Vec<FullReputationAssertion>, String> {
-    let db = state
+    let db_guard = state
         .db
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
     let conn = db.conn();
 
     // Build dynamic WHERE clause
@@ -138,10 +139,11 @@ pub async fn get_reputation(
 /// chronologically. This is the v2 "any node can reproduce" guarantee.
 #[tauri::command]
 pub async fn compute_reputation(state: State<'_, AppState>) -> Result<RecomputeResult, String> {
-    let db = state
+    let db_guard = state
         .db
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
 
     let start = std::time::Instant::now();
     let (assertions_updated, deltas_recomputed) = reputation::full_recompute(db.conn())?;
@@ -164,10 +166,11 @@ pub async fn get_instructor_ranking(
     proficiency_level: Option<String>,
     limit: Option<i64>,
 ) -> Result<Vec<InstructorRanking>, String> {
-    let db = state
+    let db_guard = state
         .db
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
 
     let max = limit.unwrap_or(50);
     let rankings = reputation::get_instructor_rankings(
@@ -206,10 +209,11 @@ pub async fn verify_reputation(
     state: State<'_, AppState>,
     assertion_id: String,
 ) -> Result<VerificationResult, String> {
-    let db = state
+    let db_guard = state
         .db
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
 
     let (
         score_matches,
