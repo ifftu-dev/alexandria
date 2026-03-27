@@ -189,27 +189,20 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 90
     env:
-      # Redirect Rust toolchain + build artifacts to /mnt (expanded by maximize-build-space)
-      # so root filesystem (used by apt) doesn't run out of space.
+      # Keep Rust toolchains and build artifacts off the root filesystem so apt and
+      # bundling work can share the runner's remaining root space.
       RUSTUP_HOME: /mnt/rustup
       CARGO_HOME: /mnt/cargo
       CARGO_TARGET_DIR: /mnt/target
       TMPDIR: /mnt/tmp
     steps:
-      # maximize-build-space must run BEFORE apt so that it removes large pre-installed
-      # packages from root before apt fills root back up. root-reserve-mb ensures apt
-      # has enough room; everything else (rustup, cargo, target) goes to /mnt LVM.
-      - name: Maximize build space
-        uses: easimon/maximize-build-space@v10
-        with:
-          root-reserve-mb: 20480
-          remove-dotnet: 'true'
-          remove-android: 'true'
-          remove-haskell: 'true'
-          remove-codeql: 'true'
-          remove-docker-images: 'true'
+      - name: Free Linux disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force || true
+          df -h
 
-      - name: Prepare /mnt directories (maximize-build-space mounts as root)
+      - name: Prepare /mnt directories
         run: |
           sudo mkdir -p /mnt/rustup /mnt/cargo /mnt/target /mnt/tmp
           sudo chown -R "$(id -un):$(id -gn)" /mnt/rustup /mnt/cargo /mnt/target /mnt/tmp
@@ -297,17 +290,13 @@ jobs:
       CARGO_TARGET_DIR: /mnt/target
       TMPDIR: /mnt/tmp
     steps:
-      - name: Maximize build space
-        uses: easimon/maximize-build-space@v10
-        with:
-          root-reserve-mb: 20480
-          remove-dotnet: 'true'
-          remove-android: 'true'
-          remove-haskell: 'true'
-          remove-codeql: 'true'
-          remove-docker-images: 'true'
+      - name: Free Linux disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force || true
+          df -h
 
-      - name: Prepare /mnt directories (maximize-build-space mounts as root)
+      - name: Prepare /mnt directories
         run: |
           sudo mkdir -p /mnt/rustup /mnt/cargo /mnt/target /mnt/tmp
           sudo chown -R "$(id -un):$(id -gn)" /mnt/rustup /mnt/cargo /mnt/target /mnt/tmp

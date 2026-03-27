@@ -61,15 +61,11 @@ jobs:
       TMPDIR: /mnt/tmp
 
     steps:
-      - name: Maximize build space
-        uses: easimon/maximize-build-space@v10
-        with:
-          root-reserve-mb: 20480
-          remove-dotnet: 'true'
-          remove-android: 'true'
-          remove-haskell: 'true'
-          remove-codeql: 'true'
-          remove-docker-images: 'true'
+      - name: Free Linux disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force || true
+          df -h
 
       - name: Prepare /mnt directories
         run: |
@@ -93,7 +89,7 @@ jobs:
         run: |
           sudo add-apt-repository universe -y
           sudo env TMPDIR="$TMPDIR" apt-get update
-          sudo env TMPDIR="$TMPDIR" apt-get install -y \
+          sudo env TMPDIR="$TMPDIR" apt-get install -y --no-install-recommends \
             cmake \
             libwebkit2gtk-4.1-dev \
             libappindicator3-dev \
