@@ -27,6 +27,12 @@ pub struct ClassroomMessagePayload {
     pub sent_at: u64,
     /// If true, this is a tombstone (soft-delete) for the message with this `id`.
     pub is_delete: bool,
+    /// If true, `content` is base64-encoded ciphertext (AES-256-GCM with group key).
+    #[serde(default)]
+    pub encrypted: bool,
+    /// The group key version used for encryption (for key rotation).
+    #[serde(default)]
+    pub key_version: u32,
 }
 
 /// A meta/control event broadcast on the classroom meta topic.
@@ -73,6 +79,18 @@ pub enum ClassroomMetaEvent {
         classroom_id: String,
         call_id: String,
     },
+    /// Distribute an encrypted group key to a specific member.
+    ///
+    /// Sent by the owner/moderator when a member is approved or when
+    /// the group key is rotated. The `encrypted_group_key` is encrypted
+    /// via X25519 ECDH for the target member's public key.
+    KeyDistribution {
+        classroom_id: String,
+        stake_address: String,
+        /// Base64-encoded encrypted group key (nonce || ciphertext).
+        encrypted_group_key: String,
+        key_version: u32,
+    },
 }
 
 impl ClassroomMetaEvent {
@@ -87,6 +105,7 @@ impl ClassroomMetaEvent {
             Self::RoleChanged { classroom_id, .. } => classroom_id,
             Self::CallStarted { classroom_id, .. } => classroom_id,
             Self::CallEnded { classroom_id, .. } => classroom_id,
+            Self::KeyDistribution { classroom_id, .. } => classroom_id,
         }
     }
 
@@ -101,6 +120,7 @@ impl ClassroomMetaEvent {
             Self::RoleChanged { .. } => "RoleChanged",
             Self::CallStarted { .. } => "CallStarted",
             Self::CallEnded { .. } => "CallEnded",
+            Self::KeyDistribution { .. } => "KeyDistribution",
         }
     }
 }

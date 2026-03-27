@@ -312,6 +312,8 @@ mod tests {
             public_key: vec![0; 32],
             stake_address: "stake_test1proposer".into(),
             timestamp: 1_700_000_000,
+            encrypted: false,
+            key_id: None,
         }
     }
 

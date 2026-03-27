@@ -30,6 +30,7 @@ const publishMessage = ref('')
 const showExportModal = ref(false)
 const exportConfirmed = ref(false)
 const exportedMnemonic = ref('')
+const exportPassword = ref('')
 const exportError = ref('')
 const exporting = ref(false)
 const locking = ref(false)
@@ -182,26 +183,33 @@ function openExportModal() {
   showExportModal.value = true
   exportConfirmed.value = false
   exportedMnemonic.value = ''
+  exportPassword.value = ''
   exportError.value = ''
 }
 
 function closeExportModal() {
   showExportModal.value = false
   exportedMnemonic.value = ''
+  exportPassword.value = ''
   exportConfirmed.value = false
 }
 
-async function doExport() {
+function confirmExport() {
   exportConfirmed.value = true
+  exportError.value = ''
+}
+
+async function doExport() {
   exporting.value = true
   exportError.value = ''
 
   try {
-    exportedMnemonic.value = await authExport()
+    exportedMnemonic.value = await authExport(exportPassword.value)
   } catch (e) {
     exportError.value = String(e)
   } finally {
     exporting.value = false
+    exportPassword.value = ''
   }
 }
 
@@ -501,7 +509,7 @@ async function disableBiometric() {
         max-width="28rem"
         @close="closeExportModal"
       >
-        <!-- Confirmation step -->
+        <!-- Warning step -->
         <div v-if="!exportedMnemonic && !exportConfirmed">
           <AppAlert variant="error" class="mb-4">
             Your recovery phrase gives full access to your identity and credentials.
@@ -512,8 +520,35 @@ async function disableBiometric() {
             <AppButton variant="ghost" class="flex-1" @click="closeExportModal">
               Cancel
             </AppButton>
-            <AppButton variant="danger" class="flex-1" @click="doExport">
-              I Understand, Show Phrase
+            <AppButton variant="danger" class="flex-1" @click="confirmExport">
+              I Understand, Continue
+            </AppButton>
+          </div>
+        </div>
+
+        <!-- Password re-entry step -->
+        <div v-else-if="exportConfirmed && !exportedMnemonic && !exporting && !exportError">
+          <p class="text-sm text-muted-foreground mb-3">
+            Enter your vault password to confirm.
+          </p>
+          <AppInput
+            v-model="exportPassword"
+            type="password"
+            placeholder="Vault password"
+            class="mb-3"
+            @keyup.enter="doExport"
+          />
+          <div class="flex gap-2">
+            <AppButton variant="ghost" class="flex-1" @click="closeExportModal">
+              Cancel
+            </AppButton>
+            <AppButton
+              variant="danger"
+              class="flex-1"
+              :disabled="!exportPassword"
+              @click="doExport"
+            >
+              Show Phrase
             </AppButton>
           </div>
         </div>
@@ -524,12 +559,17 @@ async function disableBiometric() {
           <p class="text-sm text-muted-foreground">Decrypting...</p>
         </div>
 
-        <!-- Error -->
+        <!-- Error (allow retry) -->
         <div v-else-if="exportError">
           <AppAlert variant="error" class="mb-3">{{ exportError }}</AppAlert>
-          <AppButton variant="outline" class="w-full" @click="closeExportModal">
-            Close
-          </AppButton>
+          <div class="flex gap-2">
+            <AppButton variant="outline" class="flex-1" @click="closeExportModal">
+              Close
+            </AppButton>
+            <AppButton variant="ghost" class="flex-1" @click="exportError = ''">
+              Try Again
+            </AppButton>
+          </div>
         </div>
 
         <!-- Mnemonic display -->

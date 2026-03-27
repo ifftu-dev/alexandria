@@ -240,7 +240,7 @@ mod tests {
     async fn publish_and_resolve_roundtrip() {
         let tmp = tempfile::TempDir::new().expect("create temp dir");
         let node = ContentNode::new(tmp.path());
-        node.start().await.expect("start node");
+        node.start(None).await.expect("start node");
 
         let key = make_test_key();
         let payload = make_test_payload("stake_test1roundtrip");
@@ -267,7 +267,7 @@ mod tests {
     async fn resolve_rejects_invalid_hash() {
         let tmp = tempfile::TempDir::new().expect("create temp dir");
         let node = ContentNode::new(tmp.path());
-        node.start().await.expect("start node");
+        node.start(None).await.expect("start node");
 
         let result = resolve_profile(&node, &"0".repeat(64)).await;
         assert!(matches!(result, Err(ProfileError::NotFound(_))));
@@ -279,7 +279,7 @@ mod tests {
     async fn publish_same_profile_twice_gives_same_hash() {
         let tmp = tempfile::TempDir::new().expect("create temp dir");
         let node = ContentNode::new(tmp.path());
-        node.start().await.expect("start node");
+        node.start(None).await.expect("start node");
 
         let key = make_test_key();
         let payload = make_test_payload("stake_test1deterministic");

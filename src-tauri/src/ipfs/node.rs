@@ -66,6 +66,9 @@ struct RunningNode {
 pub struct ContentNode {
     inner: Arc<Mutex<Option<RunningNode>>>,
     data_dir: PathBuf,
+    /// AES-256-GCM key for transparent content encryption.
+    /// Set after vault unlock via `set_content_key()`.
+    content_key: Arc<Mutex<Option<[u8; 32]>>>,
 }
 
 impl ContentNode {
@@ -76,7 +79,18 @@ impl ContentNode {
         Self {
             inner: Arc::new(Mutex::new(None)),
             data_dir: data_dir.to_path_buf(),
+            content_key: Arc::new(Mutex::new(None)),
         }
+    }
+
+    /// Set the content encryption key (derived from vault password).
+    pub async fn set_content_key(&self, key: [u8; 32]) {
+        *self.content_key.lock().await = Some(key);
+    }
+
+    /// Get the content encryption key, if set.
+    pub async fn content_key(&self) -> Option<[u8; 32]> {
+        *self.content_key.lock().await
     }
 
     /// Start the iroh node.
@@ -84,7 +98,11 @@ impl ContentNode {
     /// Creates the FsStore, binds the QUIC endpoint with a persistent
     /// identity key, registers the blobs protocol, and starts the
     /// accept loop.
-    pub async fn start(&self) -> Result<(), NodeError> {
+    ///
+    /// If `node_enc_key` is provided, the node's Ed25519 secret key is
+    /// encrypted at rest using AES-256-GCM. Legacy plaintext keys are
+    /// auto-migrated on first start with an encryption key.
+    pub async fn start(&self, node_enc_key: Option<&[u8; 32]>) -> Result<(), NodeError> {
         let mut inner = self.inner.lock().await;
         if inner.is_some() {
             return Err(NodeError::AlreadyRunning);
@@ -103,7 +121,7 @@ impl ContentNode {
         log::info!("iroh blob store loaded at {}", self.data_dir.display());
 
         // Load or generate the node's persistent identity key
-        let secret_key = load_or_generate_secret_key(&self.data_dir)?;
+        let secret_key = load_or_generate_secret_key(&self.data_dir, node_enc_key)?;
 
         // QUIC transport: aggressive timeouts for real-time media.
         // keep_alive=2s ensures the connection stays active during audio DTX gaps.
@@ -249,44 +267,128 @@ impl std::ops::Deref for StoreGuard<'_> {
     }
 }
 
+/// File format version bytes.
+const KEY_VERSION_PLAINTEXT: u8 = 0x00;
+const KEY_VERSION_AES_GCM: u8 = 0x01;
+
 /// Load the node's secret key from disk, or generate a new one.
 ///
-/// The key is stored as raw 32 bytes in `data_dir/node_secret.key`.
-/// This ensures the node has a stable identity across restarts.
-fn load_or_generate_secret_key(data_dir: &Path) -> Result<SecretKey, NodeError> {
+/// When `enc_key` is provided, the key file is encrypted at rest using
+/// AES-256-GCM. The file format is:
+///   `version(1) || nonce(12) || ciphertext(32 + 16 auth tag)`
+///
+/// Legacy plaintext files (32 raw bytes) are auto-migrated to encrypted
+/// format on first read when an encryption key is available.
+fn load_or_generate_secret_key(
+    data_dir: &Path,
+    enc_key: Option<&[u8; 32]>,
+) -> Result<SecretKey, NodeError> {
     let key_path = data_dir.join(SECRET_KEY_FILE);
 
     if key_path.exists() {
         let bytes = std::fs::read(&key_path)
             .map_err(|e| NodeError::KeyPersistence(format!("read key: {e}")))?;
-        if bytes.len() != 32 {
+
+        let key_bytes = if bytes.len() == 32 {
+            // Legacy plaintext format (version 0x00 implicit)
+            let mut kb = [0u8; 32];
+            kb.copy_from_slice(&bytes);
+
+            // Auto-migrate to encrypted if we have an encryption key
+            if let Some(ek) = enc_key {
+                let encrypted = encrypt_node_key(&kb, ek)?;
+                std::fs::write(&key_path, &encrypted)
+                    .map_err(|e| NodeError::KeyPersistence(format!("migrate key: {e}")))?;
+                log::info!("migrated node key to encrypted format");
+            }
+
+            kb
+        } else if bytes.first() == Some(&KEY_VERSION_AES_GCM) && bytes.len() == 1 + 12 + 32 + 16 {
+            // Encrypted format: version(1) || nonce(12) || ciphertext(48)
+            let ek = enc_key.ok_or_else(|| {
+                NodeError::KeyPersistence("node key is encrypted but no decryption key provided".into())
+            })?;
+            decrypt_node_key(&bytes[1..], ek)?
+        } else {
             return Err(NodeError::KeyPersistence(format!(
-                "key file has wrong length: {} (expected 32)",
+                "key file has unexpected length: {} bytes",
                 bytes.len()
             )));
-        }
-        let mut key_bytes = [0u8; 32];
-        key_bytes.copy_from_slice(&bytes);
+        };
+
         let key = SecretKey::from_bytes(&key_bytes);
         log::info!("loaded existing iroh node key from {}", key_path.display());
         Ok(key)
     } else {
         // Generate 32 random bytes for the Ed25519 secret key.
-        // We use rand 0.8's OsRng via RngCore::fill_bytes, then construct
-        // the iroh SecretKey from raw bytes to avoid rand version conflicts
-        // (iroh uses rand 0.9 internally, we have rand 0.8 for other deps).
         use rand::RngCore;
         let mut key_bytes = [0u8; 32];
         rand::rngs::OsRng.fill_bytes(&mut key_bytes);
         let key = SecretKey::from_bytes(&key_bytes);
-        std::fs::write(&key_path, key.to_bytes())
-            .map_err(|e| NodeError::KeyPersistence(format!("write key: {e}")))?;
+
+        // Write encrypted if we have an encryption key, plaintext otherwise
+        if let Some(ek) = enc_key {
+            let encrypted = encrypt_node_key(&key_bytes, ek)?;
+            std::fs::write(&key_path, &encrypted)
+                .map_err(|e| NodeError::KeyPersistence(format!("write key: {e}")))?;
+        } else {
+            std::fs::write(&key_path, key.to_bytes())
+                .map_err(|e| NodeError::KeyPersistence(format!("write key: {e}")))?;
+        }
+
         log::info!(
             "generated new iroh node key, saved to {}",
             key_path.display()
         );
         Ok(key)
     }
+}
+
+/// Encrypt a 32-byte node key using AES-256-GCM.
+/// Returns: `version(1) || nonce(12) || ciphertext(48)`
+fn encrypt_node_key(key_bytes: &[u8; 32], enc_key: &[u8; 32]) -> Result<Vec<u8>, NodeError> {
+    use aes_gcm::aead::Aead;
+    use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
+    use rand::RngCore;
+
+    let cipher = Aes256Gcm::new(enc_key.into());
+    let mut nonce_bytes = [0u8; 12];
+    rand::rngs::OsRng.fill_bytes(&mut nonce_bytes);
+    let nonce = Nonce::from_slice(&nonce_bytes);
+
+    let ciphertext = cipher
+        .encrypt(nonce, key_bytes.as_ref())
+        .map_err(|e| NodeError::KeyPersistence(format!("encrypt key: {e}")))?;
+
+    let mut out = Vec::with_capacity(1 + 12 + ciphertext.len());
+    out.push(KEY_VERSION_AES_GCM);
+    out.extend_from_slice(&nonce_bytes);
+    out.extend_from_slice(&ciphertext);
+    Ok(out)
+}
+
+/// Decrypt a node key from `nonce(12) || ciphertext(48)`.
+fn decrypt_node_key(data: &[u8], enc_key: &[u8; 32]) -> Result<[u8; 32], NodeError> {
+    use aes_gcm::aead::Aead;
+    use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
+
+    if data.len() != 12 + 32 + 16 {
+        return Err(NodeError::KeyPersistence(format!(
+            "encrypted key has wrong length: {}",
+            data.len()
+        )));
+    }
+
+    let nonce = Nonce::from_slice(&data[..12]);
+    let cipher = Aes256Gcm::new(enc_key.into());
+
+    let plaintext = cipher
+        .decrypt(nonce, &data[12..])
+        .map_err(|_| NodeError::KeyPersistence("decryption failed (wrong password?)".into()))?;
+
+    let mut key_bytes = [0u8; 32];
+    key_bytes.copy_from_slice(&plaintext);
+    Ok(key_bytes)
 }
 
 #[cfg(test)]
@@ -304,12 +406,12 @@ mod tests {
         assert!(node.node_id().await.is_none());
 
         // Start
-        node.start().await.expect("start failed");
+        node.start(None).await.expect("start failed");
         assert!(node.is_running().await);
         assert!(node.node_id().await.is_some());
 
         // Can't start twice
-        assert!(matches!(node.start().await, Err(NodeError::AlreadyRunning)));
+        assert!(matches!(node.start(None).await, Err(NodeError::AlreadyRunning)));
 
         // Shutdown
         node.shutdown().await.expect("shutdown failed");
@@ -326,11 +428,11 @@ mod tests {
 
         // The secret key is persisted to disk, so the node ID should be
         // stable across restarts from the same data directory.
-        node.start().await.expect("start failed");
+        node.start(None).await.expect("start failed");
         let id1 = node.node_id().await.unwrap();
         node.shutdown().await.expect("shutdown failed");
 
-        node.start().await.expect("restart failed");
+        node.start(None).await.expect("restart failed");
         let id2 = node.node_id().await.unwrap();
         node.shutdown().await.expect("shutdown failed");
 
@@ -341,11 +443,11 @@ mod tests {
     fn secret_key_persists_to_disk() {
         let tmp = TempDir::new().expect("create temp dir");
 
-        // First call generates and saves
-        let key1 = load_or_generate_secret_key(tmp.path()).expect("gen key");
+        // First call generates and saves (plaintext, no encryption key)
+        let key1 = load_or_generate_secret_key(tmp.path(), None).expect("gen key");
 
         // Second call loads from file
-        let key2 = load_or_generate_secret_key(tmp.path()).expect("load key");
+        let key2 = load_or_generate_secret_key(tmp.path(), None).expect("load key");
 
         assert_eq!(
             key1.to_bytes(),
@@ -355,5 +457,46 @@ mod tests {
 
         // File should exist
         assert!(tmp.path().join(SECRET_KEY_FILE).exists());
+    }
+
+    #[test]
+    fn secret_key_encrypted_roundtrip() {
+        let tmp = TempDir::new().expect("create temp dir");
+        let enc_key = [42u8; 32];
+
+        // Generate with encryption
+        let key1 = load_or_generate_secret_key(tmp.path(), Some(&enc_key)).expect("gen key");
+
+        // File should be encrypted (61 bytes: 1 + 12 + 32 + 16)
+        let file = std::fs::read(tmp.path().join(SECRET_KEY_FILE)).expect("read file");
+        assert_eq!(file.len(), 61, "encrypted key file should be 61 bytes");
+        assert_eq!(file[0], KEY_VERSION_AES_GCM);
+
+        // Load with same key
+        let key2 = load_or_generate_secret_key(tmp.path(), Some(&enc_key)).expect("load key");
+        assert_eq!(key1.to_bytes(), key2.to_bytes());
+
+        // Load with wrong key should fail
+        let wrong_key = [99u8; 32];
+        assert!(load_or_generate_secret_key(tmp.path(), Some(&wrong_key)).is_err());
+    }
+
+    #[test]
+    fn plaintext_key_auto_migrates_to_encrypted() {
+        let tmp = TempDir::new().expect("create temp dir");
+
+        // Create plaintext key
+        let key1 = load_or_generate_secret_key(tmp.path(), None).expect("gen key");
+        let file = std::fs::read(tmp.path().join(SECRET_KEY_FILE)).expect("read");
+        assert_eq!(file.len(), 32, "should be plaintext");
+
+        // Load with encryption key — should auto-migrate
+        let enc_key = [42u8; 32];
+        let key2 = load_or_generate_secret_key(tmp.path(), Some(&enc_key)).expect("migrate");
+        assert_eq!(key1.to_bytes(), key2.to_bytes());
+
+        // File should now be encrypted
+        let file = std::fs::read(tmp.path().join(SECRET_KEY_FILE)).expect("read");
+        assert_eq!(file.len(), 61, "should be encrypted after migration");
     }
 }
