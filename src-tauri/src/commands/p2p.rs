@@ -74,19 +74,27 @@ pub async fn p2p_start(app: AppHandle, state: State<'_, AppState>) -> Result<Str
     // Load known peers from the database so we can reconnect to them.
     let known_peers: Vec<network::KnownPeer> = {
         match state.db.lock() {
-            Ok(db) => {
-                db.conn().prepare(
-                    "SELECT peer_id, addresses FROM peers WHERE addresses IS NOT NULL AND addresses != '[]'"
-                ).ok().map(|mut stmt| {
-                    stmt.query_map([], |row| {
-                        let peer_id: String = row.get(0)?;
-                        let addrs_json: String = row.get(1)?;
-                        let addresses: Vec<String> = serde_json::from_str(&addrs_json).unwrap_or_default();
-                        Ok(network::KnownPeer { peer_id, addresses })
-                    })
-                    .map(|rows| rows.filter_map(|r| r.ok()).collect())
-                    .unwrap_or_default()
-                }).unwrap_or_default()
+            Ok(guard) => {
+                match guard.as_ref() {
+                    Some(db) => {
+                        db.conn().prepare(
+                            "SELECT peer_id, addresses FROM peers WHERE addresses IS NOT NULL AND addresses != '[]'"
+                        ).ok().map(|mut stmt| {
+                            stmt.query_map([], |row| {
+                                let peer_id: String = row.get(0)?;
+                                let addrs_json: String = row.get(1)?;
+                                let addresses: Vec<String> = serde_json::from_str(&addrs_json).unwrap_or_default();
+                                Ok(network::KnownPeer { peer_id, addresses })
+                            })
+                            .map(|rows| rows.filter_map(|r| r.ok()).collect())
+                            .unwrap_or_default()
+                        }).unwrap_or_default()
+                    }
+                    None => {
+                        diag::log("p2p_start: DB not initialized, skipping known peers");
+                        vec![]
+                    }
+                }
             }
             Err(e) => {
                 diag::log(&format!("p2p_start: DB mutex poisoned, skipping known peers: {e}"));
@@ -101,7 +109,7 @@ pub async fn p2p_start(app: AppHandle, state: State<'_, AppState>) -> Result<Str
 
     // Clone handles for the spawned task
     let p2p_node = state.p2p_node.clone();
-    let db_for_events: Arc<std::sync::Mutex<Database>> = state.db.clone();
+    let db_for_events: Arc<std::sync::Mutex<Option<Database>>> = state.db.clone();
     let peer_id_for_return = peer_id.clone();
     let app_for_events = app.clone();
 
@@ -135,27 +143,34 @@ pub async fn p2p_start(app: AppHandle, state: State<'_, AppState>) -> Result<Str
                     }
                     crate::p2p::types::P2pEvent::GossipMessage { topic, message } => {
                         log::debug!("P2P event: gossip message on {topic}");
-                        let db = match db_events.lock() {
-                            Ok(db) => db,
+                        let guard = match db_events.lock() {
+                            Ok(g) => g,
                             Err(e) => {
                                 log::error!("P2P gossip handler: DB mutex poisoned: {e}");
                                 continue;
                             }
                         };
+                        let db = match guard.as_ref() {
+                            Some(db) => db,
+                            None => {
+                                log::error!("P2P gossip handler: DB not initialized");
+                                continue;
+                            }
+                        };
                         if topic == TOPIC_CATALOG {
-                            let _ = p2p_catalog::handle_catalog_message(&db, message);
+                            let _ = p2p_catalog::handle_catalog_message(db, message);
                         } else if topic == TOPIC_EVIDENCE {
-                            let _ = p2p_evidence::handle_evidence_message(&db, message);
+                            let _ = p2p_evidence::handle_evidence_message(db, message);
                         } else if topic == TOPIC_TAXONOMY {
-                            let _ = p2p_taxonomy::handle_taxonomy_message(&db, message);
+                            let _ = p2p_taxonomy::handle_taxonomy_message(db, message);
                         } else if topic == TOPIC_GOVERNANCE {
-                            let _ = p2p_governance::handle_governance_message(&db, message);
+                            let _ = p2p_governance::handle_governance_message(db, message);
                         } else if is_classroom_topic(topic) {
                             if topic.ends_with("/meta/1.0") {
-                                classroom_manager::handle_classroom_meta(&db, message, &app_events);
+                                classroom_manager::handle_classroom_meta(db, message, &app_events);
                             } else {
                                 classroom_manager::handle_classroom_message(
-                                    &db,
+                                    db,
                                     message,
                                     &app_events,
                                 );

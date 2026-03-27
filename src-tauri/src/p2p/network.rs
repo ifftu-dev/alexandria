@@ -652,7 +652,7 @@ async fn swarm_event_loop(
     mut command_rx: mpsc::Receiver<SwarmCommand>,
     event_tx: mpsc::Sender<P2pEvent>,
     validator: Arc<MessageValidator>,
-    db: Option<Arc<std::sync::Mutex<Database>>>,
+    db: Option<Arc<std::sync::Mutex<Option<Database>>>>,
 ) {
     use libp2p::swarm::SwarmEvent;
 
@@ -754,7 +754,7 @@ async fn swarm_event_loop(
 
     /// Helper: persist a peer's addresses to the DB so we can reconnect on next startup.
     fn save_peer_to_db(
-        db: &Option<Arc<std::sync::Mutex<Database>>>,
+        db: &Option<Arc<std::sync::Mutex<Option<Database>>>>,
         peer_id: &str,
         addresses: &[String],
     ) {
@@ -762,7 +762,8 @@ async fn swarm_event_loop(
             return;
         }
         let Some(db_arc) = db else { return };
-        let Ok(db_lock) = db_arc.lock() else { return };
+        let Ok(db_guard) = db_arc.lock() else { return };
+        let Some(db_lock) = db_guard.as_ref() else { return };
         let addrs_json = serde_json::to_string(addresses).unwrap_or_default();
         let now = chrono::Utc::now().to_rfc3339();
         let _ = db_lock.conn().execute(

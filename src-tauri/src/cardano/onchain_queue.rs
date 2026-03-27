@@ -233,7 +233,7 @@ fn get_item(db: &Database, queue_id: &str) -> Result<Option<QueueItem>, String> 
 ///
 /// Returns the number of items processed.
 pub async fn process_queue(
-    db: &std::sync::Arc<std::sync::Mutex<crate::db::Database>>,
+    db: &std::sync::Arc<std::sync::Mutex<Option<crate::db::Database>>>,
     blockfrost: &Option<super::blockfrost::BlockfrostClient>,
 ) -> Result<usize, String> {
     // Skip if validators not deployed yet
@@ -250,7 +250,8 @@ pub async fn process_queue(
     // Get pending items
     let items = {
         let db_guard = db.lock().map_err(|_| "db lock poisoned".to_string())?;
-        get_pending(&db_guard)?
+        let db_ref = db_guard.as_ref().ok_or("database not initialized")?;
+        get_pending(db_ref)?
     };
 
     if items.is_empty() {
@@ -263,7 +264,8 @@ pub async fn process_queue(
         // Skip items that have been attempted too many times
         if item.attempts >= 5 {
             let db_guard = db.lock().map_err(|_| "db lock poisoned".to_string())?;
-            mark_failed(&db_guard, &item.id, "max attempts (5) reached")?;
+            let db_ref = db_guard.as_ref().ok_or("database not initialized")?;
+            mark_failed(db_ref, &item.id, "max attempts (5) reached")?;
             processed += 1;
             continue;
         }
@@ -279,12 +281,14 @@ pub async fn process_queue(
         match build_and_submit(&item.action_type, bf).await {
             Ok(tx_hash) => {
                 let db_guard = db.lock().map_err(|_| "db lock poisoned".to_string())?;
-                mark_submitted(&db_guard, &item.id, &tx_hash)?;
+                let db_ref = db_guard.as_ref().ok_or("database not initialized")?;
+                mark_submitted(db_ref, &item.id, &tx_hash)?;
                 log::info!("On-chain tx submitted: {} -> {}", item.action_type, tx_hash);
             }
             Err(e) => {
                 let db_guard = db.lock().map_err(|_| "db lock poisoned".to_string())?;
-                mark_failed(&db_guard, &item.id, &e)?;
+                let db_ref = db_guard.as_ref().ok_or("database not initialized")?;
+                mark_failed(db_ref, &item.id, &e)?;
                 log::warn!("On-chain tx failed for {}: {}", item.action_type, e);
             }
         }

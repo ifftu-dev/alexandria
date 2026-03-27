@@ -15,6 +15,8 @@ pub mod tutoring;
 // (AES-256-GCM + Argon2id instead of IOTA Stronghold)
 #[cfg(mobile)]
 pub mod crypto {
+    pub mod content_crypto;
+    pub mod group_key;
     pub mod hash;
     #[path = "keystore_portable.rs"]
     pub mod keystore;
@@ -47,7 +49,8 @@ use tutoring::TutoringManager;
 /// the `RefCell` from different OS threads — causing a SIGSEGV on iOS
 /// where the tokio thread pool is more aggressive about work-stealing.
 pub struct AppState {
-    pub db: Arc<std::sync::Mutex<Database>>,
+    pub db: Arc<std::sync::Mutex<Option<Database>>>,
+    pub db_path: PathBuf,
     pub keystore: Arc<Mutex<Option<Keystore>>>,
     pub vault_dir: PathBuf,
     pub content_node: Arc<ContentNode>,
@@ -55,6 +58,45 @@ pub struct AppState {
     pub p2p_node: Arc<Mutex<Option<P2pNode>>>,
     pub tutoring: Arc<TutoringManager>,
     pub classroom: Arc<ClassroomManager>,
+    /// Last IPC activity timestamp for session timeout (auto-lock).
+    pub last_activity: Arc<std::sync::Mutex<std::time::Instant>>,
+    /// IPC rate limiter for sensitive commands.
+    pub ipc_limiter: Arc<std::sync::Mutex<crate::commands::ratelimit::IpcRateLimiter>>,
+}
+
+impl AppState {
+    /// Open the encrypted database using the vault-derived key.
+    ///
+    /// Handles legacy migration from unencrypted → encrypted on first unlock.
+    /// Called during `unlock_vault` and `generate_wallet`.
+    pub fn open_database(&self, db_key: &[u8; 32]) -> Result<(), String> {
+        // Check if the DB is already open
+        {
+            let guard = self.db.lock().map_err(|e| e.to_string())?;
+            if guard.is_some() {
+                return Ok(());
+            }
+        }
+
+        // Migrate legacy unencrypted DB if needed
+        if Database::is_plaintext(&self.db_path) {
+            log::info!("Migrating legacy unencrypted database to SQLCipher...");
+            Database::migrate_to_encrypted(&self.db_path, db_key)
+                .map_err(|e| format!("database migration failed: {e}"))?;
+        }
+
+        // Open the encrypted database
+        let database = Database::open_encrypted(&self.db_path, db_key)
+            .map_err(|e| format!("failed to open encrypted database: {e}"))?;
+        database
+            .run_migrations()
+            .map_err(|e| format!("database migrations failed: {e}"))?;
+
+        let mut guard = self.db.lock().map_err(|e| e.to_string())?;
+        *guard = Some(database);
+        log::info!("Encrypted database initialized successfully");
+        Ok(())
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -152,15 +194,14 @@ pub fn run() {
             let db_path = app_dir.join("alexandria.db");
             log::info!("Database path: {}", db_path.display());
 
-            let database =
-                Database::open(&db_path).expect("failed to open database");
-            database
-                .run_migrations()
-                .expect("failed to run database migrations");
+            // Database open is deferred until vault unlock, since the
+            // encryption key is derived from the vault password.
+            // For new installs, the DB is created at unlock time.
+            // For legacy unencrypted DBs, migration happens at unlock.
+            let db: Arc<std::sync::Mutex<Option<Database>>> =
+                Arc::new(std::sync::Mutex::new(None));
 
-            log::info!("Database initialized successfully");
-
-            let db = Arc::new(std::sync::Mutex::new(database));
+            log::info!("Database open deferred until vault unlock");
 
             // Vault directory (Stronghold on desktop, AES-GCM portable vault on mobile)
             #[cfg(desktop)]
@@ -188,14 +229,16 @@ pub fn run() {
             diag::log("spawning iroh node startup task");
             tauri::async_runtime::spawn(async move {
                 crate::diag::log("iroh startup: calling content_node.start()...");
-                match content_node_clone.start().await {
+                match content_node_clone.start(None).await {
                     Ok(()) => {
                         crate::diag::log("iroh startup: content_node started OK");
                         log::info!("iroh content node started successfully");
 
                         // Backfill pins table for users upgrading from older versions
-                        if let Ok(db) = db_clone.lock() {
-                            ipfs::storage::backfill_pins(db.conn());
+                        if let Ok(guard) = db_clone.lock() {
+                            if let Some(db) = guard.as_ref() {
+                                ipfs::storage::backfill_pins(db.conn());
+                            }
                         }
 
                         // Initialize the content resolver with gateway fallback
@@ -275,6 +318,7 @@ pub fn run() {
 
             let app_state = AppState {
                 db,
+                db_path,
                 keystore: Arc::new(Mutex::new(None)),
                 vault_dir,
                 content_node,
@@ -282,28 +326,39 @@ pub fn run() {
                 p2p_node: Arc::new(Mutex::new(None)),
                 tutoring,
                 classroom,
+                last_activity: Arc::new(std::sync::Mutex::new(std::time::Instant::now())),
+                ipc_limiter: Arc::new(std::sync::Mutex::new(
+                    commands::ratelimit::IpcRateLimiter::new(),
+                )),
             };
 
-            // Clean up any sessions stuck as 'active' from a previous crash
+            // Clean up any sessions stuck as 'active' from a previous crash.
+            // NOTE: These run at startup, before vault unlock opens the DB.
+            // They will be skipped if the DB is not yet initialized; the
+            // cleanup will happen on the next vault unlock when the DB opens.
             diag::log("cleaning up orphaned tutoring sessions");
             {
                 match app_state.db.lock() {
-                    Ok(db) => {
-                        match db.conn().execute(
-                            "UPDATE tutoring_sessions SET status = 'ended', ended_at = datetime('now') WHERE status = 'active'",
-                            [],
-                        ) {
-                            Ok(count) if count > 0 => {
-                                log::info!("tutoring: cleaned up {count} orphaned session(s) from previous run");
-                                diag::log(&format!("cleaned up {count} orphaned session(s)"));
+                    Ok(guard) => {
+                        if let Some(db) = guard.as_ref() {
+                            match db.conn().execute(
+                                "UPDATE tutoring_sessions SET status = 'ended', ended_at = datetime('now') WHERE status = 'active'",
+                                [],
+                            ) {
+                                Ok(count) if count > 0 => {
+                                    log::info!("tutoring: cleaned up {count} orphaned session(s) from previous run");
+                                    diag::log(&format!("cleaned up {count} orphaned session(s)"));
+                                }
+                                Ok(_) => {
+                                    diag::log("no orphaned sessions to clean up");
+                                }
+                                Err(e) => {
+                                    log::warn!("tutoring: failed to clean up orphaned sessions: {e}");
+                                    diag::log(&format!("orphan cleanup error: {e}"));
+                                }
                             }
-                            Ok(_) => {
-                                diag::log("no orphaned sessions to clean up");
-                            }
-                            Err(e) => {
-                                log::warn!("tutoring: failed to clean up orphaned sessions: {e}");
-                                diag::log(&format!("orphan cleanup error: {e}"));
-                            }
+                        } else {
+                            diag::log("db not yet initialized — skipping orphan cleanup");
                         }
                     }
                     Err(e) => {
@@ -317,11 +372,13 @@ pub fn run() {
             diag::log("cleaning up orphaned classroom calls");
             {
                 match app_state.db.lock() {
-                    Ok(db) => {
-                        let _ = db.conn().execute(
-                            "UPDATE classroom_calls SET status = 'ended', ended_at = datetime('now') WHERE status = 'active'",
-                            [],
-                        );
+                    Ok(guard) => {
+                        if let Some(db) = guard.as_ref() {
+                            let _ = db.conn().execute(
+                                "UPDATE classroom_calls SET status = 'ended', ended_at = datetime('now') WHERE status = 'active'",
+                                [],
+                            );
+                        }
                     }
                     Err(e) => {
                         log::warn!("classroom: failed to clean up orphaned calls: {e}");
@@ -388,6 +445,7 @@ pub fn run() {
             commands::identity::generate_wallet,
             commands::identity::restore_wallet,
             commands::identity::export_mnemonic,
+            commands::identity::is_biometric_available,
             commands::identity::lock_vault,
             commands::identity::get_wallet_info,
             commands::identity::get_profile,

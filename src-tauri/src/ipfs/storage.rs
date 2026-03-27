@@ -235,11 +235,17 @@ async fn delete_blob_tag(node: &ContentNode, hash_hex: &str) -> Result<(), Strin
 /// across `.await`.
 pub async fn maybe_evict(
     node: &ContentNode,
-    db: &Arc<std::sync::Mutex<Database>>,
+    db: &Arc<std::sync::Mutex<Option<Database>>>,
 ) -> EvictionResult {
     // Read quota and total — short lock, released immediately
     let (quota, total, evictable) = {
-        let Ok(db) = db.lock() else {
+        let Ok(guard) = db.lock() else {
+            return EvictionResult {
+                blobs_evicted: 0,
+                bytes_freed: 0,
+            };
+        };
+        let Some(db) = guard.as_ref() else {
             return EvictionResult {
                 blobs_evicted: 0,
                 bytes_freed: 0,
@@ -274,10 +280,12 @@ pub async fn maybe_evict(
         }
 
         // Delete pin row — short lock
-        if let Ok(db) = db.lock() {
-            let _ = db
-                .conn()
-                .execute("DELETE FROM pins WHERE cid = ?1", params![pin.cid]);
+        if let Ok(guard) = db.lock() {
+            if let Some(db) = guard.as_ref() {
+                let _ = db
+                    .conn()
+                    .execute("DELETE FROM pins WHERE cid = ?1", params![pin.cid]);
+            }
         }
 
         let freed = pin.size_bytes.min(bytes_to_free);

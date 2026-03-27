@@ -19,10 +19,11 @@ pub async fn get_attestation_requirement(
     skill_id: String,
     proficiency_level: String,
 ) -> Result<Option<AttestationRequirement>, String> {
-    let db = state
+    let db_guard = state
         .db
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
     attestation::check_attestation_required(db.conn(), &skill_id, &proficiency_level)
 }
 
@@ -32,10 +33,11 @@ pub async fn list_attestation_requirements(
     state: State<'_, AppState>,
     dao_id: Option<String>,
 ) -> Result<Vec<AttestationRequirement>, String> {
-    let db = state
+    let db_guard = state
         .db
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
     attestation::list_attestation_requirements(db.conn(), dao_id.as_deref())
 }
 
@@ -45,10 +47,11 @@ pub async fn set_attestation_requirement(
     state: State<'_, AppState>,
     params: SetRequirementParams,
 ) -> Result<AttestationRequirement, String> {
-    let db = state
+    let db_guard = state
         .db
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
     attestation::set_attestation_requirement(db.conn(), &params)
 }
 
@@ -59,10 +62,11 @@ pub async fn remove_attestation_requirement(
     skill_id: String,
     proficiency_level: String,
 ) -> Result<bool, String> {
-    let db = state
+    let db_guard = state
         .db
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
     attestation::remove_attestation_requirement(db.conn(), &skill_id, &proficiency_level)
 }
 
@@ -75,10 +79,11 @@ pub async fn submit_attestation(
     state: State<'_, AppState>,
     params: SubmitAttestationParams,
 ) -> Result<EvidenceAttestation, String> {
-    let db = state
+    let db_guard = state
         .db
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
     let conn = db.conn();
 
     // Get local identity as the attestor
@@ -103,10 +108,11 @@ pub async fn list_attestations_for_evidence(
     state: State<'_, AppState>,
     evidence_id: String,
 ) -> Result<Vec<EvidenceAttestation>, String> {
-    let db = state
+    let db_guard = state
         .db
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
     attestation::list_attestations_for_evidence(db.conn(), &evidence_id)
 }
 
@@ -116,10 +122,11 @@ pub async fn get_attestation_status(
     state: State<'_, AppState>,
     evidence_id: String,
 ) -> Result<AttestationStatus, String> {
-    let db = state
+    let db_guard = state
         .db
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
     attestation::get_attestation_status(db.conn(), &evidence_id)
 }
 
@@ -128,9 +135,10 @@ pub async fn get_attestation_status(
 pub async fn list_unattested_evidence(
     state: State<'_, AppState>,
 ) -> Result<Vec<AttestationStatus>, String> {
-    let db = state
+    let db_guard = state
         .db
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
     attestation::list_unattested_evidence(db.conn())
 }

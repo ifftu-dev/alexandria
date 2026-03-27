@@ -182,6 +182,19 @@ impl Keystore {
         Ok(())
     }
 
+    /// Verify a password candidate against the stored password.
+    ///
+    /// Uses constant-time comparison to prevent timing side-channels.
+    pub fn check_password(&self, candidate: &str) -> Result<(), KeystoreError> {
+        use subtle::ConstantTimeEq;
+        let stored = self.password.as_bytes();
+        let given = candidate.as_bytes();
+        if stored.len() != given.len() || stored.ct_eq(given).unwrap_u8() != 1 {
+            return Err(KeystoreError::IncorrectPassword);
+        }
+        Ok(())
+    }
+
     /// Lock the vault, clearing in-memory secrets.
     pub fn lock(mut self) -> Result<(), KeystoreError> {
         self.mnemonic = None;
@@ -193,6 +206,21 @@ impl Keystore {
     /// Get the vault directory path.
     pub fn vault_dir(&self) -> &Path {
         &self.vault_dir
+    }
+
+    /// Derive a 32-byte database encryption key.
+    pub fn derive_db_key(&self) -> [u8; 32] {
+        derive_subkey(&self.password, &self.salt, b"alexandria-db-key")
+    }
+
+    /// Derive a 32-byte key for iroh node secret encryption.
+    pub fn derive_node_key(&self) -> [u8; 32] {
+        derive_subkey(&self.password, &self.salt, b"alexandria-iroh-node-key")
+    }
+
+    /// Derive a 32-byte key for content blob encryption.
+    pub fn derive_content_key(&self) -> [u8; 32] {
+        derive_subkey(&self.password, &self.salt, b"alexandria-content-key")
     }
 }
 
@@ -212,6 +240,29 @@ fn derive_key(password: &str, salt: &[u8]) -> Result<[u8; 32], KeystoreError> {
         .map_err(|e| KeystoreError::Crypto(format!("Argon2 hash: {e}")))?;
 
     Ok(key)
+}
+
+/// Derive a purpose-specific 32-byte subkey from password + salt.
+///
+/// Same logic as the desktop keystore: Argon2id → HKDF-SHA256.
+fn derive_subkey(password: &str, salt: &[u8], info: &[u8]) -> [u8; 32] {
+    use hkdf::Hkdf;
+    use sha2::Sha256;
+
+    let params = argon2::Params::new(64 * 1024, 3, 4, Some(32)).expect("valid argon2 params");
+    let argon2_inst =
+        argon2::Argon2::new(argon2::Algorithm::Argon2id, argon2::Version::V0x13, params);
+    let mut master = [0u8; 32];
+    argon2_inst
+        .hash_password_into(password.as_bytes(), salt, &mut master)
+        .expect("argon2 hash");
+
+    let hk = Hkdf::<Sha256>::new(None, &master);
+    let mut subkey = [0u8; 32];
+    hk.expand(info, &mut subkey).expect("hkdf expand");
+
+    master.iter_mut().for_each(|b| *b = 0);
+    subkey
 }
 
 /// Generate a cryptographically random 32-byte salt.
