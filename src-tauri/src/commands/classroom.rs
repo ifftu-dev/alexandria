@@ -83,7 +83,8 @@ pub async fn classroom_create(
         format!("{:08X}", seed)
     };
 
-    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let db_guard = state.db.lock().map_err(|e| e.to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
 
     db.conn()
         .execute(
@@ -136,7 +137,8 @@ pub async fn classroom_create(
 #[tauri::command]
 pub async fn classroom_list(state: State<'_, AppState>) -> Result<Vec<Classroom>, String> {
     let w = get_wallet(&state).await?;
-    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let db_guard = state.db.lock().map_err(|e| e.to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
 
     let mut stmt = db
         .conn()
@@ -183,7 +185,8 @@ pub async fn classroom_get(
     state: State<'_, AppState>,
 ) -> Result<Classroom, String> {
     let w = get_wallet(&state).await?;
-    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let db_guard = state.db.lock().map_err(|e| e.to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
 
     db.conn()
         .query_row(
@@ -208,7 +211,8 @@ pub async fn classroom_archive(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let w = get_wallet(&state).await?;
-    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let db_guard = state.db.lock().map_err(|e| e.to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
 
     let rows = db
         .conn()
@@ -250,7 +254,8 @@ pub async fn classroom_list_members(
     state: State<'_, AppState>,
 ) -> Result<Vec<ClassroomMember>, String> {
     let w = get_wallet(&state).await?;
-    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let db_guard = state.db.lock().map_err(|e| e.to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
     let _ = require_classroom_member(&db, &classroom_id, &w.stake_address)?;
 
     let mut stmt = db
@@ -296,7 +301,8 @@ pub async fn classroom_request_join(
 
     // Persist locally as pending
     {
-        let db = state.db.lock().map_err(|e| e.to_string())?;
+        let db_guard = state.db.lock().map_err(|e| e.to_string())?;
+        let db = db_guard.as_ref().ok_or("database not initialized")?;
         db.conn()
             .execute(
                 "INSERT OR IGNORE INTO classroom_join_requests \
@@ -355,7 +361,8 @@ pub async fn classroom_approve_member(
 
     // Verify local user is moderator/owner
     {
-        let db = state.db.lock().map_err(|e| e.to_string())?;
+        let db_guard = state.db.lock().map_err(|e| e.to_string())?;
+        let db = db_guard.as_ref().ok_or("database not initialized")?;
         let role: Option<String> = db
             .conn()
             .query_row(
@@ -422,7 +429,8 @@ pub async fn classroom_deny_member(
     let w = get_wallet(&state).await?;
 
     {
-        let db = state.db.lock().map_err(|e| e.to_string())?;
+        let db_guard = state.db.lock().map_err(|e| e.to_string())?;
+        let db = db_guard.as_ref().ok_or("database not initialized")?;
         let role: Option<String> = db
             .conn()
             .query_row(
@@ -475,7 +483,8 @@ pub async fn classroom_leave(
     let w = get_wallet(&state).await?;
 
     {
-        let db = state.db.lock().map_err(|e| e.to_string())?;
+        let db_guard = state.db.lock().map_err(|e| e.to_string())?;
+        let db = db_guard.as_ref().ok_or("database not initialized")?;
 
         // Owners must transfer ownership or archive before leaving
         let is_owner: bool = db
@@ -541,7 +550,8 @@ pub async fn classroom_kick_member(
     let w = get_wallet(&state).await?;
 
     {
-        let db = state.db.lock().map_err(|e| e.to_string())?;
+        let db_guard = state.db.lock().map_err(|e| e.to_string())?;
+        let db = db_guard.as_ref().ok_or("database not initialized")?;
         let role: Option<String> = db
             .conn()
             .query_row(
@@ -598,7 +608,8 @@ pub async fn classroom_set_role(
     let w = get_wallet(&state).await?;
 
     {
-        let db = state.db.lock().map_err(|e| e.to_string())?;
+        let db_guard = state.db.lock().map_err(|e| e.to_string())?;
+        let db = db_guard.as_ref().ok_or("database not initialized")?;
         let local_role: Option<String> = db
             .conn()
             .query_row(
@@ -648,7 +659,8 @@ pub async fn classroom_list_join_requests(
     state: State<'_, AppState>,
 ) -> Result<Vec<JoinRequest>, String> {
     let w = get_wallet(&state).await?;
-    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let db_guard = state.db.lock().map_err(|e| e.to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
 
     // Verify access
     let role: Option<String> = db
@@ -704,7 +716,8 @@ pub async fn classroom_list_channels(
     state: State<'_, AppState>,
 ) -> Result<Vec<ClassroomChannel>, String> {
     let w = get_wallet(&state).await?;
-    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let db_guard = state.db.lock().map_err(|e| e.to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
     let _ = require_classroom_member(&db, &classroom_id, &w.stake_address)?;
 
     let mut stmt = db
@@ -749,7 +762,8 @@ pub async fn classroom_create_channel(
         return Err("channel_type must be 'text' or 'announcement'".to_string());
     }
 
-    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let db_guard = state.db.lock().map_err(|e| e.to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
 
     let role: Option<String> = db
         .conn()
@@ -811,7 +825,8 @@ pub async fn classroom_delete_channel(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let w = get_wallet(&state).await?;
-    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let db_guard = state.db.lock().map_err(|e| e.to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
 
     // Only owner can delete channels (cascades to messages)
     let rows = db
@@ -841,7 +856,8 @@ pub async fn classroom_get_messages(
 ) -> Result<Vec<ClassroomMessage>, String> {
     let w = get_wallet(&state).await?;
     let limit = limit.unwrap_or(50).min(200);
-    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let db_guard = state.db.lock().map_err(|e| e.to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
     let classroom_id: String = db
         .conn()
         .query_row(
@@ -945,7 +961,8 @@ pub async fn classroom_send_message(
     let w = get_wallet(&state).await?;
 
     let classroom_id = {
-        let db = state.db.lock().map_err(|e| e.to_string())?;
+        let db_guard = state.db.lock().map_err(|e| e.to_string())?;
+        let db = db_guard.as_ref().ok_or("database not initialized")?;
 
         let (cid, ctype): (String, String) = db
             .conn()
@@ -984,7 +1001,8 @@ pub async fn classroom_send_message(
 
     // Persist locally
     {
-        let db = state.db.lock().map_err(|e| e.to_string())?;
+        let db_guard = state.db.lock().map_err(|e| e.to_string())?;
+        let db = db_guard.as_ref().ok_or("database not initialized")?;
         db.conn()
             .execute(
                 "INSERT INTO classroom_messages \
@@ -1006,14 +1024,53 @@ pub async fn classroom_send_message(
     {
         let node_lock = state.p2p_node.lock().await;
         if let Some(node) = node_lock.as_ref() {
+            // Encrypt the message content if a group key is available.
+            // Get the content key first (async), then lock DB briefly (sync).
+            let content_key = state.content_node.content_key().await;
+            let (msg_content, is_encrypted, kv) = {
+                let encrypted_gk = {
+                    let db_guard = state.db.lock().map_err(|e| e.to_string())?;
+                    db_guard.as_ref().and_then(|db| {
+                        db.conn().query_row(
+                            "SELECT group_key_enc, key_version FROM classroom_group_keys WHERE classroom_id = ?1",
+                            rusqlite::params![classroom_id],
+                            |row| Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, i32>(1)?)),
+                        ).ok()
+                    })
+                }; // db_guard dropped
+
+                match (encrypted_gk, content_key) {
+                    (Some((enc_key, version)), Some(ck)) => {
+                        match crate::crypto::content_crypto::decrypt(&ck, &enc_key) {
+                            Ok(Some(gk_bytes)) if gk_bytes.len() == 32 => {
+                                let mut gk = [0u8; 32];
+                                gk.copy_from_slice(&gk_bytes);
+                                match crate::crypto::group_key::encrypt_message(&gk, content.as_bytes()) {
+                                    Ok(ct) => {
+                                        use base64::Engine;
+                                        let encoded = base64::engine::general_purpose::STANDARD.encode(&ct);
+                                        (encoded, true, version as u32)
+                                    }
+                                    Err(_) => (content.clone(), false, 0)
+                                }
+                            }
+                            _ => (content.clone(), false, 0)
+                        }
+                    }
+                    _ => (content.clone(), false, 0)
+                }
+            };
+
             let payload = ClassroomMessagePayload {
                 id: id.clone(),
                 classroom_id: classroom_id.clone(),
                 channel_id: channel_id.clone(),
-                content: content.clone(),
+                content: msg_content,
                 sender_name: None,
                 sent_at: now_ms as u64,
                 is_delete: false,
+                encrypted: is_encrypted,
+                key_version: kv,
             };
             let _ = classroom_gossip::publish_message(
                 node,
@@ -1049,7 +1106,8 @@ pub async fn classroom_delete_message(
     let w = get_wallet(&state).await?;
 
     let (channel_id, classroom_id, sender) = {
-        let db = state.db.lock().map_err(|e| e.to_string())?;
+        let db_guard = state.db.lock().map_err(|e| e.to_string())?;
+        let db = db_guard.as_ref().ok_or("database not initialized")?;
         db.conn()
             .query_row(
                 "SELECT channel_id, classroom_id, sender_address \
@@ -1068,7 +1126,8 @@ pub async fn classroom_delete_message(
 
     // Sender can always delete their own; moderators/owners can delete any
     if sender != w.stake_address {
-        let db = state.db.lock().map_err(|e| e.to_string())?;
+        let db_guard = state.db.lock().map_err(|e| e.to_string())?;
+        let db = db_guard.as_ref().ok_or("database not initialized")?;
         let role: Option<String> = db
             .conn()
             .query_row(
@@ -1085,7 +1144,8 @@ pub async fn classroom_delete_message(
     }
 
     {
-        let db = state.db.lock().map_err(|e| e.to_string())?;
+        let db_guard = state.db.lock().map_err(|e| e.to_string())?;
+        let db = db_guard.as_ref().ok_or("database not initialized")?;
         db.conn()
             .execute(
                 "UPDATE classroom_messages SET deleted = 1 WHERE id = ?1",
@@ -1108,6 +1168,8 @@ pub async fn classroom_delete_message(
                 .unwrap_or_default()
                 .as_millis() as u64,
             is_delete: true,
+            encrypted: false,
+            key_version: 0,
         };
         let _ = classroom_gossip::publish_message(
             node,
@@ -1135,7 +1197,8 @@ pub async fn classroom_subscribe(
 ) -> Result<(), String> {
     let w = get_wallet(&state).await?;
     {
-        let db = state.db.lock().map_err(|e| e.to_string())?;
+        let db_guard = state.db.lock().map_err(|e| e.to_string())?;
+        let db = db_guard.as_ref().ok_or("database not initialized")?;
         let _ = require_classroom_member(&db, &classroom_id, &w.stake_address)?;
     }
 
@@ -1192,7 +1255,8 @@ pub async fn classroom_start_call(
 ) -> Result<ClassroomCall, String> {
     let w = get_wallet(&state).await?;
     {
-        let db = state.db.lock().map_err(|e| e.to_string())?;
+        let db_guard = state.db.lock().map_err(|e| e.to_string())?;
+        let db = db_guard.as_ref().ok_or("database not initialized")?;
         let _ = require_classroom_member(&db, &classroom_id, &w.stake_address)?;
     }
 
@@ -1231,7 +1295,8 @@ pub async fn classroom_start_call(
 
     // Persist the call record
     {
-        let db = state.db.lock().map_err(|e| e.to_string())?;
+        let db_guard = state.db.lock().map_err(|e| e.to_string())?;
+        let db = db_guard.as_ref().ok_or("database not initialized")?;
         db.conn()
             .execute(
                 "INSERT INTO classroom_calls \
@@ -1270,7 +1335,8 @@ pub async fn classroom_start_call(
         }
     }
 
-    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let db_guard = state.db.lock().map_err(|e| e.to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
     db.conn()
         .query_row(
             "SELECT id, classroom_id, channel_id, title, ticket, started_by, status, started_at, ended_at \
@@ -1296,7 +1362,8 @@ pub async fn classroom_join_call(
     let w = get_wallet(&state).await?;
 
     let ticket: String = {
-        let db = state.db.lock().map_err(|e| e.to_string())?;
+        let db_guard = state.db.lock().map_err(|e| e.to_string())?;
+        let db = db_guard.as_ref().ok_or("database not initialized")?;
         let (classroom_id, ticket): (String, Option<String>) = db
             .conn()
             .query_row(
@@ -1341,7 +1408,8 @@ pub async fn classroom_end_call(call_id: String, state: State<'_, AppState>) -> 
     let w = get_wallet(&state).await?;
 
     let classroom_id: String = {
-        let db = state.db.lock().map_err(|e| e.to_string())?;
+        let db_guard = state.db.lock().map_err(|e| e.to_string())?;
+        let db = db_guard.as_ref().ok_or("database not initialized")?;
         let (classroom_id, started_by): (String, String) = db
             .conn()
             .query_row(
@@ -1403,7 +1471,8 @@ pub async fn classroom_get_active_call(
     state: State<'_, AppState>,
 ) -> Result<Option<ClassroomCall>, String> {
     let w = get_wallet(&state).await?;
-    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let db_guard = state.db.lock().map_err(|e| e.to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
     let _ = require_classroom_member(&db, &classroom_id, &w.stake_address)?;
 
     db.conn()

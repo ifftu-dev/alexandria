@@ -149,10 +149,11 @@ pub async fn tutoring_create_room(
     log::info!("[cmd] tutoring_create_room: create_room returned, inserting into DB...");
     // Persist to database
     {
-        let db = state
-            .db
-            .lock()
-            .map_err(|_| "database lock poisoned".to_string())?;
+        let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
         db.conn()
             .execute(
                 "INSERT INTO tutoring_sessions (id, title, ticket, status) VALUES (?1, ?2, ?3, 'active')",
@@ -227,10 +228,11 @@ pub async fn tutoring_join_room(
     log::info!("[cmd] tutoring_join_room: join_room returned, inserting into DB...");
     // Persist to database
     {
-        let db = state
-            .db
-            .lock()
-            .map_err(|_| "database lock poisoned".to_string())?;
+        let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
         db.conn()
             .execute(
                 "INSERT INTO tutoring_sessions (id, title, ticket, status) VALUES (?1, ?2, ?3, 'active')",
@@ -263,10 +265,11 @@ pub async fn tutoring_leave_room(state: State<'_, AppState>) -> Result<(), Strin
 
     // Update database
     if let Some(id) = session_id {
-        let db = state
-            .db
-            .lock()
-            .map_err(|_| "database lock poisoned".to_string())?;
+        let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
         db.conn()
             .execute(
                 "UPDATE tutoring_sessions SET status = 'ended', ended_at = datetime('now') WHERE id = ?1",
@@ -332,10 +335,11 @@ pub async fn tutoring_peers(
 pub async fn tutoring_list_sessions(
     state: State<'_, AppState>,
 ) -> Result<Vec<TutoringSessionInfo>, String> {
-    let db = state
+    let db_guard = state
         .db
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
     let mut stmt = db
         .conn()
         .prepare(

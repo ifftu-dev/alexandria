@@ -19,10 +19,11 @@ pub async fn list_courses(
     state: State<'_, AppState>,
     status: Option<String>,
 ) -> Result<Vec<Course>, String> {
-    let db = state
+    let db_guard = state
         .db
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
 
     let (sql, param_values): (String, Vec<Box<dyn rusqlite::types::ToSql>>) = if let Some(ref s) =
         status
@@ -86,10 +87,11 @@ pub async fn get_course(
     state: State<'_, AppState>,
     course_id: String,
 ) -> Result<Option<Course>, String> {
-    let db = state
+    let db_guard = state
         .db
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
 
     let result = db.conn().query_row(
         "SELECT id, title, description, author_address, author_name, content_cid, thumbnail_cid, \
@@ -136,10 +138,11 @@ pub async fn create_course(
     state: State<'_, AppState>,
     req: CreateCourseRequest,
 ) -> Result<Course, String> {
-    let db = state
+    let db_guard = state
         .db
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
 
     // Get the local user's stake address
     let author_address: String = db
@@ -190,10 +193,11 @@ pub async fn update_course(
     course_id: String,
     req: UpdateCourseRequest,
 ) -> Result<Course, String> {
-    let db = state
+    let db_guard = state
         .db
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
 
     let mut set_clauses = Vec::new();
     let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
@@ -248,10 +252,11 @@ pub async fn update_course(
 /// Delete a course.
 #[tauri::command]
 pub async fn delete_course(state: State<'_, AppState>, course_id: String) -> Result<(), String> {
-    let db = state
+    let db_guard = state
         .db
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
 
     let rows = db
         .conn()
@@ -287,10 +292,11 @@ pub async fn publish_course(
 
     // Read course data from DB (scoped to release the lock before iroh calls)
     let payload = {
-        let db = state
-            .db
-            .lock()
-            .map_err(|_| "database lock poisoned".to_string())?;
+        let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
         let course = get_course_by_id(db.conn(), &course_id)?;
 
         // Read chapters with their elements
@@ -380,10 +386,11 @@ pub async fn publish_course(
 
     // Update the course in the database and build catalog announcement
     let (announcement, signed_ann, version) = {
-        let db = state
-            .db
-            .lock()
-            .map_err(|_| "database lock poisoned".to_string())?;
+        let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
         db.conn()
             .execute(
                 "UPDATE courses SET content_cid = ?1, status = 'published', \

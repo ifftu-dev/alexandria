@@ -238,6 +238,19 @@ impl Keystore {
         Ok(())
     }
 
+    /// Verify a password candidate against the stored password.
+    ///
+    /// Uses constant-time comparison to prevent timing side-channels.
+    pub fn check_password(&self, candidate: &str) -> Result<(), KeystoreError> {
+        use subtle::ConstantTimeEq;
+        let stored = self.password.as_bytes();
+        let given = candidate.as_bytes();
+        if stored.len() != given.len() || stored.ct_eq(given).unwrap_u8() != 1 {
+            return Err(KeystoreError::IncorrectPassword);
+        }
+        Ok(())
+    }
+
     /// Clear in-memory secrets (lock the vault).
     ///
     /// After this call, the Keystore is consumed. A new `open()` call
@@ -254,6 +267,24 @@ impl Keystore {
     /// Get the vault directory path.
     pub fn vault_dir(&self) -> &Path {
         &self.vault_dir
+    }
+
+    /// Derive a 32-byte database encryption key.
+    ///
+    /// Uses HKDF-SHA256 with the Argon2id master key material
+    /// (password + salt) to produce a purpose-specific subkey.
+    pub fn derive_db_key(&self) -> [u8; 32] {
+        derive_subkey(&self.password, &self.salt, b"alexandria-db-key")
+    }
+
+    /// Derive a 32-byte key for iroh node secret encryption.
+    pub fn derive_node_key(&self) -> [u8; 32] {
+        derive_subkey(&self.password, &self.salt, b"alexandria-iroh-node-key")
+    }
+
+    /// Derive a 32-byte key for content blob encryption.
+    pub fn derive_content_key(&self) -> [u8; 32] {
+        derive_subkey(&self.password, &self.salt, b"alexandria-content-key")
     }
 }
 
@@ -281,6 +312,36 @@ fn derive_key(password: &str, salt: &[u8]) -> Result<KeyProvider, KeystoreError>
         .map_err(|e| KeystoreError::Memory(format!("Argon2 hash failed: {e}")))?;
 
     KeyProvider::try_from(key).map_err(|e| KeystoreError::Memory(format!("{e:?}")))
+}
+
+/// Derive a purpose-specific 32-byte subkey from password + salt.
+///
+/// 1. Argon2id(password, salt) → 32-byte master key material
+/// 2. HKDF-SHA256(ikm=master, info=purpose) → 32-byte subkey
+///
+/// This allows deriving multiple independent keys (DB, node, content)
+/// from a single password without re-running Argon2id each time.
+fn derive_subkey(password: &str, salt: &[u8], info: &[u8]) -> [u8; 32] {
+    use hkdf::Hkdf;
+    use sha2::Sha256;
+
+    // Step 1: Argon2id master key
+    let params = argon2::Params::new(64 * 1024, 3, 4, Some(32)).expect("valid argon2 params");
+    let argon2 = Argon2::new(argon2::Algorithm::Argon2id, argon2::Version::V0x13, params);
+    let mut master = [0u8; 32];
+    argon2
+        .hash_password_into(password.as_bytes(), salt, &mut master)
+        .expect("argon2 hash");
+
+    // Step 2: HKDF-SHA256 expand
+    let hk = Hkdf::<Sha256>::new(None, &master);
+    let mut subkey = [0u8; 32];
+    hk.expand(info, &mut subkey).expect("hkdf expand");
+
+    // Clear master key material
+    master.iter_mut().for_each(|b| *b = 0);
+
+    subkey
 }
 
 /// Generate a cryptographically random 32-byte salt.

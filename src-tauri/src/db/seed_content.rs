@@ -18,12 +18,13 @@ use crate::ipfs::node::ContentNode;
 /// Seed content into iroh for elements that lack a `content_cid`.
 /// Returns the number of elements updated, or 0 if skipped.
 pub async fn seed_content_if_needed(
-    db: &Arc<Mutex<Database>>,
+    db: &Arc<Mutex<Option<Database>>>,
     node: &Arc<ContentNode>,
 ) -> Result<u32, String> {
     // Find all seed elements that still need content CIDs.
     let needs_seed: HashSet<String> = {
-        let db = db.lock().unwrap();
+        let guard = db.lock().unwrap();
+        let db = guard.as_ref().ok_or("database not initialized")?;
         let mut stmt = db
             .conn()
             .prepare("SELECT id FROM course_elements WHERE id LIKE 'el_%' AND content_cid IS NULL")
@@ -119,7 +120,8 @@ pub async fn seed_content_if_needed(
 
     // Phase 2: Single DB write lock — batch-update all rows in a transaction.
     let updated = {
-        let db = db.lock().unwrap();
+        let guard = db.lock().unwrap();
+        let db = guard.as_ref().ok_or("database not initialized")?;
         let conn = db.conn();
         conn.execute_batch("BEGIN")
             .map_err(|e| format!("begin tx: {e}"))?;

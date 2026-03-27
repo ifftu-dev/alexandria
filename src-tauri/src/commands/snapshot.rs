@@ -26,10 +26,11 @@ pub async fn snapshot_reputation(
     state: State<'_, AppState>,
     params: CreateSnapshotParams,
 ) -> Result<SnapshotRecord, String> {
-    let db = state
+    let db_guard = state
         .db
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
     let conn = db.conn();
 
     // Validate role
@@ -147,10 +148,11 @@ pub async fn list_snapshots(
     status: Option<String>,
     limit: Option<i64>,
 ) -> Result<Vec<SnapshotRecord>, String> {
-    let db = state
+    let db_guard = state
         .db
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
     let conn = db.conn();
     let max = limit.unwrap_or(50);
 
@@ -213,10 +215,11 @@ pub async fn get_snapshot(
     state: State<'_, AppState>,
     snapshot_id: String,
 ) -> Result<SnapshotRecord, String> {
-    let db = state
+    let db_guard = state
         .db
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
     let conn = db.conn();
 
     conn.query_row(
@@ -256,10 +259,11 @@ pub async fn update_snapshot_status(
     policy_id: Option<String>,
     error_message: Option<String>,
 ) -> Result<(), String> {
-    let db = state
+    let db_guard = state
         .db
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
     let conn = db.conn();
 
     // Validate status

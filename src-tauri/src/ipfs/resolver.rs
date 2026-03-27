@@ -138,12 +138,16 @@ pub struct ResolveResult {
 pub struct ContentResolver {
     node: Arc<ContentNode>,
     gateway: GatewayClient,
-    db: Arc<Mutex<Database>>,
+    db: Arc<Mutex<Option<Database>>>,
 }
 
 impl ContentResolver {
     /// Create a new resolver.
-    pub fn new(node: Arc<ContentNode>, gateway: GatewayClient, db: Arc<Mutex<Database>>) -> Self {
+    pub fn new(
+        node: Arc<ContentNode>,
+        gateway: GatewayClient,
+        db: Arc<Mutex<Option<Database>>>,
+    ) -> Self {
         Self { node, gateway, db }
     }
 
@@ -314,7 +318,8 @@ impl ContentResolver {
 
     /// Look up the BLAKE3 hash for a given IPFS CID in the mapping table.
     async fn lookup_blake3_for_cid(&self, cid_str: &str) -> Option<String> {
-        let db = self.db.lock().ok()?;
+        let guard = self.db.lock().ok()?;
+        let db = guard.as_ref()?;
         db.conn()
             .query_row(
                 "SELECT blake3_hash FROM content_mappings WHERE ipfs_cid = ?1",
@@ -326,7 +331,8 @@ impl ContentResolver {
 
     /// Look up the IPFS CID for a given BLAKE3 hash in the mapping table.
     async fn lookup_cid_for_blake3(&self, blake3_hash: &str) -> Option<String> {
-        let db = self.db.lock().ok()?;
+        let guard = self.db.lock().ok()?;
+        let db = guard.as_ref()?;
         db.conn()
             .query_row(
                 "SELECT ipfs_cid FROM content_mappings WHERE blake3_hash = ?1",
@@ -338,8 +344,11 @@ impl ContentResolver {
 
     /// Save a CID↔BLAKE3 mapping to the database.
     async fn save_mapping(&self, cid_str: &str, blake3_hash: &str, size: u64) {
-        let Ok(db) = self.db.lock() else {
+        let Ok(guard) = self.db.lock() else {
             log::warn!("database lock poisoned — skipping content mapping save");
+            return;
+        };
+        let Some(db) = guard.as_ref() else {
             return;
         };
         if let Err(e) = db.conn().execute(
@@ -364,11 +373,11 @@ mod tests {
         // Set up database
         let db = Database::open_in_memory().expect("open db");
         db.run_migrations().expect("migrations");
-        let db = Arc::new(Mutex::new(db));
+        let db = Arc::new(Mutex::new(Some(db)));
 
         // Set up iroh node
         let node = Arc::new(ContentNode::new(tmp.path()));
-        node.start().await.expect("start node");
+        node.start(None).await.expect("start node");
 
         // Use unreachable gateway (tests don't need real HTTP)
         let config = GatewayConfig {

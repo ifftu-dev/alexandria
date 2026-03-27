@@ -8,7 +8,8 @@ use crate::AppState;
 /// Get the current storage quota in bytes (0 = unlimited).
 #[tauri::command]
 pub async fn storage_get_quota(state: State<'_, AppState>) -> Result<u64, String> {
-    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let db_guard = state.db.lock().map_err(|e| e.to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
     Ok(storage::get_storage_quota(db.conn()))
 }
 
@@ -18,7 +19,8 @@ pub async fn storage_get_quota(state: State<'_, AppState>) -> Result<u64, String
 #[tauri::command]
 pub async fn storage_set_quota(state: State<'_, AppState>, bytes: u64) -> Result<(), String> {
     {
-        let db = state.db.lock().map_err(|e| e.to_string())?;
+        let db_guard = state.db.lock().map_err(|e| e.to_string())?;
+        let db = db_guard.as_ref().ok_or("database not initialized")?;
         storage::set_storage_quota(db.conn(), bytes);
     }
 
@@ -33,7 +35,8 @@ pub async fn storage_set_quota(state: State<'_, AppState>, bytes: u64) -> Result
 /// Get storage usage statistics.
 #[tauri::command]
 pub async fn storage_stats(state: State<'_, AppState>) -> Result<storage::StorageStats, String> {
-    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let db_guard = state.db.lock().map_err(|e| e.to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
     Ok(storage::storage_stats(db.conn()))
 }
 

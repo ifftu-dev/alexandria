@@ -16,10 +16,11 @@ pub async fn list_elements(
     state: State<'_, AppState>,
     chapter_id: String,
 ) -> Result<Vec<Element>, String> {
-    let db = state
+    let db_guard = state
         .db
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
 
     let mut stmt = db
         .conn()
@@ -58,10 +59,11 @@ pub async fn create_element(
     chapter_id: String,
     req: CreateElementRequest,
 ) -> Result<Element, String> {
-    let db = state
+    let db_guard = state
         .db
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
 
     // Get the next position
     let next_pos: i64 = db
@@ -115,10 +117,11 @@ pub async fn update_element(
     element_id: String,
     req: UpdateElementRequest,
 ) -> Result<Element, String> {
-    let db = state
+    let db_guard = state
         .db
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
 
     let mut set_clauses = Vec::new();
     let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
@@ -327,10 +330,11 @@ mod tests {
 /// Delete an element.
 #[tauri::command]
 pub async fn delete_element(state: State<'_, AppState>, element_id: String) -> Result<(), String> {
-    let db = state
+    let db_guard = state
         .db
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
 
     let rows = db
         .conn()
