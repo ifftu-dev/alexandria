@@ -69,6 +69,8 @@ pub fn sign_gossip_message(
         public_key: signed.public_key,
         stake_address: stake_address.to_string(),
         timestamp,
+        encrypted: false,
+        key_id: None,
     }
 }
 
