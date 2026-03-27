@@ -376,7 +376,7 @@ pub async fn open_election(
     .map_err(|e| e.to_string())?;
 
     let election = query_election(conn, &id)?;
-    try_enqueue(&db, "open_election", "governance_elections", &id);
+    try_enqueue(db, "open_election", "governance_elections", &id);
     Ok(election)
 }
 
@@ -737,7 +737,7 @@ pub async fn cast_election_vote(
     .map_err(|e| e.to_string())?;
 
     try_enqueue(
-        &db,
+        db,
         "cast_election_vote",
         "governance_election_votes",
         &vote_id,
@@ -823,7 +823,7 @@ pub async fn finalize_election(
 
     let nominees = query_nominees(conn, &election_id)?;
     try_enqueue(
-        &db,
+        db,
         "finalize_election",
         "governance_elections",
         &election_id,
@@ -911,7 +911,7 @@ pub async fn install_committee(
         .map_err(|e| e.to_string())?;
 
     try_enqueue(
-        &db,
+        db,
         "install_committee",
         "governance_elections",
         &election_id,
@@ -982,7 +982,7 @@ pub async fn submit_proposal(
     .map_err(|e| e.to_string())?;
 
     let proposal = query_proposal(conn, &id)?;
-    try_enqueue(&db, "submit_proposal", "governance_proposals", &id);
+    try_enqueue(db, "submit_proposal", "governance_proposals", &id);
     Ok(proposal)
 }
 
@@ -1102,12 +1102,7 @@ pub async fn approve_proposal(
     .map_err(|e| e.to_string())?;
 
     let proposal = query_proposal(conn, &proposal_id)?;
-    try_enqueue(
-        &db,
-        "approve_proposal",
-        "governance_proposals",
-        &proposal_id,
-    );
+    try_enqueue(db, "approve_proposal", "governance_proposals", &proposal_id);
     Ok(proposal)
 }
 
@@ -1229,7 +1224,7 @@ pub async fn cast_proposal_vote(
     }
 
     try_enqueue(
-        &db,
+        db,
         "cast_proposal_vote",
         "governance_proposal_votes",
         &vote_id,
@@ -1300,12 +1295,7 @@ pub async fn resolve_proposal(
     .map_err(|e| e.to_string())?;
 
     let proposal = query_proposal(conn, &proposal_id)?;
-    try_enqueue(
-        &db,
-        "resolve_proposal",
-        "governance_proposals",
-        &proposal_id,
-    );
+    try_enqueue(db, "resolve_proposal", "governance_proposals", &proposal_id);
     Ok(proposal)
 }
 
@@ -1321,7 +1311,7 @@ pub async fn get_onchain_queue_status(
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
     let db = db_guard.as_ref().ok_or("database not initialized")?;
-    crate::cardano::onchain_queue::get_all(&db)
+    crate::cardano::onchain_queue::get_all(db)
 }
 
 /// Retry a failed on-chain governance transaction.
@@ -1335,7 +1325,7 @@ pub async fn retry_onchain_submission(
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
     let db = db_guard.as_ref().ok_or("database not initialized")?;
-    crate::cardano::onchain_queue::retry_item(&db, &queue_id)
+    crate::cardano::onchain_queue::retry_item(db, &queue_id)
 }
 
 // ---- Internal Helpers ----

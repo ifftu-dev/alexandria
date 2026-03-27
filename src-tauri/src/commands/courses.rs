@@ -436,7 +436,7 @@ pub async fn publish_course(
         let signature_hex = hex::encode(&signed_ann.signature);
 
         // Insert into local catalog table (author's own course, pinned=1)
-        catalog::insert_own_catalog_entry(&db, &announcement, &signature_hex)
+        catalog::insert_own_catalog_entry(db, &announcement, &signature_hex)
             .map_err(|e| format!("catalog insert: {e}"))?;
 
         (announcement, signed_ann, version)

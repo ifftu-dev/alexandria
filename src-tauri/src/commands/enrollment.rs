@@ -266,7 +266,7 @@ pub async fn update_progress(
 
                 // Collect un-sent evidence for P2P broadcast
                 for skill_id in &skills {
-                    match p2p_evidence::collect_evidence_for_broadcast(&db, skill_id) {
+                    match p2p_evidence::collect_evidence_for_broadcast(db, skill_id) {
                         Ok(rows) => {
                             for row in rows {
                                 let ann = p2p_evidence::build_evidence_announcement(
@@ -338,7 +338,7 @@ pub async fn update_progress(
 
                         // Mark as sent in sync_log
                         let _ =
-                            p2p_evidence::mark_evidence_broadcast(&db, &ann.evidence_id, &sig_hex);
+                            p2p_evidence::mark_evidence_broadcast(db, &ann.evidence_id, &sig_hex);
 
                         Some((signed, ann.evidence_id.clone(), ann.skill_id.clone()))
                     })

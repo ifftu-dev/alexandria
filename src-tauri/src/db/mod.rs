@@ -66,7 +66,7 @@ impl Database {
 
         // Set the encryption key — MUST be the first PRAGMA after open.
         let key_hex = hex::encode(key);
-        conn.pragma_update(None, "key", &format!("x'{key_hex}'"))?;
+        conn.pragma_update(None, "key", format!("x'{key_hex}'"))?;
 
         // Enable WAL mode for better concurrent read performance.
         conn.pragma_update(None, "journal_mode", "WAL")?;
@@ -119,7 +119,7 @@ impl Database {
         let conn = Connection::open_with_flags(path, flags)?;
 
         // Attach an encrypted database and export
-        conn.execute_batch(&format!(
+        conn.execute_batch(format!(
             "ATTACH DATABASE '{}' AS encrypted KEY \"x'{key_hex}'\";",
             enc_path.display()
         ))?;

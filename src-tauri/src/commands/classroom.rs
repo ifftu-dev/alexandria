@@ -256,7 +256,7 @@ pub async fn classroom_list_members(
     let w = get_wallet(&state).await?;
     let db_guard = state.db.lock().map_err(|e| e.to_string())?;
     let db = db_guard.as_ref().ok_or("database not initialized")?;
-    let _ = require_classroom_member(&db, &classroom_id, &w.stake_address)?;
+    let _ = require_classroom_member(db, &classroom_id, &w.stake_address)?;
 
     let mut stmt = db
         .conn()
@@ -718,7 +718,7 @@ pub async fn classroom_list_channels(
     let w = get_wallet(&state).await?;
     let db_guard = state.db.lock().map_err(|e| e.to_string())?;
     let db = db_guard.as_ref().ok_or("database not initialized")?;
-    let _ = require_classroom_member(&db, &classroom_id, &w.stake_address)?;
+    let _ = require_classroom_member(db, &classroom_id, &w.stake_address)?;
 
     let mut stmt = db
         .conn()
@@ -866,7 +866,7 @@ pub async fn classroom_get_messages(
             |row| row.get(0),
         )
         .map_err(|_| "channel not found".to_string())?;
-    let _ = require_classroom_member(&db, &classroom_id, &w.stake_address)?;
+    let _ = require_classroom_member(db, &classroom_id, &w.stake_address)?;
 
     let rows = if let Some(ref bid) = before_id {
         // Cursor-based pagination: messages sent before the given message
@@ -973,7 +973,7 @@ pub async fn classroom_send_message(
             )
             .map_err(|_| "channel not found".to_string())?;
 
-        let role = require_classroom_member(&db, &cid, &w.stake_address)?;
+        let role = require_classroom_member(db, &cid, &w.stake_address)?;
 
         // For announcement channels, only moderators/owners can post
         if ctype == "announcement" {
@@ -1203,7 +1203,7 @@ pub async fn classroom_subscribe(
     {
         let db_guard = state.db.lock().map_err(|e| e.to_string())?;
         let db = db_guard.as_ref().ok_or("database not initialized")?;
-        let _ = require_classroom_member(&db, &classroom_id, &w.stake_address)?;
+        let _ = require_classroom_member(db, &classroom_id, &w.stake_address)?;
     }
 
     let node_lock = state.p2p_node.lock().await;
@@ -1261,7 +1261,7 @@ pub async fn classroom_start_call(
     {
         let db_guard = state.db.lock().map_err(|e| e.to_string())?;
         let db = db_guard.as_ref().ok_or("database not initialized")?;
-        let _ = require_classroom_member(&db, &classroom_id, &w.stake_address)?;
+        let _ = require_classroom_member(db, &classroom_id, &w.stake_address)?;
     }
 
     let content_node = &state.content_node;
@@ -1376,7 +1376,7 @@ pub async fn classroom_join_call(
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .map_err(|_| "call not found or already ended".to_string())?;
-        let _ = require_classroom_member(&db, &classroom_id, &w.stake_address)?;
+        let _ = require_classroom_member(db, &classroom_id, &w.stake_address)?;
         ticket.ok_or("call has no ticket")?
     };
 
@@ -1424,7 +1424,7 @@ pub async fn classroom_end_call(call_id: String, state: State<'_, AppState>) -> 
             .map_err(|_| "call not found or already ended".to_string())?;
 
         if started_by != w.stake_address {
-            match classroom_role(&db, &classroom_id, &w.stake_address)?.as_deref() {
+            match classroom_role(db, &classroom_id, &w.stake_address)?.as_deref() {
                 Some("owner") | Some("moderator") => {}
                 _ => {
                     return Err(
@@ -1477,7 +1477,7 @@ pub async fn classroom_get_active_call(
     let w = get_wallet(&state).await?;
     let db_guard = state.db.lock().map_err(|e| e.to_string())?;
     let db = db_guard.as_ref().ok_or("database not initialized")?;
-    let _ = require_classroom_member(&db, &classroom_id, &w.stake_address)?;
+    let _ = require_classroom_member(db, &classroom_id, &w.stake_address)?;
 
     db.conn()
         .query_row(
