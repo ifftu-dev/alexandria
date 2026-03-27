@@ -365,6 +365,8 @@ mod tests {
             public_key: vec![0; 32],
             stake_address: announcement.learner_address.clone(),
             timestamp: 1_700_000_000,
+            encrypted: false,
+            key_id: None,
         }
     }
 

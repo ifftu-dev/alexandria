@@ -336,6 +336,8 @@ mod tests {
             public_key: vec![0; 32],
             stake_address: ann.author_address.clone(),
             timestamp: 1_700_000_000,
+            encrypted: false,
+            key_id: None,
         };
 
         let result = handle_catalog_message(&db, &msg);
@@ -373,6 +375,8 @@ mod tests {
             public_key: vec![0; 32],
             stake_address: ann.author_address.clone(),
             timestamp: 1_700_000_000,
+            encrypted: false,
+            key_id: None,
         };
 
         handle_catalog_message(&db, &msg).unwrap();
@@ -407,6 +411,8 @@ mod tests {
             public_key: vec![0; 32],
             stake_address: ann.author_address.clone(),
             timestamp: 1_700_000_000,
+            encrypted: false,
+            key_id: None,
         };
 
         handle_catalog_message(&db, &msg).unwrap();
@@ -436,6 +442,8 @@ mod tests {
             public_key: vec![],
             stake_address: String::new(),
             timestamp: 0,
+            encrypted: false,
+            key_id: None,
         };
 
         assert!(handle_catalog_message(&db, &msg).is_err());
@@ -454,6 +462,8 @@ mod tests {
             public_key: vec![0; 32],
             stake_address: "stake_test1someoneelse".into(),
             timestamp: 1_700_000_000,
+            encrypted: false,
+            key_id: None,
         };
 
         assert!(handle_catalog_message(&db, &msg).is_err());
@@ -473,6 +483,8 @@ mod tests {
             public_key: vec![0; 32],
             stake_address: ann.author_address.clone(),
             timestamp: 1_700_000_000,
+            encrypted: false,
+            key_id: None,
         };
 
         assert!(handle_catalog_message(&db, &msg).is_err());

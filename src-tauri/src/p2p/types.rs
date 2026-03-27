@@ -45,6 +45,7 @@ pub struct SignedGossipMessage {
     /// The topic this message was published on.
     pub topic: String,
     /// The actual message payload (JSON-encoded, topic-specific).
+    /// If `encrypted` is true, this is ciphertext (encrypt-then-sign).
     pub payload: Vec<u8>,
     /// Ed25519 signature over `payload` by the sender's Cardano signing key.
     pub signature: Vec<u8>,
@@ -55,6 +56,12 @@ pub struct SignedGossipMessage {
     pub stake_address: String,
     /// Unix timestamp (seconds) when the message was created.
     pub timestamp: u64,
+    /// Whether the payload is encrypted (for private topics).
+    #[serde(default)]
+    pub encrypted: bool,
+    /// Key identifier for encrypted payloads (e.g., classroom group key version).
+    #[serde(default)]
+    pub key_id: Option<String>,
 }
 
 /// Information about a known peer.
