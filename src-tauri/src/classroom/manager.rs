@@ -342,6 +342,32 @@ pub fn handle_classroom_meta(db: &Database, signed_msg: &SignedGossipMessage, ap
                 rusqlite::params![call_id],
             );
         }
+
+        ClassroomMetaEvent::KeyDistribution {
+            classroom_id,
+            stake_address,
+            encrypted_group_key,
+            key_version,
+        } => {
+            // Only process if this key distribution is for us
+            if local_address.as_deref() != Some(stake_address.as_str()) {
+                return;
+            }
+            // Store the encrypted group key locally
+            let _ = db.conn().execute(
+                "INSERT OR REPLACE INTO classroom_group_keys \
+                 (classroom_id, group_key_enc, key_version, updated_at) \
+                 VALUES (?1, ?2, ?3, datetime('now'))",
+                rusqlite::params![
+                    classroom_id,
+                    encrypted_group_key.as_bytes(),
+                    key_version,
+                ],
+            );
+            log::info!(
+                "[classroom] Received group key v{key_version} for {classroom_id}"
+            );
+        }
     }
 
     let event_type = event.event_type().to_string();
