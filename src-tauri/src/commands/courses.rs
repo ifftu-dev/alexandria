@@ -293,10 +293,10 @@ pub async fn publish_course(
     // Read course data from DB (scoped to release the lock before iroh calls)
     let payload = {
         let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
+            .db
+            .lock()
+            .map_err(|_| "database lock poisoned".to_string())?;
+        let db = db_guard.as_ref().ok_or("database not initialized")?;
         let course = get_course_by_id(db.conn(), &course_id)?;
 
         // Read chapters with their elements
@@ -387,10 +387,10 @@ pub async fn publish_course(
     // Update the course in the database and build catalog announcement
     let (announcement, signed_ann, version) = {
         let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
+            .db
+            .lock()
+            .map_err(|_| "database lock poisoned".to_string())?;
+        let db = db_guard.as_ref().ok_or("database not initialized")?;
         db.conn()
             .execute(
                 "UPDATE courses SET content_cid = ?1, status = 'published', \

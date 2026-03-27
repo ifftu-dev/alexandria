@@ -59,7 +59,9 @@ pub struct DeviceList {
 }
 
 /// Helper: lock the database, handling poisoned mutex and uninitialized DB gracefully.
-fn lock_db(state: &AppState) -> Result<std::sync::MutexGuard<'_, Option<crate::db::Database>>, String> {
+fn lock_db(
+    state: &AppState,
+) -> Result<std::sync::MutexGuard<'_, Option<crate::db::Database>>, String> {
     state.db.lock().map_err(|e| {
         let msg = format!("database mutex poisoned: {e}");
         crate::diag::log(&msg);

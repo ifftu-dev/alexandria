@@ -326,10 +326,10 @@ pub async fn hydrate_catalog_courses(
 
     let rows: Vec<CatalogHydrateRow> = {
         let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
+            .db
+            .lock()
+            .map_err(|_| "database lock poisoned".to_string())?;
+        let db = db_guard.as_ref().ok_or("database not initialized")?;
         let mut stmt = db
             .conn()
             .prepare(
@@ -399,10 +399,10 @@ pub async fn hydrate_catalog_courses(
         };
 
         let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
+            .db
+            .lock()
+            .map_err(|_| "database lock poisoned".to_string())?;
+        let db = db_guard.as_ref().ok_or("database not initialized")?;
         let conn = db.conn();
         let tx = conn
             .unchecked_transaction()

@@ -306,7 +306,9 @@ fn load_or_generate_secret_key(
         } else if bytes.first() == Some(&KEY_VERSION_AES_GCM) && bytes.len() == 1 + 12 + 32 + 16 {
             // Encrypted format: version(1) || nonce(12) || ciphertext(48)
             let ek = enc_key.ok_or_else(|| {
-                NodeError::KeyPersistence("node key is encrypted but no decryption key provided".into())
+                NodeError::KeyPersistence(
+                    "node key is encrypted but no decryption key provided".into(),
+                )
             })?;
             decrypt_node_key(&bytes[1..], ek)?
         } else {
@@ -411,7 +413,10 @@ mod tests {
         assert!(node.node_id().await.is_some());
 
         // Can't start twice
-        assert!(matches!(node.start(None).await, Err(NodeError::AlreadyRunning)));
+        assert!(matches!(
+            node.start(None).await,
+            Err(NodeError::AlreadyRunning)
+        ));
 
         // Shutdown
         node.shutdown().await.expect("shutdown failed");

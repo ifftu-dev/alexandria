@@ -121,10 +121,10 @@ pub async fn register_course_onchain(
     // 2. Look up course details
     let (title, content_cid) = {
         let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
+            .db
+            .lock()
+            .map_err(|_| "database lock poisoned".to_string())?;
+        let db = db_guard.as_ref().ok_or("database not initialized")?;
         let (title, cid): (String, Option<String>) = db
             .conn()
             .query_row(

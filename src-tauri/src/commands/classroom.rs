@@ -1045,19 +1045,23 @@ pub async fn classroom_send_message(
                             Ok(Some(gk_bytes)) if gk_bytes.len() == 32 => {
                                 let mut gk = [0u8; 32];
                                 gk.copy_from_slice(&gk_bytes);
-                                match crate::crypto::group_key::encrypt_message(&gk, content.as_bytes()) {
+                                match crate::crypto::group_key::encrypt_message(
+                                    &gk,
+                                    content.as_bytes(),
+                                ) {
                                     Ok(ct) => {
                                         use base64::Engine;
-                                        let encoded = base64::engine::general_purpose::STANDARD.encode(&ct);
+                                        let encoded =
+                                            base64::engine::general_purpose::STANDARD.encode(&ct);
                                         (encoded, true, version as u32)
                                     }
-                                    Err(_) => (content.clone(), false, 0)
+                                    Err(_) => (content.clone(), false, 0),
                                 }
                             }
-                            _ => (content.clone(), false, 0)
+                            _ => (content.clone(), false, 0),
                         }
                     }
-                    _ => (content.clone(), false, 0)
+                    _ => (content.clone(), false, 0),
                 }
             };
 

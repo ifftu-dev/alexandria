@@ -263,10 +263,10 @@ pub async fn restore_wallet(
     emit_progress(&app, "db", "Storing identity in local database...");
     {
         let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
+            .db
+            .lock()
+            .map_err(|_| "database lock poisoned".to_string())?;
+        let db = db_guard.as_ref().ok_or("database not initialized")?;
 
         let exists: bool = db
             .conn()
@@ -515,10 +515,10 @@ pub async fn publish_profile(state: State<'_, AppState>) -> Result<PublishProfil
         String,
     ) = {
         let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
+            .db
+            .lock()
+            .map_err(|_| "database lock poisoned".to_string())?;
+        let db = db_guard.as_ref().ok_or("database not initialized")?;
         db.conn()
             .query_row(
                 "SELECT stake_address, display_name, bio, avatar_cid, created_at

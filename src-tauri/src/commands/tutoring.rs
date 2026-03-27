@@ -150,10 +150,10 @@ pub async fn tutoring_create_room(
     // Persist to database
     {
         let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
+            .db
+            .lock()
+            .map_err(|_| "database lock poisoned".to_string())?;
+        let db = db_guard.as_ref().ok_or("database not initialized")?;
         db.conn()
             .execute(
                 "INSERT INTO tutoring_sessions (id, title, ticket, status) VALUES (?1, ?2, ?3, 'active')",
@@ -229,10 +229,10 @@ pub async fn tutoring_join_room(
     // Persist to database
     {
         let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
+            .db
+            .lock()
+            .map_err(|_| "database lock poisoned".to_string())?;
+        let db = db_guard.as_ref().ok_or("database not initialized")?;
         db.conn()
             .execute(
                 "INSERT INTO tutoring_sessions (id, title, ticket, status) VALUES (?1, ?2, ?3, 'active')",
@@ -266,10 +266,10 @@ pub async fn tutoring_leave_room(state: State<'_, AppState>) -> Result<(), Strin
     // Update database
     if let Some(id) = session_id {
         let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
+            .db
+            .lock()
+            .map_err(|_| "database lock poisoned".to_string())?;
+        let db = db_guard.as_ref().ok_or("database not initialized")?;
         db.conn()
             .execute(
                 "UPDATE tutoring_sessions SET status = 'ended', ended_at = datetime('now') WHERE id = ?1",

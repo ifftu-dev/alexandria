@@ -358,15 +358,9 @@ pub fn handle_classroom_meta(db: &Database, signed_msg: &SignedGossipMessage, ap
                 "INSERT OR REPLACE INTO classroom_group_keys \
                  (classroom_id, group_key_enc, key_version, updated_at) \
                  VALUES (?1, ?2, ?3, datetime('now'))",
-                rusqlite::params![
-                    classroom_id,
-                    encrypted_group_key.as_bytes(),
-                    key_version,
-                ],
+                rusqlite::params![classroom_id, encrypted_group_key.as_bytes(), key_version,],
             );
-            log::info!(
-                "[classroom] Received group key v{key_version} for {classroom_id}"
-            );
+            log::info!("[classroom] Received group key v{key_version} for {classroom_id}");
         }
     }
 

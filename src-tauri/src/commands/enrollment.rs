@@ -147,10 +147,10 @@ pub async fn update_progress(
     // All DB work in a block so the guard is dropped before any .await
     let (progress, broadcast_data) = {
         let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
+            .db
+            .lock()
+            .map_err(|_| "database lock poisoned".to_string())?;
+        let db = db_guard.as_ref().ok_or("database not initialized")?;
 
         let id = entity_id(&[&enrollment_id, &req.element_id]);
 
@@ -313,10 +313,10 @@ pub async fn update_progress(
             // Sign all messages and mark as sent in DB (synchronous, with DB lock)
             let signed_messages: Vec<_> = {
                 let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
+                    .db
+                    .lock()
+                    .map_err(|_| "database lock poisoned".to_string())?;
+                let db = db_guard.as_ref().ok_or("database not initialized")?;
                 broadcast_data
                     .iter()
                     .filter_map(|(ann, stake_addr)| {

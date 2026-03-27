@@ -97,11 +97,9 @@ impl Database {
             Ok(c) => c,
             Err(_) => return false,
         };
-        conn.query_row(
-            "SELECT COUNT(*) FROM sqlite_master",
-            [],
-            |row| row.get::<_, i64>(0),
-        )
+        conn.query_row("SELECT COUNT(*) FROM sqlite_master", [], |row| {
+            row.get::<_, i64>(0)
+        })
         .is_ok()
     }
 

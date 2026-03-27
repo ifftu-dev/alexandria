@@ -126,7 +126,10 @@ mod tests {
 
         let enc1 = encrypt(&key, plaintext).unwrap();
         let enc2 = encrypt(&key, plaintext).unwrap();
-        assert_ne!(enc1, enc2, "different nonces should produce different ciphertext");
+        assert_ne!(
+            enc1, enc2,
+            "different nonces should produce different ciphertext"
+        );
 
         // But both decrypt to the same plaintext
         assert_eq!(

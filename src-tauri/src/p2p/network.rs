@@ -763,7 +763,9 @@ async fn swarm_event_loop(
         }
         let Some(db_arc) = db else { return };
         let Ok(db_guard) = db_arc.lock() else { return };
-        let Some(db_lock) = db_guard.as_ref() else { return };
+        let Some(db_lock) = db_guard.as_ref() else {
+            return;
+        };
         let addrs_json = serde_json::to_string(addresses).unwrap_or_default();
         let now = chrono::Utc::now().to_rfc3339();
         let _ = db_lock.conn().execute(
