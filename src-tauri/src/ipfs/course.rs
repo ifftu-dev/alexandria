@@ -295,7 +295,7 @@ mod tests {
     async fn publish_and_resolve_roundtrip() {
         let tmp = TempDir::new().unwrap();
         let node = ContentNode::new(tmp.path());
-        node.start().await.unwrap();
+        node.start(None).await.unwrap();
 
         let key = make_signing_key();
         let payload = make_payload();
@@ -322,7 +322,7 @@ mod tests {
     async fn publish_same_document_twice_gives_same_hash() {
         let tmp = TempDir::new().unwrap();
         let node = ContentNode::new(tmp.path());
-        node.start().await.unwrap();
+        node.start(None).await.unwrap();
 
         let key = make_signing_key();
         let payload = make_payload();
@@ -339,7 +339,7 @@ mod tests {
     async fn resolve_nonexistent_returns_not_found() {
         let tmp = TempDir::new().unwrap();
         let node = ContentNode::new(tmp.path());
-        node.start().await.unwrap();
+        node.start(None).await.unwrap();
 
         let fake_hash = "0".repeat(64);
         let result = resolve_course_document(&node, &fake_hash).await;

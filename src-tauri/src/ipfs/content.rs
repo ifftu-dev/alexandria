@@ -47,6 +47,9 @@ pub struct ContentInfo {
 /// Returns the BLAKE3 hash of the content. The content is stored
 /// persistently and will survive app restarts.
 ///
+/// If a content encryption key is set on the node, the data is encrypted
+/// with AES-256-GCM before storage. The BLAKE3 hash is of the ciphertext.
+///
 /// Uses a named tag (the BLAKE3 hex hash) so the tag can be found
 /// and deleted during eviction.
 pub async fn add_bytes(node: &ContentNode, data: &[u8]) -> Result<AddResult, ContentError> {
@@ -56,9 +59,17 @@ pub async fn add_bytes(node: &ContentNode, data: &[u8]) -> Result<AddResult, Con
         .map_err(|_| ContentError::NodeNotRunning)?;
     let size = data.len() as u64;
 
+    // Encrypt content if a content key is available
+    let to_store = if let Some(key) = node.content_key().await {
+        crate::crypto::content_crypto::encrypt(&key, data)
+            .map_err(|e| ContentError::Store(e.to_string()))?
+    } else {
+        data.to_vec()
+    };
+
     // Use a temp tag first to get the hash, then promote to named tag
     let temp = store
-        .add_slice(data)
+        .add_slice(&to_store)
         .temp_tag()
         .await
         .map_err(|e| ContentError::Store(e.to_string()))?;
@@ -84,6 +95,9 @@ pub async fn add_bytes(node: &ContentNode, data: &[u8]) -> Result<AddResult, Con
 ///
 /// Returns the raw bytes. Returns `ContentError::NotFound` if the
 /// content is not available locally.
+///
+/// If content is encrypted (version byte prefix), decrypts transparently.
+/// Legacy unencrypted content is returned as-is.
 pub async fn get_bytes(node: &ContentNode, hash_hex: &str) -> Result<Vec<u8>, ContentError> {
     let store = node
         .store()
@@ -105,7 +119,24 @@ pub async fn get_bytes(node: &ContentNode, hash_hex: &str) -> Result<Vec<u8>, Co
         .await
         .map_err(|e| ContentError::Store(e.to_string()))?;
 
-    Ok(bytes.to_vec())
+    let raw = bytes.to_vec();
+
+    // Attempt decryption if a content key is available
+    if let Some(key) = node.content_key().await {
+        match crate::crypto::content_crypto::decrypt(&key, &raw) {
+            Ok(Some(plaintext)) => return Ok(plaintext),
+            Ok(None) => {
+                // Not encrypted (legacy content) — return raw bytes
+                return Ok(raw);
+            }
+            Err(e) => {
+                log::warn!("content decryption failed for {hash_hex}: {e}, returning raw");
+                return Ok(raw);
+            }
+        }
+    }
+
+    Ok(raw)
 }
 
 /// Check if content exists in the local store.
@@ -173,7 +204,7 @@ mod tests {
     async fn make_node() -> (ContentNode, TempDir) {
         let tmp = TempDir::new().expect("create temp dir");
         let node = ContentNode::new(tmp.path());
-        node.start().await.expect("start node");
+        node.start(None).await.expect("start node");
         (node, tmp)
     }
 
@@ -225,7 +256,7 @@ mod tests {
 
         // Add content, shut down
         let node = ContentNode::new(tmp.path());
-        node.start().await.expect("start");
+        node.start(None).await.expect("start");
         let data = b"persistent content";
         let result = add_bytes(&node, data).await.expect("add");
         let hash = result.hash.clone();
@@ -233,7 +264,7 @@ mod tests {
 
         // Restart and verify content is still there
         let node2 = ContentNode::new(tmp.path());
-        node2.start().await.expect("restart");
+        node2.start(None).await.expect("restart");
         let retrieved = get_bytes(&node2, &hash).await.expect("get after restart");
         assert_eq!(retrieved, data);
         node2.shutdown().await.expect("shutdown 2");
