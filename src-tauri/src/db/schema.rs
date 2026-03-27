@@ -26,6 +26,7 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (16, "classrooms", MIGRATION_016),
     (17, "storage_settings", MIGRATION_017),
     (18, "onchain_governance_queue", MIGRATION_018),
+    (19, "classroom_encryption", MIGRATION_019),
 ];
 
 const MIGRATION_001: &str = r#"
@@ -974,4 +975,27 @@ CREATE TABLE IF NOT EXISTS onchain_governance_queue (
 
 CREATE INDEX IF NOT EXISTS idx_onchain_queue_status
     ON onchain_governance_queue(status);
+"#;
+
+const MIGRATION_019: &str = r#"
+-- ============================================================
+-- Migration 019: Classroom End-to-End Encryption
+-- Stores per-classroom group keys and member X25519 public keys
+-- for encrypted message exchange.
+-- ============================================================
+
+-- Group keys: one per classroom, encrypted with the local vault key.
+-- key_version increments on rotation (e.g., after a member is kicked).
+CREATE TABLE IF NOT EXISTS classroom_group_keys (
+    classroom_id  TEXT PRIMARY KEY,
+    group_key_enc BLOB NOT NULL,
+    key_version   INTEGER NOT NULL DEFAULT 1,
+    updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- X25519 public keys for each member (used for ECDH key exchange).
+ALTER TABLE classroom_members ADD COLUMN x25519_public_key BLOB;
+
+-- Local X25519 public key (derived from Ed25519 signing key).
+ALTER TABLE local_identity ADD COLUMN x25519_public_key BLOB;
 "#;
