@@ -49,9 +49,6 @@ serde_json = "1.0"
 # Async runtime
 tokio = { version = "1", features = ["full"] }
 
-# Database
-rusqlite = { version = "0.38", features = ["bundled-sqlcipher", "uuid"] }
-
 # Cryptography (always available — needed for wallet on all platforms)
 ed25519-dalek = { version = "2", features = ["serde", "rand_core"] }
 x25519-dalek = { version = "2", features = ["static_secrets"] }
@@ -113,6 +110,11 @@ postcard = { version = "1", features = ["alloc"] }
 blake3 = "1"
 
 # ── iOS-only dependencies ────────────────────────────────────────────
+[target.'cfg(any(target_os = "ios", target_os = "android"))'.dependencies]
+# Mobile uses SQLCipher too, but GitHub's mobile runners do not provide target
+# OpenSSL headers/libraries for cross-compiling SQLCipher. Vendor them here.
+rusqlite = { version = "0.38", features = ["bundled-sqlcipher-vendored-openssl", "uuid"] }
+
 [target.'cfg(target_os = "ios")'.dependencies]
 # ObjC runtime — for configuring WKWebView scrollView insets at startup
 objc2 = "0.6"
@@ -123,6 +125,9 @@ base64 = "0.21"
 
 # ── Desktop-only dependencies ────────────────────────────────────────
 [target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
+# Desktop builds can link SQLCipher against the runner's native crypto stack.
+rusqlite = { version = "0.38", features = ["bundled-sqlcipher", "uuid"] }
+
 # Secure secret storage (IOTA Stronghold encrypted vault — desktop uses this instead of portable)
 iota_stronghold = "2"
 
