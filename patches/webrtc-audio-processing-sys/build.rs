@@ -101,15 +101,51 @@ mod webrtc {
         run_command(&build_dir, "autoconf", None)?;
 
         let target = std::env::var("TARGET").unwrap();
-        autotools::Config::new(build_dir)
-            .cflag("-fPIC")
-            .cxxflag("-fPIC")
-            .config_option("host", Some(&target))
-            .disable_shared()
-            .enable_static()
-            .build();
+        if cfg!(windows) {
+            let prefix = windows_shell_path(&out_dir())?;
+            let srcdir = windows_shell_path(&build_dir)?;
+            let host_arg = format!("--host={target}");
+            let prefix_arg = format!("--prefix={prefix}");
+            let srcdir_arg = format!("--srcdir={srcdir}");
+            run_command(
+                &build_dir,
+                "./configure",
+                Some(&[
+                    prefix_arg.as_str(),
+                    srcdir_arg.as_str(),
+                    "--disable-shared",
+                    "--enable-static",
+                    host_arg.as_str(),
+                ]),
+            )?;
+            run_command(&build_dir, "make", None)?;
+            run_command(&build_dir, "make", Some(&["install"]))?;
+        } else {
+            autotools::Config::new(build_dir)
+                .cflag("-fPIC")
+                .cxxflag("-fPIC")
+                .config_option("host", Some(&target))
+                .disable_shared()
+                .enable_static()
+                .build();
+        }
 
         Ok(())
+    }
+
+    fn windows_shell_path(path: &Path) -> Result<String> {
+        let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        let raw = path
+            .to_str()
+            .ok_or_else(|| anyhow!("non-utf8 path: {path:?}"))?
+            .replace('\\', "/");
+
+        if raw.len() >= 3 && raw.as_bytes()[1] == b':' {
+            let drive = raw[..1].to_ascii_lowercase();
+            Ok(format!("/{}/{}", drive, raw[2..].trim_start_matches('/')))
+        } else {
+            Ok(raw)
+        }
     }
 
     fn run_command<P: AsRef<Path>>(
