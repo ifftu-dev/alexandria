@@ -585,6 +585,7 @@ jobs:
     if: |
       always() &&
       !cancelled() &&
+      env.ENABLE_UPDATER_SIGNING == 'true' &&
       needs.build-macos.result == 'success' &&
       needs.build-linux-x64.result == 'success' &&
       needs.build-windows.result == 'success'
