@@ -134,10 +134,13 @@ pub async fn tutoring_list_sessions(
     state: State<'_, AppState>,
 ) -> Result<Vec<TutoringSessionInfo>, String> {
     // Still read from DB on mobile (past sessions from desktop sync)
-    let db = state
+    let db_guard = state
         .db
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard
+        .as_ref()
+        .ok_or_else(|| "database not initialized".to_string())?;
     let mut stmt = db
         .conn()
         .prepare(

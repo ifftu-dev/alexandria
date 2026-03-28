@@ -84,6 +84,7 @@ log = "0.4"
 tracing = "0.1"
 tracing-log = "0.2"
 libc = "0.2"
+base64 = "0.21"
 
 # Portable vault encryption (all platforms — replaces Stronghold on mobile)
 argon2 = "0.5"
@@ -121,7 +122,6 @@ objc2 = "0.6"
 
 # Image encoding (JPEG) for bridging video frames to webview (same as desktop)
 image = { version = "0.25", default-features = false, features = ["jpeg"] }
-base64 = "0.21"
 
 # ── Desktop-only dependencies ────────────────────────────────────────
 [target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
@@ -136,7 +136,6 @@ nokhwa = { version = "0.10", default-features = false, features = ["input-native
 
 # Image encoding (JPEG) for bridging video frames to webview
 image = { version = "0.25", default-features = false, features = ["jpeg"] }
-base64 = "0.21"
 
 [dev-dependencies]
 tempfile = "3"
