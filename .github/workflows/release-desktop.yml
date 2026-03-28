@@ -203,7 +203,8 @@ jobs:
         run: |
           echo "${{ secrets.APPLE_API_KEY_CONTENT }}" > $RUNNER_TEMP/AuthKey.p8
 
-      - name: Build macOS (ARM64)
+      - name: Build macOS (ARM64) without updater signing
+        if: env.ENABLE_UPDATER_SIGNING != 'true'
         uses: tauri-apps/tauri-action@v0
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
@@ -212,10 +213,27 @@ jobs:
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_KEY_PATH: ${{ runner.temp }}/AuthKey.p8
-          TAURI_SIGNING_PRIVATE_KEY: >-
-            ${{ env.ENABLE_UPDATER_SIGNING == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: >-
-            ${{ env.ENABLE_UPDATER_SIGNING == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PKG_CONFIG_PATH: /opt/homebrew/lib/pkgconfig
+          LIBRARY_PATH: /opt/homebrew/lib
+        with:
+          projectPath: alexandria
+          releaseId: ${{ needs.create-release.outputs.release_id }}
+          args: --target aarch64-apple-darwin --bundles dmg --features tutoring-video
+          includeUpdaterJson: false
+
+      - name: Build macOS (ARM64) with updater signing
+        if: env.ENABLE_UPDATER_SIGNING == 'true'
+        uses: tauri-apps/tauri-action@v0
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_PATH: ${{ runner.temp }}/AuthKey.p8
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PKG_CONFIG_PATH: /opt/homebrew/lib/pkgconfig
           LIBRARY_PATH: /opt/homebrew/lib
@@ -308,13 +326,23 @@ jobs:
         working-directory: alexandria
         run: npm ci
 
-      - name: Build Linux x86_64
+      - name: Build Linux x86_64 without updater signing
+        if: env.ENABLE_UPDATER_SIGNING != 'true'
         uses: tauri-apps/tauri-action@v0
         env:
-          TAURI_SIGNING_PRIVATE_KEY: >-
-            ${{ env.ENABLE_UPDATER_SIGNING == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: >-
-            ${{ env.ENABLE_UPDATER_SIGNING == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: alexandria
+          releaseId: ${{ needs.create-release.outputs.release_id }}
+          args: --features tutoring-video-static --bundles appimage,deb
+          includeUpdaterJson: false
+
+      - name: Build Linux x86_64 with updater signing
+        if: env.ENABLE_UPDATER_SIGNING == 'true'
+        uses: tauri-apps/tauri-action@v0
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           projectPath: alexandria
@@ -408,13 +436,23 @@ jobs:
         working-directory: alexandria
         run: npm ci
 
-      - name: Build Linux ARM64
+      - name: Build Linux ARM64 without updater signing
+        if: env.ENABLE_UPDATER_SIGNING != 'true'
         uses: tauri-apps/tauri-action@v0
         env:
-          TAURI_SIGNING_PRIVATE_KEY: >-
-            ${{ env.ENABLE_UPDATER_SIGNING == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: >-
-            ${{ env.ENABLE_UPDATER_SIGNING == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: alexandria
+          releaseId: ${{ needs.create-release.outputs.release_id }}
+          args: --features tutoring-video-static --bundles appimage,deb
+          includeUpdaterJson: false
+
+      - name: Build Linux ARM64 with updater signing
+        if: env.ENABLE_UPDATER_SIGNING == 'true'
+        uses: tauri-apps/tauri-action@v0
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           projectPath: alexandria
@@ -526,13 +564,25 @@ jobs:
           Get-Command libtoolize
           Get-Command bash
 
-      - name: Build Windows x86_64
+      - name: Build Windows x86_64 without updater signing
+        if: env.ENABLE_UPDATER_SIGNING != 'true'
         uses: tauri-apps/tauri-action@v0
         env:
-          TAURI_SIGNING_PRIVATE_KEY: >-
-            ${{ env.ENABLE_UPDATER_SIGNING == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: >-
-            ${{ env.ENABLE_UPDATER_SIGNING == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PATH: ${{ steps.windows-build-env.outputs.path }}
+          FFMPEG_DIR: ${{ steps.windows-build-env.outputs.ffmpeg_dir }}
+        with:
+          projectPath: alexandria
+          releaseId: ${{ needs.create-release.outputs.release_id }}
+          args: --features tutoring-video --bundles nsis
+          includeUpdaterJson: false
+
+      - name: Build Windows x86_64 with updater signing
+        if: env.ENABLE_UPDATER_SIGNING == 'true'
+        uses: tauri-apps/tauri-action@v0
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PATH: ${{ steps.windows-build-env.outputs.path }}
           FFMPEG_DIR: ${{ steps.windows-build-env.outputs.ffmpeg_dir }}
