@@ -153,11 +153,17 @@ mod webrtc {
         cmd: &str,
         args_opt: Option<&[&str]>,
     ) -> Result<()> {
+        let curr_dir = curr_dir.as_ref();
         let mut command = if cfg!(windows) {
-            // On Windows these autotools helpers are shell scripts, not PE executables.
-            // Run them via `sh` so std::process doesn't reject them as "program not found".
-            let mut command = std::process::Command::new("sh");
-            command.args(["-lc", "exec \"$0\" \"$@\""]).arg(cmd);
+            // On Windows the autotools helpers and ./configure entrypoint run under MSYS2 bash.
+            // Explicitly `cd` into the translated source/build directory because relying on the
+            // Win32 current directory can leave bash in the wrong place for aclocal/configure.
+            let shell_dir = windows_shell_path(curr_dir)?;
+            let mut command = std::process::Command::new("bash");
+            command
+                .args(["-lc", "cd \"$1\" && shift && exec \"$@\"", "bash"])
+                .arg(shell_dir)
+                .arg(cmd);
             command
         } else {
             std::process::Command::new(cmd)
