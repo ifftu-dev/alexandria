@@ -119,10 +119,11 @@ impl Database {
         let conn = Connection::open_with_flags(path, flags)?;
 
         // Attach an encrypted database and export
-        conn.execute_batch(format!(
+        let attach_sql = format!(
             "ATTACH DATABASE '{}' AS encrypted KEY \"x'{key_hex}'\";",
             enc_path.display()
-        ))?;
+        );
+        conn.execute_batch(&attach_sql)?;
         conn.execute_batch("SELECT sqlcipher_export('encrypted');")?;
         conn.execute_batch("DETACH DATABASE encrypted;")?;
         drop(conn);
