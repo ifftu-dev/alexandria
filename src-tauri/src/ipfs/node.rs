@@ -268,7 +268,6 @@ impl std::ops::Deref for StoreGuard<'_> {
 }
 
 /// File format version bytes.
-const KEY_VERSION_PLAINTEXT: u8 = 0x00;
 const KEY_VERSION_AES_GCM: u8 = 0x01;
 
 /// Load the node's secret key from disk, or generate a new one.
@@ -277,8 +276,9 @@ const KEY_VERSION_AES_GCM: u8 = 0x01;
 /// AES-256-GCM. The file format is:
 ///   `version(1) || nonce(12) || ciphertext(32 + 16 auth tag)`
 ///
-/// Legacy plaintext files (32 raw bytes) are auto-migrated to encrypted
-/// format on first read when an encryption key is available.
+/// Legacy plaintext files (32 raw bytes with no version prefix) are
+/// auto-migrated to encrypted format on first read when an encryption key
+/// is available.
 fn load_or_generate_secret_key(
     data_dir: &Path,
     enc_key: Option<&[u8; 32]>,
