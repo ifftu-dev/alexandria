@@ -169,9 +169,20 @@ mod webrtc {
             command.args(args);
         }
 
-        let _output = command.output().map_err(|e| {
+        let output = command.output().map_err(|e| {
             anyhow!("Error running command '{}' with args '{:?}' - {:?}", cmd, args_opt, e)
         })?;
+
+        if !output.status.success() {
+            bail!(
+                "Command '{}' with args '{:?}' failed with status {:?}\nstdout:\n{}\nstderr:\n{}",
+                cmd,
+                args_opt,
+                output.status.code(),
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
 
         Ok(())
     }

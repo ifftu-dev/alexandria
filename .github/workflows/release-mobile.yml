@@ -20,6 +20,15 @@ on:
         required: false
         type: boolean
         default: false
+      ios_export_method:
+        description: 'iOS export method for manual runs'
+        required: false
+        type: choice
+        default: debugging
+        options:
+          - debugging
+          - release-testing
+          - app-store-connect
 
 permissions:
   contents: write
@@ -30,6 +39,9 @@ env:
   TAURI_CLI_VERSION: 2.10.0
   RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || inputs.tag }}
   BUILD_REF: ${{ github.ref_type == 'tag' && github.ref || format('refs/tags/{0}', inputs.tag) }}
+  IOS_EXPORT_METHOD: >-
+    ${{ github.event_name == 'workflow_dispatch' && inputs.ios_export_method ||
+        (contains(github.ref_name, '-test') && 'debugging' || 'app-store-connect') }}
 
 concurrency:
   group: ${{ github.workflow }}-${{ inputs.tag || github.ref }}
@@ -125,7 +137,7 @@ jobs:
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_KEY_PATH: ${{ runner.temp }}/AuthKey.p8
-        run: npx tauri ios build --export-method app-store-connect
+        run: npx tauri ios build --export-method "${IOS_EXPORT_METHOD}"
 
       - name: Upload iOS artifact
         uses: softprops/action-gh-release@v2

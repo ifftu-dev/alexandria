@@ -11,6 +11,11 @@ name: Release (Desktop)
         description: 'Tag to build (e.g. v1.0.0)'
         required: false
         type: string
+      sign_updater:
+        description: 'Sign updater artifacts (enable for production releases; disable for validation tags)'
+        required: false
+        type: boolean
+        default: false
       include_linux_arm64:
         description: 'Build Linux ARM64 (free only on public repos; enable if you have a paid plan or self-hosted runner)'
         required: false
@@ -23,8 +28,12 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  TAURI_CLI_VERSION: 2.10.0
   RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || inputs.tag }}
   BUILD_REF: ${{ github.ref_type == 'tag' && github.ref || format('refs/tags/{0}', inputs.tag) }}
+  ENABLE_UPDATER_SIGNING: >-
+    ${{ (github.event_name == 'push' && !contains(github.ref_name, '-test')) ||
+        (github.event_name == 'workflow_dispatch' && inputs.sign_updater == true) }}
 
 concurrency:
   group: ${{ github.workflow }}-${{ inputs.tag || github.ref }}
@@ -58,6 +67,27 @@ jobs:
             echo "Tag ${RELEASE_TAG} does not exist on ${GITHUB_REPOSITORY}. Create and push it before running Release (Desktop)." >&2
             exit 1
           fi
+
+      - name: Setup Node.js for updater signing preflight
+        if: env.ENABLE_UPDATER_SIGNING == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+
+      - name: Validate updater signing key
+        if: env.ENABLE_UPDATER_SIGNING == 'true'
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          if [ -z "${TAURI_SIGNING_PRIVATE_KEY}" ]; then
+            echo "TAURI_SIGNING_PRIVATE_KEY is required when updater signing is enabled." >&2
+            exit 1
+          fi
+
+          printf 'alexandria updater signing preflight\n' > "${RUNNER_TEMP}/updater-signing.txt"
+          npx -y @tauri-apps/cli@${TAURI_CLI_VERSION} signer sign "${RUNNER_TEMP}/updater-signing.txt" >/dev/null
+          rm -f "${RUNNER_TEMP}/updater-signing.txt" "${RUNNER_TEMP}/updater-signing.txt.sig"
 
       - name: Create or reuse draft release
         id: create
@@ -182,9 +212,10 @@ jobs:
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_KEY_PATH: ${{ runner.temp }}/AuthKey.p8
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY: >-
+            ${{ env.ENABLE_UPDATER_SIGNING == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: >-
-            ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+            ${{ env.ENABLE_UPDATER_SIGNING == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PKG_CONFIG_PATH: /opt/homebrew/lib/pkgconfig
           LIBRARY_PATH: /opt/homebrew/lib
@@ -280,9 +311,10 @@ jobs:
       - name: Build Linux x86_64
         uses: tauri-apps/tauri-action@v0
         env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY: >-
+            ${{ env.ENABLE_UPDATER_SIGNING == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: >-
-            ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+            ${{ env.ENABLE_UPDATER_SIGNING == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           projectPath: alexandria
@@ -379,9 +411,10 @@ jobs:
       - name: Build Linux ARM64
         uses: tauri-apps/tauri-action@v0
         env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY: >-
+            ${{ env.ENABLE_UPDATER_SIGNING == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: >-
-            ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+            ${{ env.ENABLE_UPDATER_SIGNING == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           projectPath: alexandria
@@ -496,9 +529,10 @@ jobs:
       - name: Build Windows x86_64
         uses: tauri-apps/tauri-action@v0
         env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY: >-
+            ${{ env.ENABLE_UPDATER_SIGNING == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: >-
-            ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+            ${{ env.ENABLE_UPDATER_SIGNING == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PATH: ${{ steps.windows-build-env.outputs.path }}
           FFMPEG_DIR: ${{ steps.windows-build-env.outputs.ffmpeg_dir }}
