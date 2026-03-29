@@ -159,7 +159,11 @@ mod webrtc {
             // Explicitly `cd` into the translated source/build directory because relying on the
             // Win32 current directory can leave bash in the wrong place for aclocal/configure.
             let shell_dir = windows_shell_path(curr_dir)?;
-            let mut command = std::process::Command::new("bash");
+            let bash = std::env::var_os("MSYS2_BASH_EXE")
+                .map(PathBuf::from)
+                .filter(|path| path.exists())
+                .unwrap_or_else(|| PathBuf::from(r"C:\msys64\usr\bin\bash.exe"));
+            let mut command = std::process::Command::new(bash);
             command
                 .args(["-lc", "cd \"$1\" && shift && exec \"$@\"", "bash"])
                 .arg(shell_dir)
