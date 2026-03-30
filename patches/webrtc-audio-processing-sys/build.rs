@@ -151,31 +151,26 @@ mod webrtc {
     }
 
     fn windows_tool_dirs() -> Vec<PathBuf> {
-        #[cfg(not(windows))]
-        {
-            return Vec::new();
-        }
-
-        #[cfg(windows)]
         let mut dirs = Vec::new();
 
         #[cfg(windows)]
-        if let Some(dir) = std::env::var_os("VCToolsInstallDir")
-            .map(PathBuf::from)
-            .map(|root| root.join("bin").join("Hostx64").join("x64"))
-            .filter(|dir| dir.is_dir())
         {
-            dirs.push(dir);
-        }
+            if let Some(dir) = std::env::var_os("VCToolsInstallDir")
+                .map(PathBuf::from)
+                .map(|root| root.join("bin").join("Hostx64").join("x64"))
+                .filter(|dir| dir.is_dir())
+            {
+                dirs.push(dir);
+            }
 
-        #[cfg(windows)]
-        for sdk_var in ["WindowsSdkVerBinPath", "WindowsSdkBinPath"] {
-            if let Some(root) = std::env::var_os(sdk_var).map(PathBuf::from) {
-                let x64_dir = root.join("x64");
-                if x64_dir.is_dir() {
-                    dirs.push(x64_dir);
-                } else if root.is_dir() {
-                    dirs.push(root);
+            for sdk_var in ["WindowsSdkVerBinPath", "WindowsSdkBinPath"] {
+                if let Some(root) = std::env::var_os(sdk_var).map(PathBuf::from) {
+                    let x64_dir = root.join("x64");
+                    if x64_dir.is_dir() {
+                        dirs.push(x64_dir);
+                    } else if root.is_dir() {
+                        dirs.push(root);
+                    }
                 }
             }
         }
