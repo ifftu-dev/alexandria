@@ -201,7 +201,8 @@ mod webrtc {
     }
 
     fn windows_tool(var: &str, default: &str) -> String {
-        std::env::var(var)
+        let scoped_var = format!("WEBRTC_{var}");
+        std::env::var(&scoped_var)
             .ok()
             .filter(|value| !value.trim().is_empty())
             .unwrap_or_else(|| default.to_string())

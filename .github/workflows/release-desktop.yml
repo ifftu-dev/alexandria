@@ -606,10 +606,10 @@ jobs:
           $effectivePath = ($pathEntries | Select-Object -Unique) -join ';'
           Add-Content -Path $env:GITHUB_OUTPUT -Value "path=$effectivePath"
           Add-Content -Path $env:GITHUB_OUTPUT -Value "ffmpeg_dir=${{ steps.windows-ffmpeg.outputs.root_dir }}"
-          Add-Content -Path $env:GITHUB_OUTPUT -Value "cc=clang.exe"
-          Add-Content -Path $env:GITHUB_OUTPUT -Value "cxx=clang++.exe"
-          Add-Content -Path $env:GITHUB_OUTPUT -Value "ar=lib.exe"
-          Add-Content -Path $env:GITHUB_OUTPUT -Value "ld=link.exe"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "webrtc_cc=clang.exe"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "webrtc_cxx=clang++.exe"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "webrtc_ar=lib.exe"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "webrtc_ld=link.exe"
           Get-Command cargo
           Get-Command node
           Get-Command libtoolize
@@ -627,10 +627,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PATH: ${{ steps.windows-build-env.outputs.path }}
           FFMPEG_DIR: ${{ steps.windows-build-env.outputs.ffmpeg_dir }}
-          CC: ${{ steps.windows-build-env.outputs.cc }}
-          CXX: ${{ steps.windows-build-env.outputs.cxx }}
-          AR: ${{ steps.windows-build-env.outputs.ar }}
-          LD: ${{ steps.windows-build-env.outputs.ld }}
+          WEBRTC_CC: ${{ steps.windows-build-env.outputs.webrtc_cc }}
+          WEBRTC_CXX: ${{ steps.windows-build-env.outputs.webrtc_cxx }}
+          WEBRTC_AR: ${{ steps.windows-build-env.outputs.webrtc_ar }}
+          WEBRTC_LD: ${{ steps.windows-build-env.outputs.webrtc_ld }}
           MSYS2_BASH_EXE: C:\msys64\usr\bin\bash.exe
         with:
           projectPath: alexandria
@@ -647,10 +647,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PATH: ${{ steps.windows-build-env.outputs.path }}
           FFMPEG_DIR: ${{ steps.windows-build-env.outputs.ffmpeg_dir }}
-          CC: ${{ steps.windows-build-env.outputs.cc }}
-          CXX: ${{ steps.windows-build-env.outputs.cxx }}
-          AR: ${{ steps.windows-build-env.outputs.ar }}
-          LD: ${{ steps.windows-build-env.outputs.ld }}
+          WEBRTC_CC: ${{ steps.windows-build-env.outputs.webrtc_cc }}
+          WEBRTC_CXX: ${{ steps.windows-build-env.outputs.webrtc_cxx }}
+          WEBRTC_AR: ${{ steps.windows-build-env.outputs.webrtc_ar }}
+          WEBRTC_LD: ${{ steps.windows-build-env.outputs.webrtc_ld }}
           MSYS2_BASH_EXE: C:\msys64\usr\bin\bash.exe
         with:
           projectPath: alexandria
