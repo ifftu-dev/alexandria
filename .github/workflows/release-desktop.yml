@@ -606,14 +606,16 @@ jobs:
           $effectivePath = ($pathEntries | Select-Object -Unique) -join ';'
           Add-Content -Path $env:GITHUB_OUTPUT -Value "path=$effectivePath"
           Add-Content -Path $env:GITHUB_OUTPUT -Value "ffmpeg_dir=${{ steps.windows-ffmpeg.outputs.root_dir }}"
-          Add-Content -Path $env:GITHUB_OUTPUT -Value "cc=cl.exe"
-          Add-Content -Path $env:GITHUB_OUTPUT -Value "cxx=cl.exe"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "cc=clang.exe"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "cxx=clang++.exe"
           Add-Content -Path $env:GITHUB_OUTPUT -Value "ar=lib.exe"
           Add-Content -Path $env:GITHUB_OUTPUT -Value "ld=link.exe"
           Get-Command cargo
           Get-Command node
           Get-Command libtoolize
           Get-Command bash
+          Get-Command clang.exe
+          Get-Command clang++.exe
           Get-Command cl.exe
           Get-Command link.exe
           Get-Command lib.exe

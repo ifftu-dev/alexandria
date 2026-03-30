@@ -151,10 +151,11 @@ mod webrtc {
     }
 
     fn windows_tool_dirs() -> Vec<PathBuf> {
-        let mut dirs = Vec::new();
+        let dirs = Vec::new();
 
         #[cfg(windows)]
         {
+            let mut dirs = dirs;
             if let Some(dir) = std::env::var_os("VCToolsInstallDir")
                 .map(PathBuf::from)
                 .map(|root| root.join("bin").join("Hostx64").join("x64"))
@@ -173,6 +174,8 @@ mod webrtc {
                     }
                 }
             }
+
+            return dirs;
         }
 
         dirs
@@ -197,6 +200,13 @@ mod webrtc {
         Ok(joined.to_string_lossy().into_owned())
     }
 
+    fn windows_tool(var: &str, default: &str) -> String {
+        std::env::var(var)
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| default.to_string())
+    }
+
     fn run_command<P: AsRef<Path>>(
         curr_dir: P,
         cmd: &str,
@@ -218,12 +228,12 @@ mod webrtc {
                 .arg(shell_dir)
                 .arg(cmd);
             command.env("PATH", windows_augmented_path()?);
-            // Autoconf is running under MSYS2 bash here, so explicitly seed the MSVC tool
-            // names and PATH instead of assuming the tauri-action environment preserves them.
-            command.env("CC", "cl.exe");
-            command.env("CXX", "cl.exe");
-            command.env("AR", "lib.exe");
-            command.env("LD", "link.exe");
+            // Autoconf is running under MSYS2 bash here, so explicitly seed tool names and PATH
+            // instead of assuming the tauri-action environment preserves them.
+            command.env("CC", windows_tool("CC", "clang.exe"));
+            command.env("CXX", windows_tool("CXX", "clang++.exe"));
+            command.env("AR", windows_tool("AR", "lib.exe"));
+            command.env("LD", windows_tool("LD", "link.exe"));
             command
         } else {
             std::process::Command::new(cmd)
