@@ -150,10 +150,16 @@ mod webrtc {
         }
     }
 
-    #[cfg(windows)]
     fn windows_tool_dirs() -> Vec<PathBuf> {
+        #[cfg(not(windows))]
+        {
+            return Vec::new();
+        }
+
+        #[cfg(windows)]
         let mut dirs = Vec::new();
 
+        #[cfg(windows)]
         if let Some(dir) = std::env::var_os("VCToolsInstallDir")
             .map(PathBuf::from)
             .map(|root| root.join("bin").join("Hostx64").join("x64"))
@@ -162,6 +168,7 @@ mod webrtc {
             dirs.push(dir);
         }
 
+        #[cfg(windows)]
         for sdk_var in ["WindowsSdkVerBinPath", "WindowsSdkBinPath"] {
             if let Some(root) = std::env::var_os(sdk_var).map(PathBuf::from) {
                 let x64_dir = root.join("x64");
@@ -176,7 +183,6 @@ mod webrtc {
         dirs
     }
 
-    #[cfg(windows)]
     fn windows_augmented_path() -> Result<String> {
         let mut entries = windows_tool_dirs();
         if let Some(existing_path) = std::env::var_os("PATH") {
