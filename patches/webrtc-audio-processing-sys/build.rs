@@ -10,7 +10,9 @@ use std::{
 const DEPLOYMENT_TARGET_VAR: &str = "MACOSX_DEPLOYMENT_TARGET";
 
 fn out_dir() -> PathBuf {
-    std::env::var("OUT_DIR").expect("OUT_DIR environment var not set.").into()
+    std::env::var("OUT_DIR")
+        .expect("OUT_DIR environment var not set.")
+        .into()
 }
 
 #[cfg(not(feature = "bundled"))]
@@ -40,7 +42,7 @@ mod webrtc {
                 eprintln!("Couldn't find either header or lib files for {}.", LIB_NAME);
                 eprintln!("See the crate README for installation instructions, or use the 'bundled' feature to statically compile.");
                 bail!("Aborting compilation due to linker failure.");
-            },
+            }
         }
     }
 
@@ -148,6 +150,52 @@ mod webrtc {
         }
     }
 
+    #[cfg(windows)]
+    fn windows_tool_dirs() -> Vec<PathBuf> {
+        let mut dirs = Vec::new();
+
+        if let Some(dir) = std::env::var_os("VCToolsInstallDir")
+            .map(PathBuf::from)
+            .map(|root| root.join("bin").join("Hostx64").join("x64"))
+            .filter(|dir| dir.is_dir())
+        {
+            dirs.push(dir);
+        }
+
+        for sdk_var in ["WindowsSdkVerBinPath", "WindowsSdkBinPath"] {
+            if let Some(root) = std::env::var_os(sdk_var).map(PathBuf::from) {
+                let x64_dir = root.join("x64");
+                if x64_dir.is_dir() {
+                    dirs.push(x64_dir);
+                } else if root.is_dir() {
+                    dirs.push(root);
+                }
+            }
+        }
+
+        dirs
+    }
+
+    #[cfg(windows)]
+    fn windows_augmented_path() -> Result<String> {
+        let mut entries = windows_tool_dirs();
+        if let Some(existing_path) = std::env::var_os("PATH") {
+            entries.extend(std::env::split_paths(&existing_path));
+        }
+
+        let mut deduped = Vec::new();
+        for entry in entries {
+            if entry.as_os_str().is_empty() || deduped.iter().any(|existing| existing == &entry) {
+                continue;
+            }
+            deduped.push(entry);
+        }
+
+        let joined = std::env::join_paths(deduped)
+            .map_err(|e| anyhow!("failed to join Windows tool PATH entries: {e}"))?;
+        Ok(joined.to_string_lossy().into_owned())
+    }
+
     fn run_command<P: AsRef<Path>>(
         curr_dir: P,
         cmd: &str,
@@ -168,6 +216,13 @@ mod webrtc {
                 .args(["-lc", "cd \"$1\" && shift && exec \"$@\"", "bash"])
                 .arg(shell_dir)
                 .arg(cmd);
+            command.env("PATH", windows_augmented_path()?);
+            // Autoconf is running under MSYS2 bash here, so explicitly seed the MSVC tool
+            // names and PATH instead of assuming the tauri-action environment preserves them.
+            command.env("CC", "cl.exe");
+            command.env("CXX", "cl.exe");
+            command.env("AR", "lib.exe");
+            command.env("LD", "link.exe");
             command
         } else {
             std::process::Command::new(cmd)
@@ -180,7 +235,12 @@ mod webrtc {
         }
 
         let output = command.output().map_err(|e| {
-            anyhow!("Error running command '{}' with args '{:?}' - {:?}", cmd, args_opt, e)
+            anyhow!(
+                "Error running command '{}' with args '{:?}' - {:?}",
+                cmd,
+                args_opt,
+                e
+            )
         })?;
 
         if !output.status.success() {
@@ -227,12 +287,14 @@ fn main() -> Result<()> {
         let min_version = match env::var(DEPLOYMENT_TARGET_VAR) {
             Ok(ver) => ver,
             Err(_) => {
-                String::from(match std::env::var("CARGO_CFG_TARGET_ARCH").unwrap().as_str() {
-                    "x86_64" => "10.10", // Using what I found here https://github.com/webrtc-uwp/chromium-build/blob/master/config/mac/mac_sdk.gni#L17
-                    "aarch64" => "11.0", // Apple silicon started here.
-                    arch => panic!("unknown arch: {}", arch),
-                })
-            },
+                String::from(
+                    match std::env::var("CARGO_CFG_TARGET_ARCH").unwrap().as_str() {
+                        "x86_64" => "10.10", // Using what I found here https://github.com/webrtc-uwp/chromium-build/blob/master/config/mac/mac_sdk.gni#L17
+                        "aarch64" => "11.0", // Apple silicon started here.
+                        arch => panic!("unknown arch: {}", arch),
+                    },
+                )
+            }
         };
 
         // `cc` doesn't try to pick up on this automatically, but `clang` needs it to
