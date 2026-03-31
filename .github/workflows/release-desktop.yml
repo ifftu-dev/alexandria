@@ -181,6 +181,7 @@ jobs:
           node -e "const fs=require('fs'); const path='src-tauri/tauri.conf.json'; const cfg=JSON.parse(fs.readFileSync(path,'utf8')); cfg.bundle.createUpdaterArtifacts=false; if (cfg.plugins) delete cfg.plugins.updater; fs.writeFileSync(path, JSON.stringify(cfg, null, 2)+'\n');"
 
       - name: Import Apple Certificate
+        if: env.ENABLE_UPDATER_SIGNING == 'true'
         working-directory: alexandria
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
@@ -206,6 +207,7 @@ jobs:
         run: brew install cmake ffmpeg libtool automake autoconf
 
       - name: Write Apple API Key
+        if: env.ENABLE_UPDATER_SIGNING == 'true'
         run: |
           echo "${{ secrets.APPLE_API_KEY_CONTENT }}" > $RUNNER_TEMP/AuthKey.p8
 
@@ -213,12 +215,6 @@ jobs:
         if: env.ENABLE_UPDATER_SIGNING != 'true'
         uses: tauri-apps/tauri-action@v0
         env:
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
-          APPLE_API_KEY_PATH: ${{ runner.temp }}/AuthKey.p8
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PKG_CONFIG_PATH: /opt/homebrew/lib/pkgconfig
           LIBRARY_PATH: /opt/homebrew/lib

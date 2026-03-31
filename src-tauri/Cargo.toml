@@ -112,10 +112,10 @@ iroh-live = { git = "https://github.com/ifftu-dev/iroh-live", rev = "a7e3e0fa8c0
 postcard = { version = "1", features = ["alloc"] }
 blake3 = "1"
 
-# ── iOS-only dependencies ────────────────────────────────────────────
-[target.'cfg(any(target_os = "ios", target_os = "android"))'.dependencies]
-# Mobile uses SQLCipher too, but GitHub's mobile runners do not provide target
-# OpenSSL headers/libraries for cross-compiling SQLCipher. Vendor them here.
+# ── Mobile + Windows SQLCipher dependencies ──────────────────────────
+[target.'cfg(any(target_os = "ios", target_os = "android", target_os = "windows"))'.dependencies]
+# Mobile and Windows release runners do not provide a reliable SQLCipher OpenSSL
+# toolchain out of the box. Vendor OpenSSL here so builds do not depend on runner-specific paths.
 rusqlite = { version = "0.38", features = ["bundled-sqlcipher-vendored-openssl", "uuid"] }
 
 [target.'cfg(target_os = "ios")'.dependencies]
@@ -125,11 +125,13 @@ objc2 = "0.6"
 # Image encoding (JPEG) for bridging video frames to webview (same as desktop)
 image = { version = "0.25", default-features = false, features = ["jpeg"] }
 
-# ── Desktop-only dependencies ────────────────────────────────────────
-[target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
-# Desktop builds can link SQLCipher against the runner's native crypto stack.
+# ── macOS / Linux SQLCipher dependencies ─────────────────────────────
+[target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
+# macOS/Linux desktop builds can link SQLCipher against the runner's native crypto stack.
 rusqlite = { version = "0.38", features = ["bundled-sqlcipher", "uuid"] }
 
+# ── Desktop-only dependencies ────────────────────────────────────────
+[target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
 # Secure secret storage (IOTA Stronghold encrypted vault — desktop uses this instead of portable)
 iota_stronghold = "2"
 
