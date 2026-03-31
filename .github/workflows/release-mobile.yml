@@ -129,7 +129,7 @@ jobs:
         run: cargo binstall tauri-cli --version ${TAURI_CLI_VERSION} --no-confirm --locked
 
       - name: Export Cargo bin to PATH for downstream iOS tooling
-        run: echo "${HOME}/.cargo/bin" >> $GITHUB_PATH
+        run: echo "${CARGO_HOME:-$HOME/.cargo}/bin" >> $GITHUB_PATH
 
       - name: Write Apple API Key
         run: echo "${{ secrets.APPLE_API_KEY_CONTENT }}" > $RUNNER_TEMP/AuthKey.p8
