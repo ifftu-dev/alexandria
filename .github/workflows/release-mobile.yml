@@ -142,7 +142,7 @@ jobs:
           xcodebuild \
             -project src-tauri/gen/apple/alexandria-node.xcodeproj \
             -scheme alexandria-node_iOS \
-            -configuration Release \
+            -configuration release \
             -destination 'generic/platform=iOS' \
             -derivedDataPath src-tauri/gen/apple/build/derived-data \
             CODE_SIGNING_ALLOWED=NO \
