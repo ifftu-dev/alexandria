@@ -12,11 +12,14 @@ default-run = "alexandria-node"
 [features]
 default = []
 dev-seed = []
-# Enable video support for tutoring (desktop only).
-# This activates iroh-live's "video" feature which pulls in ffmpeg, nokhwa, xcap.
-# On mobile builds, this feature MUST NOT be enabled. Desktop Tauri config and
-# desktop build/release commands enable it explicitly where needed.
-tutoring-video = ["iroh-live/video", "iroh-live/aec"]
+# Enable desktop tutoring video without acoustic echo cancellation.
+# This keeps Windows buildable on GitHub's MSVC runners, where the bundled
+# webrtc-audio-processing autotools build is not currently stable.
+tutoring-video = ["iroh-live/video"]
+
+# Enable desktop tutoring video with acoustic echo cancellation.
+# macOS/Linux release paths can opt into this when the WebRTC AEC toolchain is available.
+tutoring-video-aec = ["tutoring-video", "iroh-live/aec"]
 
 # Enable video with statically-linked ffmpeg (for Windows/Linux CI builds without system ffmpeg).
 # Activated for Linux and Windows in CI via --features tutoring-video-static.
@@ -102,9 +105,8 @@ libp2p = { version = "0.56.0", features = ["gossipsub", "kad", "quic", "tcp", "n
 futures = "0.3"
 
 # Live tutoring — Media over QUIC (iroh-live) — ALL platforms
-# Base: audio-only (default-features = false). The "video" feature is
-# activated by the "tutoring-video" cargo feature which desktop Tauri config
-# and desktop build/release commands enable explicitly.
+# Base: audio-only (default-features = false). Desktop builds opt into
+# "tutoring-video" (no AEC) or "tutoring-video-aec" (with AEC) explicitly.
 iroh-gossip = "0.96"
 iroh-live = { git = "https://github.com/ifftu-dev/iroh-live", rev = "a7e3e0fa8c073021d7e140813197705eb0f670fd", default-features = false }
 postcard = { version = "1", features = ["alloc"] }

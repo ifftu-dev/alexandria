@@ -53,7 +53,7 @@ fn all_targets() -> Vec<Target> {
             short_name: "mac-arm64",
             platform: Platform::Desktop,
             rust_target: "aarch64-apple-darwin",
-            cargo_feature: Some("tutoring-video"),
+            cargo_feature: Some("tutoring-video-aec"),
             build_args: &["tauri", "build", "--target", "aarch64-apple-darwin"],
         },
         Target {
@@ -61,7 +61,7 @@ fn all_targets() -> Vec<Target> {
             short_name: "mac-x64",
             platform: Platform::Desktop,
             rust_target: "x86_64-apple-darwin",
-            cargo_feature: Some("tutoring-video"),
+            cargo_feature: Some("tutoring-video-aec"),
             build_args: &["tauri", "build", "--target", "x86_64-apple-darwin"],
         },
         Target {
@@ -69,7 +69,7 @@ fn all_targets() -> Vec<Target> {
             short_name: "mac-universal",
             platform: Platform::Desktop,
             rust_target: "universal-apple-darwin",
-            cargo_feature: Some("tutoring-video"),
+            cargo_feature: Some("tutoring-video-aec"),
             build_args: &["tauri", "build", "--target", "universal-apple-darwin"],
         },
         Target {
@@ -144,7 +144,9 @@ fn all_targets() -> Vec<Target> {
 fn host_desktop_tutoring_feature() -> Option<&'static str> {
     if cfg!(target_os = "linux") {
         Some("tutoring-video-static")
-    } else if cfg!(any(target_os = "macos", target_os = "windows")) {
+    } else if cfg!(target_os = "macos") {
+        Some("tutoring-video-aec")
+    } else if cfg!(target_os = "windows") {
         Some("tutoring-video")
     } else {
         None

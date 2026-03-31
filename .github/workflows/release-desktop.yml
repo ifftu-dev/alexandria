@@ -225,7 +225,7 @@ jobs:
         with:
           projectPath: alexandria
           releaseId: ${{ needs.create-release.outputs.release_id }}
-          args: --target aarch64-apple-darwin --bundles dmg --features tutoring-video
+          args: --target aarch64-apple-darwin --bundles dmg --features tutoring-video-aec
           includeUpdaterJson: false
 
       - name: Build macOS (ARM64) with updater signing
@@ -246,7 +246,7 @@ jobs:
         with:
           projectPath: alexandria
           releaseId: ${{ needs.create-release.outputs.release_id }}
-          args: --target aarch64-apple-darwin --bundles dmg --features tutoring-video
+          args: --target aarch64-apple-darwin --bundles dmg --features tutoring-video-aec
           includeUpdaterJson: false
 
   build-linux-x64:

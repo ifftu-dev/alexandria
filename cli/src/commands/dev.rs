@@ -35,7 +35,9 @@ pub fn execute(cmd: &DevCommand, ctx: &ProjectContext) -> Result<()> {
 fn host_tutoring_feature() -> Option<&'static str> {
     if cfg!(target_os = "linux") {
         Some("tutoring-video-static")
-    } else if cfg!(any(target_os = "macos", target_os = "windows")) {
+    } else if cfg!(target_os = "macos") {
+        Some("tutoring-video-aec")
+    } else if cfg!(target_os = "windows") {
         Some("tutoring-video")
     } else {
         None
