@@ -500,33 +500,6 @@ jobs:
         # ends up after MSVC, so MSVC link.exe wins over MSYS2's POSIX hard-link tool.
         uses: ilammy/msvc-dev-cmd@v1
 
-      - name: Install autotools via MSYS2 for webrtc-audio-processing-sys (AEC build)
-        id: windows-msys2
-        # webrtc-audio-processing-sys requires libtoolize, aclocal, automake, autoconf.
-        # On Windows these are shell scripts without .exe extensions, so cargo build
-        # scripts cannot launch them reliably even if MSYS2's bin directory is on Path.
-        # Create .bat shims that invoke the MSYS2 tools through bash and add those shims
-        # to the Windows process PATH seen by the later Node-based tauri action.
-        shell: pwsh
-        run: |
-          & 'C:\msys64\usr\bin\bash.exe' -lc "pacman -S --noconfirm --needed libtool automake autoconf make m4"
-          Remove-Item 'C:\msys64\usr\bin\link.exe' -Force -ErrorAction SilentlyContinue
-          $shimDir = Join-Path $env:RUNNER_TEMP 'msys2-shims'
-          New-Item -ItemType Directory -Force -Path $shimDir | Out-Null
-          foreach ($tool in @('libtoolize', 'aclocal', 'automake', 'autoconf', 'autoheader', 'autoreconf')) {
-            $shimPath = Join-Path $shimDir "$tool.bat"
-            Set-Content -Path $shimPath -Encoding ascii -Value @(
-              '@echo off'
-              """C:\msys64\usr\bin\bash.exe"" -lc ""/usr/bin/$tool %*"""
-            )
-          }
-          $env:Path = "$shimDir;C:\msys64\usr\bin;$env:Path"
-          Add-Content -Path $env:GITHUB_OUTPUT -Value "shim_dir=$shimDir"
-          Add-Content -Path $env:GITHUB_ENV -Value "Path=$env:Path"
-          Add-Content -Path $env:GITHUB_PATH -Value $shimDir
-          Add-Content -Path $env:GITHUB_PATH -Value 'C:\msys64\usr\bin'
-          Get-Command libtoolize
-
       - name: Download pre-built FFmpeg for Windows
         id: windows-ffmpeg
         # Build-from-source (tutoring-video-static) fails on Windows due to MSVC/MinGW
@@ -572,6 +545,8 @@ jobs:
         id: windows-build-env
         shell: pwsh
         run: |
+          $strawberryPerlDir = 'C:\Strawberry\perl\bin'
+          $strawberryCDir = 'C:\Strawberry\c\bin'
           $msvcBinDir = $null
           if ($env:VCToolsInstallDir) {
             $candidate = Join-Path $env:VCToolsInstallDir 'bin\Hostx64\x64'
@@ -593,25 +568,18 @@ jobs:
             }
           }
           $pathEntries = @(
+            $strawberryPerlDir
+            $strawberryCDir
             $msvcBinDir
           ) + $sdkBinDirs + @(
-            '${{ steps.windows-msys2.outputs.shim_dir }}'
-            'C:\msys64\usr\bin'
             '${{ steps.windows-ffmpeg.outputs.bin_dir }}'
           ) + ($env:Path -split ';' | Where-Object { $_ })
           $effectivePath = ($pathEntries | Select-Object -Unique) -join ';'
           Add-Content -Path $env:GITHUB_OUTPUT -Value "path=$effectivePath"
           Add-Content -Path $env:GITHUB_OUTPUT -Value "ffmpeg_dir=${{ steps.windows-ffmpeg.outputs.root_dir }}"
-          Add-Content -Path $env:GITHUB_OUTPUT -Value "webrtc_cc=clang.exe"
-          Add-Content -Path $env:GITHUB_OUTPUT -Value "webrtc_cxx=clang++.exe"
-          Add-Content -Path $env:GITHUB_OUTPUT -Value "webrtc_ar=lib.exe"
-          Add-Content -Path $env:GITHUB_OUTPUT -Value "webrtc_ld=link.exe"
           Get-Command cargo
           Get-Command node
-          Get-Command libtoolize
-          Get-Command bash
-          Get-Command clang.exe
-          Get-Command clang++.exe
+          Get-Command perl
           Get-Command cl.exe
           Get-Command link.exe
           Get-Command lib.exe
@@ -623,11 +591,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PATH: ${{ steps.windows-build-env.outputs.path }}
           FFMPEG_DIR: ${{ steps.windows-build-env.outputs.ffmpeg_dir }}
-          WEBRTC_CC: ${{ steps.windows-build-env.outputs.webrtc_cc }}
-          WEBRTC_CXX: ${{ steps.windows-build-env.outputs.webrtc_cxx }}
-          WEBRTC_AR: ${{ steps.windows-build-env.outputs.webrtc_ar }}
-          WEBRTC_LD: ${{ steps.windows-build-env.outputs.webrtc_ld }}
-          MSYS2_BASH_EXE: C:\msys64\usr\bin\bash.exe
+          PERL: C:\Strawberry\perl\bin\perl.exe
         with:
           projectPath: alexandria
           releaseId: ${{ needs.create-release.outputs.release_id }}
@@ -643,11 +607,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PATH: ${{ steps.windows-build-env.outputs.path }}
           FFMPEG_DIR: ${{ steps.windows-build-env.outputs.ffmpeg_dir }}
-          WEBRTC_CC: ${{ steps.windows-build-env.outputs.webrtc_cc }}
-          WEBRTC_CXX: ${{ steps.windows-build-env.outputs.webrtc_cxx }}
-          WEBRTC_AR: ${{ steps.windows-build-env.outputs.webrtc_ar }}
-          WEBRTC_LD: ${{ steps.windows-build-env.outputs.webrtc_ld }}
-          MSYS2_BASH_EXE: C:\msys64\usr\bin\bash.exe
+          PERL: C:\Strawberry\perl\bin\perl.exe
         with:
           projectPath: alexandria
           releaseId: ${{ needs.create-release.outputs.release_id }}
