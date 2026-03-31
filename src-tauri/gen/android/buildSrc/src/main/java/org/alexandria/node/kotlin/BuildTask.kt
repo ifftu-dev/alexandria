@@ -22,7 +22,7 @@ open class BuildTask : DefaultTask() {
     @TaskAction
     fun assemble() {
         val rootDirRel = rootDirRel ?: throw GradleException("rootDirRel cannot be null")
-        val rootDir = File(project.projectDir, rootDirRel)
+        val rootDir = File(project.projectDir, rootDirRel).canonicalFile
         var lastException: Exception? = null
 
         for (command in tauriCliCommands(rootDir)) {
@@ -39,20 +39,22 @@ open class BuildTask : DefaultTask() {
 
     private fun tauriCliCommands(rootDir: File): List<TauriCliCommand> {
         val commands = mutableListOf<TauriCliCommand>()
-        val nodeModulesBin = File(rootDir, "node_modules/.bin")
         val tauriScriptNames = if (Os.isFamily(Os.FAMILY_WINDOWS)) {
             listOf("tauri.cmd", "tauri.exe", "tauri.bat")
         } else {
             listOf("tauri")
         }
 
-        for (scriptName in tauriScriptNames) {
-            val script = File(nodeModulesBin, scriptName)
-            if (script.isFile) {
-                commands += TauriCliCommand(
-                    executable = script.absolutePath,
-                    args = listOf("android", "android-studio-script"),
-                )
+        for (searchRoot in searchRoots(rootDir)) {
+            val nodeModulesBin = File(searchRoot, "node_modules/.bin")
+            for (scriptName in tauriScriptNames) {
+                val script = File(nodeModulesBin, scriptName)
+                if (script.isFile) {
+                    commands += TauriCliCommand(
+                        executable = script.absolutePath,
+                        args = listOf("android", "android-studio-script"),
+                    )
+                }
             }
         }
 
@@ -81,6 +83,16 @@ open class BuildTask : DefaultTask() {
         }
 
         return commands
+    }
+
+    private fun searchRoots(rootDir: File): List<File> {
+        val roots = mutableListOf<File>()
+        var current: File? = rootDir
+        while (current != null) {
+            roots += current
+            current = current.parentFile
+        }
+        return roots.distinctBy { it.absolutePath }
     }
 
     private fun runTauriCli(command: TauriCliCommand, rootDir: File) {
