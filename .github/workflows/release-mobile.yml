@@ -138,18 +138,7 @@ jobs:
       - name: Build iOS (unsigned validation)
         if: env.IOS_EXPORT_METHOD == 'debugging'
         working-directory: alexandria
-        run: |
-          xcodebuild \
-            -project src-tauri/gen/apple/alexandria-node.xcodeproj \
-            -scheme alexandria-node_iOS \
-            -configuration release \
-            -destination 'generic/platform=iOS' \
-            -derivedDataPath src-tauri/gen/apple/build/derived-data \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY="" \
-            DEVELOPMENT_TEAM="" \
-            build
+        run: npx tauri ios build --target aarch64-sim
 
       - name: Build iOS (signed export)
         if: env.IOS_EXPORT_METHOD != 'debugging'
