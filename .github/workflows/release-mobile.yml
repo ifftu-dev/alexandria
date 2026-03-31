@@ -225,11 +225,24 @@ jobs:
         working-directory: alexandria
         run: npm install --no-save @tauri-apps/cli@${TAURI_CLI_VERSION}
 
+      - name: Create cargo-tauri shim for Android Gradle tasks
+        run: |
+          SHIM_DIR="$RUNNER_TEMP/tauri-cargo-shim"
+          mkdir -p "$SHIM_DIR"
+          cat > "$SHIM_DIR/cargo-tauri" <<EOF
+          #!/usr/bin/env bash
+          set -euo pipefail
+          exec "$GITHUB_WORKSPACE/alexandria/node_modules/.bin/tauri" "\$@"
+          EOF
+          chmod +x "$SHIM_DIR/cargo-tauri"
+          echo "$SHIM_DIR" >> $GITHUB_PATH
+
       - name: Verify Android Tauri CLI availability
         working-directory: alexandria
         run: |
           test -x node_modules/.bin/tauri
           ./node_modules/.bin/tauri --version
+          cargo-tauri --version
           npx tauri --version
 
       - name: Decode Android keystore
