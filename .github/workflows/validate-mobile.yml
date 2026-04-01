@@ -300,6 +300,24 @@ jobs:
           echo "ANDROID_NDK_RANLIB=$NDK_BIN/llvm-ranlib" >> $GITHUB_ENV
           echo "ANDROID_NDK_STRIP=$NDK_BIN/llvm-strip" >> $GITHUB_ENV
 
+      - name: Create temporary Android validation keystore
+        run: |
+          VALIDATION_KEYSTORE="$RUNNER_TEMP/validation-release.jks"
+          keytool -genkeypair \
+            -alias validation \
+            -keystore "$VALIDATION_KEYSTORE" \
+            -storepass android \
+            -keypass android \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 3650 \
+            -dname "CN=Alexandria Validation, OU=CI, O=Alexandria, L=CI, S=CI, C=US"
+          cat > alexandria/src-tauri/gen/android/keystore.properties <<EOF
+          password=android
+          keyAlias=validation
+          storeFile=$VALIDATION_KEYSTORE
+          EOF
+
       - name: Build Android artifacts
         working-directory: alexandria
         env:
@@ -309,11 +327,13 @@ jobs:
           AR: ${{ env.ANDROID_NDK_AR }}
           RANLIB: ${{ env.ANDROID_NDK_RANLIB }}
           STRIP: ${{ env.ANDROID_NDK_STRIP }}
-        run: npx tauri android build --debug --config src-tauri/tauri.android.conf.json
+        run: npx tauri android build --config src-tauri/tauri.android.conf.json
 
       - name: Upload Android validation artifacts
         uses: actions/upload-artifact@v6
         with:
           name: mobile-android
-          path: alexandria/src-tauri/gen/android/app/build/outputs/apk/**/*.apk
+          path: |
+            alexandria/src-tauri/gen/android/app/build/outputs/apk/universal/release/*.apk
+            alexandria/src-tauri/gen/android/app/build/outputs/bundle/universalRelease/*.aab
           if-no-files-found: error
