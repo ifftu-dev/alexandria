@@ -454,9 +454,26 @@ jobs:
           args: --bundles nsis --config src-tauri/tauri.desktop.windows.conf.json
           includeUpdaterJson: false
 
+      - name: Collect Windows validation artifacts
+        id: windows-artifacts
+        shell: pwsh
+        run: |
+          $artifactDir = Join-Path $env:RUNNER_TEMP 'desktop-windows-x86_64'
+          New-Item -ItemType Directory -Path $artifactDir -Force | Out-Null
+          $bundleRoot = Resolve-Path 'alexandria\src-tauri\target\release\bundle'
+          $files = Get-ChildItem -Path $bundleRoot -Recurse -File |
+            Where-Object { $_.Extension -in @('.exe', '.msi', '.zip') }
+          if (-not $files) {
+            throw 'No Windows validation artifacts were produced under target\\release\\bundle.'
+          }
+          foreach ($file in $files) {
+            Copy-Item -Path $file.FullName -Destination $artifactDir -Force
+          }
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "artifact_dir=$artifactDir"
+
       - name: Upload Windows validation artifacts
         uses: actions/upload-artifact@v6
         with:
           name: desktop-windows-x86_64
-          path: alexandria/src-tauri/target/release/bundle/nsis/**/*
+          path: ${{ steps.windows-artifacts.outputs.artifact_dir }}/*
           if-no-files-found: error
