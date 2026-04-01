@@ -175,7 +175,25 @@ jobs:
     if: inputs.include_android == true
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    env:
+      RUSTUP_HOME: /mnt/rustup
+      CARGO_HOME: /mnt/cargo
+      CARGO_TARGET_DIR: /mnt/target
+      TMPDIR: /mnt/tmp
+      GRADLE_USER_HOME: /mnt/gradle
     steps:
+      - name: Free Linux disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force || true
+          df -h
+
+      - name: Prepare /mnt directories
+        run: |
+          sudo mkdir -p /mnt/rustup /mnt/cargo /mnt/target /mnt/tmp /mnt/gradle
+          sudo chown -R "$(id -un):$(id -gn)" /mnt/rustup /mnt/cargo /mnt/target /mnt/tmp /mnt/gradle
+          chmod 1777 /mnt/tmp
+
       - name: Checkout alexandria
         uses: actions/checkout@v5
         with:
@@ -200,8 +218,8 @@ jobs:
 
       - name: Install CMake
         run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake
+          sudo env TMPDIR="$TMPDIR" apt-get update
+          sudo env TMPDIR="$TMPDIR" apt-get install -y cmake
 
       - name: Install Android NDK
         run: |
