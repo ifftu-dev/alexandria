@@ -232,6 +232,9 @@ jobs:
           cat > "$SHIM_DIR/cargo-tauri" <<EOF
           #!/usr/bin/env bash
           set -euo pipefail
+          if [ "\${1:-}" = "tauri" ]; then
+            shift
+          fi
           exec "$GITHUB_WORKSPACE/alexandria/node_modules/.bin/tauri" "\$@"
           EOF
           chmod +x "$SHIM_DIR/cargo-tauri"
