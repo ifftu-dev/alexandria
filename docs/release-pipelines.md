@@ -11,7 +11,7 @@ The release system is split into three lanes:
 - CI uses change detection to skip Rust work for frontend-only changes and skip frontend work for backend-only changes.
 - Security audit only runs when Cargo, Rust, patch, or workflow files changed.
 - Desktop validation lets you opt into `macOS` and `Linux ARM64` instead of burning those minutes by default.
-- Mobile validation defaults `iOS` off so the expensive macOS runner is only used intentionally.
+- Mobile validation defaults `iOS` off so the expensive macOS runner is only used intentionally, and Android validation builds unsigned debug artifacts so it does not depend on release signing secrets.
 - Publish workflows are manual-only and require an immutable tag, which keeps validation and publishing from competing with each other.
 - All workflows keep `concurrency.cancel-in-progress` enabled so stale runs are canceled automatically.
 

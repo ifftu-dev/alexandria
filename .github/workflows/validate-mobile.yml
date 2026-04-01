@@ -67,20 +67,6 @@ jobs:
             exit 1
           fi
 
-      - name: Validate Android signing secrets
-        if: inputs.include_android == true
-        env:
-          ANDROID_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-        run: |
-          for secret_name in ANDROID_KEYSTORE ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS; do
-            if [ -z "$(printenv "${secret_name}")" ]; then
-              echo "${secret_name} is required for Android builds." >&2
-              exit 1
-            fi
-          done
-
       - name: Validate Apple export secrets
         if: inputs.include_ios == true && inputs.ios_export_method != 'debugging'
         env:
@@ -272,17 +258,6 @@ jobs:
           cargo-tauri --version
           npx tauri --version
 
-      - name: Decode Android keystore
-        run: echo "${{ secrets.ANDROID_KEYSTORE }}" | base64 --decode > $RUNNER_TEMP/release.jks
-
-      - name: Create keystore.properties
-        run: |
-          cat > alexandria/src-tauri/gen/android/keystore.properties <<EOF
-          password=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}
-          storeFile=${{ runner.temp }}/release.jks
-          EOF
-
       - name: Set Android API 28 toolchain
         run: |
           NDK_BIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
@@ -311,13 +286,11 @@ jobs:
           AR: ${{ env.ANDROID_NDK_AR }}
           RANLIB: ${{ env.ANDROID_NDK_RANLIB }}
           STRIP: ${{ env.ANDROID_NDK_STRIP }}
-        run: npx tauri android build --config src-tauri/tauri.android.conf.json
+        run: npx tauri android build --debug --config src-tauri/tauri.android.conf.json
 
       - name: Upload Android validation artifacts
         uses: actions/upload-artifact@v6
         with:
           name: mobile-android
-          path: |
-            alexandria/src-tauri/gen/android/app/build/outputs/apk/universal/release/*.apk
-            alexandria/src-tauri/gen/android/app/build/outputs/bundle/universalRelease/*.aab
+          path: alexandria/src-tauri/gen/android/app/build/outputs/apk/**/*.apk
           if-no-files-found: error
