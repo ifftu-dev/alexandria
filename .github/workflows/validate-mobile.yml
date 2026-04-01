@@ -27,6 +27,10 @@ on:
           - release-testing
           - app-store-connect
 
+concurrency:
+  group: validate-mobile-${{ inputs.tag }}
+  cancel-in-progress: true
+
 jobs:
   validate:
     uses: ./.github/workflows/_mobile-build.yml

@@ -6,6 +6,10 @@ on:
       - 'v*'
       - '[0-9]*'
 
+concurrency:
+  group: release-mobile-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   publish:
     uses: ./.github/workflows/_mobile-build.yml

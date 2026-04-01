@@ -28,6 +28,10 @@ on:
         type: boolean
         default: false
 
+concurrency:
+  group: validate-desktop-${{ inputs.tag }}
+  cancel-in-progress: true
+
 jobs:
   validate:
     uses: ./.github/workflows/_desktop-build.yml

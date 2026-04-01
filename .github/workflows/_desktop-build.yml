@@ -43,17 +43,13 @@ env:
   RUST_BACKTRACE: 1
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   TAURI_CLI_VERSION: 2.10.0
-  RELEASE_TAG: ${{ inputs.tag }}
-  BUILD_REF: ${{ inputs.build_ref != '' && inputs.build_ref || format('refs/tags/{0}', inputs.tag) }}
-
-concurrency:
-  group: desktop-build-${{ inputs.tag }}-${{ inputs.publish_to_release && 'publish' || 'validate' }}
-  cancel-in-progress: true
 
 jobs:
   preflight:
     name: Desktop preflight
     runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}
     outputs:
       release_id: ${{ steps.create.outputs.id }}
     steps:
@@ -148,6 +144,9 @@ jobs:
     if: inputs.include_macos == true
     runs-on: macos-latest
     timeout-minutes: 90
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}
+      BUILD_REF: ${{ inputs.build_ref != '' && inputs.build_ref || format('refs/tags/{0}', inputs.tag) }}
     steps:
       - name: Checkout alexandria
         uses: actions/checkout@v5
@@ -264,6 +263,8 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 90
     env:
+      RELEASE_TAG: ${{ inputs.tag }}
+      BUILD_REF: ${{ inputs.build_ref != '' && inputs.build_ref || format('refs/tags/{0}', inputs.tag) }}
       RUSTUP_HOME: /mnt/rustup
       CARGO_HOME: /mnt/cargo
       CARGO_TARGET_DIR: /mnt/target
@@ -385,6 +386,8 @@ jobs:
     runs-on: ubuntu-22.04-arm
     timeout-minutes: 90
     env:
+      RELEASE_TAG: ${{ inputs.tag }}
+      BUILD_REF: ${{ inputs.build_ref != '' && inputs.build_ref || format('refs/tags/{0}', inputs.tag) }}
       RUSTUP_HOME: /mnt/rustup
       CARGO_HOME: /mnt/cargo
       CARGO_TARGET_DIR: /mnt/target
@@ -503,6 +506,8 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 90
     env:
+      RELEASE_TAG: ${{ inputs.tag }}
+      BUILD_REF: ${{ inputs.build_ref != '' && inputs.build_ref || format('refs/tags/{0}', inputs.tag) }}
       HAS_WINDOWS_CERT: ${{ secrets.WINDOWS_CERTIFICATE != '' }}
     steps:
       - name: Checkout alexandria
@@ -676,6 +681,8 @@ jobs:
       - build-linux-arm64
       - build-windows
     runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}
     if: |
       inputs.publish_to_release == true &&
       inputs.sign_updater == true &&
