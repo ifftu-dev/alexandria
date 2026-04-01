@@ -1,0 +1,39 @@
+name: Validate (Mobile)
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Immutable tag to validate (for example: 0.0.1-alpha)'
+        required: true
+        type: string
+      include_android:
+        description: 'Validate Android artifacts'
+        required: false
+        type: boolean
+        default: true
+      include_ios:
+        description: 'Validate iOS artifacts'
+        required: false
+        type: boolean
+        default: false
+      ios_export_method:
+        description: 'iOS export mode for validation'
+        required: false
+        type: choice
+        default: debugging
+        options:
+          - debugging
+          - release-testing
+          - app-store-connect
+
+jobs:
+  validate:
+    uses: ./.github/workflows/_mobile-build.yml
+    with:
+      tag: ${{ inputs.tag }}
+      publish_to_release: false
+      include_android: ${{ inputs.include_android }}
+      include_ios: ${{ inputs.include_ios }}
+      ios_export_method: ${{ inputs.ios_export_method }}
+    secrets: inherit

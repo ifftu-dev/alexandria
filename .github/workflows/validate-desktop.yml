@@ -1,0 +1,42 @@
+name: Validate (Desktop)
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Immutable tag to validate (for example: 0.0.1-alpha)'
+        required: true
+        type: string
+      include_linux:
+        description: 'Validate Linux artifacts'
+        required: false
+        type: boolean
+        default: true
+      include_windows:
+        description: 'Validate Windows artifacts'
+        required: false
+        type: boolean
+        default: true
+      include_macos:
+        description: 'Validate macOS artifacts'
+        required: false
+        type: boolean
+        default: false
+      include_linux_arm64:
+        description: 'Build Linux ARM64 during validation'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  validate:
+    uses: ./.github/workflows/_desktop-build.yml
+    with:
+      tag: ${{ inputs.tag }}
+      publish_to_release: false
+      sign_updater: false
+      include_linux: ${{ inputs.include_linux }}
+      include_windows: ${{ inputs.include_windows }}
+      include_macos: ${{ inputs.include_macos }}
+      include_linux_arm64: ${{ inputs.include_linux_arm64 }}
+    secrets: inherit

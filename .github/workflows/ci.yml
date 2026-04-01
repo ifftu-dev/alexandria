@@ -48,10 +48,68 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
+  changes:
+    name: Detect changed surfaces
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.detect.outputs.backend }}
+      frontend: ${{ steps.detect.outputs.frontend }}
+      security: ${{ steps.detect.outputs.security }}
+    steps:
+      - name: Checkout alexandria
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed files
+        id: detect
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          EMPTY_TREE="$(git hash-object -t tree /dev/null)"
+          BASE_SHA="${{ github.event.pull_request.base.sha || github.event.before }}"
+
+          if [ -z "${BASE_SHA}" ] || [ "${BASE_SHA}" = "0000000000000000000000000000000000000000" ]; then
+            BASE_SHA="${EMPTY_TREE}"
+          fi
+
+          mapfile -t changed_files < <(git diff --name-only "${BASE_SHA}" "${GITHUB_SHA}")
+
+          matches_any() {
+            local path
+            for path in "${changed_files[@]}"; do
+              case "${path}" in
+                .github/workflows/*|cli/*|patches/*|scripts/*|src-tauri/*|Cargo.toml|Cargo.lock)
+                  if [ "$1" = "backend" ] || [ "$1" = "security" ]; then
+                    return 0
+                  fi
+                  ;;
+                src/*|package.json|package-lock.json|index.html|vite.config.ts|tsconfig*.json)
+                  if [ "$1" = "frontend" ]; then
+                    return 0
+                  fi
+                  ;;
+              esac
+            done
+            return 1
+          }
+
+          for surface in backend frontend security; do
+            if matches_any "${surface}"; then
+              echo "${surface}=true" >> "${GITHUB_OUTPUT}"
+            else
+              echo "${surface}=false" >> "${GITHUB_OUTPUT}"
+            fi
+          done
+
   check:
     name: Lint & Test
+    needs: changes
+    if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-22.04
     timeout-minutes: 90
     env:
@@ -74,18 +132,20 @@ jobs:
           chmod 1777 /mnt/tmp
 
       - name: Checkout alexandria
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           path: alexandria
 
       - name: Checkout iroh-live-patched
-        uses: actions/checkout@v4
+        if: needs.changes.outputs.backend == 'true'
+        uses: actions/checkout@v5
         with:
           repository: ifftu-dev/iroh-live
           path: iroh-live-patched
           token: ${{ secrets.CROSS_REPO_PAT }}
 
       - name: Install Linux system dependencies
+        if: needs.changes.outputs.backend == 'true'
         run: |
           sudo add-apt-repository universe -y
           sudo env TMPDIR="$TMPDIR" apt-get update
@@ -113,55 +173,65 @@ jobs:
             libvdpau-dev
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        if: needs.changes.outputs.frontend == 'true'
+        uses: actions/setup-node@v6
         with:
           node-version: 'lts/*'
           cache: 'npm'
           cache-dependency-path: alexandria/package-lock.json
 
       - name: Setup Rust 1.83.0 (MSRV)
+        if: needs.changes.outputs.backend == 'true'
         uses: dtolnay/rust-toolchain@1.89.0
         with:
           components: rustfmt, clippy
 
       - name: Cache Rust artifacts
+        if: needs.changes.outputs.backend == 'true'
         uses: swatinem/rust-cache@v2
         with:
           workspaces: 'alexandria/src-tauri -> target'
 
       - name: Install frontend dependencies
+        if: needs.changes.outputs.frontend == 'true'
         working-directory: alexandria
         run: npm ci
 
       - name: Check Rust formatting
+        if: needs.changes.outputs.backend == 'true'
         working-directory: alexandria
         run: cargo fmt --check
 
       - name: Run Clippy (lint)
+        if: needs.changes.outputs.backend == 'true'
         working-directory: alexandria
         run: cargo clippy --features tutoring-video-static -- -D warnings
 
       - name: Run Rust tests
+        if: needs.changes.outputs.backend == 'true'
         working-directory: alexandria
         run: cargo test --features tutoring-video-static
 
       - name: TypeScript type-check
+        if: needs.changes.outputs.frontend == 'true'
         working-directory: alexandria
         run: npx vue-tsc -b --noEmit
 
   security:
     name: Security Audit
+    needs: changes
+    if: needs.changes.outputs.security == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
     steps:
       - name: Checkout alexandria
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           path: alexandria
 
       - name: Checkout iroh-live-patched
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: ifftu-dev/iroh-live
           path: iroh-live-patched
