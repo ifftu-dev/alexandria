@@ -40,10 +40,10 @@ jobs:
   preflight:
     name: Mobile preflight
     runs-on: ubuntu-latest
-    env:
-      RELEASE_TAG: ${{ inputs.tag }}
     steps:
       - name: Ensure a release tag is available
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
         run: |
           if [ -z "${RELEASE_TAG}" ]; then
             echo "A tag is required for mobile validation and publish runs." >&2
@@ -52,6 +52,7 @@ jobs:
 
       - name: Validate tag exists on GitHub
         env:
+          RELEASE_TAG: ${{ inputs.tag }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if ! curl --fail --silent --show-error \
@@ -94,6 +95,7 @@ jobs:
       - name: Create or reuse draft release
         if: inputs.publish_to_release == true
         env:
+          RELEASE_TAG: ${{ inputs.tag }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
@@ -118,16 +120,12 @@ jobs:
     if: inputs.include_ios == true
     runs-on: macos-latest
     timeout-minutes: 90
-    env:
-      RELEASE_TAG: ${{ inputs.tag }}
-      BUILD_REF: ${{ inputs.build_ref != '' && inputs.build_ref || format('refs/tags/{0}', inputs.tag) }}
-      IOS_EXPORT_METHOD: ${{ inputs.ios_export_method }}
     steps:
       - name: Checkout alexandria
         uses: actions/checkout@v5
         with:
           path: alexandria
-          ref: ${{ env.BUILD_REF }}
+          ref: ${{ inputs.build_ref != '' && inputs.build_ref || format('refs/tags/{0}', inputs.tag) }}
 
       - name: Checkout iroh-live-patched
         uses: actions/checkout@v5
@@ -192,6 +190,7 @@ jobs:
         if: inputs.publish_to_release != true && inputs.ios_export_method != 'debugging'
         working-directory: alexandria
         env:
+          IOS_EXPORT_METHOD: ${{ inputs.ios_export_method }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_KEY_PATH: ${{ runner.temp }}/AuthKey.p8
@@ -209,6 +208,7 @@ jobs:
         if: inputs.publish_to_release == true
         working-directory: alexandria
         env:
+          IOS_EXPORT_METHOD: ${{ inputs.ios_export_method }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_KEY_PATH: ${{ runner.temp }}/AuthKey.p8
@@ -217,6 +217,7 @@ jobs:
       - name: Upload iOS release artifact
         if: inputs.publish_to_release == true
         env:
+          RELEASE_TAG: ${{ inputs.tag }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload "${RELEASE_TAG}" alexandria/src-tauri/gen/apple/build/**/*.ipa --clobber --repo "${GITHUB_REPOSITORY}" || true
 
@@ -226,15 +227,12 @@ jobs:
     if: inputs.include_android == true
     runs-on: ubuntu-latest
     timeout-minutes: 90
-    env:
-      RELEASE_TAG: ${{ inputs.tag }}
-      BUILD_REF: ${{ inputs.build_ref != '' && inputs.build_ref || format('refs/tags/{0}', inputs.tag) }}
     steps:
       - name: Checkout alexandria
         uses: actions/checkout@v5
         with:
           path: alexandria
-          ref: ${{ env.BUILD_REF }}
+          ref: ${{ inputs.build_ref != '' && inputs.build_ref || format('refs/tags/{0}', inputs.tag) }}
 
       - name: Checkout iroh-live-patched
         uses: actions/checkout@v5
@@ -366,6 +364,7 @@ jobs:
       - name: Upload Android release artifacts
         if: inputs.publish_to_release == true
         env:
+          RELEASE_TAG: ${{ inputs.tag }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release upload "${RELEASE_TAG}" \

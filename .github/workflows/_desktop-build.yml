@@ -48,12 +48,12 @@ jobs:
   preflight:
     name: Desktop preflight
     runs-on: ubuntu-latest
-    env:
-      RELEASE_TAG: ${{ inputs.tag }}
     outputs:
       release_id: ${{ steps.create.outputs.id }}
     steps:
       - name: Ensure a release tag is available
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
         run: |
           if [ -z "${RELEASE_TAG}" ]; then
             echo "A tag is required for desktop validation and publish runs." >&2
@@ -62,6 +62,7 @@ jobs:
 
       - name: Validate tag exists on GitHub
         env:
+          RELEASE_TAG: ${{ inputs.tag }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if ! curl --fail --silent --show-error \
@@ -98,6 +99,7 @@ jobs:
         id: create
         if: inputs.publish_to_release == true
         env:
+          RELEASE_TAG: ${{ inputs.tag }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
@@ -144,15 +146,12 @@ jobs:
     if: inputs.include_macos == true
     runs-on: macos-latest
     timeout-minutes: 90
-    env:
-      RELEASE_TAG: ${{ inputs.tag }}
-      BUILD_REF: ${{ inputs.build_ref != '' && inputs.build_ref || format('refs/tags/{0}', inputs.tag) }}
     steps:
       - name: Checkout alexandria
         uses: actions/checkout@v5
         with:
           path: alexandria
-          ref: ${{ env.BUILD_REF }}
+          ref: ${{ inputs.build_ref != '' && inputs.build_ref || format('refs/tags/{0}', inputs.tag) }}
 
       - name: Checkout iroh-live-patched
         uses: actions/checkout@v5
@@ -263,8 +262,6 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 90
     env:
-      RELEASE_TAG: ${{ inputs.tag }}
-      BUILD_REF: ${{ inputs.build_ref != '' && inputs.build_ref || format('refs/tags/{0}', inputs.tag) }}
       RUSTUP_HOME: /mnt/rustup
       CARGO_HOME: /mnt/cargo
       CARGO_TARGET_DIR: /mnt/target
@@ -312,7 +309,7 @@ jobs:
         uses: actions/checkout@v5
         with:
           path: alexandria
-          ref: ${{ env.BUILD_REF }}
+          ref: ${{ inputs.build_ref != '' && inputs.build_ref || format('refs/tags/{0}', inputs.tag) }}
 
       - name: Checkout iroh-live-patched
         uses: actions/checkout@v5
@@ -386,8 +383,6 @@ jobs:
     runs-on: ubuntu-22.04-arm
     timeout-minutes: 90
     env:
-      RELEASE_TAG: ${{ inputs.tag }}
-      BUILD_REF: ${{ inputs.build_ref != '' && inputs.build_ref || format('refs/tags/{0}', inputs.tag) }}
       RUSTUP_HOME: /mnt/rustup
       CARGO_HOME: /mnt/cargo
       CARGO_TARGET_DIR: /mnt/target
@@ -435,7 +430,7 @@ jobs:
         uses: actions/checkout@v5
         with:
           path: alexandria
-          ref: ${{ env.BUILD_REF }}
+          ref: ${{ inputs.build_ref != '' && inputs.build_ref || format('refs/tags/{0}', inputs.tag) }}
 
       - name: Checkout iroh-live-patched
         uses: actions/checkout@v5
@@ -506,15 +501,13 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 90
     env:
-      RELEASE_TAG: ${{ inputs.tag }}
-      BUILD_REF: ${{ inputs.build_ref != '' && inputs.build_ref || format('refs/tags/{0}', inputs.tag) }}
       HAS_WINDOWS_CERT: ${{ secrets.WINDOWS_CERTIFICATE != '' }}
     steps:
       - name: Checkout alexandria
         uses: actions/checkout@v5
         with:
           path: alexandria
-          ref: ${{ env.BUILD_REF }}
+          ref: ${{ inputs.build_ref != '' && inputs.build_ref || format('refs/tags/{0}', inputs.tag) }}
 
       - name: Checkout iroh-live-patched
         uses: actions/checkout@v5
@@ -669,6 +662,7 @@ jobs:
       - name: Re-upload signed installer
         if: inputs.publish_to_release == true && env.HAS_WINDOWS_CERT == 'true'
         env:
+          RELEASE_TAG: ${{ inputs.tag }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload "${RELEASE_TAG}" alexandria/src-tauri/target/release/bundle/nsis/*_x64-setup.exe --clobber --repo "${GITHUB_REPOSITORY}"
 
@@ -681,8 +675,6 @@ jobs:
       - build-linux-arm64
       - build-windows
     runs-on: ubuntu-latest
-    env:
-      RELEASE_TAG: ${{ inputs.tag }}
     if: |
       inputs.publish_to_release == true &&
       inputs.sign_updater == true &&
@@ -699,6 +691,7 @@ jobs:
 
       - name: Generate latest.json for auto-updater
         env:
+          RELEASE_TAG: ${{ inputs.tag }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BUILD_LINUX_ARM64_RESULT: ${{ needs.build-linux-arm64.result }}
         run: |
@@ -758,5 +751,6 @@ jobs:
 
       - name: Upload latest.json
         env:
+          RELEASE_TAG: ${{ inputs.tag }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload "${RELEASE_TAG}" latest.json --clobber --repo "${GITHUB_REPOSITORY}"
