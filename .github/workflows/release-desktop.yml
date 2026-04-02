@@ -181,6 +181,10 @@ jobs:
         working-directory: alexandria
         run: npm ci
 
+      - name: Sync release version from tag
+        working-directory: alexandria
+        run: node scripts/prepare-tauri-config.mjs sync-version "${RELEASE_TAG}"
+
       - name: Prepare unsigned desktop config
         if: inputs.sign_updater != true
         working-directory: alexandria
@@ -330,6 +334,10 @@ jobs:
         working-directory: alexandria
         run: npm ci
 
+      - name: Sync release version from tag
+        working-directory: alexandria
+        run: node scripts/prepare-tauri-config.mjs sync-version "${RELEASE_TAG}"
+
       - name: Prepare unsigned desktop config
         if: inputs.sign_updater != true
         working-directory: alexandria
@@ -431,6 +439,10 @@ jobs:
       - name: Install frontend dependencies
         working-directory: alexandria
         run: npm ci
+
+      - name: Sync release version from tag
+        working-directory: alexandria
+        run: node scripts/prepare-tauri-config.mjs sync-version "${RELEASE_TAG}"
 
       - name: Prepare unsigned desktop config
         if: inputs.sign_updater != true

@@ -16,7 +16,7 @@ on:
         description: 'Publish iOS artifacts'
         required: false
         type: boolean
-        default: false
+        default: true
       ios_export_method:
         description: 'iOS export method for publish runs'
         required: false
@@ -160,6 +160,10 @@ jobs:
         working-directory: alexandria
         run: npm ci
 
+      - name: Sync release version from tag
+        working-directory: alexandria
+        run: node scripts/prepare-tauri-config.mjs sync-version "${RELEASE_TAG}"
+
       - name: Install CMake
         run: brew install cmake
 
@@ -292,6 +296,10 @@ jobs:
       - name: Install frontend dependencies
         working-directory: alexandria
         run: npm ci
+
+      - name: Sync release version from tag
+        working-directory: alexandria
+        run: node scripts/prepare-tauri-config.mjs sync-version "${RELEASE_TAG}"
 
       - name: Install Tauri CLI
         working-directory: alexandria

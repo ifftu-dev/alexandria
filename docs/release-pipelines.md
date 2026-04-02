@@ -6,6 +6,25 @@ The release system is split into three lanes:
 - `Validate (Desktop)` / `Validate (Mobile)`: manual tag-based artifact builds without publishing.
 - `Release (Desktop)` / `Release (Mobile)`: manual publish workflows for real releases.
 
+## Public release gate
+
+The first public `0.0.1-alpha` release is gated on all targeted platforms:
+
+- `macOS`
+- `Linux`
+- `Windows`
+- `Android`
+- `iOS`
+
+Before publishing a public release, the repo must pass the cheap `Release Readiness` gate in CI. That check currently enforces:
+
+- release metadata stays version-aligned across `package.json`, `src-tauri/Cargo.toml`, and `src-tauri/tauri.conf.json`
+- desktop updater config is no longer using the placeholder public key
+- Android is not still routed through tutoring stubs
+- Android build config opts into its real mobile tutoring feature set
+- Windows is not using the reduced desktop tutoring feature path while macOS/Linux use richer media support
+- real mobile publish defaults include both `Android` and `iOS`
+
 ## Cost controls
 
 - CI uses change detection to skip Rust work for frontend-only changes and skip frontend work for backend-only changes.
@@ -28,7 +47,9 @@ For real releases:
 
 1. Push the release tag.
 2. Run `Release (Desktop)` manually with that tag to publish desktop bundles and updater metadata.
-3. Run `Release (Mobile)` manually with that tag to publish Android artifacts and, when enabled, signed iOS exports.
+3. Run `Release (Mobile)` manually with that tag to publish Android and iOS artifacts.
+
+Release workflows now sync the app version from the immutable release tag before building, so a tag like `0.0.1-alpha` produces `0.0.1-alpha` bundle metadata and artifact names instead of reusing the in-repo development version.
 
 ## Workflow files
 

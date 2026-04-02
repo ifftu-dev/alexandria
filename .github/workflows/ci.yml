@@ -58,6 +58,7 @@ jobs:
       backend: ${{ steps.detect.outputs.backend }}
       frontend: ${{ steps.detect.outputs.frontend }}
       security: ${{ steps.detect.outputs.security }}
+      release: ${{ steps.detect.outputs.release }}
     steps:
       - name: Checkout alexandria
         uses: actions/checkout@v5
@@ -105,6 +106,13 @@ jobs:
               echo "${surface}=false" >> "${GITHUB_OUTPUT}"
             fi
           done
+
+          if printf '%s\n' "${changed_files[@]}" | grep -Eq \
+            '^(\.github/workflows/(release|validate)-|\.github/workflows/ci\.yml|scripts/|src-tauri/tauri.*\.json|src-tauri/Cargo\.toml|src-tauri/src/commands/mod\.rs|src-tauri/src/commands/tutoring_stubs\.rs|src-tauri/src/tutoring/manager_android\.rs|package\.json)$'; then
+            echo "release=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "release=false" >> "${GITHUB_OUTPUT}"
+          fi
 
   check:
     name: Lint & Test
@@ -216,6 +224,27 @@ jobs:
         if: needs.changes.outputs.frontend == 'true'
         working-directory: alexandria
         run: npx vue-tsc -b --noEmit
+
+  release-readiness:
+    name: Release Readiness
+    needs: changes
+    if: needs.changes.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout alexandria
+        uses: actions/checkout@v5
+        with:
+          path: alexandria
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 'lts/*'
+
+      - name: Check release readiness
+        working-directory: alexandria
+        run: node scripts/check-release-readiness.mjs
 
   security:
     name: Security Audit
