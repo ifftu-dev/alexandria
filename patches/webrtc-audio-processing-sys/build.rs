@@ -175,6 +175,13 @@ mod webrtc {
                 }
             }
 
+            if let Some(dir) = std::env::var_os("MSYS2_USR_BIN")
+                .map(PathBuf::from)
+                .filter(|dir| dir.is_dir())
+            {
+                dirs.push(dir);
+            }
+
             return dirs;
         }
 

@@ -419,7 +419,6 @@ jobs:
         run: |
           $strawberryPerlDir = 'C:\Strawberry\perl\bin'
           $strawberryCDir = 'C:\Strawberry\c\bin'
-          $msysUsrBin = if ($env:MSYS2_USR_BIN) { $env:MSYS2_USR_BIN } else { 'C:\msys64\usr\bin' }
           $msvcBinDir = $null
           if ($env:VCToolsInstallDir) {
             $candidate = Join-Path $env:VCToolsInstallDir 'bin\Hostx64\x64'
@@ -443,7 +442,6 @@ jobs:
           $pathEntries = @(
             $strawberryPerlDir
             $strawberryCDir
-            $msysUsrBin
             $msvcBinDir
           ) + $sdkBinDirs + @(
             '${{ steps.windows-ffmpeg.outputs.bin_dir }}'
@@ -464,6 +462,7 @@ jobs:
           PATH: ${{ steps.windows-build-env.outputs.path }}
           FFMPEG_DIR: ${{ steps.windows-build-env.outputs.ffmpeg_dir }}
           MSYS2_BASH_EXE: ${{ env.MSYS2_BASH_EXE }}
+          MSYS2_USR_BIN: ${{ env.MSYS2_USR_BIN }}
           PERL: C:\Strawberry\perl\bin\perl.exe
         with:
           projectPath: alexandria
