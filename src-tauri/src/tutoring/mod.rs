@@ -13,9 +13,10 @@
 //!
 //! Desktop: full video + audio + screen share.
 //! iOS: full video + audio via platform camera + VideoToolbox.
-//! Android: tutoring manager stub; live video is not wired yet.
+//! Android: real room/audio/chat flow via the shared manager path, but
+//! tutoring video is still disabled in the current Android build.
 
-#[cfg(desktop)]
+#[cfg(any(desktop, target_os = "android"))]
 pub mod manager;
 
 #[cfg(target_os = "ios")]
@@ -24,11 +25,8 @@ pub mod manager_mobile;
 #[cfg(target_os = "android")]
 pub mod manager_android;
 
-#[cfg(desktop)]
+#[cfg(any(desktop, target_os = "android"))]
 pub use manager::TutoringManager;
 
 #[cfg(target_os = "ios")]
 pub use manager_mobile::TutoringManager;
-
-#[cfg(target_os = "android")]
-pub use manager_android::TutoringManager;
