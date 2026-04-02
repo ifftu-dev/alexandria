@@ -105,8 +105,8 @@ libp2p = { version = "0.56.0", features = ["gossipsub", "kad", "quic", "tcp", "n
 futures = "0.3"
 
 # Live tutoring — Media over QUIC (iroh-live) — ALL platforms
-# Base: audio-only (default-features = false). Desktop builds opt into
-# "tutoring-video" (no AEC) or "tutoring-video-aec" (with AEC) explicitly.
+# Base: audio-only (default-features = false). Platform-specific Tauri configs
+# opt into the appropriate media feature set for release parity.
 iroh-gossip = "0.96"
 iroh-live = { git = "https://github.com/ifftu-dev/iroh-live", rev = "a7e3e0fa8c073021d7e140813197705eb0f670fd", default-features = false }
 postcard = { version = "1", features = ["alloc"] }
@@ -122,7 +122,8 @@ rusqlite = { version = "0.38", features = ["bundled-sqlcipher-vendored-openssl",
 # ObjC runtime — for configuring WKWebView scrollView insets at startup
 objc2 = "0.6"
 
-# Image encoding (JPEG) for bridging video frames to webview (same as desktop)
+[target.'cfg(any(target_os = "ios", target_os = "android"))'.dependencies]
+# Image encoding (JPEG) for bridging video frames to the webview on mobile.
 image = { version = "0.25", default-features = false, features = ["jpeg"] }
 
 # ── macOS / Linux SQLCipher dependencies ─────────────────────────────

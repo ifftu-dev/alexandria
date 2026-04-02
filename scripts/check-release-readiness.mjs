@@ -66,14 +66,22 @@ if (/pub use tutoring_stubs as tutoring;/.test(commandsMod)) {
 }
 
 const androidFeatures = androidConfig.build?.features ?? [];
-if (!Array.isArray(androidFeatures) || androidFeatures.length === 0) {
-  failures.push("Android build config does not enable any mobile tutoring feature set.");
+if (
+  !Array.isArray(androidFeatures) ||
+  !androidFeatures.includes("tutoring-video")
+) {
+  failures.push(
+    "Android build config does not enable tutoring-video for mobile feature parity.",
+  );
 }
 
 const windowsFeatures = windowsDesktopConfig.build?.features ?? [];
-if (Array.isArray(windowsFeatures) && windowsFeatures.includes("tutoring-video")) {
+if (
+  !Array.isArray(windowsFeatures) ||
+  !windowsFeatures.includes("tutoring-video-aec")
+) {
   failures.push(
-    "Windows desktop still builds with tutoring-video (no AEC), which does not match macOS/Linux desktop media parity.",
+    "Windows desktop does not enable tutoring-video-aec, which breaks desktop media parity.",
   );
 }
 

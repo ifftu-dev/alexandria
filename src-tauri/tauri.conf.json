@@ -59,7 +59,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "PLACEHOLDER_PUBKEY",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEY2MzZCQTE3MDYwMEFEQzUKUldURnJRQUdGN28yOXUwMytkWDJvREM4YTJvcytCZkxUamN5NDM0Rk52RDdaUzluMDNPcFpnRDIK",
       "endpoints": [
         "https://github.com/ifftu-dev/alexandria/releases/latest/download/latest.json"
       ]

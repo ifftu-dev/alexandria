@@ -13,8 +13,8 @@
 //!
 //! Desktop: full video + audio + screen share.
 //! iOS: full video + audio via platform camera + VideoToolbox.
-//! Android: real room/audio/chat flow via the shared manager path, but
-//! tutoring video is still disabled in the current Android build.
+//! Android: shared tutoring manager path with mobile video enabled when the
+//! Android Tauri config opts into `tutoring-video`.
 
 #[cfg(any(desktop, target_os = "android"))]
 pub mod manager;
