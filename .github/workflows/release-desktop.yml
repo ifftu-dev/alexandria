@@ -524,12 +524,26 @@ jobs:
         shell: pwsh
         run: node scripts/prepare-tauri-config.mjs desktop-validation
 
+      - name: Install autotools via MSYS2
+        shell: pwsh
+        run: |
+          $bash = 'C:\msys64\usr\bin\bash.exe'
+          $msysUsrBin = 'C:\msys64\usr\bin'
+          if (-not (Test-Path $bash)) {
+            throw "MSYS2 bash was not found at $bash"
+          }
+          & $bash -lc "pacman -Sy --noconfirm --needed autoconf automake libtool make"
+          & $bash -lc "command -v libtoolize && libtoolize --version | head -n 1"
+          Add-Content -Path $env:GITHUB_ENV -Value "MSYS2_BASH_EXE=$bash"
+          Add-Content -Path $env:GITHUB_ENV -Value "MSYS2_USR_BIN=$msysUsrBin"
+
       - name: Prepare Windows build environment
         id: windows-build-env
         shell: pwsh
         run: |
           $strawberryPerlDir = 'C:\Strawberry\perl\bin'
           $strawberryCDir = 'C:\Strawberry\c\bin'
+          $msysUsrBin = if ($env:MSYS2_USR_BIN) { $env:MSYS2_USR_BIN } else { 'C:\msys64\usr\bin' }
           $msvcBinDir = $null
           if ($env:VCToolsInstallDir) {
             $candidate = Join-Path $env:VCToolsInstallDir 'bin\Hostx64\x64'
@@ -553,6 +567,7 @@ jobs:
           $pathEntries = @(
             $strawberryPerlDir
             $strawberryCDir
+            $msysUsrBin
             $msvcBinDir
           ) + $sdkBinDirs + @(
             '${{ steps.windows-ffmpeg.outputs.bin_dir }}'
@@ -575,6 +590,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PATH: ${{ steps.windows-build-env.outputs.path }}
           FFMPEG_DIR: ${{ steps.windows-build-env.outputs.ffmpeg_dir }}
+          MSYS2_BASH_EXE: ${{ env.MSYS2_BASH_EXE }}
           PERL: C:\Strawberry\perl\bin\perl.exe
         with:
           projectPath: alexandria

@@ -30,5 +30,5 @@ pub mod tutoring_mobile;
 #[cfg(target_os = "ios")]
 pub use tutoring_mobile as tutoring;
 
-#[cfg(target_os = "android")]
+#[cfg(not(any(desktop, target_os = "ios", target_os = "android")))]
 pub mod tutoring_stubs;

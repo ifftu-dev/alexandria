@@ -22,9 +22,6 @@ pub mod manager;
 #[cfg(target_os = "ios")]
 pub mod manager_mobile;
 
-#[cfg(target_os = "android")]
-pub mod manager_android;
-
 #[cfg(any(desktop, target_os = "android"))]
 pub use manager::TutoringManager;
 
