@@ -1,7 +1,7 @@
 use anyhow::Result;
 use regex::Regex;
 use std::{
-    env,
+    env, fs,
     fs::File,
     io::{Read, Write},
     path::{Path, PathBuf},
@@ -141,6 +141,11 @@ mod webrtc {
             .to_str()
             .ok_or_else(|| anyhow!("non-utf8 path: {path:?}"))?
             .replace('\\', "/");
+        let raw = raw
+            .strip_prefix("//?/UNC/")
+            .map(|suffix| format!("//{suffix}"))
+            .or_else(|| raw.strip_prefix("//?/").map(str::to_owned))
+            .unwrap_or(raw);
 
         if raw.len() >= 3 && raw.as_bytes()[1] == b':' {
             let drive = raw[..1].to_ascii_lowercase();
@@ -150,42 +155,41 @@ mod webrtc {
         }
     }
 
+    #[cfg(windows)]
     fn windows_tool_dirs() -> Vec<PathBuf> {
-        let dirs = Vec::new();
-
-        #[cfg(windows)]
+        let mut dirs = Vec::new();
+        if let Some(dir) = std::env::var_os("VCToolsInstallDir")
+            .map(PathBuf::from)
+            .map(|root| root.join("bin").join("Hostx64").join("x64"))
+            .filter(|dir| dir.is_dir())
         {
-            let mut dirs = dirs;
-            if let Some(dir) = std::env::var_os("VCToolsInstallDir")
-                .map(PathBuf::from)
-                .map(|root| root.join("bin").join("Hostx64").join("x64"))
-                .filter(|dir| dir.is_dir())
-            {
-                dirs.push(dir);
-            }
+            dirs.push(dir);
+        }
 
-            for sdk_var in ["WindowsSdkVerBinPath", "WindowsSdkBinPath"] {
-                if let Some(root) = std::env::var_os(sdk_var).map(PathBuf::from) {
-                    let x64_dir = root.join("x64");
-                    if x64_dir.is_dir() {
-                        dirs.push(x64_dir);
-                    } else if root.is_dir() {
-                        dirs.push(root);
-                    }
+        for sdk_var in ["WindowsSdkVerBinPath", "WindowsSdkBinPath"] {
+            if let Some(root) = std::env::var_os(sdk_var).map(PathBuf::from) {
+                let x64_dir = root.join("x64");
+                if x64_dir.is_dir() {
+                    dirs.push(x64_dir);
+                } else if root.is_dir() {
+                    dirs.push(root);
                 }
             }
+        }
 
-            if let Some(dir) = std::env::var_os("MSYS2_USR_BIN")
-                .map(PathBuf::from)
-                .filter(|dir| dir.is_dir())
-            {
-                dirs.push(dir);
-            }
-
-            return dirs;
+        if let Some(dir) = std::env::var_os("MSYS2_USR_BIN")
+            .map(PathBuf::from)
+            .filter(|dir| dir.is_dir())
+        {
+            dirs.push(dir);
         }
 
         dirs
+    }
+
+    #[cfg(not(windows))]
+    fn windows_tool_dirs() -> Vec<PathBuf> {
+        Vec::new()
     }
 
     fn windows_augmented_path() -> Result<String> {
@@ -215,6 +219,25 @@ mod webrtc {
             .unwrap_or_else(|| default.to_string())
     }
 
+    fn config_log_excerpt(curr_dir: &Path) -> String {
+        let config_log_path = curr_dir.join("config.log");
+        let Ok(contents) = fs::read_to_string(&config_log_path) else {
+            return String::new();
+        };
+
+        let mut lines: Vec<&str> = contents.lines().collect();
+        const MAX_LINES: usize = 200;
+        if lines.len() > MAX_LINES {
+            lines = lines.split_off(lines.len() - MAX_LINES);
+        }
+
+        format!(
+            "\nconfig.log (tail, {}):\n{}\n",
+            config_log_path.display(),
+            lines.join("\n")
+        )
+    }
+
     fn run_command<P: AsRef<Path>>(
         curr_dir: P,
         cmd: &str,
@@ -238,10 +261,23 @@ mod webrtc {
             command.env("PATH", windows_augmented_path()?);
             // Autoconf is running under MSYS2 bash here, so explicitly seed tool names and PATH
             // instead of assuming the tauri-action environment preserves them.
-            command.env("CC", windows_tool("CC", "clang.exe"));
-            command.env("CXX", windows_tool("CXX", "clang++.exe"));
+            command.env(
+                "CC",
+                windows_tool("CC", "clang.exe --target=x86_64-pc-windows-msvc"),
+            );
+            command.env(
+                "CXX",
+                windows_tool("CXX", "clang++.exe --target=x86_64-pc-windows-msvc"),
+            );
+            command.env(
+                "CPP",
+                windows_tool("CPP", "clang.exe -E --target=x86_64-pc-windows-msvc"),
+            );
             command.env("AR", windows_tool("AR", "lib.exe"));
             command.env("LD", windows_tool("LD", "link.exe"));
+            command.env("RC", windows_tool("RC", "rc.exe"));
+            command.env("RANLIB", windows_tool("RANLIB", "llvm-ranlib.exe"));
+            command.env("STRIP", windows_tool("STRIP", "llvm-strip.exe"));
             command
         } else {
             std::process::Command::new(cmd)
@@ -264,12 +300,13 @@ mod webrtc {
 
         if !output.status.success() {
             bail!(
-                "Command '{}' with args '{:?}' failed with status {:?}\nstdout:\n{}\nstderr:\n{}",
+                "Command '{}' with args '{:?}' failed with status {:?}\nstdout:\n{}\nstderr:\n{}{}",
                 cmd,
                 args_opt,
                 output.status.code(),
                 String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr)
+                String::from_utf8_lossy(&output.stderr),
+                config_log_excerpt(curr_dir)
             );
         }
 
