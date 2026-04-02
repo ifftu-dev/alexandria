@@ -46,6 +46,8 @@ jobs:
   preflight:
     name: Mobile preflight
     runs-on: ubuntu-latest
+    outputs:
+      android_signing_mode: ${{ steps.android-signing.outputs.mode }}
     steps:
       - name: Ensure a release tag is available
         run: |
@@ -67,19 +69,21 @@ jobs:
             exit 1
           fi
 
-      - name: Validate Android signing secrets
+      - name: Detect Android signing mode
         if: inputs.include_android == true
+        id: android-signing
         env:
           ANDROID_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         run: |
-          for secret_name in ANDROID_KEYSTORE ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS; do
-            if [ -z "$(printenv "${secret_name}")" ]; then
-              echo "${secret_name} is required for Android builds." >&2
-              exit 1
-            fi
-          done
+          if [ -n "${ANDROID_KEYSTORE}" ] && [ -n "${ANDROID_KEYSTORE_PASSWORD}" ] && [ -n "${ANDROID_KEY_ALIAS}" ]; then
+            echo "mode=secret" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          echo "mode=temporary" >> "${GITHUB_OUTPUT}"
+          echo "Android signing secrets are not fully configured; falling back to a temporary CI keystore for this alpha release." >&2
 
       - name: Validate Apple export secrets
         if: inputs.include_ios == true && inputs.ios_export_method != 'debugging'
@@ -317,14 +321,35 @@ jobs:
           npx tauri --version
 
       - name: Decode Android keystore
+        if: needs.preflight.outputs.android_signing_mode == 'secret'
         run: echo "${{ secrets.ANDROID_KEYSTORE }}" | base64 --decode > $RUNNER_TEMP/release.jks
 
       - name: Create keystore.properties
+        if: needs.preflight.outputs.android_signing_mode == 'secret'
         run: |
           cat > alexandria/src-tauri/gen/android/keystore.properties <<EOF
           password=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}
           storeFile=${{ runner.temp }}/release.jks
+          EOF
+
+      - name: Create temporary Android release keystore
+        if: needs.preflight.outputs.android_signing_mode != 'secret'
+        run: |
+          RELEASE_KEYSTORE="$RUNNER_TEMP/release.jks"
+          keytool -genkeypair \
+            -alias release \
+            -keystore "$RELEASE_KEYSTORE" \
+            -storepass android \
+            -keypass android \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 3650 \
+            -dname "CN=Alexandria Release CI, OU=CI, O=Alexandria, L=CI, S=CI, C=US"
+          cat > alexandria/src-tauri/gen/android/keystore.properties <<EOF
+          password=android
+          keyAlias=release
+          storeFile=$RELEASE_KEYSTORE
           EOF
 
       - name: Set Android API 28 toolchain
