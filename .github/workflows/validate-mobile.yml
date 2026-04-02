@@ -140,6 +140,15 @@ jobs:
         run: echo "${{ secrets.APPLE_API_KEY_CONTENT }}" > $RUNNER_TEMP/AuthKey.p8
 
       - name: Build iOS validation artifacts
+        if: inputs.ios_export_method == 'debugging'
+        working-directory: alexandria
+        env:
+          IOS_EXPORT_METHOD: ${{ inputs.ios_export_method }}
+        run: |
+          npx tauri ios build --config src-tauri/tauri.ios.conf.json --target aarch64-sim
+
+      - name: Build signed iOS validation artifacts
+        if: inputs.ios_export_method != 'debugging'
         working-directory: alexandria
         env:
           IOS_EXPORT_METHOD: ${{ inputs.ios_export_method }}
@@ -147,11 +156,7 @@ jobs:
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_KEY_PATH: ${{ runner.temp }}/AuthKey.p8
         run: |
-          if [ "${IOS_EXPORT_METHOD}" = "debugging" ]; then
-            npx tauri ios build --config src-tauri/tauri.ios.conf.json --target aarch64-sim
-          else
-            npx tauri ios build --config src-tauri/tauri.ios.conf.json --export-method "${IOS_EXPORT_METHOD}"
-          fi
+          npx tauri ios build --config src-tauri/tauri.ios.conf.json --export-method "${IOS_EXPORT_METHOD}"
 
       - name: Upload iOS validation artifacts
         uses: actions/upload-artifact@v6
