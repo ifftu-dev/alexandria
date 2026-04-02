@@ -163,15 +163,6 @@ jobs:
         working-directory: alexandria
         run: npm install --no-save @tauri-apps/cli@${TAURI_CLI_VERSION}
 
-      - name: Install cargo-binstall
-        uses: cargo-bins/cargo-binstall@main
-
-      - name: Install cargo-tauri fallback
-        run: cargo binstall tauri-cli --version ${TAURI_CLI_VERSION} --no-confirm --locked
-
-      - name: Export Cargo bin to PATH for downstream iOS tooling
-        run: echo "${CARGO_HOME:-$HOME/.cargo}/bin" >> $GITHUB_PATH
-
       - name: Verify repo-local Tauri CLI
         working-directory: alexandria
         run: |
