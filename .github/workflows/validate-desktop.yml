@@ -460,11 +460,24 @@ jobs:
         run: |
           $artifactDir = Join-Path $env:RUNNER_TEMP 'desktop-windows-x86_64'
           New-Item -ItemType Directory -Path $artifactDir -Force | Out-Null
-          $bundleRoot = Resolve-Path 'alexandria\src-tauri\target\release\bundle'
+          $bundleCandidates = @(
+            'alexandria\target\release\bundle'
+            'alexandria\src-tauri\target\release\bundle'
+          )
+          $bundleRoot = $null
+          foreach ($candidate in $bundleCandidates) {
+            if (Test-Path $candidate) {
+              $bundleRoot = (Resolve-Path $candidate).Path
+              break
+            }
+          }
+          if (-not $bundleRoot) {
+            throw "No Windows validation bundle directory was found. Checked: $($bundleCandidates -join ', ')"
+          }
           $files = Get-ChildItem -Path $bundleRoot -Recurse -File |
             Where-Object { $_.Extension -in @('.exe', '.msi', '.zip') }
           if (-not $files) {
-            throw 'No Windows validation artifacts were produced under target\\release\\bundle.'
+            throw "No Windows validation artifacts were produced under $bundleRoot."
           }
           foreach ($file in $files) {
             Copy-Item -Path $file.FullName -Destination $artifactDir -Force
