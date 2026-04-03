@@ -218,12 +218,16 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          mapfile -t ipa_files < <(find alexandria/src-tauri/gen/apple/build -name '*.ipa' -type f | sort)
-          if [ "${#ipa_files[@]}" -eq 0 ]; then
+          ipa_files=$(find alexandria/src-tauri/gen/apple/build -name '*.ipa' -type f | sort)
+          if [ -z "${ipa_files}" ]; then
             echo "No iOS .ipa artifact was produced." >&2
             exit 1
           fi
-          gh release upload "${RELEASE_TAG}" "${ipa_files[@]}" --clobber --repo "${GITHUB_REPOSITORY}"
+          while IFS= read -r ipa_file; do
+            gh release upload "${RELEASE_TAG}" "$ipa_file" --clobber --repo "${GITHUB_REPOSITORY}"
+          done <<EOF
+          ${ipa_files}
+          EOF
 
   build-android:
     name: Build Android
