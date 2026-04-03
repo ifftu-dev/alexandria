@@ -138,7 +138,7 @@ onMounted(async () => {
         </div>
       </div>
 
-      <!-- Recommended skeleton (Mark 2 style: shadow only, no border) -->
+      <!-- Recommended skeleton (shadow only, no border) -->
       <div class="mb-4 h-5 w-48 animate-pulse rounded bg-muted" />
       <div class="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         <div v-for="i in 8" :key="i" class="animate-pulse overflow-hidden rounded-xl bg-card shadow-sm">
@@ -213,7 +213,7 @@ onMounted(async () => {
           </span>
         </div>
 
-        <!-- Empty state (Mark 2 style: shadow, no border) -->
+        <!-- Empty state (shadow, no border) -->
         <div
           v-if="courses.length === 0"
           class="rounded-xl bg-card p-12 text-center shadow-sm"
@@ -233,7 +233,7 @@ onMounted(async () => {
           </router-link>
         </div>
 
-        <!-- Course grid (Mark 2 style: gap-6, 4 columns) -->
+        <!-- Course grid (gap-6, 4 columns) -->
         <div v-else class="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           <CourseCard
             v-for="course in (recommendedCourses.length > 0 ? recommendedCourses : courses)"

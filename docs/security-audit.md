@@ -1,4 +1,4 @@
-# Alexandria (Mark 3) -- Security Audit
+# Alexandria — Security Audit
 
 **Date**: 2026-02-24 (updated 2026-03-23)
 **Scope**: Full Rust backend (`src-tauri/src/`), Tauri configuration, Cargo dependencies, Vue frontend (`src/`), CI/CD workflows

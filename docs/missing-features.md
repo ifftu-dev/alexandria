@@ -1,7 +1,6 @@
-# Missing Features — (Mark 3) vs (Mark 2)
+# Missing Features
 
-> What exists in the (Mark 2) documentation and codebase that has not yet been
-> implemented or documented in (Mark 3).
+> Features and documentation that have not yet been implemented.
 
 **Last updated**: 2026-03-25
 
@@ -12,44 +11,40 @@
 1. [Documentation Gaps](#1-documentation-gaps)
 2. [Smart Contracts](#2-smart-contracts)
 3. [Authentication](#3-authentication)
-4. [API & Web Companion](#4-api--web-companion)
+4. [Web Companion](#4-web-companion)
 5. [Monitoring & Observability](#5-monitoring--observability)
-6. [Cloud Deployment](#6-cloud-deployment)
-7. [Frontend Testing](#7-frontend-testing)
-8. [Security Audit](#8-security-audit)
-9. [Content Moderation](#9-content-moderation)
-10. [Search](#10-search)
-11. [Sentinel Server-Side Models](#11-sentinel-server-side-models)
-12. [Feature Comparison Matrix](#12-feature-comparison-matrix)
+6. [Frontend Testing](#6-frontend-testing)
+7. [Content Moderation](#7-content-moderation)
+8. [Search](#8-search)
+9. [Sentinel Server-Side Models](#9-sentinel-server-side-models)
+10. [Feature Status Matrix](#10-feature-status-matrix)
 
 ---
 
 ## 1. Documentation Gaps
 
-(Mark 2) has 11 documentation files covering the full platform specification.
-(Mark 3) now has 8 docs (architecture, database schema, P2P protocol, project
-structure, missing features, security audit, performance audit, README), but
-several mark2 documents have no mark3 equivalent:
+Alexandria has 8 documentation files (architecture, database schema, P2P protocol, project structure, missing features, security audit, performance audit, README), but several areas lack written specs:
 
-| (Mark 2) Document | (Mark 3) Equivalent | Status |
-|-----------------|-------------------|--------|
-| `whitepaper-consolidated-v0.0.3.md` | None | **Missing** — The whitepaper covers reputation formulas, governance rules, decentralisation criteria, sustainability model, threat model, and credential schemas. (Mark 3) implements most of this but has no written spec. |
-| `api-reference.md` | None | **N/A** — (Mark 3) has no REST API (IPC commands replace it). A command reference could be written. |
-| `skills-and-reputation.md` | None | **Missing** — RFC covering skill graph design, evidence model, reputation system, and query/consumption model. The implementation exists in mark3 but the design document doesn't. |
-| `sentinel.md` | None | **Missing** — Architecture doc for the Sentinel anti-cheat system. (Mark 3) has `useSentinel.ts` and the ML model utilities, but no documentation. |
-| `security-audit-v0.0.1.md` | `security-audit.md` | **Created** — 27 findings (1 critical, 7 high, 10 medium, 9 low, 5 info). 21 fixed. |
-| `cloud-deployment.md` | None | **N/A** — (Mark 3) is a desktop app; no cloud deployment. |
-| `database-architecture.md` | `database-schema.md` | **Created** (this session) |
-| `project-structure.md` | `project-structure.md` | **Created** (this session) |
-| `architecture-v2.md` | `architecture.md` | **Created** (this session) |
+| Document | Status |
+|----------|--------|
+| Whitepaper | **Missing** — Reputation formulas, governance rules, decentralisation criteria, sustainability model, threat model, and credential schemas are all implemented but have no written spec. |
+| IPC command reference | **Missing** — A reference for the ~160 IPC commands could be written. |
+| Skills & reputation RFC | **Missing** — Skill graph design, evidence model, reputation system, and query/consumption model are implemented but not documented. |
+| Sentinel architecture doc | **Missing** — `useSentinel.ts` and the ML model utilities exist, but there is no documentation. |
+| Security audit | **Created** — 27 findings (1 critical, 7 high, 10 medium, 9 low, 5 info). 21 fixed. |
+| Database schema | **Created** |
+| Project structure | **Created** |
+| Architecture | **Created** |
 
-**Recommendation**: Write a mark3 whitepaper, skills/reputation RFC, and Sentinel doc.
+**Recommendation**: Write a whitepaper, skills/reputation RFC, and Sentinel doc.
 
 ---
 
 ## 2. Smart Contracts
 
-(Mark 2) had **7 Aiken/Plutus v3 validators** for on-chain governance enforcement:
+Alexandria's governance and credential operations currently use **transaction metadata only** — no on-chain validators. Transactions are submitted to Cardano with metadata fields, but there is no smart contract enforcement. The `cardano/governance.rs` module builds metadata, not Plutus scripts.
+
+The full trust model would require 7 Aiken/Plutus v3 validators:
 
 - DAO registration validator
 - Election validator (nomination, voting, finalization)
@@ -59,9 +54,7 @@ several mark2 documents have no mark3 equivalent:
 - Reputation soulbound token validator
 - Credential NFT validator
 
-**(Mark 3) status**: All governance and credential operations use **transaction metadata only** — no on-chain validators. Transactions are submitted to Cardano with metadata fields, but there is no smart contract enforcement. The `cardano/governance.rs` module builds metadata, not Plutus scripts.
-
-**Impact**: Governance rules (supermajority, committee authority, election lifecycle) are enforced only at the application level and P2P validation level. A malicious node could bypass these checks by submitting raw transactions. On-chain enforcement would require porting the Aiken validators.
+**Impact**: Governance rules (supermajority, committee authority, election lifecycle) are enforced only at the application level and P2P validation level. A malicious node could bypass these checks by submitting raw transactions. On-chain enforcement would require porting Aiken validators.
 
 **Priority**: Medium — the P2P validation pipeline provides meaningful protection for the network, but on-chain enforcement is the full trust model.
 
@@ -69,33 +62,29 @@ several mark2 documents have no mark3 equivalent:
 
 ## 3. Authentication
 
-(Mark 2) supported 4 authentication methods:
+The only authentication method is the BIP-39 mnemonic + encrypted vault (Stronghold on desktop, AES-256-GCM + Argon2id on mobile). There is no email, no OAuth, and no browser extension wallet support.
 
-| Method | (Mark 2) | (Mark 3) |
-|--------|--------|--------|
-| Email/password | Yes | No |
-| OAuth (Google, Apple, LinkedIn) | Yes | No |
-| CIP-30 wallet (browser extension) | Yes | No |
-| BIP-39 mnemonic (self-sovereign) | Yes (custodial) | **Yes** (only method) |
+| Method | Status |
+|--------|--------|
+| BIP-39 mnemonic (self-sovereign) | **Implemented** (only method) |
+| Email/password | Not implemented |
+| OAuth (Google, Apple, LinkedIn) | Not implemented |
+| CIP-30 wallet (browser extension) | Not implemented |
 
-**(Mark 3) status**: The only authentication method is the BIP-39 mnemonic + encrypted vault (Stronghold on desktop, AES-256-GCM + Argon2id on mobile). There is no email, no OAuth, and no browser extension wallet support.
-
-**Impact**: Lower barrier to entry was a mark2 design goal — non-crypto users could sign up with email and get a custodial wallet. (Mark 3) requires users to understand and safeguard a 24-word mnemonic.
+**Impact**: Users must understand and safeguard a 24-word mnemonic. Non-crypto users have no custodial onramp.
 
 **Priority**: Low for the desktop app (self-sovereign is the design goal), but important if a web companion is ever built.
 
 ---
 
-## 4. API & Web Companion
+## 4. Web Companion
 
-(Mark 2) architecture planned for a web companion alongside the desktop app:
+No web companion exists. All functionality is in the desktop and mobile app. A lightweight web UI could provide:
 
-- Lightweight web UI for credential verification
+- Credential verification (read-only, from Cardano)
 - Public skill graph browser
 - Read-only course catalog
 - No sign-in required for verification
-
-**(Mark 3) status**: No web companion exists. All functionality is in the desktop and mobile app.
 
 **Priority**: Low — the desktop app is the primary interface. A verification-only web page could be built later as a static site that reads from Cardano directly.
 
@@ -103,173 +92,107 @@ several mark2 documents have no mark3 equivalent:
 
 ## 5. Monitoring & Observability
 
-(Mark 2) had:
-
-- **Grafana dashboards** for all services
-- **Prometheus alerting** with 25 alert rules across 3 severity levels
-- **Structured logging** across all Go services
-
-**(Mark 3) status**: The app uses `tauri-plugin-log` for basic logging. There are no dashboards, no metrics collection, and no alerting. This is expected for a desktop app, but developer-facing diagnostics could be improved.
+The app uses `tauri-plugin-log` for basic logging. There are no dashboards, no metrics collection, and no alerting. This is expected for a desktop app, but developer-facing diagnostics could be improved.
 
 **Priority**: Low — desktop apps don't need Prometheus. But a diagnostics/debug page in the Settings UI would be useful.
 
 ---
 
-## 6. Cloud Deployment
+## 6. Frontend Testing
 
-(Mark 2) had **Terraform configurations** for:
-
-- AWS ECS Fargate
-- GCP Cloud Run
-- Azure ACI
-- 3 environments (dev, staging, prod)
-
-**(Mark 3) status**: Not applicable. (Mark 3) is a native desktop application distributed as a binary. Deployment is `cargo tauri build`.
-
----
-
-## 7. Frontend Testing
-
-(Mark 2) had:
-
-- **Vitest** unit tests for Vue components
-- **Playwright** E2E tests for critical flows
-
-**(Mark 3) status**: **No frontend tests exist.** The backend has 407 tests, but the Vue frontend has zero test coverage. There is no Vitest or Playwright configuration.
+**No frontend tests exist.** The backend has 407 tests, but the Vue frontend has zero test coverage. There is no Vitest or Playwright configuration.
 
 **Priority**: Medium — the backend is well-tested, but the frontend has complex flows (onboarding, course player, quiz engine, governance UI) that would benefit from testing.
 
 ---
 
-## 8. Security Audit
+## 7. Content Moderation
 
-(Mark 2) had a documented security audit (`security-audit-v0.0.1.md`) with 66 findings:
-
-- 13 Critical
-- 18 High
-- 20 Medium
-- 15 Low
-
-**(Mark 3) status**: A security audit has been performed (`security-audit.md`) with 27 findings (1 critical, 7 high, 10 medium, 9 low, 5 info). **21 findings have been fixed.** Remaining items are deferred (stake address verification, unsafe Send+Sync documentation, env var storage) or architectural limitations.
-
-Remediated threat areas include:
-- KDF upgraded to Argon2id, salt integrity HMAC added
-- XSS sanitization (DOMPurify) and CSP enabled
-- Per-peer gossip rate limiting
-- Wallet memory zeroization, password strength enforcement
-- SSRF blocklist, mutex panic prevention
-
-**Priority**: Remaining items (H-3 stake address verification, H-6 updater key) should be addressed before mainnet.
-
----
-
-## 9. Content Moderation
-
-(Mark 2)'s architecture-v2 doc identified content moderation as an open question:
-
-> "Content Moderation — With no central authority, how are spam courses or
-> harmful content handled?"
-
-**(Mark 3) status**: No content moderation system exists. Any peer can publish any course to the catalog topic. The peer scoring system penalizes invalid messages, but there is no mechanism for reporting or removing objectionable content.
+No content moderation system exists. Any peer can publish any course to the catalog topic. The peer scoring system penalizes invalid messages, but there is no mechanism for reporting or removing objectionable content.
 
 **Priority**: Medium — important for a public network, but not blocking for development/testnet.
 
 ---
 
-## 10. Search
+## 8. Search
 
-(Mark 2)'s architecture-v2 doc identified search as an open question:
-
-> "How do users discover courses and skills without a centralized search
-> index?"
-
-**(Mark 3) status**: Course discovery relies on the P2P catalog topic (GossipSub). The frontend has a course listing page but no full-text search. Skills can be browsed by taxonomy but not searched.
+Course discovery relies on the P2P catalog topic (GossipSub). The frontend has a course listing page but no full-text search. Skills can be browsed by taxonomy but not searched.
 
 **Priority**: Medium — a local SQLite FTS5 index could provide search without any server.
 
 ---
 
-## 11. Sentinel Server-Side Models
+## 9. Sentinel Server-Side Models
 
-(Mark 2)'s Sentinel used a dual architecture:
-
-- **Client-side**: Rule-based scoring (11 signals) — **implemented in mark3**
-- **Server-side**: Decision tree ensemble for final adjudication — **not implemented in mark3**
-
-(Mark 3) has the client-side ML models (`keystroke-autoencoder.ts`, `mouse-trajectory-cnn.ts`, `face-embedder.ts`) but there is no server-side aggregation. In a P2P architecture, the "server-side" model would need to run locally or be replaced by peer consensus.
+The Sentinel anti-cheat system uses a client-side rule-based scoring engine (11 signals) with ML models (`keystroke-autoencoder.ts`, `mouse-trajectory-cnn.ts`, `face-embedder.ts`). A server-side decision tree ensemble for final adjudication is not implemented. In a P2P architecture, this would need to run locally or be replaced by peer consensus.
 
 **Priority**: Low — the client-side models provide the core integrity signal. Server-side aggregation was mainly for a centralized architecture.
 
 ---
 
-## 12. Feature Comparison Matrix
+## 10. Feature Status Matrix
 
-| Feature | (Mark 2) | (Mark 3) | Notes |
-|---------|:------:|:------:|-------|
-| **Core Platform** | | | |
-| Course content (text, video, quiz) | Y | Y | (Mark 3) uses iroh instead of IPFS |
-| Skill taxonomy (DAG) | Y | Y | Same model, SQLite instead of PostgreSQL+Neo4j |
-| Evidence pipeline | Y | Y | Fully implemented |
-| Skill proofs | Y | Y | Fully implemented |
-| Reputation system | Y | Y | Fully implemented |
-| **Identity** | | | |
-| Email/password auth | Y | - | Not applicable (desktop app) |
-| OAuth (Google, Apple, LinkedIn) | Y | - | Not applicable |
-| CIP-30 wallet auth | Y | - | Not applicable (embedded wallet) |
-| BIP-39 mnemonic wallet | Y | Y | Only auth method in mark3 |
-| Encrypted vault (Stronghold / portable) | - | Y | Stronghold on desktop, AES-256-GCM + Argon2id on mobile |
-| Biometric unlock (Face ID / Touch ID) | - | Y | New in mark3 via tauri-plugin-biometry |
-| Auto-updater | - | Y | New in mark3 via tauri-plugin-updater |
-| **Blockchain** | | | |
-| Cardano transaction building | Y | Y | Conway era (pallas) |
-| NFT credential minting | Y | Y | NativeScript + CIP-25 |
-| CIP-68 soulbound tokens | - | Y | New in mark3 |
-| Aiken smart contracts | Y | - | **Missing** — metadata only |
-| **Networking** | | | |
-| REST/gRPC API | Y | - | Replaced by Tauri IPC |
-| libp2p P2P | - | Y | New in mark3 |
-| GossipSub (6 global + per-classroom topics) | - | Y | New in mark3 |
-| Cross-device sync | - | Y | New in mark3 |
-| Relay-based discovery (Kademlia DHT) | - | Y | New in mark3 (mDNS removed) |
-| NAT traversal (relay + DCUtR) | - | Y | New in mark3 |
-| Mobile nodes (iOS + Android) | - | Y | New in mark3 — full node on iPhone and Android |
-| **Governance** | | | |
-| DAOs | Y | Y | |
-| Elections | Y | Y | |
-| Proposals | Y | Y | |
-| On-chain enforcement | Y | - | **Missing** — app-level only |
-| P2P gossip governance | - | Y | New in mark3 |
-| **Integrity** | | | |
-| Client-side rule engine | Y | Y | |
-| Client-side ML models | Y | Y | Autoencoder, CNN, LBP embedder |
-| Server-side decision tree | Y | - | **Missing** — no server |
-| **UI / Design** | | | |
-| Refined Editorial design system | Y | Y | Shadow-only cards, glassmorphism stats, serif greetings, off-white bg |
-| Sidebar (collapsible, Live Tutoring, Classrooms) | Y | Y | Inline previews with status dots, marquee, unread badges |
-| Sidebar skill graph widget | Y | Y | force-graph canvas with earned/available/locked nodes |
-| Course cards (hover lift, thumbnail zoom) | Y | Y | CourseCard component with glassmorphism stats pills |
-| TopBar user menu (role badge, icon SVGs) | Y | Y | Mark 2-style rounded-xl dropdown |
-| Mobile tab bar (backdrop blur, active indicator) | Y | Y | bg-black/50 backdrop, left bar active indicator |
-| Live Tutoring pages | Y | Y | **Implemented** — iroh-live video/audio/screenshare with desktop + mobile variants |
-| Classrooms pages | Y | Y | **Implemented** — 26 commands, channels, messages, calls, role-based auth |
-| **Infrastructure** | | | |
-| Docker Compose | Y | - | Not applicable |
-| Terraform (AWS/GCP/Azure) | Y | - | Not applicable |
-| Grafana + Prometheus | Y | - | Not applicable |
-| Developer CLI | Y | Y | Go→Rust, different commands |
-| **Testing** | | | |
-| Backend tests | Y | Y | 407 tests (mark3), Go tests (mark2) |
-| Frontend unit tests (Vitest) | Y | - | **Missing** |
-| E2E tests (Playwright) | Y | - | **Missing** |
-| Stress tests | - | Y | New in mark3 (~1500 lines) |
-| **Documentation** | | | |
-| Whitepaper | Y | - | **Missing** |
-| Architecture doc | Y | Y | Created this session |
-| Database schema doc | Y | Y | Created this session |
-| P2P protocol spec | - | Y | New in mark3 |
-| API reference | Y | - | N/A (IPC replaces API) |
-| Skills & reputation RFC | Y | - | **Missing** |
-| Sentinel doc | Y | - | **Missing** |
-| Security audit | Y | Y | 27 findings, 21 fixed |
-| Cloud deployment guide | Y | - | N/A |
-| Project structure | Y | Y | Created this session |
+| Feature | Status | Notes |
+|---------|:------:|-------|
+| **Core Platform** | | |
+| Course content (text, video, quiz) | Y | iroh content-addressed storage |
+| Skill taxonomy (DAG) | Y | SQLite-backed |
+| Evidence pipeline | Y | Fully implemented |
+| Skill proofs | Y | Fully implemented |
+| Reputation system | Y | Fully implemented |
+| **Identity** | | |
+| BIP-39 mnemonic wallet | Y | Only auth method |
+| Encrypted vault (Stronghold / portable) | Y | Stronghold on desktop, AES-256-GCM + Argon2id on mobile |
+| Biometric unlock (Face ID / Touch ID) | Y | via tauri-plugin-biometry |
+| Auto-updater | Y | via tauri-plugin-updater |
+| Email/password auth | - | Not applicable (desktop app) |
+| OAuth (Google, Apple, LinkedIn) | - | Not applicable |
+| CIP-30 wallet auth | - | Not applicable (embedded wallet) |
+| **Blockchain** | | |
+| Cardano transaction building | Y | Conway era (pallas) |
+| NFT credential minting | Y | NativeScript + CIP-25 |
+| CIP-68 soulbound tokens | Y | |
+| Aiken smart contracts | - | **Missing** — metadata only |
+| **Networking** | | |
+| libp2p P2P | Y | |
+| GossipSub (6 global + per-classroom topics) | Y | |
+| Cross-device sync | Y | |
+| Relay-based discovery (Kademlia DHT) | Y | |
+| NAT traversal (relay + DCUtR) | Y | |
+| Mobile nodes (iOS + Android) | Y | Full node on iPhone and Android |
+| **Governance** | | |
+| DAOs | Y | |
+| Elections | Y | |
+| Proposals | Y | |
+| On-chain enforcement | - | **Missing** — app-level only |
+| P2P gossip governance | Y | |
+| **Integrity** | | |
+| Client-side rule engine | Y | |
+| Client-side ML models | Y | Autoencoder, CNN, LBP embedder |
+| Server-side decision tree | - | **Missing** — no server |
+| **UI / Design** | | |
+| Refined Editorial design system | Y | Shadow-only cards, glassmorphism stats, serif greetings, off-white bg |
+| Sidebar (collapsible, Live Tutoring, Classrooms) | Y | Inline previews with status dots, marquee, unread badges |
+| Sidebar skill graph widget | Y | force-graph canvas with earned/available/locked nodes |
+| Course cards (hover lift, thumbnail zoom) | Y | CourseCard component with glassmorphism stats pills |
+| TopBar user menu (role badge, icon SVGs) | Y | Rounded-xl dropdown |
+| Mobile tab bar (backdrop blur, active indicator) | Y | bg-black/50 backdrop, left bar active indicator |
+| Live Tutoring pages | Y | iroh-live video/audio/screenshare with desktop + mobile variants |
+| Classrooms pages | Y | 26 commands, channels, messages, calls, role-based auth |
+| **Infrastructure** | | |
+| Developer CLI | Y | Rust + clap (`alex`) |
+| **Testing** | | |
+| Backend tests | Y | 407 tests |
+| Frontend unit tests (Vitest) | - | **Missing** |
+| E2E tests (Playwright) | - | **Missing** |
+| Stress tests | Y | ~1500 lines |
+| **Documentation** | | |
+| Whitepaper | - | **Missing** |
+| Architecture doc | Y | |
+| Database schema doc | Y | |
+| P2P protocol spec | Y | |
+| IPC command reference | - | **Missing** |
+| Skills & reputation RFC | - | **Missing** |
+| Sentinel doc | - | **Missing** |
+| Security audit | Y | 27 findings, 21 fixed |
+| Project structure | Y | |

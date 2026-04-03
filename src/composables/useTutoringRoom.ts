@@ -341,7 +341,26 @@ async function listDevices(): Promise<DeviceList> {
     return await invoke<DeviceList>('tutoring_list_devices')
   } catch (e: unknown) {
     console.warn('Failed to list devices:', e)
-    return { audio_inputs: [], audio_outputs: [], cameras: [] }
+    return {
+      audio_inputs: [],
+      audio_outputs: [],
+      cameras: [],
+      selected_audio_input: null,
+      selected_audio_output: null,
+    }
+  }
+}
+
+async function setAudioDevices(micId?: string | null, speakerId?: string | null): Promise<void> {
+  try {
+    await invoke('tutoring_set_audio_devices', {
+      micId: micId || null,
+      speakerId: speakerId || null,
+    })
+    await refreshStatus()
+  } catch (e: unknown) {
+    lastError.value = e instanceof Error ? e.message : String(e)
+    throw e
   }
 }
 
@@ -408,6 +427,7 @@ export function useTutoringRoom() {
     getPeers,
     checkDevices,
     listDevices,
+    setAudioDevices,
     getDiagnostics,
     startPolling,
     stopPolling,

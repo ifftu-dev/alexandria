@@ -1,4 +1,4 @@
-# Alexandria (Mark 3) — Architecture
+# Alexandria — Architecture
 
 > Offline-first, trustless, multi-platform.
 
@@ -21,13 +21,12 @@
 10. [Frontend](#10-frontend)
 11. [IPC Boundary](#11-ipc-boundary)
 12. [Security Model](#12-security-model)
-13. [Key Differences from (Mark 2)](#13-key-differences-from-mark-2)
 
 ---
 
 ## 1. Design Philosophy
 
-(Mark 3) eliminates all servers. Every user runs a full node — a native
+Alexandria eliminates all servers. Every user runs a full node — a native
 application (desktop or mobile) that contains the entire platform:
 database, content store, P2P networking, wallet, and UI. There is no
 central API, no hosted database, and no Docker infrastructure.
@@ -367,7 +366,7 @@ Reputation impact computed (instructor attribution)
 | 2/3 supermajority voting | Implemented |
 | P2P gossip for governance events | Implemented |
 | On-chain metadata transactions | Implemented |
-| Aiken/Plutus smart contract enforcement | **Not implemented** (mark2 had this) |
+| Aiken/Plutus smart contract enforcement | **Not implemented** |
 
 ---
 
@@ -469,19 +468,3 @@ Note: tutoring has platform-specific variants (desktop with video, mobile stubs)
 - Cross-device sync is encrypted with a key derived from the wallet signing key
 - Public gossip contains only evidence scores and governance actions — no personal data beyond stake addresses
 
----
-
-## 13. Key Differences from (Mark 2)
-
-| Aspect | (Mark 2) | (Mark 3) |
-|--------|--------|--------|
-| Architecture | Client-server (Go API + Nuxt frontend) | Single native binary (Tauri + Rust), desktop + iOS + Android |
-| Database | PostgreSQL 17 + Neo4j | SQLite (embedded) |
-| Content storage | Blockfrost IPFS API | iroh (embedded BLAKE3 store) |
-| P2P | None (centralized API) | libp2p (GossipSub, Kademlia, Relay, QUIC/TCP) |
-| Authentication | Email/password, OAuth, CIP-30 | BIP-39 mnemonic only (self-sovereign) |
-| Deployment | Docker Compose, Terraform, AWS/GCP/Azure | `cargo tauri build` → native binary; `cargo tauri ios build` → .ipa; `cargo tauri android build` → .apk |
-| CLI | Go + Cobra (`alex`) | Rust + clap (`alex`) |
-| Smart contracts | Aiken/Plutus v3 (7 validators) | Transaction metadata only (no on-chain validators) |
-| Monitoring | Grafana + Prometheus | None (local app) |
-| API | gRPC + REST (grpc-gateway) | Tauri IPC (~160 commands) |

@@ -2,9 +2,9 @@
 /**
  * SidebarSkillGraph — compact force-directed skill graph in the sidebar.
  *
- * Port of Mark 2's SidebarSkillGraph.client.vue using the same
- * `force-graph` library, node coloring (earned=green, available=yellow,
- * locked=gray), glow effects, and legend.
+ * Compact force-directed skill graph using `force-graph` library,
+ * node coloring (earned=green, available=yellow, locked=gray),
+ * glow effects, and legend.
  *
  * Data fetched once via Tauri IPC and cached in useSkillGraphState().
  */

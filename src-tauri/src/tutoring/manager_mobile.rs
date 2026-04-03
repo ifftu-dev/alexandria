@@ -30,7 +30,7 @@ use bytes::Bytes;
 use image::ImageEncoder;
 use iroh::{Endpoint, EndpointId};
 use iroh_gossip::net::Gossip;
-use iroh_live::media::audio::{AudioBackend, DeviceId, InputStream, OutputStream};
+use iroh_live::media::audio::{AudioBackend, InputStream, OutputStream};
 use iroh_live::media::av::{AudioPreset, AudioSinkHandle, VideoPreset};
 use iroh_live::media::opus::PureOpusDecoder;
 use iroh_live::media::opus::PureOpusEncoder;
@@ -227,7 +227,18 @@ const CHAT_RATE_LIMIT_MS: u64 = 200;
 const NAME_BROADCAST_INTERVAL_SECS: u64 = 15;
 
 /// Mobile video presets — use lower resolutions to save battery/bandwidth.
-const MOBILE_VIDEO_PRESETS: [VideoPreset; 2] = [VideoPreset::P180, VideoPreset::P360];
+const MOBILE_VIDEO_PRESETS: [VideoPreset; 2] = [VideoPreset::P360, VideoPreset::P720];
+
+const IOS_AUDIO_OUTPUT_AUTO_ID: &str = "ios:auto";
+const IOS_AUDIO_OUTPUT_SPEAKER_ID: &str = "ios:speaker";
+const IOS_AUDIO_PORT_ID_PREFIX: &str = "ios:port:";
+const IOS_PORT_TYPE_BUILTIN_MIC: &str = "BuiltInMic";
+const IOS_PORT_TYPE_BLUETOOTH_HFP: &str = "BluetoothHFP";
+const IOS_PORT_TYPE_BLUETOOTH_LE: &str = "BluetoothLE";
+const IOS_PORT_TYPE_HEADSET_MIC: &str = "HeadsetMic";
+const IOS_PORT_TYPE_USB_AUDIO: &str = "USBAudio";
+const IOS_PORT_TYPE_CAR_AUDIO: &str = "CarAudio";
+const IOS_PORT_TYPE_CONTINUITY_MICROPHONE: &str = "ContinuityMicrophone";
 
 // ── Chat message protocol ──────────────────────────────────────────
 
@@ -300,10 +311,38 @@ const BROADCAST_NAME: &str = "cam";
 /// Mobile: camera is always the default device camera (front preferred).
 #[derive(Debug, Clone, Default)]
 pub struct DeviceSelection {
-    /// Audio input device ID string (from `DeviceId::to_string()`).
+    /// Audio input route ID string (`ios:port:<uid>` on iOS).
     pub mic_device_id: Option<String>,
-    /// Audio output device ID string (from `DeviceId::to_string()`).
+    /// Audio output route ID string (`ios:auto`, `ios:speaker`, or `ios:port:<uid>`).
     pub speaker_device_id: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AudioDeviceOption {
+    pub id: String,
+    pub name: String,
+    pub is_default: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct AudioDeviceInventory {
+    pub inputs: Vec<AudioDeviceOption>,
+    pub outputs: Vec<AudioDeviceOption>,
+    pub selected_input: Option<String>,
+    pub selected_output: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct IosAudioPort {
+    uid: String,
+    name: String,
+    port_type: String,
+}
+
+#[derive(Debug, Clone, Default)]
+struct IosAudioRouteSnapshot {
+    available_inputs: Vec<IosAudioPort>,
+    current_input_uid: Option<String>,
 }
 
 /// Peer info as seen from room gossip events.
@@ -695,11 +734,234 @@ impl TutoringManager {
         Self { inner }
     }
 
+    fn ios_port_device_id(uid: &str) -> String {
+        format!("{IOS_AUDIO_PORT_ID_PREFIX}{uid}")
+    }
+
+    fn ios_port_uid(device_id: Option<&str>) -> Option<&str> {
+        device_id.and_then(|id| id.strip_prefix(IOS_AUDIO_PORT_ID_PREFIX))
+    }
+
+    fn ios_output_name_for_port(port: &IosAudioPort) -> String {
+        match port.port_type.as_str() {
+            IOS_PORT_TYPE_BLUETOOTH_HFP | IOS_PORT_TYPE_BLUETOOTH_LE => {
+                format!("{} (Bluetooth)", port.name)
+            }
+            IOS_PORT_TYPE_HEADSET_MIC => format!("{} (Headset)", port.name),
+            IOS_PORT_TYPE_USB_AUDIO => format!("{} (USB)", port.name),
+            IOS_PORT_TYPE_CAR_AUDIO => format!("{} (Car Audio)", port.name),
+            IOS_PORT_TYPE_CONTINUITY_MICROPHONE => {
+                format!("{} (Continuity)", port.name)
+            }
+            _ => port.name.clone(),
+        }
+    }
+
+    fn ios_input_name_for_port(port: &IosAudioPort) -> String {
+        match port.port_type.as_str() {
+            IOS_PORT_TYPE_BUILTIN_MIC => "iPhone Microphone".into(),
+            IOS_PORT_TYPE_BLUETOOTH_HFP | IOS_PORT_TYPE_BLUETOOTH_LE => {
+                format!("{} (Bluetooth Mic)", port.name)
+            }
+            IOS_PORT_TYPE_HEADSET_MIC => format!("{} (Headset Mic)", port.name),
+            IOS_PORT_TYPE_USB_AUDIO => format!("{} (USB Mic)", port.name),
+            IOS_PORT_TYPE_CAR_AUDIO => format!("{} (Car Mic)", port.name),
+            IOS_PORT_TYPE_CONTINUITY_MICROPHONE => {
+                format!("{} (Continuity Mic)", port.name)
+            }
+            _ => port.name.clone(),
+        }
+    }
+
+    fn ios_port_supports_output(port: &IosAudioPort) -> bool {
+        !matches!(port.port_type.as_str(), IOS_PORT_TYPE_BUILTIN_MIC)
+    }
+
+    fn ios_audio_route_snapshot() -> IosAudioRouteSnapshot {
+        run_on_main_thread(|| unsafe {
+            type Id = ObjcId;
+            type Sel = ObjcSel;
+            type MsgSendNoArgs = unsafe extern "C" fn(Id, Sel) -> Id;
+            type MsgSendCount = unsafe extern "C" fn(Id, Sel) -> usize;
+            type MsgSendIndex = unsafe extern "C" fn(Id, Sel, usize) -> Id;
+            type MsgSendUtf8 = unsafe extern "C" fn(Id, Sel) -> *const i8;
+
+            let send_noargs: MsgSendNoArgs =
+                std::mem::transmute(objc_msgSend as unsafe extern "C" fn(Id, Sel, ...) -> Id);
+            let send_count: MsgSendCount =
+                std::mem::transmute(objc_msgSend as unsafe extern "C" fn(Id, Sel, ...) -> Id);
+            let send_index: MsgSendIndex =
+                std::mem::transmute(objc_msgSend as unsafe extern "C" fn(Id, Sel, ...) -> Id);
+            let send_utf8: MsgSendUtf8 =
+                std::mem::transmute(objc_msgSend as unsafe extern "C" fn(Id, Sel, ...) -> Id);
+
+            let to_string = |obj: Id| -> Option<String> {
+                if obj.is_null() {
+                    return None;
+                }
+                let utf8_sel = sel_registerName(b"UTF8String\0".as_ptr() as *const i8);
+                let cstr = send_utf8(obj, utf8_sel);
+                if cstr.is_null() {
+                    None
+                } else {
+                    Some(
+                        std::ffi::CStr::from_ptr(cstr)
+                            .to_string_lossy()
+                            .into_owned(),
+                    )
+                }
+            };
+
+            let ports_from_array = |array: Id| -> Vec<IosAudioPort> {
+                if array.is_null() {
+                    return Vec::new();
+                }
+                let count_sel = sel_registerName(b"count\0".as_ptr() as *const i8);
+                let object_sel = sel_registerName(b"objectAtIndex:\0".as_ptr() as *const i8);
+                let uid_sel = sel_registerName(b"UID\0".as_ptr() as *const i8);
+                let name_sel = sel_registerName(b"portName\0".as_ptr() as *const i8);
+                let type_sel = sel_registerName(b"portType\0".as_ptr() as *const i8);
+
+                let count = send_count(array, count_sel);
+                let mut ports = Vec::with_capacity(count);
+                for index in 0..count {
+                    let port = send_index(array, object_sel, index);
+                    if port.is_null() {
+                        continue;
+                    }
+                    let Some(uid) = to_string(send_noargs(port, uid_sel)) else {
+                        continue;
+                    };
+                    let name =
+                        to_string(send_noargs(port, name_sel)).unwrap_or_else(|| uid.clone());
+                    let port_type = to_string(send_noargs(port, type_sel)).unwrap_or_default();
+                    ports.push(IosAudioPort {
+                        uid,
+                        name,
+                        port_type,
+                    });
+                }
+                ports
+            };
+
+            let cls = objc_getClass(b"AVAudioSession\0".as_ptr() as *const i8);
+            if cls.is_null() {
+                return IosAudioRouteSnapshot::default();
+            }
+            let shared_sel = sel_registerName(b"sharedInstance\0".as_ptr() as *const i8);
+            let session = send_noargs(cls, shared_sel);
+            if session.is_null() {
+                return IosAudioRouteSnapshot::default();
+            }
+
+            let available_inputs_sel = sel_registerName(b"availableInputs\0".as_ptr() as *const i8);
+            let current_route_sel = sel_registerName(b"currentRoute\0".as_ptr() as *const i8);
+            let inputs_sel = sel_registerName(b"inputs\0".as_ptr() as *const i8);
+
+            let available_inputs = ports_from_array(send_noargs(session, available_inputs_sel));
+            let current_route = send_noargs(session, current_route_sel);
+            let current_inputs = if current_route.is_null() {
+                Vec::new()
+            } else {
+                ports_from_array(send_noargs(current_route, inputs_sel))
+            };
+            IosAudioRouteSnapshot {
+                available_inputs,
+                current_input_uid: current_inputs.first().map(|port| port.uid.clone()),
+            }
+        })
+    }
+
+    fn ios_selected_output_id(
+        selection: Option<&DeviceSelection>,
+        snapshot: &IosAudioRouteSnapshot,
+    ) -> Option<String> {
+        if let Some(device_id) = selection.and_then(|devices| devices.speaker_device_id.clone()) {
+            return Some(device_id);
+        }
+
+        if let Some(uid) = snapshot.current_input_uid.as_deref() {
+            return Some(Self::ios_port_device_id(uid));
+        }
+
+        Some(IOS_AUDIO_OUTPUT_AUTO_ID.into())
+    }
+
+    fn build_audio_device_inventory(selection: Option<&DeviceSelection>) -> AudioDeviceInventory {
+        Self::configure_ios_audio_session();
+        let snapshot = Self::ios_audio_route_snapshot();
+        let selected_input = selection
+            .and_then(|devices| devices.mic_device_id.clone())
+            .or_else(|| {
+                snapshot
+                    .current_input_uid
+                    .as_deref()
+                    .map(Self::ios_port_device_id)
+            });
+        let selected_output = Self::ios_selected_output_id(selection, &snapshot);
+
+        let inputs = snapshot
+            .available_inputs
+            .iter()
+            .map(|port| {
+                let id = Self::ios_port_device_id(&port.uid);
+                AudioDeviceOption {
+                    name: Self::ios_input_name_for_port(port),
+                    is_default: selected_input.as_deref() == Some(id.as_str()),
+                    id,
+                }
+            })
+            .collect();
+
+        let mut outputs = vec![
+            AudioDeviceOption {
+                id: IOS_AUDIO_OUTPUT_AUTO_ID.into(),
+                name: "Automatic (Speaker or Connected Device)".into(),
+                is_default: selected_output.as_deref() == Some(IOS_AUDIO_OUTPUT_AUTO_ID),
+            },
+            AudioDeviceOption {
+                id: IOS_AUDIO_OUTPUT_SPEAKER_ID.into(),
+                name: "iPhone Speaker".into(),
+                is_default: selected_output.as_deref() == Some(IOS_AUDIO_OUTPUT_SPEAKER_ID),
+            },
+        ];
+
+        for port in snapshot
+            .available_inputs
+            .iter()
+            .filter(|port| Self::ios_port_supports_output(port))
+        {
+            let id = Self::ios_port_device_id(&port.uid);
+            outputs.push(AudioDeviceOption {
+                name: Self::ios_output_name_for_port(port),
+                is_default: selected_output.as_deref() == Some(id.as_str()),
+                id,
+            });
+        }
+
+        AudioDeviceInventory {
+            inputs,
+            outputs,
+            selected_input,
+            selected_output,
+        }
+    }
+
+    pub async fn audio_device_inventory(&self) -> AudioDeviceInventory {
+        let selection = {
+            let guard = self.inner.lock().await;
+            guard
+                .as_ref()
+                .map(|session| session._device_selection.clone())
+        };
+        Self::build_audio_device_inventory(selection.as_ref())
+    }
+
     /// Configure the iOS AVAudioSession so Bluetooth devices appear in
     /// cpal enumeration. Called from `tutoring_list_devices` before
     /// device enumeration so AirPods etc. are visible. Idempotent.
     pub fn configure_ios_audio_session_for_devices() {
-        Self::configure_ios_audio_session();
+        Self::configure_ios_audio_session_with_selection(None);
     }
 
     /// Configure the iOS AVAudioSession for play-and-record.
@@ -710,6 +972,10 @@ impl TutoringManager {
     /// Dispatches to the **main thread** via GCD because AVAudioSession
     /// APIs require it.
     fn configure_ios_audio_session() {
+        Self::configure_ios_audio_session_with_selection(None);
+    }
+
+    fn configure_ios_audio_session_with_selection(selection: Option<&DeviceSelection>) {
         run_on_main_thread(|| {
             unsafe {
                 // ObjC: [[AVAudioSession sharedInstance] setCategory:AVAudioSessionCategoryPlayAndRecord
@@ -772,11 +1038,11 @@ impl TutoringManager {
                     return;
                 }
 
-                // [session setCategory:category withOptions:(DefaultToSpeaker|AllowBluetooth) error:nil]
+                // [session setCategory:category withOptions:(DefaultToSpeaker|AllowBluetoothHFP) error:nil]
                 //
                 // Do not request AllowBluetoothA2DP here. For two-way tutoring/call audio we
                 // want the system's voice route selection, not high-quality output-only A2DP.
-                let options: u64 = 0x02 | 0x04;
+                let options: u64 = 0x08 | 0x04;
                 let set_cat_sel =
                     sel_registerName(b"setCategory:withOptions:error:\0".as_ptr() as *const i8);
                 let nil: Id = std::ptr::null_mut();
@@ -813,9 +1079,92 @@ impl TutoringManager {
                     crate::diag::log("configure_ios_audio_session: setActive OK");
                 }
 
+                let available_inputs_sel =
+                    sel_registerName(b"availableInputs\0".as_ptr() as *const i8);
+                let uid_sel = sel_registerName(b"UID\0".as_ptr() as *const i8);
+                let count_sel = sel_registerName(b"count\0".as_ptr() as *const i8);
+                let object_sel = sel_registerName(b"objectAtIndex:\0".as_ptr() as *const i8);
+                let set_pref_input_sel =
+                    sel_registerName(b"setPreferredInput:error:\0".as_ptr() as *const i8);
+                let override_sel =
+                    sel_registerName(b"overrideOutputAudioPort:error:\0".as_ptr() as *const i8);
+                let utf8_string_sel = sel_registerName(b"UTF8String\0".as_ptr() as *const i8);
+
+                type MsgSendCount = unsafe extern "C" fn(Id, Sel) -> usize;
+                type MsgSendIndex = unsafe extern "C" fn(Id, Sel, usize) -> Id;
+                type MsgSendObj = unsafe extern "C" fn(Id, Sel, Id, Id) -> i8;
+                type MsgSendI64 = unsafe extern "C" fn(Id, Sel, i64, Id) -> i8;
+                type MsgSendUtf8 = unsafe extern "C" fn(Id, Sel) -> *const i8;
+
+                let send_count: MsgSendCount =
+                    std::mem::transmute(objc_msgSend as unsafe extern "C" fn(Id, Sel, ...) -> Id);
+                let send_index: MsgSendIndex =
+                    std::mem::transmute(objc_msgSend as unsafe extern "C" fn(Id, Sel, ...) -> Id);
+                let send_obj: MsgSendObj =
+                    std::mem::transmute(objc_msgSend as unsafe extern "C" fn(Id, Sel, ...) -> Id);
+                let send_i64: MsgSendI64 =
+                    std::mem::transmute(objc_msgSend as unsafe extern "C" fn(Id, Sel, ...) -> Id);
+                let send_utf8: MsgSendUtf8 =
+                    std::mem::transmute(objc_msgSend as unsafe extern "C" fn(Id, Sel, ...) -> Id);
+
+                let preferred_uid = selection
+                    .and_then(|devices| {
+                        Self::ios_port_uid(devices.mic_device_id.as_deref())
+                            .or_else(|| Self::ios_port_uid(devices.speaker_device_id.as_deref()))
+                    })
+                    .map(str::to_string);
+                let available_inputs = send(session, available_inputs_sel);
+                let preferred_port = if let Some(uid) = preferred_uid.as_deref() {
+                    if available_inputs.is_null() {
+                        nil
+                    } else {
+                        let count = send_count(available_inputs, count_sel);
+                        let mut matched: Id = nil;
+                        for index in 0..count {
+                            let port = send_index(available_inputs, object_sel, index);
+                            if port.is_null() {
+                                continue;
+                            }
+                            let uid_obj = send(port, uid_sel);
+                            let uid_cstr = if uid_obj.is_null() {
+                                std::ptr::null()
+                            } else {
+                                send_utf8(uid_obj, utf8_string_sel)
+                            };
+                            if uid_cstr.is_null() {
+                                continue;
+                            }
+                            let candidate = std::ffi::CStr::from_ptr(uid_cstr).to_string_lossy();
+                            if candidate == uid {
+                                matched = port;
+                                break;
+                            }
+                        }
+                        matched
+                    }
+                } else {
+                    nil
+                };
+
+                let set_pref_ok = send_obj(session, set_pref_input_sel, preferred_port, nil);
+                if set_pref_ok == 0 {
+                    crate::diag::log("configure_ios_audio_session: setPreferredInput failed");
+                }
+
+                let port_override = match selection
+                    .and_then(|devices| devices.speaker_device_id.as_deref())
+                {
+                    Some(IOS_AUDIO_OUTPUT_SPEAKER_ID) => i64::from(u32::from_be_bytes(*b"spkr")),
+                    _ => 0,
+                };
+                let override_ok = send_i64(session, override_sel, port_override, nil);
+                if override_ok == 0 {
+                    crate::diag::log("configure_ios_audio_session: overrideOutputAudioPort failed");
+                }
+
                 log::info!("tutoring: AVAudioSession configured for PlayAndRecord");
                 crate::diag::log(
-                    "iOS audio session configured: PlayAndRecord + VideoChat + DefaultToSpeaker + AllowBluetooth",
+                    "iOS audio session configured: PlayAndRecord + VideoChat + DefaultToSpeaker + AllowBluetoothHFP",
                 );
 
                 register_audio_session_observer();
@@ -828,11 +1177,9 @@ impl TutoringManager {
     /// Both AVAudioSession configuration and CoreAudio/cpal init are
     /// dispatched to the main thread — iOS requires it.
     /// Uses spawn_blocking + timeout to prevent indefinite hangs.
-    async fn try_create_audio_backend(
-        _input_device_id: Option<DeviceId>,
-        _output_device_id: Option<DeviceId>,
-    ) -> Option<AudioBackend> {
+    async fn try_create_audio_backend(devices: &DeviceSelection) -> Option<AudioBackend> {
         crate::diag::log("try_create_audio_backend: starting...");
+        let devices = devices.clone();
 
         // Run the entire audio init (which needs the main thread) inside
         // spawn_blocking so we can apply a timeout without blocking tokio.
@@ -840,9 +1187,9 @@ impl TutoringManager {
             Duration::from_secs(10),
             tokio::task::spawn_blocking(move || {
                 // Configure iOS audio session first — required before any CoreAudio usage.
-                Self::configure_ios_audio_session();
+                Self::configure_ios_audio_session_with_selection(Some(&devices));
                 crate::diag::log(
-                    "try_create_audio_backend: using system-selected iOS audio route (device IDs ignored)",
+                    "try_create_audio_backend: using AVAudioSession-selected iOS route",
                 );
 
                 // CoreAudio (cpal) init also needs the main thread on iOS.
@@ -884,14 +1231,13 @@ impl TutoringManager {
     fn schedule_audio_session_recovery(reason: &'static str) {
         log::info!("tutoring: scheduling iOS audio recovery after {reason}");
         crate::diag::log(&format!("iOS audio recovery scheduled after {reason}"));
-        Self::configure_ios_audio_session();
 
         let Some(inner) = TUTORING_MANAGER_INNER.get().cloned() else {
             return;
         };
 
         tauri::async_runtime::spawn(async move {
-            let outputs = {
+            let (selection, outputs) = {
                 let guard = inner.lock().await;
                 match guard.as_ref() {
                     Some(session) => {
@@ -903,21 +1249,18 @@ impl TutoringManager {
                         if let Some(output) = session.output_stream.clone() {
                             outputs.push(output);
                         }
-                        outputs
+                        (Some(session._device_selection.clone()), outputs)
                     }
-                    None => Vec::new(),
+                    None => (None, Vec::new()),
                 }
             };
+
+            Self::configure_ios_audio_session_with_selection(selection.as_ref());
 
             for output in outputs {
                 output.resume();
             }
         });
-    }
-
-    /// Parse an optional device ID string into a `DeviceId`.
-    fn parse_device_id(s: &Option<String>) -> Option<DeviceId> {
-        s.as_ref().and_then(|id| id.parse::<DeviceId>().ok())
     }
 
     /// Append a log entry to the session's ring buffer (if session is active).
@@ -1137,7 +1480,7 @@ impl TutoringManager {
         crate::diag::log(&format!(
             "  [{short_id}] video repair: subscribing (VtDecoder, quality=High)..."
         ));
-        match catalog.select_video_rendition(iroh_live::media::av::Quality::High) {
+        match catalog.select_video_rendition(iroh_live::media::av::Quality::Highest) {
             Ok(selected) => {
                 crate::diag::log(&format!(
                     "  [{short_id}] video repair: selected rendition {selected}"
@@ -1152,7 +1495,7 @@ impl TutoringManager {
 
         match broadcast.watch_with::<VtDecoder>(
             &iroh_live::media::av::DecodeConfig::default(),
-            iroh_live::media::av::Quality::High,
+            iroh_live::media::av::Quality::Highest,
         ) {
             Ok(video_track) => {
                 log::info!("tutoring: watching video from {short_id}:{name}");
@@ -1290,9 +1633,7 @@ impl TutoringManager {
         let ticket_str = room.ticket().to_string();
 
         crate::diag::log("create_room: initializing audio backend...");
-        let mic_id = Self::parse_device_id(&devices.mic_device_id);
-        let speaker_id = Self::parse_device_id(&devices.speaker_device_id);
-        let audio_ctx = Self::try_create_audio_backend(mic_id, speaker_id).await;
+        let audio_ctx = Self::try_create_audio_backend(&devices).await;
         let has_audio = audio_ctx.is_some();
         crate::diag::log(&format!(
             "create_room: audio backend done, has_audio={has_audio}"
@@ -1456,9 +1797,7 @@ impl TutoringManager {
         let ticket_str = room.ticket().to_string();
 
         crate::diag::log("join_room: creating audio backend...");
-        let mic_id = Self::parse_device_id(&devices.mic_device_id);
-        let speaker_id = Self::parse_device_id(&devices.speaker_device_id);
-        let audio_ctx = Self::try_create_audio_backend(mic_id, speaker_id).await;
+        let audio_ctx = Self::try_create_audio_backend(&devices).await;
         let has_audio = audio_ctx.is_some();
         crate::diag::log(&format!("join_room: audio={has_audio}"));
         if !has_audio {
@@ -1622,6 +1961,40 @@ impl TutoringManager {
         }
 
         Ok(session.audio_enabled)
+    }
+
+    pub async fn update_audio_devices(&self, devices: DeviceSelection) -> Result<(), String> {
+        {
+            let mut inner = self.inner.lock().await;
+            let session = inner.as_mut().ok_or("not in a tutoring session")?;
+            session._device_selection = devices.clone();
+        }
+
+        Self::configure_ios_audio_session_with_selection(Some(&devices));
+
+        let outputs = {
+            let inner = self.inner.lock().await;
+            match inner.as_ref() {
+                Some(session) => {
+                    let mut outputs = session
+                        .remote_output_streams
+                        .values()
+                        .cloned()
+                        .collect::<Vec<_>>();
+                    if let Some(output) = session.output_stream.clone() {
+                        outputs.push(output);
+                    }
+                    outputs
+                }
+                None => Vec::new(),
+            }
+        };
+
+        for output in outputs {
+            output.resume();
+        }
+
+        Ok(())
     }
 
     /// Toggle local camera on/off.
@@ -2409,15 +2782,15 @@ impl TutoringManager {
         let (mut frames, handle) = watch.split();
         let is_self_preview = node_id == "self";
         let viewport = if is_self_preview {
-            (256, 384)
+            (540, 960)
         } else {
-            (960, 540)
+            (1280, 720)
         };
-        let jpeg_quality = if is_self_preview { 38 } else { 62 };
+        let jpeg_quality = if is_self_preview { 58 } else { 70 };
         let frame_interval = if is_self_preview {
-            Duration::from_millis(220)
+            Duration::from_millis(90)
         } else {
-            Duration::from_millis(140)
+            Duration::from_millis(95)
         };
         handle.set_viewport(viewport.0, viewport.1);
 

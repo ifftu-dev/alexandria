@@ -7,8 +7,7 @@ import type { SkillInfo, SkillGraphEdge, SkillProof } from '@/types'
  * Data is loaded once by SidebarSkillGraph.vue, and the reactive refs
  * are shared across components via module-level singletons.
  *
- * Mark 2 uses Nuxt's useState() for SSR-safe shared state.
- * In Tauri (client-only), module-level refs serve the same purpose.
+ * In Tauri (client-only), module-level refs serve as shared state.
  */
 
 // Module-level singletons — shared across all consumers

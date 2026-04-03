@@ -22,7 +22,7 @@ const aiStatus = ref<{
 const activeTab = ref<'overview' | 'sessions' | 'signals' | 'profile'>('overview')
 
 // ---------------------------------------------------------------------------
-// Signal weights (matches mark2 sentinel spec)
+// Signal weights (matches sentinel spec)
 // ---------------------------------------------------------------------------
 const signalWeights = [
   { name: 'Typing Consistency', key: 'typing_consistency', weight: 20, description: 'EMA-based deviation from stored typing profile (dwell time, flight time, WPM)' },

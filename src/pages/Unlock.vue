@@ -14,11 +14,12 @@ import type { UnlistenFn } from '@tauri-apps/api/event'
 import Starfield from '@/components/auth/Starfield.vue'
 
 const router = useRouter()
-const { unlockVault } = useAuth()
+const { unlockVault, resetLocalWallet } = useAuth()
 
 const password = ref('')
 const error = ref('')
 const unlocking = ref(false)
+const recovering = ref(false)
 const biometricAvailable = ref(false)
 const hasBiometricCredential = ref(false)
 const biometricLoading = ref(false)
@@ -81,7 +82,9 @@ async function unlock() {
   } catch (e) {
     const msg = String(e)
     if (msg.includes('incorrect password') || msg.includes('IncorrectPassword')) {
-      error.value = 'Incorrect password. Please try again.'
+      error.value = 'That password does not match the local vault on this device. Please try again.'
+    } else if (msg.includes('salt file corrupted') || msg.includes('integrity check failed')) {
+      error.value = 'This desktop vault looks out of sync with its local unlock data. If you recently reset this device, clear the local desktop vault and create or restore it again.'
     } else {
       error.value = `Failed to unlock: ${msg}`
     }
@@ -119,6 +122,8 @@ async function unlockWithBiometric(auto = false) {
       const msg = String(e)
       if (msg.includes('incorrect password') || msg.includes('IncorrectPassword')) {
         error.value = 'Biometric unlock credential is out of date. Unlock with password once to refresh it.'
+      } else if (msg.includes('salt file corrupted') || msg.includes('integrity check failed')) {
+        error.value = 'The local desktop vault files look out of sync. Unlock with password after resetting the local desktop vault.'
       } else {
         error.value = `Biometric unlock failed: ${msg}`
       }
@@ -128,6 +133,29 @@ async function unlockWithBiometric(auto = false) {
     router.replace('/home')
   } finally {
     biometricLoading.value = false
+  }
+}
+
+async function recoverWallet() {
+  const confirmed = window.confirm(
+    'This will remove the local Alexandria wallet on this device and send you to wallet recovery. Continue only if you still have your recovery phrase.',
+  )
+  if (!confirmed) {
+    return
+  }
+
+  recovering.value = true
+  error.value = ''
+  progressLines.value = []
+
+  try {
+    await resetLocalWallet()
+    password.value = ''
+    router.replace({ name: 'onboarding', query: { mode: 'import' } })
+  } catch (e) {
+    error.value = `Couldn't prepare wallet recovery: ${String(e)}`
+  } finally {
+    recovering.value = false
   }
 }
 
@@ -180,7 +208,7 @@ function handleKeydown(e: KeyboardEvent) {
 
           <AppButton
             class="w-full"
-            :disabled="!password"
+            :disabled="!password || recovering"
             @click="unlock"
           >
             Unlock
@@ -197,8 +225,22 @@ function handleKeydown(e: KeyboardEvent) {
             Unlock with Biometrics
           </AppButton>
 
+          <AppButton
+            class="w-full mt-2"
+            variant="outline"
+            :loading="recovering"
+            :disabled="unlocking || biometricLoading"
+            @click="recoverWallet"
+          >
+            Recover Wallet with Recovery Phrase
+          </AppButton>
+
           <p v-if="biometricAvailable && !hasBiometricCredential" class="mt-2 text-xs text-muted-foreground">
             Touch ID is available. Unlock once with password to enable biometric unlock.
+          </p>
+
+          <p class="mt-3 text-xs text-muted-foreground">
+            Forgot your password? Recovery removes the local wallet on this device and lets you restore it from your recovery phrase.
           </p>
         </div>
 

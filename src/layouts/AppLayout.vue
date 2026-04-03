@@ -7,7 +7,7 @@ import TutoringPiP from '@/components/layout/TutoringPiP.vue'
 import { usePlatform } from '@/composables/usePlatform'
 import { ref, onMounted } from 'vue'
 
-// Persist sidebar state to localStorage (Mark 2 uses a cookie)
+// Persist sidebar state to localStorage
 const STORAGE_KEY = 'alexandria-sidebar'
 const sidebarCollapsed = ref(false)
 const { isMobilePlatform } = usePlatform()

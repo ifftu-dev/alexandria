@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useTutoringRoom } from '@/composables/useTutoringRoom'
 import { usePlatform } from '@/composables/usePlatform'
+import type { DeviceList } from '@/types'
 
 const route = useRoute()
 const router = useRouter()
@@ -25,6 +26,8 @@ const {
   stopPolling,
   setupEventListeners,
   setChatOpen,
+  listDevices,
+  setAudioDevices,
   getDiagnostics,
 } = useTutoringRoom()
 
@@ -42,6 +45,12 @@ const showTicketFallback = ref(false)
 const diagnosticsCopied = ref(false)
 const showDiagFallback = ref(false)
 const dismissedError = ref(false)
+const showAudioDevices = ref(false)
+const loadingAudioDevices = ref(false)
+const applyingAudioDevices = ref(false)
+const availableDevices = ref<DeviceList | null>(null)
+const selectedMicInput = ref<string | null>(null)
+const selectedAudioOutput = ref<string | null>(null)
 
 // Duration timer
 const elapsedSeconds = ref(0)
@@ -163,6 +172,34 @@ async function handleToggleAudio() {
     await toggleAudio(!audioEnabled.value)
   } catch {
     // error shown via lastError
+  }
+}
+
+async function loadAudioDevices() {
+  loadingAudioDevices.value = true
+  try {
+    const devices = await listDevices()
+    availableDevices.value = devices
+    selectedMicInput.value = devices.selected_audio_input ?? devices.audio_inputs.find(device => device.is_default)?.id ?? devices.audio_inputs[0]?.id ?? null
+    selectedAudioOutput.value = devices.selected_audio_output ?? devices.audio_outputs.find(device => device.is_default)?.id ?? devices.audio_outputs[0]?.id ?? null
+  } finally {
+    loadingAudioDevices.value = false
+  }
+}
+
+async function openAudioDevices() {
+  await loadAudioDevices()
+  showAudioDevices.value = true
+}
+
+async function applyAudioDevices() {
+  applyingAudioDevices.value = true
+  try {
+    await setAudioDevices(selectedMicInput.value, selectedAudioOutput.value)
+    await loadAudioDevices()
+    showAudioDevices.value = false
+  } finally {
+    applyingAudioDevices.value = false
   }
 }
 
@@ -294,6 +331,18 @@ function peerInitials(nodeId: string): string {
           <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15.3M14.25 3.104c.251.023.501.05.75.082M19.8 15.3l-1.57.393A9.065 9.065 0 0112 15a9.065 9.065 0 00-6.23.693L5 14.5m14.8.8l1.402 1.402c1.232 1.232.65 3.318-1.067 3.611l-.772.13c-1.687.282-3.404.418-5.129.418s-3.442-.136-5.129-.418l-.772-.131c-1.716-.293-2.299-2.379-1.067-3.61L5 14.5" />
           </svg>
+        </button>
+
+        <button
+          v-if="isActive && isMobilePlatform"
+          class="flex items-center gap-1 rounded-lg border border-border px-2 py-1.5 text-xs text-foreground transition-colors hover:bg-muted"
+          @click="openAudioDevices"
+          title="Audio devices"
+        >
+          <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M3 10.5h2.25m13.5 0H21m-15.75 4.5H6a2.25 2.25 0 012.25-2.25h7.5A2.25 2.25 0 0118 15h.75M7.5 10.5V8.25A2.25 2.25 0 019.75 6h4.5A2.25 2.25 0 0116.5 8.25v2.25m-9 0h9" />
+          </svg>
+          <span class="hidden sm:inline">Audio</span>
         </button>
 
         <!-- Copy ticket -->
@@ -880,6 +929,90 @@ function peerInitials(nodeId: string): string {
         </svg>
       </button>
     </div>
+
+    <Teleport to="body">
+      <Transition
+        enter-active-class="transition-all duration-200"
+        enter-from-class="opacity-0"
+        enter-to-class="opacity-100"
+        leave-active-class="transition-all duration-150"
+        leave-from-class="opacity-100"
+        leave-to-class="opacity-0"
+      >
+        <div
+          v-if="showAudioDevices"
+          class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+          @click.self="showAudioDevices = false"
+        >
+          <div class="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-xl mx-4">
+            <h2 class="text-lg font-semibold text-foreground">Audio Devices</h2>
+            <p class="mt-1 text-sm text-muted-foreground">
+              Live tutoring should play through the speaker by default, or move to a connected headset/Bluetooth device when you choose it here.
+            </p>
+
+            <div v-if="loadingAudioDevices" class="mt-4 rounded-lg border border-border bg-muted/30 px-3 py-4 text-sm text-muted-foreground">
+              Loading available routes...
+            </div>
+
+            <div v-else class="mt-4 space-y-4">
+              <div>
+                <label class="text-sm font-medium text-foreground" for="session-audio-output">Audio Output</label>
+                <select
+                  id="session-audio-output"
+                  v-model="selectedAudioOutput"
+                  class="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                >
+                  <option
+                    v-for="device in availableDevices?.audio_outputs ?? []"
+                    :key="device.id"
+                    :value="device.id"
+                  >
+                    {{ device.name || device.id }}{{ device.is_default ? ' (Current)' : '' }}
+                  </option>
+                </select>
+              </div>
+
+              <div>
+                <label class="text-sm font-medium text-foreground" for="session-audio-input">Microphone</label>
+                <select
+                  id="session-audio-input"
+                  v-model="selectedMicInput"
+                  class="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                >
+                  <option
+                    v-for="device in availableDevices?.audio_inputs ?? []"
+                    :key="device.id"
+                    :value="device.id"
+                  >
+                    {{ device.name || device.id }}{{ device.is_default ? ' (Current)' : '' }}
+                  </option>
+                </select>
+              </div>
+
+              <p class="text-xs text-muted-foreground">
+                On iPhone, connected headset and Bluetooth routes appear here when iOS exposes them to the call audio session.
+              </p>
+            </div>
+
+            <div class="mt-6 flex justify-end gap-2">
+              <button
+                class="rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+                @click="showAudioDevices = false"
+              >
+                Cancel
+              </button>
+              <button
+                class="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+                :disabled="loadingAudioDevices || applyingAudioDevices"
+                @click="applyAudioDevices"
+              >
+                {{ applyingAudioDevices ? 'Applying...' : 'Apply' }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
 
     <!-- Leave confirmation modal -->
     <Teleport to="body">

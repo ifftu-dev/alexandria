@@ -299,6 +299,15 @@ pub async fn tutoring_toggle_audio(
     state.tutoring.toggle_audio(enable).await
 }
 
+#[tauri::command]
+pub async fn tutoring_set_audio_devices(
+    _mic_id: Option<String>,
+    _speaker_id: Option<String>,
+    _state: State<'_, AppState>,
+) -> Result<(), String> {
+    Err("Changing audio devices during a live tutoring session is currently supported on mobile only".into())
+}
+
 /// Toggle screen sharing on/off.
 #[tauri::command]
 pub async fn tutoring_toggle_screen_share(
@@ -421,6 +430,8 @@ pub struct DeviceList {
     pub audio_inputs: Vec<AudioDeviceInfo>,
     pub audio_outputs: Vec<AudioDeviceInfo>,
     pub cameras: Vec<CameraDeviceInfo>,
+    pub selected_audio_input: Option<String>,
+    pub selected_audio_output: Option<String>,
 }
 
 /// List all available audio and camera devices.
@@ -450,11 +461,23 @@ pub async fn tutoring_list_devices() -> Result<DeviceList, String> {
         .collect();
 
     let cameras = list_cameras().await;
+    let selected_audio_input = audio_inputs
+        .iter()
+        .find(|device| device.is_default)
+        .map(|device| device.id.clone())
+        .or_else(|| audio_inputs.first().map(|device| device.id.clone()));
+    let selected_audio_output = audio_outputs
+        .iter()
+        .find(|device| device.is_default)
+        .map(|device| device.id.clone())
+        .or_else(|| audio_outputs.first().map(|device| device.id.clone()));
 
     Ok(DeviceList {
         audio_inputs,
         audio_outputs,
         cameras,
+        selected_audio_input,
+        selected_audio_output,
     })
 }
 

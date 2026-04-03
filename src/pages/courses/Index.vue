@@ -46,7 +46,7 @@ onMounted(async () => {
       </AppButton>
     </div>
 
-    <!-- Loading skeleton (Mark 2 style: shadow only, no border) -->
+    <!-- Loading skeleton (shadow only, no border) -->
     <div v-if="loading" class="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
       <div v-for="i in 8" :key="i" class="animate-pulse overflow-hidden rounded-xl bg-card shadow-sm">
         <div class="aspect-[16/9] bg-muted" />
@@ -65,7 +65,7 @@ onMounted(async () => {
       </div>
     </div>
 
-    <!-- Empty state (Mark 2 style: shadow, no border) -->
+    <!-- Empty state (shadow, no border) -->
     <div
       v-else-if="courses.length === 0"
       class="rounded-xl bg-card p-16 text-center shadow-sm"
@@ -84,7 +84,7 @@ onMounted(async () => {
       </AppButton>
     </div>
 
-    <!-- Course grid (Mark 2 style: gap-6, 4 columns max) -->
+    <!-- Course grid (gap-6, 4 columns max) -->
     <div v-else class="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
       <CourseCard
         v-for="course in courses"

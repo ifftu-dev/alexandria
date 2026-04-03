@@ -65,6 +65,14 @@ async function lockVault(): Promise<void> {
   initialized.value = false
 }
 
+async function resetLocalWallet(): Promise<void> {
+  await invoke('reset_local_wallet')
+  vaultUnlocked.value = false
+  identity.value = null
+  walletInfo.value = null
+  initialized.value = false
+}
+
 async function exportMnemonic(password: string): Promise<string> {
   return invoke<string>('export_mnemonic', { password })
 }
@@ -116,6 +124,7 @@ export function useAuth() {
     restoreWallet,
     refreshProfile,
     lockVault,
+    resetLocalWallet,
     exportMnemonic,
     initialize,
   }

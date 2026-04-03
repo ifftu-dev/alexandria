@@ -16,7 +16,7 @@ const MIN_PASSWORD_LENGTH: usize = 12;
 fn validate_password(password: &str) -> Result<(), String> {
     if password.len() < MIN_PASSWORD_LENGTH {
         return Err(format!(
-            "Password must be at least {MIN_PASSWORD_LENGTH} characters"
+            "Your vault password must be at least {MIN_PASSWORD_LENGTH} characters long. Add a few more characters and try again."
         ));
     }
     Ok(())
@@ -161,6 +161,7 @@ pub async fn generate_wallet(
 ) -> Result<GenerateWalletResponse, String> {
     validate_password(&password)?;
     emit_progress(&app, "vault", "Creating encrypted vault...");
+    let had_existing_vault = Keystore::exists(&state.vault_dir);
 
     // Move all CPU-bound crypto to a blocking thread:
     // - Keystore::create() sets up Stronghold in memory
@@ -179,6 +180,9 @@ pub async fn generate_wallet(
     .map_err(|e: String| e)?;
 
     // Derive the DB encryption key and open/migrate the database
+    if !had_existing_vault && state.reset_orphaned_encrypted_database()? {
+        emit_progress(&app, "db", "Resetting stale local database...");
+    }
     emit_progress(&app, "db", "Opening encrypted database...");
     let db_key = ks.derive_db_key();
     state.open_database(&db_key)?;
@@ -246,6 +250,7 @@ pub async fn restore_wallet(
 ) -> Result<WalletInfo, String> {
     validate_password(&password)?;
     emit_progress(&app, "validate", "Validating recovery phrase...");
+    let had_existing_vault = Keystore::exists(&state.vault_dir);
 
     // Move all CPU-bound crypto to a blocking thread
     let vault_dir = state.vault_dir.clone();
@@ -259,6 +264,14 @@ pub async fn restore_wallet(
     .await
     .map_err(|e| format!("blocking task failed: {e}"))?
     .map_err(|e: String| e)?;
+
+    if !had_existing_vault && state.reset_orphaned_encrypted_database()? {
+        emit_progress(&app, "db", "Resetting stale local database...");
+    }
+
+    emit_progress(&app, "db", "Opening encrypted database...");
+    let db_key = ks.derive_db_key();
+    state.open_database(&db_key)?;
 
     emit_progress(&app, "db", "Storing identity in local database...");
     {
@@ -357,6 +370,22 @@ pub async fn lock_vault(state: State<'_, AppState>) -> Result<(), String> {
     if let Some(ks) = keystore.take() {
         ks.lock().map_err(|e| e.to_string())?;
     }
+    Ok(())
+}
+
+/// Remove the local wallet on this device so the user can recover from a phrase.
+///
+/// This deletes the encrypted vault snapshot and encrypted database for the
+/// current device only. It does not affect any backed-up recovery phrase.
+#[tauri::command]
+pub async fn reset_local_wallet(state: State<'_, AppState>) -> Result<(), String> {
+    let mut keystore = state.keystore.lock().await;
+    if let Some(ks) = keystore.take() {
+        ks.lock().map_err(|e| e.to_string())?;
+    }
+    drop(keystore);
+
+    state.reset_local_wallet_files()?;
     Ok(())
 }
 

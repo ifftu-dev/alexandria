@@ -120,8 +120,8 @@ async function handleCreatePreview() {
     }
     // Pre-select default devices
     selectedCamera.value = devList.cameras[0]?.index ?? null
-    selectedMicInput.value = devList.audio_inputs.find(d => d.is_default)?.id ?? devList.audio_inputs[0]?.id ?? null
-    selectedAudioOutput.value = devList.audio_outputs.find(d => d.is_default)?.id ?? devList.audio_outputs[0]?.id ?? null
+    selectedMicInput.value = devList.selected_audio_input ?? devList.audio_inputs.find(d => d.is_default)?.id ?? devList.audio_inputs[0]?.id ?? null
+    selectedAudioOutput.value = devList.selected_audio_output ?? devList.audio_outputs.find(d => d.is_default)?.id ?? devList.audio_outputs[0]?.id ?? null
     createStep.value = 'preview'
   } finally {
     checkingDevices.value = false
@@ -162,8 +162,8 @@ async function handleJoinPreview() {
       error: null,
     }
     selectedCamera.value = devList.cameras[0]?.index ?? null
-    selectedMicInput.value = devList.audio_inputs.find(d => d.is_default)?.id ?? devList.audio_inputs[0]?.id ?? null
-    selectedAudioOutput.value = devList.audio_outputs.find(d => d.is_default)?.id ?? devList.audio_outputs[0]?.id ?? null
+    selectedMicInput.value = devList.selected_audio_input ?? devList.audio_inputs.find(d => d.is_default)?.id ?? devList.audio_inputs[0]?.id ?? null
+    selectedAudioOutput.value = devList.selected_audio_output ?? devList.audio_outputs.find(d => d.is_default)?.id ?? devList.audio_outputs[0]?.id ?? null
     joinStep.value = 'preview'
   } finally {
     checkingDevices.value = false

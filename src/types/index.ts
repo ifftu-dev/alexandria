@@ -949,6 +949,8 @@ export interface DeviceList {
   audio_inputs: AudioDeviceInfo[]
   audio_outputs: AudioDeviceInfo[]
   cameras: CameraDeviceInfo[]
+  selected_audio_input: string | null
+  selected_audio_output: string | null
 }
 
 export interface AudioLevelEvent {

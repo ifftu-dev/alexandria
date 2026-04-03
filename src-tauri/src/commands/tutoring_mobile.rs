@@ -56,6 +56,8 @@ pub struct DeviceList {
     pub audio_inputs: Vec<AudioDeviceInfo>,
     pub audio_outputs: Vec<AudioDeviceInfo>,
     pub cameras: Vec<CameraDeviceInfo>,
+    pub selected_audio_input: Option<String>,
+    pub selected_audio_output: Option<String>,
 }
 
 /// Helper: lock the database, handling poisoned mutex and uninitialized DB gracefully.
@@ -241,6 +243,21 @@ pub async fn tutoring_toggle_audio(
     state.tutoring.toggle_audio(enable).await
 }
 
+#[tauri::command]
+pub async fn tutoring_set_audio_devices(
+    mic_id: Option<String>,
+    speaker_id: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    state
+        .tutoring
+        .update_audio_devices(DeviceSelection {
+            mic_device_id: mic_id,
+            speaker_device_id: speaker_id,
+        })
+        .await
+}
+
 /// Toggle screen sharing — not available on mobile.
 #[tauri::command]
 pub async fn tutoring_toggle_screen_share(
@@ -332,29 +349,27 @@ pub async fn tutoring_check_devices() -> Result<DeviceCheckResult, String> {
 
 /// List available audio devices and camera.
 ///
-/// On iOS, the AVAudioSession must be configured before device enumeration
-/// so that Bluetooth devices (AirPods, etc.) are visible to CoreAudio/cpal.
 #[tauri::command]
-pub async fn tutoring_list_devices() -> Result<DeviceList, String> {
-    // Configure AVAudioSession first so Bluetooth devices appear in enumeration.
-    // This is idempotent — calling it multiple times is safe.
-    crate::tutoring::manager_mobile::TutoringManager::configure_ios_audio_session_for_devices();
+pub async fn tutoring_list_devices(state: State<'_, AppState>) -> Result<DeviceList, String> {
+    let inventory = state.tutoring.audio_device_inventory().await;
 
-    let audio_inputs: Vec<AudioDeviceInfo> = AudioBackend::list_input_devices()
+    let audio_inputs = inventory
+        .inputs
         .into_iter()
-        .map(|d| AudioDeviceInfo {
-            id: d.id.to_string(),
-            name: d.name,
-            is_default: d.is_default,
+        .map(|device| AudioDeviceInfo {
+            id: device.id,
+            name: Some(device.name),
+            is_default: device.is_default,
         })
         .collect();
 
-    let audio_outputs: Vec<AudioDeviceInfo> = AudioBackend::list_output_devices()
+    let audio_outputs = inventory
+        .outputs
         .into_iter()
-        .map(|d| AudioDeviceInfo {
-            id: d.id.to_string(),
-            name: d.name,
-            is_default: d.is_default,
+        .map(|device| AudioDeviceInfo {
+            id: device.id,
+            name: Some(device.name),
+            is_default: device.is_default,
         })
         .collect();
 
@@ -365,6 +380,8 @@ pub async fn tutoring_list_devices() -> Result<DeviceList, String> {
             index: "front".into(),
             name: "Front Camera".into(),
         }],
+        selected_audio_input: inventory.selected_input,
+        selected_audio_output: inventory.selected_output,
     })
 }
 

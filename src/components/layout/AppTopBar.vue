@@ -123,7 +123,7 @@ function onClickOutsideTheme(e: MouseEvent) {
 onMounted(() => document.addEventListener('click', onClickOutsideTheme))
 onUnmounted(() => document.removeEventListener('click', onClickOutsideTheme))
 
-// --- User menu dropdown (Mark 2 style) ---
+// --- User menu dropdown ---
 const userMenuOpen = ref(false)
 const userMenuRef = ref<HTMLElement | null>(null)
 

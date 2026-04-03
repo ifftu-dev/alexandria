@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useAuth } from '@/composables/useAuth'
 import { biometricSupported, storeVaultPasswordForBiometric } from '@/composables/useBiometricVault'
 import { listen } from '@tauri-apps/api/event'
@@ -8,6 +8,7 @@ import type { UnlistenFn } from '@tauri-apps/api/event'
 import Starfield from '@/components/auth/Starfield.vue'
 
 const router = useRouter()
+const route = useRoute()
 const { generateWallet: authGenerate, restoreWallet: authRestore, checkVaultExists } = useAuth()
 
 const vaultExists = ref(false)
@@ -47,6 +48,13 @@ onMounted(async () => {
     // ignore
     biometricAvailable.value = false
   }
+
+  const requestedMode = Array.isArray(route.query.mode) ? route.query.mode[0] : route.query.mode
+  if (requestedMode === 'import') {
+    startImport()
+  } else if (requestedMode === 'create') {
+    startCreate()
+  }
 })
 
 onUnmounted(() => {
@@ -61,7 +69,16 @@ onUnmounted(() => {
 
 const passwordsMatch = computed(() => password.value === confirmPassword.value)
 const passwordValid = computed(() => password.value.length >= 12)
+const passwordLength = computed(() => password.value.length)
 const mnemonicWords = computed(() => mnemonic.value.trim().split(/\s+/).filter(Boolean))
+const importWordCount = computed(() => importMnemonic.value.trim().split(/\s+/).filter(Boolean).length)
+const importWordCountValid = computed(() => {
+  if (mode.value !== 'import' || importMnemonic.value.trim().length === 0) {
+    return true
+  }
+
+  return [12, 15, 24].includes(importWordCount.value)
+})
 
 const createWizardSteps: { id: Step; label: string }[] = [
   { id: 'welcome', label: 'Welcome' },
@@ -89,6 +106,26 @@ const progressPercent = computed(() => {
   return Math.round((activeStepIndex.value / maxIndex) * 100)
 })
 
+function formatOnboardingError(cause: unknown, action: 'create' | 'restore'): string {
+  const raw = cause instanceof Error ? cause.message : String(cause)
+
+  if (raw.includes('Password must be at least')) {
+    return 'Your vault password must be at least 12 characters long. Add a few more characters, then try again.'
+  }
+
+  if (raw.includes('Recovery phrase must be')) {
+    return 'That recovery phrase length is not supported. Use a 12-, 15-, or 24-word phrase, then try again.'
+  }
+
+  if (raw.toLowerCase().includes('mnemonic') || raw.toLowerCase().includes('checksum')) {
+    return 'That recovery phrase does not look valid. Check the word order and spelling, then try again.'
+  }
+
+  return action === 'create'
+    ? `We couldn't create your wallet yet. ${raw}`
+    : `We couldn't restore your wallet yet. ${raw}`
+}
+
 function startCreate() {
   mode.value = 'create'
   step.value = 'password'
@@ -115,11 +152,11 @@ async function proceedFromPassword() {
   error.value = ''
 
   if (!passwordValid.value) {
-    error.value = 'Password must be at least 12 characters.'
+    error.value = 'Your vault password is too short. Use at least 12 characters, then try again.'
     return
   }
   if (!passwordsMatch.value) {
-    error.value = 'Passwords do not match.'
+    error.value = 'The confirmation password does not match yet. Enter the same password in both fields to continue.'
     return
   }
 
@@ -150,7 +187,7 @@ async function createWallet() {
     }
     step.value = 'backup'
   } catch (e) {
-    error.value = String(e)
+    error.value = formatOnboardingError(e, 'create')
     step.value = 'password'
   }
 }
@@ -158,13 +195,13 @@ async function createWallet() {
 async function restoreWallet() {
   const phrase = importMnemonic.value.trim()
   if (!phrase) {
-    error.value = 'Please enter your recovery phrase.'
+    error.value = 'Enter your recovery phrase to continue. Alexandria accepts 12-, 15-, or 24-word phrases.'
     return
   }
 
   const words = phrase.split(/\s+/)
   if (words.length !== 12 && words.length !== 15 && words.length !== 24) {
-    error.value = 'Recovery phrase must be 12, 15, or 24 words.'
+    error.value = 'That recovery phrase length is not supported. Use a 12-, 15-, or 24-word phrase, then try again.'
     return
   }
 
@@ -186,7 +223,7 @@ async function restoreWallet() {
     }
     step.value = 'done'
   } catch (e) {
-    error.value = String(e)
+    error.value = formatOnboardingError(e, 'restore')
     step.value = 'password'
   }
 }
@@ -362,7 +399,14 @@ function enterApp() {
             placeholder="Enter your 24-word recovery phrase, separated by spaces"
             rows="3"
             class="w-full px-3 py-2 text-sm font-mono rounded-md border border-border bg-background focus:outline-none focus:ring-2 focus:ring-ring resize-none"
+            @keyup.enter.exact.prevent="proceedFromPassword"
           />
+          <p
+            class="mt-1 text-xs"
+            :class="importWordCountValid ? 'text-muted-foreground' : 'text-error'"
+          >
+            {{ importWordCount }} words entered. Recovery phrases must contain 12, 15, or 24 words.
+          </p>
         </div>
 
         <!-- Password fields -->
@@ -377,7 +421,14 @@ function enterApp() {
                 type="password"
                 placeholder="At least 12 characters"
                 class="w-full px-3 py-2 text-sm rounded-md border border-border bg-background focus:outline-none focus:ring-2 focus:ring-ring"
+                @keyup.enter.exact.prevent="proceedFromPassword"
               >
+              <p
+                class="mt-1 text-xs"
+                :class="passwordValid ? 'text-success' : 'text-muted-foreground'"
+              >
+                {{ passwordLength }}/12 characters minimum
+              </p>
             </div>
             <div>
               <label class="block text-xs font-medium text-muted-foreground mb-1.5">
@@ -388,12 +439,19 @@ function enterApp() {
                 type="password"
                 placeholder="Enter password again"
                 class="w-full px-3 py-2 text-sm rounded-md border border-border bg-background focus:outline-none focus:ring-2 focus:ring-ring"
+                @keyup.enter.exact.prevent="proceedFromPassword"
               >
               <p
                 v-if="confirmPassword && !passwordsMatch"
                 class="text-xs text-error mt-1"
               >
                 Passwords do not match.
+              </p>
+              <p
+                v-else-if="confirmPassword && passwordsMatch"
+                class="text-xs text-success mt-1"
+              >
+                Passwords match.
               </p>
             </div>
           </div>
@@ -421,11 +479,16 @@ function enterApp() {
           </label>
         </div>
 
-        <p v-if="error" class="text-sm text-error mb-3">{{ error }}</p>
+        <div
+          v-if="error"
+          class="mb-3 rounded-md border border-error/30 bg-error/5 px-3 py-2"
+        >
+          <p class="text-xs font-semibold uppercase tracking-wide text-error">Check These Details</p>
+          <p class="mt-1 text-sm text-error">{{ error }}</p>
+        </div>
 
         <button
-          class="w-full py-2.5 px-4 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary-hover transition-colors disabled:opacity-50"
-          :disabled="!passwordValid || !passwordsMatch"
+          class="w-full py-2.5 px-4 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary-hover transition-colors"
           @click="proceedFromPassword"
         >
           {{ mode === 'create' ? 'Create Wallet' : 'Restore Wallet' }}

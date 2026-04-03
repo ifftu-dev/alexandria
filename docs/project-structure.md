@@ -1,6 +1,6 @@
 # Project Structure
 
-> Alexandria (Mark 3) — Tauri v2 desktop and mobile application (macOS, iOS, Android)
+> Alexandria — Tauri v2 desktop and mobile application (macOS, iOS, Android)
 
 ---
 
@@ -218,7 +218,7 @@ src/
     │   │   └── SentinelTrainingWizard.vue  # 6-step integrity calibration wizard
     │   └── layout/
     │       ├── AppSidebar.vue       # Desktop sidebar — collapsible Live Tutoring/Classrooms previews, skill graph
-    │       ├── AppTopBar.vue        # Top bar with Mark 2-style user menu dropdown (role badge, icon SVGs)
+    │       ├── AppTopBar.vue        # Top bar with user menu dropdown (role badge, icon SVGs)
     │       ├── MobileTabBar.vue     # Bottom tab bar for mobile (iOS/Android), backdrop blur, active indicator
     │       ├── SidebarSkillGraph.vue # force-graph canvas widget — earned/available/locked skill nodes with glow
     │       └── TutoringPiP.vue      # Picture-in-picture call overlay

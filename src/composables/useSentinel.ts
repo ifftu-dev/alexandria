@@ -24,7 +24,7 @@ import type {
 /**
  * Sentinel Engine — Client-side integrity monitoring composable.
  *
- * Adapted from mark2's useSentinel for Tauri v2 (no server HTTP — all via IPC).
+ * Tauri v2 implementation (no server HTTP — all via IPC).
  *
  * PRIVACY GUARANTEE: All biometric and behavioral data is processed entirely
  * within this composable. Only derived scores (0-1) cross to the Rust backend

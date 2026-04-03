@@ -97,6 +97,88 @@ impl AppState {
         log::info!("Encrypted database initialized successfully");
         Ok(())
     }
+
+    /// Remove an orphaned encrypted database when onboarding starts without
+    /// a vault, but stale SQLCipher files from an older vault are still present.
+    ///
+    /// This intentionally preserves legacy plaintext databases, since those can
+    /// still be migrated with the newly created vault key.
+    pub fn reset_orphaned_encrypted_database(&self) -> Result<bool, String> {
+        if !self.db_path.exists() || Database::is_plaintext(&self.db_path) {
+            return Ok(false);
+        }
+
+        {
+            let mut guard = self.db.lock().map_err(|e| e.to_string())?;
+            *guard = None;
+        }
+
+        let wal_path = PathBuf::from(format!("{}-wal", self.db_path.display()));
+        let shm_path = PathBuf::from(format!("{}-shm", self.db_path.display()));
+
+        for path in [&self.db_path, &wal_path, &shm_path] {
+            if path.exists() {
+                std::fs::remove_file(path).map_err(|e| {
+                    format!(
+                        "failed to remove stale database file {}: {e}",
+                        path.display()
+                    )
+                })?;
+            }
+        }
+
+        log::warn!(
+            "removed orphaned encrypted database files because no vault existed during onboarding"
+        );
+        Ok(true)
+    }
+
+    /// Remove the local wallet files for this device, including the vault and
+    /// the encrypted database, while leaving other app data in place.
+    pub fn reset_local_wallet_files(&self) -> Result<(), String> {
+        {
+            let mut guard = self.db.lock().map_err(|e| e.to_string())?;
+            *guard = None;
+        }
+
+        let wal_path = PathBuf::from(format!("{}-wal", self.db_path.display()));
+        let shm_path = PathBuf::from(format!("{}-shm", self.db_path.display()));
+
+        for path in [&self.db_path, &wal_path, &shm_path] {
+            if path.exists() {
+                std::fs::remove_file(path).map_err(|e| {
+                    format!(
+                        "failed to remove local database file {}: {e}",
+                        path.display()
+                    )
+                })?;
+            }
+        }
+
+        if self.vault_dir.exists() {
+            std::fs::remove_dir_all(&self.vault_dir).map_err(|e| {
+                format!(
+                    "failed to remove local vault directory {}: {e}",
+                    self.vault_dir.display()
+                )
+            })?;
+        }
+
+        std::fs::create_dir_all(&self.vault_dir).map_err(|e| {
+            format!(
+                "failed to recreate local vault directory {}: {e}",
+                self.vault_dir.display()
+            )
+        })?;
+
+        log::warn!(
+            "removed local wallet files at {} and {}",
+            self.vault_dir.display(),
+            self.db_path.display()
+        );
+
+        Ok(())
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -447,6 +529,7 @@ pub fn run() {
             commands::identity::export_mnemonic,
             commands::identity::is_biometric_available,
             commands::identity::lock_vault,
+            commands::identity::reset_local_wallet,
             commands::identity::get_wallet_info,
             commands::identity::get_profile,
             commands::identity::update_profile,
@@ -584,6 +667,7 @@ pub fn run() {
             commands::tutoring::tutoring_leave_room,
             commands::tutoring::tutoring_toggle_video,
             commands::tutoring::tutoring_toggle_audio,
+            commands::tutoring::tutoring_set_audio_devices,
             commands::tutoring::tutoring_toggle_screen_share,
             commands::tutoring::tutoring_send_chat,
             commands::tutoring::tutoring_status,

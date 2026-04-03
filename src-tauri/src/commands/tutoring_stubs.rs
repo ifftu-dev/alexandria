@@ -52,6 +52,8 @@ pub struct DeviceList {
     pub audio_inputs: Vec<AudioDeviceInfo>,
     pub audio_outputs: Vec<AudioDeviceInfo>,
     pub cameras: Vec<CameraDeviceInfo>,
+    pub selected_audio_input: Option<String>,
+    pub selected_audio_output: Option<String>,
 }
 
 const UNSUPPORTED: &str = "Audio-only tutoring on mobile is coming soon";
@@ -101,6 +103,15 @@ pub async fn tutoring_toggle_audio(
     _enable: bool,
     _state: State<'_, AppState>,
 ) -> Result<bool, String> {
+    Err(UNSUPPORTED.into())
+}
+
+#[tauri::command]
+pub async fn tutoring_set_audio_devices(
+    _mic_id: Option<String>,
+    _speaker_id: Option<String>,
+    _state: State<'_, AppState>,
+) -> Result<(), String> {
     Err(UNSUPPORTED.into())
 }
 
@@ -185,6 +196,8 @@ pub async fn tutoring_list_devices() -> Result<DeviceList, String> {
         audio_inputs: vec![],
         audio_outputs: vec![],
         cameras: vec![],
+        selected_audio_input: None,
+        selected_audio_output: None,
     })
 }
 

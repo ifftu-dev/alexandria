@@ -400,9 +400,11 @@ fn read_and_verify_salt(vault_dir: &Path, password: &str) -> Result<Vec<u8>, Key
         let (salt, stored_tag) = data.split_at(SALT_LEN);
         let expected_tag = compute_salt_hmac(password, salt);
         if stored_tag != expected_tag {
-            return Err(KeystoreError::Stronghold(
-                "salt file corrupted or tampered — integrity check failed".into(),
-            ));
+            // The HMAC is keyed by the entered password, so a mismatch is
+            // indistinguishable from an incorrect password at unlock time.
+            // Treat this the same as a wrong password instead of surfacing a
+            // misleading corruption message to the user.
+            return Err(KeystoreError::IncorrectPassword);
         }
         Ok(salt.to_vec())
     } else if data.len() == SALT_LEN {
@@ -499,6 +501,10 @@ mod tests {
 
         let result = Keystore::open(&dir, "wrongpassword");
         assert!(result.is_err());
+        assert!(
+            matches!(result.unwrap_err(), KeystoreError::IncorrectPassword),
+            "expected IncorrectPassword"
+        );
 
         fs::remove_dir_all(&dir).ok();
     }

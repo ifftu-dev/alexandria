@@ -1,4 +1,4 @@
-# Alexandria (Mark 3) -- Performance Audit
+# Alexandria — Performance Audit
 
 **Date**: 2026-02-24 (updated 2026-03-25)
 **Scope**: Full Rust backend (`src-tauri/src/`), CLI (`cli/`), frontend config, Cargo workspace

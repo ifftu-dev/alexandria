@@ -24,7 +24,7 @@ const props = withDefaults(defineProps<Props>(), {
         </svg>
       </div>
 
-      <!-- Stats pills (Mark 2 glassmorphism overlay) -->
+      <!-- Stats pills (glassmorphism overlay) -->
       <div v-if="course.tags?.length" class="cc-stats">
         <span class="cc-stats__pill">
           v{{ course.version }}
@@ -70,7 +70,7 @@ const props = withDefaults(defineProps<Props>(), {
 
 <style scoped>
 /* ============================
-   CourseCard — Mark 2 "grid" variant
+   CourseCard — "grid" variant
    Borderless card with shadow, hover lift,
    glassmorphism stats, uppercase tags
    ============================ */

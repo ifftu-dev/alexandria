@@ -28,7 +28,7 @@
 
 ## Architecture
 
-Alexandria (Mark 3) is a **Tauri v2 application** — a single binary that bundles a Rust backend with a Vue 3 frontend. It runs on macOS, Linux, Windows, iOS, and Android. There are no servers, no Docker containers, and no external databases.
+Alexandria is a **Tauri v2 application** — a single binary that bundles a Rust backend with a Vue 3 frontend. It runs on macOS, Linux, Windows, iOS, and Android. There are no servers, no Docker containers, and no external databases.
 
 ```
 alexandria/
@@ -374,7 +374,7 @@ Use `alex config path` to print this directory on any platform.
 | [Project Structure](docs/project-structure.md) | Directory layouts, module responsibilities |
 | [Security Audit](docs/security-audit.md) | 24 findings (1 critical, 4 high, 8 medium, 6 low, 5 info) |
 | [Performance Audit](docs/performance-audit.md) | 23 findings (2 critical, 5 high, 8 medium, 5 low, 3 info) |
-| [Missing Features](docs/missing-features.md) | Comparison with mark2 — what's not yet ported |
+| [Missing Features](docs/missing-features.md) | Gaps, roadmap, and features not yet implemented |
 
 ## License
 
