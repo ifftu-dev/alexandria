@@ -22,6 +22,7 @@ strip = true
 if-watch = { path = "patches/if-watch" }
 audiopus_sys = { path = "patches/audiopus_sys" }
 webrtc-audio-processing-sys = { path = "patches/webrtc-audio-processing-sys" }
+ffmpeg-sys-next = { path = "patches/ffmpeg-sys-next" }
 
 [patch."https://github.com/ifftu-dev/iroh-live"]
 iroh-live = { path = "../iroh-live-patched/iroh-live" }
