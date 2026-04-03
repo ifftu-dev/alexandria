@@ -25,6 +25,11 @@ tutoring-video-aec = ["tutoring-video", "iroh-live/aec"]
 # Activated for Linux and Windows in CI via --features tutoring-video-static.
 tutoring-video-static = ["iroh-live/static", "iroh-live/aec"]
 
+# Enable Android tutoring video with statically-linked ffmpeg but without AEC.
+# This keeps Android on the shared video pipeline without pulling in the
+# desktop-only WebRTC AEC toolchain.
+tutoring-video-android = ["tutoring-video", "iroh-live/static"]
+
 # Enable iOS video support (VideoToolbox H264 encoder/decoder, no ffmpeg).
 # Activated by tauri.ios.conf.json for iOS builds.
 tutoring-video-ios = ["iroh-live/video-ios"]

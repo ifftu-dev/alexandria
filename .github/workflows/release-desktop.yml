@@ -543,12 +543,30 @@ jobs:
         run: |
           $strawberryPerlDir = 'C:\Strawberry\perl\bin'
           $strawberryCDir = 'C:\Strawberry\c\bin'
+          $llvmBinDirs = @()
+          if ($env:LLVMInstallDir) {
+            if (Test-Path (Join-Path $env:LLVMInstallDir 'clang.exe')) {
+              $llvmBinDirs += $env:LLVMInstallDir
+            } else {
+              $llvmBin = Join-Path $env:LLVMInstallDir 'bin'
+              if (Test-Path $llvmBin) {
+                $llvmBinDirs += $llvmBin
+              }
+            }
+          }
           $msvcBinDir = $null
           if ($env:VCToolsInstallDir) {
             $candidate = Join-Path $env:VCToolsInstallDir 'bin\Hostx64\x64'
             if (Test-Path $candidate) {
               $msvcBinDir = $candidate
             }
+            $llvmFromVs = Join-Path (Split-Path (Split-Path $env:VCToolsInstallDir -Parent) -Parent) 'Llvm\x64\bin'
+            if (Test-Path $llvmFromVs) {
+              $llvmBinDirs += $llvmFromVs
+            }
+          }
+          if (Test-Path 'C:\Program Files\LLVM\bin') {
+            $llvmBinDirs += 'C:\Program Files\LLVM\bin'
           }
           $sdkBinDirs = @()
           foreach ($sdkVar in @('WindowsSdkVerBinPath', 'WindowsSdkBinPath')) {
@@ -565,6 +583,7 @@ jobs:
           }
           $pathEntries = @(
             $strawberryPerlDir
+          ) + $llvmBinDirs + @(
             $strawberryCDir
             $msvcBinDir
           ) + $sdkBinDirs + @(
@@ -576,8 +595,11 @@ jobs:
           Get-Command cargo
           Get-Command node
           Get-Command perl
+          Get-Command clang.exe
+          Get-Command clang++.exe
           Get-Command cl.exe
           Get-Command link.exe
+          Get-Command lld-link.exe
           Get-Command lib.exe
 
       - name: Build Windows release

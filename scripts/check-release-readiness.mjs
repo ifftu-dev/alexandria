@@ -68,10 +68,10 @@ if (/pub use tutoring_stubs as tutoring;/.test(commandsMod)) {
 const androidFeatures = androidConfig.build?.features ?? [];
 if (
   !Array.isArray(androidFeatures) ||
-  !androidFeatures.includes("tutoring-video")
+  !androidFeatures.includes("tutoring-video-android")
 ) {
   failures.push(
-    "Android build config does not enable tutoring-video for mobile feature parity.",
+    "Android build config does not enable tutoring-video-android for mobile feature parity.",
   );
 }
 

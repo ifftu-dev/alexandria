@@ -158,6 +158,38 @@ mod webrtc {
     #[cfg(windows)]
     fn windows_tool_dirs() -> Vec<PathBuf> {
         let mut dirs = Vec::new();
+
+        if let Some(dir) = std::env::var_os("LLVMInstallDir")
+            .map(PathBuf::from)
+            .and_then(|root| {
+                let bin = if root.join("clang.exe").is_file() {
+                    root
+                } else {
+                    root.join("bin")
+                };
+                bin.is_dir().then_some(bin)
+            })
+        {
+            dirs.push(dir);
+        }
+
+        if let Some(dir) = std::env::var_os("VCToolsInstallDir")
+            .map(PathBuf::from)
+            .and_then(|root| {
+                root.parent()
+                    .and_then(Path::parent)
+                    .map(|tools_dir| tools_dir.join("Llvm").join("x64").join("bin"))
+            })
+            .filter(|dir| dir.is_dir())
+        {
+            dirs.push(dir);
+        }
+
+        let program_files_llvm = PathBuf::from(r"C:\Program Files\LLVM\bin");
+        if program_files_llvm.is_dir() {
+            dirs.push(program_files_llvm);
+        }
+
         if let Some(dir) = std::env::var_os("VCToolsInstallDir")
             .map(PathBuf::from)
             .map(|root| root.join("bin").join("Hostx64").join("x64"))
