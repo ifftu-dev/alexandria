@@ -99,6 +99,8 @@ open class BuildTask : DefaultTask() {
         val target = target ?: throw GradleException("target cannot be null")
         val release = release ?: throw GradleException("release cannot be null")
         val args = command.args.toMutableList()
+        val targetTriple = androidTargetTriple(target)
+        val targetUnderscored = targetTriple.replace('-', '_')
         val forwardedEnvKeys = listOf(
             "ANDROID_NDK_HOME",
             "ANDROID_NDK_ROOT",
@@ -127,12 +129,23 @@ open class BuildTask : DefaultTask() {
         val forwardedEnv = forwardedEnvKeys
             .mapNotNull { key -> System.getenv(key)?.let { value -> key to value } }
             .toMap()
+        val synthesizedTargetEnv = mutableMapOf<String, String>()
+
+        System.getenv("TARGET_CC")?.let { targetCc ->
+            synthesizedTargetEnv["CC_$targetTriple"] = targetCc
+            synthesizedTargetEnv["CC_$targetUnderscored"] = targetCc
+        }
+
+        System.getenv("TARGET_CFLAGS")?.let { targetCflags ->
+            synthesizedTargetEnv["CFLAGS_$targetTriple"] = targetCflags
+            synthesizedTargetEnv["CFLAGS_$targetUnderscored"] = targetCflags
+        }
 
         project.exec {
             workingDir(rootDir)
             executable(command.executable)
             args(args)
-            environment(forwardedEnv)
+            environment(forwardedEnv + synthesizedTargetEnv)
             if (project.logger.isEnabled(LogLevel.DEBUG)) {
                 args("-vv")
             } else if (project.logger.isEnabled(LogLevel.INFO)) {
@@ -143,5 +156,13 @@ open class BuildTask : DefaultTask() {
             }
             args(listOf("--target", target))
         }.assertNormalExitValue()
+    }
+
+    private fun androidTargetTriple(target: String): String = when (target) {
+        "aarch64" -> "aarch64-linux-android"
+        "armv7" -> "armv7-linux-androideabi"
+        "i686" -> "i686-linux-android"
+        "x86_64" -> "x86_64-linux-android"
+        else -> target
     }
 }
