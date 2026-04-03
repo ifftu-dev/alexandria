@@ -1,6 +1,6 @@
 [package]
 name = "alexandria-node"
-version = "0.1.0"
+version = "0.0.1-alpha"
 description = "Alexandria — Decentralized Learning Platform (Desktop Node)"
 authors = ["Alexandria Contributors"]
 license = "TBD"
@@ -21,8 +21,8 @@ tutoring-video = ["iroh-live/video"]
 # macOS/Linux release paths can opt into this when the WebRTC AEC toolchain is available.
 tutoring-video-aec = ["tutoring-video", "iroh-live/aec"]
 
-# Enable video with statically-linked ffmpeg (for Windows/Linux CI builds without system ffmpeg).
-# Activated for Linux and Windows in CI via --features tutoring-video-static.
+# Enable video with statically-linked ffmpeg (for Linux CI builds without system ffmpeg).
+# Activated for Linux in CI via --features tutoring-video-static.
 tutoring-video-static = ["iroh-live/static", "iroh-live/aec"]
 
 # Enable Android tutoring video with statically-linked ffmpeg but without AEC.

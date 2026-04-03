@@ -401,8 +401,8 @@ jobs:
           STRIP: ${{ env.ANDROID_NDK_STRIP }}
           TARGET_CC: ${{ env.ANDROID_AARCH64_CC }}
           TARGET_CFLAGS: ${{ env.ANDROID_AARCH64_CFLAGS }}
-          CC_aarch64_linux_android: ${{ env.ANDROID_AARCH64_CC }}
-          CFLAGS_aarch64_linux_android: ${{ env.ANDROID_AARCH64_CFLAGS }}
+          CC_aarch64-linux-android: ${{ env.ANDROID_AARCH64_CC }}
+          CFLAGS_aarch64-linux-android: ${{ env.ANDROID_AARCH64_CFLAGS }}
         run: |
           env \
             "CC_aarch64-linux-android=${ANDROID_AARCH64_CC}" \

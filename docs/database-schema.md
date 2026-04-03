@@ -3,8 +3,8 @@
 > Alexandria — SQLite (local-first)
 
 **Engine**: SQLite (rusqlite 0.38, bundled)
-**Tables**: 50
-**Migrations**: 16
+**Tables**: 53
+**Migrations**: 19
 
 ---
 
@@ -47,6 +47,9 @@
 | 14 | `inline_content` | Add `content_inline` column to `course_elements` for inline HTML storage |
 | 15 | `tutoring_sessions` | Live tutoring tables: sessions, peers, chat messages |
 | 16 | `classrooms` | Classroom tables: classrooms, members, join requests, channels, messages, calls |
+| 17 | `storage_settings` | App settings key-value store with storage quota default |
+| 18 | `onchain_governance_queue` | Persistent queue for async Plutus governance transactions |
+| 19 | `classroom_encryption` | Classroom group encryption keys for E2E encrypted messages |
 
 ---
 
@@ -236,18 +239,10 @@
 - FK: `evidence_id` → `evidence_records(id)`
 - Columns: `attestor_address`, `attestor_role`, `status` (pending/approved/rejected), `notes`
 
-### Tutoring (3 tables)
+### Tutoring (1 table)
 
 **`tutoring_sessions`** — Live tutoring session metadata.
 - Columns: `id` (UUID), `title`, `topic`, `host_address`, `status` (active/ended/cancelled), `started_at`, `ended_at`
-
-**`tutoring_peers`** — Participants in tutoring sessions.
-- FK: `session_id` → `tutoring_sessions(id)` CASCADE
-- Columns: `peer_id`, `display_name`, `role` (host/participant), `joined_at`, `left_at`
-
-**`tutoring_chat`** — Chat messages within tutoring sessions.
-- FK: `session_id` → `tutoring_sessions(id)` CASCADE
-- Columns: `sender_address`, `sender_name`, `content`, `sent_at`
 
 ### Classrooms (7 tables)
 
@@ -277,9 +272,22 @@
 - FK: `classroom_id` → `classrooms(id)` CASCADE, `channel_id` → `classroom_channels(id)`
 - Columns: `title`, `ticket` (iroh-live), `started_by`, `status` (active/ended), `started_at`, `ended_at`
 
-**`classroom_call_peers`** — Participants in classroom calls.
-- FK: `call_id` → `classroom_calls(id)` CASCADE
-- Columns: `peer_id`, `display_name`, `joined_at`, `left_at`
+**`classroom_group_keys`** — Group encryption keys for E2E encrypted classroom messages.
+- PK: `classroom_id`
+- Columns: `group_key_enc` (BLOB), `key_version`, `updated_at`
+
+### On-Chain Queue (1 table)
+
+**`onchain_governance_queue`** — Persistent queue for async Plutus governance transactions.
+- Columns: `id`, `action_type`, `payload_json`, `target_table`, `target_id`, `status` (pending/submitted/confirmed/failed), `tx_hash`, `error`, `retries`, `created_at`, `updated_at`
+- Index: `status`
+
+### Settings (1 table)
+
+**`app_settings`** — Key-value store for persistent backend settings.
+- PK: `key` (TEXT)
+- Columns: `value`, `updated_at`
+- Seeded with `storage_quota_bytes = '0'` (unlimited)
 
 ---
 
@@ -324,10 +332,7 @@ erDiagram
     classrooms ||--o{ classroom_channels : channels
     classrooms ||--o{ classroom_calls : calls
     classroom_channels ||--o{ classroom_messages : messages
-    classroom_calls ||--o{ classroom_call_peers : peers
-
-    tutoring_sessions ||--o{ tutoring_peers : peers
-    tutoring_sessions ||--o{ tutoring_chat : messages
+    classrooms ||--o| classroom_group_keys : encryption
 
     integrity_sessions ||--o{ integrity_snapshots : snapshots
 

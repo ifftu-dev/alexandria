@@ -23,20 +23,20 @@
 
 ## 1. Documentation Gaps
 
-Alexandria has 8 documentation files (architecture, database schema, P2P protocol, project structure, missing features, security audit, performance audit, README), but several areas lack written specs:
+Alexandria has 10 documentation files (architecture, database schema, P2P protocol, project structure, skills & reputation, sentinel, missing features, security audit, performance audit, README), but several areas lack written specs:
 
 | Document | Status |
 |----------|--------|
-| Whitepaper | **Missing** — Reputation formulas, governance rules, decentralisation criteria, sustainability model, threat model, and credential schemas are all implemented but have no written spec. |
+| Whitepaper | **Missing** — Reputation formulas, governance rules, decentralisation criteria, sustainability model, threat model, and credential schemas are all implemented but have no written spec. The mark2 whitepaper (v0.0.3) contains the conceptual framework but references a Go/Docker/PostgreSQL architecture; a mark3 whitepaper should be written fresh. |
 | IPC command reference | **Missing** — A reference for the ~160 IPC commands could be written. |
-| Skills & reputation RFC | **Missing** — Skill graph design, evidence model, reputation system, and query/consumption model are implemented but not documented. |
-| Sentinel architecture doc | **Missing** — `useSentinel.ts` and the ML model utilities exist, but there is no documentation. |
-| Security audit | **Created** — 27 findings (1 critical, 7 high, 10 medium, 9 low, 5 info). 21 fixed. |
+| Skills & reputation RFC | **Created** — Skill graph design, evidence model, reputation system, and query/consumption model. |
+| Sentinel architecture doc | **Created** — Client-side behavioral fingerprinting, ML models, signal taxonomy, and privacy guarantees. |
+| Security audit | **Created** — 32 findings (1 critical, 7 high, 10 medium, 9 low, 5 informational). |
 | Database schema | **Created** |
 | Project structure | **Created** |
 | Architecture | **Created** |
 
-**Recommendation**: Write a whitepaper, skills/reputation RFC, and Sentinel doc.
+**Recommendation**: Write a whitepaper.
 
 ---
 
@@ -192,7 +192,7 @@ The Sentinel anti-cheat system uses a client-side rule-based scoring engine (11 
 | Database schema doc | Y | |
 | P2P protocol spec | Y | |
 | IPC command reference | - | **Missing** |
-| Skills & reputation RFC | - | **Missing** |
-| Sentinel doc | - | **Missing** |
-| Security audit | Y | 27 findings, 21 fixed |
+| Skills & reputation RFC | Y | |
+| Sentinel doc | Y | |
+| Security audit | Y | 32 findings |
 | Project structure | Y | |

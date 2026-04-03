@@ -1,5 +1,15 @@
 # Alexandria
 
+<img alt="Codename: Alexandria — Knowledge belongs to everyone." src="docs/hero.svg" width="100%">
+
+<p>
+  <img src="https://github.com/ifftu-dev/alexandria/actions/workflows/ci.yml/badge.svg" alt="CI">
+  <img src="https://github.com/ifftu-dev/alexandria/actions/workflows/validate-desktop.yml/badge.svg" alt="Validate Desktop">
+  <img src="https://github.com/ifftu-dev/alexandria/actions/workflows/validate-mobile.yml/badge.svg" alt="Validate Mobile">
+  <img src="https://github.com/ifftu-dev/alexandria/actions/workflows/release-desktop.yml/badge.svg" alt="Release Desktop">
+  <img src="https://github.com/ifftu-dev/alexandria/actions/workflows/release-mobile.yml/badge.svg" alt="Release Mobile">
+</p>
+
 **Decentralized learning platform — desktop and mobile node.**
 
 <p>
@@ -7,6 +17,8 @@
   <a href="docs/database-schema.md">Database Schema</a> &middot;
   <a href="docs/protocol-spec-v1.md">P2P Protocol</a> &middot;
   <a href="docs/project-structure.md">Project Structure</a> &middot;
+  <a href="docs/skills-and-reputation.md">Skills & Reputation</a> &middot;
+  <a href="docs/sentinel.md">Sentinel</a> &middot;
   <a href="docs/missing-features.md">Roadmap / Missing Features</a> &middot;
   <a href="CHANGELOG.md">Changelog</a>
 </p>
@@ -35,18 +47,18 @@ alexandria/
 ├── src-tauri/        # Rust backend (Tauri v2)
 │   └── src/
 │       ├── cardano/  # Blockfrost client, Conway tx building, NFT policies
-│       ├── commands/ # 118 IPC command handlers (frontend ↔ backend)
+│       ├── commands/ # ~160 IPC command handlers (frontend ↔ backend)
 │       ├── crypto/   # BIP-39 wallet, vault (Stronghold / portable), Ed25519
-│       ├── db/       # SQLite (43 tables, 14 migrations, seed data)
+│       ├── db/       # SQLite (53 tables, 19 migrations, seed data)
 │       ├── diag.rs   # File-based diagnostic logger + panic hook
 │       ├── domain/   # Business logic (courses, evidence, governance, ...)
 │       ├── evidence/ # Aggregation, attestation, challenges, reputation
 │       ├── ipfs/     # iroh node, IPFS gateway fallback, CID resolution
 │       └── p2p/      # libp2p swarm — DHT, relay, gossip, peer exchange
 ├── src/              # Vue 3 + TypeScript frontend
-│   ├── pages/        # 19 pages (onboarding, courses, skills, governance, ...)
+│   ├── pages/        # 25 pages (onboarding, courses, skills, governance, classrooms, tutoring, ...)
 │   ├── components/   # UI components + auth + course + layout
-│   ├── composables/  # useAuth, useTheme, useP2P, useSentinel, useSkillGraphState, useLocalApi
+│   ├── composables/  # useAuth, useTheme, useP2P, useSentinel, useLocalApi, useBiometricVault, useClassroom, useContentSync, usePlatform, useSkillGraphState, useSkillGraphHover, useTutoringRoom
 │   └── assets/       # Tailwind CSS v4 design system
 ├── cli/              # Developer CLI (alex) — Rust + clap
 ├── patches/          # Local crate patches (if-watch iOS fix)
@@ -357,7 +369,7 @@ All data lives in `~/Library/Application Support/org.alexandria.node/` (macOS):
 
 | File/Directory | Purpose |
 |----------------|---------|
-| `alexandria.db` | SQLite database (43 tables) |
+| `alexandria.db` | SQLite database (53 tables) |
 | `vault.stronghold` | IOTA Stronghold encrypted vault — desktop only |
 | `vault.enc` | AES-256-GCM + Argon2id encrypted vault — mobile only |
 | `iroh/` | Content-addressed blob store (course content, profiles) |
@@ -369,11 +381,13 @@ Use `alex config path` to print this directory on any platform.
 | Document | Description |
 |----------|-------------|
 | [Architecture](docs/architecture.md) | System design — offline-first, trustless, multi-platform |
-| [Database Schema](docs/database-schema.md) | All 43 tables, 14 migrations, relationships |
+| [Database Schema](docs/database-schema.md) | All 53 tables, 19 migrations, relationships |
 | [P2P Protocol](docs/protocol-spec-v1.md) | Wire formats, 6 gossip topics, validation, peer scoring |
 | [Project Structure](docs/project-structure.md) | Directory layouts, module responsibilities |
-| [Security Audit](docs/security-audit.md) | 24 findings (1 critical, 4 high, 8 medium, 6 low, 5 info) |
-| [Performance Audit](docs/performance-audit.md) | 23 findings (2 critical, 5 high, 8 medium, 5 low, 3 info) |
+| [Skills & Reputation](docs/skills-and-reputation.md) | Skill graph, evidence model, reputation system |
+| [Sentinel](docs/sentinel.md) | Assessment integrity — behavioral fingerprinting, ML models |
+| [Security Audit](docs/security-audit.md) | 32 findings (1 critical, 7 high, 10 medium, 9 low, 5 informational) |
+| [Performance Audit](docs/performance-audit.md) | 23 findings (2 critical, 5 high, 8 medium, 5 low, 3 informational) |
 | [Missing Features](docs/missing-features.md) | Gaps, roadmap, and features not yet implemented |
 
 ## License

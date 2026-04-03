@@ -75,7 +75,7 @@ src-tauri/
     │
     ├── db/                 # Database layer
     │   ├── mod.rs          # Database struct, migration runner
-    │   ├── schema.rs       # 16 migrations, 50 tables (full DDL)
+    │   ├── schema.rs       # 19 migrations, 53 tables (full DDL)
     │   ├── seed.rs         # Taxonomy, courses, governance seed data
     │   ├── seed_content.rs # Uses include!() to load seed_content_data.rs
     │   └── seed_content_data.rs  # HTML content + quiz JSON for all 82 seed elements

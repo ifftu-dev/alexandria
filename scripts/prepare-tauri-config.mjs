@@ -45,11 +45,19 @@ function syncVersionAcrossReleaseMetadata(rawVersion) {
   const version = normalizeVersion(rawVersion);
 
   const packagePath = path.resolve("package.json");
+  const packageLockPath = path.resolve("package-lock.json");
   const cargoPath = path.resolve("src-tauri/Cargo.toml");
 
   const packageJson = readJson(packagePath);
   packageJson.version = version;
   writeJson(packagePath, packageJson);
+
+  const packageLockJson = readJson(packageLockPath);
+  packageLockJson.version = version;
+  if (packageLockJson.packages && packageLockJson.packages[""]) {
+    packageLockJson.packages[""].version = version;
+  }
+  writeJson(packageLockPath, packageLockJson);
 
   const tauriConfig = readJson(configPath);
   tauriConfig.version = version;

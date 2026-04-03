@@ -2,7 +2,7 @@
 
 > Offline-first, trustless, multi-platform.
 
-**Status**: Implementation-complete through Phase 7 (Live Tutoring, Classrooms)
+**Status**: Implementation-complete
 **Last updated**: 2026-03-25
 
 ---
@@ -55,9 +55,9 @@ central API, no hosted database, and no Docker infrastructure.
 |  |   Vue 3 UI     |--IPC--->|    Rust Backend      |  |
 |  |   (WebView)    | ~160    |                      |  |
 |  |                | cmds    |  +----------------+  |  |
-|  |  26 routes     |         |  |   SQLite DB    |  |  |
-|  |  29 components |         |  |   50 tables    |  |  |
-|  |  12 composables|         |  |   16 migrations|  |  |
+|  |  25 pages      |         |  |   SQLite DB    |  |  |
+|  |  32 components |         |  |   53 tables    |  |  |
+|  |  12 composables|         |  |   19 migrations|  |  |
 |  +----------------+         |  +----------------+  |  |
 |                             |                      |  |
 |                             |  +----------------+  |  |
@@ -143,7 +143,7 @@ Both share the same lock/unlock cycle: lock clears in-memory keys, unlock re-der
 
 **Engine**: SQLite (rusqlite 0.38, bundled)
 
-**Tables**: 50 across 16 migrations
+**Tables**: 53 across 19 migrations
 
 | Domain | Tables |
 |--------|--------|
@@ -160,8 +160,10 @@ Both share the same lock/unlock cycle: lock clears in-memory keys, unlock re-der
 | Sync | `devices`, `sync_state`, `sync_queue` |
 | Challenges | `evidence_challenges`, `challenge_votes` |
 | Attestation | `attestation_requirements`, `evidence_attestations` |
-| Tutoring | `tutoring_sessions`, `tutoring_peers`, `tutoring_chat` |
-| Classrooms | `classrooms`, `classroom_members`, `classroom_join_requests`, `classroom_channels`, `classroom_messages`, `classroom_calls`, `classroom_call_peers` |
+| Tutoring | `tutoring_sessions` |
+| Classrooms | `classrooms`, `classroom_members`, `classroom_join_requests`, `classroom_channels`, `classroom_messages`, `classroom_calls`, `classroom_group_keys` |
+| Governance (on-chain) | `onchain_governance_queue` |
+| Settings | `app_settings` |
 
 ### Key Design Decisions
 

@@ -34,6 +34,7 @@ function extractWorkflowInputDefault(workflowText, inputName) {
 const failures = [];
 
 const packageJson = readJson("package.json");
+const packageLockJson = readJson("package-lock.json");
 const tauriConfig = readJson("src-tauri/tauri.conf.json");
 const androidConfig = readJson("src-tauri/tauri.android.conf.json");
 const windowsDesktopConfig = readJson("src-tauri/tauri.desktop.windows.conf.json");
@@ -41,6 +42,7 @@ const windowsDesktopConfig = readJson("src-tauri/tauri.desktop.windows.conf.json
 const cargoVersion = extractCargoPackageVersion("src-tauri/Cargo.toml");
 const versions = {
   package_json: packageJson.version,
+  package_lock: packageLockJson.version,
   cargo_toml: cargoVersion,
   tauri_conf: tauriConfig.version,
 };
@@ -78,10 +80,11 @@ if (
 const windowsFeatures = windowsDesktopConfig.build?.features ?? [];
 if (
   !Array.isArray(windowsFeatures) ||
-  !windowsFeatures.includes("tutoring-video-aec")
+  !windowsFeatures.includes("tutoring-video") ||
+  windowsFeatures.includes("tutoring-video-aec")
 ) {
   failures.push(
-    "Windows desktop does not enable tutoring-video-aec, which breaks desktop media parity.",
+    "Windows desktop must use the reduced tutoring-video feature path without tutoring-video-aec.",
   );
 }
 

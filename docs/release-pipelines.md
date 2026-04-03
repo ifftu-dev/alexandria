@@ -22,7 +22,7 @@ Before publishing a public release, the repo must pass the cheap `Release Readin
 - desktop updater config is no longer using the placeholder public key
 - Android is not still routed through tutoring stubs
 - Android build config opts into its real mobile tutoring feature set
-- Windows is not using the reduced desktop tutoring feature path while macOS/Linux use richer media support
+- Windows uses the reduced desktop tutoring feature path while macOS/Linux use richer media support
 - real mobile publish defaults include both `Android` and `iOS`
 
 ## Cost controls

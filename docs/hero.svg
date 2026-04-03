@@ -1,0 +1,160 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 400" width="1200" height="400">
+  <defs>
+    <!-- Background gradient -->
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0f0e1a"/>
+      <stop offset="40%" stop-color="#141226"/>
+      <stop offset="100%" stop-color="#0d0c18"/>
+    </linearGradient>
+    <!-- Nebula glows -->
+    <radialGradient id="nebula1" cx="20%" cy="30%" r="35%">
+      <stop offset="0%" stop-color="#6366f1" stop-opacity="0.18"/>
+      <stop offset="60%" stop-color="#6366f1" stop-opacity="0.05"/>
+      <stop offset="100%" stop-color="#6366f1" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="nebula2" cx="80%" cy="60%" r="30%">
+      <stop offset="0%" stop-color="#06b6d4" stop-opacity="0.12"/>
+      <stop offset="60%" stop-color="#06b6d4" stop-opacity="0.03"/>
+      <stop offset="100%" stop-color="#06b6d4" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="nebula3" cx="55%" cy="20%" r="25%">
+      <stop offset="0%" stop-color="#f472b6" stop-opacity="0.08"/>
+      <stop offset="100%" stop-color="#f472b6" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="nebula4" cx="35%" cy="75%" r="28%">
+      <stop offset="0%" stop-color="#f59e0b" stop-opacity="0.06"/>
+      <stop offset="100%" stop-color="#f59e0b" stop-opacity="0"/>
+    </radialGradient>
+    <!-- Accent glow behind title -->
+    <radialGradient id="titleGlow" cx="50%" cy="45%" r="30%">
+      <stop offset="0%" stop-color="#818cf8" stop-opacity="0.10"/>
+      <stop offset="100%" stop-color="#818cf8" stop-opacity="0"/>
+    </radialGradient>
+    <!-- Edge fades -->
+    <linearGradient id="fadeLeft" x1="0" y1="0" x2="0.08" y2="0">
+      <stop offset="0%" stop-color="#0f0e1a" stop-opacity="1"/>
+      <stop offset="100%" stop-color="#0f0e1a" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="fadeRight" x1="0.92" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#0d0c18" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#0d0c18" stop-opacity="1"/>
+    </linearGradient>
+    <linearGradient id="fadeTop" x1="0" y1="0" x2="0" y2="0.1">
+      <stop offset="0%" stop-color="#0f0e1a" stop-opacity="0.8"/>
+      <stop offset="100%" stop-color="#0f0e1a" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="fadeBottom" x1="0" y1="0.88" x2="0" y2="1">
+      <stop offset="0%" stop-color="#0d0c18" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#0d0c18" stop-opacity="0.9"/>
+    </linearGradient>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&amp;display=swap');
+    </style>
+  </defs>
+
+  <!-- Base background -->
+  <rect width="1200" height="400" fill="url(#bg)"/>
+
+  <!-- Nebula clouds -->
+  <rect width="1200" height="400" fill="url(#nebula1)"/>
+  <rect width="1200" height="400" fill="url(#nebula2)"/>
+  <rect width="1200" height="400" fill="url(#nebula3)"/>
+  <rect width="1200" height="400" fill="url(#nebula4)"/>
+  <rect width="1200" height="400" fill="url(#titleGlow)"/>
+
+  <!-- Constellation lines -->
+  <g opacity="0.12" stroke="#818cf8" stroke-width="0.5" fill="none">
+    <path d="M80,90 L160,140 L240,100 L310,160"/>
+    <path d="M900,80 L980,130 L1050,90 L1120,140"/>
+    <path d="M100,300 L180,270 L260,310 L340,280"/>
+    <path d="M870,290 L950,320 L1030,280 L1100,310"/>
+    <path d="M450,60 L520,90 L580,50"/>
+    <path d="M650,340 L720,310 L790,350"/>
+  </g>
+
+  <!-- Starfield - back layer (dim, small) -->
+  <g opacity="0.4">
+    <circle cx="45" cy="55" r="1" fill="#c7d2fe"/>
+    <circle cx="120" cy="30" r="0.8" fill="#e0e7ff"/>
+    <circle cx="200" cy="85" r="1.2" fill="#818cf8"/>
+    <circle cx="310" cy="45" r="0.7" fill="#c7d2fe"/>
+    <circle cx="380" cy="110" r="1" fill="#e0e7ff"/>
+    <circle cx="470" cy="35" r="0.8" fill="#a5b4fc"/>
+    <circle cx="550" cy="75" r="1.1" fill="#c7d2fe"/>
+    <circle cx="640" cy="25" r="0.6" fill="#e0e7ff"/>
+    <circle cx="720" cy="90" r="1" fill="#818cf8"/>
+    <circle cx="810" cy="40" r="0.9" fill="#c7d2fe"/>
+    <circle cx="890" cy="70" r="0.7" fill="#a5b4fc"/>
+    <circle cx="970" cy="50" r="1.2" fill="#e0e7ff"/>
+    <circle cx="1050" cy="80" r="0.8" fill="#c7d2fe"/>
+    <circle cx="1140" cy="45" r="1" fill="#818cf8"/>
+    <circle cx="70" cy="340" r="0.9" fill="#e0e7ff"/>
+    <circle cx="160" cy="360" r="1.1" fill="#c7d2fe"/>
+    <circle cx="250" cy="330" r="0.7" fill="#818cf8"/>
+    <circle cx="340" cy="355" r="1" fill="#a5b4fc"/>
+    <circle cx="430" cy="370" r="0.8" fill="#c7d2fe"/>
+    <circle cx="520" cy="340" r="1.2" fill="#e0e7ff"/>
+    <circle cx="610" cy="365" r="0.6" fill="#818cf8"/>
+    <circle cx="700" cy="345" r="1" fill="#c7d2fe"/>
+    <circle cx="790" cy="375" r="0.9" fill="#a5b4fc"/>
+    <circle cx="880" cy="340" r="0.7" fill="#e0e7ff"/>
+    <circle cx="960" cy="360" r="1.1" fill="#c7d2fe"/>
+    <circle cx="1060" cy="350" r="0.8" fill="#818cf8"/>
+    <circle cx="1150" cy="370" r="1" fill="#a5b4fc"/>
+  </g>
+
+  <!-- Starfield - mid layer (moderate) -->
+  <g opacity="0.55">
+    <circle cx="90" cy="150" r="1.2" fill="#67e8f9"/>
+    <circle cx="180" cy="200" r="1.5" fill="#818cf8"/>
+    <circle cx="75" cy="250" r="1" fill="#fbbf24"/>
+    <circle cx="270" cy="170" r="1.3" fill="#f9a8d4"/>
+    <circle cx="350" cy="230" r="1" fill="#67e8f9"/>
+    <circle cx="1100" cy="160" r="1.4" fill="#818cf8"/>
+    <circle cx="1020" cy="220" r="1.1" fill="#67e8f9"/>
+    <circle cx="1150" cy="260" r="1.2" fill="#fbbf24"/>
+    <circle cx="930" cy="180" r="1.5" fill="#f9a8d4"/>
+    <circle cx="860" cy="240" r="1" fill="#818cf8"/>
+    <circle cx="140" cy="310" r="1.3" fill="#67e8f9"/>
+    <circle cx="1080" cy="310" r="1.2" fill="#f9a8d4"/>
+  </g>
+
+  <!-- Starfield - front layer (bright, larger) -->
+  <g opacity="0.7">
+    <circle cx="60" cy="120" r="1.8" fill="#a5b4fc"/>
+    <circle cx="150" cy="180" r="2" fill="#ffffff"/>
+    <circle cx="50" cy="280" r="1.5" fill="#67e8f9"/>
+    <circle cx="230" cy="130" r="1.6" fill="#fbbf24"/>
+    <circle cx="300" cy="280" r="1.8" fill="#818cf8"/>
+    <circle cx="1130" cy="120" r="2" fill="#ffffff"/>
+    <circle cx="1060" cy="180" r="1.5" fill="#a5b4fc"/>
+    <circle cx="1140" cy="290" r="1.8" fill="#67e8f9"/>
+    <circle cx="950" cy="150" r="1.6" fill="#fbbf24"/>
+    <circle cx="880" cy="280" r="2" fill="#818cf8"/>
+  </g>
+
+  <!-- Pulsing ring accents -->
+  <g fill="none" stroke-width="0.8" opacity="0.2">
+    <circle cx="230" cy="130" r="8" stroke="#fbbf24"/>
+    <circle cx="150" cy="180" r="10" stroke="#ffffff"/>
+    <circle cx="950" cy="150" r="9" stroke="#fbbf24"/>
+    <circle cx="1130" cy="120" r="10" stroke="#ffffff"/>
+    <circle cx="300" cy="280" r="7" stroke="#818cf8"/>
+    <circle cx="880" cy="280" r="8" stroke="#818cf8"/>
+  </g>
+
+  <!-- Edge vignettes -->
+  <rect width="1200" height="400" fill="url(#fadeLeft)"/>
+  <rect width="1200" height="400" fill="url(#fadeRight)"/>
+  <rect width="1200" height="400" fill="url(#fadeTop)"/>
+  <rect width="1200" height="400" fill="url(#fadeBottom)"/>
+
+  <!-- Text content -->
+  <!-- Headline -->
+  <text x="600" y="170" text-anchor="middle" fill="#f0eef6" font-family="'Playfair Display', Georgia, 'Times New Roman', serif" font-size="52" font-weight="700">Knowledge belongs</text>
+  <text x="600" y="230" text-anchor="middle" fill="#818cf8" font-family="'Playfair Display', Georgia, 'Times New Roman', serif" font-size="52" font-weight="700">to everyone.</text>
+
+  <!-- Subheading -->
+  <text x="600" y="278" text-anchor="middle" fill="#9694a8" font-family="system-ui, -apple-system, sans-serif" font-size="15" font-weight="400">A native desktop and mobile node for decentralized learning.</text>
+  <text x="600" y="298" text-anchor="middle" fill="#9694a8" font-family="system-ui, -apple-system, sans-serif" font-size="15" font-weight="400">Verifiable credentials, earned reputation, no servers, no gatekeepers.</text>
+</svg>
