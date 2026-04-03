@@ -224,10 +224,17 @@ jobs:
             echo "No Android NDK installation was found under $ANDROID_SDK_ROOT/ndk." >&2
             exit 1
           fi
+          SYSROOT_DIR="$NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
+          if [ ! -d "$SYSROOT_DIR" ]; then
+            echo "Android NDK sysroot was not found at $SYSROOT_DIR." >&2
+            exit 1
+          fi
           echo "Using Android NDK at $NDK_DIR"
           echo "ANDROID_NDK_HOME=$NDK_DIR" >> $GITHUB_ENV
           echo "ANDROID_NDK_ROOT=$NDK_DIR" >> $GITHUB_ENV
           echo "NDK_HOME=$NDK_DIR" >> $GITHUB_ENV
+          echo "CARGO_NDK_SYSROOT_PATH=$SYSROOT_DIR" >> $GITHUB_ENV
+          echo "SYSROOT=$SYSROOT_DIR" >> $GITHUB_ENV
 
       - name: Setup Rust 1.83.0 (MSRV)
         uses: dtolnay/rust-toolchain@1.89.0

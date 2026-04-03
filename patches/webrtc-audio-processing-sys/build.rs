@@ -295,18 +295,18 @@ mod webrtc {
             // instead of assuming the tauri-action environment preserves them.
             command.env(
                 "CC",
-                windows_tool("CC", "clang.exe --target=x86_64-pc-windows-msvc"),
+                windows_tool("CC", "clang.exe --target=x86_64-pc-windows-msvc -fuse-ld=lld"),
             );
             command.env(
                 "CXX",
-                windows_tool("CXX", "clang++.exe --target=x86_64-pc-windows-msvc"),
+                windows_tool("CXX", "clang++.exe --target=x86_64-pc-windows-msvc -fuse-ld=lld"),
             );
             command.env(
                 "CPP",
                 windows_tool("CPP", "clang.exe -E --target=x86_64-pc-windows-msvc"),
             );
             command.env("AR", windows_tool("AR", "lib.exe"));
-            command.env("LD", windows_tool("LD", "link.exe"));
+            command.env("LD", windows_tool("LD", "lld-link.exe"));
             command.env("RC", windows_tool("RC", "rc.exe"));
             command.env("RANLIB", windows_tool("RANLIB", "llvm-ranlib.exe"));
             command.env("STRIP", windows_tool("STRIP", "llvm-strip.exe"));
