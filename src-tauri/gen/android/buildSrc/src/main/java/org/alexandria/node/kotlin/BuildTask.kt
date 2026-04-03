@@ -99,11 +99,40 @@ open class BuildTask : DefaultTask() {
         val target = target ?: throw GradleException("target cannot be null")
         val release = release ?: throw GradleException("release cannot be null")
         val args = command.args.toMutableList()
+        val forwardedEnvKeys = listOf(
+            "ANDROID_NDK_HOME",
+            "ANDROID_NDK_ROOT",
+            "NDK_HOME",
+            "CARGO_NDK_SYSROOT_PATH",
+            "SYSROOT",
+            "AR",
+            "RANLIB",
+            "STRIP",
+            "TARGET_CC",
+            "TARGET_CFLAGS",
+            "CC_aarch64-linux-android",
+            "CC_aarch64_linux_android",
+            "CFLAGS_aarch64-linux-android",
+            "CFLAGS_aarch64_linux_android",
+            "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER",
+            "CARGO_TARGET_AARCH64_LINUX_ANDROID_AR",
+            "CARGO_TARGET_AARCH64_LINUX_ANDROID_RANLIB",
+            "CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_LINKER",
+            "CARGO_TARGET_I686_LINUX_ANDROID_LINKER",
+            "CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER",
+            "ANDROID_NDK_AR",
+            "ANDROID_NDK_RANLIB",
+            "ANDROID_NDK_STRIP",
+        )
+        val forwardedEnv = forwardedEnvKeys
+            .mapNotNull { key -> System.getenv(key)?.let { value -> key to value } }
+            .toMap()
 
         project.exec {
             workingDir(rootDir)
             executable(command.executable)
             args(args)
+            environment(forwardedEnv)
             if (project.logger.isEnabled(LogLevel.DEBUG)) {
                 args("-vv")
             } else if (project.logger.isEnabled(LogLevel.INFO)) {
