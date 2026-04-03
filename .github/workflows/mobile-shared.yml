@@ -407,14 +407,17 @@ jobs:
         run: |
           NDK_BIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
           ANDROID_CC="$NDK_BIN/aarch64-linux-android28-clang"
+          ANDROID_NM="$NDK_BIN/llvm-nm"
           ANDROID_CFLAGS="--sysroot=$CARGO_NDK_SYSROOT_PATH"
           SHIM_DIR="$RUNNER_TEMP/android-ndk-bin"
           mkdir -p "$SHIM_DIR"
           ln -sf "$NDK_BIN/llvm-ar" "$SHIM_DIR/aarch64-linux-android-ar"
           ln -sf "$NDK_BIN/llvm-ranlib" "$SHIM_DIR/aarch64-linux-android-ranlib"
           ln -sf "$NDK_BIN/llvm-strip" "$SHIM_DIR/aarch64-linux-android-strip"
+          ln -sf "$NDK_BIN/llvm-nm" "$SHIM_DIR/aarch64-linux-android-nm"
           echo "$SHIM_DIR" >> $GITHUB_PATH
           echo "ANDROID_AARCH64_CC=$ANDROID_CC" >> $GITHUB_ENV
+          echo "ANDROID_AARCH64_NM=$ANDROID_NM" >> $GITHUB_ENV
           echo "ANDROID_AARCH64_CFLAGS=$ANDROID_CFLAGS" >> $GITHUB_ENV
           echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$ANDROID_CC" >> $GITHUB_ENV
           echo "CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_LINKER=$NDK_BIN/armv7a-linux-androideabi28-clang" >> $GITHUB_ENV
@@ -422,6 +425,9 @@ jobs:
           echo "CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER=$NDK_BIN/x86_64-linux-android28-clang" >> $GITHUB_ENV
           echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_AR=$NDK_BIN/llvm-ar" >> $GITHUB_ENV
           echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_RANLIB=$NDK_BIN/llvm-ranlib" >> $GITHUB_ENV
+          echo "NM=$ANDROID_NM" >> $GITHUB_ENV
+          echo "NM_aarch64-linux-android=$ANDROID_NM" >> $GITHUB_ENV
+          echo "NM_aarch64_linux_android=$ANDROID_NM" >> $GITHUB_ENV
           echo "CC_aarch64-linux-android=$ANDROID_CC" >> $GITHUB_ENV
           echo "CC_aarch64_linux_android=$ANDROID_CC" >> $GITHUB_ENV
           echo "CFLAGS_aarch64-linux-android=$ANDROID_CFLAGS" >> $GITHUB_ENV
@@ -441,6 +447,9 @@ jobs:
           AR: ${{ env.ANDROID_NDK_AR }}
           RANLIB: ${{ env.ANDROID_NDK_RANLIB }}
           STRIP: ${{ env.ANDROID_NDK_STRIP }}
+          NM: ${{ env.ANDROID_AARCH64_NM }}
+          NM_aarch64-linux-android: ${{ env.ANDROID_AARCH64_NM }}
+          NM_aarch64_linux_android: ${{ env.ANDROID_AARCH64_NM }}
           TARGET_CC: ${{ env.ANDROID_AARCH64_CC }}
           TARGET_CFLAGS: ${{ env.ANDROID_AARCH64_CFLAGS }}
           CC_aarch64_linux_android: ${{ env.ANDROID_AARCH64_CC }}
@@ -454,6 +463,9 @@ jobs:
           env \
             "CARGO_NDK_SYSROOT_PATH=${CARGO_NDK_SYSROOT_PATH}" \
             "SYSROOT=${SYSROOT}" \
+            "NM=${ANDROID_AARCH64_NM}" \
+            "NM_aarch64_linux_android=${ANDROID_AARCH64_NM}" \
+            "NM_aarch64-linux-android=${ANDROID_AARCH64_NM}" \
             "CC_aarch64_linux_android=${ANDROID_AARCH64_CC}" \
             "CC_aarch64-linux-android=${ANDROID_AARCH64_CC}" \
             "CFLAGS_aarch64_linux_android=${ANDROID_AARCH64_CFLAGS}" \

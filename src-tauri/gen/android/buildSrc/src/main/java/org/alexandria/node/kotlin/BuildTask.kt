@@ -110,8 +110,11 @@ open class BuildTask : DefaultTask() {
             "AR",
             "RANLIB",
             "STRIP",
+            "NM",
             "TARGET_CC",
             "TARGET_CFLAGS",
+            "NM_aarch64-linux-android",
+            "NM_aarch64_linux_android",
             "CC_aarch64-linux-android",
             "CC_aarch64_linux_android",
             "CFLAGS_aarch64-linux-android",
@@ -139,6 +142,11 @@ open class BuildTask : DefaultTask() {
         System.getenv("TARGET_CFLAGS")?.let { targetCflags ->
             synthesizedTargetEnv["CFLAGS_$targetTriple"] = targetCflags
             synthesizedTargetEnv["CFLAGS_$targetUnderscored"] = targetCflags
+        }
+
+        System.getenv("NM")?.let { targetNm ->
+            synthesizedTargetEnv["NM_$targetTriple"] = targetNm
+            synthesizedTargetEnv["NM_$targetUnderscored"] = targetNm
         }
 
         project.exec {
