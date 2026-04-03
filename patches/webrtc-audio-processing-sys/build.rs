@@ -295,17 +295,25 @@ mod webrtc {
             // instead of assuming the tauri-action environment preserves them.
             command.env(
                 "CC",
-                windows_tool("CC", "clang.exe --target=x86_64-pc-windows-msvc -fuse-ld=lld"),
+                windows_tool(
+                    "CC",
+                    "clang.exe --target=x86_64-pc-windows-msvc -fuse-ld=lld-link",
+                ),
             );
             command.env(
                 "CXX",
-                windows_tool("CXX", "clang++.exe --target=x86_64-pc-windows-msvc -fuse-ld=lld"),
+                windows_tool(
+                    "CXX",
+                    "clang++.exe --target=x86_64-pc-windows-msvc -fuse-ld=lld-link",
+                ),
             );
             command.env(
                 "CPP",
                 windows_tool("CPP", "clang.exe -E --target=x86_64-pc-windows-msvc"),
             );
-            command.env("AR", windows_tool("AR", "lib.exe"));
+            // Autotools expects GNU-style archive semantics, so prefer the LLVM
+            // binutils-compatible tools even on MSVC-targeted Windows builds.
+            command.env("AR", windows_tool("AR", "llvm-ar.exe"));
             command.env("LD", windows_tool("LD", "lld-link.exe"));
             command.env("RC", windows_tool("RC", "rc.exe"));
             command.env("RANLIB", windows_tool("RANLIB", "llvm-ranlib.exe"));
@@ -414,7 +422,7 @@ fn main() -> Result<()> {
 
     if cfg!(target_os = "macos") {
         println!("cargo:rustc-link-lib=dylib=c++");
-    } else {
+    } else if !cfg!(target_os = "windows") {
         println!("cargo:rustc-link-lib=dylib=stdc++");
     }
 
