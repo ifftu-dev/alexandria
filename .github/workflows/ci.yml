@@ -108,7 +108,7 @@ jobs:
           done
 
           if printf '%s\n' "${changed_files[@]}" | grep -Eq \
-            '^(\.github/workflows/(release|validate)-|\.github/workflows/ci\.yml|scripts/|src-tauri/tauri.*\.json|src-tauri/Cargo\.toml|src-tauri/src/commands/mod\.rs|src-tauri/src/commands/tutoring_stubs\.rs|src-tauri/src/tutoring/manager_android\.rs|package\.json)$'; then
+            '^(\.github/workflows/((release|validate)-|desktop-shared\.yml|mobile-shared\.yml)|\.github/workflows/ci\.yml|scripts/|src-tauri/tauri.*\.json|src-tauri/Cargo\.toml|src-tauri/src/commands/mod\.rs|src-tauri/src/commands/tutoring_stubs\.rs|src-tauri/src/tutoring/manager_android\.rs|package\.json|package-lock\.json)$'; then
             echo "release=true" >> "${GITHUB_OUTPUT}"
           else
             echo "release=false" >> "${GITHUB_OUTPUT}"
