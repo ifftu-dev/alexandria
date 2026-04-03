@@ -445,7 +445,6 @@ jobs:
           NDK_HOME: ${{ env.NDK_HOME }}
           CARGO_NDK_SYSROOT_PATH: ${{ env.CARGO_NDK_SYSROOT_PATH }}
           SYSROOT: ${{ env.SYSROOT }}
-          PATH: ${{ env.ANDROID_NDK_SHIM_DIR }}:${{ env.PATH }}
           AR: ${{ env.ANDROID_NDK_AR }}
           RANLIB: ${{ env.ANDROID_NDK_RANLIB }}
           STRIP: ${{ env.ANDROID_NDK_STRIP }}
@@ -462,8 +461,8 @@ jobs:
           CARGO_TARGET_AARCH64_LINUX_ANDROID_AR: ${{ env.ANDROID_NDK_AR }}
           CARGO_TARGET_AARCH64_LINUX_ANDROID_RANLIB: ${{ env.ANDROID_NDK_RANLIB }}
         run: |
+          export PATH="${ANDROID_NDK_SHIM_DIR}:$PATH"
           env \
-            "PATH=${ANDROID_NDK_SHIM_DIR}:${PATH}" \
             "CARGO_NDK_SYSROOT_PATH=${CARGO_NDK_SYSROOT_PATH}" \
             "SYSROOT=${SYSROOT}" \
             "NM=${ANDROID_AARCH64_NM}" \
