@@ -35,10 +35,10 @@ Configure these secrets in your GitHub repository settings under **Settings > Se
 The CI/CD pipeline automates the build and release process.
 
 ### Tag-based Releases
-Pushing a version tag triggers the desktop and mobile release workflows:
-1. Update the version in `package.json` and `src-tauri/tauri.conf.json`.
-2. Create a tag: `git tag v1.0.0`.
-3. Push the tag: `git push origin v1.0.0`.
+Release builds are manual and consume an immutable tag:
+1. Create a tag: `git tag 0.0.1-alpha.2`.
+2. Push the tag: `git push origin 0.0.1-alpha.2`.
+3. Run `Release (Desktop)` and `Release (Mobile)` from the **Actions** tab using that tag.
 
 The workflows build artifacts for macOS, Linux (x86_64 and ARM64), Windows, iOS, and Android.
 
@@ -46,10 +46,10 @@ The workflows build artifacts for macOS, Linux (x86_64 and ARM64), Windows, iOS,
 Manual triggers are available via the **Actions** tab in GitHub:
 1. Select the **Release (Desktop)** or **Release (Mobile)** workflow.
 2. Click **Run workflow**.
-3. Provide an optional tag name if you want to build a specific version.
+3. Provide the immutable tag name you want to build.
 
 ### Expected Artifacts
-- **macOS**: `.dmg` (Universal)
+- **macOS**: `.dmg` (ARM64)
 - **Linux**: `.AppImage`, `.deb` (x86_64 and ARM64)
 - **Windows**: `.exe` (NSIS installer)
 - **iOS**: `.ipa`
@@ -65,6 +65,8 @@ Alexandria uses the Tauri updater to deliver seamless updates.
 4. **Check Endpoints**: Verify that the updater endpoint in `tauri.conf.json` points to your repository's latest release: `https://github.com/ifftu-dev/alexandria/releases/latest/download/latest.json`.
 
 The `finalize` job in the desktop workflow automatically generates and uploads `latest.json` to the GitHub release.
+
+The dispatch entrypoints are thin wrappers over the shared `desktop-shared.yml` and `mobile-shared.yml` reusable workflows.
 
 ## Troubleshooting
 

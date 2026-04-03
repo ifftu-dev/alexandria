@@ -6,6 +6,11 @@ The release system is split into three lanes:
 - `Validate (Desktop)` / `Validate (Mobile)`: manual tag-based artifact builds without publishing.
 - `Release (Desktop)` / `Release (Mobile)`: manual publish workflows for real releases.
 
+The validate/release entrypoints are now thin wrappers over two shared reusable workflows:
+
+- `desktop-shared.yml`
+- `mobile-shared.yml`
+
 ## Public release gate
 
 The first public `0.0.1-alpha` release is gated on all targeted platforms:
@@ -18,7 +23,7 @@ The first public `0.0.1-alpha` release is gated on all targeted platforms:
 
 Before publishing a public release, the repo must pass the cheap `Release Readiness` gate in CI. That check currently enforces:
 
-- release metadata stays version-aligned across `package.json`, `src-tauri/Cargo.toml`, and `src-tauri/tauri.conf.json`
+- release metadata stays version-aligned across `package.json`, `package-lock.json`, `src-tauri/Cargo.toml`, and `src-tauri/tauri.conf.json`
 - desktop updater config is no longer using the placeholder public key
 - Android is not still routed through tutoring stubs
 - Android build config opts into its real mobile tutoring feature set
@@ -49,7 +54,7 @@ For real releases:
 2. Run `Release (Desktop)` manually with that tag to publish desktop bundles and updater metadata.
 3. Run `Release (Mobile)` manually with that tag to publish Android and iOS artifacts.
 
-Release workflows now sync the app version from the immutable release tag before building, so a tag like `0.0.1-alpha` produces `0.0.1-alpha` bundle metadata and artifact names instead of reusing the in-repo development version.
+Shared desktop/mobile build workflows now sync the app version from the immutable release tag before building, so a tag like `0.0.1-alpha` produces `0.0.1-alpha` bundle metadata and artifact names instead of reusing the in-repo development version.
 
 ## Workflow files
 
@@ -58,3 +63,5 @@ Release workflows now sync the app version from the immutable release tag before
 - [`.github/workflows/release-desktop.yml`](/Users/hack/Documents/Personal/Code/alexandria-mark3/alexandria/.github/workflows/release-desktop.yml)
 - [`.github/workflows/validate-mobile.yml`](/Users/hack/Documents/Personal/Code/alexandria-mark3/alexandria/.github/workflows/validate-mobile.yml)
 - [`.github/workflows/release-mobile.yml`](/Users/hack/Documents/Personal/Code/alexandria-mark3/alexandria/.github/workflows/release-mobile.yml)
+- [`.github/workflows/desktop-shared.yml`](/Users/hack/Documents/Personal/Code/alexandria-mark3/alexandria/.github/workflows/desktop-shared.yml)
+- [`.github/workflows/mobile-shared.yml`](/Users/hack/Documents/Personal/Code/alexandria-mark3/alexandria/.github/workflows/mobile-shared.yml)
