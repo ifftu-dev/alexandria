@@ -105,6 +105,7 @@ open class BuildTask : DefaultTask() {
             "ANDROID_NDK_HOME",
             "ANDROID_NDK_ROOT",
             "NDK_HOME",
+            "PATH",
             "CARGO_NDK_SYSROOT_PATH",
             "SYSROOT",
             "AR",

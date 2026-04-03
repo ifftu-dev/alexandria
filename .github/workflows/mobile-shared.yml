@@ -415,6 +415,7 @@ jobs:
           ln -sf "$NDK_BIN/llvm-ranlib" "$SHIM_DIR/aarch64-linux-android-ranlib"
           ln -sf "$NDK_BIN/llvm-strip" "$SHIM_DIR/aarch64-linux-android-strip"
           ln -sf "$NDK_BIN/llvm-nm" "$SHIM_DIR/aarch64-linux-android-nm"
+          echo "ANDROID_NDK_SHIM_DIR=$SHIM_DIR" >> $GITHUB_ENV
           echo "$SHIM_DIR" >> $GITHUB_PATH
           echo "ANDROID_AARCH64_CC=$ANDROID_CC" >> $GITHUB_ENV
           echo "ANDROID_AARCH64_NM=$ANDROID_NM" >> $GITHUB_ENV
@@ -444,6 +445,7 @@ jobs:
           NDK_HOME: ${{ env.NDK_HOME }}
           CARGO_NDK_SYSROOT_PATH: ${{ env.CARGO_NDK_SYSROOT_PATH }}
           SYSROOT: ${{ env.SYSROOT }}
+          PATH: ${{ env.ANDROID_NDK_SHIM_DIR }}:${{ env.PATH }}
           AR: ${{ env.ANDROID_NDK_AR }}
           RANLIB: ${{ env.ANDROID_NDK_RANLIB }}
           STRIP: ${{ env.ANDROID_NDK_STRIP }}
@@ -461,6 +463,7 @@ jobs:
           CARGO_TARGET_AARCH64_LINUX_ANDROID_RANLIB: ${{ env.ANDROID_NDK_RANLIB }}
         run: |
           env \
+            "PATH=${ANDROID_NDK_SHIM_DIR}:${PATH}" \
             "CARGO_NDK_SYSROOT_PATH=${CARGO_NDK_SYSROOT_PATH}" \
             "SYSROOT=${SYSROOT}" \
             "NM=${ANDROID_AARCH64_NM}" \
