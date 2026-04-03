@@ -375,6 +375,10 @@ fn build(sysroot: Option<&str>) -> io::Result<()> {
         }
         configure.arg(format!("--cc={android_cc_raw_path}"));
 
+        if let Some(sysroot) = sysroot {
+            configure.arg(format!("--sysroot={sysroot}"));
+        }
+
         for tool in ["nm", "strip"] {
             let android_tool_path = android_cc_path
                 .parent()
