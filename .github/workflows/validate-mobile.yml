@@ -338,9 +338,11 @@ jobs:
           TARGET_CFLAGS: ${{ env.ANDROID_AARCH64_CFLAGS }}
           CC_aarch64_linux_android: ${{ env.ANDROID_AARCH64_CC }}
           CFLAGS_aarch64_linux_android: ${{ env.ANDROID_AARCH64_CFLAGS }}
-          "CC_aarch64-linux-android": ${{ env.ANDROID_AARCH64_CC }}
-          "CFLAGS_aarch64-linux-android": ${{ env.ANDROID_AARCH64_CFLAGS }}
-        run: npx tauri android build --config src-tauri/tauri.android.conf.json
+        run: |
+          env \
+            "CC_aarch64-linux-android=${ANDROID_AARCH64_CC}" \
+            "CFLAGS_aarch64-linux-android=${ANDROID_AARCH64_CFLAGS}" \
+            npx tauri android build --config src-tauri/tauri.android.conf.json
 
       - name: Upload Android validation artifacts
         uses: actions/upload-artifact@v6
