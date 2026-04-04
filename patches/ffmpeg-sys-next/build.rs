@@ -374,12 +374,26 @@ fn build(sysroot: Option<&str>) -> io::Result<()> {
             panic!("Android CC path does not exists: {}", android_cc_raw_path);
         }
         configure.arg(format!("--cc={android_cc_raw_path}"));
+        configure.arg(format!(
+            "--cxx={}",
+            android_cc_path
+                .parent()
+                .expect("Android CC path did not have a parent directory")
+                .join(
+                    android_cc_path
+                        .file_name()
+                        .expect("Android CC path did not have a file name")
+                        .to_string_lossy()
+                        .replace("clang", "clang++")
+                )
+                .display()
+        ));
 
         if let Some(sysroot) = sysroot {
             configure.arg(format!("--sysroot={sysroot}"));
         }
 
-        for tool in ["nm", "strip"] {
+        for tool in ["ar", "nm", "ranlib", "strip"] {
             let android_tool_path = android_cc_path
                 .parent()
                 .expect("Android CC path did not have a parent directory")
@@ -410,6 +424,7 @@ fn build(sysroot: Option<&str>) -> io::Result<()> {
         // configure.arg(--extra-ldflags=-WL,-z,max-page-size=16384");
         // required for android
         configure.arg("--extra-cflags=-fPIC");
+        configure.arg("--extra-ldexeflags=-pie");
     }
 
     // control debug build
@@ -659,6 +674,7 @@ fn build(sysroot: Option<&str>) -> io::Result<()> {
         .output()
         .unwrap_or_else(|_| panic!("{:?} failed", configure));
     if !output.status.success() {
+        let config_log_path = source_dir.join("ffbuild").join("config.log");
         println!(
             "configure stdout: {}",
             String::from_utf8_lossy(&output.stdout)
@@ -667,6 +683,9 @@ fn build(sysroot: Option<&str>) -> io::Result<()> {
             "configure stderr: {}",
             String::from_utf8_lossy(&output.stderr)
         );
+        if let Ok(config_log) = fs::read_to_string(&config_log_path) {
+            println!("configure config.log: {config_log}");
+        }
 
         return Err(io::Error::other(format!(
             "configure failed {}",
