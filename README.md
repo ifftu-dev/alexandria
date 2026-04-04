@@ -392,4 +392,4 @@ Use `alex config path` to print this directory on any platform.
 
 ## License
 
-TBD
+This repo is available under the [MIT expat license](LICENSE.md), except for the ee directories (which have their own licenses) if and as applicable.
