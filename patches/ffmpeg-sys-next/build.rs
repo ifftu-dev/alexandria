@@ -400,13 +400,13 @@ fn build(sysroot: Option<&str>) -> io::Result<()> {
                 .parent()
                 .expect("Android CC path did not have a parent directory")
                 .join(format!("llvm-{tool}"));
-            configure.arg(format!(
-                "--{tool}={}",
-                android_tool_path
-                    .canonicalize()
-                    .unwrap_or_else(|_| panic!("failed to resolve a path to android {}", tool))
-                    .display()
-            ));
+            if !android_tool_path.exists() {
+                panic!("Android NDK tool not found: {}", android_tool_path.display());
+            }
+            // Use the path as-is without canonicalize() — NDK symlinks like
+            // llvm-ranlib → llvm-ar rely on argv[0] to select behavior, and
+            // canonicalize resolves the symlink breaking the tool dispatch.
+            configure.arg(format!("--{tool}={}", android_tool_path.display()));
         }
 
         if let Ok(android_target_flags) = env::var(format!("CFLAGS_{target}")).as_deref() {
