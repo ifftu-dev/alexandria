@@ -64,15 +64,13 @@ function syncVersionAcrossReleaseMetadata(rawVersion) {
   writeJson(configPath, tauriConfig);
 
   const cargoToml = fs.readFileSync(cargoPath, "utf8");
+  if (!/^version = "[^"]+"/m.test(cargoToml)) {
+    throw new Error("Could not find version field in src-tauri/Cargo.toml");
+  }
   const updatedCargoToml = cargoToml.replace(
     /^version = "[^"]+"/m,
     `version = "${version}"`,
   );
-
-  if (cargoToml === updatedCargoToml) {
-    throw new Error("Could not update src-tauri/Cargo.toml version");
-  }
-
   fs.writeFileSync(cargoPath, updatedCargoToml);
 }
 
