@@ -1,4 +1,5 @@
 The IFFTU Enterprise License (the "Enterprise License")
+
 Copyright (c) 2025-2026 IFFTU Pvt. Ltd.
 
 With regard to the IFFTU Software:
