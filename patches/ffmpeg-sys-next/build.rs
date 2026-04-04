@@ -499,64 +499,66 @@ fn build(sysroot: Option<&str>) -> io::Result<()> {
         switch(&mut configure, &lib.name.to_uppercase(), lib.name);
     }
 
-    // configure external SSL libraries
-    enable!(configure, "BUILD_LIB_GNUTLS", "gnutls");
-    enable!(configure, "BUILD_LIB_OPENSSL", "openssl");
-
-    // configure external filters
-    enable!(configure, "BUILD_LIB_FONTCONFIG", "fontconfig");
-    enable!(configure, "BUILD_LIB_FREI0R", "frei0r");
-    enable!(configure, "BUILD_LIB_LADSPA", "ladspa");
-    enable!(configure, "BUILD_LIB_ASS", "libass");
-    enable!(configure, "BUILD_LIB_FREETYPE", "libfreetype");
-    enable!(configure, "BUILD_LIB_FRIBIDI", "libfribidi");
-    enable!(configure, "BUILD_LIB_OPENCV", "libopencv");
-    enable!(configure, "BUILD_LIB_VMAF", "libvmaf");
-
-    // configure external encoders/decoders
-    enable!(configure, "BUILD_LIB_AACPLUS", "libaacplus");
-    enable!(configure, "BUILD_LIB_CELT", "libcelt");
-    enable!(configure, "BUILD_LIB_DCADEC", "libdcadec");
-    enable!(configure, "BUILD_LIB_DAV1D", "libdav1d");
-    enable!(configure, "BUILD_LIB_FAAC", "libfaac");
-    enable!(configure, "BUILD_LIB_FDK_AAC", "libfdk-aac");
-    enable!(configure, "BUILD_LIB_GSM", "libgsm");
-    enable!(configure, "BUILD_LIB_ILBC", "libilbc");
-    enable!(configure, "BUILD_LIB_VAZAAR", "libvazaar");
-    enable!(configure, "BUILD_LIB_MP3LAME", "libmp3lame");
-    enable!(configure, "BUILD_LIB_OPENCORE_AMRNB", "libopencore-amrnb");
-    enable!(configure, "BUILD_LIB_OPENCORE_AMRWB", "libopencore-amrwb");
-    enable!(configure, "BUILD_LIB_OPENH264", "libopenh264");
-    enable!(configure, "BUILD_LIB_OPENH265", "libopenh265");
-    enable!(configure, "BUILD_LIB_OPENJPEG", "libopenjpeg");
-    // Skip libopus on Android: the app uses PureOpusEncoder/PureOpusDecoder
-    // from audiopus directly — ffmpeg only handles H264 video. The Android
-    // NDK sysroot has no system opus, so configure would fail.
+    // Skip all external libraries on Android: the NDK sysroot does not
+    // ship any of these (opus, x264, openssl, etc.) and ffmpeg's configure
+    // with --disable-autodetect will fail on each pkg-config probe. The app
+    // only needs ffmpeg's built-in H264 decoder on Android — audio uses
+    // audiopus directly, and video encoding is handled separately.
     if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("android") {
+        // configure external SSL libraries
+        enable!(configure, "BUILD_LIB_GNUTLS", "gnutls");
+        enable!(configure, "BUILD_LIB_OPENSSL", "openssl");
+
+        // configure external filters
+        enable!(configure, "BUILD_LIB_FONTCONFIG", "fontconfig");
+        enable!(configure, "BUILD_LIB_FREI0R", "frei0r");
+        enable!(configure, "BUILD_LIB_LADSPA", "ladspa");
+        enable!(configure, "BUILD_LIB_ASS", "libass");
+        enable!(configure, "BUILD_LIB_FREETYPE", "libfreetype");
+        enable!(configure, "BUILD_LIB_FRIBIDI", "libfribidi");
+        enable!(configure, "BUILD_LIB_OPENCV", "libopencv");
+        enable!(configure, "BUILD_LIB_VMAF", "libvmaf");
+
+        // configure external encoders/decoders
+        enable!(configure, "BUILD_LIB_AACPLUS", "libaacplus");
+        enable!(configure, "BUILD_LIB_CELT", "libcelt");
+        enable!(configure, "BUILD_LIB_DCADEC", "libdcadec");
+        enable!(configure, "BUILD_LIB_DAV1D", "libdav1d");
+        enable!(configure, "BUILD_LIB_FAAC", "libfaac");
+        enable!(configure, "BUILD_LIB_FDK_AAC", "libfdk-aac");
+        enable!(configure, "BUILD_LIB_GSM", "libgsm");
+        enable!(configure, "BUILD_LIB_ILBC", "libilbc");
+        enable!(configure, "BUILD_LIB_VAZAAR", "libvazaar");
+        enable!(configure, "BUILD_LIB_MP3LAME", "libmp3lame");
+        enable!(configure, "BUILD_LIB_OPENCORE_AMRNB", "libopencore-amrnb");
+        enable!(configure, "BUILD_LIB_OPENCORE_AMRWB", "libopencore-amrwb");
+        enable!(configure, "BUILD_LIB_OPENH264", "libopenh264");
+        enable!(configure, "BUILD_LIB_OPENH265", "libopenh265");
+        enable!(configure, "BUILD_LIB_OPENJPEG", "libopenjpeg");
         enable!(configure, "BUILD_LIB_OPUS", "libopus");
+        enable!(configure, "BUILD_LIB_SCHROEDINGER", "libschroedinger");
+        enable!(configure, "BUILD_LIB_SHINE", "libshine");
+        enable!(configure, "BUILD_LIB_SNAPPY", "libsnappy");
+        enable!(configure, "BUILD_LIB_SPEEX", "libspeex");
+        enable!(
+            configure,
+            "BUILD_LIB_STAGEFRIGHT_H264",
+            "libstagefright-h264"
+        );
+        enable!(configure, "BUILD_LIB_THEORA", "libtheora");
+        enable!(configure, "BUILD_LIB_TWOLAME", "libtwolame");
+        enable!(configure, "BUILD_LIB_UTVIDEO", "libutvideo");
+        enable!(configure, "BUILD_LIB_VO_AACENC", "libvo-aacenc");
+        enable!(configure, "BUILD_LIB_VO_AMRWBENC", "libvo-amrwbenc");
+        enable!(configure, "BUILD_LIB_VORBIS", "libvorbis");
+        enable!(configure, "BUILD_LIB_VPX", "libvpx");
+        enable!(configure, "BUILD_LIB_WAVPACK", "libwavpack");
+        enable!(configure, "BUILD_LIB_WEBP", "libwebp");
+        enable!(configure, "BUILD_LIB_X264", "libx264");
+        enable!(configure, "BUILD_LIB_X265", "libx265");
+        enable!(configure, "BUILD_LIB_AVS", "libavs");
+        enable!(configure, "BUILD_LIB_XVID", "libxvid");
     }
-    enable!(configure, "BUILD_LIB_SCHROEDINGER", "libschroedinger");
-    enable!(configure, "BUILD_LIB_SHINE", "libshine");
-    enable!(configure, "BUILD_LIB_SNAPPY", "libsnappy");
-    enable!(configure, "BUILD_LIB_SPEEX", "libspeex");
-    enable!(
-        configure,
-        "BUILD_LIB_STAGEFRIGHT_H264",
-        "libstagefright-h264"
-    );
-    enable!(configure, "BUILD_LIB_THEORA", "libtheora");
-    enable!(configure, "BUILD_LIB_TWOLAME", "libtwolame");
-    enable!(configure, "BUILD_LIB_UTVIDEO", "libutvideo");
-    enable!(configure, "BUILD_LIB_VO_AACENC", "libvo-aacenc");
-    enable!(configure, "BUILD_LIB_VO_AMRWBENC", "libvo-amrwbenc");
-    enable!(configure, "BUILD_LIB_VORBIS", "libvorbis");
-    enable!(configure, "BUILD_LIB_VPX", "libvpx");
-    enable!(configure, "BUILD_LIB_WAVPACK", "libwavpack");
-    enable!(configure, "BUILD_LIB_WEBP", "libwebp");
-    enable!(configure, "BUILD_LIB_X264", "libx264");
-    enable!(configure, "BUILD_LIB_X265", "libx265");
-    enable!(configure, "BUILD_LIB_AVS", "libavs");
-    enable!(configure, "BUILD_LIB_XVID", "libxvid");
 
     // make sure to only enable related hw acceleration features for a correct
     // target os. This allows to leave allows cargo features enable and control
