@@ -24,7 +24,7 @@ on:
       include_macos:
         required: false
         type: boolean
-        default: false
+        default: true
       include_linux_arm64:
         required: false
         type: boolean
@@ -852,17 +852,8 @@ jobs:
           LINUX_X64_SIG_FILE=$(find_artifact "*_amd64.AppImage.sig")
           WINDOWS_SIG_FILE=$(find_artifact "*_x64-setup.nsis.zip.sig")
 
-          MISSING=""
-          [ -z "$MACOS_SIG_FILE" ] && MISSING="${MISSING}  macOS .dmg.sig\n"
-          [ -z "$LINUX_X64_SIG_FILE" ] && MISSING="${MISSING}  Linux x64 .AppImage.sig\n"
-          [ -z "$WINDOWS_SIG_FILE" ] && MISSING="${MISSING}  Windows .nsis.zip.sig\n"
-          if [ -n "$MISSING" ]; then
-            echo "ERROR: Missing required platform signatures:"
-            printf "$MISSING"
-            exit 1
-          fi
-
           PLATFORMS="{}"
+          PLATFORM_COUNT=0
           add_platform() {
             local key="$1" sig_file="$2"
             local sig pkg url
@@ -872,11 +863,26 @@ jobs:
             PLATFORMS=$(echo "$PLATFORMS" | jq \
               --arg sig "$sig" --arg url "$url" \
               ".\"$key\" = {signature: \$sig, url: \$url}")
+            PLATFORM_COUNT=$((PLATFORM_COUNT + 1))
           }
 
-          add_platform "darwin-aarch64" "$MACOS_SIG_FILE"
-          add_platform "linux-x86_64" "$LINUX_X64_SIG_FILE"
-          add_platform "windows-x86_64" "$WINDOWS_SIG_FILE"
+          if [ -n "$MACOS_SIG_FILE" ]; then
+            add_platform "darwin-aarch64" "$MACOS_SIG_FILE"
+          else
+            echo "WARNING: macOS .dmg.sig not found — skipping darwin-aarch64 in latest.json"
+          fi
+
+          if [ -n "$LINUX_X64_SIG_FILE" ]; then
+            add_platform "linux-x86_64" "$LINUX_X64_SIG_FILE"
+          else
+            echo "WARNING: Linux x64 .AppImage.sig not found — skipping linux-x86_64 in latest.json"
+          fi
+
+          if [ -n "$WINDOWS_SIG_FILE" ]; then
+            add_platform "windows-x86_64" "$WINDOWS_SIG_FILE"
+          else
+            echo "WARNING: Windows .nsis.zip.sig not found — skipping windows-x86_64 in latest.json"
+          fi
 
           if [ "$BUILD_LINUX_ARM64_RESULT" = "success" ]; then
             LINUX_ARM64_SIG_FILE=$(find_artifact "*_arm64.AppImage.sig")
@@ -884,6 +890,12 @@ jobs:
               add_platform "linux-aarch64" "$LINUX_ARM64_SIG_FILE"
             fi
           fi
+
+          if [ "$PLATFORM_COUNT" -eq 0 ]; then
+            echo "ERROR: No platform signatures found — cannot generate latest.json"
+            exit 1
+          fi
+          echo "Generating latest.json with $PLATFORM_COUNT platform(s)"
 
           VERSION="${RELEASE_TAG#v}"
           TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")

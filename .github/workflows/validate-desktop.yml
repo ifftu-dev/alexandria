@@ -21,7 +21,7 @@ on:
         description: 'Validate macOS artifacts'
         required: false
         type: boolean
-        default: false
+        default: true
       include_linux_arm64:
         description: 'Validate Linux ARM64 artifacts'
         required: false

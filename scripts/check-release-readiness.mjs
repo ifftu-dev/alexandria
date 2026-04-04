@@ -93,6 +93,11 @@ if (extractWorkflowInputDefault(releaseMobileWorkflow, "include_ios") !== "true"
   failures.push("Release (Mobile) does not include iOS by default.");
 }
 
+const releaseDesktopWorkflow = readText(".github/workflows/release-desktop.yml");
+if (extractWorkflowInputDefault(releaseDesktopWorkflow, "include_macos") !== "true") {
+  failures.push("Release (Desktop) does not include macOS by default.");
+}
+
 if (failures.length > 0) {
   console.error("Release readiness check failed:");
   for (const failure of failures) {

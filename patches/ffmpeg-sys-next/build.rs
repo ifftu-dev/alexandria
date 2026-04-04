@@ -529,7 +529,12 @@ fn build(sysroot: Option<&str>) -> io::Result<()> {
     enable!(configure, "BUILD_LIB_OPENH264", "libopenh264");
     enable!(configure, "BUILD_LIB_OPENH265", "libopenh265");
     enable!(configure, "BUILD_LIB_OPENJPEG", "libopenjpeg");
-    enable!(configure, "BUILD_LIB_OPUS", "libopus");
+    // Skip libopus on Android: the app uses PureOpusEncoder/PureOpusDecoder
+    // from audiopus directly — ffmpeg only handles H264 video. The Android
+    // NDK sysroot has no system opus, so configure would fail.
+    if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("android") {
+        enable!(configure, "BUILD_LIB_OPUS", "libopus");
+    }
     enable!(configure, "BUILD_LIB_SCHROEDINGER", "libschroedinger");
     enable!(configure, "BUILD_LIB_SHINE", "libshine");
     enable!(configure, "BUILD_LIB_SNAPPY", "libsnappy");
