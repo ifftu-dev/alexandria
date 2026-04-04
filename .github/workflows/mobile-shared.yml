@@ -472,7 +472,7 @@ jobs:
             "CC_aarch64-linux-android=${ANDROID_AARCH64_CC}" \
             "CFLAGS_aarch64_linux_android=${ANDROID_AARCH64_CFLAGS}" \
             "CFLAGS_aarch64-linux-android=${ANDROID_AARCH64_CFLAGS}" \
-            npx tauri android build --config src-tauri/tauri.android.conf.json
+            npx tauri android build --target aarch64 --config src-tauri/tauri.android.conf.json
 
       - name: Upload Android validation artifacts
         if: inputs.mode == 'validate'
