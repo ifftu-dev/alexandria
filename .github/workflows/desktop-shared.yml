@@ -204,6 +204,7 @@ jobs:
           security set-key-partition-list \
             -S apple-tool:,apple:,codesign: \
             -s -k "$KEYCHAIN_PASSWORD" build.keychain
+          security set-keychain-settings build.keychain
           rm certificate.p12
 
       - name: Install FFmpeg and autotools
