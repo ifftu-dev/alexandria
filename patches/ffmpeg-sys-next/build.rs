@@ -304,7 +304,9 @@ fn build(sysroot: Option<&str>) -> io::Result<()> {
 
         // Apple-clang needs this, -arch is not enough.
         let target_flag = format!("--target={target}");
-        if cc.is_flag_supported(&target_flag).unwrap_or(false) {
+        if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("android")
+            && cc.is_flag_supported(&target_flag).unwrap_or(false)
+        {
             configure.arg(format!("--extra-cflags={target_flag}"));
             configure.arg(format!("--extra-ldflags={target_flag}"));
         }
