@@ -2,7 +2,7 @@
 
 <img alt="Codename: Alexandria — Knowledge belongs to everyone." src="docs/hero.svg" width="100%">
 
-<p>
+<p align="center">
   <img src="https://github.com/ifftu-dev/alexandria/actions/workflows/ci.yml/badge.svg" alt="CI">
   <img src="https://github.com/ifftu-dev/alexandria/actions/workflows/release-desktop.yml/badge.svg" alt="Release Desktop">
   <img src="https://github.com/ifftu-dev/alexandria/actions/workflows/release-mobile.yml/badge.svg" alt="Release Mobile">
