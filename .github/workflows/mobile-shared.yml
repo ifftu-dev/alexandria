@@ -143,9 +143,6 @@ jobs:
           path: iroh-live-patched
           token: ${{ secrets.CROSS_REPO_PAT }}
 
-      - name: Select Xcode 26
-        run: sudo xcode-select -s /Applications/Xcode_26.3.app/Contents/Developer
-
       - name: Setup Rust 1.83.0 (MSRV)
         uses: dtolnay/rust-toolchain@1.89.0
         with:
