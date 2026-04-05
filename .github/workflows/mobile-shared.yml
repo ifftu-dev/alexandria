@@ -185,6 +185,24 @@ jobs:
         if: inputs.ios_export_method != 'debugging'
         run: echo "${{ secrets.APPLE_API_KEY_CONTENT }}" > $RUNNER_TEMP/AuthKey.p8
 
+      - name: Strip alpha channel from iOS app icons
+        working-directory: alexandria/src-tauri/gen/apple/Assets.xcassets/AppIcon.appiconset
+        run: |
+          for icon in *.png; do
+            if sips -g hasAlpha "$icon" 2>/dev/null | grep -q 'yes'; then
+              echo "Stripping alpha from $icon"
+              magick "$icon" -background none -flatten -alpha off "$icon"
+            fi
+          done
+          # Verify no alpha remains
+          for icon in *.png; do
+            if sips -g hasAlpha "$icon" 2>/dev/null | grep -q 'yes'; then
+              echo "ERROR: $icon still has alpha channel" >&2
+              exit 1
+            fi
+          done
+          echo "All icons verified: no alpha channel"
+
       - name: Build iOS artifacts
         if: inputs.ios_export_method == 'debugging'
         working-directory: alexandria
