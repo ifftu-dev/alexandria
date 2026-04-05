@@ -263,6 +263,17 @@ In addition to the 6 global topics, classrooms use per-classroom dynamic topics:
 
 Nodes subscribe/unsubscribe as they join/leave classrooms.
 
+### Classroom End-to-End Encryption
+
+Classroom messages are encrypted with AES-256-GCM using a per-classroom group key:
+
+1. **Key generation** — Owner generates a random AES-256 group key when the classroom is created.
+2. **Key distribution** — When a member is approved, the owner/moderator encrypts the group key for the new member's X25519 public key via ECDH and broadcasts a `KeyDistribution` meta event (base64-encoded `nonce || ciphertext`).
+3. **Message encryption** — Senders encrypt message content with the group key. The `ClassroomMessagePayload` carries `encrypted: true` and `key_version` to identify the key used.
+4. **Key rotation** — On member removal (kick/leave), the group key is rotated and redistributed to remaining members. The `key_version` field is incremented.
+
+Database tables: `classroom_group_keys` (encrypted key + version per classroom), with `x25519_public_key` columns on `classroom_members` and `local_identity`.
+
 ### Cross-Device Sync
 
 Private encrypted sync between devices sharing the same mnemonic:
@@ -393,7 +404,7 @@ Reputation impact computed (instructor attribution)
 | Governance Index | `/governance` | Browse DAOs |
 | DAO Detail | `/governance/:id` | DAO info, proposals, elections |
 | Classrooms Index | `/classrooms` | List joined classrooms |
-| Classroom Detail | `/classrooms/:id` | Channels, messages, active calls |
+| Classroom Detail | `/classrooms/:id` | Channels, messages, active calls (voice/video desktop only; mobile stubs) |
 | Classroom Settings | `/classrooms/:id/settings` | Role management, archive |
 | Join Requests | `/classrooms/:id/requests` | Review pending join requests |
 | Tutoring Index | `/tutoring` | Live tutoring sessions list |
@@ -423,7 +434,7 @@ The frontend communicates with the Rust backend via **~160 Tauri IPC commands** 
 
 | Module | Commands | Examples |
 |--------|----------|---------|
-| classroom | 26 | `classroom_create`, `classroom_send_message`, `classroom_start_call` |
+| classroom | 24 | `classroom_create`, `classroom_approve_member`, `classroom_send_message`, `classroom_start_call` |
 | governance | 17 | `create_dao`, `submit_proposal`, `cast_vote`, `run_election` |
 | taxonomy | 15 | `get_skills`, `get_subjects`, `update_taxonomy`, `get_skill_graph` |
 | tutoring | 14 | `tutoring_create_room`, `tutoring_join_room`, `tutoring_toggle_video` |

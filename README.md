@@ -54,7 +54,7 @@ alexandria/
 │       ├── ipfs/     # iroh node, IPFS gateway fallback, CID resolution
 │       └── p2p/      # libp2p swarm — DHT, relay, gossip, peer exchange
 ├── src/              # Vue 3 + TypeScript frontend
-│   ├── pages/        # 25 pages (onboarding, courses, skills, governance, classrooms, tutoring, ...)
+│   ├── pages/        # 26 pages (onboarding, courses, skills, governance, classrooms, tutoring, ...)
 │   ├── components/   # UI components + auth + course + layout
 │   ├── composables/  # useAuth, useTheme, useP2P, useSentinel, useLocalApi, useBiometricVault, useClassroom, useContentSync, usePlatform, useSkillGraphState, useSkillGraphHover, useTutoringRoom
 │   └── assets/       # Tailwind CSS v4 design system

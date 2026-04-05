@@ -47,7 +47,17 @@ fn build_opus(is_static: bool) {
     );
 
     println!("cargo:info=Building Opus via CMake.");
-    let opus_build_dir = cmake::build(opus_path);
+    let mut cfg = cmake::Config::new(opus_path);
+    // When cross-compiling for Android aarch64, the NDK toolchain file
+    // defaults to armeabi-v7a. Explicitly set the correct ABI.
+    let target = env::var("TARGET").unwrap_or_default();
+    if target.contains("aarch64") && target.contains("android") {
+        cfg.define("ANDROID_ABI", "arm64-v8a");
+        cfg.define("ANDROID_PLATFORM", "android-28");
+    } else if target.contains("armv7") && target.contains("android") {
+        cfg.define("ANDROID_ABI", "armeabi-v7a");
+    }
+    let opus_build_dir = cfg.build();
     link_opus(is_static, opus_build_dir.display())
 }
 

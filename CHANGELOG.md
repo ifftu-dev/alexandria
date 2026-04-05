@@ -10,7 +10,7 @@ and this project loosely follows [Semantic Versioning](https://semver.org/spec/v
 ## [2026-03-25]
 
 ### Added
-- **Classrooms**: Full classroom/cohort management with 26 Tauri commands.
+- **Classrooms**: Full classroom/cohort management with 24 Tauri commands.
   - Create/archive classrooms, manage members with role-based access (owner/moderator/member).
   - Text and announcement channels with real-time P2P messaging via per-classroom gossip topics.
   - Join request workflow (request, approve, deny).
