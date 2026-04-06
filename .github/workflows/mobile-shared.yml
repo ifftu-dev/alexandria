@@ -562,11 +562,9 @@ jobs:
             --repo "${GITHUB_REPOSITORY}"
 
       - name: Upload to Google Play (internal testing)
-        if: >-
-          inputs.mode == 'release' &&
-          needs.prepare.outputs.android_signing_mode == 'secret' &&
-          secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON != ''
+        if: inputs.mode == 'release' && needs.prepare.outputs.android_signing_mode == 'secret'
         uses: r0adkll/upload-google-play@v1
+        continue-on-error: true
         with:
           serviceAccountJsonPlainText: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
           packageName: org.alexandria.node
