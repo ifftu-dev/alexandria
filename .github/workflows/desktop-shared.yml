@@ -851,7 +851,7 @@ jobs:
           PERL: C:\Strawberry\perl\bin\perl.exe
         with:
           projectPath: alexandria
-          args: --bundles nsis --config src-tauri/tauri.desktop.windows.conf.json
+          args: --bundles nsis --config src-tauri/tauri.desktop.windows.conf.json --config '{"bundle":{"resources":{"ffmpeg-dlls/*":"./"}}}'
           includeUpdaterJson: false
 
       - name: Build Windows release
@@ -869,7 +869,7 @@ jobs:
         with:
           projectPath: alexandria
           releaseId: ${{ needs.prepare.outputs.release_id }}
-          args: --bundles nsis --config src-tauri/tauri.desktop.windows.conf.json
+          args: --bundles nsis --config src-tauri/tauri.desktop.windows.conf.json --config '{"bundle":{"resources":{"ffmpeg-dlls/*":"./"}}}'
           includeUpdaterJson: false
 
       - name: Rename Windows release assets
