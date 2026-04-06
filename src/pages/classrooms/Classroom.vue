@@ -58,7 +58,7 @@
 
       <ChannelList
         :channels="channels"
-        :active-channel-id="activeChannelId"
+        :active-channel-id="activeChannelId ?? undefined"
         :can-manage="currentClassroom?.my_role === 'owner' || currentClassroom?.my_role === 'moderator'"
         @select="selectChannel"
         @add="showNewChannel = true"
@@ -238,7 +238,7 @@
 
               <ChannelList
                 :channels="channels"
-                :active-channel-id="activeChannelId"
+                :active-channel-id="activeChannelId ?? undefined"
                 :can-manage="currentClassroom?.my_role === 'owner' || currentClassroom?.my_role === 'moderator'"
                 @select="(id: string) => { selectChannel(id); showChannelDrawer = false }"
                 @add="showNewChannel = true; showChannelDrawer = false"
@@ -336,7 +336,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch, defineComponent, h } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch, defineComponent, h, type PropType } from 'vue'
 import { useRoute } from 'vue-router'
 import { useClassroom } from '@/composables/useClassroom'
 import { useAuth } from '@/composables/useAuth'
@@ -348,8 +348,8 @@ import AppModal from '@/components/ui/AppModal.vue'
 /** Channel list — shared between desktop sidebar and mobile drawer */
 const ChannelList = defineComponent({
   props: {
-    channels: { type: Array, required: true },
-    activeChannelId: { type: String, default: null },
+    channels: { type: Array as PropType<readonly any[]>, required: true },
+    activeChannelId: { type: String, default: undefined },
     canManage: { type: Boolean, default: false },
   },
   emits: ['select', 'add'],
@@ -399,7 +399,7 @@ const ChannelList = defineComponent({
 /** Member list — shared between desktop sidebar and mobile drawer */
 const MemberList = defineComponent({
   props: {
-    members: { type: Array, required: true },
+    members: { type: Array as PropType<readonly any[]>, required: true },
   },
   setup(props) {
     function formatAddr(addr: string): string {
