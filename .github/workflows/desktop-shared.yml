@@ -797,6 +797,19 @@ jobs:
           Get-Command lld-link.exe
           Get-Command lib.exe
 
+      - name: Copy FFmpeg DLLs for bundling
+        shell: pwsh
+        run: |
+          $ffmpegBin = '${{ steps.windows-ffmpeg.outputs.bin_dir }}'
+          $dllDir = 'alexandria\src-tauri\ffmpeg-dlls'
+          New-Item -ItemType Directory -Path $dllDir -Force | Out-Null
+          $dlls = Get-ChildItem -Path $ffmpegBin -Filter '*.dll'
+          foreach ($dll in $dlls) {
+            Copy-Item $dll.FullName -Destination $dllDir
+            Write-Host "  Bundling $($dll.Name)"
+          }
+          Write-Host "Copied $($dlls.Count) FFmpeg DLLs to $dllDir"
+
       - name: Build Windows validation artifacts
         if: inputs.mode == 'validate'
         uses: tauri-apps/tauri-action@v0

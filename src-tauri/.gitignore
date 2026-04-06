@@ -1,2 +1,5 @@
 # Rust build artifacts (also covered by root .gitignore target/)
 /target/
+
+# FFmpeg DLLs copied during Windows CI builds
+/ffmpeg-dlls/
