@@ -276,6 +276,14 @@ jobs:
             echo "No macOS artifacts were produced." >&2
             exit 1
           fi
+          # Rename for user-friendly download names
+          VERSION="${RELEASE_TAG#v}"
+          for f in "$ARTIFACT_DIR"/*.dmg; do
+            [ -f "$f" ] && mv "$f" "$ARTIFACT_DIR/Alexandria-${VERSION}-macOS-Apple-Silicon.dmg"
+          done
+          for f in "$ARTIFACT_DIR"/*.dmg.sig; do
+            [ -f "$f" ] && mv "$f" "$ARTIFACT_DIR/Alexandria-${VERSION}-macOS-Apple-Silicon.dmg.sig"
+          done
           echo "artifact_dir=$ARTIFACT_DIR" >> "$GITHUB_OUTPUT"
 
       - name: Upload macOS validation artifacts
@@ -406,14 +414,33 @@ jobs:
           args: --bundles appimage,deb --config src-tauri/tauri.desktop.linux.conf.json
           includeUpdaterJson: false
 
+      - name: Collect and rename Linux x64 artifacts
+        id: linux-x64-artifacts
+        run: |
+          set -euo pipefail
+          ARTIFACT_DIR="$RUNNER_TEMP/desktop-linux-x86_64"
+          mkdir -p "$ARTIFACT_DIR"
+          VERSION="${RELEASE_TAG#v}"
+          for f in /mnt/target/release/bundle/appimage/*_amd64.AppImage; do
+            [ -f "$f" ] && cp "$f" "$ARTIFACT_DIR/Alexandria-${VERSION}-Linux-x86_64.AppImage"
+          done
+          for f in /mnt/target/release/bundle/appimage/*_amd64.AppImage.sig; do
+            [ -f "$f" ] && cp "$f" "$ARTIFACT_DIR/Alexandria-${VERSION}-Linux-x86_64.AppImage.sig"
+          done
+          for f in /mnt/target/release/bundle/deb/*_amd64.deb; do
+            [ -f "$f" ] && cp "$f" "$ARTIFACT_DIR/Alexandria-${VERSION}-Linux-x86_64.deb"
+          done
+          for f in /mnt/target/release/bundle/deb/*_amd64.deb.sig; do
+            [ -f "$f" ] && cp "$f" "$ARTIFACT_DIR/Alexandria-${VERSION}-Linux-x86_64.deb.sig"
+          done
+          echo "artifact_dir=$ARTIFACT_DIR" >> "$GITHUB_OUTPUT"
+
       - name: Upload Linux validation artifacts
         if: inputs.mode == 'validate'
         uses: actions/upload-artifact@v6
         with:
           name: desktop-linux-x86_64
-          path: |
-            /mnt/target/release/bundle/appimage/**/*
-            /mnt/target/release/bundle/deb/**/*
+          path: ${{ steps.linux-x64-artifacts.outputs.artifact_dir }}/*
           if-no-files-found: error
 
       - name: Upload Linux release artifacts for finalization
@@ -421,9 +448,7 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: release-linux-x86_64
-          path: |
-            /mnt/target/release/bundle/appimage/**/*
-            /mnt/target/release/bundle/deb/**/*
+          path: ${{ steps.linux-x64-artifacts.outputs.artifact_dir }}/*
           if-no-files-found: error
 
   build-linux-arm64:
@@ -541,14 +566,33 @@ jobs:
           args: --bundles appimage,deb --config src-tauri/tauri.desktop.linux.conf.json
           includeUpdaterJson: false
 
+      - name: Collect and rename Linux ARM64 artifacts
+        id: linux-arm64-artifacts
+        run: |
+          set -euo pipefail
+          ARTIFACT_DIR="$RUNNER_TEMP/desktop-linux-arm64"
+          mkdir -p "$ARTIFACT_DIR"
+          VERSION="${RELEASE_TAG#v}"
+          for f in /mnt/target/release/bundle/appimage/*_arm64.AppImage; do
+            [ -f "$f" ] && cp "$f" "$ARTIFACT_DIR/Alexandria-${VERSION}-Linux-ARM64.AppImage"
+          done
+          for f in /mnt/target/release/bundle/appimage/*_arm64.AppImage.sig; do
+            [ -f "$f" ] && cp "$f" "$ARTIFACT_DIR/Alexandria-${VERSION}-Linux-ARM64.AppImage.sig"
+          done
+          for f in /mnt/target/release/bundle/deb/*_arm64.deb; do
+            [ -f "$f" ] && cp "$f" "$ARTIFACT_DIR/Alexandria-${VERSION}-Linux-ARM64.deb"
+          done
+          for f in /mnt/target/release/bundle/deb/*_arm64.deb.sig; do
+            [ -f "$f" ] && cp "$f" "$ARTIFACT_DIR/Alexandria-${VERSION}-Linux-ARM64.deb.sig"
+          done
+          echo "artifact_dir=$ARTIFACT_DIR" >> "$GITHUB_OUTPUT"
+
       - name: Upload Linux ARM64 validation artifacts
         if: inputs.mode == 'validate'
         uses: actions/upload-artifact@v6
         with:
           name: desktop-linux-arm64
-          path: |
-            /mnt/target/release/bundle/appimage/**/*
-            /mnt/target/release/bundle/deb/**/*
+          path: ${{ steps.linux-arm64-artifacts.outputs.artifact_dir }}/*
           if-no-files-found: error
 
       - name: Upload Linux ARM64 release artifacts for finalization
@@ -556,9 +600,7 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: release-linux-arm64
-          path: |
-            /mnt/target/release/bundle/appimage/**/*
-            /mnt/target/release/bundle/deb/**/*
+          path: ${{ steps.linux-arm64-artifacts.outputs.artifact_dir }}/*
           if-no-files-found: error
 
   build-windows:
@@ -767,6 +809,20 @@ jobs:
           foreach ($file in $files) {
             Copy-Item -Path $file.FullName -Destination $artifactDir -Force
           }
+          # Rename for user-friendly download names
+          $version = $env:RELEASE_TAG -replace '^v', ''
+          Get-ChildItem -Path $artifactDir -Filter '*_x64-setup.exe' | ForEach-Object {
+            Rename-Item $_.FullName "Alexandria-${version}-Windows-x64-Setup.exe"
+          }
+          Get-ChildItem -Path $artifactDir -Filter '*_x64-setup.exe.sig' | ForEach-Object {
+            Rename-Item $_.FullName "Alexandria-${version}-Windows-x64-Setup.exe.sig"
+          }
+          Get-ChildItem -Path $artifactDir -Filter '*_x64-setup.nsis.zip' | ForEach-Object {
+            Rename-Item $_.FullName "Alexandria-${version}-Windows-x64-Setup.nsis.zip"
+          }
+          Get-ChildItem -Path $artifactDir -Filter '*_x64-setup.nsis.zip.sig' | ForEach-Object {
+            Rename-Item $_.FullName "Alexandria-${version}-Windows-x64-Setup.nsis.zip.sig"
+          }
           Add-Content -Path $env:GITHUB_OUTPUT -Value "artifact_dir=$artifactDir"
           Add-Content -Path $env:GITHUB_OUTPUT -Value "bundle_root=$bundleRoot"
 
@@ -801,11 +857,17 @@ jobs:
           }
           Remove-Item -Force $certPath
 
-      - name: Re-upload signed installer
+      - name: Re-upload signed installer with friendly name
         if: inputs.mode == 'release' && env.HAS_WINDOWS_CERT == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "${RELEASE_TAG}" alexandria/src-tauri/target/release/bundle/nsis/*_x64-setup.exe --clobber --repo "${GITHUB_REPOSITORY}"
+        shell: bash
+        run: |
+          VERSION="${RELEASE_TAG#v}"
+          FRIENDLY_NAME="Alexandria-${VERSION}-Windows-x64-Setup.exe"
+          # Copy signed exe from original location with friendly name
+          cp alexandria/src-tauri/target/release/bundle/nsis/*_x64-setup.exe "/tmp/${FRIENDLY_NAME}"
+          gh release upload "${RELEASE_TAG}" "/tmp/${FRIENDLY_NAME}" --clobber --repo "${GITHUB_REPOSITORY}"
 
       - name: Upload Windows release artifacts for finalization
         if: inputs.mode == 'release' && inputs.sign_updater == true
@@ -849,9 +911,9 @@ jobs:
 
           find_artifact() { find artifacts -name "$1" -type f 2>/dev/null | head -1; }
 
-          MACOS_SIG_FILE=$(find_artifact "*.dmg.sig")
-          LINUX_X64_SIG_FILE=$(find_artifact "*_amd64.AppImage.sig")
-          WINDOWS_SIG_FILE=$(find_artifact "*_x64-setup.nsis.zip.sig")
+          MACOS_SIG_FILE=$(find_artifact "*macOS-Apple-Silicon.dmg.sig")
+          LINUX_X64_SIG_FILE=$(find_artifact "*Linux-x86_64.AppImage.sig")
+          WINDOWS_SIG_FILE=$(find_artifact "*Windows-x64-Setup.nsis.zip.sig")
 
           PLATFORMS="{}"
           PLATFORM_COUNT=0
@@ -886,7 +948,7 @@ jobs:
           fi
 
           if [ "$BUILD_LINUX_ARM64_RESULT" = "success" ]; then
-            LINUX_ARM64_SIG_FILE=$(find_artifact "*_arm64.AppImage.sig")
+            LINUX_ARM64_SIG_FILE=$(find_artifact "*Linux-ARM64.AppImage.sig")
             if [ -n "$LINUX_ARM64_SIG_FILE" ]; then
               add_platform "linux-aarch64" "$LINUX_ARM64_SIG_FILE"
             fi

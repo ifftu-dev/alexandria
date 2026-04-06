@@ -49,11 +49,19 @@ Manual triggers are available via the **Actions** tab in GitHub:
 3. Provide the immutable tag name you want to build.
 
 ### Expected Artifacts
-- **macOS**: `.dmg` (ARM64)
-- **Linux**: `.AppImage`, `.deb` (x86_64 and ARM64)
-- **Windows**: `.exe` (NSIS installer)
-- **iOS**: `.ipa`
-- **Android**: `.apk`, `.aab` (Universal)
+
+Release artifacts follow the naming convention `Alexandria-<version>-<platform>.<ext>`:
+
+| Platform | Artifact |
+| :--- | :--- |
+| macOS | `Alexandria-<version>-macOS-Apple-Silicon.dmg` |
+| Linux x86_64 | `Alexandria-<version>-Linux-x86_64.AppImage`, `.deb` |
+| Linux ARM64 | `Alexandria-<version>-Linux-ARM64.AppImage`, `.deb` |
+| Windows | `Alexandria-<version>-Windows-x64-Setup.exe` |
+| iOS | `Alexandria-<version>-iOS.ipa` |
+| Android | `Alexandria-<version>-Android.apk`, `.aab` |
+
+Signed artifacts also produce `.sig` files. The desktop finalize job generates `latest.json` for the auto-updater.
 
 ## Auto-Updater Setup
 

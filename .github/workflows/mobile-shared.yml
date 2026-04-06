@@ -262,16 +262,15 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          ipa_files=$(find alexandria/src-tauri/gen/apple/build -name '*.ipa' -type f | sort)
-          if [ -z "${ipa_files}" ]; then
+          VERSION="${RELEASE_TAG#v}"
+          ipa_file=$(find alexandria/src-tauri/gen/apple/build -name '*.ipa' -type f | head -1)
+          if [ -z "${ipa_file}" ]; then
             echo "No iOS .ipa artifact was produced." >&2
             exit 1
           fi
-          while IFS= read -r ipa_file; do
-            gh release upload "${RELEASE_TAG}" "$ipa_file" --clobber --repo "${GITHUB_REPOSITORY}"
-          done <<EOF
-          ${ipa_files}
-          EOF
+          FRIENDLY_NAME="Alexandria-${VERSION}-iOS.ipa"
+          cp "$ipa_file" "/tmp/${FRIENDLY_NAME}"
+          gh release upload "${RELEASE_TAG}" "/tmp/${FRIENDLY_NAME}" --clobber --repo "${GITHUB_REPOSITORY}"
 
   build-android:
     name: Build Android
@@ -534,8 +533,13 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
+          VERSION="${RELEASE_TAG#v}"
+          apk_file=$(find alexandria/src-tauri/gen/android/app/build/outputs/apk/universal/release -name '*.apk' -type f | head -1)
+          aab_file=$(find alexandria/src-tauri/gen/android/app/build/outputs/bundle/universalRelease -name '*.aab' -type f | head -1)
+          [ -n "$apk_file" ] && cp "$apk_file" "/tmp/Alexandria-${VERSION}-Android.apk"
+          [ -n "$aab_file" ] && cp "$aab_file" "/tmp/Alexandria-${VERSION}-Android.aab"
           gh release upload "${RELEASE_TAG}" \
-            alexandria/src-tauri/gen/android/app/build/outputs/apk/universal/release/*.apk \
-            alexandria/src-tauri/gen/android/app/build/outputs/bundle/universalRelease/*.aab \
+            "/tmp/Alexandria-${VERSION}-Android.apk" \
+            "/tmp/Alexandria-${VERSION}-Android.aab" \
             --clobber \
             --repo "${GITHUB_REPOSITORY}"
