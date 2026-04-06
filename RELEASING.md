@@ -29,6 +29,7 @@ Configure these secrets in your GitHub repository settings under **Settings > Se
 | `ANDROID_KEYSTORE` | Android signing keystore (.jks file). | Generate using `keytool`. Base64 encode the file: `base64 -i release.jks \| pbcopy`. |
 | `ANDROID_KEYSTORE_PASSWORD` | Password for the Android keystore. | Set this when generating the keystore. |
 | `ANDROID_KEY_ALIAS` | Key alias for the Android keystore. | Set this when generating the keystore (e.g., "release-key"). |
+| `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` | Google Play service account JSON key (optional). | Create in Google Cloud Console > IAM > Service Accounts. Grant "Release Manager" role in Google Play Console > API access. |
 
 ## Creating a Release
 
@@ -62,6 +63,13 @@ Release artifacts follow the naming convention `Alexandria-<version>-<platform>.
 | Android | `Alexandria-<version>-Android.apk`, `.aab` |
 
 Signed artifacts also produce `.sig` files. The desktop finalize job generates `latest.json` for the auto-updater.
+
+### Store Uploads
+
+After building, the mobile workflow automatically uploads to app stores:
+
+- **TestFlight (iOS)**: Uploads via `xcrun altool` when `ios_export_method` is `app-store-connect`. The build appears in TestFlight after Apple processing (5-15 minutes). Requires `APPLE_API_KEY`, `APPLE_API_ISSUER`, and `APPLE_API_KEY_CONTENT` secrets.
+- **Google Play (Android)**: Uploads the AAB to the **internal testing** track via `r0adkll/upload-google-play`. Only runs when `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` secret is configured and the Android build uses the production keystore (`secret` signing mode). To promote to other tracks, use the Google Play Console.
 
 ## Auto-Updater Setup
 

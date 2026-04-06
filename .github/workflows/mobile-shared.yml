@@ -272,6 +272,23 @@ jobs:
           cp "$ipa_file" "/tmp/${FRIENDLY_NAME}"
           gh release upload "${RELEASE_TAG}" "/tmp/${FRIENDLY_NAME}" --clobber --repo "${GITHUB_REPOSITORY}"
 
+      - name: Upload to TestFlight
+        if: inputs.mode == 'release' && inputs.ios_export_method == 'app-store-connect'
+        env:
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_PATH: ${{ runner.temp }}/AuthKey.p8
+        run: |
+          set -euo pipefail
+          ipa_file=$(find alexandria/src-tauri/gen/apple/build -name '*.ipa' -type f | head -1)
+          echo "Uploading ${ipa_file} to App Store Connect (TestFlight)..."
+          xcrun altool --upload-app \
+            --type ios \
+            --file "$ipa_file" \
+            --apiKey "$APPLE_API_KEY" \
+            --apiIssuer "$APPLE_API_ISSUER"
+          echo "TestFlight upload complete — build will appear after Apple processing (usually 5-15 minutes)"
+
   build-android:
     name: Build Android
     needs: prepare
@@ -543,3 +560,16 @@ jobs:
             "/tmp/Alexandria-${VERSION}-Android.aab" \
             --clobber \
             --repo "${GITHUB_REPOSITORY}"
+
+      - name: Upload to Google Play (internal testing)
+        if: >-
+          inputs.mode == 'release' &&
+          needs.prepare.outputs.android_signing_mode == 'secret' &&
+          secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON != ''
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: org.alexandria.node
+          releaseFiles: alexandria/src-tauri/gen/android/app/build/outputs/bundle/universalRelease/*.aab
+          track: internal
+          status: completed
