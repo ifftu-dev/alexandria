@@ -5,7 +5,7 @@
   },
   "bundle": {
     "resources": {
-      "ffmpeg-dlls/*.dll": "./"
+      "ffmpeg-dlls/": "./"
     }
   }
 }
