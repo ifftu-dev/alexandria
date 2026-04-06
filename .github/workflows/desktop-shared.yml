@@ -266,14 +266,21 @@ jobs:
         run: |
           VERSION="${RELEASE_TAG#v}"
           RELEASE_ID="${{ needs.prepare.outputs.release_id }}"
-          gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets" --jq '.[] | "\(.id) \(.name)"' | while read -r id name; do
-            case "$name" in
-              *_aarch64.dmg)
-                gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/assets/$id" -f name="Alexandria-${VERSION}-macOS-Apple-Silicon.dmg" --silent ;;
-              *_aarch64.dmg.sig)
-                gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/assets/$id" -f name="Alexandria-${VERSION}-macOS-Apple-Silicon.dmg.sig" --silent ;;
-            esac
-          done
+          rename_asset() {
+            local old_pattern="$1" new_name="$2"
+            local assets
+            assets=$(gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets" --jq '.[] | "\(.id) \(.name)"')
+            echo "$assets" | while read -r id name; do
+              if [ "$name" = "$new_name" ]; then
+                gh api -X DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/$id" --silent || true
+              fi
+            done
+            echo "$assets" | while read -r id name; do
+              case "$name" in $old_pattern) gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/assets/$id" -f name="$new_name" --silent ;; esac
+            done
+          }
+          rename_asset '*_aarch64.dmg' "Alexandria-${VERSION}-macOS-Apple-Silicon.dmg"
+          rename_asset '*_aarch64.dmg.sig' "Alexandria-${VERSION}-macOS-Apple-Silicon.dmg.sig"
 
       - name: Collect macOS artifacts
         id: macos-artifacts
@@ -437,14 +444,23 @@ jobs:
         run: |
           VERSION="${RELEASE_TAG#v}"
           RELEASE_ID="${{ needs.prepare.outputs.release_id }}"
-          gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets" --jq '.[] | "\(.id) \(.name)"' | while read -r id name; do
-            case "$name" in
-              *_amd64.AppImage) gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/assets/$id" -f name="Alexandria-${VERSION}-Linux-x86_64.AppImage" --silent ;;
-              *_amd64.AppImage.sig) gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/assets/$id" -f name="Alexandria-${VERSION}-Linux-x86_64.AppImage.sig" --silent ;;
-              *_amd64.deb) gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/assets/$id" -f name="Alexandria-${VERSION}-Linux-x86_64.deb" --silent ;;
-              *_amd64.deb.sig) gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/assets/$id" -f name="Alexandria-${VERSION}-Linux-x86_64.deb.sig" --silent ;;
-            esac
-          done
+          rename_asset() {
+            local old_pattern="$1" new_name="$2"
+            local assets
+            assets=$(gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets" --jq '.[] | "\(.id) \(.name)"')
+            echo "$assets" | while read -r id name; do
+              if [ "$name" = "$new_name" ]; then
+                gh api -X DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/$id" --silent || true
+              fi
+            done
+            echo "$assets" | while read -r id name; do
+              case "$name" in $old_pattern) gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/assets/$id" -f name="$new_name" --silent ;; esac
+            done
+          }
+          rename_asset '*_amd64.AppImage' "Alexandria-${VERSION}-Linux-x86_64.AppImage"
+          rename_asset '*_amd64.AppImage.sig' "Alexandria-${VERSION}-Linux-x86_64.AppImage.sig"
+          rename_asset '*_amd64.deb' "Alexandria-${VERSION}-Linux-x86_64.deb"
+          rename_asset '*_amd64.deb.sig' "Alexandria-${VERSION}-Linux-x86_64.deb.sig"
 
       - name: Collect and rename Linux x64 artifacts
         id: linux-x64-artifacts
@@ -605,14 +621,23 @@ jobs:
         run: |
           VERSION="${RELEASE_TAG#v}"
           RELEASE_ID="${{ needs.prepare.outputs.release_id }}"
-          gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets" --jq '.[] | "\(.id) \(.name)"' | while read -r id name; do
-            case "$name" in
-              *_arm64.AppImage) gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/assets/$id" -f name="Alexandria-${VERSION}-Linux-ARM64.AppImage" --silent ;;
-              *_arm64.AppImage.sig) gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/assets/$id" -f name="Alexandria-${VERSION}-Linux-ARM64.AppImage.sig" --silent ;;
-              *_arm64.deb) gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/assets/$id" -f name="Alexandria-${VERSION}-Linux-ARM64.deb" --silent ;;
-              *_arm64.deb.sig) gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/assets/$id" -f name="Alexandria-${VERSION}-Linux-ARM64.deb.sig" --silent ;;
-            esac
-          done
+          rename_asset() {
+            local old_pattern="$1" new_name="$2"
+            local assets
+            assets=$(gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets" --jq '.[] | "\(.id) \(.name)"')
+            echo "$assets" | while read -r id name; do
+              if [ "$name" = "$new_name" ]; then
+                gh api -X DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/$id" --silent || true
+              fi
+            done
+            echo "$assets" | while read -r id name; do
+              case "$name" in $old_pattern) gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/assets/$id" -f name="$new_name" --silent ;; esac
+            done
+          }
+          rename_asset '*_arm64.AppImage' "Alexandria-${VERSION}-Linux-ARM64.AppImage"
+          rename_asset '*_arm64.AppImage.sig' "Alexandria-${VERSION}-Linux-ARM64.AppImage.sig"
+          rename_asset '*_arm64.deb' "Alexandria-${VERSION}-Linux-ARM64.deb"
+          rename_asset '*_arm64.deb.sig' "Alexandria-${VERSION}-Linux-ARM64.deb.sig"
 
       - name: Collect and rename Linux ARM64 artifacts
         id: linux-arm64-artifacts
@@ -850,12 +875,23 @@ jobs:
         run: |
           VERSION="${RELEASE_TAG#v}"
           RELEASE_ID="${{ needs.prepare.outputs.release_id }}"
-          gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets" --jq '.[] | "\(.id) \(.name)"' | while read -r id name; do
-            case "$name" in
-              *_x64-setup.exe) gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/assets/$id" -f name="Alexandria-${VERSION}-Windows-x64-Setup.exe" --silent ;;
-              *_x64-setup.exe.sig) gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/assets/$id" -f name="Alexandria-${VERSION}-Windows-x64-Setup.exe.sig" --silent ;;
-            esac
-          done
+          rename_asset() {
+            local old_pattern="$1" new_name="$2"
+            local assets
+            assets=$(gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets" --jq '.[] | "\(.id) \(.name)"')
+            # Delete any existing asset with the target name (from a previous run)
+            echo "$assets" | while read -r id name; do
+              if [ "$name" = "$new_name" ]; then
+                gh api -X DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/$id" --silent || true
+              fi
+            done
+            # Rename the Tauri-named asset
+            echo "$assets" | while read -r id name; do
+              case "$name" in $old_pattern) gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/assets/$id" -f name="$new_name" --silent ;; esac
+            done
+          }
+          rename_asset '*_x64-setup.exe' "Alexandria-${VERSION}-Windows-x64-Setup.exe"
+          rename_asset '*_x64-setup.exe.sig' "Alexandria-${VERSION}-Windows-x64-Setup.exe.sig"
 
       - name: Collect Windows artifacts
         id: windows-artifacts
