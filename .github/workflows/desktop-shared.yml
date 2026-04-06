@@ -259,6 +259,22 @@ jobs:
           args: --target aarch64-apple-darwin --bundles dmg --config src-tauri/tauri.desktop.macos.conf.json
           includeUpdaterJson: false
 
+      - name: Rename macOS release assets
+        if: inputs.mode == 'release'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${RELEASE_TAG#v}"
+          RELEASE_ID="${{ needs.prepare.outputs.release_id }}"
+          gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets" --jq '.[] | "\(.id) \(.name)"' | while read -r id name; do
+            case "$name" in
+              *_aarch64.dmg)
+                gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/assets/$id" -f name="Alexandria-${VERSION}-macOS-Apple-Silicon.dmg" --silent ;;
+              *_aarch64.dmg.sig)
+                gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/assets/$id" -f name="Alexandria-${VERSION}-macOS-Apple-Silicon.dmg.sig" --silent ;;
+            esac
+          done
+
       - name: Collect macOS artifacts
         id: macos-artifacts
         run: |
@@ -414,6 +430,22 @@ jobs:
           args: --bundles appimage,deb --config src-tauri/tauri.desktop.linux.conf.json
           includeUpdaterJson: false
 
+      - name: Rename Linux x64 release assets
+        if: inputs.mode == 'release'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${RELEASE_TAG#v}"
+          RELEASE_ID="${{ needs.prepare.outputs.release_id }}"
+          gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets" --jq '.[] | "\(.id) \(.name)"' | while read -r id name; do
+            case "$name" in
+              *_amd64.AppImage) gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/assets/$id" -f name="Alexandria-${VERSION}-Linux-x86_64.AppImage" --silent ;;
+              *_amd64.AppImage.sig) gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/assets/$id" -f name="Alexandria-${VERSION}-Linux-x86_64.AppImage.sig" --silent ;;
+              *_amd64.deb) gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/assets/$id" -f name="Alexandria-${VERSION}-Linux-x86_64.deb" --silent ;;
+              *_amd64.deb.sig) gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/assets/$id" -f name="Alexandria-${VERSION}-Linux-x86_64.deb.sig" --silent ;;
+            esac
+          done
+
       - name: Collect and rename Linux x64 artifacts
         id: linux-x64-artifacts
         run: |
@@ -565,6 +597,22 @@ jobs:
           releaseId: ${{ needs.prepare.outputs.release_id }}
           args: --bundles appimage,deb --config src-tauri/tauri.desktop.linux.conf.json
           includeUpdaterJson: false
+
+      - name: Rename Linux ARM64 release assets
+        if: inputs.mode == 'release'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${RELEASE_TAG#v}"
+          RELEASE_ID="${{ needs.prepare.outputs.release_id }}"
+          gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets" --jq '.[] | "\(.id) \(.name)"' | while read -r id name; do
+            case "$name" in
+              *_arm64.AppImage) gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/assets/$id" -f name="Alexandria-${VERSION}-Linux-ARM64.AppImage" --silent ;;
+              *_arm64.AppImage.sig) gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/assets/$id" -f name="Alexandria-${VERSION}-Linux-ARM64.AppImage.sig" --silent ;;
+              *_arm64.deb) gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/assets/$id" -f name="Alexandria-${VERSION}-Linux-ARM64.deb" --silent ;;
+              *_arm64.deb.sig) gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/assets/$id" -f name="Alexandria-${VERSION}-Linux-ARM64.deb.sig" --silent ;;
+            esac
+          done
 
       - name: Collect and rename Linux ARM64 artifacts
         id: linux-arm64-artifacts
@@ -780,6 +828,21 @@ jobs:
           releaseId: ${{ needs.prepare.outputs.release_id }}
           args: --bundles nsis --config src-tauri/tauri.desktop.windows.conf.json
           includeUpdaterJson: false
+
+      - name: Rename Windows release assets
+        if: inputs.mode == 'release'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          VERSION="${RELEASE_TAG#v}"
+          RELEASE_ID="${{ needs.prepare.outputs.release_id }}"
+          gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets" --jq '.[] | "\(.id) \(.name)"' | while read -r id name; do
+            case "$name" in
+              *_x64-setup.exe) gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/assets/$id" -f name="Alexandria-${VERSION}-Windows-x64-Setup.exe" --silent ;;
+              *_x64-setup.exe.sig) gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/assets/$id" -f name="Alexandria-${VERSION}-Windows-x64-Setup.exe.sig" --silent ;;
+            esac
+          done
 
       - name: Collect Windows artifacts
         id: windows-artifacts

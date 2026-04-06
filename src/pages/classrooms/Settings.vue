@@ -1,45 +1,42 @@
 <template>
-  <div class="min-h-screen bg-gray-950 text-white">
+  <div>
     <!-- Header -->
-    <div class="border-b border-gray-800 px-6 py-4 flex items-center gap-3">
+    <div class="border-b border-border px-6 py-4 flex items-center gap-3">
       <RouterLink
         :to="{ name: 'classroom', params: { id: classroomId } }"
-        class="text-gray-400 hover:text-white transition-colors"
+        class="text-muted-foreground hover:text-foreground transition-colors"
       >
         ← Back
       </RouterLink>
       <div>
-        <h1 class="text-xl font-bold">Classroom Settings</h1>
-        <p class="text-sm text-gray-400">{{ currentClassroom?.name }}</p>
+        <h1 class="text-xl font-bold text-foreground">Classroom Settings</h1>
+        <p class="text-sm text-muted-foreground">{{ currentClassroom?.name }}</p>
       </div>
     </div>
 
-    <div class="max-w-2xl mx-auto px-6 py-8 space-y-8">
+    <div class="max-w-2xl mx-auto px-4 sm:px-6 py-8 space-y-6">
       <!-- General info -->
-      <section class="bg-gray-900 rounded-xl border border-gray-800 p-6">
-        <h2 class="text-base font-semibold text-white mb-4">General</h2>
+      <section class="card p-6">
+        <h2 class="text-base font-semibold text-foreground mb-4">General</h2>
         <div class="space-y-4">
           <div>
-            <label class="block text-sm text-gray-400 mb-1">Invite code</label>
+            <label class="block text-sm text-muted-foreground mb-1">Invite code</label>
             <div class="flex gap-2">
-              <code class="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm font-mono">
+              <code class="flex-1 px-3 py-2 bg-muted border border-border rounded-lg text-foreground text-sm font-mono truncate">
                 {{ currentClassroom?.invite_code ?? '—' }}
               </code>
-              <button
-                @click="copyInviteCode"
-                class="px-3 py-2 bg-gray-700 hover:bg-gray-600 text-white text-sm rounded-lg transition-colors"
-              >
+              <AppButton variant="secondary" size="sm" @click="copyInviteCode">
                 Copy
-              </button>
+              </AppButton>
             </div>
-            <p class="text-xs text-gray-500 mt-1">Share this code with others so they can find and request to join your classroom.</p>
+            <p class="text-xs text-muted-foreground mt-1">Share this code with others so they can find and request to join your classroom.</p>
           </div>
         </div>
       </section>
 
       <!-- Members -->
-      <section class="bg-gray-900 rounded-xl border border-gray-800 p-6">
-        <h2 class="text-base font-semibold text-white mb-4">
+      <section class="card p-6">
+        <h2 class="text-base font-semibold text-foreground mb-4">
           Members ({{ members.length }})
         </h2>
         <div class="space-y-2">
@@ -49,74 +46,65 @@
             class="flex items-center justify-between py-2"
           >
             <div class="flex items-center gap-3">
-              <div class="w-8 h-8 rounded-full bg-gray-700 flex items-center justify-center text-sm flex-shrink-0">
+              <div class="w-8 h-8 rounded-full bg-muted flex items-center justify-center text-sm text-muted-foreground flex-shrink-0">
                 {{ (m.display_name ?? m.stake_address).charAt(0).toUpperCase() }}
               </div>
-              <div>
-                <div class="text-sm text-white">
+              <div class="min-w-0">
+                <div class="text-sm text-foreground truncate">
                   {{ m.display_name ?? formatAddress(m.stake_address) }}
                 </div>
-                <div class="text-xs text-gray-500 capitalize">{{ m.role }}</div>
+                <div class="text-xs text-muted-foreground capitalize">{{ m.role }}</div>
               </div>
             </div>
 
             <!-- Role + kick actions (owner only, not for self) -->
             <div
               v-if="currentClassroom?.my_role === 'owner' && m.role !== 'owner'"
-              class="flex items-center gap-2"
+              class="flex items-center gap-2 flex-shrink-0"
             >
               <select
                 :value="m.role"
                 @change="handleSetRole(m.stake_address, ($event.target as HTMLSelectElement).value)"
-                class="text-xs bg-gray-800 border border-gray-700 rounded px-2 py-1 text-gray-300"
+                class="text-xs bg-muted border border-border rounded px-2 py-1 text-foreground"
               >
                 <option value="member">Member</option>
                 <option value="moderator">Moderator</option>
               </select>
-              <button
-                @click="handleKick(m.stake_address)"
-                class="text-xs text-red-400 hover:text-red-300 transition-colors px-2 py-1"
-              >
+              <AppButton variant="ghost" size="xs" @click="handleKick(m.stake_address)" class="text-destructive hover:text-destructive">
                 Kick
-              </button>
+              </AppButton>
             </div>
           </div>
         </div>
       </section>
 
       <!-- Danger zone -->
-      <section class="bg-red-950/20 rounded-xl border border-red-800/40 p-6">
-        <h2 class="text-base font-semibold text-red-400 mb-4">Danger Zone</h2>
-        <div class="flex items-center justify-between">
-          <div>
-            <p class="text-sm text-white">Archive this classroom</p>
-            <p class="text-xs text-gray-500">The classroom will be hidden and can no longer receive messages.</p>
+      <section class="card p-6 border-destructive/30">
+        <h2 class="text-base font-semibold text-destructive mb-4">Danger Zone</h2>
+        <div class="flex items-center justify-between gap-4">
+          <div class="min-w-0">
+            <p class="text-sm text-foreground">Archive this classroom</p>
+            <p class="text-xs text-muted-foreground">The classroom will be hidden and can no longer receive messages.</p>
           </div>
-          <button
-            @click="handleArchive"
-            class="px-4 py-2 bg-red-900 hover:bg-red-800 text-white text-sm font-medium rounded-lg transition-colors"
-          >
+          <AppButton variant="danger" size="sm" @click="handleArchive">
             Archive
-          </button>
+          </AppButton>
         </div>
       </section>
 
       <!-- Leave classroom -->
       <section
         v-if="currentClassroom?.my_role !== 'owner'"
-        class="bg-gray-900 rounded-xl border border-gray-800 p-6"
+        class="card p-6"
       >
-        <div class="flex items-center justify-between">
-          <div>
-            <p class="text-sm text-white">Leave this classroom</p>
-            <p class="text-xs text-gray-500">You will need to request access again to rejoin.</p>
+        <div class="flex items-center justify-between gap-4">
+          <div class="min-w-0">
+            <p class="text-sm text-foreground">Leave this classroom</p>
+            <p class="text-xs text-muted-foreground">You will need to request access again to rejoin.</p>
           </div>
-          <button
-            @click="handleLeave"
-            class="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium rounded-lg transition-colors"
-          >
+          <AppButton variant="secondary" size="sm" @click="handleLeave">
             Leave
-          </button>
+          </AppButton>
         </div>
       </section>
     </div>
@@ -128,6 +116,7 @@ import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { useClassroom } from '@/composables/useClassroom'
+import AppButton from '@/components/ui/AppButton.vue'
 
 const route = useRoute()
 const router = useRouter()

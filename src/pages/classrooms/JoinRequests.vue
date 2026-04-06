@@ -1,24 +1,26 @@
 <template>
-  <div class="min-h-screen bg-gray-950 text-white">
+  <div>
     <!-- Header -->
-    <div class="border-b border-gray-800 px-6 py-4 flex items-center gap-3">
+    <div class="border-b border-border px-6 py-4 flex items-center gap-3">
       <RouterLink
         :to="{ name: 'classroom', params: { id: classroomId } }"
-        class="text-gray-400 hover:text-white transition-colors"
+        class="text-muted-foreground hover:text-foreground transition-colors"
       >
         ← Back
       </RouterLink>
       <div>
-        <h1 class="text-xl font-bold">Join Requests</h1>
-        <p class="text-sm text-gray-400">{{ currentClassroom?.name }}</p>
+        <h1 class="text-xl font-bold text-foreground">Join Requests</h1>
+        <p class="text-sm text-muted-foreground">{{ currentClassroom?.name }}</p>
       </div>
     </div>
 
-    <div class="max-w-2xl mx-auto px-6 py-8">
+    <div class="max-w-2xl mx-auto px-4 sm:px-6 py-8">
       <!-- Empty state -->
-      <div v-if="joinRequests.length === 0" class="text-center py-16">
-        <div class="text-4xl mb-3">✅</div>
-        <p class="text-gray-400 text-sm">No pending join requests</p>
+      <div v-if="joinRequests.length === 0" class="flex flex-col items-center justify-center py-16 text-center">
+        <div class="w-16 h-16 rounded-2xl bg-success/10 flex items-center justify-center text-3xl mb-4">
+          ✅
+        </div>
+        <p class="text-muted-foreground text-sm">No pending join requests</p>
       </div>
 
       <!-- Requests list -->
@@ -26,41 +28,44 @@
         <div
           v-for="req in joinRequests"
           :key="req.id"
-          class="bg-gray-900 rounded-xl border border-gray-800 p-4 flex items-center justify-between gap-4"
+          class="card p-4 flex items-center justify-between gap-4"
         >
           <div class="flex items-center gap-3 min-w-0">
-            <div class="w-10 h-10 rounded-full bg-gray-700 flex items-center justify-center text-sm flex-shrink-0">
+            <div class="w-10 h-10 rounded-full bg-muted flex items-center justify-center text-sm text-muted-foreground flex-shrink-0">
               {{ (req.display_name ?? req.stake_address).charAt(0).toUpperCase() }}
             </div>
             <div class="min-w-0">
-              <div class="text-sm font-medium text-white">
+              <div class="text-sm font-medium text-foreground">
                 {{ req.display_name ?? formatAddress(req.stake_address) }}
               </div>
-              <div class="text-xs text-gray-500 truncate">{{ req.stake_address }}</div>
-              <div v-if="req.message" class="text-xs text-gray-400 mt-1 italic">
+              <div class="text-xs text-muted-foreground truncate">{{ req.stake_address }}</div>
+              <div v-if="req.message" class="text-xs text-muted-foreground mt-1 italic">
                 "{{ req.message }}"
               </div>
-              <div class="text-xs text-gray-600 mt-1">
+              <div class="text-xs text-muted-foreground/60 mt-1">
                 {{ formatTime(req.requested_at) }}
               </div>
             </div>
           </div>
 
           <div class="flex gap-2 flex-shrink-0">
-            <button
-              @click="handleDeny(req)"
+            <AppButton
+              variant="secondary"
+              size="xs"
               :disabled="processing === req.id"
-              class="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-white text-sm rounded-lg transition-colors disabled:opacity-50"
+              @click="handleDeny(req)"
             >
               Deny
-            </button>
-            <button
-              @click="handleApprove(req)"
+            </AppButton>
+            <AppButton
+              variant="primary"
+              size="xs"
               :disabled="processing === req.id"
-              class="px-3 py-1.5 bg-green-700 hover:bg-green-600 text-white text-sm rounded-lg transition-colors disabled:opacity-50"
+              :loading="processing === req.id"
+              @click="handleApprove(req)"
             >
-              {{ processing === req.id ? '...' : 'Approve' }}
-            </button>
+              Approve
+            </AppButton>
           </div>
         </div>
       </div>
@@ -72,6 +77,7 @@
 import { ref, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { useClassroom } from '@/composables/useClassroom'
+import AppButton from '@/components/ui/AppButton.vue'
 import type { JoinRequest } from '@/types'
 
 const route = useRoute()
