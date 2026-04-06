@@ -12,6 +12,8 @@ function applyTheme(t: Theme) {
   const isDark =
     t === 'dark' || (t === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)
   document.documentElement.classList.toggle('dark', isDark)
+  // Clear any inline background-color set by the startup flash-prevention script
+  document.documentElement.style.removeProperty('background-color')
 }
 
 /** Call once at app startup (from App.vue) to eagerly apply the stored theme. */

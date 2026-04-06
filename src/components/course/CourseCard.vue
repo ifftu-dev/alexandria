@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { invoke } from '@tauri-apps/api/core'
 import type { Course } from '@/types'
 import { sanitizeSvg } from '@/utils/sanitize'
 
@@ -11,6 +13,40 @@ interface Props {
 const props = withDefaults(defineProps<Props>(), {
   variant: 'grid',
 })
+
+// Module-level cache: CID → blob URL (shared across all CourseCard instances)
+const cidCache = new Map<string, string>()
+
+const thumbnailUrl = ref<string | null>(null)
+let ownBlobUrl: string | null = null
+
+onMounted(async () => {
+  const cid = props.course.thumbnail_cid
+  if (props.course.thumbnail_svg || !cid) return
+
+  // Check cache first
+  const cached = cidCache.get(cid)
+  if (cached) {
+    thumbnailUrl.value = cached
+    return
+  }
+
+  try {
+    const bytes = await invoke<number[]>('content_resolve_bytes', { identifier: cid })
+    const blob = new Blob([new Uint8Array(bytes)], { type: 'image/png' })
+    const url = URL.createObjectURL(blob)
+    cidCache.set(cid, url)
+    thumbnailUrl.value = url
+    ownBlobUrl = url
+  } catch {
+    // Silently fall back to placeholder
+  }
+})
+
+onBeforeUnmount(() => {
+  // Don't revoke — other cards with same CID may still reference it
+  ownBlobUrl = null
+})
 </script>
 
 <template>
@@ -18,6 +54,9 @@ const props = withDefaults(defineProps<Props>(), {
     <!-- Thumbnail -->
     <div class="cc-thumb">
       <div v-if="course.thumbnail_svg" class="cc-thumb__img" v-html="sanitizeSvg(course.thumbnail_svg)" />
+      <div v-else-if="thumbnailUrl" class="cc-thumb__img">
+        <img :src="thumbnailUrl" alt="" />
+      </div>
       <div v-else class="cc-thumb__placeholder">
         <svg class="h-10 w-10 text-muted-foreground/35" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
           <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
