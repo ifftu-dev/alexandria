@@ -834,11 +834,6 @@ jobs:
             Write-Host "  Bundling $($dll.Name)"
           }
           Write-Host "Copied $($dlls.Count) FFmpeg DLLs to $dllDir"
-          # Verify files exist
-          Get-ChildItem -Path $dllDir | ForEach-Object { Write-Host "  Verified: $($_.Name) ($($_.Length) bytes)" }
-          # Show merged config for debugging
-          Write-Host "Windows config:"
-          Get-Content 'alexandria\src-tauri\tauri.desktop.windows.conf.json'
 
       - name: Build Windows validation artifacts
         if: inputs.mode == 'validate'
