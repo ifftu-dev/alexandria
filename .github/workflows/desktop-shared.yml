@@ -369,10 +369,13 @@ jobs:
             libdbus-1-dev \
             libopus-dev \
             libssl-dev \
+            libx264-dev \
             libva-dev \
             libgbm-dev \
             libdrm-dev \
             libvdpau-dev
+          # Remove shared x264 libs to force static linking
+          sudo rm -f /usr/lib/*/libx264.so*
 
       - name: Checkout alexandria
         uses: actions/checkout@v5
@@ -545,10 +548,13 @@ jobs:
             libdbus-1-dev \
             libopus-dev \
             libssl-dev \
+            libx264-dev \
             libva-dev \
             libgbm-dev \
             libdrm-dev \
             libvdpau-dev
+          # Remove shared x264 libs to force static linking
+          sudo rm -f /usr/lib/*/libx264.so*
 
       - name: Checkout alexandria
         uses: actions/checkout@v5
