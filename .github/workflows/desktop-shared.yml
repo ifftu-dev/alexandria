@@ -374,9 +374,6 @@ jobs:
             libgbm-dev \
             libdrm-dev \
             libvdpau-dev
-          # Remove unversioned x264 .so symlink to force static linking at link time.
-          # The versioned .so.NNN and .pc remain so pkg-config and FFmpeg configure work.
-          sudo rm -f /usr/lib/*/libx264.so
 
       - name: Checkout alexandria
         uses: actions/checkout@v5
@@ -554,9 +551,6 @@ jobs:
             libgbm-dev \
             libdrm-dev \
             libvdpau-dev
-          # Remove unversioned x264 .so symlink to force static linking at link time.
-          # The versioned .so.NNN and .pc remain so pkg-config and FFmpeg configure work.
-          sudo rm -f /usr/lib/*/libx264.so
 
       - name: Checkout alexandria
         uses: actions/checkout@v5

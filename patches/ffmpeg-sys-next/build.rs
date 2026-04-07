@@ -1040,7 +1040,13 @@ fn main() {
                 .iter()
                 .filter(|flag| flag.starts_with("-l"))
                 .map(|lib| &lib[2..])
-                .for_each(|lib| println!("cargo:rustc-link-lib={lib}"));
+                .for_each(|lib| {
+                    if statik {
+                        println!("cargo:rustc-link-lib=static={lib}");
+                    } else {
+                        println!("cargo:rustc-link-lib={lib}");
+                    }
+                });
 
             extra_linker_args
                 .iter()
