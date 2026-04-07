@@ -1036,12 +1036,16 @@ fn main() {
                 .flatten()
                 .collect::<Vec<_>>();
 
+            // Libraries that should be statically linked when building in
+            // static mode to avoid runtime dependencies users won't have.
+            const FORCE_STATIC: &[&str] = &["x264", "x265"];
+
             extra_linker_args
                 .iter()
                 .filter(|flag| flag.starts_with("-l"))
                 .map(|lib| &lib[2..])
                 .for_each(|lib| {
-                    if statik {
+                    if statik && FORCE_STATIC.iter().any(|s| *s == lib) {
                         println!("cargo:rustc-link-lib=static={lib}");
                     } else {
                         println!("cargo:rustc-link-lib={lib}");
