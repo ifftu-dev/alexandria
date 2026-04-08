@@ -204,7 +204,11 @@ fn run_migrate(ctx: &ProjectContext, password_file: Option<&std::path::Path>) ->
 
 // ── Subcommand: seed ────────────────────────────────────────────────
 
-fn run_seed(ctx: &ProjectContext, force: bool, password_file: Option<&std::path::Path>) -> Result<()> {
+fn run_seed(
+    ctx: &ProjectContext,
+    force: bool,
+    password_file: Option<&std::path::Path>,
+) -> Result<()> {
     output::header("Database seed");
     output::kv("Database", &ctx.db_path().display().to_string());
 
