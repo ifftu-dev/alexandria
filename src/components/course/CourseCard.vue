@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { ref, onMounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import type { Course } from '@/types'
 import { sanitizeSvg } from '@/utils/sanitize'
@@ -18,7 +18,6 @@ const props = withDefaults(defineProps<Props>(), {
 const cidCache = new Map<string, string>()
 
 const thumbnailUrl = ref<string | null>(null)
-let ownBlobUrl: string | null = null
 
 onMounted(async () => {
   const cid = props.course.thumbnail_cid
@@ -37,15 +36,9 @@ onMounted(async () => {
     const url = URL.createObjectURL(blob)
     cidCache.set(cid, url)
     thumbnailUrl.value = url
-    ownBlobUrl = url
   } catch {
     // Silently fall back to placeholder
   }
-})
-
-onBeforeUnmount(() => {
-  // Don't revoke — other cards with same CID may still reference it
-  ownBlobUrl = null
 })
 </script>
 
