@@ -280,6 +280,9 @@ jobs:
           APPLE_API_KEY_PATH: ${{ runner.temp }}/AuthKey.p8
         run: |
           set -euo pipefail
+          # altool searches for AuthKey_<KEY_ID>.p8 in ~/private_keys/
+          mkdir -p ~/private_keys
+          cp "$APPLE_API_KEY_PATH" ~/private_keys/AuthKey_${APPLE_API_KEY}.p8
           ipa_file=$(find alexandria/src-tauri/gen/apple/build -name '*.ipa' -type f | head -1)
           echo "Uploading ${ipa_file} to App Store Connect (TestFlight)..."
           xcrun altool --upload-app \
