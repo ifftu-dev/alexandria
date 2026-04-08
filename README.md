@@ -29,8 +29,8 @@
 - **Public Content Availability** — Published course media can resolve from public URLs (with local BLAKE3 caching), and fresh installs bootstrap a bundled public catalog before network discovery catches up.
 - **Skill Proofs** — Learners earn verifiable credentials scoped to individual skills at Bloom's taxonomy levels (remember through create), aggregated from weighted evidence.
 - **Reputation** — Instructor impact derived from learner outcomes, scoped to `(subject, role, skill, proficiency_level)`. Distribution-based with confidence bounds — no global scores.
-- **Blockchain Credentials** — NFTs minted on Cardano (Conway era) with CIP-25 metadata. Independently verifiable on-chain without the platform.
-- **Governance** — DAOs mirror the knowledge taxonomy. Elections and proposals with 2/3 supermajority. Committee-gated taxonomy updates.
+- **Blockchain Credentials** — NFTs minted on Cardano (Conway era) with CIP-25 metadata. CIP-68 soulbound reputation tokens anchor skill proofs on-chain. Independently verifiable without the platform.
+- **Governance** — DAOs mirror the knowledge taxonomy. Elections and proposals with 2/3 supermajority. Committee-gated taxonomy updates. 7 Aiken/Plutus V3 smart contracts enforce on-chain governance rules.
 - **Assessment Integrity** — Sentinel anti-cheat with keystroke autoencoder, mouse trajectory CNN, and face embedder. All processing client-side — only derived scores cross the network.
 - **Peer-to-Peer** — Fully decentralized via libp2p with a private Alexandria Kademlia DHT, GossipSub, Circuit Relay v2, AutoNAT, and DCUtR. Devices discover each other through a relay bootstrap node — no central server required.
 - **Offline-First** — Local SQLite database, iroh content store, and encrypted vault (Stronghold on desktop, AES-256-GCM + Argon2id on mobile). Everything works without connectivity.
@@ -68,7 +68,7 @@ alexandria/
 | Shell | Tauri 2.10, WebKit (macOS/iOS) / WebView2 (Windows) / Android WebView (Chromium) |
 | Backend | Rust (2021 edition), tokio async runtime |
 | Frontend | Vue 3, TypeScript, Vite, Tailwind CSS 4 |
-| Database | SQLite (rusqlite, bundled) |
+| Database | SQLite + SQLCipher (rusqlite, bundled-sqlcipher) |
 | Content storage | iroh 0.96 (BLAKE3 content-addressed blobs) |
 | P2P networking | libp2p 0.56 (TCP, QUIC, GossipSub, Kademlia, Relay, DCUtR) |
 | Wallet (desktop) | BIP-39 + CIP-1852 (pallas), IOTA Stronghold vault |
@@ -126,6 +126,19 @@ For Android builds:
 - **Android Studio** with SDK, NDK 26+, and Build Tools 34+
 - **Rust Android targets**: `rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android`
 - **Environment variables**: `ANDROID_HOME`, `NDK_HOME`, `JAVA_HOME` (pointing to Android Studio's bundled JDK)
+
+### Cardano (Optional)
+
+For on-chain features (NFT minting, governance enforcement, soulbound tokens):
+
+- **Blockfrost API key**: Sign up at [blockfrost.io](https://blockfrost.io), create a preprod project, set `BLOCKFROST_PROJECT_ID`:
+  ```bash
+  export BLOCKFROST_PROJECT_ID="preprodXXX..."
+  ```
+- **Testnet ADA**: Fund your wallet address from the [Cardano Faucet](https://docs.cardano.org/cardano-testnets/tools/faucet/) (minimum 5 tADA for NFT minting, ~40 tADA for deploying governance validators)
+- **Aiken** (for smart contract development): Install from [aiken-lang.org](https://aiken-lang.org/installation-instructions) v1.1.21+
+
+Without `BLOCKFROST_PROJECT_ID`, the app works fully offline — blockchain features are simply unavailable.
 
 ### Development (Desktop)
 
@@ -295,10 +308,17 @@ Prerequisites are checked automatically before each build. Android requires `AND
 
 #### Database & Data
 
+The CLI operates on the same SQLCipher-encrypted database as the app. Commands that access the database prompt for your vault password.
+
 ```bash
 alex db status        # Table row counts, migration version, data sizes
+alex db migrate       # Run pending schema migrations
+alex db seed          # Seed demo data (taxonomy, courses, governance)
+alex db seed --force  # Clear and re-seed
 alex db reset --force # Delete all app data (SQLite + vault + iroh)
 ```
+
+> **Note**: The database is encrypted with a key derived from your vault password (Argon2id + HKDF-SHA256). The app must have been launched at least once to create the vault before CLI database commands will work.
 
 #### Configuration
 
@@ -357,8 +377,8 @@ npx vue-tsc -b
 ```
 
 The test suite includes:
-- **283 synchronous tests** across crypto, database, P2P, evidence, cardano, and domain modules
-- **26 async tests** (tokio) for iroh content operations, P2P swarm lifecycle, and network integration
+- **400+ synchronous tests** across crypto, database, P2P, evidence, cardano, governance, and domain modules
+- **30+ async tests** (tokio) for iroh content operations, P2P swarm lifecycle, and network integration
 - **~1500 lines of stress tests** covering high-volume gossip (200+ messages), concurrent validation (1000 messages / 10 threads), sync conflicts, and adversarial inputs
 
 ## Data Storage
@@ -367,9 +387,9 @@ All data lives in `~/Library/Application Support/org.alexandria.node/` (macOS):
 
 | File/Directory | Purpose |
 |----------------|---------|
-| `alexandria.db` | SQLite database (53 tables) |
-| `vault.stronghold` | IOTA Stronghold encrypted vault — desktop only |
-| `vault.enc` | AES-256-GCM + Argon2id encrypted vault — mobile only |
+| `alexandria.db` | SQLCipher-encrypted SQLite database (53 tables) |
+| `stronghold/` | IOTA Stronghold vault directory — desktop |
+| `vault/` | AES-256-GCM + Argon2id vault directory — mobile |
 | `iroh/` | Content-addressed blob store (course content, profiles) |
 
 Use `alex config path` to print this directory on any platform.

@@ -54,7 +54,7 @@ src-tauri/
     │   ├── p2p.rs          #  4 cmds — network status, peers
     │   ├── enrollment.rs   #  4 cmds — enroll, progress
     │   ├── reputation.rs   #  4 cmds — assertions, impact
-    │   ├── snapshot.rs     #  4 cmds — CIP-68 reputation anchoring
+    │   ├── snapshot.rs     #  5 cmds — CIP-68 reputation anchoring + soulbound minting
     │   ├── chapters.rs     #  4 cmds — chapter CRUD
     │   ├── elements.rs     #  4 cmds — element CRUD
     │   ├── evidence.rs     #  3 cmds — submit, query, broadcast
@@ -62,7 +62,7 @@ src-tauri/
     │   ├── tutoring.rs     # 14 cmds — rooms, video/audio toggle, chat (desktop)
     │   ├── tutoring_stubs.rs # 14 cmds — mobile stubs (not-yet-supported errors)
     │   ├── catalog.rs      #  4 cmds — search, browse, bootstrap, hydrate
-    │   ├── cardano.rs      #  2 cmds — UTxOs, tx submit
+    │   ├── cardano.rs      #  2 cmds — NFT minting, course registration
     │   └── health.rs       #  2 cmds — health check, diag log
     │
     ├── crypto/             # Cryptographic primitives
@@ -148,12 +148,17 @@ src-tauri/
     │
     └── cardano/            # Cardano blockchain integration
         ├── mod.rs
-        ├── blockfrost.rs   # Blockfrost REST client (preprod)
+        ├── blockfrost.rs   # Blockfrost REST client (preprod, 6 endpoints)
         ├── types.rs        # UTxO, protocol params, chain tip
         ├── policy.rs       # NativeScript policies, asset names
-        ├── tx_builder.rs   # Conway-era tx building (pallas)
-        ├── snapshot.rs     # CIP-68 soulbound reputation tokens
-        └── governance.rs   # On-chain governance metadata
+        ├── tx_builder.rs   # Conway-era tx building — NFT minting (pallas)
+        ├── gov_tx_builder.rs  # Plutus V3 governance tx builders (6 actions)
+        ├── soulbound_tx_builder.rs  # CIP-68 soulbound token minting tx builder
+        ├── plutus_data.rs  # Plutus Data CBOR encoding (datums + redeemers)
+        ├── snapshot.rs     # CIP-68 asset names, datum encoding, metadata
+        ├── governance.rs   # On-chain governance metadata (CIP-25 label 1694)
+        ├── onchain_queue.rs  # Persistent governance tx queue (pending → submitted → confirmed)
+        └── script_refs.rs  # Deployed validator script hashes + reference UTxO locations
 ```
 
 ---

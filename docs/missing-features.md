@@ -2,7 +2,7 @@
 
 > Features and documentation that have not yet been implemented.
 
-**Last updated**: 2026-03-25
+**Last updated**: 2026-04-08
 
 ---
 
@@ -42,21 +42,21 @@ Alexandria has 10 documentation files (architecture, database schema, P2P protoc
 
 ## 2. Smart Contracts
 
-Alexandria's governance and credential operations currently use **transaction metadata only** — no on-chain validators. Transactions are submitted to Cardano with metadata fields, but there is no smart contract enforcement. The `cardano/governance.rs` module builds metadata, not Plutus scripts.
+All 7 Aiken/Plutus v3 governance validators have been **written and compiled** (`cardano/governance/`). The Rust transaction builders in `src-tauri/src/cardano/gov_tx_builder.rs` and `soulbound_tx_builder.rs` are implemented and dispatch correctly from the on-chain governance queue.
 
-The full trust model would require 7 Aiken/Plutus v3 validators:
+| Validator | Status |
+|-----------|--------|
+| `dao_registry` (DAO state) | Written, compiled |
+| `dao_minting` (DAO state tokens) | Written, compiled |
+| `election` (lifecycle) | Written, compiled |
+| `proposal` (lifecycle) | Written, compiled |
+| `vote_minting` (double-vote prevention) | Written, compiled |
+| `reputation_minting` (CIP-68 soulbound) | Written, compiled |
+| `soulbound` (non-transferable spending) | Written, compiled |
 
-- DAO registration validator
-- Election validator (nomination, voting, finalization)
-- Proposal validator (submission, voting, resolution)
-- Committee token minting policy
-- Vote receipt minting policy (double-vote prevention)
-- Reputation soulbound token validator
-- Credential NFT validator
+**Remaining work**: Deploy the 7 validators as reference scripts on Cardano preprod testnet (`cardano/governance/deploy_reference_scripts.sh`), then update `script_refs.rs` with the deployment tx hashes. Once deployed, the governance queue automatically submits Plutus transactions.
 
-**Impact**: Governance rules (supermajority, committee authority, election lifecycle) are enforced only at the application level and P2P validation level. A malicious node could bypass these checks by submitting raw transactions. On-chain enforcement would require porting Aiken validators.
-
-**Priority**: Medium — the P2P validation pipeline provides meaningful protection for the network, but on-chain enforcement is the full trust model.
+**Priority**: High — the validators are ready, deployment is the last step.
 
 ---
 
@@ -152,7 +152,7 @@ The Sentinel anti-cheat system uses a client-side rule-based scoring engine (11 
 | Cardano transaction building | Y | Conway era (pallas) |
 | NFT credential minting | Y | NativeScript + CIP-25 |
 | CIP-68 soulbound tokens | Y | |
-| Aiken smart contracts | - | **Missing** — metadata only |
+| Aiken smart contracts | Y | 7 validators compiled, tx builders implemented — awaiting preprod deployment |
 | **Networking** | | |
 | libp2p P2P | Y | |
 | GossipSub (6 global + per-classroom topics) | Y | |
@@ -164,7 +164,7 @@ The Sentinel anti-cheat system uses a client-side rule-based scoring engine (11 
 | DAOs | Y | |
 | Elections | Y | |
 | Proposals | Y | |
-| On-chain enforcement | - | **Missing** — app-level only |
+| On-chain enforcement | Y | Plutus v3 tx builders + on-chain queue — awaiting preprod deployment |
 | P2P gossip governance | Y | |
 | **Integrity** | | |
 | Client-side rule engine | Y | |
@@ -182,7 +182,7 @@ The Sentinel anti-cheat system uses a client-side rule-based scoring engine (11 
 | **Infrastructure** | | |
 | Developer CLI | Y | Rust + clap (`alex`) |
 | **Testing** | | |
-| Backend tests | Y | 407 tests |
+| Backend tests | Y | 437 tests |
 | Frontend unit tests (Vitest) | - | **Missing** |
 | E2E tests (Playwright) | - | **Missing** |
 | Stress tests | Y | ~1500 lines |
