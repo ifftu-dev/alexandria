@@ -487,7 +487,10 @@ pub(crate) fn parse_tx_hash(hex_str: &str) -> Result<Hash<32>, TxBuildError> {
 ///
 /// Decodes the tx, computes the body hash, signs it, adds the
 /// VKeyWitness to the witness set, and re-encodes.
-pub(crate) fn sign_raw_tx(tx_bytes: &[u8], private_key: &PrivateKey) -> Result<Vec<u8>, TxBuildError> {
+pub(crate) fn sign_raw_tx(
+    tx_bytes: &[u8],
+    private_key: &PrivateKey,
+) -> Result<Vec<u8>, TxBuildError> {
     let mut tx =
         Tx::decode_fragment(tx_bytes).map_err(|e| TxBuildError::TxDecode(e.to_string()))?;
 

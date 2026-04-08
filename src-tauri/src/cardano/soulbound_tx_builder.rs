@@ -20,8 +20,8 @@ use super::gov_tx_builder::{self, GovTxResult};
 use super::script_refs;
 use super::snapshot;
 use super::tx_builder::{
-    inject_metadata, parse_tx_hash, sign_raw_tx, TxBuildError, MIN_NFT_LOVELACE,
-    MIN_UTXO_LOVELACE, TTL_OFFSET,
+    inject_metadata, parse_tx_hash, sign_raw_tx, TxBuildError, MIN_NFT_LOVELACE, MIN_UTXO_LOVELACE,
+    TTL_OFFSET,
 };
 
 /// Minimum ADA for the reference NFT UTxO at the soulbound script address.
@@ -73,7 +73,8 @@ pub async fn build_soulbound_mint_tx(
     let redeemer = super::plutus_data::encode_reputation_mint_redeemer("mint")?;
 
     // 4. Compute the reputation minting policy ID
-    let policy_hash = gov_tx_builder::hash_from_hex_pub(script_refs::REPUTATION_MINTING_SCRIPT_HASH)?;
+    let policy_hash =
+        gov_tx_builder::hash_from_hex_pub(script_refs::REPUTATION_MINTING_SCRIPT_HASH)?;
     let policy_id = Hash::<28>::from(policy_hash);
 
     // 5. Query chain state (parallel)
@@ -169,7 +170,7 @@ pub async fn build_soulbound_mint_tx(
 
     // 10. Inject CIP-25 metadata (label 1694 for reputation)
     let metadata = snapshot::build_snapshot_metadata(
-        "snap",    // snapshot_id (short placeholder, overridden by caller)
+        "snap", // snapshot_id (short placeholder, overridden by caller)
         subject_id,
         role.as_str(),
         "mint",

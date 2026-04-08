@@ -9,9 +9,9 @@
 //! 6. Sign and return CBOR bytes + tx hash
 
 use pallas_addresses::Address as PallasAddress;
+use pallas_codec::utils::MaybeIndefArray;
 use pallas_crypto::hash::Hash;
 use pallas_crypto::key::ed25519::SecretKeyExtended;
-use pallas_codec::utils::MaybeIndefArray;
 use pallas_primitives::conway::{self, Redeemer, RedeemerTag, Redeemers, Tx};
 use pallas_primitives::{Fragment, NonEmptySet};
 use pallas_traverse::ComputeHash;
@@ -22,8 +22,7 @@ use super::blockfrost::BlockfrostClient;
 use super::plutus_data;
 use super::script_refs;
 use super::tx_builder::{
-    parse_tx_hash, sign_raw_tx, inject_metadata, TxBuildError,
-    MIN_UTXO_LOVELACE, TTL_OFFSET,
+    inject_metadata, parse_tx_hash, sign_raw_tx, TxBuildError, MIN_UTXO_LOVELACE, TTL_OFFSET,
 };
 
 /// Minimum ADA for a script UTxO with inline datum (~3 ADA).
@@ -108,7 +107,7 @@ pub fn inject_plutus_fields(
             data: conway::PlutusData::decode_fragment(redeemer_cbor)
                 .map_err(|e| TxBuildError::Cbor(format!("redeemer decode: {e}")))?,
             ex_units: conway::ExUnits {
-                mem: 500_000,   // initial estimate, refined by evaluate_tx
+                mem: 500_000, // initial estimate, refined by evaluate_tx
                 steps: 200_000_000,
             },
         };
@@ -155,7 +154,12 @@ async fn build_gov_tx(
     ref_utxo: (&str, u64),
     datum_cbor: &[u8],
     redeemer_cbor: &[u8],
-    metadata: Option<pallas_codec::utils::KeyValuePairs<pallas_primitives::MetadatumLabel, pallas_primitives::Metadatum>>,
+    metadata: Option<
+        pallas_codec::utils::KeyValuePairs<
+            pallas_primitives::MetadatumLabel,
+            pallas_primitives::Metadatum,
+        >,
+    >,
     mint_asset: Option<(Hash<28>, Vec<u8>, i64)>, // (policy_id, asset_name, quantity)
 ) -> Result<GovTxResult, TxBuildError> {
     // 1. Query chain state (parallel)
@@ -185,7 +189,9 @@ async fn build_gov_tx(
     let input_tx_hash = parse_tx_hash(&selected.tx_hash)?;
 
     // 3. Calculate fees
-    let fee = params.calculate_min_fee(ESTIMATED_PLUTUS_TX_SIZE).max(400_000);
+    let fee = params
+        .calculate_min_fee(ESTIMATED_PLUTUS_TX_SIZE)
+        .max(400_000);
     let input_lovelace = selected.lovelace();
     let needed = MIN_SCRIPT_UTXO_LOVELACE + fee;
     if input_lovelace < needed {
@@ -282,8 +288,8 @@ async fn build_gov_tx(
     let signed_tx_bytes = sign_raw_tx(&tx_bytes_final, &private_key)?;
 
     // Compute tx hash
-    let tx = Tx::decode_fragment(&signed_tx_bytes)
-        .map_err(|e| TxBuildError::TxDecode(e.to_string()))?;
+    let tx =
+        Tx::decode_fragment(&signed_tx_bytes).map_err(|e| TxBuildError::TxDecode(e.to_string()))?;
     let tx_hash = hex::encode(tx.transaction_body.compute_hash().as_ref());
 
     Ok(GovTxResult {
@@ -563,8 +569,8 @@ pub(crate) fn hash_from_hex_pub(hex_str: &str) -> Result<[u8; 28], TxBuildError>
 }
 
 fn hash_from_hex(hex_str: &str) -> Result<[u8; 28], TxBuildError> {
-    let bytes = hex::decode(hex_str)
-        .map_err(|e| TxBuildError::Cbor(format!("invalid hash hex: {e}")))?;
+    let bytes =
+        hex::decode(hex_str).map_err(|e| TxBuildError::Cbor(format!("invalid hash hex: {e}")))?;
     bytes
         .try_into()
         .map_err(|_| TxBuildError::Cbor("hash must be 28 bytes".into()))
@@ -688,14 +694,8 @@ mod tests {
         let built = staging.build_conway_raw().unwrap();
 
         let redeemer_cbor = vec![0xd8, 0x79, 0x80]; // Constr(0, [])
-        let (tx_bytes, _) = inject_plutus_fields(
-            &built.tx_bytes.0,
-            &[],
-            &[],
-            &redeemer_cbor,
-            None,
-        )
-        .unwrap();
+        let (tx_bytes, _) =
+            inject_plutus_fields(&built.tx_bytes.0, &[], &[], &redeemer_cbor, None).unwrap();
 
         // Patch with new ex-units
         let mut tx = Tx::decode_fragment(&tx_bytes).unwrap();
@@ -707,8 +707,7 @@ mod tests {
                     steps: 500_000_000,
                 };
             }
-            tx.transaction_witness_set.redeemer =
-                Some(Redeemers::List(MaybeIndefArray::Def(vec)));
+            tx.transaction_witness_set.redeemer = Some(Redeemers::List(MaybeIndefArray::Def(vec)));
         }
         let patched = tx.encode_fragment().unwrap();
 

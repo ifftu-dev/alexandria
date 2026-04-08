@@ -411,8 +411,12 @@ async fn build_and_submit(
                 &[],
                 params["election_id"].as_i64().unwrap_or(0),
                 params["seats"].as_i64().unwrap_or(5),
-                params["nominee_min_proficiency"].as_str().unwrap_or("apply"),
-                params["voter_min_proficiency"].as_str().unwrap_or("remember"),
+                params["nominee_min_proficiency"]
+                    .as_str()
+                    .unwrap_or("apply"),
+                params["voter_min_proficiency"]
+                    .as_str()
+                    .unwrap_or("remember"),
                 params["nomination_end_ms"].as_i64().unwrap_or(0),
                 params["voting_end_ms"].as_i64().unwrap_or(0),
             )
@@ -442,8 +446,8 @@ async fn build_and_submit(
             let params: serde_json::Value = serde_json::from_str(&item.payload_json)
                 .map_err(|e| format!("invalid payload: {e}"))?;
             let election_tx = params["election_tx_hash"].as_str().unwrap_or("");
-            let election_tx_bytes = hex::decode(election_tx)
-                .map_err(|e| format!("invalid election tx hash: {e}"))?;
+            let election_tx_bytes =
+                hex::decode(election_tx).map_err(|e| format!("invalid election tx hash: {e}"))?;
             super::gov_tx_builder::build_install_committee_tx(
                 blockfrost,
                 payment_address,

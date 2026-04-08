@@ -377,7 +377,12 @@ pub async fn submit_snapshot_tx(
                     };
                     Ok(OnChainSkillScore {
                         skill_id_bytes: hex::encode(
-                            skill_id.as_bytes().iter().take(16).copied().collect::<Vec<u8>>(),
+                            skill_id
+                                .as_bytes()
+                                .iter()
+                                .take(16)
+                                .copied()
+                                .collect::<Vec<u8>>(),
                         ),
                         proficiency: snapshot::proficiency_to_index(&prof_level),
                         impact_score: (score * cip68::IMPACT_SCALE as f64) as i64,
@@ -404,15 +409,15 @@ pub async fn submit_snapshot_tx(
     let ks_guard = state.keystore.lock().await;
     let ks = ks_guard.as_ref().ok_or("vault is locked — unlock first")?;
     let mnemonic = ks.retrieve_mnemonic().map_err(|e| e.to_string())?;
-    let wallet = crate::crypto::wallet::wallet_from_mnemonic(&mnemonic)
-        .map_err(|e| e.to_string())?;
+    let wallet =
+        crate::crypto::wallet::wallet_from_mnemonic(&mnemonic).map_err(|e| e.to_string())?;
     drop(ks_guard);
 
     // 3. Build Blockfrost client
     let project_id = std::env::var("BLOCKFROST_PROJECT_ID")
         .map_err(|_| "BLOCKFROST_PROJECT_ID environment variable not set")?;
-    let blockfrost = crate::cardano::blockfrost::BlockfrostClient::new(project_id)
-        .map_err(|e| e.to_string())?;
+    let blockfrost =
+        crate::cardano::blockfrost::BlockfrostClient::new(project_id).map_err(|e| e.to_string())?;
 
     let role = ReputationRole::from_str(&record.role)
         .ok_or_else(|| format!("invalid role: {}", record.role))?;
