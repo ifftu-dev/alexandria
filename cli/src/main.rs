@@ -3,6 +3,8 @@ mod context;
 mod output;
 mod runner;
 
+use std::path::PathBuf;
+
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
@@ -17,6 +19,11 @@ use context::ProjectContext;
     propagate_version = true
 )]
 struct Cli {
+    /// Read vault password from a file instead of prompting interactively.
+    /// Useful for CI/CD pipelines and scripted operations.
+    #[arg(long, global = true)]
+    password_file: Option<PathBuf>,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -69,7 +76,7 @@ fn run(cli: Cli) -> Result<()> {
     match &cli.command {
         Commands::Run(cmd) => run::execute(cmd, &ctx),
         Commands::Dev(cmd) => dev::execute(cmd, &ctx),
-        Commands::Db(cmd) => db::execute(cmd, &ctx),
+        Commands::Db(cmd) => db::execute(cmd, &ctx, cli.password_file.as_deref()),
         Commands::Build(cmd) => build::execute(cmd, &ctx),
         Commands::Config(cmd) => config::execute(cmd, &ctx),
         Commands::Health => health::execute(&ctx),

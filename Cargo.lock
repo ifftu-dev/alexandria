@@ -86,22 +86,28 @@ name = "alex"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "argon2",
  "bytesize",
  "clap",
  "console 0.16.3",
  "dialoguer",
  "dirs 6.0.0",
+ "hex",
+ "hkdf",
+ "hmac",
  "indicatif",
  "log",
  "owo-colors",
+ "rand 0.8.5",
  "rusqlite",
  "serde_json",
+ "sha2 0.10.9",
  "sysinfo",
 ]
 
 [[package]]
 name = "alexandria-node"
-version = "0.0.2-alpha"
+version = "0.0.4-alpha"
 dependencies = [
  "aes-gcm",
  "anyhow",
