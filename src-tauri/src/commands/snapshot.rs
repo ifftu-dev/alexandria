@@ -348,9 +348,6 @@ pub async fn submit_snapshot_tx(
         }
 
         // Gather skills
-        let role = ReputationRole::from_str(&record.role)
-            .ok_or_else(|| format!("invalid role: {}", record.role))?;
-
         let mut stmt = conn
             .prepare(
                 "SELECT ra.skill_id, ra.proficiency_level, ra.score, ra.evidence_count \
