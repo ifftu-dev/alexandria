@@ -154,8 +154,33 @@ async function mintNft(proof: SkillProof) {
             </div>
           </div>
 
-          <!-- Mint button -->
+          <!-- On-chain status -->
+          <div v-if="proof.nft_tx_hash" class="space-y-2">
+            <div class="flex items-center gap-1.5 text-xs">
+              <span class="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 font-medium text-emerald-600 dark:text-emerald-400">
+                <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                </svg>
+                Minted
+              </span>
+              <a
+                :href="`https://preprod.cardanoscan.io/transaction/${proof.nft_tx_hash}`"
+                target="_blank"
+                rel="noopener"
+                class="text-muted-foreground hover:text-primary transition-colors truncate max-w-[120px]"
+                :title="proof.nft_tx_hash"
+              >
+                {{ proof.nft_tx_hash.slice(0, 8) }}...{{ proof.nft_tx_hash.slice(-6) }}
+              </a>
+            </div>
+            <p class="text-[10px] text-muted-foreground font-mono truncate" :title="proof.nft_policy_id ?? undefined">
+              Policy: {{ proof.nft_policy_id?.slice(0, 12) }}...
+            </p>
+          </div>
+
+          <!-- Mint button (only when not yet minted) -->
           <AppButton
+            v-else
             size="sm"
             class="w-full"
             :loading="minting === proof.id"

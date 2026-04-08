@@ -93,6 +93,9 @@ pub struct SkillProof {
     pub evidence_count: i64,
     pub computed_at: String,
     pub updated_at: String,
+    pub nft_policy_id: Option<String>,
+    pub nft_asset_name: Option<String>,
+    pub nft_tx_hash: Option<String>,
 }
 
 /// A reputation assertion — computed impact score for an actor.
@@ -193,11 +196,16 @@ mod tests {
             evidence_count: 12,
             computed_at: "2025-01-01".into(),
             updated_at: "2025-01-02".into(),
+            nft_policy_id: Some("abc123".into()),
+            nft_asset_name: Some("AlexProofsp1".into()),
+            nft_tx_hash: None,
         };
         let json = serde_json::to_string(&proof).unwrap();
         let parsed: SkillProof = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.confidence, 0.92);
         assert_eq!(parsed.evidence_count, 12);
+        assert_eq!(parsed.nft_policy_id, Some("abc123".into()));
+        assert!(parsed.nft_tx_hash.is_none());
     }
 
     #[test]
