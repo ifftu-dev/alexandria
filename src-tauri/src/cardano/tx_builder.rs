@@ -38,17 +38,17 @@ pub enum TxBuildError {
 const CIP25_LABEL: MetadatumLabel = 721;
 
 /// Minimum ADA to send with an NFT output (2 ADA).
-const MIN_NFT_LOVELACE: u64 = 2_000_000;
+pub(crate) const MIN_NFT_LOVELACE: u64 = 2_000_000;
 
 /// Minimum ADA required in a UTxO for coin selection (5 ADA).
-const MIN_UTXO_LOVELACE: u64 = 5_000_000;
+pub(crate) const MIN_UTXO_LOVELACE: u64 = 5_000_000;
 
 /// TTL offset from current slot (1 hour = 3600 slots on preprod).
-const TTL_OFFSET: u64 = 3600;
+pub(crate) const TTL_OFFSET: u64 = 3600;
 
 /// Estimated fee for initial transaction sizing (300k lovelace, ~0.3 ADA).
 /// Will be refined with actual protocol parameters.
-const ESTIMATED_FEE: u64 = 300_000;
+pub(crate) const ESTIMATED_FEE: u64 = 300_000;
 
 /// Build CIP-25 metadata for a SkillProof NFT.
 ///
@@ -193,7 +193,7 @@ fn build_course_metadata(
 /// 2. Set `auxiliary_data` to `AuxiliaryData::Shelley(metadata)`
 /// 3. Recompute `auxiliary_data_hash` in the transaction body
 /// 4. Re-encode and recalculate the tx hash
-fn inject_metadata(
+pub(crate) fn inject_metadata(
     tx_bytes: &[u8],
     metadata: KeyValuePairs<MetadatumLabel, Metadatum>,
 ) -> Result<(Vec<u8>, [u8; 32]), TxBuildError> {
@@ -250,8 +250,16 @@ pub async fn build_skill_proof_mint(
     minicbor::encode(&native_script, &mut script_cbor)
         .map_err(|e| TxBuildError::Cbor(e.to_string()))?;
 
-    // 3. Query chain state
-    let utxos = blockfrost.get_utxos(payment_address).await?;
+    // 3. Query chain state (parallel)
+    let (utxos_res, params_res, tip_res) = tokio::join!(
+        blockfrost.get_utxos(payment_address),
+        blockfrost.get_protocol_params(),
+        blockfrost.get_tip_slot(),
+    );
+    let utxos = utxos_res?;
+    let params = params_res?;
+    let tip_slot = tip_res?;
+
     if utxos.is_empty() {
         return Err(TxBuildError::NoUtxos);
     }
@@ -261,9 +269,6 @@ pub async fn build_skill_proof_mint(
             available: utxos.iter().map(|u| u.lovelace()).sum(),
         },
     )?;
-
-    let params = blockfrost.get_protocol_params().await?;
-    let tip_slot = blockfrost.get_tip_slot().await?;
 
     // 4. Parse addresses
     let pallas_addr = PallasAddress::from_bech32(payment_address)
@@ -369,8 +374,16 @@ pub async fn build_course_registration(
     minicbor::encode(&native_script, &mut script_cbor)
         .map_err(|e| TxBuildError::Cbor(e.to_string()))?;
 
-    // 3. Query chain state
-    let utxos = blockfrost.get_utxos(payment_address).await?;
+    // 3. Query chain state (parallel)
+    let (utxos_res, params_res, tip_res) = tokio::join!(
+        blockfrost.get_utxos(payment_address),
+        blockfrost.get_protocol_params(),
+        blockfrost.get_tip_slot(),
+    );
+    let utxos = utxos_res?;
+    let params = params_res?;
+    let tip_slot = tip_res?;
+
     if utxos.is_empty() {
         return Err(TxBuildError::NoUtxos);
     }
@@ -380,9 +393,6 @@ pub async fn build_course_registration(
             available: utxos.iter().map(|u| u.lovelace()).sum(),
         },
     )?;
-
-    let params = blockfrost.get_protocol_params().await?;
-    let tip_slot = blockfrost.get_tip_slot().await?;
 
     // 4. Parse addresses
     let pallas_addr = PallasAddress::from_bech32(payment_address)
@@ -454,7 +464,7 @@ pub async fn build_course_registration(
 ///
 /// Uses the linear fee formula: `min_fee_a * estimated_size + min_fee_b`.
 /// We estimate ~500 bytes for a simple mint tx with CIP-25 metadata.
-fn estimate_fee(params: &ProtocolParameters, _num_witnesses: u32) -> u64 {
+pub(crate) fn estimate_fee(params: &ProtocolParameters, _num_witnesses: u32) -> u64 {
     // A simple mint tx with 1 input, 2 outputs, native script, and CIP-25 metadata
     // is typically 400-600 bytes. We use 600 as a conservative estimate.
     let estimated_size: u64 = 600;
@@ -464,7 +474,7 @@ fn estimate_fee(params: &ProtocolParameters, _num_witnesses: u32) -> u64 {
 }
 
 /// Parse a hex-encoded 32-byte transaction hash into a pallas Hash.
-fn parse_tx_hash(hex_str: &str) -> Result<Hash<32>, TxBuildError> {
+pub(crate) fn parse_tx_hash(hex_str: &str) -> Result<Hash<32>, TxBuildError> {
     let bytes = hex::decode(hex_str)
         .map_err(|e| TxBuildError::TxDecode(format!("invalid tx hash hex: {e}")))?;
     let arr: [u8; 32] = bytes
@@ -477,7 +487,7 @@ fn parse_tx_hash(hex_str: &str) -> Result<Hash<32>, TxBuildError> {
 ///
 /// Decodes the tx, computes the body hash, signs it, adds the
 /// VKeyWitness to the witness set, and re-encodes.
-fn sign_raw_tx(tx_bytes: &[u8], private_key: &PrivateKey) -> Result<Vec<u8>, TxBuildError> {
+pub(crate) fn sign_raw_tx(tx_bytes: &[u8], private_key: &PrivateKey) -> Result<Vec<u8>, TxBuildError> {
     let mut tx =
         Tx::decode_fragment(tx_bytes).map_err(|e| TxBuildError::TxDecode(e.to_string()))?;
 

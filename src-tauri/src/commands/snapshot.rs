@@ -295,6 +295,208 @@ pub async fn update_snapshot_status(
     Ok(())
 }
 
+/// Build and submit a soulbound reputation token minting transaction.
+///
+/// Takes a pending snapshot record, builds the CIP-68 minting transaction,
+/// submits it via Blockfrost, and updates the snapshot status.
+#[tauri::command]
+pub async fn submit_snapshot_tx(
+    state: State<'_, AppState>,
+    snapshot_id: String,
+) -> Result<SnapshotRecord, String> {
+    // 1. Read snapshot record
+    let (record, skills) = {
+        let db_guard = state
+            .db
+            .lock()
+            .map_err(|_| "database lock poisoned".to_string())?;
+        let db = db_guard.as_ref().ok_or("database not initialized")?;
+        let conn = db.conn();
+
+        let record: SnapshotRecord = conn
+            .query_row(
+                "SELECT id, actor_address, subject_id, role, skill_count, tx_status, \
+                 tx_hash, policy_id, ref_asset_name, user_asset_name, error_message, \
+                 snapshot_at, confirmed_at \
+                 FROM reputation_snapshots WHERE id = ?1",
+                params![snapshot_id],
+                |row| {
+                    Ok(SnapshotRecord {
+                        id: row.get(0)?,
+                        actor_address: row.get(1)?,
+                        subject_id: row.get(2)?,
+                        role: row.get(3)?,
+                        skill_count: row.get(4)?,
+                        tx_status: row.get(5)?,
+                        tx_hash: row.get(6)?,
+                        policy_id: row.get(7)?,
+                        ref_asset_name: row.get(8)?,
+                        user_asset_name: row.get(9)?,
+                        error_message: row.get(10)?,
+                        snapshot_at: row.get(11)?,
+                        confirmed_at: row.get(12)?,
+                    })
+                },
+            )
+            .map_err(|e| format!("snapshot not found: {e}"))?;
+
+        if record.tx_status != "pending" && record.tx_status != "failed" {
+            return Err(format!(
+                "snapshot {} is already {}, cannot resubmit",
+                snapshot_id, record.tx_status
+            ));
+        }
+
+        // Gather skills
+        let role = ReputationRole::from_str(&record.role)
+            .ok_or_else(|| format!("invalid role: {}", record.role))?;
+
+        let mut stmt = conn
+            .prepare(
+                "SELECT ra.skill_id, ra.proficiency_level, ra.score, ra.evidence_count \
+                 FROM reputation_assertions ra \
+                 JOIN skills s ON s.id = ra.skill_id \
+                 JOIN subjects sub ON sub.id = s.subject_id \
+                 WHERE ra.actor_address = ?1 AND ra.role = ?2 AND sub.id = ?3 \
+                 ORDER BY ra.skill_id",
+            )
+            .map_err(|e| e.to_string())?;
+
+        let skills: Vec<OnChainSkillScore> = stmt
+            .query_map(
+                params![record.actor_address, record.role, record.subject_id],
+                |row| {
+                    let skill_id: String = row.get(0)?;
+                    let prof_level: String = row.get(1)?;
+                    let score: f64 = row.get(2)?;
+                    let evidence_count: i64 = row.get(3)?;
+                    let confidence = if record.role == "instructor" {
+                        evidence_count as f64 / (evidence_count as f64 + 5.0)
+                    } else {
+                        score
+                    };
+                    Ok(OnChainSkillScore {
+                        skill_id_bytes: hex::encode(
+                            skill_id.as_bytes().iter().take(16).copied().collect::<Vec<u8>>(),
+                        ),
+                        proficiency: snapshot::proficiency_to_index(&prof_level),
+                        impact_score: (score * cip68::IMPACT_SCALE as f64) as i64,
+                        confidence: (confidence * cip68::CONFIDENCE_SCALE as f64) as i64,
+                        evidence_count,
+                    })
+                },
+            )
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+
+        // Update status to building
+        conn.execute(
+            "UPDATE reputation_snapshots SET tx_status = 'building' WHERE id = ?1",
+            params![snapshot_id],
+        )
+        .map_err(|e| e.to_string())?;
+
+        (record, skills)
+    };
+
+    // 2. Get wallet from unlocked vault
+    let ks_guard = state.keystore.lock().await;
+    let ks = ks_guard.as_ref().ok_or("vault is locked — unlock first")?;
+    let mnemonic = ks.retrieve_mnemonic().map_err(|e| e.to_string())?;
+    let wallet = crate::crypto::wallet::wallet_from_mnemonic(&mnemonic)
+        .map_err(|e| e.to_string())?;
+    drop(ks_guard);
+
+    // 3. Build Blockfrost client
+    let project_id = std::env::var("BLOCKFROST_PROJECT_ID")
+        .map_err(|_| "BLOCKFROST_PROJECT_ID environment variable not set")?;
+    let blockfrost = crate::cardano::blockfrost::BlockfrostClient::new(project_id)
+        .map_err(|e| e.to_string())?;
+
+    let role = ReputationRole::from_str(&record.role)
+        .ok_or_else(|| format!("invalid role: {}", record.role))?;
+
+    let now_ms = chrono::Utc::now().timestamp_millis();
+
+    // 4. Build and submit transaction
+    match crate::cardano::soulbound_tx_builder::build_soulbound_mint_tx(
+        &blockfrost,
+        &wallet.payment_address,
+        &wallet.payment_key_hash,
+        &wallet.payment_key_extended,
+        &wallet.payment_key_hash, // owner = self
+        &record.subject_id,
+        &role,
+        &skills,
+        now_ms - 30 * 24 * 3600 * 1000, // 30 days window
+        now_ms,
+    )
+    .await
+    {
+        Ok(gov_result) => {
+            // Submit to Blockfrost
+            match blockfrost.submit_tx(&gov_result.tx_cbor).await {
+                Ok(tx_hash) => {
+                    let policy_id =
+                        crate::cardano::script_refs::REPUTATION_MINTING_SCRIPT_HASH.to_string();
+
+                    let db_guard = state
+                        .db
+                        .lock()
+                        .map_err(|_| "database lock poisoned".to_string())?;
+                    let db = db_guard.as_ref().ok_or("database not initialized")?;
+                    db.conn()
+                        .execute(
+                            "UPDATE reputation_snapshots SET \
+                             tx_status = 'submitted', tx_hash = ?1, policy_id = ?2 \
+                             WHERE id = ?3",
+                            params![tx_hash, policy_id, snapshot_id],
+                        )
+                        .map_err(|e| e.to_string())?;
+
+                    Ok(SnapshotRecord {
+                        tx_status: "submitted".into(),
+                        tx_hash: Some(tx_hash),
+                        policy_id: Some(policy_id),
+                        ..record
+                    })
+                }
+                Err(e) => {
+                    let db_guard = state
+                        .db
+                        .lock()
+                        .map_err(|_| "database lock poisoned".to_string())?;
+                    let db = db_guard.as_ref().ok_or("database not initialized")?;
+                    db.conn()
+                        .execute(
+                            "UPDATE reputation_snapshots SET \
+                             tx_status = 'failed', error_message = ?1 WHERE id = ?2",
+                            params![e.to_string(), snapshot_id],
+                        )
+                        .ok();
+                    Err(format!("tx submission failed: {e}"))
+                }
+            }
+        }
+        Err(e) => {
+            let db_guard = state
+                .db
+                .lock()
+                .map_err(|_| "database lock poisoned".to_string())?;
+            let db = db_guard.as_ref().ok_or("database not initialized")?;
+            db.conn()
+                .execute(
+                    "UPDATE reputation_snapshots SET \
+                     tx_status = 'failed', error_message = ?1 WHERE id = ?2",
+                    params![e.to_string(), snapshot_id],
+                )
+                .ok();
+            Err(format!("tx build failed: {e}"))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

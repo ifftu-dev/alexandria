@@ -6,5 +6,6 @@ pub mod plutus_data;
 pub mod policy;
 pub mod script_refs;
 pub mod snapshot;
+pub mod soulbound_tx_builder;
 pub mod tx_builder;
 pub mod types;

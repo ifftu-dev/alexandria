@@ -262,6 +262,29 @@ impl BlockfrostClient {
 
         Ok(units)
     }
+
+    /// Check if a transaction has been confirmed on-chain.
+    ///
+    /// Queries `GET /txs/{hash}`. Returns `true` if Blockfrost returns 200
+    /// (transaction exists on-chain), `false` for 404 (not yet confirmed).
+    pub async fn is_tx_confirmed(&self, tx_hash: &str) -> Result<bool, BlockfrostError> {
+        let url = format!("{}/txs/{}", self.base_url, tx_hash);
+        let resp = self
+            .client
+            .get(&url)
+            .header("project_id", &self.project_id)
+            .send()
+            .await?;
+
+        match resp.status().as_u16() {
+            200 => Ok(true),
+            404 => Ok(false),
+            status => {
+                let body = resp.text().await.unwrap_or_default();
+                Err(BlockfrostError::Api { status, body })
+            }
+        }
+    }
 }
 
 #[cfg(test)]
