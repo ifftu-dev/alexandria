@@ -376,7 +376,9 @@ pub fn run() {
                                 cardano::blockfrost::BlockfrostClient::new(id).ok()
                             });
 
-                        match cardano::onchain_queue::process_queue(&db_for_queue, &bf).await
+                        // TODO: retrieve wallet from vault for queue processing
+                        let wallet: Option<crypto::wallet::Wallet> = None;
+                        match cardano::onchain_queue::process_queue(&db_for_queue, &bf, &wallet).await
                         {
                             Ok(n) if n > 0 => {
                                 log::info!("governance queue: processed {n} items");

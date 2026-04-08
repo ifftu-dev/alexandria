@@ -235,15 +235,20 @@ fn get_item(db: &Database, queue_id: &str) -> Result<Option<QueueItem>, String> 
 pub async fn process_queue(
     db: &std::sync::Arc<std::sync::Mutex<Option<crate::db::Database>>>,
     blockfrost: &Option<super::blockfrost::BlockfrostClient>,
+    wallet: &Option<crate::crypto::wallet::Wallet>,
 ) -> Result<usize, String> {
     // Skip if validators not deployed yet
     if !super::gov_tx_builder::validators_deployed() {
         return Ok(0);
     }
 
-    // Skip if no Blockfrost client available
+    // Skip if no Blockfrost client or wallet available
     let bf = match blockfrost {
         Some(ref client) => client,
+        None => return Ok(0),
+    };
+    let w = match wallet {
+        Some(ref w) => w,
         None => return Ok(0),
     };
 
@@ -278,7 +283,7 @@ pub async fn process_queue(
         );
 
         // Attempt to build and submit the transaction
-        match build_and_submit(&item.action_type, bf).await {
+        match build_and_submit(&item.action_type, item, bf, w).await {
             Ok(tx_hash) => {
                 let db_guard = db.lock().map_err(|_| "db lock poisoned".to_string())?;
                 let db_ref = db_guard.as_ref().ok_or("database not initialized")?;
@@ -296,7 +301,87 @@ pub async fn process_queue(
         processed += 1;
     }
 
-    Ok(processed)
+    // After processing pending items, check submitted ones for confirmation
+    let confirmed = confirm_submitted_items(db, bf).await?;
+    if confirmed > 0 {
+        log::info!("governance queue: confirmed {confirmed} transaction(s)");
+    }
+
+    Ok(processed + confirmed)
+}
+
+/// Poll submitted queue items for on-chain confirmation.
+///
+/// Queries items with status='submitted' and checks each via Blockfrost.
+/// Items confirmed on-chain transition to 'confirmed'.
+async fn confirm_submitted_items(
+    db: &std::sync::Arc<std::sync::Mutex<Option<crate::db::Database>>>,
+    blockfrost: &super::blockfrost::BlockfrostClient,
+) -> Result<usize, String> {
+    let items = {
+        let db_guard = db.lock().map_err(|_| "db lock poisoned".to_string())?;
+        let db_ref = db_guard.as_ref().ok_or("database not initialized")?;
+        get_submitted(db_ref)?
+    };
+
+    let mut confirmed = 0;
+    for item in &items {
+        if let Some(ref tx_hash) = item.tx_hash {
+            match blockfrost.is_tx_confirmed(tx_hash).await {
+                Ok(true) => {
+                    let db_guard = db.lock().map_err(|_| "db lock poisoned".to_string())?;
+                    let db_ref = db_guard.as_ref().ok_or("database not initialized")?;
+                    mark_confirmed(db_ref, &item.id)?;
+                    log::info!("On-chain tx confirmed: {} ({})", item.action_type, tx_hash);
+                    confirmed += 1;
+                }
+                Ok(false) => {
+                    // Not yet confirmed, will check again next cycle
+                }
+                Err(e) => {
+                    log::debug!("Failed to check tx {}: {e}", tx_hash);
+                }
+            }
+        }
+    }
+
+    Ok(confirmed)
+}
+
+/// Get queue items that have been submitted but not yet confirmed.
+fn get_submitted(db: &crate::db::Database) -> Result<Vec<QueueItem>, String> {
+    let mut stmt = db
+        .conn()
+        .prepare(
+            "SELECT id, action_type, payload_json, target_table, target_id, \
+             status, tx_hash, attempts, last_error, created_at, updated_at \
+             FROM onchain_governance_queue \
+             WHERE status = 'submitted' AND tx_hash IS NOT NULL \
+             ORDER BY updated_at ASC LIMIT 20",
+        )
+        .map_err(|e| e.to_string())?;
+
+    let items = stmt
+        .query_map([], |row| {
+            Ok(QueueItem {
+                id: row.get(0)?,
+                action_type: row.get(1)?,
+                payload_json: row.get(2)?,
+                target_table: row.get(3)?,
+                target_id: row.get(4)?,
+                status: row.get(5)?,
+                tx_hash: row.get(6)?,
+                attempts: row.get(7)?,
+                last_error: row.get(8)?,
+                created_at: row.get(9)?,
+                updated_at: row.get(10)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+
+    Ok(items)
 }
 
 /// Build and submit an on-chain transaction for a specific governance action.
@@ -305,37 +390,114 @@ pub async fn process_queue(
 /// Returns the transaction hash on success.
 async fn build_and_submit(
     action_type: &str,
-    _blockfrost: &super::blockfrost::BlockfrostClient,
+    item: &QueueItem,
+    blockfrost: &super::blockfrost::BlockfrostClient,
+    wallet: &crate::crypto::wallet::Wallet,
 ) -> Result<String, String> {
-    // Each action type maps to a specific tx builder.
-    // Currently the builders return errors pending full Plutus implementation.
-    // Once reference scripts are deployed and the builders are complete,
-    // they will construct, sign, and submit the transaction.
-    match action_type {
+    let payment_address = &wallet.payment_address;
+    let payment_key_hash = &wallet.payment_key_hash;
+    let payment_key_extended = &wallet.payment_key_extended;
+
+    let result = match action_type {
         "open_election" => {
-            Err("open_election tx builder awaiting reference script deployment".into())
+            let params: serde_json::Value = serde_json::from_str(&item.payload_json)
+                .map_err(|e| format!("invalid payload: {e}"))?;
+            super::gov_tx_builder::build_open_election_tx(
+                blockfrost,
+                payment_address,
+                payment_key_hash,
+                payment_key_extended,
+                &[0u8; 28],
+                &[],
+                params["election_id"].as_i64().unwrap_or(0),
+                params["seats"].as_i64().unwrap_or(5),
+                params["nominee_min_proficiency"].as_str().unwrap_or("apply"),
+                params["voter_min_proficiency"].as_str().unwrap_or("remember"),
+                params["nomination_end_ms"].as_i64().unwrap_or(0),
+                params["voting_end_ms"].as_i64().unwrap_or(0),
+            )
+            .await
         }
         "cast_election_vote" => {
-            Err("cast_election_vote tx builder awaiting reference script deployment".into())
+            super::gov_tx_builder::build_cast_vote_tx(
+                blockfrost,
+                payment_address,
+                payment_key_hash,
+                payment_key_extended,
+                "election",
+                None,
+            )
+            .await
         }
         "finalize_election" => {
-            Err("finalize_election tx builder awaiting reference script deployment".into())
+            super::gov_tx_builder::build_finalize_election_tx(
+                blockfrost,
+                payment_address,
+                payment_key_hash,
+                payment_key_extended,
+            )
+            .await
         }
         "install_committee" => {
-            Err("install_committee tx builder awaiting reference script deployment".into())
+            let params: serde_json::Value = serde_json::from_str(&item.payload_json)
+                .map_err(|e| format!("invalid payload: {e}"))?;
+            let election_tx = params["election_tx_hash"].as_str().unwrap_or("");
+            let election_tx_bytes = hex::decode(election_tx)
+                .map_err(|e| format!("invalid election tx hash: {e}"))?;
+            super::gov_tx_builder::build_install_committee_tx(
+                blockfrost,
+                payment_address,
+                payment_key_hash,
+                payment_key_extended,
+                (&election_tx_bytes, 0),
+            )
+            .await
         }
-        "submit_proposal" => {
-            Err("submit_proposal tx builder awaiting reference script deployment".into())
-        }
-        "approve_proposal" => {
-            Err("approve_proposal tx builder awaiting reference script deployment".into())
+        "submit_proposal" | "approve_proposal" => {
+            // Both create/approve a proposal UTxO at the proposal script address
+            super::gov_tx_builder::build_resolve_proposal_tx(
+                blockfrost,
+                payment_address,
+                payment_key_hash,
+                payment_key_extended,
+            )
+            .await
         }
         "cast_proposal_vote" => {
-            Err("cast_proposal_vote tx builder awaiting reference script deployment".into())
+            let params: serde_json::Value = serde_json::from_str(&item.payload_json)
+                .map_err(|e| format!("invalid payload: {e}"))?;
+            let in_favor = params["in_favor"].as_bool();
+            super::gov_tx_builder::build_cast_vote_tx(
+                blockfrost,
+                payment_address,
+                payment_key_hash,
+                payment_key_extended,
+                "proposal",
+                in_favor,
+            )
+            .await
         }
         "resolve_proposal" => {
-            Err("resolve_proposal tx builder awaiting reference script deployment".into())
+            super::gov_tx_builder::build_resolve_proposal_tx(
+                blockfrost,
+                payment_address,
+                payment_key_hash,
+                payment_key_extended,
+            )
+            .await
         }
-        other => Err(format!("unknown governance action type: {other}")),
+        other => return Err(format!("unknown governance action type: {other}")),
+    };
+
+    match result {
+        Ok(gov_result) => {
+            // Submit signed tx to Blockfrost
+            let tx_hash = blockfrost
+                .submit_tx(&gov_result.tx_cbor)
+                .await
+                .map_err(|e| format!("tx submission failed: {e}"))?;
+            Ok(tx_hash)
+        }
+        Err(e) => Err(format!("tx build failed: {e}")),
     }
 }
