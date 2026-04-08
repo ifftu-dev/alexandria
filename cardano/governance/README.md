@@ -49,4 +49,53 @@ aiken check
 - **Reputation tokens** are CIP-68 soulbound NFTs — the reference token holds metadata (skill, proficiency, confidence), the user token is non-transferable
 - **Vote receipts** prevent double-voting without requiring on-chain voter rolls
 
+## Deploying to Preprod
+
+A deployment script is provided to deploy all 7 validators as reference scripts on Cardano preprod testnet.
+
+### Prerequisites
+
+- `cardano-cli` installed (Conway-era compatible)
+- A funded preprod wallet (needs ~40 tADA for 7 reference script UTxOs + fees)
+- `BLOCKFROST_PROJECT_ID` environment variable set (get one from [blockfrost.io](https://blockfrost.io))
+
+### Deploy
+
+```sh
+export BLOCKFROST_PROJECT_ID="preprodXXX..."
+export DEPLOYER_SIGNING_KEY="$HOME/.cardano/deployer.skey"
+export DEPLOYER_ADDRESS="addr_test1..."
+./deploy_reference_scripts.sh
+```
+
+The script:
+1. Extracts compiled UPLC from `plutus.json`
+2. Wraps each as a PlutusScriptV3 envelope
+3. Builds + signs + submits one reference script transaction per validator
+4. Saves results to `build/deploy/deployment_results.json`
+
+### After Deployment
+
+Update `src-tauri/src/cardano/script_refs.rs` with the deployment tx hashes from `deployment_results.json`:
+
+```rust
+pub const DAO_REGISTRY_REF_UTXO: (&str, u64) = ("<tx_hash>", 0);
+// ... repeat for all 7 validators
+```
+
+Once updated, `ref_utxos_deployed()` returns `true` and the governance on-chain queue begins submitting Plutus transactions automatically.
+
+## Integration with the App
+
+The Rust backend integrates with these validators through:
+
+| Module | Purpose |
+|--------|---------|
+| `cardano/gov_tx_builder.rs` | 6 governance tx builders (CreateDao, OpenElection, CastVote, ResolveProposal, FinalizeElection, InstallCommittee) |
+| `cardano/soulbound_tx_builder.rs` | CIP-68 soulbound reputation token minting |
+| `cardano/onchain_queue.rs` | Persistent queue that dispatches governance actions to tx builders |
+| `cardano/plutus_data.rs` | All datum/redeemer CBOR encoding for Plutus Data |
+| `cardano/script_refs.rs` | Script hashes and reference UTxO locations |
+| `commands/snapshot.rs` | `submit_snapshot_tx` command for soulbound minting |
+
 See `docs/whitepaper-consolidated-v0.0.1.md` Section 4 for the full governance specification.
