@@ -21,7 +21,8 @@ pub async fn list_skill_proofs(state: State<'_, AppState>) -> Result<Vec<SkillPr
         .conn()
         .prepare(
             "SELECT id, skill_id, proficiency_level, confidence, evidence_count, \
-             computed_at, updated_at FROM skill_proofs ORDER BY updated_at DESC",
+             computed_at, updated_at, nft_policy_id, nft_asset_name, nft_tx_hash \
+             FROM skill_proofs ORDER BY updated_at DESC",
         )
         .map_err(|e| e.to_string())?;
 
@@ -35,6 +36,9 @@ pub async fn list_skill_proofs(state: State<'_, AppState>) -> Result<Vec<SkillPr
                 evidence_count: row.get(4)?,
                 computed_at: row.get(5)?,
                 updated_at: row.get(6)?,
+                nft_policy_id: row.get(7)?,
+                nft_asset_name: row.get(8)?,
+                nft_tx_hash: row.get(9)?,
             })
         })
         .map_err(|e| e.to_string())?

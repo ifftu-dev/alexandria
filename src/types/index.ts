@@ -198,6 +198,9 @@ export interface SkillProof {
   evidence_count: number
   computed_at: string
   updated_at: string
+  nft_policy_id: string | null
+  nft_asset_name: string | null
+  nft_tx_hash: string | null
 }
 
 export interface ReputationAssertion {
