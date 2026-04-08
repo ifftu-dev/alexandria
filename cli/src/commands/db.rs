@@ -1,7 +1,7 @@
 use anyhow::{bail, Context, Result};
 use bytesize::ByteSize;
 use clap::Subcommand;
-use rusqlite::Connection;
+use rusqlite::{Connection, OpenFlags};
 use std::fs;
 
 use crate::context::ProjectContext;
@@ -50,11 +50,15 @@ pub enum DbCommand {
     },
 }
 
-pub fn execute(cmd: &DbCommand, ctx: &ProjectContext) -> Result<()> {
+pub fn execute(
+    cmd: &DbCommand,
+    ctx: &ProjectContext,
+    password_file: Option<&std::path::Path>,
+) -> Result<()> {
     match cmd {
-        DbCommand::Status => show_status(ctx),
-        DbCommand::Migrate => run_migrate(ctx),
-        DbCommand::Seed { force } => run_seed(ctx, *force),
+        DbCommand::Status => show_status(ctx, password_file),
+        DbCommand::Migrate => run_migrate(ctx, password_file),
+        DbCommand::Seed { force } => run_seed(ctx, *force, password_file),
         DbCommand::Reset { force } => reset_data(ctx, *force),
     }
 }
@@ -112,27 +116,63 @@ fn apply_migrations(conn: &Connection) -> Result<usize> {
 
 // ── Open DB helper ──────────────────────────────────────────────────
 
-fn open_db(ctx: &ProjectContext) -> Result<Connection> {
+/// Get the vault password — from file if provided, otherwise prompt interactively.
+fn get_vault_password(password_file: Option<&std::path::Path>) -> Result<String> {
+    if let Some(path) = password_file {
+        fs::read_to_string(path)
+            .map(|s| s.trim().to_string())
+            .with_context(|| format!("Failed to read password file: {}", path.display()))
+    } else {
+        let password = dialoguer::Password::new()
+            .with_prompt("Vault password")
+            .interact()
+            .context("Failed to read password")?;
+        Ok(password)
+    }
+}
+
+/// Open the SQLCipher-encrypted database, deriving the key from the vault.
+fn open_db(ctx: &ProjectContext, password_file: Option<&std::path::Path>) -> Result<Connection> {
     if !ctx.has_app_data() {
         fs::create_dir_all(&ctx.app_data_dir).context("Failed to create app data directory")?;
     }
 
-    let conn = Connection::open(ctx.db_path())
+    if !ctx.has_vault() {
+        bail!(
+            "No vault found at {}.\n\
+             Launch the app and create a wallet first, then use the CLI.",
+            ctx.vault_dir().display()
+        );
+    }
+
+    let password = get_vault_password(password_file)?;
+    let db_key = ctx.derive_db_key(&password)?;
+
+    let flags = OpenFlags::SQLITE_OPEN_READ_WRITE
+        | OpenFlags::SQLITE_OPEN_CREATE
+        | OpenFlags::SQLITE_OPEN_FULL_MUTEX;
+    let conn = Connection::open_with_flags(ctx.db_path(), flags)
         .with_context(|| format!("Failed to open database at {}", ctx.db_path().display()))?;
 
+    let key_hex = hex::encode(db_key);
+    conn.pragma_update(None, "key", format!("x'{key_hex}'"))?;
     conn.pragma_update(None, "journal_mode", "WAL")?;
     conn.pragma_update(None, "foreign_keys", "ON")?;
+
+    // Verify the key works by reading sqlite_master
+    conn.query_row("SELECT count(*) FROM sqlite_master", [], |_| Ok(()))
+        .context("Failed to decrypt database — wrong password?")?;
 
     Ok(conn)
 }
 
 // ── Subcommand: migrate ─────────────────────────────────────────────
 
-fn run_migrate(ctx: &ProjectContext) -> Result<()> {
+fn run_migrate(ctx: &ProjectContext, password_file: Option<&std::path::Path>) -> Result<()> {
     output::header("Database migrate");
     output::kv("Database", &ctx.db_path().display().to_string());
 
-    let conn = open_db(ctx)?;
+    let conn = open_db(ctx, password_file)?;
     ensure_migration_table(&conn)?;
 
     let before = current_version(&conn);
@@ -164,11 +204,11 @@ fn run_migrate(ctx: &ProjectContext) -> Result<()> {
 
 // ── Subcommand: seed ────────────────────────────────────────────────
 
-fn run_seed(ctx: &ProjectContext, force: bool) -> Result<()> {
+fn run_seed(ctx: &ProjectContext, force: bool, password_file: Option<&std::path::Path>) -> Result<()> {
     output::header("Database seed");
     output::kv("Database", &ctx.db_path().display().to_string());
 
-    let conn = open_db(ctx)?;
+    let conn = open_db(ctx, password_file)?;
 
     // Ensure migrations are current first
     let applied = apply_migrations(&conn)?;
@@ -222,7 +262,7 @@ fn run_seed(ctx: &ProjectContext, force: bool) -> Result<()> {
 
 // ── Subcommand: status ──────────────────────────────────────────────
 
-fn show_status(ctx: &ProjectContext) -> Result<()> {
+fn show_status(ctx: &ProjectContext, password_file: Option<&std::path::Path>) -> Result<()> {
     output::header("Database status");
 
     // App data dir
@@ -235,11 +275,8 @@ fn show_status(ctx: &ProjectContext) -> Result<()> {
 
     // Vault status
     if ctx.has_vault() {
-        let meta = fs::metadata(ctx.vault_path()).ok();
-        let size = meta
-            .map(|m| ByteSize(m.len()).to_string())
-            .unwrap_or_default();
-        output::kv("Vault", &format!("exists ({})", size));
+        let vault_size = dir_size(&ctx.vault_dir());
+        output::kv("Vault", &format!("exists ({})", ByteSize(vault_size)));
     } else {
         output::kv("Vault", "not created");
     }
@@ -269,8 +306,8 @@ fn show_status(ctx: &ProjectContext) -> Result<()> {
 
     output::blank();
 
-    // Open DB and show migration info
-    let conn = Connection::open(ctx.db_path()).context("Failed to open database")?;
+    // Open encrypted DB to show migration info
+    let conn = open_db(ctx, password_file)?;
 
     ensure_migration_table(&conn)?;
     let current = current_version(&conn);
@@ -368,7 +405,7 @@ fn reset_data(ctx: &ProjectContext, force: bool) -> Result<()> {
 
     fs::remove_dir_all(&ctx.app_data_dir).context("Failed to remove app data directory")?;
 
-    output::success("App data reset. Run `alex db migrate && alex db seed` to re-initialize.");
+    output::success("App data reset. Launch the app to create a new wallet and re-initialize.");
     Ok(())
 }
 

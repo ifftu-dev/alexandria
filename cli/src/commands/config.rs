@@ -46,7 +46,7 @@ fn show_config(ctx: &ProjectContext) -> Result<()> {
     output::header("App data");
     output::kv("Directory", &ctx.app_data_dir.display().to_string());
     output::kv("Database", &ctx.db_path().display().to_string());
-    output::kv("Vault", &ctx.vault_path().display().to_string());
+    output::kv("Vault", &ctx.vault_dir().display().to_string());
     output::kv("Iroh", &ctx.iroh_dir().display().to_string());
 
     output::blank();
