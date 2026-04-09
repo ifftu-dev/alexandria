@@ -82,17 +82,14 @@ pub fn relay_circuit_addrs() -> Vec<Multiaddr> {
 /// Build the circuit address for a specific relay peer.
 pub fn relay_circuit_addr_for(peer_id: &PeerId) -> Option<Multiaddr> {
     let pid_str = peer_id.to_string();
-    RELAYS
-        .iter()
-        .find(|r| r.peer_id == pid_str)
-        .and_then(|r| {
-            format!(
-                "/ip4/{}/tcp/{}/p2p/{}/p2p-circuit",
-                r.ipv4, r.port, r.peer_id
-            )
-            .parse()
-            .ok()
-        })
+    RELAYS.iter().find(|r| r.peer_id == pid_str).and_then(|r| {
+        format!(
+            "/ip4/{}/tcp/{}/p2p/{}/p2p-circuit",
+            r.ipv4, r.port, r.peer_id
+        )
+        .parse()
+        .ok()
+    })
 }
 
 pub fn bootstrap_peers() -> Vec<Multiaddr> {
@@ -104,39 +101,41 @@ pub fn bootstrap_peers() -> Vec<Multiaddr> {
         }
 
         // TCP via DNS
-        if let Ok(addr) =
-            format!("/dns4/{}/tcp/{}/p2p/{}", relay.host, relay.port, relay.peer_id)
-                .parse::<Multiaddr>()
+        if let Ok(addr) = format!(
+            "/dns4/{}/tcp/{}/p2p/{}",
+            relay.host, relay.port, relay.peer_id
+        )
+        .parse::<Multiaddr>()
         {
             addrs.push(addr);
         }
 
         // QUIC via DNS
-        if let Ok(addr) =
-            format!(
-                "/dns4/{}/udp/{}/quic-v1/p2p/{}",
-                relay.host, relay.port, relay.peer_id
-            )
-            .parse::<Multiaddr>()
+        if let Ok(addr) = format!(
+            "/dns4/{}/udp/{}/quic-v1/p2p/{}",
+            relay.host, relay.port, relay.peer_id
+        )
+        .parse::<Multiaddr>()
         {
             addrs.push(addr);
         }
 
         // Direct IPv4 TCP (fallback — DNS resolution can fail on some mobile networks)
-        if let Ok(addr) =
-            format!("/ip4/{}/tcp/{}/p2p/{}", relay.ipv4, relay.port, relay.peer_id)
-                .parse::<Multiaddr>()
+        if let Ok(addr) = format!(
+            "/ip4/{}/tcp/{}/p2p/{}",
+            relay.ipv4, relay.port, relay.peer_id
+        )
+        .parse::<Multiaddr>()
         {
             addrs.push(addr);
         }
 
         // Direct IPv4 QUIC (fallback)
-        if let Ok(addr) =
-            format!(
-                "/ip4/{}/udp/{}/quic-v1/p2p/{}",
-                relay.ipv4, relay.port, relay.peer_id
-            )
-            .parse::<Multiaddr>()
+        if let Ok(addr) = format!(
+            "/ip4/{}/udp/{}/quic-v1/p2p/{}",
+            relay.ipv4, relay.port, relay.peer_id
+        )
+        .parse::<Multiaddr>()
         {
             addrs.push(addr);
         }
@@ -176,9 +175,7 @@ mod tests {
         // First relay addresses
         assert!(peers[0].to_string().contains("alexandria-relay.fly.dev"));
         // Second relay addresses
-        assert!(peers[4]
-            .to_string()
-            .contains("alexandria-relay-eu.fly.dev"));
+        assert!(peers[4].to_string().contains("alexandria-relay-eu.fly.dev"));
     }
 
     #[test]

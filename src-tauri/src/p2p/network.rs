@@ -669,7 +669,8 @@ async fn swarm_event_loop(
     // We request a reservation from each relay after the Identify
     // handshake confirms we're connected to it.
     let relay_peer_ids = super::discovery::relay_peer_ids();
-    let mut relay_reservations_requested: std::collections::HashSet<libp2p::PeerId> = std::collections::HashSet::new();
+    let mut relay_reservations_requested: std::collections::HashSet<libp2p::PeerId> =
+        std::collections::HashSet::new();
 
     // Periodic Kademlia bootstrap — re-run every 5 minutes to keep
     // the routing table fresh and discover new peers.
