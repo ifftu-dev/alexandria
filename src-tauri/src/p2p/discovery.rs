@@ -33,13 +33,13 @@ const RELAYS: &[RelayInfo] = &[
         ipv4: "168.220.86.30",
         port: 4001,
     },
-    // Frankfurt (EU) — placeholder PeerId, update after first deploy
-    // RelayInfo {
-    //     peer_id: "PLACEHOLDER_EU_PEER_ID",
-    //     host: "alexandria-relay-eu.fly.dev",
-    //     ipv4: "PLACEHOLDER_EU_IPV4",
-    //     port: 4001,
-    // },
+    // Frankfurt (EU)
+    RelayInfo {
+        peer_id: "12D3KooWFDVfPBwa6EVEp8v8cqXpgmiksV7qMarHCYLF174XV9xj",
+        host: "alexandria-relay-eu.fly.dev",
+        ipv4: "66.51.123.68",
+        port: 4001,
+    },
 ];
 
 /// Legacy constants for backward compatibility with code that references them directly.
