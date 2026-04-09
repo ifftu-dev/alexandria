@@ -1,31 +1,50 @@
 use libp2p::{Multiaddr, PeerId};
 
-/// Alexandria relay bootstrap node.
+/// Alexandria relay bootstrap nodes.
 ///
-/// This is the primary entry point into the private Alexandria Kademlia DHT
-/// (`/alexandria/kad/1.0`). The relay runs Circuit Relay v2 so NATted peers
-/// (phones, laptops behind routers) can connect through it.
+/// These are the entry points into the private Alexandria Kademlia DHT
+/// (`/alexandria/kad/1.0`). Relays run Circuit Relay v2 so NATted peers
+/// (phones, laptops behind routers) can connect through them.
 ///
-/// The relay has NO special authority — it cannot read encrypted traffic,
-/// forge identities, or censor content. It's a dumb pipe + phonebook.
+/// Relays have NO special authority — they cannot read encrypted traffic,
+/// forge identities, or censor content. They're dumb pipes + phonebooks.
 ///
-/// ## Updating after deployment
+/// ## Adding a new relay
 ///
-/// After deploying `alexandria-relay` to Fly.io:
-/// 1. Run `alexandria-relay --generate-key` to get a deterministic PeerId
-/// 2. Set `RELAY_SEED` env var on the server
-/// 3. Update `RELAY_PEER_ID` below with the generated PeerId
-/// 4. The DNS address will be `alexandria-relay.fly.dev`
+/// 1. Deploy `alexandria-relay` to a new Fly.io region
+/// 2. Run `alexandria-relay --generate-key` to get a deterministic PeerId
+/// 3. Set `RELAY_SEED` env var on the server
+/// 4. Add the new relay's info to the `RELAYS` array below
 ///
+struct RelayInfo {
+    peer_id: &'static str,
+    host: &'static str,
+    ipv4: &'static str,
+    port: u16,
+}
+
+/// All known relay nodes. The client will bootstrap to all of them.
+/// The first relay is used as the primary circuit relay for NAT traversal.
+const RELAYS: &[RelayInfo] = &[
+    // Mumbai (primary)
+    RelayInfo {
+        peer_id: "12D3KooWENHQjSydcHUXVTuq4wVNvCP4VGXzxueBtdKi1D3mS6wR",
+        host: "alexandria-relay.fly.dev",
+        ipv4: "168.220.86.30",
+        port: 4001,
+    },
+    // Frankfurt (EU) — placeholder PeerId, update after first deploy
+    // RelayInfo {
+    //     peer_id: "PLACEHOLDER_EU_PEER_ID",
+    //     host: "alexandria-relay-eu.fly.dev",
+    //     ipv4: "PLACEHOLDER_EU_IPV4",
+    //     port: 4001,
+    // },
+];
+
+/// Legacy constants for backward compatibility with code that references them directly.
 const RELAY_PEER_ID: &str = "12D3KooWENHQjSydcHUXVTuq4wVNvCP4VGXzxueBtdKi1D3mS6wR";
-
-/// DNS hostname of the Alexandria relay server.
-const RELAY_HOST: &str = "alexandria-relay.fly.dev";
-
-/// Dedicated IPv4 address (Fly.io). Fallback when DNS resolution fails.
 const RELAY_IPV4: &str = "168.220.86.30";
-
-/// Port the relay listens on (TCP and QUIC/UDP).
 const RELAY_PORT: u16 = 4001;
 
 /// Return the relay's PeerId if configured (not placeholder).
@@ -56,41 +75,48 @@ pub fn relay_circuit_addr() -> Option<Multiaddr> {
 }
 
 pub fn bootstrap_peers() -> Vec<Multiaddr> {
-    if RELAY_PEER_ID == "PLACEHOLDER_PEER_ID" {
-        // Relay not deployed yet — return empty so the node starts without bootstrap.
-        // Peers will only discover each other via known_peers DB or peer exchange.
-        log::warn!("Alexandria relay PeerId not configured — no bootstrap peers available");
-        return vec![];
-    }
-
     let mut addrs = Vec::new();
 
-    // TCP via DNS
-    if let Ok(addr) =
-        format!("/dns4/{RELAY_HOST}/tcp/{RELAY_PORT}/p2p/{RELAY_PEER_ID}").parse::<Multiaddr>()
-    {
-        addrs.push(addr);
+    for relay in RELAYS {
+        if relay.peer_id.starts_with("PLACEHOLDER") {
+            continue;
+        }
+
+        // TCP via DNS
+        if let Ok(addr) =
+            format!("/dns4/{}/tcp/{}/p2p/{}", relay.host, relay.port, relay.peer_id)
+                .parse::<Multiaddr>()
+        {
+            addrs.push(addr);
+        }
+
+        // QUIC via DNS
+        if let Ok(addr) =
+            format!("/dns4/{}/udp/{}/quic-v1/p2p/{}", relay.host, relay.port, relay.peer_id)
+                .parse::<Multiaddr>()
+        {
+            addrs.push(addr);
+        }
+
+        // Direct IPv4 TCP (fallback — DNS resolution can fail on some mobile networks)
+        if let Ok(addr) =
+            format!("/ip4/{}/tcp/{}/p2p/{}", relay.ipv4, relay.port, relay.peer_id)
+                .parse::<Multiaddr>()
+        {
+            addrs.push(addr);
+        }
+
+        // Direct IPv4 QUIC (fallback)
+        if let Ok(addr) =
+            format!("/ip4/{}/udp/{}/quic-v1/p2p/{}", relay.ipv4, relay.port, relay.peer_id)
+                .parse::<Multiaddr>()
+        {
+            addrs.push(addr);
+        }
     }
 
-    // QUIC via DNS
-    if let Ok(addr) = format!("/dns4/{RELAY_HOST}/udp/{RELAY_PORT}/quic-v1/p2p/{RELAY_PEER_ID}")
-        .parse::<Multiaddr>()
-    {
-        addrs.push(addr);
-    }
-
-    // Direct IPv4 TCP (fallback — DNS resolution can fail on some mobile networks)
-    if let Ok(addr) =
-        format!("/ip4/{RELAY_IPV4}/tcp/{RELAY_PORT}/p2p/{RELAY_PEER_ID}").parse::<Multiaddr>()
-    {
-        addrs.push(addr);
-    }
-
-    // Direct IPv4 QUIC (fallback)
-    if let Ok(addr) = format!("/ip4/{RELAY_IPV4}/udp/{RELAY_PORT}/quic-v1/p2p/{RELAY_PEER_ID}")
-        .parse::<Multiaddr>()
-    {
-        addrs.push(addr);
+    if addrs.is_empty() {
+        log::warn!("No relay peers configured — no bootstrap peers available");
     }
 
     addrs
