@@ -665,11 +665,11 @@ async fn swarm_event_loop(
     let mut current_nat_state = NatState::Unknown;
     let mut relay_addrs: Vec<String> = Vec::new();
 
-    // Track whether we've already requested a relay reservation.
-    // We only need to do this once per session — after the Identify
-    // handshake confirms we're connected to the relay.
-    let relay_peer_id = super::discovery::relay_peer_id();
-    let mut relay_reservation_requested = false;
+    // Track which relays we've already requested reservations from.
+    // We request a reservation from each relay after the Identify
+    // handshake confirms we're connected to it.
+    let relay_peer_ids = super::discovery::relay_peer_ids();
+    let mut relay_reservations_requested: std::collections::HashSet<libp2p::PeerId> = std::collections::HashSet::new();
 
     // Periodic Kademlia bootstrap — re-run every 5 minutes to keep
     // the routing table fresh and discover new peers.
@@ -945,18 +945,18 @@ async fn swarm_event_loop(
                             swarm.behaviour_mut().kademlia.add_address(&peer_id, addr.clone());
                         }
 
-                        // If this is the relay peer, perform relay-based discovery:
+                        // If this is a relay peer we haven't reserved on yet:
                         // 1. Request a relay reservation so other NATted peers can reach us
-                        // 2. Bootstrap Kademlia now that we have the relay in our routing table
+                        // 2. Bootstrap Kademlia now that we have a relay in our routing table
                         // 3. Start providing on the namespace key for peer discovery
-                        if Some(peer_id) == relay_peer_id && !relay_reservation_requested {
-                            relay_reservation_requested = true;
+                        if relay_peer_ids.contains(&peer_id) && !relay_reservations_requested.contains(&peer_id) {
+                            relay_reservations_requested.insert(peer_id);
                             diag::log(&format!(
                                 "Identified relay peer {peer_id} — requesting reservation"
                             ));
 
                             // Request relay reservation via listen_on with the circuit address.
-                            if let Some(circuit_addr) = super::discovery::relay_circuit_addr() {
+                            if let Some(circuit_addr) = super::discovery::relay_circuit_addr_for(&peer_id) {
                                 match swarm.listen_on(circuit_addr.clone()) {
                                     Ok(_) => diag::log(&format!(
                                         "Relay: listening on circuit {circuit_addr}"

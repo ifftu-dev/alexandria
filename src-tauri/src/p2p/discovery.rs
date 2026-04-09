@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use libp2p::{Multiaddr, PeerId};
 
 /// Alexandria relay bootstrap nodes.
@@ -23,8 +25,8 @@ struct RelayInfo {
     port: u16,
 }
 
-/// All known relay nodes. The client will bootstrap to all of them.
-/// The first relay is used as the primary circuit relay for NAT traversal.
+/// All known relay nodes. The client bootstraps to all of them and
+/// requests circuit relay reservations from each.
 const RELAYS: &[RelayInfo] = &[
     // Mumbai (primary)
     RelayInfo {
@@ -42,36 +44,55 @@ const RELAYS: &[RelayInfo] = &[
     },
 ];
 
-/// Legacy constants for backward compatibility with code that references them directly.
-const RELAY_PEER_ID: &str = "12D3KooWENHQjSydcHUXVTuq4wVNvCP4VGXzxueBtdKi1D3mS6wR";
-const RELAY_IPV4: &str = "168.220.86.30";
-const RELAY_PORT: u16 = 4001;
-
-/// Return the relay's PeerId if configured (not placeholder).
+/// Return the set of all configured relay PeerIds.
 ///
-/// Used by the event loop to identify the relay after Identify handshake
+/// Used by the event loop to identify relay peers after Identify handshake
 /// and trigger relay reservation + Kademlia bootstrap.
-pub fn relay_peer_id() -> Option<PeerId> {
-    if RELAY_PEER_ID == "PLACEHOLDER_PEER_ID" {
-        return None;
-    }
-    RELAY_PEER_ID.parse().ok()
+pub fn relay_peer_ids() -> HashSet<PeerId> {
+    RELAYS
+        .iter()
+        .filter(|r| !r.peer_id.starts_with("PLACEHOLDER"))
+        .filter_map(|r| r.peer_id.parse().ok())
+        .collect()
 }
 
-/// Build the relay circuit listen address for requesting a reservation.
+/// Build circuit relay listen addresses for all configured relays.
 ///
-/// Returns a full multiaddr like:
-/// `/ip4/{ip}/tcp/4001/p2p/{relay_peer_id}/p2p-circuit`
+/// Returns multiaddrs like:
+/// `/ip4/{ip}/tcp/{port}/p2p/{relay_peer_id}/p2p-circuit`
 ///
-/// When passed to `Swarm::listen_on`, this tells the relay client to
-/// connect to the relay and request a circuit reservation so other
-/// NATted peers can reach us through the relay.
-pub fn relay_circuit_addr() -> Option<Multiaddr> {
-    let _relay_pid = relay_peer_id()?;
-    // Use the direct IPv4 address for the circuit (most reliable)
-    format!("/ip4/{RELAY_IPV4}/tcp/{RELAY_PORT}/p2p/{RELAY_PEER_ID}/p2p-circuit")
-        .parse()
-        .ok()
+/// When passed to `Swarm::listen_on`, each tells the relay client to
+/// connect to that relay and request a circuit reservation so other
+/// NATted peers can reach us through it.
+pub fn relay_circuit_addrs() -> Vec<Multiaddr> {
+    RELAYS
+        .iter()
+        .filter(|r| !r.peer_id.starts_with("PLACEHOLDER"))
+        .filter_map(|r| {
+            format!(
+                "/ip4/{}/tcp/{}/p2p/{}/p2p-circuit",
+                r.ipv4, r.port, r.peer_id
+            )
+            .parse()
+            .ok()
+        })
+        .collect()
+}
+
+/// Build the circuit address for a specific relay peer.
+pub fn relay_circuit_addr_for(peer_id: &PeerId) -> Option<Multiaddr> {
+    let pid_str = peer_id.to_string();
+    RELAYS
+        .iter()
+        .find(|r| r.peer_id == pid_str)
+        .and_then(|r| {
+            format!(
+                "/ip4/{}/tcp/{}/p2p/{}/p2p-circuit",
+                r.ipv4, r.port, r.peer_id
+            )
+            .parse()
+            .ok()
+        })
 }
 
 pub fn bootstrap_peers() -> Vec<Multiaddr> {
@@ -92,8 +113,11 @@ pub fn bootstrap_peers() -> Vec<Multiaddr> {
 
         // QUIC via DNS
         if let Ok(addr) =
-            format!("/dns4/{}/udp/{}/quic-v1/p2p/{}", relay.host, relay.port, relay.peer_id)
-                .parse::<Multiaddr>()
+            format!(
+                "/dns4/{}/udp/{}/quic-v1/p2p/{}",
+                relay.host, relay.port, relay.peer_id
+            )
+            .parse::<Multiaddr>()
         {
             addrs.push(addr);
         }
@@ -108,8 +132,11 @@ pub fn bootstrap_peers() -> Vec<Multiaddr> {
 
         // Direct IPv4 QUIC (fallback)
         if let Ok(addr) =
-            format!("/ip4/{}/udp/{}/quic-v1/p2p/{}", relay.ipv4, relay.port, relay.peer_id)
-                .parse::<Multiaddr>()
+            format!(
+                "/ip4/{}/udp/{}/quic-v1/p2p/{}",
+                relay.ipv4, relay.port, relay.peer_id
+            )
+            .parse::<Multiaddr>()
         {
             addrs.push(addr);
         }
@@ -142,16 +169,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn bootstrap_peers_returns_relay_addrs() {
+    fn bootstrap_peers_returns_all_relay_addrs() {
         let peers = bootstrap_peers();
-        assert_eq!(peers.len(), 4, "should return DNS TCP/QUIC + IPv4 TCP/QUIC");
-        for addr in &peers {
-            let s = addr.to_string();
-            assert!(s.contains(RELAY_PEER_ID), "should contain relay PeerId");
-        }
-        // First two are DNS, last two are IPv4 fallback
+        // 4 addrs per relay (DNS TCP/QUIC + IPv4 TCP/QUIC), 2 relays
+        assert_eq!(peers.len(), 8, "should return 4 addrs per relay * 2 relays");
+        // First relay addresses
         assert!(peers[0].to_string().contains("alexandria-relay.fly.dev"));
-        assert!(peers[2].to_string().contains("168.220.86.30"));
+        // Second relay addresses
+        assert!(peers[4]
+            .to_string()
+            .contains("alexandria-relay-eu.fly.dev"));
     }
 
     #[test]
@@ -162,20 +189,42 @@ mod tests {
     }
 
     #[test]
-    fn relay_peer_id_returns_valid_peer() {
-        let pid = relay_peer_id().expect("relay PeerId should be configured");
-        assert!(
-            pid.to_string().starts_with("12D3KooW"),
-            "should be a valid Ed25519 PeerId"
-        );
+    fn relay_peer_ids_returns_all() {
+        let ids = relay_peer_ids();
+        assert_eq!(ids.len(), 2, "should have 2 relay peer IDs");
+        for id in &ids {
+            assert!(
+                id.to_string().starts_with("12D3KooW"),
+                "should be a valid Ed25519 PeerId"
+            );
+        }
     }
 
     #[test]
-    fn relay_circuit_addr_is_valid() {
-        let addr = relay_circuit_addr().expect("relay circuit addr should be configured");
-        let s = addr.to_string();
-        assert!(s.contains("p2p-circuit"), "should contain p2p-circuit");
-        assert!(s.contains(RELAY_PEER_ID), "should contain relay PeerId");
-        assert!(s.contains(RELAY_IPV4), "should contain relay IP");
+    fn relay_circuit_addrs_returns_all() {
+        let addrs = relay_circuit_addrs();
+        assert_eq!(addrs.len(), 2, "should have circuit addr per relay");
+        for addr in &addrs {
+            let s = addr.to_string();
+            assert!(s.contains("p2p-circuit"), "should contain p2p-circuit");
+        }
+    }
+
+    #[test]
+    fn relay_circuit_addr_for_known_peer() {
+        let ids = relay_peer_ids();
+        for id in &ids {
+            let addr = relay_circuit_addr_for(id);
+            assert!(addr.is_some(), "should find circuit addr for known relay");
+            assert!(addr.unwrap().to_string().contains("p2p-circuit"));
+        }
+    }
+
+    #[test]
+    fn relay_circuit_addr_for_unknown_peer() {
+        let unknown: PeerId = "12D3KooWDpJ7As7BWAwRMfu1VU2WCqNjvq387JEYKDBj4kx6nXTN"
+            .parse()
+            .unwrap();
+        assert!(relay_circuit_addr_for(&unknown).is_none());
     }
 }
