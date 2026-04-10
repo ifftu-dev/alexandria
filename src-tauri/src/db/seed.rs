@@ -820,6 +820,382 @@ INSERT INTO skill_proofs (id, skill_id, proficiency_level, confidence, evidence_
     ('proof_011', 'skill_ia',            'create',     0.80, 2),
     ('proof_012', 'skill_wireframing',   'create',     0.82, 2);
 
+-- ============================================================
+-- P1: ENROLLMENTS & PROGRESS
+-- ============================================================
+-- 4 enrollments: 1 completed, 2 active (in-progress), 1 recently started
+INSERT INTO enrollments (id, course_id, enrolled_at, completed_at, status) VALUES
+    ('enroll_algo',   'course_algo_101',      '2026-01-15T10:00:00', '2026-03-20T16:45:00', 'completed'),
+    ('enroll_web',    'course_web_fullstack', '2026-02-01T09:30:00', NULL,                   'active'),
+    ('enroll_ml',     'course_ml_foundations','2026-03-10T14:00:00', NULL,                   'active'),
+    ('enroll_crypto', 'course_crypto',        '2026-04-01T11:15:00', NULL,                   'active');
+
+-- Algo 101: fully completed (all elements done)
+INSERT INTO element_progress (id, enrollment_id, element_id, status, score, time_spent, completed_at) VALUES
+    ('ep_a1_1', 'enroll_algo', 'el_algo_1_1', 'completed', NULL, 420,  '2026-01-16T11:00:00'),
+    ('ep_a1_2', 'enroll_algo', 'el_algo_1_2', 'completed', NULL, 1200, '2026-01-18T14:30:00'),
+    ('ep_a1_3', 'enroll_algo', 'el_algo_1_3', 'completed', 0.92, 900,  '2026-01-20T10:15:00'),
+    ('ep_a2_1', 'enroll_algo', 'el_algo_2_1', 'completed', NULL, 480,  '2026-01-22T09:00:00'),
+    ('ep_a2_2', 'enroll_algo', 'el_algo_2_2', 'completed', NULL, 1500, '2026-01-25T16:00:00'),
+    ('ep_a2_3', 'enroll_algo', 'el_algo_2_3', 'completed', 0.88, 1080, '2026-01-28T11:30:00'),
+    ('ep_a3_1', 'enroll_algo', 'el_algo_3_1', 'completed', NULL, 600,  '2026-02-01T10:00:00'),
+    ('ep_a3_2', 'enroll_algo', 'el_algo_3_2', 'completed', NULL, 1800, '2026-02-05T15:45:00'),
+    ('ep_a3_3', 'enroll_algo', 'el_algo_3_3', 'completed', 0.95, 720,  '2026-02-08T10:30:00'),
+    ('ep_a4_1', 'enroll_algo', 'el_algo_4_1', 'completed', NULL, 360,  '2026-02-10T09:15:00'),
+    ('ep_a4_2', 'enroll_algo', 'el_algo_4_2', 'completed', NULL, 2400, '2026-02-15T14:00:00'),
+    ('ep_a4_3', 'enroll_algo', 'el_algo_4_3', 'completed', 0.90, 1200, '2026-03-20T16:45:00');
+
+-- Web fullstack: 60% through (chapters 1-3 done, partway through 4)
+INSERT INTO element_progress (id, enrollment_id, element_id, status, score, time_spent, completed_at) VALUES
+    ('ep_w1_1', 'enroll_web', 'el_web_1_1', 'completed', NULL, 300,  '2026-02-02T10:00:00'),
+    ('ep_w1_2', 'enroll_web', 'el_web_1_2', 'completed', NULL, 900,  '2026-02-04T11:30:00'),
+    ('ep_w1_3', 'enroll_web', 'el_web_1_3', 'completed', 0.96, 600,  '2026-02-06T09:45:00'),
+    ('ep_w2_1', 'enroll_web', 'el_web_2_1', 'completed', NULL, 480,  '2026-02-08T14:00:00'),
+    ('ep_w2_2', 'enroll_web', 'el_web_2_2', 'completed', NULL, 1200, '2026-02-11T10:30:00'),
+    ('ep_w2_3', 'enroll_web', 'el_web_2_3', 'completed', 0.84, 900,  '2026-02-14T16:00:00'),
+    ('ep_w3_1', 'enroll_web', 'el_web_3_1', 'completed', NULL, 600,  '2026-02-16T09:00:00'),
+    ('ep_w3_2', 'enroll_web', 'el_web_3_2', 'completed', NULL, 1500, '2026-02-20T13:15:00'),
+    ('ep_w3_3', 'enroll_web', 'el_web_3_3', 'completed', 0.91, 1080, '2026-02-24T11:00:00'),
+    ('ep_w4_1', 'enroll_web', 'el_web_4_1', 'completed', NULL, 540,  '2026-03-01T10:00:00'),
+    ('ep_w4_2', 'enroll_web', 'el_web_4_2', 'in_progress', NULL, 600, NULL);
+
+-- ML foundations: just started (chapter 1 done)
+INSERT INTO element_progress (id, enrollment_id, element_id, status, score, time_spent, completed_at) VALUES
+    ('ep_m1_1', 'enroll_ml', 'el_ml_1_1', 'completed',   NULL, 360, '2026-03-12T10:00:00'),
+    ('ep_m1_2', 'enroll_ml', 'el_ml_1_2', 'completed',   NULL, 900, '2026-03-14T14:30:00'),
+    ('ep_m1_3', 'enroll_ml', 'el_ml_1_3', 'completed',   0.87, 720, '2026-03-16T11:00:00'),
+    ('ep_m2_1', 'enroll_ml', 'el_ml_2_1', 'in_progress', NULL, 180, NULL);
+
+-- Crypto: barely started
+INSERT INTO element_progress (id, enrollment_id, element_id, status, score, time_spent, completed_at) VALUES
+    ('ep_c1_1', 'enroll_crypto', 'el_crypto_1_1', 'completed',   NULL, 480, '2026-04-02T10:30:00'),
+    ('ep_c1_2', 'enroll_crypto', 'el_crypto_1_2', 'in_progress', NULL, 120, NULL);
+
+-- Course notes
+INSERT INTO course_notes (id, enrollment_id, chapter_id, element_id, preview_text) VALUES
+    ('note_001', 'enroll_algo', 'ch_algo_1', 'el_algo_1_2', 'Key insight: amortized O(1) for dynamic arrays because doubling only happens log(n) times. Think of it like paying a little extra each insertion to cover the rare expensive resize.'),
+    ('note_002', 'enroll_web',  'ch_web_2',  'el_web_2_2',  'Vue 3 Composition API vs Options API: use composables for shared stateful logic. defineProps + defineEmits for type-safe component contracts. Remember: ref() for primitives, reactive() for objects.'),
+    ('note_003', 'enroll_ml',   'ch_ml_1',   'el_ml_1_2',   'Bias-variance tradeoff: high bias = underfitting (model too simple), high variance = overfitting (model too complex). Cross-validation is the practical tool to detect both.');
+
+-- ============================================================
+-- P2: ASSESSMENTS, EVIDENCE RECORDS, & PROOF LINKS
+-- ============================================================
+-- Skill assessments (one per skill that has a proof)
+INSERT INTO skill_assessments (id, skill_id, course_id, assessment_type, proficiency_level, difficulty, trust_factor) VALUES
+    ('sa_001', 'skill_arrays',        'course_algo_101',      'quiz',        'apply',    0.60, 1.0),
+    ('sa_002', 'skill_big_o',         'course_algo_101',      'quiz',        'analyze',  0.70, 1.0),
+    ('sa_003', 'skill_linked_lists',  'course_algo_101',      'quiz',        'apply',    0.55, 1.0),
+    ('sa_004', 'skill_stacks_queues', 'course_algo_101',      'quiz',        'apply',    0.55, 1.0),
+    ('sa_005', 'skill_html_css',      'course_web_fullstack', 'quiz',        'apply',    0.50, 1.0),
+    ('sa_006', 'skill_javascript',    'course_web_fullstack', 'quiz',        'apply',    0.60, 1.0),
+    ('sa_007', 'skill_typescript',    'course_web_fullstack', 'quiz',        'apply',    0.65, 1.0),
+    ('sa_008', 'skill_sql',           NULL,                   'project',     'apply',    0.70, 1.0),
+    ('sa_009', 'skill_symmetric',     'course_crypto',        'exam',        'apply',    0.75, 1.0),
+    ('sa_010', 'skill_user_research', 'course_ux_design',     'peer_review', 'evaluate', 0.65, 0.9),
+    ('sa_011', 'skill_ia',            'course_ux_design',     'project',     'create',   0.70, 1.0),
+    ('sa_012', 'skill_wireframing',   'course_ux_design',     'project',     'create',   0.65, 1.0);
+
+-- Evidence records backing each proof (2-4 per proof as claimed by evidence_count)
+INSERT INTO evidence_records (id, skill_assessment_id, skill_id, proficiency_level, score, difficulty, trust_factor, course_id, instructor_address, created_at) VALUES
+    -- proof_001: skill_arrays (4 evidence)
+    ('ev_001a', 'sa_001', 'skill_arrays',   'apply', 0.95, 0.55, 1.0, 'course_algo_101', 'addr_seed_author_1', '2026-01-20T10:15:00'),
+    ('ev_001b', 'sa_001', 'skill_arrays',   'apply', 0.90, 0.60, 1.0, 'course_algo_101', 'addr_seed_author_1', '2026-02-08T10:30:00'),
+    ('ev_001c', 'sa_001', 'skill_arrays',   'apply', 0.93, 0.65, 1.0, 'course_algo_101', 'addr_seed_author_1', '2026-02-28T14:00:00'),
+    ('ev_001d', 'sa_001', 'skill_arrays',   'apply', 0.92, 0.60, 1.0, 'course_algo_101', 'addr_seed_author_1', '2026-03-15T11:30:00'),
+    -- proof_002: skill_big_o (3 evidence)
+    ('ev_002a', 'sa_002', 'skill_big_o',    'analyze', 0.85, 0.70, 1.0, 'course_algo_101', 'addr_seed_author_1', '2026-01-28T11:30:00'),
+    ('ev_002b', 'sa_002', 'skill_big_o',    'analyze', 0.90, 0.72, 1.0, 'course_algo_101', 'addr_seed_author_1', '2026-02-15T14:00:00'),
+    ('ev_002c', 'sa_002', 'skill_big_o',    'analyze', 0.88, 0.68, 1.0, 'course_algo_101', 'addr_seed_author_1', '2026-03-20T16:45:00'),
+    -- proof_003: skill_linked_lists (3 evidence)
+    ('ev_003a', 'sa_003', 'skill_linked_lists', 'apply', 0.88, 0.55, 1.0, 'course_algo_101', 'addr_seed_author_1', '2026-02-01T10:00:00'),
+    ('ev_003b', 'sa_003', 'skill_linked_lists', 'apply', 0.92, 0.58, 1.0, 'course_algo_101', 'addr_seed_author_1', '2026-02-15T09:30:00'),
+    ('ev_003c', 'sa_003', 'skill_linked_lists', 'apply', 0.90, 0.55, 1.0, 'course_algo_101', 'addr_seed_author_1', '2026-03-05T13:00:00'),
+    -- proof_004: skill_stacks_queues (2 evidence)
+    ('ev_004a', 'sa_004', 'skill_stacks_queues', 'apply', 0.84, 0.55, 1.0, 'course_algo_101', 'addr_seed_author_1', '2026-02-05T15:45:00'),
+    ('ev_004b', 'sa_004', 'skill_stacks_queues', 'apply', 0.86, 0.58, 1.0, 'course_algo_101', 'addr_seed_author_1', '2026-02-20T10:15:00'),
+    -- proof_005: skill_html_css (4 evidence)
+    ('ev_005a', 'sa_005', 'skill_html_css', 'apply', 0.94, 0.48, 1.0, 'course_web_fullstack', 'addr_seed_author_1', '2026-02-06T09:45:00'),
+    ('ev_005b', 'sa_005', 'skill_html_css', 'apply', 0.91, 0.52, 1.0, 'course_web_fullstack', 'addr_seed_author_1', '2026-02-14T16:00:00'),
+    ('ev_005c', 'sa_005', 'skill_html_css', 'apply', 0.90, 0.50, 1.0, 'course_web_fullstack', 'addr_seed_author_1', '2026-02-24T11:00:00'),
+    ('ev_005d', 'sa_005', 'skill_html_css', 'apply', 0.93, 0.55, 1.0, 'course_web_fullstack', 'addr_seed_author_1', '2026-03-10T14:30:00'),
+    -- proof_006: skill_javascript (3 evidence)
+    ('ev_006a', 'sa_006', 'skill_javascript', 'apply', 0.88, 0.58, 1.0, 'course_web_fullstack', 'addr_seed_author_1', '2026-02-14T16:00:00'),
+    ('ev_006b', 'sa_006', 'skill_javascript', 'apply', 0.91, 0.62, 1.0, 'course_web_fullstack', 'addr_seed_author_1', '2026-02-24T11:00:00'),
+    ('ev_006c', 'sa_006', 'skill_javascript', 'apply', 0.87, 0.60, 1.0, 'course_web_fullstack', 'addr_seed_author_1', '2026-03-15T10:00:00'),
+    -- proof_007: skill_typescript (2 evidence)
+    ('ev_007a', 'sa_007', 'skill_typescript', 'apply', 0.80, 0.65, 1.0, 'course_web_fullstack', 'addr_seed_author_1', '2026-03-01T10:00:00'),
+    ('ev_007b', 'sa_007', 'skill_typescript', 'apply', 0.82, 0.68, 1.0, 'course_web_fullstack', 'addr_seed_author_1', '2026-03-20T14:15:00'),
+    -- proof_008: skill_sql (3 evidence)
+    ('ev_008a', 'sa_008', 'skill_sql', 'apply', 0.84, 0.68, 1.0, NULL, 'addr_seed_author_2', '2026-01-10T09:00:00'),
+    ('ev_008b', 'sa_008', 'skill_sql', 'apply', 0.88, 0.72, 1.0, NULL, 'addr_seed_author_2', '2026-02-05T11:30:00'),
+    ('ev_008c', 'sa_008', 'skill_sql', 'apply', 0.86, 0.70, 1.0, NULL, 'addr_seed_author_2', '2026-03-01T15:00:00'),
+    -- proof_009: skill_symmetric (2 evidence)
+    ('ev_009a', 'sa_009', 'skill_symmetric', 'apply', 0.82, 0.75, 1.0, 'course_crypto', 'addr_seed_author_2', '2026-02-20T10:00:00'),
+    ('ev_009b', 'sa_009', 'skill_symmetric', 'apply', 0.84, 0.78, 1.0, 'course_crypto', 'addr_seed_author_2', '2026-03-10T13:45:00'),
+    -- proof_010: skill_user_research (2 evidence)
+    ('ev_010a', 'sa_010', 'skill_user_research', 'evaluate', 0.83, 0.65, 0.9, 'course_ux_design', 'addr_seed_author_3', '2026-01-25T14:00:00'),
+    ('ev_010b', 'sa_010', 'skill_user_research', 'evaluate', 0.85, 0.68, 0.9, 'course_ux_design', 'addr_seed_author_3', '2026-02-15T10:30:00'),
+    -- proof_011: skill_ia (2 evidence)
+    ('ev_011a', 'sa_011', 'skill_ia', 'create', 0.78, 0.70, 1.0, 'course_ux_design', 'addr_seed_author_3', '2026-02-01T09:00:00'),
+    ('ev_011b', 'sa_011', 'skill_ia', 'create', 0.82, 0.72, 1.0, 'course_ux_design', 'addr_seed_author_3', '2026-03-01T11:15:00'),
+    -- proof_012: skill_wireframing (2 evidence)
+    ('ev_012a', 'sa_012', 'skill_wireframing', 'create', 0.80, 0.65, 1.0, 'course_ux_design', 'addr_seed_author_3', '2026-02-10T13:00:00'),
+    ('ev_012b', 'sa_012', 'skill_wireframing', 'create', 0.84, 0.68, 1.0, 'course_ux_design', 'addr_seed_author_3', '2026-03-05T10:45:00');
+
+-- Link evidence to proofs
+INSERT INTO skill_proof_evidence (proof_id, evidence_id) VALUES
+    ('proof_001', 'ev_001a'), ('proof_001', 'ev_001b'), ('proof_001', 'ev_001c'), ('proof_001', 'ev_001d'),
+    ('proof_002', 'ev_002a'), ('proof_002', 'ev_002b'), ('proof_002', 'ev_002c'),
+    ('proof_003', 'ev_003a'), ('proof_003', 'ev_003b'), ('proof_003', 'ev_003c'),
+    ('proof_004', 'ev_004a'), ('proof_004', 'ev_004b'),
+    ('proof_005', 'ev_005a'), ('proof_005', 'ev_005b'), ('proof_005', 'ev_005c'), ('proof_005', 'ev_005d'),
+    ('proof_006', 'ev_006a'), ('proof_006', 'ev_006b'), ('proof_006', 'ev_006c'),
+    ('proof_007', 'ev_007a'), ('proof_007', 'ev_007b'),
+    ('proof_008', 'ev_008a'), ('proof_008', 'ev_008b'), ('proof_008', 'ev_008c'),
+    ('proof_009', 'ev_009a'), ('proof_009', 'ev_009b'),
+    ('proof_010', 'ev_010a'), ('proof_010', 'ev_010b'),
+    ('proof_011', 'ev_011a'), ('proof_011', 'ev_011b'),
+    ('proof_012', 'ev_012a'), ('proof_012', 'ev_012b');
+
+-- ============================================================
+-- P3: REPUTATION ASSERTIONS & IMPACT DATA
+-- ============================================================
+-- 3 instructors with reputation across different domains
+INSERT INTO reputation_assertions (id, actor_address, role, skill_id, proficiency_level, score, evidence_count, median_impact, impact_p25, impact_p75, learner_count, impact_variance, window_start, window_end, computation_spec) VALUES
+    -- Author 1: Algorithms & Web instructor
+    ('rep_001', 'addr_seed_author_1', 'instructor', 'skill_arrays',    'apply',    0.91, 12, 0.08, 0.05, 0.12, 8, 0.003, '2025-10-01T00:00:00', '2026-04-01T00:00:00', 'v2'),
+    ('rep_002', 'addr_seed_author_1', 'instructor', 'skill_big_o',     'analyze',  0.87, 9,  0.07, 0.04, 0.10, 6, 0.004, '2025-10-01T00:00:00', '2026-04-01T00:00:00', 'v2'),
+    ('rep_003', 'addr_seed_author_1', 'instructor', 'skill_html_css',  'apply',    0.93, 15, 0.09, 0.06, 0.13, 10, 0.002, '2025-10-01T00:00:00', '2026-04-01T00:00:00', 'v2'),
+    ('rep_004', 'addr_seed_author_1', 'instructor', 'skill_javascript','apply',    0.89, 11, 0.07, 0.04, 0.11, 7, 0.003, '2025-10-01T00:00:00', '2026-04-01T00:00:00', 'v2'),
+    -- Author 2: Data & Crypto instructor
+    ('rep_005', 'addr_seed_author_2', 'instructor', 'skill_sql',       'apply',    0.85, 8,  0.06, 0.03, 0.09, 5, 0.005, '2025-10-01T00:00:00', '2026-04-01T00:00:00', 'v2'),
+    ('rep_006', 'addr_seed_author_2', 'instructor', 'skill_symmetric', 'apply',    0.82, 6,  0.05, 0.02, 0.08, 4, 0.006, '2025-10-01T00:00:00', '2026-04-01T00:00:00', 'v2'),
+    ('rep_007', 'addr_seed_author_2', 'instructor', 'skill_supervised','apply',    0.88, 10, 0.08, 0.05, 0.11, 7, 0.004, '2025-10-01T00:00:00', '2026-04-01T00:00:00', 'v2'),
+    -- Author 3: Design instructor
+    ('rep_008', 'addr_seed_author_3', 'instructor', 'skill_user_research', 'evaluate', 0.86, 7, 0.06, 0.03, 0.10, 5, 0.005, '2025-10-01T00:00:00', '2026-04-01T00:00:00', 'v2'),
+    ('rep_009', 'addr_seed_author_3', 'instructor', 'skill_ia',            'create',   0.84, 6, 0.05, 0.03, 0.08, 4, 0.004, '2025-10-01T00:00:00', '2026-04-01T00:00:00', 'v2'),
+    ('rep_010', 'addr_seed_author_3', 'instructor', 'skill_wireframing',   'create',   0.83, 5, 0.05, 0.02, 0.07, 4, 0.006, '2025-10-01T00:00:00', '2026-04-01T00:00:00', 'v2');
+
+-- Link reputation to proofs
+INSERT INTO reputation_evidence (assertion_id, proof_id, delta_confidence, attribution_weight) VALUES
+    ('rep_001', 'proof_001', 0.08, 1.0),
+    ('rep_002', 'proof_002', 0.07, 1.0),
+    ('rep_003', 'proof_005', 0.09, 1.0),
+    ('rep_004', 'proof_006', 0.07, 1.0),
+    ('rep_005', 'proof_008', 0.06, 1.0),
+    ('rep_006', 'proof_009', 0.05, 1.0),
+    ('rep_008', 'proof_010', 0.06, 0.9),
+    ('rep_009', 'proof_011', 0.05, 1.0),
+    ('rep_010', 'proof_012', 0.05, 1.0);
+
+-- Impact deltas (sample per-learner contributions)
+INSERT INTO reputation_impact_deltas (id, assertion_id, learner_address, delta, attribution, proof_id) VALUES
+    ('rid_001', 'rep_001', 'addr_seed_learner_1', 0.08, 1.0, 'proof_001'),
+    ('rid_002', 'rep_001', 'addr_seed_learner_2', 0.06, 1.0, NULL),
+    ('rid_003', 'rep_001', 'addr_seed_learner_3', 0.12, 1.0, NULL),
+    ('rid_004', 'rep_002', 'addr_seed_learner_1', 0.07, 1.0, 'proof_002'),
+    ('rid_005', 'rep_002', 'addr_seed_learner_4', 0.05, 1.0, NULL),
+    ('rid_006', 'rep_003', 'addr_seed_learner_1', 0.09, 1.0, 'proof_005'),
+    ('rid_007', 'rep_003', 'addr_seed_learner_5', 0.11, 1.0, NULL),
+    ('rid_008', 'rep_005', 'addr_seed_learner_1', 0.06, 1.0, 'proof_008');
+
+-- ============================================================
+-- P4: GOVERNANCE (members, elections, proposals, votes)
+-- ============================================================
+-- DAO members (committee members for each DAO)
+INSERT INTO governance_dao_members (dao_id, stake_address, role) VALUES
+    -- CS DAO: 7 members
+    ('dao_cs', 'addr_seed_author_1',   'chair'),
+    ('dao_cs', 'addr_seed_author_2',   'committee'),
+    ('dao_cs', 'addr_seed_member_1',   'committee'),
+    ('dao_cs', 'addr_seed_member_2',   'committee'),
+    ('dao_cs', 'addr_seed_member_3',   'member'),
+    ('dao_cs', 'addr_seed_member_4',   'member'),
+    ('dao_cs', 'addr_seed_member_5',   'member'),
+    -- Math DAO: 5 members
+    ('dao_math', 'addr_seed_author_2', 'chair'),
+    ('dao_math', 'addr_seed_member_1', 'committee'),
+    ('dao_math', 'addr_seed_member_6', 'committee'),
+    ('dao_math', 'addr_seed_member_7', 'member'),
+    ('dao_math', 'addr_seed_member_8', 'member'),
+    -- Web DAO: 5 members
+    ('dao_web', 'addr_seed_author_1',  'chair'),
+    ('dao_web', 'addr_seed_member_2',  'committee'),
+    ('dao_web', 'addr_seed_member_9',  'committee'),
+    ('dao_web', 'addr_seed_member_10', 'member'),
+    ('dao_web', 'addr_seed_member_11', 'member'),
+    -- Design DAO: 5 members
+    ('dao_design', 'addr_seed_author_3', 'chair'),
+    ('dao_design', 'addr_seed_member_3',  'committee'),
+    ('dao_design', 'addr_seed_member_12', 'committee'),
+    ('dao_design', 'addr_seed_member_13', 'member'),
+    ('dao_design', 'addr_seed_member_14', 'member'),
+    -- Cyber DAO: 5 members
+    ('dao_cyber', 'addr_seed_author_2', 'chair'),
+    ('dao_cyber', 'addr_seed_member_4', 'committee'),
+    ('dao_cyber', 'addr_seed_member_15', 'member'),
+    ('dao_cyber', 'addr_seed_member_16', 'member'),
+    ('dao_cyber', 'addr_seed_member_17', 'member'),
+    -- Data DAO: 5 members
+    ('dao_data', 'addr_seed_author_2', 'chair'),
+    ('dao_data', 'addr_seed_member_5', 'committee'),
+    ('dao_data', 'addr_seed_member_6', 'committee'),
+    ('dao_data', 'addr_seed_member_18', 'member'),
+    ('dao_data', 'addr_seed_member_19', 'member');
+
+-- Elections: 1 finalized, 1 in voting phase, 1 in nomination phase
+INSERT INTO governance_elections (id, dao_id, title, description, phase, seats, nominee_min_proficiency, voter_min_proficiency, nomination_start, nomination_end, voting_end, finalized_at) VALUES
+    ('election_001', 'dao_cs', 'Q1 2026 CS Committee Election', 'Annual election for the Computer Science DAO committee seats', 'finalized', 5, 'apply', 'remember', '2025-12-01T00:00:00', '2025-12-15T00:00:00', '2025-12-31T00:00:00', '2026-01-02T00:00:00'),
+    ('election_002', 'dao_web', 'Q2 2026 Web Dev Committee Election', 'Election for Web Development DAO committee seats', 'voting', 5, 'apply', 'remember', '2026-03-01T00:00:00', '2026-03-15T00:00:00', '2026-04-15T00:00:00', NULL),
+    ('election_003', 'dao_design', 'Q2 2026 Design Committee Election', 'Election for Design DAO committee seats', 'nomination', 5, 'apply', 'remember', '2026-04-01T00:00:00', '2026-04-30T00:00:00', NULL, NULL);
+
+-- Election nominees
+INSERT INTO governance_election_nominees (id, election_id, stake_address, accepted, votes_received, is_winner) VALUES
+    -- Finalized CS election: 4 nominees, 3 won
+    ('nom_001', 'election_001', 'addr_seed_author_1',  1, 12, 1),
+    ('nom_002', 'election_001', 'addr_seed_author_2',  1, 9,  1),
+    ('nom_003', 'election_001', 'addr_seed_member_1',  1, 8,  1),
+    ('nom_004', 'election_001', 'addr_seed_member_2',  1, 4,  0),
+    -- Active Web election: 3 nominees, voting in progress
+    ('nom_005', 'election_002', 'addr_seed_author_1',  1, 6, 0),
+    ('nom_006', 'election_002', 'addr_seed_member_2',  1, 4, 0),
+    ('nom_007', 'election_002', 'addr_seed_member_9',  1, 3, 0),
+    -- Design nomination: 2 nominees so far
+    ('nom_008', 'election_003', 'addr_seed_author_3',  1, 0, 0),
+    ('nom_009', 'election_003', 'addr_seed_member_12', 0, 0, 0);
+
+-- Election votes (for finalized + active elections)
+INSERT INTO governance_election_votes (id, election_id, voter, nominee_id) VALUES
+    ('evote_001', 'election_001', 'addr_seed_member_3', 'nom_001'),
+    ('evote_002', 'election_001', 'addr_seed_member_4', 'nom_001'),
+    ('evote_003', 'election_001', 'addr_seed_member_5', 'nom_002'),
+    ('evote_004', 'election_001', 'addr_seed_member_6', 'nom_003'),
+    ('evote_005', 'election_002', 'addr_seed_member_10', 'nom_005'),
+    ('evote_006', 'election_002', 'addr_seed_member_11', 'nom_005'),
+    ('evote_007', 'election_002', 'addr_seed_member_3',  'nom_006');
+
+-- Proposals: varied states across DAOs
+INSERT INTO governance_proposals (id, dao_id, title, description, category, status, proposer, votes_for, votes_against, voting_deadline, min_vote_proficiency) VALUES
+    ('prop_001', 'dao_cs', 'Add Quantum Computing subject', 'Proposal to add Quantum Computing as a new subject under Computer Science, with skills for quantum gates, Shor/Grover algorithms, and quantum error correction.', 'taxonomy_change', 'approved', 'addr_seed_author_1', 5, 1, '2026-02-28T00:00:00', 'apply'),
+    ('prop_002', 'dao_cs', 'Require 3 evidence records for analyze-level proofs', 'Increase minimum evidence threshold for analyze-level skill proofs from 2 to 3 to improve credential rigor.', 'policy', 'active', 'addr_seed_member_1', 3, 2, '2026-04-30T00:00:00', 'remember'),
+    ('prop_003', 'dao_web', 'Add WebAssembly skill under Frontend', 'Proposal to add WASM as a new skill under Frontend Development: compiling Rust/C++ to WebAssembly, JS interop, and performance optimization.', 'taxonomy_change', 'active', 'addr_seed_author_1', 2, 0, '2026-04-20T00:00:00', 'apply'),
+    ('prop_004', 'dao_design', 'Content moderation policy for design courses', 'Establish guidelines for reviewing design course content: original work requirements, attribution standards, and accessibility compliance.', 'content_moderation', 'draft', 'addr_seed_author_3', 0, 0, NULL, 'remember'),
+    ('prop_005', 'dao_math', 'Add Applied Mathematics subject', 'Create a new Applied Mathematics subject covering numerical methods, optimization, and mathematical modelling.', 'taxonomy_change', 'rejected', 'addr_seed_member_7', 1, 4, '2026-03-15T00:00:00', 'apply');
+
+-- Proposal votes
+INSERT INTO governance_proposal_votes (id, proposal_id, voter, in_favor) VALUES
+    ('pvote_001', 'prop_001', 'addr_seed_author_2',  1),
+    ('pvote_002', 'prop_001', 'addr_seed_member_1',  1),
+    ('pvote_003', 'prop_001', 'addr_seed_member_2',  1),
+    ('pvote_004', 'prop_001', 'addr_seed_member_3',  1),
+    ('pvote_005', 'prop_001', 'addr_seed_member_4',  1),
+    ('pvote_006', 'prop_001', 'addr_seed_member_5',  0),
+    ('pvote_007', 'prop_002', 'addr_seed_author_1',  1),
+    ('pvote_008', 'prop_002', 'addr_seed_author_2',  1),
+    ('pvote_009', 'prop_002', 'addr_seed_member_1',  1),
+    ('pvote_010', 'prop_002', 'addr_seed_member_3',  0),
+    ('pvote_011', 'prop_002', 'addr_seed_member_4',  0),
+    ('pvote_012', 'prop_003', 'addr_seed_member_2',  1),
+    ('pvote_013', 'prop_003', 'addr_seed_member_9',  1),
+    ('pvote_014', 'prop_005', 'addr_seed_author_2',  0),
+    ('pvote_015', 'prop_005', 'addr_seed_member_1',  0),
+    ('pvote_016', 'prop_005', 'addr_seed_member_6',  0),
+    ('pvote_017', 'prop_005', 'addr_seed_member_8',  0),
+    ('pvote_018', 'prop_005', 'addr_seed_member_7',  1);
+
+-- ============================================================
+-- P5: CLASSROOMS
+-- ============================================================
+INSERT INTO classrooms (id, name, description, owner_address) VALUES
+    ('class_algo_study', 'Algorithms Study Group', 'A collaborative space for learners working through Algorithms 101. Share solutions, discuss approaches, and prep for assessments.', 'addr_seed_author_1'),
+    ('class_web_cohort', 'Web Dev Cohort — Spring 2026', 'Spring 2026 cohort for the Full-Stack Web Development course. Weekly sync calls, code reviews, and project feedback.', 'addr_seed_author_1'),
+    ('class_design_crit', 'Design Critique Circle', 'Weekly design critiques and portfolio reviews. Share your work, get constructive feedback, and improve together.', 'addr_seed_author_3');
+
+INSERT INTO classroom_members (classroom_id, stake_address, role, joined_at) VALUES
+    -- Algo study group
+    ('class_algo_study', 'addr_seed_author_1',   'owner',     '2026-01-20T10:00:00'),
+    ('class_algo_study', 'addr_seed_learner_1',  'member',    '2026-01-21T09:30:00'),
+    ('class_algo_study', 'addr_seed_learner_2',  'member',    '2026-01-22T14:00:00'),
+    ('class_algo_study', 'addr_seed_learner_3',  'member',    '2026-01-23T11:15:00'),
+    ('class_algo_study', 'addr_seed_learner_4',  'member',    '2026-01-25T16:00:00'),
+    -- Web cohort
+    ('class_web_cohort', 'addr_seed_author_1',   'owner',     '2026-02-01T09:00:00'),
+    ('class_web_cohort', 'addr_seed_learner_1',  'member',    '2026-02-02T10:00:00'),
+    ('class_web_cohort', 'addr_seed_learner_5',  'member',    '2026-02-03T11:30:00'),
+    ('class_web_cohort', 'addr_seed_member_10',  'member',    '2026-02-04T14:00:00'),
+    -- Design crit circle
+    ('class_design_crit', 'addr_seed_author_3',  'owner',     '2026-03-01T10:00:00'),
+    ('class_design_crit', 'addr_seed_learner_1', 'member',    '2026-03-02T09:00:00'),
+    ('class_design_crit', 'addr_seed_member_13', 'member',    '2026-03-03T13:30:00');
+
+INSERT INTO classroom_channels (id, classroom_id, name, description, channel_type) VALUES
+    ('chan_001', 'class_algo_study', 'general',     'General discussion and announcements', 'text'),
+    ('chan_002', 'class_algo_study', 'help',        'Ask for help with problems and concepts', 'text'),
+    ('chan_003', 'class_web_cohort', 'general',     'Cohort announcements and weekly updates', 'text'),
+    ('chan_004', 'class_web_cohort', 'code-review', 'Share code for peer review', 'text'),
+    ('chan_005', 'class_web_cohort', 'standups',    'Async daily standups — what did you learn today?', 'text'),
+    ('chan_006', 'class_design_crit', 'general',    'Announcements and scheduling', 'text'),
+    ('chan_007', 'class_design_crit', 'critique',   'Post your designs for feedback', 'text');
+
+INSERT INTO classroom_messages (id, channel_id, classroom_id, sender_address, content, sent_at) VALUES
+    ('msg_001', 'chan_001', 'class_algo_study', 'addr_seed_author_1',  'Welcome to the Algorithms Study Group! Post questions anytime, and lets use the #help channel for specific problem discussions.', '2026-01-20T10:05:00'),
+    ('msg_002', 'chan_001', 'class_algo_study', 'addr_seed_learner_1', 'Thanks for setting this up! Im working through chapter 2 on linked lists — anyone else at that point?', '2026-01-21T09:45:00'),
+    ('msg_003', 'chan_001', 'class_algo_study', 'addr_seed_learner_3', 'Just finished the arrays quiz with a 95%. The amortized analysis question was tricky.', '2026-01-23T14:30:00'),
+    ('msg_004', 'chan_002', 'class_algo_study', 'addr_seed_learner_2', 'Can someone explain why the time complexity of building a heap is O(n) and not O(n log n)? The sift-down approach is confusing me.', '2026-01-24T10:00:00'),
+    ('msg_005', 'chan_002', 'class_algo_study', 'addr_seed_author_1',  'Great question! The key insight is that most nodes are near the bottom of the heap, so their sift-down cost is O(1). The mathematical proof uses the fact that the sum of h/2^h converges to 2.', '2026-01-24T10:30:00'),
+    ('msg_006', 'chan_002', 'class_algo_study', 'addr_seed_learner_2', 'That makes so much more sense now — thanks!', '2026-01-24T10:45:00'),
+    ('msg_007', 'chan_003', 'class_web_cohort', 'addr_seed_author_1',  'Welcome to the Spring 2026 Web Dev Cohort! Well have weekly sync calls on Thursdays at 6pm UTC. First call this Thursday.', '2026-02-01T09:15:00'),
+    ('msg_008', 'chan_004', 'class_web_cohort', 'addr_seed_learner_5', 'Just pushed my first Vue component — a todo list with Composition API. Would love feedback on the reactivity patterns.', '2026-02-10T15:00:00'),
+    ('msg_009', 'chan_004', 'class_web_cohort', 'addr_seed_author_1',  'Nice work! One suggestion: use computed() instead of watch() for derived state. Its more declarative and Vue can optimize it better.', '2026-02-10T16:30:00'),
+    ('msg_010', 'chan_005', 'class_web_cohort', 'addr_seed_learner_1', 'Today: finished the REST API chapter. Finally understand why PUT is idempotent but POST isnt.', '2026-02-20T18:00:00'),
+    ('msg_011', 'chan_006', 'class_design_crit', 'addr_seed_author_3',  'Welcome to the Design Critique Circle! Post your work in #critique anytime, and well do live critique sessions every Friday at 3pm UTC.', '2026-03-01T10:15:00'),
+    ('msg_012', 'chan_007', 'class_design_crit', 'addr_seed_learner_1', 'Sharing my first wireframe for a learning dashboard. Looking for feedback on the information hierarchy — is the skill progress too buried?', '2026-03-05T14:00:00'),
+    ('msg_013', 'chan_007', 'class_design_crit', 'addr_seed_author_3',  'Good start! I would move the skill progress above the course list — its the primary metric learners care about. Also consider a sparkline showing progress over time.', '2026-03-05T15:30:00'),
+    ('msg_014', 'chan_007', 'class_design_crit', 'addr_seed_member_13', 'Agree with the feedback above. Also the color contrast on the secondary text might not meet WCAG AA — try bumping it to at least 4.5:1.', '2026-03-05T16:00:00');
+
+-- Join request for the approval-required classroom
+INSERT INTO classroom_join_requests (id, classroom_id, stake_address, message, status) VALUES
+    ('jr_001', 'class_web_cohort', 'addr_seed_learner_6', 'Hi, I am enrolled in the Web Dev course and would love to join the cohort for code reviews and weekly syncs.', 'pending'),
+    ('jr_002', 'class_web_cohort', 'addr_seed_learner_7', 'Currently in chapter 3 of the course. Looking for study partners!', 'approved');
+
+-- ============================================================
+-- P6: SENTINEL (integrity), TUTORING, APP SETTINGS
+-- ============================================================
+-- Integrity sessions (tied to algo enrollment)
+INSERT INTO integrity_sessions (id, enrollment_id, status, integrity_score, started_at, ended_at) VALUES
+    ('isess_001', 'enroll_algo', 'completed', 0.94, '2026-01-20T10:00:00', '2026-01-20T10:45:00'),
+    ('isess_002', 'enroll_algo', 'completed', 0.91, '2026-02-08T10:00:00', '2026-02-08T11:00:00'),
+    ('isess_003', 'enroll_web',  'completed', 0.96, '2026-02-06T09:30:00', '2026-02-06T10:00:00'),
+    ('isess_004', 'enroll_ml',   'completed', 0.89, '2026-03-16T10:45:00', '2026-03-16T11:30:00');
+
+-- Integrity snapshots (behavioral signals per session)
+INSERT INTO integrity_snapshots (id, session_id, typing_score, mouse_score, human_score, tab_score, paste_score, devtools_score, camera_score, composite_score, captured_at) VALUES
+    ('isnap_001a', 'isess_001', 0.95, 0.92, 0.98, 1.0, 1.0, 1.0, 0.88, 0.94, '2026-01-20T10:05:00'),
+    ('isnap_001b', 'isess_001', 0.93, 0.94, 0.97, 1.0, 1.0, 1.0, 0.90, 0.95, '2026-01-20T10:15:00'),
+    ('isnap_001c', 'isess_001', 0.96, 0.91, 0.96, 1.0, 1.0, 1.0, 0.87, 0.93, '2026-01-20T10:30:00'),
+    ('isnap_002a', 'isess_002', 0.91, 0.88, 0.95, 1.0, 0.95, 1.0, 0.85, 0.91, '2026-02-08T10:10:00'),
+    ('isnap_002b', 'isess_002', 0.89, 0.90, 0.94, 1.0, 1.0,  1.0, 0.86, 0.92, '2026-02-08T10:30:00'),
+    ('isnap_002c', 'isess_002', 0.92, 0.87, 0.96, 0.95, 1.0, 1.0, 0.88, 0.91, '2026-02-08T10:50:00'),
+    ('isnap_003a', 'isess_003', 0.97, 0.95, 0.99, 1.0, 1.0, 1.0, 0.92, 0.96, '2026-02-06T09:40:00'),
+    ('isnap_003b', 'isess_003', 0.96, 0.96, 0.98, 1.0, 1.0, 1.0, 0.94, 0.97, '2026-02-06T09:55:00'),
+    ('isnap_004a', 'isess_004', 0.88, 0.85, 0.92, 1.0, 1.0, 1.0, 0.80, 0.89, '2026-03-16T11:00:00'),
+    ('isnap_004b', 'isess_004', 0.90, 0.84, 0.91, 0.90, 1.0, 1.0, 0.82, 0.88, '2026-03-16T11:15:00');
+
+-- Tutoring sessions
+INSERT INTO tutoring_sessions (id, title, status, created_at, ended_at) VALUES
+    ('tutor_001', 'Dynamic Programming — Top-down vs Bottom-up', 'ended', '2026-02-25T15:05:00', '2026-02-25T16:00:00'),
+    ('tutor_002', 'Wireframing Review — Learning Dashboard', 'ended', '2026-03-10T14:02:00', '2026-03-10T15:00:00'),
+    ('tutor_003', 'Graph Algorithms — BFS & DFS Walkthrough', 'active', '2026-04-10T16:00:00', NULL);
+
+-- App settings
+INSERT INTO app_settings (key, value) VALUES
+    ('theme', 'dark'),
+    ('language', 'en'),
+    ('notifications_enabled', 'true'),
+    ('auto_sync', 'true'),
+    ('sentinel_camera_enabled', 'true'),
+    ('sentinel_keyboard_enabled', 'true');
+
 "##;
 
 // Gate tests behind `has_app_lib` because this file is shared with the CLI
