@@ -5,6 +5,8 @@ use crate::context::ProjectContext;
 use crate::output;
 use crate::runner;
 
+type DevStep = fn(&ProjectContext) -> Result<()>;
+
 #[derive(Subcommand)]
 pub enum DevCommand {
     /// Launch the app in dev mode (cargo tauri dev)
@@ -19,6 +21,10 @@ pub enum DevCommand {
     Fmt,
     /// Run everything: fmt, clippy, test, check
     All,
+    /// Run the exact checks CI runs on push/PR — covers both `src-tauri`
+    /// and `cli` crates plus the frontend. Use this before `git push`
+    /// to avoid red builds on main.
+    Ci,
 }
 
 pub fn execute(cmd: &DevCommand, ctx: &ProjectContext) -> Result<()> {
@@ -29,6 +35,7 @@ pub fn execute(cmd: &DevCommand, ctx: &ProjectContext) -> Result<()> {
         DevCommand::Clippy => run_clippy(ctx),
         DevCommand::Fmt => run_fmt(ctx),
         DevCommand::All => run_all(ctx),
+        DevCommand::Ci => run_ci(ctx),
     }
 }
 
@@ -119,5 +126,57 @@ fn run_all(ctx: &ProjectContext) -> Result<()> {
 
     output::blank();
     output::success("All checks passed!");
+    Ok(())
+}
+
+/// Mirror CI: catch everything CI would catch, before pushing.
+/// Covers both `src-tauri` and `cli` crates + strict vue-tsc with
+/// `--noEmit`. Stops at the first failure.
+fn run_ci(ctx: &ProjectContext) -> Result<()> {
+    let steps: [(&str, DevStep); 6] = [
+        ("Workspace formatting (cargo fmt --check)", ci_workspace_fmt),
+        ("src-tauri clippy (-D warnings)", run_clippy),
+        ("CLI clippy (-D warnings)", ci_cli_clippy),
+        ("src-tauri tests", run_test),
+        ("CLI tests", ci_cli_test),
+        ("Frontend type-check (vue-tsc --noEmit)", ci_vue_tsc_strict),
+    ];
+    let total = steps.len();
+
+    for (i, (label, func)) in steps.iter().enumerate() {
+        output::step(i + 1, total, label);
+        func(ctx)?;
+    }
+
+    output::blank();
+    output::success("All CI checks passed. Safe to push.");
+    Ok(())
+}
+
+fn ci_workspace_fmt(ctx: &ProjectContext) -> Result<()> {
+    // Run from workspace root so both src-tauri and cli are formatted.
+    runner::run_step(&ctx.root, "cargo", &["fmt", "--check"])?;
+    Ok(())
+}
+
+fn ci_cli_clippy(ctx: &ProjectContext) -> Result<()> {
+    let cli_dir = ctx.root.join("cli");
+    runner::run_step(&cli_dir, "cargo", &["clippy", "--", "-D", "warnings"])?;
+    output::success("CLI clippy passed (no warnings)");
+    Ok(())
+}
+
+fn ci_cli_test(ctx: &ProjectContext) -> Result<()> {
+    let cli_dir = ctx.root.join("cli");
+    runner::run_step(&cli_dir, "cargo", &["test"])?;
+    output::success("CLI tests passed");
+    Ok(())
+}
+
+fn ci_vue_tsc_strict(ctx: &ProjectContext) -> Result<()> {
+    // Match CI exactly: `npx vue-tsc -b --noEmit`. `--noEmit` ensures
+    // no `.tsbuildinfo` caches can mask type errors across runs.
+    runner::run_step(&ctx.root, "npx", &["vue-tsc", "-b", "--noEmit"])?;
+    output::success("Frontend type check passed");
     Ok(())
 }
