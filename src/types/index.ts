@@ -449,6 +449,38 @@ export interface GovernanceTxResult {
   action: string
 }
 
+// ---- Opinions (Field Commentary) ----
+
+export interface OpinionRow {
+  id: string
+  author_address: string
+  subject_field_id: string
+  title: string
+  summary: string | null
+  video_cid: string
+  thumbnail_cid: string | null
+  duration_seconds: number | null
+  credential_proof_ids: string[]
+  signature: string
+  public_key: string | null
+  published_at: string
+  received_at: string
+  withdrawn: boolean
+  withdrawn_reason: string | null
+  on_chain_tx: string | null
+}
+
+export interface PublishOpinionRequest {
+  subject_field_id: string
+  title: string
+  summary?: string | null
+  video_cid: string
+  thumbnail_cid?: string | null
+  duration_seconds?: number | null
+  /** Skill proof IDs the author stakes. ≥ 1 required; at least one must be under `subject_field_id`. */
+  credential_proof_ids: string[]
+}
+
 // ---- Catalog ----
 
 export interface CatalogEntry {
