@@ -6,6 +6,7 @@ import { useTheme } from '@/composables/useTheme'
 import { useP2P } from '@/composables/useP2P'
 import { useAuth } from '@/composables/useAuth'
 import { usePlatform } from '@/composables/usePlatform'
+import { useOmniSearch } from '@/composables/useOmniSearch'
 
 defineProps<{ sidebarCollapsed: boolean }>()
 const emit = defineEmits<{ toggleSidebar: [] }>()
@@ -16,6 +17,11 @@ const { theme, setTheme } = useTheme()
 const { status: p2pStatus, startPolling } = useP2P()
 const { displayName, lockVault } = useAuth()
 const { isMobilePlatform, isMac } = usePlatform()
+const omniSearch = useOmniSearch()
+
+function openOmniSearch() {
+  omniSearch.open()
+}
 const canGoBack = ref(false)
 const canGoForward = ref(false)
 
@@ -26,18 +32,6 @@ function syncNavButtons() {
   canGoForward.value = Boolean(state.forward)
 }
 
-// --- Search ---
-const searchQuery = ref('')
-const searchFocused = ref(false)
-const searchInput = ref<HTMLInputElement | null>(null)
-
-function onSearchKeydown(e: KeyboardEvent) {
-  if (e.key === 'Escape') {
-    searchInput.value?.blur()
-    searchFocused.value = false
-  }
-}
-
 function isEditableTarget(target: EventTarget | null) {
   const element = target as HTMLElement | null
   if (!element) return false
@@ -45,7 +39,8 @@ function isEditableTarget(target: EventTarget | null) {
   return ['INPUT', 'TEXTAREA', 'SELECT'].includes(element.tagName)
 }
 
-// Global "/" shortcut to focus search
+// Global shortcuts: "/" and Cmd+K / Ctrl+K open the omni search palette.
+// Cmd+[/] navigate history, Cmd+, opens Settings.
 function onGlobalKeydown(e: KeyboardEvent) {
   if (isMac && e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
     if (e.key === ',' || e.key === ';') {
@@ -67,9 +62,10 @@ function onGlobalKeydown(e: KeyboardEvent) {
     }
   }
 
+  // "/" to open omni search (unless typing in a field)
   if (e.key === '/' && !isEditableTarget(e.target)) {
     e.preventDefault()
-    searchInput.value?.focus()
+    openOmniSearch()
   }
 }
 
@@ -202,35 +198,22 @@ const userInitial = () => displayName.value ? displayName.value.charAt(0).toUppe
       </button>
     </div>
 
-    <!-- Center: Omni-search -->
-    <div class="topbar-search-wrapper">
-      <div :class="['topbar-search', searchFocused ? 'topbar-search--focused' : '']">
+    <!-- Center: Omni-search trigger -->
+    <div class="topbar-search-wrapper" data-no-drag>
+      <button
+        type="button"
+        class="topbar-search topbar-search--button"
+        data-no-drag
+        aria-label="Open search"
+        @mousedown.stop
+        @click="openOmniSearch"
+      >
         <svg class="topbar-search-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
           <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
         </svg>
-        <input
-          ref="searchInput"
-          v-model="searchQuery"
-          type="text"
-          placeholder="Search courses, skills..."
-          class="topbar-search-input"
-          @focus="searchFocused = true"
-          @blur="searchFocused = false"
-          @keydown="onSearchKeydown"
-        />
-        <button
-          v-if="searchQuery"
-          type="button"
-          class="topbar-search-clear"
-          tabindex="-1"
-          @mousedown.prevent="searchQuery = ''; searchInput?.focus()"
-        >
-          <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
-        <kbd v-if="!searchQuery && !searchFocused" class="topbar-search-kbd">/</kbd>
-      </div>
+        <span class="topbar-search-placeholder">Search skills, courses, DAOs…</span>
+        <kbd class="topbar-search-kbd">{{ isMac ? '⌘K' : 'Ctrl K' }}</kbd>
+      </button>
     </div>
 
     <!-- Right: P2P + theme + avatar -->
@@ -581,15 +564,45 @@ const userInitial = () => displayName.value ? displayName.value.charAt(0).toUppe
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 1.25rem;
+  min-width: 1.25rem;
   height: 1.25rem;
+  padding: 0 0.375rem;
   font-size: 0.625rem;
   font-weight: 500;
+  font-family: inherit;
   color: color-mix(in srgb, var(--app-muted-foreground) 45%, transparent);
   background: color-mix(in srgb, var(--app-muted) 50%, transparent);
   border: 1px solid color-mix(in srgb, var(--app-border) 40%, transparent);
   border-radius: 0.25rem;
   pointer-events: none;
+}
+
+/* Button-style trigger (opens omni search palette) */
+.topbar-search--button {
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  padding: 0;
+}
+
+.topbar-search-placeholder {
+  flex: 1;
+  display: block;
+  color: color-mix(in srgb, var(--app-muted-foreground) 55%, transparent);
+  padding: 0.375rem 3.5rem 0.375rem 2rem;
+  font-size: 1rem;
+  line-height: 1.5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none; /* let clicks pass through to the button */
+}
+
+@media (min-width: 640px) {
+  .topbar-search-placeholder {
+    font-size: 0.8125rem;
+  }
 }
 
 /* Dark mode search overrides */

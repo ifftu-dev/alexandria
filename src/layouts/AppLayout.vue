@@ -4,6 +4,7 @@ import AppTopBar from '@/components/layout/AppTopBar.vue'
 import AppBottomBar from '@/components/layout/AppBottomBar.vue'
 import MobileTabBar from '@/components/layout/MobileTabBar.vue'
 import TutoringPiP from '@/components/layout/TutoringPiP.vue'
+import OmniSearch from '@/components/omni/OmniSearch.vue'
 import { usePlatform } from '@/composables/usePlatform'
 import { ref, onMounted } from 'vue'
 
@@ -52,5 +53,8 @@ function toggleSidebar() {
 
     <!-- Bottom tab bar — visible only on mobile -->
     <MobileTabBar />
+
+    <!-- Global omni search palette (Cmd+K / Ctrl+K / "/") -->
+    <OmniSearch />
   </div>
 </template>
