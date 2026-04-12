@@ -226,6 +226,11 @@ jobs:
         working-directory: alexandria
         run: npx vue-tsc -b --noEmit
 
+      - name: Frontend tests (vitest)
+        if: needs.changes.outputs.frontend == 'true'
+        working-directory: alexandria
+        run: npm test
+
   release-readiness:
     name: Release Readiness
     needs: changes
