@@ -720,11 +720,30 @@ fn execute_builds(ctx: &ProjectContext, targets: &[&Target], is_debug: bool) -> 
         if let Some(feature) = target.cargo_feature {
             args.extend(["--features", feature]);
         }
+        // Merge platform-specific tauri config so features like
+        // `tutoring-video-ios` / `tutoring-video-android` from the
+        // platform conf files get picked up (mirrors CI behavior).
+        match target.platform {
+            Platform::Ios => args.extend(["--config", crate::tauri_config::IOS]),
+            Platform::Android => args.extend(["--config", crate::tauri_config::ANDROID]),
+            Platform::Desktop => {}
+        }
         if is_debug {
             args.push("--debug");
         }
 
-        let result = runner::run_step(&ctx.root, "cargo", &args);
+        // For Android, set up the NDK cross-compilation env matrix
+        // (mirrors mobile-shared.yml). Without this, opus-sys / openssl-sys
+        // fail to find `aarch64-linux-android-ranlib` and CMake can't
+        // locate the NDK.
+        let result = if target.platform == Platform::Android {
+            match crate::android_env::AndroidEnv::detect() {
+                Ok(env) => runner::run_step_with_env(&ctx.root, "cargo", &args, &env.env_vars()),
+                Err(e) => Err(e),
+            }
+        } else {
+            runner::run_step(&ctx.root, "cargo", &args)
+        };
 
         match result {
             Ok(()) => {
