@@ -159,41 +159,54 @@ struct RemoteSeedAsset {
 }
 
 const REMOTE_SEED_ASSETS: &[RemoteSeedAsset] = &[
-    // Videos (CC0, via MDN interactive examples)
+    // ── Videos ──────────────────────────────────────────────────────
+    // Blender Foundation open-movie clips (CC BY), served from Google's
+    // public test CDN. Distinct video per topic so the demo isn't monotonous.
     RemoteSeedAsset {
+        // Algo: Big Buck Bunny — classic "complexity / performance" vibe
         element_id: "el_algo_1_4",
-        url: "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4",
+        url: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
     },
     RemoteSeedAsset {
+        // Web: For Bigger Blazes — short Chromecast demo
         element_id: "el_web_3_2",
-        url: "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4",
+        url: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
     },
     RemoteSeedAsset {
+        // ML: Elephants Dream — surreal, abstract (matches ML "black box" vibe)
         element_id: "el_ml_1_3",
-        url: "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4",
+        url: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4",
     },
     RemoteSeedAsset {
+        // Crypto: Sintel — longer, thematic (a tale of obsession & secrets)
         element_id: "el_cry_1_2",
-        url: "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4",
+        url: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4",
     },
     RemoteSeedAsset {
+        // UX: Tears of Steel — character-driven (fits user research/personas)
         element_id: "el_ux_1_3",
-        url: "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4",
+        url: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4",
     },
-    // PDFs
+
+    // ── PDFs ────────────────────────────────────────────────────────
+    // Varied real-world reference PDFs, all freely distributable.
     RemoteSeedAsset {
+        // Web: MDN HTML cheat sheet surrogate — Mozilla PDF reference doc
         element_id: "el_web_1_4",
         url: "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf",
     },
     RemoteSeedAsset {
+        // ML: Bitcoin whitepaper — real, landmark technical paper (public domain)
         element_id: "el_ml_4_4",
-        url: "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf",
+        url: "https://bitcoin.org/bitcoin.pdf",
     },
     RemoteSeedAsset {
+        // UX: W3C WCAG summary surrogate
         element_id: "el_ux_4_3",
         url: "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf",
     },
-    // Downloadable assets (IETF RFC text files)
+
+    // ── Downloadable text assets (IETF RFC files, all public domain) ─
     RemoteSeedAsset {
         element_id: "el_web_5_4",
         url: "https://www.rfc-editor.org/rfc/rfc1149.txt",

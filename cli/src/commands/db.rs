@@ -224,26 +224,87 @@ fn run_seed(
         output::blank();
         output::warning("Force mode: clearing existing seed data...");
 
-        // Delete in dependency order (leaf tables first)
+        // Delete in dependency order (leaf tables first).
+        // Use PRAGMA foreign_keys = OFF to avoid ordering headaches on
+        // interconnected tables (evidence → proofs → skills, etc.).
         conn.execute_batch(
-            "DELETE FROM element_skill_tags;
-             DELETE FROM element_progress;
-             DELETE FROM course_notes;
-             DELETE FROM course_elements;
-             DELETE FROM course_chapters;
-             DELETE FROM enrollments;
-             DELETE FROM courses;
+            "PRAGMA foreign_keys = OFF;
+
+             -- Classrooms & messaging
+             DELETE FROM classroom_messages;
+             DELETE FROM classroom_calls;
+             DELETE FROM classroom_channels;
+             DELETE FROM classroom_join_requests;
+             DELETE FROM classroom_members;
+             DELETE FROM classroom_group_keys;
+             DELETE FROM classrooms;
+
+             -- Tutoring & integrity
+             DELETE FROM tutoring_sessions;
+             DELETE FROM integrity_snapshots;
+             DELETE FROM integrity_sessions;
+
+             -- Governance lifecycle
+             DELETE FROM governance_proposal_votes;
+             DELETE FROM governance_election_votes;
+             DELETE FROM governance_election_nominees;
+             DELETE FROM governance_elections;
              DELETE FROM governance_proposals;
              DELETE FROM governance_dao_members;
              DELETE FROM governance_daos;
+
+             -- Reputation
+             DELETE FROM reputation_impact_deltas;
+             DELETE FROM reputation_evidence;
+             DELETE FROM reputation_snapshots;
+             DELETE FROM reputation_assertions;
+
+             -- Evidence & proofs
+             DELETE FROM skill_proof_evidence;
+             DELETE FROM skill_proofs;
+             DELETE FROM evidence_records;
+             DELETE FROM skill_assessments;
+
+             -- Progress & notes
+             DELETE FROM element_progress;
+             DELETE FROM course_notes;
+             DELETE FROM enrollments;
+
+             -- Courses & taxonomy
+             DELETE FROM element_skill_tags;
+             DELETE FROM course_elements;
+             DELETE FROM course_chapters;
+             DELETE FROM courses;
              DELETE FROM skill_prerequisites;
              DELETE FROM skill_relations;
              DELETE FROM skills;
              DELETE FROM subjects;
-             DELETE FROM subject_fields;",
+             DELETE FROM subject_fields;
+
+             -- App settings (seed-managed keys only)
+             DELETE FROM app_settings WHERE key IN (
+                 'theme','language','notifications_enabled','auto_sync',
+                 'sentinel_camera_enabled','sentinel_keyboard_enabled'
+             );
+
+             PRAGMA foreign_keys = ON;",
         )
         .context("Failed to clear seed data")?;
         output::success("Existing data cleared.");
+
+        // Wipe the iroh content store too — seeded blobs (videos, PDFs,
+        // downloadables) are content-addressed by their hash, and those
+        // hashes were just nulled out of the DB. Leaving the blobs behind
+        // just wastes disk and creates orphans; the next seed will re-fetch.
+        let iroh_dir = ctx.iroh_dir();
+        if iroh_dir.exists() {
+            fs::remove_dir_all(&iroh_dir)
+                .with_context(|| format!("Failed to remove iroh dir {}", iroh_dir.display()))?;
+            output::info(&format!(
+                "Cleared iroh content store ({})",
+                iroh_dir.display()
+            ));
+        }
     }
 
     output::blank();

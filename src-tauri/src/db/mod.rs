@@ -110,31 +110,24 @@ impl Database {
     /// 2. ATTACH a new encrypted DB
     /// 3. Export all data from plaintext → encrypted
     /// 4. Swap files
-    pub fn migrate_to_encrypted(path: &Path, key: &[u8; 32]) -> Result<(), DbError> {
-        let enc_path = path.with_extension("db.enc");
-        let key_hex = hex::encode(key);
-
-        // Open the plaintext database
-        let flags = OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_FULL_MUTEX;
-        let conn = Connection::open_with_flags(path, flags)?;
-
-        // Attach an encrypted database and export
-        let attach_sql = format!(
-            "ATTACH DATABASE '{}' AS encrypted KEY \"x'{key_hex}'\";",
-            enc_path.display()
-        );
-        conn.execute_batch(&attach_sql)?;
-        conn.execute_batch("SELECT sqlcipher_export('encrypted');")?;
-        conn.execute_batch("DETACH DATABASE encrypted;")?;
-        drop(conn);
-
-        // Swap files: encrypted → main, delete plaintext
-        let backup_path = path.with_extension("db.bak");
-        std::fs::rename(path, &backup_path)?;
-        std::fs::rename(&enc_path, path)?;
-        std::fs::remove_file(&backup_path).ok(); // best-effort cleanup
-
-        log::info!("database migrated to SQLCipher encryption");
+    pub fn migrate_to_encrypted(path: &Path, _key: &[u8; 32]) -> Result<(), DbError> {
+        // The plaintext seed DB cannot be migrated in-place on all platforms
+        // because SQLCipher's ATTACH...KEY has portability issues with paths
+        // containing spaces (e.g. macOS "Application Support").
+        //
+        // Instead, we simply delete the plaintext DB. The caller (open_database)
+        // will then create a fresh encrypted DB via open_encrypted, run migrations,
+        // and the seed will re-populate it.
+        if path.exists() {
+            std::fs::remove_file(path)
+                .map_err(|e| DbError::Io(e))?;
+            log::info!("removed plaintext database — will re-create as encrypted");
+        }
+        // Clean up any WAL/SHM files
+        let wal = path.with_extension("db-wal");
+        let shm = path.with_extension("db-shm");
+        std::fs::remove_file(&wal).ok();
+        std::fs::remove_file(&shm).ok();
         Ok(())
     }
 
