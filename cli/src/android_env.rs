@@ -1,12 +1,24 @@
-//! Android NDK environment setup for cross-compilation.
+//! Android NDK + JDK environment setup for cross-compilation.
 //!
 //! Detects the NDK, builds the set of env vars that CMake, `cc-rs`, and
 //! Cargo need to cross-compile Rust + C/C++ dependencies (opus, openssl,
 //! etc.) for Android targets. Mirrors `.github/workflows/mobile-shared.yml`
 //! lines 469–501.
 //!
+//! Also resolves a valid `JAVA_HOME` for the Gradle step that follows
+//! the Rust compile, because the user's ambient `JAVA_HOME` is often a
+//! dead symlink (previous homebrew install uninstalled, jenv shim
+//! pointing to an obsolete version, etc.). Resolution priority:
+//!   1. `ALEX_JAVA_HOME` (explicit override — always wins)
+//!   2. `JAVA_HOME` (if it exists AND `bin/java` resolves)
+//!   3. `.java-version` in the project root + `~/.jenv/versions/<v>`
+//!   4. Android Studio's bundled JBR
+//!   5. `/usr/libexec/java_home -v 21` on macOS
+//!
 //! Without this, `alex build android` / `alex run android` fails with
-//! `aarch64-linux-android-ranlib: command not found` and similar errors.
+//! `aarch64-linux-android-ranlib: command not found` (before NDK fix)
+//! and `A problem occurred configuring project ':buildSrc' > <version>`
+//! (before JDK fix).
 
 use anyhow::{bail, Context, Result};
 use std::os::unix::fs as unix_fs;
@@ -27,12 +39,18 @@ pub struct AndroidEnv {
     /// Prepended to PATH because some C deps (opus) call the unsuffixed names.
     pub shim_dir: PathBuf,
     pub api_level: u32,
+    /// Resolved JDK home for the Gradle step. `None` when no JDK could
+    /// be located — in that case `JAVA_HOME` is left untouched and the
+    /// user's ambient value applies (which may or may not work).
+    pub java_home: Option<PathBuf>,
 }
 
 impl AndroidEnv {
     /// Detect the NDK and set up the shim directory. Fails with a
-    /// user-friendly error if the NDK cannot be found.
-    pub fn detect() -> Result<Self> {
+    /// user-friendly error if the NDK cannot be found. Best-effort
+    /// `JAVA_HOME` resolution uses `project_root` to read the local
+    /// `.java-version`.
+    pub fn detect(project_root: &Path) -> Result<Self> {
         let ndk_home = find_ndk().context(
             "Could not locate the Android NDK. Install it via Android Studio \
              (SDK Manager > SDK Tools > NDK) or set ANDROID_NDK_HOME / NDK_HOME \
@@ -68,6 +86,14 @@ impl AndroidEnv {
         let shim_dir = shim_dir()?;
         populate_shim_dir(&shim_dir, &toolchain_bin)?;
 
+        let java_home = detect_java_home(project_root);
+        if java_home.is_none() {
+            eprintln!(
+                "  ⚠ Could not auto-resolve a JDK for Gradle. Set ALEX_JAVA_HOME \
+                 or JAVA_HOME to a JDK 21 install if the Gradle step fails."
+            );
+        }
+
         Ok(Self {
             ndk_home,
             sysroot,
@@ -75,6 +101,7 @@ impl AndroidEnv {
             host_tag,
             shim_dir,
             api_level,
+            java_home,
         })
     }
 
@@ -157,6 +184,12 @@ impl AndroidEnv {
         env.push(("ANDROID_NM".into(), llvm_nm.clone()));
         env.push(("ANDROID_AARCH64_NM".into(), llvm_nm.clone()));
         env.push(("TARGET_CC".into(), aarch64_clang));
+
+        // Gradle JDK (only override if we resolved one; don't stomp the
+        // user's ambient value with nothing).
+        if let Some(ref jh) = self.java_home {
+            env.push(("JAVA_HOME".into(), jh.display().to_string()));
+        }
 
         env
     }
@@ -288,4 +321,110 @@ fn refresh_symlink(link: &Path, target: &Path) -> Result<()> {
             target.display()
         )
     })
+}
+
+// ── JDK resolution ──────────────────────────────────────────────────
+
+/// Resolve a valid JDK home for the Gradle step. Returns `None` if no
+/// candidate exists in any of the known locations — callers should
+/// surface a hint to set `ALEX_JAVA_HOME` in that case.
+///
+/// Priority order (see module docstring):
+///   1. `$ALEX_JAVA_HOME` (always wins — user override)
+///   2. `$JAVA_HOME` if the directory exists AND `bin/java` is reachable
+///   3. `.java-version` in `project_root` → `~/.jenv/versions/<v>`
+///   4. Android Studio bundled JBR at the standard macOS path
+///   5. `/usr/libexec/java_home -v 21` on macOS
+fn detect_java_home(project_root: &Path) -> Option<PathBuf> {
+    // 1. Explicit override
+    if let Ok(v) = std::env::var("ALEX_JAVA_HOME") {
+        let p = PathBuf::from(&v);
+        if is_valid_jdk(&p) {
+            return Some(p);
+        }
+        eprintln!(
+            "  ⚠ ALEX_JAVA_HOME set to {} but path is not a valid JDK — falling through",
+            p.display()
+        );
+    }
+
+    // 2. Existing JAVA_HOME (if still valid — jenv shims often drift)
+    if let Ok(v) = std::env::var("JAVA_HOME") {
+        let p = PathBuf::from(&v);
+        if is_valid_jdk(&p) {
+            return Some(p);
+        }
+    }
+
+    // 3. .java-version + jenv
+    if let Some(jh) = try_jenv(project_root) {
+        return Some(jh);
+    }
+
+    // 4. Android Studio bundled JBR (macOS path — adjust per OS if
+    //    we ever support Linux/Windows Android builds locally)
+    #[cfg(target_os = "macos")]
+    {
+        let studio_jbr =
+            PathBuf::from("/Applications/Android Studio.app/Contents/jbr/Contents/Home");
+        if is_valid_jdk(&studio_jbr) {
+            return Some(studio_jbr);
+        }
+    }
+
+    // 5. macOS system `java_home` command, pinned to 21 to match
+    //    the project's `.java-version`.
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(jh) = try_java_home_cmd("21") {
+            return Some(jh);
+        }
+    }
+
+    None
+}
+
+fn is_valid_jdk(path: &Path) -> bool {
+    path.is_dir() && path.join("bin/java").exists()
+}
+
+fn try_jenv(project_root: &Path) -> Option<PathBuf> {
+    let version_file = project_root.join(".java-version");
+    let version = std::fs::read_to_string(&version_file).ok()?;
+    let version = version.trim();
+    if version.is_empty() {
+        return None;
+    }
+    let home = std::env::var("HOME").ok()?;
+    let candidate = PathBuf::from(&home).join(".jenv/versions").join(version);
+    // jenv entries are symlinks; canonicalize to the real dir so Gradle
+    // gets an absolute path it can cache across runs.
+    let resolved = std::fs::canonicalize(&candidate).ok()?;
+    if is_valid_jdk(&resolved) {
+        Some(resolved)
+    } else {
+        None
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn try_java_home_cmd(version: &str) -> Option<PathBuf> {
+    let out = std::process::Command::new("/usr/libexec/java_home")
+        .args(["-v", version])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8(out.stdout).ok()?;
+    let path = stdout.trim();
+    if path.is_empty() {
+        return None;
+    }
+    let p = PathBuf::from(path);
+    if is_valid_jdk(&p) {
+        Some(p)
+    } else {
+        None
+    }
 }

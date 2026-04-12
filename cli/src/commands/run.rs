@@ -490,7 +490,7 @@ fn run_android(
 
     // Set up the NDK cross-compile env before invoking Tauri so opus-sys /
     // openssl-sys can find the toolchain (matches mobile CI).
-    let env = crate::android_env::AndroidEnv::detect()?.env_vars();
+    let env = crate::android_env::AndroidEnv::detect(&ctx.root)?.env_vars();
     runner::run_step_with_env(&ctx.root, "cargo", &args, &env)?;
     Ok(())
 }

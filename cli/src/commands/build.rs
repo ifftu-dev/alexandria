@@ -737,7 +737,7 @@ fn execute_builds(ctx: &ProjectContext, targets: &[&Target], is_debug: bool) -> 
         // fail to find `aarch64-linux-android-ranlib` and CMake can't
         // locate the NDK.
         let result = if target.platform == Platform::Android {
-            match crate::android_env::AndroidEnv::detect() {
+            match crate::android_env::AndroidEnv::detect(&ctx.root) {
                 Ok(env) => runner::run_step_with_env(&ctx.root, "cargo", &args, &env.env_vars()),
                 Err(e) => Err(e),
             }
