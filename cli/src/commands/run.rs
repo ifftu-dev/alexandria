@@ -45,6 +45,14 @@ pub enum RunCommand {
         /// Build in release mode
         #[arg(long)]
         release: bool,
+
+        /// Target a physically connected iPhone instead of a simulator.
+        /// Without this flag, the picker shows simulators only and the app
+        /// is installed via `xcrun simctl` (bypassing Tauri's device
+        /// auto-detection which overrides simulator targeting when a
+        /// physical device is plugged in).
+        #[arg(long)]
+        physical: bool,
     },
 
     /// Run on an Android emulator or connected device
@@ -70,7 +78,8 @@ pub fn execute(cmd: &RunCommand, ctx: &ProjectContext) -> Result<()> {
             device,
             open,
             release,
-        } => run_ios(ctx, device.as_deref(), *open, *release),
+            physical,
+        } => run_ios(ctx, device.as_deref(), *open, *release, *physical),
         RunCommand::Android {
             device,
             open,
@@ -97,30 +106,9 @@ fn run_desktop(ctx: &ProjectContext, release: bool) -> Result<()> {
 
 // ── iOS ──────────────────────────────────────────────────────────────
 
-fn list_ios_devices() -> Result<Vec<Device>> {
+fn list_ios_devices(include_physical: bool) -> Result<Vec<Device>> {
     let cwd = std::env::current_dir().unwrap_or_default();
     let mut devices = Vec::new();
-
-    // Connected physical devices via xcrun devicectl
-    if let Ok(out) = runner::run_silent(&cwd, "xcrun", &["devicectl", "list", "devices"]) {
-        // Parse the table output — look for lines with device info
-        // Format varies, but typically: Name  Identifier  ...
-        for line in out.lines() {
-            let trimmed = line.trim();
-            // Skip headers and separators
-            if trimmed.is_empty()
-                || trimmed.starts_with("--")
-                || trimmed.starts_with("==")
-                || trimmed.contains("Identifier")
-                || trimmed.contains("No devices")
-            {
-                continue;
-            }
-            // Physical devices show up with a UDID-like pattern
-            // We'll rely on the simctl list for simulators and just flag
-            // physically connected devices differently
-        }
-    }
 
     // Simulators via xcrun simctl list
     let out = runner::run_silent(&cwd, "xcrun", &["simctl", "list", "devices", "available"])?;
@@ -158,34 +146,38 @@ fn list_ios_devices() -> Result<Vec<Device>> {
     }
 
     // Also check for physically connected iOS devices via xcrun xctrace
-    if let Ok(out) = runner::run_silent(&cwd, "xcrun", &["xctrace", "list", "devices"]) {
-        let mut in_devices_section = false;
-        for line in out.lines() {
-            let trimmed = line.trim();
-            if trimmed == "== Devices ==" {
-                in_devices_section = true;
-                continue;
-            }
-            if trimmed.starts_with("== ") {
-                in_devices_section = false;
-                continue;
-            }
-            if in_devices_section && !trimmed.is_empty() {
-                // Format: "Device Name (UDID)"
-                // Skip entries that look like the Mac itself
-                if trimmed.contains("Mac") || trimmed.contains("macOS") {
+    // (only when explicitly requested — physical devices interfere with
+    // simulator targeting when plugged in).
+    if include_physical {
+        if let Ok(out) = runner::run_silent(&cwd, "xcrun", &["xctrace", "list", "devices"]) {
+            let mut in_devices_section = false;
+            for line in out.lines() {
+                let trimmed = line.trim();
+                if trimmed == "== Devices ==" {
+                    in_devices_section = true;
                     continue;
                 }
-                if let Some((name, rest)) = trimmed.rsplit_once(" (") {
-                    let udid = rest.trim_end_matches(')');
-                    // Only add if not already in simulator list
-                    if !devices.iter().any(|d| d.id == udid) {
-                        devices.push(Device {
-                            name: name.to_string(),
-                            detail: "Physical device".to_string(),
-                            state: "Connected".to_string(),
-                            id: udid.to_string(),
-                        });
+                if trimmed.starts_with("== ") {
+                    in_devices_section = false;
+                    continue;
+                }
+                if in_devices_section && !trimmed.is_empty() {
+                    // Format: "Device Name (UDID)"
+                    // Skip entries that look like the Mac itself
+                    if trimmed.contains("Mac") || trimmed.contains("macOS") {
+                        continue;
+                    }
+                    if let Some((name, rest)) = trimmed.rsplit_once(" (") {
+                        let udid = rest.trim_end_matches(')');
+                        // Only add if not already in simulator list
+                        if !devices.iter().any(|d| d.id == udid) {
+                            devices.push(Device {
+                                name: name.to_string(),
+                                detail: "Physical device".to_string(),
+                                state: "Connected".to_string(),
+                                id: udid.to_string(),
+                            });
+                        }
                     }
                 }
             }
@@ -195,25 +187,111 @@ fn list_ios_devices() -> Result<Vec<Device>> {
     Ok(devices)
 }
 
-fn run_ios(ctx: &ProjectContext, device: Option<&str>, open: bool, release: bool) -> Result<()> {
+/// Bundle identifier from `tauri.conf.json` — used by `simctl launch`.
+const IOS_BUNDLE_ID: &str = "org.alexandria.node";
+
+fn run_ios(
+    ctx: &ProjectContext,
+    device: Option<&str>,
+    open: bool,
+    release: bool,
+    physical: bool,
+) -> Result<()> {
     output::header("Run on iOS");
     output::blank();
 
+    // Physical-device runs and "open in Xcode" stay on Tauri's native dev flow.
+    // The simctl path below replaces the default simulator flow because
+    // `cargo tauri ios dev` picks the connected iPhone (if any) even when
+    // a simulator is named on the command line.
+    if physical || open {
+        return run_ios_tauri_dev(ctx, device, open, release, physical);
+    }
+
+    // Simulator flow — build the app, boot the sim, install, launch.
+    output::info("Scanning for iOS simulators...");
+    output::blank();
+
+    let devices = list_ios_devices(false)?;
+    if devices.is_empty() {
+        bail!(
+            "No iOS simulators found.\n\
+             Install simulators via Xcode > Settings > Platforms."
+        );
+    }
+
+    let selected = if let Some(name) = device {
+        // Match by UDID or name (exact first, then case-insensitive contains)
+        devices
+            .iter()
+            .find(|d| d.id == name || d.name == name)
+            .or_else(|| devices.iter().find(|d| d.name.eq_ignore_ascii_case(name)))
+            .cloned()
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "No iOS simulator matched '{}'. Run `alex run ios` to pick interactively.",
+                    name
+                )
+            })?
+    } else {
+        pick_device(&devices, "iOS")?
+    };
+
+    output::info(&format!(
+        "Target: {} ({}, {})",
+        selected.name, selected.detail, selected.state
+    ));
+    output::blank();
+
+    // Boot the simulator if it isn't already booted.
+    if selected.state != "Booted" {
+        output::step(1, 4, &format!("Booting {}", selected.name));
+        boot_simulator(&selected.id)?;
+    } else {
+        output::step(1, 4, &format!("{} already booted", selected.name));
+    }
+    // Bring the Simulator window forward (best-effort).
+    let _ = runner::run_silent(&ctx.root, "open", &["-a", "Simulator"]);
+
+    // Build the app for the simulator target.
+    output::step(2, 4, "Building for iOS simulator");
+    let app_path = build_ios_sim_app(ctx, release)?;
+
+    // Install and launch.
+    output::step(3, 4, "Installing app");
+    let udid = &selected.id;
+    let app_str = app_path.to_string_lossy();
+    runner::run_step(&ctx.root, "xcrun", &["simctl", "install", udid, &app_str])?;
+
+    output::step(4, 4, "Launching app");
+    runner::run_step(
+        &ctx.root,
+        "xcrun",
+        &["simctl", "launch", udid, IOS_BUNDLE_ID],
+    )?;
+
+    output::blank();
+    output::success(&format!("Alexandria launched on {}", selected.name));
+    Ok(())
+}
+
+/// Fallback to Tauri's native `cargo tauri ios dev` flow (physical device or --open).
+fn run_ios_tauri_dev(
+    ctx: &ProjectContext,
+    device: Option<&str>,
+    open: bool,
+    release: bool,
+    include_physical: bool,
+) -> Result<()> {
     let device_name = if let Some(name) = device {
         name.to_string()
     } else {
-        // List devices and let user pick
         output::info("Scanning for iOS simulators and devices...");
         output::blank();
-
-        let devices = list_ios_devices()?;
+        let devices = list_ios_devices(include_physical)?;
         if devices.is_empty() {
-            bail!(
-                "No iOS simulators or devices found.\n\
-                 Install simulators via Xcode > Settings > Platforms."
-            );
+            bail!("No iOS simulators or devices found.");
         }
-
         let selected = pick_device(&devices, "iOS")?;
         selected.name.clone()
     };
@@ -223,18 +301,68 @@ fn run_ios(ctx: &ProjectContext, device: Option<&str>, open: bool, release: bool
     output::blank();
 
     let mut args = vec!["tauri", "ios", "dev"];
+    args.extend(["--config", crate::tauri_config::IOS]);
     if open {
         args.push("--open");
     }
     if release {
         args.push("--release");
     }
-    // Device name is a positional argument for `cargo tauri ios dev`
-    let device_arg = device_name.clone();
-    args.push(&device_arg);
+    args.push(&device_name);
 
     runner::run_step(&ctx.root, "cargo", &args)?;
     Ok(())
+}
+
+/// Boot a simulator by UDID. Ignores "already booted" errors.
+fn boot_simulator(udid: &str) -> Result<()> {
+    let cwd = std::env::current_dir().unwrap_or_default();
+    match runner::run_silent(&cwd, "xcrun", &["simctl", "boot", udid]) {
+        Ok(_) => Ok(()),
+        Err(e) => {
+            let msg = e.to_string();
+            // simctl returns an error if the device is already booted — not fatal.
+            if msg.contains("Unable to boot device in current state: Booted")
+                || msg.contains("state: Booted")
+            {
+                Ok(())
+            } else {
+                bail!("Failed to boot simulator {}: {}", udid, msg)
+            }
+        }
+    }
+}
+
+/// Build the app for the iOS simulator (aarch64-sim). Returns the path to the
+/// .app bundle that can be passed to `xcrun simctl install`.
+fn build_ios_sim_app(ctx: &ProjectContext, release: bool) -> Result<std::path::PathBuf> {
+    let mut args = vec![
+        "tauri",
+        "ios",
+        "build",
+        "--config",
+        crate::tauri_config::IOS,
+        "--target",
+        "aarch64-sim",
+        "--features",
+        "tutoring-video-ios",
+    ];
+    if !release {
+        args.push("--debug");
+    }
+    runner::run_step(&ctx.root, "cargo", &args)?;
+
+    // Tauri places the simulator .app at src-tauri/gen/apple/build/arm64-sim/*.app
+    let build_dir = ctx.root.join("src-tauri/gen/apple/build/arm64-sim");
+    let mut apps = std::fs::read_dir(&build_dir)
+        .map_err(|e| anyhow::anyhow!("failed to read {}: {}", build_dir.display(), e))?
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("app"))
+        .map(|e| e.path())
+        .collect::<Vec<_>>();
+    apps.sort();
+    apps.pop()
+        .ok_or_else(|| anyhow::anyhow!("no .app bundle found in {}", build_dir.display()))
 }
 
 // ── Android ──────────────────────────────────────────────────────────
@@ -341,6 +469,7 @@ fn run_android(
     output::blank();
 
     let mut args = vec!["tauri", "android", "dev"];
+    args.extend(["--config", crate::tauri_config::ANDROID]);
     if open {
         args.push("--open");
     }
@@ -350,7 +479,10 @@ fn run_android(
     let device_arg = device_name.clone();
     args.push(&device_arg);
 
-    runner::run_step(&ctx.root, "cargo", &args)?;
+    // Set up the NDK cross-compile env before invoking Tauri so opus-sys /
+    // openssl-sys can find the toolchain (matches mobile CI).
+    let env = crate::android_env::AndroidEnv::detect()?.env_vars();
+    runner::run_step_with_env(&ctx.root, "cargo", &args, &env)?;
     Ok(())
 }
 

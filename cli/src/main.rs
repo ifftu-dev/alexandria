@@ -1,7 +1,9 @@
+mod android_env;
 mod commands;
 mod context;
 mod output;
 mod runner;
+mod tauri_config;
 
 use std::path::PathBuf;
 

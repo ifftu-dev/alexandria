@@ -5,15 +5,23 @@ use std::process::{Command, ExitStatus, Stdio};
 use std::time::Duration;
 
 /// Run a command with real-time output streaming, returning its exit status.
-pub fn run(dir: &Path, program: &str, args: &[&str]) -> Result<ExitStatus> {
-    let status = Command::new(program)
-        .args(args)
+/// Extra `env` pairs are layered on top of the inherited environment.
+fn run_with_env(
+    dir: &Path,
+    program: &str,
+    args: &[&str],
+    env: &[(String, String)],
+) -> Result<ExitStatus> {
+    let mut cmd = Command::new(program);
+    cmd.args(args)
         .current_dir(dir)
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .status()?;
-    Ok(status)
+        .stderr(Stdio::inherit());
+    for (k, v) in env {
+        cmd.env(k, v);
+    }
+    Ok(cmd.status()?)
 }
 
 /// Run a command silently, capturing its output.
@@ -36,7 +44,17 @@ pub fn run_silent(dir: &Path, program: &str, args: &[&str]) -> Result<String> {
 
 /// Run a command and bail if it fails, with a step message.
 pub fn run_step(dir: &Path, program: &str, args: &[&str]) -> Result<()> {
-    let status = run(dir, program, args)?;
+    run_step_with_env(dir, program, args, &[])
+}
+
+/// Run a command with extra environment variables and bail if it fails.
+pub fn run_step_with_env(
+    dir: &Path,
+    program: &str,
+    args: &[&str],
+    env: &[(String, String)],
+) -> Result<()> {
+    let status = run_with_env(dir, program, args, env)?;
     if !status.success() {
         bail!(
             "`{} {}` failed with exit code {}",
