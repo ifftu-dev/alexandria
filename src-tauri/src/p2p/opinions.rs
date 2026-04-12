@@ -248,9 +248,9 @@ pub fn promote_pending_opinions(db: &Database) -> Result<u32, String> {
     let rows: Vec<(String, String, String, String)> = stmt
         .query_map([], |row| {
             Ok((
-                row.get::<_, String>(0)?,              // id
-                row.get::<_, String>(2)?,              // subject_field_id
-                row.get::<_, String>(8)?,              // credential_proof_ids_json
+                row.get::<_, String>(0)?,                              // id
+                row.get::<_, String>(2)?,                              // subject_field_id
+                row.get::<_, String>(8)?,                              // credential_proof_ids_json
                 row.get::<_, Option<String>>(10)?.unwrap_or_default(), // public_key
             ))
         })
@@ -260,8 +260,7 @@ pub fn promote_pending_opinions(db: &Database) -> Result<u32, String> {
 
     let mut promoted = 0_u32;
     for (opinion_id, subject_field_id, proof_ids_json, _pk) in rows {
-        let proof_ids: Vec<String> =
-            serde_json::from_str(&proof_ids_json).unwrap_or_default();
+        let proof_ids: Vec<String> = serde_json::from_str(&proof_ids_json).unwrap_or_default();
         let mut qualifies = false;
         for pid in &proof_ids {
             let ok: i64 = db
@@ -325,8 +324,8 @@ fn verify_payload_signature(
     }
     let mut pk_bytes = [0u8; 32];
     pk_bytes.copy_from_slice(&message.public_key);
-    let verifying_key = VerifyingKey::from_bytes(&pk_bytes)
-        .map_err(|e| format!("parse verifying key: {e}"))?;
+    let verifying_key =
+        VerifyingKey::from_bytes(&pk_bytes).map_err(|e| format!("parse verifying key: {e}"))?;
 
     if message.signature.len() != 64 {
         return Err("envelope signature is not 64 bytes".into());

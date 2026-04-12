@@ -140,7 +140,9 @@ pub async fn search_catalog(
                 received_at: row.get(10)?,
                 pinned: pinned_int != 0,
                 on_chain_tx: row.get(12)?,
-                kind: row.get::<_, Option<String>>(13)?.unwrap_or_else(|| "course".into()),
+                kind: row
+                    .get::<_, Option<String>>(13)?
+                    .unwrap_or_else(|| "course".into()),
             })
         })
         .map_err(|e| e.to_string())?
@@ -292,7 +294,9 @@ pub async fn get_catalog_entry(
                 received_at: row.get(10)?,
                 pinned: pinned_int != 0,
                 on_chain_tx: row.get(12)?,
-                kind: row.get::<_, Option<String>>(13)?.unwrap_or_else(|| "course".into()),
+                kind: row
+                    .get::<_, Option<String>>(13)?
+                    .unwrap_or_else(|| "course".into()),
             })
         },
     );
