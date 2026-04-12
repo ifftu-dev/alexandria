@@ -598,6 +598,13 @@ pub fn run() {
             commands::courses::publish_course,
             commands::courses::publish_tutorial,
             commands::courses::fetch_course_document,
+            // Opinions (Field Commentary)
+            commands::opinions::publish_opinion,
+            commands::opinions::list_opinions,
+            commands::opinions::get_opinion,
+            commands::opinions::list_my_opinions,
+            commands::opinions::list_eligible_subject_fields_for_posting,
+            commands::opinions::withdraw_own_opinion,
             // Evidence
             commands::evidence::list_skill_proofs,
             commands::evidence::list_evidence,

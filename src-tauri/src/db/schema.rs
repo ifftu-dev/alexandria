@@ -28,6 +28,7 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (18, "onchain_governance_queue", MIGRATION_018),
     (19, "classroom_encryption", MIGRATION_019),
     (20, "tutorials_and_video_chapters", MIGRATION_020),
+    (21, "opinions", MIGRATION_021),
 ];
 
 const MIGRATION_001: &str = r#"
@@ -1036,4 +1037,80 @@ CREATE TABLE IF NOT EXISTS video_chapters (
 
 CREATE INDEX IF NOT EXISTS idx_video_chapters_element
     ON video_chapters(element_id, position);
+"#;
+
+const MIGRATION_021: &str = r#"
+-- ============================================================
+-- Migration 021: Opinions (Field Commentary)
+-- Scoped, credentialed video commentary from educators who hold
+-- at least one SkillProof (level >= apply) under the target
+-- subject_field. Not a social feed — opinions are chronological
+-- within a subject field, moderated by the subject's DAO via the
+-- existing evidence_challenges mechanism.
+--
+-- The `evidence_challenges.target_type` column is already TEXT
+-- with no CHECK constraint, so the new value 'opinion' requires
+-- no schema change — only code-level handling.
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS opinions (
+    id                    TEXT PRIMARY KEY,      -- blake2b(author_address + video_cid)
+    author_address        TEXT NOT NULL,          -- Cardano stake address
+    subject_field_id      TEXT NOT NULL REFERENCES subject_fields(id),
+    title                 TEXT NOT NULL,
+    summary               TEXT,                   -- soft limit 280 chars at app layer
+    video_cid             TEXT NOT NULL,          -- iroh BLAKE3 of video blob
+    thumbnail_cid         TEXT,
+    duration_seconds      INTEGER,
+    credential_proof_ids  TEXT NOT NULL,          -- JSON array of skill_proof IDs the author stakes
+    signature             TEXT NOT NULL,          -- Ed25519 over the canonical payload
+    public_key            TEXT,                   -- Ed25519 public key (hex) for verification
+    published_at          TEXT NOT NULL,
+    received_at           TEXT NOT NULL DEFAULT (datetime('now')),
+    withdrawn             INTEGER NOT NULL DEFAULT 0,
+    withdrawn_reason      TEXT,                   -- e.g. 'challenge_upheld'
+    on_chain_tx           TEXT                    -- optional: future DAO-attested anchor
+);
+
+CREATE INDEX IF NOT EXISTS idx_opinions_subject
+    ON opinions(subject_field_id, published_at DESC);
+CREATE INDEX IF NOT EXISTS idx_opinions_author
+    ON opinions(author_address);
+CREATE INDEX IF NOT EXISTS idx_opinions_withdrawn
+    ON opinions(withdrawn);
+
+-- Pending-verification queue for opinions whose referenced
+-- credential_proof_ids haven't synced to this node yet. When a new
+-- skill_proof arrives, we re-check the queue and promote matching
+-- opinions into the main `opinions` table.
+CREATE TABLE IF NOT EXISTS opinions_pending_verification (
+    id                    TEXT PRIMARY KEY,
+    author_address        TEXT NOT NULL,
+    subject_field_id      TEXT NOT NULL,
+    title                 TEXT NOT NULL,
+    summary               TEXT,
+    video_cid             TEXT NOT NULL,
+    thumbnail_cid         TEXT,
+    duration_seconds      INTEGER,
+    credential_proof_ids  TEXT NOT NULL,
+    signature             TEXT NOT NULL,
+    public_key            TEXT,
+    published_at          TEXT NOT NULL,
+    queued_at             TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_opinions_pending_author
+    ON opinions_pending_verification(author_address);
+
+-- DAO-signed withdrawal list. When a challenge is upheld, the
+-- subject-field DAO publishes a record here which every receiving
+-- node honors by setting `opinions.withdrawn = 1` and unpinning the
+-- video blob. Best-effort takedown on a content-addressed network.
+CREATE TABLE IF NOT EXISTS opinion_withdrawals (
+    opinion_id      TEXT PRIMARY KEY,
+    dao_id          TEXT NOT NULL REFERENCES governance_daos(id),
+    reason          TEXT NOT NULL,               -- e.g. 'challenge_upheld', 'author_request'
+    dao_signature   TEXT NOT NULL,               -- DAO committee signature over the record
+    withdrawn_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
 "#;

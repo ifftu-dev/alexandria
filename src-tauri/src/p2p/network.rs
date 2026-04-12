@@ -1331,7 +1331,7 @@ mod tests {
         let status = node.status().await.expect("should get status");
         assert!(status.is_running);
         assert!(status.peer_id.is_some());
-        assert_eq!(status.subscribed_topics.len(), 6); // All 6 topics (5 app + 1 peer exchange)
+        assert_eq!(status.subscribed_topics.len(), 7); // 6 app topics (catalog, evidence, taxonomy, governance, profiles, opinions) + 1 peer exchange
         assert_eq!(status.connected_peers, 0); // No peers yet
         assert_eq!(status.nat_status, NatState::Unknown); // NAT unknown initially
         assert!(status.relay_addresses.is_empty()); // No relays yet

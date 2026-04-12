@@ -12,6 +12,7 @@ pub mod governance;
 pub mod health;
 pub mod identity;
 pub mod integrity;
+pub mod opinions;
 pub mod reputation;
 pub mod snapshot;
 pub mod taxonomy;

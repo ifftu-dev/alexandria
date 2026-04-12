@@ -8,6 +8,13 @@ pub const TOPIC_EVIDENCE: &str = "/alexandria/evidence/1.0";
 pub const TOPIC_TAXONOMY: &str = "/alexandria/taxonomy/1.0";
 pub const TOPIC_GOVERNANCE: &str = "/alexandria/governance/1.0";
 pub const TOPIC_PROFILES: &str = "/alexandria/profiles/1.0";
+/// Field Commentary opinions — credentialed-in-domain video takes.
+/// Receivers validate the envelope signature AND check that the
+/// author's referenced `skill_proof` IDs exist locally and cover at
+/// least one skill under the target `subject_field_id`. Opinions
+/// whose credentials haven't synced yet are held in
+/// `opinions_pending_verification`.
+pub const TOPIC_OPINIONS: &str = "/alexandria/opinions/1.0";
 /// Peer exchange topic — nodes broadcast their PeerId + listen addresses
 /// so that peers-of-peers can discover each other transitively.
 pub const TOPIC_PEER_EXCHANGE: &str = "/alexandria/peer-exchange/1.0";
@@ -19,6 +26,7 @@ pub const ALL_TOPICS: &[&str] = &[
     TOPIC_TAXONOMY,
     TOPIC_GOVERNANCE,
     TOPIC_PROFILES,
+    TOPIC_OPINIONS,
     TOPIC_PEER_EXCHANGE,
 ];
 

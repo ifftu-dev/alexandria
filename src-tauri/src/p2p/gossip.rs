@@ -3,8 +3,8 @@ use ed25519_dalek::SigningKey;
 use super::network::{NetworkError, P2pNode};
 use super::signing::sign_gossip_message;
 use super::types::{
-    SignedGossipMessage, TOPIC_CATALOG, TOPIC_EVIDENCE, TOPIC_GOVERNANCE, TOPIC_PROFILES,
-    TOPIC_TAXONOMY,
+    SignedGossipMessage, TOPIC_CATALOG, TOPIC_EVIDENCE, TOPIC_GOVERNANCE, TOPIC_OPINIONS,
+    TOPIC_PROFILES, TOPIC_TAXONOMY,
 };
 
 /// High-level gossip operations for publishing typed messages.
@@ -71,6 +71,17 @@ impl P2pNode {
         stake_address: &str,
     ) -> Result<(), NetworkError> {
         self.sign_and_publish(TOPIC_PROFILES, payload, signing_key, stake_address)
+            .await
+    }
+
+    /// Publish a Field Commentary opinion to the opinions topic.
+    pub async fn publish_opinion(
+        &self,
+        payload: Vec<u8>,
+        signing_key: &SigningKey,
+        stake_address: &str,
+    ) -> Result<(), NetworkError> {
+        self.sign_and_publish(TOPIC_OPINIONS, payload, signing_key, stake_address)
             .await
     }
 
