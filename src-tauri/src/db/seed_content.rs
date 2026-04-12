@@ -218,6 +218,36 @@ const REMOTE_SEED_ASSETS: &[RemoteSeedAsset] = &[
         element_id: "el_ux_3_3",
         url: "https://www.rfc-editor.org/rfc/rfc8259.txt",
     },
+
+    // ── Tutorial videos (kind='tutorial' courses from BACKFILL_SQL) ─
+    // Reuse reliable W3C + MDN CC-licensed clips. The same URL is fine
+    // across multiple tutorials — the cache in seed_content_if_needed
+    // dedups by URL so the blob is downloaded once per unique URL.
+    RemoteSeedAsset {
+        // Big-O in 8 Minutes — Big Buck Bunny trailer as a stand-in
+        element_id: "el_tut_bigO_video",
+        url: "https://media.w3.org/2010/05/bunny/trailer.mp4",
+    },
+    RemoteSeedAsset {
+        // Async/Await Quick Tour — W3C short test clip
+        element_id: "el_tut_asyncawait_video",
+        url: "https://media.w3.org/2010/05/video/movie_300.mp4",
+    },
+    RemoteSeedAsset {
+        // Linear Regression from First Principles — MDN flower
+        element_id: "el_tut_ml_regression_video",
+        url: "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4",
+    },
+    RemoteSeedAsset {
+        // AES Walkthrough — Sintel trailer
+        element_id: "el_tut_aes_video",
+        url: "https://media.w3.org/2010/05/sintel/trailer.mp4",
+    },
+    RemoteSeedAsset {
+        // Running a Good User Interview — MDN friday
+        element_id: "el_tut_ux_interviews_video",
+        url: "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/friday.mp4",
+    },
 ];
 
 // The SEED_CONTENT constant lives in seed_content_data.rs so the CLI
