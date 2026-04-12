@@ -63,6 +63,26 @@ const router = createRouter({
       meta: { layout: 'app' },
     },
 
+    // Opinions (Field Commentary — credentialed video takes)
+    {
+      path: '/opinions',
+      name: 'opinions',
+      component: () => import('@/pages/opinions/Index.vue'),
+      meta: { layout: 'app' },
+    },
+    {
+      path: '/opinions/new',
+      name: 'opinion-create',
+      component: () => import('@/pages/opinions/New.vue'),
+      meta: { layout: 'app' },
+    },
+    {
+      path: '/opinions/:id',
+      name: 'opinion-detail',
+      component: () => import('@/pages/opinions/Detail.vue'),
+      meta: { layout: 'app' },
+    },
+
     // Learning player
     {
       path: '/learn/:id',
