@@ -186,8 +186,8 @@ pub async fn publish_opinion(
         };
 
         // Sign the canonical JSON
-        let payload_bytes = serde_json::to_vec(&payload)
-            .map_err(|e| format!("serialize opinion payload: {e}"))?;
+        let payload_bytes =
+            serde_json::to_vec(&payload).map_err(|e| format!("serialize opinion payload: {e}"))?;
         let signature = ed25519_dalek::Signer::sign(&w.signing_key, &payload_bytes);
         let signature_hex = hex::encode(signature.to_bytes());
         let public_key_hex = hex::encode(w.signing_key.verifying_key().to_bytes());

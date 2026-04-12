@@ -157,8 +157,7 @@ mod tests {
     fn sample_announcement() -> OpinionAnnouncement {
         OpinionAnnouncement {
             opinion_id: "op_test_001".into(),
-            author_address: "stake_test1uqfu74w3wh4gfzu8m6e7j987h4lq9r3t7ef5gaw497uu85qsqfy"
-                .into(),
+            author_address: "stake_test1uqfu74w3wh4gfzu8m6e7j987h4lq9r3t7ef5gaw497uu85qsqfy".into(),
             subject_field_id: "sf_cs".into(),
             title: "Why functional-first is the wrong default for CS1".into(),
             summary: Some("A counter-take to Racket-first curricula.".into()),

@@ -74,7 +74,9 @@ pub async fn list_courses(
                 on_chain_tx: row.get(13)?,
                 created_at: row.get(14)?,
                 updated_at: row.get(15)?,
-                kind: row.get::<_, Option<String>>(16)?.unwrap_or_else(|| "course".into()),
+                kind: row
+                    .get::<_, Option<String>>(16)?
+                    .unwrap_or_else(|| "course".into()),
             })
         })
         .map_err(|e| e.to_string())?
