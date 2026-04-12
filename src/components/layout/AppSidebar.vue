@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import SidebarSkillGraph from '@/components/layout/SidebarSkillGraph.vue'
+import TickerText from '@/components/layout/TickerText.vue'
 import { useTutoringRoom } from '@/composables/useTutoringRoom'
 import { useClassroom } from '@/composables/useClassroom'
 
@@ -177,8 +178,8 @@ const classroomPreviews = computed(() =>
               @click="navigate(`/tutoring/${session.id}`)"
             >
               <div class="sb-avatar">{{ session.initials }}</div>
-              <div class="min-w-0 flex-1">
-                <span class="sb-preview-title">{{ session.title }}</span>
+              <div class="min-w-0 flex-1 sb-preview-title-slot">
+                <TickerText class="sb-preview-title" :text="session.title" />
               </div>
               <!-- Active: pulsing green dot -->
               <span v-if="session.status === 'active'" class="sb-status-icon" title="Active"><span class="sb-live-dot" style="background: #22c55e" /><span class="sb-live-dot-ping" style="background: #22c55e" /></span>
@@ -257,10 +258,8 @@ const classroomPreviews = computed(() =>
               @click="navigate(`/classrooms/${classroom.id}`)"
             >
               <div class="sb-avatar sb-avatar--classroom">{{ classroom.initial }}</div>
-              <div class="min-w-0 flex-1">
-                <div class="flex items-center gap-1.5">
-                  <span class="sb-preview-title">{{ classroom.name }}</span>
-                </div>
+              <div class="min-w-0 flex-1 sb-preview-title-slot">
+                <TickerText class="sb-preview-title" :text="classroom.name" />
                 <span class="sb-preview-meta">{{ classroom.member_count }} members</span>
               </div>
             </button>
@@ -368,15 +367,21 @@ const classroomPreviews = computed(() =>
   background: linear-gradient(135deg, var(--app-accent), var(--app-primary));
 }
 
+/* Title wraps the TickerText root. The ticker itself owns the
+   overflow-clipping and animation — these rules only set typography
+   and hover state. Width is constrained by the flex-1 slot above. */
 .sb-preview-title {
   font-size: 0.8125rem;
   font-weight: 600;
   color: var(--app-foreground);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 9rem;
   line-height: 1.3;
+}
+
+.sb-preview-title-slot {
+  /* Guard-rail: ensure the slot itself doesn't grow past the parent
+     flex container when the status icon / chevron is present. */
+  min-width: 0;
+  overflow: hidden;
 }
 
 .sb-preview-card:hover .sb-preview-title {
@@ -390,30 +395,6 @@ const classroomPreviews = computed(() =>
   font-size: 0.75rem;
   color: var(--app-muted-foreground);
   line-height: 1.2;
-}
-
-/* Marquee scroll for overflowing session topics */
-.sb-marquee-wrap {
-  display: block;
-  overflow: hidden;
-  white-space: nowrap;
-  max-width: 100%;
-  mask-image: linear-gradient(to right, black 0%, black 85%, transparent 100%);
-  -webkit-mask-image: linear-gradient(to right, black 0%, black 85%, transparent 100%);
-}
-
-.sb-marquee-text {
-  display: inline-block;
-  white-space: nowrap;
-}
-
-.sb-preview-card:hover .sb-marquee-text {
-  animation: sb-marquee 6s linear 0.4s infinite;
-}
-
-@keyframes sb-marquee {
-  0%   { transform: translateX(0); }
-  100% { transform: translateX(-100%); }
 }
 
 /* Status dots & icons */
