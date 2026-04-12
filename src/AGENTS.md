@@ -2,6 +2,10 @@
 
 **Generated:** 2026-03-20
 
+## Standing Instructions
+
+- **Documentation review after code changes**: After completing any code changes, always assess whether README and other docs need updating. Ask the user for permission before modifying any documentation files.
+
 ## Overview
 
 Vue 3 SPA frontend for the Tauri app. 13 composables, 10+ page directories, 965 TypeScript types.

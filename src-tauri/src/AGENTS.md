@@ -2,6 +2,10 @@
 
 **Generated:** 2026-03-20
 
+## Standing Instructions
+
+- **Documentation review after code changes**: After completing any code changes, always assess whether README and other docs need updating. Ask the user for permission before modifying any documentation files.
+
 ## Overview
 
 Rust backend for the Tauri v2 desktop/mobile app. 25 modules, 100+ files.
