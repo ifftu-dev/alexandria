@@ -64,6 +64,39 @@ export interface Course {
   on_chain_tx: string | null
   created_at: string
   updated_at: string
+  /** `"course"` or `"tutorial"`. Older peers may omit this — defaults to `"course"` on the backend side. */
+  kind: string
+}
+
+// ---- Tutorials (standalone video) ----
+
+export interface VideoChapterInput {
+  title: string
+  start_seconds: number
+}
+
+export interface TutorialQuizInput {
+  /** JSON body matching the existing quiz element format. */
+  content_json: string
+}
+
+export interface SkillTagInput {
+  skill_id: string
+  /** Weight in [0.0, 1.0]. Defaults to 1.0 at the DB layer. */
+  weight?: number | null
+}
+
+export interface PublishTutorialRequest {
+  title: string
+  description?: string | null
+  /** BLAKE3 content hash of the uploaded video blob (via `content_add`). */
+  video_content_hash: string
+  thumbnail_hash?: string | null
+  duration_seconds?: number | null
+  skill_tags: SkillTagInput[]
+  video_chapters?: VideoChapterInput[]
+  quiz?: TutorialQuizInput | null
+  tags?: string[]
 }
 
 export interface CreateCourseRequest {
@@ -432,6 +465,8 @@ export interface CatalogEntry {
   received_at: string
   pinned: boolean
   on_chain_tx: string | null
+  /** `"course"` or `"tutorial"`. Older announcements default to `"course"`. */
+  kind: string
 }
 
 // ---- Taxonomy ----
@@ -546,7 +581,7 @@ export interface SyncHistoryEntry {
 
 // ---- Challenge ----
 
-export type ChallengeTargetType = 'evidence' | 'skill_proof'
+export type ChallengeTargetType = 'evidence' | 'skill_proof' | 'opinion'
 export type ChallengeStatus = 'pending' | 'reviewing' | 'upheld' | 'rejected' | 'expired'
 
 export interface EvidenceChallenge {

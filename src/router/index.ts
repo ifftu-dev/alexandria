@@ -56,6 +56,12 @@ const router = createRouter({
       component: () => import('@/pages/instructor/CourseEdit.vue'),
       meta: { layout: 'app' },
     },
+    {
+      path: '/instructor/tutorials/new',
+      name: 'tutorial-create',
+      component: () => import('@/pages/instructor/TutorialNew.vue'),
+      meta: { layout: 'app' },
+    },
 
     // Learning player
     {
