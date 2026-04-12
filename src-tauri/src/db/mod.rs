@@ -119,8 +119,7 @@ impl Database {
         // will then create a fresh encrypted DB via open_encrypted, run migrations,
         // and the seed will re-populate it.
         if path.exists() {
-            std::fs::remove_file(path)
-                .map_err(|e| DbError::Io(e))?;
+            std::fs::remove_file(path).map_err(|e| DbError::Io(e))?;
             log::info!("removed plaintext database — will re-create as encrypted");
         }
         // Clean up any WAL/SHM files
