@@ -34,6 +34,14 @@ pub struct CourseDocumentPayload {
     pub created_at: i64,
     /// Unix timestamp of this publication.
     pub updated_at: i64,
+    /// Document kind: `"course"` (default) or `"tutorial"`. Serde default
+    /// keeps documents from older nodes parseable as regular courses.
+    #[serde(default = "default_kind")]
+    pub kind: String,
+}
+
+fn default_kind() -> String {
+    "course".to_string()
 }
 
 /// A chapter in the course document.
@@ -66,6 +74,23 @@ pub struct DocumentElement {
     pub content_hash: Option<String>,
     /// Duration in seconds (for video/audio elements).
     pub duration_seconds: Option<i64>,
+    /// Optional timestamp-based chapter markers for video elements.
+    /// Empty/absent for non-video elements or videos without chapters.
+    /// Serde-default keeps older documents parseable.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub video_chapters: Vec<VideoChapter>,
+}
+
+/// A single chapter marker within a video element (used for
+/// timestamp-based navigation in tutorials).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VideoChapter {
+    /// Chapter title (shown in the UI).
+    pub title: String,
+    /// Timestamp in seconds from the start of the video.
+    pub start_seconds: i64,
+    /// Display position / ordering (0-indexed).
+    pub position: i64,
 }
 
 /// A signed course document (payload + Ed25519 signature).
@@ -83,6 +108,8 @@ pub struct SignedCourseDocument {
     pub chapters: Vec<DocumentChapter>,
     pub created_at: i64,
     pub updated_at: i64,
+    #[serde(default = "default_kind")]
+    pub kind: String,
 
     // -- Cryptographic fields --
     /// Ed25519 signature over the payload JSON (hex-encoded, 128 chars).
@@ -106,6 +133,7 @@ impl SignedCourseDocument {
             chapters: self.chapters.clone(),
             created_at: self.created_at,
             updated_at: self.updated_at,
+            kind: self.kind.clone(),
         }
     }
 }
@@ -145,10 +173,12 @@ mod tests {
                     element_type: "text".into(),
                     content_hash: Some("hash1".into()),
                     duration_seconds: None,
+                    video_chapters: vec![],
                 }],
             }],
             created_at: 1700000000,
             updated_at: 1700100000,
+            kind: "course".into(),
             signature: "deadbeef".into(),
             public_key: "cafebabe".into(),
         }
@@ -192,6 +222,7 @@ mod tests {
             chapters: vec![],
             created_at: 0,
             updated_at: 0,
+            kind: "course".into(),
         };
         let json = serde_json::to_string(&payload).unwrap();
         let parsed: CourseDocumentPayload = serde_json::from_str(&json).unwrap();
@@ -214,6 +245,11 @@ mod tests {
                     element_type: "video".into(),
                     content_hash: Some("hash".into()),
                     duration_seconds: Some(300),
+                    video_chapters: vec![VideoChapter {
+                        title: "Intro".into(),
+                        start_seconds: 0,
+                        position: 0,
+                    }],
                 },
                 DocumentElement {
                     id: "el2".into(),
@@ -222,6 +258,7 @@ mod tests {
                     element_type: "assessment".into(),
                     content_hash: None,
                     duration_seconds: None,
+                    video_chapters: vec![],
                 },
             ],
         };

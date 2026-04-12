@@ -58,6 +58,7 @@ pub fn sign_course_document(
         chapters: payload.chapters.clone(),
         created_at: payload.created_at,
         updated_at: payload.updated_at,
+        kind: payload.kind.clone(),
         signature: hex::encode(signature.to_bytes()),
         public_key: hex::encode(public_key.to_bytes()),
     })
@@ -173,6 +174,7 @@ mod tests {
             thumbnail_hash: None,
             tags: vec!["algorithms".to_string(), "cs".to_string()],
             skill_ids: vec!["skill_001".to_string()],
+            kind: "course".to_string(),
             chapters: vec![DocumentChapter {
                 id: "ch_001".to_string(),
                 position: 0,
@@ -186,6 +188,7 @@ mod tests {
                         element_type: "video".to_string(),
                         content_hash: Some("a".repeat(64)),
                         duration_seconds: Some(1200),
+                        video_chapters: vec![],
                     },
                     DocumentElement {
                         id: "el_002".to_string(),
@@ -194,6 +197,7 @@ mod tests {
                         element_type: "quiz".to_string(),
                         content_hash: None,
                         duration_seconds: None,
+                        video_chapters: vec![],
                     },
                 ],
             }],

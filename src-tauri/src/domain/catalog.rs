@@ -53,6 +53,15 @@ pub struct CatalogAnnouncement {
     pub version: i64,
     /// Unix timestamp of publication.
     pub published_at: i64,
+    /// Discriminator: `"course"` (default) or `"tutorial"`. The default
+    /// preserves compatibility with announcements from older nodes that
+    /// predate the tutorials feature.
+    #[serde(default = "default_kind")]
+    pub kind: String,
+}
+
+fn default_kind() -> String {
+    "course".to_string()
 }
 
 /// A catalog entry as stored in the local `catalog` SQLite table.
@@ -74,4 +83,7 @@ pub struct CatalogEntry {
     pub received_at: String,
     pub pinned: bool,
     pub on_chain_tx: Option<String>,
+    /// `"course"` or `"tutorial"`.
+    #[serde(default = "default_kind")]
+    pub kind: String,
 }

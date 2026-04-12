@@ -76,21 +76,30 @@ pub fn create_evidence_for_element(
         return Ok(vec![]);
     }
 
-    // Get the instructor (course author) address
-    let instructor_address: Option<String> = conn
+    // Get the instructor (course author) address and course kind
+    // (tutorials earn a lower trust_factor than full courses — see
+    // migration 020 and publish_tutorial).
+    let (instructor_address, course_kind): (Option<String>, String) = conn
         .query_row(
-            "SELECT author_address FROM courses WHERE id = ?1",
+            "SELECT author_address, kind FROM courses WHERE id = ?1",
             params![course_id],
-            |row| row.get(0),
+            |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, Option<String>>(1)?
+                        .unwrap_or_else(|| "course".into()),
+                ))
+            },
         )
-        .ok();
+        .unwrap_or((None, "course".into()));
 
     let mut evaluated_skills = Vec::new();
     let now = chrono::Utc::now().to_rfc3339();
 
     for (skill_id, _tag_weight) in &skill_tags {
         // Find or auto-create a skill_assessment for (course, element, skill)
-        let assessment_id = find_or_create_assessment(conn, course_id, element_id, skill_id)?;
+        let assessment_id =
+            find_or_create_assessment(conn, course_id, element_id, skill_id, &course_kind)?;
 
         // Get assessment details for denormalization
         let (difficulty, trust_factor, weight, proficiency_level, assessment_type): (
@@ -153,12 +162,21 @@ pub fn create_evidence_for_element(
 /// Find or auto-create a skill assessment for (course, element, skill).
 ///
 /// Defaults: proficiency_level=apply, assessment_type=quiz,
-/// difficulty=0.50, weight=1.0, trust_factor=1.0
+/// difficulty=0.50, weight=1.0. `trust_factor` depends on `course_kind`:
+///   - `"course"`   → 1.0 (a proctored course assessment)
+///   - `"tutorial"` → 0.6 (a drive-by end-of-video check)
+///
+/// The intent is that 20 tutorial drive-by quizzes should not sum to
+/// the same evidence as a full course assessment. This is the sole
+/// point in the evidence pipeline where `kind` has runtime effect —
+/// everything downstream (aggregation, proof confidence, reputation)
+/// is driven by the assessment's trust_factor column.
 fn find_or_create_assessment(
     conn: &Connection,
     course_id: &str,
     element_id: &str,
     skill_id: &str,
+    course_kind: &str,
 ) -> Result<String, String> {
     // Try to find existing
     let existing: Option<String> = conn
@@ -174,14 +192,19 @@ fn find_or_create_assessment(
         return Ok(id);
     }
 
+    let trust_factor: f64 = match course_kind {
+        "tutorial" => 0.6,
+        _ => 1.0,
+    };
+
     // Auto-create with defaults
     let id = entity_id(&[course_id, element_id, skill_id]);
     conn.execute(
         "INSERT INTO skill_assessments \
          (id, skill_id, course_id, source_element_id, assessment_type, \
           proficiency_level, difficulty, weight, trust_factor) \
-         VALUES (?1, ?2, ?3, ?4, 'quiz', 'apply', 0.50, 1.0, 1.0)",
-        params![id, skill_id, course_id, element_id],
+         VALUES (?1, ?2, ?3, ?4, 'quiz', 'apply', 0.50, 1.0, ?5)",
+        params![id, skill_id, course_id, element_id, trust_factor],
     )
     .map_err(|e| e.to_string())?;
 

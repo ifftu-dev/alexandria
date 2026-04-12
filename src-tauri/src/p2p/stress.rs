@@ -307,6 +307,7 @@ mod tests {
                 &[],
                 &[],
                 1,
+                "course",
             );
             let msg = signed_catalog_msg(&key, &ann);
             handle_catalog_message(&db, &msg).unwrap();
@@ -343,6 +344,7 @@ mod tests {
             &[],
             &[],
             1,
+            "course",
         );
 
         for _ in 0..100 {
@@ -384,6 +386,7 @@ mod tests {
                 &[],
                 &[],
                 *version,
+                "course",
             );
             let msg = signed_catalog_msg(&key, &ann);
             handle_catalog_message(&db, &msg).unwrap();
@@ -1391,6 +1394,7 @@ mod tests {
             skill_ids: vec![],
             version: 1,
             published_at: now_secs() as i64,
+            kind: "course".into(),
         };
         let msg = signed_catalog_msg(&key, &ann);
         assert!(handle_catalog_message(&db, &msg).is_err());
@@ -1407,6 +1411,7 @@ mod tests {
             skill_ids: vec![],
             version: 1,
             published_at: now_secs() as i64,
+            kind: "course".into(),
         };
         let msg2 = signed_catalog_msg(&key, &ann2);
         assert!(handle_catalog_message(&db, &msg2).is_err());
@@ -1632,6 +1637,7 @@ mod tests {
             &[],
             &[],
             1,
+            "course",
         );
         let payload = serde_json::to_vec(&ann).unwrap();
         let publish_result = timeout(Duration::from_secs(5), async {
