@@ -57,7 +57,13 @@ onMounted(async () => {
       </div>
 
       <!-- Stats pills (glassmorphism overlay) -->
-      <div v-if="course.tags?.length" class="cc-stats">
+      <div v-if="course.tags?.length || course.kind === 'tutorial'" class="cc-stats">
+        <span v-if="course.kind === 'tutorial'" class="cc-stats__pill cc-stats__pill--tutorial">
+          <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M8 5v14l11-7z" />
+          </svg>
+          Tutorial
+        </span>
         <span class="cc-stats__pill">
           v{{ course.version }}
         </span>
@@ -200,6 +206,10 @@ onMounted(async () => {
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   border-radius: 0.375rem;
+}
+
+.cc-stats__pill--tutorial {
+  background: color-mix(in srgb, var(--app-primary) 85%, black);
 }
 
 /* Body */
