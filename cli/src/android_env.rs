@@ -237,6 +237,10 @@ fn shim_dir() -> Result<PathBuf> {
 /// `aarch64-linux-android-{ar,ranlib,strip,nm}` → `<bin>/llvm-<tool>` etc.
 /// Idempotent: existing correct symlinks are left alone.
 fn populate_shim_dir(shim: &Path, toolchain_bin: &Path) -> Result<()> {
+    // Announce first-time creation so users know where we're writing.
+    if !shim.exists() {
+        eprintln!("  ℹ Creating NDK tool shims at {}", shim.display());
+    }
     std::fs::create_dir_all(shim)
         .with_context(|| format!("failed to create shim dir {}", shim.display()))?;
 

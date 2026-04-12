@@ -302,6 +302,11 @@ fn run_ios_tauri_dev(
 
     let mut args = vec!["tauri", "ios", "dev"];
     args.extend(["--config", crate::tauri_config::IOS]);
+    // `--config` alone does not propagate `build.features` into the Rust
+    // compile step in `cargo tauri ios dev` (verified empirically — the
+    // compile invocation ends up with `--features ""` otherwise). Pass
+    // the feature explicitly so iroh-live's iOS media path compiles.
+    args.extend(["--features", "tutoring-video-ios"]);
     if open {
         args.push("--open");
     }
@@ -470,6 +475,10 @@ fn run_android(
 
     let mut args = vec!["tauri", "android", "dev"];
     args.extend(["--config", crate::tauri_config::ANDROID]);
+    // Force the Android-specific tutoring feature through to cargo —
+    // `--config` alone doesn't propagate `build.features` into the
+    // Rust compile step in `cargo tauri android dev` (same caveat as iOS).
+    args.extend(["--features", "tutoring-video-android"]);
     if open {
         args.push("--open");
     }

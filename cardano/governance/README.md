@@ -2,6 +2,8 @@
 
 On-chain governance for the Alexandria learning platform, implementing whitepaper Section 4. Written in [Aiken](https://aiken-lang.org) v1.1.21 targeting Plutus v3 (Conway era).
 
+> **⚠ Status: compiled but not deployed.** The validators below are built and their hashes are hardcoded in `src-tauri/src/cardano/script_refs.rs`, but the reference UTxOs are still `DEPLOY_PENDING`. Until someone runs [`deploy_reference_scripts.sh`](#deploying-to-preprod) and updates `script_refs.rs`, `cardano::gov_tx_builder::validators_deployed()` returns `false` and the on-chain governance queue silently skips every item — nothing actually hits the chain. The off-chain lifecycle (DAOs, elections, proposals in SQLite, P2P gossip) works regardless; only Cardano-side settlement is gated on deployment.
+
 ## Validators
 
 | Validator | Purpose |
