@@ -15,7 +15,7 @@ use std::time::Duration;
 use libp2p::gossipsub::{IdentTopic, PeerScoreParams, PeerScoreThresholds, TopicScoreParams};
 
 use super::types::{
-    TOPIC_CATALOG, TOPIC_EVIDENCE, TOPIC_GOVERNANCE, TOPIC_PROFILES, TOPIC_TAXONOMY,
+    TOPIC_CATALOG, TOPIC_EVIDENCE, TOPIC_GOVERNANCE, TOPIC_OPINIONS, TOPIC_PROFILES, TOPIC_TAXONOMY,
 };
 
 /// Build Alexandria-specific GossipSub peer score parameters.
@@ -45,6 +45,10 @@ pub fn build_peer_score_params() -> PeerScoreParams {
     topics.insert(
         IdentTopic::new(TOPIC_PROFILES).hash(),
         topic_params_profiles(),
+    );
+    topics.insert(
+        IdentTopic::new(TOPIC_OPINIONS).hash(),
+        topic_params_opinions(),
     );
 
     PeerScoreParams {
@@ -248,6 +252,41 @@ fn topic_params_profiles() -> TopicScoreParams {
     }
 }
 
+/// Opinions topic scoring — Field Commentary videos.
+///
+/// Tighter than catalog: opinions are cheaper to produce (no course
+/// structure, no chapters) and therefore a more attractive spam
+/// target. Higher invalid-message weight reflects the fact that an
+/// invalid opinion (failed credential check, bad signature) is a
+/// clear protocol violation.
+fn topic_params_opinions() -> TopicScoreParams {
+    TopicScoreParams {
+        topic_weight: 0.4,
+        // P1: time in mesh — same as catalog
+        time_in_mesh_weight: 0.5,
+        time_in_mesh_quantum: Duration::from_secs(1),
+        time_in_mesh_cap: 100.0,
+        // P2: first-delivery rewards — modest
+        first_message_deliveries_weight: 1.5,
+        first_message_deliveries_decay: 0.9,
+        first_message_deliveries_cap: 30.0,
+        // P3: mesh deliveries
+        mesh_message_deliveries_weight: -0.5,
+        mesh_message_deliveries_decay: 0.9,
+        mesh_message_deliveries_cap: 15.0,
+        mesh_message_deliveries_threshold: 1.0,
+        mesh_message_deliveries_window: Duration::from_millis(500),
+        mesh_message_deliveries_activation: Duration::from_secs(30),
+        // P3b
+        mesh_failure_penalty_weight: -0.5,
+        mesh_failure_penalty_decay: 0.9,
+        // P4: stronger than catalog — invalid opinions (bad credentials,
+        // unknown subject_field, or bad signature) are a clear attack.
+        invalid_message_deliveries_weight: -20.0,
+        invalid_message_deliveries_decay: 0.5,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -268,12 +307,12 @@ mod tests {
     }
 
     #[test]
-    fn all_five_topics_have_params() {
+    fn all_scored_topics_have_params() {
         let params = build_peer_score_params();
         assert_eq!(
             params.topics.len(),
-            5,
-            "should have params for all 5 topics"
+            6,
+            "should have params for all 6 scored topics (5 originals + opinions)"
         );
     }
 

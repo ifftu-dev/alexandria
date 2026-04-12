@@ -18,6 +18,10 @@ pub const CHALLENGE_DEADLINE_DAYS: i64 = 30;
 pub enum ChallengeTargetType {
     Evidence,
     SkillProof,
+    /// A posted opinion (Field Commentary video). Upheld challenges mark
+    /// the opinion `withdrawn=1` and instruct well-behaved nodes to
+    /// unpin the video blob.
+    Opinion,
 }
 
 impl ChallengeTargetType {
@@ -25,6 +29,7 @@ impl ChallengeTargetType {
         match self {
             ChallengeTargetType::Evidence => "evidence",
             ChallengeTargetType::SkillProof => "skill_proof",
+            ChallengeTargetType::Opinion => "opinion",
         }
     }
 
@@ -33,6 +38,7 @@ impl ChallengeTargetType {
         match s {
             "evidence" => Some(Self::Evidence),
             "skill_proof" => Some(Self::SkillProof),
+            "opinion" => Some(Self::Opinion),
             _ => None,
         }
     }

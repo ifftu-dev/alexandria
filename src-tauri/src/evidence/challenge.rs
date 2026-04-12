@@ -381,6 +381,11 @@ fn get_skill_ids_for_targets(
                     }
                 }
             }
+            // Opinions are scoped to a subject_field rather than a
+            // skill. No skill IDs contribute to reputation zeroing on
+            // an upheld opinion challenge — the reputation callback
+            // is simply skipped.
+            "opinion" => {}
             _ => {}
         }
     }
@@ -429,6 +434,25 @@ pub fn invalidate_evidence(
                 // Delete the proof
                 let affected = conn
                     .execute("DELETE FROM skill_proofs WHERE id = ?1", params![tid])
+                    .map_err(|e| e.to_string())?;
+                deleted += affected as i64;
+            }
+            "opinion" => {
+                // Opinions are content-addressed (video blob on iroh), so
+                // "deletion" is actually a withdraw flag. We flip
+                // `opinions.withdrawn=1` so the UI hides it, and leave
+                // the row in place so the node can honor the DAO-signed
+                // `opinion_withdrawals` takedown list the next time it
+                // propagates. Unpinning the blob is handled separately
+                // by the storage sweeper (pin_type='course' entry keyed
+                // on the video_cid).
+                let affected = conn
+                    .execute(
+                        "UPDATE opinions \
+                         SET withdrawn = 1, withdrawn_reason = 'challenge_upheld' \
+                         WHERE id = ?1",
+                        params![tid],
+                    )
                     .map_err(|e| e.to_string())?;
                 deleted += affected as i64;
             }
