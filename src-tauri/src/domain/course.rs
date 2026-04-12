@@ -19,6 +19,14 @@ pub struct Course {
     pub on_chain_tx: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+    /// `"course"` or `"tutorial"`. Defaults to `"course"` for rows
+    /// that predate migration 020.
+    #[serde(default = "default_course_kind")]
+    pub kind: String,
+}
+
+fn default_course_kind() -> String {
+    "course".to_string()
 }
 
 /// Request to create a new course.
@@ -95,4 +103,59 @@ pub struct UpdateElementRequest {
     pub content_hash: Option<String>,
     pub position: Option<i64>,
     pub duration_seconds: Option<i64>,
+}
+
+/// A single video chapter marker (title + start second), used when
+/// creating a tutorial so the timestamp navigation is authored in the
+/// same call as the tutorial itself.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VideoChapterInput {
+    pub title: String,
+    pub start_seconds: i64,
+}
+
+/// Optional end-of-video quiz attached to a tutorial. When present,
+/// it becomes a second `course_elements` row of `element_type='quiz'`
+/// with the same skill tags — this is what lets watching + passing
+/// the quiz feed the evidence pipeline.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TutorialQuizInput {
+    /// Quiz body — JSON matching the existing quiz element format
+    /// (questions, options, correct answers). Stored inline in the
+    /// `course_elements.content_inline` column.
+    pub content_json: String,
+}
+
+/// Skill tag on a tutorial: a skill ID plus the weight with which
+/// completing the tutorial contributes to evidence for that skill.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SkillTagInput {
+    pub skill_id: String,
+    /// Weight in [0.0, 1.0]. Defaults to 1.0 at the DB layer.
+    pub weight: Option<f64>,
+}
+
+/// Everything needed to publish a standalone video tutorial in one shot.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PublishTutorialRequest {
+    pub title: String,
+    pub description: Option<String>,
+    /// BLAKE3 content hash of the uploaded video blob (produced via
+    /// `content_add`). Must already exist in the iroh store.
+    pub video_content_hash: String,
+    /// Optional BLAKE3 thumbnail hash.
+    pub thumbnail_hash: Option<String>,
+    /// Video duration in seconds (for UI display + trust_factor logic).
+    pub duration_seconds: Option<i64>,
+    /// At least one skill tag is required — a tutorial without a
+    /// skill is just a video, not a learning artefact.
+    pub skill_tags: Vec<SkillTagInput>,
+    /// Optional chapter markers for timestamp navigation.
+    #[serde(default)]
+    pub video_chapters: Vec<VideoChapterInput>,
+    /// Optional end-of-video quiz (grants partial skill evidence on pass).
+    pub quiz: Option<TutorialQuizInput>,
+    /// Free-text tags for discovery.
+    #[serde(default)]
+    pub tags: Vec<String>,
 }

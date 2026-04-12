@@ -87,8 +87,8 @@ pub fn handle_catalog_message(
     db.conn()
         .execute(
             "INSERT INTO catalog (course_id, title, description, author_address, content_cid, \
-             thumbnail_cid, tags, skill_ids, version, published_at, signature) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11) \
+             thumbnail_cid, tags, skill_ids, version, published_at, signature, kind) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12) \
              ON CONFLICT(course_id) DO UPDATE SET \
              title = excluded.title, \
              description = excluded.description, \
@@ -99,7 +99,8 @@ pub fn handle_catalog_message(
              version = excluded.version, \
              published_at = excluded.published_at, \
              received_at = datetime('now'), \
-             signature = excluded.signature",
+             signature = excluded.signature, \
+             kind = excluded.kind",
             params![
                 announcement.course_id,
                 announcement.title,
@@ -112,6 +113,7 @@ pub fn handle_catalog_message(
                 announcement.version,
                 published_at,
                 signature_hex,
+                announcement.kind,
             ],
         )
         .map_err(|e| format!("failed to upsert catalog entry: {e}"))?;
@@ -149,6 +151,7 @@ pub fn build_catalog_announcement(
     tags: &[String],
     skill_ids: &[String],
     version: i64,
+    kind: &str,
 ) -> CatalogAnnouncement {
     // Spec: course_id = blake2b(author_address + content_cid)
     let course_id = entity_id(&[author_address, content_cid]);
@@ -169,6 +172,7 @@ pub fn build_catalog_announcement(
         skill_ids: skill_ids.to_vec(),
         version,
         published_at,
+        kind: kind.to_string(),
     }
 }
 
@@ -191,8 +195,8 @@ pub fn insert_own_catalog_entry(
     db.conn()
         .execute(
             "INSERT INTO catalog (course_id, title, description, author_address, content_cid, \
-             thumbnail_cid, tags, skill_ids, version, published_at, pinned, signature) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 1, ?11) \
+             thumbnail_cid, tags, skill_ids, version, published_at, pinned, signature, kind) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 1, ?11, ?12) \
              ON CONFLICT(course_id) DO UPDATE SET \
              title = excluded.title, \
              description = excluded.description, \
@@ -203,7 +207,8 @@ pub fn insert_own_catalog_entry(
              version = excluded.version, \
              published_at = excluded.published_at, \
              pinned = 1, \
-             signature = excluded.signature",
+             signature = excluded.signature, \
+             kind = excluded.kind",
             params![
                 announcement.course_id,
                 announcement.title,
@@ -216,6 +221,7 @@ pub fn insert_own_catalog_entry(
                 announcement.version,
                 published_at,
                 signature_hex,
+                announcement.kind,
             ],
         )
         .map_err(|e| format!("failed to insert own catalog entry: {e}"))?;
@@ -252,13 +258,23 @@ mod tests {
             &["algorithms".into(), "graphs".into()],
             &["skill_graph_traversal".into()],
             1,
+            "course",
         )
     }
 
     #[test]
     fn build_announcement_generates_deterministic_id() {
-        let a1 =
-            build_catalog_announcement("stake1u8abc", "Test", None, "cid123", None, &[], &[], 1);
+        let a1 = build_catalog_announcement(
+            "stake1u8abc",
+            "Test",
+            None,
+            "cid123",
+            None,
+            &[],
+            &[],
+            1,
+            "course",
+        );
         let a2 = build_catalog_announcement(
             "stake1u8abc",
             "Different Title",
@@ -268,6 +284,7 @@ mod tests {
             &[],
             &[],
             1,
+            "course",
         );
         // Same author + content_cid → same course_id (title not in ID)
         assert_eq!(a1.course_id, a2.course_id);
@@ -275,10 +292,28 @@ mod tests {
 
     #[test]
     fn different_cids_produce_different_ids() {
-        let a1 =
-            build_catalog_announcement("stake1u8abc", "Test", None, "cid123", None, &[], &[], 1);
-        let a2 =
-            build_catalog_announcement("stake1u8abc", "Test", None, "cid456", None, &[], &[], 1);
+        let a1 = build_catalog_announcement(
+            "stake1u8abc",
+            "Test",
+            None,
+            "cid123",
+            None,
+            &[],
+            &[],
+            1,
+            "course",
+        );
+        let a2 = build_catalog_announcement(
+            "stake1u8abc",
+            "Test",
+            None,
+            "cid456",
+            None,
+            &[],
+            &[],
+            1,
+            "course",
+        );
         assert_ne!(a1.course_id, a2.course_id);
     }
 

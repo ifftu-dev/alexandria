@@ -109,7 +109,7 @@ pub async fn search_catalog(
     let sql = format!(
         "SELECT course_id, title, description, author_address, content_cid, \
          thumbnail_cid, tags, skill_ids, version, published_at, received_at, \
-         pinned, on_chain_tx \
+         pinned, on_chain_tx, kind \
          FROM catalog {where_clause} \
          ORDER BY published_at DESC \
          LIMIT {max}"
@@ -140,6 +140,7 @@ pub async fn search_catalog(
                 received_at: row.get(10)?,
                 pinned: pinned_int != 0,
                 on_chain_tx: row.get(12)?,
+                kind: row.get::<_, Option<String>>(13)?.unwrap_or_else(|| "course".into()),
             })
         })
         .map_err(|e| e.to_string())?
@@ -269,7 +270,7 @@ pub async fn get_catalog_entry(
     let result = db.conn().query_row(
         "SELECT course_id, title, description, author_address, content_cid, \
          thumbnail_cid, tags, skill_ids, version, published_at, received_at, \
-         pinned, on_chain_tx \
+         pinned, on_chain_tx, kind \
          FROM catalog WHERE course_id = ?1",
         params![course_id],
         |row| {
@@ -291,6 +292,7 @@ pub async fn get_catalog_entry(
                 received_at: row.get(10)?,
                 pinned: pinned_int != 0,
                 on_chain_tx: row.get(12)?,
+                kind: row.get::<_, Option<String>>(13)?.unwrap_or_else(|| "course".into()),
             })
         },
     );

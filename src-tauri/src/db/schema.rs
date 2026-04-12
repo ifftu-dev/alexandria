@@ -27,6 +27,7 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (17, "storage_settings", MIGRATION_017),
     (18, "onchain_governance_queue", MIGRATION_018),
     (19, "classroom_encryption", MIGRATION_019),
+    (20, "tutorials_and_video_chapters", MIGRATION_020),
 ];
 
 const MIGRATION_001: &str = r#"
@@ -998,4 +999,41 @@ ALTER TABLE classroom_members ADD COLUMN x25519_public_key BLOB;
 
 -- Local X25519 public key (derived from Ed25519 signing key).
 ALTER TABLE local_identity ADD COLUMN x25519_public_key BLOB;
+"#;
+
+const MIGRATION_020: &str = r#"
+-- ============================================================
+-- Migration 020: Tutorials + Video Chapters
+-- Standalone video tutorials are structurally minimal courses.
+-- Adds a `kind` discriminator to `courses` and `catalog` so they
+-- can be filtered separately in the UI while reusing the entire
+-- existing pipeline (publish, gossip, pin, evidence).
+-- Also adds `video_chapters` for timestamp navigation within a
+-- single video element.
+-- ============================================================
+
+-- Discriminator for course-vs-tutorial. Default preserves backward
+-- compatibility: every existing row remains a 'course'.
+ALTER TABLE courses  ADD COLUMN kind TEXT NOT NULL DEFAULT 'course'
+    CHECK (kind IN ('course', 'tutorial'));
+ALTER TABLE catalog  ADD COLUMN kind TEXT NOT NULL DEFAULT 'course';
+
+CREATE INDEX IF NOT EXISTS idx_courses_kind ON courses(kind);
+CREATE INDEX IF NOT EXISTS idx_catalog_kind ON catalog(kind);
+
+-- Timestamp-based chapter markers for a single video element. Lets a
+-- long tutorial expose a table of contents without being broken into
+-- multiple course_elements. Optional: tutorials without chapters work
+-- just fine.
+CREATE TABLE IF NOT EXISTS video_chapters (
+    id            TEXT PRIMARY KEY,
+    element_id    TEXT NOT NULL REFERENCES course_elements(id) ON DELETE CASCADE,
+    title         TEXT NOT NULL,
+    start_seconds INTEGER NOT NULL,
+    position      INTEGER NOT NULL DEFAULT 0,
+    created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_video_chapters_element
+    ON video_chapters(element_id, position);
 "#;

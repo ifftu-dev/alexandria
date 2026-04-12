@@ -2,7 +2,9 @@ use rusqlite::params;
 use tauri::State;
 
 use crate::crypto::hash::entity_id;
-use crate::domain::course::{Course, CreateCourseRequest, UpdateCourseRequest};
+use crate::domain::course::{
+    Course, CreateCourseRequest, PublishTutorialRequest, UpdateCourseRequest,
+};
 use crate::AppState;
 
 use crate::crypto::wallet;
@@ -30,7 +32,7 @@ pub async fn list_courses(
     {
         (
                 "SELECT id, title, description, author_address, author_name, content_cid, thumbnail_cid, \
-                 thumbnail_svg, tags, skill_ids, version, status, published_at, on_chain_tx, created_at, updated_at \
+                 thumbnail_svg, tags, skill_ids, version, status, published_at, on_chain_tx, created_at, updated_at, kind \
                  FROM courses WHERE status = ?1 ORDER BY updated_at DESC"
                     .to_string(),
                 vec![Box::new(s.clone())],
@@ -38,7 +40,7 @@ pub async fn list_courses(
     } else {
         (
                 "SELECT id, title, description, author_address, author_name, content_cid, thumbnail_cid, \
-                 thumbnail_svg, tags, skill_ids, version, status, published_at, on_chain_tx, created_at, updated_at \
+                 thumbnail_svg, tags, skill_ids, version, status, published_at, on_chain_tx, created_at, updated_at, kind \
                  FROM courses ORDER BY updated_at DESC"
                     .to_string(),
                 vec![],
@@ -72,6 +74,7 @@ pub async fn list_courses(
                 on_chain_tx: row.get(13)?,
                 created_at: row.get(14)?,
                 updated_at: row.get(15)?,
+                kind: row.get::<_, Option<String>>(16)?.unwrap_or_else(|| "course".into()),
             })
         })
         .map_err(|e| e.to_string())?
@@ -95,7 +98,7 @@ pub async fn get_course(
 
     let result = db.conn().query_row(
         "SELECT id, title, description, author_address, author_name, content_cid, thumbnail_cid, \
-         thumbnail_svg, tags, skill_ids, version, status, published_at, on_chain_tx, created_at, updated_at \
+         thumbnail_svg, tags, skill_ids, version, status, published_at, on_chain_tx, created_at, updated_at, kind \
          FROM courses WHERE id = ?1",
         params![course_id],
         |row| {
@@ -121,6 +124,7 @@ pub async fn get_course(
                 on_chain_tx: row.get(13)?,
                 created_at: row.get(14)?,
                 updated_at: row.get(15)?,
+                kind: row.get::<_, Option<String>>(16)?.unwrap_or_else(|| "course".into()),
             })
         },
     );
@@ -332,18 +336,53 @@ pub async fn publish_course(
 
                 let els = el_stmt
                     .query_map(params![ch_id], |row| {
+                        let el_id: String = row.get(0)?;
                         Ok(DocumentElement {
-                            id: row.get(0)?,
+                            id: el_id,
                             title: row.get(1)?,
                             element_type: row.get(2)?,
                             content_hash: row.get(3)?,
                             position: row.get(4)?,
                             duration_seconds: row.get(5)?,
+                            // video_chapters are joined in below after the
+                            // element list is materialised, to keep the row
+                            // closure free of outer borrows.
+                            video_chapters: Vec::new(),
                         })
                     })
                     .map_err(|e| e.to_string())?
                     .collect::<Result<Vec<_>, _>>()
                     .map_err(|e| e.to_string())?;
+
+                // Load chapter markers for any video elements in this
+                // chapter. Small N — a chapter rarely has more than a
+                // handful of videos, so a per-element query is fine.
+                let mut els = els;
+                for el in els.iter_mut() {
+                    if el.element_type != "video" {
+                        continue;
+                    }
+                    let mut vc_stmt = db
+                        .conn()
+                        .prepare(
+                            "SELECT title, start_seconds, position \
+                             FROM video_chapters WHERE element_id = ?1 \
+                             ORDER BY position ASC",
+                        )
+                        .map_err(|e| e.to_string())?;
+                    let vcs: Vec<_> = vc_stmt
+                        .query_map(params![el.id], |row| {
+                            Ok(crate::domain::course_document::VideoChapter {
+                                title: row.get(0)?,
+                                start_seconds: row.get(1)?,
+                                position: row.get(2)?,
+                            })
+                        })
+                        .map_err(|e| e.to_string())?
+                        .filter_map(|r| r.ok())
+                        .collect();
+                    el.video_chapters = vcs;
+                }
                 els
             };
 
@@ -371,6 +410,7 @@ pub async fn publish_course(
             chapters,
             created_at,
             updated_at,
+            kind: course.kind.clone(),
         }
         // db lock dropped here
     };
@@ -423,6 +463,7 @@ pub async fn publish_course(
             &payload.tags,
             &payload.skill_ids,
             version,
+            &payload.kind,
         );
 
         // Sign the announcement payload to get the signature for the catalog entry
@@ -472,6 +513,183 @@ pub async fn fetch_course_document(
     ipfs_course::resolve_course_document(&state.content_node, &identifier)
         .await
         .map_err(|e| e.to_string())
+}
+
+/// Publish a standalone video tutorial.
+///
+/// Structurally, a tutorial is a minimal course: one synthetic chapter
+/// containing a video element, optionally followed by an end-of-video
+/// quiz. By reusing the course model we inherit the entire P2P,
+/// evidence, pin-lifecycle, and signing pipeline for free — the only
+/// difference is the `kind='tutorial'` discriminator on `courses` and
+/// `catalog`, which the UI uses to route/label and which the evidence
+/// pipeline uses (via migration 020) to apply a lower `trust_factor`
+/// than full courses earn.
+///
+/// Workflow:
+///   1. Insert a `courses` row with `kind='tutorial'`.
+///   2. Insert one hidden chapter at position 0.
+///   3. Insert the video element (`element_type='video'`) pointing at
+///      `video_content_hash`.
+///   4. If `quiz` is present, insert a second element of
+///      `element_type='quiz'` with `content_inline=<quiz json>`.
+///   5. Insert `element_skill_tags` for every requested skill
+///      (applied to every authored element so watching + quiz both
+///      count toward the same skills).
+///   6. Insert `video_chapters` rows, if provided.
+///   7. Delegate to `publish_course` to sign, publish to iroh,
+///      broadcast on `TOPIC_CATALOG`, and register non-evictable pins.
+///
+/// Requires the vault to be unlocked (the publish step needs the
+/// signing key).
+#[tauri::command]
+pub async fn publish_tutorial(
+    state: State<'_, AppState>,
+    req: PublishTutorialRequest,
+) -> Result<PublishCourseResult, String> {
+    if req.title.trim().is_empty() {
+        return Err("tutorial title must not be empty".into());
+    }
+    if req.video_content_hash.trim().is_empty() {
+        return Err("video_content_hash is required".into());
+    }
+    if req.skill_tags.is_empty() {
+        return Err(
+            "at least one skill tag is required — a tutorial without a skill is just a video"
+                .into(),
+        );
+    }
+
+    // Step 1–5 & 7: write the minimal course/chapter/element rows
+    // inside a single DB scope, then release the lock before the
+    // async `publish_course` call which acquires it again and also
+    // touches iroh/gossip (which must not hold the DB mutex).
+    let course_id: String = {
+        let db_guard = state
+            .db
+            .lock()
+            .map_err(|_| "database lock poisoned".to_string())?;
+        let db = db_guard.as_ref().ok_or("database not initialized")?;
+        let conn = db.conn();
+
+        let author_address: String = conn
+            .query_row(
+                "SELECT stake_address FROM local_identity WHERE id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|e| format!("no identity found — generate a wallet first: {e}"))?;
+
+        // Deterministic IDs — the course_id depends on the video
+        // hash (not a timestamp) so re-publishing the exact same
+        // video is idempotent.
+        let course_id = entity_id(&[&author_address, &req.video_content_hash, &req.title]);
+        let chapter_id = entity_id(&[&course_id, "ch_0"]);
+        let video_element_id = entity_id(&[&course_id, "el_video"]);
+        let quiz_element_id = entity_id(&[&course_id, "el_quiz"]);
+
+        let tags_json = serde_json::to_string(&req.tags).unwrap_or_else(|_| "[]".into());
+        let skill_ids: Vec<&String> = req.skill_tags.iter().map(|t| &t.skill_id).collect();
+        let skill_ids_json = serde_json::to_string(&skill_ids).unwrap_or_else(|_| "[]".into());
+
+        // 1. course (kind='tutorial')
+        conn.execute(
+            "INSERT INTO courses (id, title, description, author_address, thumbnail_cid, \
+             tags, skill_ids, status, kind) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'draft', 'tutorial')",
+            params![
+                course_id,
+                req.title,
+                req.description,
+                author_address,
+                req.thumbnail_hash,
+                tags_json,
+                skill_ids_json,
+            ],
+        )
+        .map_err(|e| format!("insert tutorial course row: {e}"))?;
+
+        // 2. synthetic chapter
+        conn.execute(
+            "INSERT INTO course_chapters (id, course_id, title, description, position) \
+             VALUES (?1, ?2, ?3, NULL, 0)",
+            params![chapter_id, course_id, req.title],
+        )
+        .map_err(|e| format!("insert tutorial chapter: {e}"))?;
+
+        // 3. video element
+        conn.execute(
+            "INSERT INTO course_elements (id, chapter_id, title, element_type, \
+             content_cid, position, duration_seconds) \
+             VALUES (?1, ?2, ?3, 'video', ?4, 0, ?5)",
+            params![
+                video_element_id,
+                chapter_id,
+                req.title,
+                req.video_content_hash,
+                req.duration_seconds,
+            ],
+        )
+        .map_err(|e| format!("insert tutorial video element: {e}"))?;
+
+        // 4. optional quiz element
+        if let Some(quiz) = &req.quiz {
+            conn.execute(
+                "INSERT INTO course_elements (id, chapter_id, title, element_type, \
+                 content_inline, position) \
+                 VALUES (?1, ?2, ?3, 'quiz', ?4, 1)",
+                params![
+                    quiz_element_id,
+                    chapter_id,
+                    format!("{} — Check", req.title),
+                    quiz.content_json,
+                ],
+            )
+            .map_err(|e| format!("insert tutorial quiz element: {e}"))?;
+        }
+
+        // 5. skill tags — applied to the video element AND the quiz
+        // (when present) so both paths feed evidence correctly.
+        for tag in &req.skill_tags {
+            let weight = tag.weight.unwrap_or(1.0);
+            conn.execute(
+                "INSERT INTO element_skill_tags (element_id, skill_id, weight) \
+                 VALUES (?1, ?2, ?3)",
+                params![video_element_id, tag.skill_id, weight],
+            )
+            .map_err(|e| format!("tag video element with skill {}: {e}", tag.skill_id))?;
+            if req.quiz.is_some() {
+                conn.execute(
+                    "INSERT INTO element_skill_tags (element_id, skill_id, weight) \
+                     VALUES (?1, ?2, ?3)",
+                    params![quiz_element_id, tag.skill_id, weight],
+                )
+                .map_err(|e| format!("tag quiz element with skill {}: {e}", tag.skill_id))?;
+            }
+        }
+
+        // 7. video chapters (timestamp navigation)
+        for (idx, vc) in req.video_chapters.iter().enumerate() {
+            let vc_id = entity_id(&[&video_element_id, &idx.to_string()]);
+            conn.execute(
+                "INSERT INTO video_chapters (id, element_id, title, start_seconds, position) \
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![
+                    vc_id,
+                    video_element_id,
+                    vc.title,
+                    vc.start_seconds,
+                    idx as i64,
+                ],
+            )
+            .map_err(|e| format!("insert video chapter: {e}"))?;
+        }
+
+        course_id
+    };
+
+    // 8. delegate to publish_course for the signing / iroh / gossip work.
+    publish_course(state, course_id).await
 }
 
 /// Parse a SQLite datetime string to a Unix timestamp.
@@ -619,7 +837,7 @@ mod tests {
 fn get_course_by_id(conn: &rusqlite::Connection, id: &str) -> Result<Course, String> {
     conn.query_row(
         "SELECT id, title, description, author_address, author_name, content_cid, thumbnail_cid, \
-         thumbnail_svg, tags, skill_ids, version, status, published_at, on_chain_tx, created_at, updated_at \
+         thumbnail_svg, tags, skill_ids, version, status, published_at, on_chain_tx, created_at, updated_at, kind \
          FROM courses WHERE id = ?1",
         params![id],
         |row| {
@@ -645,6 +863,7 @@ fn get_course_by_id(conn: &rusqlite::Connection, id: &str) -> Result<Course, Str
                 on_chain_tx: row.get(13)?,
                 created_at: row.get(14)?,
                 updated_at: row.get(15)?,
+                kind: row.get::<_, Option<String>>(16)?.unwrap_or_else(|| "course".into()),
             })
         },
     )
