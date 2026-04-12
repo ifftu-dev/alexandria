@@ -92,9 +92,42 @@ impl AppState {
             .run_migrations()
             .map_err(|e| format!("database migrations failed: {e}"))?;
 
-        let mut guard = self.db.lock().map_err(|e| e.to_string())?;
-        *guard = Some(database);
+        // Seed demo data into the encrypted DB if empty
+        #[cfg(feature = "dev-seed")]
+        {
+            if let Err(e) = crate::db::seed::seed_if_empty(database.conn()) {
+                log::warn!("seed failed (non-fatal): {e}");
+            }
+        }
+
+        {
+            let mut guard = self.db.lock().map_err(|e| e.to_string())?;
+            *guard = Some(database);
+        }
         log::info!("Encrypted database initialized successfully");
+
+        // Seed iroh content blobs (videos, PDFs, downloadables) in the
+        // background. This requires network IO and the iroh node to be
+        // up, so we don't block wallet creation on it — the user can
+        // explore the app while content fetches.
+        #[cfg(feature = "dev-seed")]
+        {
+            let db_handle = Arc::clone(&self.db);
+            let node_handle = Arc::clone(&self.content_node);
+            tokio::spawn(async move {
+                match crate::db::seed_content::seed_content_if_needed(
+                    &db_handle,
+                    &node_handle,
+                )
+                .await
+                {
+                    Ok(0) => {}
+                    Ok(n) => log::info!("seeded iroh content for {n} elements"),
+                    Err(e) => log::warn!("iroh content seed failed (non-fatal): {e}"),
+                }
+            });
+        }
+
         Ok(())
     }
 

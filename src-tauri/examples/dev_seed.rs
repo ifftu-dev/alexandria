@@ -103,9 +103,9 @@ async fn main() -> Result<(), String> {
         }
     );
 
-    let db = Arc::new(std::sync::Mutex::new(database));
+    let db = Arc::new(std::sync::Mutex::new(Some(database)));
     let node = Arc::new(ContentNode::new(&iroh_dir));
-    node.start()
+    node.start(None)
         .await
         .map_err(|e| format!("failed to start iroh node: {e}"))?;
 

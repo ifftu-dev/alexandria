@@ -9,7 +9,8 @@
     "beforeDevCommand": "npm run dev",
     "beforeBuildCommand": "npm run build",
     "features": [
-      "tutoring-video"
+      "tutoring-video",
+      "dev-seed"
     ]
   },
   "app": {

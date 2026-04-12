@@ -17,12 +17,15 @@ pub fn seed_if_empty(conn: &Connection) -> Result<bool, rusqlite::Error> {
 
     if count > 0 {
         log::info!("Database already has taxonomy data — skipping seed");
+        // Still backfill new demo data for existing databases
+        backfill_demo_data(conn)?;
         return Ok(false);
     }
 
     log::info!("Seeding database with demo taxonomy, courses, and governance data…");
 
     conn.execute_batch(SEED_SQL)?;
+    conn.execute_batch(BACKFILL_SQL)?;
 
     // Visual assets are applied via parameterized queries (not execute_batch)
     // because sqlite3_exec can silently fail on long SVG strings or emoji.
@@ -34,6 +37,32 @@ pub fn seed_if_empty(conn: &Connection) -> Result<bool, rusqlite::Error> {
 
     log::info!("Seed data inserted successfully");
     Ok(true)
+}
+
+/// Backfill demo data for tables added after the initial seed.
+/// Checks each table independently so it's safe to run on any existing DB.
+fn backfill_demo_data(conn: &Connection) -> Result<(), rusqlite::Error> {
+    let needs_backfill = |table: &str| -> bool {
+        conn.query_row(
+            &format!("SELECT COUNT(*) FROM {table}"),
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap_or(0)
+            == 0
+    };
+
+    // Only backfill if the core new tables are empty
+    if needs_backfill("enrollments")
+        || needs_backfill("governance_dao_members")
+        || needs_backfill("classrooms")
+    {
+        log::info!("Backfilling demo data for new tables…");
+        conn.execute_batch(BACKFILL_SQL)?;
+        log::info!("Demo data backfill complete");
+    }
+
+    Ok(())
 }
 
 /// Store element content directly in the `content_inline` column.
@@ -820,6 +849,12 @@ INSERT INTO skill_proofs (id, skill_id, proficiency_level, confidence, evidence_
     ('proof_011', 'skill_ia',            'create',     0.80, 2),
     ('proof_012', 'skill_wireframing',   'create',     0.82, 2);
 
+"##;
+
+const BACKFILL_SQL: &str = r##"
+-- Temporarily disable FK checks during bulk seed insert
+PRAGMA foreign_keys = OFF;
+
 -- ============================================================
 -- P1: ENROLLMENTS & PROGRESS
 -- ============================================================
@@ -828,7 +863,7 @@ INSERT INTO enrollments (id, course_id, enrolled_at, completed_at, status) VALUE
     ('enroll_algo',   'course_algo_101',      '2026-01-15T10:00:00', '2026-03-20T16:45:00', 'completed'),
     ('enroll_web',    'course_web_fullstack', '2026-02-01T09:30:00', NULL,                   'active'),
     ('enroll_ml',     'course_ml_foundations','2026-03-10T14:00:00', NULL,                   'active'),
-    ('enroll_crypto', 'course_crypto',        '2026-04-01T11:15:00', NULL,                   'active');
+    ('enroll_crypto', 'course_crypto_101',        '2026-04-01T11:15:00', NULL,                   'active');
 
 -- Algo 101: fully completed (all elements done)
 INSERT INTO element_progress (id, enrollment_id, element_id, status, score, time_spent, completed_at) VALUES
@@ -868,8 +903,8 @@ INSERT INTO element_progress (id, enrollment_id, element_id, status, score, time
 
 -- Crypto: barely started
 INSERT INTO element_progress (id, enrollment_id, element_id, status, score, time_spent, completed_at) VALUES
-    ('ep_c1_1', 'enroll_crypto', 'el_crypto_1_1', 'completed',   NULL, 480, '2026-04-02T10:30:00'),
-    ('ep_c1_2', 'enroll_crypto', 'el_crypto_1_2', 'in_progress', NULL, 120, NULL);
+    ('ep_c1_1', 'enroll_crypto', 'el_cry_1_1', 'completed',   NULL, 480, '2026-04-02T10:30:00'),
+    ('ep_c1_2', 'enroll_crypto', 'el_cry_1_2', 'in_progress', NULL, 120, NULL);
 
 -- Course notes
 INSERT INTO course_notes (id, enrollment_id, chapter_id, element_id, preview_text) VALUES
@@ -890,7 +925,7 @@ INSERT INTO skill_assessments (id, skill_id, course_id, assessment_type, profici
     ('sa_006', 'skill_javascript',    'course_web_fullstack', 'quiz',        'apply',    0.60, 1.0),
     ('sa_007', 'skill_typescript',    'course_web_fullstack', 'quiz',        'apply',    0.65, 1.0),
     ('sa_008', 'skill_sql',           NULL,                   'project',     'apply',    0.70, 1.0),
-    ('sa_009', 'skill_symmetric',     'course_crypto',        'exam',        'apply',    0.75, 1.0),
+    ('sa_009', 'skill_symmetric',     'course_crypto_101',        'exam',        'apply',    0.75, 1.0),
     ('sa_010', 'skill_user_research', 'course_ux_design',     'peer_review', 'evaluate', 0.65, 0.9),
     ('sa_011', 'skill_ia',            'course_ux_design',     'project',     'create',   0.70, 1.0),
     ('sa_012', 'skill_wireframing',   'course_ux_design',     'project',     'create',   0.65, 1.0);
@@ -930,8 +965,8 @@ INSERT INTO evidence_records (id, skill_assessment_id, skill_id, proficiency_lev
     ('ev_008b', 'sa_008', 'skill_sql', 'apply', 0.88, 0.72, 1.0, NULL, 'addr_seed_author_2', '2026-02-05T11:30:00'),
     ('ev_008c', 'sa_008', 'skill_sql', 'apply', 0.86, 0.70, 1.0, NULL, 'addr_seed_author_2', '2026-03-01T15:00:00'),
     -- proof_009: skill_symmetric (2 evidence)
-    ('ev_009a', 'sa_009', 'skill_symmetric', 'apply', 0.82, 0.75, 1.0, 'course_crypto', 'addr_seed_author_2', '2026-02-20T10:00:00'),
-    ('ev_009b', 'sa_009', 'skill_symmetric', 'apply', 0.84, 0.78, 1.0, 'course_crypto', 'addr_seed_author_2', '2026-03-10T13:45:00'),
+    ('ev_009a', 'sa_009', 'skill_symmetric', 'apply', 0.82, 0.75, 1.0, 'course_crypto_101', 'addr_seed_author_2', '2026-02-20T10:00:00'),
+    ('ev_009b', 'sa_009', 'skill_symmetric', 'apply', 0.84, 0.78, 1.0, 'course_crypto_101', 'addr_seed_author_2', '2026-03-10T13:45:00'),
     -- proof_010: skill_user_research (2 evidence)
     ('ev_010a', 'sa_010', 'skill_user_research', 'evaluate', 0.83, 0.65, 0.9, 'course_ux_design', 'addr_seed_author_3', '2026-01-25T14:00:00'),
     ('ev_010b', 'sa_010', 'skill_user_research', 'evaluate', 0.85, 0.68, 0.9, 'course_ux_design', 'addr_seed_author_3', '2026-02-15T10:30:00'),
@@ -1195,6 +1230,9 @@ INSERT INTO app_settings (key, value) VALUES
     ('auto_sync', 'true'),
     ('sentinel_camera_enabled', 'true'),
     ('sentinel_keyboard_enabled', 'true');
+
+-- Re-enable FK checks
+PRAGMA foreign_keys = ON;
 
 "##;
 
