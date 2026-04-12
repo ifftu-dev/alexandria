@@ -50,10 +50,16 @@ fn backfill_demo_data(conn: &Connection) -> Result<(), rusqlite::Error> {
             == 0
     };
 
-    // Only backfill if the core new tables are empty
+    // Only backfill if any of the demo-data tables are empty. Add
+    // new tables to this list when you extend BACKFILL_SQL so that
+    // existing seeded DBs pick up the new content. The idempotent
+    // `ON CONFLICT` clauses in BACKFILL_SQL handle the case where
+    // some tables already have rows but others don't.
     if needs_backfill("enrollments")
         || needs_backfill("governance_dao_members")
         || needs_backfill("classrooms")
+        || needs_backfill("video_chapters")
+        || needs_backfill("opinions")
     {
         log::info!("Backfilling demo data for new tables…");
         conn.execute_batch(BACKFILL_SQL)?;
@@ -1228,6 +1234,230 @@ INSERT INTO app_settings (key, value) VALUES
     ('auto_sync', 'true'),
     ('sentinel_camera_enabled', 'true'),
     ('sentinel_keyboard_enabled', 'true');
+
+-- ============================================================
+-- P7: TUTORIALS (kind='tutorial' courses with video_chapters)
+-- ============================================================
+-- Standalone video tutorials — minimal courses (1 chapter, 1 video
+-- element, no quiz for v1 of the seed). The video elements reuse
+-- REMOTE_SEED_ASSETS URLs so `seed_content_if_needed` downloads them
+-- into iroh on first boot.
+--
+-- Using INSERT OR IGNORE so the backfill is idempotent for users who
+-- already seeded before this data existed.
+
+-- Tutorial courses
+INSERT OR IGNORE INTO courses
+    (id, title, description, author_address, thumbnail_cid, tags, skill_ids, status, kind, version, published_at)
+VALUES
+    ('course_tut_bigO',
+     'Big-O in 8 Minutes',
+     'A fast, visual tour of time complexity: what it is, why it matters, and how to read the common classes (O(1), O(log n), O(n), O(n log n), O(n²)) without getting lost in the math.',
+     'addr_seed_author_1',
+     NULL,
+     '["algorithms","intro","complexity"]',
+     '["skill_big_o"]',
+     'published',
+     'tutorial',
+     1,
+     '2026-02-18 10:00:00'),
+
+    ('course_tut_asyncawait',
+     'Async/Await Quick Tour',
+     'Understand async/await in 6 minutes. When to use it, what it actually does under the hood, and the three mistakes that bite every beginner.',
+     'addr_seed_author_1',
+     NULL,
+     '["javascript","async","web"]',
+     '["skill_javascript"]',
+     'published',
+     'tutorial',
+     1,
+     '2026-02-24 14:30:00'),
+
+    ('course_tut_ml_regression',
+     'Linear Regression from First Principles',
+     'Derive the least-squares fit on a napkin. No libraries, no black boxes — just geometry and one quadratic.',
+     'addr_seed_author_2',
+     NULL,
+     '["ml","regression","math"]',
+     '["skill_regression"]',
+     'published',
+     'tutorial',
+     1,
+     '2026-03-08 09:15:00'),
+
+    ('course_tut_aes',
+     'AES Walkthrough: What S-Boxes Actually Do',
+     'A concrete walk through one full AES round, including the substitution box and why it exists. Good for anyone who has read "just use AES" but wants to know what "AES" means.',
+     'addr_seed_author_2',
+     NULL,
+     '["crypto","aes","symmetric"]',
+     '["skill_symmetric"]',
+     'published',
+     'tutorial',
+     1,
+     '2026-03-15 16:45:00'),
+
+    ('course_tut_ux_interviews',
+     'Running a Good User Interview',
+     '12 minutes on what to ask, what not to ask, and how to listen. Includes a 3-question opening script that works for almost any product.',
+     'addr_seed_author_3',
+     NULL,
+     '["ux","research","interviews"]',
+     '["skill_user_research"]',
+     'published',
+     'tutorial',
+     1,
+     '2026-03-22 11:00:00');
+
+-- Synthetic single-chapter wrappers for each tutorial
+INSERT OR IGNORE INTO course_chapters (id, course_id, title, position) VALUES
+    ('ch_tut_bigO',         'course_tut_bigO',         'Big-O in 8 Minutes',           0),
+    ('ch_tut_asyncawait',   'course_tut_asyncawait',   'Async/Await Quick Tour',       0),
+    ('ch_tut_ml_regression','course_tut_ml_regression','Linear Regression from First Principles', 0),
+    ('ch_tut_aes',          'course_tut_aes',          'AES Walkthrough',              0),
+    ('ch_tut_ux_interviews','course_tut_ux_interviews','Running a Good User Interview',0);
+
+-- Video elements. content_cid is NULL; seed_content_if_needed fills
+-- it in by downloading the URL from REMOTE_SEED_ASSETS (see seed_content.rs).
+INSERT OR IGNORE INTO course_elements
+    (id, chapter_id, title, element_type, content_cid, position, duration_seconds)
+VALUES
+    ('el_tut_bigO_video',         'ch_tut_bigO',         'Big-O in 8 Minutes',                     'video', NULL, 0, 480),
+    ('el_tut_asyncawait_video',   'ch_tut_asyncawait',   'Async/Await Quick Tour',                 'video', NULL, 0, 360),
+    ('el_tut_ml_regression_video','ch_tut_ml_regression','Linear Regression from First Principles','video', NULL, 0, 540),
+    ('el_tut_aes_video',          'ch_tut_aes',          'AES Walkthrough',                        'video', NULL, 0, 600),
+    ('el_tut_ux_interviews_video','ch_tut_ux_interviews','Running a Good User Interview',          'video', NULL, 0, 720);
+
+-- Skill tags on the video elements (drives evidence contribution
+-- if/when a learner runs an assessment under this tutorial)
+INSERT OR IGNORE INTO element_skill_tags (element_id, skill_id, weight) VALUES
+    ('el_tut_bigO_video',         'skill_big_o',         1.0),
+    ('el_tut_asyncawait_video',   'skill_javascript',    1.0),
+    ('el_tut_ml_regression_video','skill_regression',    1.0),
+    ('el_tut_aes_video',          'skill_symmetric',     1.0),
+    ('el_tut_ux_interviews_video','skill_user_research', 1.0);
+
+-- Video chapter markers (timestamp navigation)
+INSERT OR IGNORE INTO video_chapters (id, element_id, title, start_seconds, position) VALUES
+    -- Big-O
+    ('vc_bigO_1', 'el_tut_bigO_video', 'What Big-O actually measures', 0,   0),
+    ('vc_bigO_2', 'el_tut_bigO_video', 'The common classes',           90,  1),
+    ('vc_bigO_3', 'el_tut_bigO_video', 'Reading code for complexity',  240, 2),
+    ('vc_bigO_4', 'el_tut_bigO_video', 'Practice: two walkthroughs',   360, 3),
+    -- Async/Await
+    ('vc_aa_1',   'el_tut_asyncawait_video', 'Why async exists at all',   0,   0),
+    ('vc_aa_2',   'el_tut_asyncawait_video', 'await, the 10-second version', 60, 1),
+    ('vc_aa_3',   'el_tut_asyncawait_video', 'The three mistakes',         180, 2),
+    -- Linear regression
+    ('vc_lr_1',   'el_tut_ml_regression_video', 'What we are fitting',          0,   0),
+    ('vc_lr_2',   'el_tut_ml_regression_video', 'The least-squares derivation', 120, 1),
+    ('vc_lr_3',   'el_tut_ml_regression_video', 'A worked example',             360, 2),
+    -- AES
+    ('vc_aes_1',  'el_tut_aes_video', 'Block ciphers, quickly',     0,   0),
+    ('vc_aes_2',  'el_tut_aes_video', 'SubBytes and the S-Box',     120, 1),
+    ('vc_aes_3',  'el_tut_aes_video', 'ShiftRows + MixColumns',     300, 2),
+    ('vc_aes_4',  'el_tut_aes_video', 'AddRoundKey + wrapping up',  480, 3),
+    -- UX interviews
+    ('vc_ux_1',   'el_tut_ux_interviews_video', 'Planning the interview',      0,   0),
+    ('vc_ux_2',   'el_tut_ux_interviews_video', 'The 3-question opening',     180, 1),
+    ('vc_ux_3',   'el_tut_ux_interviews_video', 'Following signal, not script',420, 2),
+    ('vc_ux_4',   'el_tut_ux_interviews_video', 'Debrief patterns',           600, 3);
+
+-- ============================================================
+-- P8: OPINIONS (Field Commentary)
+-- ============================================================
+-- Opinions appear as received-from-peers content. Each references a
+-- real locally-seeded skill_proof so the credential-verification path
+-- has something to chew on in the UI. Signatures here are placeholder
+-- strings — because opinions are inserted directly (not via the P2P
+-- handler), no re-verification happens on read.
+--
+-- Authors map to the same seed author addresses used by courses, so
+-- the Detail page can show a non-empty "credentials" section.
+
+INSERT OR IGNORE INTO opinions
+    (id, author_address, subject_field_id, title, summary, video_cid,
+     thumbnail_cid, duration_seconds, credential_proof_ids,
+     signature, public_key, published_at, received_at, withdrawn)
+VALUES
+    ('op_cs_01',
+     'addr_seed_author_1',
+     'sf_cs',
+     'Teach arrays before objects. Always.',
+     'The modern curriculum keeps trying to make the first two weeks "real-world". It should not. Arrays first, allocation mental model first, everything else later.',
+     'https://media.w3.org/2010/05/bunny/trailer.mp4',
+     NULL, 420, '["proof_001","proof_002"]',
+     'seed_signature_cs01',
+     'seed_publickey_cs01',
+     '2026-03-04 10:00:00',
+     '2026-03-04 10:02:00',
+     0),
+
+    ('op_cs_02',
+     'addr_seed_author_1',
+     'sf_cs',
+     'Big-O is the wrong thing to test freshmen on',
+     'We end up testing symbol manipulation instead of the underlying cost model. I''ve watched students get the right answer for the wrong reason too many times.',
+     'https://media.w3.org/2010/05/bunny/trailer.mp4',
+     NULL, 540, '["proof_002"]',
+     'seed_signature_cs02',
+     'seed_publickey_cs02',
+     '2026-03-10 14:20:00',
+     '2026-03-10 14:22:00',
+     0),
+
+    ('op_web_01',
+     'addr_seed_author_1',
+     'sf_web',
+     'Why I stopped teaching flexbox first',
+     'Grid is simpler to reason about once you are past the "boxes next to each other" case. Start with grid; flexbox comes up naturally when you need row-within-grid.',
+     'https://media.w3.org/2010/05/video/movie_300.mp4',
+     NULL, 360, '["proof_005","proof_006"]',
+     'seed_signature_web01',
+     'seed_publickey_web01',
+     '2026-03-12 09:30:00',
+     '2026-03-12 09:32:00',
+     0),
+
+    ('op_cyber_01',
+     'addr_seed_author_2',
+     'sf_cyber',
+     'The block cipher zoo is too big',
+     'We do not need to teach ten block ciphers. AES, ChaCha, and why you do not roll your own. Everything else is footnotes for people who want to read footnotes.',
+     'https://media.w3.org/2010/05/sintel/trailer.mp4',
+     NULL, 480, '["proof_009"]',
+     'seed_signature_cyb01',
+     'seed_publickey_cyb01',
+     '2026-03-17 16:00:00',
+     '2026-03-17 16:01:00',
+     0),
+
+    ('op_design_01',
+     'addr_seed_author_3',
+     'sf_design',
+     'UX research is not optional, it''s the cheapest step',
+     'Five $50 interviews shipped before a single Figma file will save you more weeks of engineering than any amount of tooling. I will die on this hill.',
+     'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/friday.mp4',
+     NULL, 660, '["proof_010","proof_011"]',
+     'seed_signature_dsg01',
+     'seed_publickey_dsg01',
+     '2026-03-21 11:15:00',
+     '2026-03-21 11:16:00',
+     0),
+
+    ('op_design_02',
+     'addr_seed_author_3',
+     'sf_design',
+     'Stop calling it "lo-fi wireframes"',
+     'Call them sketches, or drawings, or prototypes. "Lo-fi wireframe" makes newcomers think there is a taxonomy that matters. There is not. Draw the thing.',
+     'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/friday.mp4',
+     NULL, 300, '["proof_012"]',
+     'seed_signature_dsg02',
+     'seed_publickey_dsg02',
+     '2026-03-28 13:45:00',
+     '2026-03-28 13:46:00',
+     0);
 
 -- Re-enable FK checks
 PRAGMA foreign_keys = ON;
