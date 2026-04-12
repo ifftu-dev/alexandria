@@ -115,11 +115,8 @@ impl AppState {
             let db_handle = Arc::clone(&self.db);
             let node_handle = Arc::clone(&self.content_node);
             tokio::spawn(async move {
-                match crate::db::seed_content::seed_content_if_needed(
-                    &db_handle,
-                    &node_handle,
-                )
-                .await
+                match crate::db::seed_content::seed_content_if_needed(&db_handle, &node_handle)
+                    .await
                 {
                     Ok(0) => {}
                     Ok(n) => log::info!("seeded iroh content for {n} elements"),

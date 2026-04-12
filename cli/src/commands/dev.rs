@@ -131,15 +131,16 @@ fn run_all(ctx: &ProjectContext) -> Result<()> {
 
 /// Mirror CI: catch everything CI would catch, before pushing.
 /// Covers both `src-tauri` and `cli` crates + strict vue-tsc with
-/// `--noEmit`. Stops at the first failure.
+/// `--noEmit` + frontend unit tests. Stops at the first failure.
 fn run_ci(ctx: &ProjectContext) -> Result<()> {
-    let steps: [(&str, DevStep); 6] = [
+    let steps: [(&str, DevStep); 7] = [
         ("Workspace formatting (cargo fmt --check)", ci_workspace_fmt),
         ("src-tauri clippy (-D warnings)", run_clippy),
         ("CLI clippy (-D warnings)", ci_cli_clippy),
         ("src-tauri tests", run_test),
         ("CLI tests", ci_cli_test),
         ("Frontend type-check (vue-tsc --noEmit)", ci_vue_tsc_strict),
+        ("Frontend tests (vitest)", ci_vitest),
     ];
     let total = steps.len();
 
@@ -178,5 +179,12 @@ fn ci_vue_tsc_strict(ctx: &ProjectContext) -> Result<()> {
     // no `.tsbuildinfo` caches can mask type errors across runs.
     runner::run_step(&ctx.root, "npx", &["vue-tsc", "-b", "--noEmit"])?;
     output::success("Frontend type check passed");
+    Ok(())
+}
+
+fn ci_vitest(ctx: &ProjectContext) -> Result<()> {
+    // `npm test` is wired to `vitest run` (one-shot, non-watch mode).
+    runner::run_step(&ctx.root, "npm", &["test"])?;
+    output::success("Frontend tests passed");
     Ok(())
 }

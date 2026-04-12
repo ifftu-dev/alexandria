@@ -43,11 +43,9 @@ pub fn seed_if_empty(conn: &Connection) -> Result<bool, rusqlite::Error> {
 /// Checks each table independently so it's safe to run on any existing DB.
 fn backfill_demo_data(conn: &Connection) -> Result<(), rusqlite::Error> {
     let needs_backfill = |table: &str| -> bool {
-        conn.query_row(
-            &format!("SELECT COUNT(*) FROM {table}"),
-            [],
-            |row| row.get::<_, i64>(0),
-        )
+        conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+            row.get::<_, i64>(0)
+        })
         .unwrap_or(0)
             == 0
     };

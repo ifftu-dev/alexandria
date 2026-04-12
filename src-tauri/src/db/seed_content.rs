@@ -170,7 +170,8 @@ const REMOTE_SEED_ASSETS: &[RemoteSeedAsset] = &[
     RemoteSeedAsset {
         // Web: For Bigger Blazes — short Chromecast demo
         element_id: "el_web_3_2",
-        url: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
+        url:
+            "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
     },
     RemoteSeedAsset {
         // ML: Elephants Dream — surreal, abstract (matches ML "black box" vibe)
@@ -187,7 +188,6 @@ const REMOTE_SEED_ASSETS: &[RemoteSeedAsset] = &[
         element_id: "el_ux_1_3",
         url: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4",
     },
-
     // ── PDFs ────────────────────────────────────────────────────────
     // Varied real-world reference PDFs, all freely distributable.
     RemoteSeedAsset {
@@ -205,7 +205,6 @@ const REMOTE_SEED_ASSETS: &[RemoteSeedAsset] = &[
         element_id: "el_ux_4_3",
         url: "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf",
     },
-
     // ── Downloadable text assets (IETF RFC files, all public domain) ─
     RemoteSeedAsset {
         element_id: "el_web_5_4",
