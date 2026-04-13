@@ -29,6 +29,7 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (19, "classroom_encryption", MIGRATION_019),
     (20, "tutorials_and_video_chapters", MIGRATION_020),
     (21, "opinions", MIGRATION_021),
+    (22, "vc_key_registry", MIGRATION_022),
 ];
 
 const MIGRATION_001: &str = r#"
@@ -1113,4 +1114,36 @@ CREATE TABLE IF NOT EXISTS opinion_withdrawals (
     dao_signature   TEXT NOT NULL,               -- DAO committee signature over the record
     withdrawn_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
+"#;
+
+const MIGRATION_022: &str = r#"
+-- ============================================================
+-- Migration 022: VC key registry
+-- Historical public-key record per spec §5.3.
+-- ============================================================
+--
+-- `did:key` is self-resolving — the DID string encodes the current
+-- public key. But once an issuer rotates, credentials signed under
+-- the previous key must still be verifiable. This table captures
+-- every known (did, key_id) binding with a validity window so
+-- verification at time t_v resolves to the key that was valid at t_v.
+--
+-- Rows are append-only except for `valid_until`, which is set on the
+-- previous open entry when a rotation happens. `rotated_by` points to
+-- the successor DID (or the same DID with a new key_id) so callers
+-- can walk the rotation chain forward if needed.
+CREATE TABLE IF NOT EXISTS key_registry (
+    did              TEXT NOT NULL,
+    key_id           TEXT NOT NULL,                  -- '<did>#key-N' fragment
+    public_key_hex   TEXT NOT NULL,                  -- raw 32-byte Ed25519 pubkey, hex
+    valid_from       TEXT NOT NULL,                  -- ISO 8601 UTC
+    valid_until      TEXT,                           -- NULL while active
+    rotated_by       TEXT,                           -- DID of successor, if rotated
+    PRIMARY KEY (did, key_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_key_registry_did_valid_from
+    ON key_registry(did, valid_from);
+CREATE INDEX IF NOT EXISTS idx_key_registry_active
+    ON key_registry(did) WHERE valid_until IS NULL;
 "#;
