@@ -32,6 +32,7 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (22, "vc_key_registry", MIGRATION_022),
     (23, "vc_credentials_and_status_lists", MIGRATION_023),
     (24, "vc_credential_anchors", MIGRATION_024),
+    (25, "vc_pinboard_observations", MIGRATION_025),
 ];
 
 const MIGRATION_001: &str = r#"
@@ -1232,4 +1233,37 @@ CREATE TABLE IF NOT EXISTS credential_anchors (
 
 CREATE INDEX IF NOT EXISTS idx_credential_anchors_status
     ON credential_anchors(anchor_status, next_attempt_at);
+"#;
+
+const MIGRATION_025: &str = r#"
+-- ============================================================
+-- Migration 025: PinBoard observations
+-- Backs both local declarations and remote observations of
+-- per-subject pinning commitments per spec §12 + §20.4.
+-- ============================================================
+--
+-- One row per (pinner_did, subject_did, scope, commitment_since).
+-- Both `ipfs::pinboard::declare_commitment` (local) and
+-- `ipfs::pinboard::record_observation` (remote, fed by
+-- `p2p::pinboard::handle_pinboard_message`) write here. The 5-tier
+-- eviction logic in `commands::pinning` reads this table to figure
+-- out which content stays pinned even under storage pressure.
+CREATE TABLE IF NOT EXISTS pinboard_observations (
+    id                 TEXT PRIMARY KEY,
+    pinner_did         TEXT NOT NULL,
+    subject_did        TEXT NOT NULL,
+    scope              TEXT NOT NULL,            -- JSON array of strings
+    commitment_since   TEXT NOT NULL,
+    revoked_at         TEXT,
+    signature          TEXT NOT NULL,
+    public_key         TEXT NOT NULL,
+    received_at        TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_pinboard_observations_subject
+    ON pinboard_observations(subject_did);
+CREATE INDEX IF NOT EXISTS idx_pinboard_observations_pinner
+    ON pinboard_observations(pinner_did);
+CREATE INDEX IF NOT EXISTS idx_pinboard_observations_active
+    ON pinboard_observations(subject_did) WHERE revoked_at IS NULL;
 "#;
