@@ -116,6 +116,7 @@ dependencies = [
  "bip39",
  "blake2",
  "blake3",
+ "bs58",
  "bytes",
  "cc",
  "chrono",
