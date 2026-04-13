@@ -169,3 +169,68 @@ pub enum VcError {
     #[error("serde error: {0}")]
     Serde(#[from] serde_json::Error),
 }
+
+// ---------------------------------------------------------------------------
+// Shape-level tests for the VC domain types. These don't depend on any
+// stubbed function body; they lock in the serde surface (field names,
+// snake_case vs camelCase, optional-field handling) against accidental
+// regressions as the implementation fills in around them.
+// ---------------------------------------------------------------------------
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_verification_policy_rejects_expired() {
+        // Spec §11.1: strict default MUST treat expired formal
+        // credentials as inactive.
+        let p = VerificationPolicy::default();
+        assert!(p.reject_expired);
+        assert!(!p.require_integrity_anchor);
+    }
+
+    #[test]
+    fn default_policy_allows_all_credential_types() {
+        // Out of the box, every enum variant is acceptable; policies
+        // narrow this later (e.g., a hiring portal that only accepts
+        // FormalCredential + AssessmentCredential).
+        let p = VerificationPolicy::default();
+        assert!(p.allowed_types.contains(&CredentialType::FormalCredential));
+        assert!(p
+            .allowed_types
+            .contains(&CredentialType::AssessmentCredential));
+        assert!(p
+            .allowed_types
+            .contains(&CredentialType::AttestationCredential));
+    }
+
+    #[test]
+    fn credential_type_serializes_as_pascal_case() {
+        // Must match the `type` field values in §7's canonical JSON.
+        let json = serde_json::to_string(&CredentialType::FormalCredential).unwrap();
+        assert_eq!(json, "\"FormalCredential\"");
+    }
+
+    #[test]
+    fn acceptance_decision_serializes_as_lowercase() {
+        // Spec §13.1 shows `"acceptanceDecision": "accept"`.
+        let json = serde_json::to_string(&AcceptanceDecision::Accept).unwrap();
+        assert_eq!(json, "\"accept\"");
+    }
+
+    #[test]
+    fn claim_tag_is_snake_case() {
+        // `Claim::Skill` must serialize with `"kind": "skill"` to
+        // match the payload shape in §7.
+        let claim = Claim::Skill(SkillClaim {
+            skill_id: "skill_x".into(),
+            level: 3,
+            score: 0.5,
+            evidence_refs: vec![],
+            rubric_version: None,
+            assessment_method: None,
+        });
+        let v = serde_json::to_value(&claim).unwrap();
+        assert_eq!(v.get("kind").and_then(|x| x.as_str()), Some("skill"));
+    }
+}

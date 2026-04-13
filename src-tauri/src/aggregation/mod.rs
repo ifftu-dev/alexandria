@@ -69,3 +69,114 @@ pub fn aggregate_skill_state(
 ) -> DerivedSkillState {
     unimplemented!("PR 6 — aggregation engine")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::vc::CredentialType;
+
+    const TEST_NOW: &str = "2026-04-13T00:00:00Z";
+
+    fn ev(credential_id: &str, issuer: &str, t: CredentialType, q: f64) -> AggregationInput {
+        AggregationInput {
+            credential_id: credential_id.into(),
+            issuer: Did(format!("did:key:z{issuer}")),
+            credential_type: t,
+            raw_score: q,
+            issuance_time: TEST_NOW.into(),
+            expiration_time: None,
+            rubric_completeness: 0.9,
+            proctoring_reliability: 0.8,
+            evidence_traceability: 0.9,
+        }
+    }
+
+    #[test]
+    #[ignore = "pending PR 6 — aggregation engine"]
+    fn empty_evidence_produces_no_score_state() {
+        // Spec §14.10: if Σw = 0 then no active score exists. The
+        // explainable output still needs to be well-formed — zero
+        // mass, zero confidence, level 1 (floor).
+        let cfg = AggregationConfig::default();
+        let state = aggregate_skill_state(
+            &Did("did:key:zAlice".into()),
+            "skill_x",
+            &[],
+            TEST_NOW,
+            &cfg,
+        );
+        assert_eq!(state.active_evidence_count, 0);
+        assert!((state.evidence_mass).abs() < 1e-9);
+        assert!((state.confidence).abs() < 1e-9);
+        assert!((state.trust_score).abs() < 1e-9);
+    }
+
+    #[test]
+    #[ignore = "pending PR 6 — aggregation engine"]
+    fn trust_score_equals_raw_times_confidence() {
+        // §14.13: T = Q · C, always.
+        let cfg = AggregationConfig::default();
+        let state = aggregate_skill_state(
+            &Did("did:key:zAlice".into()),
+            "skill_x",
+            &[
+                ev("e1", "Uni", CredentialType::FormalCredential, 0.8),
+                ev("e2", "Bootcamp", CredentialType::AssessmentCredential, 0.7),
+            ],
+            TEST_NOW,
+            &cfg,
+        );
+        let expected = state.raw_score * state.confidence;
+        assert!((state.trust_score - expected).abs() < 1e-6);
+    }
+
+    #[test]
+    #[ignore = "pending PR 6 — aggregation engine"]
+    fn output_stamps_calculation_version_and_sources() {
+        // Spec §16 output MUST be explainable: the version and the
+        // source credential IDs are preserved so a verifier can tell
+        // which formula produced this state and from which evidence.
+        let cfg = AggregationConfig::default();
+        let state = aggregate_skill_state(
+            &Did("did:key:zAlice".into()),
+            "skill_x",
+            &[ev("cred-a", "Uni", CredentialType::FormalCredential, 0.9)],
+            TEST_NOW,
+            &cfg,
+        );
+        assert_eq!(state.calculation_version, cfg.version);
+        assert!(state.sources.iter().any(|s| s == "cred-a"));
+    }
+
+    #[test]
+    #[ignore = "pending PR 6 — aggregation engine"]
+    fn more_diverse_issuers_raise_confidence() {
+        // §14.12: confidence increases in U_{s,k} — three distinct
+        // clusters should beat three endorsements from one cluster,
+        // all else equal.
+        let cfg = AggregationConfig::default();
+        let diverse = aggregate_skill_state(
+            &Did("did:key:zAlice".into()),
+            "skill_x",
+            &[
+                ev("e1", "Uni", CredentialType::FormalCredential, 0.8),
+                ev("e2", "Bootcamp", CredentialType::FormalCredential, 0.8),
+                ev("e3", "DAO", CredentialType::FormalCredential, 0.8),
+            ],
+            TEST_NOW,
+            &cfg,
+        );
+        let monolithic = aggregate_skill_state(
+            &Did("did:key:zAlice".into()),
+            "skill_x",
+            &[
+                ev("e1", "Uni", CredentialType::FormalCredential, 0.8),
+                ev("e2", "Uni", CredentialType::FormalCredential, 0.8),
+                ev("e3", "Uni", CredentialType::FormalCredential, 0.8),
+            ],
+            TEST_NOW,
+            &cfg,
+        );
+        assert!(diverse.confidence > monolithic.confidence);
+    }
+}

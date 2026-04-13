@@ -23,3 +23,62 @@ pub fn handle_pinboard_message(
 ) -> Result<(), String> {
     unimplemented!("PR 10 — PinBoard gossip")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn stub_commitment(revoked_at: Option<&str>) -> PinboardCommitment {
+        PinboardCommitment {
+            id: "commit-1".into(),
+            pinner_did: "did:key:zPinner".into(),
+            subject_did: "did:key:zSubject".into(),
+            scope: vec!["credentials".into()],
+            commitment_since: "2026-04-13T00:00:00Z".into(),
+            revoked_at: revoked_at.map(Into::into),
+            signature: "sig".into(),
+            public_key: "pk".into(),
+        }
+    }
+
+    #[test]
+    fn pinboard_commitment_serde_round_trips() {
+        // Gossip messages carry these as JSON payloads. Locking the
+        // serde surface here prevents silent field-name drift between
+        // the handler, the storage layer, and the IPC command.
+        let c = stub_commitment(None);
+        let s = serde_json::to_string(&c).unwrap();
+        let back: PinboardCommitment = serde_json::from_str(&s).unwrap();
+        assert_eq!(back.id, c.id);
+        assert_eq!(back.scope, c.scope);
+        assert!(back.revoked_at.is_none());
+    }
+
+    #[test]
+    fn pinboard_commitment_revocation_round_trips() {
+        let c = stub_commitment(Some("2026-05-01T00:00:00Z"));
+        let s = serde_json::to_string(&c).unwrap();
+        let back: PinboardCommitment = serde_json::from_str(&s).unwrap();
+        assert_eq!(back.revoked_at.as_deref(), Some("2026-05-01T00:00:00Z"));
+    }
+
+    #[test]
+    #[ignore = "pending PR 10 — PinBoard gossip"]
+    fn handle_pinboard_message_persists_observation() {
+        let db = Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+        let payload = serde_json::to_vec(&stub_commitment(None)).unwrap();
+        let msg = SignedGossipMessage {
+            topic: "/alexandria/pinboard/1.0".into(),
+            payload,
+            signature: vec![0u8; 64],
+            public_key: vec![0u8; 32],
+            stake_address: "stake_test1...".into(),
+            timestamp: 1_712_880_000,
+            encrypted: false,
+            key_id: None,
+        };
+        handle_pinboard_message(&db, &msg).unwrap();
+        // PR 10 asserts the DB state; here we only lock the success path.
+    }
+}
