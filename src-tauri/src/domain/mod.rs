@@ -13,3 +13,4 @@ pub mod profile;
 pub mod reputation;
 pub mod sync;
 pub mod taxonomy;
+pub mod vc;

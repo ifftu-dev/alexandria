@@ -1,3 +1,4 @@
+pub mod aggregation;
 pub mod cardano;
 pub mod classroom;
 pub mod commands;

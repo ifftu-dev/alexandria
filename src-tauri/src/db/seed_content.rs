@@ -218,7 +218,6 @@ const REMOTE_SEED_ASSETS: &[RemoteSeedAsset] = &[
         element_id: "el_ux_3_3",
         url: "https://www.rfc-editor.org/rfc/rfc8259.txt",
     },
-
     // ── Tutorial videos (kind='tutorial' courses from BACKFILL_SQL) ─
     // Reuse reliable W3C + MDN CC-licensed clips. The same URL is fine
     // across multiple tutorials — the cache in seed_content_if_needed
