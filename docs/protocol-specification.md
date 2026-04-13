@@ -8,6 +8,29 @@
 
 ---
 
+## Implementation Status
+
+The §4 reputation system has been substantially extended by the
+**Alexandria Credential & Reputation Protocol v1** (separate spec
+document) which lands a W3C-style Verifiable Credential model
+alongside the legacy skill-proof + NFT pipeline described in §4
+below. Both models coexist:
+
+- **Legacy path (§4 + §5)** — assessment → skill_proof → optional
+  Cardano NFT mint. Still implemented and supported. See
+  `evidence::aggregator`, `commands::cardano::mint_skill_proof_nft`.
+- **VC-first path (PRs 2–13)** — `did:key` identity + signed VCs +
+  status-list revocation + deterministic aggregation +
+  selective-disclosure presentations + offline survivability bundle.
+  See `docs/architecture.md` §13 for the layer overview and the
+  v1 credential-reputation spec for the normative protocol.
+
+For each section in this document, see the implementation-status
+table at `docs/architecture.md` §13 to determine which PR landed
+the corresponding feature.
+
+---
+
 ## Conventions and Terminology
 
 The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "SHOULD NOT", "RECOMMENDED", "MAY", and "OPTIONAL" in this document are to be interpreted as described in RFC 2119.

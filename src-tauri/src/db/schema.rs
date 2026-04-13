@@ -34,6 +34,7 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (24, "vc_credential_anchors", MIGRATION_024),
     (25, "vc_pinboard_observations", MIGRATION_025),
     (26, "vc_presentations_seen", MIGRATION_026),
+    (27, "vc_derived_skill_states", MIGRATION_027),
 ];
 
 const MIGRATION_001: &str = r#"
@@ -1289,4 +1290,42 @@ CREATE TABLE IF NOT EXISTS presentations_seen (
 
 CREATE INDEX IF NOT EXISTS idx_presentations_seen_audience
     ON presentations_seen(audience);
+"#;
+
+const MIGRATION_027: &str = r#"
+-- ============================================================
+-- Migration 027: Persisted derived skill states (§14 + §16)
+-- Per-(subject, skill, version) materialised aggregation output.
+-- ============================================================
+--
+-- The aggregation engine in `src/aggregation/` is pure and
+-- recomputes deterministically from `credentials`, but recruiter /
+-- consumer queries (§17) want fast lookups by (subject, skill).
+-- This table caches the most recent computation per
+-- (subject_did, skill_id, calculation_version), refreshed by the
+-- `commands::aggregation::recompute_all` IPC.
+--
+-- The full DerivedSkillState payload is stored as JSON so any
+-- future field additions in the explainable output (§16) flow
+-- through without a migration.
+CREATE TABLE IF NOT EXISTS derived_skill_states (
+    subject_did          TEXT NOT NULL,
+    skill_id             TEXT NOT NULL,
+    calculation_version  TEXT NOT NULL,
+    raw_score            REAL NOT NULL,
+    confidence           REAL NOT NULL,
+    trust_score          REAL NOT NULL,
+    level                INTEGER NOT NULL,
+    evidence_mass        REAL NOT NULL,
+    unique_issuer_clusters INTEGER NOT NULL,
+    active_evidence_count  INTEGER NOT NULL,
+    state_json           TEXT NOT NULL,                 -- full DerivedSkillState
+    computed_at          TEXT NOT NULL,
+    PRIMARY KEY (subject_did, skill_id, calculation_version)
+);
+
+CREATE INDEX IF NOT EXISTS idx_derived_skill_states_subject
+    ON derived_skill_states(subject_did);
+CREATE INDEX IF NOT EXISTS idx_derived_skill_states_skill
+    ON derived_skill_states(skill_id);
 "#;

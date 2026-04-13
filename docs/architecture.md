@@ -21,6 +21,7 @@
 10. [Frontend](#10-frontend)
 11. [IPC Boundary](#11-ipc-boundary)
 12. [Security Model](#12-security-model)
+13. [Verifiable Credentials Layer](#13-verifiable-credentials-layer)
 
 ---
 
@@ -435,6 +436,10 @@ The frontend communicates with the Rust backend via **~160 Tauri IPC commands** 
 | Module | Commands | Examples |
 |--------|----------|---------|
 | classroom | 24 | `classroom_create`, `classroom_approve_member`, `classroom_send_message`, `classroom_start_call` |
+| credentials | 6 | `issue_credential`, `list_credentials`, `verify_credential_cmd`, `revoke_credential`, `export_credentials_bundle` |
+| presentation | 2 | `create_presentation`, `verify_presentation` |
+| pinning | 5 | `declare_pinboard_commitment`, `revoke_pinboard_commitment`, `list_my_commitments`, `list_incoming_commitments`, `get_quota_breakdown` |
+| aggregation | 3 | `get_derived_skill_state`, `list_derived_states`, `recompute_all` |
 | governance | 17 | `create_dao`, `submit_proposal`, `cast_vote`, `run_election` |
 | taxonomy | 15 | `get_skills`, `get_subjects`, `update_taxonomy`, `get_skill_graph` |
 | tutoring | 14 | `tutoring_create_room`, `tutoring_join_room`, `tutoring_toggle_video` |
@@ -480,4 +485,91 @@ Note: tutoring has platform-specific variants (desktop with video, mobile stubs)
 - Only derived integrity scores (0.0-1.0) are stored and transmitted
 - Cross-device sync is encrypted with a key derived from the wallet signing key
 - Public gossip contains only evidence scores and governance actions — no personal data beyond stake addresses
+
+---
+
+## 13. Verifiable Credentials Layer
+
+VC-first credential model implemented in PRs 2–13 from the normative
+spec at [`docs/protocol-specification.md`](protocol-specification.md).
+The layer is local-first, signature-verifiable without
+Alexandria infrastructure (§20.4 survivability), and orthogonal to
+the legacy skill-proof + NFT pipeline (which remains for backwards
+compatibility with content already on-chain).
+
+### Six layers
+
+1. **Identity** — `did:key` self-resolving DIDs over Ed25519 keys
+   (`crypto::did`, PR 3). Historical key rotation tracked in
+   `key_registry` so credentials signed under a pre-rotation key
+   still verify.
+2. **Credential** — W3C-style Verifiable Credentials with
+   `Ed25519Signature2020` detached JWS proofs over JCS-canonical
+   bytes (`domain::vc`, PR 4). Stored in `credentials` (PR 5).
+3. **Status** — RevocationList2020-style bitmap per issuer in
+   `credential_status_lists`. Versioned to prevent rollback on
+   gossip propagation. PR 5 + PR 9.
+4. **Anchoring** — Per-credential integrity anchor queue
+   (`cardano::anchor_queue`) writes BLAKE3(JCS bytes) into
+   metadata-only Cardano txs. Idle-node contract: silently
+   no-ops without Blockfrost / wallet credentials. PR 8 (queue),
+   PR 16 (real submission).
+5. **Aggregation** — Deterministic, explainable trust scores via
+   the §14 weighted-mean + saturating-confidence pipeline
+   (`aggregation::aggregate_skill_state`, PR 6) + anti-gaming
+   (cluster cap, inflation z-score, PR 7).
+6. **Presentation** — Selective-disclosure envelopes signed by the
+   subject (`commands::presentation`). JCS-canonical payload bound
+   to (audience, nonce); replay-protected via `presentations_seen`.
+   PR 11.
+
+### Survivability (§20.4)
+
+The `commands::credentials::export_credentials_bundle` IPC produces
+a JCS-canonical JSON bundle with credentials + key registry +
+status lists. `verify_bundle_offline_impl` re-loads the bundle
+into a fresh ephemeral DB and runs the full §13.2 verification
+pipeline — proving the bundle is self-contained and survives
+Alexandria shutdown. PR 12.
+
+### P2P propagation
+
+Four new gossip topics carry VC-layer messages:
+- `/alexandria/vc-did/1.0` → DID doc + rotation announcements
+- `/alexandria/vc-status/1.0` → status list snapshots / deltas
+- `/alexandria/vc-presentation/1.0` → opt-in selective presentations
+- `/alexandria/pinboard/1.0` → PinBoard pinning commitments
+
+Plus a request-response protocol on `/alexandria/vc-fetch/1.0` for
+authority-respecting credential pull. Handlers in `p2p::vc_did`,
+`p2p::vc_status`, `p2p::vc_fetch`, `p2p::presentation`,
+`p2p::pinboard`. PR 9 + PR 10.
+
+### Worked example (§26)
+
+The aggregation engine reproduces the spec's worked example
+end-to-end: `Q ≈ 0.846`, `C ≈ 0.514`, `L = 5`, `T ≈ 0.435`. See
+`tests/e2e_vc/aggregation.rs` for the four assertions that pin
+this on every test run.
+
+### Implementation status
+
+| Spec section | PR | Status |
+|--------------|----|----|
+| §4–§5 (DID identity, key rotation) | PR 3 | Implemented |
+| §6–§7 (credential taxonomy + canonical structure) | PR 4 | Implemented |
+| §8–§10 (required fields, issuance, non-transferability) | PR 4–5 | Implemented |
+| §11 (expiration, revocation, suspension, supersession) | PR 5 | Revocation + expiration done; suspension + supersession deferred |
+| §12 (storage, durability, integrity anchoring) | PR 8 + PR 10 | Storage + anchor queue + PinBoard implemented; on-chain submission lands in PR 16 |
+| §13 (verification algorithm + acceptance predicate) | PR 4–5 | Implemented |
+| §14 (trust aggregation, weights, confidence, levels) | PR 6 | Implemented |
+| §15 (anti-gaming controls) | PR 7 | Cluster cap + inflation penalty implemented; cluster_issuers is per-DID until governance signals land |
+| §16 (derived skill state output) | PR 6 + PR 13 | Implemented + cached |
+| §17 (recruiter/consumer queries) | PR 13 | Cached lookups via `get_derived_skill_state` |
+| §18 (selective disclosure) | PR 11 | Redact-and-resign MVP; BBS+/zk follow-up |
+| §19 (NFT wrapper rules) | — | Existing skill-proof NFT pipeline retained; no VC-NFT wrapper yet |
+| §20 (survivability) | PR 12 | Bundle export + offline verifier |
+| §21–§22 (interfaces + pseudocode) | PR 4–11 | Implemented |
+| §23 (security requirements) | PR 4–11 | Canonicalization, replay resistance, audit logging |
+| §24 (minimal implementation profile) | PR 12 | Complete |
 
