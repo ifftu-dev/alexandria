@@ -85,9 +85,11 @@ dependencies = [
 name = "alex"
 version = "0.1.0"
 dependencies = [
+ "alexandria-node",
  "anyhow",
  "argon2",
  "bytesize",
+ "chrono",
  "clap",
  "console 0.16.3",
  "dialoguer",

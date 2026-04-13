@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
-use commands::{build, clean, config, db, dev, health, run};
+use commands::{build, clean, config, credentials, db, dev, health, run};
 use context::ProjectContext;
 
 #[derive(Parser)]
@@ -43,6 +43,10 @@ enum Commands {
     /// Database and app data operations
     #[command(subcommand)]
     Db(db::DbCommand),
+
+    /// Inspect, export, and verify Verifiable Credentials
+    #[command(subcommand)]
+    Credentials(credentials::CredentialsCommand),
 
     /// Build and compile operations
     #[command(subcommand)]
@@ -79,6 +83,7 @@ fn run(cli: Cli) -> Result<()> {
         Commands::Run(cmd) => run::execute(cmd, &ctx),
         Commands::Dev(cmd) => dev::execute(cmd, &ctx),
         Commands::Db(cmd) => db::execute(cmd, &ctx, cli.password_file.as_deref()),
+        Commands::Credentials(cmd) => credentials::execute(cmd, &ctx, cli.password_file.as_deref()),
         Commands::Build(cmd) => build::execute(cmd, &ctx),
         Commands::Config(cmd) => config::execute(cmd, &ctx),
         Commands::Health => health::execute(&ctx),
