@@ -7,7 +7,6 @@ use app_lib::aggregation::{
 };
 
 #[tokio::test]
-#[ignore = "pending PR 7 — anti-gaming"]
 async fn cluster_cap_prevents_linear_scaling() {
     // Sum of 10 same-cluster weights must not exceed kappa_cluster.
     let cfg = AggregationConfig::default();
@@ -16,7 +15,6 @@ async fn cluster_cap_prevents_linear_scaling() {
 }
 
 #[tokio::test]
-#[ignore = "pending PR 7 — anti-gaming"]
 async fn z_score_below_threshold_applies_no_penalty() {
     let cfg = AggregationConfig::default();
     let p = inflation_penalty(1.0, &cfg); // z below z_max=1.5
@@ -24,7 +22,6 @@ async fn z_score_below_threshold_applies_no_penalty() {
 }
 
 #[tokio::test]
-#[ignore = "pending PR 7 — anti-gaming"]
 async fn z_score_above_threshold_penalises_monotonically() {
     let cfg = AggregationConfig::default();
     let p1 = inflation_penalty(2.0, &cfg);
@@ -34,7 +31,6 @@ async fn z_score_above_threshold_penalises_monotonically() {
 }
 
 #[tokio::test]
-#[ignore = "pending PR 7 — anti-gaming"]
 async fn inflation_z_score_uses_global_stats() {
     let db = new_test_db();
     let z = inflation_z_score(&test_did("generous-issuer"), db.conn(), "quiz");
