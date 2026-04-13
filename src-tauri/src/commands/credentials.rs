@@ -126,6 +126,14 @@ pub fn issue_credential_impl(
     )
     .map_err(|e| format!("insert credential: {e}"))?;
 
+    // Auto-enqueue for §12.3 integrity anchoring. Failure here is
+    // non-fatal — anchoring is a survivability convenience, not the
+    // critical issuance path. A retry will re-enqueue on next issuance
+    // or via an explicit IPC.
+    if let Err(e) = crate::cardano::anchor_queue::enqueue(conn, &credential_id) {
+        log::warn!("auto-enqueue anchor failed for {credential_id}: {e}");
+    }
+
     Ok(signed)
 }
 
