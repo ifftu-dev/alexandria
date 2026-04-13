@@ -50,6 +50,14 @@
 | 17 | `storage_settings` | App settings key-value store with storage quota default |
 | 18 | `onchain_governance_queue` | Persistent queue for async Plutus governance transactions |
 | 19 | `classroom_encryption` | Classroom group encryption keys for E2E encrypted messages |
+| 20 | `tutorials_and_video_chapters` | Standalone video tutorials (kind='tutorial') + per-chapter video metadata |
+| 21 | `opinions` | Field Commentary opinions, pending verification queue, DAO-signed withdrawals |
+| 22 | `vc_key_registry` | Historical (DID, key_id, valid window) entries — VC §5.3 historical key resolution |
+| 23 | `vc_credentials_and_status_lists` | Verifiable credentials canonical store + RevocationList2020-style status list bitmaps |
+| 24 | `vc_credential_anchors` | Cardano integrity-anchor queue for credential hashes (§12.3) |
+| 25 | `vc_pinboard_observations` | Local + remote PinBoard pinning commitments (§12 + §20.4) |
+| 26 | `vc_presentations_seen` | (audience, nonce) replay-protection log for selective-disclosure presentations (§18) |
+| 27 | `vc_derived_skill_states` | Cached per-(subject, skill, version) aggregation outputs (§14, §16) |
 
 ---
 
@@ -288,6 +296,81 @@
 - PK: `key` (TEXT)
 - Columns: `value`, `updated_at`
 - Seeded with `storage_quota_bytes = '0'` (unlimited)
+
+### Verifiable Credentials (6 tables — VC-first migration, PRs 3–13)
+
+The credentialing model implemented from `docs/protocol-specification.md`
+v1. Issuance + verification + aggregation are local-first; gossip
+handlers reflect remote DID docs / status lists / PinBoard commitments
+into the same tables so verifiers can operate purely against local
+state. See `docs/protocol-specification.md` for the normative schema.
+
+**`key_registry`** — Historical (DID, key_id) public-key bindings
+with validity windows. Backfilled with `valid_from = '1970-01-01...Z'`
+on first rotation so credentials signed before the registry existed
+still resolve at any verification time ≤ rotation. PR 3.
+- Composite PK: `(did, key_id)`
+- Columns: `public_key_hex`, `valid_from`, `valid_until`, `rotated_by`
+- Indexes: `(did, valid_from)`, partial on `did WHERE valid_until IS NULL`
+
+**`credentials`** — Canonical signed VC store. `signed_vc_json` is the
+W3C-style envelope; `integrity_hash = blake3(JCS bytes)` feeds the
+Cardano anchor queue. `revoked` is cached from the status list for
+fast reads on the verify hot path. PR 5.
+- PK: `id` (urn:uuid:…)
+- Columns: `issuer_did`, `subject_did`, `credential_type`, `claim_kind`,
+  `skill_id` (NULL for non-skill claims), `issuance_date`,
+  `expiration_date`, `signed_vc_json`, `integrity_hash`,
+  `status_list_id`, `status_list_index`, `revoked`, `revoked_at`,
+  `revocation_reason`, `supersedes`, `received_at`
+- Indexes: subject_did, issuer_did, partial on skill_id, partial on
+  (status_list_id, status_list_index)
+
+**`credential_status_lists`** — RevocationList2020-style bitmap per
+issuer. `bits` is a raw BLOB so the list can be re-broadcast verbatim
+and verified independently. Versioned to prevent rollback (§11.2). PR 5.
+- PK: `list_id` (urn:alexandria:status-list:…)
+- Columns: `issuer_did`, `version`, `status_purpose`, `bits` (BLOB),
+  `bit_length`, `signature` (NULL for local-issuer rows), `updated_at`
+- Index: issuer_did
+
+**`credential_anchors`** — Cardano integrity-anchor queue (§12.3).
+Idle-node contract: rows stay pending without `BLOCKFROST_PROJECT_ID`.
+PR 8.
+- PK: `credential_id` → FK `credentials(id)`
+- Columns: `anchor_tx_hash`, `anchor_status` (pending|submitted|
+  confirmed|failed), `attempts`, `last_error`, `next_attempt_at`,
+  `enqueued_at`, `confirmed_at`
+- Index: (anchor_status, next_attempt_at)
+
+**`pinboard_observations`** — Local declarations + remote observations
+of per-subject pinning commitments (§12 + §20.4). The 5-tier
+eviction logic reads this to identify content that must survive
+storage pressure. PR 10.
+- PK: `id` (urn:uuid:…)
+- Columns: `pinner_did`, `subject_did`, `scope` (JSON array),
+  `commitment_since`, `revoked_at`, `signature`, `public_key`,
+  `received_at`
+- Indexes: subject_did, pinner_did, partial on `subject_did WHERE
+  revoked_at IS NULL`
+
+**`presentations_seen`** — Per-verifier (audience, nonce) replay
+protection log for selective-disclosure presentations (§18 + §23.3).
+Local-only — replay protection is per-verifier, not network-wide.
+PR 11.
+- Composite PK: `(audience, nonce)`
+- Columns: `seen_at`
+- Index: audience
+
+**`derived_skill_states`** — Cached per-(subject, skill, version)
+aggregation output. `recompute_all` IPC repopulates this from
+`credentials`; `get_derived_skill_state` reads from cache then
+computes-and-caches on miss. PR 13.
+- Composite PK: `(subject_did, skill_id, calculation_version)`
+- Hoisted columns: `raw_score`, `confidence`, `trust_score`, `level`,
+  `evidence_mass`, `unique_issuer_clusters`, `active_evidence_count`
+- Full payload: `state_json` (the explainable §16 output)
+- Indexes: subject_did, skill_id
 
 ---
 

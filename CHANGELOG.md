@@ -7,6 +7,94 @@ and this project loosely follows [Semantic Versioning](https://semver.org/spec/v
 
 ## [Unreleased]
 
+### Added — VC-first credential migration (PRs 2–13)
+
+End-to-end implementation of the Alexandria Credential & Reputation
+Protocol v1 (`alexandria-credential-reputation-protocol-v1.md`)
+alongside the existing skill-proof + NFT pipeline. See
+`docs/architecture.md` §13 for the full layer breakdown.
+
+- **PR 2** — Unit-test scaffolding across every stub introduced in
+  PR 1 (20 active wire-shape tests + 73 `#[ignore]`'d behaviour
+  specs un-ignored as their landing PRs arrive).
+- **PR 3** — `did:key` self-resolving DIDs over Ed25519
+  (multicodec 0xed + multibase base58btc) plus a historical
+  `key_registry` (migration 22) for §5.3 historical-key
+  verification across rotation.
+- **PR 4** — VC sign/verify pipeline. JCS canonicalization
+  (`serde_json_canonicalizer`), embedded W3C + Alexandria
+  JSON-LD contexts, Ed25519Signature2020 detached JWS over
+  JCS bytes, full §13.2 verification algorithm with the §13.3
+  acceptance predicate.
+- **PR 5** — Canonical credential storage (`credentials` table,
+  migration 23) + RevocationList2020-style status lists
+  (`credential_status_lists`). New IPC: `issue_credential`,
+  `list_credentials`, `get_credential`, `revoke_credential`,
+  `verify_credential_cmd`. Verify hot-path consults the status
+  list bitmap.
+- **PR 6** — Deterministic aggregation engine (§14, §16, §22.2):
+  weighted mean Q, evidence mass M, unique issuer clusters U,
+  saturating confidence C, trust score T = Q·C, level mapping.
+  §25 default parameters baked in; §26 worked example
+  (Q ≈ 0.846, C ≈ 0.514, L = 5) reproduced in e2e tests.
+- **PR 7** — Anti-gaming controls (§15): cluster cap,
+  inflation z-score from the credentials table, exponential
+  penalty above z_max. Per-DID issuer clustering as the v1
+  baseline.
+- **PR 8** — Cardano integrity-anchor queue scaffolding
+  (`credential_anchors`, migration 24) with idle-node contract:
+  `tick` silently no-ops without `BLOCKFROST_PROJECT_ID` /
+  wallet credentials. Real on-chain submission scheduled for
+  a follow-up PR with testnet validation.
+- **PR 9** — P2P propagation handlers for four new gossip
+  topics: `vc-did`, `vc-status`, `vc-presentation`, `pinboard`,
+  plus the `vc-fetch/1.0` request-response handler. Authority-
+  respecting fetch (subject = self-allow, others = unauthorized).
+- **PR 10** — PinBoard storage layer (`pinboard_observations`,
+  migration 25) + IPC commands. DHT archive discovery surface
+  with idle-node contract.
+- **PR 11** — Selective-disclosure presentations (§18 + §23.3).
+  Redact-and-resign envelope: subject signs a JCS-canonical
+  bundle of redacted credentials bound to (audience, nonce);
+  `presentations_seen` (migration 26) provides per-verifier
+  replay protection.
+- **PR 12** — Survivability bundle export + offline verifier
+  (§20.4). `export_credentials_bundle` IPC produces a JCS-
+  canonical JSON document carrying credentials + key registry
+  + status lists; `verify_bundle_offline_impl` re-loads into a
+  fresh ephemeral DB and runs the full §13.2 pipeline. Bundles
+  are byte-identical for same inputs (content-addressable).
+- **PR 13** — IPC command registration (lib.rs `invoke_handler!`
+  block now exposes all 16 new VC commands) + wired-up
+  aggregation IPC handlers backed by a new `derived_skill_states`
+  cache (migration 27). Documentation sweep across
+  `docs/architecture.md` (§13 added), `docs/database-schema.md`
+  (migrations 22–27 + new VC domain section),
+  `docs/protocol-specification.md` (implementation-status
+  preamble), and `docs/skills-and-reputation.md` (PR cross-refs).
+
+#### Migration scoreboard
+
+| PR | Lib unit tests | Lib ignored | E2E pass | E2E ignored |
+|----|----|----|----|----|
+| 2  | 470 | 73 | 0  | 37 |
+| 3  | 483 | 63 | 3  | 34 |
+| 4  | 500 | 49 | 7  | 30 |
+| 5  | 506 | 49 | 8  | 29 |
+| 6  | 526 | 29 | 12 | 25 |
+| 7  | 537 | 20 | 16 | 21 |
+| 8  | 540 | 17 | 18 | 19 |
+| 9  | 551 | 7  | 18 | 19 |
+| 10 | 560 | **0** | 18 | 19 |
+| 11 | 566 | 0  | 21 | 16 |
+| 12 | 571 | 0  | 24 | 14 |
+| 13 | 576 | 0  | 24 | 14 |
+
+The 14 still-ignored e2e tests have `unimplemented!()` bodies and
+need a real two-node libp2p fixture (`p2p_did_status`,
+`p2p_vc_fetch`, `p2p_survival`, `pinning` 5-tier eviction). They
+land in PR 17.
+
 ## [2026-03-25]
 
 ### Added

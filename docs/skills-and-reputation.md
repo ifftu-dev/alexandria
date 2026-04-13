@@ -252,3 +252,29 @@ Resumes are proxies; this system provides proof.
 
 ### Rigor
 Atomic skills, explicit evidence, confidence-aware reputation.
+
+---
+
+## Implementation Status
+
+The reputation aggregation pipeline described above (§12) is now
+backed by the **Alexandria Credential & Reputation Protocol v1**
+end-to-end. See `docs/architecture.md` §13 for the layered
+implementation and `docs/protocol-specification.md` for the
+implementation-status preamble.
+
+| Component | Module | PR |
+|-----------|--------|----|
+| Skill proofs (legacy NFT pipeline) | `evidence::aggregator`, `commands::cardano::mint_skill_proof_nft` | Pre-existing |
+| W3C-style Verifiable Credentials | `domain::vc`, `commands::credentials` | PR 4–5 |
+| Deterministic aggregation engine (Q, M, U, C, T, L) | `aggregation::aggregate_skill_state` | PR 6 |
+| Type weights, freshness, quality, independence (§14) | `aggregation::weights` | PR 6 |
+| Anti-gaming (cluster cap, inflation z-score, §15) | `aggregation::antigaming` | PR 7 |
+| Issuer clustering / pairwise dependence | `aggregation::independence` | PR 7 (per-DID v1; richer signals deferred) |
+| Persisted derived-state cache (§16) | `commands::aggregation` (`derived_skill_states` table) | PR 13 |
+| Recruiter / consumer query API (§17) | `get_derived_skill_state`, `list_derived_states`, `recompute_all` IPC | PR 13 |
+
+The §26 worked example is reproduced end-to-end by the four
+assertions in `tests/e2e_vc/aggregation.rs`:
+`Q ≈ 0.846`, `C ≈ 0.514`, `L = 5`, `T = Q · C`.
+
