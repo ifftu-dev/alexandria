@@ -79,11 +79,44 @@ async fn tampered_payload_fails_verification() {
 }
 
 #[tokio::test]
-#[ignore = "pending PR 5 — canonical storage + status list"]
 async fn revoked_credential_is_rejected() {
-    // Issue → publish a revocation in the status list → verify rejects.
-    // Requires the credentials table + status_lists table from PR 5.
-    unimplemented!("drive via commands::credentials::{{issue_credential, revoke_credential}}")
+    // Issue → revoke via status list → verify rejects (§11.2).
+    use app_lib::commands::credentials::{
+        issue_credential_impl, revoke_credential_impl, IssueCredentialRequest,
+    };
+    use app_lib::domain::vc::{CredentialType, SkillClaim};
+
+    let db = new_test_db();
+    let subject = test_did("alice");
+    let issuer_key = super::common::test_key("issuer");
+    let issuer_did = test_did("issuer");
+    let req = IssueCredentialRequest {
+        credential_type: CredentialType::FormalCredential,
+        subject: subject.clone(),
+        claim: Claim::Skill(SkillClaim {
+            skill_id: "skill_revocation_e2e".into(),
+            level: 3,
+            score: 0.7,
+            evidence_refs: vec![],
+            rubric_version: None,
+            assessment_method: None,
+        }),
+        evidence_refs: vec![],
+        expiration_date: None,
+    };
+    let vc =
+        issue_credential_impl(db.conn(), &issuer_key, &issuer_did, &req, TEST_NOW).expect("issue");
+
+    // Pre-revocation: verifier accepts.
+    let before = verify_credential(db.conn(), &vc, TEST_NOW, &VerificationPolicy::default());
+    assert_eq!(before.acceptance_decision, AcceptanceDecision::Accept);
+
+    revoke_credential_impl(db.conn(), &vc.id, "superseded", TEST_NOW).expect("revoke");
+
+    // Post-revocation: verifier rejects with revoked=true.
+    let after = verify_credential(db.conn(), &vc, TEST_NOW, &VerificationPolicy::default());
+    assert!(after.revoked);
+    assert_eq!(after.acceptance_decision, AcceptanceDecision::Reject);
 }
 
 #[tokio::test]

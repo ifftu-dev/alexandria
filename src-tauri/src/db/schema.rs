@@ -30,6 +30,7 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (20, "tutorials_and_video_chapters", MIGRATION_020),
     (21, "opinions", MIGRATION_021),
     (22, "vc_key_registry", MIGRATION_022),
+    (23, "vc_credentials_and_status_lists", MIGRATION_023),
 ];
 
 const MIGRATION_001: &str = r#"
@@ -1146,4 +1147,62 @@ CREATE INDEX IF NOT EXISTS idx_key_registry_did_valid_from
     ON key_registry(did, valid_from);
 CREATE INDEX IF NOT EXISTS idx_key_registry_active
     ON key_registry(did) WHERE valid_until IS NULL;
+"#;
+
+const MIGRATION_023: &str = r#"
+-- ============================================================
+-- Migration 023: VC storage + revocation status lists
+-- Credentials layer per spec §7, §11.2, §12.1.
+-- ============================================================
+--
+-- `credentials` stores every VC the node has issued or received.
+-- The canonical record is `signed_vc_json` (the full signed VC),
+-- with the most-queried fields hoisted into their own columns so
+-- verification, aggregation, and UI don't have to re-parse the JSON
+-- on every read. `integrity_hash` is the BLAKE3-hashed JCS bytes —
+-- PR 8 anchors this hash to Cardano via `credential_anchors`.
+CREATE TABLE IF NOT EXISTS credentials (
+    id                TEXT PRIMARY KEY,           -- e.g. urn:uuid:...
+    issuer_did        TEXT NOT NULL,
+    subject_did       TEXT NOT NULL,
+    credential_type   TEXT NOT NULL,              -- FormalCredential, etc.
+    claim_kind        TEXT NOT NULL,              -- skill | role | custom
+    skill_id          TEXT,                       -- NULL for non-skill claims
+    issuance_date     TEXT NOT NULL,
+    expiration_date   TEXT,
+    signed_vc_json    TEXT NOT NULL,              -- full JSON-LD VC
+    integrity_hash    TEXT NOT NULL,              -- hex(blake3(JCS bytes))
+    status_list_id    TEXT,                       -- FK to credential_status_lists.list_id
+    status_list_index INTEGER,                    -- bit position in the list
+    revoked           INTEGER NOT NULL DEFAULT 0, -- cached from status list for fast queries
+    revoked_at        TEXT,
+    revocation_reason TEXT,
+    supersedes        TEXT,                       -- prior credential id, §11.4
+    received_at       TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_credentials_subject ON credentials(subject_did);
+CREATE INDEX IF NOT EXISTS idx_credentials_issuer ON credentials(issuer_did);
+CREATE INDEX IF NOT EXISTS idx_credentials_skill ON credentials(skill_id) WHERE skill_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_credentials_status
+    ON credentials(status_list_id, status_list_index)
+    WHERE status_list_id IS NOT NULL;
+
+-- `credential_status_lists` stores the versioned revocation bitmap per
+-- issuer per list. Bit `status_list_index` = 1 means revoked. We keep
+-- the raw `bits` blob so the list can be rebroadcast verbatim (same
+-- bytes ⇒ same signature) and verified independently.
+CREATE TABLE IF NOT EXISTS credential_status_lists (
+    list_id         TEXT PRIMARY KEY,             -- issuer's list identifier
+    issuer_did      TEXT NOT NULL,
+    version         INTEGER NOT NULL DEFAULT 1,   -- monotonic; older versions ignored
+    status_purpose  TEXT NOT NULL DEFAULT 'revocation',
+    bits            BLOB NOT NULL,                -- packed little-endian bitmap
+    bit_length      INTEGER NOT NULL DEFAULT 0,
+    signature       TEXT,                         -- issuer signature over (list_id, version, bits)
+    updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_status_lists_issuer
+    ON credential_status_lists(issuer_did);
 "#;
