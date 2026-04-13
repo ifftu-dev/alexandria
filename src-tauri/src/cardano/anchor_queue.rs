@@ -31,18 +31,47 @@ pub struct CredentialAnchor {
 /// Process one batch from the queue. Silently skips when
 /// `BLOCKFROST_PROJECT_ID` is unset or the vault is locked; logs at
 /// debug only so an idle node doesn't spam.
+///
+/// PR 8 ships the queue + idle-node contract. Actual on-chain
+/// submission via `build_anchor_metadata_tx` is a follow-up tied
+/// to a real testnet — until then the processor returns 0 and
+/// leaves rows pending whenever the chain hooks are wired but the
+/// builder is still stubbed.
 pub async fn tick(
-    _db: &Arc<Mutex<Option<Database>>>,
-    _blockfrost: &Option<crate::cardano::blockfrost::BlockfrostClient>,
-    _wallet: &Option<crate::crypto::wallet::Wallet>,
+    db: &Arc<Mutex<Option<Database>>>,
+    blockfrost: &Option<crate::cardano::blockfrost::BlockfrostClient>,
+    wallet: &Option<crate::crypto::wallet::Wallet>,
 ) -> Result<u32, String> {
-    unimplemented!("PR 8 — anchor queue processor")
+    // Idle-node contract: no chain credentials ⇒ no work, no error.
+    if blockfrost.is_none() || wallet.is_none() {
+        log::debug!("anchor_queue::tick: blockfrost or wallet unavailable, skipping");
+        return Ok(0);
+    }
+
+    // Confirm the DB is open; otherwise this is also an idle skip.
+    {
+        let guard = db.lock().map_err(|_| "db lock poisoned".to_string())?;
+        if guard.is_none() {
+            return Ok(0);
+        }
+    }
+
+    // Builder is not yet wired — pending rows remain pending. Return 0
+    // so the scheduler treats this as "nothing processed this tick".
+    log::debug!("anchor_queue::tick: builder not yet wired, leaving pending rows");
+    Ok(0)
 }
 
-/// Enqueue a credential for anchoring. Idempotent: no-op if the
-/// credential is already pending, submitted, or confirmed.
-pub fn enqueue(_db: &rusqlite::Connection, _credential_id: &str) -> Result<(), String> {
-    unimplemented!("PR 8 — enqueue credential anchor")
+/// Enqueue a credential for anchoring. Idempotent: a no-op insert
+/// if the credential is already pending, submitted, or confirmed.
+pub fn enqueue(db: &rusqlite::Connection, credential_id: &str) -> Result<(), String> {
+    db.execute(
+        "INSERT OR IGNORE INTO credential_anchors \
+         (credential_id, anchor_status) VALUES (?1, 'pending')",
+        rusqlite::params![credential_id],
+    )
+    .map_err(|e| format!("enqueue credential anchor: {e}"))?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -71,11 +100,25 @@ mod tests {
         );
     }
 
+    /// Insert a minimal credentials row so the FK on credential_anchors
+    /// is satisfiable. Returns the inserted credential_id.
+    fn seed_credential(conn: &rusqlite::Connection, id: &str) {
+        conn.execute(
+            "INSERT INTO credentials \
+             (id, issuer_did, subject_did, credential_type, claim_kind, \
+              issuance_date, signed_vc_json, integrity_hash) \
+             VALUES (?1, 'did:key:zI', 'did:key:zS', 'FormalCredential', \
+                     'skill', '2026-04-13T00:00:00Z', '{}', 'h')",
+            rusqlite::params![id],
+        )
+        .unwrap();
+    }
+
     #[test]
-    #[ignore = "pending PR 8 — anchor queue processor"]
     fn enqueue_inserts_pending_row() {
         let db = Database::open_in_memory().unwrap();
         db.run_migrations().unwrap();
+        seed_credential(db.conn(), "cred-1");
         enqueue(db.conn(), "cred-1").unwrap();
         let status: String = db
             .conn()
@@ -89,13 +132,13 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "pending PR 8 — anchor queue processor"]
     fn enqueue_is_idempotent_for_same_credential_id() {
         // Protocol §12.3 + queue convention: multiple enqueue calls for
         // the same credential MUST NOT create duplicate rows or flip
         // `confirmed` → `pending`.
         let db = Database::open_in_memory().unwrap();
         db.run_migrations().unwrap();
+        seed_credential(db.conn(), "cred-1");
         enqueue(db.conn(), "cred-1").unwrap();
         enqueue(db.conn(), "cred-1").unwrap();
         let count: i64 = db
@@ -110,7 +153,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "pending PR 8 — anchor queue processor"]
     async fn tick_without_blockfrost_returns_zero_silently() {
         // Idle-node contract: no Blockfrost project id + no wallet
         // ⇒ tick is a silent no-op. Logs at debug only to avoid spam.

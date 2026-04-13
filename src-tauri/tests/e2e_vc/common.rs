@@ -29,12 +29,18 @@ pub fn new_test_db() -> Database {
 }
 
 fn uuid_like() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
+    // Tests run in parallel inside one process — same nanosecond +
+    // same PID can collide. Bumping a process-global counter
+    // guarantees uniqueness without needing a real UUID dep here.
+    static SEQ: AtomicU64 = AtomicU64::new(0);
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or(0);
-    format!("{nanos}-{}", std::process::id())
+    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+    format!("{nanos}-{}-{seq}", std::process::id())
 }
 
 /// Convenience: derive a `did:key` from a role-keyed signing key.
