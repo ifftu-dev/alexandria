@@ -76,8 +76,11 @@ impl Database {
         Ok(Self { conn })
     }
 
-    /// Open an in-memory database (for tests).
-    #[cfg(test)]
+    /// Open an unencrypted in-memory database. Used by tests and by
+    /// the offline credential bundle verifier — both want a fresh,
+    /// transient store that holds nothing sensitive. The encrypted
+    /// `open_encrypted` path stays the only way to open a persistent
+    /// DB for real user data.
     pub fn open_in_memory() -> Result<Self, DbError> {
         let conn = Connection::open_in_memory()?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
