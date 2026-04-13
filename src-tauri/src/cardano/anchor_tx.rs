@@ -20,3 +20,26 @@ pub async fn build_anchor_metadata_tx(
 ) -> Result<AnchorTx, String> {
     unimplemented!("PR 8 — build anchor metadata tx")
 }
+
+#[cfg(test)]
+mod tests {
+    // Most behaviour here (fee estimation, UTxO selection, Blockfrost
+    // chain-tip fetch) lives behind network and wallet fixtures that
+    // only make sense once PR 8 lands. For PR 2 we just pin the type
+    // surface: AnchorTx is a plain data container — its shape must
+    // match what `anchor_queue::tick` stores when it records success.
+    use super::*;
+
+    #[test]
+    fn anchor_tx_is_a_plain_data_container() {
+        // Shape-level regression guard: if this compiles with these
+        // field names + types, the queue processor's persistence code
+        // in PR 8 will line up without churn.
+        let tx = AnchorTx {
+            signed_cbor: vec![0x82, 0x00, 0x00],
+            tx_hash: "deadbeef".into(),
+        };
+        assert_eq!(tx.tx_hash, "deadbeef");
+        assert_eq!(tx.signed_cbor.len(), 3);
+    }
+}
