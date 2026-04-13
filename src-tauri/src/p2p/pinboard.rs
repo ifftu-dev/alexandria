@@ -17,11 +17,10 @@ pub struct PinboardCommitment {
     pub public_key: String,
 }
 
-pub fn handle_pinboard_message(
-    _db: &Database,
-    _message: &SignedGossipMessage,
-) -> Result<(), String> {
-    unimplemented!("PR 10 — PinBoard gossip")
+pub fn handle_pinboard_message(db: &Database, message: &SignedGossipMessage) -> Result<(), String> {
+    let commit: PinboardCommitment = serde_json::from_slice(&message.payload)
+        .map_err(|e| format!("malformed pinboard payload: {e}"))?;
+    crate::ipfs::pinboard::record_observation(db.conn(), &commit)
 }
 
 #[cfg(test)]
@@ -63,7 +62,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "pending PR 10 — PinBoard gossip"]
     fn handle_pinboard_message_persists_observation() {
         let db = Database::open_in_memory().unwrap();
         db.run_migrations().unwrap();
@@ -79,6 +77,13 @@ mod tests {
             key_id: None,
         };
         handle_pinboard_message(&db, &msg).unwrap();
-        // PR 10 asserts the DB state; here we only lock the success path.
+        // Round-trip: the observation must now be findable via the
+        // local `list_pinners_for(subject)` query.
+        let found = crate::ipfs::pinboard::list_pinners_for(
+            db.conn(),
+            &crate::crypto::did::Did("did:key:zSubject".into()),
+        )
+        .unwrap();
+        assert!(found.iter().any(|c| c.id == "commit-1"));
     }
 }
