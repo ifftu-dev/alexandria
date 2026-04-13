@@ -14,6 +14,10 @@ pub struct AggregationConfig {
     /// Per-skill decay constant λ for freshness (§14.6).
     pub skill_decay: HashMap<String, f64>,
     pub default_decay: f64,
+    /// Per-issuer trust priors (§14.4). Values ∈ [0, 1]. Missing
+    /// issuers fall back to `default_issuer_weight`.
+    pub issuer_weights: HashMap<String, f64>,
+    pub default_issuer_weight: f64,
     /// Confidence saturation parameters (§14.12, §25.3).
     pub beta: f64,
     pub gamma: f64,
@@ -30,12 +34,30 @@ pub struct AggregationConfig {
 
 impl Default for AggregationConfig {
     fn default() -> Self {
-        // Placeholder values — replaced with the §25 defaults in PR 6.
+        // Spec §25 defaults. Type weights per §25.1.
+        let mut type_weights = HashMap::new();
+        type_weights.insert(CredentialType::FormalCredential, 1.00);
+        type_weights.insert(CredentialType::AssessmentCredential, 0.90);
+        type_weights.insert(CredentialType::RoleCredential, 0.60);
+        type_weights.insert(CredentialType::AttestationCredential, 0.35);
+        type_weights.insert(CredentialType::SelfAssertion, 0.25);
+        // DerivedCredential is a computed artifact (§6.5) — it MUST
+        // NOT be confused with source-issued evidence, so it gets 0
+        // by default and must be explicitly weighted by a verifier
+        // policy that wants to consume derived states as inputs.
+        type_weights.insert(CredentialType::DerivedCredential, 0.00);
+
         Self {
             version: "1.0".into(),
-            type_weights: HashMap::new(),
+            type_weights,
             skill_decay: HashMap::new(),
             default_decay: 0.08,
+            issuer_weights: HashMap::new(),
+            // 0.8 is a reasonable prior for an unknown issuer in v1 —
+            // high enough that a new issuer's evidence isn't dismissed,
+            // low enough that verifiers can differentiate recognized
+            // institutions upward (e.g., 0.95) via configuration.
+            default_issuer_weight: 0.8,
             beta: 0.6,
             gamma: 0.7,
             quality_rubric_alpha: 0.4,
@@ -94,7 +116,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "pending PR 6 — aggregation engine"]
     fn default_populates_type_weights_per_spec_25_1() {
         // §25.1 defaults:
         //   Formal 1.00, Assessment 0.90, Role 0.60,

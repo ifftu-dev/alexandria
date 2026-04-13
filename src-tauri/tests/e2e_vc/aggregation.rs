@@ -46,7 +46,6 @@ fn spec_26_evidence() -> Vec<AggregationInput> {
 }
 
 #[tokio::test]
-#[ignore = "pending PR 6 — aggregation engine"]
 async fn worked_example_26_reproduces_raw_score() {
     let state = aggregate_skill_state(
         &test_did("alice"),
@@ -63,7 +62,6 @@ async fn worked_example_26_reproduces_raw_score() {
 }
 
 #[tokio::test]
-#[ignore = "pending PR 6 — aggregation engine"]
 async fn worked_example_26_reproduces_confidence() {
     let state = aggregate_skill_state(
         &test_did("alice"),
@@ -80,7 +78,6 @@ async fn worked_example_26_reproduces_confidence() {
 }
 
 #[tokio::test]
-#[ignore = "pending PR 6 — aggregation engine"]
 async fn worked_example_26_yields_level_5() {
     let state = aggregate_skill_state(
         &test_did("alice"),
@@ -94,7 +91,6 @@ async fn worked_example_26_yields_level_5() {
 }
 
 #[tokio::test]
-#[ignore = "pending PR 6 — aggregation engine"]
 async fn trust_score_equals_q_times_c() {
     let state = aggregate_skill_state(
         &test_did("alice"),
