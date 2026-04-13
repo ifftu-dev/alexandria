@@ -1135,3 +1135,192 @@ export interface ClassroomMetaEvent {
     | 'CallEnded'
   data: Record<string, unknown>
 }
+
+// ---------------------------------------------------------------------------
+// Verifiable Credentials (VC-first migration, PRs 2–13)
+//
+// All field names mirror the Rust serde wire format (snake_case). The VC
+// envelope itself uses snake_case keys too — the project's domain types
+// don't apply `rename_all = "camelCase"`.
+// ---------------------------------------------------------------------------
+
+export type CredentialType =
+  | 'FormalCredential'
+  | 'AssessmentCredential'
+  | 'AttestationCredential'
+  | 'RoleCredential'
+  | 'DerivedCredential'
+  | 'SelfAssertion'
+
+export type AcceptanceDecision = 'accept' | 'reject'
+
+export interface SkillClaim {
+  kind: 'skill'
+  skill_id: string
+  level: number
+  score: number
+  evidence_refs: string[]
+  rubric_version?: string | null
+  assessment_method?: string | null
+}
+
+export interface RoleClaim {
+  kind: 'role'
+  role: string
+  scope?: string | null
+}
+
+export interface CustomClaim {
+  kind: 'custom'
+  [field: string]: unknown
+}
+
+export type Claim = SkillClaim | RoleClaim | CustomClaim
+
+export interface CredentialSubject {
+  id: string
+  claim: Claim
+}
+
+export interface CredentialStatus {
+  id: string
+  type: string
+  status_purpose: string
+  status_list_index: string
+  status_list_credential: string
+}
+
+export interface TermsOfUse {
+  policy_version: string
+  usage: string
+}
+
+export interface Proof {
+  type: string
+  created: string
+  verification_method: string
+  proof_purpose: string
+  jws: string
+}
+
+export interface VerifiableCredential {
+  '@context': string[]
+  id: string
+  type: string[]
+  issuer: string
+  issuance_date: string
+  expiration_date?: string | null
+  credential_subject: CredentialSubject
+  credential_status?: CredentialStatus | null
+  terms_of_use?: TermsOfUse | null
+  proof: Proof
+}
+
+export interface IssueCredentialRequest {
+  credential_type: CredentialType
+  subject: string
+  claim: Claim
+  evidence_refs: string[]
+  expiration_date?: string | null
+}
+
+export interface VerificationResult {
+  credential_id: string
+  valid_signature: boolean
+  issuer_resolved: boolean
+  revoked: boolean
+  expired: boolean
+  subject_bound: boolean
+  integrity_anchored: boolean
+  verification_time: string
+  acceptance_decision: AcceptanceDecision
+}
+
+// --- Survivability bundle (§20.4) ----------------------------------------
+
+export interface KeyRegistryRow {
+  did: string
+  key_id: string
+  public_key_hex: string
+  valid_from: string
+  valid_until: string | null
+  rotated_by: string | null
+}
+
+export interface StatusListRow {
+  list_id: string
+  issuer_did: string
+  version: number
+  status_purpose: string
+  bits_b64: string
+  bit_length: number
+}
+
+export interface CredentialBundle {
+  format_version: string
+  credentials: VerifiableCredential[]
+  key_registry: KeyRegistryRow[]
+  status_lists: StatusListRow[]
+}
+
+// --- Selective-disclosure presentations (§18) ----------------------------
+
+export interface CreatePresentationRequest {
+  credential_ids: string[]
+  /** Dot-separated field paths to reveal, e.g. `["credential_subject.claim.level"]`. */
+  reveal: string[]
+  audience: string
+  nonce: string
+}
+
+export interface PresentationEnvelope {
+  id: string
+  payload_json: string
+  proof: string
+  subject: string
+}
+
+export type PresentationVerification =
+  | 'accepted'
+  | 'bad_signature'
+  | 'audience_mismatch'
+  | 'replayed'
+  | 'malformed'
+
+// --- PinBoard (§12 + §20.4) ----------------------------------------------
+
+export interface PinboardCommitment {
+  id: string
+  pinner_did: string
+  subject_did: string
+  scope: string[]
+  commitment_since: string
+  revoked_at: string | null
+  signature: string
+  public_key: string
+}
+
+export interface QuotaBreakdown {
+  subject_authored_bytes: number
+  pinboard_bytes: number
+  cache_bytes: number
+  enrollment_bytes: number
+  total_quota_bytes: number
+}
+
+// --- Aggregation / derived state (§14, §16) -------------------------------
+
+export interface DerivedSkillState {
+  subject: string
+  skill_id: string
+  raw_score: number
+  confidence: number
+  trust_score: number
+  level: number
+  evidence_mass: number
+  unique_issuer_clusters: number
+  active_evidence_count: number
+  calculation_version: string
+  sources: string[]
+  computed_at: string
+}
