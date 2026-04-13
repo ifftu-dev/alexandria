@@ -33,6 +33,7 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (23, "vc_credentials_and_status_lists", MIGRATION_023),
     (24, "vc_credential_anchors", MIGRATION_024),
     (25, "vc_pinboard_observations", MIGRATION_025),
+    (26, "vc_presentations_seen", MIGRATION_026),
 ];
 
 const MIGRATION_001: &str = r#"
@@ -1266,4 +1267,26 @@ CREATE INDEX IF NOT EXISTS idx_pinboard_observations_pinner
     ON pinboard_observations(pinner_did);
 CREATE INDEX IF NOT EXISTS idx_pinboard_observations_active
     ON pinboard_observations(subject_did) WHERE revoked_at IS NULL;
+"#;
+
+const MIGRATION_026: &str = r#"
+-- ============================================================
+-- Migration 026: Selective-disclosure presentation replay table
+-- §18 + §23.3 — replay protection on (audience, nonce) pairs.
+-- ============================================================
+--
+-- Every verified presentation logs its (audience, nonce) pair here.
+-- Subsequent verifications with the same pair are rejected as
+-- replays. The table is purely local — verifiers don't sync it
+-- across the network; replay protection is a per-verifier guarantee
+-- against the same attacker, not a global guarantee.
+CREATE TABLE IF NOT EXISTS presentations_seen (
+    audience    TEXT NOT NULL,
+    nonce       TEXT NOT NULL,
+    seen_at     TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (audience, nonce)
+);
+
+CREATE INDEX IF NOT EXISTS idx_presentations_seen_audience
+    ON presentations_seen(audience);
 "#;
