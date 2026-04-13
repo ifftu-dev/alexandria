@@ -31,6 +31,7 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (21, "opinions", MIGRATION_021),
     (22, "vc_key_registry", MIGRATION_022),
     (23, "vc_credentials_and_status_lists", MIGRATION_023),
+    (24, "vc_credential_anchors", MIGRATION_024),
 ];
 
 const MIGRATION_001: &str = r#"
@@ -1205,4 +1206,30 @@ CREATE TABLE IF NOT EXISTS credential_status_lists (
 
 CREATE INDEX IF NOT EXISTS idx_status_lists_issuer
     ON credential_status_lists(issuer_did);
+"#;
+
+const MIGRATION_024: &str = r#"
+-- ============================================================
+-- Migration 024: Cardano integrity anchor queue
+-- One row per credential we want anchored on-chain (§12.3).
+-- ============================================================
+--
+-- The queue processor (`cardano::anchor_queue::tick`) batches
+-- pending rows, builds metadata-only Cardano txs that embed the
+-- credential hash, submits, and writes the resulting tx_hash back.
+-- Idle nodes (no Blockfrost project id, vault locked) silently skip
+-- — anchoring is a survivability convenience, not a critical path.
+CREATE TABLE IF NOT EXISTS credential_anchors (
+    credential_id    TEXT PRIMARY KEY REFERENCES credentials(id),
+    anchor_tx_hash   TEXT,
+    anchor_status    TEXT NOT NULL DEFAULT 'pending',  -- pending|submitted|confirmed|failed
+    attempts         INTEGER NOT NULL DEFAULT 0,
+    last_error       TEXT,
+    next_attempt_at  TEXT,
+    enqueued_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    confirmed_at     TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_credential_anchors_status
+    ON credential_anchors(anchor_status, next_attempt_at);
 "#;
