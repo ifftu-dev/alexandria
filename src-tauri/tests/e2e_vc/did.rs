@@ -5,7 +5,6 @@ use app_lib::crypto::did::{derive_did_key, resolve_did_key, resolve_key_at, rota
 use ed25519_dalek::Signer;
 
 #[tokio::test]
-#[ignore = "pending PR 3 — DID layer"]
 async fn derive_did_key_is_deterministic() {
     let k = test_key("alice");
     let d1 = derive_did_key(&k);
@@ -15,7 +14,6 @@ async fn derive_did_key_is_deterministic() {
 }
 
 #[tokio::test]
-#[ignore = "pending PR 3 — DID layer"]
 async fn did_key_resolves_to_original_public_key() {
     let k = test_key("bob");
     let did = derive_did_key(&k);
@@ -26,7 +24,6 @@ async fn did_key_resolves_to_original_public_key() {
 }
 
 #[tokio::test]
-#[ignore = "pending PR 3 — DID layer"]
 async fn rotated_keys_preserve_historical_verification() {
     // A VC signed under key_v1 at T1 must remain verifiable at T2
     // after the issuer has rotated to key_v2. Spec §5.3.
