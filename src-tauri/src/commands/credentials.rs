@@ -393,6 +393,218 @@ pub async fn verify_credential_cmd(
 }
 
 // ---------------------------------------------------------------------------
+// Survivability — credential bundle export + offline verification (§20.4).
+//
+// The export bundle is a single JSON document carrying everything a
+// third-party verifier needs to re-check the credentials without any
+// Alexandria infrastructure: the signed VCs themselves, the historical
+// key registry, and the revocation status lists.
+//
+// Determinism comes from JCS canonicalization — same inputs ⇒
+// byte-identical bundle, which is what the survivability tests assert
+// and what archival storage relies on for content-addressing.
+// ---------------------------------------------------------------------------
+
+/// Bundle wire shape. Keys sort under JCS so the canonical bytes are
+/// stable across implementations.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CredentialBundle {
+    pub format_version: String,
+    pub credentials: Vec<VerifiableCredential>,
+    pub key_registry: Vec<KeyRegistryRow>,
+    pub status_lists: Vec<StatusListRow>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct KeyRegistryRow {
+    pub did: String,
+    pub key_id: String,
+    pub public_key_hex: String,
+    pub valid_from: String,
+    pub valid_until: Option<String>,
+    pub rotated_by: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct StatusListRow {
+    pub list_id: String,
+    pub issuer_did: String,
+    pub version: i64,
+    pub status_purpose: String,
+    /// Base64-encoded bitmap.
+    pub bits_b64: String,
+    pub bit_length: i64,
+}
+
+const BUNDLE_FORMAT_VERSION: &str = "alexandria-credential-bundle/1.0";
+
+/// Build a JCS-canonical export bundle of every credential, key
+/// registry row, and status list known to this node.
+pub fn export_bundle_impl(conn: &Connection) -> Result<String, String> {
+    use base64::Engine;
+
+    // Credentials, ordered deterministically by id so ad-hoc ordering
+    // in the credentials table doesn't leak into the bundle.
+    let mut stmt = conn
+        .prepare("SELECT signed_vc_json FROM credentials ORDER BY id")
+        .map_err(|e| e.to_string())?;
+    let cred_rows = stmt
+        .query_map([], |r| r.get::<_, String>(0))
+        .map_err(|e| e.to_string())?;
+    let mut credentials = Vec::new();
+    for r in cred_rows {
+        let json = r.map_err(|e| e.to_string())?;
+        credentials.push(serde_json::from_str(&json).map_err(|e| e.to_string())?);
+    }
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT did, key_id, public_key_hex, valid_from, valid_until, rotated_by \
+             FROM key_registry ORDER BY did, key_id",
+        )
+        .map_err(|e| e.to_string())?;
+    let key_rows = stmt
+        .query_map([], |r| {
+            Ok(KeyRegistryRow {
+                did: r.get(0)?,
+                key_id: r.get(1)?,
+                public_key_hex: r.get(2)?,
+                valid_from: r.get(3)?,
+                valid_until: r.get(4)?,
+                rotated_by: r.get(5)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    let mut key_registry = Vec::new();
+    for r in key_rows {
+        key_registry.push(r.map_err(|e| e.to_string())?);
+    }
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT list_id, issuer_did, version, status_purpose, bits, bit_length \
+             FROM credential_status_lists ORDER BY list_id",
+        )
+        .map_err(|e| e.to_string())?;
+    let list_rows = stmt
+        .query_map([], |r| {
+            let bits: Vec<u8> = r.get(4)?;
+            Ok(StatusListRow {
+                list_id: r.get(0)?,
+                issuer_did: r.get(1)?,
+                version: r.get(2)?,
+                status_purpose: r.get(3)?,
+                bits_b64: base64::engine::general_purpose::STANDARD.encode(&bits),
+                bit_length: r.get(5)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    let mut status_lists = Vec::new();
+    for r in list_rows {
+        status_lists.push(r.map_err(|e| e.to_string())?);
+    }
+
+    let bundle = CredentialBundle {
+        format_version: BUNDLE_FORMAT_VERSION.into(),
+        credentials,
+        key_registry,
+        status_lists,
+    };
+    serde_json_canonicalizer::to_string(&bundle).map_err(|e| format!("canonicalize bundle: {e}"))
+}
+
+/// Verify a bundle with no dependence on the calling node's state —
+/// loads the bundle into a fresh in-memory DB and runs each VC
+/// through the full §13.2 verification pipeline. Returns
+/// `(accepted, total)`.
+///
+/// This is the in-process analogue of "shell out to digitalbazaar/
+/// vc-js" — same offline guarantee, no Alexandria infrastructure
+/// required, except the verifier itself.
+pub fn verify_bundle_offline_impl(
+    bundle_json: &str,
+    verification_time: &str,
+) -> Result<(u32, u32), String> {
+    use crate::db::Database;
+    use crate::domain::vc::verify::verify_credential;
+    use crate::domain::vc::{AcceptanceDecision, VerificationPolicy};
+    use base64::Engine;
+
+    let bundle: CredentialBundle =
+        serde_json::from_str(bundle_json).map_err(|e| format!("parse bundle: {e}"))?;
+    if bundle.format_version != BUNDLE_FORMAT_VERSION {
+        return Err(format!(
+            "unsupported bundle format_version: {}",
+            bundle.format_version
+        ));
+    }
+
+    // Spin up a clean DB so the verifier can't see any local state.
+    let db = Database::open_in_memory().map_err(|e| format!("open ephemeral db: {e}"))?;
+    db.run_migrations()
+        .map_err(|e| format!("ephemeral migrations: {e}"))?;
+
+    for entry in &bundle.key_registry {
+        db.conn()
+            .execute(
+                "INSERT OR IGNORE INTO key_registry \
+                 (did, key_id, public_key_hex, valid_from, valid_until, rotated_by) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    entry.did,
+                    entry.key_id,
+                    entry.public_key_hex,
+                    entry.valid_from,
+                    entry.valid_until,
+                    entry.rotated_by,
+                ],
+            )
+            .map_err(|e| e.to_string())?;
+    }
+    for list in &bundle.status_lists {
+        let bits = base64::engine::general_purpose::STANDARD
+            .decode(list.bits_b64.as_bytes())
+            .map_err(|e| format!("decode list bits: {e}"))?;
+        db.conn()
+            .execute(
+                "INSERT INTO credential_status_lists \
+                 (list_id, issuer_did, version, status_purpose, bits, bit_length) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    list.list_id,
+                    list.issuer_did,
+                    list.version,
+                    list.status_purpose,
+                    bits,
+                    list.bit_length,
+                ],
+            )
+            .map_err(|e| e.to_string())?;
+    }
+
+    let total = bundle.credentials.len() as u32;
+    let mut accepted = 0u32;
+    let policy = VerificationPolicy::default();
+    for vc in &bundle.credentials {
+        let result = verify_credential(db.conn(), vc, verification_time, &policy);
+        if result.acceptance_decision == AcceptanceDecision::Accept {
+            accepted += 1;
+        }
+    }
+    Ok((accepted, total))
+}
+
+#[tauri::command]
+pub async fn export_credentials_bundle(state: State<'_, AppState>) -> Result<String, String> {
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
+    export_bundle_impl(db.conn())
+}
+
+// ---------------------------------------------------------------------------
 // Tests.
 //
 // Unit-test the pure `*_impl` functions against an in-memory DB — the
@@ -585,5 +797,74 @@ mod tests {
         let rejected = verify_credential(db.conn(), &vc, NOW, &VerificationPolicy::default());
         assert!(rejected.revoked, "revocation bit must propagate to verify");
         assert_eq!(rejected.acceptance_decision, AcceptanceDecision::Reject);
+    }
+
+    #[test]
+    fn export_bundle_is_deterministic_for_same_inputs() {
+        // §20.4: same credential set + same fixed clock + same key
+        // ⇒ byte-identical bundle. This is what lets the bundle
+        // round-trip through content-addressed archival.
+        let (db, key, issuer, subject) = setup();
+        let _ =
+            issue_credential_impl(db.conn(), &key, &issuer, &sample_request(subject), NOW).unwrap();
+        let a = export_bundle_impl(db.conn()).unwrap();
+        let b = export_bundle_impl(db.conn()).unwrap();
+        assert_eq!(a, b, "bundle MUST be byte-identical");
+    }
+
+    #[test]
+    fn export_bundle_includes_credentials_and_status_lists() {
+        let (db, key, issuer, subject) = setup();
+        let vc =
+            issue_credential_impl(db.conn(), &key, &issuer, &sample_request(subject), NOW).unwrap();
+        let json = export_bundle_impl(db.conn()).unwrap();
+        let bundle: CredentialBundle = serde_json::from_str(&json).unwrap();
+        assert_eq!(bundle.format_version, BUNDLE_FORMAT_VERSION);
+        assert_eq!(bundle.credentials.len(), 1);
+        assert_eq!(bundle.credentials[0].id, vc.id);
+        assert_eq!(bundle.status_lists.len(), 1);
+        assert_eq!(bundle.status_lists[0].issuer_did, issuer.as_str());
+    }
+
+    #[test]
+    fn offline_verifier_accepts_a_well_signed_bundle() {
+        // §20: bundle survives Alexandria shutdown — verify uses an
+        // ephemeral DB with no shared state.
+        let (db, key, issuer, subject) = setup();
+        let _ =
+            issue_credential_impl(db.conn(), &key, &issuer, &sample_request(subject), NOW).unwrap();
+        let json = export_bundle_impl(db.conn()).unwrap();
+        let (accepted, total) = verify_bundle_offline_impl(&json, NOW).unwrap();
+        assert_eq!(total, 1);
+        assert_eq!(accepted, 1, "round-tripped credential must verify");
+    }
+
+    #[test]
+    fn offline_verifier_rejects_revoked_credential_in_bundle() {
+        // The status list inside the bundle carries the revocation
+        // bit, so the offline verifier sees the same Reject as the
+        // local one.
+        let (db, key, issuer, subject) = setup();
+        let vc =
+            issue_credential_impl(db.conn(), &key, &issuer, &sample_request(subject), NOW).unwrap();
+        revoke_credential_impl(db.conn(), &vc.id, "test", NOW).unwrap();
+        let json = export_bundle_impl(db.conn()).unwrap();
+        let (accepted, total) = verify_bundle_offline_impl(&json, NOW).unwrap();
+        assert_eq!(total, 1);
+        assert_eq!(accepted, 0, "revoked VC must not be accepted offline");
+    }
+
+    #[test]
+    fn offline_verifier_rejects_unsupported_format_version() {
+        let bundle = serde_json::json!({
+            "format_version": "alexandria-credential-bundle/0.0",
+            "credentials": [],
+            "key_registry": [],
+            "status_lists": []
+        });
+        assert!(
+            verify_bundle_offline_impl(&bundle.to_string(), NOW).is_err(),
+            "must reject unknown format_version"
+        );
     }
 }
