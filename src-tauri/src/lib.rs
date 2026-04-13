@@ -748,6 +748,26 @@ pub fn run() {
             commands::storage::storage_set_quota,
             commands::storage::storage_stats,
             commands::storage::storage_evict_now,
+            // Verifiable Credentials (VC-first migration, PRs 2–12)
+            commands::credentials::issue_credential,
+            commands::credentials::list_credentials,
+            commands::credentials::get_credential,
+            commands::credentials::revoke_credential,
+            commands::credentials::verify_credential_cmd,
+            commands::credentials::export_credentials_bundle,
+            // Selective-disclosure presentations (§18)
+            commands::presentation::create_presentation,
+            commands::presentation::verify_presentation,
+            // PinBoard (§12 + §20.4)
+            commands::pinning::declare_pinboard_commitment,
+            commands::pinning::revoke_pinboard_commitment,
+            commands::pinning::list_my_commitments,
+            commands::pinning::list_incoming_commitments,
+            commands::pinning::get_quota_breakdown,
+            // Derived skill state (§14 aggregation)
+            commands::aggregation::get_derived_skill_state,
+            commands::aggregation::list_derived_states,
+            commands::aggregation::recompute_all,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
