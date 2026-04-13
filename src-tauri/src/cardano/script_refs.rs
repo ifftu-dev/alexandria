@@ -66,6 +66,14 @@ pub const SOULBOUND_REF_UTXO: (&str, u64) = ("DEPLOY_PENDING", 0);
 /// Governance metadata label (CIP-68 / custom).
 pub const GOVERNANCE_METADATA_LABEL: u64 = 1694;
 
+/// Custom metadata label for Alexandria credential integrity anchors
+/// (spec §12.3). Sits one past `GOVERNANCE_METADATA_LABEL` to keep
+/// Alexandria-internal labels grouped, and well clear of CIP-25 (721)
+/// and CIP-68 reference / user-token labels (100, 222, 333, 444).
+/// No registered CIP-X label exists for this purpose at the time of
+/// writing — verifiers MUST look for label 1697 explicitly.
+pub const ALEXANDRIA_ANCHOR_LABEL: u64 = 1697;
+
 /// Preprod shelley epoch start for slot conversion.
 /// Slot = (posix_seconds - SHELLEY_EPOCH_START_POSIX)
 pub const PREPROD_SHELLEY_EPOCH_START: i64 = 1_654_041_600;
