@@ -173,6 +173,12 @@ const router = createRouter({
       meta: { layout: 'app' },
     },
     {
+      path: '/dashboard/credentials/:id',
+      name: 'dashboard-credential-detail',
+      component: () => import('@/pages/dashboard/CredentialDetail.vue'),
+      meta: { layout: 'app' },
+    },
+    {
       path: '/dashboard/reputation',
       name: 'dashboard-reputation',
       component: () => import('@/pages/dashboard/Reputation.vue'),
