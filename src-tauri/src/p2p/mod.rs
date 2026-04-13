@@ -14,3 +14,11 @@ pub mod sync;
 pub mod taxonomy;
 pub mod types;
 pub mod validation;
+
+// VC / credential / pinning / archive propagation (VC-first migration)
+pub mod archive;
+pub mod pinboard;
+pub mod presentation;
+pub mod vc_did;
+pub mod vc_fetch;
+pub mod vc_status;
