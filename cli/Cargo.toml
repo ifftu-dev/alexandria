@@ -33,3 +33,14 @@ sha2 = "0.10"
 hmac = "0.12"
 hex = "0.4"
 rand = "0.8"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+
+# `alex credentials` shares its impl functions with the Tauri backend so
+# `list_credentials_impl`, `export_bundle_impl`, `verify_bundle_offline_impl`
+# stay one source of truth. The package name in src-tauri/Cargo.toml is
+# `alexandria-node`; the [lib] name is `app_lib`, which is what we use
+# for imports (`use app_lib::commands::credentials::*`). This pulls in
+# the full app_lib transitive tree (pallas, iroh, libp2p…) which slows
+# CLI builds, but it's the correctness vs ergonomics trade we're
+# explicitly making per the `alex credentials` design.
+alexandria-node = { path = "../src-tauri" }
