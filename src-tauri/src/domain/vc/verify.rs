@@ -58,6 +58,25 @@ pub fn verify_credential(
         }
     }
 
+    // -- revocation via credential_status -----------------------------------
+    // §11.2: each revocable credential MUST provide a resolvable status
+    // reference. We look up the referenced status list locally (remote
+    // lists land via the PR 9 P2P sync path) and check the bit. If the
+    // list isn't known yet, we leave `revoked = false` — strict-mode
+    // verifiers can reject on `credentialStatus` presence alone via a
+    // future policy flag. This is the conservative default.
+    if let Some(status) = &credential.credential_status {
+        if let Ok(idx) = status.status_list_index.parse::<i64>() {
+            if let Some(bits) = lookup_status_list_bits(db, &status.status_list_credential) {
+                let byte = (idx / 8) as usize;
+                let bit = (idx % 8) as u8;
+                if byte < bits.len() && (bits[byte] & (1 << bit)) != 0 {
+                    result.revoked = true;
+                }
+            }
+        }
+    }
+
     // -- issuer resolution --------------------------------------------------
     let issuer_pk = match resolve_issuer_key(db, &credential.issuer, verification_time) {
         Some(pk) => {
@@ -93,6 +112,18 @@ fn resolve_issuer_key(db: &Connection, issuer: &Did, at: &str) -> Option<Verifyi
     // unsupported method short-circuits cleanly.
     parse_did_key(issuer.as_str()).ok()?;
     resolve_did_key(issuer).ok()
+}
+
+/// Look up the raw bits of a locally-known status list. Returns
+/// `None` if the list isn't in our `credential_status_lists` table —
+/// callers treat absence as "not known to be revoked".
+fn lookup_status_list_bits(db: &Connection, list_id: &str) -> Option<Vec<u8>> {
+    db.query_row(
+        "SELECT bits FROM credential_status_lists WHERE list_id = ?1",
+        rusqlite::params![list_id],
+        |r| r.get::<_, Vec<u8>>(0),
+    )
+    .ok()
 }
 
 fn verifying_key_from_slice(bytes: &[u8]) -> Result<VerifyingKey, String> {
