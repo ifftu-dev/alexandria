@@ -47,3 +47,73 @@ impl Default for AggregationConfig {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_uses_spec_25_confidence_parameters() {
+        // Spec §25.3: β = 0.6, γ = 0.7.
+        let cfg = AggregationConfig::default();
+        assert!((cfg.beta - 0.6).abs() < 1e-9);
+        assert!((cfg.gamma - 0.7).abs() < 1e-9);
+    }
+
+    #[test]
+    fn default_uses_spec_25_inflation_parameters() {
+        // Spec §25.4: z_max = 1.5, η = 0.5.
+        let cfg = AggregationConfig::default();
+        assert!((cfg.z_max - 1.5).abs() < 1e-9);
+        assert!((cfg.eta - 0.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn default_quality_alphas_sum_to_one() {
+        // Spec §14.7: α_r + α_a + α_x = 1. Otherwise the quality weight
+        // can exceed 1.0 or collapse to <1.0, silently skewing every
+        // aggregated score.
+        let cfg = AggregationConfig::default();
+        let sum = cfg.quality_rubric_alpha
+            + cfg.quality_proctoring_alpha
+            + cfg.quality_traceability_alpha;
+        assert!((sum - 1.0).abs() < 1e-9, "got {}", sum);
+    }
+
+    #[test]
+    fn default_version_is_semver_1_dot_x() {
+        // Aggregation engine MUST be versioned (§28): historical derived
+        // states keep the version that produced them, so bumping the
+        // formula does not silently rewrite past interpretations.
+        let cfg = AggregationConfig::default();
+        assert!(
+            cfg.version.starts_with("1."),
+            "expected 1.x, got {}",
+            cfg.version
+        );
+    }
+
+    #[test]
+    #[ignore = "pending PR 6 — aggregation engine"]
+    fn default_populates_type_weights_per_spec_25_1() {
+        // §25.1 defaults:
+        //   Formal 1.00, Assessment 0.90, Role 0.60,
+        //   Attestation 0.35, SelfAssertion 0.25.
+        let cfg = AggregationConfig::default();
+        assert_eq!(
+            cfg.type_weights
+                .get(&crate::domain::vc::CredentialType::FormalCredential),
+            Some(&1.0)
+        );
+        assert_eq!(
+            cfg.type_weights
+                .get(&crate::domain::vc::CredentialType::AssessmentCredential),
+            Some(&0.9)
+        );
+        assert_eq!(
+            cfg.type_weights
+                .get(&crate::domain::vc::CredentialType::AttestationCredential),
+            Some(&0.35)
+        );
+    }
+}
