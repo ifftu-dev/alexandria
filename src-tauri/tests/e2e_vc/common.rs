@@ -62,8 +62,9 @@ pub const TEST_NOW: &str = "2026-04-13T00:00:00Z";
 // Each test costs ~10–15s wall-clock.
 // ---------------------------------------------------------------------------
 
-use app_lib::p2p::network::{keypair_from_cardano_key, start_node, P2pNode};
+use app_lib::p2p::network::{keypair_from_cardano_key, start_node, start_node_with_db, P2pNode};
 use app_lib::p2p::types::P2pEvent;
+use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::timeout;
@@ -84,6 +85,31 @@ pub async fn start_test_node(
     let kp = keypair_from_cardano_key(&seed).ok()?;
     let (tx, rx) = mpsc::channel::<P2pEvent>(capacity);
     match start_node(kp, tx, vec![]).await {
+        Ok(node) => Some((node, rx)),
+        Err(err) => {
+            eprintln!("SKIP: node `{role}` failed to start ({err:?})");
+            None
+        }
+    }
+}
+
+/// Variant that wires a `Database` into the swarm event loop so the
+/// node can answer inbound vc-fetch requests against local
+/// credentials.
+pub async fn start_test_node_with_db(
+    role: &str,
+    capacity: usize,
+    db: app_lib::db::Database,
+) -> Option<(P2pNode, mpsc::Receiver<P2pEvent>)> {
+    let mut seed = [0u8; 32];
+    let b = role.as_bytes();
+    for (i, byte) in seed.iter_mut().enumerate() {
+        *byte = b[i % b.len().max(1)];
+    }
+    let kp = keypair_from_cardano_key(&seed).ok()?;
+    let (tx, rx) = mpsc::channel::<P2pEvent>(capacity);
+    let db_arc = Arc::new(StdMutex::new(Some(db)));
+    match start_node_with_db(kp, tx, vec![], Some(db_arc)).await {
         Ok(node) => Some((node, rx)),
         Err(err) => {
             eprintln!("SKIP: node `{role}` failed to start ({err:?})");

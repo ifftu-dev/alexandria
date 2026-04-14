@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -5,15 +6,21 @@ use futures::StreamExt;
 use libp2p::gossipsub::{self, IdentTopic, MessageAuthenticity, MessageId, ValidationMode};
 use libp2p::identity::Keypair;
 use libp2p::kad::store::MemoryStore;
+use libp2p::request_response::{self, ProtocolSupport, ResponseChannel};
 use libp2p::swarm::NetworkBehaviour;
-use libp2p::{autonat, dcutr, identify, kad, noise, relay, yamux, PeerId, Swarm, SwarmBuilder};
+use libp2p::{
+    autonat, dcutr, identify, kad, noise, relay, yamux, PeerId, StreamProtocol, Swarm, SwarmBuilder,
+};
 use thiserror::Error;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
+
+use super::vc_fetch::{FetchRequest, FetchResponse};
 
 use crate::db::Database;
 
 use crate::crypto::hash::blake2b_256;
 use crate::diag;
+use std::sync::Mutex as StdMutex;
 
 use super::nat::build_autonat_config;
 use super::rate_limit::PeerRateLimiter;
@@ -250,6 +257,12 @@ pub struct AlexandriaBehaviour {
     pub relay_server: relay::Behaviour,
     pub relay_client: relay::client::Behaviour,
     pub dcutr: dcutr::Behaviour,
+    /// Pull-based credential fetch — `/alexandria/vc-fetch/1.0`
+    /// request-response protocol with CBOR codec. Inbound requests
+    /// are forwarded to the application layer via
+    /// `P2pEvent::FetchRequestReceived`; the application calls
+    /// `P2pNode::send_fetch_response` to reply.
+    pub vc_fetch: request_response::cbor::Behaviour<FetchRequest, FetchResponse>,
 }
 
 /// The running P2P network node.
@@ -287,6 +300,21 @@ pub enum SwarmCommand {
     Status { reply: mpsc::Sender<NetworkStatus> },
     /// Get the list of connected peers.
     Peers { reply: mpsc::Sender<Vec<PeerId>> },
+    /// Send a vc-fetch request to a peer. The reply oneshot
+    /// resolves when the peer's response (or an outbound failure)
+    /// comes back.
+    SendFetchRequest {
+        peer: PeerId,
+        request: FetchRequest,
+        reply: oneshot::Sender<Result<FetchResponse, NetworkError>>,
+    },
+    /// Reply to an inbound vc-fetch request. The application layer
+    /// receives the request via `P2pEvent::FetchRequestReceived`
+    /// and calls back through this command.
+    SendFetchResponse {
+        channel: ResponseChannel<FetchResponse>,
+        response: FetchResponse,
+    },
     /// Shutdown the node.
     Shutdown,
 }
@@ -321,6 +349,21 @@ pub async fn start_node(
     keypair: Keypair,
     event_tx: mpsc::Sender<P2pEvent>,
     known_peers: Vec<KnownPeer>,
+) -> Result<P2pNode, NetworkError> {
+    start_node_with_db(keypair, event_tx, known_peers, None).await
+}
+
+/// Variant of `start_node` that wires a `Database` into the swarm
+/// event loop so inbound vc-fetch requests can be answered against
+/// local credentials. Without a DB the event loop responds with
+/// `FetchResponse::NotFound` to every request — preserves the
+/// previous "not yet wired" semantics for any caller that doesn't
+/// opt in.
+pub async fn start_node_with_db(
+    keypair: Keypair,
+    event_tx: mpsc::Sender<P2pEvent>,
+    known_peers: Vec<KnownPeer>,
+    db: Option<Arc<StdMutex<Option<Database>>>>,
 ) -> Result<P2pNode, NetworkError> {
     let peer_id = keypair.public().to_peer_id();
     diag::log(&format!("start_node: PeerId: {peer_id}"));
@@ -512,10 +555,11 @@ pub async fn start_node(
     // Create the message validator (shared via Arc for the event loop)
     let validator = Arc::new(MessageValidator::new());
 
-    // Spawn the swarm event loop
-    tokio::spawn(swarm_event_loop(
-        swarm, command_rx, event_tx, validator, None,
-    ));
+    // Spawn the swarm event loop. The db handle (None for the
+    // legacy `start_node` entry point, populated by
+    // `start_node_with_db`) lets the loop answer inbound vc-fetch
+    // requests synchronously.
+    tokio::spawn(swarm_event_loop(swarm, command_rx, event_tx, validator, db));
 
     diag::log("start_node: event loop spawned, node running");
 
@@ -629,6 +673,17 @@ fn build_behaviour(
     // DCUtR — upgrade relayed connections to direct via hole punching
     let dcutr = dcutr::Behaviour::new(peer_id);
 
+    // Pull-based credential fetch (§9 vc-fetch). CBOR codec is
+    // ergonomic + small over the wire. Full bidirectional support so
+    // every node can both serve and request credentials.
+    let vc_fetch = request_response::cbor::Behaviour::<FetchRequest, FetchResponse>::new(
+        [(
+            StreamProtocol::new("/alexandria/vc-fetch/1.0"),
+            ProtocolSupport::Full,
+        )],
+        request_response::Config::default(),
+    );
+
     diag::log("build_behaviour: all sub-behaviours created OK");
 
     Ok(AlexandriaBehaviour {
@@ -638,6 +693,7 @@ fn build_behaviour(
         autonat,
         relay_server,
         relay_client: relay_behaviour,
+        vc_fetch,
         dcutr,
     })
 }
@@ -660,6 +716,15 @@ async fn swarm_event_loop(
 
     // Per-peer gossip rate limiter (token bucket: 20 msgs, 1 refill/3s)
     let mut rate_limiter = PeerRateLimiter::new();
+
+    // vc-fetch outbound request bookkeeping. When the application
+    // calls `P2pNode::fetch_credential`, we get back a libp2p
+    // OutboundRequestId; we stash the caller's reply oneshot here
+    // and resolve it when the matching Response/Failure event fires.
+    let mut outbound_fetch_replies: HashMap<
+        libp2p::request_response::OutboundRequestId,
+        oneshot::Sender<Result<FetchResponse, NetworkError>>,
+    > = HashMap::new();
 
     // Track NAT state locally for the Status command
     let mut current_nat_state = NatState::Unknown;
@@ -862,6 +927,21 @@ async fn swarm_event_loop(
                             .cloned()
                             .collect();
                         let _ = reply.send(peers).await;
+                    }
+                    Some(SwarmCommand::SendFetchRequest { peer, request, reply }) => {
+                        let request_id = swarm
+                            .behaviour_mut()
+                            .vc_fetch
+                            .send_request(&peer, request);
+                        outbound_fetch_replies.insert(request_id, reply);
+                    }
+                    Some(SwarmCommand::SendFetchResponse { channel, response }) => {
+                        // Best-effort — if the peer disconnected mid-flight
+                        // the channel returns `Err(response)` and we drop it.
+                        let _ = swarm
+                            .behaviour_mut()
+                            .vc_fetch
+                            .send_response(channel, response);
                     }
                     Some(SwarmCommand::Shutdown) | None => {
                         log::info!("P2P node shutting down");
@@ -1141,6 +1221,68 @@ async fn swarm_event_loop(
                             }
                         }
                     }
+                    // ---- vc-fetch (request-response) -----------------
+                    SwarmEvent::Behaviour(AlexandriaBehaviourEvent::VcFetch(
+                        request_response::Event::Message { peer, message, .. }
+                    )) => {
+                        match message {
+                            request_response::Message::Request { request, channel, .. } => {
+                                log::debug!(
+                                    "vc-fetch: inbound request from {peer} for {}",
+                                    request.credential_id
+                                );
+                                // Synchronously answer using the local DB.
+                                // Without a DB handle we MUST respond
+                                // (the libp2p contract requires it) so
+                                // we fall back to NotFound.
+                                let response = match db.as_ref() {
+                                    Some(db_arc) => match db_arc.lock() {
+                                        Ok(guard) => match guard.as_ref() {
+                                            Some(database) => super::vc_fetch::handle_fetch_request(
+                                                database.conn(),
+                                                &request,
+                                            )
+                                            .unwrap_or(super::vc_fetch::FetchResponse::NotFound),
+                                            None => super::vc_fetch::FetchResponse::NotFound,
+                                        },
+                                        Err(_) => super::vc_fetch::FetchResponse::NotFound,
+                                    },
+                                    None => super::vc_fetch::FetchResponse::NotFound,
+                                };
+                                let _ = swarm
+                                    .behaviour_mut()
+                                    .vc_fetch
+                                    .send_response(channel, response);
+                            }
+                            request_response::Message::Response { request_id, response } => {
+                                if let Some(reply) = outbound_fetch_replies.remove(&request_id) {
+                                    let _ = reply.send(Ok(response));
+                                } else {
+                                    log::debug!(
+                                        "vc-fetch: unmatched response for {request_id} from {peer}"
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    SwarmEvent::Behaviour(AlexandriaBehaviourEvent::VcFetch(
+                        request_response::Event::OutboundFailure { request_id, error, peer, .. }
+                    )) => {
+                        log::warn!("vc-fetch: outbound to {peer} failed: {error}");
+                        if let Some(reply) = outbound_fetch_replies.remove(&request_id) {
+                            let _ = reply.send(Err(NetworkError::Publish(error.to_string())));
+                        }
+                    }
+                    SwarmEvent::Behaviour(AlexandriaBehaviourEvent::VcFetch(
+                        request_response::Event::InboundFailure { error, peer, .. }
+                    )) => {
+                        log::debug!("vc-fetch: inbound from {peer} failed: {error}");
+                    }
+                    SwarmEvent::Behaviour(AlexandriaBehaviourEvent::VcFetch(
+                        request_response::Event::ResponseSent { .. }
+                    )) => {
+                        // Nothing to do — the outbound peer already got it.
+                    }
                     SwarmEvent::NewListenAddr { address, .. } => {
                         log::info!("Listening on {address}");
                     }
@@ -1269,6 +1411,30 @@ impl P2pNode {
             .recv()
             .await
             .unwrap_or(Err(NetworkError::NotRunning))
+    }
+
+    /// Send a vc-fetch request to a specific peer and await the
+    /// reply (or an outbound failure). Resolves the protocol-level
+    /// `FetchResponse` directly — the caller can match on
+    /// `Ok(vc) | Unauthorized | NotFound`.
+    pub async fn fetch_credential(
+        &self,
+        peer: PeerId,
+        request: FetchRequest,
+    ) -> Result<FetchResponse, NetworkError> {
+        if !self.running {
+            return Err(NetworkError::NotRunning);
+        }
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.command_tx
+            .send(SwarmCommand::SendFetchRequest {
+                peer,
+                request,
+                reply: reply_tx,
+            })
+            .await
+            .map_err(|_| NetworkError::NotRunning)?;
+        reply_rx.await.map_err(|_| NetworkError::NotRunning)?
     }
 
     /// Shutdown the node.
