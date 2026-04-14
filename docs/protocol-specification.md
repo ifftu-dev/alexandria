@@ -67,7 +67,7 @@ All state lives on the user's device in three locations:
 
 | Store | Purpose |
 |-------|---------|
-| SQLite | Relational data (courses, skills, evidence, governance) — 53 tables, 19 migrations |
+| SQLite | Relational data (courses, skills, evidence, governance, verifiable credentials) — 66 tables, 30 migrations |
 | Encrypted vault | Wallet keys and mnemonic — IOTA Stronghold (desktop) or AES-256-GCM + Argon2id (mobile) |
 | iroh | Content-addressed blobs (course HTML, profiles) — BLAKE3 hashes |
 
@@ -96,7 +96,7 @@ The architecture MUST satisfy:
 
 ### 2.4 IPC Boundary
 
-The frontend communicates with the Rust backend via approximately 160 Tauri IPC commands across 22 modules (classroom, governance, taxonomy, tutoring, identity, attestation, sync, challenge, courses, content, integrity, catalog, enrollment, p2p, reputation, snapshot, chapters, elements, evidence, cardano, health, storage).
+The frontend communicates with the Rust backend via 194 Tauri IPC commands registered in `tauri::generate_handler!`. Commands are split across 26 IPC modules (classroom, governance, taxonomy, tutoring, identity, credentials, sync, courses, attestation, challenge, opinions, integrity, content, pinning, storage, snapshot, reputation, enrollment, elements, chapters, catalog, p2p, evidence, aggregation, presentation, health, cardano), with `commands/` totalling 30 source files (excluding `mod.rs`; `tutoring_mobile.rs` / `tutoring_stubs.rs` are platform-conditional variants of `tutoring`, and `ratelimit.rs` is an internal helper).
 
 ---
 
@@ -366,9 +366,19 @@ Seven libp2p protocols compose `AlexandriaBehaviour`:
 | `/alexandria/taxonomy/1.0` | DAO-ratified skill graph updates |
 | `/alexandria/governance/1.0` | Governance events |
 | `/alexandria/profiles/1.0` | User profile updates |
+| `/alexandria/opinions/1.0` | Subjective ratings on courses, evidence, peers (Field Commentary, mig 21) |
 | `/alexandria/peer-exchange/1.0` | Known peer address propagation |
+| `/alexandria/vc-did/1.0` | DID document + key-rotation announcements (§5) |
+| `/alexandria/vc-status/1.0` | RevocationList2020 status-list snapshots and deltas (§11.2) |
+| `/alexandria/vc-presentation/1.0` | Opt-in selective-disclosure presentation envelopes (§18) |
+| `/alexandria/pinboard/1.0` | PinBoard pinning-commitment observations (§12, §20.4) |
 
-All 6 topics MUST be subscribed on node startup.
+All 11 topics MUST be subscribed on node startup. In addition, a
+request-response protocol on `/alexandria/vc-fetch/1.0`
+(libp2p `request-response` + CBOR codec) handles authority-respecting
+credential pull; this is a 1-to-1 protocol, not a gossip topic, and
+is enabled when the node has a `Database` wired into its swarm event
+loop.
 
 ### 6.6 Message Envelope
 
@@ -762,8 +772,8 @@ The reference implementation is a Tauri v2 application — a single binary that 
 | Component | Technology | Purpose |
 |-----------|------------|---------|
 | Backend | Rust (tokio) | Business logic, wallet, P2P, database, evidence, governance |
-| Frontend | Vue 3, TypeScript, Tailwind CSS v4 | 26 pages, 32 components, 12 composables |
-| Database | SQLite (rusqlite, bundled) | 53 tables, 19 migrations |
+| Frontend | Vue 3, TypeScript, Tailwind CSS v4 | 30 pages, 34 components, 15 composables |
+| Database | SQLite (rusqlite, bundled) | 66 tables, 30 migrations |
 | Content | iroh 0.96 | BLAKE3 content-addressed blob store |
 | P2P | libp2p 0.56 | Kademlia, GossipSub, Relay, DCUtR |
 | Wallet | pallas 0.35, Stronghold / AES-256-GCM | Conway era transactions, encrypted key storage |
@@ -774,7 +784,7 @@ The reference implementation is a Tauri v2 application — a single binary that 
 
 ### 14.2 Database
 
-**Engine**: SQLite (rusqlite 0.38, bundled). **Tables**: 53 across 19 migrations.
+**Engine**: SQLite (rusqlite 0.38, bundled). **Tables**: 66 across 30 migrations.
 
 | Domain | Tables |
 |--------|--------|

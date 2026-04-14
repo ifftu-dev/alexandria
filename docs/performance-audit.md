@@ -349,3 +349,45 @@ The content seeding function acquires the DB lock, reads what is needed, drops t
 | ~~10~~ | ~~H-5: LRU dedup cache~~ | ~~Low~~ | **FIXED** |
 | 11 | M-5: Fix sequential lock acquisitions | Low | Reduces lock contention |
 | 12 | M-7: Spawn reputation computation | Medium | Prevents UI blocking on recompute |
+
+---
+
+## Deferred scope: VC-layer modules (PRs 2–19, post-audit)
+
+This audit's snapshot date (2026-03-25) precedes the VC-first
+credential migration. C-1 (global DB mutex) and C-2 (gossip lock)
+remain accurate descriptions of the current code at HEAD —
+`AppState.db` is still `Arc<Mutex<Database>>` — and the VC layer
+inherits both bottlenecks. The following risks were not measured
+in this audit and warrant follow-up:
+
+- **`aggregation::aggregate_skill_state`** is invoked per-skill on
+  cache miss in `get_derived_skill_state` and over the entire
+  credential set in `recompute_all`. Each call walks the §14
+  weighted-mean + §15 anti-gaming pipeline without any internal
+  caching beyond the `derived_skill_states` row. Recomputing a
+  subject with thousands of credentials currently runs on the
+  Tauri command thread under the global DB mutex.
+- **VC verify hot path** does Ed25519 signature verification + JCS
+  canonicalisation per request (`domain::vc::verify`). Both are
+  CPU-bound; neither is wrapped in `spawn_blocking`. A bulk
+  bundle-verify (`verify_bundle_offline`) holds the DB mutex while
+  iterating credentials sequentially.
+- **`p2p/vc_fetch.rs`** request-response carries the full VC body
+  in a single libp2p message. Large credentials with embedded
+  attachments will exceed gossipsub's `max_transmit_size` if
+  someone reuses the codec layer for gossip; the request-response
+  channel itself is uncapped per-peer.
+- **Anchor queue tick** (`cardano::anchor_queue`) batches HTTP
+  requests to Blockfrost serially with exponential backoff;
+  successive tick callbacks share the same queue lock, so a
+  Blockfrost outage stalls subsequent ticks until the in-flight
+  attempt resolves.
+- **Status-list propagation** rebroadcasts the full bitmap on every
+  delta. For high-revocation issuers, consider compressed deltas
+  before this becomes a gossip-bandwidth issue.
+
+Recommended follow-up: re-run the perf audit against the VC
+modules with realistic fixture sizes (≥1k credentials per subject)
+once the C-1/C-2 fixes land — those structural changes will move
+the bottleneck to whichever of the above surfaces first.

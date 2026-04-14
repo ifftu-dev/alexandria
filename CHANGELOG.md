@@ -7,7 +7,7 @@ and this project loosely follows [Semantic Versioning](https://semver.org/spec/v
 
 ## [Unreleased]
 
-### Added — VC-first credential migration (PRs 2–13)
+### Added — VC-first credential migration (PRs 2–19)
 
 End-to-end implementation of the Alexandria Credential & Reputation
 Protocol v1 (`alexandria-credential-reputation-protocol-v1.md`)
@@ -94,6 +94,10 @@ alongside the existing skill-proof + NFT pipeline. See
 | 16 | 579 | 0  | 25 | 13 |
 | 17 | 579 | 0  | **38** | **0** |
 | 18 | 579 | 0  | 38 | 0  |
+| 19a | 579 | 0  | 38 | 0  |
+| 19b | 583 | 0  | 38 | 0  |
+| 19c | 587 | 0  | 39 | 0  |
+| 19d | **589** | 0  | **40** | **0** |
 
 - **PR 14** — Full rewrite of `Credentials.vue` against the new
   VC-first backend: list/issue/verify/revoke/export/present flows,
@@ -123,6 +127,40 @@ alongside the existing skill-proof + NFT pipeline. See
   shadow struct (prefers `tx_index`, falls back to `output_index`).
   Live tx: `0e5ee75…93dd9f25` on preprod, metadata under label
   1697 confirmed via Blockfrost.
+- **PR 19a** — Two pre-existing clippy-on-tests violations
+  fixed: a helper (`get_course_by_id`) that landed inside the
+  test module in `commands/courses.rs` is hoisted above the
+  `mod tests`, and a `len() >= 1` check in
+  `commands/reputation.rs` is rewritten to `!is_empty()`. No
+  behaviour changes — pure clippy hygiene against
+  `cargo clippy --tests`.
+- **PR 19b** — Implements §11.3 suspension and §11.4 supersession.
+  New `credentials.suspended`, `suspended_at`, `suspended_until`,
+  `suspension_reason` columns (migration 29). New IPC
+  `suspend_credential` and `reinstate_credential`. Verifier
+  treats suspended credentials as not-currently-valid (distinct
+  from `revoked` which is permanent). `IssueCredentialRequest`
+  gains an optional `supersedes` field that enforces the §11.4
+  invariant (issuer + subject + claim_kind + skill_id must
+  match). Promotes the inbound-pending queue
+  (`credentials_pending_verification`, migration 28) to a
+  first-class table.
+- **PR 19c** — Subject-controlled allowlist for the pull-based
+  fetch protocol. New `credential_allowlist` table (migration 30)
+  + `allow_credential_fetch` / `disallow_credential_fetch` IPCs.
+  The literal string `"public"` in `requestor_did` makes a
+  credential world-fetchable. Fetch handler now consults the
+  allowlist alongside the existing subject-self check.
+- **PR 19d** — Wires `/alexandria/vc-fetch/1.0` end-to-end.
+  Adds `request-response` + `cbor` to libp2p features; the
+  `Behaviour` now includes a `request_response::cbor::Behaviour`
+  for the protocol. New `start_node_with_db` variant lets the
+  swarm event loop synchronously consult a `Database` to answer
+  inbound fetch requests; `P2pNode::fetch_credential(peer_id, req)`
+  is the outbound counterpart. Adds an integration test
+  (`tests/e2e_vc/p2p_vc_fetch.rs::two_node_round_trip_over_vc_fetch_protocol`)
+  that boots two real libp2p nodes, fires a fetch over the wire,
+  and asserts the deserialised response.
 
 ## [2026-03-25]
 

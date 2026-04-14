@@ -45,9 +45,9 @@ alexandria/
 ├── src-tauri/        # Rust backend (Tauri v2)
 │   └── src/
 │       ├── cardano/  # Blockfrost client, Conway tx building, NFT policies
-│       ├── commands/ # ~160 IPC command handlers (frontend ↔ backend)
+│       ├── commands/ # 194 IPC command handlers (frontend ↔ backend)
 │       ├── crypto/   # BIP-39 wallet, vault (Stronghold / portable), Ed25519
-│       ├── db/       # SQLite (53 tables, 19 migrations, seed data)
+│       ├── db/       # SQLite (66 tables, 30 migrations, seed data)
 │       ├── diag.rs   # File-based diagnostic logger + panic hook
 │       ├── domain/   # Business logic (courses, evidence, governance, ...)
 │       ├── evidence/ # Aggregation, attestation, challenges, reputation
@@ -387,7 +387,7 @@ All data lives in `~/Library/Application Support/org.alexandria.node/` (macOS):
 
 | File/Directory | Purpose |
 |----------------|---------|
-| `alexandria.db` | SQLCipher-encrypted SQLite database (53 tables) |
+| `alexandria.db` | SQLCipher-encrypted SQLite database (66 tables) |
 | `stronghold/` | IOTA Stronghold vault directory — desktop |
 | `vault/` | AES-256-GCM + Argon2id vault directory — mobile |
 | `iroh/` | Content-addressed blob store (course content, profiles) |
@@ -399,8 +399,8 @@ Use `alex config path` to print this directory on any platform.
 | Document | Description |
 |----------|-------------|
 | [Architecture](docs/architecture.md) | System design — offline-first, trustless, multi-platform |
-| [Database Schema](docs/database-schema.md) | All 53 tables, 19 migrations, relationships |
-| [P2P Protocol](docs/protocol-spec-v1.md) | Wire formats, 6 gossip topics, validation, peer scoring |
+| [Database Schema](docs/database-schema.md) | All 66 tables, 30 migrations, relationships |
+| [P2P Protocol](docs/protocol-spec-v1.md) | Wire formats, 11 gossip topics, validation, peer scoring |
 | [Project Structure](docs/project-structure.md) | Directory layouts, module responsibilities |
 | [Skills & Reputation](docs/skills-and-reputation.md) | Skill graph, evidence model, reputation system |
 | [Sentinel](docs/sentinel.md) | Assessment integrity — behavioral fingerprinting, ML models |

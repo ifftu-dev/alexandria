@@ -56,7 +56,7 @@ If Alexandria the organisation disappeared tomorrow, every learner's credentials
 
 ### Offline-First by Design
 
-Every operation works without network access. The local SQLite database (53 tables), iroh content store, and encrypted vault provide complete functionality offline. Sync is opportunistic — when connectivity returns, nodes exchange updates via GossipSub topics and cross-device sync.
+Every operation works without network access. The local SQLite database (66 tables), iroh content store, and encrypted vault provide complete functionality offline. Sync is opportunistic — when connectivity returns, nodes exchange updates via GossipSub topics and cross-device sync.
 
 ### Mobile Is a First-Class Node
 
