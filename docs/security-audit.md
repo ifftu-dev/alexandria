@@ -542,3 +542,52 @@ Evidence announcements validate that `score` is in `[0.0, 1.0]` before storing. 
 | 14 | M-6: Add per-peer rate limiting | Medium | Prevents resource exhaustion |
 | 15 | M-1: Protect salt file integrity | Low | Prevents DoS and precomputation |
 | 16 | L-7: Add SSRF blocklist to IPFS resolver | Low | Prevents internal network probing |
+
+---
+
+## Deferred scope: VC-layer modules (PRs 2–19, post-audit)
+
+This audit's snapshot date (2026-03-23) precedes the VC-first
+credential migration that landed across PRs 2–19. The remediation
+status table above is accurate as-of-date — every "FIXED" claim
+verified against the current source — but the following modules
+were added after the audit and **have not been independently
+reviewed**:
+
+- `crypto/did.rs` — `did:key` derivation, parsing, key registry
+- `domain/vc/{mod,canonicalize,context,sign,verify}.rs` — JCS
+  canonicalisation, Ed25519Signature2020 detached JWS, §13.2
+  acceptance predicate
+- `aggregation/{mod,weights,level,independence,antigaming,config}.rs`
+  — §14 trust aggregation + §15 anti-gaming
+- `commands/{credentials,presentation,pinning,aggregation}.rs` —
+  IPC surface for VC issuance/verification/export, presentation
+  envelopes, PinBoard commitments, aggregated-state queries
+- `p2p/{vc_did,vc_status,vc_fetch,presentation,pinboard,archive}.rs`
+  — gossip handlers + libp2p request-response protocol
+  `/alexandria/vc-fetch/1.0`
+- `cardano/{anchor_queue,anchor_tx}.rs` — credential integrity
+  anchoring on Cardano (label 1697 metadata transactions)
+- `ipfs/pinboard.rs` — PinBoard-driven 5-tier eviction policy
+
+A follow-up audit pass should specifically cover:
+
+1. **Authority verification** on the four new gossip topics
+   (`vc-did`, `vc-status`, `vc-presentation`, `pinboard`) — does
+   each handler verify that the message author is the legitimate
+   subject/issuer for the operation?
+2. **Replay/dedup** on the request-response `/alexandria/vc-fetch/1.0`
+   protocol — outbound responses are not deduplicated by the
+   gossip layer; nonces in `FetchRequest` are not currently
+   validated for freshness.
+3. **Selective-disclosure canonicalisation** — verify that
+   presentation envelopes (`p2p/presentation.rs`) bind audience +
+   nonce into the JCS-canonical signed payload, and that
+   `presentations_seen` is consulted before acceptance.
+4. **Allowlist amplification** — does the per-credential
+   `credential_allowlist` table properly gate fetch responses, and
+   does the `'public'` sentinel correctly fan out without inadvertent
+   amplification of unbounded fetch traffic?
+5. **Anchor queue resilience** — `cardano::anchor_queue` does
+   exponential backoff but persists `last_error`; ensure errors
+   don't leak Blockfrost API tokens into log lines.

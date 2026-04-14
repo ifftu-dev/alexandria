@@ -3,8 +3,8 @@
 > Alexandria — SQLite (local-first)
 
 **Engine**: SQLite (rusqlite 0.38, bundled)
-**Tables**: 53
-**Migrations**: 19
+**Tables**: 66
+**Migrations**: 30
 
 ---
 
@@ -58,6 +58,9 @@
 | 25 | `vc_pinboard_observations` | Local + remote PinBoard pinning commitments (§12 + §20.4) |
 | 26 | `vc_presentations_seen` | (audience, nonce) replay-protection log for selective-disclosure presentations (§18) |
 | 27 | `vc_derived_skill_states` | Cached per-(subject, skill, version) aggregation outputs (§14, §16) |
+| 28 | `vc_credentials_pending_verification` | Inbound credentials awaiting issuer-DID resolution before promotion to `credentials` |
+| 29 | `vc_credential_suspension` | Adds `suspended`, `suspended_at`, `suspended_until`, `suspension_reason` columns to `credentials` (§11.3) |
+| 30 | `vc_credential_allowlist` | Per-credential subject-controlled allowlist for pull-based fetch over `/alexandria/vc-fetch/1.0` |
 
 ---
 
@@ -141,7 +144,8 @@
 - Columns: `id`, `skill_id`, `course_id`, `source_type`, `max_score`, `difficulty`, `trust_factor`
 
 **`evidence_records`** — Raw evidence of skill demonstration.
-- Columns: `id`, `learner_address`, `skill_id`, `assessment_id`, `score`, `proficiency_level`, `instructor_address`, `course_id`, `difficulty`, `trust_factor`
+- Columns: `id`, `skill_assessment_id`, `skill_id`, `proficiency_level`, `score`, `difficulty`, `trust_factor`, `course_id`, `instructor_address`, `integrity_session_id`, `integrity_score`, `cid`, `signature`, `created_at`
+- FKs: `skill_assessment_id` → `skill_assessments(id)`, `skill_id` → `skills(id)`, `course_id` → `courses(id)`
 
 **`skill_proofs`** — Aggregated proofs (confidence scores per skill per level).
 - Columns: `learner_address`, `skill_id`, `proficiency_level`, `confidence`, `evidence_count`, `verified`
@@ -297,7 +301,7 @@
 - Columns: `value`, `updated_at`
 - Seeded with `storage_quota_bytes = '0'` (unlimited)
 
-### Verifiable Credentials (6 tables — VC-first migration, PRs 3–13)
+### Verifiable Credentials (9 tables — VC-first migration, PRs 3–19)
 
 The credentialing model implemented from `docs/protocol-specification.md`
 v1. Issuance + verification + aggregation are local-first; gossip
@@ -316,15 +320,22 @@ still resolve at any verification time ≤ rotation. PR 3.
 **`credentials`** — Canonical signed VC store. `signed_vc_json` is the
 W3C-style envelope; `integrity_hash = blake3(JCS bytes)` feeds the
 Cardano anchor queue. `revoked` is cached from the status list for
-fast reads on the verify hot path. PR 5.
+fast reads on the verify hot path. PR 5; suspension columns added in
+PR 19b.
 - PK: `id` (urn:uuid:…)
 - Columns: `issuer_did`, `subject_did`, `credential_type`, `claim_kind`,
   `skill_id` (NULL for non-skill claims), `issuance_date`,
   `expiration_date`, `signed_vc_json`, `integrity_hash`,
   `status_list_id`, `status_list_index`, `revoked`, `revoked_at`,
-  `revocation_reason`, `supersedes`, `received_at`
+  `revocation_reason`, `supersedes`, `received_at`,
+  `suspended` (BOOLEAN, default 0), `suspended_at`,
+  `suspended_until` (NULL for indefinite), `suspension_reason`
 - Indexes: subject_did, issuer_did, partial on skill_id, partial on
   (status_list_id, status_list_index)
+- Suspension semantics (§11.3): `suspended = 1` blocks the credential
+  from verification; `reinstate_credential` clears the four
+  `suspended_*` columns and re-enables verification. Distinct from
+  `revoked`, which is permanent.
 
 **`credential_status_lists`** — RevocationList2020-style bitmap per
 issuer. `bits` is a raw BLOB so the list can be re-broadcast verbatim
@@ -371,6 +382,27 @@ computes-and-caches on miss. PR 13.
   `evidence_mass`, `unique_issuer_clusters`, `active_evidence_count`
 - Full payload: `state_json` (the explainable §16 output)
 - Indexes: subject_did, skill_id
+
+**`credentials_pending_verification`** — Inbound credentials whose
+issuer DID isn't yet resolvable (DID doc not seen, or key not in
+`key_registry` at the relevant epoch). The verifier promotes a row
+into `credentials` once verification succeeds, or drops it if the
+DID never resolves within a TTL. PR 19b.
+- PK: `id` (urn:uuid:… — same as the eventual `credentials.id`)
+- Columns: `issuer_did`, `subject_did`, `signed_vc_json`,
+  `integrity_hash`, `received_at`, `last_attempt_at`, `attempts`,
+  `last_error`
+- Index: (issuer_did, last_attempt_at)
+
+**`credential_allowlist`** — Per-credential subject-controlled
+allowlist for the pull-based fetch protocol on
+`/alexandria/vc-fetch/1.0`. The literal string `'public'` in
+`requestor_did` makes the credential world-fetchable. Local-only
+(not synchronised across the network). PR 19c.
+- Composite PK: `(credential_id, requestor_did)`
+- FK: `credential_id` → `credentials(id)`
+- Columns: `created_at`
+- Index: credential_id
 
 ---
 

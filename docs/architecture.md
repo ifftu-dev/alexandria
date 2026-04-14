@@ -3,7 +3,7 @@
 > Offline-first, trustless, multi-platform.
 
 **Status**: Implementation-complete
-**Last updated**: 2026-03-25
+**Last updated**: 2026-04-13
 
 ---
 
@@ -54,11 +54,11 @@ central API, no hosted database, and no Docker infrastructure.
 |                                                       |
 |  +----------------+         +----------------------+  |
 |  |   Vue 3 UI     |--IPC--->|    Rust Backend      |  |
-|  |   (WebView)    | ~160    |                      |  |
+|  |   (WebView)    | 194     |                      |  |
 |  |                | cmds    |  +----------------+  |  |
-|  |  25 pages      |         |  |   SQLite DB    |  |  |
-|  |  32 components |         |  |   53 tables    |  |  |
-|  |  12 composables|         |  |   19 migrations|  |  |
+|  |  30 pages      |         |  |   SQLite DB    |  |  |
+|  |  34 components |         |  |   66 tables    |  |  |
+|  |  15 composables|         |  |   30 migrations|  |  |
 |  +----------------+         |  +----------------+  |  |
 |                             |                      |  |
 |                             |  +----------------+  |  |
@@ -144,7 +144,7 @@ Both share the same lock/unlock cycle: lock clears in-memory keys, unlock re-der
 
 **Engine**: SQLite (rusqlite 0.38, bundled)
 
-**Tables**: 53 across 19 migrations
+**Tables**: 66 across 30 migrations
 
 | Domain | Tables |
 |--------|--------|
@@ -234,7 +234,16 @@ Both use Ed25519 signatures for authenticity verification.
 | Taxonomy | `/alexandria/taxonomy/1.0` | DAO-ratified skill graph updates |
 | Governance | `/alexandria/governance/1.0` | Proposals, elections, committee updates |
 | Profiles | `/alexandria/profiles/1.0` | User profile announcements |
+| Opinions | `/alexandria/opinions/1.0` | Subjective ratings on courses, evidence, peers |
 | Peer Exchange | `/alexandria/peer-exchange/1.0` | Known peer address propagation |
+| VC DID | `/alexandria/vc-did/1.0` | DID document + key-rotation announcements |
+| VC Status | `/alexandria/vc-status/1.0` | RevocationList2020 status-list snapshots and deltas |
+| VC Presentation | `/alexandria/vc-presentation/1.0` | Opt-in selective-disclosure presentation envelopes |
+| PinBoard | `/alexandria/pinboard/1.0` | PinBoard pinning commitment observations |
+
+A request-response protocol on `/alexandria/vc-fetch/1.0` (libp2p
+`request-response` + CBOR codec) handles authority-respecting
+credential pull and is not part of the gossip-topic set.
 
 ### Message Flow
 
@@ -258,7 +267,7 @@ Per-peer token-bucket rate limiter (20 messages per 60 seconds, 1 refill per 3 s
 
 ### Dynamic Topics
 
-In addition to the 6 global topics, classrooms use per-classroom dynamic topics:
+In addition to the 11 global topics, classrooms use per-classroom dynamic topics:
 - Message topic: `/alexandria/classroom/{id}/1.0`
 - Meta topic: `/alexandria/classroom/{id}/meta/1.0`
 
@@ -388,7 +397,7 @@ Reputation impact computed (instructor attribution)
 
 **Stack**: Vue 3 + TypeScript + Vite + Tailwind CSS v4
 
-### Pages (26 routes)
+### Pages (30 routes)
 
 | Page | Route | Description |
 |------|-------|-------------|
@@ -431,37 +440,39 @@ CSS custom properties with light/dark mode via `.dark` class on `<html>`:
 
 ## 11. IPC Boundary
 
-The frontend communicates with the Rust backend via **~160 Tauri IPC commands** across 22 modules:
+The frontend communicates with the Rust backend via **194 Tauri IPC commands** registered in `tauri::generate_handler!`. The `commands/` directory holds **30 modules** (excluding `mod.rs`); `tutoring_mobile.rs` and `tutoring_stubs.rs` are platform-conditional variants of `tutoring`, and `ratelimit.rs` is an internal helper not registered as IPC. The 26 modules with registered commands:
 
 | Module | Commands | Examples |
 |--------|----------|---------|
 | classroom | 24 | `classroom_create`, `classroom_approve_member`, `classroom_send_message`, `classroom_start_call` |
-| credentials | 6 | `issue_credential`, `list_credentials`, `verify_credential_cmd`, `revoke_credential`, `export_credentials_bundle` |
-| presentation | 2 | `create_presentation`, `verify_presentation` |
-| pinning | 5 | `declare_pinboard_commitment`, `revoke_pinboard_commitment`, `list_my_commitments`, `list_incoming_commitments`, `get_quota_breakdown` |
-| aggregation | 3 | `get_derived_skill_state`, `list_derived_states`, `recompute_all` |
-| governance | 17 | `create_dao`, `submit_proposal`, `cast_vote`, `run_election` |
+| governance | 19 | `create_dao`, `submit_proposal`, `cast_vote`, `run_election` |
+| tutoring | 15 | `tutoring_create_room`, `tutoring_join_room`, `tutoring_toggle_video` |
 | taxonomy | 15 | `get_skills`, `get_subjects`, `update_taxonomy`, `get_skill_graph` |
-| tutoring | 14 | `tutoring_create_room`, `tutoring_join_room`, `tutoring_toggle_video` |
-| identity | 11 | `generate_wallet`, `unlock_vault`, `lock_vault`, `get_profile` |
-| attestation | 8 | `create_attestation_requirement`, `submit_attestation` |
+| identity | 13 | `generate_wallet`, `unlock_vault`, `lock_vault`, `get_profile` |
+| credentials | 10 | `issue_credential`, `list_credentials`, `verify_credential_cmd`, `revoke_credential`, `suspend_credential`, `reinstate_credential`, `allow_credential_fetch`, `disallow_credential_fetch`, `export_credentials_bundle`, `verify_bundle_offline` |
 | sync | 8 | `register_device`, `trigger_sync`, `get_sync_status` |
+| courses | 8 | `create_course`, `get_course`, `list_courses` |
+| attestation | 8 | `create_attestation_requirement`, `submit_attestation` |
 | challenge | 7 | `submit_challenge`, `cast_challenge_vote`, `resolve_challenge` |
-| courses | 7 | `create_course`, `get_course`, `list_courses` |
-| content | 6 | `store_content`, `get_content`, `resolve_cid` |
+| opinions | 6 | `submit_opinion`, `list_opinions`, `aggregate_opinions` |
 | integrity | 6 | `start_session`, `submit_snapshot`, `get_session_score` |
-| catalog | 4 | `search_catalog`, `get_catalog_entry`, `bootstrap_public_catalog` |
-| enrollment | 4 | `enroll`, `update_progress`, `get_enrollment` |
-| p2p | 4 | `p2p_start`, `p2p_stop`, `p2p_status`, `p2p_peers` |
-| reputation | 4 | `get_reputation`, `compute_impact`, `get_assertions` |
+| content | 6 | `store_content`, `get_content`, `resolve_cid` |
+| pinning | 5 | `declare_pinboard_commitment`, `revoke_pinboard_commitment`, `list_my_commitments`, `list_incoming_commitments`, `get_quota_breakdown` |
+| storage | 4 | `get_storage_stats`, `set_storage_quota`, `prune_cache`, `get_storage_settings` |
 | snapshot | 4 | `build_snapshot_tx`, `submit_snapshot_tx` |
-| chapters | 4 | `get_chapters`, `create_chapter`, `update_chapter` |
+| reputation | 4 | `get_reputation`, `compute_impact`, `get_assertions` |
+| enrollment | 4 | `enroll`, `update_progress`, `get_enrollment` |
 | elements | 4 | `get_elements`, `create_element`, `update_element` |
+| chapters | 4 | `get_chapters`, `create_chapter`, `update_chapter` |
+| catalog | 4 | `search_catalog`, `get_catalog_entry`, `bootstrap_public_catalog` |
+| p2p | 4 | `p2p_start`, `p2p_stop`, `p2p_status`, `p2p_peers` |
 | evidence | 3 | `submit_evidence`, `get_evidence`, `broadcast_evidence` |
-| cardano | 2 | `get_utxos`, `submit_transaction` |
+| aggregation | 3 | `get_derived_skill_state`, `list_derived_states`, `recompute_all` |
+| presentation | 2 | `create_presentation`, `verify_presentation` |
 | health | 2 | `health_check`, `read_diag_log` |
+| cardano | 2 | `get_utxos`, `submit_transaction` |
 
-Note: tutoring has platform-specific variants (desktop with video, mobile stubs). The ~160 count reflects unique commands registered per platform.
+Note: `tutoring` has platform-specific variants (desktop with video, mobile stubs). The 194 count reflects the unique commands registered for the current build.
 
 ---
 
