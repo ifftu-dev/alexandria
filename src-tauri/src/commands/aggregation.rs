@@ -323,6 +323,7 @@ mod tests {
             }),
             evidence_refs: vec![],
             expiration_date: None,
+            supersedes: None,
         };
         issue_credential_impl(db.conn(), &issuer_key, &issuer, &req, NOW).unwrap();
         (db, subject, skill.to_string())

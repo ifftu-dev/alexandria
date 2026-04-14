@@ -37,6 +37,8 @@ pub fn verify_credential(
         expired: false,
         subject_bound: false,
         integrity_anchored: false,
+        suspended: false,
+        superseded: false,
         verification_time: verification_time.to_string(),
         acceptance_decision: AcceptanceDecision::Reject,
     };
@@ -75,6 +77,31 @@ pub fn verify_credential(
                 }
             }
         }
+    }
+
+    // -- suspension (§11.3) -------------------------------------------------
+    // Local `credentials.suspended` flag set by `suspend_credential_impl`.
+    // `suspended_until` NULL means "suspended indefinitely"; a set value
+    // is compared against `verification_time` for automatic reinstatement.
+    if let Some((sus_flag, sus_until)) = lookup_suspension(db, &credential.id) {
+        if sus_flag {
+            let active = match sus_until {
+                Some(until) => until.as_str() > verification_time,
+                None => true,
+            };
+            if active {
+                result.suspended = true;
+            }
+        }
+    }
+
+    // -- supersession (§11.4) -----------------------------------------------
+    // A newer credential in the local store pointing to this one via
+    // `supersedes` marks it as superseded. The match is on id only — the
+    // stricter same-subject/same-claim/same-issuer invariant is enforced
+    // at the INSERT site (see `supersede_credential_impl`).
+    if lookup_is_superseded(db, &credential.id) {
+        result.superseded = true;
     }
 
     // -- issuer resolution --------------------------------------------------
@@ -178,13 +205,40 @@ fn finalize(mut result: VerificationResult, policy: &VerificationPolicy) -> Veri
         && result.issuer_resolved
         && result.subject_bound
         && !result.revoked
-        && !(policy.reject_expired && result.expired);
+        && !(policy.reject_expired && result.expired)
+        && !(policy.reject_suspended && result.suspended)
+        && !(policy.reject_superseded && result.superseded);
     result.acceptance_decision = if accept {
         AcceptanceDecision::Accept
     } else {
         AcceptanceDecision::Reject
     };
     result
+}
+
+/// Look up `(suspended, suspended_until)` for a credential id.
+/// Returns `None` if the row doesn't exist (e.g. a bundle-only
+/// credential the verifier hasn't stored).
+fn lookup_suspension(conn: &Connection, credential_id: &str) -> Option<(bool, Option<String>)> {
+    conn.query_row(
+        "SELECT suspended, suspended_until FROM credentials WHERE id = ?1",
+        rusqlite::params![credential_id],
+        |r| Ok((r.get::<_, i64>(0)? != 0, r.get::<_, Option<String>>(1)?)),
+    )
+    .ok()
+}
+
+/// True iff any newer credential in the local store declares this
+/// credential's id in its `supersedes` column.
+fn lookup_is_superseded(conn: &Connection, credential_id: &str) -> bool {
+    let count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM credentials WHERE supersedes = ?1",
+            rusqlite::params![credential_id],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+    count > 0
 }
 
 #[cfg(test)]
