@@ -106,15 +106,23 @@ pub fn disallow_fetch(
     Ok(())
 }
 
-/// Issue an outbound fetch to a specific peer DID. Real network
-/// transport (libp2p request-response) lands when the protocol
-/// behaviour is wired in `p2p::network`; until then, callers should
-/// treat this as not-yet-available rather than an error condition.
+/// Issue an outbound fetch to a specific peer DID.
+///
+/// **Deprecated**: this free function predates the libp2p request-
+/// response wiring. Use `crate::p2p::network::P2pNode::fetch_credential`
+/// instead — it takes a libp2p `PeerId` (not a DID) and round-trips
+/// through the real `/alexandria/vc-fetch/1.0` protocol. We keep
+/// this stub returning Err so the function name stays free for any
+/// caller that hasn't migrated yet.
+#[deprecated(
+    since = "0.0.6-alpha",
+    note = "use P2pNode::fetch_credential — request-response is now wired"
+)]
 pub async fn fetch_credential(
     _peer_did: &Did,
     _credential_id: &str,
 ) -> Result<FetchResponse, String> {
-    Err("vc-fetch outbound: libp2p request-response not yet wired".into())
+    Err("use P2pNode::fetch_credential — request-response is now wired".into())
 }
 
 #[cfg(test)]
