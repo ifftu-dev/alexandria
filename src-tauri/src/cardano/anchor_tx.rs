@@ -119,8 +119,9 @@ pub async fn build_anchor_metadata_tx(
 }
 
 /// Build the `{ 1697: { … } }` auxiliary-data map. Public so tests +
-/// the `anchor_queue` processor can re-derive it for snapshotting.
-pub(crate) fn build_anchor_metadata(
+/// the `anchor_queue` processor + the `preprod_anchor` example can
+/// re-derive it for snapshotting.
+pub fn build_anchor_metadata(
     credential_hash: &str,
     issuer_did: &Did,
     issued_at: &str,
