@@ -7,6 +7,8 @@ and this project loosely follows [Semantic Versioning](https://semver.org/spec/v
 
 ## [Unreleased]
 
+## [0.1.0-alpha] - 2026-04-14
+
 ### Added — VC-first credential migration (PRs 2–19)
 
 End-to-end implementation of the Alexandria Credential & Reputation

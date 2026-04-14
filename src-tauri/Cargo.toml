@@ -1,6 +1,6 @@
 [package]
 name = "alexandria-node"
-version = "0.0.5-alpha"
+version = "0.1.0-alpha"
 description = "Alexandria — Decentralized Learning Platform (Desktop Node)"
 authors = ["Alexandria Contributors"]
 license = "TBD"
