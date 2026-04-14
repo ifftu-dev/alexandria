@@ -26,9 +26,9 @@
 
 - **Courses & Assessments** — Rich HTML, video, and interactive quiz content with per-element progress tracking, notes, and skill tagging.
 - **Public Content Availability** — Published course media can resolve from public URLs (with local BLAKE3 caching), and fresh installs bootstrap a bundled public catalog before network discovery catches up.
-- **Skill Proofs** — Learners earn verifiable credentials scoped to individual skills at Bloom's taxonomy levels (remember through create), aggregated from weighted evidence.
+- **Skill Proofs** — Learners earn verifiable credentials scoped to individual skills at Bloom's taxonomy levels (remember through create), aggregated from weighted evidence. The canonical credential record is a signed W3C VC.
 - **Reputation** — Instructor impact derived from learner outcomes, scoped to `(subject, role, skill, proficiency_level)`. Distribution-based with confidence bounds — no global scores.
-- **Blockchain Credentials** — Native-script NFT minting is implemented for skill-proof wrappers and course/governance metadata. VC integrity anchoring, reputation snapshots, and soulbound-style flows exist in the data model and tx builders, but validator-backed reference-script deployment is still pending.
+- **Cardano Anchoring & Wrappers** — Optional on-chain artifacts are implemented: native-script NFT wrappers for legacy `skill_proof` records, course/governance metadata mints, and VC integrity anchoring. NFTs are not the canonical credential record. Reputation snapshots and soulbound-style flows exist in the data model and tx builders, but validator-backed reference-script deployment is still pending.
 - **Governance** — DAOs mirror the knowledge taxonomy. Elections, proposals, committee-gated taxonomy updates, and P2P propagation are implemented locally; validator-backed on-chain enforcement is not fully deployed yet.
 - **Assessment Integrity** — Sentinel anti-cheat uses a keystroke autoencoder, mouse trajectory CNN, and face embedder. All processing stays client-side; snapshots are stored locally and feed downstream trust decisions without exposing raw biometrics.
 - **Peer-to-Peer** — Fully decentralized via libp2p with a private Alexandria Kademlia DHT, GossipSub, Circuit Relay v2, AutoNAT, and DCUtR. Devices discover each other through a relay bootstrap node — no central server required.
@@ -128,13 +128,13 @@ For Android builds:
 
 ### Cardano (Optional)
 
-For on-chain features (NFT minting, governance enforcement, soulbound tokens):
+For on-chain features (NFT wrappers, governance transactions, soulbound/reputation flows):
 
 - **Blockfrost API key**: Sign up at [blockfrost.io](https://blockfrost.io), create a preprod project, set `BLOCKFROST_PROJECT_ID`:
   ```bash
   export BLOCKFROST_PROJECT_ID="preprodXXX..."
   ```
-- **Testnet ADA**: Fund your wallet address from the [Cardano Faucet](https://docs.cardano.org/cardano-testnets/tools/faucet/) (minimum 5 tADA for NFT minting, ~40 tADA for deploying governance validators)
+- **Testnet ADA**: Fund your wallet address from the [Cardano Faucet](https://docs.cardano.org/cardano-testnets/tools/faucet/) (minimum 5 tADA for wrapper/NFT minting, ~40 tADA for deploying governance validators)
 - **Aiken** (for smart contract development): Install from [aiken-lang.org](https://aiken-lang.org/installation-instructions) v1.1.21+
 
 Without `BLOCKFROST_PROJECT_ID`, the app works fully offline — blockchain features are simply unavailable.
