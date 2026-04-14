@@ -35,6 +35,7 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (25, "vc_pinboard_observations", MIGRATION_025),
     (26, "vc_presentations_seen", MIGRATION_026),
     (27, "vc_derived_skill_states", MIGRATION_027),
+    (28, "vc_credentials_pending_verification", MIGRATION_028),
 ];
 
 const MIGRATION_001: &str = r#"
@@ -1328,4 +1329,23 @@ CREATE INDEX IF NOT EXISTS idx_derived_skill_states_subject
     ON derived_skill_states(subject_did);
 CREATE INDEX IF NOT EXISTS idx_derived_skill_states_skill
     ON derived_skill_states(skill_id);
+"#;
+
+const MIGRATION_028: &str = r#"
+-- ============================================================
+-- Migration 028: Pending-verification queue for incoming VCs
+-- A receiving node may ingest a credential whose issuer DID
+-- isn't yet known locally. We queue those here until a DID
+-- document arrives via `TOPIC_VC_DID`, at which point a sweeper
+-- promotes matching rows into `credentials`.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS credentials_pending_verification (
+    id              TEXT PRIMARY KEY,
+    issuer_did      TEXT NOT NULL,
+    subject_did     TEXT NOT NULL,
+    signed_vc_json  TEXT NOT NULL,
+    received_at     TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_credentials_pending_issuer
+    ON credentials_pending_verification(issuer_did);
 "#;
