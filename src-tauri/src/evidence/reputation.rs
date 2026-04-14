@@ -1330,7 +1330,7 @@ mod tests {
         let rankings = get_instructor_rankings(db.conn(), "sk1", None, 10).unwrap();
 
         assert!(
-            rankings.len() >= 1,
+            !rankings.is_empty(),
             "should have at least 1 instructor ranking"
         );
 
