@@ -27,6 +27,11 @@ pub struct IssueCredentialRequest {
     pub claim: Claim,
     pub evidence_refs: Vec<String>,
     pub expiration_date: Option<String>,
+    /// §11.4 supersession: if set, the new credential declares that
+    /// it replaces the credential with this id. The issuer/subject
+    /// /claim-kind invariants from §11.4 are enforced at insert time.
+    #[serde(default)]
+    pub supersedes: Option<String>,
 }
 
 const STATUS_LIST_BITS: usize = 16_384; // 2 KiB bitmap per list
@@ -103,12 +108,40 @@ pub fn issue_credential_impl(
         Claim::Custom(_) => ("custom", None),
     };
 
+    // §11.4 supersession invariants: a newer credential may
+    // supersede an older only when the same subject, claim kind, and
+    // issuer match (otherwise we'd let an arbitrary issuer "retire"
+    // someone else's credentials). Enforce here at the insert site.
+    if let Some(prior_id) = &req.supersedes {
+        let prior: Option<(String, String, String)> = conn
+            .query_row(
+                "SELECT issuer_did, subject_did, claim_kind FROM credentials WHERE id = ?1",
+                params![prior_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?;
+        let (prior_issuer, prior_subject, prior_kind) =
+            prior.ok_or_else(|| format!("supersedes target {prior_id} not found locally"))?;
+        if prior_issuer != issuer_did.as_str() {
+            return Err("§11.4: supersession requires same issuer as the prior credential".into());
+        }
+        if prior_subject != req.subject.as_str() {
+            return Err("§11.4: supersession requires same subject as the prior credential".into());
+        }
+        if prior_kind != claim_kind {
+            return Err(
+                "§11.4: supersession requires same claim kind as the prior credential".into(),
+            );
+        }
+    }
+
     conn.execute(
         "INSERT INTO credentials \
          (id, issuer_did, subject_did, credential_type, claim_kind, skill_id, \
           issuance_date, expiration_date, signed_vc_json, integrity_hash, \
-          status_list_id, status_list_index) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+          status_list_id, status_list_index, supersedes) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
         params![
             credential_id,
             issuer_did.as_str(),
@@ -122,6 +155,7 @@ pub fn issue_credential_impl(
             integrity_hash,
             list_id,
             index,
+            req.supersedes,
         ],
     )
     .map_err(|e| format!("insert credential: {e}"))?;
@@ -194,6 +228,44 @@ pub fn revoke_credential_impl(
     )
     .map_err(|e| format!("update credential: {e}"))?;
 
+    Ok(())
+}
+
+/// §11.3 suspension. Set `suspended = 1` plus optional
+/// `suspended_until` for automatic reinstatement at verify time.
+/// Idempotent — re-suspending updates the until window.
+pub fn suspend_credential_impl(
+    conn: &Connection,
+    credential_id: &str,
+    until: Option<&str>,
+    reason: Option<&str>,
+    now: &str,
+) -> Result<(), String> {
+    let updated = conn
+        .execute(
+            "UPDATE credentials \
+             SET suspended = 1, suspended_at = ?2, \
+                 suspended_until = ?3, suspended_reason = ?4 \
+             WHERE id = ?1",
+            params![credential_id, now, until, reason],
+        )
+        .map_err(|e| format!("suspend credential: {e}"))?;
+    if updated == 0 {
+        return Err(format!("credential {credential_id} not found"));
+    }
+    Ok(())
+}
+
+/// §11.3 reinstatement — clear the suspension flag. Idempotent.
+pub fn reinstate_credential_impl(conn: &Connection, credential_id: &str) -> Result<(), String> {
+    conn.execute(
+        "UPDATE credentials \
+         SET suspended = 0, suspended_at = NULL, \
+             suspended_until = NULL, suspended_reason = NULL \
+         WHERE id = ?1",
+        params![credential_id],
+    )
+    .map_err(|e| format!("reinstate credential: {e}"))?;
     Ok(())
 }
 
@@ -379,6 +451,41 @@ pub async fn revoke_credential(
         .map_err(|_| "database lock poisoned".to_string())?;
     let db = db_guard.as_ref().ok_or("database not initialized")?;
     revoke_credential_impl(db.conn(), &credential_id, &reason, &now)
+}
+
+#[tauri::command]
+pub async fn suspend_credential(
+    state: State<'_, AppState>,
+    credential_id: String,
+    until: Option<String>,
+    reason: Option<String>,
+) -> Result<(), String> {
+    let now = now_rfc3339();
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
+    suspend_credential_impl(
+        db.conn(),
+        &credential_id,
+        until.as_deref(),
+        reason.as_deref(),
+        &now,
+    )
+}
+
+#[tauri::command]
+pub async fn reinstate_credential(
+    state: State<'_, AppState>,
+    credential_id: String,
+) -> Result<(), String> {
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
+    reinstate_credential_impl(db.conn(), &credential_id)
 }
 
 #[tauri::command]
@@ -659,6 +766,7 @@ mod tests {
             }),
             evidence_refs: vec!["urn:uuid:e1".into()],
             expiration_date: None,
+            supersedes: None,
         }
     }
 
@@ -874,5 +982,129 @@ mod tests {
             verify_bundle_offline_impl(&bundle.to_string(), NOW).is_err(),
             "must reject unknown format_version"
         );
+    }
+
+    // ---- §11.3 suspension --------------------------------------------------
+
+    #[test]
+    fn suspension_round_trip_flips_verify_decision() {
+        use crate::domain::vc::verify::verify_credential;
+        use crate::domain::vc::{AcceptanceDecision, VerificationPolicy};
+
+        let (db, key, issuer, subject) = setup();
+        let vc =
+            issue_credential_impl(db.conn(), &key, &issuer, &sample_request(subject), NOW).unwrap();
+
+        // Pre-suspension: accepted.
+        let pre = verify_credential(db.conn(), &vc, NOW, &VerificationPolicy::default());
+        assert_eq!(pre.acceptance_decision, AcceptanceDecision::Accept);
+        assert!(!pre.suspended);
+
+        // Suspend with no upper bound — indefinite suspension.
+        suspend_credential_impl(db.conn(), &vc.id, None, Some("under review"), NOW).unwrap();
+        let mid = verify_credential(db.conn(), &vc, NOW, &VerificationPolicy::default());
+        assert!(mid.suspended);
+        assert_eq!(mid.acceptance_decision, AcceptanceDecision::Reject);
+
+        // Reinstate.
+        reinstate_credential_impl(db.conn(), &vc.id).unwrap();
+        let after = verify_credential(db.conn(), &vc, NOW, &VerificationPolicy::default());
+        assert!(!after.suspended);
+        assert_eq!(after.acceptance_decision, AcceptanceDecision::Accept);
+    }
+
+    #[test]
+    fn suspension_with_until_in_past_is_no_longer_active() {
+        use crate::domain::vc::verify::verify_credential;
+        use crate::domain::vc::VerificationPolicy;
+
+        let (db, key, issuer, subject) = setup();
+        let vc =
+            issue_credential_impl(db.conn(), &key, &issuer, &sample_request(subject), NOW).unwrap();
+
+        // Suspended until a time before NOW — verifier sees the
+        // suspension as auto-expired and treats the credential as
+        // active again.
+        suspend_credential_impl(db.conn(), &vc.id, Some("2026-01-01T00:00:00Z"), None, NOW)
+            .unwrap();
+        let result = verify_credential(db.conn(), &vc, NOW, &VerificationPolicy::default());
+        assert!(!result.suspended);
+    }
+
+    #[test]
+    fn permissive_policy_can_accept_suspended() {
+        use crate::domain::vc::verify::verify_credential;
+        use crate::domain::vc::{AcceptanceDecision, VerificationPolicy};
+
+        let (db, key, issuer, subject) = setup();
+        let vc =
+            issue_credential_impl(db.conn(), &key, &issuer, &sample_request(subject), NOW).unwrap();
+        suspend_credential_impl(db.conn(), &vc.id, None, None, NOW).unwrap();
+
+        let permissive = VerificationPolicy {
+            reject_suspended: false,
+            ..Default::default()
+        };
+        let result = verify_credential(db.conn(), &vc, NOW, &permissive);
+        assert!(result.suspended);
+        assert_eq!(result.acceptance_decision, AcceptanceDecision::Accept);
+    }
+
+    // ---- §11.4 supersession ------------------------------------------------
+
+    #[test]
+    fn supersession_marks_old_credential_superseded() {
+        use crate::domain::vc::verify::verify_credential;
+        use crate::domain::vc::{AcceptanceDecision, VerificationPolicy};
+
+        let (db, key, issuer, subject) = setup();
+        let old = issue_credential_impl(
+            db.conn(),
+            &key,
+            &issuer,
+            &sample_request(subject.clone()),
+            NOW,
+        )
+        .unwrap();
+
+        // Issue a newer credential that supersedes the old one.
+        let mut new_req = sample_request(subject);
+        new_req.supersedes = Some(old.id.clone());
+        let _new = issue_credential_impl(db.conn(), &key, &issuer, &new_req, NOW).unwrap();
+
+        let result = verify_credential(db.conn(), &old, NOW, &VerificationPolicy::default());
+        assert!(result.superseded);
+        assert_eq!(result.acceptance_decision, AcceptanceDecision::Reject);
+    }
+
+    #[test]
+    fn supersession_rejects_cross_issuer() {
+        // §11.4: same subject, claim kind, and issuer required.
+        let (db, key, issuer, subject) = setup();
+        let old = issue_credential_impl(
+            db.conn(),
+            &key,
+            &issuer,
+            &sample_request(subject.clone()),
+            NOW,
+        )
+        .unwrap();
+
+        let other_key = test_key("other-issuer");
+        let other_issuer = derive_did_key(&other_key);
+        let mut bad_req = sample_request(subject);
+        bad_req.supersedes = Some(old.id.clone());
+        let err =
+            issue_credential_impl(db.conn(), &other_key, &other_issuer, &bad_req, NOW).unwrap_err();
+        assert!(err.contains("issuer"), "got {err}");
+    }
+
+    #[test]
+    fn supersession_rejects_unknown_prior_id() {
+        let (db, key, issuer, subject) = setup();
+        let mut req = sample_request(subject);
+        req.supersedes = Some("urn:uuid:does-not-exist".into());
+        let err = issue_credential_impl(db.conn(), &key, &issuer, &req, NOW).unwrap_err();
+        assert!(err.contains("not found"), "got {err}");
     }
 }

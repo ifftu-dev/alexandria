@@ -1222,6 +1222,8 @@ export interface IssueCredentialRequest {
   claim: Claim
   evidence_refs: string[]
   expiration_date?: string | null
+  /** §11.4 supersession: id of the prior credential this replaces. */
+  supersedes?: string | null
 }
 
 export interface VerificationResult {
@@ -1232,6 +1234,10 @@ export interface VerificationResult {
   expired: boolean
   subject_bound: boolean
   integrity_anchored: boolean
+  /** §11.3: temporary invalidation window currently active. */
+  suspended: boolean
+  /** §11.4: a newer credential supersedes this one. */
+  superseded: boolean
   verification_time: string
   acceptance_decision: AcceptanceDecision
 }

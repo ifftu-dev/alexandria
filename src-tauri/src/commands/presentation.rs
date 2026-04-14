@@ -410,6 +410,7 @@ mod tests {
             }),
             evidence_refs: vec!["urn:uuid:e1".into()],
             expiration_date: None,
+            supersedes: None,
         };
         let vc = issue_credential_impl(db.conn(), &issuer_key, &issuer, &req, NOW).unwrap();
         (db, subject_key, subject, vc.id)

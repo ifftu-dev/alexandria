@@ -36,6 +36,7 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (26, "vc_presentations_seen", MIGRATION_026),
     (27, "vc_derived_skill_states", MIGRATION_027),
     (28, "vc_credentials_pending_verification", MIGRATION_028),
+    (29, "vc_credential_suspension", MIGRATION_029),
 ];
 
 const MIGRATION_001: &str = r#"
@@ -1348,4 +1349,28 @@ CREATE TABLE IF NOT EXISTS credentials_pending_verification (
 );
 CREATE INDEX IF NOT EXISTS idx_credentials_pending_issuer
     ON credentials_pending_verification(issuer_did);
+"#;
+
+const MIGRATION_029: &str = r#"
+-- ============================================================
+-- Migration 029: Credential suspension metadata (§11.3, §11.4)
+-- Temporary invalidation + supersession tracking.
+-- ============================================================
+--
+-- §11.3 Suspension: a credential MAY be temporarily invalidated.
+-- We store suspension as local flags on the credential itself
+-- rather than a separate status-list bitmap — callers can still
+-- ingest a per-purpose status list from gossip and mirror the
+-- bits here via `suspend_credential_impl`.
+--
+-- §11.4 Supersession: `credentials.supersedes` (added in migration
+-- 023) already points from the newer credential back to the older.
+-- We add an index so `is_superseded_by(old_id)` is O(1).
+ALTER TABLE credentials ADD COLUMN suspended INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE credentials ADD COLUMN suspended_at TEXT;
+ALTER TABLE credentials ADD COLUMN suspended_until TEXT;
+ALTER TABLE credentials ADD COLUMN suspended_reason TEXT;
+
+CREATE INDEX IF NOT EXISTS idx_credentials_supersedes
+    ON credentials(supersedes) WHERE supersedes IS NOT NULL;
 "#;

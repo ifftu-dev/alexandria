@@ -871,4 +871,3 @@ mod tests {
         assert!(course.content_cid.is_none());
     }
 }
-
