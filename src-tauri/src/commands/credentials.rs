@@ -488,6 +488,39 @@ pub async fn reinstate_credential(
     reinstate_credential_impl(db.conn(), &credential_id)
 }
 
+/// Add a (credential_id, requestor_did) entry to the per-credential
+/// vc-fetch allowlist. Pass the literal string `"public"` to mark
+/// the credential as world-fetchable.
+#[tauri::command]
+pub async fn allow_credential_fetch(
+    state: State<'_, AppState>,
+    credential_id: String,
+    requestor_did: String,
+) -> Result<(), String> {
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
+    crate::p2p::vc_fetch::allow_fetch(db.conn(), &credential_id, &requestor_did)
+}
+
+/// Remove a (credential_id, requestor_did) entry from the
+/// allowlist. Idempotent.
+#[tauri::command]
+pub async fn disallow_credential_fetch(
+    state: State<'_, AppState>,
+    credential_id: String,
+    requestor_did: String,
+) -> Result<(), String> {
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
+    crate::p2p::vc_fetch::disallow_fetch(db.conn(), &credential_id, &requestor_did)
+}
+
 #[tauri::command]
 pub async fn verify_credential_cmd(
     state: State<'_, AppState>,
