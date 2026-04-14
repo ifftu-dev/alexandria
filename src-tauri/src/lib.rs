@@ -17,6 +17,7 @@ pub mod tutoring;
 #[cfg(mobile)]
 pub mod crypto {
     pub mod content_crypto;
+    pub mod did;
     pub mod group_key;
     pub mod hash;
     #[path = "keystore_portable.rs"]
