@@ -898,9 +898,11 @@ An **Attestor** is an issuer of lightweight attestations such as peer validation
 
 #### 14.5.1 DID Support
 
-Implementations MUST support at least one DID method and SHOULD support multiple. Recommended minimum support: `did:key`, `did:ethr`, equivalent pluggable DID methods.
+Implementations MUST support at least one DID method and SHOULD support multiple. Recommended methods include `did:key` (required minimum) and additional pluggable methods such as `did:ethr`.
 
 A DID document resolver MUST yield sufficient public key material to verify signatures.
+
+*v1 implementation note: the reference implementation ships `did:key` only (multicodec `0xed01` + multibase base58btc over an Ed25519 verification key; see §3.4). Additional DID methods are scoped for a future version. Parsers MUST reject unrecognised methods with a clear error rather than silently accepting them.*
 
 #### 14.5.2 Subject Binding
 
@@ -1347,7 +1349,9 @@ Adjusted issuer weight: `w'_issuer,I = w_issuer,I × p_I`.
 
 #### 14.15.4 Repeated Re-Issuance Spam Control
 
-If the same issuer repeatedly issues nearly identical credentials for the same claim without materially new evidence, only the most recent or highest-quality active credential SHOULD be counted, or earlier ones MUST be strongly discounted.
+If the same issuer repeatedly issues nearly identical credentials for the same claim without materially new evidence, implementations MAY count only the most recent or highest-quality active credential, or MAY strongly discount earlier ones.
+
+*v1 implementation note: the reference implementation does not yet enforce a re-issuance discount at the aggregation layer. The §14.11.4 supersession mechanism is the current means for an issuer to explicitly replace a prior credential; duplicate re-issuances without a supersession reference contribute independently to the evidence set and are bounded only by the §14.14.8 independence-weight discount when they share an issuer cluster.*
 
 ### 14.16 Derived Skill State Output
 
@@ -1582,6 +1586,8 @@ Recommended decay constants per year-equivalent unit:
 | Operational practices | 0.08 |
 | Technical tools / frameworks | 0.15 |
 
+Implementations MAY seed these values in an `AggregationConfig`-style per-skill table. The reference implementation ships a single global default of `λ = 0.08` with per-skill overrides available through an opt-in `skill_decay` map; governance or per-taxonomy seeding of the three reference values above is an anticipated v1.1 extension.
+
 #### 14.25.3 Confidence
 
 Recommended: `β = 0.6`, `γ = 0.7`. Quality-weight component coefficients: `α_r = 0.4`, `α_a = 0.3`, `α_x = 0.3`.
@@ -1709,7 +1715,7 @@ Key design decisions: deterministic IDs via `hex(blake2b_256(parts.join("|")))`,
 
 ### 15.3 Test Suite
 
-407 backend tests across crypto, database, P2P, evidence, cardano, and domain modules. ~1500 lines of stress tests covering high-volume gossip (200+ messages), concurrent validation (1000 messages / 10 threads), sync conflicts, and adversarial inputs.
+589 library unit tests (`cargo test --lib`) and 40 end-to-end VC tests (`cargo test --test e2e_vc`), all passing with 0 ignored at the v0.1.0-alpha release. Coverage spans the `crypto`, `db`, `p2p`, `evidence`, `cardano`, `domain`, `aggregation`, `commands`, and `ipfs` modules. ~1500 lines of P2P stress tests cover high-volume gossip (200+ messages), concurrent validation (1000 messages / 10 threads), sync conflicts, and adversarial inputs. The §14.26 worked example is locked in by `tests/e2e_vc/aggregation.rs`.
 
 ---
 
