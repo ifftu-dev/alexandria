@@ -80,11 +80,132 @@ pub fn handle_did_message(
             rusqlite::params![did.as_str()],
         )
         .map_err(|e| e.to_string())?;
+
+    // Kick the pending-verification sweeper now that the issuer's
+    // DID is known — credentials from this issuer that landed before
+    // the DID doc can be promoted into the main `credentials` table.
+    let _ = promote_pending_for(db, did.as_str());
+
     if inserted > 0 {
         Ok(DidIngest::Stored)
     } else {
         Ok(DidIngest::Ignored)
     }
+}
+
+/// Promote credentials queued in `credentials_pending_verification`
+/// that match `issuer_did` into the main `credentials` table.
+/// Called by the DID-doc gossip handler whenever an issuer becomes
+/// resolvable. Returns the number of rows promoted.
+pub fn promote_pending_for(db: &Database, issuer_did: &str) -> Result<u32, String> {
+    let conn = db.conn();
+    let rows: Vec<(String, String, String)> = {
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, subject_did, signed_vc_json \
+                 FROM credentials_pending_verification \
+                 WHERE issuer_did = ?1",
+            )
+            .map_err(|e| e.to_string())?;
+        let iter = stmt
+            .query_map(rusqlite::params![issuer_did], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                ))
+            })
+            .map_err(|e| e.to_string())?;
+        let mut out = Vec::new();
+        for r in iter {
+            out.push(r.map_err(|e| e.to_string())?);
+        }
+        out
+    };
+
+    let mut promoted = 0u32;
+    for (id, subject_did, json) in rows {
+        // Parse + extract minimal fields for the hoisted columns.
+        // If parsing fails, leave the row in pending — a future DID
+        // doc version might fix it, or an operator can clean up.
+        let vc: Result<serde_json::Value, _> = serde_json::from_str(&json);
+        let vc = match vc {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let type_str = vc
+            .get("type")
+            .and_then(|v| v.as_array())
+            .and_then(|a| {
+                a.iter()
+                    .find_map(|x| x.as_str().filter(|s| *s != "VerifiableCredential"))
+            })
+            .unwrap_or("Credential")
+            .to_string();
+        let issuance_date = vc
+            .get("issuance_date")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let claim_kind = vc
+            .pointer("/credential_subject/claim/kind")
+            .and_then(|v| v.as_str())
+            .unwrap_or("custom")
+            .to_string();
+        let skill_id = vc
+            .pointer("/credential_subject/claim/skill_id")
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
+
+        let inserted = conn.execute(
+            "INSERT OR IGNORE INTO credentials \
+             (id, issuer_did, subject_did, credential_type, claim_kind, skill_id, \
+              issuance_date, signed_vc_json, integrity_hash) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, '')",
+            rusqlite::params![
+                id,
+                issuer_did,
+                subject_did,
+                type_str,
+                claim_kind,
+                skill_id,
+                issuance_date,
+                json,
+            ],
+        );
+        if let Ok(n) = inserted {
+            if n > 0 {
+                conn.execute(
+                    "DELETE FROM credentials_pending_verification WHERE id = ?1",
+                    rusqlite::params![id],
+                )
+                .map_err(|e| e.to_string())?;
+                promoted += 1;
+            }
+        }
+    }
+    Ok(promoted)
+}
+
+/// Queue a signed VC whose issuer DID isn't yet known. Callers are
+/// typically the credential gossip handler (a future PR) — for now
+/// tests drive this directly.
+pub fn queue_pending(
+    db: &Database,
+    id: &str,
+    issuer_did: &str,
+    subject_did: &str,
+    signed_vc_json: &str,
+) -> Result<(), String> {
+    db.conn()
+        .execute(
+            "INSERT OR IGNORE INTO credentials_pending_verification \
+             (id, issuer_did, subject_did, signed_vc_json) \
+             VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![id, issuer_did, subject_did, signed_vc_json],
+        )
+        .map_err(|e| format!("queue_pending: {e}"))?;
+    Ok(())
 }
 
 #[cfg(test)]

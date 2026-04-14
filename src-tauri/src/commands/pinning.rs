@@ -81,17 +81,42 @@ pub fn list_incoming_commitments_impl(
     list_pinners_for(conn, self_did)
 }
 
-pub fn quota_breakdown_impl(_conn: &Connection) -> Result<QuotaBreakdown, String> {
-    // Real per-tier accounting hooks land alongside iroh-blobs
-    // integration; until then the IPC returns the canonical zero
-    // shape so the dashboard renders "0 used / 0 quota" instead of
-    // erroring. The frontend treats this as "not yet measured".
+pub fn quota_breakdown_impl(conn: &Connection) -> Result<QuotaBreakdown, String> {
+    // Per-tier byte accounting via SQL aggregates on the `pins`
+    // table. Mirrors the 5-tier eviction classification in
+    // `ipfs::storage::list_evictable_pins`:
+    //   - subject_authored: auto_unpin = 0
+    //   - pinboard:         pin_type = 'pinboard'
+    //   - enrollment:       pin_type = 'course' (regardless of
+    //                       active/completed — the hot vs cold split
+    //                       is an eviction-order concern, not a
+    //                       quota-category one)
+    //   - cache:            pin_type = 'cache'
+    let sum = |pred: &str| -> Result<u64, String> {
+        let sql = format!("SELECT COALESCE(SUM(size_bytes), 0) FROM pins WHERE {pred}");
+        conn.query_row(&sql, [], |row| row.get::<_, i64>(0))
+            .map(|n| n.max(0) as u64)
+            .map_err(|e| format!("quota sum: {e}"))
+    };
+    let subject_authored_bytes = sum("auto_unpin = 0")?;
+    let pinboard_bytes = sum("pin_type = 'pinboard' AND auto_unpin = 1")?;
+    let cache_bytes = sum("pin_type = 'cache' AND auto_unpin = 1")?;
+    let enrollment_bytes = sum("pin_type = 'course' AND auto_unpin = 1")?;
+    let total_quota_bytes: u64 = conn
+        .query_row(
+            "SELECT value FROM app_settings WHERE key = 'storage_quota_bytes'",
+            [],
+            |r| r.get::<_, String>(0),
+        )
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
     Ok(QuotaBreakdown {
-        subject_authored_bytes: 0,
-        pinboard_bytes: 0,
-        cache_bytes: 0,
-        enrollment_bytes: 0,
-        total_quota_bytes: 0,
+        subject_authored_bytes,
+        pinboard_bytes,
+        cache_bytes,
+        enrollment_bytes,
+        total_quota_bytes,
     })
 }
 
