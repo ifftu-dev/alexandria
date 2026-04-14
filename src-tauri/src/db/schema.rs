@@ -37,6 +37,7 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (27, "vc_derived_skill_states", MIGRATION_027),
     (28, "vc_credentials_pending_verification", MIGRATION_028),
     (29, "vc_credential_suspension", MIGRATION_029),
+    (30, "vc_credential_allowlist", MIGRATION_030),
 ];
 
 const MIGRATION_001: &str = r#"
@@ -1373,4 +1374,26 @@ ALTER TABLE credentials ADD COLUMN suspended_reason TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_credentials_supersedes
     ON credentials(supersedes) WHERE supersedes IS NOT NULL;
+"#;
+
+const MIGRATION_030: &str = r#"
+-- ============================================================
+-- Migration 030: Per-credential vc-fetch allowlist
+-- §10 + presentation policy: subjects opt-in to which DIDs may
+-- pull a private credential via vc-fetch.
+-- ============================================================
+--
+-- Without an allowlist row, the credential is private and only
+-- the subject themselves can fetch it. Adding (credential_id,
+-- requestor_did) opens that requestor up. A `(credential_id,
+-- 'public')` row marks the credential as world-fetchable.
+CREATE TABLE IF NOT EXISTS credential_allowlist (
+    credential_id  TEXT NOT NULL,
+    requestor_did  TEXT NOT NULL,         -- or the literal 'public'
+    granted_at     TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (credential_id, requestor_did)
+);
+
+CREATE INDEX IF NOT EXISTS idx_credential_allowlist_cred
+    ON credential_allowlist(credential_id);
 "#;

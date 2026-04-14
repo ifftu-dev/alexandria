@@ -28,8 +28,11 @@ pub enum FetchResponse {
 /// Decision tree:
 ///   1. If we don't have the credential locally → `NotFound`.
 ///   2. If the requestor is the subject themselves → `Ok(vc)`.
-///   3. Otherwise → `Unauthorized`. (PR 11 layers per-credential
-///      allowlists + public-flag overrides on top of this.)
+///   3. If the credential has an allowlist row matching the
+///      requestor DID exactly → `Ok(vc)`.
+///   4. If the credential has an allowlist row marking it
+///      `'public'` → `Ok(vc)` (anyone can fetch).
+///   5. Otherwise → `Unauthorized`.
 pub fn handle_fetch_request(
     db: &rusqlite::Connection,
     req: &FetchRequest,
@@ -45,11 +48,62 @@ pub fn handle_fetch_request(
         Some(r) => r,
         None => return Ok(FetchResponse::NotFound),
     };
-    if req.requestor.as_str() == subject_did {
+    if req.requestor.as_str() == subject_did
+        || is_allowlisted(db, &req.credential_id, req.requestor.as_str())
+    {
         let vc: VerifiableCredential = serde_json::from_str(&json).map_err(|e| e.to_string())?;
         return Ok(FetchResponse::Ok(Box::new(vc)));
     }
     Ok(FetchResponse::Unauthorized)
+}
+
+/// True iff the credential has an allowlist row for this requestor
+/// (exact match) OR a `'public'` row (anyone can fetch). Pure SQL —
+/// the allowlist is local-only and not synchronised across the
+/// network.
+fn is_allowlisted(db: &rusqlite::Connection, credential_id: &str, requestor: &str) -> bool {
+    let count: i64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM credential_allowlist \
+             WHERE credential_id = ?1 \
+               AND (requestor_did = ?2 OR requestor_did = 'public')",
+            rusqlite::params![credential_id, requestor],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+    count > 0
+}
+
+/// Insert a (credential_id, requestor_did) allowlist entry. Use the
+/// literal string `"public"` as `requestor_did` to mark the
+/// credential as world-fetchable. Idempotent.
+pub fn allow_fetch(
+    db: &rusqlite::Connection,
+    credential_id: &str,
+    requestor_did: &str,
+) -> Result<(), String> {
+    db.execute(
+        "INSERT OR IGNORE INTO credential_allowlist \
+         (credential_id, requestor_did) VALUES (?1, ?2)",
+        rusqlite::params![credential_id, requestor_did],
+    )
+    .map_err(|e| format!("allow_fetch: {e}"))?;
+    Ok(())
+}
+
+/// Remove a (credential_id, requestor_did) entry. Idempotent.
+pub fn disallow_fetch(
+    db: &rusqlite::Connection,
+    credential_id: &str,
+    requestor_did: &str,
+) -> Result<(), String> {
+    db.execute(
+        "DELETE FROM credential_allowlist \
+         WHERE credential_id = ?1 AND requestor_did = ?2",
+        rusqlite::params![credential_id, requestor_did],
+    )
+    .map_err(|e| format!("disallow_fetch: {e}"))?;
+    Ok(())
 }
 
 /// Issue an outbound fetch to a specific peer DID. Real network
@@ -147,8 +201,9 @@ mod tests {
 
     #[test]
     fn subject_can_fetch_their_own_credential() {
-        // The subject themselves is always allowed; any future
-        // allowlist policy layers above this baseline.
+        // The subject themselves is always allowed regardless of
+        // the allowlist; any allowlist policy layers above this
+        // baseline.
         let db = Database::open_in_memory().unwrap();
         db.run_migrations().unwrap();
         seed_credential(db.conn(), "urn:uuid:mine", "did:key:zSubject");
@@ -159,5 +214,70 @@ mod tests {
         };
         let resp = handle_fetch_request(db.conn(), &req).unwrap();
         assert!(matches!(resp, FetchResponse::Ok(_)));
+    }
+
+    #[test]
+    fn allowlisted_requestor_can_fetch() {
+        let db = Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+        seed_credential(db.conn(), "urn:uuid:al", "did:key:zSubject");
+        allow_fetch(db.conn(), "urn:uuid:al", "did:key:zRecruiter").unwrap();
+        let req = FetchRequest {
+            credential_id: "urn:uuid:al".into(),
+            requestor: Did("did:key:zRecruiter".into()),
+            nonce: "n-allow".into(),
+        };
+        let resp = handle_fetch_request(db.conn(), &req).unwrap();
+        assert!(matches!(resp, FetchResponse::Ok(_)));
+    }
+
+    #[test]
+    fn public_flag_allows_anyone() {
+        let db = Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+        seed_credential(db.conn(), "urn:uuid:pub", "did:key:zSubject");
+        allow_fetch(db.conn(), "urn:uuid:pub", "public").unwrap();
+        let req = FetchRequest {
+            credential_id: "urn:uuid:pub".into(),
+            requestor: Did("did:key:zRandom".into()),
+            nonce: "n-pub".into(),
+        };
+        let resp = handle_fetch_request(db.conn(), &req).unwrap();
+        assert!(matches!(resp, FetchResponse::Ok(_)));
+    }
+
+    #[test]
+    fn disallow_revokes_allowlist_entry() {
+        let db = Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+        seed_credential(db.conn(), "urn:uuid:rev", "did:key:zSubject");
+        allow_fetch(db.conn(), "urn:uuid:rev", "did:key:zRecruiter").unwrap();
+        disallow_fetch(db.conn(), "urn:uuid:rev", "did:key:zRecruiter").unwrap();
+        let req = FetchRequest {
+            credential_id: "urn:uuid:rev".into(),
+            requestor: Did("did:key:zRecruiter".into()),
+            nonce: "n-rev".into(),
+        };
+        let resp = handle_fetch_request(db.conn(), &req).unwrap();
+        assert!(matches!(resp, FetchResponse::Unauthorized));
+    }
+
+    #[test]
+    fn allow_fetch_is_idempotent() {
+        let db = Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+        seed_credential(db.conn(), "urn:uuid:idem", "did:key:zSubject");
+        allow_fetch(db.conn(), "urn:uuid:idem", "did:key:zRec").unwrap();
+        allow_fetch(db.conn(), "urn:uuid:idem", "did:key:zRec").unwrap();
+        let count: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM credential_allowlist \
+                 WHERE credential_id = 'urn:uuid:idem'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
     }
 }

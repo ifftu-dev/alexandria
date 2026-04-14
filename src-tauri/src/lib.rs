@@ -755,6 +755,8 @@ pub fn run() {
             commands::credentials::revoke_credential,
             commands::credentials::suspend_credential,
             commands::credentials::reinstate_credential,
+            commands::credentials::allow_credential_fetch,
+            commands::credentials::disallow_credential_fetch,
             commands::credentials::verify_credential_cmd,
             commands::credentials::export_credentials_bundle,
             // Selective-disclosure presentations (§18)

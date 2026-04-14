@@ -9,7 +9,7 @@
 
 use super::common::new_test_db;
 use app_lib::crypto::did::Did;
-use app_lib::p2p::vc_fetch::{handle_fetch_request, FetchRequest, FetchResponse};
+use app_lib::p2p::vc_fetch::{allow_fetch, handle_fetch_request, FetchRequest, FetchResponse};
 
 fn seed_credential(conn: &rusqlite::Connection, id: &str, subject: &str) {
     let json = serde_json::json!({
@@ -80,22 +80,53 @@ async fn private_credential_fetch_returns_unauthorized() {
 
 #[tokio::test]
 async fn allowlisted_requestor_receives_private_credential() {
-    // The PR 11 allowlist is not yet backed by a SQL column — the
-    // MVP handler only recognizes the subject themselves as
-    // authorized. This test verifies the subject-based
-    // authorization path, which IS the current allowlist surface
-    // for v1. Future work: add a per-credential allowlist table
-    // and extend handle_fetch_request to consult it.
+    // Subject explicitly allowlists a recruiter's DID; the
+    // recruiter (not the subject) successfully fetches.
     let db = new_test_db();
     seed_credential(
         db.conn(),
-        "urn:uuid:subject-fetch",
+        "urn:uuid:allowlisted-vc",
         "did:key:zSubjectFetchTest",
     );
+    allow_fetch(
+        db.conn(),
+        "urn:uuid:allowlisted-vc",
+        "did:key:zRecruiterFetchTest",
+    )
+    .unwrap();
     let req = FetchRequest {
-        credential_id: "urn:uuid:subject-fetch".into(),
-        requestor: Did("did:key:zSubjectFetchTest".into()),
+        credential_id: "urn:uuid:allowlisted-vc".into(),
+        requestor: Did("did:key:zRecruiterFetchTest".into()),
         nonce: "n-allowlist".into(),
+    };
+    let resp = handle_fetch_request(db.conn(), &req).unwrap();
+    assert!(matches!(resp, FetchResponse::Ok(_)));
+
+    // Sanity: a different requestor still gets Unauthorized.
+    let req2 = FetchRequest {
+        credential_id: "urn:uuid:allowlisted-vc".into(),
+        requestor: Did("did:key:zNotOnList".into()),
+        nonce: "n-allowlist-2".into(),
+    };
+    let resp2 = handle_fetch_request(db.conn(), &req2).unwrap();
+    assert!(matches!(resp2, FetchResponse::Unauthorized));
+}
+
+#[tokio::test]
+async fn public_credential_fetch_returns_vc_via_public_flag() {
+    // `public` flag in the allowlist makes the credential
+    // world-fetchable.
+    let db = new_test_db();
+    seed_credential(
+        db.conn(),
+        "urn:uuid:public-flag",
+        "did:key:zSubjectFetchTest",
+    );
+    allow_fetch(db.conn(), "urn:uuid:public-flag", "public").unwrap();
+    let req = FetchRequest {
+        credential_id: "urn:uuid:public-flag".into(),
+        requestor: Did("did:key:zArbitraryRequestor".into()),
+        nonce: "n-pub-flag".into(),
     };
     let resp = handle_fetch_request(db.conn(), &req).unwrap();
     assert!(matches!(resp, FetchResponse::Ok(_)));
