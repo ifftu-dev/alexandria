@@ -41,10 +41,10 @@ const CIP25_LABEL: MetadatumLabel = 721;
 pub(crate) const MIN_NFT_LOVELACE: u64 = 2_000_000;
 
 /// Minimum ADA required in a UTxO for coin selection (5 ADA).
-pub(crate) const MIN_UTXO_LOVELACE: u64 = 5_000_000;
+pub const MIN_UTXO_LOVELACE: u64 = 5_000_000;
 
 /// TTL offset from current slot (1 hour = 3600 slots on preprod).
-pub(crate) const TTL_OFFSET: u64 = 3600;
+pub const TTL_OFFSET: u64 = 3600;
 
 /// Estimated fee for initial transaction sizing (300k lovelace, ~0.3 ADA).
 /// Will be refined with actual protocol parameters.
@@ -193,7 +193,7 @@ fn build_course_metadata(
 /// 2. Set `auxiliary_data` to `AuxiliaryData::Shelley(metadata)`
 /// 3. Recompute `auxiliary_data_hash` in the transaction body
 /// 4. Re-encode and recalculate the tx hash
-pub(crate) fn inject_metadata(
+pub fn inject_metadata(
     tx_bytes: &[u8],
     metadata: KeyValuePairs<MetadatumLabel, Metadatum>,
 ) -> Result<(Vec<u8>, [u8; 32]), TxBuildError> {
@@ -464,7 +464,7 @@ pub async fn build_course_registration(
 ///
 /// Uses the linear fee formula: `min_fee_a * estimated_size + min_fee_b`.
 /// We estimate ~500 bytes for a simple mint tx with CIP-25 metadata.
-pub(crate) fn estimate_fee(params: &ProtocolParameters, _num_witnesses: u32) -> u64 {
+pub fn estimate_fee(params: &ProtocolParameters, _num_witnesses: u32) -> u64 {
     // A simple mint tx with 1 input, 2 outputs, native script, and CIP-25 metadata
     // is typically 400-600 bytes. We use 600 as a conservative estimate.
     let estimated_size: u64 = 600;
@@ -474,7 +474,7 @@ pub(crate) fn estimate_fee(params: &ProtocolParameters, _num_witnesses: u32) -> 
 }
 
 /// Parse a hex-encoded 32-byte transaction hash into a pallas Hash.
-pub(crate) fn parse_tx_hash(hex_str: &str) -> Result<Hash<32>, TxBuildError> {
+pub fn parse_tx_hash(hex_str: &str) -> Result<Hash<32>, TxBuildError> {
     let bytes = hex::decode(hex_str)
         .map_err(|e| TxBuildError::TxDecode(format!("invalid tx hash hex: {e}")))?;
     let arr: [u8; 32] = bytes
@@ -487,10 +487,7 @@ pub(crate) fn parse_tx_hash(hex_str: &str) -> Result<Hash<32>, TxBuildError> {
 ///
 /// Decodes the tx, computes the body hash, signs it, adds the
 /// VKeyWitness to the witness set, and re-encodes.
-pub(crate) fn sign_raw_tx(
-    tx_bytes: &[u8],
-    private_key: &PrivateKey,
-) -> Result<Vec<u8>, TxBuildError> {
+pub fn sign_raw_tx(tx_bytes: &[u8], private_key: &PrivateKey) -> Result<Vec<u8>, TxBuildError> {
     let mut tx =
         Tx::decode_fragment(tx_bytes).map_err(|e| TxBuildError::TxDecode(e.to_string()))?;
 

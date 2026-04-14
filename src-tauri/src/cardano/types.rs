@@ -1,15 +1,45 @@
 use serde::{Deserialize, Serialize};
 
 /// A UTxO (Unspent Transaction Output) as returned by Blockfrost.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// Blockfrost's live response includes BOTH `tx_index` and
+/// `output_index` (identical values) for the same output slot —
+/// a serde `alias` can't handle that, because `alias` means "one
+/// of these spellings MAY appear" and with both present serde
+/// raises a duplicate-field error. We deserialize via a shadow
+/// struct that accepts either (or both) and prefers `tx_index`.
+#[derive(Debug, Clone, Serialize)]
 pub struct UTxO {
     /// Transaction hash (64-char hex).
     pub tx_hash: String,
     /// Output index within the transaction.
-    #[serde(alias = "output_index")]
     pub tx_index: u64,
     /// Multi-asset amounts on this UTxO.
     pub amount: Vec<AmountEntry>,
+}
+
+impl<'de> Deserialize<'de> for UTxO {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        struct Shadow {
+            tx_hash: String,
+            #[serde(default)]
+            tx_index: Option<u64>,
+            #[serde(default)]
+            output_index: Option<u64>,
+            amount: Vec<AmountEntry>,
+        }
+        let raw = Shadow::deserialize(d)?;
+        let idx = raw
+            .tx_index
+            .or(raw.output_index)
+            .ok_or_else(|| serde::de::Error::missing_field("tx_index"))?;
+        Ok(UTxO {
+            tx_hash: raw.tx_hash,
+            tx_index: idx,
+            amount: raw.amount,
+        })
+    }
 }
 
 /// A single asset amount within a UTxO.

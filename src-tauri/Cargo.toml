@@ -158,3 +158,9 @@ tempfile = "3"
 name = "dev_seed"
 path = "examples/dev_seed.rs"
 required-features = ["dev-seed"]
+
+# Live Cardano preprod anchor-tx submission, used to hand-verify
+# PR 16's label-1697 metadata path against a funded testnet wallet.
+[[example]]
+name = "preprod_anchor"
+path = "examples/preprod_anchor.rs"
