@@ -161,17 +161,39 @@ pub fn storage_stats(conn: &Connection) -> StorageStats {
 // ── Eviction ────────────────────────────────────────────────────────────
 
 /// List pins eligible for eviction, ordered by priority (first = evict first).
+/// Public so e2e tests can assert the 5-tier precedence without
+/// having to stand up a full iroh content node for `maybe_evict`.
+pub fn list_evictable_pins_for_test(conn: &Connection) -> Vec<PinRecord> {
+    list_evictable_pins(conn)
+}
+
+/// Internal version used by `maybe_evict` itself.
 ///
-/// Tier 1: cached gateway content (`pin_type = 'cache'`), LRU.
-/// Tier 2: course content with no active enrollment, LRU.
+/// 5-tier precedence (higher number = evicted earlier, lower number
+/// = retained longer). Matches the spec §12 + §20.4 pinning contract:
+///
+/// Tier 5 (evict first): `pin_type = 'cache'` — opportunistic gateway fetches.
+/// Tier 4: course content with NO active enrollment, LRU.
 /// Tier 3: course content for completed/dropped enrollments, LRU.
+/// Tier 2: content we've committed to pin for other subjects via
+///         `pinboard_observations` with `revoked_at IS NULL`.
+/// Tier 1 (NEVER evict): `auto_unpin = 0` — subject-authored,
+///         profiles, taxonomy, and VC infrastructure (DID docs,
+///         status lists — even though these live in SQL today, the
+///         blob-level invariant is that `auto_unpin = 0` pins don't
+///         leave the store under storage pressure).
 ///
-/// Excludes `auto_unpin = 0` (authored content, profiles, taxonomy).
+/// Query only returns evictable rows (`auto_unpin = 1`), which by
+/// construction means Tier 1 is invisible here. Tiers 2–5 are
+/// prioritized so PinBoard content outlives cache but yields to
+/// subject-authored under pressure.
 fn list_evictable_pins(conn: &Connection) -> Vec<PinRecord> {
     let sql = r#"
         SELECT p.cid, p.pin_type, p.size_bytes, p.last_accessed, p.auto_unpin, p.pinned_at,
                CASE
-                 WHEN p.pin_type = 'cache' THEN 1
+                 -- Tier 5: cache gets evicted first.
+                 WHEN p.pin_type = 'cache' THEN 5
+                 -- Tier 4: course content without any active enrollment.
                  WHEN p.pin_type = 'course' AND NOT EXISTS (
                    SELECT 1 FROM enrollments e
                    JOIN courses c ON e.course_id = c.id
@@ -182,12 +204,20 @@ fn list_evictable_pins(conn: &Connection) -> Vec<PinRecord> {
                             WHERE cc.course_id = c.id AND ce.content_cid = p.cid
                           ))
                      AND e.status = 'active'
-                 ) THEN 2
+                 ) THEN 4
+                 -- Tier 2: content we've committed to pin for others
+                 -- via an active PinBoard observation.
+                 WHEN EXISTS (
+                   SELECT 1 FROM pinboard_observations po
+                   WHERE po.revoked_at IS NULL
+                 ) AND p.pin_type = 'pinboard' THEN 2
+                 -- Tier 3: otherwise default (course with completed
+                 -- enrollment, evidence, etc).
                  ELSE 3
                END AS eviction_tier
         FROM pins p
         WHERE p.auto_unpin = 1
-        ORDER BY eviction_tier ASC, p.last_accessed ASC NULLS FIRST
+        ORDER BY eviction_tier DESC, p.last_accessed ASC NULLS FIRST
     "#;
 
     let mut stmt = match conn.prepare(sql) {

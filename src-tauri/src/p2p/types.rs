@@ -19,6 +19,23 @@ pub const TOPIC_OPINIONS: &str = "/alexandria/opinions/1.0";
 /// so that peers-of-peers can discover each other transitively.
 pub const TOPIC_PEER_EXCHANGE: &str = "/alexandria/peer-exchange/1.0";
 
+// ---- VC-first migration (PRs 2–13) --------------------------------------
+/// DID document announcements + key rotation records (spec §5.3).
+/// Receivers reflect the DID registry into their local `key_registry`
+/// so historical verification survives across peers.
+pub const TOPIC_VC_DID: &str = "/alexandria/vc-did/1.0";
+/// RevocationList2020-style status list snapshots / deltas (§11.2).
+/// Versioned — receivers refuse older versions to prevent rollback.
+pub const TOPIC_VC_STATUS: &str = "/alexandria/vc-status/1.0";
+/// Subject-authored selective-disclosure presentations (§18). Opt-in;
+/// a subject broadcasts a presentation to a specific audience and
+/// network members relay it.
+pub const TOPIC_VC_PRESENTATION: &str = "/alexandria/vc-presentation/1.0";
+/// PinBoard pinning commitments (§12 + §20.4). Peers broadcast opt-in
+/// commitments to pin specific subjects' content for community
+/// redundancy.
+pub const TOPIC_PINBOARD: &str = "/alexandria/pinboard/1.0";
+
 /// All gossip topics the node subscribes to.
 pub const ALL_TOPICS: &[&str] = &[
     TOPIC_CATALOG,
@@ -28,6 +45,10 @@ pub const ALL_TOPICS: &[&str] = &[
     TOPIC_PROFILES,
     TOPIC_OPINIONS,
     TOPIC_PEER_EXCHANGE,
+    TOPIC_VC_DID,
+    TOPIC_VC_STATUS,
+    TOPIC_VC_PRESENTATION,
+    TOPIC_PINBOARD,
 ];
 
 /// Peer exchange message — broadcast on TOPIC_PEER_EXCHANGE.
