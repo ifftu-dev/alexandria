@@ -702,6 +702,43 @@ fn parse_datetime_to_unix(datetime_str: &str) -> i64 {
         .unwrap_or_else(|_| chrono::Utc::now().timestamp())
 }
 
+/// Internal helper: fetch a course by ID from the connection.
+fn get_course_by_id(conn: &rusqlite::Connection, id: &str) -> Result<Course, String> {
+    conn.query_row(
+        "SELECT id, title, description, author_address, author_name, content_cid, thumbnail_cid, \
+         thumbnail_svg, tags, skill_ids, version, status, published_at, on_chain_tx, created_at, updated_at, kind \
+         FROM courses WHERE id = ?1",
+        params![id],
+        |row| {
+            let tags_json: Option<String> = row.get(8)?;
+            let skill_ids_json: Option<String> = row.get(9)?;
+
+            Ok(Course {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                description: row.get(2)?,
+                author_address: row.get(3)?,
+                author_name: row.get(4)?,
+                content_cid: row.get(5)?,
+                thumbnail_cid: row.get(6)?,
+                thumbnail_svg: row.get(7)?,
+                tags: tags_json
+                    .and_then(|j| serde_json::from_str(&j).ok()),
+                skill_ids: skill_ids_json
+                    .and_then(|j| serde_json::from_str(&j).ok()),
+                version: row.get(10)?,
+                status: row.get(11)?,
+                published_at: row.get(12)?,
+                on_chain_tx: row.get(13)?,
+                created_at: row.get(14)?,
+                updated_at: row.get(15)?,
+                kind: row.get::<_, Option<String>>(16)?.unwrap_or_else(|| "course".into()),
+            })
+        },
+    )
+    .map_err(|e| e.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -835,39 +872,3 @@ mod tests {
     }
 }
 
-/// Internal helper: fetch a course by ID from the connection.
-fn get_course_by_id(conn: &rusqlite::Connection, id: &str) -> Result<Course, String> {
-    conn.query_row(
-        "SELECT id, title, description, author_address, author_name, content_cid, thumbnail_cid, \
-         thumbnail_svg, tags, skill_ids, version, status, published_at, on_chain_tx, created_at, updated_at, kind \
-         FROM courses WHERE id = ?1",
-        params![id],
-        |row| {
-            let tags_json: Option<String> = row.get(8)?;
-            let skill_ids_json: Option<String> = row.get(9)?;
-
-            Ok(Course {
-                id: row.get(0)?,
-                title: row.get(1)?,
-                description: row.get(2)?,
-                author_address: row.get(3)?,
-                author_name: row.get(4)?,
-                content_cid: row.get(5)?,
-                thumbnail_cid: row.get(6)?,
-                thumbnail_svg: row.get(7)?,
-                tags: tags_json
-                    .and_then(|j| serde_json::from_str(&j).ok()),
-                skill_ids: skill_ids_json
-                    .and_then(|j| serde_json::from_str(&j).ok()),
-                version: row.get(10)?,
-                status: row.get(11)?,
-                published_at: row.get(12)?,
-                on_chain_tx: row.get(13)?,
-                created_at: row.get(14)?,
-                updated_at: row.get(15)?,
-                kind: row.get::<_, Option<String>>(16)?.unwrap_or_else(|| "course".into()),
-            })
-        },
-    )
-    .map_err(|e| e.to_string())
-}

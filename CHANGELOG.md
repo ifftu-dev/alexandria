@@ -89,11 +89,40 @@ alongside the existing skill-proof + NFT pipeline. See
 | 11 | 566 | 0  | 21 | 16 |
 | 12 | 571 | 0  | 24 | 14 |
 | 13 | 576 | 0  | 24 | 14 |
+| 14 | 576 | 0  | 24 | 14 |
+| 15 | 576 | 0  | 24 | 14 |
+| 16 | 579 | 0  | 25 | 13 |
+| 17 | 579 | 0  | **38** | **0** |
+| 18 | 579 | 0  | 38 | 0  |
 
-The 14 still-ignored e2e tests have `unimplemented!()` bodies and
-need a real two-node libp2p fixture (`p2p_did_status`,
-`p2p_vc_fetch`, `p2p_survival`, `pinning` 5-tier eviction). They
-land in PR 17.
+- **PR 14** — Full rewrite of `Credentials.vue` against the new
+  VC-first backend: list/issue/verify/revoke/export/present flows,
+  new `CredentialDetail.vue`, `useCredentials` composable over
+  every VC IPC command, and 14 new domain types in
+  `src/types/index.ts`. Drops the legacy skill-proof + NFT-mint UI.
+- **PR 15** — `alex credentials {list, get, export, verify}` CLI
+  subcommand. Delegates to `app_lib::commands::credentials::*_impl`
+  so GUI + CLI share one source of truth. 5 clap-derive parsing
+  tests.
+- **PR 16** — Real Cardano anchor metadata tx builder +
+  `tick` processor with exponential-backoff retries (capped at
+  5 attempts / 60 min). Auto-enqueue on `issue_credential_impl`.
+  Metadata label 1697 registered in `cardano::script_refs`.
+- **PR 17** — Two-node libp2p fixture lifted into
+  `tests/e2e_vc/common.rs` + all four VC gossip topics added to
+  `ALL_TOPICS` + 5-tier pinning eviction + per-tier byte accounting
+  in `quota_breakdown_impl` + migration 28 for
+  `credentials_pending_verification` + 13 new e2e test bodies.
+  E2E ignored count: **14 → 0**.
+- **PR 18** — Preprod anchor submission validated end-to-end
+  against a funded testnet wallet. Exposed and fixed a real bug
+  in `cardano::types::UTxO` deserialization: Blockfrost's live
+  API returns BOTH `tx_index` and `output_index` on each UTxO,
+  and `#[serde(alias)]` rejects with a duplicate-field error on
+  both-present. Replaced with a manual `Deserialize` via a
+  shadow struct (prefers `tx_index`, falls back to `output_index`).
+  Live tx: `0e5ee75…93dd9f25` on preprod, metadata under label
+  1697 confirmed via Blockfrost.
 
 ## [2026-03-25]
 
