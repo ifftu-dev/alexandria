@@ -103,6 +103,7 @@ async fn revoked_credential_is_rejected() {
         }),
         evidence_refs: vec![],
         expiration_date: None,
+        supersedes: None,
     };
     let vc =
         issue_credential_impl(db.conn(), &issuer_key, &issuer_did, &req, TEST_NOW).expect("issue");

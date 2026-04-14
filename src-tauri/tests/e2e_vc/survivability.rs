@@ -36,6 +36,7 @@ fn issue_one(db: &app_lib::db::Database, skill: &str) -> (app_lib::crypto::did::
         }),
         evidence_refs: vec![],
         expiration_date: None,
+        supersedes: None,
     };
     let vc = issue_credential_impl(db.conn(), &issuer_key, &issuer, &req, TEST_NOW).expect("issue");
     (issuer, vc.id)

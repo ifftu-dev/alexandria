@@ -111,6 +111,11 @@ pub struct Proof {
 }
 
 /// Output of the verification algorithm (§13.1).
+///
+/// `suspended` and `superseded` were added in the §11.3/§11.4
+/// follow-up. `#[serde(default)]` is set so older persisted results
+/// (e.g. ones hydrated from an earlier schema or an older peer's
+/// gossip) round-trip without a migration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VerificationResult {
     pub credential_id: String,
@@ -120,6 +125,14 @@ pub struct VerificationResult {
     pub expired: bool,
     pub subject_bound: bool,
     pub integrity_anchored: bool,
+    /// True if the credential is currently within an active
+    /// suspension window (§11.3).
+    #[serde(default)]
+    pub suspended: bool,
+    /// True if any newer credential claims to supersede this one
+    /// via `supersedes` (§11.4).
+    #[serde(default)]
+    pub superseded: bool,
     pub verification_time: String,
     pub acceptance_decision: AcceptanceDecision,
 }
@@ -137,6 +150,18 @@ pub struct VerificationPolicy {
     pub reject_expired: bool,
     pub require_integrity_anchor: bool,
     pub allowed_types: Vec<CredentialType>,
+    /// §11.3 says suspended credentials MUST be excluded from
+    /// positive active computations. Default true.
+    #[serde(default = "default_true")]
+    pub reject_suspended: bool,
+    /// §11.4 says superseded credentials SHOULD NOT be treated as
+    /// the current active state. Default true.
+    #[serde(default = "default_true")]
+    pub reject_superseded: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Default for VerificationPolicy {
@@ -152,6 +177,8 @@ impl Default for VerificationPolicy {
                 CredentialType::DerivedCredential,
                 CredentialType::SelfAssertion,
             ],
+            reject_suspended: true,
+            reject_superseded: true,
         }
     }
 }
