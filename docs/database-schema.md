@@ -19,11 +19,12 @@
 
 ## Design Principles
 
-- **Deterministic IDs**: `hex(blake2b_256(parts.join("|")))` instead of server-generated UUIDs. This makes IDs reproducible across nodes.
-- **Singleton identity**: `local_identity` has `CHECK (id = 1)` — exactly one row (the node owner). No multi-user tables.
-- **No server tables**: No `refresh_tokens`, `oauth_accounts`, or session management. Authentication is vault-based.
-- **Content external**: Course HTML and profile documents live in iroh blobs, referenced by BLAKE3 hash. The database stores metadata only.
-- **Timestamps as TEXT**: ISO 8601 strings (`datetime('now')`) for SQLite compatibility and human readability.
+- **Deterministic IDs**: Most application entities use `hex(blake2b_256(parts.join("|")))` instead of server-generated UUIDs.
+- **Singleton identity**: `local_identity` is a one-row table with `CHECK (id = 1)`.
+- **No server tables**: No hosted auth/session model exists; the app is vault-based and local-first.
+- **External content**: Course content, published profiles, evidence bundles, and other large artifacts live in iroh/IPFS-addressed blobs. SQLite stores metadata, references, and caches.
+- **Text timestamps**: Time values are stored as ISO-8601-ish `TEXT` for portability and easy inspection.
+- **Canonical source**: The exact DDL, defaults, `CHECK` constraints, indexes, and migration bodies live in `src-tauri/src/db/schema.rs`.
 
 ---
 
@@ -32,379 +33,188 @@
 | Version | Name | Description |
 |---------|------|-------------|
 | 1 | `initial_schema` | Core tables: identity, taxonomy, courses, learning, evidence, integrity, P2P, governance |
-| 2 | `profile_hash` | Add `profile_cid` column to `local_identity` |
-| 3 | `content_mappings` | Bidirectional CID↔BLAKE3 mapping table for iroh/IPFS bridge |
-| 4 | `assessment_columns` | Add `source_type`, `max_score`, `difficulty`, `trust_factor` to `skill_assessments` |
-| 5 | `governance_members` | DAO committee membership table |
-| 6 | `reputation_engine` | Evidence-based reputation tables (evidence, impact deltas) |
-| 7 | `governance_elections` | Elections, nominees, election votes |
+| 2 | `profile_hash` | Add `profile_hash` to `local_identity` |
+| 3 | `content_mappings` | Bidirectional CID↔BLAKE3 mapping for the iroh/IPFS bridge |
+| 4 | `assessment_columns` | Add `weight` and `source_element_id` to `skill_assessments` |
+| 5 | `governance_members` | DAO committee membership |
+| 6 | `reputation_engine` | Reputation evidence and impact-delta tables |
+| 7 | `governance_elections` | Elections, nominees, proposal voting, election voting |
 | 8 | `reputation_snapshots` | On-chain reputation snapshot records |
-| 9 | `taxonomy_ratification` | `ratified_by` and `ratified_at` columns on `taxonomy_versions` |
-| 10 | `cross_device_sync` | Devices, sync state, sync queue tables |
-| 11 | `evidence_challenges` | Stake-based evidence challenges and votes |
+| 9 | `taxonomy_ratification` | Add `ratified_by` and `ratified_at` to `taxonomy_versions` |
+| 10 | `cross_device_sync` | Devices, sync state, sync queue, local device metadata |
+| 11 | `evidence_challenges` | Challenge and challenge-vote tables |
 | 12 | `multi_party_attestation` | Attestation requirements and attestation records |
-| 13 | `visual_assets` | Add `author_name`, `thumbnail_svg` to courses; `icon_emoji` to DAOs and subject_fields |
-| 14 | `inline_content` | Add `content_inline` column to `course_elements` for inline HTML storage |
-| 15 | `tutoring_sessions` | Live tutoring tables: sessions, peers, chat messages |
-| 16 | `classrooms` | Classroom tables: classrooms, members, join requests, channels, messages, calls |
-| 17 | `storage_settings` | App settings key-value store with storage quota default |
-| 18 | `onchain_governance_queue` | Persistent queue for async Plutus governance transactions |
-| 19 | `classroom_encryption` | Classroom group encryption keys for E2E encrypted messages |
-| 20 | `tutorials_and_video_chapters` | Standalone video tutorials (kind='tutorial') + per-chapter video metadata |
-| 21 | `opinions` | Field Commentary opinions, pending verification queue, DAO-signed withdrawals |
-| 22 | `vc_key_registry` | Historical (DID, key_id, valid window) entries — VC §5.3 historical key resolution |
-| 23 | `vc_credentials_and_status_lists` | Verifiable credentials canonical store + RevocationList2020-style status list bitmaps |
-| 24 | `vc_credential_anchors` | Cardano integrity-anchor queue for credential hashes (§12.3) |
-| 25 | `vc_pinboard_observations` | Local + remote PinBoard pinning commitments (§12 + §20.4) |
-| 26 | `vc_presentations_seen` | (audience, nonce) replay-protection log for selective-disclosure presentations (§18) |
-| 27 | `vc_derived_skill_states` | Cached per-(subject, skill, version) aggregation outputs (§14, §16) |
-| 28 | `vc_credentials_pending_verification` | Inbound credentials awaiting issuer-DID resolution before promotion to `credentials` |
-| 29 | `vc_credential_suspension` | Adds `suspended`, `suspended_at`, `suspended_until`, `suspension_reason` columns to `credentials` (§11.3) |
-| 30 | `vc_credential_allowlist` | Per-credential subject-controlled allowlist for pull-based fetch over `/alexandria/vc-fetch/1.0` |
+| 13 | `visual_assets` | Add display/image fields such as `author_name`, `thumbnail_svg`, and `icon_emoji` |
+| 14 | `inline_content` | Add `content_inline` to `course_elements` |
+| 15 | `tutoring_sessions` | Live tutoring session metadata |
+| 16 | `classrooms` | Classrooms, members, join requests, channels, messages, calls |
+| 17 | `storage_settings` | Persistent app settings (`app_settings`) |
+| 18 | `onchain_governance_queue` | Async governance submission queue |
+| 19 | `classroom_encryption` | Classroom group keys plus X25519 key material |
+| 20 | `tutorials_and_video_chapters` | Course/tutorial discriminator and per-video chapter markers |
+| 21 | `opinions` | Field Commentary opinions, pending verification, DAO withdrawals |
+| 22 | `vc_key_registry` | Historical DID key registry for VC verification |
+| 23 | `vc_credentials_and_status_lists` | Canonical VC store and status-list bitmaps |
+| 24 | `vc_credential_anchors` | Cardano integrity-anchor queue for credential hashes |
+| 25 | `vc_pinboard_observations` | PinBoard commitment observations |
+| 26 | `vc_presentations_seen` | Replay-protection log for selective-disclosure presentations |
+| 27 | `vc_derived_skill_states` | Cached aggregation outputs |
+| 28 | `vc_credentials_pending_verification` | Queue for inbound credentials awaiting issuer DID resolution |
+| 29 | `vc_credential_suspension` | Add credential suspension metadata and supersession index |
+| 30 | `vc_credential_allowlist` | Subject-controlled allowlist for `/alexandria/vc-fetch/1.0` |
 
 ---
 
 ## Tables by Domain
 
-### Identity (1 table)
+This section is a domain summary, not a copy of the full DDL. For exact
+columns and indexes, use `src-tauri/src/db/schema.rs`.
 
-**`local_identity`** — The node owner's wallet and profile (singleton).
+### Identity
 
-| Column | Type | Notes |
-|--------|------|-------|
-| `id` | INTEGER PK | `CHECK (id = 1)` — singleton |
-| `stake_address` | TEXT NOT NULL UNIQUE | Cardano stake address (bech32) |
-| `payment_address` | TEXT NOT NULL | Cardano payment address (bech32) |
-| `display_name` | TEXT | |
-| `bio` | TEXT | |
-| `avatar_cid` | TEXT | iroh BLAKE3 hash |
-| `profile_hash` | TEXT | Signed profile document BLAKE3 hash |
-| `mnemonic_enc` | BLOB | Encrypted mnemonic (Stronghold fallback) |
-| `created_at` | TEXT | |
-| `updated_at` | TEXT | |
+- **`local_identity`** — Singleton node-owner row. Stores wallet/profile
+  metadata such as `stake_address`, `payment_address`, `display_name`,
+  `bio`, `avatar_cid`, `profile_hash`, encrypted mnemonic fallback,
+  device metadata, and X25519 public key material.
 
 ### Taxonomy (6 tables)
 
-**`subject_fields`** — Top-level knowledge domains (e.g., Computer Science, Mathematics).
+- **`subject_fields`** — Top-level domains, including optional `icon_emoji`.
+- **`subjects`** — Child subjects linked to a `subject_field_id`.
+- **`skills`** — Skill records tied to a subject and Bloom level.
+- **`skill_prerequisites`** — Directed prerequisite edges.
+- **`skill_relations`** — Non-prerequisite skill relationships.
+- **`taxonomy_versions`** — Signed taxonomy version history with `cid`,
+  `previous_cid`, `ratified_by`, `ratified_at`, `signature`, and `applied_at`.
 
-**`subjects`** — Subdivisions of subject fields (e.g., Algorithms, Data Structures).
-- FK: `subject_field_id` → `subject_fields(id)`
+### Courses and Learning (9 tables)
 
-**`skills`** — Individual competencies at specific Bloom's levels.
-- FK: `subject_id` → `subjects(id)`
-- Columns: `name`, `description`, `bloom_level`
+- **`courses`** — Course/tutorial metadata. Important fields include
+  `title`, `description`, `author_address`, `author_name`, `content_cid`,
+  `thumbnail_cid`, `thumbnail_svg`, `tags`, `skill_ids`, `kind`,
+  `version`, `status`, `published_at`, and `on_chain_tx`.
+- **`course_chapters`** — Ordered chapter rows per course.
+- **`course_elements`** — Element rows with `title`, `element_type`,
+  `content_cid`, optional `content_inline`, `position`, and `duration_seconds`.
+- **`element_skill_tags`** — Element-to-skill mapping with `weight`.
+- **`video_chapters`** — Timestamp markers for video elements.
+- **`enrollments`** — Enrollment rows with `course_id`, `enrolled_at`,
+  `completed_at`, `status`, and `updated_at`.
+- **`element_progress`** — Per-element progress with `status`, `score`,
+  `time_spent`, `completed_at`, and `updated_at`.
+- **`course_notes`** — Notes scoped to an enrollment/chapter/element,
+  with `content_cid`, `preview_text`, and `video_timestamp_seconds`.
+- **`catalog`** — Network-discovered course metadata mirroring the
+  publishable subset of `courses`.
 
-**`skill_prerequisites`** — Directed prerequisite edges in the skill DAG.
-- Composite PK: `(skill_id, prerequisite_id)`
-- FKs: both → `skills(id)`
+### Evidence and Reputation (8 tables)
 
-**`skill_relations`** — Non-prerequisite relationships between skills (e.g., "related to", "builds on").
-- FKs: `skill_id`, `related_skill_id` → `skills(id)`
-- Column: `relation_type`
-
-**`taxonomy_versions`** — Version history for taxonomy updates.
-- Columns: `version`, `cid`, `previous_cid`, `ratified_by`, `ratified_at`, `changes_json`
-
-### Courses (4 tables)
-
-**`courses`** — Course metadata.
-- Columns: `id`, `title`, `description`, `author_address`, `author_name`, `content_cid`, `thumbnail_cid`, `thumbnail_svg`, `status`, `version`, `tags_json`, `skill_ids_json`
-- `author_name`, `thumbnail_svg` (migration 13): Display name cache and inline SVG thumbnail
-
-**`course_chapters`** — Ordered chapters within a course.
-- FK: `course_id` → `courses(id)` CASCADE
-- Columns: `title`, `description`, `position`
-
-**`course_elements`** — Content elements within chapters.
-- FK: `chapter_id` → `course_chapters(id)` CASCADE
-- Columns: `title`, `element_type` (text/video/quiz/essay/pdf), `content_ref`, `content_inline`, `position`, `duration_minutes`, `points`
-- `content_inline` (migration 14): Optional inline HTML content stored directly in the DB, avoiding iroh lookup for small elements
-
-**`element_skill_tags`** — Maps elements to skills they assess.
-- FKs: `element_id` → `course_elements(id)` CASCADE, `skill_id` → `skills(id)`
-- Column: `bloom_level`
-
-### Learning (3 tables)
-
-**`enrollments`** — Course enrollments.
-- FKs: `course_id` → `courses(id)`, learner identified by `learner_address`
-- Columns: `status` (enrolled/active/completed/dropped), `progress`
-
-**`element_progress`** — Per-element completion tracking.
-- FKs: `enrollment_id` → `enrollments(id)` CASCADE, `element_id` → `course_elements(id)`
-- Columns: `status`, `score`, `attempts`, `time_spent_seconds`
-
-**`course_notes`** — User notes on course elements.
-- FKs: `course_id` → `courses(id)`, `element_id` → `course_elements(id)`
-- Columns: `content`, `learner_address`
-
-### Evidence (4 tables)
-
-**`skill_assessments`** — Assessment metadata (auto-created from evidence if missing).
-- Columns: `id`, `skill_id`, `course_id`, `source_type`, `max_score`, `difficulty`, `trust_factor`
-
-**`evidence_records`** — Raw evidence of skill demonstration.
-- Columns: `id`, `skill_assessment_id`, `skill_id`, `proficiency_level`, `score`, `difficulty`, `trust_factor`, `course_id`, `instructor_address`, `integrity_session_id`, `integrity_score`, `cid`, `signature`, `created_at`
-- FKs: `skill_assessment_id` → `skill_assessments(id)`, `skill_id` → `skills(id)`, `course_id` → `courses(id)`
-
-**`skill_proofs`** — Aggregated proofs (confidence scores per skill per level).
-- Columns: `learner_address`, `skill_id`, `proficiency_level`, `confidence`, `evidence_count`, `verified`
-
-**`skill_proof_evidence`** — Links proofs to their contributing evidence.
-- FKs: → `skill_proofs(id)`, → `evidence_records(id)`
-
-### Reputation (4 tables)
-
-**`reputation_assertions`** — Scoped reputation statements.
-- Columns: `subject_address`, `role`, `subject_id`, `skill_id`, `proficiency_level`, `confidence`, `evidence_count`
-
-**`reputation_evidence`** — Evidence contributing to reputation assertions.
-- FK: `assertion_id` → `reputation_assertions(id)` CASCADE
-
-**`reputation_impact_deltas`** — Instructor impact from individual evidence.
-- FK: `evidence_id` → `evidence_records(id)` CASCADE
-
-**`reputation_snapshots`** — On-chain reputation anchoring records.
-- Columns: `assertion_id`, `tx_hash`, `policy_id`, `asset_name`, `datum_cbor`
+- **`skill_assessments`** — Assessment metadata. Current columns include
+  `assessment_type`, `proficiency_level`, `difficulty`, `trust_factor`,
+  plus `weight` and `source_element_id`.
+- **`evidence_records`** — Raw skill evidence with score, difficulty,
+  trust factor, course/instructor linkage, integrity linkage, content CID,
+  signature, and timestamp.
+- **`skill_proofs`** — Aggregated skill outputs keyed by learner/skill/level,
+  with `confidence`, `evidence_count`, proof CID, and optional NFT fields.
+- **`skill_proof_evidence`** — Join table from proofs to supporting evidence.
+- **`reputation_assertions`** — Reputation rows keyed by actor/role/skill/window,
+  with distribution metrics such as `median_impact`, `impact_p25`,
+  `impact_p75`, `learner_count`, and `impact_variance`.
+- **`reputation_evidence`** — Join table linking assertions to proofs.
+- **`reputation_impact_deltas`** — Per-learner impact deltas used to
+  compute the distribution metrics.
+- **`reputation_snapshots`** — Snapshot/anchoring records for reputation assertions.
 
 ### Integrity (2 tables)
 
-**`integrity_sessions`** — Sentinel anti-cheat sessions.
-- Columns: `session_id`, `learner_address`, `assessment_id`, `rule_score`, `ai_score`, `final_score`, `flagged`
+- **`integrity_sessions`** — Sentinel sessions tied to an `enrollment_id`,
+  with `status`, `integrity_score`, `started_at`, and `ended_at`.
+- **`integrity_snapshots`** — Snapshot rows keyed by `session_id`, with
+  per-signal scores (`typing_score`, `mouse_score`, `human_score`,
+  `tab_score`, `paste_score`, `devtools_score`, `camera_score`),
+  `composite_score`, and `captured_at`.
 
-**`integrity_snapshots`** — Behavioral signal snapshots within sessions.
-- FK: `session_id` → `integrity_sessions(session_id)` CASCADE
-- Columns: `signal_type`, `signal_value`, `timestamp`
+### P2P, Content, and Sync Support (7 tables)
 
-### P2P & Discovery (4 tables)
+- **`peers`** — Known libp2p peers with `addresses`, `roles`, and local `reputation`.
+- **`pins`** — Local iroh pin state, including `size_bytes`,
+  `last_accessed`, `auto_unpin`, and `pinned_at`.
+- **`sync_log`** — Broadcast/receive audit trail for gossip-synced entities.
+- **`content_mappings`** — IPFS CID ↔ iroh BLAKE3 bridge table.
+- **`devices`** — Known devices for cross-device sync (`id`, `device_name`,
+  `platform`, `peer_id`, `is_local`, timestamps).
+- **`sync_state`** — Per-device per-table watermarks plus `row_count`.
+- **`sync_queue`** — Outbound row-change queue with `row_data`,
+  `updated_at`, `queued_at`, and `delivered_to`.
 
-**`peers`** — Known P2P peers.
-- Columns: `peer_id`, `stake_address`, `addresses_json`, `last_seen`, `reputation_score`
+### Governance (7 tables + 1 queue)
 
-**`pins`** — Pinned content (kept in local iroh store).
-- Columns: `cid`, `pin_type`, `related_id`
+- **`governance_daos`** — DAO metadata scoped by `scope_type` and `scope_id`.
+- **`governance_proposals`** — Proposal lifecycle rows with category,
+  vote tallies, and optional `on_chain_tx`.
+- **`governance_dao_members`** — DAO committee membership.
+- **`governance_elections`** — Election cycles keyed by `phase`,
+  proficiency gates, timing windows, and `on_chain_tx`.
+- **`governance_election_nominees`** — Election nominees and results.
+- **`governance_election_votes`** — Individual election votes.
+- **`governance_proposal_votes`** — Individual proposal votes.
+- **`onchain_governance_queue`** — Persistent queue for async governance
+  submissions, with `attempts`, `last_error`, and status transitions.
 
-**`sync_log`** — Record of P2P sync events.
-- Columns: `entity_type`, `entity_id`, `direction` (sent/received), `peer_id`
+### Challenges, Attestations, and Opinions (7 tables)
 
-**`catalog`** — Discovered courses from the P2P network.
-- Columns: mirrors `courses` schema + `author_address`, `version`, `published_at`
+- **`evidence_challenges`** — Stake-based challenges against evidence.
+- **`challenge_votes`** — Votes on those challenges.
+- **`attestation_requirements`** — Minimum attestor counts, required roles,
+  and optional DAO scoping.
+- **`evidence_attestations`** — Individual attestation records.
+- **`opinions`** — Field Commentary video takes scoped to a `subject_field_id`,
+  with staked `credential_proof_ids`, signature, publication timestamps,
+  and withdrawal state.
+- **`opinions_pending_verification`** — Queue for opinions whose referenced
+  proofs have not synced locally yet.
+- **`opinion_withdrawals`** — DAO-signed withdrawal records.
 
-### Governance (7 tables)
+### Tutoring, Classrooms, and Settings (9 tables)
 
-**`governance_daos`** — DAOs (one per subject field or subject).
-- Columns: `id`, `name`, `description`, `dao_type`, `related_id`, `status`
+- **`tutoring_sessions`** — Live tutoring session metadata:
+  `title`, `ticket`, `status`, `created_at`, `ended_at`.
+- **`classrooms`** — Group-space metadata with `owner_address`,
+  `invite_code`, and `status`.
+- **`classroom_members`** — Membership rows; migration 19 adds
+  `x25519_public_key`.
+- **`classroom_join_requests`** — Join request queue with review state.
+- **`classroom_channels`** — Text/announcement channels per classroom.
+- **`classroom_messages`** — Persisted messages with edit/delete flags.
+- **`classroom_calls`** — Live classroom A/V calls backed by iroh-live tickets.
+- **`classroom_group_keys`** — Encrypted per-classroom group keys for E2E messaging.
+- **`app_settings`** — Backend settings KV store, seeded with
+  `storage_quota_bytes = '0'`.
 
-**`governance_proposals`** — Proposals within DAOs.
-- FK: `dao_id` → `governance_daos(id)` CASCADE
-- Columns: `title`, `description`, `category`, `status`, `proposer`, `votes_for`, `votes_against`, `on_chain_tx`
+### Verifiable Credentials Layer
 
-**`governance_dao_members`** — Committee membership.
-- FK: `dao_id` → `governance_daos(id)` CASCADE
-- Columns: `stake_address`, `role` (chair/committee/member), `joined_at`
+These tables back the VC-first protocol described in
+`docs/protocol-specification.md`.
 
-**`governance_elections`** — Election cycles.
-- FK: `dao_id` → `governance_daos(id)` CASCADE
-- Columns: `status` (nomination/voting/finalized/cancelled), `nomination_start`, `voting_start`, `voting_end`
-
-**`governance_election_nominees`** — Candidates in elections.
-- FK: `election_id` → `governance_elections(id)` CASCADE
-
-**`governance_election_votes`** — Votes in elections.
-- FK: `election_id` → `governance_elections(id)` CASCADE
-
-**`governance_proposal_votes`** — Votes on proposals.
-- FK: `proposal_id` → `governance_proposals(id)` CASCADE
-
-### Content Mapping (1 table)
-
-**`content_mappings`** — Bidirectional CID↔BLAKE3 hash mapping for iroh/IPFS bridge.
-- Columns: `cid`, `blake3_hash`, UNIQUE on both
-
-### Cross-Device Sync (3 tables)
-
-**`devices`** — Registered devices for cross-device sync.
-- Columns: `device_id`, `device_name`, `platform`, `last_sync`
-
-**`sync_state`** — Per-device, per-table sync watermarks.
-- Columns: `device_id`, `table_name`, `last_synced_at`
-
-**`sync_queue`** — Outbound changes pending delivery to other devices.
-- Columns: `table_name`, `row_id`, `operation`, `row_data`, `updated_at`
-
-### Challenges (2 tables)
-
-**`evidence_challenges`** — Stake-based evidence challenges.
-- FK: `evidence_id` → `evidence_records(id)`
-- Columns: `challenger_address`, `reason`, `stake_amount` (lovelace), `status` (open/upheld/rejected), `votes_for`, `votes_against`
-
-**`challenge_votes`** — Votes on evidence challenges.
-- FK: `challenge_id` → `evidence_challenges(id)` CASCADE
-- Columns: `voter_address`, `vote` (uphold/reject), `weight`
-
-### Attestation (2 tables)
-
-**`attestation_requirements`** — Multi-party attestation requirements for assessments.
-- Columns: `assessment_id`, `min_attestors`, `required_roles_json`, `dao_id`
-
-**`evidence_attestations`** — Individual attestation records.
-- FK: `evidence_id` → `evidence_records(id)`
-- Columns: `attestor_address`, `attestor_role`, `status` (pending/approved/rejected), `notes`
-
-### Tutoring (1 table)
-
-**`tutoring_sessions`** — Live tutoring session metadata.
-- Columns: `id` (UUID), `title`, `topic`, `host_address`, `status` (active/ended/cancelled), `started_at`, `ended_at`
-
-### Classrooms (7 tables)
-
-**`classrooms`** — Classroom/cohort metadata.
-- Columns: `id` (blake2b-based), `name`, `description`, `icon_emoji`, `owner_address`, `invite_code` (8-char unique), `status` (active/archived), `created_at`, `updated_at`
-
-**`classroom_members`** — Classroom membership.
-- PK: `(classroom_id, stake_address)`
-- FK: `classroom_id` → `classrooms(id)` CASCADE
-- Columns: `role` (owner/moderator/member), `display_name`, `joined_at`
-
-**`classroom_join_requests`** — Pending join requests.
-- FK: `classroom_id` → `classrooms(id)` CASCADE
-- Columns: `stake_address`, `display_name`, `message`, `status` (pending/approved/denied), `reviewed_by`, `requested_at`, `reviewed_at`
-- Unique: `(classroom_id, stake_address)` WHERE `status = 'pending'`
-
-**`classroom_channels`** — Text/announcement channels within classrooms.
-- FK: `classroom_id` → `classrooms(id)` CASCADE
-- Columns: `name`, `description`, `channel_type` (text/announcement), `position`
-- Unique: `(classroom_id, name)`
-
-**`classroom_messages`** — Messages within channels.
-- FK: `channel_id` → `classroom_channels(id)` CASCADE
-- Columns: `classroom_id`, `sender_address`, `sender_name`, `content`, `deleted` (flag), `edited_at`, `sent_at`, `received_at`
-
-**`classroom_calls`** — Voice/video calls in classrooms (iroh-live integration).
-- FK: `classroom_id` → `classrooms(id)` CASCADE, `channel_id` → `classroom_channels(id)`
-- Columns: `title`, `ticket` (iroh-live), `started_by`, `status` (active/ended), `started_at`, `ended_at`
-
-**`classroom_group_keys`** — Group encryption keys for E2E encrypted classroom messages.
-- PK: `classroom_id`
-- Columns: `group_key_enc` (BLOB), `key_version`, `updated_at`
-
-### On-Chain Queue (1 table)
-
-**`onchain_governance_queue`** — Persistent queue for async Plutus governance transactions.
-- Columns: `id`, `action_type`, `payload_json`, `target_table`, `target_id`, `status` (pending/submitted/confirmed/failed), `tx_hash`, `error`, `retries`, `created_at`, `updated_at`
-- Index: `status`
-
-### Settings (1 table)
-
-**`app_settings`** — Key-value store for persistent backend settings.
-- PK: `key` (TEXT)
-- Columns: `value`, `updated_at`
-- Seeded with `storage_quota_bytes = '0'` (unlimited)
-
-### Verifiable Credentials (9 tables — VC-first migration, PRs 3–19)
-
-The credentialing model implemented from `docs/protocol-specification.md`
-v1. Issuance + verification + aggregation are local-first; gossip
-handlers reflect remote DID docs / status lists / PinBoard commitments
-into the same tables so verifiers can operate purely against local
-state. See `docs/protocol-specification.md` for the normative schema.
-
-**`key_registry`** — Historical (DID, key_id) public-key bindings
-with validity windows. Backfilled with `valid_from = '1970-01-01...Z'`
-on first rotation so credentials signed before the registry existed
-still resolve at any verification time ≤ rotation. PR 3.
-- Composite PK: `(did, key_id)`
-- Columns: `public_key_hex`, `valid_from`, `valid_until`, `rotated_by`
-- Indexes: `(did, valid_from)`, partial on `did WHERE valid_until IS NULL`
-
-**`credentials`** — Canonical signed VC store. `signed_vc_json` is the
-W3C-style envelope; `integrity_hash = blake3(JCS bytes)` feeds the
-Cardano anchor queue. `revoked` is cached from the status list for
-fast reads on the verify hot path. PR 5; suspension columns added in
-PR 19b.
-- PK: `id` (urn:uuid:…)
-- Columns: `issuer_did`, `subject_did`, `credential_type`, `claim_kind`,
-  `skill_id` (NULL for non-skill claims), `issuance_date`,
-  `expiration_date`, `signed_vc_json`, `integrity_hash`,
-  `status_list_id`, `status_list_index`, `revoked`, `revoked_at`,
-  `revocation_reason`, `supersedes`, `received_at`,
-  `suspended` (BOOLEAN, default 0), `suspended_at`,
-  `suspended_until` (NULL for indefinite), `suspension_reason`
-- Indexes: subject_did, issuer_did, partial on skill_id, partial on
-  (status_list_id, status_list_index)
-- Suspension semantics (§11.3): `suspended = 1` blocks the credential
-  from verification; `reinstate_credential` clears the four
-  `suspended_*` columns and re-enables verification. Distinct from
-  `revoked`, which is permanent.
-
-**`credential_status_lists`** — RevocationList2020-style bitmap per
-issuer. `bits` is a raw BLOB so the list can be re-broadcast verbatim
-and verified independently. Versioned to prevent rollback (§11.2). PR 5.
-- PK: `list_id` (urn:alexandria:status-list:…)
-- Columns: `issuer_did`, `version`, `status_purpose`, `bits` (BLOB),
-  `bit_length`, `signature` (NULL for local-issuer rows), `updated_at`
-- Index: issuer_did
-
-**`credential_anchors`** — Cardano integrity-anchor queue (§12.3).
-Idle-node contract: rows stay pending without `BLOCKFROST_PROJECT_ID`.
-PR 8.
-- PK: `credential_id` → FK `credentials(id)`
-- Columns: `anchor_tx_hash`, `anchor_status` (pending|submitted|
-  confirmed|failed), `attempts`, `last_error`, `next_attempt_at`,
-  `enqueued_at`, `confirmed_at`
-- Index: (anchor_status, next_attempt_at)
-
-**`pinboard_observations`** — Local declarations + remote observations
-of per-subject pinning commitments (§12 + §20.4). The 5-tier
-eviction logic reads this to identify content that must survive
-storage pressure. PR 10.
-- PK: `id` (urn:uuid:…)
-- Columns: `pinner_did`, `subject_did`, `scope` (JSON array),
-  `commitment_since`, `revoked_at`, `signature`, `public_key`,
-  `received_at`
-- Indexes: subject_did, pinner_did, partial on `subject_did WHERE
-  revoked_at IS NULL`
-
-**`presentations_seen`** — Per-verifier (audience, nonce) replay
-protection log for selective-disclosure presentations (§18 + §23.3).
-Local-only — replay protection is per-verifier, not network-wide.
-PR 11.
-- Composite PK: `(audience, nonce)`
-- Columns: `seen_at`
-- Index: audience
-
-**`derived_skill_states`** — Cached per-(subject, skill, version)
-aggregation output. `recompute_all` IPC repopulates this from
-`credentials`; `get_derived_skill_state` reads from cache then
-computes-and-caches on miss. PR 13.
-- Composite PK: `(subject_did, skill_id, calculation_version)`
-- Hoisted columns: `raw_score`, `confidence`, `trust_score`, `level`,
-  `evidence_mass`, `unique_issuer_clusters`, `active_evidence_count`
-- Full payload: `state_json` (the explainable §16 output)
-- Indexes: subject_did, skill_id
-
-**`credentials_pending_verification`** — Inbound credentials whose
-issuer DID isn't yet resolvable (DID doc not seen, or key not in
-`key_registry` at the relevant epoch). The verifier promotes a row
-into `credentials` once verification succeeds, or drops it if the
-DID never resolves within a TTL. PR 19b.
-- PK: `id` (urn:uuid:… — same as the eventual `credentials.id`)
-- Columns: `issuer_did`, `subject_did`, `signed_vc_json`,
-  `integrity_hash`, `received_at`, `last_attempt_at`, `attempts`,
-  `last_error`
-- Index: (issuer_did, last_attempt_at)
-
-**`credential_allowlist`** — Per-credential subject-controlled
-allowlist for the pull-based fetch protocol on
-`/alexandria/vc-fetch/1.0`. The literal string `'public'` in
-`requestor_did` makes the credential world-fetchable. Local-only
-(not synchronised across the network). PR 19c.
-- Composite PK: `(credential_id, requestor_did)`
-- FK: `credential_id` → `credentials(id)`
-- Columns: `created_at`
-- Index: credential_id
-
----
+- **`key_registry`** — Historical `(did, key_id)` public-key bindings with
+  validity windows.
+- **`credentials`** — Canonical signed VC store, with searchable mirrors
+  for issuer/subject/type/skill plus revocation, suspension, and
+  supersession state.
+- **`credential_status_lists`** — Versioned RevocationList2020-style status bitmaps.
+- **`credential_anchors`** — Per-credential integrity-anchor queue.
+- **`pinboard_observations`** — Local and remote PinBoard commitments.
+- **`presentations_seen`** — `(audience, nonce)` replay-protection log.
+- **`derived_skill_states`** — Materialized aggregation cache for
+  recruiter/consumer queries.
+- **`credentials_pending_verification`** — Queue for VCs that arrive
+  before the issuer DID document.
+- **`credential_allowlist`** — Per-credential fetch policy for
+  `/alexandria/vc-fetch/1.0`.
+- **Migration 29 additions on `credentials`** — `suspended`,
+  `suspended_at`, `suspended_until`, `suspended_reason`, plus an index
+  on `supersedes`.
 
 ## Entity Relationship Summary
 
@@ -418,8 +228,10 @@ erDiagram
     courses ||--o{ course_chapters : contains
     course_chapters ||--o{ course_elements : contains
     course_elements ||--o{ element_skill_tags : tagged
+    course_elements ||--o{ video_chapters : chapters
     skills ||--o{ element_skill_tags : tagged
 
+    courses ||--o{ enrollments : has
     enrollments ||--o{ element_progress : tracks
     enrollments ||--o{ course_notes : has
 
@@ -427,13 +239,14 @@ erDiagram
     skill_assessments ||--o{ attestation_requirements : requires
     evidence_records ||--o{ skill_proof_evidence : supports
     skill_proofs ||--o{ skill_proof_evidence : aggregates
-    evidence_records ||--o{ reputation_impact_deltas : impacts
+    reputation_assertions ||--o{ reputation_evidence : backed
+    reputation_assertions ||--o{ reputation_impact_deltas : computes
+    reputation_assertions ||--o{ reputation_snapshots : anchors
     evidence_records ||--o{ evidence_challenges : challenged
     evidence_challenges ||--o{ challenge_votes : votes
     evidence_records ||--o{ evidence_attestations : attested
 
-    reputation_assertions ||--o{ reputation_evidence : backed
-    reputation_assertions ||--o{ reputation_snapshots : anchored
+    integrity_sessions ||--o{ integrity_snapshots : snapshots
 
     governance_daos ||--o{ governance_proposals : has
     governance_daos ||--o{ governance_dao_members : members
@@ -449,8 +262,8 @@ erDiagram
     classroom_channels ||--o{ classroom_messages : messages
     classrooms ||--o| classroom_group_keys : encryption
 
-    integrity_sessions ||--o{ integrity_snapshots : snapshots
-
     devices ||--o{ sync_state : tracks
-    devices ||--o{ sync_queue : queues
+
+    credentials ||--o| credential_anchors : anchors
+    credentials ||--o{ credential_allowlist : grants
 ```

@@ -70,16 +70,17 @@ Taxonomy updates are committee-gated via the governance system and propagated ov
 
 ## 5. Content and Assessment Tagging
 
-Course elements (`course_elements`) are tagged with skills via `element_skill_tags`, linking each content element to specific skills and Bloom's levels. This enables skill-specific progress tracking and evidence generation.
+Course elements (`course_elements`) are tagged with skills via `element_skill_tags`, linking each content element to specific skills with a per-tag `weight`. This enables skill-specific progress tracking and evidence generation.
 
 ---
 
 ## 6. Evidence Model
 
 `evidence_records` bind assessments to verifiable outcomes:
-- `learner_address`, `skill_id`, `assessment_id`
-- `score`, `proficiency_level`, `difficulty`, `trust_factor`
-- `instructor_address`, `course_id`
+- `skill_assessment_id`, `skill_id`, `proficiency_level`
+- `score`, `difficulty`, `trust_factor`
+- `course_id`, `instructor_address`, `integrity_session_id`, `integrity_score`
+- optional `cid` and `signature`
 
 Evidence is broadcast over the `/alexandria/evidence/1.0` GossipSub topic with Ed25519 signatures for authenticity.
 
@@ -90,11 +91,12 @@ IDs are deterministic: `hex(blake2b_256(parts.join("|")))`.
 ## 7. Skill Proofs (Credentials)
 
 `skill_proofs` aggregate evidence into learner-owned credentials:
-- Scoped to `(learner_address, skill_id, proficiency_level)`
+- Deterministic ID scoped to `(learner, skill_id, proficiency_level)`
 - Confidence score derived from weighted evidence aggregation (`evidence/aggregator.rs`)
-- Evidence linkage via `skill_proof_evidence` junction table
+- Evidence linkage via `skill_proof_evidence`
+- Optional `cid`, `nft_policy_id`, `nft_asset_name`, and `nft_tx_hash` columns for export/on-chain wrappers
 
-Proofs can be minted as NFTs on Cardano (Conway era) with CIP-25 metadata containing skill, proficiency level, confidence score, and evidence count. Independently verifiable on-chain.
+Proofs can be wrapped as native-script NFTs on Cardano (Conway era) with CIP-25 metadata containing skill, proficiency level, confidence score, and evidence count. More advanced soulbound/CIP-68-style paths exist in the codebase but are not fully deployed yet.
 
 ---
 
@@ -155,13 +157,15 @@ Reputation evaluates instructional, assessment, or authorship impact within a sp
 
 ```
 ReputationAssertion {
-  subject_address     -- The actor being evaluated
-  role                -- instructor / assessor / author
-  subject_id          -- Subject scope
-  skill_id            -- Skill scope
+  actor_address       -- The actor being evaluated
+  role                -- instructor / assessor / author / learner / mentor
+  skill_id            -- Skill scope (nullable for broad role assertions)
   proficiency_level   -- Level scope
-  confidence          -- Statistical confidence
+  score               -- Aggregated reputation score
   evidence_count      -- Supporting evidence count
+  median_impact       -- Distribution median
+  impact_p25/p75      -- Distribution bounds
+  learner_count       -- Sample count
 }
 ```
 
@@ -277,4 +281,3 @@ implementation-status preamble.
 The §26 worked example is reproduced end-to-end by the four
 assertions in `tests/e2e_vc/aggregation.rs`:
 `Q ≈ 0.846`, `C ≈ 0.514`, `L = 5`, `T = Q · C`.
-

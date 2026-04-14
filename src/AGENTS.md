@@ -1,6 +1,6 @@
 # alexandria/src/
 
-**Generated:** 2026-03-20
+**Generated:** 2026-04-15
 
 ## Standing Instructions
 
@@ -8,19 +8,19 @@
 
 ## Overview
 
-Vue 3 SPA frontend for the Tauri app. 13 composables, 10+ page directories, 965 TypeScript types.
+Vue 3 SPA frontend for the Tauri app. 14 composables, 30 route views, and a 1332-line `types/index.ts`.
 
 ## WHERE TO LOOK
 
 | Task | Location | Notes |
 |------|----------|-------|
-| State | `composables/` | 13 singleton refs (no Pinia/Vuex) |
+| State | `composables/` | 14 singleton refs (no Pinia/Vuex) |
 | UI design system | `components/ui/` | 12 components, barrel-exported |
-| Pages | `pages/` | Home, Onboarding, Unlock + 7 feature dirs |
+| Pages | `pages/` | 3 root pages + 9 feature dirs (`classrooms`, `courses`, `dashboard`, `governance`, `instructor`, `learn`, `opinions`, `skills`, `tutoring`) |
 | Types | `types/index.ts` | All TS interfaces (mirrors Rust domain) |
 | Styling | `assets/css/` | Tailwind v4 + CSS custom properties |
 | Routing | `router/` | Vue Router config |
-| ML/biometric | `utils/sentinel/` | Mouse/keystroke/face ML models |
+| ML/integrity | `utils/sentinel/` | Mouse/keystroke/face ML models for Sentinel |
 
 ## CONVENTIONS (TypeScript/Vue)
 
@@ -80,10 +80,10 @@ DataRow, EmptyState, StatusBadge
 
 | File | Lines | Role |
 |------|-------|------|
-| `composables/useSentinel.ts` | 903 | 165 functions — biometric auth ML |
-| `types/index.ts` | 965 | All TS domain interfaces |
+| `composables/useSentinel.ts` | 903 | Sentinel monitoring + on-device ML |
+| `types/index.ts` | 1332 | All TS domain interfaces |
 | `utils/sentinel/mouse-trajectory-cnn.ts` | 413 | 90 functions — gesture classifier |
 | `utils/sentinel/keystroke-autoencoder.ts` | 397 | 67 functions — keystroke ML |
 | `utils/sentinel/face-embedder.ts` | 380 | 66 functions — face embedding |
 | `pages/learn/Player.vue` | 1037 | Course player with video/quiz |
-| `pages/tutoring/Session.vue` | 1004 | Live tutoring UI |
+| `pages/tutoring/Session.vue` | 1137 | Live tutoring UI |

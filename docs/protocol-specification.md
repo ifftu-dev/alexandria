@@ -98,7 +98,7 @@ The architecture MUST satisfy:
 
 ### 2.4 IPC Boundary
 
-The frontend communicates with the Rust backend via 194 Tauri IPC commands registered in `tauri::generate_handler!`. Commands are split across 26 IPC modules (classroom, governance, taxonomy, tutoring, identity, credentials, sync, courses, attestation, challenge, opinions, integrity, content, pinning, storage, snapshot, reputation, enrollment, elements, chapters, catalog, p2p, evidence, aggregation, presentation, health, cardano), with `commands/` totalling 30 source files (excluding `mod.rs`; `tutoring_mobile.rs` / `tutoring_stubs.rs` are platform-conditional variants of `tutoring`, and `ratelimit.rs` is an internal helper).
+The frontend communicates with the Rust backend via 194 Tauri IPC commands registered in `tauri::generate_handler!`. Commands are split across 27 domain-facing IPC modules (classroom, governance, taxonomy, tutoring, identity, credentials, sync, courses, attestation, challenge, opinions, integrity, content, pinning, storage, snapshot, reputation, enrollment, elements, chapters, catalog, p2p, evidence, aggregation, presentation, health, cardano), with `commands/` containing 31 Rust source files total (`mod.rs`, `ratelimit.rs`, and the two tutoring platform variants included). Excluding `mod.rs`, the directory contains 30 source files.
 
 ---
 
@@ -184,13 +184,17 @@ A conforming ReputationAssertion MUST contain the following fields:
 
 ```
 ReputationAssertion {
-    subject_address: string       // The actor being evaluated (Cardano stake address)
-    role: instructor | assessor | author
-    subject_id: string            // Subject scope
-    skill_id: string              // Skill scope
-    proficiency_level: ProficiencyLevel
-    confidence: number            // Statistical confidence
+    actor_address: string         // The actor being evaluated (Cardano stake address)
+    role: instructor | assessor | author | learner | mentor
+    skill_id: string | null       // Skill scope (nullable for broad role assertions)
+    proficiency_level: ProficiencyLevel | null
+    score: number                 // Aggregated reputation score
     evidence_count: number        // Supporting evidence count
+    median_impact: number | null
+    impact_p25: number | null
+    impact_p75: number | null
+    learner_count: number | null
+    impact_variance: number | null
 }
 ```
 
@@ -270,15 +274,18 @@ Evidence records bind assessments to verifiable outcomes:
 
 ```
 EvidenceRecord {
-    learner_address: string     // Cardano stake address
+    skill_assessment_id: string
     skill_id: string
-    assessment_id: string
-    score: number
     proficiency_level: ProficiencyLevel
+    score: number
     difficulty: number
     trust_factor: number        // Derived from Sentinel integrity scoring
-    instructor_address: string
-    course_id: string
+    instructor_address: string | null
+    course_id: string | null
+    integrity_session_id: string | null
+    integrity_score: number | null
+    cid: string | null
+    signature: string | null
 }
 ```
 
@@ -1673,7 +1680,7 @@ The reference implementation is a Tauri v2 application — a single binary that 
 | Component | Technology | Purpose |
 |-----------|------------|---------|
 | Backend | Rust (tokio) | Business logic, wallet, P2P, database, evidence, governance |
-| Frontend | Vue 3, TypeScript, Tailwind CSS v4 | 30 pages, 34 components, 15 composables |
+| Frontend | Vue 3, TypeScript, Tailwind CSS v4 | 30 pages, 34 components, 14 composables |
 | Database | SQLite (rusqlite, bundled) | 66 tables, 30 migrations |
 | Content | iroh 0.96 | BLAKE3 content-addressed blob store |
 | P2P | libp2p 0.56 | Kademlia, GossipSub, Relay, DCUtR, request-response/CBOR for `/alexandria/vc-fetch/1.0` |

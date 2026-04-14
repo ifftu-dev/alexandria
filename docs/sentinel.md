@@ -1,10 +1,10 @@
 # Sentinel — Assessment Integrity System
 
-> Anti-cheat system for Alexandria that monitors assessment integrity through multi-signal behavioral fingerprinting. No biometric or sensitive data ever leaves the device — only derived scores (0-1) and anomaly flags are stored and transmitted.
+> Anti-cheat system for Alexandria that monitors learning-session integrity through multi-signal behavioral fingerprinting. No biometric or sensitive data ever leaves the device — only derived scores (0-1) and anomaly flags are stored locally.
 
 ## Design Principles
 
-1. **Privacy-first** — All behavioral data (keystrokes, mouse movements, video frames) is processed entirely on-device. Only numeric scores and categorical flags are stored in the local database and broadcast over P2P.
+1. **Privacy-first** — All behavioral data (keystrokes, mouse movements, video frames) is processed entirely on-device. Only numeric scores and categorical flags are stored in the local database.
 2. **Non-punitive by default** — Sentinel informs rather than punishes. Flagged sessions surface for review; automated suspensions require multiple strong signals.
 3. **Dual scoring** — Rule-based and AI-based systems run in parallel. Rule-based is authoritative today; AI is advisory until validated with labeled data.
 4. **Zero dependencies for AI** — All ML models are hand-written in TypeScript. No external ML frameworks, WASM runtimes, or model downloads.
@@ -35,7 +35,7 @@
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-All processing happens client-side. There is no server-side component — Alexandria is a fully decentralized desktop and mobile application. Integrity scores are stored locally in SQLite and optionally broadcast over the P2P evidence topic.
+All processing happens client-side. There is no server-side component — Alexandria is a fully decentralized desktop and mobile application. Integrity scores are stored locally in SQLite; the current implementation does not publish Sentinel snapshots over P2P.
 
 ## Signal Taxonomy
 
@@ -57,7 +57,7 @@ All processing happens client-side. There is no server-side component — Alexan
 
 ### Client-Side (`useSentinel.ts`)
 
-- **Activation**: Only during assessment elements (MCQ, essay)
+- **Activation**: Starts when an enrolled learner opens the course player; the active element context is updated as they navigate
 - **Snapshot interval**: Random 15-45 seconds
 - **Profile storage**: localStorage keyed by `sentinel_profile_{userId}_{deviceFp[0:16]}`
 - **Profile update**: Exponential Moving Average with alpha=0.2 (alpha=0.5 during training wizard)
@@ -152,7 +152,7 @@ Stored in local SQLite. See [Database Schema](database-schema.md) for full DDL.
 
 | Command | Description |
 |---------|-------------|
-| `integrity_start_session` | Start integrity monitoring for an assessment |
+| `integrity_start_session` | Start integrity monitoring for an enrolled learning session |
 | `integrity_get_session` | Get session with scores |
 | `integrity_end_session` | End session and compute final score |
 | `integrity_submit_snapshot` | Submit a behavioral snapshot |

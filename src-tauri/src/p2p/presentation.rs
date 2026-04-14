@@ -1,11 +1,11 @@
 //! `TOPIC_VC_PRESENTATION` — subject opts in to broadcast a
 //! selectively-disclosed presentation of a credential.
 //!
-//! PR 9 lands the parse + accept path. Persistence is a no-op for
-//! now — until PR 11's full presentation layer ships, there's no
-//! `presentations` table to insert into; the gossip path validates
-//! the envelope is parseable so peers don't silently drop valid
-//! traffic, but doesn't surface anything to the UI yet.
+//! The current inbound gossip path validates that the envelope is
+//! parseable so peers do not silently drop valid traffic. Full
+//! presentation persistence/UI surfacing is still limited; replay
+//! protection for locally verified presentations lives in the
+//! `presentations_seen` table.
 
 use crate::db::Database;
 use crate::p2p::types::SignedGossipMessage;

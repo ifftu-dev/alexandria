@@ -1,6 +1,6 @@
 # alexandria/src-tauri/src/
 
-**Generated:** 2026-03-20
+**Generated:** 2026-04-15
 
 ## Standing Instructions
 
@@ -8,18 +8,18 @@
 
 ## Overview
 
-Rust backend for the Tauri v2 desktop/mobile app. 25 modules, 100+ files.
+Rust backend for the Tauri v2 desktop/mobile app. Core responsibilities include 194 registered Tauri commands, a 66-table SQLite schema, libp2p networking, iroh content storage, and Cardano integration.
 
 ## WHERE TO LOOK
 
 | Task | Location | Notes |
 |------|----------|-------|
-| Tauri commands | `commands/` | 22 handlers — one file per domain |
-| Domain models | `domain/` | 13 structs mirroring TS types |
-| P2P networking | `p2p/` | 15 submodules (swarm, gossip, sync, etc.) |
+| Tauri commands | `commands/` | Domain-oriented IPC handlers plus platform-specific tutoring variants |
+| Domain models | `domain/` | Core app types plus the `vc/` protocol submodule |
+| P2P networking | `p2p/` | Swarm, gossip, validation, scoring, discovery, vc-fetch, sync, stress |
 | Database | `db/` | SQLite + versioned migrations |
 | Tutoring | `tutoring/` | Platform-conditional (`desktop`, `mobile`, `ios`, `android`) |
-| Cardano | `cardano/` | Pallas wallet/tx building |
+| Cardano | `cardano/` | Pallas wallet/tx building; reference-script deployment still pending in-tree |
 | Content storage | `ipfs/` | iroh blobs integration |
 | Cryptography | `crypto/` | Ed25519, Blake2b, keystore |
 
@@ -84,9 +84,9 @@ mod tests {
 
 | File | Lines | Risk |
 |------|-------|------|
-| `tutoring/manager_mobile.rs` | 2013 | Mobile tutoring logic |
-| `p2p/stress.rs` | 1695 | Stress testing utilities |
-| `tutoring/manager.rs` | 1627 | Desktop tutoring |
-| `evidence/reputation.rs` | 1440 | Reputation system |
-| `commands/governance.rs` | 1335 | 20 functions |
-| `p2p/sync.rs` | 1184 | 21 functions |
+| `tutoring/manager_mobile.rs` | 2918 | Mobile tutoring logic |
+| `p2p/stress.rs` | 1775 | Stress testing utilities |
+| `tutoring/manager.rs` | 1939 | Desktop tutoring |
+| `evidence/reputation.rs` | 1442 | Reputation system |
+| `commands/governance.rs` | 1734 | Governance command surface |
+| `p2p/sync.rs` | 1203 | P2P sync protocol |

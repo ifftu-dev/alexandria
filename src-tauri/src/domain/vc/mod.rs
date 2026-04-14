@@ -3,8 +3,7 @@
 //! Per the Alexandria Credential & Reputation Protocol v1, the
 //! **canonical credential is a signed W3C VC**, not a Cardano NFT.
 //! This module defines the types; sub-modules handle canonicalization,
-//! signing, and verification. All function bodies stubbed until the
-//! corresponding implementation PRs land.
+//! signing, and verification for the local-first VC implementation.
 
 pub mod canonicalize;
 pub mod context;

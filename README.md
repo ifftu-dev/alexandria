@@ -13,11 +13,10 @@
 <p>
   <a href="docs/architecture.md">Architecture</a> &middot;
   <a href="docs/database-schema.md">Database Schema</a> &middot;
-  <a href="docs/protocol-spec-v1.md">P2P Protocol</a> &middot;
+  <a href="docs/protocol-specification.md">Protocol Specification</a> &middot;
   <a href="docs/project-structure.md">Project Structure</a> &middot;
   <a href="docs/skills-and-reputation.md">Skills & Reputation</a> &middot;
   <a href="docs/sentinel.md">Sentinel</a> &middot;
-  <a href="docs/missing-features.md">Roadmap / Missing Features</a> &middot;
   <a href="CHANGELOG.md">Changelog</a>
 </p>
 
@@ -29,9 +28,9 @@
 - **Public Content Availability** — Published course media can resolve from public URLs (with local BLAKE3 caching), and fresh installs bootstrap a bundled public catalog before network discovery catches up.
 - **Skill Proofs** — Learners earn verifiable credentials scoped to individual skills at Bloom's taxonomy levels (remember through create), aggregated from weighted evidence.
 - **Reputation** — Instructor impact derived from learner outcomes, scoped to `(subject, role, skill, proficiency_level)`. Distribution-based with confidence bounds — no global scores.
-- **Blockchain Credentials** — NFTs minted on Cardano (Conway era) with CIP-25 metadata. CIP-68 soulbound reputation tokens anchor skill proofs on-chain. Independently verifiable without the platform.
-- **Governance** — DAOs mirror the knowledge taxonomy. Elections and proposals with 2/3 supermajority. Committee-gated taxonomy updates. 7 Aiken/Plutus V3 smart contracts enforce on-chain governance rules.
-- **Assessment Integrity** — Sentinel anti-cheat with keystroke autoencoder, mouse trajectory CNN, and face embedder. All processing client-side — only derived scores cross the network.
+- **Blockchain Credentials** — Native-script NFT minting is implemented for skill-proof wrappers and course/governance metadata. VC integrity anchoring, reputation snapshots, and soulbound-style flows exist in the data model and tx builders, but validator-backed reference-script deployment is still pending.
+- **Governance** — DAOs mirror the knowledge taxonomy. Elections, proposals, committee-gated taxonomy updates, and P2P propagation are implemented locally; validator-backed on-chain enforcement is not fully deployed yet.
+- **Assessment Integrity** — Sentinel anti-cheat uses a keystroke autoencoder, mouse trajectory CNN, and face embedder. All processing stays client-side; snapshots are stored locally and feed downstream trust decisions without exposing raw biometrics.
 - **Peer-to-Peer** — Fully decentralized via libp2p with a private Alexandria Kademlia DHT, GossipSub, Circuit Relay v2, AutoNAT, and DCUtR. Devices discover each other through a relay bootstrap node — no central server required.
 - **Offline-First** — Local SQLite database, iroh content store, and encrypted vault (Stronghold on desktop, AES-256-GCM + Argon2id on mobile). Everything works without connectivity.
 - **Mobile Node** — iOS and Android are first-class targets. The mobile app is a fully functional node — same P2P networking, content storage, and wallet as desktop. Multi-device support via shared BIP-39 mnemonic.
@@ -54,9 +53,9 @@ alexandria/
 │       ├── ipfs/     # iroh node, IPFS gateway fallback, CID resolution
 │       └── p2p/      # libp2p swarm — DHT, relay, gossip, peer exchange
 ├── src/              # Vue 3 + TypeScript frontend
-│   ├── pages/        # 26 pages (onboarding, courses, skills, governance, classrooms, tutoring, ...)
+│   ├── pages/        # 30 route views (courses, skills, governance, opinions, tutoring, ...)
 │   ├── components/   # UI components + auth + course + layout
-│   ├── composables/  # useAuth, useTheme, useP2P, useSentinel, useLocalApi, useBiometricVault, useClassroom, useContentSync, usePlatform, useSkillGraphState, useSkillGraphHover, useTutoringRoom
+│   ├── composables/  # useAuth, useTheme, useP2P, useSentinel, useLocalApi, useBiometricVault, useClassroom, useContentSync, useCredentials, useOmniSearch, usePlatform, useSkillGraphState, useSkillGraphHover, useTutoringRoom
 │   └── assets/       # Tailwind CSS v4 design system
 ├── cli/              # Developer CLI (alex) — Rust + clap
 ├── patches/          # Local crate patches (if-watch iOS fix)
@@ -103,7 +102,7 @@ The relay server lives in a [separate repository](https://github.com/ifftu-dev/a
 
 ### Prerequisites
 
-- **Rust 1.83+** with `cargo`
+- **Rust 1.89+** with `cargo`
 - **Node.js 22+** with `npm`
 - **Tauri CLI**: `cargo install tauri-cli`
 
@@ -113,7 +112,7 @@ For fresh desktop builds with full audio-video live tutoring:
 - **Linux**: `sudo apt-get install -y cmake libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf nasm libclang-dev pkg-config libopus-dev libssl-dev libx264-dev libva-dev libgbm-dev libdrm-dev libvdpau-dev`
 - **Windows**: install CMake, install MSYS2 autotools (`pacman -S --noconfirm libtool automake autoconf`), download a shared FFmpeg build, set `FFMPEG_DIR`, and add `FFMPEG_DIR\\bin` to `PATH`
 
-Desktop builds use `tutoring-video` on macOS/Windows and `tutoring-video-static` on Linux. iOS builds use `tutoring-video-ios`. Android does not yet ship live video tutoring.
+Desktop builds use `tutoring-video` on macOS/Windows and `tutoring-video-static` on Linux. iOS builds use `tutoring-video-ios`. Android builds can opt into the shared video pipeline with `tutoring-video-android`.
 
 For iOS builds:
 
@@ -400,13 +399,12 @@ Use `alex config path` to print this directory on any platform.
 |----------|-------------|
 | [Architecture](docs/architecture.md) | System design — offline-first, trustless, multi-platform |
 | [Database Schema](docs/database-schema.md) | All 66 tables, 30 migrations, relationships |
-| [P2P Protocol](docs/protocol-spec-v1.md) | Wire formats, 11 gossip topics, validation, peer scoring |
+| [Protocol Specification](docs/protocol-specification.md) | Wire formats, VC protocol, 11 gossip topics, validation, peer scoring |
 | [Project Structure](docs/project-structure.md) | Directory layouts, module responsibilities |
 | [Skills & Reputation](docs/skills-and-reputation.md) | Skill graph, evidence model, reputation system |
 | [Sentinel](docs/sentinel.md) | Assessment integrity — behavioral fingerprinting, ML models |
 | [Security Audit](docs/security-audit.md) | 32 findings (1 critical, 7 high, 10 medium, 9 low, 5 informational) |
 | [Performance Audit](docs/performance-audit.md) | 23 findings (2 critical, 5 high, 8 medium, 5 low, 3 informational) |
-| [Missing Features](docs/missing-features.md) | Gaps, roadmap, and features not yet implemented |
 
 ## License
 

@@ -2,8 +2,8 @@
 
 > Offline-first, trustless, multi-platform.
 
-**Status**: Implementation-complete
-**Last updated**: 2026-04-13
+**Status**: In progress — core local/P2P flows are implemented, with some on-chain and VC presentation surfaces still partial
+**Last updated**: 2026-04-15
 
 ---
 
@@ -38,8 +38,10 @@ central API, no hosted database, and no Docker infrastructure.
   is opportunistic, not required.
 - **Self-sovereign identity**: Your 24-word mnemonic IS your account.
   No email, no password recovery service, no OAuth provider.
-- **Trustless verification**: Credentials are anchored on Cardano.
-  Anyone can verify a skill proof without contacting the platform.
+- **Trustless verification**: Credentials can be verified locally and
+  offline today. Optional Cardano anchoring and validator-backed
+  enforcement exist in the design, but some deployment paths remain
+  incomplete.
 - **Privacy by architecture**: Raw behavioral data (Sentinel) never
   leaves the device. Signed evidence travels over P2P, but only
   derived scores — never biometrics.
@@ -58,7 +60,7 @@ central API, no hosted database, and no Docker infrastructure.
 |  |                | cmds    |  +----------------+  |  |
 |  |  30 pages      |         |  |   SQLite DB    |  |  |
 |  |  34 components |         |  |   66 tables    |  |  |
-|  |  15 composables|         |  |   30 migrations|  |  |
+|  |  14 composables|         |  |   30 migrations|  |  |
 |  +----------------+         |  +----------------+  |  |
 |                             |                      |  |
 |                             |  +----------------+  |  |
@@ -293,7 +295,7 @@ Private encrypted sync between devices sharing the same mnemonic:
 - Append-only merge for evidence records
 - SQL injection prevention via table name allowlist
 
-See [P2P Protocol Specification](protocol-spec-v1.md) for full wire formats.
+See [Protocol Specification](protocol-specification.md) for full wire formats.
 
 ---
 
@@ -313,16 +315,16 @@ See [P2P Protocol Specification](protocol-spec-v1.md) for full wire formats.
 | Fee estimation | Linear fee model from protocol params |
 | NFT minting | NativeScript signature policy + CIP-25 metadata |
 | Course registration | Mint token with course metadata |
-| Reputation snapshots | CIP-68 soulbound tokens with Plutus inline datums |
-| Governance metadata | DAO registration, elections, proposals, vote receipts |
+| Reputation snapshots | Queue + tx builders exist; reference-script deployment is still pending |
+| Governance metadata | DAO/election/proposal tx builders and queue records; validator-backed enforcement is still pending |
 | Coin selection | Greedy UTxO selection with min-ADA enforcement |
 
 ### Transaction Types
 
 1. **SkillProof NFT** — Mints a token with CIP-25 metadata containing skill, proficiency level, confidence score, and evidence count
 2. **Course Registration** — Mints a token recording course enrollment on-chain
-3. **Reputation Snapshot** — CIP-68 soulbound token with CBOR-encoded datum (reference + user token pair)
-4. **Governance Actions** — Metadata-bearing transactions for DAO ops, elections, proposals, votes
+3. **Reputation Snapshot** — Soulbound/CIP-68-style builder path with CBOR-encoded datum; currently gated on undeployed reference scripts
+4. **Governance Actions** — Metadata-bearing transactions and queue entries for DAO ops, elections, proposals, votes
 
 ---
 
@@ -570,8 +572,8 @@ this on every test run.
 | §4–§5 (DID identity, key rotation) | PR 3 | Implemented |
 | §6–§7 (credential taxonomy + canonical structure) | PR 4 | Implemented |
 | §8–§10 (required fields, issuance, non-transferability) | PR 4–5 | Implemented |
-| §11 (expiration, revocation, suspension, supersession) | PR 5 | Revocation + expiration done; suspension + supersession deferred |
-| §12 (storage, durability, integrity anchoring) | PR 8 + PR 10 | Storage + anchor queue + PinBoard implemented; on-chain submission lands in PR 16 |
+| §11 (expiration, revocation, suspension, supersession) | PR 5 | Implemented |
+| §12 (storage, durability, integrity anchoring) | PR 8 + PR 10 | Storage + anchor queue + PinBoard implemented; on-chain/reference-script submission still incomplete |
 | §13 (verification algorithm + acceptance predicate) | PR 4–5 | Implemented |
 | §14 (trust aggregation, weights, confidence, levels) | PR 6 | Implemented |
 | §15 (anti-gaming controls) | PR 7 | Cluster cap + inflation penalty implemented; cluster_issuers is per-DID until governance signals land |
@@ -583,4 +585,3 @@ this on every test run.
 | §21–§22 (interfaces + pseudocode) | PR 4–11 | Implemented |
 | §23 (security requirements) | PR 4–11 | Canonicalization, replay resistance, audit logging |
 | §24 (minimal implementation profile) | PR 12 | Complete |
-
