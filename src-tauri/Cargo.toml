@@ -110,7 +110,7 @@ iroh-blobs = { version = "0.98", features = ["fs-store"] }
 # P2P networking (libp2p swarm) — all platforms
 # Uses private Alexandria DHT (/alexandria/kad/1.0) with relay bootstrap.
 # mDNS removed — not useful in production (no LAN discovery needed).
-libp2p = { version = "0.56.0", features = ["gossipsub", "kad", "quic", "tcp", "noise", "identify", "tokio", "ed25519", "macros", "autonat", "relay", "dcutr", "yamux"] }
+libp2p = { version = "0.56.0", features = ["gossipsub", "kad", "quic", "tcp", "noise", "identify", "tokio", "ed25519", "macros", "autonat", "relay", "dcutr", "yamux", "request-response", "cbor"] }
 futures = "0.3"
 
 # Live tutoring — Media over QUIC (iroh-live) — ALL platforms
