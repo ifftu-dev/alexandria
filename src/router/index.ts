@@ -209,11 +209,17 @@ const router = createRouter({
       meta: { layout: 'app' },
     },
 
-    // Community plugins (Phase 1 of the plugin system).
+    // Community plugins.
     {
       path: '/plugins',
       name: 'plugins-installed',
       component: () => import('@/pages/plugins/Installed.vue'),
+      meta: { layout: 'app' },
+    },
+    {
+      path: '/plugins/browse',
+      name: 'plugins-browse',
+      component: () => import('@/pages/plugins/Browse.vue'),
       meta: { layout: 'app' },
     },
   ],

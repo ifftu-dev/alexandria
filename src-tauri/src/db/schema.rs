@@ -41,6 +41,8 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (31, "content_provenance", MIGRATION_031),
     (32, "plugin_system_phase1", MIGRATION_032),
     (33, "plugin_system_phase2", MIGRATION_033),
+    (34, "plugin_catalog", MIGRATION_034),
+    (35, "plugin_attestations", MIGRATION_035),
 ];
 
 const MIGRATION_001: &str = r#"
@@ -1503,4 +1505,95 @@ CREATE INDEX IF NOT EXISTS idx_element_submissions_enrollment
 
 CREATE INDEX IF NOT EXISTS idx_element_submissions_grader
     ON element_submissions(grader_cid);
+"#;
+
+const MIGRATION_034: &str = r#"
+-- ============================================================
+-- Migration 034: Plugin discovery catalog (Phase 3)
+--
+-- Caches plugin announcements seen on the /alexandria/plugins/1.0
+-- gossip topic. Mirrors the existing course `catalog` table — discovery
+-- is the same opinion-weighted browsing model, just over plugins.
+--
+-- A row here means "we have heard of this plugin"; it does NOT mean it
+-- is installed. Cross-reference plugin_installed for that. Built-in
+-- plugins also write rows here at startup with source='builtin' so the
+-- browse UI surfaces them alongside community plugins.
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS plugin_catalog (
+    plugin_cid          TEXT PRIMARY KEY,    -- BLAKE3 of manifest.json
+    name                TEXT NOT NULL,
+    version             TEXT NOT NULL,
+    author_did          TEXT NOT NULL,
+    description         TEXT,
+    api_version         TEXT NOT NULL,
+    kinds_json          TEXT NOT NULL,        -- JSON array
+    capabilities_json   TEXT NOT NULL,        -- JSON array
+    subject_tags_json   TEXT NOT NULL,        -- JSON array
+    platforms_json      TEXT NOT NULL,        -- JSON array
+    has_grader          INTEGER NOT NULL DEFAULT 0,
+    grader_cid          TEXT,                 -- NULL for interactive-only
+    source              TEXT NOT NULL,        -- 'gossip' | 'builtin' | 'local'
+    announced_at        TEXT NOT NULL,        -- author-stamped time from announcement
+    last_seen_at        TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_plugin_catalog_author
+    ON plugin_catalog(author_did);
+CREATE INDEX IF NOT EXISTS idx_plugin_catalog_source
+    ON plugin_catalog(source);
+"#;
+
+const MIGRATION_035: &str = r#"
+-- ============================================================
+-- Migration 035: Alexandria Plugin DAO attestations
+--
+-- The single top-level community DAO that gates *credential recognition*
+-- (not existence — anyone can publish, anyone can install, anyone can run).
+-- A row here is a multi-sig committee attestation that a specific
+-- (plugin_cid, grader_cid) pair is recognized for issuing credentials
+-- under the default verifier policy.
+--
+-- Append-only by design: a captured DAO cannot retroactively invalidate
+-- credentials issued in good faith. Advisory notes (deprecated /
+-- known_flawed) ride on a separate column without affecting historical
+-- recognition; the verifier UI surfaces them but does not act on them.
+--
+-- The signed_attestation_blob carries a serialized threshold signature
+-- over BLAKE3(plugin_cid || grader_cid || attestation_terms). Verification
+-- happens in plugins::attestation; the storage layer is opaque.
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS plugin_attestations (
+    plugin_cid               TEXT NOT NULL,
+    grader_cid               TEXT NOT NULL,
+    attestation_terms        TEXT NOT NULL,        -- JSON, freeform terms
+    threshold_signature_blob BLOB NOT NULL,        -- serialized threshold sig
+    committee_pubkeys_json   TEXT NOT NULL,        -- JSON array of hex pubkeys
+    issued_at                TEXT NOT NULL,
+    advisory_kind            TEXT,                 -- NULL = not advisory
+    advisory_message         TEXT,
+    PRIMARY KEY (plugin_cid, grader_cid)
+);
+
+CREATE INDEX IF NOT EXISTS idx_plugin_attestations_plugin
+    ON plugin_attestations(plugin_cid);
+
+-- A separate table for advisory-only notes that do NOT count as
+-- attestations. Lets us add "we no longer recommend X" without inserting
+-- into the canonical attestation log (which would imply continued
+-- recognition).
+CREATE TABLE IF NOT EXISTS plugin_advisories (
+    id                       TEXT PRIMARY KEY,
+    plugin_cid               TEXT NOT NULL,
+    kind                     TEXT NOT NULL CHECK (kind IN ('deprecated','superseded','known_flawed')),
+    message                  TEXT NOT NULL,
+    issued_at                TEXT NOT NULL DEFAULT (datetime('now')),
+    threshold_signature_blob BLOB NOT NULL,
+    committee_pubkeys_json   TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_plugin_advisories_plugin
+    ON plugin_advisories(plugin_cid);
 "#;

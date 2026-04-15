@@ -1,0 +1,19 @@
+{
+  "id": "did:key:z6MkvDqGT54cXesYGvABpF1UapVNwjCqRcafi4Px6Thv5T3Z#mcq",
+  "version": "1.0.0",
+  "api_version": "1",
+  "host_min_version": "0.1.0",
+  "name": "Multiple Choice Question",
+  "description": "Built-in graded MCQ element. Single or multiple correct answers; partial-credit scoring with penalties for wrong selections.",
+  "author_did": "did:key:z6MkvDqGT54cXesYGvABpF1UapVNwjCqRcafi4Px6Thv5T3Z",
+  "kinds": ["graded"],
+  "capabilities": [],
+  "grader": {
+    "cid": "7cbb8f10544bf94d95ec0448070a7e0bf45af5e004467551158fb83e8b16ab98",
+    "blake3": "7cbb8f10544bf94d95ec0448070a7e0bf45af5e004467551158fb83e8b16ab98",
+    "entrypoint": "alex_grade"
+  },
+  "subject_tags": ["assessment"],
+  "platforms": ["macos", "windows", "linux", "ios", "android"],
+  "entry": "ui/index.html"
+}

@@ -36,6 +36,19 @@ pub const TOPIC_VC_PRESENTATION: &str = "/alexandria/vc-presentation/1.0";
 /// redundancy.
 pub const TOPIC_PINBOARD: &str = "/alexandria/pinboard/1.0";
 
+// ---- Community plugin system (Phase 3) -----------------------------------
+/// Plugin announcements — authors broadcast a manifest CID + metadata so
+/// other nodes can discover and (optionally) install. Receivers cache the
+/// announcement in `plugin_catalog` for opinion-weighted browse. The full
+/// bundle bytes are *not* on this topic — they're fetched on demand from
+/// the iroh blob store via the manifest CID.
+pub const TOPIC_PLUGINS: &str = "/alexandria/plugins/1.0";
+/// Plugin DAO attestations — the canonical Alexandria Plugin DAO
+/// publishes threshold-signed (plugin_cid, grader_cid) attestations on
+/// this topic. Verifiers cross-reference attestations from this topic
+/// to decide whether a graded plugin's submissions are credential-eligible.
+pub const TOPIC_PLUGIN_ATTESTATIONS: &str = "/alexandria/plugin-attestations/1.0";
+
 /// All gossip topics the node subscribes to.
 pub const ALL_TOPICS: &[&str] = &[
     TOPIC_CATALOG,
@@ -49,6 +62,8 @@ pub const ALL_TOPICS: &[&str] = &[
     TOPIC_VC_STATUS,
     TOPIC_VC_PRESENTATION,
     TOPIC_PINBOARD,
+    TOPIC_PLUGINS,
+    TOPIC_PLUGIN_ATTESTATIONS,
 ];
 
 /// Peer exchange message — broadcast on TOPIC_PEER_EXCHANGE.
