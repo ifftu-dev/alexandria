@@ -10,6 +10,7 @@ pub mod domain;
 pub mod evidence;
 pub mod ipfs;
 pub mod p2p;
+pub mod plugins;
 pub mod tutoring;
 
 // Mobile crypto: same modules as desktop but with portable keystore
@@ -55,6 +56,9 @@ pub struct AppState {
     pub db_path: PathBuf,
     pub keystore: Arc<Mutex<Option<Keystore>>>,
     pub vault_dir: PathBuf,
+    /// Directory where installed plugin bundles live (`<app_data>/plugins/`).
+    /// Each plugin is rooted at `plugins_dir/<plugin_cid>/`.
+    pub plugins_dir: PathBuf,
     pub content_node: Arc<ContentNode>,
     pub resolver: Arc<Mutex<Option<ContentResolver>>>,
     pub p2p_node: Arc<Mutex<Option<P2pNode>>>,
@@ -432,11 +436,19 @@ pub fn run() {
             diag::log("creating ClassroomManager");
             let classroom = Arc::new(ClassroomManager::new());
 
+            // Plugin bundle store. Created eagerly so install commands
+            // don't race the first install.
+            let plugins_dir = app_dir.join("plugins");
+            std::fs::create_dir_all(&plugins_dir)
+                .expect("failed to create plugins directory");
+            log::info!("Plugins directory: {}", plugins_dir.display());
+
             let app_state = AppState {
                 db,
                 db_path,
                 keystore: Arc::new(Mutex::new(None)),
                 vault_dir,
+                plugins_dir,
                 content_node,
                 resolver,
                 p2p_node: Arc::new(Mutex::new(None)),
@@ -552,6 +564,19 @@ pub fn run() {
         .plugin(tauri_plugin_biometry::init())
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        // Community plugin asset protocol — serves files out of
+        // `app_data_dir/plugins/<cid>/` with a per-plugin CSP and the
+        // alex bootstrap injected into HTML responses. See
+        // `src/plugins/asset_protocol.rs` and
+        // `/Users/hack/.claude/plans/prancy-bubbling-grove.md`.
+        .register_uri_scheme_protocol("plugin", |ctx, request| {
+            let plugins_dir = ctx
+                .app_handle()
+                .state::<AppState>()
+                .plugins_dir
+                .clone();
+            plugins::asset_protocol::handle(&plugins_dir, request)
+        })
         .invoke_handler(tauri::generate_handler![
             commands::health::check_health,
             commands::health::read_diag_log,
@@ -773,6 +798,15 @@ pub fn run() {
             commands::aggregation::get_derived_skill_state,
             commands::aggregation::list_derived_states,
             commands::aggregation::recompute_all,
+            // Community plugin system (Phase 1 — local-file install,
+            // iframe-sandboxed interactive plugins)
+            commands::plugins::plugin_install_from_file,
+            commands::plugins::plugin_uninstall,
+            commands::plugins::plugin_list,
+            commands::plugins::plugin_get_manifest,
+            commands::plugins::plugin_grant_capability,
+            commands::plugins::plugin_revoke_capability,
+            commands::plugins::plugin_list_permissions,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -145,6 +145,13 @@ export interface Element {
   content_inline: string | null
   position: number
   duration_seconds: number | null
+  /** Plugin bundle CID (Phase 1+ of the community plugin system).
+   *  Non-null when `element_type === 'plugin'`. */
+  plugin_cid?: string | null
+  /** Human-readable version string for display. Dispatch is by CID. */
+  plugin_version?: string | null
+  /** CID of per-element plugin configuration passed at `init`. */
+  plugin_config_cid?: string | null
 }
 
 export interface CreateElementRequest {
@@ -1335,4 +1342,72 @@ export interface DerivedSkillState {
   calculation_version: string
   sources: string[]
   computed_at: string
+}
+
+// ============================================================
+// Community plugin system — Phase 1
+// See /Users/hack/.claude/plans/prancy-bubbling-grove.md
+// ============================================================
+
+/** Capabilities a plugin can declare. Only these are recognized at the
+ *  protocol level in v1; adding more requires a host release. */
+export type PluginCapability =
+  | 'microphone'
+  | 'camera'
+  | 'midi'
+  | 'fullscreen'
+  | 'clipboard'
+  | 'storage'
+  | 'ml_inference'
+
+export type PluginKind = 'interactive' | 'graded'
+
+export type PluginPermissionScope = 'once' | 'session' | 'always'
+
+/** Parsed plugin manifest. Shape matches the Rust `PluginManifest`. */
+export interface PluginManifest {
+  id: string
+  version: string
+  api_version: string
+  host_min_version: string
+  name: string
+  description: string | null
+  author_did: string
+  kinds: PluginKind[]
+  capabilities: PluginCapability[]
+  grader: PluginGraderRef | null
+  content_schema_cid: string | null
+  submission_schema_cid: string | null
+  subject_tags: string[]
+  platforms: string[]
+  icon_path: string | null
+  entry: string
+}
+
+/** Phase-2 grader reference. Ignored in Phase 1 even if present. */
+export interface PluginGraderRef {
+  cid: string
+  blake3: string
+  entrypoint: string
+}
+
+/** A plugin installed on this node. */
+export interface InstalledPlugin {
+  plugin_cid: string
+  name: string
+  version: string
+  author_did: string
+  install_path: string
+  source: 'local_file' | 'p2p' | 'builtin'
+  manifest_json: string
+  installed_at: string
+}
+
+/** A persisted capability grant record. */
+export interface PluginPermissionRecord {
+  plugin_cid: string
+  capability: PluginCapability
+  scope: PluginPermissionScope
+  granted_at: string
+  granted_until: string | null
 }

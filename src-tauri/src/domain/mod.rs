@@ -9,6 +9,7 @@ pub mod evidence;
 pub mod governance;
 pub mod identity;
 pub mod opinions;
+pub mod plugin;
 pub mod profile;
 pub mod reputation;
 pub mod sync;

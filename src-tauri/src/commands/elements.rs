@@ -25,7 +25,8 @@ pub async fn list_elements(
     let mut stmt = db
         .conn()
         .prepare(
-            "SELECT id, chapter_id, title, element_type, content_cid, content_inline, position, duration_seconds \
+            "SELECT id, chapter_id, title, element_type, content_cid, content_inline, position, duration_seconds, \
+             plugin_cid, plugin_version, plugin_config_cid \
              FROM course_elements WHERE chapter_id = ?1 ORDER BY position ASC",
         )
         .map_err(|e| e.to_string())?;
@@ -41,6 +42,9 @@ pub async fn list_elements(
                 content_inline: row.get(5)?,
                 position: row.get(6)?,
                 duration_seconds: row.get(7)?,
+                plugin_cid: row.get(8)?,
+                plugin_version: row.get(9)?,
+                plugin_config_cid: row.get(10)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -107,6 +111,9 @@ pub async fn create_element(
         content_inline: None,
         position: next_pos,
         duration_seconds: req.duration_seconds,
+        plugin_cid: None,
+        plugin_version: None,
+        plugin_config_cid: None,
     })
 }
 
@@ -171,7 +178,8 @@ pub async fn update_element(
 
     db.conn()
         .query_row(
-            "SELECT id, chapter_id, title, element_type, content_cid, content_inline, position, duration_seconds \
+            "SELECT id, chapter_id, title, element_type, content_cid, content_inline, position, duration_seconds, \
+             plugin_cid, plugin_version, plugin_config_cid \
              FROM course_elements WHERE id = ?1",
             params![element_id],
             |row| {
@@ -184,6 +192,9 @@ pub async fn update_element(
                     content_inline: row.get(5)?,
                     position: row.get(6)?,
                     duration_seconds: row.get(7)?,
+                    plugin_cid: row.get(8)?,
+                    plugin_version: row.get(9)?,
+                    plugin_config_cid: row.get(10)?,
                 })
             },
         )

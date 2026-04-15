@@ -208,6 +208,14 @@ const router = createRouter({
       component: () => import('@/pages/dashboard/Settings.vue'),
       meta: { layout: 'app' },
     },
+
+    // Community plugins (Phase 1 of the plugin system).
+    {
+      path: '/plugins',
+      name: 'plugins-installed',
+      component: () => import('@/pages/plugins/Installed.vue'),
+      meta: { layout: 'app' },
+    },
   ],
 })
 

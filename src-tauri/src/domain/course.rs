@@ -90,6 +90,19 @@ pub struct Element {
     pub content_inline: Option<String>,
     pub position: i64,
     pub duration_seconds: Option<i64>,
+    /// Plugin bundle CID this element dispatches to (Phase 1+ of the
+    /// community plugin system). `None` for built-in element types.
+    /// When `element_type == "plugin"`, this must be `Some(cid)`.
+    #[serde(default)]
+    pub plugin_cid: Option<String>,
+    /// Human-readable version of the pinned plugin (semver). For display
+    /// only — the actual dispatch uses `plugin_cid`.
+    #[serde(default)]
+    pub plugin_version: Option<String>,
+    /// CID of per-element plugin configuration (lesson content passed to
+    /// the plugin at `init`). `None` means the plugin uses its defaults.
+    #[serde(default)]
+    pub plugin_config_cid: Option<String>,
 }
 
 /// Request to create a new element.

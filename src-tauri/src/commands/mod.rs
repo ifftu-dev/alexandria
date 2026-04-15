@@ -16,6 +16,7 @@ pub mod identity;
 pub mod integrity;
 pub mod opinions;
 pub mod pinning;
+pub mod plugins;
 pub mod presentation;
 pub mod reputation;
 pub mod snapshot;
