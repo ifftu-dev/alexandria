@@ -59,6 +59,13 @@ pub struct AppState {
     /// Directory where installed plugin bundles live (`<app_data>/plugins/`).
     /// Each plugin is rooted at `plugins_dir/<plugin_cid>/`.
     pub plugins_dir: PathBuf,
+    /// Deterministic Wasmtime grader runtime for community plugins (Phase 2).
+    /// Cheap to clone; the underlying engine and module cache are shared.
+    /// Desktop-only — wasmtime v27 does not support iOS / Android; mobile
+    /// builds do not carry the runtime and the corresponding IPC command
+    /// returns `GraderUnavailable` on mobile.
+    #[cfg(desktop)]
+    pub grader_runtime: Arc<plugins::wasm_runtime::GraderRuntime>,
     pub content_node: Arc<ContentNode>,
     pub resolver: Arc<Mutex<Option<ContentResolver>>>,
     pub p2p_node: Arc<Mutex<Option<P2pNode>>>,
@@ -443,12 +450,24 @@ pub fn run() {
                 .expect("failed to create plugins directory");
             log::info!("Plugins directory: {}", plugins_dir.display());
 
+            // Deterministic Wasmtime engine for plugin graders (Phase 2).
+            // Construction is cheap; the engine + module cache live for
+            // the app's lifetime. Desktop-only because wasmtime v27 does
+            // not support iOS / Android targets.
+            #[cfg(desktop)]
+            let grader_runtime = Arc::new(
+                plugins::wasm_runtime::GraderRuntime::new()
+                    .expect("failed to create grader runtime"),
+            );
+
             let app_state = AppState {
                 db,
                 db_path,
                 keystore: Arc::new(Mutex::new(None)),
                 vault_dir,
                 plugins_dir,
+                #[cfg(desktop)]
+                grader_runtime,
                 content_node,
                 resolver,
                 p2p_node: Arc::new(Mutex::new(None)),
@@ -807,6 +826,10 @@ pub fn run() {
             commands::plugins::plugin_grant_capability,
             commands::plugins::plugin_revoke_capability,
             commands::plugins::plugin_list_permissions,
+            // Phase 2 — submit-and-grade against deterministic WASM graders.
+            // Desktop-only: wasmtime v27 lacks iOS / Android support.
+            #[cfg(desktop)]
+            commands::plugins::plugin_submit_and_grade,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

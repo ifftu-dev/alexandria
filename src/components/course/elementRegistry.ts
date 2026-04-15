@@ -20,13 +20,17 @@ import PluginHost from '@/components/plugin/PluginHost.vue'
 
 // Context the Player provides to every dispatched element binding. Bindings
 // pull whatever they need out of this; the host owns all stateful concerns
-// (download lifecycle, completion progress, labels) so element components stay
-// thin and the same registry shape works for plugins later.
+// (download lifecycle, completion progress, labels, enrollment) so element
+// components stay thin and the same registry shape works for plugins later.
 export interface ElementHostContext {
   element: Element
   isCompleted: boolean
   downloading: boolean
   downloadError: string | null
+  /** Enrollment the learner is taking this element under. `null` while
+   *  browsing without enrolling — graded plugin submissions require an
+   *  enrollment id and refuse to grade otherwise. */
+  enrollmentId: string | null
   onDownload: () => void
   onComplete: () => void
   onScoredComplete: (score: number) => void
@@ -147,9 +151,15 @@ const builtinRegistry = new Map<string, ElementBinding>([
   // element_type === 'plugin' and a non-NULL plugin_cid dispatches to a
   // sandboxed iframe via PluginHost. Built-ins remain in this registry
   // unchanged; plugins are an additional dispatch path, not a replacement.
+  // Phase 2 wires `enrollmentId` through so graded plugins can persist
+  // their submission bundle to element_submissions.
   ['plugin', {
     component: PluginHost,
-    props: ({ element }) => ({ element, mode: 'learn' }),
+    props: ({ element, enrollmentId }) => ({
+      element,
+      mode: 'learn',
+      enrollmentId,
+    }),
     events: ({ onComplete, onScoredComplete }) => ({
       complete: onComplete,
       'scored-complete': onScoredComplete as (...args: never[]) => void,

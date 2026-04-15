@@ -455,6 +455,7 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
     isCompleted: elementStatus(el.id) === 'completed',
     downloading: downloadingElementId.value === el.id,
     downloadError: downloadError.value,
+    enrollmentId: enrollment.value?.id ?? null,
     onDownload: onDownloadClick,
     onComplete: () => { void markComplete() },
     onScoredComplete: (score: number) => { void markComplete(score) },
