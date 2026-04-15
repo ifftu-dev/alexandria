@@ -166,7 +166,7 @@ image = { version = "0.25", default-features = false, features = ["jpeg"] }
 # on aarch64-apple-ios-sim and aarch64-linux-android. On mobile the grader
 # is disabled at the IPC layer — the built-in-native (non-WASM) graders
 # still run, and third-party WASM plugins simply can't be executed.
-wasmtime = { version = "27", default-features = false, features = ["cranelift", "runtime"] }
+wasmtime = { version = "36", default-features = false, features = ["cranelift", "runtime"] }
 
 [dev-dependencies]
 tempfile = "3"
