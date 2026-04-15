@@ -1,7 +1,8 @@
 //! Community plugin system runtime.
 //!
 //! Phase 1 — local-file install of iframe-sandboxed interactive plugins.
-//! See `/Users/hack/.claude/plans/prancy-bubbling-grove.md`.
+//! Phase 2 — deterministic Wasmtime grader runtime for credential-bearing
+//! assessments.
 //!
 //! Public surface:
 //! - [`manifest`] — parse + validate the signed `manifest.json`.
@@ -9,8 +10,12 @@
 //!   and compute the content-addressed `plugin_cid`.
 //! - [`registry`] — on-disk bundle store + SQLite-backed install/list/uninstall
 //!   and per-plugin capability grants.
+//! - [`asset_protocol`] — `plugin://` URI scheme handler with per-plugin CSP.
+//! - [`wasm_runtime`] — Wasmtime-backed grader runtime configured for
+//!   reproducible execution. Phase 2.
 
 pub mod asset_protocol;
 pub mod manifest;
 pub mod registry;
 pub mod verifier;
+pub mod wasm_runtime;

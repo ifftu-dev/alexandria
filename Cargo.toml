@@ -1,6 +1,14 @@
 [workspace]
 resolver = "2"
 members = ["src-tauri", "cli"]
+# Built-in plugin graders compile to wasm32-unknown-unknown and live
+# outside the desktop/mobile workspace so the main build doesn't try to
+# pull them in for the host target. Each grader has its own Cargo.toml
+# and is built via `cargo build --target wasm32-unknown-unknown --release`
+# from inside its directory. The resulting `.wasm` is checked in next to
+# the source so reproducibility tests don't need a wasm toolchain at
+# CI time.
+exclude = ["plugins"]
 
 # Stronghold uses scrypt internally for snapshot encryption.
 # Without opt-level = 3, scrypt is 10-30x slower in debug builds,

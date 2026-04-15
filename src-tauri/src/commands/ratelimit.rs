@@ -81,6 +81,13 @@ impl IpcRateLimiter {
             "plugin_install_from_file".to_string(),
             Bucket::new(10, Duration::from_secs(60)),
         );
+        // Plugin grade: each call compiles+runs WASM and writes a
+        // submission row. 60 per minute is generous for an interactive
+        // assessment and caps a runaway plugin that hammers the grader.
+        buckets.insert(
+            "plugin_submit_and_grade".to_string(),
+            Bucket::new(60, Duration::from_secs(6)),
+        );
 
         Self { buckets }
     }

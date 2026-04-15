@@ -40,6 +40,7 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (30, "vc_credential_allowlist", MIGRATION_030),
     (31, "content_provenance", MIGRATION_031),
     (32, "plugin_system_phase1", MIGRATION_032),
+    (33, "plugin_system_phase2", MIGRATION_033),
 ];
 
 const MIGRATION_001: &str = r#"
@@ -1461,4 +1462,45 @@ CREATE TABLE IF NOT EXISTS plugin_permissions (
     granted_until  TEXT,            -- NULL for 'always'
     PRIMARY KEY (plugin_cid, capability)
 );
+"#;
+
+const MIGRATION_033: &str = r#"
+-- ============================================================
+-- Migration 033: Community plugin system — Phase 2
+--
+-- Stores the reproducibility bundle for every graded plugin submission.
+-- A verifier — anywhere on the network, decades from now — fetches the
+-- (content_cid, submission_cid, grader_cid) triple, re-runs the WASM
+-- grader against those bytes, and confirms the score reproduces. That
+-- mathematical reproducibility is the root of trust for credentials
+-- produced by community plugins.
+--
+-- The signed_attestation column carries the host-side Ed25519 signature
+-- over the bundle (using the learner's DID-Key), suitable for inclusion
+-- in a Verifiable Credential. Phase 3 will add the Plugin DAO attestation
+-- step that elevates it to a recognized credential.
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS element_submissions (
+    id                  TEXT PRIMARY KEY,
+    element_id          TEXT NOT NULL REFERENCES course_elements(id),
+    enrollment_id       TEXT NOT NULL REFERENCES enrollments(id) ON DELETE CASCADE,
+    submission_cid      TEXT NOT NULL,   -- BLAKE3 of the submission bytes (in iroh store)
+    grader_cid          TEXT NOT NULL,   -- BLAKE3 of the grader.wasm
+    content_cid         TEXT NOT NULL,   -- BLAKE3 of the content bytes the grader saw
+    score               REAL NOT NULL CHECK (score >= 0.0 AND score <= 1.0),
+    score_details_json  TEXT,            -- plugin-defined `details` payload
+    learner_did         TEXT NOT NULL,
+    signed_attestation  BLOB,            -- Ed25519 signature over the bundle (NULL until signed)
+    created_at          TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_element_submissions_element
+    ON element_submissions(element_id);
+
+CREATE INDEX IF NOT EXISTS idx_element_submissions_enrollment
+    ON element_submissions(enrollment_id);
+
+CREATE INDEX IF NOT EXISTS idx_element_submissions_grader
+    ON element_submissions(grader_cid);
 "#;

@@ -121,6 +121,18 @@ iroh-live = { git = "https://github.com/ifftu-dev/iroh-live", rev = "a7e3e0fa8c0
 postcard = { version = "1", features = ["alloc"] }
 blake3 = "1"
 
+# Phase 2 — WASM grader runtime for the community plugin system.
+#
+# Wasmtime is configured for deterministic execution at construction time:
+# NaN canonicalization, fuel-based interruption (instead of wall-clock
+# epoch deadlines), and no WASI imports for pure-compute graders. This is
+# the substrate that lets any node re-run a grader on a captured submission
+# bundle and reproduce the score byte-for-byte — the root of trust for
+# credential-bearing assessments. wasi-virt support for graders that
+# legitimately need filesystem/RNG/clock arrives in a later session along
+# with the iOS AOT story (App Store JIT prohibition).
+wasmtime = { version = "27", default-features = false, features = ["cranelift", "runtime"] }
+
 # ── Mobile + Windows SQLCipher dependencies ──────────────────────────
 [target.'cfg(any(target_os = "ios", target_os = "android", target_os = "windows"))'.dependencies]
 # Mobile and Windows release runners do not provide a reliable SQLCipher OpenSSL
@@ -153,6 +165,10 @@ image = { version = "0.25", default-features = false, features = ["jpeg"] }
 
 [dev-dependencies]
 tempfile = "3"
+# WebAssembly text format parser — used to keep grader runtime tests
+# readable by writing the test fixtures inline as WAT instead of shipping
+# pre-compiled .wasm blobs in the repo.
+wat = "1"
 
 [[example]]
 name = "dev_seed"

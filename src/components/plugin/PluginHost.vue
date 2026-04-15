@@ -10,10 +10,11 @@
  *  - Persist state and proxy completion events back to the parent
  *    element registry.
  *
- * Phase 1 scope: interactive plugins only. If the manifest's `kinds`
- * does not include `"interactive"`, the host refuses to mount and
- * shows an advisory instead (graded-only plugins require the Phase 2
- * WASM grader runtime).
+ * Phase 1 scope: interactive plugins. Phase 2 adds graded plugins —
+ * when a plugin emits `submit` with a non-null `grader` in its manifest,
+ * the host calls `plugin_submit_and_grade` to run the grader inside the
+ * deterministic Wasmtime sandbox, persists the reproducibility bundle,
+ * and emits `scored-complete` with the resulting score.
  */
 
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
@@ -29,9 +30,18 @@ import type {
   PluginPermissionScope,
 } from '@/types'
 
+interface ScoreRecord {
+  version: string
+  score: number
+  details: unknown
+}
+
 const props = defineProps<{
   element: Element
   mode?: 'learn' | 'author' | 'review'
+  /** Enrollment the learner is taking this element under. Required for
+   *  graded plugins to persist a submission row. */
+  enrollmentId?: string | null
 }>()
 
 const emit = defineEmits<{
@@ -90,9 +100,14 @@ onMounted(async () => {
     manifest.value = m
     permissions.value = perms
 
-    if (!m.kinds.includes('interactive')) {
+    // Phase 2 supports both interactive and graded plugins. Refuse only
+    // if the plugin declares no kinds at all (manifest validation should
+    // have already caught that, but defense in depth).
+    if (m.kinds.length === 0) {
+      refusalReason.value = 'This plugin declares no element kinds and cannot be mounted.'
+    } else if (m.kinds.includes('graded') && !m.kinds.includes('interactive') && !m.grader) {
       refusalReason.value =
-        'This plugin only provides graded assessments, which require a runtime that is not available yet. Please check back after the next app update.'
+        'This plugin declares "graded" but no grader is attached. The author needs to publish a corrected manifest.'
     }
   } catch (e) {
     loadError.value = `Failed to load plugin: ${e}`
@@ -173,10 +188,47 @@ function onEmitEvent(type: string, payload: unknown) {
   console.debug('[alex] plugin event', type, payload)
 }
 
-function onSubmit(_submission: unknown, _metadata: unknown) {
-  // Phase 1 has no submission path. Phase 2 wires this to the WASM grader
-  // and then emits `scored-complete` with the reproducible score.
-  console.warn('[alex] plugin submitted but grading is not enabled in Phase 1')
+async function onSubmit(submission: unknown, _metadata: unknown) {
+  const m = manifest.value
+  if (!m) return
+  if (!m.grader) {
+    console.warn('[alex] plugin submitted but manifest has no grader — ignoring')
+    return
+  }
+  if (!props.enrollmentId) {
+    console.warn('[alex] graded plugin submission requires an enrollment — refusing')
+    iframeRef.value?.sendSubmitAck('', null)
+    return
+  }
+
+  // Build content_json from element.content_inline. If content_cid is the
+  // primary source (Phase 3+), the host will resolve it to bytes here.
+  // For Phase 2 session 1, content_inline is sufficient.
+  const contentJson = props.element.content_inline ?? '{}'
+  const submissionJson = JSON.stringify(submission ?? {})
+
+  try {
+    const score = await invoke<ScoreRecord>('plugin_submit_and_grade', {
+      pluginCid: pluginCid.value,
+      elementId: props.element.id,
+      enrollmentId: props.enrollmentId,
+      contentJson,
+      submissionJson,
+    })
+    iframeRef.value?.sendSubmitAck(blake3HexHint(), score.score)
+    emit('scored-complete', score.score)
+  } catch (e) {
+    console.error('[alex] grade failed', e)
+    iframeRef.value?.sendSubmitAck('', null)
+  }
+}
+
+/** The host computes BLAKE3 of the submission bytes for the persisted row;
+ *  the iframe doesn't need the actual CID right now (it's a hint for the
+ *  plugin's own UI, e.g. "submission saved as <short cid>"). Phase 3
+ *  surfaces the real CID once submissions are pinned in the iroh store. */
+function blake3HexHint(): string {
+  return ''
 }
 
 function onComplete(progress: number, advisoryScore: number | null) {
