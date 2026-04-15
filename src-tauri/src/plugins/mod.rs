@@ -18,4 +18,10 @@ pub mod asset_protocol;
 pub mod manifest;
 pub mod registry;
 pub mod verifier;
+// Wasmtime v27 does not support iOS or Android targets (emits
+// `compile_error!("unsupported platform")` on both). The grader runtime
+// is desktop-only; mobile builds omit it. The IPC layer exposes a stub
+// that returns a `GraderUnavailable` error on mobile — native built-in
+// graders (MCQ, essay) continue to work everywhere.
+#[cfg(desktop)]
 pub mod wasm_runtime;

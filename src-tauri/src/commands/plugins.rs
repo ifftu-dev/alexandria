@@ -18,6 +18,7 @@ use crate::domain::plugin::{
     InstalledPlugin, PluginCapability, PluginManifest, PluginPermissionRecord,
 };
 use crate::plugins::registry;
+#[cfg(desktop)]
 use crate::plugins::wasm_runtime::{GraderBudgets, ScoreRecord};
 use crate::AppState;
 
@@ -165,6 +166,7 @@ pub async fn plugin_list_permissions(
 /// already, but signing a verifiable attestation is best added with the
 /// VC-issuance code in §10.x). The persisted row carries `signed_attestation
 /// = NULL` until that lands.
+#[cfg(desktop)]
 #[tauri::command]
 pub async fn plugin_submit_and_grade(
     state: State<'_, AppState>,
