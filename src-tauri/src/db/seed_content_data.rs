@@ -828,7 +828,298 @@ b = b - lr * ∂MSE/∂b</code></pre>
 <p>This mindset leads to better reliability and incident-response planning.</p>"#,
     ),
     ("el_math_4_2", ASSESSMENT_MATH),
+    // ======================================================================
+    // CIVIC SENSE COURSE (sf_civics — AI-generated example content)
+    // ======================================================================
+    (
+        "el_civ_1_1",
+        r#"<h2>What a Constitution Actually Does</h2>
+<p>A constitution is a contract — between a state and its citizens, and between branches of government. It does three things, in roughly this order of importance:</p>
+<ol>
+  <li><strong>Limits power.</strong> It says what the state <em>cannot</em> do to you (usually a bill of rights).</li>
+  <li><strong>Distributes power.</strong> It names the branches of government and says who decides what.</li>
+  <li><strong>Authorises power.</strong> It creates offices (president, parliament, courts) and rules for filling them.</li>
+</ol>
+<p>A constitution that is only (3) — an organisation chart — is not a real constitution. Several post-colonial constitutions were drafted well on paper but weak on the first two functions, and the gap shows up decades later as institutional fragility.</p>"#,
+    ),
+    (
+        "el_civ_1_2",
+        r#"<h2>Separation of Powers in Practice</h2>
+<p>The classical split — executive, legislature, judiciary — rarely runs clean in practice. What matters is whether each branch can <em>actually</em> check the others. Ask:</p>
+<ul>
+  <li><strong>Executive:</strong> Who appoints the cabinet? Who controls the military and police?</li>
+  <li><strong>Legislature:</strong> Can it pass laws the executive opposes? Can it remove a minister?</li>
+  <li><strong>Judiciary:</strong> Are judges appointed by a single actor? Can their budgets be cut as retaliation?</li>
+</ul>
+<p>When one branch can simultaneously appoint, pay, and discipline another, separation is a label, not a safeguard. The design pattern is: <em>every appointing authority needs a confirming authority from a different branch</em>.</p>"#,
+    ),
+    (
+        "el_civ_1_3",
+        r#"<h2>Federal vs Unitary States</h2>
+<p>A <strong>unitary state</strong> has one sovereign centre that delegates authority to provinces. A <strong>federal state</strong> has provinces with their own constitutionally-guaranteed powers that the centre cannot unilaterally take back.</p>
+<p>Most "federal" post-colonial states are unitary in disguise — the centre can dissolve a state government, appoint its governor, or withhold its revenue. The test is simple: <em>can the centre legally act against a province without the province's consent?</em> If yes, it is unitary in effect, regardless of what the constitution calls it.</p>
+<p>Neither model is inherently better. Federalism handles diverse populations but slows national responses. Unitarism acts quickly but concentrates risk. The choice should match the country's actual social composition, not a template.</p>"#,
+    ),
+    ("el_civ_1_4", QUIZ_CIVICS_SHAPE),
+    (
+        "el_civ_2_1",
+        r#"<h2>Civil and Political Rights</h2>
+<p>Civil rights protect you <em>from</em> the state: freedom from arbitrary arrest, torture, forced confession, surveillance without warrant. Political rights let you <em>participate in</em> the state: voting, running for office, forming parties, protesting.</p>
+<p>The important thing to read in your own bill of rights is the <strong>limitation clauses</strong>. Most rights are not absolute — they can be restricted under conditions (public order, public health, national security). The question is <em>who</em> decides those conditions apply. A right limited at the discretion of the executive is a much weaker right than one limited only by law, tested in court.</p>"#,
+    ),
+    (
+        "el_civ_2_2",
+        r#"<h2>Press Freedom Under Pressure</h2>
+<p>Press freedom erodes quietly, usually through three vectors:</p>
+<ul>
+  <li><strong>Ownership concentration:</strong> a handful of proprietors friendly to power buy up outlets.</li>
+  <li><strong>Criminal defamation + "fake news" laws:</strong> vague statutes make reporting legally risky.</li>
+  <li><strong>Advertising pressure:</strong> state-owned or state-dependent firms pull ads from critical outlets.</li>
+</ul>
+<p>Outright censorship (banning publications) is rare in modern democracies; economic and legal pressure does the same work with plausible deniability. Track who owns what, and which journalists have been charged — not whether the newspaper is officially "free".</p>"#,
+    ),
+    (
+        "el_civ_2_3",
+        r#"<h2>Judicial Independence</h2>
+<p>Courts are independent when judges can rule against the government and still keep their job, pay, and safety. Three structural tests:</p>
+<ol>
+  <li><strong>Appointment:</strong> who nominates judges, who confirms, and can the executive stack the bench?</li>
+  <li><strong>Tenure:</strong> fixed term or until retirement? Can they be removed without impeachment?</li>
+  <li><strong>Funding:</strong> is the judiciary's budget set by parliament or by the executive, and can it be cut mid-term?</li>
+</ol>
+<p>Also watch for "court packing" (expanding bench size to dilute opposition), "court shrinking" (the inverse), and transfer policies that move inconvenient judges to minor benches far from home.</p>"#,
+    ),
+    ("el_civ_2_4", QUIZ_CIVICS_RIGHTS),
+    (
+        "el_civ_3_1",
+        r#"<h2>How Voting Systems Differ</h2>
+<p>Three families of systems, with very different outcomes:</p>
+<ul>
+  <li><strong>Plurality / first-past-the-post:</strong> most votes wins. Simple; can produce huge parliamentary majorities on 40% vote shares. Common in former British colonies.</li>
+  <li><strong>Proportional representation:</strong> seats allocated by vote share. Reflects diversity; usually requires coalitions.</li>
+  <li><strong>Ranked-choice / alternative vote:</strong> voters rank candidates; lowest-placed eliminated and votes transferred. Rewards consensus candidates.</li>
+</ul>
+<p>A country's voting system shapes its party system more than the other way around. Plurality tends toward two big blocs. PR tends toward many parties and coalition governance. Neither is inherently fairer; both encode a tradeoff between <em>stable governance</em> and <em>accurate representation</em>.</p>"#,
+    ),
+    (
+        "el_civ_3_2",
+        r#"<h2>Election Integrity: Red Flags</h2>
+<p>Election fraud is rarely a single dramatic event. It is usually the accumulation of small, plausibly-deniable irregularities. Watch for:</p>
+<ul>
+  <li>Voter-roll purges close to polling day (especially in opposition strongholds).</li>
+  <li>Polling stations relocated or closed with inadequate notice.</li>
+  <li>Long queues in some areas and none in others.</li>
+  <li>Ballot paper shortages — always at specific precincts.</li>
+  <li>Results delayed in competitive seats, announced quickly in safe ones.</li>
+  <li>Observer access denied at counting centres.</li>
+</ul>
+<p>No single flag proves fraud. Multiple flags, clustered in competitive seats, are the signal. Document time, place, and specific irregularity — a diary is worth more than a tweet.</p>"#,
+    ),
+    ("el_civ_3_3", QUIZ_CIVICS_VOTING),
+    (
+        "el_civ_3_4",
+        r#"<h2>Voting Systems Comparison</h2>
+<p>Interactive exercise: drag three sample election results through first-past-the-post, proportional representation, and ranked-choice tabulations and compare the seat allocations. Try inputs where a party wins 45% of the vote but 65% of the seats — or vice versa.</p>
+<p><em>(This interactive element is a placeholder in the seed; a real implementation would ship an in-app simulator.)</em></p>"#,
+    ),
+    (
+        "el_civ_4_1",
+        r#"<h2>Community Organising on a Small Budget</h2>
+<p>Most civic impact at the local level happens without institutional money. A practical playbook:</p>
+<ol>
+  <li><strong>Pick one issue.</strong> Not "governance" — "fix the water pump at Ward 7 school".</li>
+  <li><strong>Find five committed people.</strong> They do not have to be rich or well-connected. They have to show up.</li>
+  <li><strong>Identify the <em>accountable</em> office-holder.</strong> Usually one municipal officer, not "the government".</li>
+  <li><strong>Make one written ask.</strong> Specific, dated, signed by named residents.</li>
+  <li><strong>Document every interaction.</strong> Dates, names, what was said.</li>
+</ol>
+<p>Most civic campaigns fail because they aim at "the system" instead of one office-holder with one obligation. Shrink the target. Repeat.</p>"#,
+    ),
+    (
+        "el_civ_4_2",
+        r#"<h2>Political Media Literacy</h2>
+<p>Not all content in a newspaper is reporting. A practical taxonomy:</p>
+<ul>
+  <li><strong>News report:</strong> who, what, when, where; quotes named sources; dated byline.</li>
+  <li><strong>Analysis:</strong> same facts, but interprets. Should be labeled as such.</li>
+  <li><strong>Opinion / editorial:</strong> argues a position. Labeled.</li>
+  <li><strong>Press release rebroadcast:</strong> unlabeled reprinting of corporate or government statements. Often filler; treat with suspicion.</li>
+  <li><strong>Paid content:</strong> looks like reporting, isn't. Look for a small "sponsored" or "advertorial" tag.</li>
+  <li><strong>Synthetic/AI-generated content:</strong> increasingly common; images and audio can be fabricated convincingly.</li>
+</ul>
+<p>The discipline is: <em>before you react to a claim, find its source</em>. If the source is an unnamed "official" or a press release, the claim is weak, regardless of how confidently it is presented.</p>"#,
+    ),
+    (
+        "el_civ_4_3",
+        r#"<h2>Civic Tech in Practice</h2>
+<p>Civic tech = technology that helps citizens hold institutions accountable. Examples that have worked:</p>
+<ul>
+  <li><strong>Budget trackers</strong> that parse government spending data and flag unusual line items.</li>
+  <li><strong>Complaint dashboards</strong> that aggregate municipal service failures by ward.</li>
+  <li><strong>Open-data portals</strong> that expose public records under Right to Information laws.</li>
+  <li><strong>Election observation tools</strong> that let citizen monitors upload real-time incident reports.</li>
+</ul>
+<p>Civic tech fails when it is built by engineers who never leave their chairs. It works when built <em>with</em> the communities it serves, starting from their actual questions (usually: "where did my tax money go?" or "why is this service broken?"). Tooling is not the bottleneck; trust is.</p>"#,
+    ),
+    (
+        "el_civ_5_1",
+        r#"<h2>How to Read a National Budget</h2>
+<p>National budgets look intimidating but usually have three readable sections:</p>
+<ol>
+  <li><strong>Revenue:</strong> where money comes from. Taxes (income, corporate, VAT), borrowing, grants, resource exports.</li>
+  <li><strong>Recurrent expenditure:</strong> salaries, pensions, interest on debt. Usually 60–80% of the total in developing economies.</li>
+  <li><strong>Capital expenditure:</strong> infrastructure, new schools, hospitals. The "development" portion.</li>
+</ol>
+<p>Three questions to ask any budget:</p>
+<ul>
+  <li>What fraction of revenue is consumed by debt interest? (Over 30% is a warning sign.)</li>
+  <li>Is capital expenditure actually executed, or rolled over year after year?</li>
+  <li>Who has discretionary spending authority, and how large is that pool?</li>
+</ul>
+<p>Budgets are political documents. The numbers tell you what the government <em>claims</em> it will do; the execution reports tell you what it actually did.</p>"#,
+    ),
+    (
+        "el_civ_5_2",
+        r#"<h2>Anti-Corruption Mechanisms</h2>
+<p>Corruption is not a personal failing — it is a systems problem. The mechanisms that reduce it are structural:</p>
+<ul>
+  <li><strong>Asset disclosure</strong> for public officials, with independent verification.</li>
+  <li><strong>E-procurement</strong> with published tender evaluations.</li>
+  <li><strong>Whistleblower protection</strong> that actually protects — legal immunity, not just rhetoric.</li>
+  <li><strong>Right to Information</strong> with statutory deadlines and penalties for non-compliance.</li>
+  <li><strong>Independent audit offices</strong> whose budget and chief cannot be cut by the executive.</li>
+  <li><strong>Public beneficial-ownership registries</strong> so shell companies cannot hide behind opaque structures.</li>
+</ul>
+<p>No single mechanism is sufficient. Layered, mutually-reinforcing mechanisms make corruption expensive enough that rational actors often decline to engage in it.</p>"#,
+    ),
+    (
+        "el_civ_5_3",
+        r#"<h2>The Colonial Legacy</h2>
+<p>Many modern institutions in the Global South are direct inheritances from colonial administrative structures — borders drawn for resource extraction, legal codes copied from metropolitan statute books, police forces designed to control rather than serve. This is not blame; it is data.</p>
+<p>Three durable legacies:</p>
+<ul>
+  <li><strong>Artificial borders</strong> that cut across ethnic and linguistic communities, guaranteeing internal tension.</li>
+  <li><strong>Extractive tax structures</strong> that concentrate revenue in the capital, leaving peripheries underfunded.</li>
+  <li><strong>Dual legal systems</strong> where imported codes coexist uneasily with customary law.</li>
+</ul>
+<p>Recognising this legacy doesn't absolve modern governments; it locates some of the problems they inherited. Reforms that ignore structural inheritance often fail for reasons that look local but are actually historical.</p>"#,
+    ),
 ];
+
+// ---------------------------------------------------------------------------
+// Civic Sense quiz content
+// ---------------------------------------------------------------------------
+
+const QUIZ_CIVICS_SHAPE: &str = r#"{
+  "title": "The Shape of Democracy",
+  "pass_threshold": 0.66,
+  "questions": [
+    {
+      "id": "q1",
+      "type": "single_choice",
+      "prompt": "Which of these is the MOST important function of a constitution?",
+      "options": ["Describing the flag and anthem", "Limiting what the state can do to citizens", "Listing foreign treaties", "Naming the capital city"],
+      "correct_indices": [1],
+      "explanation": "A bill of rights that limits state power is the first-order function; the rest are administrative.",
+      "points": 1,
+      "difficulty": 1
+    },
+    {
+      "id": "q2",
+      "type": "single_choice",
+      "prompt": "A state is meaningfully federal when:",
+      "options": ["The central government can dissolve provincial governments at will", "Provinces have constitutionally-guaranteed powers the centre cannot unilaterally revoke", "There are multiple languages in the national anthem", "The constitution uses the word 'federal' in its title"],
+      "correct_indices": [1],
+      "explanation": "Federalism is a test of power, not a label. If the centre can override the provinces without consent, the system is unitary in effect.",
+      "points": 1,
+      "difficulty": 2
+    },
+    {
+      "id": "q3",
+      "type": "true_false",
+      "prompt": "Separation of powers works when each branch can appoint, fund, and discipline another branch unilaterally.",
+      "options": ["True", "False"],
+      "correct_indices": [1],
+      "explanation": "The opposite: separation works only when no branch holds all three levers over another.",
+      "points": 1,
+      "difficulty": 1
+    }
+  ]
+}"#;
+
+const QUIZ_CIVICS_RIGHTS: &str = r#"{
+  "title": "Rights Frameworks",
+  "pass_threshold": 0.66,
+  "questions": [
+    {
+      "id": "q1",
+      "type": "single_choice",
+      "prompt": "Which of these most weakens a right in practice?",
+      "options": ["The right is not listed in the preamble", "A limitation clause lets the executive restrict the right at its discretion", "The right is paraphrased, not quoted verbatim, in civics textbooks", "The right has international parallels"],
+      "correct_indices": [1],
+      "explanation": "A right limited at executive discretion is far weaker than one limited only by law and judicial review.",
+      "points": 1,
+      "difficulty": 2
+    },
+    {
+      "id": "q2",
+      "type": "single_choice",
+      "prompt": "Which of these is the STRONGEST sign of eroding press freedom?",
+      "options": ["A newspaper switches to a smaller font", "Ownership of most major outlets concentrates in allies of the ruling party", "A newspaper redesigns its website", "More stories are published online than in print"],
+      "correct_indices": [1],
+      "explanation": "Ownership concentration is a classic vector; it quietly reshapes what gets reported without any formal censorship.",
+      "points": 1,
+      "difficulty": 1
+    },
+    {
+      "id": "q3",
+      "type": "multi_choice",
+      "prompt": "Which of these indicate judicial independence is under pressure? (choose all that apply)",
+      "options": ["Judges can be transferred by the executive without cause", "Court budgets can be cut mid-term by the finance ministry", "Judges take an oath on appointment", "Bench size expands suddenly to dilute existing judges"],
+      "correct_indices": [0, 1, 3],
+      "explanation": "Transfer power, budget power, and court-packing are three classic pressure vectors. Oaths are ceremonial.",
+      "points": 2,
+      "difficulty": 2
+    }
+  ]
+}"#;
+
+const QUIZ_CIVICS_VOTING: &str = r#"{
+  "title": "Voting Systems",
+  "pass_threshold": 0.66,
+  "questions": [
+    {
+      "id": "q1",
+      "type": "single_choice",
+      "prompt": "In a first-past-the-post system, a party can plausibly win a parliamentary majority with what share of the vote?",
+      "options": ["Over 50%, always", "Around 40% in a competitive multi-party race", "Over 75%", "Exactly 50%"],
+      "correct_indices": [1],
+      "explanation": "In plurality systems with 3+ parties, 40% of the vote can yield 60%+ of seats when opposition is split.",
+      "points": 1,
+      "difficulty": 2
+    },
+    {
+      "id": "q2",
+      "type": "single_choice",
+      "prompt": "Which of these is a specific, documentable election irregularity worth recording?",
+      "options": ["The incumbent's speeches were longer than the challenger's", "A polling station in a competitive precinct opened 3 hours late without notice", "Voters looked stressed", "The election was held in the summer"],
+      "correct_indices": [1],
+      "explanation": "Specific time-place irregularities are what observers document. The rest is atmospherics.",
+      "points": 1,
+      "difficulty": 1
+    },
+    {
+      "id": "q3",
+      "type": "true_false",
+      "prompt": "Proportional representation tends to produce single-party majority governments.",
+      "options": ["True", "False"],
+      "correct_indices": [1],
+      "explanation": "PR typically produces coalitions; plurality systems are the ones biased toward single-party majorities.",
+      "points": 1,
+      "difficulty": 1
+    }
+  ]
+}"#;
 
 // ---------------------------------------------------------------------------
 // Quiz content (QuizDefinition JSON matching QuizEngine.vue expectations)

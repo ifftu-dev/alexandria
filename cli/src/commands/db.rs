@@ -259,16 +259,47 @@ fn run_seed(
              DELETE FROM reputation_snapshots;
              DELETE FROM reputation_assertions;
 
+             -- Verifiable Credentials & DID registry (added in seed expansion)
+             DELETE FROM credential_allowlist;
+             DELETE FROM credentials_pending_verification;
+             DELETE FROM credential_anchors;
+             DELETE FROM credentials;
+             DELETE FROM credential_status_lists;
+             DELETE FROM key_registry;
+             DELETE FROM derived_skill_states;
+             DELETE FROM presentations_seen;
+             DELETE FROM pinboard_observations;
+
+             -- Multi-device sync state
+             DELETE FROM sync_queue;
+             DELETE FROM sync_state;
+             DELETE FROM sync_log;
+             DELETE FROM devices;
+
+             -- Multi-party attestation requirements
+             DELETE FROM evidence_attestations;
+             DELETE FROM attestation_requirements;
+
+             -- Evidence challenges
+             DELETE FROM challenge_votes;
+             DELETE FROM evidence_challenges;
+
              -- Evidence & proofs
              DELETE FROM skill_proof_evidence;
              DELETE FROM skill_proofs;
              DELETE FROM evidence_records;
              DELETE FROM skill_assessments;
 
+             -- Opinions (Field Commentary)
+             DELETE FROM opinions;
+
              -- Progress & notes
              DELETE FROM element_progress;
              DELETE FROM course_notes;
              DELETE FROM enrollments;
+
+             -- Tutorials video chapters (must come before course_elements)
+             DELETE FROM video_chapters;
 
              -- Courses & taxonomy
              DELETE FROM element_skill_tags;

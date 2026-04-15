@@ -10,6 +10,7 @@ import {
   AppModal,
   AppTextarea,
   AppInput,
+  ProvenanceBadge,
 } from '@/components/ui'
 import VideoPlayer from '@/components/course/VideoPlayer.vue'
 import type {
@@ -198,7 +199,10 @@ onMounted(async () => {
       <!-- Meta -->
       <div class="flex items-start gap-4 mb-4">
         <div class="min-w-0 flex-1">
-          <h1 class="text-2xl font-bold text-foreground">{{ opinion.title }}</h1>
+          <div class="flex items-center gap-2 mb-1">
+            <h1 class="text-2xl font-bold text-foreground">{{ opinion.title }}</h1>
+            <ProvenanceBadge :provenance="opinion.provenance" />
+          </div>
           <div class="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
             <AppBadge v-if="subjectField" variant="secondary">
               {{ subjectField.icon_emoji ? subjectField.icon_emoji + ' ' : '' }}{{ subjectField.name }}

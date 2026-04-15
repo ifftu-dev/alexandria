@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useLocalApi } from '@/composables/useLocalApi'
-import { AppButton, EmptyState, AppBadge } from '@/components/ui'
+import { AppButton, EmptyState, AppBadge, ProvenanceBadge } from '@/components/ui'
 import type { OpinionRow, SubjectFieldInfo } from '@/types'
 
 const { invoke } = useLocalApi()
@@ -185,6 +185,7 @@ onMounted(async () => {
                 <AppBadge v-if="op.duration_seconds" variant="secondary">
                   {{ Math.round(op.duration_seconds / 60) }} min
                 </AppBadge>
+                <ProvenanceBadge :provenance="op.provenance" />
               </div>
               <p v-if="op.summary" class="line-clamp-2 text-xs text-muted-foreground">
                 {{ op.summary }}

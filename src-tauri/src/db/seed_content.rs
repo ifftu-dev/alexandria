@@ -247,6 +247,27 @@ const REMOTE_SEED_ASSETS: &[RemoteSeedAsset] = &[
         element_id: "el_tut_ux_interviews_video",
         url: "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/friday.mp4",
     },
+    // ── Civic Sense course + tutorials (AI-generated example content) ──
+    RemoteSeedAsset {
+        // Civics ch1 video — "Reading a National Constitution"
+        element_id: "el_civ_1_5",
+        url: "https://media.w3.org/2010/05/bunny/trailer.mp4",
+    },
+    RemoteSeedAsset {
+        // Civics ch2 PDF — standing in for UDHR text
+        element_id: "el_civ_2_5",
+        url: "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf",
+    },
+    RemoteSeedAsset {
+        // Civics tutorial — constitution walkthrough
+        element_id: "el_tut_civ_constitution_video",
+        url: "https://media.w3.org/2010/05/sintel/trailer.mp4",
+    },
+    RemoteSeedAsset {
+        // Civics tutorial — reading a budget
+        element_id: "el_tut_civ_budget_video",
+        url: "https://media.w3.org/2010/05/video/movie_300.mp4",
+    },
 ];
 
 // The SEED_CONTENT constant lives in seed_content_data.rs so the CLI

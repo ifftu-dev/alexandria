@@ -296,7 +296,7 @@ pub async fn list_opinions(
     let mut sql = String::from(
         "SELECT id, author_address, subject_field_id, title, summary, video_cid, \
          thumbnail_cid, duration_seconds, credential_proof_ids, signature, public_key, \
-         published_at, received_at, withdrawn, withdrawn_reason, on_chain_tx \
+         published_at, received_at, withdrawn, withdrawn_reason, on_chain_tx, provenance \
          FROM opinions WHERE 1=1",
     );
     let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
@@ -458,7 +458,7 @@ fn load_opinion_row(
     let result = conn.query_row(
         "SELECT id, author_address, subject_field_id, title, summary, video_cid, \
          thumbnail_cid, duration_seconds, credential_proof_ids, signature, public_key, \
-         published_at, received_at, withdrawn, withdrawn_reason, on_chain_tx \
+         published_at, received_at, withdrawn, withdrawn_reason, on_chain_tx, provenance \
          FROM opinions WHERE id = ?1",
         rusqlite::params![opinion_id],
         row_to_opinion,
@@ -494,6 +494,7 @@ fn row_to_opinion(row: &rusqlite::Row<'_>) -> rusqlite::Result<OpinionRow> {
         withdrawn: withdrawn_int != 0,
         withdrawn_reason: row.get(14)?,
         on_chain_tx: row.get(15)?,
+        provenance: row.get(16)?,
     })
 }
 

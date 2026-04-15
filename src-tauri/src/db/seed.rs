@@ -36,7 +36,61 @@ pub fn seed_if_empty(conn: &Connection) -> Result<bool, rusqlite::Error> {
     seed_inline_content(conn)?;
 
     log::info!("Seed data inserted successfully");
+
+    // If the wallet is already populated (rare on a fresh seed, but
+    // possible in tests and in the backfill-after-seed flow), try to
+    // rebind the demo learner to the real wallet right away.
+    let _ = bind_current_user_to_seed(conn);
+
     Ok(true)
+}
+
+/// Rewrite any demo-learner sentinel rows to the real wallet address.
+///
+/// Seed data references `addr_demo_learner` for learner-scoped rows
+/// that are created before the user's wallet exists. Once
+/// `local_identity` is populated (during `generate_wallet`,
+/// `unlock_vault`, or `restore_wallet`), this function updates
+/// reputation rows in place so the dashboards light up under the
+/// user's real stake address.
+///
+/// Idempotent: after the first run the sentinel is gone and subsequent
+/// invocations are no-ops. Returns the number of rows rewritten across
+/// all targeted tables.
+pub fn bind_current_user_to_seed(conn: &Connection) -> Result<usize, rusqlite::Error> {
+    const SENTINEL: &str = "addr_demo_learner";
+
+    // Read the real wallet address. If none is set yet, skip silently.
+    let real_address: Option<String> = conn
+        .query_row(
+            "SELECT stake_address FROM local_identity WHERE id = 1",
+            [],
+            |row| row.get(0),
+        )
+        .ok();
+
+    let Some(real_address) = real_address else {
+        return Ok(0);
+    };
+
+    if real_address == SENTINEL {
+        return Ok(0);
+    }
+
+    let mut total: usize = 0;
+    total += conn.execute(
+        "UPDATE reputation_assertions SET actor_address = ?1 WHERE actor_address = ?2",
+        rusqlite::params![&real_address, SENTINEL],
+    )?;
+    total += conn.execute(
+        "UPDATE reputation_impact_deltas SET learner_address = ?1 WHERE learner_address = ?2",
+        rusqlite::params![&real_address, SENTINEL],
+    )?;
+
+    if total > 0 {
+        log::info!("Rebound {total} demo-learner rows to real wallet");
+    }
+    Ok(total)
 }
 
 /// Backfill demo data for tables added after the initial seed.
@@ -60,11 +114,17 @@ fn backfill_demo_data(conn: &Connection) -> Result<(), rusqlite::Error> {
         || needs_backfill("classrooms")
         || needs_backfill("video_chapters")
         || needs_backfill("opinions")
+        || needs_backfill("credentials")
+        || needs_backfill("attestation_requirements")
+        || needs_backfill("pinboard_observations")
     {
         log::info!("Backfilling demo data for new tables…");
         conn.execute_batch(BACKFILL_SQL)?;
         log::info!("Demo data backfill complete");
     }
+
+    // Always retry the bind after seed/backfill — cheap and idempotent.
+    let _ = bind_current_user_to_seed(conn);
 
     Ok(())
 }
@@ -96,6 +156,7 @@ fn seed_visual_assets(conn: &Connection) -> Result<(), rusqlite::Error> {
         ("sf_web", "\u{1F310}"),    // 🌐
         ("sf_cyber", "\u{1F510}"),  // 🔐
         ("sf_design", "\u{1F3A8}"), // 🎨
+        ("sf_civics", "\u{1F5F3}"), // 🗳
     ] {
         conn.execute(
             "UPDATE subject_fields SET icon_emoji = ?1 WHERE id = ?2",
@@ -111,6 +172,7 @@ fn seed_visual_assets(conn: &Connection) -> Result<(), rusqlite::Error> {
         ("dao_web", "\u{1F310}"),
         ("dao_cyber", "\u{1F510}"),
         ("dao_design", "\u{1F3A8}"),
+        ("dao_civics", "\u{1F5F3}"),
     ] {
         conn.execute(
             "UPDATE governance_daos SET icon_emoji = ?1 WHERE id = ?2",
@@ -126,6 +188,9 @@ fn seed_visual_assets(conn: &Connection) -> Result<(), rusqlite::Error> {
         ("course_crypto_101", "Marcus Chen"),
         ("course_ux_design", "Amara Osei"),
         ("course_math_discrete", "Prof. Imani Okafor"),
+        ("course_civics_101", "Dr. Nomvula Dlamini"),
+        ("course_tut_civ_constitution", "Dr. Nomvula Dlamini"),
+        ("course_tut_civ_budget", "Dr. Nomvula Dlamini"),
     ] {
         conn.execute(
             "UPDATE courses SET author_name = ?1 WHERE id = ?2",
@@ -168,6 +233,10 @@ const COURSE_THUMBNAILS: &[(&str, &str)] = &[
     (
         "course_math_discrete",
         r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#14b8a6"/><stop offset="100%" stop-color="#0ea5e9"/></linearGradient></defs><rect width="640" height="360" fill="url(#g)"/><g opacity="0.12" fill="none" stroke="#fff" stroke-width="2"><circle cx="160" cy="90" r="6"/><circle cx="250" cy="140" r="6"/><circle cx="350" cy="100" r="6"/><circle cx="450" cy="170" r="6"/><circle cx="540" cy="120" r="6"/><line x1="160" y1="90" x2="250" y2="140"/><line x1="250" y1="140" x2="350" y2="100"/><line x1="350" y1="100" x2="450" y2="170"/><line x1="450" y1="170" x2="540" y2="120"/></g><g opacity="0.08" fill="#fff"><rect x="90" y="220" width="460" height="90" rx="12"/><rect x="120" y="245" width="120" height="16" rx="4"/><rect x="260" y="245" width="120" height="16" rx="4"/><rect x="400" y="245" width="120" height="16" rx="4"/></g><text x="320" y="165" text-anchor="middle" fill="#fff" font-family="system-ui,sans-serif" font-size="26" font-weight="700" opacity="0.92">Discrete Math</text><text x="320" y="200" text-anchor="middle" fill="#fff" font-family="system-ui,sans-serif" font-size="14" opacity="0.65">Logic, Sets, Graphs, Probability</text></svg>"##,
+    ),
+    (
+        "course_civics_101",
+        r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#dc2626"/><stop offset="50%" stop-color="#f59e0b"/><stop offset="100%" stop-color="#059669"/></linearGradient></defs><rect width="640" height="360" fill="url(#g)"/><g opacity="0.10" fill="none" stroke="#fff" stroke-width="1.5"><rect x="80" y="60" width="200" height="240" rx="10"/><rect x="110" y="100" width="140" height="10" rx="3"/><rect x="110" y="125" width="120" height="8" rx="3"/><rect x="110" y="145" width="130" height="8" rx="3"/><rect x="110" y="180" width="140" height="70" rx="6"/><rect x="110" y="260" width="60" height="22" rx="4"/><rect x="180" y="260" width="60" height="22" rx="4"/></g><g opacity="0.12" fill="#fff"><circle cx="440" cy="140" r="52" fill="none" stroke="#fff" stroke-width="2"/><path d="M420 122 L430 140 L440 126 L450 142 L460 126" stroke="#fff" stroke-width="2" fill="none"/><rect x="388" y="185" width="104" height="10" rx="3"/><rect x="408" y="205" width="64" height="6" rx="2"/></g><g opacity="0.08" fill="none" stroke="#fff" stroke-width="1"><path d="M340 240 C 380 260 420 260 460 240 C 500 220 540 220 580 240"/><path d="M340 260 C 380 280 420 280 460 260 C 500 240 540 240 580 260"/></g><text x="320" y="175" text-anchor="middle" fill="#fff" font-family="system-ui,sans-serif" font-size="24" font-weight="700" opacity="0.92">Civic Sense</text><text x="320" y="205" text-anchor="middle" fill="#fff" font-family="system-ui,sans-serif" font-size="13" opacity="0.7">For the Global South</text></svg>"##,
     ),
 ];
 
@@ -853,6 +922,147 @@ INSERT INTO skill_proofs (id, skill_id, proficiency_level, confidence, evidence_
     ('proof_011', 'skill_ia',            'create',     0.80, 2),
     ('proof_012', 'skill_wireframing',   'create',     0.82, 2);
 
+-- ============================================================
+-- CIVIC ENGAGEMENT — subject field, subjects, skills, course
+-- Framed for learners in the Global South / developing democracies.
+-- All civics content is AI-generated example material.
+-- ============================================================
+INSERT INTO subject_fields (id, name, description) VALUES
+    ('sf_civics', 'Civic Engagement', 'Constitutional literacy, rights, voting systems, public accountability, and civic participation — framed for learners in the Global South and emerging democracies');
+
+INSERT INTO subjects (id, name, description, subject_field_id) VALUES
+    ('sub_democratic_systems',   'Democratic Systems',        'Constitutions, separation of powers, federalism vs centralism, and how democracies are organised in practice', 'sf_civics'),
+    ('sub_rights_governance',    'Rights & Governance',       'Civil and political rights, press freedom, judicial independence, and checks on state power',                 'sf_civics'),
+    ('sub_global_citizenship',   'Global Citizenship',        'Post-colonial legacies, human rights frameworks, and the international order',                                'sf_civics'),
+    ('sub_civic_participation',  'Civic Participation',       'Voting, community organising, public finance literacy, media literacy, and civic technology',                 'sf_civics');
+
+INSERT INTO skills (id, name, description, subject_id, bloom_level) VALUES
+    ('skill_constitutional_literacy',  'Constitutional Literacy',         'Read a national constitution and identify who holds which power',                    'sub_democratic_systems',  'understand'),
+    ('skill_separation_of_powers',     'Separation of Powers',            'Distinguish executive, legislative, and judicial functions in a real system',         'sub_democratic_systems',  'analyze'),
+    ('skill_federalism_vs_centralism', 'Federalism vs Centralism',        'Compare federal and unitary state structures and their trade-offs',                  'sub_democratic_systems',  'analyze'),
+    ('skill_civil_rights_frameworks',  'Civil & Political Rights',        'Apply national bills of rights and international covenants to concrete situations',  'sub_rights_governance',   'apply'),
+    ('skill_press_freedom',            'Press Freedom',                   'Evaluate legal and practical threats to an independent press',                       'sub_rights_governance',   'evaluate'),
+    ('skill_judicial_independence',    'Judicial Independence',           'Assess appointment, tenure, and funding structures that protect (or erode) courts',  'sub_rights_governance',   'evaluate'),
+    ('skill_human_rights_advocacy',    'Human Rights Advocacy',           'Use UN, regional, and NGO instruments to advocate for human rights',                  'sub_global_citizenship',  'apply'),
+    ('skill_colonial_legacy_analysis', 'Colonial Legacy Analysis',        'Analyse how colonial institutions shape modern borders, law, and economies',         'sub_global_citizenship',  'analyze'),
+    ('skill_voting_systems',           'Voting Systems',                  'Compare plurality, proportional, and ranked-choice electoral systems',                'sub_civic_participation', 'apply'),
+    ('skill_election_integrity',       'Election Integrity',              'Identify and document irregularities in election administration',                     'sub_civic_participation', 'evaluate'),
+    ('skill_public_accountability',    'Public Accountability',           'Use audit reports, RTI requests, and oversight bodies to hold officials accountable', 'sub_civic_participation', 'apply'),
+    ('skill_community_organizing',     'Community Organising',            'Plan and run local civic campaigns on a small budget',                                'sub_civic_participation', 'create'),
+    ('skill_media_literacy_political', 'Political Media Literacy',        'Distinguish reporting, opinion, propaganda, and manufactured consensus',              'sub_civic_participation', 'evaluate'),
+    ('skill_public_finance_literacy',  'Public Finance Literacy',         'Read a national or municipal budget and track where tax money goes',                  'sub_civic_participation', 'understand'),
+    ('skill_anti_corruption_mechanisms','Anti-Corruption Mechanisms',     'Design and evaluate transparency mechanisms that reduce corruption',                  'sub_civic_participation', 'analyze'),
+    ('skill_civic_tech_and_data',      'Civic Tech & Open Data',          'Use open data and civic-tech tools for accountability and public interest research',  'sub_civic_participation', 'apply');
+
+INSERT INTO skill_prerequisites (skill_id, prerequisite_id) VALUES
+    ('skill_separation_of_powers',     'skill_constitutional_literacy'),
+    ('skill_federalism_vs_centralism', 'skill_constitutional_literacy'),
+    ('skill_judicial_independence',    'skill_separation_of_powers'),
+    ('skill_press_freedom',            'skill_civil_rights_frameworks'),
+    ('skill_civil_rights_frameworks',  'skill_constitutional_literacy'),
+    ('skill_election_integrity',       'skill_voting_systems'),
+    ('skill_public_accountability',    'skill_public_finance_literacy'),
+    ('skill_anti_corruption_mechanisms','skill_public_accountability'),
+    ('skill_community_organizing',     'skill_voting_systems'),
+    ('skill_human_rights_advocacy',    'skill_civil_rights_frameworks'),
+    ('skill_colonial_legacy_analysis', 'skill_constitutional_literacy');
+
+INSERT INTO skill_relations (skill_id, related_skill_id, relation_type) VALUES
+    ('skill_civic_tech_and_data',      'skill_sql',                'complementary'),
+    ('skill_civic_tech_and_data',      'skill_accessibility',      'related'),
+    ('skill_media_literacy_political', 'skill_user_research',      'related'),
+    ('skill_public_accountability',    'skill_logic',              'complementary'),
+    ('skill_election_integrity',       'skill_hash_crypto',        'related'),
+    ('skill_anti_corruption_mechanisms','skill_db_design',         'related');
+
+-- Civics DAO
+INSERT INTO governance_daos (id, name, description, scope_type, scope_id, status, committee_size, election_interval_days) VALUES
+    ('dao_civics', 'Civic Engagement DAO', 'Governs the Civic Engagement taxonomy and example-content standards', 'subject_field', 'sf_civics', 'active', 5, 365);
+
+-- Civic Sense course
+INSERT INTO courses (id, title, description, author_address, tags, skill_ids, status) VALUES
+    ('course_civics_101',
+     'Civic Sense for the Global South',
+     'A practical civics course framed for learners in the Global South and emerging democracies. Covers constitutions, rights, voting systems, public accountability, and grassroots participation — with examples drawn from post-colonial contexts.',
+     'addr_seed_author_5',
+     '["civics","democracy","global-south","rights","accountability","post-colonial"]',
+     '["skill_constitutional_literacy","skill_separation_of_powers","skill_civil_rights_frameworks","skill_press_freedom","skill_voting_systems","skill_election_integrity","skill_public_accountability","skill_community_organizing","skill_public_finance_literacy","skill_colonial_legacy_analysis"]',
+     'published');
+
+-- Chapters
+INSERT INTO course_chapters (id, course_id, title, description, position) VALUES
+    ('ch_civ_1', 'course_civics_101', 'The Shape of Democracy',            'Constitutions, separation of powers, federalism, and how democracies are organised',         0),
+    ('ch_civ_2', 'course_civics_101', 'Rights You Actually Have',          'Civil and political rights, press freedom, and judicial independence',                        1),
+    ('ch_civ_3', 'course_civics_101', 'Voting and Elections',              'Voting systems, election integrity, and public accountability',                              2),
+    ('ch_civ_4', 'course_civics_101', 'Beyond the Ballot',                 'Community organising, media literacy, and civic technology',                                  3),
+    ('ch_civ_5', 'course_civics_101', 'Power, Money, and Accountability',  'Public finance literacy, anti-corruption mechanisms, and the colonial legacy',                4);
+
+-- Elements (22 across 5 chapters)
+INSERT INTO course_elements (id, chapter_id, title, element_type, position, duration_seconds) VALUES
+    -- Chapter 1: The Shape of Democracy
+    ('el_civ_1_1', 'ch_civ_1', 'What a Constitution Actually Does',     'text',  0, NULL),
+    ('el_civ_1_2', 'ch_civ_1', 'Separation of Powers in Practice',       'text',  1, NULL),
+    ('el_civ_1_3', 'ch_civ_1', 'Federal vs Unitary States',              'text',  2, NULL),
+    ('el_civ_1_4', 'ch_civ_1', 'Constitutions Quiz',                     'quiz',  3, NULL),
+    ('el_civ_1_5', 'ch_civ_1', 'Reading a National Constitution',        'video', 4, 720),
+    -- Chapter 2: Rights You Actually Have
+    ('el_civ_2_1', 'ch_civ_2', 'Civil and Political Rights',             'text',  0, NULL),
+    ('el_civ_2_2', 'ch_civ_2', 'Press Freedom Under Pressure',           'text',  1, NULL),
+    ('el_civ_2_3', 'ch_civ_2', 'Judicial Independence',                  'text',  2, NULL),
+    ('el_civ_2_4', 'ch_civ_2', 'Rights Frameworks Quiz',                 'quiz',  3, NULL),
+    ('el_civ_2_5', 'ch_civ_2', 'Universal Declaration of Human Rights',  'pdf',   4, NULL),
+    -- Chapter 3: Voting and Elections
+    ('el_civ_3_1', 'ch_civ_3', 'How Voting Systems Differ',              'text',  0, NULL),
+    ('el_civ_3_2', 'ch_civ_3', 'Election Integrity: Red Flags',          'text',  1, NULL),
+    ('el_civ_3_3', 'ch_civ_3', 'Voting Systems Quiz',                    'quiz',  2, NULL),
+    ('el_civ_3_4', 'ch_civ_3', 'Voting Systems Comparison',              'interactive', 3, NULL),
+    -- Chapter 4: Beyond the Ballot
+    ('el_civ_4_1', 'ch_civ_4', 'Community Organising on a Small Budget', 'text',  0, NULL),
+    ('el_civ_4_2', 'ch_civ_4', 'Political Media Literacy',               'text',  1, NULL),
+    ('el_civ_4_3', 'ch_civ_4', 'Civic Tech in Practice',                 'text',  2, NULL),
+    ('el_civ_4_4', 'ch_civ_4', 'Designing a Civic Campaign',             'essay', 3, NULL),
+    -- Chapter 5: Power, Money, and Accountability
+    ('el_civ_5_1', 'ch_civ_5', 'How to Read a National Budget',          'text',  0, NULL),
+    ('el_civ_5_2', 'ch_civ_5', 'Anti-Corruption Mechanisms',             'text',  1, NULL),
+    ('el_civ_5_3', 'ch_civ_5', 'The Colonial Legacy',                    'text',  2, NULL),
+    ('el_civ_5_4', 'ch_civ_5', 'Civic Sense Final Assessment',           'assessment', 3, NULL);
+
+-- Element skill tags
+INSERT INTO element_skill_tags (element_id, skill_id, weight) VALUES
+    ('el_civ_1_1', 'skill_constitutional_literacy',  1.0),
+    ('el_civ_1_2', 'skill_separation_of_powers',     1.0),
+    ('el_civ_1_3', 'skill_federalism_vs_centralism', 1.0),
+    ('el_civ_1_4', 'skill_constitutional_literacy',  0.5),
+    ('el_civ_1_4', 'skill_separation_of_powers',     0.5),
+    ('el_civ_1_4', 'skill_federalism_vs_centralism', 0.5),
+    ('el_civ_1_5', 'skill_constitutional_literacy',  0.5),
+    ('el_civ_2_1', 'skill_civil_rights_frameworks',  1.0),
+    ('el_civ_2_2', 'skill_press_freedom',            1.0),
+    ('el_civ_2_3', 'skill_judicial_independence',    1.0),
+    ('el_civ_2_4', 'skill_civil_rights_frameworks',  0.5),
+    ('el_civ_2_4', 'skill_press_freedom',            0.5),
+    ('el_civ_2_4', 'skill_judicial_independence',    0.5),
+    ('el_civ_2_5', 'skill_human_rights_advocacy',    0.5),
+    ('el_civ_3_1', 'skill_voting_systems',           1.0),
+    ('el_civ_3_2', 'skill_election_integrity',       1.0),
+    ('el_civ_3_3', 'skill_voting_systems',           0.5),
+    ('el_civ_3_3', 'skill_election_integrity',       0.5),
+    ('el_civ_3_4', 'skill_voting_systems',           1.0),
+    ('el_civ_4_1', 'skill_community_organizing',     1.0),
+    ('el_civ_4_2', 'skill_media_literacy_political', 1.0),
+    ('el_civ_4_3', 'skill_civic_tech_and_data',      1.0),
+    ('el_civ_4_4', 'skill_community_organizing',     1.0),
+    ('el_civ_4_4', 'skill_civic_tech_and_data',      0.5),
+    ('el_civ_5_1', 'skill_public_finance_literacy',  1.0),
+    ('el_civ_5_2', 'skill_anti_corruption_mechanisms', 1.0),
+    ('el_civ_5_2', 'skill_public_accountability',    0.5),
+    ('el_civ_5_3', 'skill_colonial_legacy_analysis', 1.0),
+    ('el_civ_5_4', 'skill_constitutional_literacy',  0.5),
+    ('el_civ_5_4', 'skill_civil_rights_frameworks',  0.5),
+    ('el_civ_5_4', 'skill_voting_systems',           0.5),
+    ('el_civ_5_4', 'skill_public_accountability',    0.5),
+    ('el_civ_5_4', 'skill_colonial_legacy_analysis', 0.5);
+
 "##;
 
 const BACKFILL_SQL: &str = r##"
@@ -1457,7 +1667,329 @@ VALUES
      'seed_publickey_dsg02',
      '2026-03-28 13:45:00',
      '2026-03-28 13:46:00',
+     0),
+
+    ('op_civics_01',
+     'addr_seed_author_5',
+     'sf_civics',
+     'Teach budget literacy before the constitution',
+     'Most citizens never read the constitution. But every citizen pays taxes. Start with how public money flows, and the rest of civics becomes tangible — not academic.',
+     'https://media.w3.org/2010/05/bunny/trailer.mp4',
+     NULL, 390, '["proof_demo_constitutional","proof_demo_voting"]',
+     'seed_signature_civ01',
+     'seed_publickey_civ01',
+     '2026-04-04 12:00:00',
+     '2026-04-04 12:02:00',
      0);
+
+-- ============================================================
+-- P9: CIVIC SENSE TUTORIALS (kind='tutorial')
+-- ============================================================
+INSERT OR IGNORE INTO courses
+    (id, title, description, author_address, thumbnail_cid, tags, skill_ids, status, kind, version, published_at)
+VALUES
+    ('course_tut_civ_constitution',
+     'What a Constitution Actually Does (12 min)',
+     'A short, practical walk through what constitutions do, what they do not, and why "follow the constitution" is a harder sentence than it sounds.',
+     'addr_seed_author_5',
+     NULL,
+     '["civics","constitution","governance","global-south"]',
+     '["skill_constitutional_literacy"]',
+     'published',
+     'tutorial',
+     1,
+     '2026-04-05 10:00:00'),
+
+    ('course_tut_civ_budget',
+     'How to Read a National Budget (8 min)',
+     'Skip the jargon. Walk through a real budget document, find the three numbers that matter, and learn what to ask at the next public forum.',
+     'addr_seed_author_5',
+     NULL,
+     '["civics","budget","finance","accountability"]',
+     '["skill_public_finance_literacy"]',
+     'published',
+     'tutorial',
+     1,
+     '2026-04-06 14:00:00');
+
+INSERT OR IGNORE INTO course_chapters (id, course_id, title, position) VALUES
+    ('ch_tut_civ_constitution', 'course_tut_civ_constitution', 'What a Constitution Actually Does', 0),
+    ('ch_tut_civ_budget',       'course_tut_civ_budget',       'How to Read a National Budget',     0);
+
+INSERT OR IGNORE INTO course_elements
+    (id, chapter_id, title, element_type, content_cid, position, duration_seconds)
+VALUES
+    ('el_tut_civ_constitution_video', 'ch_tut_civ_constitution', 'What a Constitution Actually Does', 'video', NULL, 0, 720),
+    ('el_tut_civ_budget_video',       'ch_tut_civ_budget',       'How to Read a National Budget',     'video', NULL, 0, 480);
+
+INSERT OR IGNORE INTO element_skill_tags (element_id, skill_id, weight) VALUES
+    ('el_tut_civ_constitution_video', 'skill_constitutional_literacy', 1.0),
+    ('el_tut_civ_budget_video',       'skill_public_finance_literacy', 1.0);
+
+INSERT OR IGNORE INTO video_chapters (id, element_id, title, start_seconds, position) VALUES
+    ('vc_civc_1', 'el_tut_civ_constitution_video', 'What a constitution is', 0,   0),
+    ('vc_civc_2', 'el_tut_civ_constitution_video', 'What a constitution is not', 180, 1),
+    ('vc_civc_3', 'el_tut_civ_constitution_video', 'Reading the one you have', 420, 2),
+    ('vc_civb_1', 'el_tut_civ_budget_video',       'The budget in 30 seconds', 0,   0),
+    ('vc_civb_2', 'el_tut_civ_budget_video',       'The three numbers that matter', 120, 1),
+    ('vc_civb_3', 'el_tut_civ_budget_video',       'What to ask next', 300, 2);
+
+-- ============================================================
+-- P10: AUTHOR 5 (Dr. Nomvula Dlamini) — visual + reputation
+-- ============================================================
+UPDATE courses SET author_name = 'Dr. Nomvula Dlamini' WHERE author_address = 'addr_seed_author_5';
+
+-- Dr. Dlamini's instructor reputation in civics skills
+INSERT OR IGNORE INTO reputation_assertions (id, actor_address, role, skill_id, proficiency_level, score, evidence_count, median_impact, impact_p25, impact_p75, learner_count, impact_variance, window_start, window_end, computation_spec) VALUES
+    ('rep_011', 'addr_seed_author_5', 'instructor', 'skill_constitutional_literacy', 'understand', 0.90, 8, 0.07, 0.04, 0.10, 6, 0.003, '2025-10-01T00:00:00', '2026-04-01T00:00:00', 'v2'),
+    ('rep_012', 'addr_seed_author_5', 'instructor', 'skill_voting_systems',          'apply',      0.87, 6, 0.06, 0.03, 0.09, 4, 0.004, '2025-10-01T00:00:00', '2026-04-01T00:00:00', 'v2'),
+    ('rep_013', 'addr_seed_author_5', 'instructor', 'skill_public_finance_literacy', 'understand', 0.85, 5, 0.05, 0.02, 0.08, 3, 0.005, '2025-10-01T00:00:00', '2026-04-01T00:00:00', 'v2');
+
+-- ============================================================
+-- P11: DEMO LEARNER — per-user state bound to addr_demo_learner
+-- These rows are rewritten to the real wallet address by
+-- `bind_current_user_to_seed()` after the wallet is created.
+-- Until then, they are visible in debug/headless scenarios but
+-- unreachable from the UI (dashboards filter by local_identity).
+-- ============================================================
+
+-- DID key registry — one active DID per seed author so the Credentials
+-- dashboard can resolve issuer DIDs. Pubkeys are placeholder hex
+-- (64 chars = 32 bytes). Real verification does not happen on read.
+INSERT OR IGNORE INTO key_registry (did, key_id, public_key_hex, valid_from) VALUES
+    ('did:key:z6MkSeedAuthor1AlgoWebInstructorXXXXXXXXXXXXXXX', 'did:key:z6MkSeedAuthor1AlgoWebInstructorXXXXXXXXXXXXXXX#key-1', '11a1b1c1d1e1f1012121314151617181192a2b2c2d2e2f01121314151617181', '2025-09-01T00:00:00Z'),
+    ('did:key:z6MkSeedAuthor2DataCryptoInstructorXXXXXXXXXXXX', 'did:key:z6MkSeedAuthor2DataCryptoInstructorXXXXXXXXXXXX#key-1', '22b2c2d2e2f2022323242526272829212a3b3c3d3e3f02232425262728291301', '2025-09-01T00:00:00Z'),
+    ('did:key:z6MkSeedAuthor3DesignInstructorXXXXXXXXXXXXXXX',  'did:key:z6MkSeedAuthor3DesignInstructorXXXXXXXXXXXXXXX#key-1',  '33c3d3e3f3041434343536373839313a4b4c4d4e4f504334353637383931401',  '2025-09-01T00:00:00Z'),
+    ('did:key:z6MkSeedAuthor4MathInstructorXXXXXXXXXXXXXXXXX',  'did:key:z6MkSeedAuthor4MathInstructorXXXXXXXXXXXXXXXXX#key-1',  '44d4e4f405144454546474849414b5c5d5e5f6054455464748494a1b5c501',     '2025-09-01T00:00:00Z'),
+    ('did:key:z6MkSeedAuthor5CivicsInstructorXXXXXXXXXXXXXXX',  'did:key:z6MkSeedAuthor5CivicsInstructorXXXXXXXXXXXXXXX#key-1',  '55e5f5061254555657585a6a7c7d7e7f605565574757677879891b2c5d601',     '2025-09-01T00:00:00Z'),
+    ('did:key:z6MkDemoLearnerPlaceholderXXXXXXXXXXXXXXXXXXXX',  'did:key:z6MkDemoLearnerPlaceholderXXXXXXXXXXXXXXXXXXXX#key-1',  '66f60617236465666768797b8c9d8e8f706667685858789a8b9c1d2e7f801',     '2025-10-01T00:00:00Z');
+
+-- Revocation status list for credential suspension demo
+INSERT OR IGNORE INTO credential_status_lists (list_id, issuer_did, version, status_purpose, bits, bit_length, signature) VALUES
+    ('urn:status-list:seed-author-5-revoke-2026',
+     'did:key:z6MkSeedAuthor5CivicsInstructorXXXXXXXXXXXXXXX',
+     1,
+     'revocation',
+     X'02',       -- binary: bit 1 set => credential index 1 revoked
+     8,
+     'seed_statuslist_sig_civ5');
+
+-- Demo learner's 5 Verifiable Credentials. signed_vc_json is a minimal
+-- W3C VC shape — the UI renders issuer, subject, type, issuance, and
+-- skill from these columns without re-parsing.
+INSERT OR IGNORE INTO credentials
+    (id, issuer_did, subject_did, credential_type, claim_kind, skill_id,
+     issuance_date, expiration_date, signed_vc_json, integrity_hash,
+     status_list_id, status_list_index, revoked, received_at)
+VALUES
+    ('urn:uuid:cred-demo-algo-completion',
+     'did:key:z6MkSeedAuthor1AlgoWebInstructorXXXXXXXXXXXXXXX',
+     'did:key:z6MkDemoLearnerPlaceholderXXXXXXXXXXXXXXXXXXXX',
+     'FormalCredential',
+     'skill',
+     'skill_big_o',
+     '2026-03-20T16:45:00Z',
+     NULL,
+     '{"@context":["https://www.w3.org/ns/credentials/v2"],"type":["VerifiableCredential","FormalCredential"],"issuer":"did:key:z6MkSeedAuthor1AlgoWebInstructorXXXXXXXXXXXXXXX","validFrom":"2026-03-20T16:45:00Z","credentialSubject":{"id":"did:key:z6MkDemoLearnerPlaceholderXXXXXXXXXXXXXXXXXXXX","skill":"skill_big_o","proficiency":"analyze","course":"course_algo_101"}}',
+     'a1b2c3d4e5f60718293a4b5c6d7e8f9001112233445566778899aabbccddeeff',
+     NULL, NULL, 0, '2026-03-21T09:00:00Z'),
+
+    ('urn:uuid:cred-demo-civics-constitution',
+     'did:key:z6MkSeedAuthor5CivicsInstructorXXXXXXXXXXXXXXX',
+     'did:key:z6MkDemoLearnerPlaceholderXXXXXXXXXXXXXXXXXXXX',
+     'AssessmentCredential',
+     'skill',
+     'skill_constitutional_literacy',
+     '2026-04-08T11:15:00Z',
+     NULL,
+     '{"@context":["https://www.w3.org/ns/credentials/v2"],"type":["VerifiableCredential","AssessmentCredential"],"issuer":"did:key:z6MkSeedAuthor5CivicsInstructorXXXXXXXXXXXXXXX","validFrom":"2026-04-08T11:15:00Z","credentialSubject":{"id":"did:key:z6MkDemoLearnerPlaceholderXXXXXXXXXXXXXXXXXXXX","skill":"skill_constitutional_literacy","proficiency":"remember","score":0.82}}',
+     'b2c3d4e5f60718293a4b5c6d7e8f900111223344556677889900aabbccddeeff',
+     'urn:status-list:seed-author-5-revoke-2026', 0, 0, '2026-04-08T11:20:00Z'),
+
+    ('urn:uuid:cred-demo-ml-regression',
+     'did:key:z6MkSeedAuthor2DataCryptoInstructorXXXXXXXXXXXX',
+     'did:key:z6MkDemoLearnerPlaceholderXXXXXXXXXXXXXXXXXXXX',
+     'AssessmentCredential',
+     'skill',
+     'skill_regression',
+     '2026-03-16T11:00:00Z',
+     NULL,
+     '{"@context":["https://www.w3.org/ns/credentials/v2"],"type":["VerifiableCredential","AssessmentCredential"],"issuer":"did:key:z6MkSeedAuthor2DataCryptoInstructorXXXXXXXXXXXX","validFrom":"2026-03-16T11:00:00Z","credentialSubject":{"id":"did:key:z6MkDemoLearnerPlaceholderXXXXXXXXXXXXXXXXXXXX","skill":"skill_regression","proficiency":"remember","score":0.87,"course":"course_ml_foundations"}}',
+     'c3d4e5f607182939abcdef012233445566778899aabbccddee001122334455ff',
+     NULL, NULL, 0, '2026-03-17T09:30:00Z'),
+
+    ('urn:uuid:cred-demo-design-role',
+     'did:key:z6MkSeedAuthor3DesignInstructorXXXXXXXXXXXXXXX',
+     'did:key:z6MkDemoLearnerPlaceholderXXXXXXXXXXXXXXXXXXXX',
+     'RoleCredential',
+     'role',
+     NULL,
+     '2026-03-05T10:00:00Z',
+     NULL,
+     '{"@context":["https://www.w3.org/ns/credentials/v2"],"type":["VerifiableCredential","RoleCredential"],"issuer":"did:key:z6MkSeedAuthor3DesignInstructorXXXXXXXXXXXXXXX","validFrom":"2026-03-05T10:00:00Z","credentialSubject":{"id":"did:key:z6MkDemoLearnerPlaceholderXXXXXXXXXXXXXXXXXXXX","role":"classroom.member","classroom":"class_design_crit"}}',
+     'd4e5f6071829394abcdef0123344556677889900aabbccddee0011223344556',
+     NULL, NULL, 0, '2026-03-05T10:05:00Z'),
+
+    ('urn:uuid:cred-demo-civic-interest',
+     'did:key:z6MkDemoLearnerPlaceholderXXXXXXXXXXXXXXXXXXXX',
+     'did:key:z6MkDemoLearnerPlaceholderXXXXXXXXXXXXXXXXXXXX',
+     'SelfAssertion',
+     'custom',
+     NULL,
+     '2026-04-10T09:00:00Z',
+     NULL,
+     '{"@context":["https://www.w3.org/ns/credentials/v2"],"type":["VerifiableCredential","SelfAssertion"],"issuer":"did:key:z6MkDemoLearnerPlaceholderXXXXXXXXXXXXXXXXXXXX","validFrom":"2026-04-10T09:00:00Z","credentialSubject":{"id":"did:key:z6MkDemoLearnerPlaceholderXXXXXXXXXXXXXXXXXXXX","interest":"civic-tech","description":"Building open-data tools for municipal accountability"}}',
+     'e5f6071829394abcdef0123344556677889900aabbccddeeff001122334455667',
+     NULL, NULL, 0, '2026-04-10T09:00:00Z');
+
+-- Revoked credential: the civics assessment cred gets its bit set
+UPDATE credentials SET revoked = 1, revoked_at = '2026-04-11T12:00:00Z', revocation_reason = 'demo: issuer retracted after review'
+  WHERE id = 'urn:uuid:cred-demo-civics-constitution';
+
+-- Civics skill_assessments (prereq for demo evidence_records below)
+INSERT OR IGNORE INTO skill_assessments (id, skill_id, course_id, assessment_type, proficiency_level, difficulty, trust_factor) VALUES
+    ('sa_civ_001', 'skill_constitutional_literacy', 'course_civics_101', 'quiz',    'remember',  0.45, 1.0),
+    ('sa_civ_002', 'skill_voting_systems',          'course_civics_101', 'quiz',    'apply',     0.60, 1.0),
+    ('sa_civ_003', 'skill_public_finance_literacy', 'course_civics_101', 'project', 'understand',0.50, 1.0),
+    ('sa_013',     'skill_regression',              'course_ml_foundations', 'quiz', 'remember', 0.55, 1.0);
+
+-- Demo learner evidence records. skill_assessment_id links to the
+-- global per-skill assessments (local-first: proofs imply the learner
+-- is the node owner). Records for the demo learner go into the normal
+-- evidence table; no learner_address column exists.
+INSERT OR IGNORE INTO evidence_records (id, skill_assessment_id, skill_id, proficiency_level, score, difficulty, trust_factor, course_id, instructor_address, created_at) VALUES
+    ('ev_demo_01', 'sa_002',     'skill_big_o',                   'analyze',   0.89, 0.70, 1.0, 'course_algo_101',           'addr_seed_author_1', '2026-01-28T11:30:00'),
+    ('ev_demo_02', 'sa_001',     'skill_arrays',                  'apply',     0.91, 0.60, 1.0, 'course_algo_101',           'addr_seed_author_1', '2026-02-05T15:00:00'),
+    ('ev_demo_03', 'sa_002',     'skill_big_o',                   'analyze',   0.87, 0.72, 1.0, 'course_algo_101',           'addr_seed_author_1', '2026-03-10T10:00:00'),
+    ('ev_demo_04', 'sa_013',     'skill_regression',              'remember',  0.86, 0.55, 1.0, 'course_ml_foundations',     'addr_seed_author_2', '2026-03-16T11:00:00'),
+    ('ev_demo_05', 'sa_005',     'skill_html_css',                'apply',     0.94, 0.48, 1.0, 'course_web_fullstack',      'addr_seed_author_1', '2026-02-06T09:45:00'),
+    ('ev_demo_06', 'sa_010',     'skill_user_research',           'evaluate',  0.82, 0.65, 0.9, 'course_ux_design',          'addr_seed_author_3', '2026-02-20T14:00:00'),
+    ('ev_demo_07', 'sa_civ_001', 'skill_constitutional_literacy', 'remember',  0.84, 0.45, 1.0, 'course_civics_101',         'addr_seed_author_5', '2026-04-08T11:15:00'),
+    ('ev_demo_08', 'sa_civ_002', 'skill_voting_systems',          'apply',     0.81, 0.60, 1.0, 'course_civics_101',         'addr_seed_author_5', '2026-04-09T14:00:00'),
+    ('ev_demo_09', 'sa_civ_003', 'skill_public_finance_literacy', 'understand',0.78, 0.50, 1.0, 'course_civics_101',         'addr_seed_author_5', '2026-04-10T10:00:00'),
+    ('ev_demo_10', 'sa_civ_001', 'skill_constitutional_literacy', 'remember',  0.80, 0.45, 1.0, 'course_civics_101',         'addr_seed_author_5', '2026-04-11T09:30:00'),
+    ('ev_demo_11', 'sa_006',     'skill_javascript',              'apply',     0.88, 0.60, 1.0, 'course_web_fullstack',      'addr_seed_author_1', '2026-02-14T16:00:00'),
+    ('ev_demo_12', 'sa_009',     'skill_symmetric',               'apply',     0.82, 0.70, 1.0, 'course_crypto_101',         'addr_seed_author_2', '2026-04-02T10:30:00');
+
+-- Link demo evidence to demo proofs
+INSERT OR IGNORE INTO skill_proof_evidence (proof_id, evidence_id) VALUES
+    ('proof_demo_big_o',          'ev_demo_01'),
+    ('proof_demo_big_o',          'ev_demo_03'),
+    ('proof_demo_arrays',         'ev_demo_02'),
+    ('proof_demo_regression',     'ev_demo_04'),
+    ('proof_demo_user_research',  'ev_demo_06'),
+    ('proof_demo_constitutional', 'ev_demo_07'),
+    ('proof_demo_constitutional', 'ev_demo_10'),
+    ('proof_demo_voting',         'ev_demo_08');
+
+-- Demo learner's computed skill proofs (per-user)
+INSERT OR IGNORE INTO skill_proofs (id, skill_id, proficiency_level, confidence, evidence_count) VALUES
+    ('proof_demo_big_o',           'skill_big_o',                   'analyze',   0.88, 2),
+    ('proof_demo_arrays',          'skill_arrays',                  'apply',     0.91, 1),
+    ('proof_demo_regression',      'skill_regression',              'remember',  0.86, 1),
+    ('proof_demo_user_research',   'skill_user_research',           'evaluate',  0.82, 1),
+    ('proof_demo_constitutional',  'skill_constitutional_literacy', 'remember',  0.82, 2),
+    ('proof_demo_voting',          'skill_voting_systems',          'apply',     0.81, 1);
+
+-- Learner-role reputation assertions for the demo user (will be
+-- rewritten to the real wallet by bind_current_user_to_seed).
+INSERT OR IGNORE INTO reputation_assertions (id, actor_address, role, skill_id, proficiency_level, score, evidence_count, median_impact, impact_p25, impact_p75, learner_count, impact_variance, window_start, window_end, computation_spec) VALUES
+    ('rep_demo_01', 'addr_demo_learner', 'learner', 'skill_big_o',                   'analyze',  0.88, 2, 0.0, 0.0, 0.0, 0, 0.002, '2026-01-01T00:00:00', '2026-04-01T00:00:00', 'v2'),
+    ('rep_demo_02', 'addr_demo_learner', 'learner', 'skill_arrays',                  'apply',    0.91, 1, 0.0, 0.0, 0.0, 0, 0.003, '2026-01-01T00:00:00', '2026-04-01T00:00:00', 'v2'),
+    ('rep_demo_03', 'addr_demo_learner', 'learner', 'skill_constitutional_literacy', 'remember', 0.82, 2, 0.0, 0.0, 0.0, 0, 0.002, '2026-04-01T00:00:00', '2026-04-15T00:00:00', 'v2');
+
+-- Additional instructor-impact deltas attributing instructors to the
+-- demo learner's growth (Reputation dashboard instructor-view detail).
+INSERT OR IGNORE INTO reputation_impact_deltas (id, assertion_id, learner_address, delta, attribution, proof_id) VALUES
+    ('rid_demo_01', 'rep_002', 'addr_demo_learner', 0.08, 1.0, 'proof_demo_big_o'),
+    ('rid_demo_02', 'rep_001', 'addr_demo_learner', 0.07, 1.0, 'proof_demo_arrays'),
+    ('rid_demo_03', 'rep_011', 'addr_demo_learner', 0.06, 1.0, 'proof_demo_constitutional');
+
+-- Derived skill states — materialised aggregation output per (subject, skill).
+-- The aggregation engine would normally write these; we inline a realistic
+-- snapshot so the skill graph can render filled-in progress without the
+-- user having to trigger a recompute.
+INSERT OR IGNORE INTO derived_skill_states (subject_did, skill_id, calculation_version, raw_score, confidence, trust_score, level, evidence_mass, unique_issuer_clusters, active_evidence_count, state_json, computed_at) VALUES
+    ('did:key:z6MkDemoLearnerPlaceholderXXXXXXXXXXXXXXXXXXXX', 'skill_big_o',                   'v2', 0.88, 0.85, 0.90, 4, 1.8, 1, 2, '{"level":4,"raw":0.88,"confidence":0.85,"last_updated":"2026-03-10T10:00:00Z"}', '2026-04-11T09:00:00Z'),
+    ('did:key:z6MkDemoLearnerPlaceholderXXXXXXXXXXXXXXXXXXXX', 'skill_arrays',                  'v2', 0.91, 0.80, 0.90, 3, 1.0, 1, 1, '{"level":3,"raw":0.91,"confidence":0.80,"last_updated":"2026-02-05T15:00:00Z"}', '2026-04-11T09:00:00Z'),
+    ('did:key:z6MkDemoLearnerPlaceholderXXXXXXXXXXXXXXXXXXXX', 'skill_regression',              'v2', 0.86, 0.75, 0.90, 1, 0.9, 1, 1, '{"level":1,"raw":0.86,"confidence":0.75,"last_updated":"2026-03-16T11:00:00Z"}', '2026-04-11T09:00:00Z'),
+    ('did:key:z6MkDemoLearnerPlaceholderXXXXXXXXXXXXXXXXXXXX', 'skill_html_css',                'v2', 0.94, 0.78, 0.90, 3, 1.0, 1, 1, '{"level":3,"raw":0.94,"confidence":0.78,"last_updated":"2026-02-06T09:45:00Z"}', '2026-04-11T09:00:00Z'),
+    ('did:key:z6MkDemoLearnerPlaceholderXXXXXXXXXXXXXXXXXXXX', 'skill_user_research',           'v2', 0.82, 0.72, 0.85, 5, 0.9, 1, 1, '{"level":5,"raw":0.82,"confidence":0.72,"last_updated":"2026-02-20T14:00:00Z"}', '2026-04-11T09:00:00Z'),
+    ('did:key:z6MkDemoLearnerPlaceholderXXXXXXXXXXXXXXXXXXXX', 'skill_constitutional_literacy', 'v2', 0.82, 0.80, 0.90, 1, 1.8, 1, 2, '{"level":1,"raw":0.82,"confidence":0.80,"last_updated":"2026-04-11T09:30:00Z"}', '2026-04-11T09:30:00Z'),
+    ('did:key:z6MkDemoLearnerPlaceholderXXXXXXXXXXXXXXXXXXXX', 'skill_voting_systems',          'v2', 0.81, 0.70, 0.90, 3, 0.9, 1, 1, '{"level":3,"raw":0.81,"confidence":0.70,"last_updated":"2026-04-09T14:00:00Z"}', '2026-04-11T09:30:00Z'),
+    ('did:key:z6MkDemoLearnerPlaceholderXXXXXXXXXXXXXXXXXXXX', 'skill_public_finance_literacy', 'v2', 0.78, 0.65, 0.85, 2, 0.9, 1, 1, '{"level":2,"raw":0.78,"confidence":0.65,"last_updated":"2026-04-10T10:00:00Z"}', '2026-04-11T09:30:00Z');
+
+-- Bind demo-learner integrity sessions via placeholder; keeps the
+-- Sentinel dashboard populated until bind_current_user_to_seed fires.
+
+-- ============================================================
+-- P12: MULTI-DEVICE SYNC (second paired device + recent activity log)
+-- ============================================================
+INSERT OR IGNORE INTO devices (id, device_name, platform, first_seen, last_synced, is_local, peer_id) VALUES
+    ('dev_demo_local',  'This Device',         'macos',   '2026-01-10T09:00:00', '2026-04-14T09:00:00', 1, '12D3KooWDemoLocalPlaceholderPeerIdXXXXXXXXXXXXX'),
+    ('dev_demo_mobile', 'Pixel 9 Pro (paired)','android', '2026-03-02T11:15:00', '2026-04-14T08:42:00', 0, '12D3KooWDemoMobilePlaceholderPeerIdXXXXXXXXXXXX');
+
+INSERT OR IGNORE INTO sync_state (device_id, table_name, last_synced_at, row_count) VALUES
+    ('dev_demo_mobile', 'enrollments',        '2026-04-14T08:42:00', 4),
+    ('dev_demo_mobile', 'element_progress',   '2026-04-14T08:42:00', 40),
+    ('dev_demo_mobile', 'course_notes',       '2026-04-13T21:10:00', 3),
+    ('dev_demo_mobile', 'credentials',        '2026-04-14T08:42:00', 5),
+    ('dev_demo_mobile', 'evidence_records',   '2026-04-14T08:42:00', 12);
+
+INSERT OR IGNORE INTO sync_log (entity_type, entity_id, direction, peer_id, synced_at) VALUES
+    ('catalog',          'course_civics_101',                  'received', '12D3KooWDemoMobilePlaceholderPeerIdXXXXXXXXXXXX', '2026-04-12T09:30:00'),
+    ('evidence',         'ev_demo_07',                         'sent',     '12D3KooWDemoMobilePlaceholderPeerIdXXXXXXXXXXXX', '2026-04-13T10:00:00'),
+    ('credentials',      'urn:uuid:cred-demo-civics-constitution', 'sent', '12D3KooWDemoMobilePlaceholderPeerIdXXXXXXXXXXXX', '2026-04-13T10:02:00'),
+    ('taxonomy',         'sf_civics',                          'sent',     '12D3KooWDemoMobilePlaceholderPeerIdXXXXXXXXXXXX', '2026-04-13T10:05:00'),
+    ('evidence',         'ev_demo_08',                         'sent',     '12D3KooWDemoMobilePlaceholderPeerIdXXXXXXXXXXXX', '2026-04-14T08:30:00'),
+    ('catalog',          'course_tut_civ_constitution',        'received', '12D3KooWDemoMobilePlaceholderPeerIdXXXXXXXXXXXX', '2026-04-14T08:41:00');
+
+-- ============================================================
+-- P13: ATTESTATION REQUIREMENTS (high-stakes skills)
+-- ============================================================
+INSERT OR IGNORE INTO attestation_requirements (skill_id, proficiency_level, required_attestors, dao_id, set_by_proposal) VALUES
+    ('skill_election_integrity',        'evaluate',  2, 'dao_civics', NULL),
+    ('skill_signatures',                'apply',     2, 'dao_cyber',  NULL),
+    ('skill_constitutional_literacy',   'analyze',   2, 'dao_civics', NULL);
+
+-- ============================================================
+-- P14: PINBOARD OBSERVATIONS (opt-in content pinning commitments)
+-- ============================================================
+INSERT OR IGNORE INTO pinboard_observations (id, pinner_did, subject_did, scope, commitment_since, signature, public_key) VALUES
+    ('pb_demo_01',
+     'did:key:z6MkDemoLearnerPlaceholderXXXXXXXXXXXXXXXXXXXX',
+     'course_algo_101',
+     '["courses","element_media"]',
+     '2026-02-20T10:00:00Z',
+     'seed_pinboard_sig_demo_01',
+     '66f60617236465666768797b8c9d8e8f706667685858789a8b9c1d2e7f801'),
+    ('pb_demo_02',
+     'did:key:z6MkDemoLearnerPlaceholderXXXXXXXXXXXXXXXXXXXX',
+     'course_civics_101',
+     '["courses","element_media","opinions"]',
+     '2026-04-12T09:00:00Z',
+     'seed_pinboard_sig_demo_02',
+     '66f60617236465666768797b8c9d8e8f706667685858789a8b9c1d2e7f801'),
+    ('pb_peer_01',
+     'did:key:z6MkSeedPeerEducator1XXXXXXXXXXXXXXXXXXXXXXXX',
+     'course_ml_foundations',
+     '["courses"]',
+     '2026-03-10T14:00:00Z',
+     'seed_pinboard_sig_peer_01',
+     '77aabbccddeeff00112233445566778899aabbccddeeff001122334455667788'),
+    ('pb_peer_02',
+     'did:key:z6MkSeedPeerEducator2XXXXXXXXXXXXXXXXXXXXXXXX',
+     'course_crypto_101',
+     '["courses","element_media"]',
+     '2026-03-18T16:00:00Z',
+     'seed_pinboard_sig_peer_02',
+     '88bbccddeeff001122334455667788990011223344556677889900aabbccddee');
+
+-- ============================================================
+-- P15: CONTENT PROVENANCE — mark all seeded content as AI-generated
+-- ============================================================
+UPDATE courses  SET provenance = 'ai_generated' WHERE provenance IS NULL;
+UPDATE opinions SET provenance = 'ai_generated' WHERE provenance IS NULL;
 
 -- Re-enable FK checks
 PRAGMA foreign_keys = ON;
@@ -1485,19 +2017,19 @@ mod tests {
             .conn()
             .query_row("SELECT COUNT(*) FROM subject_fields", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(fields, 6);
+        assert_eq!(fields, 7);
 
         let subjects: i64 = db
             .conn()
             .query_row("SELECT COUNT(*) FROM subjects", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(subjects, 18);
+        assert_eq!(subjects, 22);
 
         let skills: i64 = db
             .conn()
             .query_row("SELECT COUNT(*) FROM skills", [], |r| r.get(0))
             .unwrap();
-        assert!(skills >= 70, "expected >= 70 skills, got {}", skills);
+        assert!(skills >= 85, "expected >= 85 skills, got {}", skills);
 
         let prereqs: i64 = db
             .conn()
@@ -1523,13 +2055,19 @@ mod tests {
             .conn()
             .query_row("SELECT COUNT(*) FROM governance_daos", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(daos, 6);
+        assert_eq!(daos, 7);
 
+        // Courses: 6 original full courses + 1 civics + 5 tutorials (backfill)
+        // + 2 civics tutorials = 14 total when backfill runs on first seed.
         let courses: i64 = db
             .conn()
             .query_row("SELECT COUNT(*) FROM courses", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(courses, 6);
+        assert!(
+            courses >= 7,
+            "expected >= 7 full courses (full + civics + tutorials), got {}",
+            courses
+        );
 
         let chapters: i64 = db
             .conn()
@@ -1575,7 +2113,8 @@ mod tests {
         db.run_migrations().expect("migrate");
         seed_if_empty(db.conn()).expect("seed");
 
-        // Check thumbnail_svg
+        // Check thumbnail_svg — 7 full courses (6 original + civics) have SVGs.
+        // Tutorials intentionally don't.
         let svg_count: i64 = db
             .conn()
             .query_row(
@@ -1584,9 +2123,9 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(svg_count, 6, "all 6 courses should have thumbnail_svg");
+        assert_eq!(svg_count, 7, "7 full courses should have thumbnail_svg");
 
-        // Check author_name
+        // Check author_name on all full + tutorial courses
         let author_count: i64 = db
             .conn()
             .query_row(
@@ -1595,7 +2134,11 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(author_count, 6, "all 6 courses should have author_name");
+        assert!(
+            author_count >= 7,
+            "expected >= 7 courses with author_name, got {}",
+            author_count
+        );
 
         // Check a specific SVG starts correctly
         let svg: String = db
@@ -1629,6 +2172,197 @@ mod tests {
             .conn()
             .query_row("SELECT COUNT(*) FROM subject_fields", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(fields, 6);
+        assert_eq!(fields, 7);
+    }
+
+    #[test]
+    fn civics_content_is_seeded() {
+        let db = Database::open_in_memory().expect("open");
+        db.run_migrations().expect("migrate");
+        seed_if_empty(db.conn()).expect("seed");
+
+        let civics_field: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM subject_fields WHERE id = 'sf_civics'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(civics_field, 1, "civics subject field must exist");
+
+        let civics_skills: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM skills s JOIN subjects sub ON s.subject_id = sub.id WHERE sub.subject_field_id = 'sf_civics'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(
+            civics_skills >= 15,
+            "expected >= 15 civics skills, got {}",
+            civics_skills
+        );
+
+        let civics_course: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM courses WHERE id = 'course_civics_101'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(civics_course, 1, "Civic Sense course must exist");
+
+        let civics_tutorials: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM courses WHERE kind = 'tutorial' AND author_address = 'addr_seed_author_5'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(civics_tutorials, 2, "2 civics tutorials must exist");
+    }
+
+    #[test]
+    fn ai_generated_provenance_is_set() {
+        let db = Database::open_in_memory().expect("open");
+        db.run_migrations().expect("migrate");
+        seed_if_empty(db.conn()).expect("seed");
+
+        let courses_unset: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM courses WHERE provenance IS NULL",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            courses_unset, 0,
+            "all seeded courses should have provenance set"
+        );
+
+        let opinions_unset: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM opinions WHERE provenance IS NULL",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            opinions_unset, 0,
+            "all seeded opinions should have provenance set"
+        );
+    }
+
+    #[test]
+    fn demo_learner_state_is_seeded() {
+        let db = Database::open_in_memory().expect("open");
+        db.run_migrations().expect("migrate");
+        seed_if_empty(db.conn()).expect("seed");
+
+        let creds: i64 = db
+            .conn()
+            .query_row("SELECT COUNT(*) FROM credentials", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(creds, 5, "5 demo VCs should be seeded");
+
+        let demo_proofs: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM skill_proofs WHERE id LIKE 'proof_demo_%'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(
+            demo_proofs >= 6,
+            "expected >= 6 demo proofs, got {demo_proofs}"
+        );
+
+        let revoked: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM credentials WHERE revoked = 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(revoked, 1, "1 demo VC should be marked revoked");
+
+        let devices: i64 = db
+            .conn()
+            .query_row("SELECT COUNT(*) FROM devices", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(devices, 2, "2 devices should be seeded");
+
+        let attest_reqs: i64 = db
+            .conn()
+            .query_row("SELECT COUNT(*) FROM attestation_requirements", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(
+            attest_reqs, 3,
+            "3 attestation requirements should be seeded"
+        );
+
+        let pinboard: i64 = db
+            .conn()
+            .query_row("SELECT COUNT(*) FROM pinboard_observations", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert!(
+            pinboard >= 4,
+            "expected >= 4 pinboard observations, got {pinboard}"
+        );
+    }
+
+    #[test]
+    fn bind_current_user_rewrites_learner_rows() {
+        let db = Database::open_in_memory().expect("open");
+        db.run_migrations().expect("migrate");
+        seed_if_empty(db.conn()).expect("seed");
+
+        // Before bind: addr_demo_learner should have learner-role assertions.
+        let before: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM reputation_assertions WHERE actor_address = 'addr_demo_learner'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(before >= 3, "expected demo learner assertions before bind");
+
+        // Populate local_identity and bind.
+        db.conn()
+            .execute(
+                "INSERT INTO local_identity (id, stake_address, payment_address) VALUES (1, 'stake_test_user_1', 'addr_test_user_1')",
+                [],
+            )
+            .expect("insert identity");
+        let rewritten = bind_current_user_to_seed(db.conn()).expect("bind");
+        assert!(rewritten >= before as usize);
+
+        // After: no demo rows remain.
+        let after: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM reputation_assertions WHERE actor_address = 'addr_demo_learner'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(after, 0, "no demo sentinel rows should remain after bind");
+
+        // Idempotent second call.
+        let again = bind_current_user_to_seed(db.conn()).expect("bind2");
+        assert_eq!(again, 0);
     }
 }

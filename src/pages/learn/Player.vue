@@ -3,7 +3,7 @@ import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { useSentinel } from '@/composables/useSentinel'
-import { AppButton } from '@/components/ui'
+import { AppButton, ProvenanceBadge } from '@/components/ui'
 import TextContent from '@/components/course/TextContent.vue'
 import VideoPlayer from '@/components/course/VideoPlayer.vue'
 import PdfViewer from '@/components/course/PdfViewer.vue'
@@ -578,7 +578,10 @@ function formatFileSize(bytes: number): string {
 
           <!-- Course title + progress -->
           <div class="space-y-2">
-            <h2 class="text-sm font-semibold text-foreground leading-snug">{{ course.title }}</h2>
+            <div class="flex items-start justify-between gap-2">
+              <h2 class="text-sm font-semibold text-foreground leading-snug">{{ course.title }}</h2>
+              <ProvenanceBadge :provenance="course.provenance" />
+            </div>
             <div class="space-y-1">
               <div class="flex items-center justify-between text-xs text-muted-foreground">
                 <span>{{ completedElements }} of {{ totalElements }} complete</span>

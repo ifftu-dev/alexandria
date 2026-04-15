@@ -3,6 +3,7 @@ import { ref, onMounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import type { Course } from '@/types'
 import { sanitizeSvg } from '@/utils/sanitize'
+import { ProvenanceBadge } from '@/components/ui'
 
 interface Props {
   course: Course
@@ -93,7 +94,7 @@ onMounted(async () => {
       <!-- Spacer to push author down -->
       <div class="flex-1" />
 
-      <!-- Author -->
+      <!-- Author + provenance -->
       <div class="cc-author">
         <div class="cc-avatar">
           <span>{{ (course.author_name || 'A').charAt(0).toUpperCase() }}</span>
@@ -101,6 +102,7 @@ onMounted(async () => {
         <span class="cc-author__name">
           {{ course.author_name || (course.author_address ? course.author_address.slice(0, 16) + '...' : 'Unknown') }}
         </span>
+        <ProvenanceBadge :provenance="course.provenance" class="cc-author__badge" />
       </div>
     </div>
   </router-link>
@@ -315,5 +317,10 @@ onMounted(async () => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.cc-author__badge {
+  margin-left: auto;
+  flex-shrink: 0;
 }
 </style>
