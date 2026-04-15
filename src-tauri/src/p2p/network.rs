@@ -1499,8 +1499,9 @@ mod tests {
         assert!(status.peer_id.is_some());
         // 6 pre-VC app topics (catalog, evidence, taxonomy, governance,
         // profiles, opinions) + peer exchange + 4 VC-migration topics
-        // (vc-did, vc-status, vc-presentation, pinboard) = 11.
-        assert_eq!(status.subscribed_topics.len(), 11);
+        // (vc-did, vc-status, vc-presentation, pinboard) + 2 plugin-system
+        // topics (plugins, plugin-attestations) = 13.
+        assert_eq!(status.subscribed_topics.len(), 13);
         assert_eq!(status.connected_peers, 0); // No peers yet
         assert_eq!(status.nat_status, NatState::Unknown); // NAT unknown initially
         assert!(status.relay_addresses.is_empty()); // No relays yet

@@ -1,0 +1,14 @@
+{
+  "id": "did:key:z6MkvDqGT54cXesYGvABpF1UapVNwjCqRcafi4Px6Thv5T3Z#music-trainer",
+  "version": "0.1.0",
+  "api_version": "1",
+  "host_min_version": "0.1.0",
+  "name": "Music Instrument Trainer",
+  "description": "Canonical interactive demo: shows a target note, requests microphone, and visualises live audio amplitude. Demonstrates the capability-prompt flow end-to-end.",
+  "author_did": "did:key:z6MkvDqGT54cXesYGvABpF1UapVNwjCqRcafi4Px6Thv5T3Z",
+  "kinds": ["interactive"],
+  "capabilities": ["microphone"],
+  "subject_tags": ["music", "demo"],
+  "platforms": ["macos", "windows", "linux", "android"],
+  "entry": "ui/index.html"
+}

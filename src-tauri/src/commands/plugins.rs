@@ -15,11 +15,12 @@ use crate::crypto::hash::entity_id;
 use crate::crypto::wallet;
 use crate::db::Database;
 use crate::domain::plugin::{
-    InstalledPlugin, PluginCapability, PluginManifest, PluginPermissionRecord,
+    InstalledPlugin, PluginAttestationEvent, PluginAttestationStatus, PluginCapability,
+    PluginCatalogEntry, PluginManifest, PluginPermissionRecord,
 };
-use crate::plugins::registry;
 #[cfg(desktop)]
 use crate::plugins::wasm_runtime::{GraderBudgets, ScoreRecord};
+use crate::plugins::{attestation, catalog, registry};
 use crate::AppState;
 
 /// Install a plugin from a directory on the user's local filesystem.
@@ -348,4 +349,60 @@ fn check_rate_limit(state: &State<'_, AppState>, command: &str) -> Result<(), St
         .lock()
         .map_err(|_| "rate limiter poisoned".to_string())?;
     limiter.check(command)
+}
+
+// ---- Phase 3: discovery + DAO attestation IPC -----------------------------
+
+/// List every plugin known to this node — built-ins + locally-installed +
+/// any plugins seen on the `/alexandria/plugins/1.0` gossip topic. The
+/// browse UI reads from this.
+#[tauri::command]
+pub async fn plugin_browse_catalog(
+    state: State<'_, AppState>,
+) -> Result<Vec<PluginCatalogEntry>, String> {
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
+
+    catalog::list_catalog(db)
+}
+
+/// Look up the Plugin DAO attestation status for a single plugin CID.
+/// Returns `attested = true` when a multi-sig committee attestation row
+/// exists in `plugin_attestations`. Active advisory notes are surfaced
+/// as well — they don't affect attestation status, but the UI should
+/// display them prominently.
+#[tauri::command]
+pub async fn plugin_attestation_status(
+    state: State<'_, AppState>,
+    plugin_cid: String,
+) -> Result<PluginAttestationStatus, String> {
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
+
+    attestation::status_for(db, &plugin_cid)
+}
+
+/// Submit a fully-formed attestation event for verification + storage.
+/// The host validates the multi-sig threshold against the embedded
+/// committee pubkeys before persisting. Used by the gossip handler when
+/// a new attestation arrives on `/alexandria/plugin-attestations/1.0`,
+/// and by tests / CLI tooling. Idempotent — duplicates are no-ops.
+#[tauri::command]
+pub async fn plugin_ingest_attestation(
+    state: State<'_, AppState>,
+    event: PluginAttestationEvent,
+) -> Result<(), String> {
+    attestation::verify_event(&event, &attestation::AttestationPolicy::default())?;
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
+    attestation::persist_event(db, &event)
 }

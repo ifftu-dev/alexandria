@@ -19,8 +19,18 @@ use crate::plugins::{manifest, verifier};
 
 const MANIFEST_FILENAME: &str = "manifest.json";
 const SIGNATURE_FILENAME: &str = "manifest.sig";
+const GRADER_FILENAME: &str = "grader.wasm";
 
 pub const SOURCE_LOCAL_FILE: &str = "local_file";
+pub const SOURCE_BUILTIN: &str = "builtin";
+
+/// Aggregate result of an `install_all` builtin pass. Logs only — the
+/// caller doesn't take action on these counts in v1.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct InstallStats {
+    pub installed: usize,
+    pub failed: usize,
+}
 
 /// Install a plugin from an already-extracted directory on disk. In Phase 1
 /// the caller hands over the directory path directly (the app file picker
@@ -124,6 +134,118 @@ pub fn install_from_directory(
         })?;
 
     Ok(record)
+}
+
+/// Install a built-in plugin from in-memory bytes. Phase 2 — the host
+/// binary embeds first-party plugin bundles via `include_bytes!` and
+/// installs them at startup so they're available without P2P fetch.
+///
+/// Distinct from [`install_from_directory`] in two ways:
+///  * No `manifest.sig` — the binary itself is the trust root for
+///    built-ins, so signature verification would be tautological.
+///  * Source is recorded as `SOURCE_BUILTIN` so the UI can distinguish.
+///
+/// Idempotent: same `plugin_cid` (BLAKE3 of manifest bytes) → no-op.
+pub fn install_builtin(
+    db: &Database,
+    plugins_dir: &Path,
+    bundle: &BuiltinBundle<'_>,
+) -> Result<InstalledPlugin, String> {
+    let manifest = manifest::parse_and_validate(bundle.manifest_json)?;
+    let plugin_cid = verifier::compute_plugin_cid(bundle.manifest_json);
+
+    if let Some(existing) = get_installed(db, &plugin_cid)? {
+        return Ok(existing);
+    }
+
+    let dest_dir = plugins_dir.join(&plugin_cid);
+    if dest_dir.exists() {
+        fs::remove_dir_all(&dest_dir)
+            .map_err(|e| format!("failed to clean stale builtin dir: {e}"))?;
+    }
+    fs::create_dir_all(&dest_dir)
+        .map_err(|e| format!("failed to create builtin plugin dir: {e}"))?;
+
+    fs::write(dest_dir.join(MANIFEST_FILENAME), bundle.manifest_json)
+        .map_err(|e| format!("failed to write builtin manifest: {e}"))?;
+
+    if let Some(grader_bytes) = bundle.grader_wasm {
+        // The manifest's grader.cid must match the actual bytes — same
+        // sanity check the grade IPC enforces. A mismatch here means
+        // the manifest is stale relative to the embedded grader.
+        let computed = blake3::hash(grader_bytes).to_hex().to_string();
+        let declared = manifest
+            .grader
+            .as_ref()
+            .map(|g| g.cid.as_str())
+            .unwrap_or("");
+        if !declared.is_empty() && declared != computed {
+            return Err(format!(
+                "builtin grader hash mismatch: manifest declared {declared}, embedded is {computed}"
+            ));
+        }
+        fs::write(dest_dir.join(GRADER_FILENAME), grader_bytes)
+            .map_err(|e| format!("failed to write builtin grader: {e}"))?;
+    }
+
+    for (rel_path, bytes) in bundle.ui_files {
+        let dest_path = dest_dir.join(rel_path);
+        if let Some(parent) = dest_path.parent() {
+            fs::create_dir_all(parent)
+                .map_err(|e| format!("failed to create builtin ui subdir: {e}"))?;
+        }
+        // Same path-traversal guard as install_from_directory.
+        if rel_path.starts_with('/') || rel_path.contains("..") {
+            return Err(format!("invalid builtin ui path '{rel_path}'"));
+        }
+        fs::write(&dest_path, bytes)
+            .map_err(|e| format!("failed to write builtin ui file '{rel_path}': {e}"))?;
+    }
+
+    let record = InstalledPlugin {
+        plugin_cid: plugin_cid.clone(),
+        name: manifest.name.clone(),
+        version: manifest.version.clone(),
+        author_did: manifest.author_did.clone(),
+        install_path: dest_dir.to_string_lossy().to_string(),
+        source: SOURCE_BUILTIN.to_string(),
+        manifest_json: String::from_utf8(bundle.manifest_json.to_vec())
+            .map_err(|e| format!("builtin manifest is not UTF-8: {e}"))?,
+        installed_at: chrono::Utc::now().to_rfc3339(),
+    };
+
+    db.conn()
+        .execute(
+            "INSERT INTO plugin_installed \
+             (plugin_cid, name, version, author_did, install_path, source, manifest_json, installed_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                record.plugin_cid,
+                record.name,
+                record.version,
+                record.author_did,
+                record.install_path,
+                record.source,
+                record.manifest_json,
+                record.installed_at,
+            ],
+        )
+        .map_err(|e| {
+            let _ = fs::remove_dir_all(&dest_dir);
+            format!("failed to record builtin install: {e}")
+        })?;
+
+    Ok(record)
+}
+
+/// Static descriptor of a built-in plugin bundle. The host embeds these
+/// via `include_bytes!`; see `src/plugins/builtins.rs`.
+pub struct BuiltinBundle<'a> {
+    /// Identifier for logs/errors only — the canonical id is the manifest's.
+    pub slug: &'a str,
+    pub manifest_json: &'a [u8],
+    pub grader_wasm: Option<&'a [u8]>,
+    pub ui_files: &'a [(&'a str, &'a [u8])],
 }
 
 /// Look up a single installed plugin by CID.

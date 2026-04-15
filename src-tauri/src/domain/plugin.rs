@@ -168,3 +168,113 @@ pub struct PluginPermissionRecord {
     /// ISO timestamp; `None` for `"always"`.
     pub granted_until: Option<String>,
 }
+
+// ---- Phase 3: plugin discovery + DAO attestation ------------------------
+
+/// Plugin announcement payload broadcast on `/alexandria/plugins/1.0`.
+///
+/// Authors send one of these per published plugin version. The full bundle
+/// bytes are *not* on the gossip topic — only the manifest CID + summary
+/// metadata. Receivers fetch the bundle on demand via the iroh blob store
+/// when the user clicks Install.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PluginAnnouncement {
+    pub plugin_cid: String,
+    pub manifest_cid: String,
+    pub author_did: String,
+    pub name: String,
+    pub version: String,
+    pub api_version: String,
+    pub description: Option<String>,
+    pub kinds: Vec<PluginKind>,
+    pub capabilities: Vec<PluginCapability>,
+    pub subject_tags: Vec<String>,
+    pub platforms: Vec<String>,
+    pub has_grader: bool,
+    pub grader_cid: Option<String>,
+    /// Author-stamped publish time (ISO-8601). Receivers compare against
+    /// any existing row to keep the latest announcement.
+    pub announced_at: String,
+}
+
+/// A row in the local `plugin_catalog` table — what the discovery UI reads.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PluginCatalogEntry {
+    pub plugin_cid: String,
+    pub name: String,
+    pub version: String,
+    pub author_did: String,
+    pub description: Option<String>,
+    pub api_version: String,
+    pub kinds: Vec<PluginKind>,
+    pub capabilities: Vec<PluginCapability>,
+    pub subject_tags: Vec<String>,
+    pub platforms: Vec<String>,
+    pub has_grader: bool,
+    pub grader_cid: Option<String>,
+    /// `"gossip"` | `"builtin"` | `"local"`.
+    pub source: String,
+    pub announced_at: String,
+    pub last_seen_at: String,
+}
+
+/// Plugin DAO attestation event broadcast on
+/// `/alexandria/plugin-attestations/1.0`. A multi-sig committee binds a
+/// `(plugin_cid, grader_cid)` pair as credential-eligible.
+///
+/// `signatures` is a list of per-member Ed25519 signatures over
+/// `BLAKE3(plugin_cid || grader_cid || canonical_attestation_terms_json)`.
+/// Verification requires N-of-M signatures from the listed
+/// `committee_pubkeys` to validate, where N is the policy-defined
+/// threshold (default 5-of-7; see `plugins::attestation`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PluginAttestationEvent {
+    pub plugin_cid: String,
+    pub grader_cid: String,
+    /// JSON object with freeform terms — the canonical bytes of this
+    /// field (serde_json::to_vec) are part of the signed message.
+    pub attestation_terms: serde_json::Value,
+    /// Committee members' Ed25519 public keys (32-byte hex). The
+    /// (committee_pubkeys, threshold) pair *is* the DAO at the moment
+    /// of attestation; key rotation produces a new attestation event.
+    pub committee_pubkeys: Vec<String>,
+    /// Hex-encoded Ed25519 signatures (64 bytes each), one per signer
+    /// who endorsed. Order is paired with `signer_indices`.
+    pub signatures: Vec<String>,
+    /// Indices into `committee_pubkeys` for each signature in `signatures`.
+    pub signer_indices: Vec<u32>,
+    pub issued_at: String,
+}
+
+/// A stored plugin attestation row (mirrors `plugin_attestations`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StoredPluginAttestation {
+    pub plugin_cid: String,
+    pub grader_cid: String,
+    pub attestation_terms: serde_json::Value,
+    pub committee_pubkeys: Vec<String>,
+    pub issued_at: String,
+    pub advisory_kind: Option<String>,
+    pub advisory_message: Option<String>,
+}
+
+/// Verifier-policy view of "is this plugin attested for credentials?"
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PluginAttestationStatus {
+    pub plugin_cid: String,
+    pub attested: bool,
+    /// Some(record) when `attested` is true.
+    pub attestation: Option<StoredPluginAttestation>,
+    /// Active advisories for this plugin — non-blocking but surfaced
+    /// in UI ("known flawed", "deprecated", etc.).
+    pub advisories: Vec<PluginAdvisoryRecord>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PluginAdvisoryRecord {
+    pub id: String,
+    pub plugin_cid: String,
+    pub kind: String,
+    pub message: String,
+    pub issued_at: String,
+}

@@ -19,6 +19,7 @@ import type {
   PluginManifest,
   PluginCapability,
   PluginPermissionRecord,
+  PluginAttestationStatus,
 } from '@/types'
 
 const { invoke } = useLocalApi()
@@ -29,6 +30,9 @@ const installPath = ref('')
 const installing = ref(false)
 const installError = ref<string | null>(null)
 const installSuccess = ref<string | null>(null)
+
+/** Attestation status keyed by plugin_cid, populated alongside `plugins`. */
+const attestation = ref<Record<string, PluginAttestationStatus>>({})
 
 const expandedCid = ref<string | null>(null)
 const expandedManifest = ref<PluginManifest | null>(null)
@@ -43,11 +47,34 @@ async function refresh() {
   loading.value = true
   try {
     plugins.value = await invoke<InstalledPlugin[]>('plugin_list')
+    const lookups = await Promise.all(
+      plugins.value.map((p) =>
+        invoke<PluginAttestationStatus>('plugin_attestation_status', {
+          pluginCid: p.plugin_cid,
+        }).catch(() => null),
+      ),
+    )
+    const next: Record<string, PluginAttestationStatus> = {}
+    plugins.value.forEach((p, i) => {
+      const s = lookups[i]
+      if (s) next[p.plugin_cid] = s
+    })
+    attestation.value = next
   } catch (e) {
     installError.value = `Failed to list plugins: ${e}`
   } finally {
     loading.value = false
   }
+}
+
+function attestationBadge(cid: string): { label: string; variant: 'success' | 'warning' | 'secondary' } {
+  const s = attestation.value[cid]
+  if (!s) return { label: 'Status pending', variant: 'secondary' }
+  if (s.advisories.some((a) => a.kind === 'known_flawed')) {
+    return { label: 'Known flawed', variant: 'warning' }
+  }
+  if (s.attested) return { label: 'DAO attested', variant: 'success' }
+  return { label: 'Unattested', variant: 'secondary' }
 }
 
 async function install() {
@@ -192,10 +219,13 @@ function shortDid(did: string): string {
         >
           <div class="flex items-start justify-between gap-3 p-4">
             <div class="min-w-0 flex-1">
-              <div class="flex items-center gap-2">
+              <div class="flex flex-wrap items-center gap-2">
                 <h3 class="text-sm font-semibold text-foreground">{{ p.name }}</h3>
                 <AppBadge variant="secondary">v{{ p.version }}</AppBadge>
                 <AppBadge variant="secondary">{{ p.source }}</AppBadge>
+                <AppBadge :variant="attestationBadge(p.plugin_cid).variant">
+                  {{ attestationBadge(p.plugin_cid).label }}
+                </AppBadge>
               </div>
               <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
                 <span>Author: <code class="font-mono">{{ shortDid(p.author_did) }}</code></span>

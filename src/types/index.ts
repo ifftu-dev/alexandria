@@ -1411,3 +1411,51 @@ export interface PluginPermissionRecord {
   granted_at: string
   granted_until: string | null
 }
+
+// ---- Phase 3: discovery + DAO attestation ----
+
+/** A row in the local plugin discovery cache. */
+export interface PluginCatalogEntry {
+  plugin_cid: string
+  name: string
+  version: string
+  author_did: string
+  description: string | null
+  api_version: string
+  kinds: PluginKind[]
+  capabilities: PluginCapability[]
+  subject_tags: string[]
+  platforms: string[]
+  has_grader: boolean
+  grader_cid: string | null
+  /** `'gossip'` | `'builtin'` | `'local'` */
+  source: string
+  announced_at: string
+  last_seen_at: string
+}
+
+/** Verifier-policy view of "is this plugin attested?" */
+export interface PluginAttestationStatus {
+  plugin_cid: string
+  attested: boolean
+  attestation: StoredPluginAttestation | null
+  advisories: PluginAdvisoryRecord[]
+}
+
+export interface StoredPluginAttestation {
+  plugin_cid: string
+  grader_cid: string
+  attestation_terms: unknown
+  committee_pubkeys: string[]
+  issued_at: string
+  advisory_kind: string | null
+  advisory_message: string | null
+}
+
+export interface PluginAdvisoryRecord {
+  id: string
+  plugin_cid: string
+  kind: 'deprecated' | 'superseded' | 'known_flawed'
+  message: string
+  issued_at: string
+}

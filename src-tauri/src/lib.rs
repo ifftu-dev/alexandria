@@ -119,6 +119,23 @@ impl AppState {
         }
         log::info!("Encrypted database initialized successfully");
 
+        // Install built-in plugins (Phase 2). Idempotent — same CID ≠
+        // reinstall. Runs synchronously after migrations because both
+        // the dispatcher and any pre-existing course_elements pointing
+        // at builtin plugin CIDs need them to resolve from the very
+        // first render.
+        {
+            let guard = self.db.lock().map_err(|e| e.to_string())?;
+            if let Some(db) = guard.as_ref() {
+                let stats = plugins::builtins::install_all(db, &self.plugins_dir);
+                log::info!(
+                    "builtin plugins: installed={} failed={}",
+                    stats.installed,
+                    stats.failed
+                );
+            }
+        }
+
         // Seed iroh content blobs (videos, PDFs, downloadables) in the
         // background. This requires network IO and the iroh node to be
         // up, so we don't block wallet creation on it — the user can
@@ -830,6 +847,10 @@ pub fn run() {
             // Desktop-only: wasmtime v27 lacks iOS / Android support.
             #[cfg(desktop)]
             commands::plugins::plugin_submit_and_grade,
+            // Phase 3 — P2P discovery + Plugin DAO attestation
+            commands::plugins::plugin_browse_catalog,
+            commands::plugins::plugin_attestation_status,
+            commands::plugins::plugin_ingest_attestation,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
