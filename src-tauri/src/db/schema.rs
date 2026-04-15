@@ -39,6 +39,7 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (29, "vc_credential_suspension", MIGRATION_029),
     (30, "vc_credential_allowlist", MIGRATION_030),
     (31, "content_provenance", MIGRATION_031),
+    (32, "plugin_system_phase1", MIGRATION_032),
 ];
 
 const MIGRATION_001: &str = r#"
@@ -1411,4 +1412,53 @@ const MIGRATION_031: &str = r#"
 -- ============================================================
 ALTER TABLE courses  ADD COLUMN provenance TEXT;
 ALTER TABLE opinions ADD COLUMN provenance TEXT;
+"#;
+
+const MIGRATION_032: &str = r#"
+-- ============================================================
+-- Migration 032: Community plugin system — Phase 1
+-- See /Users/hack/.claude/plans/prancy-bubbling-grove.md
+--
+-- Phase 1 ships: iframe-sandboxed interactive plugins, installed
+-- from a local file (no P2P discovery yet), with a persistent
+-- per-plugin capability consent table. WASM graders, attestations
+-- and Plugin DAO tables arrive in Phases 2–3.
+-- ============================================================
+
+-- Add plugin binding columns to course_elements. All optional; an
+-- element referencing a plugin has element_type = 'plugin' plus
+-- a non-NULL plugin_cid. Built-in elements leave them NULL.
+ALTER TABLE course_elements ADD COLUMN plugin_cid TEXT;
+ALTER TABLE course_elements ADD COLUMN plugin_version TEXT;
+ALTER TABLE course_elements ADD COLUMN plugin_config_cid TEXT;
+
+-- Installed plugins. One row per plugin CID — the bundle is
+-- content-addressed so re-installing the same CID is a no-op.
+CREATE TABLE IF NOT EXISTS plugin_installed (
+    plugin_cid     TEXT PRIMARY KEY,
+    name           TEXT NOT NULL,
+    version        TEXT NOT NULL,
+    author_did     TEXT NOT NULL,
+    install_path   TEXT NOT NULL,   -- filesystem path under app_data/plugins/
+    source         TEXT NOT NULL,   -- 'local_file' | 'p2p' | 'builtin'
+    manifest_json  TEXT NOT NULL,   -- full manifest at install time
+    installed_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_plugin_installed_author
+    ON plugin_installed(author_did);
+
+-- Per-plugin, per-capability consent. Scope is one of:
+--   'once'    — granted for a single session (should be purged on exit,
+--               kept here for audit trail)
+--   'session' — granted for the current vault-unlock session
+--   'always'  — persistent until user revokes
+CREATE TABLE IF NOT EXISTS plugin_permissions (
+    plugin_cid     TEXT NOT NULL REFERENCES plugin_installed(plugin_cid) ON DELETE CASCADE,
+    capability     TEXT NOT NULL,
+    scope          TEXT NOT NULL CHECK (scope IN ('once','session','always')),
+    granted_at     TEXT NOT NULL DEFAULT (datetime('now')),
+    granted_until  TEXT,            -- NULL for 'always'
+    PRIMARY KEY (plugin_cid, capability)
+);
 "#;

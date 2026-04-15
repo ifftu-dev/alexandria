@@ -73,6 +73,15 @@ impl IpcRateLimiter {
             Bucket::new(5, Duration::from_secs(720)),
         );
 
+        // Plugin install: a slow, security-sensitive operation (manifest
+        // parse, signature verify, disk copy). 10 per 10 min is generous
+        // for interactive use and low enough that a script-driven loop
+        // can't wedge the app.
+        buckets.insert(
+            "plugin_install_from_file".to_string(),
+            Bucket::new(10, Duration::from_secs(60)),
+        );
+
         Self { buckets }
     }
 

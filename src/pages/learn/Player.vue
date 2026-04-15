@@ -4,12 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { useSentinel } from '@/composables/useSentinel'
 import { AppButton, ProvenanceBadge } from '@/components/ui'
-import TextContent from '@/components/course/TextContent.vue'
-import VideoPlayer from '@/components/course/VideoPlayer.vue'
-import PdfViewer from '@/components/course/PdfViewer.vue'
-import QuizEngine from '@/components/course/QuizEngine.vue'
-import McqQuestion from '@/components/course/McqQuestion.vue'
-import EssayInput from '@/components/course/EssayInput.vue'
+import { resolveElementBinding, type ElementHostContext } from '@/components/course/elementRegistry'
 import type { Course, Chapter, Element, Enrollment, ElementProgress, UpdateProgressRequest, QuizResult } from '@/types'
 
 const { invoke } = useLocalApi()
@@ -281,22 +276,6 @@ async function markComplete(score?: number) {
   }
 }
 
-function onQuizComplete(result: QuizResult) {
-  markComplete(result.score)
-}
-
-function onMcqComplete(score: number) {
-  markComplete(score)
-}
-
-function onEssayComplete(score: number) {
-  markComplete(score)
-}
-
-function onVideoComplete() {
-  markComplete()
-}
-
 function sanitizeFileName(name: string): string {
   const trimmed = name.trim()
   const safe = trimmed.replace(/[\\/:*?"<>|]/g, '-').replace(/\s+/g, ' ')
@@ -463,11 +442,26 @@ function elementTypeLabel(elementType: string): string {
   }
 }
 
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-}
+// Element dispatch — see alexandria/src/components/course/elementRegistry.ts
+const elementBinding = computed(() =>
+  currentElement.value ? resolveElementBinding(currentElement.value.element_type) : null,
+)
+
+const elementHostContext = computed<ElementHostContext | null>(() => {
+  const el = currentElement.value
+  if (!el) return null
+  return {
+    element: el,
+    isCompleted: elementStatus(el.id) === 'completed',
+    downloading: downloadingElementId.value === el.id,
+    downloadError: downloadError.value,
+    onDownload: onDownloadClick,
+    onComplete: () => { void markComplete() },
+    onScoredComplete: (score: number) => { void markComplete(score) },
+    onQuizComplete: (result: QuizResult) => { void markComplete(result.score) },
+    elementTypeLabel,
+  }
+})
 
 </script>
 
@@ -773,167 +767,16 @@ function formatFileSize(bytes: number): string {
 
             <!-- ============================== -->
             <!-- CONTENT RENDERERS              -->
+            <!-- Dispatched via elementRegistry. Phase 0 of plugin system. -->
             <!-- ============================== -->
             <div class="mb-8 rounded-2xl border border-border/70 bg-card/60 p-4 md:p-6 shadow-[0_1px_0_rgba(255,255,255,0.04),0_8px_28px_rgba(0,0,0,0.08)]">
-              <!-- Video -->
-              <VideoPlayer
-                v-if="currentElement.element_type === 'video'"
-                :key="`video-${activeChapter}-${activeElement}`"
-                :content-cid="currentElement.content_cid"
-                :title="currentElement.title"
-                @complete="onVideoComplete"
+              <component
+                :is="elementBinding!.component"
+                v-if="elementBinding && elementHostContext"
+                :key="`${currentElement.element_type}-${activeChapter}-${activeElement}`"
+                v-bind="elementBinding.props(elementHostContext)"
+                v-on="elementBinding.events(elementHostContext)"
               />
-
-              <!-- Text/Reading -->
-              <TextContent
-                v-else-if="currentElement.element_type === 'text'"
-                :key="`text-${activeChapter}-${activeElement}`"
-                :content-cid="currentElement.content_cid"
-                :content-inline="currentElement.content_inline"
-                @complete="markComplete()"
-              />
-
-              <!-- PDF -->
-              <PdfViewer
-                v-else-if="currentElement.element_type === 'pdf'"
-                :key="`pdf-${activeChapter}-${activeElement}`"
-                :content-cid="currentElement.content_cid"
-                :page-count="(currentElement as any).page_count"
-                @complete="markComplete()"
-              />
-
-              <!-- Downloadable -->
-              <div
-                v-else-if="currentElement.element_type === 'downloadable'"
-                :key="`dl-${activeChapter}-${activeElement}`"
-                class="rounded-xl border border-border bg-card p-8"
-              >
-                <div class="flex items-start gap-5">
-                  <div class="flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-xl bg-green-100 dark:bg-green-900/30">
-                    <svg class="h-7 w-7 text-green-600 dark:text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-                      <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                    </svg>
-                  </div>
-                  <div class="flex-1 min-w-0">
-                    <h3 class="text-base font-semibold text-foreground">
-                      {{ (currentElement as any).filename || currentElement.title }}
-                    </h3>
-                    <div class="mt-1 flex items-center gap-3 text-sm text-muted-foreground">
-                      <span v-if="(currentElement as any).mime_type">{{ (currentElement as any).mime_type }}</span>
-                      <span v-if="(currentElement as any).size_bytes">{{ formatFileSize((currentElement as any).size_bytes) }}</span>
-                    </div>
-                    <p v-if="(currentElement as any).description" class="mt-3 text-sm text-muted-foreground">
-                      {{ (currentElement as any).description }}
-                    </p>
-                    <div class="mt-4">
-                      <AppButton
-                        :loading="downloadingElementId === currentElement.id"
-                        :disabled="downloadingElementId !== null"
-                        @click="onDownloadClick"
-                      >
-                        <svg class="mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                          <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                        </svg>
-                        Download
-                      </AppButton>
-                      <p v-if="downloadError" class="mt-2 text-xs text-destructive">
-                        {{ downloadError }}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <!-- Quiz / Assessment (old format) -->
-              <QuizEngine
-                v-else-if="currentElement.element_type === 'quiz' || currentElement.element_type === 'assessment'"
-                :key="`quiz-${activeChapter}-${activeElement}`"
-                :content-cid="currentElement.content_cid"
-                :content-inline="currentElement.content_inline"
-                :element-id="currentElement.id"
-                @complete="onQuizComplete"
-              />
-
-              <!-- Objective Single MCQ -->
-              <McqQuestion
-                v-else-if="currentElement.element_type === 'objective_single_mcq'"
-                :key="`mcq-s-${activeChapter}-${activeElement}`"
-                :content-cid="currentElement.content_cid"
-                :content-inline="currentElement.content_inline"
-                :element-id="currentElement.id"
-                type="objective_single_mcq"
-                :is-completed="elementStatus(currentElement.id) === 'completed'"
-                @complete="onMcqComplete"
-              />
-
-              <!-- Objective Multi MCQ -->
-              <McqQuestion
-                v-else-if="currentElement.element_type === 'objective_multi_mcq'"
-                :key="`mcq-m-${activeChapter}-${activeElement}`"
-                :content-cid="currentElement.content_cid"
-                :content-inline="currentElement.content_inline"
-                :element-id="currentElement.id"
-                type="objective_multi_mcq"
-                :is-completed="elementStatus(currentElement.id) === 'completed'"
-                @complete="onMcqComplete"
-              />
-
-              <!-- Subjective MCQ -->
-              <McqQuestion
-                v-else-if="currentElement.element_type === 'subjective_mcq'"
-                :key="`mcq-sub-${activeChapter}-${activeElement}`"
-                :content-cid="currentElement.content_cid"
-                :content-inline="currentElement.content_inline"
-                :element-id="currentElement.id"
-                type="subjective_mcq"
-                :is-completed="elementStatus(currentElement.id) === 'completed'"
-                @complete="onMcqComplete"
-              />
-
-              <!-- Essay -->
-              <EssayInput
-                v-else-if="currentElement.element_type === 'essay'"
-                :key="`essay-${activeChapter}-${activeElement}`"
-                :content-cid="currentElement.content_cid"
-                :content-inline="currentElement.content_inline"
-                :element-id="currentElement.id"
-                :is-completed="elementStatus(currentElement.id) === 'completed'"
-                @complete="onEssayComplete"
-              />
-
-              <!-- Interactive (placeholder with content rendering) -->
-              <div v-else-if="currentElement.element_type === 'interactive'" class="space-y-4">
-                <TextContent
-                  :key="`interactive-${activeChapter}-${activeElement}`"
-                  :content-cid="currentElement.content_cid"
-                  :content-inline="currentElement.content_inline"
-                />
-                <div class="flex items-center gap-2 rounded-lg bg-amber-50 p-3 text-xs text-amber-700 dark:bg-amber-900/20 dark:text-amber-400">
-                  <svg class="h-4 w-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-                  </svg>
-                  Interactive simulation support coming in a future update.
-                </div>
-              </div>
-
-              <!-- Fallback for unknown types -->
-              <div v-else class="rounded-xl border border-border bg-card p-8 text-center">
-                <div class="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-muted/30">
-                  <svg class="h-6 w-6 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
-                  </svg>
-                </div>
-                <p class="text-sm font-medium text-foreground">
-                  {{ elementTypeLabel(currentElement.element_type) }}
-                </p>
-                <div v-if="currentElement.content_cid" class="mt-2 text-xs text-muted-foreground">
-                  <p class="mb-1">Content CID:</p>
-                  <code class="break-all font-mono text-[10px]">{{ currentElement.content_cid }}</code>
-                </div>
-                <div v-else class="mt-2 text-xs text-muted-foreground">
-                  No content attached to this element yet.
-                </div>
-              </div>
             </div>
           </div>
         </div>
