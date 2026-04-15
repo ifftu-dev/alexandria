@@ -43,15 +43,18 @@ Alexandria is a **Tauri v2 application** — a single binary that bundles a Rust
 alexandria/
 ├── src-tauri/        # Rust backend (Tauri v2)
 │   └── src/
-│       ├── cardano/  # Blockfrost client, Conway tx building, NFT policies
-│       ├── commands/ # 194 IPC command handlers (frontend ↔ backend)
-│       ├── crypto/   # BIP-39 wallet, vault (Stronghold / portable), Ed25519
+│       ├── aggregation/ # Deterministic aggregation engine with anti-gaming penalties, weights, independence
+│       ├── cardano/  # Blockfrost client, Conway tx building, NFT policies, metadata anchoring
+│       ├── classroom/ # Encrypted group messaging, membership, gossip
+│       ├── commands/ # 227 IPC command handlers across 31 modules (frontend ↔ backend)
+│       ├── crypto/   # BIP-39 wallet, vault (Stronghold / portable), Ed25519, did:key
 │       ├── db/       # SQLite (66 tables, 30 migrations, seed data)
 │       ├── diag.rs   # File-based diagnostic logger + panic hook
-│       ├── domain/   # Business logic (courses, evidence, governance, ...)
+│       ├── domain/   # Business logic (courses, tutorials, opinions, vc, evidence, governance, ...)
 │       ├── evidence/ # Aggregation, attestation, challenges, reputation
-│       ├── ipfs/     # iroh node, IPFS gateway fallback, CID resolution
-│       └── p2p/      # libp2p swarm — DHT, relay, gossip, peer exchange
+│       ├── ipfs/     # iroh node, BLAKE3 content-addressed blobs, CID resolution
+│       ├── p2p/      # libp2p swarm — DHT, relay, gossip, peer exchange, vc-fetch
+│       └── tutoring/ # Live audio/video tutoring (desktop + mobile managers)
 ├── src/              # Vue 3 + TypeScript frontend
 │   ├── pages/        # 30 route views (courses, skills, governance, opinions, tutoring, ...)
 │   ├── components/   # UI components + auth + course + layout
@@ -376,9 +379,10 @@ npx vue-tsc -b
 ```
 
 The test suite includes:
-- **400+ synchronous tests** across crypto, database, P2P, evidence, cardano, governance, and domain modules
+- **570+ synchronous tests** across crypto, database, P2P, evidence, cardano, credentials, aggregation, governance, and domain modules
 - **30+ async tests** (tokio) for iroh content operations, P2P swarm lifecycle, and network integration
 - **~1500 lines of stress tests** covering high-volume gossip (200+ messages), concurrent validation (1000 messages / 10 threads), sync conflicts, and adversarial inputs
+- **Frontend Vitest suite** — first wave of composable tests (e.g. `useOmniSearch`), expanding
 
 ## Data Storage
 
