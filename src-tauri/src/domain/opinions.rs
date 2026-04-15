@@ -119,6 +119,10 @@ pub struct OpinionRow {
     pub withdrawn: bool,
     pub withdrawn_reason: Option<String>,
     pub on_chain_tx: Option<String>,
+    /// Where this opinion came from. `"ai_generated"` marks seeded
+    /// example content; `None` means user-created. Added in migration 031.
+    #[serde(default)]
+    pub provenance: Option<String>,
 }
 
 /// Request payload for `publish_opinion` — what the frontend sends.

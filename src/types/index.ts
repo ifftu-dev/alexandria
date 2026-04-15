@@ -66,6 +66,9 @@ export interface Course {
   updated_at: string
   /** `"course"` or `"tutorial"`. Older peers may omit this — defaults to `"course"` on the backend side. */
   kind: string
+  /** Where this content came from. `"ai_generated"` marks seeded example
+   *  content; `null`/missing means user-created. Added in migration 031. */
+  provenance?: string | null
 }
 
 // ---- Tutorials (standalone video) ----
@@ -468,6 +471,9 @@ export interface OpinionRow {
   withdrawn: boolean
   withdrawn_reason: string | null
   on_chain_tx: string | null
+  /** Where this opinion came from. `"ai_generated"` marks seeded example
+   *  content; `null`/missing means user-created. Added in migration 031. */
+  provenance?: string | null
 }
 
 export interface PublishOpinionRequest {

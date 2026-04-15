@@ -127,6 +127,14 @@ pub async fn unlock_vault(
                 .map_err(|e| e.to_string())?;
         }
 
+        // Rebind any demo-learner seed rows to this wallet so the
+        // dashboards light up under the user's real address. Idempotent
+        // and silently no-op once the sentinel rows are gone.
+        #[cfg(feature = "dev-seed")]
+        {
+            let _ = crate::db::seed::bind_current_user_to_seed(db.conn());
+        }
+
         // Read back the full profile in the same DB lock — no extra IPC needed
         read_profile(db.conn())
     }; // db guard dropped here — before any .await
@@ -221,6 +229,13 @@ pub async fn generate_wallet(
                 )
                 .map_err(|e| e.to_string())?;
         }
+
+        // Bind seeded demo-learner rows to this wallet now that the
+        // identity is committed. See seed::bind_current_user_to_seed.
+        #[cfg(feature = "dev-seed")]
+        {
+            let _ = crate::db::seed::bind_current_user_to_seed(db.conn());
+        }
     } // db guard dropped here — before any .await
 
     // Store keystore in app state
@@ -304,6 +319,12 @@ pub async fn restore_wallet(
                     params![w.stake_address.clone(), w.payment_address],
                 )
                 .map_err(|e| e.to_string())?;
+        }
+
+        // Bind seeded demo-learner rows to this restored wallet.
+        #[cfg(feature = "dev-seed")]
+        {
+            let _ = crate::db::seed::bind_current_user_to_seed(db.conn());
         }
     } // db guard dropped here — before any .await
 

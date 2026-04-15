@@ -38,6 +38,7 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (28, "vc_credentials_pending_verification", MIGRATION_028),
     (29, "vc_credential_suspension", MIGRATION_029),
     (30, "vc_credential_allowlist", MIGRATION_030),
+    (31, "content_provenance", MIGRATION_031),
 ];
 
 const MIGRATION_001: &str = r#"
@@ -1396,4 +1397,18 @@ CREATE TABLE IF NOT EXISTS credential_allowlist (
 
 CREATE INDEX IF NOT EXISTS idx_credential_allowlist_cred
     ON credential_allowlist(credential_id);
+"#;
+
+const MIGRATION_031: &str = r#"
+-- ============================================================
+-- Migration 031: Content provenance
+-- Distinguishes seeded / AI-generated example content from
+-- real user-created content. Surfaced in the UI as a badge so
+-- reviewers and demo audiences can tell demo data apart from
+-- real work. Plain TEXT (no CHECK constraint) so future values
+-- ('imported', 'seed_real', etc.) don't require a schema change.
+-- NULL means "user-created" (the default).
+-- ============================================================
+ALTER TABLE courses  ADD COLUMN provenance TEXT;
+ALTER TABLE opinions ADD COLUMN provenance TEXT;
 "#;

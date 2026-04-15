@@ -23,6 +23,12 @@ pub struct Course {
     /// that predate migration 020.
     #[serde(default = "default_course_kind")]
     pub kind: String,
+    /// Where this content came from. `"ai_generated"` marks seeded
+    /// example content; `None` means user-created. Free-form TEXT so
+    /// future provenance values do not require a schema change.
+    /// Added in migration 031.
+    #[serde(default)]
+    pub provenance: Option<String>,
 }
 
 fn default_course_kind() -> String {

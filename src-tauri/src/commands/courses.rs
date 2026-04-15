@@ -32,7 +32,7 @@ pub async fn list_courses(
     {
         (
                 "SELECT id, title, description, author_address, author_name, content_cid, thumbnail_cid, \
-                 thumbnail_svg, tags, skill_ids, version, status, published_at, on_chain_tx, created_at, updated_at, kind \
+                 thumbnail_svg, tags, skill_ids, version, status, published_at, on_chain_tx, created_at, updated_at, kind, provenance \
                  FROM courses WHERE status = ?1 ORDER BY updated_at DESC"
                     .to_string(),
                 vec![Box::new(s.clone())],
@@ -40,7 +40,7 @@ pub async fn list_courses(
     } else {
         (
                 "SELECT id, title, description, author_address, author_name, content_cid, thumbnail_cid, \
-                 thumbnail_svg, tags, skill_ids, version, status, published_at, on_chain_tx, created_at, updated_at, kind \
+                 thumbnail_svg, tags, skill_ids, version, status, published_at, on_chain_tx, created_at, updated_at, kind, provenance \
                  FROM courses ORDER BY updated_at DESC"
                     .to_string(),
                 vec![],
@@ -77,6 +77,7 @@ pub async fn list_courses(
                 kind: row
                     .get::<_, Option<String>>(16)?
                     .unwrap_or_else(|| "course".into()),
+                provenance: row.get::<_, Option<String>>(17)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -100,7 +101,7 @@ pub async fn get_course(
 
     let result = db.conn().query_row(
         "SELECT id, title, description, author_address, author_name, content_cid, thumbnail_cid, \
-         thumbnail_svg, tags, skill_ids, version, status, published_at, on_chain_tx, created_at, updated_at, kind \
+         thumbnail_svg, tags, skill_ids, version, status, published_at, on_chain_tx, created_at, updated_at, kind, provenance \
          FROM courses WHERE id = ?1",
         params![course_id],
         |row| {
@@ -127,6 +128,7 @@ pub async fn get_course(
                 created_at: row.get(14)?,
                 updated_at: row.get(15)?,
                 kind: row.get::<_, Option<String>>(16)?.unwrap_or_else(|| "course".into()),
+                provenance: row.get::<_, Option<String>>(17)?,
             })
         },
     );
@@ -706,7 +708,7 @@ fn parse_datetime_to_unix(datetime_str: &str) -> i64 {
 fn get_course_by_id(conn: &rusqlite::Connection, id: &str) -> Result<Course, String> {
     conn.query_row(
         "SELECT id, title, description, author_address, author_name, content_cid, thumbnail_cid, \
-         thumbnail_svg, tags, skill_ids, version, status, published_at, on_chain_tx, created_at, updated_at, kind \
+         thumbnail_svg, tags, skill_ids, version, status, published_at, on_chain_tx, created_at, updated_at, kind, provenance \
          FROM courses WHERE id = ?1",
         params![id],
         |row| {
@@ -733,6 +735,7 @@ fn get_course_by_id(conn: &rusqlite::Connection, id: &str) -> Result<Course, Str
                 created_at: row.get(14)?,
                 updated_at: row.get(15)?,
                 kind: row.get::<_, Option<String>>(16)?.unwrap_or_else(|| "course".into()),
+                provenance: row.get::<_, Option<String>>(17)?,
             })
         },
     )

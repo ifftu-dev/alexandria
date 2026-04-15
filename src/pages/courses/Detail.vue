@@ -2,7 +2,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useLocalApi } from '@/composables/useLocalApi'
-import { AppButton, StatusBadge, EmptyState } from '@/components/ui'
+import { AppButton, StatusBadge, EmptyState, ProvenanceBadge } from '@/components/ui'
 import type { Course, Chapter, Element, Enrollment } from '@/types'
 
 const { invoke } = useLocalApi()
@@ -135,6 +135,7 @@ function elementTypeLabel(elementType: string): string {
           <div class="flex items-center gap-2 mb-2">
             <StatusBadge :status="course.status" />
             <span class="text-xs text-muted-foreground">v{{ course.version }}</span>
+            <ProvenanceBadge :provenance="course.provenance" />
           </div>
           <h1 class="text-2xl font-bold tracking-tight">{{ course.title }}</h1>
           <p v-if="course.description" class="text-sm text-muted-foreground mt-2 max-w-2xl">
