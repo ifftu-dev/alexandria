@@ -55,10 +55,13 @@ const firstName = computed(() => {
   return displayName.value.split(' ')[0] || ''
 })
 
-// Recommended courses (non-enrolled)
+// Split non-enrolled courses into tutorials and full courses
 const enrolledCourseIds = computed(() => new Set(enrollments.value.map(e => e.course_id)))
 const recommendedCourses = computed(() =>
-  courses.value.filter(c => !enrolledCourseIds.value.has(c.id))
+  courses.value.filter(c => !enrolledCourseIds.value.has(c.id) && c.kind !== 'tutorial')
+)
+const tutorials = computed(() =>
+  courses.value.filter(c => c.kind === 'tutorial')
 )
 
 onMounted(async () => {
@@ -181,6 +184,19 @@ onMounted(async () => {
                     <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
                   </svg>
                 </div>
+                <!-- Content-type pill -->
+                <div class="absolute top-2 left-2">
+                  <span v-if="enrolledCourseMap[enrollment.course_id]?.kind === 'tutorial'" class="inline-flex items-center gap-1 rounded-full bg-[color-mix(in_srgb,var(--app-primary)_85%,black)] px-2 py-0.5 text-[10px] font-semibold text-white shadow">
+                    <svg class="h-3 w-3" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                    Tutorial
+                  </span>
+                  <span v-else class="inline-flex items-center gap-1 rounded-full bg-[color-mix(in_srgb,var(--app-success)_80%,black)] px-2 py-0.5 text-[10px] font-semibold text-white shadow">
+                    <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                    </svg>
+                    Course
+                  </span>
+                </div>
                 <!-- Progress bar overlay at bottom -->
                 <div class="absolute bottom-0 left-0 right-0 h-1.5 bg-black/30">
                   <div class="h-full bg-primary" style="width: 0%" />
@@ -202,11 +218,61 @@ onMounted(async () => {
         </div>
       </section>
 
-      <!-- Recommended Courses -->
+      <!-- Quick Tutorials -->
+      <section v-if="tutorials.length > 0" class="mb-10">
+        <div class="flex items-center justify-between mb-4">
+          <div class="flex items-center gap-2">
+            <svg class="h-5 w-5 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+              <path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <h2 class="text-base font-semibold text-foreground">Quick Tutorials</h2>
+          </div>
+          <span class="text-xs text-muted-foreground">
+            {{ tutorials.length }} tutorial{{ tutorials.length !== 1 ? 's' : '' }}
+          </span>
+        </div>
+        <div class="flex gap-4 overflow-x-auto pb-2 scrollbar-thin">
+          <router-link
+            v-for="tut in tutorials"
+            :key="tut.id"
+            :to="`/learn/${tut.id}`"
+            class="w-72 shrink-0 group"
+          >
+            <div class="card card-interactive overflow-hidden rounded-xl border border-primary/15">
+              <!-- Thumbnail -->
+              <div class="relative aspect-[2/1] overflow-hidden bg-gradient-to-br from-primary/20 via-accent/10 to-primary/5">
+                <div v-if="tut.thumbnail_svg" class="w-full h-full" v-html="sanitizeSvg(tut.thumbnail_svg)" />
+                <div v-else class="w-full h-full flex items-center justify-center">
+                  <svg class="w-12 h-12 text-primary/30" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </div>
+                <!-- Play badge -->
+                <div class="absolute top-2 left-2 flex items-center gap-1 rounded-full bg-primary/90 px-2 py-0.5 text-[10px] font-semibold text-white shadow">
+                  <svg class="h-3 w-3" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                  Tutorial
+                </div>
+              </div>
+              <div class="p-3">
+                <h3 class="text-sm font-medium text-foreground truncate group-hover:text-primary transition-colors">
+                  {{ tut.title }}
+                </h3>
+                <p v-if="tut.description" class="mt-0.5 text-xs text-muted-foreground line-clamp-1">
+                  {{ tut.description }}
+                </p>
+              </div>
+            </div>
+          </router-link>
+        </div>
+      </section>
+
+      <!-- Courses -->
       <section>
         <div class="flex items-center justify-between mb-4">
           <h2 class="text-base font-semibold text-foreground">
-            {{ enrollments.length > 0 ? 'Recommended For You' : 'Available Courses' }}
+            {{ enrollments.length > 0 ? 'Recommended For You' : 'Courses' }}
           </h2>
           <span v-if="recommendedCourses.length > 0" class="text-xs text-muted-foreground">
             {{ recommendedCourses.length }} course{{ recommendedCourses.length !== 1 ? 's' : '' }}
@@ -236,7 +302,7 @@ onMounted(async () => {
         <!-- Course grid (gap-6, 4 columns) -->
         <div v-else class="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           <CourseCard
-            v-for="course in (recommendedCourses.length > 0 ? recommendedCourses : courses)"
+            v-for="course in (recommendedCourses.length > 0 ? recommendedCourses : courses.filter(c => c.kind !== 'tutorial'))"
             :key="course.id"
             :course="course"
           />
@@ -284,4 +350,5 @@ onMounted(async () => {
     font-size: 1.75rem;
   }
 }
+
 </style>
