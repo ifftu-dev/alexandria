@@ -35,26 +35,27 @@ Every single Tauri command acquires this lock for the duration of its DB access.
 
 **File**: `src-tauri/src/commands/p2p.rs:76-130`
 
-The gossip event handler acquires `db_for_events.lock().await` at line 76 and holds it through the entire if/else-if chain handling catalog, evidence, taxonomy, and governance messages. Every incoming gossip message holds the global DB mutex:
+The gossip event handler acquires `db_for_events.lock().await` at line 76 and holds it through the entire if/else-if chain. Every incoming gossip message holds the global DB mutex. After PR 144 wired the VC + opinions + pinboard handlers, the chain now covers 9 topics + classroom:
 
 ```rust
 crate::p2p::types::P2pEvent::GossipMessage { topic, message } => {
     log::debug!("P2P event: gossip message on {topic}");
     let db = db_for_events.lock().await;  // Lock acquired here
-    if topic == TOPIC_CATALOG {
-        ...  // DB operations
-    } else if topic == TOPIC_EVIDENCE {
-        ...  // DB operations
-    } else if topic == TOPIC_TAXONOMY {
-        ...  // DB operations
-    } else if topic == TOPIC_GOVERNANCE {
-        ...  // DB operations
-    }
+    if topic == TOPIC_CATALOG { ... }
+    else if topic == TOPIC_EVIDENCE { ... }
+    else if topic == TOPIC_TAXONOMY { ... }
+    else if topic == TOPIC_GOVERNANCE { ... }
+    else if topic == TOPIC_OPINIONS { ... }          // PR 144
+    else if topic == TOPIC_VC_DID { ... }            // PR 144
+    else if topic == TOPIC_VC_STATUS { ... }         // PR 144
+    else if topic == TOPIC_VC_PRESENTATION { ... }   // PR 144
+    else if topic == TOPIC_PINBOARD { ... }          // PR 144
+    else if is_classroom_topic(topic) { ... }
     // Lock released here -- held for entire chain
 }
 ```
 
-**Impact**: During gossip bursts (e.g., joining a busy network with many peers), the DB lock is held continuously, blocking all frontend commands (`list_*`, `get_*`, `enroll`, etc.) until gossip processing completes. With rapid messages, this can cause multi-second UI freezes.
+**Impact**: During gossip bursts (e.g., joining a busy network with many peers), the DB lock is held continuously, blocking all frontend commands (`list_*`, `get_*`, `enroll`, etc.) until gossip processing completes. With rapid messages, this can cause multi-second UI freezes. The PR 144 additions increased the surface but not the underlying contention pattern.
 
 **Fix**: Move DB operations into a dedicated channel-based worker: gossip events push to an `mpsc` channel, a worker task batch-processes them. Or at minimum, scope the lock to each individual `if` branch so the lock is dropped between messages.
 
