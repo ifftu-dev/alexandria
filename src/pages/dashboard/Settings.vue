@@ -5,6 +5,11 @@ import { useLocalApi } from '@/composables/useLocalApi'
 import { useAuth } from '@/composables/useAuth'
 import { useTheme } from '@/composables/useTheme'
 import {
+  useKeyboardShortcuts,
+  formatCombo,
+  comboFromEvent,
+} from '@/composables/useKeyboardShortcuts'
+import {
   biometricCredentialExists,
   biometricSupported,
   clearBiometricVaultPassword,
@@ -17,6 +22,8 @@ import type { Identity } from '@/types'
 const { invoke } = useLocalApi()
 const { identity, lockVault: authLock, exportMnemonic: authExport, refreshProfile } = useAuth()
 const { theme, toggleTheme } = useTheme()
+const { shortcuts, updateShortcut, resetShortcut, resetAll: resetAllShortcuts } =
+  useKeyboardShortcuts()
 const router = useRouter()
 
 const displayName = ref('')
@@ -114,6 +121,27 @@ async function freeSpace() {
   } finally {
     evicting.value = false
   }
+}
+
+// Keyboard shortcut recording state — when a user clicks "edit" on a
+// shortcut row, we put its id here and capture the next keydown.
+const recordingShortcutId = ref<string | null>(null)
+
+function startRecording(id: string) {
+  recordingShortcutId.value = id
+}
+
+function cancelRecording() {
+  recordingShortcutId.value = null
+}
+
+function onShortcutKeydown(e: KeyboardEvent) {
+  e.preventDefault()
+  e.stopPropagation()
+  const combo = comboFromEvent(e)
+  if (!combo || !recordingShortcutId.value) return
+  updateShortcut(recordingShortcutId.value, combo)
+  recordingShortcutId.value = null
 }
 
 onMounted(() => {
@@ -412,6 +440,59 @@ async function disableBiometric() {
           <AppButton variant="outline" size="sm" @click="toggleTheme">
             Toggle ({{ theme === 'light' ? 'Dark' : theme === 'dark' ? 'System' : 'Light' }})
           </AppButton>
+        </div>
+      </div>
+
+      <!-- Keyboard Shortcuts -->
+      <div class="rounded-xl bg-card shadow-sm p-6 mb-6">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-lg font-semibold text-foreground">Keyboard Shortcuts</h2>
+          <AppButton variant="ghost" size="sm" @click="resetAllShortcuts">
+            Reset all
+          </AppButton>
+        </div>
+        <p class="text-xs text-muted-foreground mb-4">
+          Click a shortcut's key binding to record a new one. Press Escape to cancel.
+        </p>
+        <div class="divide-y divide-border/50">
+          <div
+            v-for="def in Object.values(shortcuts)"
+            :key="def.id"
+            class="flex items-center justify-between py-3 first:pt-0 last:pb-0"
+          >
+            <span class="text-sm text-foreground">{{ def.label }}</span>
+            <div class="flex items-center gap-2">
+              <!-- Recording mode: capture next keypress -->
+              <template v-if="recordingShortcutId === def.id">
+                <kbd
+                  class="inline-flex min-w-[60px] items-center justify-center rounded-md border border-primary bg-primary/10 px-2 py-1 font-mono text-xs text-primary animate-pulse"
+                  tabindex="0"
+                  autofocus
+                  @keydown="onShortcutKeydown"
+                  @blur="cancelRecording"
+                >
+                  Press keys…
+                </kbd>
+              </template>
+              <!-- Display mode -->
+              <template v-else>
+                <button
+                  class="inline-flex min-w-[60px] items-center justify-center rounded-md border border-border bg-muted/30 px-2 py-1 font-mono text-xs text-foreground transition-colors hover:bg-muted/60"
+                  @click="startRecording(def.id)"
+                >
+                  {{ formatCombo(def.keys) }}
+                </button>
+              </template>
+              <button
+                v-if="def.keys.key !== def.defaultKeys.key || def.keys.mod !== def.defaultKeys.mod || def.keys.shift !== def.defaultKeys.shift || def.keys.alt !== def.defaultKeys.alt"
+                class="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                title="Reset to default"
+                @click="resetShortcut(def.id)"
+              >
+                reset
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 

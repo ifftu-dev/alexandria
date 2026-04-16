@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useOmniSearch } from '@/composables/useOmniSearch'
-import { usePlatform } from '@/composables/usePlatform'
+import { useKeyboardShortcuts } from '@/composables/useKeyboardShortcuts'
 
 const router = useRouter()
-const { isMac } = usePlatform()
+const { registerAction } = useKeyboardShortcuts()
 const {
   isOpen,
   query,
@@ -66,14 +66,15 @@ function onClickItem(index: number) {
   if (route) void router.push(route)
 }
 
-function onGlobalKeydown(e: KeyboardEvent) {
-  const mod = isMac ? e.metaKey : e.ctrlKey
-  if (mod && (e.key === 'k' || e.key === 'K') && !e.altKey && !e.shiftKey) {
-    e.preventDefault()
-    if (isOpen.value) close()
-    else open()
-  }
-}
+// Search shortcut (default Cmd+F) — dispatched by useKeyboardShortcuts.
+registerAction('search', () => {
+  if (isOpen.value) close()
+  else open()
+})
+// "/" focus-search (no modifier) — also dispatched by useKeyboardShortcuts.
+registerAction('focus-search', () => {
+  if (!isOpen.value) open()
+})
 
 /** Flat index for visibleItems so each list row can know its position. */
 function flatIndexFor(groupType: string, itemId: string): number {
@@ -96,8 +97,8 @@ watch(isOpen, async (val) => {
   }
 })
 
-onMounted(() => document.addEventListener('keydown', onGlobalKeydown))
-onUnmounted(() => document.removeEventListener('keydown', onGlobalKeydown))
+// Global keydown listener is managed by useKeyboardShortcuts — no
+// manual addEventListener needed here.
 </script>
 
 <template>

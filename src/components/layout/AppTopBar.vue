@@ -7,6 +7,7 @@ import { useP2P } from '@/composables/useP2P'
 import { useAuth } from '@/composables/useAuth'
 import { usePlatform } from '@/composables/usePlatform'
 import { useOmniSearch } from '@/composables/useOmniSearch'
+import { useKeyboardShortcuts, formatCombo } from '@/composables/useKeyboardShortcuts'
 
 defineProps<{ sidebarCollapsed: boolean }>()
 const emit = defineEmits<{ toggleSidebar: [] }>()
@@ -18,10 +19,21 @@ const { status: p2pStatus, startPolling } = useP2P()
 const { displayName, lockVault } = useAuth()
 const { isMobilePlatform, isMac } = usePlatform()
 const omniSearch = useOmniSearch()
+const { shortcuts, registerAction } = useKeyboardShortcuts()
 
 function openOmniSearch() {
   omniSearch.open()
 }
+
+// Register centralized shortcut actions. The global keydown listener in
+// useKeyboardShortcuts dispatches to these — no per-component listener
+// needed.
+registerAction('settings', () => {
+  if (route.path !== '/dashboard/settings') void router.push('/dashboard/settings')
+})
+registerAction('nav-back', () => router.back())
+registerAction('nav-forward', () => router.forward())
+registerAction('toggle-sidebar', () => emit('toggleSidebar'))
 const canGoBack = ref(false)
 const canGoForward = ref(false)
 
@@ -32,42 +44,8 @@ function syncNavButtons() {
   canGoForward.value = Boolean(state.forward)
 }
 
-function isEditableTarget(target: EventTarget | null) {
-  const element = target as HTMLElement | null
-  if (!element) return false
-  if (element.isContentEditable) return true
-  return ['INPUT', 'TEXTAREA', 'SELECT'].includes(element.tagName)
-}
-
-// Global shortcuts: "/" and Cmd+K / Ctrl+K open the omni search palette.
-// Cmd+[/] navigate history, Cmd+, opens Settings.
-function onGlobalKeydown(e: KeyboardEvent) {
-  if (isMac && e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
-    if (e.key === ',' || e.key === ';') {
-      e.preventDefault()
-      if (route.path !== '/dashboard/settings') {
-        void router.push('/dashboard/settings')
-      }
-      return
-    }
-    if (e.key === '[' && !isEditableTarget(e.target)) {
-      e.preventDefault()
-      router.back()
-      return
-    }
-    if (e.key === ']' && !isEditableTarget(e.target)) {
-      e.preventDefault()
-      router.forward()
-      return
-    }
-  }
-
-  // "/" to open omni search (unless typing in a field)
-  if (e.key === '/' && !isEditableTarget(e.target)) {
-    e.preventDefault()
-    openOmniSearch()
-  }
-}
+// Global shortcuts dispatched by useKeyboardShortcuts — see registerAction
+// calls above.
 
 async function onTopbarMouseDown(e: MouseEvent) {
   if (e.button !== 0) return
@@ -91,13 +69,11 @@ async function onTopbarMouseDown(e: MouseEvent) {
 
 onMounted(() => {
   startPolling(15000)
-  document.addEventListener('keydown', onGlobalKeydown)
   window.addEventListener('popstate', syncNavButtons)
   syncNavButtons()
 })
 
 onUnmounted(() => {
-  document.removeEventListener('keydown', onGlobalKeydown)
   window.removeEventListener('popstate', syncNavButtons)
 })
 
@@ -212,7 +188,7 @@ const userInitial = () => displayName.value ? displayName.value.charAt(0).toUppe
           <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
         </svg>
         <span class="topbar-search-placeholder">Search skills, courses, DAOs…</span>
-        <kbd class="topbar-search-kbd">{{ isMac ? '⌘K' : 'Ctrl K' }}</kbd>
+        <kbd class="topbar-search-kbd">{{ shortcuts.search ? formatCombo(shortcuts.search.keys) : '' }}</kbd>
       </button>
     </div>
 
