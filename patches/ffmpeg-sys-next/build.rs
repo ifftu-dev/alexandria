@@ -246,6 +246,17 @@ fn find_sysroot() -> Option<String> {
     None
 }
 
+fn find_target_env_var(base: &str, target: &str) -> Option<String> {
+    let target_underscored = target.replace('-', "_");
+    IntoIterator::into_iter([
+        format!("{base}_{target}"),
+        format!("{base}_{target_underscored}"),
+        format!("TARGET_{base}"),
+        base.to_string(),
+    ])
+    .find_map(|key| env::var(key).ok())
+}
+
 fn build(sysroot: Option<&str>) -> io::Result<()> {
     let source_dir = source();
     if cfg!(target_os = "windows") {
@@ -370,7 +381,9 @@ fn build(sysroot: Option<&str>) -> io::Result<()> {
     if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("android") {
         // cargo ndk auto populates rust env variables for android cross compilation
         // so we can just leverage the same compiler path and cflags for ffmpeg build
-        let android_cc_raw_path = env::var(format!("CC_{target}")).expect("Missing CC path for android. Make sure to use cargo-ndk for adnrdoic cross compilation");
+        let android_cc_raw_path = find_target_env_var("CC", &target).expect(
+            "Missing CC path for android. Make sure to use cargo-ndk or expose TARGET_CC / CC_<target> for cross compilation",
+        );
         let android_cc_path = Path::new(&android_cc_raw_path);
         if !android_cc_path.exists() {
             panic!("Android CC path does not exists: {}", android_cc_raw_path);
@@ -401,7 +414,10 @@ fn build(sysroot: Option<&str>) -> io::Result<()> {
                 .expect("Android CC path did not have a parent directory")
                 .join(format!("llvm-{tool}"));
             if !android_tool_path.exists() {
-                panic!("Android NDK tool not found: {}", android_tool_path.display());
+                panic!(
+                    "Android NDK tool not found: {}",
+                    android_tool_path.display()
+                );
             }
             // Use the path as-is without canonicalize() — NDK symlinks like
             // llvm-ranlib → llvm-ar rely on argv[0] to select behavior, and
@@ -409,7 +425,7 @@ fn build(sysroot: Option<&str>) -> io::Result<()> {
             configure.arg(format!("--{tool}={}", android_tool_path.display()));
         }
 
-        if let Ok(android_target_flags) = env::var(format!("CFLAGS_{target}")).as_deref() {
+        if let Some(android_target_flags) = find_target_env_var("CFLAGS", &target) {
             configure.arg(format!("--extra-cflags={android_target_flags}"));
             configure.arg(format!("--extra-ldflags={android_target_flags}"));
         }

@@ -11,16 +11,19 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { useLocalApi } from '@/composables/useLocalApi'
+import { useAuth } from '@/composables/useAuth'
 import { useSkillGraphState, type SkillStatus } from '@/composables/useSkillGraphState'
 import type { SkillInfo, SkillGraphEdge, SkillProof } from '@/types'
 import SkillGraphModal from '@/components/layout/SkillGraphModal.vue'
 
 const router = useRouter()
 const { invoke } = useLocalApi()
+const { vaultUnlocked } = useAuth()
 
 const containerRef = ref<HTMLElement | null>(null)
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const graphInstance = ref<any>(null)
+const loadError = ref(false)
 
 const {
   skills,
@@ -108,6 +111,7 @@ async function loadData() {
     lockedCount.value = lock
   } catch (e) {
     console.error('SidebarSkillGraph: failed to load data:', e)
+    loadError.value = true
   }
 
   loaded.value = true
@@ -118,6 +122,22 @@ async function loadData() {
 onMounted(() => {
   loadData()
 })
+
+// Retry when vault is unlocked (initial load may fail pre-onboarding).
+// `immediate: true` handles the case where the sidebar mounts after
+// the vault is already unlocked (e.g. navigating from onboarding to
+// the main app layout — vaultUnlocked is already true, so a
+// non-immediate watcher would never fire).
+watch(vaultUnlocked, (unlocked) => {
+  if (unlocked && (!loaded.value || loadError.value || totalCount.value === 0)) {
+    // Small delay lets the DB + seed finish initialising after unlock
+    setTimeout(() => {
+      loaded.value = false
+      loadError.value = false
+      loadData()
+    }, 500)
+  }
+}, { immediate: true })
 
 // If data was already loaded (e.g. navigated away and back), re-init the canvas
 watch(loaded, (val) => {
@@ -277,4 +297,64 @@ onBeforeUnmount(() => {
   <div v-else-if="!loaded" class="flex items-center justify-center py-6">
     <div class="spinner" />
   </div>
+
+  <!-- Empty / error state -->
+  <div v-else class="sb-graph-empty">
+    <svg class="sb-graph-empty__icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+      <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6z" />
+    </svg>
+    <p v-if="loadError" class="sb-graph-empty__text">
+      Unlock your vault to see the skill graph
+    </p>
+    <p v-else class="sb-graph-empty__text">
+      No skills loaded yet
+    </p>
+    <button
+      class="sb-graph-empty__retry"
+      @click="loaded = false; loadError = false; loadData()"
+    >
+      Retry
+    </button>
+  </div>
 </template>
+
+<style scoped>
+.sb-graph-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 1.25rem 0.75rem;
+  text-align: center;
+}
+
+.sb-graph-empty__icon {
+  width: 1.5rem;
+  height: 1.5rem;
+  color: var(--app-muted-foreground);
+  opacity: 0.4;
+}
+
+.sb-graph-empty__text {
+  font-size: 0.6875rem;
+  color: var(--app-muted-foreground);
+  line-height: 1.4;
+  max-width: 10rem;
+}
+
+.sb-graph-empty__retry {
+  font-size: 0.6875rem;
+  font-weight: 500;
+  color: var(--app-primary);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0.125rem 0.375rem;
+  border-radius: 0.25rem;
+  transition: background 0.15s;
+}
+
+.sb-graph-empty__retry:hover {
+  background: color-mix(in srgb, var(--app-primary) 10%, transparent);
+}
+</style>

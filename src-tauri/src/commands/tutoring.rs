@@ -305,7 +305,7 @@ pub async fn tutoring_set_audio_devices(
     _speaker_id: Option<String>,
     _state: State<'_, AppState>,
 ) -> Result<(), String> {
-    Err("Changing audio devices during a live tutoring session is currently supported on mobile only".into())
+    Err("Changing audio devices during a live tutoring session is currently supported on iPhone and iPad only".into())
 }
 
 /// Toggle screen sharing on/off.

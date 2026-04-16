@@ -31,7 +31,7 @@ const {
   getDiagnostics,
 } = useTutoringRoom()
 
-const { isMobilePlatform } = usePlatform()
+const { isMobilePlatform, isIOS } = usePlatform()
 
 const sessionId = computed(() => route.params.id as string)
 const ticketCopied = ref(false)
@@ -334,7 +334,7 @@ function peerInitials(nodeId: string): string {
         </button>
 
         <button
-          v-if="isActive && isMobilePlatform"
+          v-if="isActive && isIOS"
           class="flex items-center gap-1 rounded-lg border border-border px-2 py-1.5 text-xs text-foreground transition-colors hover:bg-muted"
           @click="openAudioDevices"
           title="Audio devices"
@@ -940,7 +940,7 @@ function peerInitials(nodeId: string): string {
         leave-to-class="opacity-0"
       >
         <div
-          v-if="showAudioDevices"
+          v-if="showAudioDevices && isIOS"
           class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
           @click.self="showAudioDevices = false"
         >
