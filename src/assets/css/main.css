@@ -194,25 +194,40 @@ body {
 }
 
 /* ============================================
+   Selection — UI chrome is non-selectable,
+   content areas are selectable.
+   ============================================ */
+
+/* Prevent text selection on all UI chrome (buttons, labels, nav, etc.)
+   so the app feels like a native desktop app, not a webpage. */
+body {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* Re-enable text selection on actual content areas — anything the user
+   would reasonably want to copy (lesson text, code, inputs, credentials). */
+.prose,
+.lesson-body,
+.input,
+input,
+textarea,
+code,
+pre,
+[contenteditable="true"],
+[data-selectable] {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* ============================================
    Mobile / iOS — Touch handling & Safe Areas
    ============================================ */
 
-/* Prevent iOS callout menus & text selection on interactive elements */
 @media (max-width: 767px) {
   body {
     -webkit-touch-callout: none;
-    -webkit-user-select: none;
-    user-select: none;
     touch-action: pan-x pan-y;
-  }
-
-  /* Re-enable text selection on content areas */
-  .prose,
-  .input,
-  textarea,
-  [contenteditable="true"] {
-    -webkit-user-select: text;
-    user-select: text;
   }
 
   /* Prevent double-tap zoom on buttons/links */

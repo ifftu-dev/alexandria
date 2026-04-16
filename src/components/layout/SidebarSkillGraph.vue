@@ -120,8 +120,41 @@ async function loadData() {
 }
 
 onMounted(() => {
-  loadData()
+  if (loaded.value && skills.value.length > 0) {
+    // Data already cached from a previous mount — re-init the canvas.
+    // Wait for the sidebar expand transition (300ms) to finish so
+    // clientWidth is the final expanded size, not the mid-transition value.
+    waitForStableSize(() => initGraph())
+  } else {
+    loadData()
+  }
 })
+
+/** Wait until the container has a stable, non-zero width before calling `fn`.
+ *  Uses ResizeObserver to detect the end of the sidebar CSS transition. */
+function waitForStableSize(fn: () => void) {
+  const el = containerRef.value
+  if (!el) return
+  if (el.clientWidth > 0 && el.clientHeight > 0) {
+    // Already sized — but may be mid-transition. Use a one-shot
+    // ResizeObserver to catch the final size.
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const observer = new ResizeObserver(() => {
+      if (timer) clearTimeout(timer)
+      // Debounce: run fn 50ms after the last resize event (transition end).
+      timer = setTimeout(() => {
+        observer.disconnect()
+        fn()
+      }, 50)
+    })
+    observer.observe(el)
+    // Safety fallback if ResizeObserver never fires (already final size).
+    setTimeout(() => { observer.disconnect(); fn() }, 400)
+  } else {
+    // Container not yet sized — nextTick + small delay.
+    setTimeout(() => fn(), 350)
+  }
+}
 
 // Retry when vault is unlocked (initial load may fail pre-onboarding).
 // `immediate: true` handles the case where the sidebar mounts after
