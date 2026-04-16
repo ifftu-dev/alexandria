@@ -112,9 +112,13 @@ pub async fn seed_content_if_needed(
             )
         })?;
 
-        // Store globally resolvable URL for public media, and keep a local
-        // URL->BLAKE3 cache mapping for fast future lookups.
-        pending.push((asset.element_id, asset.url.to_string()));
+        // Store the BLAKE3 hash as content_cid (not the URL). This gives
+        // the resolver a direct iroh-local lookup without indirection
+        // through the mapping table. The URL→BLAKE3 mapping is still
+        // kept in content_mappings so cross-device resolver fallback
+        // can re-fetch from the public URL if the local store is missing
+        // the blob.
+        pending.push((asset.element_id, result.hash.clone()));
         mappings.push((asset.url, result.hash.clone(), result.size));
     }
 
@@ -160,33 +164,38 @@ struct RemoteSeedAsset {
 
 const REMOTE_SEED_ASSETS: &[RemoteSeedAsset] = &[
     // ── Videos ──────────────────────────────────────────────────────
-    // Blender Foundation open-movie clips (CC BY), served from Google's
-    // public test CDN. Distinct video per topic so the demo isn't monotonous.
+    // Short CC0/CC-BY clips that work reliably through the Tauri IPC
+    // bridge (~0.3–5 MB each, H.264 MP4). The full Blender films
+    // (100+ MB) are too large to pass as number[] through JSON IPC.
+    //
+    // Sources:
+    //   - W3C media test files (public domain / CC BY)
+    //   - MDN CC0 sample videos
+    //   - Blender Foundation trailers (CC BY 3.0)
     RemoteSeedAsset {
-        // Algo: Big Buck Bunny — classic "complexity / performance" vibe
+        // Algo: Big Buck Bunny trailer (~2.7 MB, CC BY 3.0)
         element_id: "el_algo_1_4",
-        url: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+        url: "https://media.w3.org/2010/05/bunny/trailer.mp4",
     },
     RemoteSeedAsset {
-        // Web: For Bigger Blazes — short Chromecast demo
+        // Web: W3C test movie clip (~300 KB, public domain)
         element_id: "el_web_3_2",
-        url:
-            "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
+        url: "https://media.w3.org/2010/05/video/movie_300.mp4",
     },
     RemoteSeedAsset {
-        // ML: Elephants Dream — surreal, abstract (matches ML "black box" vibe)
+        // ML: MDN flower CC0 sample (~1.4 MB, CC0)
         element_id: "el_ml_1_3",
-        url: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4",
+        url: "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4",
     },
     RemoteSeedAsset {
-        // Crypto: Sintel — longer, thematic (a tale of obsession & secrets)
+        // Crypto: Sintel trailer (~5 MB, CC BY 3.0)
         element_id: "el_cry_1_2",
-        url: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4",
+        url: "https://media.w3.org/2010/05/sintel/trailer.mp4",
     },
     RemoteSeedAsset {
-        // UX: Tears of Steel — character-driven (fits user research/personas)
+        // UX: MDN friday CC0 sample (~1 MB, CC0)
         element_id: "el_ux_1_3",
-        url: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4",
+        url: "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/friday.mp4",
     },
     // ── PDFs ────────────────────────────────────────────────────────
     // Varied real-world reference PDFs, all freely distributable.

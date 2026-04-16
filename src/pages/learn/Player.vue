@@ -140,6 +140,17 @@ onMounted(async () => {
       elements.value[ch.id] = await invoke<Element[]>('list_elements', { chapterId: ch.id }).catch(() => [])
     }
 
+    // Tutorials auto-enroll silently so progress tracks without the
+    // user having to click "Enroll". Clicking a tutorial on the home
+    // page goes straight to the player — no detail/enrollment gate.
+    if (!enrollment.value && c.kind === 'tutorial') {
+      try {
+        enrollment.value = await invoke<Enrollment>('enroll', { courseId })
+      } catch (e) {
+        console.warn('Tutorial auto-enroll failed (non-blocking):', e)
+      }
+    }
+
     // Load progress if enrolled
     if (enrollment.value) {
       try {
@@ -810,7 +821,7 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
 
             <!-- Center action -->
             <AppButton
-              v-if="!enrollment"
+              v-if="!enrollment && course?.kind !== 'tutorial'"
               size="sm"
               :loading="enrolling"
               @click="enrollFromPlayer"
