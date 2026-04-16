@@ -37,8 +37,13 @@ const networkIconClass = computed(() => {
       </span>
     </div>
 
-    <div v-if="contentSyncVisible && contentSyncMessage" class="bottom-bar__right" :title="contentSyncMessage">
+    <div v-if="contentSyncVisible && contentSyncMessage" class="bottom-bar__center" :title="contentSyncMessage">
       {{ contentSyncMessage }}
+    </div>
+
+    <div class="bottom-bar__right">
+      Built with <span class="bottom-bar__heart">&#10084;</span> by
+      <a href="https://www.ifftu.dev" target="_blank" rel="noopener noreferrer" class="bottom-bar__link">IFFTU</a>
     </div>
   </footer>
 </template>
@@ -64,13 +69,38 @@ const networkIconClass = computed(() => {
   color: var(--app-foreground);
 }
 
-.bottom-bar__right {
-  margin-left: auto;
+.bottom-bar__center {
   min-width: 0;
-  max-width: 65%;
+  max-width: 50%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--app-muted-foreground);
+}
+
+.bottom-bar__right {
+  margin-left: auto;
+  flex-shrink: 0;
+  white-space: nowrap;
+  color: var(--app-muted-foreground);
+}
+
+.bottom-bar__heart {
+  color: #e11d48;
+  font-size: 0.8em;
+  vertical-align: baseline;
+}
+
+.bottom-bar__link {
+  color: var(--app-primary);
+  text-decoration: none;
+  font-weight: 500;
+  transition: opacity 0.15s;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+.bottom-bar__link:hover {
+  opacity: 0.8;
+  text-decoration: underline;
 }
 </style>

@@ -47,24 +47,22 @@ function syncNavButtons() {
 // Global shortcuts dispatched by useKeyboardShortcuts — see registerAction
 // calls above.
 
+/** Programmatic window drag for the topbar. CSS `app-region: drag` is also
+ *  set on `.topbar`, but because child divs (search wrapper) fill all
+ *  space, the native CSS approach alone doesn't give the user enough
+ *  surface to grab. This handler fires for clicks that land on non-button
+ *  areas (the search wrapper gap, the left/right padding). */
 async function onTopbarMouseDown(e: MouseEvent) {
   if (e.button !== 0) return
   if (isMobilePlatform) return
-
   const target = e.target as HTMLElement | null
   if (!target) return
-
-  const interactiveTarget = target.closest('button, input, textarea, select, a, [role="option"], [data-no-drag]')
-  if (interactiveTarget) return
-
+  if (target.closest('button, input, select, a, [role="option"]')) return
   const inTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
   if (!inTauri) return
-
   try {
     await getCurrentWindow().startDragging()
-  } catch (err) {
-    console.warn('Failed to start window drag:', err)
-  }
+  } catch { /* non-critical */ }
 }
 
 onMounted(() => {
@@ -128,7 +126,7 @@ const userInitial = () => displayName.value ? displayName.value.charAt(0).toUppe
 </script>
 
 <template>
-  <header :class="['topbar', isMac ? 'topbar--macos' : '']" data-tauri-drag-region @mousedown="onTopbarMouseDown">
+  <header :class="['topbar', isMac ? 'topbar--macos' : '']" @mousedown="onTopbarMouseDown">
     <!-- Left: Sidebar toggle -->
     <div class="topbar-left">
       <!-- Sidebar toggle (desktop only) -->
@@ -385,6 +383,10 @@ const userInitial = () => displayName.value ? displayName.value.charAt(0).toUppe
   background: var(--app-background);
   gap: 0.5rem;
   flex-shrink: 0;
+  /* Native window drag — Tauri recognises this CSS property and treats
+     the region as a title bar. Interactive children opt out below. */
+  -webkit-app-region: drag;
+  app-region: drag;
 }
 
 .topbar--macos {
