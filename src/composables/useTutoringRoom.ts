@@ -174,7 +174,6 @@ async function createRoom(
   loading.value = true
   lastError.value = null
   try {
-    console.log('[tutoring] createRoom: invoking tutoring_create_room...')
     const session = await invoke<TutoringSessionInfo>('tutoring_create_room', {
       title,
       displayName: displayName || null,
@@ -182,21 +181,16 @@ async function createRoom(
       micId: micId || null,
       speakerId: speakerId || null,
     })
-    console.log('[tutoring] createRoom: invoke returned, session id =', session.id)
     await setupEventListeners()
     chatMessages.value = []
     videoFrames.value = {}
     peerNames.value = {}
     unreadChatCount.value = 0
-    console.log('[tutoring] createRoom: refreshing status...')
     await refreshStatus()
-    console.log('[tutoring] createRoom: refreshing sessions...')
     await refreshSessions()
-    console.log('[tutoring] createRoom: done, returning session')
     return session
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e)
-    console.error('[tutoring] createRoom: error:', msg)
     lastError.value = msg
     throw new Error(msg)
   } finally {
@@ -215,7 +209,6 @@ async function joinRoom(
   loading.value = true
   lastError.value = null
   try {
-    console.log('[tutoring] joinRoom: invoking tutoring_join_room...')
     const session = await invoke<TutoringSessionInfo>('tutoring_join_room', {
       ticket,
       title: title || null,
@@ -224,21 +217,16 @@ async function joinRoom(
       micId: micId || null,
       speakerId: speakerId || null,
     })
-    console.log('[tutoring] joinRoom: invoke returned, session id =', session.id)
     await setupEventListeners()
     chatMessages.value = []
     videoFrames.value = {}
     peerNames.value = {}
     unreadChatCount.value = 0
-    console.log('[tutoring] joinRoom: refreshing status...')
     await refreshStatus()
-    console.log('[tutoring] joinRoom: refreshing sessions...')
     await refreshSessions()
-    console.log('[tutoring] joinRoom: done, returning session')
     return session
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e)
-    console.error('[tutoring] joinRoom: error:', msg)
     lastError.value = msg
     throw new Error(msg)
   } finally {

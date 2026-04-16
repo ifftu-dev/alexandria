@@ -2,11 +2,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useTutoringRoom } from '@/composables/useTutoringRoom'
-import { usePlatform } from '@/composables/usePlatform'
-import { useLocalApi } from '@/composables/useLocalApi'
 import type { DeviceCheckResult, DeviceList } from '@/types'
-
-console.log('[tutoring/Index] <script setup> executing')
 
 const router = useRouter()
 const {
@@ -18,9 +14,6 @@ const {
   joinRoom,
   listDevices,
 } = useTutoringRoom()
-
-const { isMobilePlatform } = usePlatform()
-const { invoke: rawInvoke } = useLocalApi()
 
 const showCreateModal = ref(false)
 const showJoinModal = ref(false)
@@ -43,29 +36,13 @@ const selectedCamera = ref<string | null>(null)
 const selectedMicInput = ref<string | null>(null)
 const selectedAudioOutput = ref<string | null>(null)
 
-// Diagnostic log state (for debugging iOS freeze)
-const diagLog = ref<string | null>(null)
-const diagError = ref<string | null>(null)
-
-async function fetchDiagLog() {
-  try {
-    diagLog.value = await rawInvoke<string>('read_diag_log')
-    diagError.value = null
-  } catch (e: unknown) {
-    diagError.value = e instanceof Error ? e.message : String(e)
-  }
-}
-
 onMounted(async () => {
-  console.log('[tutoring/Index] onMounted: about to refreshSessions')
   try {
     await Promise.race([
       refreshSessions(),
       new Promise((_, reject) => setTimeout(() => reject(new Error('refreshSessions timed out after 5s')), 5000)),
     ])
-    console.log('[tutoring/Index] onMounted: refreshSessions completed')
-  } catch (e) {
-    console.error('[tutoring/Index] onMounted: refreshSessions error/timeout:', e)
+  } catch {
   }
 })
 
@@ -131,7 +108,6 @@ async function handleCreatePreview() {
 async function handleCreateConfirm() {
   if (!newRoomTitle.value.trim()) return
   try {
-    console.log('[tutoring] handleCreateConfirm: starting...')
     const session = await createRoom(
       newRoomTitle.value.trim(),
       createDisplayName.value.trim() || undefined,
@@ -139,11 +115,9 @@ async function handleCreateConfirm() {
       selectedMicInput.value,
       selectedAudioOutput.value,
     )
-    console.log('[tutoring] handleCreateConfirm: createRoom returned, navigating to', `/tutoring/${session.id}`)
     resetCreateModal()
     router.push(`/tutoring/${session.id}`)
-  } catch (e) {
-    console.error('[tutoring] handleCreateConfirm: caught error:', e)
+  } catch {
   }
 }
 
@@ -173,7 +147,6 @@ async function handleJoinPreview() {
 async function handleJoinConfirm() {
   if (!joinTicket.value.trim()) return
   try {
-    console.log('[tutoring] handleJoinConfirm: starting...')
     const session = await joinRoom(
       joinTicket.value.trim(),
       joinTitle.value.trim() || undefined,
@@ -182,11 +155,9 @@ async function handleJoinConfirm() {
       selectedMicInput.value,
       selectedAudioOutput.value,
     )
-    console.log('[tutoring] handleJoinConfirm: joinRoom returned, navigating to', `/tutoring/${session.id}`)
     resetJoinModal()
     router.push(`/tutoring/${session.id}`)
-  } catch (e) {
-    console.error('[tutoring] handleJoinConfirm: caught error:', e)
+  } catch {
   }
 }
 
@@ -222,7 +193,7 @@ function formatDate(iso: string) {
         </div>
         <div>
           <h1 class="text-2xl font-bold text-foreground">Live Tutoring</h1>
-          <p class="text-sm text-muted-foreground">{{ isMobilePlatform ? 'P2P audio sessions powered by iroh — no servers, no limits.' : 'P2P video sessions powered by iroh — no servers, no limits.' }}</p>
+          <p class="text-sm text-muted-foreground">P2P video sessions powered by iroh — no servers, no limits.</p>
         </div>
       </div>
     </div>
@@ -230,21 +201,6 @@ function formatDate(iso: string) {
     <!-- Error banner -->
     <div v-if="lastError" class="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
       {{ lastError }}
-    </div>
-
-    <!-- Diagnostic section (for debugging iOS freeze — remove once resolved) -->
-    <div v-if="isMobilePlatform" class="rounded-lg border border-border bg-muted/30 p-3 space-y-2">
-      <div class="flex items-center justify-between">
-        <span class="text-xs font-medium text-muted-foreground">Diagnostics</span>
-        <button
-          class="rounded px-2 py-0.5 text-[0.65rem] font-medium bg-primary/10 text-primary"
-          @click="fetchDiagLog"
-        >
-          Read diag.log
-        </button>
-      </div>
-      <div v-if="diagError" class="text-[0.6rem] text-destructive">{{ diagError }}</div>
-      <pre v-if="diagLog" class="text-[0.55rem] text-muted-foreground whitespace-pre-wrap max-h-48 overflow-y-auto leading-tight">{{ diagLog }}</pre>
     </div>
 
     <!-- Active session banner -->
@@ -282,7 +238,7 @@ function formatDate(iso: string) {
         </div>
         <h3 class="mt-4 text-lg font-semibold text-foreground">Start a Session</h3>
         <p class="mt-1 text-sm text-muted-foreground">
-          {{ isMobilePlatform ? 'Create a new audio-only tutoring room. Share the invite ticket with participants.' : 'Create a new tutoring room with camera and microphone. Share the invite ticket with participants.' }}
+          Create a new tutoring room with camera and microphone. Share the invite ticket with participants.
         </p>
       </button>
 
@@ -298,7 +254,7 @@ function formatDate(iso: string) {
         </div>
         <h3 class="mt-4 text-lg font-semibold text-foreground">Join a Session</h3>
         <p class="mt-1 text-sm text-muted-foreground">
-          {{ isMobilePlatform ? 'Enter a room ticket to join an existing session. Audio and chat will activate on join.' : 'Enter a room ticket to join an existing tutoring session. Your camera and mic will activate on join.' }}
+          Enter a room ticket to join an existing tutoring session. Your camera and mic will activate on join.
         </p>
       </button>
     </div>
