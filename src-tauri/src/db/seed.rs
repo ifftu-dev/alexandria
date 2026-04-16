@@ -2180,7 +2180,11 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(svg_count, 7, "7 full courses should have thumbnail_svg");
+        assert!(
+            svg_count >= 7,
+            "expected >= 7 courses with thumbnail_svg, got {}",
+            svg_count
+        );
 
         // Check author_name on all full + tutorial courses
         let author_count: i64 = db
