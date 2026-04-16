@@ -556,7 +556,9 @@ Four new gossip topics carry VC-layer messages:
 Plus a request-response protocol on `/alexandria/vc-fetch/1.0` for
 authority-respecting credential pull. Handlers in `p2p::vc_did`,
 `p2p::vc_status`, `p2p::vc_fetch`, `p2p::presentation`,
-`p2p::pinboard`. PR 9 + PR 10.
+`p2p::pinboard`. PR 9 + PR 10. Dispatched from the gossip event
+loop in `commands/p2p.rs` alongside `catalog`, `evidence`,
+`taxonomy`, `governance`, `opinions`, and classroom topics (PR 144).
 
 ### Worked example (§26)
 
@@ -573,7 +575,7 @@ this on every test run.
 | §6–§7 (credential taxonomy + canonical structure) | PR 4 | Implemented |
 | §8–§10 (required fields, issuance, non-transferability) | PR 4–5 | Implemented |
 | §11 (expiration, revocation, suspension, supersession) | PR 5 | Implemented |
-| §12 (storage, durability, integrity anchoring) | PR 8 + PR 10 | Storage + anchor queue + PinBoard implemented; on-chain/reference-script submission still incomplete |
+| §12 (storage, durability, integrity anchoring) | PR 8 + PR 10 + PR 145 | Storage + anchor queue + PinBoard implemented. Anchor tick runs every 60s with wallet derived from the unlocked keystore; metadata-only txs submit to Cardano preprod when `BLOCKFROST_PROJECT_ID` is set. Mainnet reference-script deployment still pending. |
 | §13 (verification algorithm + acceptance predicate) | PR 4–5 | Implemented |
 | §14 (trust aggregation, weights, confidence, levels) | PR 6 | Implemented |
 | §15 (anti-gaming controls) | PR 7 | Cluster cap + inflation penalty implemented; cluster_issuers is per-DID until governance signals land |
