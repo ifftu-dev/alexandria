@@ -175,11 +175,6 @@ tempfile = "3"
 # pre-compiled .wasm blobs in the repo.
 wat = "1"
 
-[[example]]
-name = "dev_seed"
-path = "examples/dev_seed.rs"
-required-features = ["dev-seed"]
-
 # Live Cardano preprod anchor-tx submission, used to hand-verify
 # PR 16's label-1697 metadata path against a funded testnet wallet.
 [[example]]
