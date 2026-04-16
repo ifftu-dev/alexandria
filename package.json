@@ -9,9 +9,6 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "seed:up": "cargo run --manifest-path src-tauri/Cargo.toml --features dev-seed --example dev_seed -- up",
-    "seed:down": "cargo run --manifest-path src-tauri/Cargo.toml --features dev-seed --example dev_seed -- down",
-    "seed:reset": "cargo run --manifest-path src-tauri/Cargo.toml --features dev-seed --example dev_seed -- reset",
     "bump": "bash scripts/bump-version.sh"
   },
   "dependencies": {

@@ -85,6 +85,9 @@ xcuserdata/
 credentials.json
 key.properties
 
+# ── Local dev data (legacy CLI seed tool output) ─────────────────────
+dev-data/
+
 # ── Misc ──────────────────────────────────────────────────────────────
 *.tgz
 *.tsbuildinfo
