@@ -420,10 +420,20 @@ pub fn run() {
                 }
             });
 
-            // Spawn governance on-chain queue processor (runs every 60s)
+            // Keystore arc — created early so both the queue processor
+            // background task and AppState share the same handle. The
+            // keystore starts as None; it's populated when the user
+            // unlocks or generates a wallet.
+            let keystore: Arc<Mutex<Option<Keystore>>> = Arc::new(Mutex::new(None));
+
+            // Spawn on-chain queue processor (runs every 60s).
+            // Processes both the governance tx queue and the credential
+            // anchor queue. Both silently skip when BLOCKFROST_PROJECT_ID
+            // is unset or the vault isn't unlocked yet.
             {
                 let db_for_queue = db.clone();
-                diag::log("spawning governance on-chain queue processor");
+                let ks_for_queue = keystore.clone();
+                diag::log("spawning on-chain queue processor (governance + credential anchors)");
                 tauri::async_runtime::spawn(async move {
                     // Wait for app to fully initialize before processing
                     tokio::time::sleep(std::time::Duration::from_secs(10)).await;
@@ -436,8 +446,19 @@ pub fn run() {
                                 cardano::blockfrost::BlockfrostClient::new(id).ok()
                             });
 
-                        // TODO: retrieve wallet from vault for queue processing
-                        let wallet: Option<crypto::wallet::Wallet> = None;
+                        // Derive wallet from the unlocked keystore. If the vault
+                        // is still locked (keystore is None), wallet will be None
+                        // and both queues skip silently.
+                        let wallet: Option<crypto::wallet::Wallet> = {
+                            let guard = ks_for_queue.lock().await;
+                            guard.as_ref().and_then(|ks| {
+                                ks.retrieve_mnemonic()
+                                    .ok()
+                                    .and_then(|m| crypto::wallet::wallet_from_mnemonic(&m).ok())
+                            })
+                        };
+
+                        // Governance tx queue (elections, proposals, soulbound)
                         match cardano::onchain_queue::process_queue(&db_for_queue, &bf, &wallet).await
                         {
                             Ok(n) if n > 0 => {
@@ -445,6 +466,18 @@ pub fn run() {
                             }
                             Err(e) => {
                                 log::debug!("governance queue: {e}");
+                            }
+                            _ => {}
+                        }
+
+                        // Credential anchor queue (VC integrity hashes → Cardano metadata-only txs)
+                        match cardano::anchor_queue::tick(&db_for_queue, &bf, &wallet).await
+                        {
+                            Ok(n) if n > 0 => {
+                                log::info!("anchor queue: processed {n} items");
+                            }
+                            Err(e) => {
+                                log::debug!("anchor queue: {e}");
                             }
                             _ => {}
                         }
@@ -480,7 +513,7 @@ pub fn run() {
             let app_state = AppState {
                 db,
                 db_path,
-                keystore: Arc::new(Mutex::new(None)),
+                keystore,
                 vault_dir,
                 plugins_dir,
                 #[cfg(desktop)]
