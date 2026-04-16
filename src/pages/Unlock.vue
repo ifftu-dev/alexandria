@@ -20,6 +20,7 @@ const password = ref('')
 const error = ref('')
 const unlocking = ref(false)
 const recovering = ref(false)
+const showRecoverConfirm = ref(false)
 const biometricAvailable = ref(false)
 const hasBiometricCredential = ref(false)
 const biometricLoading = ref(false)
@@ -136,14 +137,12 @@ async function unlockWithBiometric(auto = false) {
   }
 }
 
-async function recoverWallet() {
-  const confirmed = window.confirm(
-    'This will remove the local Alexandria wallet on this device and send you to wallet recovery. Continue only if you still have your recovery phrase.',
-  )
-  if (!confirmed) {
-    return
-  }
+function promptRecoverWallet() {
+  showRecoverConfirm.value = true
+}
 
+async function confirmRecoverWallet() {
+  showRecoverConfirm.value = false
   recovering.value = true
   error.value = ''
   progressLines.value = []
@@ -230,7 +229,7 @@ function handleKeydown(e: KeyboardEvent) {
             variant="outline"
             :loading="recovering"
             :disabled="unlocking || biometricLoading"
-            @click="recoverWallet"
+            @click="promptRecoverWallet"
           >
             Recover Wallet with Recovery Phrase
           </AppButton>
@@ -305,5 +304,25 @@ function handleKeydown(e: KeyboardEvent) {
       </div>
 
     </div>
+
+    <!-- Recovery confirmation dialog -->
+    <Teleport to="body">
+      <div v-if="showRecoverConfirm" class="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+        <div class="w-full max-w-sm rounded-2xl bg-card border border-border p-6 shadow-2xl">
+          <h3 class="text-base font-semibold text-foreground">Reset wallet?</h3>
+          <p class="mt-2 text-sm text-muted-foreground">
+            This will remove the local Alexandria wallet on this device and send you to wallet recovery. Continue only if you still have your recovery phrase.
+          </p>
+          <div class="mt-5 flex gap-3">
+            <AppButton variant="outline" class="flex-1" @click="showRecoverConfirm = false">
+              Cancel
+            </AppButton>
+            <AppButton variant="danger" class="flex-1" @click="confirmRecoverWallet">
+              Reset &amp; Recover
+            </AppButton>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
