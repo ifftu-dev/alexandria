@@ -1,14 +1,31 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow'
 import AppLayout from '@/layouts/AppLayout.vue'
 import BlankLayout from '@/layouts/BlankLayout.vue'
 import { useAuth } from '@/composables/useAuth'
 import { initTheme } from '@/composables/useTheme'
+import { isMac } from '@/composables/usePlatform'
 
 // Apply stored theme immediately (before first render)
 initTheme()
+
+// Cmd/Ctrl + vertical scroll → horizontal scroll in overflow-x containers.
+function onWheel(e: WheelEvent) {
+  const mod = isMac ? e.metaKey : e.ctrlKey
+  if (!mod) return
+  // Only act on vertical wheel deltas.
+  if (e.deltaY === 0) return
+  const target = e.target as HTMLElement | null
+  if (!target) return
+  const scroller = target.closest('.overflow-x-auto, .scrollbar-thin') as HTMLElement | null
+  if (!scroller) return
+  // If the container can scroll horizontally, redirect.
+  if (scroller.scrollWidth <= scroller.clientWidth) return
+  e.preventDefault()
+  scroller.scrollLeft += e.deltaY
+}
 
 const route = useRoute()
 const router = useRouter()
@@ -23,6 +40,8 @@ const layout = computed(() => {
 })
 
 onMounted(async () => {
+  document.addEventListener('wheel', onWheel, { passive: false })
+
   try {
     const state = await initialize()
 
@@ -41,6 +60,10 @@ onMounted(async () => {
 
   // Show the window now that the frontend is rendered and themed
   getCurrentWebviewWindow().show()
+})
+
+onUnmounted(() => {
+  document.removeEventListener('wheel', onWheel)
 })
 </script>
 
