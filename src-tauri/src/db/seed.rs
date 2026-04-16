@@ -123,6 +123,22 @@ fn backfill_demo_data(conn: &Connection) -> Result<(), rusqlite::Error> {
         log::info!("Demo data backfill complete");
     }
 
+    // Backfill thumbnails — runs every time so existing DBs that were
+    // seeded before the thumbnail artwork was added pick them up. The
+    // UPDATE is a no-op if the value is already correct.
+    for (id, svg) in COURSE_THUMBNAILS {
+        conn.execute(
+            "UPDATE courses SET thumbnail_svg = ?1 WHERE id = ?2 AND (thumbnail_svg IS NULL OR thumbnail_svg = '')",
+            rusqlite::params![svg, id],
+        )?;
+    }
+    for (id, svg) in TUTORIAL_THUMBNAILS {
+        conn.execute(
+            "UPDATE courses SET thumbnail_svg = ?1 WHERE id = ?2 AND (thumbnail_svg IS NULL OR thumbnail_svg = '')",
+            rusqlite::params![svg, id],
+        )?;
+    }
+
     // Always retry the bind after seed/backfill — cheap and idempotent.
     let _ = bind_current_user_to_seed(conn);
 
@@ -206,8 +222,49 @@ fn seed_visual_assets(conn: &Connection) -> Result<(), rusqlite::Error> {
         )?;
     }
 
+    // Tutorial thumbnail SVGs (distinct style: wider, play-button, cinematic)
+    for (id, svg) in TUTORIAL_THUMBNAILS {
+        conn.execute(
+            "UPDATE courses SET thumbnail_svg = ?1 WHERE id = ?2",
+            params![svg, id],
+        )?;
+    }
+
     Ok(())
 }
+
+// Tutorial thumbnails — wider aspect (2:1), play-button motif, bolder
+// gradients with a cinematic feel. Visually distinct from course cards.
+const TUTORIAL_THUMBNAILS: &[(&str, &str)] = &[
+    (
+        "course_tut_bigO",
+        r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 320"><rect width="640" height="320" rx="0" fill="#1e1b4b"/><circle cx="520" cy="160" r="120" fill="#4338ca" opacity="0.3"/><circle cx="120" cy="160" r="80" fill="#6366f1" opacity="0.15"/><polygon points="280,120 340,160 280,200" fill="#fff" opacity="0.9"/><text x="400" y="155" fill="#fff" font-family="system-ui,sans-serif" font-size="20" font-weight="700" opacity="0.9">Big-O in 8 Min</text><text x="400" y="180" fill="#a5b4fc" font-family="system-ui,sans-serif" font-size="12" opacity="0.7">Complexity fundamentals</text></svg>"##,
+    ),
+    (
+        "course_tut_asyncawait",
+        r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 320"><rect width="640" height="320" fill="#0c4a6e"/><circle cx="500" cy="100" r="160" fill="#0284c7" opacity="0.2"/><circle cx="160" cy="240" r="100" fill="#0ea5e9" opacity="0.12"/><polygon points="280,120 340,160 280,200" fill="#fff" opacity="0.9"/><text x="400" y="155" fill="#fff" font-family="system-ui,sans-serif" font-size="20" font-weight="700" opacity="0.9">Async / Await</text><text x="400" y="180" fill="#7dd3fc" font-family="system-ui,sans-serif" font-size="12" opacity="0.7">Concurrency quick tour</text></svg>"##,
+    ),
+    (
+        "course_tut_ml_regression",
+        r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 320"><rect width="640" height="320" fill="#431407"/><circle cx="540" cy="140" r="140" fill="#ea580c" opacity="0.15"/><circle cx="100" cy="200" r="100" fill="#f97316" opacity="0.1"/><polygon points="280,120 340,160 280,200" fill="#fff" opacity="0.9"/><text x="400" y="155" fill="#fff" font-family="system-ui,sans-serif" font-size="18" font-weight="700" opacity="0.9">Linear Regression</text><text x="400" y="180" fill="#fdba74" font-family="system-ui,sans-serif" font-size="12" opacity="0.7">From first principles</text></svg>"##,
+    ),
+    (
+        "course_tut_aes",
+        r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 320"><rect width="640" height="320" fill="#052e16"/><circle cx="480" cy="120" r="150" fill="#16a34a" opacity="0.15"/><circle cx="140" cy="220" r="90" fill="#22c55e" opacity="0.1"/><polygon points="280,120 340,160 280,200" fill="#fff" opacity="0.9"/><text x="400" y="155" fill="#fff" font-family="system-ui,sans-serif" font-size="20" font-weight="700" opacity="0.9">AES Walkthrough</text><text x="400" y="180" fill="#86efac" font-family="system-ui,sans-serif" font-size="12" opacity="0.7">Block cipher step-by-step</text></svg>"##,
+    ),
+    (
+        "course_tut_ux_interviews",
+        r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 320"><rect width="640" height="320" fill="#4a044e"/><circle cx="520" cy="160" r="130" fill="#c026d3" opacity="0.15"/><circle cx="120" cy="180" r="100" fill="#e879f9" opacity="0.08"/><polygon points="280,120 340,160 280,200" fill="#fff" opacity="0.9"/><text x="400" y="155" fill="#fff" font-family="system-ui,sans-serif" font-size="18" font-weight="700" opacity="0.9">User Interviews</text><text x="400" y="180" fill="#f0abfc" font-family="system-ui,sans-serif" font-size="12" opacity="0.7">Run great research sessions</text></svg>"##,
+    ),
+    (
+        "course_tut_civ_constitution",
+        r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 320"><rect width="640" height="320" fill="#450a0a"/><circle cx="500" cy="140" r="140" fill="#dc2626" opacity="0.12"/><circle cx="140" cy="200" r="90" fill="#f59e0b" opacity="0.08"/><polygon points="280,120 340,160 280,200" fill="#fff" opacity="0.9"/><text x="400" y="155" fill="#fff" font-family="system-ui,sans-serif" font-size="18" font-weight="700" opacity="0.9">Constitutions 101</text><text x="400" y="180" fill="#fca5a5" font-family="system-ui,sans-serif" font-size="12" opacity="0.7">Reading a national charter</text></svg>"##,
+    ),
+    (
+        "course_tut_civ_budget",
+        r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 320"><rect width="640" height="320" fill="#422006"/><circle cx="520" cy="150" r="130" fill="#d97706" opacity="0.15"/><circle cx="120" cy="190" r="100" fill="#fbbf24" opacity="0.08"/><polygon points="280,120 340,160 280,200" fill="#fff" opacity="0.9"/><text x="400" y="155" fill="#fff" font-family="system-ui,sans-serif" font-size="18" font-weight="700" opacity="0.9">Reading a Budget</text><text x="400" y="180" fill="#fde68a" font-family="system-ui,sans-serif" font-size="12" opacity="0.7">Where your taxes go</text></svg>"##,
+    ),
+];
 
 const COURSE_THUMBNAILS: &[(&str, &str)] = &[
     (
