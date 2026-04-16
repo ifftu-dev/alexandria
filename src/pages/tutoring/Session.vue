@@ -71,6 +71,7 @@ onMounted(async () => {
 onUnmounted(() => {
   stopPolling()
   setChatOpen(false)
+  stopSelfPreview()
   if (durationInterval) {
     clearInterval(durationInterval)
     durationInterval = null
@@ -95,7 +96,75 @@ const connectedPeerCount = computed(() => peers.value.filter(p => p.connected).l
 const videoEnabled = computed(() => sessionStatus.value?.video_enabled ?? false)
 const audioEnabled = computed(() => sessionStatus.value?.audio_enabled ?? false)
 const screenSharing = computed(() => sessionStatus.value?.screen_sharing ?? false)
+// Fallback for screen-share preview, which still flows through the Rust JPEG
+// bridge. Camera self-preview is rendered via a native MediaStream below to
+// avoid the Rust→JS JPEG-over-IPC bottleneck that produced choppy, low-res
+// playback at 720p.
 const selfVideoSrc = computed(() => videoFrames.value['self'] ?? null)
+
+// ── Native self-preview (camera) via getUserMedia ─────────────────
+// Renders the local camera in a <video> element with no IPC round-trip.
+// The Rust side still captures independently for publish-to-peers.
+const selfVideoElMobile = ref<HTMLVideoElement | null>(null)
+const selfVideoElDesktop = ref<HTMLVideoElement | null>(null)
+const selfStream = ref<MediaStream | null>(null)
+const selfStreamActive = computed(() => selfStream.value !== null && !screenSharing.value)
+
+async function attachSelfStream() {
+  const stream = selfStream.value
+  if (!stream) return
+  await nextTick()
+  for (const el of [selfVideoElMobile.value, selfVideoElDesktop.value]) {
+    if (el && el.srcObject !== stream) {
+      el.srcObject = stream
+      el.play().catch(() => { /* autoplay policy — muted should avoid this */ })
+    }
+  }
+}
+
+async function startSelfPreview() {
+  if (selfStream.value) return
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
+      audio: false,
+    })
+    selfStream.value = stream
+    await attachSelfStream()
+  } catch (e) {
+    console.warn('[tutoring] getUserMedia for self-preview failed:', e)
+  }
+}
+
+function stopSelfPreview() {
+  const stream = selfStream.value
+  if (!stream) return
+  for (const track of stream.getTracks()) track.stop()
+  selfStream.value = null
+  for (const el of [selfVideoElMobile.value, selfVideoElDesktop.value]) {
+    if (el) el.srcObject = null
+  }
+}
+
+// Sync with session video state. Only run the native preview when the
+// camera track is on AND we're not screen-sharing (screen share reuses the
+// Rust JPEG bridge).
+watch(
+  [videoEnabled, screenSharing, isActive],
+  ([video, screen, active]) => {
+    if (active && video && !screen) {
+      startSelfPreview()
+    } else {
+      stopSelfPreview()
+    }
+  },
+  { immediate: true },
+)
+
+// Re-attach when template refs appear (e.g. after mobile/desktop toggle).
+watch([selfVideoElMobile, selfVideoElDesktop], () => {
+  if (selfStream.value) attachSelfStream()
+})
 
 /** Connection quality: 'good' | 'fair' | 'poor' | 'none' based on peer connectivity. */
 const connectionQuality = computed(() => {
@@ -406,11 +475,20 @@ function peerInitials(nodeId: string): string {
             <template v-if="isMobilePlatform">
               <!-- Self video / camera preview -->
               <div class="relative mx-auto w-full aspect-[3/4] max-h-[50vh] overflow-hidden rounded-2xl border border-border bg-card">
-                <!-- Live self-preview from camera -->
-                <img
-                  v-if="selfVideoSrc"
-                  :src="selfVideoSrc"
+                <!-- Native MediaStream self-preview (camera) — no IPC round-trip -->
+                <video
+                  v-if="selfStreamActive"
+                  ref="selfVideoElMobile"
+                  autoplay
+                  muted
+                  playsinline
                   class="absolute inset-0 h-full w-full object-cover scale-x-[-1]"
+                />
+                <!-- JPEG bridge fallback (screen share self-view) -->
+                <img
+                  v-else-if="selfVideoSrc"
+                  :src="selfVideoSrc"
+                  class="absolute inset-0 h-full w-full object-cover"
                   alt="Self preview"
                 />
                 <!-- Fallback: audio-only circular indicator -->
@@ -572,12 +650,20 @@ function peerInitials(nodeId: string): string {
             <template v-else>
               <!-- Self video / camera status -->
               <div class="relative mx-auto aspect-video w-full max-w-3xl overflow-hidden rounded-2xl border border-border bg-card">
-                <!-- Live self-preview from camera/screen -->
+                <!-- Native MediaStream self-preview (camera) — no IPC round-trip -->
+                <video
+                  v-if="selfStreamActive"
+                  ref="selfVideoElDesktop"
+                  autoplay
+                  muted
+                  playsinline
+                  class="absolute inset-0 h-full w-full object-cover scale-x-[-1]"
+                />
+                <!-- JPEG bridge fallback (screen share self-view) -->
                 <img
-                  v-if="selfVideoSrc"
+                  v-else-if="selfVideoSrc"
                   :src="selfVideoSrc"
                   class="absolute inset-0 h-full w-full object-cover"
-                  :class="screenSharing ? '' : 'scale-x-[-1]'"
                   alt="Self preview"
                 />
                 <!-- Fallback placeholder when no video frames -->

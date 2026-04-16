@@ -1335,8 +1335,8 @@ impl TutoringManager {
             "self".into(),
             app_handle,
             (1280, 720),
-            76,
-            18,
+            82,
+            30,
         ))
     }
 
