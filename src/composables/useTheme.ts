@@ -3,7 +3,7 @@ import { ref, watch, onMounted, onUnmounted } from 'vue'
 type Theme = 'light' | 'dark' | 'system'
 
 const STORAGE_KEY = 'alexandria-theme'
-const theme = ref<Theme>('system')
+const theme = ref<Theme>('dark')
 let initialized = false
 let mediaQuery: MediaQueryList | null = null
 let mediaHandler: (() => void) | null = null
