@@ -9,8 +9,8 @@
     <script>
       // Apply theme class + background before anything renders
       ;(function () {
-        var t = localStorage.getItem('alexandria-theme')
-        var dark = t === 'dark' || (!t || t === 'system') && window.matchMedia('(prefers-color-scheme: dark)').matches
+        var t = localStorage.getItem('alexandria-theme') || 'dark'
+        var dark = t === 'dark' || (t === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)
         if (dark) {
           document.documentElement.classList.add('dark')
           document.documentElement.style.backgroundColor = '#111827'
