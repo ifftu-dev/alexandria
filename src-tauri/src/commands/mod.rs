@@ -19,6 +19,8 @@ pub mod pinning;
 pub mod plugins;
 pub mod presentation;
 pub mod reputation;
+pub mod sentinel_dao;
+pub mod sentinel_priors;
 pub mod snapshot;
 pub mod taxonomy;
 

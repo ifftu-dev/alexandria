@@ -19,6 +19,8 @@ import type {
   SignalData,
   BehavioralProfile,
   StartSessionResponse,
+  SentinelPrior,
+  SentinelPriorBlob,
 } from '@/types'
 
 /**
@@ -45,6 +47,19 @@ const isActive = ref(false)
 const integrityScore = ref(1.0)
 const consistencyScore = ref(1.0)
 const cameraOptedIn = ref(false)
+
+// AI scoring is advisory until validated with labeled data (see
+// docs/sentinel.md §AI Models). Off by default; can be toggled per-device
+// via setAIScoringEnabled(). When enabled, each available AI signal
+// contributes a small advisory weight to the integrity score.
+const AI_SCORING_STORAGE_KEY = 'sentinel_ai_scoring_enabled'
+const AI_ADVISORY_WEIGHT = 0.05
+const aiScoringEnabled = ref<boolean>(readAIScoringPref())
+
+function readAIScoringPref(): boolean {
+  try { return localStorage.getItem(AI_SCORING_STORAGE_KEY) === '1' }
+  catch { return false }
+}
 
 // ============================================================================
 // Module-level internal state
@@ -329,6 +344,24 @@ export function useSentinel() {
       integrity += faceScore * 0.15; weights += 0.15
     }
 
+    // Advisory AI contributions — opt-in, small weights. Each feeds through
+    // as "confidence this is a legit user" so the math stays consistent
+    // with the rule-based terms above.
+    if (aiScoringEnabled.value) {
+      if (signals.ai_keystroke_anomaly !== undefined) {
+        integrity += (1 - signals.ai_keystroke_anomaly) * AI_ADVISORY_WEIGHT
+        weights += AI_ADVISORY_WEIGHT
+      }
+      if (signals.ai_mouse_human_prob !== undefined) {
+        integrity += signals.ai_mouse_human_prob * AI_ADVISORY_WEIGHT
+        weights += AI_ADVISORY_WEIGHT
+      }
+      if (cameraOptedIn.value && signals.ai_face_similarity !== undefined) {
+        integrity += signals.ai_face_similarity * AI_ADVISORY_WEIGHT
+        weights += AI_ADVISORY_WEIGHT
+      }
+    }
+
     integrity = weights > 0 ? integrity / weights : 0.5
 
     let consistencyVal = (typingConsistency + mouseConsistency) / 2
@@ -336,7 +369,11 @@ export function useSentinel() {
       consistencyVal = (typingConsistency + mouseConsistency + faceConsistency) / 3
     }
 
-    // Rule-based anomaly flags
+    // Rule-based anomaly flags (see docs/sentinel.md §Flagging Logic)
+    const boundedIntegrity = Math.min(1, Math.max(0, integrity))
+    const boundedConsistency = Math.min(1, Math.max(0, consistencyVal))
+    if (boundedIntegrity < 0.40) anomalies.push('low_integrity')
+    if (boundedConsistency < 0.35) anomalies.push('behavior_shift')
     if (tabSwitchCount > 10) anomalies.push('tab_switching')
     if (pastedCharCount > 500) anomalies.push('paste_detected')
     if (devtoolsDetected) anomalies.push('devtools_detected')
@@ -348,8 +385,8 @@ export function useSentinel() {
 
     return {
       signals,
-      integrity: Math.min(1, Math.max(0, integrity)),
-      consistency: Math.min(1, Math.max(0, consistencyVal)),
+      integrity: boundedIntegrity,
+      consistency: boundedConsistency,
       anomalies: [...new Set(anomalies)],
     }
   }
@@ -815,31 +852,62 @@ export function useSentinel() {
     saveProfile(userId, deviceFp, profile)
   }
 
+  const fetchPriorTrajectories = async (): Promise<MousePoint[][]> => {
+    try {
+      const priors = await invoke<SentinelPrior[]>('sentinel_priors_list', { modelKind: 'mouse' })
+      const blobs = await Promise.all(priors.map(p =>
+        invoke<SentinelPriorBlob>('sentinel_priors_load', { priorId: p.id }).catch(() => null),
+      ))
+      const out: MousePoint[][] = []
+      for (const blob of blobs) {
+        if (!blob || blob.model_kind !== 'mouse') continue
+        for (const entry of blob.samples as Array<{ trajectory?: MousePoint[] }>) {
+          if (Array.isArray(entry?.trajectory) && entry.trajectory.length >= 51) {
+            out.push(entry.trajectory)
+          }
+        }
+      }
+      return out
+    } catch {
+      return []
+    }
+  }
+
   const trainAIModels = async (): Promise<{
     keystrokeAE: { trained: boolean; loss: number; samples: number }
-    mouseCNN: { trained: boolean; loss: number; samples: number }
+    mouseCNN: { trained: boolean; loss: number; samples: number; priorTrajectories: number }
     faceEmbedder: { enrolled: boolean; progress: number }
   }> => {
     let aeLoss = -1, aeSamples = 0
     if (keystrokeBuffer.length >= 20) {
       const aeInput: AEKeystrokeEvent[] = keystrokeBuffer.map(k => ({ key: k.key, dwellMs: k.dwellMs, flightMs: k.flightMs }))
       if (!keystrokeAE) keystrokeAE = new KeystrokeAutoencoder()
+      // Keystroke-prior contrastive training is a follow-up. The AE's
+      // current training is reconstruction-only on user data; a
+      // "push-away" pass against ratified paste-macro priors needs
+      // margin-loss plumbing that doesn't exist yet.
       aeLoss = keystrokeAE.train(aeInput)
       aeSamples = keystrokeAE.getStats().samples
     }
 
     let cnnLoss = -1, cnnSamples = 0
+    let priorTrajectories = 0
     const moves = mouseBuffer.filter(m => m.type === 'move')
     if (moves.length >= 51) {
       const mousePoints: MousePoint[] = moves.map(m => ({ x: m.x, y: m.y, t: m.t }))
       if (!mouseCNN) mouseCNN = new MouseTrajectoryCNN()
-      cnnLoss = mouseCNN.train(mousePoints)
+      // Hydrate ratified bot trajectories from the Sentinel DAO library.
+      // Empty array on first run is fine — CNN falls back to its 5
+      // hard-coded synthetic bot patterns.
+      const ratifiedBots = await fetchPriorTrajectories()
+      priorTrajectories = ratifiedBots.length
+      cnnLoss = mouseCNN.train(mousePoints, undefined, ratifiedBots)
       cnnSamples = mouseCNN.getStats().samples
     }
 
     return {
       keystrokeAE: { trained: keystrokeAE?.isTrained ?? false, loss: aeLoss, samples: aeSamples },
-      mouseCNN: { trained: mouseCNN?.isTrained ?? false, loss: cnnLoss, samples: cnnSamples },
+      mouseCNN: { trained: mouseCNN?.isTrained ?? false, loss: cnnLoss, samples: cnnSamples, priorTrajectories },
       faceEmbedder: { enrolled: faceEmbedder?.isEnrolled ?? false, progress: faceEmbedder?.enrollmentProgress ?? 0 },
     }
   }
@@ -867,6 +935,30 @@ export function useSentinel() {
     faceEmbedder = null
   }
 
+  const setAIScoringEnabled = (enabled: boolean) => {
+    aiScoringEnabled.value = enabled
+    try { localStorage.setItem(AI_SCORING_STORAGE_KEY, enabled ? '1' : '0') }
+    catch { /* localStorage not available */ }
+  }
+
+  /** Toggle camera opt-in mid-session. Caller is responsible for acquiring
+   * the MediaStream, attaching an HTMLVideoElement, and driving the 3s
+   * face-verification loop (see docs/sentinel.md §Camera). This only flips
+   * the flag that gates face-related signals in computeScores(). */
+  const setCameraOptedIn = (opted: boolean) => {
+    cameraOptedIn.value = opted
+    if (!opted) {
+      facePresent = undefined
+      faceCount = undefined
+      faceConsistency = undefined
+      faceSimilarity = undefined
+      faceMatch = undefined
+      consecutiveNoFaceChecks = 0
+      faceAbsentChecks = 0
+      totalFaceChecks = 0
+    }
+  }
+
   return {
     // State
     sessionId: readonly(sessionId),
@@ -874,6 +966,7 @@ export function useSentinel() {
     integrityScore: readonly(integrityScore),
     consistencyScore: readonly(consistencyScore),
     cameraOptedIn: readonly(cameraOptedIn),
+    aiScoringEnabled: readonly(aiScoringEnabled),
 
     // Session controls
     start,
@@ -899,5 +992,7 @@ export function useSentinel() {
     trainAIModels,
     enrollFace,
     getAIModelStatus,
+    setAIScoringEnabled,
+    setCameraOptedIn,
   }
 }

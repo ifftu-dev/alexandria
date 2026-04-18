@@ -359,7 +359,10 @@ export class KeystrokeAutoencoder {
     }
 
     const avgError = totalError / data.length
-    const baseline = Math.max(this.trainLoss, 0.01)
+    // Floor prevents ratio blow-up when trainLoss is near-zero (users with
+    // very consistent typing) — without this, every legitimate keystroke
+    // would score as anomalous.
+    const baseline = Math.max(this.trainLoss, 0.05)
     const ratio = avgError / baseline
     const anomalyScore = 1 / (1 + Math.exp(-0.5 * (ratio - 5)))
     return Math.min(1, Math.max(0, anomalyScore))

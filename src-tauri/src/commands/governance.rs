@@ -61,6 +61,13 @@ fn check_proficiency(
         )
         .map_err(|e| format!("DAO not found: {e}"))?;
 
+    // Sentinel DAO (scope_type='sentinel') is open-proposal by design
+    // (see docs/sentinel-federation.md §10 decision 4). Sybil is absorbed
+    // by DAO ratification itself, so the proficiency gate does not apply.
+    if scope_type == "sentinel" {
+        return Ok(());
+    }
+
     // Check if the user has any skill_proof at or above min_level for a
     // skill within the DAO's scope.
     // Check if ANY proof exists for skills in scope at the required level

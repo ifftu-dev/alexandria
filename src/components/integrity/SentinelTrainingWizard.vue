@@ -62,7 +62,7 @@ const savedProfile = ref<Record<string, unknown> | null>(null)
 const saving = ref(false)
 const aiTrainingResults = ref<{
   keystrokeAE: { trained: boolean; loss: number; samples: number }
-  mouseCNN: { trained: boolean; loss: number; samples: number }
+  mouseCNN: { trained: boolean; loss: number; samples: number; priorTrajectories: number }
   faceEmbedder: { enrolled: boolean; progress: number }
 } | null>(null)
 

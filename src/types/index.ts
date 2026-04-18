@@ -819,8 +819,34 @@ export interface IntegritySession {
   enrollment_id: string
   status: string
   integrity_score: number | null
+  critical_count: number
+  warning_count: number
   started_at: string
   ended_at: string | null
+}
+
+/** Ratified adversarial-prior metadata as persisted in `sentinel_priors`. */
+export interface SentinelPrior {
+  id: string
+  proposal_id: string
+  cid: string
+  model_kind: string
+  label: string
+  schema_version: number
+  sample_count: number
+  notes: string | null
+  ratified_at: string
+  signature: string
+}
+
+/** Parsed labeled-samples blob loaded via `sentinel_priors_load`. */
+export interface SentinelPriorBlob {
+  schema_version: number
+  model_kind: string
+  label: string
+  samples: unknown[]
+  notes?: string | null
+  contributor_attribution?: string | null
 }
 
 export interface IntegritySnapshot {
@@ -834,6 +860,7 @@ export interface IntegritySnapshot {
   devtools_score: number | null
   camera_score: number | null
   composite_score: number | null
+  anomaly_flags: string[]
   captured_at: string
 }
 

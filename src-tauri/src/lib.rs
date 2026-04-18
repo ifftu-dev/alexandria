@@ -797,6 +797,14 @@ pub fn run() {
             commands::integrity::integrity_get_session,
             commands::integrity::integrity_list_sessions,
             commands::integrity::integrity_list_snapshots,
+            // Sentinel DAO (adversarial-prior governance)
+            commands::sentinel_dao::sentinel_dao_get_info,
+            // Sentinel adversarial priors (propose / ratify / list / sync / load)
+            commands::sentinel_priors::sentinel_propose_prior,
+            commands::sentinel_priors::sentinel_ratify_prior,
+            commands::sentinel_priors::sentinel_priors_list,
+            commands::sentinel_priors::sentinel_priors_sync,
+            commands::sentinel_priors::sentinel_priors_load,
             // Live Tutoring (iroh-live rooms)
             commands::tutoring::tutoring_create_room,
             commands::tutoring::tutoring_join_room,

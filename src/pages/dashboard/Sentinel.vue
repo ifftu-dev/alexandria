@@ -7,7 +7,13 @@ import SentinelTrainingWizard from '@/components/integrity/SentinelTrainingWizar
 import type { IntegritySession } from '@/types'
 
 const { invoke } = useLocalApi()
-const { getProfile, getAIModelStatus, resetProfile } = useSentinel()
+const {
+  getProfile,
+  getAIModelStatus,
+  resetProfile,
+  aiScoringEnabled,
+  setAIScoringEnabled,
+} = useSentinel()
 
 const showWizard = ref(false)
 const sessions = ref<IntegritySession[]>([])
@@ -54,11 +60,11 @@ const anomalyFlagTypes = [
 // ---------------------------------------------------------------------------
 
 function getOutcome(session: IntegritySession): 'clean' | 'flagged' | 'suspended' {
-  const score = session.integrity_score
-  if (score === null || score === undefined) return 'clean'
-  if (score >= 0.8) return 'clean'
-  if (score >= 0.4) return 'flagged'
-  return 'suspended'
+  // Server-authoritative: backend computes status from cumulative anomaly
+  // severity + running integrity score. Clean == active|completed.
+  if (session.status === 'suspended') return 'suspended'
+  if (session.status === 'flagged') return 'flagged'
+  return 'clean'
 }
 
 const sessionBreakdown = computed(() => {
@@ -759,6 +765,27 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
                 <p class="text-[0.65rem] text-muted-foreground">2+ critical flags, OR 1 critical + 2 warnings — assessment results may be invalidated</p>
               </div>
             </div>
+          </div>
+        </div>
+
+        <!-- AI scoring toggle -->
+        <div class="card p-5">
+          <div class="flex items-center justify-between gap-4">
+            <div>
+              <h2 class="text-sm font-semibold text-foreground">Advisory AI Scoring</h2>
+              <p class="mt-1 text-xs text-muted-foreground">
+                Fold keystroke autoencoder, mouse CNN, and face LBP scores into the
+                integrity calculation at a small advisory weight. Off by default — AI
+                signals are considered advisory until validated with labeled data.
+              </p>
+            </div>
+            <AppButton
+              :variant="aiScoringEnabled ? 'primary' : 'secondary'"
+              size="sm"
+              @click="setAIScoringEnabled(!aiScoringEnabled)"
+            >
+              {{ aiScoringEnabled ? 'Enabled' : 'Disabled' }}
+            </AppButton>
           </div>
         </div>
 
