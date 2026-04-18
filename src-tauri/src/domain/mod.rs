@@ -12,6 +12,7 @@ pub mod opinions;
 pub mod plugin;
 pub mod profile;
 pub mod reputation;
+pub mod sentinel;
 pub mod sync;
 pub mod taxonomy;
 pub mod vc;

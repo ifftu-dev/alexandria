@@ -25,6 +25,8 @@ use tauri::State;
 
 use crate::commands::sentinel_dao::{SENTINEL_DAO_ID, SENTINEL_PRIOR_CATEGORY};
 use crate::crypto::hash::{blake2b_256, entity_id};
+use crate::crypto::wallet;
+use crate::domain::sentinel::SentinelPriorAnnouncement;
 use crate::ipfs::storage;
 use crate::AppState;
 
@@ -395,7 +397,7 @@ pub async fn sentinel_ratify_prior(
     });
     let blob_size = bytes.len() as u64;
 
-    {
+    let row = {
         let db_guard = state
             .db
             .lock()
@@ -427,7 +429,77 @@ pub async fn sentinel_ratify_prior(
         // survives storage-pressure eviction.
         storage::upsert_pin(conn, &cid, PIN_TYPE_SENTINEL_PRIOR, blob_size, false);
 
-        read_prior_by_proposal(conn, &proposal_id)
+        read_prior_by_proposal(conn, &proposal_id)?
+    };
+
+    // Best-effort gossip broadcast. Failures are logged, never fatal —
+    // the prior is already persisted locally and will be re-broadcast
+    // next time a committee member ratifies or syncs (future sweeper
+    // work). Gated on an unlocked keystore; if locked, the node is
+    // running read-only and gossip will catch up once unlocked.
+    broadcast_sentinel_prior(&state, &row).await;
+
+    Ok(row)
+}
+
+/// Fire-and-forget broadcast of a freshly ratified prior onto the
+/// Sentinel priors gossip topic. All error paths log + continue.
+async fn broadcast_sentinel_prior(state: &State<'_, AppState>, row: &SentinelPrior) {
+    let mnemonic = {
+        let keystore = state.keystore.lock().await;
+        match keystore.as_ref() {
+            Some(ks) => match ks.retrieve_mnemonic() {
+                Ok(m) => m,
+                Err(e) => {
+                    log::warn!("sentinel broadcast: retrieve_mnemonic failed: {e}");
+                    return;
+                }
+            },
+            None => {
+                log::debug!("sentinel broadcast: keystore locked — skipping gossip");
+                return;
+            }
+        }
+    };
+    let w = match wallet::wallet_from_mnemonic(&mnemonic) {
+        Ok(w) => w,
+        Err(e) => {
+            log::warn!("sentinel broadcast: wallet_from_mnemonic failed: {e}");
+            return;
+        }
+    };
+
+    let ann = SentinelPriorAnnouncement {
+        prior_id: row.id.clone(),
+        proposal_id: row.proposal_id.clone(),
+        cid: row.cid.clone(),
+        model_kind: row.model_kind.clone(),
+        label: row.label.clone(),
+        schema_version: row.schema_version as u32,
+        sample_count: row.sample_count,
+        notes: row.notes.clone(),
+        signature: row.signature.clone(),
+        ratified_at: row.ratified_at.clone(),
+    };
+    let payload = match serde_json::to_vec(&ann) {
+        Ok(b) => b,
+        Err(e) => {
+            log::warn!("sentinel broadcast: serialize failed: {e}");
+            return;
+        }
+    };
+
+    let node_guard = state.p2p_node.lock().await;
+    match node_guard.as_ref() {
+        Some(node) => {
+            if let Err(e) = node
+                .publish_sentinel_prior(payload, &w.signing_key, &w.stake_address)
+                .await
+            {
+                log::warn!("sentinel broadcast: publish failed: {e}");
+            }
+        }
+        None => log::debug!("sentinel broadcast: p2p node not running — skipping gossip"),
     }
 }
 

@@ -4,8 +4,8 @@ use super::network::{NetworkError, P2pNode};
 use super::signing::sign_gossip_message;
 use super::types::{
     SignedGossipMessage, TOPIC_CATALOG, TOPIC_EVIDENCE, TOPIC_GOVERNANCE, TOPIC_OPINIONS,
-    TOPIC_PINBOARD, TOPIC_PROFILES, TOPIC_TAXONOMY, TOPIC_VC_DID, TOPIC_VC_PRESENTATION,
-    TOPIC_VC_STATUS,
+    TOPIC_PINBOARD, TOPIC_PROFILES, TOPIC_SENTINEL_PRIORS, TOPIC_TAXONOMY, TOPIC_VC_DID,
+    TOPIC_VC_PRESENTATION, TOPIC_VC_STATUS,
 };
 
 /// High-level gossip operations for publishing typed messages.
@@ -131,6 +131,19 @@ impl P2pNode {
         stake_address: &str,
     ) -> Result<(), NetworkError> {
         self.sign_and_publish(TOPIC_PINBOARD, payload, signing_key, stake_address)
+            .await
+    }
+
+    /// Publish a ratified Sentinel adversarial-prior announcement.
+    /// Carried on a dedicated topic so peers can subscribe just to the
+    /// Sentinel library without needing the full governance firehose.
+    pub async fn publish_sentinel_prior(
+        &self,
+        payload: Vec<u8>,
+        signing_key: &SigningKey,
+        stake_address: &str,
+    ) -> Result<(), NetworkError> {
+        self.sign_and_publish(TOPIC_SENTINEL_PRIORS, payload, signing_key, stake_address)
             .await
     }
 

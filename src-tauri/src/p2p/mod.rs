@@ -8,6 +8,7 @@ pub mod network;
 pub mod opinions;
 pub mod rate_limit;
 pub mod scoring;
+pub mod sentinel;
 pub mod signing;
 pub mod stress;
 pub mod sync;
