@@ -373,6 +373,40 @@ export interface DaoMember {
   joined_at: string
 }
 
+/** Returned by `sentinel_dao_get_info`. */
+export interface SentinelDaoInfo {
+  dao: DaoInfo
+  committee: DaoMember[]
+  recognized_categories: string[]
+}
+
+/** Returned by `sentinel_holdout_list`. */
+export interface SentinelHoldoutRef {
+  id: string
+  encrypted_cid: string
+  model_kind: string
+  threshold: number
+  created_at: string
+}
+
+export interface SentinelHoldoutSealedShare {
+  share_index: number
+  stake_address: string
+  x25519_pubkey_hex: string
+  sender_x25519_pubkey_hex: string
+  sealed_share_hex: string
+}
+
+export interface SentinelHoldoutKeyPolicy {
+  threshold: number
+  shares: SentinelHoldoutSealedShare[]
+}
+
+export interface SentinelHoldoutPlaintextShare {
+  share_index: number
+  y_hex: string
+}
+
 export interface Election {
   id: string
   dao_id: string

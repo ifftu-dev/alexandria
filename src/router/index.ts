@@ -209,6 +209,12 @@ const router = createRouter({
       meta: { layout: 'app' },
     },
     {
+      path: '/dashboard/sentinel/holdout-evaluate',
+      name: 'dashboard-sentinel-holdout-evaluate',
+      component: () => import('@/pages/dashboard/sentinel/HoldoutEvaluate.vue'),
+      meta: { layout: 'app' },
+    },
+    {
       path: '/dashboard/settings',
       name: 'dashboard-settings',
       component: () => import('@/pages/dashboard/Settings.vue'),
