@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { AppButton, AppBadge, EmptyState } from '@/components/ui'
 import { useSentinel } from '@/composables/useSentinel'
 import { useLocalApi } from '@/composables/useLocalApi'
 import SentinelTrainingWizard from '@/components/integrity/SentinelTrainingWizard.vue'
 import type { IntegritySession } from '@/types'
+
+const router = useRouter()
 
 const { invoke } = useLocalApi()
 const {
@@ -198,6 +201,13 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
           @click="handleResetProfile"
         >
           Reset Profile
+        </AppButton>
+        <AppButton
+          variant="secondary"
+          size="sm"
+          @click="router.push('/dashboard/sentinel/propose-prior')"
+        >
+          Propose cheat pattern
         </AppButton>
         <AppButton
           variant="primary"

@@ -203,6 +203,12 @@ const router = createRouter({
       meta: { layout: 'app' },
     },
     {
+      path: '/dashboard/sentinel/propose-prior',
+      name: 'dashboard-sentinel-propose-prior',
+      component: () => import('@/pages/dashboard/sentinel/ProposePrior.vue'),
+      meta: { layout: 'app' },
+    },
+    {
       path: '/dashboard/settings',
       name: 'dashboard-settings',
       component: () => import('@/pages/dashboard/Settings.vue'),
