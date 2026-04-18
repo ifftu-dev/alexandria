@@ -31,6 +31,7 @@ use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 use x25519_dalek::{PublicKey, StaticSecret};
+use zeroize::Zeroizing;
 
 use crate::commands::sentinel_priors::{validate_prior_blob, ModelKind, PriorBlob};
 use crate::crypto::group_key::{decrypt_message, encrypt_message, generate_group_key};
@@ -216,13 +217,16 @@ pub async fn sentinel_holdout_upload(
         }
     }
 
-    // 1. Generate AES key, encrypt the plaintext.
-    let aes_key = generate_group_key();
+    // 1. Generate AES key, encrypt the plaintext. Wrap in Zeroizing
+    //    so the stack copy is wiped on drop rather than lingering.
+    let aes_key: Zeroizing<[u8; 32]> = Zeroizing::new(generate_group_key());
     let ciphertext =
         encrypt_message(&aes_key, &req.plaintext).map_err(|e| format!("AES encrypt: {e}"))?;
 
-    // 2. Shamir-split the AES key.
-    let shares = shamir::split(&aes_key, threshold, n).map_err(|e| format!("shamir: {e}"))?;
+    // 2. Shamir-split the AES key. `shares` holds the plaintext share
+    //    bytes too — those get sealed per-member below and never
+    //    leave this function in the clear.
+    let shares = shamir::split(&*aes_key, threshold, n).map_err(|e| format!("shamir: {e}"))?;
 
     // 3. Seal each share to its member. Use a fresh ephemeral X25519
     //    secret per upload — the sender isn't a stable identity here.
@@ -301,10 +305,11 @@ pub async fn sentinel_holdout_upload(
         );
     }
 
-    // Note: `aes_key` is `[u8; 32]` (Copy) so `drop` is a no-op. Real
-    // zeroization would need the `zeroize` crate; left as follow-up
-    // since the key never crosses a process boundary in this call.
-    let _ = aes_key;
+    // aes_key is Zeroizing and will be wiped when this function
+    // returns. Same for `shares` once it goes out of scope — the y
+    // bytes are just Vec<u8> inside Share, not zeroize-wrapped, so
+    // they live in non-scrubbed heap until the allocator reuses the
+    // page. Acceptable: shares are also sealed on disk.
 
     Ok(UploadHoldoutResponse {
         holdout_id,
@@ -467,15 +472,22 @@ pub async fn sentinel_holdout_evaluate(
         })
         .collect::<Result<Vec<_>, _>>()?;
 
-    let aes_key_vec = shamir::combine(&shamir_shares).map_err(|e| format!("shamir: {e}"))?;
+    // Reconstructed AES key stays in Zeroizing so the Vec contents
+    // are scrubbed on drop. The fixed-array copy used for decryption
+    // is also wrapped, belt-and-braces.
+    let aes_key_vec: Zeroizing<Vec<u8>> =
+        Zeroizing::new(shamir::combine(&shamir_shares).map_err(|e| format!("shamir: {e}"))?);
     if aes_key_vec.len() != 32 {
         return Err(format!(
             "reconstructed key has wrong length: {}",
             aes_key_vec.len()
         ));
     }
-    let mut aes_key = [0u8; 32];
-    aes_key.copy_from_slice(&aes_key_vec);
+    let aes_key: Zeroizing<[u8; 32]> = {
+        let mut arr = [0u8; 32];
+        arr.copy_from_slice(&aes_key_vec);
+        Zeroizing::new(arr)
+    };
 
     // Fetch the encrypted blob from the content store.
     let ciphertext = content::get_bytes(&state.content_node, &encrypted_cid)
@@ -483,11 +495,6 @@ pub async fn sentinel_holdout_evaluate(
         .map_err(|e| format!("content_get: {e}"))?;
     let plaintext = decrypt_message(&aes_key, &ciphertext)
         .map_err(|e| format!("AES decrypt failed (wrong shares?): {e}"))?;
-
-    // `aes_key` is Copy; `drop` is a no-op on it. Same follow-up as
-    // upload: introduce zeroize to actually scrub.
-    let _ = aes_key;
-    drop(aes_key_vec);
 
     let json = std::str::from_utf8(&plaintext)
         .map_err(|_| "decrypted holdout is not valid UTF-8 JSON".to_string())?;
