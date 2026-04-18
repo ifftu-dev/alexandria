@@ -46,6 +46,7 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (36, "sentinel_flags_and_status", MIGRATION_036),
     (37, "sentinel_dao_seed", MIGRATION_037),
     (38, "sentinel_priors", MIGRATION_038),
+    (39, "sentinel_holdout", MIGRATION_039),
 ];
 
 const MIGRATION_001: &str = r#"
@@ -1690,4 +1691,40 @@ CREATE INDEX IF NOT EXISTS idx_sentinel_priors_kind
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_sentinel_priors_proposal
     ON sentinel_priors(proposal_id);
+"#;
+
+const MIGRATION_039: &str = r#"
+-- ============================================================
+-- Migration 039: Sentinel DAO holdout evaluation set
+--
+-- A private labeled-samples blob used by the Sentinel DAO to
+-- measure classifier accuracy / false-positive rate without
+-- leaking the evaluation criteria to attackers.
+--
+-- The blob itself is AES-256-GCM encrypted under a random key.
+-- That key is split into N shares via Shamir's Secret Sharing
+-- over GF(256); each share is sealed to one DAO member's X25519
+-- pubkey. Any `threshold` members can reconstruct the key.
+--
+-- Storage-side this table keeps only metadata + the sealed-share
+-- policy JSON; the encrypted blob lives in the content store
+-- (pinned under pin_type='sentinel_holdout').
+--
+-- Role separation (decision 7 in sentinel-federation.md): the
+-- committee members holding decryption shares should not overlap
+-- with the curators ratifying priors. Enforcement is at the
+-- committee-election layer, not this schema.
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS sentinel_holdout_refs (
+    id             TEXT PRIMARY KEY,
+    encrypted_cid  TEXT NOT NULL,
+    model_kind     TEXT NOT NULL,       -- 'keystroke' | 'mouse'
+    threshold      INTEGER NOT NULL,
+    key_policy     TEXT NOT NULL,       -- JSON: sealed-share envelope
+    created_at     TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_sentinel_holdout_kind
+    ON sentinel_holdout_refs(model_kind);
 "#;
