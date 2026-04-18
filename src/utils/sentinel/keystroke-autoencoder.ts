@@ -345,8 +345,22 @@ export class KeystrokeAutoencoder {
 
   score(keystrokes: KeystrokeEvent[]): number {
     if (this.trainedEpochs === 0) return -1
-
     const digraphs = extractDigraphFeatures(keystrokes)
+    return this.scoreFeatures(digraphs)
+  }
+
+  /**
+   * Score pre-extracted digraph features directly, bypassing the
+   * KeystrokeEvent → DigraphFeatures conversion. Useful for scoring
+   * blobs from the Sentinel DAO prior library whose samples are
+   * already feature-shaped.
+   *
+   * Returns the same [0,1] anomaly score as `score()`: higher means
+   * the input reconstructs poorly, i.e. doesn't look like the
+   * enrolled user.
+   */
+  scoreFeatures(digraphs: DigraphFeatures[]): number {
+    if (this.trainedEpochs === 0) return -1
     if (digraphs.length < 5) return -1
 
     const rawData = digraphs.map(featureToVec)

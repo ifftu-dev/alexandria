@@ -3,6 +3,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { AppButton } from '@/components/ui'
 import { useLocalApi } from '@/composables/useLocalApi'
+import { useSentinel } from '@/composables/useSentinel'
 import type { IntegritySession } from '@/types'
 
 // Propose an adversarial prior to the Sentinel DAO for ratification.
@@ -13,6 +14,7 @@ import type { IntegritySession } from '@/types'
 
 const router = useRouter()
 const { invoke } = useLocalApi()
+const { testBlobAgainstClassifier } = useSentinel()
 
 type ModelKind = 'keystroke' | 'mouse'
 
@@ -35,6 +37,13 @@ const fileName = ref<string>('')
 const fileBytes = ref<Uint8Array | null>(null)
 const parsedBlob = ref<{ schema_version: number; model_kind: string; label: string; sampleCount: number } | null>(null)
 const parseError = ref<string | null>(null)
+
+// Classifier self-check: does our own local model already flag this
+// blob as anomalous? If yes → prior is genuinely adversarial and worth
+// proposing. If no → ratifying it would teach the model to flag legit
+// users. Null means the local classifier isn't trained yet (can't compare).
+const classifierCheck = ref<{ meanScore: number; adversarialFraction: number; sampleCount: number } | null>(null)
+const classifierCheckStatus = ref<'untested' | 'untrained' | 'ok'>('untested')
 
 const sessions = ref<IntegritySession[]>([])
 const sourceSessionId = ref<string>('')
@@ -96,6 +105,19 @@ function onFileChosen(event: Event) {
       if (sv !== 1) throw new Error(`unsupported schema_version: ${sv}`)
       if (!lb || lb.trim().length === 0) throw new Error('label must be non-empty')
       parsedBlob.value = { schema_version: sv, model_kind: mk, label: lb, sampleCount: samples.length }
+
+      // Run the local classifier against the blob to verify it's
+      // actually adversarial. The proposer sees this before submitting;
+      // DAO voters would see the same signal (future work).
+      const kind = mk as ModelKind
+      const check = testBlobAgainstClassifier(kind, samples)
+      if (check) {
+        classifierCheck.value = check
+        classifierCheckStatus.value = 'ok'
+      } else {
+        classifierCheck.value = null
+        classifierCheckStatus.value = 'untrained'
+      }
     } catch (e) {
       parseError.value = e instanceof Error ? e.message : String(e)
     }
@@ -103,6 +125,35 @@ function onFileChosen(event: Event) {
     parseError.value = `file read failed: ${String(e)}`
   })
 }
+
+const classifierVerdict = computed<{ tone: 'success' | 'warning' | 'info'; message: string } | null>(() => {
+  if (classifierCheckStatus.value === 'untested') return null
+  if (classifierCheckStatus.value === 'untrained') {
+    return {
+      tone: 'info',
+      message: 'Local classifier not trained yet — cannot self-check. Train Sentinel first for the adversarial-ness verdict.',
+    }
+  }
+  const c = classifierCheck.value!
+  const pct = Math.round(c.meanScore * 100)
+  const adv = Math.round(c.adversarialFraction * 100)
+  if (c.meanScore >= 0.65 && c.adversarialFraction >= 0.5) {
+    return {
+      tone: 'success',
+      message: `Your classifier flags this strongly (mean ${pct}%, ${adv}% of samples above threshold). Good adversarial prior.`,
+    }
+  }
+  if (c.meanScore < 0.35) {
+    return {
+      tone: 'warning',
+      message: `Your classifier reads this as near-normal (mean ${pct}%). Ratifying could teach the model to flag honest users — reconsider before submitting.`,
+    }
+  }
+  return {
+    tone: 'warning',
+    message: `Borderline: mean ${pct}%, ${adv}% adversarial. Prior may be weak or mixed — inspect the samples.`,
+  }
+})
 
 async function submit() {
   if (!canSubmit.value || !fileBytes.value) return
@@ -247,6 +298,19 @@ function reset() {
           <div v-if="parsedBlob.model_kind !== modelKind" class="text-amber-600 dark:text-amber-400">
             Warning: blob model_kind is "{{ parsedBlob.model_kind }}" but you selected "{{ modelKind }}". Change one before submitting.
           </div>
+        </div>
+        <!-- Classifier self-check verdict (follow-up #6) -->
+        <div
+          v-if="classifierVerdict"
+          class="rounded-md px-3 py-2 text-xs"
+          :class="{
+            'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400': classifierVerdict.tone === 'success',
+            'bg-amber-500/10 text-amber-700 dark:text-amber-400': classifierVerdict.tone === 'warning',
+            'bg-muted/60 text-muted-foreground': classifierVerdict.tone === 'info',
+          }"
+        >
+          <div class="font-medium">Classifier self-check</div>
+          <div class="mt-0.5">{{ classifierVerdict.message }}</div>
         </div>
       </div>
 

@@ -4,6 +4,7 @@ import { useAuth } from './useAuth'
 import {
   KeystrokeAutoencoder,
   type AutoencoderWeights,
+  type DigraphFeatures,
   type KeystrokeEvent as AEKeystrokeEvent,
 } from '@/utils/sentinel/keystroke-autoencoder'
 import {
@@ -852,6 +853,75 @@ export function useSentinel() {
     saveProfile(userId, deviceFp, profile)
   }
 
+  /**
+   * Score a candidate prior blob against the current local classifier.
+   *
+   * Used by the propose-prior UX to self-check before submitting: if
+   * the classifier already flags the blob as strongly anomalous, the
+   * prior is genuinely adversarial and worth proposing. If it scores
+   * like a legit human, ratifying it would teach the model to flag
+   * honest users — the proposer (and later DAO voters) should reject.
+   *
+   * Returns null if the local classifier isn't trained yet (no signal
+   * to compare against). Returns `meanScore` on [0,1]:
+   *   - keystroke: average reconstruction-error anomaly score (higher
+   *     = more anomalous; > 0.65 is the ratify signal)
+   *   - mouse: 1 - average human probability (higher = more bot-like;
+   *     > 0.50 is the ratify signal since the CNN is symmetric)
+   *
+   * `adversarialFraction` is the share of samples that individually
+   * cross the per-model anomaly threshold — useful for picking up
+   * priors that are a mix of good/bad examples.
+   */
+  const testBlobAgainstClassifier = (
+    modelKind: 'keystroke' | 'mouse',
+    samples: unknown[],
+  ): { meanScore: number; adversarialFraction: number; sampleCount: number } | null => {
+    if (modelKind === 'keystroke') {
+      if (!keystrokeAE?.isTrained) return null
+      const digraphs = samples.filter((s): s is DigraphFeatures =>
+        typeof s === 'object' && s !== null
+        && typeof (s as DigraphFeatures).dwellMs1 === 'number'
+        && typeof (s as DigraphFeatures).dwellMs2 === 'number'
+        && typeof (s as DigraphFeatures).flightMs === 'number'
+        && typeof (s as DigraphFeatures).speedRatio === 'number',
+      )
+      if (digraphs.length < 5) return null
+      // Score in small windows so `adversarialFraction` is meaningful.
+      const WINDOW = 10
+      const scores: number[] = []
+      for (let i = 0; i + 5 <= digraphs.length; i += WINDOW) {
+        const window = digraphs.slice(i, Math.min(i + WINDOW, digraphs.length))
+        if (window.length < 5) continue
+        const s = keystrokeAE.scoreFeatures(window)
+        if (s >= 0) scores.push(s)
+      }
+      if (scores.length === 0) return null
+      const mean = scores.reduce((a, b) => a + b, 0) / scores.length
+      const anomalous = scores.filter(s => s >= 0.65).length
+      return { meanScore: mean, adversarialFraction: anomalous / scores.length, sampleCount: digraphs.length }
+    }
+
+    // mouse
+    if (!mouseCNN?.isTrained) return null
+    const trajectories = samples.filter((s): s is { trajectory: MousePoint[] } =>
+      typeof s === 'object' && s !== null
+      && Array.isArray((s as { trajectory?: unknown }).trajectory),
+    )
+    if (trajectories.length === 0) return null
+    const botScores: number[] = []
+    for (const t of trajectories) {
+      if (t.trajectory.length < 51) continue
+      const humanProb = mouseCNN.predict(t.trajectory)
+      if (humanProb < 0) continue
+      botScores.push(1 - humanProb)
+    }
+    if (botScores.length === 0) return null
+    const mean = botScores.reduce((a, b) => a + b, 0) / botScores.length
+    const adversarial = botScores.filter(s => s >= 0.5).length
+    return { meanScore: mean, adversarialFraction: adversarial / botScores.length, sampleCount: trajectories.length }
+  }
+
   const fetchPriorTrajectories = async (): Promise<MousePoint[][]> => {
     try {
       const priors = await invoke<SentinelPrior[]>('sentinel_priors_list', { modelKind: 'mouse' })
@@ -994,5 +1064,6 @@ export function useSentinel() {
     getAIModelStatus,
     setAIScoringEnabled,
     setCameraOptedIn,
+    testBlobAgainstClassifier,
   }
 }
