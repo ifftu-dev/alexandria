@@ -943,20 +943,44 @@ export function useSentinel() {
     }
   }
 
+  const fetchKeystrokeNegatives = async (): Promise<DigraphFeatures[]> => {
+    try {
+      const priors = await invoke<SentinelPrior[]>('sentinel_priors_list', { modelKind: 'keystroke' })
+      const blobs = await Promise.all(priors.map(p =>
+        invoke<SentinelPriorBlob>('sentinel_priors_load', { priorId: p.id }).catch(() => null),
+      ))
+      const out: DigraphFeatures[] = []
+      for (const blob of blobs) {
+        if (!blob || blob.model_kind !== 'keystroke') continue
+        for (const s of blob.samples) {
+          const d = s as Partial<DigraphFeatures>
+          if (typeof d.dwellMs1 === 'number' && typeof d.dwellMs2 === 'number'
+              && typeof d.flightMs === 'number' && typeof d.speedRatio === 'number') {
+            out.push(d as DigraphFeatures)
+          }
+        }
+      }
+      return out
+    } catch {
+      return []
+    }
+  }
+
   const trainAIModels = async (): Promise<{
-    keystrokeAE: { trained: boolean; loss: number; samples: number }
+    keystrokeAE: { trained: boolean; loss: number; samples: number; priorDigraphs: number }
     mouseCNN: { trained: boolean; loss: number; samples: number; priorTrajectories: number }
     faceEmbedder: { enrolled: boolean; progress: number }
   }> => {
-    let aeLoss = -1, aeSamples = 0
+    let aeLoss = -1, aeSamples = 0, priorDigraphs = 0
     if (keystrokeBuffer.length >= 20) {
       const aeInput: AEKeystrokeEvent[] = keystrokeBuffer.map(k => ({ key: k.key, dwellMs: k.dwellMs, flightMs: k.flightMs }))
       if (!keystrokeAE) keystrokeAE = new KeystrokeAutoencoder()
-      // Keystroke-prior contrastive training is a follow-up. The AE's
-      // current training is reconstruction-only on user data; a
-      // "push-away" pass against ratified paste-macro priors needs
-      // margin-loss plumbing that doesn't exist yet.
-      aeLoss = keystrokeAE.train(aeInput)
+      // Hydrate ratified keystroke priors (labeled attack digraphs) to
+      // drive the AE's contrastive "push-away" pass. Empty on first
+      // run — falls back to reconstruction-only training.
+      const ratifiedNegatives = await fetchKeystrokeNegatives()
+      priorDigraphs = ratifiedNegatives.length
+      aeLoss = keystrokeAE.train(aeInput, undefined, ratifiedNegatives)
       aeSamples = keystrokeAE.getStats().samples
     }
 
@@ -976,7 +1000,7 @@ export function useSentinel() {
     }
 
     return {
-      keystrokeAE: { trained: keystrokeAE?.isTrained ?? false, loss: aeLoss, samples: aeSamples },
+      keystrokeAE: { trained: keystrokeAE?.isTrained ?? false, loss: aeLoss, samples: aeSamples, priorDigraphs },
       mouseCNN: { trained: mouseCNN?.isTrained ?? false, loss: cnnLoss, samples: cnnSamples, priorTrajectories },
       faceEmbedder: { enrolled: faceEmbedder?.isEnrolled ?? false, progress: faceEmbedder?.enrollmentProgress ?? 0 },
     }

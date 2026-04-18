@@ -61,7 +61,7 @@ let faceDetectionInterval: ReturnType<typeof setInterval> | null = null
 const savedProfile = ref<Record<string, unknown> | null>(null)
 const saving = ref(false)
 const aiTrainingResults = ref<{
-  keystrokeAE: { trained: boolean; loss: number; samples: number }
+  keystrokeAE: { trained: boolean; loss: number; samples: number; priorDigraphs: number }
   mouseCNN: { trained: boolean; loss: number; samples: number; priorTrajectories: number }
   faceEmbedder: { enrolled: boolean; progress: number }
 } | null>(null)
