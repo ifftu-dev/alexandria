@@ -49,6 +49,14 @@ pub const TOPIC_PLUGINS: &str = "/alexandria/plugins/1.0";
 /// to decide whether a graded plugin's submissions are credential-eligible.
 pub const TOPIC_PLUGIN_ATTESTATIONS: &str = "/alexandria/plugin-attestations/1.0";
 
+/// Ratified Sentinel adversarial priors — the Sentinel DAO broadcasts
+/// metadata for each prior the committee has approved so every client
+/// can mirror the library locally. The blob itself is content-addressed
+/// and fetched separately on demand; this topic carries only the
+/// envelope metadata plus the approved proposal reference.
+/// See docs/sentinel-adversarial-priors.md.
+pub const TOPIC_SENTINEL_PRIORS: &str = "/alexandria/sentinel-priors/1.0";
+
 /// All gossip topics the node subscribes to.
 pub const ALL_TOPICS: &[&str] = &[
     TOPIC_CATALOG,
@@ -64,6 +72,7 @@ pub const ALL_TOPICS: &[&str] = &[
     TOPIC_PINBOARD,
     TOPIC_PLUGINS,
     TOPIC_PLUGIN_ATTESTATIONS,
+    TOPIC_SENTINEL_PRIORS,
 ];
 
 /// Peer exchange message — broadcast on TOPIC_PEER_EXCHANGE.

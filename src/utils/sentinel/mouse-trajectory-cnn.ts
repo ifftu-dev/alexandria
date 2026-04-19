@@ -311,12 +311,23 @@ export class MouseTrajectoryCNN {
     return { prob, flatOut, dense1Pre, dense1Out }
   }
 
-  train(humanPoints: MousePoint[], epochs: number = DEFAULT_EPOCHS): number {
+  train(
+    humanPoints: MousePoint[],
+    epochs: number = DEFAULT_EPOCHS,
+    additionalBotTrajectories: MousePoint[][] = [],
+  ): number {
     const humanSegments = extractTrajectorySegments(humanPoints, 1)
     if (humanSegments.length < 2) return -1
 
     const botSegments = generateBotTrajectories(humanSegments.length * BOT_PATTERNS)
-    const allSegments = [...humanSegments, ...botSegments]
+    // Ratified adversarial priors from the Sentinel DAO contribute extra
+    // bot-class segments (label=0). See docs/sentinel-adversarial-priors.md.
+    // Falls back to synthetics alone when no priors have synced yet.
+    const ratifiedBotSegments: TrajectorySegment[] = []
+    for (const traj of additionalBotTrajectories) {
+      ratifiedBotSegments.push(...extractTrajectorySegments(traj, 0))
+    }
+    const allSegments = [...humanSegments, ...botSegments, ...ratifiedBotSegments]
     const indices = Array.from({ length: allSegments.length }, (_, i) => i)
     let epochLoss = 1.0
 

@@ -373,6 +373,40 @@ export interface DaoMember {
   joined_at: string
 }
 
+/** Returned by `sentinel_dao_get_info`. */
+export interface SentinelDaoInfo {
+  dao: DaoInfo
+  committee: DaoMember[]
+  recognized_categories: string[]
+}
+
+/** Returned by `sentinel_holdout_list`. */
+export interface SentinelHoldoutRef {
+  id: string
+  encrypted_cid: string
+  model_kind: string
+  threshold: number
+  created_at: string
+}
+
+export interface SentinelHoldoutSealedShare {
+  share_index: number
+  stake_address: string
+  x25519_pubkey_hex: string
+  sender_x25519_pubkey_hex: string
+  sealed_share_hex: string
+}
+
+export interface SentinelHoldoutKeyPolicy {
+  threshold: number
+  shares: SentinelHoldoutSealedShare[]
+}
+
+export interface SentinelHoldoutPlaintextShare {
+  share_index: number
+  y_hex: string
+}
+
 export interface Election {
   id: string
   dao_id: string
@@ -819,8 +853,34 @@ export interface IntegritySession {
   enrollment_id: string
   status: string
   integrity_score: number | null
+  critical_count: number
+  warning_count: number
   started_at: string
   ended_at: string | null
+}
+
+/** Ratified adversarial-prior metadata as persisted in `sentinel_priors`. */
+export interface SentinelPrior {
+  id: string
+  proposal_id: string
+  cid: string
+  model_kind: string
+  label: string
+  schema_version: number
+  sample_count: number
+  notes: string | null
+  ratified_at: string
+  signature: string
+}
+
+/** Parsed labeled-samples blob loaded via `sentinel_priors_load`. */
+export interface SentinelPriorBlob {
+  schema_version: number
+  model_kind: string
+  label: string
+  samples: unknown[]
+  notes?: string | null
+  contributor_attribution?: string | null
 }
 
 export interface IntegritySnapshot {
@@ -834,6 +894,7 @@ export interface IntegritySnapshot {
   devtools_score: number | null
   camera_score: number | null
   composite_score: number | null
+  anomaly_flags: string[]
   captured_at: string
 }
 

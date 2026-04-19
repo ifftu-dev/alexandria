@@ -1,18 +1,29 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { AppButton, AppBadge, EmptyState } from '@/components/ui'
 import { useSentinel } from '@/composables/useSentinel'
 import { useLocalApi } from '@/composables/useLocalApi'
 import SentinelTrainingWizard from '@/components/integrity/SentinelTrainingWizard.vue'
-import type { IntegritySession } from '@/types'
+import type { IntegritySession, SentinelDaoInfo, SentinelHoldoutRef } from '@/types'
+
+const router = useRouter()
 
 const { invoke } = useLocalApi()
-const { getProfile, getAIModelStatus, resetProfile } = useSentinel()
+const {
+  getProfile,
+  getAIModelStatus,
+  resetProfile,
+  aiScoringEnabled,
+  setAIScoringEnabled,
+} = useSentinel()
 
 const showWizard = ref(false)
 const sessions = ref<IntegritySession[]>([])
 const loading = ref(true)
 const profile = ref<Record<string, unknown> | null>(null)
+const sentinelDao = ref<SentinelDaoInfo | null>(null)
+const holdouts = ref<SentinelHoldoutRef[]>([])
 const aiStatus = ref<{
   keystrokeAE: { trained: boolean; loss: number; samples: number } | null
   mouseCNN: { trained: boolean; loss: number; samples: number } | null
@@ -54,11 +65,11 @@ const anomalyFlagTypes = [
 // ---------------------------------------------------------------------------
 
 function getOutcome(session: IntegritySession): 'clean' | 'flagged' | 'suspended' {
-  const score = session.integrity_score
-  if (score === null || score === undefined) return 'clean'
-  if (score >= 0.8) return 'clean'
-  if (score >= 0.4) return 'flagged'
-  return 'suspended'
+  // Server-authoritative: backend computes status from cumulative anomaly
+  // severity + running integrity score. Clean == active|completed.
+  if (session.status === 'suspended') return 'suspended'
+  if (session.status === 'flagged') return 'flagged'
+  return 'clean'
 }
 
 const sessionBreakdown = computed(() => {
@@ -119,6 +130,19 @@ async function loadData() {
     sessions.value = await invoke<IntegritySession[]>('integrity_list_sessions')
     profile.value = getProfile() as unknown as Record<string, unknown>
     aiStatus.value = getAIModelStatus()
+    // Sentinel DAO + holdout data — both may be absent on fresh
+    // installs; failures are logged but don't block the page.
+    try {
+      sentinelDao.value = await invoke<SentinelDaoInfo>('sentinel_dao_get_info')
+    } catch (e) {
+      console.warn('Sentinel DAO info unavailable:', e)
+      sentinelDao.value = null
+    }
+    try {
+      holdouts.value = await invoke<SentinelHoldoutRef[]>('sentinel_holdout_list')
+    } catch {
+      holdouts.value = []
+    }
   } catch (e) {
     console.error('Failed to load sentinel data:', e)
   } finally {
@@ -192,6 +216,13 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
           @click="handleResetProfile"
         >
           Reset Profile
+        </AppButton>
+        <AppButton
+          variant="secondary"
+          size="sm"
+          @click="router.push('/dashboard/sentinel/propose-prior')"
+        >
+          Propose cheat pattern
         </AppButton>
         <AppButton
           variant="primary"
@@ -350,6 +381,67 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
               </div>
             </div>
           </template>
+        </div>
+
+        <!-- Sentinel DAO status + holdout summary (follow-ups #1 and #3) -->
+        <div v-if="sentinelDao" class="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <!-- DAO committee card -->
+          <div class="card p-5">
+            <div class="mb-2 flex items-center justify-between">
+              <h2 class="text-sm font-semibold text-foreground">Sentinel DAO</h2>
+              <AppBadge :variant="sentinelDao.committee.length > 0 ? 'success' : 'warning'">
+                {{ sentinelDao.committee.length > 0 ? 'Active' : 'Bootstrap pending' }}
+              </AppBadge>
+            </div>
+            <p class="text-xs text-muted-foreground">
+              Curates the adversarial-prior library every Sentinel client trains against.
+            </p>
+            <div v-if="sentinelDao.committee.length === 0" class="mt-3 rounded-md bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+              No committee elected yet. Propose the initial Sentinel DAO committee on the main
+              Alexandria DAO to unlock ratification and holdout evaluation.
+              <div class="mt-2">
+                <AppButton size="sm" variant="secondary" @click="router.push('/governance')">
+                  Open governance
+                </AppButton>
+              </div>
+            </div>
+            <div v-else class="mt-3 space-y-1">
+              <div
+                v-for="m in sentinelDao.committee"
+                :key="m.stake_address"
+                class="flex items-center justify-between text-xs"
+              >
+                <code class="truncate font-mono text-muted-foreground">{{ m.stake_address }}</code>
+                <AppBadge :variant="m.role === 'chair' ? 'primary' : 'secondary'">
+                  {{ m.role }}
+                </AppBadge>
+              </div>
+            </div>
+          </div>
+
+          <!-- Holdout summary card -->
+          <div class="card p-5">
+            <div class="mb-2 flex items-center justify-between">
+              <h2 class="text-sm font-semibold text-foreground">Classifier Holdout</h2>
+              <AppBadge :variant="holdouts.length > 0 ? 'success' : 'secondary'">
+                {{ holdouts.length }} {{ holdouts.length === 1 ? 'set' : 'sets' }}
+              </AppBadge>
+            </div>
+            <p class="text-xs text-muted-foreground">
+              DAO-private evaluation data used to measure classifier accuracy and false-positive
+              rate. Shamir-split across committee members; evaluate requires
+              {{ holdouts[0]?.threshold ?? 'N' }} reconstructed shares.
+            </p>
+            <div v-if="holdouts.length === 0" class="mt-3 rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+              No holdout uploaded yet. A committee member uploads it via
+              <code class="font-mono">sentinel_holdout_upload</code>.
+            </div>
+            <div v-else class="mt-3">
+              <AppButton size="sm" variant="secondary" @click="router.push('/dashboard/sentinel/holdout-evaluate')">
+                Run evaluation
+              </AppButton>
+            </div>
+          </div>
         </div>
 
         <!-- Engine Status -->
@@ -759,6 +851,27 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
                 <p class="text-[0.65rem] text-muted-foreground">2+ critical flags, OR 1 critical + 2 warnings — assessment results may be invalidated</p>
               </div>
             </div>
+          </div>
+        </div>
+
+        <!-- AI scoring toggle -->
+        <div class="card p-5">
+          <div class="flex items-center justify-between gap-4">
+            <div>
+              <h2 class="text-sm font-semibold text-foreground">Advisory AI Scoring</h2>
+              <p class="mt-1 text-xs text-muted-foreground">
+                Fold keystroke autoencoder, mouse CNN, and face LBP scores into the
+                integrity calculation at a small advisory weight. Off by default — AI
+                signals are considered advisory until validated with labeled data.
+              </p>
+            </div>
+            <AppButton
+              :variant="aiScoringEnabled ? 'primary' : 'secondary'"
+              size="sm"
+              @click="setAIScoringEnabled(!aiScoringEnabled)"
+            >
+              {{ aiScoringEnabled ? 'Enabled' : 'Disabled' }}
+            </AppButton>
           </div>
         </div>
 

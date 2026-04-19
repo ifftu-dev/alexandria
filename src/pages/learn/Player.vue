@@ -26,6 +26,17 @@ const sentinelStarted = ref(false)
 const downloadingElementId = ref<string | null>(null)
 const downloadError = ref<string | null>(null)
 
+// Camera verification — see docs/sentinel.md §Camera. Opt-in only; if
+// granted, a 3s loop drives sentinel.verifyFace() against a hidden
+// <video>. All face processing is on-device; no frames are stored or sent.
+const FACE_LOOP_INTERVAL_MS = 3000
+const cameraVideoRef = ref<HTMLVideoElement | null>(null)
+const cameraStream = ref<MediaStream | null>(null)
+const cameraError = ref<string | null>(null)
+const cameraStarting = ref(false)
+const lastFacePresent = ref<boolean | null>(null)
+let faceLoopTimer: ReturnType<typeof setInterval> | null = null
+
 const activeChapter = ref<string | null>(null)
 const activeElement = ref<string | null>(null)
 
@@ -197,10 +208,72 @@ watch([activeChapter, activeElement], () => {
 
 onUnmounted(async () => {
   window.removeEventListener('keydown', onGlobalKeydown)
+  stopFaceLoop()
+  releaseCameraStream()
   if (sentinelStarted.value) {
     await sentinel.stop()
   }
 })
+
+async function enableCamera() {
+  if (cameraStream.value || cameraStarting.value) return
+  cameraError.value = null
+  cameraStarting.value = true
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { width: 320, height: 240, facingMode: 'user' },
+      audio: false,
+    })
+    cameraStream.value = stream
+    // Wait a tick so the <video> element is rendered under v-if before attach.
+    await new Promise(resolve => setTimeout(resolve, 0))
+    const video = cameraVideoRef.value
+    if (video) {
+      video.srcObject = stream
+      video.muted = true
+      await video.play().catch(() => { /* autoplay rules — loop will retry */ })
+    }
+    sentinel.setCameraOptedIn(true)
+    startFaceLoop()
+  } catch (e) {
+    cameraError.value = e instanceof Error ? e.message : 'Camera unavailable'
+    releaseCameraStream()
+  } finally {
+    cameraStarting.value = false
+  }
+}
+
+function disableCamera() {
+  stopFaceLoop()
+  releaseCameraStream()
+  sentinel.setCameraOptedIn(false)
+  lastFacePresent.value = null
+}
+
+function releaseCameraStream() {
+  if (cameraStream.value) {
+    for (const track of cameraStream.value.getTracks()) track.stop()
+    cameraStream.value = null
+  }
+  if (cameraVideoRef.value) cameraVideoRef.value.srcObject = null
+}
+
+function startFaceLoop() {
+  if (faceLoopTimer) return
+  faceLoopTimer = setInterval(() => {
+    const video = cameraVideoRef.value
+    if (!video) return
+    const result = sentinel.verifyFace(video)
+    lastFacePresent.value = result.present
+  }, FACE_LOOP_INTERVAL_MS)
+}
+
+function stopFaceLoop() {
+  if (faceLoopTimer) {
+    clearInterval(faceLoopTimer)
+    faceLoopTimer = null
+  }
+}
 
 function selectElement(chapterId: string, elementId: string) {
   activeChapter.value = chapterId
@@ -728,6 +801,26 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
                       </svg>
                       Monitored
                     </span>
+                    <!-- Camera verification status (only while active) -->
+                    <span
+                      v-if="isAssessment && cameraStream"
+                      class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium"
+                      :class="lastFacePresent
+                        ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
+                        : 'bg-muted/60 text-muted-foreground'"
+                    >
+                      <span class="relative flex h-1.5 w-1.5">
+                        <span
+                          class="absolute inline-flex h-full w-full animate-ping rounded-full opacity-75"
+                          :class="lastFacePresent ? 'bg-emerald-500' : 'bg-muted-foreground/50'"
+                        />
+                        <span
+                          class="relative inline-flex h-1.5 w-1.5 rounded-full"
+                          :class="lastFacePresent ? 'bg-emerald-500' : 'bg-muted-foreground/50'"
+                        />
+                      </span>
+                      {{ lastFacePresent === null ? 'Camera connecting…' : lastFacePresent ? 'Face verified' : 'No face detected' }}
+                    </span>
                   </div>
                 </div>
 
@@ -775,6 +868,62 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
                   {{ skill.skill_name || skill.name }}
                 </router-link>
               </div>
+            </div>
+
+            <!-- ============================== -->
+            <!-- CAMERA OPT-IN (assessments only)-->
+            <!-- ============================== -->
+            <div
+              v-if="isAssessment && sentinelStarted"
+              class="mb-4 rounded-xl border border-border/70 bg-card/60 p-4"
+            >
+              <div class="flex items-start gap-3">
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-2">
+                    <svg class="h-4 w-4 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z" />
+                    </svg>
+                    <h3 class="text-sm font-semibold text-foreground">Camera Verification</h3>
+                  </div>
+                  <p class="mt-1 text-xs text-muted-foreground">
+                    Optional: verify your presence every 3 seconds using on-device face detection.
+                    Video frames never leave your device — only derived scores are stored locally.
+                  </p>
+                  <p v-if="cameraError" class="mt-2 text-xs text-red-600 dark:text-red-400">
+                    {{ cameraError }}
+                  </p>
+                </div>
+                <div class="flex-shrink-0">
+                  <AppButton
+                    v-if="!cameraStream"
+                    size="sm"
+                    variant="secondary"
+                    :loading="cameraStarting"
+                    @click="enableCamera"
+                  >
+                    Enable camera
+                  </AppButton>
+                  <AppButton
+                    v-else
+                    size="sm"
+                    variant="ghost"
+                    @click="disableCamera"
+                  >
+                    Disable
+                  </AppButton>
+                </div>
+              </div>
+              <!-- Hidden video element driving verifyFace(). Kept off-screen
+                   rather than display:none so the decoder stays active. -->
+              <video
+                v-show="false"
+                ref="cameraVideoRef"
+                playsinline
+                autoplay
+                muted
+                width="320"
+                height="240"
+              />
             </div>
 
             <!-- ============================== -->

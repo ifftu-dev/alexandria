@@ -68,6 +68,21 @@ const DEFAULT_EPOCHS = 80
 const MIN_TRAINING_SAMPLES = 20
 const ANOMALY_THRESHOLD = 0.65
 
+// Contrastive / "push-away" pass against labeled attack patterns.
+//
+// After a normal reconstruction training run, we do CONTRASTIVE_EPOCHS
+// extra passes over negative samples with flipped gradients, so the AE
+// learns to reconstruct attack patterns poorly (raising their anomaly
+// scores). A quarter learning rate keeps things numerically stable —
+// gradient ascent with a full-size step tends to blow the network up.
+//
+// The margin is `5 × trainLoss`, matching the sigmoid calibration in
+// `scoreFeatures`: once a negative's reconstruction error exceeds this,
+// its anomaly score is already ≥ 0.5 and further push-away adds nothing.
+const CONTRASTIVE_EPOCHS = 10
+const CONTRASTIVE_LEARNING_RATE = LEARNING_RATE / 4
+const CONTRASTIVE_MARGIN_MULT = 5
+
 // ============================================================================
 // Linear algebra primitives
 // ============================================================================
@@ -247,7 +262,11 @@ export class KeystrokeAutoencoder {
     return { output, z1Pre, z1, z2Pre, z2, z3Pre, z3 }
   }
 
-  train(keystrokes: KeystrokeEvent[], epochs: number = DEFAULT_EPOCHS): number {
+  train(
+    keystrokes: KeystrokeEvent[],
+    epochs: number = DEFAULT_EPOCHS,
+    negativeDigraphs: DigraphFeatures[] = [],
+  ): number {
     const digraphs = extractDigraphFeatures(keystrokes)
     if (digraphs.length < MIN_TRAINING_SAMPLES) return -1
 
@@ -340,13 +359,123 @@ export class KeystrokeAutoencoder {
     this.trainedEpochs += epochs
     this.trainingSamples = digraphs.length
     this.trainLoss = epochLoss
+
+    // Optional contrastive pass against labeled attack patterns (see
+    // docs/sentinel-adversarial-priors.md). Does nothing when the prior
+    // library is empty — callers pass `[]` by default.
+    if (negativeDigraphs.length > 0) {
+      this.trainContrastive(negativeDigraphs)
+    }
+
     return epochLoss
+  }
+
+  /**
+   * "Push away" the AE's reconstruction of labeled attack patterns.
+   *
+   * For each negative sample, we run a normal forward+backprop but
+   * flip the gradient sign (gradient ascent) with a reduced learning
+   * rate. A margin gate skips samples that already reconstruct poorly
+   * enough — no point destabilizing the network pushing something
+   * even further from the manifold.
+   */
+  private trainContrastive(negativeDigraphs: DigraphFeatures[]): void {
+    if (negativeDigraphs.length === 0) return
+    const margin = this.trainLoss * CONTRASTIVE_MARGIN_MULT
+    const rawData = negativeDigraphs.map(featureToVec)
+    const data = rawData.map(row => normalize(row, this.featureMeans, this.featureStds))
+
+    for (let epoch = 0; epoch < CONTRASTIVE_EPOCHS; epoch++) {
+      for (const x of data) {
+        const { output, z1Pre, z1, z2Pre, z2, z3Pre, z3 } = this.forward(x)
+        const currentLoss = mse(output, x)
+        // Margin gate: once the negative is already "far enough" in
+        // reconstruction-error terms, stop pushing — further ascent
+        // risks degrading legitimate-user reconstruction.
+        if (currentLoss >= margin) continue
+
+        const dOutput = output.map((o, i) => (2 * (o - x[i]!)) / INPUT_DIM)
+
+        // Backprop through decoder layer 2, gradient-ASCEND (sign flipped).
+        const rg3 = reluGrad(z3Pre)
+        const dz3 = new Array(HIDDEN_DIM).fill(0)
+        for (let i = 0; i < HIDDEN_DIM; i++) {
+          let sum = 0
+          for (let j = 0; j < INPUT_DIM; j++) {
+            sum += this.w4[j]![i]! * dOutput[j]!
+          }
+          dz3[i] = sum * rg3[i]!
+        }
+        for (let i = 0; i < INPUT_DIM; i++) {
+          for (let j = 0; j < HIDDEN_DIM; j++) {
+            this.w4[i]![j]! += CONTRASTIVE_LEARNING_RATE * dOutput[i]! * z3[j]!
+          }
+          this.b4[i]! += CONTRASTIVE_LEARNING_RATE * dOutput[i]!
+        }
+
+        // Backprop through decoder layer 1
+        const rg2 = reluGrad(z2Pre)
+        const dz2 = new Array(LATENT_DIM).fill(0)
+        for (let i = 0; i < LATENT_DIM; i++) {
+          let sum = 0
+          for (let j = 0; j < HIDDEN_DIM; j++) {
+            sum += this.w3[j]![i]! * dz3[j]!
+          }
+          dz2[i] = sum * rg2[i]!
+        }
+        for (let i = 0; i < HIDDEN_DIM; i++) {
+          for (let j = 0; j < LATENT_DIM; j++) {
+            this.w3[i]![j]! += CONTRASTIVE_LEARNING_RATE * dz3[i]! * z2[j]!
+          }
+          this.b3[i]! += CONTRASTIVE_LEARNING_RATE * dz3[i]!
+        }
+
+        // Backprop through encoder layer 2
+        const rg1 = reluGrad(z1Pre)
+        const dz1 = new Array(HIDDEN_DIM).fill(0)
+        for (let i = 0; i < HIDDEN_DIM; i++) {
+          let sum = 0
+          for (let j = 0; j < LATENT_DIM; j++) {
+            sum += this.w2[j]![i]! * dz2[j]!
+          }
+          dz1[i] = sum * rg1[i]!
+        }
+        for (let i = 0; i < LATENT_DIM; i++) {
+          for (let j = 0; j < HIDDEN_DIM; j++) {
+            this.w2[i]![j]! += CONTRASTIVE_LEARNING_RATE * dz2[i]! * z1[j]!
+          }
+          this.b2[i]! += CONTRASTIVE_LEARNING_RATE * dz2[i]!
+        }
+
+        // Backprop through encoder layer 1
+        for (let i = 0; i < HIDDEN_DIM; i++) {
+          for (let j = 0; j < INPUT_DIM; j++) {
+            this.w1[i]![j]! += CONTRASTIVE_LEARNING_RATE * dz1[i]! * x[j]!
+          }
+          this.b1[i]! += CONTRASTIVE_LEARNING_RATE * dz1[i]!
+        }
+      }
+    }
   }
 
   score(keystrokes: KeystrokeEvent[]): number {
     if (this.trainedEpochs === 0) return -1
-
     const digraphs = extractDigraphFeatures(keystrokes)
+    return this.scoreFeatures(digraphs)
+  }
+
+  /**
+   * Score pre-extracted digraph features directly, bypassing the
+   * KeystrokeEvent → DigraphFeatures conversion. Useful for scoring
+   * blobs from the Sentinel DAO prior library whose samples are
+   * already feature-shaped.
+   *
+   * Returns the same [0,1] anomaly score as `score()`: higher means
+   * the input reconstructs poorly, i.e. doesn't look like the
+   * enrolled user.
+   */
+  scoreFeatures(digraphs: DigraphFeatures[]): number {
+    if (this.trainedEpochs === 0) return -1
     if (digraphs.length < 5) return -1
 
     const rawData = digraphs.map(featureToVec)
@@ -359,7 +488,10 @@ export class KeystrokeAutoencoder {
     }
 
     const avgError = totalError / data.length
-    const baseline = Math.max(this.trainLoss, 0.01)
+    // Floor prevents ratio blow-up when trainLoss is near-zero (users with
+    // very consistent typing) — without this, every legitimate keystroke
+    // would score as anomalous.
+    const baseline = Math.max(this.trainLoss, 0.05)
     const ratio = avgError / baseline
     const anomalyScore = 1 / (1 + Math.exp(-0.5 * (ratio - 5)))
     return Math.min(1, Math.max(0, anomalyScore))
