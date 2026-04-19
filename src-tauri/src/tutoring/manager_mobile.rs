@@ -21,7 +21,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::io::Cursor;
-use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -470,6 +470,11 @@ struct ActiveSession {
 static AUDIO_SESSION_WAS_ACTIVE: AtomicBool = AtomicBool::new(false);
 static AUDIO_SESSION_OBSERVER: AtomicPtr<std::ffi::c_void> = AtomicPtr::new(std::ptr::null_mut());
 static TUTORING_MANAGER_INNER: OnceLock<Arc<Mutex<Option<ActiveSession>>>> = OnceLock::new();
+/// millis since UNIX_EPOCH of the most recent audio session recovery. Used to
+/// debounce bursts of route-change notifications caused by the reconfigure
+/// itself (setCategory/setActive fire CategoryChange → route change → etc).
+static LAST_AUDIO_RECOVERY_MS: AtomicU64 = AtomicU64::new(0);
+const AUDIO_RECOVERY_DEBOUNCE_MS: u64 = 2000;
 
 /// Minimal handler invoked from ObjC when AVAudioSessionInterruptionNotification fires.
 /// On `began`: records whether the session was active. On `ended`: reactivates if needed.
@@ -561,10 +566,72 @@ impl InterruptionBridge {
         }
     }
 
-    fn handle_route_change(&self, _notification: ObjcId) {
-        log::info!("tutoring: AVAudioSession route changed, refreshing session/output");
-        crate::diag::log("iOS audio route changed, refreshing session/output");
-        TutoringManager::schedule_audio_session_recovery("route change");
+    fn handle_route_change(&self, notification: ObjcId) {
+        // Parse `AVAudioSessionRouteChangeReasonKey` from userInfo so we only
+        // recover on genuine device events. Self-induced reasons (CategoryChange,
+        // Override, RouteConfigurationChange) would otherwise produce an
+        // infinite feedback loop: setCategory/setActive → route change → recovery
+        // → setCategory/setActive → …
+        let reason = unsafe {
+            type MsgSendNoArgs = unsafe extern "C" fn(ObjcId, ObjcSel) -> ObjcId;
+            type MsgSendCString = unsafe extern "C" fn(ObjcId, ObjcSel, *const i8) -> ObjcId;
+            type MsgSendObj = unsafe extern "C" fn(ObjcId, ObjcSel, ObjcId) -> ObjcId;
+            type MsgSendI32 = unsafe extern "C" fn(ObjcId, ObjcSel) -> i32;
+
+            let send_noargs: MsgSendNoArgs = std::mem::transmute(
+                objc_msgSend as unsafe extern "C" fn(ObjcId, ObjcSel, ...) -> ObjcId,
+            );
+            let send_cstr: MsgSendCString = std::mem::transmute(
+                objc_msgSend as unsafe extern "C" fn(ObjcId, ObjcSel, ...) -> ObjcId,
+            );
+            let send_obj: MsgSendObj = std::mem::transmute(
+                objc_msgSend as unsafe extern "C" fn(ObjcId, ObjcSel, ...) -> ObjcId,
+            );
+            let send_i32: MsgSendI32 = std::mem::transmute(
+                objc_msgSend as unsafe extern "C" fn(ObjcId, ObjcSel, ...) -> ObjcId,
+            );
+
+            if notification.is_null() {
+                return;
+            }
+            let user_info_sel = sel_registerName(b"userInfo\0".as_ptr() as *const i8);
+            let user_info: ObjcId = send_noargs(notification, user_info_sel);
+            if user_info.is_null() {
+                return;
+            }
+            let ns_string_cls = objc_getClass(b"NSString\0".as_ptr() as *const i8);
+            if ns_string_cls.is_null() {
+                return;
+            }
+            let utf8_sel = sel_registerName(b"stringWithUTF8String:\0".as_ptr() as *const i8);
+            let reason_key = send_cstr(
+                ns_string_cls,
+                utf8_sel,
+                b"AVAudioSessionRouteChangeReasonKey\0".as_ptr() as *const i8,
+            );
+            let dict_sel = sel_registerName(b"objectForKey:\0".as_ptr() as *const i8);
+            let reason_obj: ObjcId = send_obj(user_info, dict_sel, reason_key);
+            if reason_obj.is_null() {
+                return;
+            }
+            let int_value_sel = sel_registerName(b"intValue\0".as_ptr() as *const i8);
+            send_i32(reason_obj, int_value_sel)
+        };
+
+        // AVAudioSessionRouteChangeReason values:
+        //   0 Unknown, 1 NewDeviceAvailable, 2 OldDeviceUnavailable,
+        //   3 CategoryChange, 4 Override, 6 WakeFromSleep,
+        //   7 NoSuitableRouteForCategory, 8 RouteConfigurationChange
+        let should_recover = matches!(reason, 1 | 2 | 7);
+        log::info!(
+            "tutoring: AVAudioSession route changed, reason={reason}, recover={should_recover}"
+        );
+        crate::diag::log(&format!(
+            "iOS audio route changed reason={reason} recover={should_recover}"
+        ));
+        if should_recover {
+            TutoringManager::schedule_audio_session_recovery("route change");
+        }
     }
 
     fn handle_media_services_reset(&self, _notification: ObjcId) {
@@ -1053,10 +1120,16 @@ impl TutoringManager {
                     crate::diag::log("configure_ios_audio_session: setCategory OK");
                 }
 
+                // Use Default mode (not VideoChat). VideoChat clamps the iOS
+                // hardware sample rate to 16/24 kHz which forces firewheel's
+                // resampler to downsample 48 kHz Opus output and may drop samples
+                // when its ring buffer isn't primed. Default mode allows the
+                // native 48 kHz rate and doesn't add voice-processing filters
+                // (we handle AEC separately via webrtc-audio-processing).
                 let mode: Id = send_ptr(
                     nsstring_cls,
                     utf8_sel,
-                    b"AVAudioSessionModeVideoChat\0".as_ptr() as *const i8,
+                    b"AVAudioSessionModeDefault\0".as_ptr() as *const i8,
                 );
                 if mode.is_null() {
                     crate::diag::log("configure_ios_audio_session: failed to create mode NSString");
@@ -1064,9 +1137,9 @@ impl TutoringManager {
                     let set_mode_sel = sel_registerName(b"setMode:error:\0".as_ptr() as *const i8);
                     let set_mode_ok: i8 = send_mode(session, set_mode_sel, mode, nil);
                     if set_mode_ok == 0 {
-                        crate::diag::log("configure_ios_audio_session: setMode(VideoChat) failed");
+                        crate::diag::log("configure_ios_audio_session: setMode(Default) failed");
                     } else {
-                        crate::diag::log("configure_ios_audio_session: setMode(VideoChat) OK");
+                        crate::diag::log("configure_ios_audio_session: setMode(Default) OK");
                     }
                 }
 
@@ -1151,12 +1224,21 @@ impl TutoringManager {
                     crate::diag::log("configure_ios_audio_session: setPreferredInput failed");
                 }
 
-                let port_override = match selection
-                    .and_then(|devices| devices.speaker_device_id.as_deref())
-                {
-                    Some(IOS_AUDIO_OUTPUT_SPEAKER_ID) => i64::from(u32::from_be_bytes(*b"spkr")),
-                    _ => 0,
-                };
+                // Override rules:
+                //   - No user selection (default) or user explicitly picked the
+                //     built-in loudspeaker → force Speaker override. VideoChat
+                //     mode otherwise defaults to the earpiece (very quiet / looks
+                //     muted), which is the bug we're fixing.
+                //   - User picked any other port (Bluetooth / wired / AirPods /
+                //     car audio) → clear override; iOS will route to the active
+                //     port automatically as long as it's connected.
+                let port_override =
+                    match selection.and_then(|devices| devices.speaker_device_id.as_deref()) {
+                        None | Some(IOS_AUDIO_OUTPUT_SPEAKER_ID) => {
+                            i64::from(u32::from_be_bytes(*b"spkr"))
+                        }
+                        Some(_) => 0,
+                    };
                 let override_ok = send_i64(session, override_sel, port_override, nil);
                 if override_ok == 0 {
                     crate::diag::log("configure_ios_audio_session: overrideOutputAudioPort failed");
@@ -1164,8 +1246,72 @@ impl TutoringManager {
 
                 log::info!("tutoring: AVAudioSession configured for PlayAndRecord");
                 crate::diag::log(
-                    "iOS audio session configured: PlayAndRecord + VideoChat + DefaultToSpeaker + AllowBluetoothHFP",
+                    "iOS audio session configured: PlayAndRecord + Default + DefaultToSpeaker + AllowBluetoothHFP",
                 );
+
+                // Log the negotiated hardware sample rate. Confirms the mode
+                // change actually lifted the 16/24 kHz VideoChat clamp.
+                type MsgSendF64 = unsafe extern "C" fn(Id, Sel) -> f64;
+                let send_f64: MsgSendF64 =
+                    std::mem::transmute(objc_msgSend as unsafe extern "C" fn(Id, Sel, ...) -> Id);
+                let sr_sel = sel_registerName(b"sampleRate\0".as_ptr() as *const i8);
+                let sample_rate = send_f64(session, sr_sel);
+                crate::diag::log(&format!("iOS audio sampleRate: {sample_rate:.0} Hz"));
+
+                // Log the currently active route so we can see exactly where
+                // audio is going after each reconfigure. Essential for debugging
+                // silent-output bugs where iOS silently picks a surprising port.
+                let current_route_sel = sel_registerName(b"currentRoute\0".as_ptr() as *const i8);
+                let outputs_sel = sel_registerName(b"outputs\0".as_ptr() as *const i8);
+                let inputs_sel = sel_registerName(b"inputs\0".as_ptr() as *const i8);
+                let port_type_sel = sel_registerName(b"portType\0".as_ptr() as *const i8);
+                let port_name_sel = sel_registerName(b"portName\0".as_ptr() as *const i8);
+                let route: Id = send(session, current_route_sel);
+                if !route.is_null() {
+                    let log_ports = |label: &str, collection: Id| {
+                        if collection.is_null() {
+                            return;
+                        }
+                        let count = send_count(collection, count_sel);
+                        if count == 0 {
+                            crate::diag::log(&format!("iOS audio route {label}: <none>"));
+                            return;
+                        }
+                        for index in 0..count {
+                            let port = send_index(collection, object_sel, index);
+                            if port.is_null() {
+                                continue;
+                            }
+                            let type_obj = send(port, port_type_sel);
+                            let name_obj = send(port, port_name_sel);
+                            let type_c = if type_obj.is_null() {
+                                std::ptr::null()
+                            } else {
+                                send_utf8(type_obj, utf8_string_sel)
+                            };
+                            let name_c = if name_obj.is_null() {
+                                std::ptr::null()
+                            } else {
+                                send_utf8(name_obj, utf8_string_sel)
+                            };
+                            let type_str = if type_c.is_null() {
+                                std::borrow::Cow::Borrowed("?")
+                            } else {
+                                std::ffi::CStr::from_ptr(type_c).to_string_lossy()
+                            };
+                            let name_str = if name_c.is_null() {
+                                std::borrow::Cow::Borrowed("?")
+                            } else {
+                                std::ffi::CStr::from_ptr(name_c).to_string_lossy()
+                            };
+                            crate::diag::log(&format!(
+                                "iOS audio route {label}[{index}]: {type_str} ({name_str})"
+                            ));
+                        }
+                    };
+                    log_ports("output", send(route, outputs_sel));
+                    log_ports("input", send(route, inputs_sel));
+                }
 
                 register_audio_session_observer();
             }
@@ -1229,6 +1375,19 @@ impl TutoringManager {
     }
 
     fn schedule_audio_session_recovery(reason: &'static str) {
+        // Debounce bursts: the reconfigure itself emits route-change /
+        // media-services notifications, so without a guard we would recurse.
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        let last = LAST_AUDIO_RECOVERY_MS.load(Ordering::SeqCst);
+        if now_ms.saturating_sub(last) < AUDIO_RECOVERY_DEBOUNCE_MS {
+            log::info!("tutoring: skipping iOS audio recovery after {reason} (debounced)");
+            return;
+        }
+        LAST_AUDIO_RECOVERY_MS.store(now_ms, Ordering::SeqCst);
+
         log::info!("tutoring: scheduling iOS audio recovery after {reason}");
         crate::diag::log(&format!("iOS audio recovery scheduled after {reason}"));
 
@@ -2782,13 +2941,13 @@ impl TutoringManager {
         let (mut frames, handle) = watch.split();
         let is_self_preview = node_id == "self";
         let viewport = if is_self_preview {
-            (540, 960)
+            (720, 1280)
         } else {
             (1280, 720)
         };
-        let jpeg_quality = if is_self_preview { 58 } else { 70 };
+        let jpeg_quality = if is_self_preview { 75 } else { 70 };
         let frame_interval = if is_self_preview {
-            Duration::from_millis(90)
+            Duration::from_millis(55)
         } else {
             Duration::from_millis(95)
         };

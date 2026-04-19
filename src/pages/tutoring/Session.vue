@@ -125,6 +125,11 @@ async function attachSelfStream() {
 }
 
 async function startSelfPreview() {
+  // iOS/Android cameras permit only one client. The Rust AVCaptureSession /
+  // Camera2 already holds the device to publish to peers, so getUserMedia from
+  // the webview returns a blank stream. Fall through to the Rust JPEG bridge
+  // (selfVideoSrc) on mobile.
+  if (isMobilePlatform) return
   if (selfStream.value) return
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
