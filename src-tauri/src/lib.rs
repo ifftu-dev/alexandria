@@ -23,6 +23,7 @@ pub mod crypto {
     pub mod hash;
     #[path = "keystore_portable.rs"]
     pub mod keystore;
+    pub mod shamir;
     pub mod signing;
     pub mod wallet;
 }
