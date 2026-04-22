@@ -346,7 +346,10 @@ function peerInitials(nodeId: string): string {
 </script>
 
 <template>
-  <div class="flex flex-col" style="height: calc(100vh - 4rem); height: calc(100dvh - 4rem);">
+  <div
+    class="flex flex-col"
+    style="height: calc(100vh - 4rem); height: calc(100dvh - 4rem); padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom);"
+  >
     <!-- Top bar -->
     <div class="flex items-center justify-between border-b border-border px-3 py-2.5 sm:px-4 sm:py-3 shrink-0 gap-2">
       <div class="flex items-center gap-2 sm:gap-3 min-w-0">
@@ -938,15 +941,31 @@ function peerInitials(nodeId: string): string {
       </div>
 
       <!-- Chat sidebar (full overlay on mobile, side panel on desktop) -->
+      <!-- Backdrop (mobile only) -->
+      <Transition
+        enter-active-class="transition-opacity duration-150 ease-out"
+        enter-from-class="opacity-0"
+        enter-to-class="opacity-100"
+        leave-active-class="transition-opacity duration-100 ease-in"
+        leave-from-class="opacity-100"
+        leave-to-class="opacity-0"
+      >
+        <div
+          v-if="showChat && isActive"
+          class="absolute inset-0 z-20 bg-black/40 sm:hidden"
+          @click="showChat = false"
+        />
+      </Transition>
+
       <Transition
         enter-active-class="transition-all duration-200 ease-out"
         enter-from-class="translate-x-full sm:translate-x-0 sm:w-0 opacity-0"
-        enter-to-class="translate-x-0 sm:w-80 opacity-100"
+        enter-to-class="translate-x-0 sm:w-72 opacity-100"
         leave-active-class="transition-all duration-150 ease-in"
-        leave-from-class="translate-x-0 sm:w-80 opacity-100"
+        leave-from-class="translate-x-0 sm:w-72 opacity-100"
         leave-to-class="translate-x-full sm:translate-x-0 sm:w-0 opacity-0"
       >
-        <div v-if="showChat && isActive" class="absolute inset-0 z-30 sm:relative sm:inset-auto sm:z-auto flex w-full sm:w-80 flex-col bg-card shrink-0 overflow-hidden">
+        <div v-if="showChat && isActive" class="absolute right-0 top-0 bottom-0 z-30 sm:relative sm:inset-auto sm:z-auto flex w-[min(20rem,85vw)] sm:w-72 flex-col border-l border-border bg-card shrink-0 overflow-hidden shadow-xl sm:shadow-none">
           <!-- Chat header -->
           <div class="flex items-center justify-between border-b border-border px-4 py-3 shrink-0">
             <h3 class="text-sm font-semibold text-foreground">Session Chat</h3>
