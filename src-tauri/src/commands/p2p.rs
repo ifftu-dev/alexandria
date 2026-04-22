@@ -20,10 +20,11 @@ use crate::p2p::network::{self, keypair_from_cardano_key};
 use crate::p2p::opinions as p2p_opinions;
 use crate::p2p::pinboard as p2p_pinboard;
 use crate::p2p::presentation as p2p_presentation;
+use crate::p2p::sentinel as p2p_sentinel;
 use crate::p2p::taxonomy as p2p_taxonomy;
 use crate::p2p::types::{
     NetworkStatus, TOPIC_CATALOG, TOPIC_EVIDENCE, TOPIC_GOVERNANCE, TOPIC_OPINIONS, TOPIC_PINBOARD,
-    TOPIC_TAXONOMY, TOPIC_VC_DID, TOPIC_VC_PRESENTATION, TOPIC_VC_STATUS,
+    TOPIC_SENTINEL_PRIORS, TOPIC_TAXONOMY, TOPIC_VC_DID, TOPIC_VC_PRESENTATION, TOPIC_VC_STATUS,
 };
 use crate::p2p::vc_did as p2p_vc_did;
 use crate::p2p::vc_status as p2p_vc_status;
@@ -181,6 +182,8 @@ pub async fn p2p_start(app: AppHandle, state: State<'_, AppState>) -> Result<Str
                             let _ = p2p_presentation::handle_presentation_message(db, message);
                         } else if topic == TOPIC_PINBOARD {
                             let _ = p2p_pinboard::handle_pinboard_message(db, message);
+                        } else if topic == TOPIC_SENTINEL_PRIORS {
+                            let _ = p2p_sentinel::handle_sentinel_prior_message(db, message);
                         } else if is_classroom_topic(topic) {
                             if topic.ends_with("/meta/1.0") {
                                 classroom_manager::handle_classroom_meta(db, message, &app_events);

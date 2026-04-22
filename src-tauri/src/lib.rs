@@ -23,6 +23,7 @@ pub mod crypto {
     pub mod hash;
     #[path = "keystore_portable.rs"]
     pub mod keystore;
+    pub mod shamir;
     pub mod signing;
     pub mod wallet;
 }
@@ -797,6 +798,20 @@ pub fn run() {
             commands::integrity::integrity_get_session,
             commands::integrity::integrity_list_sessions,
             commands::integrity::integrity_list_snapshots,
+            // Sentinel DAO (adversarial-prior governance)
+            commands::sentinel_dao::sentinel_dao_get_info,
+            // Sentinel adversarial priors (propose / ratify / list / sync / load)
+            commands::sentinel_priors::sentinel_propose_prior,
+            commands::sentinel_priors::sentinel_ratify_prior,
+            commands::sentinel_priors::sentinel_priors_list,
+            commands::sentinel_priors::sentinel_priors_sync,
+            commands::sentinel_priors::sentinel_priors_load,
+            // Sentinel holdout evaluation (threshold-sealed)
+            commands::sentinel_holdout::sentinel_holdout_upload,
+            commands::sentinel_holdout::sentinel_holdout_list,
+            commands::sentinel_holdout::sentinel_holdout_get_policy,
+            commands::sentinel_holdout::sentinel_holdout_unseal_share,
+            commands::sentinel_holdout::sentinel_holdout_evaluate,
             // Live Tutoring (iroh-live rooms)
             commands::tutoring::tutoring_create_room,
             commands::tutoring::tutoring_join_room,

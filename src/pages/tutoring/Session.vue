@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useTutoringRoom } from '@/composables/useTutoringRoom'
 import { usePlatform } from '@/composables/usePlatform'
+import QrCodeDisplay from '@/components/tutoring/QrCodeDisplay.vue'
 import type { DeviceList } from '@/types'
 
 const route = useRoute()
@@ -42,6 +43,7 @@ const diagnosticsData = ref<Record<string, unknown> | null>(null)
 const chatInput = ref('')
 const chatScrollRef = ref<HTMLElement | null>(null)
 const showTicketFallback = ref(false)
+const showQrInvite = ref(false)
 const diagnosticsCopied = ref(false)
 const showDiagFallback = ref(false)
 const dismissedError = ref(false)
@@ -123,6 +125,11 @@ async function attachSelfStream() {
 }
 
 async function startSelfPreview() {
+  // iOS/Android cameras permit only one client. The Rust AVCaptureSession /
+  // Camera2 already holds the device to publish to peers, so getUserMedia from
+  // the webview returns a blank stream. Fall through to the Rust JPEG bridge
+  // (selfVideoSrc) on mobile.
+  if (isMobilePlatform) return
   if (selfStream.value) return
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
@@ -428,6 +435,20 @@ function peerInitials(nodeId: string): string {
             <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
           </svg>
           <span class="hidden sm:inline">{{ ticketCopied ? 'Copied!' : 'Copy Invite' }}</span>
+        </button>
+
+        <!-- Show QR invite -->
+        <button
+          v-if="isActive && sessionStatus?.ticket"
+          class="flex items-center gap-1.5 rounded-lg border border-border px-2 sm:px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+          @click="showQrInvite = true"
+          title="Show QR code for invite"
+        >
+          <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 013.75 9.375v-4.5zM3.75 14.625c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5a1.125 1.125 0 01-1.125-1.125v-4.5zM13.5 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0113.5 9.375v-4.5z" />
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6.75 6.75h.75v.75h-.75v-.75zM6.75 16.5h.75v.75h-.75v-.75zM16.5 6.75h.75v.75h-.75v-.75zM13.5 13.5h.75v.75h-.75v-.75zM13.5 19.5h.75v.75h-.75v-.75zM19.5 13.5h.75v.75h-.75v-.75zM19.5 19.5h.75v.75h-.75v-.75zM16.5 16.5h.75v.75h-.75v-.75z" />
+          </svg>
+          <span class="hidden sm:inline">QR</span>
         </button>
 
         <!-- Chat toggle -->
@@ -1158,6 +1179,42 @@ function peerInitials(nodeId: string): string {
               <button
                 class="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
                 @click="showTicketFallback = false"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
+
+    <!-- QR invite modal -->
+    <Teleport to="body">
+      <Transition
+        enter-active-class="transition-all duration-200"
+        enter-from-class="opacity-0"
+        enter-to-class="opacity-100"
+        leave-active-class="transition-all duration-150"
+        leave-from-class="opacity-100"
+        leave-to-class="opacity-0"
+      >
+        <div v-if="showQrInvite && sessionStatus?.ticket" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" @click.self="showQrInvite = false">
+          <div class="w-full max-w-sm rounded-xl border border-border bg-card p-6 shadow-xl mx-4">
+            <h2 class="text-lg font-semibold text-foreground">Scan to join</h2>
+            <p class="mt-1 text-sm text-muted-foreground">Open Alexandria on another device and scan this code from the Join dialog.</p>
+            <div class="mt-4 flex justify-center">
+              <QrCodeDisplay :value="sessionStatus.ticket" :size="260" />
+            </div>
+            <div class="mt-4 flex justify-end gap-2">
+              <button
+                class="rounded-lg border border-border px-3 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+                @click="copyTicket"
+              >
+                {{ ticketCopied ? 'Copied!' : 'Copy ticket' }}
+              </button>
+              <button
+                class="rounded-lg bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+                @click="showQrInvite = false"
               >
                 Done
               </button>

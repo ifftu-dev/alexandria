@@ -43,6 +43,10 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (33, "plugin_system_phase2", MIGRATION_033),
     (34, "plugin_catalog", MIGRATION_034),
     (35, "plugin_attestations", MIGRATION_035),
+    (36, "sentinel_flags_and_status", MIGRATION_036),
+    (37, "sentinel_dao_seed", MIGRATION_037),
+    (38, "sentinel_priors", MIGRATION_038),
+    (39, "sentinel_holdout", MIGRATION_039),
 ];
 
 const MIGRATION_001: &str = r#"
@@ -1596,4 +1600,131 @@ CREATE TABLE IF NOT EXISTS plugin_advisories (
 
 CREATE INDEX IF NOT EXISTS idx_plugin_advisories_plugin
     ON plugin_advisories(plugin_cid);
+"#;
+
+const MIGRATION_036: &str = r#"
+-- ============================================================
+-- Migration 036: Sentinel anomaly flags + outcome tracking
+--
+-- Adds the plumbing for server-side session outcome evaluation
+-- (active → flagged → suspended) per docs/sentinel.md.
+--
+-- Per-snapshot anomaly_flags JSON lets the backend recompute
+-- cumulative severity without shipping flag-parsing logic to
+-- the client. The denormalized counts on integrity_sessions
+-- give O(1) outcome checks on each submit_snapshot.
+-- ============================================================
+
+ALTER TABLE integrity_snapshots ADD COLUMN anomaly_flags TEXT;
+
+ALTER TABLE integrity_sessions ADD COLUMN critical_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE integrity_sessions ADD COLUMN warning_count  INTEGER NOT NULL DEFAULT 0;
+
+CREATE INDEX IF NOT EXISTS idx_integrity_snapshots_session
+    ON integrity_snapshots(session_id);
+
+CREATE INDEX IF NOT EXISTS idx_evidence_integrity_session
+    ON evidence_records(integrity_session_id);
+"#;
+
+const MIGRATION_037: &str = r#"
+-- ============================================================
+-- Migration 037: Sentinel DAO seed
+--
+-- Seeds a single DAO row scoped to cheat-pattern governance for
+-- Sentinel (scope_type='sentinel'). This is the curation body
+-- for federated adversarial priors (Option B; see
+-- docs/sentinel-federation.md and docs/sentinel-adversarial-priors.md).
+--
+-- Seed-only: no new DDL. Proposals use the existing
+-- governance_proposals pipeline with category='sentinel_prior'.
+-- Committee bootstrap (who sits on the Sentinel DAO initially) is
+-- handled out-of-band — the main Alexandria DAO elects the first
+-- committee before this pipeline goes live.
+-- ============================================================
+
+INSERT OR IGNORE INTO governance_daos
+    (id, name, description, icon_emoji, scope_type, scope_id, status,
+     committee_size, election_interval_days)
+VALUES
+    ('sentinel-dao',
+     'Sentinel DAO',
+     'Curates labeled adversarial priors (cheat patterns) that every Sentinel client trains against. Open proposals, DAO-ratified.',
+     '🛡',
+     'sentinel',
+     'sentinel-global',
+     'active',
+     5,
+     365);
+"#;
+
+const MIGRATION_038: &str = r#"
+-- ============================================================
+-- Migration 038: Sentinel adversarial-prior library
+--
+-- Ratified cheat-pattern entries curated by the Sentinel DAO.
+-- Each row references the governance_proposal that approved it
+-- and the content-addressed blob (CID) holding the labeled
+-- training samples. Clients pull these and fold them into their
+-- local anomaly models as negative examples.
+--
+-- See docs/sentinel-adversarial-priors.md §2 phase 2.
+-- Face model kind is forbidden by design (decision 2).
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS sentinel_priors (
+    id              TEXT PRIMARY KEY,  -- blake2b(cid + label + model_kind)
+    proposal_id     TEXT NOT NULL REFERENCES governance_proposals(id),
+    cid             TEXT NOT NULL,     -- BLAKE3 content hash of the labeled-samples blob
+    model_kind      TEXT NOT NULL,     -- 'keystroke' | 'mouse' (face is forbidden)
+    label           TEXT NOT NULL,     -- e.g. 'paste_macro', 'bot_script', 'teleport'
+    schema_version  INTEGER NOT NULL,
+    sample_count    INTEGER NOT NULL,
+    notes           TEXT,
+    ratified_at     TEXT NOT NULL DEFAULT (datetime('now')),
+    signature       TEXT NOT NULL      -- placeholder: blake2b digest over (cid|label|model_kind|schema_version).
+                                       -- Replaced with Sentinel DAO threshold sig once that infra lands.
+);
+
+CREATE INDEX IF NOT EXISTS idx_sentinel_priors_kind
+    ON sentinel_priors(model_kind);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_sentinel_priors_proposal
+    ON sentinel_priors(proposal_id);
+"#;
+
+const MIGRATION_039: &str = r#"
+-- ============================================================
+-- Migration 039: Sentinel DAO holdout evaluation set
+--
+-- A private labeled-samples blob used by the Sentinel DAO to
+-- measure classifier accuracy / false-positive rate without
+-- leaking the evaluation criteria to attackers.
+--
+-- The blob itself is AES-256-GCM encrypted under a random key.
+-- That key is split into N shares via Shamir's Secret Sharing
+-- over GF(256); each share is sealed to one DAO member's X25519
+-- pubkey. Any `threshold` members can reconstruct the key.
+--
+-- Storage-side this table keeps only metadata + the sealed-share
+-- policy JSON; the encrypted blob lives in the content store
+-- (pinned under pin_type='sentinel_holdout').
+--
+-- Role separation (decision 7 in sentinel-federation.md): the
+-- committee members holding decryption shares should not overlap
+-- with the curators ratifying priors. Enforcement is at the
+-- committee-election layer, not this schema.
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS sentinel_holdout_refs (
+    id             TEXT PRIMARY KEY,
+    encrypted_cid  TEXT NOT NULL,
+    model_kind     TEXT NOT NULL,       -- 'keystroke' | 'mouse'
+    threshold      INTEGER NOT NULL,
+    key_policy     TEXT NOT NULL,       -- JSON: sealed-share envelope
+    created_at     TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_sentinel_holdout_kind
+    ON sentinel_holdout_refs(model_kind);
 "#;
