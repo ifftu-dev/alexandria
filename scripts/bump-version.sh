@@ -30,17 +30,31 @@ jq --arg v "$VERSION" '.version = $v' "$ROOT/src-tauri/tauri.conf.json" \
   && mv "$ROOT/src-tauri/tauri.conf.json.tmp" "$ROOT/src-tauri/tauri.conf.json"
 echo "  Updated src-tauri/tauri.conf.json"
 
-# src-tauri/Cargo.toml (first [package] version field only)
-sed -i.bak "0,/^version = \"[^\"]*\"/{s/^version = \"[^\"]*\"/version = \"$VERSION\"/}" \
-  "$ROOT/src-tauri/Cargo.toml"
-rm -f "$ROOT/src-tauri/Cargo.toml.bak"
+# src-tauri/Cargo.toml (first [package] version field only).
+# awk is used in place of sed for portability — BSD sed (macOS) does not
+# support GNU's `0,/regex/{...}` first-match syntax.
+awk -v ver="$VERSION" '
+  !done && /^version = "[^"]*"/ { sub(/"[^"]*"/, "\"" ver "\""); done = 1 }
+  { print }
+' "$ROOT/src-tauri/Cargo.toml" > "$ROOT/src-tauri/Cargo.toml.tmp" \
+  && mv "$ROOT/src-tauri/Cargo.toml.tmp" "$ROOT/src-tauri/Cargo.toml"
 echo "  Updated src-tauri/Cargo.toml"
+
+# Cargo.lock — refresh the alexandria-node entry so subsequent builds
+# don't re-pin the old version.
+if command -v cargo >/dev/null 2>&1; then
+  (cd "$ROOT" && cargo update -p alexandria-node >/dev/null 2>&1) \
+    && echo "  Updated Cargo.lock" \
+    || echo "  Skipped Cargo.lock (cargo update failed; run manually)"
+else
+  echo "  Skipped Cargo.lock (cargo not found; run 'cargo update -p alexandria-node')"
+fi
 
 echo ""
 echo "Done. Version is now $VERSION."
 echo ""
 echo "Next steps:"
-echo "  git add package.json package-lock.json src-tauri/tauri.conf.json src-tauri/Cargo.toml"
+echo "  git add package.json package-lock.json src-tauri/tauri.conf.json src-tauri/Cargo.toml Cargo.lock"
 echo "  git commit -m 'chore: bump version to $VERSION'"
 echo "  git tag v$VERSION"
 echo "  git push && git push --tags"
