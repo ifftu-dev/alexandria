@@ -587,6 +587,13 @@ async function disableBiometric() {
             <p class="text-xs text-muted-foreground mb-1">Peer ID</p>
             <code v-if="p2pStatus?.peer_id" class="block font-mono text-xs break-all select-all text-foreground">{{ p2pStatus.peer_id }}</code>
             <p v-else class="text-xs text-muted-foreground italic">Network offline</p>
+            <router-link
+              to="/dashboard/network"
+              class="mt-2 inline-flex items-center gap-1 text-xs text-primary hover:underline"
+            >
+              View network details
+              <span aria-hidden="true">→</span>
+            </router-link>
           </div>
         </div>
       </div>
