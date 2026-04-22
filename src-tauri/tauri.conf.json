@@ -54,7 +54,8 @@
     "copyright": "Alexandria Contributors",
     "macOS": {
       "minimumSystemVersion": "10.15",
-      "entitlements": "./Entitlements.plist"
+      "entitlements": "./Entitlements.plist",
+      "signingIdentity": "Developer ID Application: Pratyush Pundir (VLMNL3V44U)"
     },
     "iOS": {
       "developmentTeam": "VLMNL3V44U"
@@ -62,7 +63,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEY2MzZCQTE3MDYwMEFEQzUKUldURnJRQUdGN28yOXUwMytkWDJvREM4YTJvcytCZkxUamN5NDM0Rk52RDdaUzluMDNPcFpnRDIK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IERBQTkzRTUwOEVFQ0E1NzQKUldSMHBleU9VRDZwMmtFTGErYmFsUVN3VXB3em5xR0xsMHllcHRSc1FnREJvNFBKQ21iNEZxSWcK",
       "endpoints": [
         "https://github.com/ifftu-dev/alexandria/releases/latest/download/latest.json"
       ]
