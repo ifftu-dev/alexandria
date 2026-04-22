@@ -429,6 +429,10 @@ struct ActiveSession {
     audio_enabled: bool,
     /// Chat sender for the derived gossip topic.
     chat_sender: Option<iroh_gossip::api::GossipSender>,
+    /// Names sender for the /names gossip topic. Seeded with peer node IDs
+    /// as the MoQ room discovers them; otherwise gossip subscriptions with
+    /// an empty bootstrap list never propagate.
+    names_sender: Option<iroh_gossip::api::GossipSender>,
     /// Our node ID (for attributing chat messages).
     our_node_id: String,
     /// Our display name (sent to peers via `/names` gossip).
@@ -1821,7 +1825,7 @@ impl TutoringManager {
             Self::setup_chat(&gossip, &topic_seed, &our_node_id, app_handle.clone()).await;
 
         // Set up name announcements on a derived /names gossip topic
-        let names_task = Self::setup_names(
+        let names_setup = Self::setup_names(
             &gossip,
             &topic_seed,
             &our_node_id,
@@ -1830,6 +1834,10 @@ impl TutoringManager {
             app_handle.clone(),
         )
         .await;
+        let (names_sender, names_task) = match names_setup {
+            Some((s, t)) => (Some(s), Some(t)),
+            None => (None, None),
+        };
 
         // Spawn event loop to track peers and subscribe to audio+video
         let inner_clone = self.inner.clone();
@@ -1871,6 +1879,7 @@ impl TutoringManager {
             video_enabled: has_video,
             audio_enabled: has_audio,
             chat_sender,
+            names_sender,
             our_node_id,
             our_display_name: display_name,
             started_at: Self::now_millis(),
@@ -1987,7 +1996,7 @@ impl TutoringManager {
             Self::setup_chat(&gossip, &topic_seed, &our_node_id, app_handle.clone()).await;
 
         // Set up name announcements on a derived /names gossip topic
-        let names_task = Self::setup_names(
+        let names_setup = Self::setup_names(
             &gossip,
             &topic_seed,
             &our_node_id,
@@ -1996,6 +2005,10 @@ impl TutoringManager {
             app_handle.clone(),
         )
         .await;
+        let (names_sender, names_task) = match names_setup {
+            Some((s, t)) => (Some(s), Some(t)),
+            None => (None, None),
+        };
 
         let inner_clone = self.inner.clone();
         let audio_ctx_clone = audio_ctx.clone();
@@ -2032,6 +2045,7 @@ impl TutoringManager {
             video_enabled: has_video,
             audio_enabled: has_audio,
             chat_sender,
+            names_sender,
             our_node_id,
             our_display_name: display_name,
             started_at: Self::now_millis(),
@@ -2610,7 +2624,7 @@ impl TutoringManager {
         our_display_name: &str,
         inner: Arc<Mutex<Option<ActiveSession>>>,
         app_handle: AppHandle,
-    ) -> Option<JoinHandle<()>> {
+    ) -> Option<(iroh_gossip::api::GossipSender, JoinHandle<()>)> {
         use iroh_gossip::proto::TopicId;
 
         let mut hasher = blake3::Hasher::new();
@@ -2622,6 +2636,7 @@ impl TutoringManager {
         match gossip.subscribe(topic_id, vec![]).await {
             Ok(topic) => {
                 let (sender, mut receiver) = topic.split();
+                let sender_ret = sender.clone();
                 let our_id = our_node_id.to_string();
                 let our_name = our_display_name.to_string();
 
@@ -2703,11 +2718,30 @@ impl TutoringManager {
                     log::info!("tutoring: names loop ended");
                 });
 
-                Some(task)
+                Some((sender_ret, task))
             }
             Err(e) => {
                 log::warn!("tutoring: failed to set up names gossip topic: {e}");
                 None
+            }
+        }
+    }
+
+    /// Seed the chat/names gossip topics with a freshly-discovered peer.
+    /// Without this, empty-bootstrap subscriptions never form neighbors.
+    async fn bootstrap_gossip_peer(
+        chat_sender: &Option<iroh_gossip::api::GossipSender>,
+        names_sender: &Option<iroh_gossip::api::GossipSender>,
+        peer: EndpointId,
+    ) {
+        if let Some(s) = chat_sender {
+            if let Err(e) = s.join_peers(vec![peer]).await {
+                log::warn!("tutoring: chat join_peers failed: {e}");
+            }
+        }
+        if let Some(s) = names_sender {
+            if let Err(e) = s.join_peers(vec![peer]).await {
+                log::warn!("tutoring: names join_peers failed: {e}");
             }
         }
     }
@@ -2731,56 +2765,69 @@ impl TutoringManager {
                         "RemoteAnnounced: {short_id} broadcasts={broadcasts:?}"
                     ));
 
-                    let mut guard = inner.lock().await;
-                    if let Some(session) = guard.as_mut() {
-                        session
-                            .peers
-                            .entry(node_id.clone())
-                            .and_modify(|p| {
-                                p.broadcasts = broadcasts.clone();
-                            })
-                            .or_insert(TutoringPeer {
-                                node_id,
-                                display_name: None,
-                                broadcasts: broadcasts.clone(),
-                                connected: false,
-                            });
-                        // Log to ring buffer
-                        let msg = format!("peer_announced: {short_id} broadcasts={broadcasts:?}");
-                        if session.recent_logs.len() >= MAX_LOG_ENTRIES {
-                            session.recent_logs.remove(0);
+                    let (chat_s, names_s) = {
+                        let mut guard = inner.lock().await;
+                        if let Some(session) = guard.as_mut() {
+                            session
+                                .peers
+                                .entry(node_id.clone())
+                                .and_modify(|p| {
+                                    p.broadcasts = broadcasts.clone();
+                                })
+                                .or_insert(TutoringPeer {
+                                    node_id,
+                                    display_name: None,
+                                    broadcasts: broadcasts.clone(),
+                                    connected: false,
+                                });
+                            let msg =
+                                format!("peer_announced: {short_id} broadcasts={broadcasts:?}");
+                            if session.recent_logs.len() >= MAX_LOG_ENTRIES {
+                                session.recent_logs.remove(0);
+                            }
+                            session.recent_logs.push(msg);
+                            (session.chat_sender.clone(), session.names_sender.clone())
+                        } else {
+                            (None, None)
                         }
-                        session.recent_logs.push(msg);
-                    }
+                    };
+                    Self::bootstrap_gossip_peer(&chat_s, &names_s, remote).await;
                 }
                 RoomEvent::RemoteConnected {
                     session: moq_session,
                 } => {
-                    let node_id = moq_session.conn().remote_id().to_string();
+                    let remote = moq_session.conn().remote_id();
+                    let node_id = remote.to_string();
                     let short_id = node_id[..node_id.len().min(12)].to_string();
                     log::info!("tutoring: peer connected (MoQ): {short_id}");
                     crate::diag::log(&format!("RemoteConnected: {short_id}"));
 
-                    let mut guard = inner.lock().await;
-                    if let Some(session) = guard.as_mut() {
-                        session
-                            .peers
-                            .entry(node_id.clone())
-                            .and_modify(|p| {
-                                p.connected = true;
-                            })
-                            .or_insert(TutoringPeer {
-                                node_id,
-                                display_name: None,
-                                broadcasts: vec![],
-                                connected: true,
-                            });
-                        let msg = format!("peer_connected_moq: {short_id}");
-                        if session.recent_logs.len() >= MAX_LOG_ENTRIES {
-                            session.recent_logs.remove(0);
+                    let (chat_s, names_s) = {
+                        let mut guard = inner.lock().await;
+                        if let Some(session) = guard.as_mut() {
+                            session
+                                .peers
+                                .entry(node_id.clone())
+                                .and_modify(|p| {
+                                    p.connected = true;
+                                })
+                                .or_insert(TutoringPeer {
+                                    node_id,
+                                    display_name: None,
+                                    broadcasts: vec![],
+                                    connected: true,
+                                });
+                            let msg = format!("peer_connected_moq: {short_id}");
+                            if session.recent_logs.len() >= MAX_LOG_ENTRIES {
+                                session.recent_logs.remove(0);
+                            }
+                            session.recent_logs.push(msg);
+                            (session.chat_sender.clone(), session.names_sender.clone())
+                        } else {
+                            (None, None)
                         }
-                        session.recent_logs.push(msg);
-                    }
+                    };
+                    Self::bootstrap_gossip_peer(&chat_s, &names_s, remote).await;
                 }
                 RoomEvent::BroadcastSubscribed {
                     session: moq_session,
