@@ -705,7 +705,11 @@ jobs:
         id: windows-ffmpeg
         shell: pwsh
         run: |
-          $url = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl-shared.zip"
+          # Pinned to the autobuild that matches the ffmpeg-next bindings we
+          # vendor. Master snapshots after April 2026 added new variants to
+          # AVPacketSideDataType (e.g. AV_PKT_DATA_DYNAMIC_HDR_SMPTE_2094_APP5)
+          # that ffmpeg-next does not match against, breaking the build.
+          $url = "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-04-13-13-18/ffmpeg-N-123950-g49a2d426e9-win64-gpl-shared.zip"
           Invoke-WebRequest -Uri $url -OutFile "$env:RUNNER_TEMP\ffmpeg.zip"
           Expand-Archive -Path "$env:RUNNER_TEMP\ffmpeg.zip" -DestinationPath "$env:RUNNER_TEMP\ffmpeg-extracted"
           $ffmpegDir = (Get-ChildItem "$env:RUNNER_TEMP\ffmpeg-extracted" -Directory | Select-Object -First 1).FullName
