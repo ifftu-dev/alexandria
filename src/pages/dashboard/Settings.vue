@@ -3,6 +3,7 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { useAuth } from '@/composables/useAuth'
+import { useP2P } from '@/composables/useP2P'
 import { useTheme } from '@/composables/useTheme'
 import {
   useKeyboardShortcuts,
@@ -21,6 +22,7 @@ import type { Identity } from '@/types'
 
 const { invoke } = useLocalApi()
 const { identity, lockVault: authLock, exportMnemonic: authExport, refreshProfile } = useAuth()
+const { status: p2pStatus, refreshStatus: refreshP2pStatus } = useP2P()
 const { theme, toggleTheme } = useTheme()
 const { shortcuts, updateShortcut, resetShortcut, resetAll: resetAllShortcuts } =
   useKeyboardShortcuts()
@@ -152,6 +154,7 @@ onMounted(() => {
 
   void refreshBiometricState()
   void loadStorageStats()
+  void refreshP2pStatus()
 })
 
 async function refreshBiometricState() {
@@ -579,6 +582,11 @@ async function disableBiometric() {
           <div class="py-3">
             <p class="text-xs text-muted-foreground mb-1">Payment Address</p>
             <code class="block font-mono text-xs break-all select-all text-foreground">{{ identity.payment_address }}</code>
+          </div>
+          <div class="py-3 last:pb-0">
+            <p class="text-xs text-muted-foreground mb-1">Peer ID</p>
+            <code v-if="p2pStatus?.peer_id" class="block font-mono text-xs break-all select-all text-foreground">{{ p2pStatus.peer_id }}</code>
+            <p v-else class="text-xs text-muted-foreground italic">Network offline</p>
           </div>
         </div>
       </div>
