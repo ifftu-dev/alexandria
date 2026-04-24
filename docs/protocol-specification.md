@@ -1,18 +1,29 @@
 # Alexandria Protocol Specification
 
-**Status:** Draft v0.1.0
+**Status:** Draft v0.2.0 (VC-first cutover, migration 040)
 **Category:** Standards Track
 **Created:** 2025
-**Updated:** 2026-04-14
+**Updated:** 2026-04-24
 **Author:** Pratyush Pundir
 
 ---
 
+> **⚠️ Post-VC-first cutover (migration 040, 2026-04-24):** §4 and §5
+> as written describe the retired SkillProof + evidence_records
+> pipeline. That dual-pipeline framing is gone — §14 (Verifiable
+> Credentials) is now the only credential path. All §4/§5 references
+> to `skill_proofs`, `evidence_records`, `skill_assessments`, NFT
+> wrappers, and the aggregator should be read as historical context
+> only. See [`vc-migration.md`](./vc-migration.md) for what replaced
+> them and the forthcoming §4′/§5′ rewrite plan.
+
 ## Implementation Status
 
-Two credential pipelines coexist in this specification:
+Two credential pipelines coexisted in earlier drafts of this
+specification; the SkillProof pipeline has now been retired. What
+remains:
 
-- **Legacy path (§4 + §5)** — assessment → skill_proof → optional
+- **Legacy path (§4 + §5)** — **retired**. Historical reference only.
   Cardano NFT mint. Still implemented and supported. See
   `evidence::aggregator`, `commands::cardano::mint_skill_proof_nft`.
 - **VC-first path (§14)** — `did:key` identity + signed VCs +

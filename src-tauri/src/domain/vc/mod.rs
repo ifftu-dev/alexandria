@@ -78,6 +78,29 @@ pub struct TermsOfUse {
     pub usage: String,
 }
 
+/// Cardano on-chain witness for auto-earned credentials.
+///
+/// When a learner's element-completion tx is confirmed by the
+/// `completion.ak` validator (or an equivalent authorised validator),
+/// the observer auto-issues a self-signed VC referencing that tx.
+/// The witness block is part of the signed envelope — the learner
+/// asserts *"this credential is authorised by on-chain tx X under
+/// validator script Y"* and the JWS covers that assertion.
+///
+/// Verifiers resolve the `tx_hash` on Cardano and check that it locks
+/// at `validator_script_hash`; if it does not, the credential MUST be
+/// rejected. A VC without a `Witness` block is a manually-issued
+/// credential and relies on the issuer DID alone.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Witness {
+    /// Confirmed Cardano tx hash that locked at the validator.
+    pub tx_hash: String,
+    /// Hex-encoded script hash of the authorising validator.
+    pub validator_script_hash: String,
+    /// Human-readable validator name (e.g. `"completion.ak"`).
+    pub validator_name: String,
+}
+
 /// The signed credential envelope. Serialises to JSON-LD per §7.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VerifiableCredential {
@@ -95,6 +118,10 @@ pub struct VerifiableCredential {
     pub credential_status: Option<CredentialStatus>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terms_of_use: Option<TermsOfUse>,
+    /// On-chain witness for auto-earned credentials (§14.7). Signed
+    /// over by the JWS when present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub witness: Option<Witness>,
     pub proof: Proof,
 }
 

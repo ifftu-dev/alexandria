@@ -82,10 +82,9 @@ pub fn bind_current_user_to_seed(conn: &Connection) -> Result<usize, rusqlite::E
         "UPDATE reputation_assertions SET actor_address = ?1 WHERE actor_address = ?2",
         rusqlite::params![&real_address, SENTINEL],
     )?;
-    total += conn.execute(
-        "UPDATE reputation_impact_deltas SET learner_address = ?1 WHERE learner_address = ?2",
-        rusqlite::params![&real_address, SENTINEL],
-    )?;
+    // Post-migration 040: reputation_impact_deltas was dropped — the
+    // per-learner impact table will be reintroduced (repointed at
+    // credentials) when the reputation engine is rebuilt.
 
     if total > 0 {
         log::info!("Rebound {total} demo-learner rows to real wallet");
@@ -115,8 +114,9 @@ fn backfill_demo_data(conn: &Connection) -> Result<(), rusqlite::Error> {
         || needs_backfill("video_chapters")
         || needs_backfill("opinions")
         || needs_backfill("credentials")
-        || needs_backfill("attestation_requirements")
         || needs_backfill("pinboard_observations")
+        || needs_backfill("completion_observations")
+        || needs_backfill("completion_attestation_requirements")
     {
         log::info!("Backfilling demo data for new tables…");
         conn.execute_batch(BACKFILL_SQL)?;
@@ -963,21 +963,12 @@ INSERT INTO element_skill_tags (element_id, skill_id, weight) VALUES
     ('el_math_4_2', 'skill_probability',    0.5);
 
 -- ============================================================
--- SEEDED SKILL PROOFS (ensures earned/available/locked graph states)
+-- Post-migration 040: SkillProof seed rows retired. The earned/
+-- available/locked demo states that used these rows now land via
+-- seeded Verifiable Credentials once the VC auto-issuance pipeline
+-- lands; until then the demo graph shows everything without prereqs
+-- as 'available' and the rest as 'locked'.
 -- ============================================================
-INSERT INTO skill_proofs (id, skill_id, proficiency_level, confidence, evidence_count) VALUES
-    ('proof_001', 'skill_arrays',        'apply',      0.93, 4),
-    ('proof_002', 'skill_big_o',         'analyze',    0.88, 3),
-    ('proof_003', 'skill_linked_lists',  'apply',      0.90, 3),
-    ('proof_004', 'skill_stacks_queues', 'apply',      0.85, 2),
-    ('proof_005', 'skill_html_css',      'apply',      0.92, 4),
-    ('proof_006', 'skill_javascript',    'apply',      0.89, 3),
-    ('proof_007', 'skill_typescript',    'apply',      0.81, 2),
-    ('proof_008', 'skill_sql',           'apply',      0.86, 3),
-    ('proof_009', 'skill_symmetric',     'apply',      0.83, 2),
-    ('proof_010', 'skill_user_research', 'evaluate',   0.84, 2),
-    ('proof_011', 'skill_ia',            'create',     0.80, 2),
-    ('proof_012', 'skill_wireframing',   'create',     0.82, 2);
 
 -- ============================================================
 -- CIVIC ENGAGEMENT — subject field, subjects, skills, course
@@ -1185,83 +1176,17 @@ INSERT INTO course_notes (id, enrollment_id, chapter_id, element_id, preview_tex
 
 -- ============================================================
 -- P2: ASSESSMENTS, EVIDENCE RECORDS, & PROOF LINKS
+--
+-- Post-migration 040: all three legacy tables (skill_assessments,
+-- evidence_records, skill_proof_evidence) are dropped. Leaving the
+-- seeds out here keeps `cargo test --package alexandria-node`
+-- runs from crashing on INSERT into a non-existent table; demo data
+-- for the VC-first world gets reintroduced with the auto-issuance
+-- pipeline.
 -- ============================================================
--- Skill assessments (one per skill that has a proof)
-INSERT INTO skill_assessments (id, skill_id, course_id, assessment_type, proficiency_level, difficulty, trust_factor) VALUES
-    ('sa_001', 'skill_arrays',        'course_algo_101',      'quiz',        'apply',    0.60, 1.0),
-    ('sa_002', 'skill_big_o',         'course_algo_101',      'quiz',        'analyze',  0.70, 1.0),
-    ('sa_003', 'skill_linked_lists',  'course_algo_101',      'quiz',        'apply',    0.55, 1.0),
-    ('sa_004', 'skill_stacks_queues', 'course_algo_101',      'quiz',        'apply',    0.55, 1.0),
-    ('sa_005', 'skill_html_css',      'course_web_fullstack', 'quiz',        'apply',    0.50, 1.0),
-    ('sa_006', 'skill_javascript',    'course_web_fullstack', 'quiz',        'apply',    0.60, 1.0),
-    ('sa_007', 'skill_typescript',    'course_web_fullstack', 'quiz',        'apply',    0.65, 1.0),
-    ('sa_008', 'skill_sql',           NULL,                   'project',     'apply',    0.70, 1.0),
-    ('sa_009', 'skill_symmetric',     'course_crypto_101',        'exam',        'apply',    0.75, 1.0),
-    ('sa_010', 'skill_user_research', 'course_ux_design',     'peer_review', 'evaluate', 0.65, 0.9),
-    ('sa_011', 'skill_ia',            'course_ux_design',     'project',     'create',   0.70, 1.0),
-    ('sa_012', 'skill_wireframing',   'course_ux_design',     'project',     'create',   0.65, 1.0);
 
--- Evidence records backing each proof (2-4 per proof as claimed by evidence_count)
-INSERT INTO evidence_records (id, skill_assessment_id, skill_id, proficiency_level, score, difficulty, trust_factor, course_id, instructor_address, created_at) VALUES
-    -- proof_001: skill_arrays (4 evidence)
-    ('ev_001a', 'sa_001', 'skill_arrays',   'apply', 0.95, 0.55, 1.0, 'course_algo_101', 'addr_seed_author_1', '2026-01-20T10:15:00'),
-    ('ev_001b', 'sa_001', 'skill_arrays',   'apply', 0.90, 0.60, 1.0, 'course_algo_101', 'addr_seed_author_1', '2026-02-08T10:30:00'),
-    ('ev_001c', 'sa_001', 'skill_arrays',   'apply', 0.93, 0.65, 1.0, 'course_algo_101', 'addr_seed_author_1', '2026-02-28T14:00:00'),
-    ('ev_001d', 'sa_001', 'skill_arrays',   'apply', 0.92, 0.60, 1.0, 'course_algo_101', 'addr_seed_author_1', '2026-03-15T11:30:00'),
-    -- proof_002: skill_big_o (3 evidence)
-    ('ev_002a', 'sa_002', 'skill_big_o',    'analyze', 0.85, 0.70, 1.0, 'course_algo_101', 'addr_seed_author_1', '2026-01-28T11:30:00'),
-    ('ev_002b', 'sa_002', 'skill_big_o',    'analyze', 0.90, 0.72, 1.0, 'course_algo_101', 'addr_seed_author_1', '2026-02-15T14:00:00'),
-    ('ev_002c', 'sa_002', 'skill_big_o',    'analyze', 0.88, 0.68, 1.0, 'course_algo_101', 'addr_seed_author_1', '2026-03-20T16:45:00'),
-    -- proof_003: skill_linked_lists (3 evidence)
-    ('ev_003a', 'sa_003', 'skill_linked_lists', 'apply', 0.88, 0.55, 1.0, 'course_algo_101', 'addr_seed_author_1', '2026-02-01T10:00:00'),
-    ('ev_003b', 'sa_003', 'skill_linked_lists', 'apply', 0.92, 0.58, 1.0, 'course_algo_101', 'addr_seed_author_1', '2026-02-15T09:30:00'),
-    ('ev_003c', 'sa_003', 'skill_linked_lists', 'apply', 0.90, 0.55, 1.0, 'course_algo_101', 'addr_seed_author_1', '2026-03-05T13:00:00'),
-    -- proof_004: skill_stacks_queues (2 evidence)
-    ('ev_004a', 'sa_004', 'skill_stacks_queues', 'apply', 0.84, 0.55, 1.0, 'course_algo_101', 'addr_seed_author_1', '2026-02-05T15:45:00'),
-    ('ev_004b', 'sa_004', 'skill_stacks_queues', 'apply', 0.86, 0.58, 1.0, 'course_algo_101', 'addr_seed_author_1', '2026-02-20T10:15:00'),
-    -- proof_005: skill_html_css (4 evidence)
-    ('ev_005a', 'sa_005', 'skill_html_css', 'apply', 0.94, 0.48, 1.0, 'course_web_fullstack', 'addr_seed_author_1', '2026-02-06T09:45:00'),
-    ('ev_005b', 'sa_005', 'skill_html_css', 'apply', 0.91, 0.52, 1.0, 'course_web_fullstack', 'addr_seed_author_1', '2026-02-14T16:00:00'),
-    ('ev_005c', 'sa_005', 'skill_html_css', 'apply', 0.90, 0.50, 1.0, 'course_web_fullstack', 'addr_seed_author_1', '2026-02-24T11:00:00'),
-    ('ev_005d', 'sa_005', 'skill_html_css', 'apply', 0.93, 0.55, 1.0, 'course_web_fullstack', 'addr_seed_author_1', '2026-03-10T14:30:00'),
-    -- proof_006: skill_javascript (3 evidence)
-    ('ev_006a', 'sa_006', 'skill_javascript', 'apply', 0.88, 0.58, 1.0, 'course_web_fullstack', 'addr_seed_author_1', '2026-02-14T16:00:00'),
-    ('ev_006b', 'sa_006', 'skill_javascript', 'apply', 0.91, 0.62, 1.0, 'course_web_fullstack', 'addr_seed_author_1', '2026-02-24T11:00:00'),
-    ('ev_006c', 'sa_006', 'skill_javascript', 'apply', 0.87, 0.60, 1.0, 'course_web_fullstack', 'addr_seed_author_1', '2026-03-15T10:00:00'),
-    -- proof_007: skill_typescript (2 evidence)
-    ('ev_007a', 'sa_007', 'skill_typescript', 'apply', 0.80, 0.65, 1.0, 'course_web_fullstack', 'addr_seed_author_1', '2026-03-01T10:00:00'),
-    ('ev_007b', 'sa_007', 'skill_typescript', 'apply', 0.82, 0.68, 1.0, 'course_web_fullstack', 'addr_seed_author_1', '2026-03-20T14:15:00'),
-    -- proof_008: skill_sql (3 evidence)
-    ('ev_008a', 'sa_008', 'skill_sql', 'apply', 0.84, 0.68, 1.0, NULL, 'addr_seed_author_2', '2026-01-10T09:00:00'),
-    ('ev_008b', 'sa_008', 'skill_sql', 'apply', 0.88, 0.72, 1.0, NULL, 'addr_seed_author_2', '2026-02-05T11:30:00'),
-    ('ev_008c', 'sa_008', 'skill_sql', 'apply', 0.86, 0.70, 1.0, NULL, 'addr_seed_author_2', '2026-03-01T15:00:00'),
-    -- proof_009: skill_symmetric (2 evidence)
-    ('ev_009a', 'sa_009', 'skill_symmetric', 'apply', 0.82, 0.75, 1.0, 'course_crypto_101', 'addr_seed_author_2', '2026-02-20T10:00:00'),
-    ('ev_009b', 'sa_009', 'skill_symmetric', 'apply', 0.84, 0.78, 1.0, 'course_crypto_101', 'addr_seed_author_2', '2026-03-10T13:45:00'),
-    -- proof_010: skill_user_research (2 evidence)
-    ('ev_010a', 'sa_010', 'skill_user_research', 'evaluate', 0.83, 0.65, 0.9, 'course_ux_design', 'addr_seed_author_3', '2026-01-25T14:00:00'),
-    ('ev_010b', 'sa_010', 'skill_user_research', 'evaluate', 0.85, 0.68, 0.9, 'course_ux_design', 'addr_seed_author_3', '2026-02-15T10:30:00'),
-    -- proof_011: skill_ia (2 evidence)
-    ('ev_011a', 'sa_011', 'skill_ia', 'create', 0.78, 0.70, 1.0, 'course_ux_design', 'addr_seed_author_3', '2026-02-01T09:00:00'),
-    ('ev_011b', 'sa_011', 'skill_ia', 'create', 0.82, 0.72, 1.0, 'course_ux_design', 'addr_seed_author_3', '2026-03-01T11:15:00'),
-    -- proof_012: skill_wireframing (2 evidence)
-    ('ev_012a', 'sa_012', 'skill_wireframing', 'create', 0.80, 0.65, 1.0, 'course_ux_design', 'addr_seed_author_3', '2026-02-10T13:00:00'),
-    ('ev_012b', 'sa_012', 'skill_wireframing', 'create', 0.84, 0.68, 1.0, 'course_ux_design', 'addr_seed_author_3', '2026-03-05T10:45:00');
-
--- Link evidence to proofs
-INSERT INTO skill_proof_evidence (proof_id, evidence_id) VALUES
-    ('proof_001', 'ev_001a'), ('proof_001', 'ev_001b'), ('proof_001', 'ev_001c'), ('proof_001', 'ev_001d'),
-    ('proof_002', 'ev_002a'), ('proof_002', 'ev_002b'), ('proof_002', 'ev_002c'),
-    ('proof_003', 'ev_003a'), ('proof_003', 'ev_003b'), ('proof_003', 'ev_003c'),
-    ('proof_004', 'ev_004a'), ('proof_004', 'ev_004b'),
-    ('proof_005', 'ev_005a'), ('proof_005', 'ev_005b'), ('proof_005', 'ev_005c'), ('proof_005', 'ev_005d'),
-    ('proof_006', 'ev_006a'), ('proof_006', 'ev_006b'), ('proof_006', 'ev_006c'),
-    ('proof_007', 'ev_007a'), ('proof_007', 'ev_007b'),
-    ('proof_008', 'ev_008a'), ('proof_008', 'ev_008b'), ('proof_008', 'ev_008c'),
-    ('proof_009', 'ev_009a'), ('proof_009', 'ev_009b'),
-    ('proof_010', 'ev_010a'), ('proof_010', 'ev_010b'),
-    ('proof_011', 'ev_011a'), ('proof_011', 'ev_011b'),
-    ('proof_012', 'ev_012a'), ('proof_012', 'ev_012b');
+-- (SkillProof / evidence_record / skill_proof_evidence seed blocks
+--  removed with migration 040.)
 
 -- ============================================================
 -- P3: REPUTATION ASSERTIONS & IMPACT DATA
@@ -1282,28 +1207,9 @@ INSERT INTO reputation_assertions (id, actor_address, role, skill_id, proficienc
     ('rep_009', 'addr_seed_author_3', 'instructor', 'skill_ia',            'create',   0.84, 6, 0.05, 0.03, 0.08, 4, 0.004, '2025-10-01T00:00:00', '2026-04-01T00:00:00', 'v2'),
     ('rep_010', 'addr_seed_author_3', 'instructor', 'skill_wireframing',   'create',   0.83, 5, 0.05, 0.02, 0.07, 4, 0.006, '2025-10-01T00:00:00', '2026-04-01T00:00:00', 'v2');
 
--- Link reputation to proofs
-INSERT INTO reputation_evidence (assertion_id, proof_id, delta_confidence, attribution_weight) VALUES
-    ('rep_001', 'proof_001', 0.08, 1.0),
-    ('rep_002', 'proof_002', 0.07, 1.0),
-    ('rep_003', 'proof_005', 0.09, 1.0),
-    ('rep_004', 'proof_006', 0.07, 1.0),
-    ('rep_005', 'proof_008', 0.06, 1.0),
-    ('rep_006', 'proof_009', 0.05, 1.0),
-    ('rep_008', 'proof_010', 0.06, 0.9),
-    ('rep_009', 'proof_011', 0.05, 1.0),
-    ('rep_010', 'proof_012', 0.05, 1.0);
-
--- Impact deltas (sample per-learner contributions)
-INSERT INTO reputation_impact_deltas (id, assertion_id, learner_address, delta, attribution, proof_id) VALUES
-    ('rid_001', 'rep_001', 'addr_seed_learner_1', 0.08, 1.0, 'proof_001'),
-    ('rid_002', 'rep_001', 'addr_seed_learner_2', 0.06, 1.0, NULL),
-    ('rid_003', 'rep_001', 'addr_seed_learner_3', 0.12, 1.0, NULL),
-    ('rid_004', 'rep_002', 'addr_seed_learner_1', 0.07, 1.0, 'proof_002'),
-    ('rid_005', 'rep_002', 'addr_seed_learner_4', 0.05, 1.0, NULL),
-    ('rid_006', 'rep_003', 'addr_seed_learner_1', 0.09, 1.0, 'proof_005'),
-    ('rid_007', 'rep_003', 'addr_seed_learner_5', 0.11, 1.0, NULL),
-    ('rid_008', 'rep_005', 'addr_seed_learner_1', 0.06, 1.0, 'proof_008');
+-- (reputation_evidence / reputation_impact_deltas seed blocks
+--  removed with migration 040; both tables were dropped and will be
+--  reintroduced — repointed at credentials — in a follow-up session.)
 
 -- ============================================================
 -- P4: GOVERNANCE (members, elections, proposals, votes)
@@ -1635,8 +1541,8 @@ INSERT OR IGNORE INTO video_chapters (id, element_id, title, start_seconds, posi
 -- P8: OPINIONS (Field Commentary)
 -- ============================================================
 -- Opinions appear as received-from-peers content. Each references a
--- real locally-seeded skill_proof so the credential-verification path
--- has something to chew on in the UI. Signatures here are placeholder
+-- locally-seeded credential id so the credential-verification path has
+-- something to chew on in the UI. Signatures here are placeholder
 -- strings — because opinions are inserted directly (not via the P2P
 -- handler), no re-verification happens on read.
 --
@@ -1903,50 +1809,13 @@ VALUES
 UPDATE credentials SET revoked = 1, revoked_at = '2026-04-11T12:00:00Z', revocation_reason = 'demo: issuer retracted after review'
   WHERE id = 'urn:uuid:cred-demo-civics-constitution';
 
--- Civics skill_assessments (prereq for demo evidence_records below)
-INSERT OR IGNORE INTO skill_assessments (id, skill_id, course_id, assessment_type, proficiency_level, difficulty, trust_factor) VALUES
-    ('sa_civ_001', 'skill_constitutional_literacy', 'course_civics_101', 'quiz',    'remember',  0.45, 1.0),
-    ('sa_civ_002', 'skill_voting_systems',          'course_civics_101', 'quiz',    'apply',     0.60, 1.0),
-    ('sa_civ_003', 'skill_public_finance_literacy', 'course_civics_101', 'project', 'understand',0.50, 1.0),
-    ('sa_013',     'skill_regression',              'course_ml_foundations', 'quiz', 'remember', 0.55, 1.0);
-
--- Demo learner evidence records. skill_assessment_id links to the
--- global per-skill assessments (local-first: proofs imply the learner
--- is the node owner). Records for the demo learner go into the normal
--- evidence table; no learner_address column exists.
-INSERT OR IGNORE INTO evidence_records (id, skill_assessment_id, skill_id, proficiency_level, score, difficulty, trust_factor, course_id, instructor_address, created_at) VALUES
-    ('ev_demo_01', 'sa_002',     'skill_big_o',                   'analyze',   0.89, 0.70, 1.0, 'course_algo_101',           'addr_seed_author_1', '2026-01-28T11:30:00'),
-    ('ev_demo_02', 'sa_001',     'skill_arrays',                  'apply',     0.91, 0.60, 1.0, 'course_algo_101',           'addr_seed_author_1', '2026-02-05T15:00:00'),
-    ('ev_demo_03', 'sa_002',     'skill_big_o',                   'analyze',   0.87, 0.72, 1.0, 'course_algo_101',           'addr_seed_author_1', '2026-03-10T10:00:00'),
-    ('ev_demo_04', 'sa_013',     'skill_regression',              'remember',  0.86, 0.55, 1.0, 'course_ml_foundations',     'addr_seed_author_2', '2026-03-16T11:00:00'),
-    ('ev_demo_05', 'sa_005',     'skill_html_css',                'apply',     0.94, 0.48, 1.0, 'course_web_fullstack',      'addr_seed_author_1', '2026-02-06T09:45:00'),
-    ('ev_demo_06', 'sa_010',     'skill_user_research',           'evaluate',  0.82, 0.65, 0.9, 'course_ux_design',          'addr_seed_author_3', '2026-02-20T14:00:00'),
-    ('ev_demo_07', 'sa_civ_001', 'skill_constitutional_literacy', 'remember',  0.84, 0.45, 1.0, 'course_civics_101',         'addr_seed_author_5', '2026-04-08T11:15:00'),
-    ('ev_demo_08', 'sa_civ_002', 'skill_voting_systems',          'apply',     0.81, 0.60, 1.0, 'course_civics_101',         'addr_seed_author_5', '2026-04-09T14:00:00'),
-    ('ev_demo_09', 'sa_civ_003', 'skill_public_finance_literacy', 'understand',0.78, 0.50, 1.0, 'course_civics_101',         'addr_seed_author_5', '2026-04-10T10:00:00'),
-    ('ev_demo_10', 'sa_civ_001', 'skill_constitutional_literacy', 'remember',  0.80, 0.45, 1.0, 'course_civics_101',         'addr_seed_author_5', '2026-04-11T09:30:00'),
-    ('ev_demo_11', 'sa_006',     'skill_javascript',              'apply',     0.88, 0.60, 1.0, 'course_web_fullstack',      'addr_seed_author_1', '2026-02-14T16:00:00'),
-    ('ev_demo_12', 'sa_009',     'skill_symmetric',               'apply',     0.82, 0.70, 1.0, 'course_crypto_101',         'addr_seed_author_2', '2026-04-02T10:30:00');
-
--- Link demo evidence to demo proofs
-INSERT OR IGNORE INTO skill_proof_evidence (proof_id, evidence_id) VALUES
-    ('proof_demo_big_o',          'ev_demo_01'),
-    ('proof_demo_big_o',          'ev_demo_03'),
-    ('proof_demo_arrays',         'ev_demo_02'),
-    ('proof_demo_regression',     'ev_demo_04'),
-    ('proof_demo_user_research',  'ev_demo_06'),
-    ('proof_demo_constitutional', 'ev_demo_07'),
-    ('proof_demo_constitutional', 'ev_demo_10'),
-    ('proof_demo_voting',         'ev_demo_08');
-
--- Demo learner's computed skill proofs (per-user)
-INSERT OR IGNORE INTO skill_proofs (id, skill_id, proficiency_level, confidence, evidence_count) VALUES
-    ('proof_demo_big_o',           'skill_big_o',                   'analyze',   0.88, 2),
-    ('proof_demo_arrays',          'skill_arrays',                  'apply',     0.91, 1),
-    ('proof_demo_regression',      'skill_regression',              'remember',  0.86, 1),
-    ('proof_demo_user_research',   'skill_user_research',           'evaluate',  0.82, 1),
-    ('proof_demo_constitutional',  'skill_constitutional_literacy', 'remember',  0.82, 2),
-    ('proof_demo_voting',          'skill_voting_systems',          'apply',     0.81, 1);
+-- Post-migration 040: the demo-learner civics seeds (skill_assessments,
+-- evidence_records, skill_proof_evidence, skill_proofs,
+-- reputation_assertions for the demo learner, reputation_impact_deltas)
+-- are retired because the underlying tables are dropped. The
+-- `derived_skill_states` snapshot below still represents the demo
+-- learner's progression because that table is independent of the
+-- SkillProof pipeline and reflects the aggregation output directly.
 
 -- Learner-role reputation assertions for the demo user (will be
 -- rewritten to the real wallet by bind_current_user_to_seed).
@@ -1954,13 +1823,6 @@ INSERT OR IGNORE INTO reputation_assertions (id, actor_address, role, skill_id, 
     ('rep_demo_01', 'addr_demo_learner', 'learner', 'skill_big_o',                   'analyze',  0.88, 2, 0.0, 0.0, 0.0, 0, 0.002, '2026-01-01T00:00:00', '2026-04-01T00:00:00', 'v2'),
     ('rep_demo_02', 'addr_demo_learner', 'learner', 'skill_arrays',                  'apply',    0.91, 1, 0.0, 0.0, 0.0, 0, 0.003, '2026-01-01T00:00:00', '2026-04-01T00:00:00', 'v2'),
     ('rep_demo_03', 'addr_demo_learner', 'learner', 'skill_constitutional_literacy', 'remember', 0.82, 2, 0.0, 0.0, 0.0, 0, 0.002, '2026-04-01T00:00:00', '2026-04-15T00:00:00', 'v2');
-
--- Additional instructor-impact deltas attributing instructors to the
--- demo learner's growth (Reputation dashboard instructor-view detail).
-INSERT OR IGNORE INTO reputation_impact_deltas (id, assertion_id, learner_address, delta, attribution, proof_id) VALUES
-    ('rid_demo_01', 'rep_002', 'addr_demo_learner', 0.08, 1.0, 'proof_demo_big_o'),
-    ('rid_demo_02', 'rep_001', 'addr_demo_learner', 0.07, 1.0, 'proof_demo_arrays'),
-    ('rid_demo_03', 'rep_011', 'addr_demo_learner', 0.06, 1.0, 'proof_demo_constitutional');
 
 -- Derived skill states — materialised aggregation output per (subject, skill).
 -- The aggregation engine would normally write these; we inline a realistic
@@ -1990,24 +1852,19 @@ INSERT OR IGNORE INTO sync_state (device_id, table_name, last_synced_at, row_cou
     ('dev_demo_mobile', 'enrollments',        '2026-04-14T08:42:00', 4),
     ('dev_demo_mobile', 'element_progress',   '2026-04-14T08:42:00', 40),
     ('dev_demo_mobile', 'course_notes',       '2026-04-13T21:10:00', 3),
-    ('dev_demo_mobile', 'credentials',        '2026-04-14T08:42:00', 5),
-    ('dev_demo_mobile', 'evidence_records',   '2026-04-14T08:42:00', 12);
+    ('dev_demo_mobile', 'credentials',        '2026-04-14T08:42:00', 5);
 
 INSERT OR IGNORE INTO sync_log (entity_type, entity_id, direction, peer_id, synced_at) VALUES
     ('catalog',          'course_civics_101',                  'received', '12D3KooWDemoMobilePlaceholderPeerIdXXXXXXXXXXXX', '2026-04-12T09:30:00'),
-    ('evidence',         'ev_demo_07',                         'sent',     '12D3KooWDemoMobilePlaceholderPeerIdXXXXXXXXXXXX', '2026-04-13T10:00:00'),
     ('credentials',      'urn:uuid:cred-demo-civics-constitution', 'sent', '12D3KooWDemoMobilePlaceholderPeerIdXXXXXXXXXXXX', '2026-04-13T10:02:00'),
     ('taxonomy',         'sf_civics',                          'sent',     '12D3KooWDemoMobilePlaceholderPeerIdXXXXXXXXXXXX', '2026-04-13T10:05:00'),
-    ('evidence',         'ev_demo_08',                         'sent',     '12D3KooWDemoMobilePlaceholderPeerIdXXXXXXXXXXXX', '2026-04-14T08:30:00'),
     ('catalog',          'course_tut_civ_constitution',        'received', '12D3KooWDemoMobilePlaceholderPeerIdXXXXXXXXXXXX', '2026-04-14T08:41:00');
 
 -- ============================================================
--- P13: ATTESTATION REQUIREMENTS (high-stakes skills)
+-- P13: ATTESTATION REQUIREMENTS (retired with migration 040 — the
+-- attestation_requirements table is dropped; gating moves to the
+-- completion validator on-chain in a follow-up session.)
 -- ============================================================
-INSERT OR IGNORE INTO attestation_requirements (skill_id, proficiency_level, required_attestors, dao_id, set_by_proposal) VALUES
-    ('skill_election_integrity',        'evaluate',  2, 'dao_civics', NULL),
-    ('skill_signatures',                'apply',     2, 'dao_cyber',  NULL),
-    ('skill_constitutional_literacy',   'analyze',   2, 'dao_civics', NULL);
 
 -- ============================================================
 -- P14: PINBOARD OBSERVATIONS (opt-in content pinning commitments)
@@ -2047,6 +1904,53 @@ INSERT OR IGNORE INTO pinboard_observations (id, pinner_did, subject_did, scope,
 -- ============================================================
 UPDATE courses  SET provenance = 'ai_generated' WHERE provenance IS NULL;
 UPDATE opinions SET provenance = 'ai_generated' WHERE provenance IS NULL;
+
+-- ============================================================
+-- P16: VC-FIRST DEMO SEEDS
+-- Populates a demo completion observation (waiting on auto-issuance
+-- once the observer daemon ticks) and a demo attestation requirement
+-- on a high-stakes civics course so the frontend can render the full
+-- state machine: observation → attestation requirement → issued VC.
+-- ============================================================
+INSERT OR IGNORE INTO completion_attestation_requirements
+    (course_id, required_attestors, dao_id, set_by_proposal)
+VALUES
+    ('course_civics_101',                   2, 'dao_civics', NULL),
+    ('636f757273655f636976696373203131',    2, 'dao_civics', NULL);
+
+-- A pending observation keyed on the civics course (hex-encoded
+-- bytes of "course_civics_101"). The credential_id is NULL, which
+-- means the observer saw a mint but has not yet auto-issued.
+INSERT OR IGNORE INTO completion_observations (
+    policy_id, asset_name_hex, tx_hash, subject_pubkey,
+    course_id, completion_root, completion_time,
+    credential_id, observed_at, issued_at
+) VALUES (
+    '6380450179a6933acdf76213732f8626e1486b9ed5cc7fe7f46c98e0',
+    'aabbccddeeff00112233445566778899aabbccddeeff0011deadbeef',
+    'deadbeef00000000000000000000000000000000000000000000000000000000',
+    'abababababababababababababababababababababababababababababababab',
+    '636f757273655f636976696373203131',
+    '11aa22bb33cc44dd55ee66ff778899aa11bb22cc33dd44ee55ff66aa7788cc99',
+    '2026-04-24T12:00:00Z',
+    NULL,
+    '2026-04-24 12:00:00',
+    NULL
+);
+
+-- A demo completion attestation on the pending observation. One
+-- attestor signed the witness tx; a second is needed before the
+-- observer will auto-issue.
+INSERT OR IGNORE INTO completion_attestations (
+    id, witness_tx_hash, attestor_did, attestor_pubkey, signature, note
+) VALUES (
+    'ca_demo_first',
+    'deadbeef00000000000000000000000000000000000000000000000000000000',
+    'did:key:zCivicsDemoAttestorX',
+    'cafef00dcafef00dcafef00dcafef00dcafef00dcafef00dcafef00dcafef00d',
+    'beefcafe0011223344556677889900aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabb',
+    'Witnessed live; integrity score 0.92'
+);
 
 -- Re-enable FK checks
 PRAGMA foreign_keys = ON;
@@ -2332,19 +2236,6 @@ mod tests {
             .unwrap();
         assert_eq!(creds, 5, "5 demo VCs should be seeded");
 
-        let demo_proofs: i64 = db
-            .conn()
-            .query_row(
-                "SELECT COUNT(*) FROM skill_proofs WHERE id LIKE 'proof_demo_%'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert!(
-            demo_proofs >= 6,
-            "expected >= 6 demo proofs, got {demo_proofs}"
-        );
-
         let revoked: i64 = db
             .conn()
             .query_row(
@@ -2361,17 +2252,6 @@ mod tests {
             .unwrap();
         assert_eq!(devices, 2, "2 devices should be seeded");
 
-        let attest_reqs: i64 = db
-            .conn()
-            .query_row("SELECT COUNT(*) FROM attestation_requirements", [], |r| {
-                r.get(0)
-            })
-            .unwrap();
-        assert_eq!(
-            attest_reqs, 3,
-            "3 attestation requirements should be seeded"
-        );
-
         let pinboard: i64 = db
             .conn()
             .query_row("SELECT COUNT(*) FROM pinboard_observations", [], |r| {
@@ -2382,6 +2262,40 @@ mod tests {
             pinboard >= 4,
             "expected >= 4 pinboard observations, got {pinboard}"
         );
+
+        let pending_completions: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM completion_observations WHERE credential_id IS NULL",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(
+            pending_completions >= 1,
+            "expected >= 1 pending completion observation"
+        );
+
+        let requirements: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM completion_attestation_requirements",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(
+            requirements >= 1,
+            "expected >= 1 completion attestation requirement"
+        );
+
+        let attestations: i64 = db
+            .conn()
+            .query_row("SELECT COUNT(*) FROM completion_attestations", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert!(attestations >= 1, "expected >= 1 completion attestation");
     }
 
     #[test]

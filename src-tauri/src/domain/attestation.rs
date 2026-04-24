@@ -1,16 +1,31 @@
-//! Multi-party attestation domain types.
+//! Completion-attestation domain types (post-VC-first rebuild).
 //!
-//! For high-stakes skills (governance-gated), evidence records require
-//! assessor co-signatures before contributing to skill proof aggregation.
-//! Assessors are DAO-elected members with role = 'assessor'.
+//! Legacy evidence cosigning has been retired along with the
+//! `evidence_records` + `evidence_attestations` tables. The new model
+//! is simpler and VC-first:
+//!
+//! 1. A DAO declares **attestation requirements** on a specific
+//!    *course* (rather than a skill/level pair): "before auto-issuing
+//!    a VC for this course, require at least N assessor signatures on
+//!    the learner's completion-witness tx."
+//! 2. Assessors produce a **completion attestation** row: an Ed25519
+//!    signature of the witness tx hash + their verification key.
+//! 3. The auto-issuance pipeline checks the assessor count for a
+//!    given witness tx before emitting a VC. If short, the observation
+//!    stays pending and the UI nudges assessors.
+//!
+//! The implementation lives in `commands::attestation`; this module
+//! defines serializable shapes for the IPC surface.
 
 use serde::{Deserialize, Serialize};
 
-/// Attestation requirement for a skill at a specific proficiency level.
+/// A DAO-set attestation requirement keyed on a course id. When a
+/// requirement is present, the observer will not auto-issue a VC for
+/// that course until the required number of attestations have been
+/// recorded against the learner's witness tx hash.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AttestationRequirement {
-    pub skill_id: String,
-    pub proficiency_level: String,
+pub struct CompletionAttestationRequirement {
+    pub course_id: String,
     pub required_attestors: i64,
     pub dao_id: String,
     pub set_by_proposal: Option<String>,
@@ -18,73 +33,48 @@ pub struct AttestationRequirement {
     pub updated_at: String,
 }
 
-/// An assessor's attestation on an evidence record.
+/// A single attestor's signature over a completion-witness tx hash.
+/// Stored once per (witness_tx_hash, attestor_did); duplicates are
+/// ignored. Signatures are over the raw bytes of `witness_tx_hash`
+/// hex-decoded to 32 bytes.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EvidenceAttestation {
+pub struct CompletionAttestation {
     pub id: String,
-    pub evidence_id: String,
-    pub attestor_address: String,
-    pub attestor_role: String,
-    pub attestation_type: String,
-    pub integrity_score: Option<f64>,
-    pub session_cid: Option<String>,
+    pub witness_tx_hash: String,
+    pub attestor_did: String,
+    pub attestor_pubkey: String,
     pub signature: String,
+    pub note: Option<String>,
     pub created_at: String,
 }
 
-/// Attestor role.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AttestorRole {
-    Assessor,
-    Proctor,
+/// Summary view for the UI — how many attestations does a given
+/// witness tx hold, and is it gated?
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompletionAttestationStatus {
+    pub witness_tx_hash: String,
+    pub course_id: Option<String>,
+    pub required_attestors: i64,
+    pub current_attestors: i64,
+    pub is_satisfied: bool,
+    pub attestations: Vec<CompletionAttestation>,
 }
 
-impl AttestorRole {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            AttestorRole::Assessor => "assessor",
-            AttestorRole::Proctor => "proctor",
-        }
-    }
-
-    #[allow(clippy::should_implement_trait)]
-    pub fn from_str(s: &str) -> Option<Self> {
-        match s {
-            "assessor" => Some(Self::Assessor),
-            "proctor" => Some(Self::Proctor),
-            _ => None,
-        }
-    }
+/// IPC: set an attestation requirement on a course.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetCompletionRequirementParams {
+    pub course_id: String,
+    pub required_attestors: i64,
+    pub dao_id: String,
+    pub set_by_proposal: Option<String>,
 }
 
-/// Attestation type.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AttestationType {
-    CoSign,
-    ProctorVerify,
-    SkillVerify,
-}
-
-impl AttestationType {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            AttestationType::CoSign => "co_sign",
-            AttestationType::ProctorVerify => "proctor_verify",
-            AttestationType::SkillVerify => "skill_verify",
-        }
-    }
-
-    #[allow(clippy::should_implement_trait)]
-    pub fn from_str(s: &str) -> Option<Self> {
-        match s {
-            "co_sign" => Some(Self::CoSign),
-            "proctor_verify" => Some(Self::ProctorVerify),
-            "skill_verify" => Some(Self::SkillVerify),
-            _ => None,
-        }
-    }
+/// IPC: submit an attestation on a witness tx. The caller's signing
+/// key is used to sign the 32-byte tx hash.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SubmitCompletionAttestationParams {
+    pub witness_tx_hash: String,
+    pub note: Option<String>,
 }
 
 #[cfg(test)]
@@ -92,123 +82,42 @@ mod tests {
     use super::*;
 
     #[test]
-    fn attestor_role_roundtrip() {
-        for (variant, expected) in [
-            (AttestorRole::Assessor, "assessor"),
-            (AttestorRole::Proctor, "proctor"),
-        ] {
-            assert_eq!(variant.as_str(), expected);
-            let parsed = AttestorRole::from_str(expected).unwrap();
-            assert_eq!(variant, parsed);
-        }
+    fn requirement_round_trip() {
+        let req = CompletionAttestationRequirement {
+            course_id: "course_abc".into(),
+            required_attestors: 2,
+            dao_id: "dao_cs".into(),
+            set_by_proposal: Some("prop_1".into()),
+            created_at: "2026-04-24T00:00:00Z".into(),
+            updated_at: "2026-04-24T00:00:00Z".into(),
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        let back: CompletionAttestationRequirement = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.course_id, "course_abc");
+        assert_eq!(back.required_attestors, 2);
     }
 
     #[test]
-    fn attestor_role_from_str_invalid() {
-        assert!(AttestorRole::from_str("").is_none());
-        assert!(AttestorRole::from_str("Assessor").is_none());
-        assert!(AttestorRole::from_str("verifier").is_none());
-    }
-
-    #[test]
-    fn attestation_type_roundtrip() {
-        for (variant, expected) in [
-            (AttestationType::CoSign, "co_sign"),
-            (AttestationType::ProctorVerify, "proctor_verify"),
-            (AttestationType::SkillVerify, "skill_verify"),
-        ] {
-            assert_eq!(variant.as_str(), expected);
-            let parsed = AttestationType::from_str(expected).unwrap();
-            assert_eq!(variant, parsed);
-        }
-    }
-
-    #[test]
-    fn attestation_type_from_str_invalid() {
-        assert!(AttestationType::from_str("").is_none());
-        assert!(AttestationType::from_str("cosign").is_none());
-        assert!(AttestationType::from_str("CoSign").is_none());
-    }
-
-    #[test]
-    fn attestor_role_serde_roundtrip() {
-        for variant in [AttestorRole::Assessor, AttestorRole::Proctor] {
-            let json = serde_json::to_string(&variant).unwrap();
-            let parsed: AttestorRole = serde_json::from_str(&json).unwrap();
-            assert_eq!(variant, parsed);
-        }
-    }
-
-    #[test]
-    fn attestation_type_serde_roundtrip() {
-        for variant in [
-            AttestationType::CoSign,
-            AttestationType::ProctorVerify,
-            AttestationType::SkillVerify,
-        ] {
-            let json = serde_json::to_string(&variant).unwrap();
-            let parsed: AttestationType = serde_json::from_str(&json).unwrap();
-            assert_eq!(variant, parsed);
-        }
-    }
-
-    #[test]
-    fn attestation_status_serde_roundtrip() {
-        let status = AttestationStatus {
-            evidence_id: "ev1".into(),
-            skill_id: "sk1".into(),
-            proficiency_level: "apply".into(),
-            required_attestors: 3,
+    fn status_round_trip() {
+        let s = CompletionAttestationStatus {
+            witness_tx_hash: "aa".repeat(32),
+            course_id: Some("course_abc".into()),
+            required_attestors: 2,
             current_attestors: 1,
-            is_fully_attested: false,
-            attestations: vec![EvidenceAttestation {
-                id: "att1".into(),
-                evidence_id: "ev1".into(),
-                attestor_address: "stake_test1u123".into(),
-                attestor_role: "assessor".into(),
-                attestation_type: "co_sign".into(),
-                integrity_score: Some(0.95),
-                session_cid: None,
-                signature: "sig".into(),
-                created_at: "2025-01-01".into(),
+            is_satisfied: false,
+            attestations: vec![CompletionAttestation {
+                id: "att_1".into(),
+                witness_tx_hash: "aa".repeat(32),
+                attestor_did: "did:key:z".into(),
+                attestor_pubkey: "11".repeat(32),
+                signature: "22".repeat(64),
+                note: None,
+                created_at: "2026-04-24T00:00:00Z".into(),
             }],
         };
-        let json = serde_json::to_string(&status).unwrap();
-        let parsed: AttestationStatus = serde_json::from_str(&json).unwrap();
-        assert_eq!(parsed.required_attestors, 3);
-        assert_eq!(parsed.current_attestors, 1);
-        assert!(!parsed.is_fully_attested);
-        assert_eq!(parsed.attestations.len(), 1);
+        let json = serde_json::to_string(&s).unwrap();
+        let back: CompletionAttestationStatus = serde_json::from_str(&json).unwrap();
+        assert!(!back.is_satisfied);
+        assert_eq!(back.attestations.len(), 1);
     }
-}
-
-/// Parameters for setting an attestation requirement.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SetRequirementParams {
-    pub skill_id: String,
-    pub proficiency_level: String,
-    pub required_attestors: i64,
-    pub dao_id: String,
-    pub set_by_proposal: Option<String>,
-}
-
-/// Parameters for submitting an attestation.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SubmitAttestationParams {
-    pub evidence_id: String,
-    pub attestation_type: Option<String>,
-    pub integrity_score: Option<f64>,
-    pub session_cid: Option<String>,
-}
-
-/// Attestation status for an evidence record.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AttestationStatus {
-    pub evidence_id: String,
-    pub skill_id: String,
-    pub proficiency_level: String,
-    pub required_attestors: i64,
-    pub current_attestors: i64,
-    pub is_fully_attested: bool,
-    pub attestations: Vec<EvidenceAttestation>,
 }

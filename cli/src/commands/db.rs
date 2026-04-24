@@ -276,19 +276,8 @@ fn run_seed(
              DELETE FROM sync_log;
              DELETE FROM devices;
 
-             -- Multi-party attestation requirements
-             DELETE FROM evidence_attestations;
-             DELETE FROM attestation_requirements;
-
-             -- Evidence challenges
-             DELETE FROM challenge_votes;
-             DELETE FROM evidence_challenges;
-
-             -- Evidence & proofs
-             DELETE FROM skill_proof_evidence;
-             DELETE FROM skill_proofs;
-             DELETE FROM evidence_records;
-             DELETE FROM skill_assessments;
+             -- (Legacy attestation / challenge / evidence-record /
+             --  skill-proof tables were dropped by migration 040.)
 
              -- Opinions (Field Commentary)
              DELETE FROM opinions;

@@ -418,6 +418,7 @@ mod tests {
             },
             credential_status: None,
             terms_of_use: None,
+            witness: None,
             proof: crate::domain::vc::Proof {
                 type_: "Ed25519Signature2020".into(),
                 created: NOW.into(),

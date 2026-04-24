@@ -2,6 +2,13 @@
 
 > Open skill graph, evidence-based credentials, and reputation system.
 
+> **⚠️ Post-VC-first cutover (migration 040, 2026-04-24):** Every
+> reference to `skill_proofs`, `evidence_records`, or
+> `skill_assessments` in this doc describes the retired pipeline.
+> Credentials are now W3C VCs auto-earned via a Cardano completion
+> validator. Reputation computation will repoint at credentials
+> (math unchanged). See [`vc-migration.md`](./vc-migration.md).
+
 **Status:** Draft
 **Audience:** Platform builders, education providers, governments, recruitment services, LLM-based tooling
 

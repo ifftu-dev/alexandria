@@ -483,6 +483,64 @@ pub fn run() {
                             _ => {}
                         }
 
+                        // Completion-witness observer + auto-issuance pipeline.
+                        // Gated on ALEXANDRIA_COMPLETION_POLICY_ID + the vault
+                        // being unlocked (wallet present). Silent no-op otherwise.
+                        if let (Some(bf_client), Some(w)) = (bf.as_ref(), wallet.as_ref()) {
+                            if let Ok(policy_id_raw) =
+                                std::env::var("ALEXANDRIA_COMPLETION_POLICY_ID")
+                            {
+                                let policy_id = policy_id_raw.trim().to_string();
+                                if !policy_id.is_empty() {
+                                    // Observer: takes the shared DB handle
+                                    // so locks stay short across awaits.
+                                    match cardano::completion::tick(
+                                        &db_for_queue,
+                                        bf_client,
+                                        &policy_id,
+                                    )
+                                    .await
+                                    {
+                                        Ok(n) if n > 0 => log::info!(
+                                            "completion observer: ingested {n} new mint(s)"
+                                        ),
+                                        Err(e) => log::debug!("completion observer: {e}"),
+                                        _ => {}
+                                    }
+
+                                    // Auto-issuance over the ingested rows.
+                                    let issuance = {
+                                        let guard = db_for_queue.lock();
+                                        match guard.as_deref() {
+                                            Ok(Some(db)) => Some(
+                                                commands::auto_issuance::tick(
+                                                    db.conn(),
+                                                    &w.signing_key,
+                                                ),
+                                            ),
+                                            _ => None,
+                                        }
+                                    };
+                                    match issuance {
+                                        Some(Ok(report)) if report.issued > 0 => log::info!(
+                                            "auto-issuance: issued {} VC(s), {} waiting on attestation",
+                                            report.issued,
+                                            report.waiting_on_attestations,
+                                        ),
+                                        Some(Ok(report)) if !report.errors.is_empty() => {
+                                            log::warn!(
+                                                "auto-issuance: {} error(s): {:?}",
+                                                report.errors.len(),
+                                                report.errors
+                                            );
+                                        }
+                                        Some(Err(e)) => log::debug!("auto-issuance: {e}"),
+                                        _ => {}
+                                    }
+                                }
+                            }
+                        }
+
                         tokio::time::sleep(std::time::Duration::from_secs(60)).await;
                     }
                 });
@@ -660,6 +718,7 @@ pub fn run() {
             commands::identity::lock_vault,
             commands::identity::reset_local_wallet,
             commands::identity::get_wallet_info,
+            commands::identity::get_local_did,
             commands::identity::get_profile,
             commands::identity::update_profile,
             commands::identity::publish_profile,
@@ -702,13 +761,9 @@ pub fn run() {
             commands::opinions::list_my_opinions,
             commands::opinions::list_eligible_subject_fields_for_posting,
             commands::opinions::withdraw_own_opinion,
-            // Evidence
-            commands::evidence::list_skill_proofs,
-            commands::evidence::list_evidence,
+            // Reputation read surface (skill_proofs/evidence listings
+            // retired in migration 040; use `list_credentials` instead).
             commands::evidence::list_reputation,
-            // Cardano (all platforms — uses portable keystore)
-            commands::cardano::mint_skill_proof_nft,
-            commands::cardano::register_course_onchain,
             // P2P (libp2p swarm)
             commands::p2p::p2p_start,
             commands::p2p::p2p_stop,
@@ -739,11 +794,9 @@ pub fn run() {
             commands::governance::resolve_proposal,
             commands::governance::get_onchain_queue_status,
             commands::governance::retry_onchain_submission,
-            // Reputation
-            commands::reputation::get_reputation,
-            commands::reputation::compute_reputation,
-            commands::reputation::get_instructor_ranking,
-            commands::reputation::verify_reputation,
+            // Reputation (VC-sourced engine — see commands::reputation).
+            commands::reputation::list_reputation_rows,
+            commands::reputation::recompute_reputation_for_subject,
             // Snapshots
             commands::snapshot::snapshot_reputation,
             commands::snapshot::list_snapshots,
@@ -774,23 +827,22 @@ pub fn run() {
             commands::sync::sync_now,
             commands::sync::sync_set_auto,
             commands::sync::sync_history,
-            // Challenges (all platforms — pure DB operations)
-            commands::challenge::submit_evidence_challenge,
-            commands::challenge::list_challenges,
-            commands::challenge::get_challenge,
-            commands::challenge::vote_on_challenge,
-            commands::challenge::resolve_challenge,
-            commands::challenge::list_my_challenges,
-            commands::challenge::list_challenges_against_me,
-            // Attestation
-            commands::attestation::get_attestation_requirement,
-            commands::attestation::list_attestation_requirements,
-            commands::attestation::set_attestation_requirement,
-            commands::attestation::remove_attestation_requirement,
-            commands::attestation::submit_attestation,
-            commands::attestation::list_attestations_for_evidence,
-            commands::attestation::get_attestation_status,
-            commands::attestation::list_unattested_evidence,
+            // Completion attestation (VC-first gate).
+            commands::attestation::set_completion_attestation_requirement,
+            commands::attestation::remove_completion_attestation_requirement,
+            commands::attestation::list_completion_attestation_requirements,
+            commands::attestation::submit_completion_attestation,
+            commands::attestation::get_completion_attestation_status,
+            // Credential challenges (VC-first rebuild).
+            commands::challenge::submit_credential_challenge,
+            commands::challenge::vote_on_credential_challenge,
+            commands::challenge::resolve_credential_challenge,
+            commands::challenge::list_credential_challenges,
+            commands::challenge::get_credential_challenge,
+            commands::challenge::expire_overdue_credential_challenges,
+            // Completion-witness flow (Merkle root + tx submission).
+            commands::completion::preview_completion_root,
+            commands::completion::submit_completion_witness,
             // Integrity
             commands::integrity::integrity_start_session,
             commands::integrity::integrity_submit_snapshot,

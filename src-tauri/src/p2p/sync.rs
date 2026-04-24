@@ -433,10 +433,6 @@ pub fn merge_lww_rows(
                 }
             }
             "delete" => {
-                // For append-only tables, ignore deletes
-                if table_name == "evidence_records" || table_name == "skill_proof_evidence" {
-                    continue;
-                }
                 let deleted = conn
                     .execute(
                         &format!(
@@ -461,8 +457,10 @@ pub fn merge_lww_rows(
 
 /// Merge incoming rows using append-only union strategy.
 ///
-/// For evidence_records and skill_proof_evidence: insert if not
-/// exists (deduplicate by primary key), never update or delete.
+/// Insert if not exists (deduplicate by primary key); never update
+/// or delete. No append-only tables ship in SYNCABLE_TABLES at the
+/// moment — this function stays as a sync primitive for a future
+/// append-only credentials-sync path.
 pub fn merge_append_only(
     conn: &Connection,
     table_name: &str,
@@ -661,8 +659,6 @@ fn sanitize_table_name(name: &str) -> Result<&str, String> {
         "enrollments",
         "element_progress",
         "course_notes",
-        "evidence_records",
-        "skill_proof_evidence",
         "course_enrollments",
     ];
 
@@ -1059,83 +1055,18 @@ mod tests {
         assert_eq!(status, "completed"); // Unchanged
     }
 
-    #[test]
-    fn append_only_deduplicates() {
-        let db = test_db();
-
-        // Set up required foreign keys
-        db.conn()
-            .execute(
-                "INSERT INTO subject_fields (id, name) VALUES ('sf1', 'CS')",
-                [],
-            )
-            .unwrap();
-        db.conn()
-            .execute(
-                "INSERT INTO subjects (id, name, subject_field_id) VALUES ('sub1', 'Algo', 'sf1')",
-                [],
-            )
-            .unwrap();
-        db.conn()
-            .execute(
-                "INSERT INTO skills (id, name, subject_id) VALUES ('sk1', 'Sort', 'sub1')",
-                [],
-            )
-            .unwrap();
-        db.conn()
-            .execute(
-                "INSERT INTO courses (id, title, author_address) VALUES ('c1', 'Test', 'addr1')",
-                [],
-            )
-            .unwrap();
-        db.conn()
-            .execute(
-                "INSERT INTO skill_assessments (id, skill_id, assessment_type, proficiency_level, difficulty, weight) \
-                 VALUES ('sa1', 'sk1', 'quiz', 'apply', 0.5, 1.0)",
-                [],
-            )
-            .unwrap();
-
-        // Insert a row first
-        db.conn()
-            .execute(
-                "INSERT INTO evidence_records \
-                 (id, skill_id, skill_assessment_id, proficiency_level, course_id, score, difficulty, trust_factor) \
-                 VALUES ('ev_1', 'sk1', 'sa1', 'apply', 'c1', 0.80, 0.50, 1.0)",
-                [],
-            )
-            .unwrap();
-
-        // Try to merge the same row — should be ignored (dedup)
-        let rows = vec![SyncRow {
-            row_id: "ev_1".into(),
-            operation: "insert".into(),
-            data: Some(serde_json::json!({
-                "skill_id": "sk1",
-                "score": 0.90
-            })),
-            updated_at: "2025-06-01T00:00:00Z".into(),
-        }];
-
-        let merged = merge_append_only(db.conn(), "evidence_records", &rows).unwrap();
-        assert_eq!(merged, 0); // Already exists
-
-        // Original score unchanged
-        let score: f64 = db
-            .conn()
-            .query_row(
-                "SELECT score FROM evidence_records WHERE id = 'ev_1'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert!((score - 0.80).abs() < 0.001);
-    }
+    // Post-migration 040: the `append_only_deduplicates` test exercised
+    // merge_append_only against `evidence_records`, which is dropped.
+    // With no append-only table remaining in SYNCABLE_TABLES, coverage
+    // for `merge_append_only` returns when a credentials-sync append
+    // path is wired up.
 
     #[test]
     fn sanitize_rejects_invalid_tables() {
         assert!(sanitize_table_name("enrollments").is_ok());
-        assert!(sanitize_table_name("evidence_records").is_ok());
+        assert!(sanitize_table_name("element_progress").is_ok());
+        assert!(sanitize_table_name("course_notes").is_ok());
+        assert!(sanitize_table_name("evidence_records").is_err());
         assert!(sanitize_table_name("users; DROP TABLE").is_err());
         assert!(sanitize_table_name("local_identity").is_err());
     }

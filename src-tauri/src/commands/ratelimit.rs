@@ -63,16 +63,6 @@ impl IpcRateLimiter {
             Bucket::new(3, Duration::from_secs(100)), // 1 refill per 100s → 3 per 5min
         );
 
-        // Cardano transactions: 5 per hour
-        buckets.insert(
-            "mint_skill_proof_nft".to_string(),
-            Bucket::new(5, Duration::from_secs(720)), // 1 refill per 12min → 5 per hour
-        );
-        buckets.insert(
-            "register_course_onchain".to_string(),
-            Bucket::new(5, Duration::from_secs(720)),
-        );
-
         // Plugin install: a slow, security-sensitive operation (manifest
         // parse, signature verify, disk copy). 10 per 10 min is generous
         // for interactive use and low enough that a script-driven loop

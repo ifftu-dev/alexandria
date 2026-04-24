@@ -100,20 +100,29 @@ pub fn handle_opinion_message(
         ));
     }
 
-    // Credential check. We want at least one referenced proof to:
-    //   (a) exist locally
-    //   (b) be at a qualifying level (apply+)
+    // Credential check (post-migration 040). We want at least one
+    // referenced credential id to:
+    //   (a) exist locally in the `credentials` table
+    //   (b) be a non-revoked skill-kind VC with
+    //       `proficiency level >= apply` (index 2)
     //   (c) cover a skill under the target subject_field
-    // If (a) fails for ALL proofs, queue the opinion — maybe the
-    // referenced proofs will arrive later. If (a) passes for some
-    // but (b)+(c) fail for all, reject outright.
+    //
+    // The proficiency level is read at query time from the SkillClaim
+    // inside `signed_vc_json` via `json_extract`. The 'apply+' gate
+    // mirrors the pre-migration semantics (apply | analyze | evaluate
+    // | create were the qualifying levels).
+    //
+    // If (a) fails for ALL ids, queue the opinion — the credentials
+    // may arrive later via VC gossip. If (a) passes for some but
+    // (b)+(c) fail for all, reject outright.
+    const APPLY_LEVEL_IDX: i64 = 2;
     let mut any_known = false;
     let mut any_qualifying = false;
     for proof_id in &payload.credential_proof_ids {
         let known: i64 = db
             .conn()
             .query_row(
-                "SELECT COUNT(*) FROM skill_proofs WHERE id = ?1",
+                "SELECT COUNT(*) FROM credentials WHERE id = ?1",
                 params![proof_id],
                 |row| row.get(0),
             )
@@ -127,14 +136,17 @@ pub fn handle_opinion_message(
             .query_row(
                 "SELECT CASE WHEN EXISTS ( \
                    SELECT 1 \
-                   FROM skill_proofs p \
-                   JOIN skills s ON s.id = p.skill_id \
+                   FROM credentials c \
+                   JOIN skills s ON s.id = c.skill_id \
                    JOIN subjects sub ON sub.id = s.subject_id \
-                   WHERE p.id = ?1 \
+                   WHERE c.id = ?1 \
+                     AND c.claim_kind = 'skill' \
+                     AND c.revoked = 0 \
                      AND sub.subject_field_id = ?2 \
-                     AND p.proficiency_level IN ('apply','analyze','evaluate','create') \
+                     AND CAST(json_extract(c.signed_vc_json, \
+                         '$.credentialSubject.claim.level') AS INTEGER) >= ?3 \
                  ) THEN 1 ELSE 0 END",
-                params![proof_id, payload.subject_field_id],
+                params![proof_id, payload.subject_field_id, APPLY_LEVEL_IDX],
                 |row| row.get(0),
             )
             .map_err(|e| e.to_string())?;
@@ -220,20 +232,21 @@ pub fn handle_opinion_message(
             .map_err(|e| format!("queue pending opinion: {e}"))?;
         Ok(OpinionIngest::Pending)
     } else {
-        // We know the referenced proofs but none of them qualify the
-        // author to post in this subject field. Hard-reject — invalid
-        // under our current view. Reputation scoring will penalize the
-        // sender per the opinions topic `invalid_message_deliveries_weight`.
+        // We know the referenced credentials but none of them qualify
+        // the author to post in this subject field. Hard-reject —
+        // invalid under our current view. Reputation scoring will
+        // penalize the sender per the opinions topic
+        // `invalid_message_deliveries_weight`.
         Err(format!(
-            "opinion references known skill_proofs but none qualify under subject_field '{}'",
+            "opinion references known credentials but none qualify under subject_field '{}'",
             payload.subject_field_id
         ))
     }
 }
 
-/// Promote any queued opinions whose referenced credential proofs
-/// have now landed in `skill_proofs`. Intended to be called after
-/// inbound `evidence` or `skill_proof` updates.
+/// Promote any queued opinions whose referenced credentials have now
+/// landed in the `credentials` table. Intended to be called after
+/// inbound VC gossip updates.
 pub fn promote_pending_opinions(db: &Database) -> Result<u32, String> {
     let mut stmt = db
         .conn()
@@ -267,11 +280,15 @@ pub fn promote_pending_opinions(db: &Database) -> Result<u32, String> {
                 .conn()
                 .query_row(
                     "SELECT CASE WHEN EXISTS ( \
-                       SELECT 1 FROM skill_proofs p \
-                       JOIN skills s ON s.id = p.skill_id \
+                       SELECT 1 FROM credentials c \
+                       JOIN skills s ON s.id = c.skill_id \
                        JOIN subjects sub ON sub.id = s.subject_id \
-                       WHERE p.id = ?1 AND sub.subject_field_id = ?2 \
-                         AND p.proficiency_level IN ('apply','analyze','evaluate','create') \
+                       WHERE c.id = ?1 \
+                         AND c.claim_kind = 'skill' \
+                         AND c.revoked = 0 \
+                         AND sub.subject_field_id = ?2 \
+                         AND CAST(json_extract(c.signed_vc_json, \
+                             '$.credentialSubject.claim.level') AS INTEGER) >= 2 \
                      ) THEN 1 ELSE 0 END",
                     params![pid, subject_field_id],
                     |row| row.get(0),
@@ -378,12 +395,41 @@ mod tests {
             .unwrap();
     }
 
-    fn seed_qualifying_proof(db: &Database, proof_id: &str) {
+    fn seed_qualifying_proof(db: &Database, cred_id: &str) {
+        seed_credential(db, cred_id, 2 /* apply */);
+    }
+
+    fn seed_credential(db: &Database, cred_id: &str, level: u8) {
+        // Seeds a skill-claim VC with a SkillClaim.level the opinion
+        // gate can read via `json_extract`. The signed_vc_json payload
+        // mirrors the actual serialised shape that `sign_credential`
+        // produces so the level check exercises the real json path.
+        let vc_value = serde_json::json!({
+            "@context": ["https://www.w3.org/2018/credentials/v1"],
+            "credentialSubject": {
+                "id": "did:key:zTestAuthor",
+                "claim": {
+                    "kind": "skill",
+                    "skill_id": "skill_graphs",
+                    "level": level,
+                    "score": 0.9,
+                    "evidence_refs": [],
+                }
+            }
+        });
+        let vc_json = serde_json::to_string(&vc_value).unwrap();
         db.conn()
             .execute(
-                "INSERT INTO skill_proofs (id, skill_id, proficiency_level, confidence) \
-                 VALUES (?1, 'skill_graphs', 'apply', 0.9)",
-                rusqlite::params![proof_id],
+                "INSERT INTO credentials ( \
+                   id, issuer_did, subject_did, credential_type, claim_kind, \
+                   skill_id, issuance_date, signed_vc_json, integrity_hash, \
+                   revoked \
+                 ) VALUES ( \
+                   ?1, 'did:key:zTestIssuer', 'did:key:zTestAuthor', \
+                   'SelfAssertion', 'skill', 'skill_graphs', \
+                   '2026-04-24T00:00:00Z', ?2, 'hash', 0 \
+                 )",
+                rusqlite::params![cred_id, vc_json],
             )
             .unwrap();
     }
@@ -469,6 +515,22 @@ mod tests {
         let msg = sign_message(&key, "/alexandria/opinions/1.0", &bytes);
         let err = handle_opinion_message(&db, &msg).unwrap_err();
         assert!(err.contains("unknown subject_field_id"));
+    }
+
+    #[test]
+    fn rejects_when_credential_is_below_apply_level() {
+        // A known credential at `understand` (level 1) should be
+        // rejected outright — it's not queued, because the id is
+        // already present locally and failing the proficiency gate.
+        let db = test_db();
+        seed_taxonomy(&db);
+        seed_credential(&db, "proof_below_apply", 1 /* understand */);
+        let key = test_key();
+        let payload = build_payload(vec!["proof_below_apply".into()], "cid_below");
+        let bytes = serde_json::to_vec(&payload).unwrap();
+        let msg = sign_message(&key, "/alexandria/opinions/1.0", &bytes);
+        let err = handle_opinion_message(&db, &msg).unwrap_err();
+        assert!(err.contains("none qualify"), "unexpected error: {err}");
     }
 
     #[test]

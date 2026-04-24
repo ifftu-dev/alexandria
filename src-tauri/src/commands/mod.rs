@@ -1,10 +1,11 @@
 pub mod aggregation;
 pub mod attestation;
-pub mod cardano;
+pub mod auto_issuance;
 pub mod catalog;
 pub mod challenge;
 pub mod chapters;
 pub mod classroom;
+pub mod completion;
 pub mod courses;
 pub mod credentials;
 pub mod elements;

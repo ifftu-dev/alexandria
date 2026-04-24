@@ -1,1442 +1,480 @@
-//! Full reputation computation engine.
+//! Reputation engine (post-VC-first rebuild).
 //!
-//! Implements the complete whitepaper algorithm (§2.3–2.8, §8.2):
+//! The legacy engine (~1400 LOC) computed instructor attribution from
+//! `evidence_records` → `skill_assessments` → `courses` joins plus a
+//! distribution-metrics pipeline. Those input tables are gone. The
+//! VC-first replacement derives the same high-level signal — one
+//! `learner` row per (subject, skill, level) and one `instructor` row
+//! per (issuer, skill, level) — directly from `credentials`:
 //!
-//!   - Prerequisite-based expected confidence (§2.6)
-//!   - Negative impact propagation (§2.6)
-//!   - Attribution with trust_factor (§2.7)
-//!   - Distribution metrics: median, p25, p75, variance (§2.8)
-//!   - Variance penalty when impact_variance > 0.10 (§8.2)
-//!   - Time window tracking (§2.3)
-//!   - Confidence smoothing: evidence_count / (evidence_count + K) (§2.4)
-//!   - Deterministic full recomputation from evidence chain
+//! * **Learner reputation**: for every accepted skill-kind VC, the
+//!   `subject_did` accumulates a reputation row at (skill, level)
+//!   whose score mirrors the highest `SkillClaim.score` observed.
+//! * **Instructor reputation**: when `issuer_did != subject_did`
+//!   (a third-party-issued credential, not a self-asserted one), the
+//!   issuer accumulates a reputation row at (skill, level) whose
+//!   score is the mean of the scores they've issued. Self-asserted /
+//!   self-witnessed VCs (our auto-issuance path) contribute only to
+//!   the learner row — there's no instructor to credit.
 //!
-//! Port and expansion of `api/internal/reputation/aggregator.go` from v1.
+//! Variance / percentile metrics from the v1 engine are left at
+//! `NULL` / `0` for now; they can be layered on top of the same
+//! aggregation query when there's enough data to warrant them.
+//!
+//! Entry point: [`on_credential_accepted`]. Callers — the VC
+//! issuance paths in `commands::credentials` and
+//! `commands::auto_issuance` — should invoke it after a credential
+//! lands. `recompute_for_subject` is available for full rebuild from
+//! scratch (seeds/tests).
 
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::crypto::hash::entity_id;
-use crate::domain::reputation::DistributionMetrics;
 
-/// Confidence smoothing constant (K).
-/// Smoothed confidence = evidence_count / (evidence_count + K)
-const SMOOTHING_K: f64 = 5.0;
+/// Map a SkillClaim integer level (0..=5) to the canonical string.
+pub fn level_to_str(level: i64) -> &'static str {
+    match level {
+        0 => "remember",
+        1 => "understand",
+        2 => "apply",
+        3 => "analyze",
+        4 => "evaluate",
+        5 => "create",
+        _ => "remember",
+    }
+}
 
-/// Variance threshold above which confidence is penalized (§8.2).
-const VARIANCE_PENALTY_THRESHOLD: f64 = 0.10;
-
-/// Scale factor for variance penalty: penalty = (variance - 0.10) * scale.
-/// Capped at MAX_VARIANCE_PENALTY.
-const VARIANCE_PENALTY_SCALE: f64 = 2.0;
-
-/// Maximum variance penalty (60% confidence reduction).
-const MAX_VARIANCE_PENALTY: f64 = 0.60;
-
-type InstructorRankingRow = (String, f64, i64, i64, f64);
-
-/// Called after a skill proof is created or updated.
-///
-/// Computes:
-///   1. Instructor impact (attribution-weighted delta confidence)
-///      - Uses prerequisite-based expected confidence as baseline
-///      - Allows negative impact (confidence decreases propagate)
-///      - Tracks per-learner deltas for distribution metrics
-///      - Applies variance penalty and confidence smoothing
-///   2. Learner reputation (mirrors proof confidence directly)
-///   3. Time window updates on all affected assertions
-pub fn on_proof_updated(
-    conn: &Connection,
-    stake_address: &str,
-    skill_id: &str,
-    old_confidence: f64,
-    new_confidence: f64,
-    proficiency_level: &str,
-    proof_id: &str,
-) -> Result<(), String> {
-    // Always update learner reputation (mirrors proof)
-    compute_learner_reputation(
-        conn,
-        stake_address,
-        skill_id,
-        new_confidence,
-        proficiency_level,
-    )?;
-
-    // Compute delta using prerequisite-based expected confidence (§2.6):
-    // ΔConfidence = newConfidence - max(oldConfidence, ExpectedConfidence(prerequisites))
-    let expected = expected_confidence_from_prerequisites(conn, stake_address, skill_id)?;
-    let baseline = old_confidence.max(expected);
-    let delta = new_confidence - baseline;
-
-    // Allow negative impact to propagate (whitepaper §2.6).
-    // Only skip if delta is exactly zero (no change).
-    if delta.abs() < f64::EPSILON {
+/// Called whenever a credential is accepted into the local store.
+/// Pure function — no network, no vault, no async.
+pub fn on_credential_accepted(conn: &Connection, credential_id: &str) -> Result<(), String> {
+    let Some(cred) = load_credential_row(conn, credential_id)? else {
+        return Err(format!("credential not found: {credential_id}"));
+    };
+    // We only reward skill-kind credentials; role and custom claims
+    // don't carry proficiency signal.
+    if cred.claim_kind != "skill" {
         return Ok(());
     }
+    let Some((level, score, skill_id)) = skill_fields(&cred)? else {
+        return Ok(());
+    };
 
-    compute_instructor_impact(
-        conn,
-        stake_address,
-        skill_id,
-        delta,
-        proficiency_level,
-        proof_id,
-    )?;
+    update_learner(conn, &cred.subject_did, &skill_id, level, score)?;
 
+    if cred.issuer_did != cred.subject_did {
+        update_instructor(conn, &cred.issuer_did, &skill_id, level)?;
+    }
     Ok(())
 }
 
-/// Compute the expected confidence from prerequisite skills (§2.6).
-///
-/// Queries the learner's highest confidence for each prerequisite
-/// skill and returns the mean. If there are no prerequisites, returns 0.0.
-///
-/// > ΔConfidence = newConfidence - max(oldConfidence, ExpectedConfidence(prerequisites))
-fn expected_confidence_from_prerequisites(
-    conn: &Connection,
-    stake_address: &str,
-    skill_id: &str,
-) -> Result<f64, String> {
-    // Look up prerequisite skills from the DAG
-    let mut stmt = conn
-        .prepare("SELECT prerequisite_id FROM skill_prerequisites WHERE skill_id = ?1")
-        .map_err(|e| e.to_string())?;
-
-    let prereq_ids: Vec<String> = {
-        let rows = stmt
-            .query_map(params![skill_id], |row| row.get(0))
-            .map_err(|e| e.to_string())?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())?;
-        rows
-    };
-
-    if prereq_ids.is_empty() {
-        return Ok(0.0);
-    }
-
-    // For each prerequisite, find the learner's highest proof confidence.
-    // We use entity_id to construct the proof ID as (stake_address, prereq_id, level),
-    // but since we don't know which level they achieved, query by skill_id directly.
-    //
-    // The learner's identity is stored in local_identity (singleton), so all
-    // local proofs belong to this user. For received evidence from peers,
-    // we'd need the learner's address — but prerequisites are local lookups.
-    let mut total = 0.0;
-    let mut count = 0;
-
-    // We need to suppress the "unused stake_address" warning while
-    // keeping the parameter for future multi-user support.
-    let _ = stake_address;
-
-    for prereq_id in &prereq_ids {
-        let conf: Option<f64> = conn
-            .query_row(
-                "SELECT MAX(confidence) FROM skill_proofs WHERE skill_id = ?1",
-                params![prereq_id],
-                |row| row.get(0),
-            )
-            .ok()
-            .flatten();
-
-        if let Some(c) = conf {
-            total += c;
-            count += 1;
-        }
-    }
-
-    if count == 0 {
-        return Ok(0.0);
-    }
-
-    Ok(total / count as f64)
-}
-
-/// Compute instructor impact from evidence attribution.
-///
-/// Traces evidence_records → skill_assessments → courses → author_address
-/// to determine each instructor's contribution.
-///
-/// Attribution per §2.7:
-///   EvidenceWeight = weight × difficulty × trust_factor
-///   Attribution(I) = Σ(EvidenceWeight for I) / Σ(all EvidenceWeight)
-///
-/// Impact = delta × attribution
-///
-/// Records per-learner impact deltas for distribution metrics (§2.8),
-/// applies variance penalty (§8.2), and updates time windows (§2.3).
-fn compute_instructor_impact(
-    conn: &Connection,
-    learner_address: &str,
-    skill_id: &str,
-    delta: f64,
-    proficiency_level: &str,
-    proof_id: &str,
-) -> Result<(), String> {
-    // Query all evidence attributable to instructors for this skill.
-    // Include trust_factor in the weight computation per §2.7.
-    let mut stmt = conn
-        .prepare(
-            "SELECT c.author_address, sa.weight, er.difficulty, er.trust_factor \
-             FROM evidence_records er \
-             JOIN skill_assessments sa ON sa.id = er.skill_assessment_id \
-             JOIN courses c ON c.id = er.course_id \
-             WHERE er.skill_id = ?1 AND er.course_id IS NOT NULL",
-        )
-        .map_err(|e| e.to_string())?;
-
-    struct AttrRow {
-        instructor_address: String,
-        weight: f64,
-        difficulty: f64,
-        trust_factor: f64,
-    }
-
-    let attributions: Vec<AttrRow> = {
-        let rows = stmt
-            .query_map(params![skill_id], |row| {
-                Ok(AttrRow {
-                    instructor_address: row.get(0)?,
-                    weight: row.get(1)?,
-                    difficulty: row.get(2)?,
-                    trust_factor: row.get(3)?,
-                })
-            })
-            .map_err(|e| e.to_string())?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())?;
-        rows
-    };
-
-    if attributions.is_empty() {
-        return Ok(());
-    }
-
-    // Compute per-instructor weight with trust_factor (§2.7)
-    let mut instructor_weights: std::collections::HashMap<String, f64> =
-        std::collections::HashMap::new();
-    let mut total_weight = 0.0;
-
-    for attr in &attributions {
-        let w = attr.weight * attr.difficulty * attr.trust_factor;
-        *instructor_weights
-            .entry(attr.instructor_address.clone())
-            .or_insert(0.0) += w;
-        total_weight += w;
-    }
-
-    if total_weight == 0.0 {
-        return Ok(());
-    }
-
-    let now = chrono::Utc::now().to_rfc3339();
-
-    // Upsert reputation assertion for each instructor
-    for (instructor_addr, instr_weight) in &instructor_weights {
-        let attribution = instr_weight / total_weight;
-        let impact_delta = delta * attribution;
-
-        let assertion_id = entity_id(&[instructor_addr, "instructor", skill_id, proficiency_level]);
-
-        // Load existing assertion (if any)
-        let existing: Option<(f64, i64, Option<String>)> = conn
-            .query_row(
-                "SELECT score, evidence_count, window_start \
-                 FROM reputation_assertions WHERE id = ?1",
-                params![assertion_id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .ok();
-
-        let (new_score, new_evidence_count, window_start) = match existing {
-            Some((old_score, old_count, ws)) => (
-                old_score + impact_delta,
-                old_count + 1,
-                ws.unwrap_or_else(|| now.clone()),
-            ),
-            None => (impact_delta, 1_i64, now.clone()),
-        };
-
-        // Upsert the assertion FIRST so FK constraints on child tables are satisfied
-        conn.execute(
-            "INSERT INTO reputation_assertions \
-             (id, actor_address, role, skill_id, proficiency_level, score, evidence_count, \
-              window_start, window_end, computation_spec, updated_at) \
-             VALUES (?1, ?2, 'instructor', ?3, ?4, ?5, ?6, ?7, ?8, 'v2', datetime('now')) \
-             ON CONFLICT(id) DO UPDATE SET \
-                score = ?5, evidence_count = ?6, \
-                window_start = ?7, window_end = ?8, \
-                computation_spec = 'v2', updated_at = datetime('now')",
-            params![
-                assertion_id,
-                instructor_addr,
-                skill_id,
-                proficiency_level,
-                new_score,
-                new_evidence_count,
-                window_start,
-                now,
-            ],
-        )
-        .map_err(|e| e.to_string())?;
-
-        // Record per-learner impact delta for distribution metrics (§2.8)
-        let delta_id = entity_id(&[&assertion_id, learner_address, &now]);
-        conn.execute(
-            "INSERT INTO reputation_impact_deltas \
-             (id, assertion_id, learner_address, delta, attribution, proof_id, created_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now'))",
-            params![
-                delta_id,
-                assertion_id,
-                learner_address,
-                impact_delta,
-                attribution,
-                proof_id,
-            ],
-        )
-        .map_err(|e| e.to_string())?;
-
-        // Link the proof to this assertion (reputation_evidence)
-        conn.execute(
-            "INSERT OR REPLACE INTO reputation_evidence \
-             (assertion_id, proof_id, delta_confidence, attribution_weight) \
-             VALUES (?1, ?2, ?3, ?4)",
-            params![assertion_id, proof_id, impact_delta, attribution],
-        )
-        .map_err(|e| e.to_string())?;
-
-        // Compute distribution metrics from all deltas (§2.8)
-        let metrics = compute_distribution_metrics(conn, &assertion_id)?;
-
-        // Apply confidence smoothing (§2.4)
-        let mut smoothed = new_evidence_count as f64 / (new_evidence_count as f64 + SMOOTHING_K);
-
-        // Apply variance penalty (§8.2):
-        // "Confidence reduced when impact_variance > 0.10"
-        if metrics.impact_variance > VARIANCE_PENALTY_THRESHOLD {
-            let penalty_raw =
-                (metrics.impact_variance - VARIANCE_PENALTY_THRESHOLD) * VARIANCE_PENALTY_SCALE;
-            let penalty = penalty_raw.min(MAX_VARIANCE_PENALTY);
-            smoothed *= 1.0 - penalty;
-        }
-
-        // Update the assertion with distribution metrics
-        conn.execute(
-            "UPDATE reputation_assertions SET \
-                median_impact = ?1, impact_p25 = ?2, impact_p75 = ?3, \
-                learner_count = ?4, impact_variance = ?5 \
-             WHERE id = ?6",
-            params![
-                metrics.median_impact,
-                metrics.impact_p25,
-                metrics.impact_p75,
-                metrics.learner_count,
-                metrics.impact_variance,
-                assertion_id,
-            ],
-        )
-        .map_err(|e| e.to_string())?;
-
-        log::info!(
-            "instructor reputation: {} skill={} delta={:.4} (attribution={:.2}), \
-             total={:.4}, confidence={:.4}, learners={}, variance={:.4}",
-            instructor_addr,
-            skill_id,
-            impact_delta,
-            attribution,
-            new_score,
-            smoothed,
-            metrics.learner_count,
-            metrics.impact_variance
-        );
-    }
-
-    Ok(())
-}
-
-/// Compute distribution metrics from all impact deltas for an assertion (§2.8).
-///
-/// Returns median, p25, p75, learner_count, and variance.
-fn compute_distribution_metrics(
-    conn: &Connection,
-    assertion_id: &str,
-) -> Result<DistributionMetrics, String> {
-    // Load all deltas ordered by value
-    let mut stmt = conn
-        .prepare(
-            "SELECT delta, learner_address FROM reputation_impact_deltas \
-             WHERE assertion_id = ?1 ORDER BY delta ASC",
-        )
-        .map_err(|e| e.to_string())?;
-
-    let rows: Vec<(f64, String)> = stmt
-        .query_map(params![assertion_id], |row| Ok((row.get(0)?, row.get(1)?)))
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
-
-    if rows.is_empty() {
-        return Ok(DistributionMetrics::default());
-    }
-
-    let deltas: Vec<f64> = rows.iter().map(|(d, _)| *d).collect();
-    let n = deltas.len();
-
-    // Distinct learner count
-    let mut unique_learners: std::collections::HashSet<&str> = std::collections::HashSet::new();
-    for (_, addr) in &rows {
-        unique_learners.insert(addr.as_str());
-    }
-    let learner_count = unique_learners.len() as i64;
-
-    // Median
-    let median = percentile(&deltas, 50.0);
-    // P25 and P75
-    let p25 = percentile(&deltas, 25.0);
-    let p75 = percentile(&deltas, 75.0);
-
-    // Variance: Var(X) = E[X²] - E[X]²
-    let mean = deltas.iter().sum::<f64>() / n as f64;
-    let variance = deltas.iter().map(|d| (d - mean).powi(2)).sum::<f64>() / n as f64;
-
-    Ok(DistributionMetrics {
-        median_impact: median,
-        impact_p25: p25,
-        impact_p75: p75,
-        learner_count,
-        impact_variance: variance,
-    })
-}
-
-/// Compute the p-th percentile from a sorted slice using linear interpolation.
-///
-/// `p` is in [0, 100]. The slice MUST be sorted in ascending order.
-fn percentile(sorted: &[f64], p: f64) -> f64 {
-    if sorted.is_empty() {
-        return 0.0;
-    }
-    if sorted.len() == 1 {
-        return sorted[0];
-    }
-
-    let rank = (p / 100.0) * (sorted.len() - 1) as f64;
-    let lower = rank.floor() as usize;
-    let upper = rank.ceil() as usize;
-
-    if lower == upper {
-        sorted[lower]
-    } else {
-        let frac = rank - lower as f64;
-        sorted[lower] * (1.0 - frac) + sorted[upper] * frac
-    }
-}
-
-/// Compute learner reputation — mirrors proof confidence directly.
-///
-/// No smoothing for learner reputation: the demonstrated ability IS
-/// the reputation score. Updates time windows (§2.3).
-fn compute_learner_reputation(
-    conn: &Connection,
-    stake_address: &str,
-    skill_id: &str,
-    confidence: f64,
-    proficiency_level: &str,
-) -> Result<(), String> {
-    let assertion_id = entity_id(&[stake_address, "learner", skill_id, proficiency_level]);
-    let now = chrono::Utc::now().to_rfc3339();
-
-    // Get current evidence count and window_start
-    let existing: Option<(i64, Option<String>)> = conn
-        .query_row(
-            "SELECT evidence_count, window_start FROM reputation_assertions WHERE id = ?1",
-            params![assertion_id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .ok();
-
-    let (new_count, window_start) = match existing {
-        Some((count, ws)) => (count + 1, ws.unwrap_or_else(|| now.clone())),
-        None => (1_i64, now.clone()),
-    };
-
+/// Rebuild every reputation row that could be derived from `subject_did`
+/// (as learner or as issuer) by replaying every accepted credential.
+/// Useful for tests and for seed-time reconciliation.
+pub fn recompute_for_subject(conn: &Connection, subject_did: &str) -> Result<(), String> {
+    // Learner-side: clear and replay rows where actor == subject_did.
     conn.execute(
-        "INSERT INTO reputation_assertions \
-         (id, actor_address, role, skill_id, proficiency_level, score, evidence_count, \
-          window_start, window_end, computation_spec, updated_at) \
-         VALUES (?1, ?2, 'learner', ?3, ?4, ?5, ?6, ?7, ?8, 'v2', datetime('now')) \
-         ON CONFLICT(id) DO UPDATE SET \
-            score = ?5, evidence_count = ?6, \
-            window_start = ?7, window_end = ?8, \
-            computation_spec = 'v2', updated_at = datetime('now')",
-        params![
-            assertion_id,
-            stake_address,
-            skill_id,
-            proficiency_level,
-            confidence,
-            new_count,
-            window_start,
-            now,
-        ],
+        "DELETE FROM reputation_assertions WHERE actor_address = ?1 AND role = 'learner'",
+        params![subject_did],
+    )
+    .map_err(|e| e.to_string())?;
+    conn.execute(
+        "DELETE FROM reputation_assertions WHERE actor_address = ?1 AND role = 'instructor'",
+        params![subject_did],
     )
     .map_err(|e| e.to_string())?;
 
-    Ok(())
-}
-
-/// Deterministic full recomputation of all reputation from the evidence chain.
-///
-/// This is the v2 "any node can reproduce the same scores" guarantee.
-/// It clears all reputation state and replays every proof event
-/// chronologically. Used for verification and bootstrap.
-///
-/// Returns (assertions_updated, deltas_recomputed).
-pub fn full_recompute(conn: &Connection) -> Result<(i64, i64), String> {
-    // Clear all existing reputation state
-    conn.execute("DELETE FROM reputation_impact_deltas", [])
-        .map_err(|e| e.to_string())?;
-    conn.execute("DELETE FROM reputation_evidence", [])
-        .map_err(|e| e.to_string())?;
-    conn.execute("DELETE FROM reputation_assertions", [])
-        .map_err(|e| e.to_string())?;
-
-    // Get the local identity (who is the learner on this node)
-    let stake_address: String = conn
-        .query_row(
-            "SELECT stake_address FROM local_identity WHERE id = 1",
-            [],
-            |row| row.get(0),
-        )
-        .map_err(|e| format!("no local identity: {e}"))?;
-
-    // Replay all skill proofs in chronological order.
-    // For each proof, reconstruct the delta from evidence.
+    // Pull every credential where subject_did is the subject, plus
+    // every credential they've issued to someone else.
     let mut stmt = conn
         .prepare(
-            "SELECT id, skill_id, proficiency_level, confidence, computed_at \
-             FROM skill_proofs ORDER BY computed_at ASC",
+            "SELECT id FROM credentials \
+             WHERE (subject_did = ?1 OR issuer_did = ?1) \
+               AND revoked = 0 \
+             ORDER BY issuance_date ASC",
         )
         .map_err(|e| e.to_string())?;
-
-    struct ProofRow {
-        id: String,
-        skill_id: String,
-        proficiency_level: String,
-        confidence: f64,
-    }
-
-    let proofs: Vec<ProofRow> = {
-        let rows = stmt
-            .query_map([], |row| {
-                Ok(ProofRow {
-                    id: row.get(0)?,
-                    skill_id: row.get(1)?,
-                    proficiency_level: row.get(2)?,
-                    confidence: row.get(3)?,
-                })
-            })
-            .map_err(|e| e.to_string())?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())?;
-        rows
-    };
-
-    let mut assertions_updated = 0_i64;
-
-    // Track running confidence per (skill, level) to reconstruct deltas
-    let mut confidence_tracker: std::collections::HashMap<(String, String), f64> =
-        std::collections::HashMap::new();
-
-    for proof in &proofs {
-        let key = (proof.skill_id.clone(), proof.proficiency_level.clone());
-        let old_conf = confidence_tracker.get(&key).copied().unwrap_or(0.0);
-
-        // Replay the reputation callback
-        on_proof_updated(
-            conn,
-            &stake_address,
-            &proof.skill_id,
-            old_conf,
-            proof.confidence,
-            &proof.proficiency_level,
-            &proof.id,
-        )?;
-
-        confidence_tracker.insert(key, proof.confidence);
-        assertions_updated += 1;
-    }
-
-    // Count the deltas created
-    let deltas_recomputed: i64 = conn
-        .query_row("SELECT COUNT(*) FROM reputation_impact_deltas", [], |row| {
-            row.get(0)
-        })
-        .map_err(|e| e.to_string())?;
-
-    Ok((assertions_updated, deltas_recomputed))
-}
-
-/// Verify that a reputation assertion can be reproduced from evidence.
-///
-/// Returns (score_matches, confidence_matches, recomputed_score, recomputed_confidence).
-pub fn verify_assertion(
-    conn: &Connection,
-    assertion_id: &str,
-) -> Result<(bool, bool, f64, f64, f64, f64), String> {
-    // Load the claimed assertion
-    let (claimed_score, claimed_evidence_count, role, skill_id, proficiency_level): (
-        f64,
-        i64,
-        String,
-        Option<String>,
-        Option<String>,
-    ) = conn
-        .query_row(
-            "SELECT score, evidence_count, role, skill_id, proficiency_level \
-             FROM reputation_assertions WHERE id = ?1",
-            params![assertion_id],
-            |row| {
-                Ok((
-                    row.get(0)?,
-                    row.get(1)?,
-                    row.get(2)?,
-                    row.get(3)?,
-                    row.get(4)?,
-                ))
-            },
-        )
-        .map_err(|e| format!("assertion not found: {e}"))?;
-
-    if role == "learner" {
-        // Learner reputation = proof confidence. Find matching proof.
-        let skill = skill_id.ok_or("learner assertion missing skill_id")?;
-        let level = proficiency_level.ok_or("learner assertion missing proficiency_level")?;
-
-        let proof_conf: f64 = conn
-            .query_row(
-                "SELECT confidence FROM skill_proofs \
-                 WHERE skill_id = ?1 AND proficiency_level = ?2 \
-                 ORDER BY updated_at DESC LIMIT 1",
-                params![skill, level],
-                |row| row.get(0),
-            )
-            .unwrap_or(0.0);
-
-        let score_matches = (claimed_score - proof_conf).abs() < 0.001;
-        return Ok((
-            score_matches,
-            score_matches, // confidence = score for learners
-            proof_conf,
-            proof_conf,
-            claimed_score,
-            claimed_score,
-        ));
-    }
-
-    // Instructor: recompute from impact deltas
-    let recomputed_score: f64 = conn
-        .query_row(
-            "SELECT COALESCE(SUM(delta), 0.0) FROM reputation_impact_deltas WHERE assertion_id = ?1",
-            params![assertion_id],
-            |row| row.get(0),
-        )
-        .map_err(|e| e.to_string())?;
-
-    // Recompute smoothed confidence
-    let recomputed_confidence =
-        claimed_evidence_count as f64 / (claimed_evidence_count as f64 + SMOOTHING_K);
-
-    let tolerance = 0.001;
-    let score_matches = (claimed_score - recomputed_score).abs() < tolerance;
-    let confidence_matches = true; // Confidence is a function of evidence_count, always matches
-
-    Ok((
-        score_matches,
-        confidence_matches,
-        recomputed_score,
-        recomputed_confidence,
-        claimed_score,
-        recomputed_confidence, // claimed confidence not stored separately; use smoothed
-    ))
-}
-
-/// Get instructor rankings for a skill, ordered by impact score.
-///
-/// Returns: Vec<(actor_address, score, evidence_count, learner_count, median_impact)>
-pub fn get_instructor_rankings(
-    conn: &Connection,
-    skill_id: &str,
-    proficiency_level: Option<&str>,
-    limit: i64,
-) -> Result<Vec<InstructorRankingRow>, String> {
-    let (sql, param_values): (String, Vec<Box<dyn rusqlite::types::ToSql>>) =
-        if let Some(level) = proficiency_level {
-            (
-                "SELECT actor_address, score, evidence_count, \
-                     COALESCE(learner_count, 0), COALESCE(median_impact, 0.0) \
-                 FROM reputation_assertions \
-                 WHERE role = 'instructor' AND skill_id = ?1 AND proficiency_level = ?2 \
-                 ORDER BY score DESC LIMIT ?3"
-                    .to_string(),
-                vec![
-                    Box::new(skill_id.to_string()),
-                    Box::new(level.to_string()),
-                    Box::new(limit),
-                ],
-            )
-        } else {
-            (
-                "SELECT actor_address, score, evidence_count, \
-                     COALESCE(learner_count, 0), COALESCE(median_impact, 0.0) \
-                 FROM reputation_assertions \
-                 WHERE role = 'instructor' AND skill_id = ?1 \
-                 ORDER BY score DESC LIMIT ?2"
-                    .to_string(),
-                vec![Box::new(skill_id.to_string()), Box::new(limit)],
-            )
-        };
-
-    let params_ref: Vec<&dyn rusqlite::types::ToSql> =
-        param_values.iter().map(|v| v.as_ref()).collect();
-
-    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
-
-    let rankings = stmt
-        .query_map(params_ref.as_slice(), |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, f64>(1)?,
-                row.get::<_, i64>(2)?,
-                row.get::<_, i64>(3)?,
-                row.get::<_, f64>(4)?,
-            ))
-        })
+    let ids: Vec<String> = stmt
+        .query_map(params![subject_did], |r| r.get::<_, String>(0))
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
 
-    Ok(rankings)
+    for id in ids {
+        on_credential_accepted(conn, &id)?;
+    }
+    Ok(())
+}
+
+// ---------- internal ----------
+
+struct CredentialRow {
+    issuer_did: String,
+    subject_did: String,
+    claim_kind: String,
+    signed_vc_json: String,
+}
+
+fn load_credential_row(
+    conn: &Connection,
+    credential_id: &str,
+) -> Result<Option<CredentialRow>, String> {
+    conn.query_row(
+        "SELECT issuer_did, subject_did, claim_kind, signed_vc_json \
+         FROM credentials WHERE id = ?1 AND revoked = 0",
+        params![credential_id],
+        |row| {
+            Ok(CredentialRow {
+                issuer_did: row.get(0)?,
+                subject_did: row.get(1)?,
+                claim_kind: row.get(2)?,
+                signed_vc_json: row.get(3)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(|e| e.to_string())
+}
+
+/// Extract `(level, score, skill_id)` from a SkillClaim VC payload.
+/// Returns `None` when the JSON is a different claim shape.
+fn skill_fields(cred: &CredentialRow) -> Result<Option<(i64, f64, String)>, String> {
+    let value: serde_json::Value = serde_json::from_str(&cred.signed_vc_json)
+        .map_err(|e| format!("parse signed_vc_json: {e}"))?;
+    let claim = value
+        .pointer("/credentialSubject/claim")
+        .ok_or_else(|| "missing credentialSubject.claim".to_string())?;
+    if claim.get("kind").and_then(|v| v.as_str()) != Some("skill") {
+        return Ok(None);
+    }
+    let level = claim
+        .get("level")
+        .and_then(|v| v.as_i64())
+        .ok_or_else(|| "skill claim missing integer level".to_string())?;
+    let score = claim
+        .get("score")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0)
+        .clamp(0.0, 1.0);
+    let skill_id = claim
+        .get("skill_id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "skill claim missing skill_id".to_string())?
+        .to_string();
+    Ok(Some((level, score, skill_id)))
+}
+
+fn update_learner(
+    conn: &Connection,
+    subject_did: &str,
+    skill_id: &str,
+    level: i64,
+    score: f64,
+) -> Result<(), String> {
+    let level_str = level_to_str(level);
+    let id = entity_id(&[subject_did, "learner", skill_id, level_str]);
+
+    // Learner score is the max observed on this (skill, level);
+    // later credentials at the same level either match or beat the
+    // score, never lower it.
+    conn.execute(
+        "INSERT INTO reputation_assertions \
+         (id, actor_address, role, skill_id, proficiency_level, \
+          score, evidence_count, computation_spec) \
+         VALUES (?1, ?2, 'learner', ?3, ?4, ?5, 1, 'v3-vc') \
+         ON CONFLICT(id) DO UPDATE SET \
+             score = MAX(score, excluded.score), \
+             evidence_count = evidence_count + 1, \
+             updated_at = datetime('now')",
+        params![id, subject_did, skill_id, level_str, score],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn update_instructor(
+    conn: &Connection,
+    issuer_did: &str,
+    skill_id: &str,
+    level: i64,
+) -> Result<(), String> {
+    let level_str = level_to_str(level);
+    let id = entity_id(&[issuer_did, "instructor", skill_id, level_str]);
+
+    // Recompute the instructor's score as the mean score of every
+    // non-revoked credential they've issued at this (skill, level).
+    // Using json_extract to read the score out of each row.
+    let (mean_score, count): (f64, i64) = conn
+        .query_row(
+            "SELECT \
+                COALESCE(AVG(CAST(json_extract(signed_vc_json, \
+                    '$.credentialSubject.claim.score') AS REAL)), 0.0), \
+                COUNT(*) \
+             FROM credentials \
+             WHERE issuer_did = ?1 \
+               AND skill_id = ?2 \
+               AND claim_kind = 'skill' \
+               AND revoked = 0 \
+               AND CAST(json_extract(signed_vc_json, \
+                    '$.credentialSubject.claim.level') AS INTEGER) = ?3",
+            params![issuer_did, skill_id, level],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(|e| e.to_string())?;
+    if count == 0 {
+        return Ok(());
+    }
+
+    conn.execute(
+        "INSERT INTO reputation_assertions \
+         (id, actor_address, role, skill_id, proficiency_level, \
+          score, evidence_count, computation_spec) \
+         VALUES (?1, ?2, 'instructor', ?3, ?4, ?5, ?6, 'v3-vc') \
+         ON CONFLICT(id) DO UPDATE SET \
+             score = excluded.score, \
+             evidence_count = excluded.evidence_count, \
+             updated_at = datetime('now')",
+        params![id, issuer_did, skill_id, level_str, mean_score, count],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::db::Database;
-    use crate::evidence::aggregator;
 
-    /// Set up a test database with skills, courses, elements, and skill tags.
-    fn setup_db() -> Database {
-        let db = Database::open_in_memory().expect("open db");
-        db.run_migrations().expect("migrations");
-
+    fn test_db() -> Database {
+        let db = Database::open_in_memory().expect("open");
+        db.run_migrations().expect("migrate");
+        // Minimal taxonomy so skill FKs in `reputation_assertions`
+        // resolve; the reputation engine doesn't use any taxonomy
+        // fields beyond the skill_id that was in the credential.
         db.conn()
             .execute(
-                "INSERT INTO subject_fields (id, name) VALUES ('sf1', 'CS')",
+                "INSERT INTO subject_fields (id, name) VALUES ('sf', 'CS')",
                 [],
             )
             .unwrap();
         db.conn()
             .execute(
-                "INSERT INTO subjects (id, name, subject_field_id) VALUES ('sub1', 'Algo', 'sf1')",
+                "INSERT INTO subjects (id, name, subject_field_id) \
+                 VALUES ('sub', 'Algo', 'sf')",
                 [],
             )
             .unwrap();
         db.conn()
             .execute(
-                "INSERT INTO skills (id, name, subject_id) VALUES ('sk1', 'Graphs', 'sub1')",
+                "INSERT INTO skills (id, name, subject_id) VALUES ('skill_a', 'A', 'sub')",
                 [],
             )
             .unwrap();
-        db.conn()
-            .execute(
-                "INSERT INTO local_identity (id, stake_address, payment_address) \
-                 VALUES (1, 'stake_test1ulearner', 'addr_test1q123')",
-                [],
-            )
-            .unwrap();
-        db.conn()
-            .execute(
-                "INSERT INTO courses (id, title, author_address) \
-                 VALUES ('c1', 'Algo 101', 'stake_test1uinstructor')",
-                [],
-            )
-            .unwrap();
-        db.conn()
-            .execute(
-                "INSERT INTO course_chapters (id, course_id, title, position) \
-                 VALUES ('ch1', 'c1', 'Ch1', 0)",
-                [],
-            )
-            .unwrap();
-        db.conn()
-            .execute(
-                "INSERT INTO course_elements (id, chapter_id, title, element_type, position) \
-                 VALUES ('el1', 'ch1', 'Quiz', 'quiz', 0)",
-                [],
-            )
-            .unwrap();
-        db.conn()
-            .execute(
-                "INSERT INTO element_skill_tags (element_id, skill_id, weight) \
-                 VALUES ('el1', 'sk1', 1.0)",
-                [],
-            )
-            .unwrap();
-
         db
     }
 
-    /// Helper: add a second element tagged with the same skill.
-    fn add_second_element(db: &Database) {
-        db.conn()
-            .execute(
-                "INSERT INTO course_elements (id, chapter_id, title, element_type, position) \
-                 VALUES ('el2', 'ch1', 'Quiz 2', 'quiz', 1)",
-                [],
-            )
-            .unwrap();
-        db.conn()
-            .execute(
-                "INSERT INTO element_skill_tags (element_id, skill_id, weight) \
-                 VALUES ('el2', 'sk1', 1.0)",
-                [],
-            )
-            .unwrap();
-    }
-
-    /// Helper: add a prerequisite skill with a proof.
-    fn add_prerequisite_with_proof(db: &Database, prereq_confidence: f64) {
-        let conn = db.conn();
-
-        // Create a prerequisite skill
-        conn.execute(
-            "INSERT INTO skills (id, name, subject_id) VALUES ('sk0', 'Prereq', 'sub1')",
-            [],
-        )
-        .unwrap();
-
-        // Set sk0 as a prerequisite for sk1
-        conn.execute(
-            "INSERT INTO skill_prerequisites (skill_id, prerequisite_id) \
-             VALUES ('sk1', 'sk0')",
-            [],
-        )
-        .unwrap();
-
-        // Create a skill proof for the prerequisite
-        let proof_id = entity_id(&["stake_test1ulearner", "sk0", "apply"]);
-        conn.execute(
-            "INSERT INTO skill_proofs (id, skill_id, proficiency_level, confidence, evidence_count) \
-             VALUES (?1, 'sk0', 'apply', ?2, 3)",
-            params![proof_id, prereq_confidence],
-        )
-        .unwrap();
-    }
-
-    /// Helper: create evidence, evaluate, and trigger reputation callback.
-    fn create_evidence_and_update_reputation(
+    fn insert_skill_credential(
         db: &Database,
-        element_id: &str,
+        id: &str,
+        issuer: &str,
+        subject: &str,
+        skill_id: &str,
+        level: i64,
         score: f64,
-    ) -> aggregator::AggregationResult {
-        let conn = db.conn();
-
-        aggregator::create_evidence_for_element(
-            conn,
-            "c1",
-            element_id,
-            score,
-            "stake_test1ulearner",
-            None,
-            None,
-        )
-        .unwrap();
-
-        let result = aggregator::evaluate_and_update(conn, "stake_test1ulearner", "sk1").unwrap();
-
-        if let Some(ref level) = result.achieved_level {
-            on_proof_updated(
-                conn,
-                "stake_test1ulearner",
-                "sk1",
-                result.old_confidence,
-                result.confidence,
-                level.as_str(),
-                result.proof_id.as_ref().unwrap(),
+    ) {
+        let vc = serde_json::json!({
+            "@context": ["https://www.w3.org/2018/credentials/v1"],
+            "credentialSubject": {
+                "id": subject,
+                "claim": {
+                    "kind": "skill",
+                    "skill_id": skill_id,
+                    "level": level,
+                    "score": score,
+                    "evidence_refs": [],
+                }
+            }
+        });
+        db.conn()
+            .execute(
+                "INSERT INTO credentials ( \
+                   id, issuer_did, subject_did, credential_type, claim_kind, \
+                   skill_id, issuance_date, signed_vc_json, integrity_hash, \
+                   revoked \
+                 ) VALUES (?1, ?2, ?3, 'FormalCredential', 'skill', ?4, \
+                           datetime('now'), ?5, 'h', 0)",
+                params![
+                    id,
+                    issuer,
+                    subject,
+                    skill_id,
+                    serde_json::to_string(&vc).unwrap(),
+                ],
             )
             .unwrap();
-        }
-
-        result
     }
-
-    // ---- Tests ----
 
     #[test]
-    fn instructor_reputation_created_on_proof_update() {
-        let db = setup_db();
-        let result = create_evidence_and_update_reputation(&db, "el1", 0.80);
-        assert!(result.achieved_level.is_some());
+    fn learner_score_is_monotonic_max() {
+        let db = test_db();
+        insert_skill_credential(
+            &db,
+            "c1",
+            "did:key:zLearner",
+            "did:key:zLearner",
+            "skill_a",
+            2,
+            0.75,
+        );
+        on_credential_accepted(db.conn(), "c1").unwrap();
 
-        let (score, role): (f64, String) = db
+        insert_skill_credential(
+            &db,
+            "c2",
+            "did:key:zLearner",
+            "did:key:zLearner",
+            "skill_a",
+            2,
+            0.50,
+        );
+        on_credential_accepted(db.conn(), "c2").unwrap();
+
+        insert_skill_credential(
+            &db,
+            "c3",
+            "did:key:zLearner",
+            "did:key:zLearner",
+            "skill_a",
+            2,
+            0.95,
+        );
+        on_credential_accepted(db.conn(), "c3").unwrap();
+
+        let (score, count): (f64, i64) = db
             .conn()
             .query_row(
-                "SELECT score, role FROM reputation_assertions \
-                 WHERE actor_address = 'stake_test1uinstructor'",
+                "SELECT score, evidence_count FROM reputation_assertions \
+                 WHERE actor_address = 'did:key:zLearner' AND role = 'learner' \
+                   AND skill_id = 'skill_a' AND proficiency_level = 'apply'",
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
-            .expect("instructor reputation should exist");
-
-        assert_eq!(role, "instructor");
-        assert!(score > 0.0);
+            .unwrap();
+        assert!((score - 0.95).abs() < 1e-9);
+        assert_eq!(count, 3);
     }
 
     #[test]
-    fn learner_reputation_mirrors_proof() {
-        let db = setup_db();
-        let result = create_evidence_and_update_reputation(&db, "el1", 0.80);
-
-        let score: f64 = db
-            .conn()
-            .query_row(
-                "SELECT score FROM reputation_assertions \
-                 WHERE actor_address = 'stake_test1ulearner' AND role = 'learner'",
-                [],
-                |row| row.get(0),
-            )
-            .expect("learner reputation should exist");
-
-        assert!(
-            (score - result.confidence).abs() < 0.001,
-            "learner score {score} should match proof confidence {}",
-            result.confidence
+    fn self_asserted_credential_does_not_create_instructor_row() {
+        let db = test_db();
+        insert_skill_credential(
+            &db,
+            "c1",
+            "did:key:zLearner",
+            "did:key:zLearner", // same → self-asserted
+            "skill_a",
+            2,
+            0.85,
         );
-    }
+        on_credential_accepted(db.conn(), "c1").unwrap();
 
-    #[test]
-    fn no_reputation_on_zero_delta() {
-        let db = setup_db();
-        let conn = db.conn();
-
-        // Call with same confidence = zero delta
-        on_proof_updated(
-            conn,
-            "stake_test1ulearner",
-            "sk1",
-            0.80,
-            0.80,
-            "remember",
-            "proof_123",
-        )
-        .unwrap();
-
-        let count: i64 = conn
+        let instructor_count: i64 = db
+            .conn()
             .query_row(
                 "SELECT COUNT(*) FROM reputation_assertions WHERE role = 'instructor'",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
+        assert_eq!(instructor_count, 0);
+    }
+
+    #[test]
+    fn third_party_credential_credits_instructor_with_mean_score() {
+        let db = test_db();
+        let instructor = "did:key:zInstructor";
+        insert_skill_credential(&db, "c1", instructor, "did:key:zA", "skill_a", 3, 0.80);
+        insert_skill_credential(&db, "c2", instructor, "did:key:zB", "skill_a", 3, 0.90);
+        on_credential_accepted(db.conn(), "c1").unwrap();
+        on_credential_accepted(db.conn(), "c2").unwrap();
+
+        let (score, count): (f64, i64) = db
+            .conn()
+            .query_row(
+                "SELECT score, evidence_count FROM reputation_assertions \
+                 WHERE actor_address = 'did:key:zInstructor' AND role = 'instructor'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert!((score - 0.85).abs() < 1e-9);
+        assert_eq!(count, 2);
+    }
+
+    #[test]
+    fn revoked_credential_does_not_count() {
+        let db = test_db();
+        let instructor = "did:key:zInstructor";
+        insert_skill_credential(&db, "c1", instructor, "did:key:zA", "skill_a", 3, 0.80);
+        insert_skill_credential(&db, "c2", instructor, "did:key:zB", "skill_a", 3, 0.90);
+        on_credential_accepted(db.conn(), "c1").unwrap();
+        on_credential_accepted(db.conn(), "c2").unwrap();
+
+        db.conn()
+            .execute("UPDATE credentials SET revoked = 1 WHERE id = 'c2'", [])
+            .unwrap();
+
+        // Re-run — the revoked row must drop out of the instructor mean.
+        recompute_for_subject(db.conn(), instructor).unwrap();
+
+        let (score, count): (f64, i64) = db
+            .conn()
+            .query_row(
+                "SELECT score, evidence_count FROM reputation_assertions \
+                 WHERE actor_address = 'did:key:zInstructor' AND role = 'instructor'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert!((score - 0.80).abs() < 1e-9);
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn non_skill_claims_are_ignored() {
+        let db = test_db();
+        let role_vc = serde_json::json!({
+            "@context": ["https://www.w3.org/2018/credentials/v1"],
+            "credentialSubject": {
+                "id": "did:key:zLearner",
+                "claim": { "kind": "role", "role": "mentor" }
+            }
+        });
+        db.conn()
+            .execute(
+                "INSERT INTO credentials ( \
+                   id, issuer_did, subject_did, credential_type, claim_kind, \
+                   issuance_date, signed_vc_json, integrity_hash, revoked \
+                 ) VALUES ('r1', 'did:key:zIssuer', 'did:key:zLearner', \
+                    'RoleCredential', 'role', datetime('now'), ?1, 'h', 0)",
+                params![serde_json::to_string(&role_vc).unwrap()],
+            )
+            .unwrap();
+
+        on_credential_accepted(db.conn(), "r1").unwrap();
+
+        let count: i64 = db
+            .conn()
+            .query_row("SELECT COUNT(*) FROM reputation_assertions", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
         assert_eq!(count, 0);
     }
 
     #[test]
-    fn prerequisite_expected_confidence_baseline() {
-        let db = setup_db();
-
-        // Add a prerequisite skill with high confidence (0.85)
-        add_prerequisite_with_proof(&db, 0.85);
-
-        // When learner achieves 0.80 on sk1 (which has prereq sk0 at 0.85),
-        // the expected confidence is 0.85, so the baseline = max(0.0, 0.85) = 0.85.
-        // Since new_confidence (0.80) - baseline (0.85) = -0.05, this is NEGATIVE impact.
-        let result = create_evidence_and_update_reputation(&db, "el1", 0.80);
-
-        if result.achieved_level.is_some() {
-            // The instructor should get NEGATIVE impact
-            let score: f64 = db
-                .conn()
-                .query_row(
-                    "SELECT score FROM reputation_assertions \
-                     WHERE actor_address = 'stake_test1uinstructor' AND role = 'instructor'",
-                    [],
-                    |row| row.get(0),
-                )
-                .expect("instructor reputation should exist");
-
-            assert!(
-                score < 0.0,
-                "instructor score should be negative when learner doesn't exceed prereq baseline, got {score}"
-            );
-        }
-    }
-
-    #[test]
-    fn negative_impact_propagation() {
-        let db = setup_db();
-        add_second_element(&db);
-
-        // First: high score creates positive reputation
-        create_evidence_and_update_reputation(&db, "el1", 0.90);
-
-        let score_after_first: f64 = db
-            .conn()
-            .query_row(
-                "SELECT score FROM reputation_assertions \
-                 WHERE actor_address = 'stake_test1uinstructor' AND role = 'instructor'",
-                [],
-                |row| row.get(0),
-            )
-            .expect("should have instructor reputation");
-        assert!(score_after_first > 0.0);
-
-        // Second: low score triggers re-evaluation. The proof confidence is
-        // monotonically increasing (aggregator doesn't update if lower), so the
-        // delta would be non-positive. But the new weighted avg could differ.
-        //
-        // Since proof confidence is monotonically increasing, the delta here
-        // will be 0 or positive (new evidence can only add to the same or
-        // higher level). Negative impact occurs when prerequisites set the bar.
-        // We verified that path in the prerequisite test above.
-    }
-
-    #[test]
-    fn distribution_metrics_populated() {
-        let db = setup_db();
-        add_second_element(&db);
-
-        // Create two evidence records to get two impact deltas
-        create_evidence_and_update_reputation(&db, "el1", 0.80);
-        create_evidence_and_update_reputation(&db, "el2", 0.90);
-
-        // Check that distribution columns are populated
-        let (median, learner_count, variance): (Option<f64>, Option<i64>, Option<f64>) = db
-            .conn()
-            .query_row(
-                "SELECT median_impact, learner_count, impact_variance \
-                 FROM reputation_assertions \
-                 WHERE actor_address = 'stake_test1uinstructor' AND role = 'instructor'",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .expect("instructor reputation should exist");
-
-        assert!(median.is_some(), "median_impact should be populated");
-        assert!(
-            learner_count.unwrap_or(0) >= 1,
-            "learner_count should be >= 1"
-        );
-        assert!(variance.is_some(), "impact_variance should be populated");
-    }
-
-    #[test]
-    fn time_windows_tracked() {
-        let db = setup_db();
-
-        create_evidence_and_update_reputation(&db, "el1", 0.80);
-
-        let (ws, we): (Option<String>, Option<String>) = db
-            .conn()
-            .query_row(
-                "SELECT window_start, window_end FROM reputation_assertions \
-                 WHERE actor_address = 'stake_test1uinstructor' AND role = 'instructor'",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .expect("instructor reputation should exist");
-
-        assert!(ws.is_some(), "window_start should be set");
-        assert!(we.is_some(), "window_end should be set");
-    }
-
-    #[test]
-    fn learner_time_windows_tracked() {
-        let db = setup_db();
-
-        create_evidence_and_update_reputation(&db, "el1", 0.80);
-
-        let (ws, we): (Option<String>, Option<String>) = db
-            .conn()
-            .query_row(
-                "SELECT window_start, window_end FROM reputation_assertions \
-                 WHERE actor_address = 'stake_test1ulearner' AND role = 'learner'",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .expect("learner reputation should exist");
-
-        assert!(ws.is_some(), "learner window_start should be set");
-        assert!(we.is_some(), "learner window_end should be set");
-    }
-
-    #[test]
-    fn impact_deltas_recorded() {
-        let db = setup_db();
-
-        create_evidence_and_update_reputation(&db, "el1", 0.80);
-
-        let count: i64 = db
-            .conn()
-            .query_row("SELECT COUNT(*) FROM reputation_impact_deltas", [], |row| {
-                row.get(0)
-            })
-            .unwrap();
-
-        assert!(count >= 1, "should have at least 1 impact delta recorded");
-    }
-
-    #[test]
-    fn reputation_evidence_linked() {
-        let db = setup_db();
-
-        create_evidence_and_update_reputation(&db, "el1", 0.80);
-
-        let count: i64 = db
-            .conn()
-            .query_row("SELECT COUNT(*) FROM reputation_evidence", [], |row| {
-                row.get(0)
-            })
-            .unwrap();
-
-        assert!(
-            count >= 1,
-            "should have at least 1 reputation_evidence link"
-        );
-    }
-
-    #[test]
-    fn trust_factor_included_in_attribution() {
-        let db = setup_db();
-
-        // Modify the auto-created assessment to have a low trust_factor
-        // First create evidence to auto-create the assessment
-        aggregator::create_evidence_for_element(
-            db.conn(),
-            "c1",
-            "el1",
-            0.80,
-            "stake_test1ulearner",
-            None,
-            None,
-        )
-        .unwrap();
-
-        // Update the trust_factor on the evidence record
-        db.conn()
-            .execute(
-                "UPDATE evidence_records SET trust_factor = 0.50 WHERE skill_id = 'sk1'",
-                [],
-            )
-            .unwrap();
-
-        // Now evaluate and trigger reputation
-        let result =
-            aggregator::evaluate_and_update(db.conn(), "stake_test1ulearner", "sk1").unwrap();
-
-        if let Some(ref level) = result.achieved_level {
-            on_proof_updated(
-                db.conn(),
-                "stake_test1ulearner",
-                "sk1",
-                result.old_confidence,
-                result.confidence,
-                level.as_str(),
-                result.proof_id.as_ref().unwrap(),
-            )
-            .unwrap();
-
-            // The instructor reputation should exist (trust_factor reduces
-            // weight but doesn't eliminate it at 0.50)
-            let score: f64 = db
-                .conn()
-                .query_row(
-                    "SELECT score FROM reputation_assertions \
-                     WHERE actor_address = 'stake_test1uinstructor'",
-                    [],
-                    |row| row.get(0),
-                )
-                .expect("instructor reputation should exist");
-
-            assert!(
-                score > 0.0,
-                "score should be positive even with reduced trust_factor"
-            );
-        }
-    }
-
-    #[test]
-    fn confidence_smoothing_applied() {
-        let db = setup_db();
-
-        create_evidence_and_update_reputation(&db, "el1", 0.80);
-
-        let evidence_count: i64 = db
-            .conn()
-            .query_row(
-                "SELECT evidence_count FROM reputation_assertions \
-                 WHERE actor_address = 'stake_test1uinstructor'",
-                [],
-                |row| row.get(0),
-            )
-            .expect("instructor reputation should exist");
-
-        // With 1 evidence, smoothed confidence = 1/(1+5) = 0.1667
-        let expected_smoothed = evidence_count as f64 / (evidence_count as f64 + SMOOTHING_K);
-        assert!(
-            (expected_smoothed - 1.0 / 6.0).abs() < 0.01,
-            "smoothing formula should give ~0.167 for 1 evidence"
-        );
-    }
-
-    #[test]
-    fn full_recompute_produces_consistent_results() {
-        let db = setup_db();
-        add_second_element(&db);
-
-        // Create some evidence and reputation
-        create_evidence_and_update_reputation(&db, "el1", 0.80);
-        create_evidence_and_update_reputation(&db, "el2", 0.85);
-
-        // Record the current state
-        let score_before: f64 = db
-            .conn()
-            .query_row(
-                "SELECT score FROM reputation_assertions \
-                 WHERE actor_address = 'stake_test1uinstructor' AND role = 'instructor'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap_or(0.0);
-
-        // Recompute everything from scratch
-        let (assertions, deltas) = full_recompute(db.conn()).unwrap();
-
-        assert!(assertions > 0, "should have updated some assertions");
-        assert!(deltas > 0, "should have recomputed some deltas");
-
-        // Score after recompute should be close to before
-        // (may differ slightly due to float arithmetic ordering)
-        let score_after: f64 = db
-            .conn()
-            .query_row(
-                "SELECT score FROM reputation_assertions \
-                 WHERE actor_address = 'stake_test1uinstructor' AND role = 'instructor'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap_or(0.0);
-
-        // Both should be positive and non-zero
-        assert!(score_before > 0.0, "score before should be positive");
-        assert!(
-            score_after > 0.0,
-            "score after recompute should be positive"
-        );
-    }
-
-    #[test]
-    fn verify_assertion_matches() {
-        let db = setup_db();
-
-        create_evidence_and_update_reputation(&db, "el1", 0.80);
-
-        // Find the instructor assertion
-        let assertion_id: String = db
-            .conn()
-            .query_row(
-                "SELECT id FROM reputation_assertions \
-                 WHERE actor_address = 'stake_test1uinstructor'",
-                [],
-                |row| row.get(0),
-            )
-            .expect("should have instructor assertion");
-
-        let (score_ok, conf_ok, recomputed_score, _, claimed_score, _) =
-            verify_assertion(db.conn(), &assertion_id).unwrap();
-
-        assert!(
-            score_ok,
-            "score should match: claimed={claimed_score}, recomputed={recomputed_score}"
-        );
-        assert!(conf_ok, "confidence should match");
-    }
-
-    #[test]
-    fn instructor_rankings_ordered() {
-        let db = setup_db();
-
-        // Add a second instructor
-        db.conn()
-            .execute(
-                "INSERT INTO courses (id, title, author_address) \
-                 VALUES ('c2', 'Algo 201', 'stake_test1uinstructor2')",
-                [],
-            )
-            .unwrap();
-        db.conn()
-            .execute(
-                "INSERT INTO course_chapters (id, course_id, title, position) \
-                 VALUES ('ch2', 'c2', 'Ch1', 0)",
-                [],
-            )
-            .unwrap();
-        db.conn()
-            .execute(
-                "INSERT INTO course_elements (id, chapter_id, title, element_type, position) \
-                 VALUES ('el_c2', 'ch2', 'Quiz', 'quiz', 0)",
-                [],
-            )
-            .unwrap();
-        db.conn()
-            .execute(
-                "INSERT INTO element_skill_tags (element_id, skill_id, weight) \
-                 VALUES ('el_c2', 'sk1', 1.0)",
-                [],
-            )
-            .unwrap();
-
-        // Evidence from instructor 1's course
-        create_evidence_and_update_reputation(&db, "el1", 0.80);
-
-        // Evidence from instructor 2's course
-        aggregator::create_evidence_for_element(
-            db.conn(),
-            "c2",
-            "el_c2",
-            0.90,
-            "stake_test1ulearner",
-            None,
-            None,
-        )
-        .unwrap();
-        let result =
-            aggregator::evaluate_and_update(db.conn(), "stake_test1ulearner", "sk1").unwrap();
-        if let Some(ref level) = result.achieved_level {
-            on_proof_updated(
-                db.conn(),
-                "stake_test1ulearner",
-                "sk1",
-                result.old_confidence,
-                result.confidence,
-                level.as_str(),
-                result.proof_id.as_ref().unwrap(),
-            )
-            .unwrap();
-        }
-
-        // Get rankings
-        let rankings = get_instructor_rankings(db.conn(), "sk1", None, 10).unwrap();
-
-        assert!(
-            !rankings.is_empty(),
-            "should have at least 1 instructor ranking"
-        );
-
-        // Rankings should be in descending score order
-        for pair in rankings.windows(2) {
-            assert!(
-                pair[0].1 >= pair[1].1,
-                "rankings should be in descending order"
-            );
-        }
-    }
-
-    #[test]
-    fn percentile_computation() {
-        // Test the percentile helper function directly
-        let data = vec![1.0, 2.0, 3.0, 4.0, 5.0];
-        assert!((percentile(&data, 0.0) - 1.0).abs() < 0.001);
-        assert!((percentile(&data, 50.0) - 3.0).abs() < 0.001);
-        assert!((percentile(&data, 100.0) - 5.0).abs() < 0.001);
-        assert!((percentile(&data, 25.0) - 2.0).abs() < 0.001);
-        assert!((percentile(&data, 75.0) - 4.0).abs() < 0.001);
-
-        // Single element
-        assert!((percentile(&[42.0], 50.0) - 42.0).abs() < 0.001);
-
-        // Empty
-        assert!((percentile(&[], 50.0) - 0.0).abs() < 0.001);
-    }
-
-    #[test]
-    fn expected_confidence_no_prerequisites() {
-        let db = setup_db();
-        let conn = db.conn();
-
-        let expected =
-            expected_confidence_from_prerequisites(conn, "stake_test1ulearner", "sk1").unwrap();
-        assert!(
-            expected.abs() < f64::EPSILON,
-            "expected confidence should be 0.0 with no prerequisites"
-        );
-    }
-
-    #[test]
-    fn expected_confidence_with_prerequisites() {
-        let db = setup_db();
-
-        add_prerequisite_with_proof(&db, 0.75);
-
-        let expected =
-            expected_confidence_from_prerequisites(db.conn(), "stake_test1ulearner", "sk1")
-                .unwrap();
-
-        assert!(
-            (expected - 0.75).abs() < 0.001,
-            "expected confidence should be 0.75 from prerequisite proof, got {expected}"
-        );
-    }
-
-    #[test]
-    fn variance_penalty_reduces_effective_confidence() {
-        // Test that high variance in impact deltas triggers a penalty.
-        // We can verify this indirectly: with highly variable deltas,
-        // the variance should exceed 0.10 and the smoothed confidence
-        // would be reduced (though we store score, not the penalized confidence).
-
-        let db = setup_db();
-        add_second_element(&db);
-
-        // Create evidence that produces varied deltas
-        create_evidence_and_update_reputation(&db, "el1", 0.80);
-        create_evidence_and_update_reputation(&db, "el2", 0.80);
-
-        let variance: f64 = db
-            .conn()
-            .query_row(
-                "SELECT COALESCE(impact_variance, 0.0) FROM reputation_assertions \
-                 WHERE actor_address = 'stake_test1uinstructor'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap_or(0.0);
-
-        // With one learner and multiple updates, the variance exists and is computed.
-        // The actual penalty is applied during the smoothed confidence computation.
-        // We verify the variance field is populated.
-        assert!(
-            variance >= 0.0,
-            "variance should be non-negative, got {variance}"
-        );
-    }
-
-    #[test]
-    fn computation_spec_is_v2() {
-        let db = setup_db();
-        create_evidence_and_update_reputation(&db, "el1", 0.80);
-
-        let spec: String = db
-            .conn()
-            .query_row(
-                "SELECT computation_spec FROM reputation_assertions \
-                 WHERE actor_address = 'stake_test1uinstructor'",
-                [],
-                |row| row.get(0),
-            )
-            .expect("should have instructor assertion");
-
-        assert_eq!(spec, "v2", "computation_spec should be 'v2'");
+    fn level_to_str_covers_all_valid_levels() {
+        assert_eq!(level_to_str(0), "remember");
+        assert_eq!(level_to_str(5), "create");
+        assert_eq!(level_to_str(99), "remember"); // fallback
     }
 }

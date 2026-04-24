@@ -3,12 +3,7 @@ use tauri::State;
 
 use crate::crypto::hash::entity_id;
 use crate::domain::enrollment::{ElementProgress, Enrollment, UpdateProgressRequest};
-use crate::evidence::{aggregator, reputation};
 use crate::AppState;
-
-use crate::crypto::wallet;
-use crate::p2p::evidence as p2p_evidence;
-use crate::p2p::types::TOPIC_EVIDENCE;
 
 /// List all enrollments for the local user.
 #[tauri::command]
@@ -144,8 +139,8 @@ pub async fn update_progress(
     enrollment_id: String,
     req: UpdateProgressRequest,
 ) -> Result<ElementProgress, String> {
-    // All DB work in a block so the guard is dropped before any .await
-    let (progress, broadcast_data) = {
+    // All DB work in a block so the guard is dropped before any .await.
+    let progress = {
         let db_guard = state
             .db
             .lock()
@@ -198,173 +193,16 @@ pub async fn update_progress(
             )
             .map_err(|e| e.to_string())?;
 
-        // Trigger evidence pipeline on completion with a score
-        // Collect broadcast data while holding the DB lock
-        let mut broadcast_data: Vec<(
-            crate::domain::evidence::EvidenceAnnouncement,
-            String, // stake_address
-        )> = Vec::new();
-
-        if req.status == "completed" {
-            if let Some(score) = req.score {
-                // Get course_id and stake_address for evidence creation
-                let course_id: String = db
-                    .conn()
-                    .query_row(
-                        "SELECT course_id FROM enrollments WHERE id = ?1",
-                        params![enrollment_id],
-                        |row| row.get(0),
-                    )
-                    .map_err(|e| e.to_string())?;
-
-                let stake_address: String = db
-                    .conn()
-                    .query_row(
-                        "SELECT stake_address FROM local_identity WHERE id = 1",
-                        [],
-                        |row| row.get(0),
-                    )
-                    .map_err(|e| e.to_string())?;
-
-                // Create evidence records for each skill tagged on this element
-                let skills = aggregator::create_evidence_for_element(
-                    db.conn(),
-                    &course_id,
-                    &req.element_id,
-                    score,
-                    &stake_address,
-                    req.integrity_session_id.as_deref(),
-                    req.integrity_score,
-                )
-                .map_err(|e| format!("evidence creation failed: {}", e))?;
-
-                // Evaluate and update proofs + reputation for each skill
-                for skill_id in &skills {
-                    match aggregator::evaluate_and_update(db.conn(), &stake_address, skill_id) {
-                        Ok(result) => {
-                            if let (Some(level), Some(ref proof_id)) =
-                                (result.achieved_level, &result.proof_id)
-                            {
-                                if result.confidence > result.old_confidence {
-                                    let _ = reputation::on_proof_updated(
-                                        db.conn(),
-                                        &stake_address,
-                                        skill_id,
-                                        result.old_confidence,
-                                        result.confidence,
-                                        level.as_str(),
-                                        proof_id,
-                                    );
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            log::warn!("proof evaluation failed for skill {}: {}", skill_id, e);
-                        }
-                    }
-                }
-
-                // Collect un-sent evidence for P2P broadcast
-                for skill_id in &skills {
-                    match p2p_evidence::collect_evidence_for_broadcast(db, skill_id) {
-                        Ok(rows) => {
-                            for row in rows {
-                                let ann = p2p_evidence::build_evidence_announcement(
-                                    &row.evidence_id,
-                                    &stake_address,
-                                    skill_id,
-                                    &row.proficiency_level,
-                                    &row.assessment_id,
-                                    row.score,
-                                    row.difficulty,
-                                    row.trust_factor,
-                                    row.course_id.as_deref(),
-                                    row.instructor_address.as_deref(),
-                                );
-                                broadcast_data.push((ann, stake_address.clone()));
-                            }
-                        }
-                        Err(e) => {
-                            log::warn!("failed to collect evidence for broadcast: {e}");
-                        }
-                    }
-                }
-            }
-        }
-
-        (progress, broadcast_data)
-    }; // db guard dropped here — before any .await
-
-    // Broadcast evidence to P2P network (best-effort, don't fail progress update)
-    if !broadcast_data.is_empty() {
-        // Get signing key from vault first
-        let signing_key_result = {
-            let ks_guard = state.keystore.lock().await;
-            match ks_guard.as_ref() {
-                Some(ks) => ks
-                    .retrieve_mnemonic()
-                    .map_err(|e| e.to_string())
-                    .and_then(|m| wallet::wallet_from_mnemonic(&m).map_err(|e| e.to_string())),
-                None => Err("vault locked".to_string()),
-            }
-        };
-
-        if let Ok(w) = signing_key_result {
-            // Sign all messages and mark as sent in DB (synchronous, with DB lock)
-            let signed_messages: Vec<_> = {
-                let db_guard = state
-                    .db
-                    .lock()
-                    .map_err(|_| "database lock poisoned".to_string())?;
-                let db = db_guard.as_ref().ok_or("database not initialized")?;
-                broadcast_data
-                    .iter()
-                    .filter_map(|(ann, stake_addr)| {
-                        let payload = match serde_json::to_vec(ann) {
-                            Ok(p) => p,
-                            Err(e) => {
-                                log::warn!("failed to serialize evidence announcement: {e}");
-                                return None;
-                            }
-                        };
-
-                        let signed = crate::p2p::signing::sign_gossip_message(
-                            TOPIC_EVIDENCE,
-                            payload,
-                            &w.signing_key,
-                            stake_addr,
-                        );
-                        let sig_hex = hex::encode(&signed.signature);
-
-                        // Mark as sent in sync_log
-                        let _ =
-                            p2p_evidence::mark_evidence_broadcast(db, &ann.evidence_id, &sig_hex);
-
-                        Some((signed, ann.evidence_id.clone(), ann.skill_id.clone()))
-                    })
-                    .collect()
-            }; // db guard dropped here — before async publish
-
-            // Now publish all signed messages (async, no DB lock held)
-            let p2p_node = state.p2p_node.lock().await;
-            if let Some(ref node) = *p2p_node {
-                for (signed, evidence_id, skill_id) in &signed_messages {
-                    match node.publish_signed(signed).await {
-                        Ok(()) => {
-                            log::info!(
-                                "Broadcast evidence '{}' for skill '{}'",
-                                evidence_id,
-                                skill_id,
-                            );
-                        }
-                        Err(e) => {
-                            log::warn!("Failed to broadcast evidence: {e}");
-                        }
-                    }
-                }
-            }
-        }
-    }
+        // Post-migration 040: completion no longer triggers evidence
+        // creation or aggregation. In the VC-first model, element
+        // completion is expected to produce a Cardano completion-witness
+        // tx; the Blockfrost observer (Session 2) auto-issues a signed
+        // VC referencing that tx and writes it to `credentials`. That
+        // wiring lands in a follow-up session; for now progress tracking
+        // alone is preserved so learners still see their course state
+        // move forward locally.
+        progress
+    }; // db guard dropped
 
     Ok(progress)
 }

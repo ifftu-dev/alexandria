@@ -15,7 +15,7 @@ use std::time::Duration;
 use libp2p::gossipsub::{IdentTopic, PeerScoreParams, PeerScoreThresholds, TopicScoreParams};
 
 use super::types::{
-    TOPIC_CATALOG, TOPIC_EVIDENCE, TOPIC_GOVERNANCE, TOPIC_OPINIONS, TOPIC_PROFILES, TOPIC_TAXONOMY,
+    TOPIC_CATALOG, TOPIC_GOVERNANCE, TOPIC_OPINIONS, TOPIC_PROFILES, TOPIC_TAXONOMY,
 };
 
 /// Build Alexandria-specific GossipSub peer score parameters.
@@ -29,10 +29,6 @@ pub fn build_peer_score_params() -> PeerScoreParams {
     topics.insert(
         IdentTopic::new(TOPIC_CATALOG).hash(),
         topic_params_catalog(),
-    );
-    topics.insert(
-        IdentTopic::new(TOPIC_EVIDENCE).hash(),
-        topic_params_evidence(),
     );
     topics.insert(
         IdentTopic::new(TOPIC_TAXONOMY).hash(),
@@ -125,37 +121,6 @@ fn topic_params_catalog() -> TopicScoreParams {
         mesh_failure_penalty_decay: 0.9,
         // P4: Invalid message penalty — moderate for catalog
         invalid_message_deliveries_weight: -10.0,
-        invalid_message_deliveries_decay: 0.5,
-    }
-}
-
-/// Evidence topic scoring — skill evidence broadcasts.
-///
-/// Lower frequency than catalog. Evidence is high-value
-/// (feeds into reputation computation).
-fn topic_params_evidence() -> TopicScoreParams {
-    TopicScoreParams {
-        topic_weight: 0.7,
-        // P1: Time in mesh
-        time_in_mesh_weight: 0.5,
-        time_in_mesh_quantum: Duration::from_secs(1),
-        time_in_mesh_cap: 100.0,
-        // P2: First message deliveries — evidence relay is valuable
-        first_message_deliveries_weight: 3.0,
-        first_message_deliveries_decay: 0.9,
-        first_message_deliveries_cap: 30.0,
-        // P3: Mesh message deliveries
-        mesh_message_deliveries_weight: -0.5,
-        mesh_message_deliveries_decay: 0.9,
-        mesh_message_deliveries_cap: 15.0,
-        mesh_message_deliveries_threshold: 1.0,
-        mesh_message_deliveries_window: Duration::from_millis(500),
-        mesh_message_deliveries_activation: Duration::from_secs(30),
-        // P3b
-        mesh_failure_penalty_weight: -0.5,
-        mesh_failure_penalty_decay: 0.9,
-        // P4: Invalid evidence is a stronger penalty
-        invalid_message_deliveries_weight: -15.0,
         invalid_message_deliveries_decay: 0.5,
     }
 }
@@ -309,10 +274,12 @@ mod tests {
     #[test]
     fn all_scored_topics_have_params() {
         let params = build_peer_score_params();
+        // catalog, taxonomy, governance, profiles, opinions — evidence
+        // topic removed post-migration 040.
         assert_eq!(
             params.topics.len(),
-            6,
-            "should have params for all 6 scored topics (5 originals + opinions)"
+            5,
+            "should have params for catalog, taxonomy, governance, profiles, opinions"
         );
     }
 
@@ -349,7 +316,6 @@ mod tests {
     #[test]
     fn each_topic_params_validates_individually() {
         assert!(topic_params_catalog().validate().is_ok());
-        assert!(topic_params_evidence().validate().is_ok());
         assert!(topic_params_taxonomy().validate().is_ok());
         assert!(topic_params_governance().validate().is_ok());
         assert!(topic_params_profiles().validate().is_ok());

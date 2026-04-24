@@ -30,6 +30,7 @@ fn sample_unsigned(subject: app_lib::crypto::did::Did) -> UnsignedCredential {
             },
             credential_status: None,
             terms_of_use: None,
+            witness: None,
             proof: Proof {
                 type_: "Ed25519Signature2020".into(),
                 created: TEST_NOW.into(),

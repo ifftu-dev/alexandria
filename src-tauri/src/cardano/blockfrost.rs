@@ -1,7 +1,51 @@
 use reqwest::Client;
+use serde::Deserialize;
 use thiserror::Error;
 
 use super::types::{ChainTip, ProtocolParameters, UTxO};
+
+/// Minimal shape of an entry in `GET /assets/policy/{policy_id}`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct PolicyAsset {
+    /// Concatenated `policy_id + asset_name_hex` (hex).
+    pub asset: String,
+    /// Current supply as a string-encoded integer.
+    #[serde(default)]
+    pub quantity: String,
+}
+
+/// Minimal shape of an entry in `GET /assets/{unit}/history`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct AssetHistoryEntry {
+    pub tx_hash: String,
+    /// `"minted"` or `"burned"`.
+    pub action: Option<String>,
+}
+
+/// Outputs attached to a confirmed transaction, surfaced by
+/// `GET /txs/{hash}/utxos`. We only consume the outputs side — inline
+/// datums and asset lists — but Blockfrost also returns inputs here.
+#[derive(Debug, Clone, Deserialize)]
+pub struct TxUtxos {
+    #[serde(default)]
+    pub outputs: Vec<TxOutput>,
+}
+
+/// A single output from `GET /txs/{hash}/utxos`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct TxOutput {
+    pub address: String,
+    #[serde(default)]
+    pub amount: Vec<super::types::AmountEntry>,
+    /// Hex-encoded CBOR of the inline datum, when present.
+    #[serde(default)]
+    pub inline_datum: Option<String>,
+    /// Hash of the inline datum (Blockfrost returns this even when the
+    /// CBOR itself is absent on certain plans).
+    #[serde(default)]
+    pub data_hash: Option<String>,
+    pub output_index: u32,
+}
 
 #[derive(Error, Debug)]
 pub enum BlockfrostError {
@@ -261,6 +305,116 @@ impl BlockfrostClient {
         }
 
         Ok(units)
+    }
+
+    /// List every asset ever minted under a policy ID.
+    ///
+    /// Used by the completion observer to discover new completion
+    /// witnesses. Blockfrost paginates at 100 entries by default; we
+    /// use `count=100` and iterate until an empty page comes back so
+    /// the observer catches up after a long offline stretch.
+    pub async fn list_policy_assets(
+        &self,
+        policy_id: &str,
+    ) -> Result<Vec<PolicyAsset>, BlockfrostError> {
+        let mut out: Vec<PolicyAsset> = Vec::new();
+        let mut page: u32 = 1;
+        loop {
+            let url = format!(
+                "{}/assets/policy/{}?count=100&page={}",
+                self.base_url, policy_id, page
+            );
+            let resp = self
+                .client
+                .get(&url)
+                .header("project_id", &self.project_id)
+                .send()
+                .await?;
+
+            let status = resp.status().as_u16();
+            if status == 404 {
+                return Ok(out);
+            }
+            if status != 200 {
+                let body = resp.text().await.unwrap_or_default();
+                return Err(BlockfrostError::Api { status, body });
+            }
+
+            let batch: Vec<PolicyAsset> = resp
+                .json()
+                .await
+                .map_err(|e| BlockfrostError::Deserialize(e.to_string()))?;
+
+            if batch.is_empty() {
+                return Ok(out);
+            }
+            let done = batch.len() < 100;
+            out.extend(batch);
+            if done {
+                return Ok(out);
+            }
+            page += 1;
+        }
+    }
+
+    /// Fetch the set of addresses a specific asset has ever been
+    /// observed at, along with the tx hash where it was minted.
+    ///
+    /// The completion witness is a one-shot mint per (learner, course),
+    /// so we expect one entry. The tx hash is what lands in the VC's
+    /// `witness.tx_hash` field.
+    pub async fn get_asset_history(
+        &self,
+        asset_unit: &str,
+    ) -> Result<Option<AssetHistoryEntry>, BlockfrostError> {
+        let url = format!("{}/assets/{}/history?order=asc", self.base_url, asset_unit);
+        let resp = self
+            .client
+            .get(&url)
+            .header("project_id", &self.project_id)
+            .send()
+            .await?;
+
+        let status = resp.status().as_u16();
+        if status == 404 {
+            return Ok(None);
+        }
+        if status != 200 {
+            let body = resp.text().await.unwrap_or_default();
+            return Err(BlockfrostError::Api { status, body });
+        }
+
+        let entries: Vec<AssetHistoryEntry> = resp
+            .json()
+            .await
+            .map_err(|e| BlockfrostError::Deserialize(e.to_string()))?;
+
+        Ok(entries
+            .into_iter()
+            .find(|e| e.action.as_deref() == Some("minted")))
+    }
+
+    /// Fetch tx outputs (including any inline datums) for a confirmed
+    /// transaction. Used by the completion observer to read back the
+    /// `CompletionDatum` carried on the witness output.
+    pub async fn get_tx_utxos(&self, tx_hash: &str) -> Result<TxUtxos, BlockfrostError> {
+        let url = format!("{}/txs/{}/utxos", self.base_url, tx_hash);
+        let resp = self
+            .client
+            .get(&url)
+            .header("project_id", &self.project_id)
+            .send()
+            .await?;
+
+        let status = resp.status().as_u16();
+        if status != 200 {
+            let body = resp.text().await.unwrap_or_default();
+            return Err(BlockfrostError::Api { status, body });
+        }
+
+        resp.json::<TxUtxos>()
+            .await
+            .map_err(|e| BlockfrostError::Deserialize(e.to_string()))
     }
 
     /// Check if a transaction has been confirmed on-chain.

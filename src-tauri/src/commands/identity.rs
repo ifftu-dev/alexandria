@@ -438,6 +438,28 @@ pub async fn get_wallet_info(state: State<'_, AppState>) -> Result<Option<Wallet
     }
 }
 
+/// Derive the local user's `did:key` from the unlocked vault.
+///
+/// Returns `None` when the vault is locked — frontend callers use
+/// that as a signal to show the unlock prompt before surfacing VC
+/// features. Failing to unlock is NOT an error for this command, so
+/// the UI can render in locked-read-only mode.
+#[tauri::command]
+pub async fn get_local_did(state: State<'_, AppState>) -> Result<Option<String>, String> {
+    let ks_guard = state.keystore.lock().await;
+    let Some(ks) = ks_guard.as_ref() else {
+        return Ok(None);
+    };
+    let mnemonic = match ks.retrieve_mnemonic() {
+        Ok(m) => m,
+        Err(_) => return Ok(None),
+    };
+    drop(ks_guard);
+    let w = wallet::wallet_from_mnemonic(&mnemonic).map_err(|e| e.to_string())?;
+    let did = crate::crypto::did::derive_did_key(&w.signing_key);
+    Ok(Some(did.as_str().to_string()))
+}
+
 /// Get the local user's profile.
 #[tauri::command]
 pub async fn get_profile(state: State<'_, AppState>) -> Result<Option<Identity>, String> {

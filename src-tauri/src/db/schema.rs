@@ -47,6 +47,10 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (37, "sentinel_dao_seed", MIGRATION_037),
     (38, "sentinel_priors", MIGRATION_038),
     (39, "sentinel_holdout", MIGRATION_039),
+    (40, "vc_first_cutover", MIGRATION_040),
+    (41, "completion_observer", MIGRATION_041),
+    (42, "completion_attestation", MIGRATION_042),
+    (43, "credential_challenges", MIGRATION_043),
 ];
 
 const MIGRATION_001: &str = r#"
@@ -1727,4 +1731,178 @@ CREATE TABLE IF NOT EXISTS sentinel_holdout_refs (
 
 CREATE INDEX IF NOT EXISTS idx_sentinel_holdout_kind
     ON sentinel_holdout_refs(model_kind);
+"#;
+
+const MIGRATION_040: &str = r#"
+-- ============================================================
+-- Migration 040: VC-first cutover (hard cut)
+--
+-- Retires the SkillProof/evidence_record pipeline. All credential
+-- semantics move to W3C Verifiable Credentials (`credentials` table).
+-- VCs are now auto-earned via Cardano smart-contract witness events
+-- (self-signed by the learner, referencing a confirmed on-chain tx).
+--
+-- Hard cut: the project has not launched, so there is no compat
+-- window. Downstream subsystems (reputation, attestation, challenge)
+-- are scheduled for rebuild against `credentials` in subsequent
+-- migrations and are dropped here rather than left with stale FKs.
+-- ============================================================
+
+-- ---- Drop dependent tables (FK roots dropped last) ----
+
+DROP TABLE IF EXISTS evidence_attestations;
+DROP TABLE IF EXISTS attestation_requirements;
+DROP TABLE IF EXISTS challenge_votes;
+DROP TABLE IF EXISTS evidence_challenges;
+DROP TABLE IF EXISTS reputation_impact_deltas;
+DROP TABLE IF EXISTS reputation_evidence;
+
+-- ---- Drop the SkillProof pipeline ----
+
+DROP TABLE IF EXISTS skill_proof_evidence;
+DROP TABLE IF EXISTS skill_proofs;
+DROP TABLE IF EXISTS evidence_records;
+DROP TABLE IF EXISTS skill_assessments;
+
+-- ---- Extend `credentials` with witness metadata ----
+--
+-- When a Cardano completion validator witnesses a learner's
+-- element-completion tx, the observer auto-issues a self-signed
+-- VC referencing that tx. These columns record the on-chain proof
+-- so verifiers can check the witness independently.
+ALTER TABLE credentials ADD COLUMN witness_tx_hash TEXT;
+ALTER TABLE credentials ADD COLUMN witness_validator_script_hash TEXT;
+ALTER TABLE credentials ADD COLUMN witness_validator_name TEXT;
+ALTER TABLE credentials ADD COLUMN auto_issued INTEGER NOT NULL DEFAULT 0;
+
+CREATE INDEX IF NOT EXISTS idx_credentials_witness_tx
+    ON credentials(witness_tx_hash)
+    WHERE witness_tx_hash IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_credentials_auto_issued
+    ON credentials(auto_issued, subject_did);
+"#;
+
+const MIGRATION_041: &str = r#"
+-- ============================================================
+-- Migration 041: Completion-witness observer state
+--
+-- The observer in `cardano::completion` watches Blockfrost for mints
+-- under the configured completion-validator policy ID. Each time a
+-- new (policy_id, asset_name) pair is seen it's decoded into a
+-- CompletionDatum and handed off to the auto-issuance pipeline which
+-- writes a VC into `credentials`. This table is the observer's
+-- persistent memo so we don't re-issue the same credential on every
+-- tick and so we don't miss mints that happened while the app was
+-- offline.
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS completion_observations (
+    policy_id        TEXT NOT NULL,
+    asset_name_hex   TEXT NOT NULL,
+    tx_hash          TEXT NOT NULL,
+    subject_pubkey   TEXT NOT NULL,  -- hex, 64 chars (32-byte Ed25519 pubkey)
+    course_id        TEXT NOT NULL,  -- hex
+    completion_root  TEXT NOT NULL,  -- hex, 64 chars (32-byte blake2b-256)
+    completion_time  TEXT NOT NULL,  -- ISO 8601 from CompletionDatum.timestamp
+    credential_id    TEXT,           -- populated once the VC is issued
+    observed_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    issued_at        TEXT,
+    PRIMARY KEY (policy_id, asset_name_hex)
+);
+
+CREATE INDEX IF NOT EXISTS idx_completion_obs_subject
+    ON completion_observations(subject_pubkey);
+
+CREATE INDEX IF NOT EXISTS idx_completion_obs_pending
+    ON completion_observations(credential_id) WHERE credential_id IS NULL;
+"#;
+
+const MIGRATION_042: &str = r#"
+-- ============================================================
+-- Migration 042: Completion-attestation gating
+--
+-- Replaces the legacy evidence-cosigning tables (`attestation_requirements`
+-- + `evidence_attestations`, both dropped by migration 040) with a
+-- VC-first model. A DAO can require N attestor signatures on a
+-- learner's completion-witness tx before the observer auto-issues a
+-- Verifiable Credential. Assessors record their signature in
+-- `completion_attestations`.
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS completion_attestation_requirements (
+    course_id          TEXT PRIMARY KEY,
+    required_attestors INTEGER NOT NULL,
+    dao_id             TEXT NOT NULL,
+    set_by_proposal    TEXT,
+    created_at         TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at         TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_completion_req_dao
+    ON completion_attestation_requirements(dao_id);
+
+CREATE TABLE IF NOT EXISTS completion_attestations (
+    id              TEXT PRIMARY KEY,
+    witness_tx_hash TEXT NOT NULL,
+    attestor_did    TEXT NOT NULL,
+    attestor_pubkey TEXT NOT NULL, -- hex, 64 chars
+    signature       TEXT NOT NULL, -- hex, 128 chars (Ed25519 signature)
+    note            TEXT,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(witness_tx_hash, attestor_did)
+);
+
+CREATE INDEX IF NOT EXISTS idx_completion_att_tx
+    ON completion_attestations(witness_tx_hash);
+"#;
+
+const MIGRATION_043: &str = r#"
+-- ============================================================
+-- Migration 043: Credential challenge workflow
+--
+-- Replaces the legacy evidence-challenge tables (`evidence_challenges`
+-- + `challenge_votes`, both dropped by migration 040). A challenger
+-- stakes ADA to dispute a credential; the DAO committee reviews; if
+-- upheld, the credential is revoked via its status list.
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS credential_challenges (
+    id              TEXT PRIMARY KEY,
+    challenger      TEXT NOT NULL,
+    credential_id   TEXT NOT NULL REFERENCES credentials(id) ON DELETE CASCADE,
+    reason          TEXT NOT NULL,
+    stake_lovelace  INTEGER NOT NULL,
+    stake_tx_hash   TEXT,
+    status          TEXT NOT NULL DEFAULT 'pending',
+        -- pending | reviewing | upheld | rejected | expired
+    dao_id          TEXT NOT NULL,
+    resolution_tx   TEXT,
+    signature       TEXT NOT NULL,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    resolved_at     TEXT,
+    expires_at      TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_cred_challenge_credential
+    ON credential_challenges(credential_id);
+CREATE INDEX IF NOT EXISTS idx_cred_challenge_status
+    ON credential_challenges(status);
+CREATE INDEX IF NOT EXISTS idx_cred_challenge_dao
+    ON credential_challenges(dao_id);
+CREATE INDEX IF NOT EXISTS idx_cred_challenge_challenger
+    ON credential_challenges(challenger);
+
+CREATE TABLE IF NOT EXISTS credential_challenge_votes (
+    id              TEXT PRIMARY KEY,
+    challenge_id    TEXT NOT NULL REFERENCES credential_challenges(id) ON DELETE CASCADE,
+    voter           TEXT NOT NULL,
+    upheld          INTEGER NOT NULL,  -- 1 = uphold, 0 = reject
+    reason          TEXT,
+    voted_at        TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(challenge_id, voter)
+);
+
+CREATE INDEX IF NOT EXISTS idx_cred_challenge_votes_challenge
+    ON credential_challenge_votes(challenge_id);
 "#;

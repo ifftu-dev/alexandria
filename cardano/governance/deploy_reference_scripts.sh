@@ -44,6 +44,7 @@ VALIDATORS=(
   "vote_minting.vote_minting.mint:vote_minting"
   "reputation_minting.reputation_minting.mint:reputation_minting"
   "soulbound.soulbound.spend:soulbound"
+  "completion.completion_minting.mint:completion_minting"
 )
 
 echo "=== Alexandria Governance Validator Deployment ==="

@@ -12,8 +12,12 @@ import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { useAuth } from '@/composables/useAuth'
-import { useSkillGraphState, type SkillStatus } from '@/composables/useSkillGraphState'
-import type { SkillInfo, SkillGraphEdge, SkillProof } from '@/types'
+import {
+  useSkillGraphState,
+  earnedSkillIdsFromCredentials,
+  type SkillStatus,
+} from '@/composables/useSkillGraphState'
+import type { SkillInfo, SkillGraphEdge, VerifiableCredential } from '@/types'
 import SkillGraphModal from '@/components/layout/SkillGraphModal.vue'
 
 const router = useRouter()
@@ -28,7 +32,7 @@ const loadError = ref(false)
 const {
   skills,
   edges,
-  proofs,
+  credentials,
   earnedSkillIds,
   earnedCount,
   availableCount,
@@ -72,23 +76,25 @@ async function loadData() {
   try {
     await invoke<number>('bootstrap_public_taxonomy').catch(() => 0)
 
-    const [sk, edgeList, proofList] = await Promise.all([
+    // Local DID may be null when the vault is locked — in that case
+    // we still render the skill graph, just without earned-state
+    // colouring (every skill becomes available/locked by prereqs).
+    const [sk, edgeList, localDid, creds] = await Promise.all([
       invoke<SkillInfo[]>('list_skills', {}),
       invoke<SkillGraphEdge[]>('list_skill_graph_edges', {}),
-      invoke<SkillProof[]>('list_skill_proofs', {}),
+      invoke<string | null>('get_local_did').catch(() => null),
+      invoke<VerifiableCredential[]>('list_credentials', {}).catch(() => []),
     ])
 
     skills.value = sk
     edges.value = edgeList
-    proofs.value = proofList
+    credentials.value = creds
     totalCount.value = sk.length
 
-    // Build earned set from proofs
-    const earnedIds = new Set(proofList.map(p => p.skill_id))
-    earnedSkillIds.value = earnedIds
-    earnedCount.value = earnedIds.size
+    const earned = earnedSkillIdsFromCredentials(creds, localDid)
+    earnedSkillIds.value = earned
+    earnedCount.value = earned.size
 
-    // Build prerequisite map to determine available vs locked
     const prereqMap = new Map<string, string[]>()
     for (const e of edgeList) {
       if (!prereqMap.has(e.skill_id)) prereqMap.set(e.skill_id, [])
@@ -98,9 +104,9 @@ async function loadData() {
     let avail = 0
     let lock = 0
     for (const skill of sk) {
-      if (earnedIds.has(skill.id)) continue
+      if (earned.has(skill.id)) continue
       const prereqs = prereqMap.get(skill.id) ?? []
-      const allMet = prereqs.length === 0 || prereqs.every(p => earnedIds.has(p))
+      const allMet = prereqs.length === 0 || prereqs.every(p => earned.has(p))
       if (allMet) {
         avail++
       } else {

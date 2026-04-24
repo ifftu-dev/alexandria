@@ -2,9 +2,21 @@
 
 > Alexandria — SQLite (local-first)
 
+> **⚠️ Post-VC-first cutover (migration 040, 2026-04-24):** The
+> following tables are **dropped** and should be treated as absent
+> when cross-referencing this document:
+> `skill_proofs`, `skill_proof_evidence`, `evidence_records`,
+> `skill_assessments`, `reputation_evidence`,
+> `reputation_impact_deltas`, `evidence_challenges`,
+> `challenge_votes`, `attestation_requirements`,
+> `evidence_attestations`.
+> The `credentials` table gains four columns:
+> `witness_tx_hash`, `witness_validator_script_hash`,
+> `witness_validator_name`, `auto_issued`. See
+> [`vc-migration.md`](./vc-migration.md) for the full diff.
+
 **Engine**: SQLite (rusqlite 0.38, bundled)
-**Tables**: 66
-**Migrations**: 30
+**Migrations**: 40
 
 ---
 

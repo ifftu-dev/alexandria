@@ -68,79 +68,48 @@ fn check_proficiency(
         return Ok(());
     }
 
-    // Check if the user has any skill_proof at or above min_level for a
-    // skill within the DAO's scope.
-    // Check if ANY proof exists for skills in scope at the required level
-    let has_proof: bool = if scope_type == "subject_field" {
+    // Post-migration 040: eligibility is derived from `credentials`
+    // (skill-kind VCs) instead of `skill_proofs`. The proficiency
+    // level on a SkillClaim serialises as an integer 0..=5 inside
+    // `signed_vc_json` — we read it back via `json_extract` at query
+    // time (no hoisted column needed; governance checks are low-
+    // frequency). The integer maps 1:1 onto `BLOOM_ORDER`:
+    //   0 = remember, 1 = understand, 2 = apply,
+    //   3 = analyze,  4 = evaluate,   5 = create.
+    let min_idx_i64 = min_idx as i64;
+    let has_credential: bool = if scope_type == "subject_field" {
         conn.query_row(
-            "SELECT COUNT(*) > 0 FROM skill_proofs sp \
-             JOIN skills sk ON sk.id = sp.skill_id \
+            "SELECT COUNT(*) > 0 FROM credentials c \
+             JOIN skills sk ON sk.id = c.skill_id \
              JOIN subjects sub ON sub.id = sk.subject_id \
-             WHERE sub.subject_field_id = ?1",
-            params![scope_id],
+             WHERE c.claim_kind = 'skill' AND c.revoked = 0 \
+               AND sub.subject_field_id = ?1 \
+               AND CAST(json_extract(c.signed_vc_json, \
+                   '$.credentialSubject.claim.level') AS INTEGER) >= ?2",
+            params![scope_id, min_idx_i64],
             |row| row.get(0),
         )
         .unwrap_or(false)
     } else {
         conn.query_row(
-            "SELECT COUNT(*) > 0 FROM skill_proofs sp \
-             JOIN skills sk ON sk.id = sp.skill_id \
-             WHERE sk.subject_id = ?1",
-            params![scope_id],
+            "SELECT COUNT(*) > 0 FROM credentials c \
+             JOIN skills sk ON sk.id = c.skill_id \
+             WHERE c.claim_kind = 'skill' AND c.revoked = 0 \
+               AND sk.subject_id = ?1 \
+               AND CAST(json_extract(c.signed_vc_json, \
+                   '$.credentialSubject.claim.level') AS INTEGER) >= ?2",
+            params![scope_id, min_idx_i64],
             |row| row.get(0),
         )
         .unwrap_or(false)
     };
 
-    // For the "remember" level (minimum), just having any proof in scope is enough
-    if min_idx == 0 && has_proof {
-        return Ok(());
-    }
-
-    // For higher levels, check the actual proficiency level of proofs
-    let max_level: Option<String> = if scope_type == "subject_field" {
-        conn.query_row(
-            "SELECT sp.proficiency_level FROM skill_proofs sp \
-             JOIN skills sk ON sk.id = sp.skill_id \
-             JOIN subjects sub ON sub.id = sk.subject_id \
-             WHERE sub.subject_field_id = ?1 \
-             ORDER BY CASE sp.proficiency_level \
-               WHEN 'create' THEN 5 WHEN 'evaluate' THEN 4 \
-               WHEN 'analyze' THEN 3 WHEN 'apply' THEN 2 \
-               WHEN 'understand' THEN 1 ELSE 0 END DESC LIMIT 1",
-            params![scope_id],
-            |row| row.get(0),
-        )
-        .ok()
+    if has_credential {
+        Ok(())
     } else {
-        conn.query_row(
-            "SELECT sp.proficiency_level FROM skill_proofs sp \
-             JOIN skills sk ON sk.id = sp.skill_id \
-             WHERE sk.subject_id = ?1 \
-             ORDER BY CASE sp.proficiency_level \
-               WHEN 'create' THEN 5 WHEN 'evaluate' THEN 4 \
-               WHEN 'analyze' THEN 3 WHEN 'apply' THEN 2 \
-               WHEN 'understand' THEN 1 ELSE 0 END DESC LIMIT 1",
-            params![scope_id],
-            |row| row.get(0),
-        )
-        .ok()
-    };
-
-    match max_level {
-        Some(level) => {
-            let actual_idx = BLOOM_ORDER.iter().position(|&l| l == level).unwrap_or(0);
-            if actual_idx >= min_idx {
-                Ok(())
-            } else {
-                Err(format!(
-                    "Insufficient proficiency: requires '{min_level}' but your highest is '{level}'"
-                ))
-            }
-        }
-        None => Err(format!(
-            "Insufficient proficiency: requires '{min_level}' in {scope_type} '{scope_id}' — no qualifying skill proofs found"
-        )),
+        Err(format!(
+            "Insufficient proficiency: requires '{min_level}' in {scope_type} '{scope_id}' — no qualifying credentials found"
+        ))
     }
 }
 
@@ -1476,11 +1445,21 @@ mod tests {
         let db = setup_db();
         let conn = db.conn();
 
-        // Count DAOs
+        // `setup_db` inserts one DAO (`dao1`). Migration 037 seeds the
+        // Sentinel DAO on any fresh database, so the total count is 2.
         let count: i64 = conn
             .query_row("SELECT COUNT(*) FROM governance_daos", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(count, 1);
+        assert_eq!(count, 2);
+
+        let dao1_exists: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM governance_daos WHERE id = 'dao1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(dao1_exists);
     }
 
     #[test]

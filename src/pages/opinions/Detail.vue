@@ -7,17 +7,13 @@ import {
   AppBadge,
   AppAlert,
   AppSpinner,
-  AppModal,
-  AppTextarea,
-  AppInput,
   ProvenanceBadge,
 } from '@/components/ui'
 import VideoPlayer from '@/components/course/VideoPlayer.vue'
 import type {
   OpinionRow,
   SubjectFieldInfo,
-  SkillProof,
-  SubmitChallengeParams,
+  VerifiableCredential,
 } from '@/types'
 
 const route = useRoute()
@@ -31,17 +27,21 @@ const error = ref('')
 // Local identity (to know if we're looking at our own post)
 const selfStakeAddress = ref<string>('')
 
-// Challenge modal
-const showChallenge = ref(false)
-const challengeReason = ref('')
-const challengeStake = ref<number>(5) // ADA
-const challengeDaoId = ref('')
-const challengeSubmitting = ref(false)
-const challengeError = ref('')
-
 const isOwner = computed(
   () => opinion.value !== null && opinion.value.author_address === selfStakeAddress.value,
 )
+
+// Credentials the author staked on this opinion, fetched by id.
+// Unknown / unsynced credentials simply render as raw id badges.
+const linkedCredentials = ref<VerifiableCredential[]>([])
+
+const bloomOrder = ['remember', 'understand', 'apply', 'analyze', 'evaluate', 'create']
+
+function skillClaim(vc: VerifiableCredential) {
+  const claim = vc.credential_subject.claim
+  if (claim.kind !== 'skill') return null
+  return claim
+}
 
 async function loadOpinion() {
   loading.value = true
@@ -55,14 +55,23 @@ async function loadOpinion() {
     }
     opinion.value = row
 
-    // Load supporting info in parallel. Any individual failure is
-    // non-fatal — the page still renders.
     const [fields, identity] = await Promise.all([
       invoke<SubjectFieldInfo[]>('list_subject_fields', {}).catch(() => []),
       invoke<{ stake_address: string } | null>('get_profile').catch(() => null),
     ])
     subjectField.value = fields.find((f) => f.id === row.subject_field_id) ?? null
     selfStakeAddress.value = identity?.stake_address ?? ''
+
+    // Resolve each referenced credential locally — any that haven't
+    // synced to this peer just show as raw ids below.
+    const fetched = await Promise.all(
+      row.credential_proof_ids.map((cid) =>
+        invoke<VerifiableCredential | null>('get_credential', { credentialId: cid }).catch(
+          () => null,
+        ),
+      ),
+    )
+    linkedCredentials.value = fetched.filter((vc): vc is VerifiableCredential => vc != null)
   } catch (e) {
     error.value = String(e)
   } finally {
@@ -83,46 +92,6 @@ async function withdraw() {
   }
 }
 
-async function submitChallenge() {
-  if (!opinion.value) return
-  if (challengeReason.value.trim().length < 10) {
-    challengeError.value = 'Please give a substantive reason (≥ 10 characters).'
-    return
-  }
-  if (challengeStake.value < 5) {
-    challengeError.value = 'Minimum stake is 5 ADA.'
-    return
-  }
-  if (!challengeDaoId.value.trim()) {
-    challengeError.value = 'Please provide a DAO ID to review the challenge.'
-    return
-  }
-
-  challengeSubmitting.value = true
-  challengeError.value = ''
-  try {
-    const params: SubmitChallengeParams = {
-      target_type: 'opinion',
-      target_ids: [opinion.value.id],
-      evidence_cids: [],
-      reason: challengeReason.value.trim(),
-      stake_lovelace: Math.round(challengeStake.value * 1_000_000),
-      dao_id: challengeDaoId.value.trim(),
-      learner_address: opinion.value.author_address,
-    }
-    await invoke('submit_evidence_challenge', { params })
-    showChallenge.value = false
-    // Reload the opinion — the UI doesn't change until resolution, but we
-    // want the user to see any `withdrawn=1` flip that might happen if a
-    // fast-track handler fires.
-    await loadOpinion()
-  } catch (e) {
-    challengeError.value = String(e)
-  } finally {
-    challengeSubmitting.value = false
-  }
-}
-
 function formatDate(iso: string | null | undefined): string {
   if (!iso) return ''
   try {
@@ -136,28 +105,14 @@ function formatDate(iso: string | null | undefined): string {
   }
 }
 
-function formatProof(p: SkillProof): string {
-  return `${p.skill_id} (${p.proficiency_level})`
-}
-
-// Author's credential proofs (looked up by ID — may not all exist
-// locally if we haven't synced them yet)
-const linkedProofs = ref<SkillProof[]>([])
-async function loadLinkedProofs() {
-  if (!opinion.value) return
-  try {
-    const all = await invoke<SkillProof[]>('list_skill_proofs', {})
-    linkedProofs.value = all.filter((p) =>
-      opinion.value?.credential_proof_ids.includes(p.id),
-    )
-  } catch {
-    // non-fatal
-  }
+function unresolvedIds(): string[] {
+  if (!opinion.value) return []
+  const knownIds = new Set(linkedCredentials.value.map((vc) => vc.id))
+  return opinion.value.credential_proof_ids.filter((id) => !knownIds.has(id))
 }
 
 onMounted(async () => {
   await loadOpinion()
-  await loadLinkedProofs()
 })
 </script>
 
@@ -174,144 +129,91 @@ onMounted(async () => {
       Back
     </button>
 
-    <div v-if="loading" class="flex justify-center py-12">
-      <AppSpinner />
-    </div>
-
+    <AppSpinner v-if="loading" />
     <AppAlert v-else-if="error" type="error">{{ error }}</AppAlert>
 
-    <div v-else-if="opinion">
-      <!-- Withdrawn banner -->
-      <AppAlert
-        v-if="opinion.withdrawn"
-        type="warning"
-        class="mb-4"
-      >
-        This opinion has been withdrawn<template v-if="opinion.withdrawn_reason">
-          ({{ opinion.withdrawn_reason }})</template>.
-      </AppAlert>
-
-      <!-- Video player -->
-      <div class="rounded-xl overflow-hidden bg-black mb-6">
-        <VideoPlayer :content-cid="opinion.video_cid" :title="opinion.title" />
-      </div>
-
-      <!-- Meta -->
-      <div class="flex items-start gap-4 mb-4">
+    <div v-else-if="opinion" class="space-y-6">
+      <header class="flex items-start justify-between gap-3">
         <div class="min-w-0 flex-1">
-          <div class="flex items-center gap-2 mb-1">
-            <h1 class="text-2xl font-bold text-foreground">{{ opinion.title }}</h1>
-            <ProvenanceBadge :provenance="opinion.provenance" />
-          </div>
-          <div class="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
+          <div class="flex items-center gap-2 mb-2 flex-wrap">
             <AppBadge v-if="subjectField" variant="secondary">
               {{ subjectField.icon_emoji ? subjectField.icon_emoji + ' ' : '' }}{{ subjectField.name }}
             </AppBadge>
-            <span>·</span>
-            <span>{{ formatDate(opinion.published_at) }}</span>
-            <span v-if="opinion.duration_seconds">·</span>
-            <span v-if="opinion.duration_seconds">
-              {{ Math.round(opinion.duration_seconds / 60) }} min
+            <ProvenanceBadge :provenance="opinion.provenance" />
+          </div>
+          <h1 class="text-2xl font-bold text-foreground">{{ opinion.title }}</h1>
+          <p v-if="opinion.summary" class="mt-2 text-sm text-muted-foreground">
+            {{ opinion.summary }}
+          </p>
+          <p class="mt-2 text-xs text-muted-foreground font-mono">
+            by {{ opinion.author_address }} · {{ formatDate(opinion.published_at) }}
+          </p>
+        </div>
+        <AppButton v-if="isOwner" variant="ghost" @click="withdraw">Withdraw</AppButton>
+      </header>
+
+      <div v-if="opinion.video_cid" class="rounded-xl overflow-hidden bg-black">
+        <VideoPlayer :content-cid="opinion.video_cid" :title="opinion.title" />
+      </div>
+
+      <div class="rounded-xl border border-border bg-card p-5 space-y-3">
+        <h3 class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          Staked credentials
+        </h3>
+
+        <div v-if="opinion.credential_proof_ids.length === 0" class="text-xs text-muted-foreground">
+          No credentials referenced.
+        </div>
+
+        <div v-else class="space-y-3">
+          <div
+            v-for="vc in linkedCredentials"
+            :key="vc.id"
+            class="rounded-lg bg-muted/30 p-3"
+          >
+            <div class="flex items-center justify-between gap-3">
+              <div class="min-w-0">
+                <div class="text-sm font-medium text-foreground">
+                  <template v-if="skillClaim(vc)">
+                    {{ skillClaim(vc)!.skill_id }}
+                    <AppBadge variant="secondary" class="ml-2 text-[0.6rem]">
+                      {{ bloomOrder[skillClaim(vc)!.level] ?? 'apply' }}
+                    </AppBadge>
+                  </template>
+                  <template v-else>
+                    {{ vc.type[vc.type.length - 1] }}
+                  </template>
+                </div>
+                <div class="text-[11px] text-muted-foreground font-mono mt-1">
+                  {{ vc.id }}
+                </div>
+              </div>
+              <div class="text-right flex-shrink-0 space-y-1">
+                <AppBadge v-if="vc.witness" variant="success" class="text-[0.6rem]">
+                  on-chain witness
+                </AppBadge>
+                <div class="text-[10px] text-muted-foreground">
+                  {{ vc.issuance_date.slice(0, 10) }}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div
+            v-if="unresolvedIds().length > 0"
+            class="text-xs text-muted-foreground"
+          >
+            Unsynced credentials:
+            <span
+              v-for="pid in unresolvedIds()"
+              :key="pid"
+              class="inline-block ml-1 font-mono"
+            >
+              {{ pid.slice(0, 16) }}…
             </span>
           </div>
         </div>
-
-        <div class="flex gap-2">
-          <AppButton
-            v-if="isOwner && !opinion.withdrawn"
-            variant="ghost"
-            size="sm"
-            @click="withdraw"
-          >
-            Withdraw
-          </AppButton>
-          <AppButton
-            v-if="!isOwner && !opinion.withdrawn"
-            variant="ghost"
-            size="sm"
-            @click="showChallenge = true"
-          >
-            <svg class="w-4 h-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M3 3v18h18" />
-              <path stroke-linecap="round" stroke-linejoin="round" d="M3 12l6-6 4 4 8-8" />
-            </svg>
-            Challenge
-          </AppButton>
-        </div>
-      </div>
-
-      <!-- Summary -->
-      <p v-if="opinion.summary" class="text-base text-foreground mb-6 leading-relaxed">
-        {{ opinion.summary }}
-      </p>
-
-      <!-- Author + credentials -->
-      <div class="rounded-xl border border-border bg-card p-5 mb-6">
-        <h2 class="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-3">
-          Author
-        </h2>
-        <code class="block text-xs text-muted-foreground break-all mb-4">
-          {{ opinion.author_address }}
-        </code>
-
-        <h3 class="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
-          Staked credentials
-        </h3>
-        <div v-if="linkedProofs.length === 0" class="text-xs text-muted-foreground">
-          The referenced skill proofs haven't synced to this node yet. The
-          signature is verified, but we can't display credential details.
-        </div>
-        <div v-else class="flex flex-wrap gap-2">
-          <AppBadge v-for="p in linkedProofs" :key="p.id" variant="success">
-            {{ formatProof(p) }}
-          </AppBadge>
-        </div>
       </div>
     </div>
-
-    <!-- Challenge modal -->
-    <AppModal :open="showChallenge" title="Challenge this opinion" @close="showChallenge = false">
-      <div class="space-y-4">
-        <AppAlert type="info">
-          Challenging costs a minimum 5 ADA stake. If the DAO committee upholds
-          your challenge, the opinion is marked withdrawn on all honoring
-          nodes. If rejected, your stake is slashed.
-        </AppAlert>
-
-        <AppTextarea
-          v-model="challengeReason"
-          label="Reason"
-          placeholder="Why does this opinion merit takedown? Be specific."
-          :rows="4"
-        />
-
-        <AppInput
-          v-model="challengeDaoId"
-          label="DAO ID"
-          placeholder="ID of the subject-field DAO that reviews this challenge"
-        />
-
-        <div>
-          <label class="mb-1 block text-sm font-medium text-foreground">
-            Stake (ADA)
-          </label>
-          <input
-            v-model.number="challengeStake"
-            type="number"
-            min="5"
-            step="0.5"
-            class="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
-          />
-        </div>
-
-        <AppAlert v-if="challengeError" type="error">{{ challengeError }}</AppAlert>
-      </div>
-      <template #footer>
-        <AppButton variant="ghost" @click="showChallenge = false">Cancel</AppButton>
-        <AppButton :loading="challengeSubmitting" @click="submitChallenge">
-          Submit challenge
-        </AppButton>
-      </template>
-    </AppModal>
   </div>
 </template>

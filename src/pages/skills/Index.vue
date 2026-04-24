@@ -4,7 +4,14 @@ import { useRouter } from 'vue-router'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { useSkillGraphHover } from '@/composables/useSkillGraphHover'
 import { AppBadge, AppTabs } from '@/components/ui'
-import type { SubjectFieldInfo, SubjectInfo, SkillInfo, SkillGraphEdge, SkillProof } from '@/types'
+import type {
+  SubjectFieldInfo,
+  SubjectInfo,
+  SkillInfo,
+  SkillGraphEdge,
+  VerifiableCredential,
+} from '@/types'
+import { earnedSkillIdsFromCredentials } from '@/composables/useSkillGraphState'
 
 const { invoke } = useLocalApi()
 const router = useRouter()
@@ -14,7 +21,8 @@ const fields = ref<SubjectFieldInfo[]>([])
 const subjects = ref<SubjectInfo[]>([])
 const skills = ref<SkillInfo[]>([])
 const graphEdges = ref<SkillGraphEdge[]>([])
-const proofs = ref<SkillProof[]>([])
+const myCredentials = ref<VerifiableCredential[]>([])
+const localDid = ref<string | null>(null)
 
 const search = ref('')
 const selectedField = ref<string | null>(null)
@@ -24,25 +32,27 @@ const activeTab = ref('graph')
 const tabs = [
   { key: 'graph', label: 'My Graph' },
   { key: 'browse', label: 'Browse Taxonomy' },
-  { key: 'proofs', label: 'My Proofs' },
+  { key: 'credentials', label: 'My Credentials' },
 ]
 
 onMounted(async () => {
   try {
     await invoke<number>('bootstrap_public_taxonomy', {}).catch(() => 0)
 
-    const [f, s, sk, edges, p] = await Promise.all([
+    const [f, s, sk, edges, did, creds] = await Promise.all([
       invoke<SubjectFieldInfo[]>('list_subject_fields', {}),
       invoke<SubjectInfo[]>('list_subjects', {}),
       invoke<SkillInfo[]>('list_skills', {}),
       invoke<SkillGraphEdge[]>('list_skill_graph_edges', {}),
-      invoke<SkillProof[]>('list_skill_proofs', {}),
+      invoke<string | null>('get_local_did').catch(() => null),
+      invoke<VerifiableCredential[]>('list_credentials', {}).catch(() => []),
     ])
     fields.value = f
     subjects.value = s
     skills.value = sk
     graphEdges.value = edges
-    proofs.value = p
+    localDid.value = did
+    myCredentials.value = creds
   } catch (e) {
     console.error('Failed to load taxonomy:', e)
   } finally {
@@ -79,15 +89,6 @@ const filteredSkills = computed(() => {
   return result
 })
 
-// Proof lookup by skill ID
-const proofMap = computed(() => {
-  const map = new Map<string, SkillProof>()
-  for (const p of proofs.value) {
-    map.set(p.skill_id, p)
-  }
-  return map
-})
-
 // Stats
 const totalSkills = computed(() => skills.value.length)
 
@@ -115,7 +116,16 @@ const bloomColors: Record<string, string> = {
 
 const bloomOrder = ['remember', 'understand', 'apply', 'analyze', 'evaluate', 'create']
 
-const earnedSkillIdSet = computed(() => new Set(proofs.value.map((p) => p.skill_id)))
+const earnedSkillIdSet = computed(() =>
+  earnedSkillIdsFromCredentials(myCredentials.value, localDid.value),
+)
+
+const mySkillCredentials = computed(() =>
+  myCredentials.value.filter((vc) => {
+    if (localDid.value && vc.credential_subject.id !== localDid.value) return false
+    return vc.credential_subject.claim.kind === 'skill'
+  }),
+)
 
 const prereqMap = computed(() => {
   const map = new Map<string, string[]>()
@@ -494,13 +504,6 @@ onBeforeUnmount(() => {
                     </div>
                   </div>
 
-                  <!-- Proof indicator -->
-                  <div v-if="proofMap.get(skill.id)" class="text-right flex-shrink-0">
-                    <p class="font-mono text-sm font-bold text-primary">
-                      {{ (proofMap.get(skill.id)!.confidence * 100).toFixed(0) }}%
-                    </p>
-                    <p class="text-[0.6rem] text-muted-foreground">proven</p>
-                  </div>
                 </div>
               </div>
             </div>
@@ -542,52 +545,57 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <!-- ============ PROOFS TAB ============ -->
-      <div v-if="activeTab === 'proofs'">
-        <div v-if="proofs.length === 0" class="py-16 text-center">
+      <!-- ============ CREDENTIALS TAB ============ -->
+      <div v-if="activeTab === 'credentials'">
+        <div v-if="mySkillCredentials.length === 0" class="py-16 text-center">
           <div class="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-primary/10">
             <svg class="h-8 w-8 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
               <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12c0 1.268-.63 2.39-1.593 3.068a3.745 3.745 0 01-1.043 3.296 3.745 3.745 0 01-3.296 1.043A3.745 3.745 0 0112 21c-1.268 0-2.39-.63-3.068-1.593a3.746 3.746 0 01-3.296-1.043 3.745 3.745 0 01-1.043-3.296A3.745 3.745 0 013 12c0-1.268.63-2.39 1.593-3.068a3.745 3.745 0 011.043-3.296 3.746 3.746 0 013.296-1.043A3.746 3.746 0 0112 3c1.268 0 2.39.63 3.068 1.593a3.746 3.746 0 013.296 1.043 3.746 3.746 0 011.043 3.296A3.745 3.745 0 0121 12z" />
             </svg>
           </div>
-          <h3 class="text-lg font-semibold text-foreground">No skill proofs yet</h3>
+          <h3 class="text-lg font-semibold text-foreground">No credentials yet</h3>
           <p class="mt-1 text-sm text-muted-foreground max-w-md mx-auto">
-            Complete course assessments to earn skill proofs. Each proof attests proficiency at a specific Bloom's taxonomy level.
+            Verifiable credentials you earn will appear here. Complete a course whose elements
+            can submit a Cardano completion witness to auto-earn your first VC.
           </p>
         </div>
 
         <div v-else class="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div
-            v-for="proof in proofs"
-            :key="proof.id"
+            v-for="vc in mySkillCredentials"
+            :key="vc.id"
             class="rounded-xl bg-card shadow-sm p-5 cursor-pointer transition-shadow hover:shadow-md"
-            @click="goToSkill(proof.skill_id)"
+            @click="goToSkill((vc.credential_subject.claim as { kind: 'skill'; skill_id: string }).skill_id)"
           >
-            <div class="flex items-start justify-between mb-3">
+            <div class="flex items-start justify-between mb-3 gap-3">
               <div class="min-w-0">
                 <div class="text-sm font-medium truncate text-foreground">
-                  {{ skills.find(s => s.id === proof.skill_id)?.name ?? proof.skill_id }}
+                  {{ skills.find(s => s.id === (vc.credential_subject.claim as { kind: 'skill'; skill_id: string }).skill_id)?.name ?? (vc.credential_subject.claim as { kind: 'skill'; skill_id: string }).skill_id }}
                 </div>
-                <AppBadge :variant="(bloomColors[proof.proficiency_level] as any) ?? 'secondary'" class="mt-1.5">
-                  {{ proof.proficiency_level }}
+                <AppBadge
+                  :variant="(bloomColors[bloomOrder[(vc.credential_subject.claim as { kind: 'skill'; level: number }).level] ?? 'apply'] as any) ?? 'secondary'"
+                  class="mt-1.5"
+                >
+                  {{ bloomOrder[(vc.credential_subject.claim as { kind: 'skill'; level: number }).level] ?? 'apply' }}
                 </AppBadge>
               </div>
               <div class="text-right flex-shrink-0">
                 <div class="font-mono text-lg font-bold text-primary">
-                  {{ (proof.confidence * 100).toFixed(0) }}%
+                  {{ (((vc.credential_subject.claim as { kind: 'skill'; score: number }).score) * 100).toFixed(0) }}%
                 </div>
-                <div class="text-[10px] text-muted-foreground">confidence</div>
+                <div class="text-[10px] text-muted-foreground">score</div>
               </div>
             </div>
-            <div class="h-1.5 rounded-full bg-muted/30 overflow-hidden">
-              <div
-                class="h-full rounded-full bg-primary transition-all duration-500"
-                :style="{ width: `${proof.confidence * 100}%` }"
-              />
-            </div>
-            <div class="flex items-center justify-between mt-2.5 text-xs text-muted-foreground">
-              <span>{{ proof.evidence_count }} evidence</span>
-              <span>{{ proof.updated_at }}</span>
+            <div class="flex flex-wrap gap-1.5 mt-2.5">
+              <AppBadge v-if="vc.witness" variant="success" class="text-[0.6rem]">
+                on-chain witness
+              </AppBadge>
+              <AppBadge v-else variant="secondary" class="text-[0.6rem]">
+                {{ vc.type[vc.type.length - 1] }}
+              </AppBadge>
+              <span class="text-[10px] text-muted-foreground font-mono">
+                {{ vc.issuance_date.slice(0, 10) }}
+              </span>
             </div>
           </div>
         </div>

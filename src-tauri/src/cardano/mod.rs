@@ -1,11 +1,12 @@
 pub mod anchor_queue;
 pub mod anchor_tx;
 pub mod blockfrost;
+pub mod completion;
+pub mod completion_tx_builder;
 pub mod gov_tx_builder;
 pub mod governance;
 pub mod onchain_queue;
 pub mod plutus_data;
-pub mod policy;
 pub mod script_refs;
 pub mod snapshot;
 pub mod soulbound_tx_builder;

@@ -8,20 +8,18 @@
 //! Merge strategy:
 //!   - LWW (last-writer-wins): enrollments, element_progress, course_notes,
 //!     integrity_sessions, local_identity
-//!   - Append-only union: evidence_records, skill_proof_evidence
-//!   - Derived (not synced): skill_proofs, reputation_assertions —
-//!     recomputed locally after evidence sync
+//!   - Derived (not synced): reputation_assertions — recomputed locally
+//!     from credentials after sync
+//!
+//! Post-migration 040: `evidence_records` and `skill_proof_evidence`
+//! were retired together with the SkillProof pipeline. Auto-earned VCs
+//! are the new canonical artifact; `credentials` sync is tracked as
+//! follow-up work (see memory: project_vc_first_architecture.md).
 
 use serde::{Deserialize, Serialize};
 
 /// Tables eligible for cross-device sync.
-pub const SYNCABLE_TABLES: &[&str] = &[
-    "enrollments",
-    "element_progress",
-    "course_notes",
-    "evidence_records",
-    "skill_proof_evidence",
-];
+pub const SYNCABLE_TABLES: &[&str] = &["enrollments", "element_progress", "course_notes"];
 
 /// Information about a known device.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -197,7 +195,7 @@ mod tests {
 
     #[test]
     fn syncable_tables_count() {
-        assert_eq!(SYNCABLE_TABLES.len(), 5);
+        assert_eq!(SYNCABLE_TABLES.len(), 3);
     }
 
     #[test]
@@ -205,8 +203,6 @@ mod tests {
         assert!(SYNCABLE_TABLES.contains(&"enrollments"));
         assert!(SYNCABLE_TABLES.contains(&"element_progress"));
         assert!(SYNCABLE_TABLES.contains(&"course_notes"));
-        assert!(SYNCABLE_TABLES.contains(&"evidence_records"));
-        assert!(SYNCABLE_TABLES.contains(&"skill_proof_evidence"));
     }
 
     #[test]

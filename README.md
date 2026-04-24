@@ -26,9 +26,9 @@
 
 - **Courses & Assessments** — Rich HTML, video, and interactive quiz content with per-element progress tracking, notes, and skill tagging.
 - **Public Content Availability** — Published course media can resolve from public URLs (with local BLAKE3 caching), and fresh installs bootstrap a bundled public catalog before network discovery catches up.
-- **Skill Proofs** — Learners earn verifiable credentials scoped to individual skills at Bloom's taxonomy levels (remember through create), aggregated from weighted evidence. The canonical credential record is a signed W3C VC.
+- **Verifiable Credentials** — Learners earn W3C Verifiable Credentials scoped to individual skills at Bloom's taxonomy levels (remember through create). Credentials are auto-earned: a Cardano completion validator witnesses the learner's element-completion tx, and a local observer auto-issues a self-signed VC referencing that on-chain witness. See [`docs/vc-migration.md`](docs/vc-migration.md) for the current architectural state.
 - **Reputation** — Instructor impact derived from learner outcomes, scoped to `(subject, role, skill, proficiency_level)`. Distribution-based with confidence bounds — no global scores.
-- **Cardano Anchoring & Wrappers** — Optional on-chain artifacts are implemented: native-script NFT wrappers for legacy `skill_proof` records, course/governance metadata mints, and VC integrity anchoring. NFTs are not the canonical credential record. Reputation snapshots and soulbound-style flows exist in the data model and tx builders, but validator-backed reference-script deployment is still pending.
+- **Cardano's role** — Two: (1) VC integrity anchoring (BLAKE3-of-VC metadata txs), (2) DAO governance (elections, proposals, reputation snapshots, soulbound reputation tokens). A new `completion.ak` validator will witness learner completion events to authorize VC issuance. Legacy skill-proof / course-registration NFT minting has been retired.
 - **Governance** — DAOs mirror the knowledge taxonomy. Elections, proposals, committee-gated taxonomy updates, and P2P propagation are implemented locally; validator-backed on-chain enforcement is not fully deployed yet.
 - **Assessment Integrity** — Sentinel anti-cheat uses a keystroke autoencoder, mouse trajectory CNN, and face embedder. All processing stays client-side; snapshots are stored locally and feed downstream trust decisions without exposing raw biometrics.
 - **Peer-to-Peer** — Fully decentralized via libp2p with a private Alexandria Kademlia DHT, GossipSub, Circuit Relay v2, AutoNAT, and DCUtR. Devices discover each other through a relay bootstrap node — no central server required.
@@ -51,7 +51,7 @@ alexandria/
 │       ├── db/       # SQLite (66 tables, 30 migrations, seed data)
 │       ├── diag.rs   # File-based diagnostic logger + panic hook
 │       ├── domain/   # Business logic (courses, tutorials, opinions, vc, evidence, governance, ...)
-│       ├── evidence/ # Aggregation, attestation, challenges, reputation
+│       ├── evidence/ # Proficiency taxonomy + thresholds (reputation/attestation/challenge disabled post-VC-first cutover)
 │       ├── ipfs/     # iroh node, BLAKE3 content-addressed blobs, CID resolution
 │       ├── p2p/      # libp2p swarm — DHT, relay, gossip, peer exchange, vc-fetch
 │       └── tutoring/ # Live audio/video tutoring (desktop + mobile managers)

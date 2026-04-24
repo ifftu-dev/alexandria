@@ -1,29 +1,55 @@
-//! IPC commands for the reputation engine.
+//! Reputation IPC (VC-first rebuild).
 //!
-//! Exposes the full whitepaper reputation computation to the frontend:
-//!   - Query reputation assertions with filters
-//!   - Compute reputation for a specific actor (on-demand recompute)
-//!   - Get instructor rankings per skill scope
-//!   - Verify a reputation assertion against its evidence chain
+//! Exposes the rebuilt reputation engine to the frontend:
+//!   * `list_reputation_rows` — query the stored `reputation_assertions`
+//!     with optional filters.
+//!   * `recompute_reputation_for_subject` — replay every accepted
+//!     credential for a given subject DID, producing a fresh learner
+//!     row (and any issuer rows if that subject also issued credentials).
+//!
+//! The heavy whitepaper pipeline (distribution metrics, impact
+//! deltas, full replay, verification) is deferred — it can be
+//! layered on top of the simpler VC-sourced engine if/when there's
+//! enough accumulated credential volume to warrant it.
 
+use rusqlite::params;
+use serde::{Deserialize, Serialize};
 use tauri::State;
 
-use crate::domain::reputation::{
-    DistributionMetrics, FullReputationAssertion, InstructorRanking, RecomputeResult,
-    ReputationQuery, VerificationResult,
-};
 use crate::evidence::reputation;
 use crate::AppState;
 
-/// Get reputation assertions with optional filters.
-///
-/// Supports filtering by actor_address, role, skill_id, proficiency_level.
-/// Returns full assertions including distribution metrics.
+/// A single reputation row surfaced to the frontend. Mirrors the
+/// subset of columns the VC-sourced engine populates (the legacy
+/// distribution columns stay `NULL` and are omitted from the shape).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReputationRow {
+    pub id: String,
+    pub actor_address: String,
+    pub role: String,
+    pub skill_id: Option<String>,
+    pub proficiency_level: Option<String>,
+    pub score: f64,
+    pub evidence_count: i64,
+    pub computation_spec: String,
+    pub updated_at: String,
+}
+
+/// IPC filter for [`list_reputation_rows`]. All fields are optional.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct ReputationQuery {
+    pub actor: Option<String>,
+    pub role: Option<String>,
+    pub skill_id: Option<String>,
+    pub proficiency_level: Option<String>,
+    pub limit: Option<i64>,
+}
+
 #[tauri::command]
-pub async fn get_reputation(
+pub async fn list_reputation_rows(
     state: State<'_, AppState>,
     query: ReputationQuery,
-) -> Result<Vec<FullReputationAssertion>, String> {
+) -> Result<Vec<ReputationRow>, String> {
     let db_guard = state
         .db
         .lock()
@@ -31,30 +57,28 @@ pub async fn get_reputation(
     let db = db_guard.as_ref().ok_or("database not initialized")?;
     let conn = db.conn();
 
-    // Build dynamic WHERE clause
     let mut conditions: Vec<String> = Vec::new();
-    let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-    let mut idx = 1;
-
-    if let Some(ref addr) = query.actor_address {
-        conditions.push(format!("actor_address = ?{idx}"));
-        param_values.push(Box::new(addr.clone()));
-        idx += 1;
+    let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+    let mut i = 1;
+    if let Some(ref v) = query.actor {
+        conditions.push(format!("actor_address = ?{i}"));
+        values.push(Box::new(v.clone()));
+        i += 1;
     }
-    if let Some(ref role) = query.role {
-        conditions.push(format!("role = ?{idx}"));
-        param_values.push(Box::new(role.clone()));
-        idx += 1;
+    if let Some(ref v) = query.role {
+        conditions.push(format!("role = ?{i}"));
+        values.push(Box::new(v.clone()));
+        i += 1;
     }
-    if let Some(ref skill) = query.skill_id {
-        conditions.push(format!("skill_id = ?{idx}"));
-        param_values.push(Box::new(skill.clone()));
-        idx += 1;
+    if let Some(ref v) = query.skill_id {
+        conditions.push(format!("skill_id = ?{i}"));
+        values.push(Box::new(v.clone()));
+        i += 1;
     }
-    if let Some(ref level) = query.proficiency_level {
-        conditions.push(format!("proficiency_level = ?{idx}"));
-        param_values.push(Box::new(level.clone()));
-        idx += 1;
+    if let Some(ref v) = query.proficiency_level {
+        conditions.push(format!("proficiency_level = ?{i}"));
+        values.push(Box::new(v.clone()));
+        i += 1;
     }
 
     let where_clause = if conditions.is_empty() {
@@ -62,179 +86,236 @@ pub async fn get_reputation(
     } else {
         format!("WHERE {}", conditions.join(" AND "))
     };
-
-    let limit = query.limit.unwrap_or(100);
     let sql = format!(
         "SELECT id, actor_address, role, skill_id, proficiency_level, \
-         score, evidence_count, median_impact, impact_p25, impact_p75, \
-         learner_count, impact_variance, window_start, window_end, \
-         computation_spec, updated_at \
+                score, evidence_count, computation_spec, updated_at \
          FROM reputation_assertions {where_clause} \
-         ORDER BY updated_at DESC LIMIT ?{idx}"
+         ORDER BY updated_at DESC LIMIT ?{i}"
     );
+    let limit = query.limit.unwrap_or(100);
+    values.push(Box::new(limit));
 
-    param_values.push(Box::new(limit));
-
-    let params_ref: Vec<&dyn rusqlite::types::ToSql> =
-        param_values.iter().map(|v| v.as_ref()).collect();
+    let params_ref: Vec<&dyn rusqlite::types::ToSql> = values.iter().map(|v| v.as_ref()).collect();
 
     let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
-
-    let assertions = stmt
+    let rows = stmt
         .query_map(params_ref.as_slice(), |row| {
-            let role: String = row.get(2)?;
-            let median: Option<f64> = row.get(7)?;
-            let p25: Option<f64> = row.get(8)?;
-            let p75: Option<f64> = row.get(9)?;
-            let lc: Option<i64> = row.get(10)?;
-            let var: Option<f64> = row.get(11)?;
-
-            let distribution = if role == "instructor" && median.is_some() {
-                Some(DistributionMetrics {
-                    median_impact: median.unwrap_or(0.0),
-                    impact_p25: p25.unwrap_or(0.0),
-                    impact_p75: p75.unwrap_or(0.0),
-                    learner_count: lc.unwrap_or(0),
-                    impact_variance: var.unwrap_or(0.0),
-                })
-            } else {
-                None
-            };
-
-            // Compute confidence: for instructors use smoothing, for learners use score
-            let evidence_count: i64 = row.get(6)?;
-            let score: f64 = row.get(5)?;
-            let confidence = if role == "instructor" {
-                evidence_count as f64 / (evidence_count as f64 + 5.0)
-            } else {
-                score // learner confidence = score
-            };
-
-            Ok(FullReputationAssertion {
+            Ok(ReputationRow {
                 id: row.get(0)?,
                 actor_address: row.get(1)?,
-                role,
+                role: row.get(2)?,
                 skill_id: row.get(3)?,
                 proficiency_level: row.get(4)?,
-                score,
-                confidence,
-                evidence_count,
-                distribution,
-                computation_spec: row.get(14)?,
-                window_start: row.get(12)?,
-                window_end: row.get(13)?,
-                updated_at: row.get(15)?,
+                score: row.get(5)?,
+                evidence_count: row.get(6)?,
+                computation_spec: row.get(7)?,
+                updated_at: row.get(8)?,
             })
         })
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
-
-    Ok(assertions)
+    Ok(rows)
 }
 
-/// Trigger a full reputation recomputation from the evidence chain.
-///
-/// Clears all reputation state and replays every proof event
-/// chronologically. This is the v2 "any node can reproduce" guarantee.
 #[tauri::command]
-pub async fn compute_reputation(state: State<'_, AppState>) -> Result<RecomputeResult, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-
-    let start = std::time::Instant::now();
-    let (assertions_updated, deltas_recomputed) = reputation::full_recompute(db.conn())?;
-    let duration_ms = start.elapsed().as_millis() as i64;
-
-    Ok(RecomputeResult {
-        assertions_updated,
-        deltas_recomputed,
-        duration_ms,
-    })
-}
-
-/// Get instructor rankings for a skill, ordered by impact score.
-///
-/// Returns ranked list with impact score, learner count, and median impact.
-#[tauri::command]
-pub async fn get_instructor_ranking(
+pub async fn recompute_reputation_for_subject(
     state: State<'_, AppState>,
-    skill_id: String,
-    proficiency_level: Option<String>,
-    limit: Option<i64>,
-) -> Result<Vec<InstructorRanking>, String> {
+    subject_did: String,
+) -> Result<i64, String> {
     let db_guard = state
         .db
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
     let db = db_guard.as_ref().ok_or("database not initialized")?;
-
-    let max = limit.unwrap_or(50);
-    let rankings = reputation::get_instructor_rankings(
-        db.conn(),
-        &skill_id,
-        proficiency_level.as_deref(),
-        max,
-    )?;
-
-    let result: Vec<InstructorRanking> = rankings
-        .into_iter()
-        .enumerate()
-        .map(
-            |(i, (addr, score, ev_count, learner_count, median))| InstructorRanking {
-                actor_address: addr,
-                skill_id: skill_id.clone(),
-                proficiency_level: proficiency_level.clone().unwrap_or_default(),
-                impact_score: score,
-                confidence: ev_count as f64 / (ev_count as f64 + 5.0),
-                learner_count,
-                median_impact: median,
-                rank: (i + 1) as i64,
-            },
+    reputation::recompute_for_subject(db.conn(), &subject_did)?;
+    let count: i64 = db
+        .conn()
+        .query_row(
+            "SELECT COUNT(*) FROM reputation_assertions WHERE actor_address = ?1",
+            params![subject_did],
+            |row| row.get(0),
         )
-        .collect();
-
-    Ok(result)
+        .map_err(|e| e.to_string())?;
+    Ok(count)
 }
 
-/// Verify a reputation assertion against its evidence chain.
-///
-/// Checks if the claimed score can be independently reproduced
-/// from the stored impact deltas. Used for P2P verification.
-#[tauri::command]
-pub async fn verify_reputation(
-    state: State<'_, AppState>,
-    assertion_id: String,
-) -> Result<VerificationResult, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::Database;
+    use rusqlite::params;
 
-    let (
-        score_matches,
-        confidence_matches,
-        recomputed_score,
-        recomputed_confidence,
-        claimed_score,
-        claimed_confidence,
-    ) = reputation::verify_assertion(db.conn(), &assertion_id)?;
+    #[test]
+    fn query_builder_respects_filters() {
+        let db = Database::open_in_memory().expect("open");
+        db.run_migrations().expect("migrate");
+        // Taxonomy for FKs
+        db.conn()
+            .execute(
+                "INSERT INTO subject_fields (id, name) VALUES ('sf', 'CS')",
+                [],
+            )
+            .unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO subjects (id, name, subject_field_id) \
+                 VALUES ('sub', 'Algo', 'sf')",
+                [],
+            )
+            .unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO skills (id, name, subject_id) VALUES ('sk', 'A', 'sub')",
+                [],
+            )
+            .unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO reputation_assertions \
+                   (id, actor_address, role, skill_id, proficiency_level, score, \
+                    evidence_count, computation_spec) \
+                 VALUES ('a', 'did:A', 'learner', 'sk', 'apply', 0.9, 1, 'v3-vc'), \
+                        ('b', 'did:B', 'instructor', 'sk', 'apply', 0.8, 3, 'v3-vc')",
+                [],
+            )
+            .unwrap();
 
-    let max_diff = (claimed_score - recomputed_score)
-        .abs()
-        .max((claimed_confidence - recomputed_confidence).abs());
+        // No filter → both rows
+        let all = fetch(&db, ReputationQuery::default());
+        assert_eq!(all.len(), 2);
 
-    Ok(VerificationResult {
-        score_matches,
-        confidence_matches,
-        recomputed_score,
-        recomputed_confidence,
-        claimed_score,
-        claimed_confidence,
-        max_diff,
-    })
+        // Actor filter
+        let one = fetch(
+            &db,
+            ReputationQuery {
+                actor: Some("did:A".into()),
+                ..Default::default()
+            },
+        );
+        assert_eq!(one.len(), 1);
+        assert_eq!(one[0].role, "learner");
+
+        // Role filter
+        let instructors = fetch(
+            &db,
+            ReputationQuery {
+                role: Some("instructor".into()),
+                ..Default::default()
+            },
+        );
+        assert_eq!(instructors.len(), 1);
+        assert_eq!(instructors[0].actor_address, "did:B");
+    }
+
+    fn fetch(db: &Database, q: ReputationQuery) -> Vec<ReputationRow> {
+        // Mirror the command body without going through Tauri State.
+        let conn = db.conn();
+        let mut conditions: Vec<String> = Vec::new();
+        let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+        let mut i = 1;
+        if let Some(ref v) = q.actor {
+            conditions.push(format!("actor_address = ?{i}"));
+            values.push(Box::new(v.clone()));
+            i += 1;
+        }
+        if let Some(ref v) = q.role {
+            conditions.push(format!("role = ?{i}"));
+            values.push(Box::new(v.clone()));
+            i += 1;
+        }
+        let where_clause = if conditions.is_empty() {
+            String::new()
+        } else {
+            format!("WHERE {}", conditions.join(" AND "))
+        };
+        values.push(Box::new(1000i64));
+        let sql = format!(
+            "SELECT id, actor_address, role, skill_id, proficiency_level, \
+                    score, evidence_count, computation_spec, updated_at \
+             FROM reputation_assertions {where_clause} \
+             ORDER BY updated_at DESC LIMIT ?{i}"
+        );
+        let params_ref: Vec<&dyn rusqlite::types::ToSql> =
+            values.iter().map(|v| v.as_ref()).collect();
+        let mut stmt = conn.prepare(&sql).unwrap();
+        stmt.query_map(params_ref.as_slice(), |row| {
+            Ok(ReputationRow {
+                id: row.get(0)?,
+                actor_address: row.get(1)?,
+                role: row.get(2)?,
+                skill_id: row.get(3)?,
+                proficiency_level: row.get(4)?,
+                score: row.get(5)?,
+                evidence_count: row.get(6)?,
+                computation_spec: row.get(7)?,
+                updated_at: row.get(8)?,
+            })
+        })
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap()
+    }
+
+    #[test]
+    fn recompute_from_credentials_round_trip() {
+        let db = Database::open_in_memory().expect("open");
+        db.run_migrations().expect("migrate");
+        db.conn()
+            .execute(
+                "INSERT INTO subject_fields (id, name) VALUES ('sf', 'CS')",
+                [],
+            )
+            .unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO subjects (id, name, subject_field_id) \
+                 VALUES ('sub', 'Algo', 'sf')",
+                [],
+            )
+            .unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO skills (id, name, subject_id) VALUES ('sk', 'A', 'sub')",
+                [],
+            )
+            .unwrap();
+
+        let vc = serde_json::json!({
+            "@context": ["https://www.w3.org/2018/credentials/v1"],
+            "credentialSubject": {
+                "id": "did:L",
+                "claim": {
+                    "kind": "skill",
+                    "skill_id": "sk",
+                    "level": 2,
+                    "score": 0.77,
+                    "evidence_refs": [],
+                }
+            }
+        });
+        db.conn()
+            .execute(
+                "INSERT INTO credentials ( \
+                   id, issuer_did, subject_did, credential_type, claim_kind, \
+                   skill_id, issuance_date, signed_vc_json, integrity_hash, \
+                   revoked \
+                 ) VALUES ('c1', 'did:L', 'did:L', 'SelfAssertion', 'skill', 'sk', \
+                    datetime('now'), ?1, 'h', 0)",
+                params![serde_json::to_string(&vc).unwrap()],
+            )
+            .unwrap();
+
+        reputation::recompute_for_subject(db.conn(), "did:L").unwrap();
+        let count: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM reputation_assertions WHERE actor_address = 'did:L'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        // One learner row; no instructor row (self-asserted).
+        assert_eq!(count, 1);
+    }
 }

@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { AppBadge, EmptyState } from '@/components/ui'
-import type { SkillDetail, SkillProof, EvidenceRecord } from '@/types'
+import type { SkillDetail, VerifiableCredential } from '@/types'
 
 const { invoke } = useLocalApi()
 const route = useRoute()
@@ -12,21 +12,52 @@ const router = useRouter()
 const skillId = route.params.id as string
 
 const detail = ref<SkillDetail | null>(null)
-const proofs = ref<SkillProof[]>([])
-const evidence = ref<EvidenceRecord[]>([])
 const loading = ref(true)
 const error = ref<string | null>(null)
 
+// Credentials the local user holds that target this skill. Read via
+// `list_credentials(subject=<localDid>, skill_id=<skillId>)` so only
+// the user's own VCs render here.
+const myCredentials = ref<VerifiableCredential[]>([])
+const localDid = ref<string | null>(null)
+
+const bloomOrder = [
+  'remember',
+  'understand',
+  'apply',
+  'analyze',
+  'evaluate',
+  'create',
+] as const
+
+const bestCredential = computed<VerifiableCredential | null>(() => {
+  let best: VerifiableCredential | null = null
+  let bestLevel = -1
+  for (const vc of myCredentials.value) {
+    const claim = vc.credential_subject.claim
+    if (claim.kind !== 'skill') continue
+    if (claim.level > bestLevel) {
+      bestLevel = claim.level
+      best = vc
+    }
+  }
+  return best
+})
+
 onMounted(async () => {
   try {
-    const [d, allProofs, allEvidence] = await Promise.all([
+    const [d, did, creds] = await Promise.all([
       invoke<SkillDetail>('get_skill', { skillId }),
-      invoke<SkillProof[]>('list_skill_proofs'),
-      invoke<EvidenceRecord[]>('list_evidence', { skillId }),
+      invoke<string | null>('get_local_did').catch(() => null),
+      invoke<VerifiableCredential[]>('list_credentials', { skillId }).catch(() => []),
     ])
     detail.value = d
-    proofs.value = allProofs.filter(p => p.skill_id === skillId)
-    evidence.value = allEvidence
+    localDid.value = did
+    myCredentials.value = creds.filter((vc) => {
+      if (did && vc.credential_subject.id !== did) return false
+      const claim = vc.credential_subject.claim
+      return claim.kind === 'skill' && claim.skill_id === skillId
+    })
   } catch (e: any) {
     error.value = typeof e === 'string' ? e : e?.message ?? 'Failed to load skill'
     console.error('Failed to load skill:', e)
@@ -203,14 +234,6 @@ const relationLabels: Record<string, string> = {
             </div>
           </div>
 
-          <!-- Confidence display -->
-          <div v-if="proofs.length > 0" class="text-right flex-shrink-0">
-            <p class="font-mono text-2xl font-bold text-primary">
-              {{ (proofs[0]!.confidence * 100).toFixed(0) }}%
-            </p>
-            <p class="text-xs text-muted-foreground">confidence</p>
-            <AppBadge variant="success" class="mt-1">Proven</AppBadge>
-          </div>
         </div>
       </div>
 
@@ -307,70 +330,48 @@ const relationLabels: Record<string, string> = {
         </div>
       </div>
 
-      <!-- Skill Proofs -->
-      <div v-if="proofs.length > 0" class="card p-5 mt-6">
-        <h2 class="text-sm font-semibold text-foreground mb-3">Skill Proofs</h2>
-        <div class="space-y-3">
-          <div v-for="proof in proofs" :key="proof.id">
-            <div class="flex items-center justify-between mb-1">
-              <AppBadge :variant="(bloomColors[proof.proficiency_level] as any) ?? 'secondary'">
-                {{ proof.proficiency_level }}
-              </AppBadge>
-              <span class="text-sm font-medium text-foreground">
-                {{ (proof.confidence * 100).toFixed(1) }}% confidence
-              </span>
-            </div>
-            <div class="h-1.5 rounded-full bg-muted overflow-hidden">
-              <div
-                class="h-full rounded-full bg-primary transition-all duration-500"
-                :style="{ width: `${proof.confidence * 100}%` }"
-              />
-            </div>
-            <div class="text-xs text-muted-foreground mt-1">
-              {{ proof.evidence_count }} evidence record{{ proof.evidence_count !== 1 ? 's' : '' }}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Evidence Records -->
+      <!-- Your credentials for this skill -->
       <div class="card p-5 mt-6">
-        <h2 class="text-sm font-semibold text-foreground mb-3">Evidence Records</h2>
+        <h2 class="text-sm font-semibold text-foreground mb-3">Your Credentials</h2>
         <EmptyState
-          v-if="evidence.length === 0"
-          title="No evidence yet"
-          description="Evidence records are created when you complete assessments linked to this skill."
+          v-if="myCredentials.length === 0"
+          title="No credentials yet"
+          description="Auto-earned Verifiable Credentials for this skill will appear here. Complete a course tagged with this skill to earn one."
         />
-        <div v-else class="space-y-2">
+        <div v-else class="space-y-3">
           <div
-            v-for="ev in evidence"
-            :key="ev.id"
-            class="rounded-lg bg-muted/30 p-3"
+            v-for="vc in myCredentials"
+            :key="vc.id"
+            class="rounded-lg bg-muted/30 p-4"
           >
-            <div class="flex items-center justify-between mb-2">
-              <AppBadge :variant="(bloomColors[ev.proficiency_level] as any) ?? 'secondary'" class="text-[0.6rem]">
-                {{ ev.proficiency_level }}
-              </AppBadge>
-              <span class="text-sm font-medium font-mono text-foreground">
-                {{ (ev.score * 100).toFixed(0) }}%
+            <div class="flex items-center justify-between mb-2 gap-3">
+              <div class="min-w-0">
+                <AppBadge
+                  :variant="(bloomColors[bloomOrder[(vc.credential_subject.claim as { kind: 'skill'; level: number }).level] ?? 'apply'] as any) ?? 'secondary'"
+                >
+                  {{ bloomOrder[(vc.credential_subject.claim as { kind: 'skill'; level: number }).level] ?? 'apply' }}
+                </AppBadge>
+                <span class="ml-2 text-sm font-medium text-foreground">
+                  {{ (((vc.credential_subject.claim as { kind: 'skill'; score: number }).score) * 100).toFixed(0) }}% score
+                </span>
+              </div>
+              <span class="text-xs text-muted-foreground font-mono">
+                {{ vc.issuance_date.slice(0, 10) }}
               </span>
             </div>
-            <div class="grid grid-cols-3 gap-4 mt-2">
-              <div>
-                <p class="text-[10px] uppercase tracking-wider text-muted-foreground">Difficulty</p>
-                <p class="text-sm font-medium font-mono">{{ ev.difficulty.toFixed(2) }}</p>
-              </div>
-              <div>
-                <p class="text-[10px] uppercase tracking-wider text-muted-foreground">Trust</p>
-                <p class="text-sm font-medium font-mono">{{ ev.trust_factor.toFixed(2) }}</p>
-              </div>
-              <div>
-                <p class="text-[10px] uppercase tracking-wider text-muted-foreground">Date</p>
-                <p class="text-sm font-medium font-mono">{{ ev.created_at }}</p>
-              </div>
+            <div class="flex flex-wrap gap-1.5 text-[10px]">
+              <AppBadge v-if="vc.witness" variant="success">on-chain witness</AppBadge>
+              <AppBadge variant="secondary">{{ vc.type[vc.type.length - 1] }}</AppBadge>
+              <span v-if="vc.witness" class="text-muted-foreground font-mono">
+                tx {{ vc.witness.tx_hash.slice(0, 12) }}…
+              </span>
             </div>
           </div>
         </div>
+        <p v-if="bestCredential" class="mt-3 text-xs text-muted-foreground">
+          Highest credential: level
+          {{ bloomOrder[(bestCredential.credential_subject.claim as { kind: 'skill'; level: number }).level] ?? 'apply' }}.
+        </p>
       </div>
     </template>
   </div>

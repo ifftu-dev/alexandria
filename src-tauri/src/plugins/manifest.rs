@@ -216,8 +216,7 @@ mod tests {
 
     #[test]
     fn rejects_path_traversal_in_entry() {
-        let bad = format!(
-            r#"{{
+        let bad = r#"{
                 "id": "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK#x",
                 "version": "0.1.0",
                 "api_version": "1",
@@ -226,8 +225,7 @@ mod tests {
                 "author_did": "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK",
                 "kinds": ["interactive"],
                 "entry": "../outside/index.html"
-            }}"#
-        );
+            }"#;
         assert!(parse_and_validate(bad.as_bytes()).is_err());
     }
 

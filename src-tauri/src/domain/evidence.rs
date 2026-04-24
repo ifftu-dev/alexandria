@@ -1,7 +1,15 @@
-//! Evidence pipeline domain models.
+//! Proficiency-level taxonomy and reputation types.
 //!
-//! Types for assessments, evidence records, skill proofs, and
-//! reputation assertions. These map directly to the SQLite schema.
+//! Post-migration 040 this module no longer holds the legacy evidence
+//! pipeline (SkillAssessment / EvidenceRecord / SkillProof). Those were
+//! retired when VCs became the sole credential artifact. What stays:
+//!
+//! * `ProficiencyLevel` — Bloom's taxonomy enum, still used as the
+//!   proficiency level on VC claims (`credentials.skill_id` +
+//!   claim-embedded `proficiency_level`).
+//! * `ReputationAssertion` — computed reputation row, kept because the
+//!   reputation engine survives; only its *input* changes (credentials
+//!   instead of skill_proofs).
 
 use serde::{Deserialize, Serialize};
 
@@ -51,51 +59,6 @@ impl ProficiencyLevel {
             _ => None,
         }
     }
-}
-
-/// A skill assessment definition.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SkillAssessment {
-    pub id: String,
-    pub skill_id: String,
-    pub course_id: Option<String>,
-    pub source_element_id: Option<String>,
-    pub assessment_type: String,
-    pub proficiency_level: String,
-    pub difficulty: f64,
-    pub weight: f64,
-    pub trust_factor: f64,
-    pub created_at: String,
-}
-
-/// An evidence record — a single scored attempt at a skill assessment.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EvidenceRecord {
-    pub id: String,
-    pub skill_assessment_id: String,
-    pub skill_id: String,
-    pub proficiency_level: String,
-    pub score: f64,
-    pub difficulty: f64,
-    pub trust_factor: f64,
-    pub course_id: Option<String>,
-    pub instructor_address: Option<String>,
-    pub created_at: String,
-}
-
-/// A skill proof — aggregated evidence demonstrating proficiency.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SkillProof {
-    pub id: String,
-    pub skill_id: String,
-    pub proficiency_level: String,
-    pub confidence: f64,
-    pub evidence_count: i64,
-    pub computed_at: String,
-    pub updated_at: String,
-    pub nft_policy_id: Option<String>,
-    pub nft_asset_name: Option<String>,
-    pub nft_tx_hash: Option<String>,
 }
 
 /// A reputation assertion — computed impact score for an actor.
@@ -163,105 +126,4 @@ mod tests {
         let json = serde_json::to_string(&ProficiencyLevel::Create).unwrap();
         assert_eq!(json, "\"create\"");
     }
-
-    #[test]
-    fn evidence_record_serde_roundtrip() {
-        let record = EvidenceRecord {
-            id: "ev1".into(),
-            skill_assessment_id: "sa1".into(),
-            skill_id: "sk1".into(),
-            proficiency_level: "apply".into(),
-            score: 0.85,
-            difficulty: 0.7,
-            trust_factor: 1.0,
-            course_id: Some("c1".into()),
-            instructor_address: None,
-            created_at: "2025-01-01 00:00:00".into(),
-        };
-        let json = serde_json::to_string(&record).unwrap();
-        let parsed: EvidenceRecord = serde_json::from_str(&json).unwrap();
-        assert_eq!(parsed.id, "ev1");
-        assert_eq!(parsed.score, 0.85);
-        assert!(parsed.instructor_address.is_none());
-        assert_eq!(parsed.course_id.unwrap(), "c1");
-    }
-
-    #[test]
-    fn skill_proof_serde_roundtrip() {
-        let proof = SkillProof {
-            id: "sp1".into(),
-            skill_id: "sk1".into(),
-            proficiency_level: "analyze".into(),
-            confidence: 0.92,
-            evidence_count: 12,
-            computed_at: "2025-01-01".into(),
-            updated_at: "2025-01-02".into(),
-            nft_policy_id: Some("abc123".into()),
-            nft_asset_name: Some("AlexProofsp1".into()),
-            nft_tx_hash: None,
-        };
-        let json = serde_json::to_string(&proof).unwrap();
-        let parsed: SkillProof = serde_json::from_str(&json).unwrap();
-        assert_eq!(parsed.confidence, 0.92);
-        assert_eq!(parsed.evidence_count, 12);
-        assert_eq!(parsed.nft_policy_id, Some("abc123".into()));
-        assert!(parsed.nft_tx_hash.is_none());
-    }
-
-    #[test]
-    fn evidence_announcement_serde_roundtrip() {
-        let ann = EvidenceAnnouncement {
-            evidence_id: "ev1".into(),
-            learner_address: "stake_test1u123".into(),
-            skill_id: "sk1".into(),
-            proficiency_level: "apply".into(),
-            assessment_id: "sa1".into(),
-            score: 0.75,
-            difficulty: 0.6,
-            trust_factor: 1.0,
-            course_id: None,
-            instructor_address: Some("stake_test1uinst".into()),
-            created_at: 1700000000,
-        };
-        let json = serde_json::to_string(&ann).unwrap();
-        let parsed: EvidenceAnnouncement = serde_json::from_str(&json).unwrap();
-        assert_eq!(parsed.created_at, 1700000000);
-        assert!(parsed.course_id.is_none());
-        assert_eq!(parsed.instructor_address.unwrap(), "stake_test1uinst");
-    }
-}
-
-/// An evidence announcement broadcast on `/alexandria/evidence/1.0`.
-///
-/// This is the gossip payload for sharing evidence records across the
-/// P2P network. Other nodes store these for reputation computation.
-/// Matches the spec §10.1 evidence record structure.
-///
-/// **Important**: Received evidence does NOT trigger local aggregation.
-/// Only the learner's own node aggregates proofs — peers store evidence
-/// solely for reputation inputs (instructor impact, verification).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EvidenceAnnouncement {
-    /// Deterministic evidence ID: `blake2b(learner + assessment + timestamp + skill)`.
-    pub evidence_id: String,
-    /// Learner's Cardano stake address (bech32).
-    pub learner_address: String,
-    /// Skill ID this evidence applies to.
-    pub skill_id: String,
-    /// Bloom's taxonomy proficiency level being assessed.
-    pub proficiency_level: String,
-    /// Assessment ID this evidence was generated from.
-    pub assessment_id: String,
-    /// Score achieved (0.0 to 1.0).
-    pub score: f64,
-    /// Assessment difficulty (0.0 to 1.0).
-    pub difficulty: f64,
-    /// Assessment trust factor (default 1.0).
-    pub trust_factor: f64,
-    /// Course ID this evidence was generated from (if any).
-    pub course_id: Option<String>,
-    /// Instructor's Cardano stake address (if applicable).
-    pub instructor_address: Option<String>,
-    /// Unix timestamp of evidence creation.
-    pub created_at: i64,
 }

@@ -5,16 +5,16 @@ import { invoke } from '@tauri-apps/api/core'
 import { AppButton, AppInput, AppTextarea, AppAlert, AppBadge } from '@/components/ui'
 import type {
   SubjectFieldInfo,
-  SkillProof,
   SkillInfo,
   OpinionRow,
   PublishOpinionRequest,
+  VerifiableCredential,
 } from '@/types'
 
 const router = useRouter()
 
 const SUMMARY_MAX = 280
-const QUALIFYING_LEVELS = new Set(['apply', 'analyze', 'evaluate', 'create'])
+const APPLY_LEVEL = 2 // Bloom's apply — minimum to post an opinion.
 
 // -----------------------------------------------------------------------------
 // State
@@ -33,22 +33,19 @@ const videoProgress = ref('')
 const thumbHash = ref<string | null>(null)
 const thumbUploading = ref(false)
 
-// Author's own skill proofs (we'll compute qualifying ones per-field)
-const myProofs = ref<SkillProof[]>([])
+const myCredentials = ref<VerifiableCredential[]>([])
 const allSkills = ref<SkillInfo[]>([])
 const eligibleFields = ref<string[]>([])
 const subjectFields = ref<SubjectFieldInfo[]>([])
+const localDid = ref<string | null>(null)
 
-// Which proofs the author is staking on this opinion. Users pick at
-// least one — but we auto-select all qualifying proofs under the
-// chosen subject field so the happy path is a single click.
-const selectedProofIds = ref<Set<string>>(new Set())
+const selectedCredentialIds = ref<Set<string>>(new Set())
 
 const submitting = ref(false)
 const error = ref('')
 
 // -----------------------------------------------------------------------------
-// Derived state
+// Derived
 // -----------------------------------------------------------------------------
 
 const eligibleFieldsInfo = computed(() =>
@@ -56,17 +53,22 @@ const eligibleFieldsInfo = computed(() =>
 )
 
 /**
- * Proofs that would qualify the author to post in the currently
- * selected subject field. These are the proofs where:
- *   - proficiency_level is apply / analyze / evaluate / create
- *   - the skill's subject is under the selected subject_field_id
+ * Credentials that qualify the author to post in the currently
+ * selected subject field:
+ *   - SkillClaim with level >= apply (2)
+ *   - the SkillClaim's `skill_id` lives under the selected
+ *     subject_field_id
+ *   - subject == local DID (their own credential)
  */
-const qualifyingProofsForField = computed<SkillProof[]>(() => {
+const qualifyingCredentialsForField = computed<VerifiableCredential[]>(() => {
   if (!subjectFieldId.value) return []
   const skillById = new Map(allSkills.value.map((s) => [s.id, s]))
-  return myProofs.value.filter((p) => {
-    if (!QUALIFYING_LEVELS.has(p.proficiency_level)) return false
-    const skill = skillById.get(p.skill_id)
+  return myCredentials.value.filter((vc) => {
+    if (localDid.value && vc.credential_subject.id !== localDid.value) return false
+    const claim = vc.credential_subject.claim
+    if (claim.kind !== 'skill') return false
+    if (claim.level < APPLY_LEVEL) return false
+    const skill = skillById.get(claim.skill_id)
     return skill?.subject_field_id === subjectFieldId.value
   })
 })
@@ -79,7 +81,7 @@ const canSubmit = computed(
     title.value.trim().length > 0 &&
     summaryLength.value <= SUMMARY_MAX &&
     videoHash.value !== null &&
-    selectedProofIds.value.size > 0 &&
+    selectedCredentialIds.value.size > 0 &&
     !submitting.value &&
     !videoUploading.value &&
     !thumbUploading.value,
@@ -91,22 +93,23 @@ const canSubmit = computed(
 
 onMounted(async () => {
   try {
-    const [fields, eligible, proofs, skills] = await Promise.all([
+    const [fields, eligible, did, creds, skills] = await Promise.all([
       invoke<SubjectFieldInfo[]>('list_subject_fields', {}),
       invoke<string[]>('list_eligible_subject_fields_for_posting'),
-      invoke<SkillProof[]>('list_skill_proofs', {}),
+      invoke<string | null>('get_local_did').catch(() => null),
+      invoke<VerifiableCredential[]>('list_credentials', {}).catch(() => []),
       invoke<SkillInfo[]>('list_skills', {}),
     ])
     subjectFields.value = fields
     eligibleFields.value = eligible
-    myProofs.value = proofs
+    localDid.value = did
+    myCredentials.value = creds
     allSkills.value = skills
 
-    // Default: pick the first eligible field if there is one
     const first = eligible[0]
     if (first !== undefined) {
       subjectFieldId.value = first
-      autoSelectProofs()
+      autoSelectCredentials()
     }
   } catch (e) {
     error.value = `Failed to load taxonomy: ${e}`
@@ -114,21 +117,42 @@ onMounted(async () => {
 })
 
 function onFieldChange() {
-  // Reset proof selection when field changes — the set of qualifying
-  // proofs is per-field.
-  selectedProofIds.value = new Set()
-  autoSelectProofs()
+  selectedCredentialIds.value = new Set()
+  autoSelectCredentials()
 }
 
-function autoSelectProofs() {
-  selectedProofIds.value = new Set(qualifyingProofsForField.value.map((p) => p.id))
+function autoSelectCredentials() {
+  selectedCredentialIds.value = new Set(
+    qualifyingCredentialsForField.value.map((vc) => vc.id),
+  )
 }
 
-function toggleProof(id: string) {
-  const s = new Set(selectedProofIds.value)
+function toggleCredential(id: string) {
+  const s = new Set(selectedCredentialIds.value)
   if (s.has(id)) s.delete(id)
   else s.add(id)
-  selectedProofIds.value = s
+  selectedCredentialIds.value = s
+}
+
+const bloomOrder = ['remember', 'understand', 'apply', 'analyze', 'evaluate', 'create']
+
+function describeSkill(vc: VerifiableCredential): string {
+  const claim = vc.credential_subject.claim
+  if (claim.kind !== 'skill') return vc.id
+  const skill = allSkills.value.find((s) => s.id === claim.skill_id)
+  return skill?.name ?? claim.skill_id
+}
+
+function claimLevel(vc: VerifiableCredential): string {
+  const claim = vc.credential_subject.claim
+  if (claim.kind !== 'skill') return ''
+  return bloomOrder[claim.level] ?? String(claim.level)
+}
+
+function claimScore(vc: VerifiableCredential): number {
+  const claim = vc.credential_subject.claim
+  if (claim.kind !== 'skill') return 0
+  return claim.score
 }
 
 // -----------------------------------------------------------------------------
@@ -154,7 +178,6 @@ async function onVideoChange(e: Event) {
       data: bytes,
     })
     videoHash.value = result.hash
-    // Best-effort duration probe
     const probe = document.createElement('video')
     probe.preload = 'metadata'
     probe.src = URL.createObjectURL(file)
@@ -208,7 +231,7 @@ async function submit() {
     video_cid: videoHash.value,
     thumbnail_cid: thumbHash.value,
     duration_seconds: videoDuration.value,
-    credential_proof_ids: Array.from(selectedProofIds.value),
+    credential_proof_ids: Array.from(selectedCredentialIds.value),
   }
 
   try {
@@ -228,25 +251,22 @@ async function submit() {
       <h1 class="text-3xl font-bold text-foreground">Post an Opinion</h1>
       <p class="mt-2 text-muted-foreground">
         Opinions are scoped to a subject field. To post in a field you must
-        hold at least one skill proof (level ≥ <em>apply</em>) under that field.
-        Your opinion will be chronological in that field's view — no global feed,
-        no rankings.
+        hold at least one skill-kind Verifiable Credential at level <em>apply</em>+
+        under a skill in that field.
       </p>
     </div>
 
-    <!-- No eligible fields -->
     <AppAlert
       v-if="eligibleFields.length === 0"
       type="warning"
       class="mb-6"
     >
-      You don't hold any qualifying skill proofs yet. Earn a proof at level
-      <em>apply</em> or above in any skill, and you'll be eligible to post
+      You don't hold any qualifying credentials yet. Earn a credential at level
+      <em>apply</em> or above in any skill and you'll be eligible to post
       opinions in that skill's subject field.
     </AppAlert>
 
     <div v-else class="space-y-6">
-      <!-- Subject field picker -->
       <section class="rounded-xl border border-border bg-card p-6 space-y-4">
         <h2 class="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
           Subject field
@@ -262,7 +282,6 @@ async function submit() {
         </select>
       </section>
 
-      <!-- Content -->
       <section class="rounded-xl border border-border bg-card p-6 space-y-4">
         <h2 class="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
           Content
@@ -327,39 +346,38 @@ async function submit() {
         </label>
       </section>
 
-      <!-- Credential selection -->
       <section class="rounded-xl border border-border bg-card p-6 space-y-4">
         <h2 class="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
           Credentials
         </h2>
         <p class="text-xs text-muted-foreground">
-          Which of your skill proofs you're staking on this opinion. At least
+          Which of your credentials you're staking on this opinion. At least
           one must qualify you to post in this subject field — we've
-          pre-selected all of those. You can add or remove proofs below.
+          pre-selected all of those. You can add or remove credentials below.
         </p>
 
-        <div v-if="qualifyingProofsForField.length === 0" class="text-sm text-red-500">
-          You don't have a qualifying proof for this field. Pick a different field.
+        <div v-if="qualifyingCredentialsForField.length === 0" class="text-sm text-red-500">
+          You don't have a qualifying credential for this field. Pick a different field.
         </div>
         <div v-else class="space-y-2">
           <label
-            v-for="p in qualifyingProofsForField"
-            :key="p.id"
+            v-for="vc in qualifyingCredentialsForField"
+            :key="vc.id"
             class="flex items-center gap-3 p-2 rounded-md hover:bg-muted/40 cursor-pointer"
           >
             <input
               type="checkbox"
-              :checked="selectedProofIds.has(p.id)"
-              @change="toggleProof(p.id)"
+              :checked="selectedCredentialIds.has(vc.id)"
+              @change="toggleCredential(vc.id)"
             />
             <div class="min-w-0 flex-1">
               <div class="text-sm font-medium text-foreground">
-                {{ p.skill_id }}
-                <AppBadge variant="secondary" class="ml-2">{{ p.proficiency_level }}</AppBadge>
+                {{ describeSkill(vc) }}
+                <AppBadge variant="secondary" class="ml-2">{{ claimLevel(vc) }}</AppBadge>
+                <AppBadge v-if="vc.witness" variant="success" class="ml-1">on-chain</AppBadge>
               </div>
               <div class="text-xs text-muted-foreground">
-                confidence {{ Math.round(p.confidence * 100) }}% ·
-                {{ p.evidence_count }} evidence
+                score {{ Math.round(claimScore(vc) * 100) }}% · issued {{ vc.issuance_date.slice(0, 10) }}
               </div>
             </div>
           </label>

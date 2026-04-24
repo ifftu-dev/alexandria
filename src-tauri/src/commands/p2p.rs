@@ -14,7 +14,6 @@ use crate::crypto::wallet;
 use crate::db::Database;
 use crate::diag;
 use crate::p2p::catalog as p2p_catalog;
-use crate::p2p::evidence as p2p_evidence;
 use crate::p2p::governance as p2p_governance;
 use crate::p2p::network::{self, keypair_from_cardano_key};
 use crate::p2p::opinions as p2p_opinions;
@@ -23,7 +22,7 @@ use crate::p2p::presentation as p2p_presentation;
 use crate::p2p::sentinel as p2p_sentinel;
 use crate::p2p::taxonomy as p2p_taxonomy;
 use crate::p2p::types::{
-    NetworkStatus, TOPIC_CATALOG, TOPIC_EVIDENCE, TOPIC_GOVERNANCE, TOPIC_OPINIONS, TOPIC_PINBOARD,
+    NetworkStatus, TOPIC_CATALOG, TOPIC_GOVERNANCE, TOPIC_OPINIONS, TOPIC_PINBOARD,
     TOPIC_SENTINEL_PRIORS, TOPIC_TAXONOMY, TOPIC_VC_DID, TOPIC_VC_PRESENTATION, TOPIC_VC_STATUS,
 };
 use crate::p2p::vc_did as p2p_vc_did;
@@ -166,8 +165,6 @@ pub async fn p2p_start(app: AppHandle, state: State<'_, AppState>) -> Result<Str
                         };
                         if topic == TOPIC_CATALOG {
                             let _ = p2p_catalog::handle_catalog_message(db, message);
-                        } else if topic == TOPIC_EVIDENCE {
-                            let _ = p2p_evidence::handle_evidence_message(db, message);
                         } else if topic == TOPIC_TAXONOMY {
                             let _ = p2p_taxonomy::handle_taxonomy_message(db, message);
                         } else if topic == TOPIC_GOVERNANCE {

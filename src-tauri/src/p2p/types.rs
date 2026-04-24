@@ -4,15 +4,14 @@ use serde::{Deserialize, Serialize};
 ///
 /// Each topic uses a versioned path to allow protocol upgrades.
 pub const TOPIC_CATALOG: &str = "/alexandria/catalog/1.0";
-pub const TOPIC_EVIDENCE: &str = "/alexandria/evidence/1.0";
 pub const TOPIC_TAXONOMY: &str = "/alexandria/taxonomy/1.0";
 pub const TOPIC_GOVERNANCE: &str = "/alexandria/governance/1.0";
 pub const TOPIC_PROFILES: &str = "/alexandria/profiles/1.0";
 /// Field Commentary opinions — credentialed-in-domain video takes.
 /// Receivers validate the envelope signature AND check that the
-/// author's referenced `skill_proof` IDs exist locally and cover at
-/// least one skill under the target `subject_field_id`. Opinions
-/// whose credentials haven't synced yet are held in
+/// author's referenced credentials exist locally and cover at least
+/// one skill under the target `subject_field_id`. Opinions whose
+/// credentials haven't synced yet are held in
 /// `opinions_pending_verification`.
 pub const TOPIC_OPINIONS: &str = "/alexandria/opinions/1.0";
 /// Peer exchange topic — nodes broadcast their PeerId + listen addresses
@@ -60,7 +59,6 @@ pub const TOPIC_SENTINEL_PRIORS: &str = "/alexandria/sentinel-priors/1.0";
 /// All gossip topics the node subscribes to.
 pub const ALL_TOPICS: &[&str] = &[
     TOPIC_CATALOG,
-    TOPIC_EVIDENCE,
     TOPIC_TAXONOMY,
     TOPIC_GOVERNANCE,
     TOPIC_PROFILES,

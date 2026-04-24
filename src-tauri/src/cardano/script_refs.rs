@@ -35,6 +35,14 @@ pub const REPUTATION_MINTING_SCRIPT_HASH: &str =
 /// Script hash for the soulbound spending validator.
 pub const SOULBOUND_SCRIPT_HASH: &str = "2700722e5fb56941388a7813f416a0d1e76ee251dbb3ea248d41890a";
 
+/// Script hash for the completion-witness minting policy.
+///
+/// Compiled from `cardano/governance/validators/completion.ak` and
+/// used as the policy id of `completion_minting`. Completion tokens
+/// carry asset names of shape `learner_pkh (28) || course_tag (4)`.
+pub const COMPLETION_MINTING_SCRIPT_HASH: &str =
+    "6380450179a6933acdf76213732f8626e1486b9ed5cc7fe7f46c98e0";
+
 // ---- Reference UTxO Locations (populated after deployment) ----
 // These are the UTxOs where each validator's compiled script is stored
 // as a reference script (CIP-33). Transactions reference these instead
@@ -60,6 +68,9 @@ pub const REPUTATION_MINTING_REF_UTXO: (&str, u64) = ("DEPLOY_PENDING", 0);
 
 /// Reference UTxO for the soulbound validator.
 pub const SOULBOUND_REF_UTXO: (&str, u64) = ("DEPLOY_PENDING", 0);
+
+/// Reference UTxO for the completion-witness minting policy.
+pub const COMPLETION_MINTING_REF_UTXO: (&str, u64) = ("DEPLOY_PENDING", 0);
 
 // ---- Utility ----
 

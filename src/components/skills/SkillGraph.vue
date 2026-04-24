@@ -11,12 +11,11 @@
  * highlighted ring. Click a node to navigate to its detail page.
  */
 import { ref, computed } from 'vue'
-import type { SkillInfo, SkillGraphEdge, SkillProof } from '@/types'
+import type { SkillInfo, SkillGraphEdge } from '@/types'
 
 const props = defineProps<{
   skills: SkillInfo[]
   edges: SkillGraphEdge[]
-  proofs: Map<string, SkillProof>
 }>()
 
 const emit = defineEmits<{
@@ -42,8 +41,6 @@ interface LayoutNode {
   layer: number
   x: number
   y: number
-  proven: boolean
-  confidence: number
 }
 
 interface LayoutEdge {
@@ -132,7 +129,6 @@ const layout = computed(() => {
       const skill = skillMap.get(id)
       const x = startX + i * (NODE_W + NODE_GAP)
       const y = PADDING + layer * (NODE_H + LAYER_GAP)
-      const proof = props.proofs.get(id)
 
       positions.set(id, { x: x + NODE_W / 2, y: y + NODE_H / 2 })
 
@@ -143,8 +139,6 @@ const layout = computed(() => {
         layer,
         x,
         y,
-        proven: !!proof,
-        confidence: proof?.confidence ?? 0,
       })
     }
   }
@@ -246,20 +240,6 @@ function isEdgeHighlighted(e: LayoutEdge): boolean {
           @mouseenter="hoveredNode = node.id"
           @mouseleave="hoveredNode = null"
         >
-          <!-- Proven ring -->
-          <rect
-            v-if="node.proven"
-            :x="node.x - 3"
-            :y="node.y - 3"
-            :width="NODE_W + 6"
-            :height="NODE_H + 6"
-            rx="10"
-            fill="none"
-            stroke="var(--app-primary)"
-            stroke-width="2"
-            opacity="0.6"
-          />
-
           <!-- Node background -->
           <rect
             :x="node.x"
@@ -286,17 +266,6 @@ function isEdgeHighlighted(e: LayoutEdge): boolean {
             <tspan>{{ node.name.length > 18 ? node.name.slice(0, 16) + '...' : node.name }}</tspan>
           </text>
 
-          <!-- Confidence indicator (small bar below) -->
-          <rect
-            v-if="node.proven"
-            :x="node.x + 4"
-            :y="node.y + NODE_H - 5"
-            :width="(NODE_W - 8) * node.confidence"
-            height="2"
-            rx="1"
-            fill="white"
-            opacity="0.7"
-          />
         </g>
       </svg>
     </div>

@@ -84,6 +84,7 @@ pub fn issue_credential_impl(
             status_list_credential: list_id.clone(),
         }),
         terms_of_use: None,
+        witness: None,
         proof: Proof {
             type_: "Ed25519Signature2020".into(),
             created: now.to_string(),
@@ -166,6 +167,13 @@ pub fn issue_credential_impl(
     // or via an explicit IPC.
     if let Err(e) = crate::cardano::anchor_queue::enqueue(conn, &credential_id) {
         log::warn!("auto-enqueue anchor failed for {credential_id}: {e}");
+    }
+
+    // Reputation feedback. Skill-kind credentials feed the learner's
+    // score on (skill, level); third-party-issued credentials also
+    // credit the instructor. Soft-fail: reputation is a derived view.
+    if let Err(e) = crate::evidence::reputation::on_credential_accepted(conn, &credential_id) {
+        log::warn!("reputation update failed for {credential_id}: {e}");
     }
 
     Ok(signed)

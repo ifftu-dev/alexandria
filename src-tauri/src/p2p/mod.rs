@@ -1,6 +1,5 @@
 pub mod catalog;
 pub mod discovery;
-pub mod evidence;
 pub mod gossip;
 pub mod governance;
 pub mod nat;

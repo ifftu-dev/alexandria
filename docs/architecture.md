@@ -2,8 +2,17 @@
 
 > Offline-first, trustless, multi-platform.
 
+> **⚠️ Post-VC-first cutover (migration 040, 2026-04-24):** The
+> SkillProof pipeline described in §5–§7 (`skill_proofs`,
+> `evidence_records`, `skill_assessments`, the NFT wrapper, the
+> aggregator) has been retired. Credentials are now W3C Verifiable
+> Credentials auto-earned via a Cardano completion validator. See
+> [`vc-migration.md`](./vc-migration.md) for what replaces what.
+> Reputation/challenge/attestation subsystems are on the VC rebuild
+> list; their code is on disk but disabled from the module tree.
+
 **Status**: In progress — core local/P2P flows are implemented, with some on-chain and VC presentation surfaces still partial
-**Last updated**: 2026-04-15
+**Last updated**: 2026-04-24 (VC-first cutover)
 
 ---
 

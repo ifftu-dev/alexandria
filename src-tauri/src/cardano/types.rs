@@ -119,28 +119,6 @@ pub struct TxSubmissionResult {
     pub tx_hash: String,
 }
 
-/// Result of minting a SkillProof NFT.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MintResult {
-    /// Transaction hash of the mint.
-    pub tx_hash: String,
-    /// Policy ID (56-char hex, Blake2b-224 of the serialized NativeScript).
-    pub policy_id: String,
-    /// Asset name (UTF-8 string, e.g. "AlexProof12345678").
-    pub asset_name: String,
-}
-
-/// Result of registering a course on-chain.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CourseRegistrationResult {
-    /// Transaction hash of the registration.
-    pub tx_hash: String,
-    /// Policy ID of the course NFT.
-    pub policy_id: String,
-    /// Asset name of the course NFT.
-    pub asset_name: String,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

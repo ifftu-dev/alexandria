@@ -1,5 +1,13 @@
 # Alexandria: Free Knowledge, Verified Skills, No Gatekeepers
 
+> **⚠️ Post-VC-first cutover (migration 040, 2026-04-24):** This
+> document predates the retirement of the SkillProof pipeline.
+> Wherever it references `SkillProof`, `evidence_records`, or
+> "skill-proof NFT minting" the authoritative replacement is W3C
+> Verifiable Credentials auto-earned via a Cardano completion
+> validator. See [`vc-migration.md`](./vc-migration.md) for the
+> current model.
+
 ## A vision for public-interest education infrastructure
 
 ---

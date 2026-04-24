@@ -203,48 +203,15 @@ export interface UpdateProgressRequest {
   time_spent?: number | null
 }
 
-// ---- Evidence & Skill Proofs ----
+// ---- Proficiency + Reputation ----
+//
+// Post-migration 040: SkillProof / EvidenceRecord / SkillAssessment
+// types are retired along with the SkillProof pipeline. Callers should
+// model skill claims as `Credential` rows (see the VC types further
+// down). The ProficiencyLevel union and ReputationAssertion stay —
+// both are reused by the VC-first world.
 
 export type ProficiencyLevel = 'remember' | 'understand' | 'apply' | 'analyze' | 'evaluate' | 'create'
-
-export interface SkillAssessment {
-  id: string
-  skill_id: string
-  course_id: string | null
-  source_element_id: string | null
-  assessment_type: string
-  proficiency_level: string
-  difficulty: number
-  weight: number
-  trust_factor: number
-  created_at: string
-}
-
-export interface EvidenceRecord {
-  id: string
-  skill_assessment_id: string
-  skill_id: string
-  proficiency_level: string
-  score: number
-  difficulty: number
-  trust_factor: number
-  course_id: string | null
-  instructor_address: string | null
-  created_at: string
-}
-
-export interface SkillProof {
-  id: string
-  skill_id: string
-  proficiency_level: string
-  confidence: number
-  evidence_count: number
-  computed_at: string
-  updated_at: string
-  nft_policy_id: string | null
-  nft_asset_name: string | null
-  nft_tx_hash: string | null
-}
 
 export interface ReputationAssertion {
   id: string
@@ -658,24 +625,23 @@ export interface SyncHistoryEntry {
   direction: string
 }
 
-// ---- Challenge ----
+// ---- Challenge (VC-first) ----
+//
+// The legacy evidence/skill_proof/opinion challenge shape is gone.
+// Challenges now target individual credentials; upholding a challenge
+// revokes the credential via its RevocationList2020 status list.
 
-export type ChallengeTargetType = 'evidence' | 'skill_proof' | 'opinion'
 export type ChallengeStatus = 'pending' | 'reviewing' | 'upheld' | 'rejected' | 'expired'
 
-export interface EvidenceChallenge {
+export interface CredentialChallenge {
   id: string
   challenger: string
-  target_type: string
-  target_ids: string[]
-  evidence_cids: string[]
+  credential_id: string
   reason: string
   stake_lovelace: number
   stake_tx_hash: string | null
   status: string
   dao_id: string
-  learner_address: string
-  reviewed_by: string[]
   resolution_tx: string | null
   signature: string
   created_at: string
@@ -692,33 +658,31 @@ export interface ChallengeVote {
   voted_at: string
 }
 
-export interface SubmitChallengeParams {
-  target_type: string
-  target_ids: string[]
-  evidence_cids: string[]
+export interface SubmitCredentialChallengeParams {
+  credential_id: string
   reason: string
   stake_lovelace: number
   dao_id: string
-  learner_address: string
 }
 
 export interface ChallengeResolution {
   challenge_id: string
   status: string
-  votes_upheld: number
-  votes_rejected: number
-  proofs_invalidated: number
-  reputation_zeroed: boolean
+  votes_for_uphold: number
+  votes_for_reject: number
+  credential_revoked: boolean
 }
 
 // ---- Attestation ----
 
-export type AttestorRole = 'assessor' | 'proctor'
-export type AttestationType = 'co_sign' | 'proctor_verify' | 'skill_verify'
+// ---- Completion Attestation (VC-first) ----
+//
+// Replaces the legacy evidence-cosigning types. Requirements now key
+// on `course_id`; attestations are Ed25519 signatures over the
+// 32-byte completion-witness tx hash.
 
-export interface AttestationRequirement {
-  skill_id: string
-  proficiency_level: string
+export interface CompletionAttestationRequirement {
+  course_id: string
   required_attestors: number
   dao_id: string
   set_by_proposal: string | null
@@ -726,33 +690,35 @@ export interface AttestationRequirement {
   updated_at: string
 }
 
-export interface EvidenceAttestation {
+export interface CompletionAttestation {
   id: string
-  evidence_id: string
-  attestor_address: string
-  attestor_role: string
-  attestation_type: string
-  integrity_score: number | null
-  session_cid: string | null
+  witness_tx_hash: string
+  attestor_did: string
+  attestor_pubkey: string
   signature: string
+  note: string | null
   created_at: string
 }
 
-export interface AttestationStatus {
-  evidence_id: string
-  skill_id: string
-  proficiency_level: string
+export interface CompletionAttestationStatus {
+  witness_tx_hash: string
+  course_id: string | null
   required_attestors: number
   current_attestors: number
-  is_fully_attested: boolean
-  attestations: EvidenceAttestation[]
+  is_satisfied: boolean
+  attestations: CompletionAttestation[]
 }
 
-export interface SubmitAttestationParams {
-  evidence_id: string
-  attestation_type?: string | null
-  integrity_score?: number | null
-  session_cid?: string | null
+export interface SetCompletionRequirementParams {
+  course_id: string
+  required_attestors: number
+  dao_id: string
+  set_by_proposal: string | null
+}
+
+export interface SubmitCompletionAttestationParams {
+  witness_tx_hash: string
+  note: string | null
 }
 
 // ---- Taxonomy (skill graph) ----
@@ -1277,6 +1243,17 @@ export interface Proof {
   jws: string
 }
 
+/**
+ * On-chain witness for auto-earned credentials. When present, the
+ * credential was minted by a Cardano completion validator and the
+ * tx hash can be resolved on Blockfrost to confirm the witness.
+ */
+export interface Witness {
+  tx_hash: string
+  validator_script_hash: string
+  validator_name: string
+}
+
 export interface VerifiableCredential {
   '@context': string[]
   id: string
@@ -1287,6 +1264,7 @@ export interface VerifiableCredential {
   credential_subject: CredentialSubject
   credential_status?: CredentialStatus | null
   terms_of_use?: TermsOfUse | null
+  witness?: Witness | null
   proof: Proof
 }
 
