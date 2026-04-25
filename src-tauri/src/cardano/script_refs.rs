@@ -70,7 +70,10 @@ pub const REPUTATION_MINTING_REF_UTXO: (&str, u64) = ("DEPLOY_PENDING", 0);
 pub const SOULBOUND_REF_UTXO: (&str, u64) = ("DEPLOY_PENDING", 0);
 
 /// Reference UTxO for the completion-witness minting policy.
-pub const COMPLETION_MINTING_REF_UTXO: (&str, u64) = ("DEPLOY_PENDING", 0);
+pub const COMPLETION_MINTING_REF_UTXO: (&str, u64) = (
+    "cb763b8336d0a0f2abba52bcc43e347e1fc2972c8ca7aabb871090358e0e6eea",
+    0,
+);
 
 // ---- Utility ----
 
@@ -104,8 +107,16 @@ pub fn slot_to_posix_ms(slot: u64) -> i64 {
     (slot as i64 + PREPROD_SHELLEY_EPOCH_START) * 1000
 }
 
-/// Check if reference UTxOs have been deployed.
+/// Check if the governance bundle reference UTxOs have been deployed.
 /// Returns false while reference scripts are still pending deployment.
 pub fn ref_utxos_deployed() -> bool {
     DAO_REGISTRY_REF_UTXO.0 != "DEPLOY_PENDING"
+}
+
+/// Check if the completion-witness validator has been deployed as a
+/// reference script. Independent from the governance bundle so the
+/// VC-first completion flow can run before the rest of the validators
+/// land on-chain.
+pub fn completion_ref_deployed() -> bool {
+    COMPLETION_MINTING_REF_UTXO.0 != "DEPLOY_PENDING"
 }

@@ -180,3 +180,9 @@ wat = "1"
 [[example]]
 name = "preprod_anchor"
 path = "examples/preprod_anchor.rs"
+
+# CIP-33 reference-script deploy for the completion_minting validator,
+# used to populate `script_refs::COMPLETION_MINTING_REF_UTXO`.
+[[example]]
+name = "deploy_completion"
+path = "examples/deploy_completion.rs"

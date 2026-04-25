@@ -101,9 +101,9 @@ pub async fn build_completion_mint_tx(
     completion_root: &[u8; 32],
     timestamp_ms: i64,
 ) -> Result<GovTxResult, TxBuildError> {
-    if !gov_tx_builder::validators_deployed() {
+    if !script_refs::completion_ref_deployed() {
         return Err(TxBuildError::Cbor(
-            "CompletionMint: validators not yet deployed as reference scripts".into(),
+            "CompletionMint: completion validator reference UTxO not yet deployed".into(),
         ));
     }
 
@@ -261,9 +261,15 @@ mod tests {
     }
 
     #[test]
-    fn build_fails_before_validators_deploy() {
+    fn build_fails_with_invalid_blockfrost_credentials() {
+        // With the completion validator now deployed
+        // (`COMPLETION_MINTING_REF_UTXO` populated), the deploy gate
+        // passes and the call falls through to the Blockfrost query.
+        // The fake project id makes the chain query fail; we only
+        // care that the function errors out cleanly rather than
+        // panicking or silently succeeding.
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let err = rt.block_on(async {
+        let result = rt.block_on(async {
             let bf = BlockfrostClient::new("test_project_id".into()).unwrap();
             build_completion_mint_tx(
                 &bf,
@@ -278,12 +284,7 @@ mod tests {
             )
             .await
         });
-        assert!(err.is_err());
-        let msg = err.unwrap_err().to_string();
-        assert!(
-            msg.contains("validators not yet deployed"),
-            "unexpected error: {msg}"
-        );
+        assert!(result.is_err(), "expected error with fake credentials");
     }
 
     #[test]
