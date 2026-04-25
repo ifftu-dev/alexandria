@@ -88,6 +88,10 @@ key.properties
 # ── Local dev data (legacy CLI seed tool output) ─────────────────────
 dev-data/
 
+# ── Operational env files (Blockfrost credentials, deployer key paths) ─
+scripts/env.completion
+!scripts/env.completion.example
+
 # ── Misc ──────────────────────────────────────────────────────────────
 *.tgz
 *.tsbuildinfo
