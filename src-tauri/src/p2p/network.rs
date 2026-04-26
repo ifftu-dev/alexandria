@@ -44,6 +44,12 @@ pub enum NetworkError {
     Identity(String),
 }
 
+const PROVIDER_INITIAL_DELAY: Duration = Duration::from_secs(5);
+const PROVIDER_WARMUP_INTERVAL: Duration = Duration::from_secs(15);
+const PROVIDER_WARMUP_WINDOW: Duration = Duration::from_secs(120);
+const PROVIDER_REFRESH_INTERVAL: Duration = Duration::from_secs(180);
+const PEER_EXCHANGE_INTERVAL: Duration = Duration::from_secs(30);
+
 fn identify_agent_version() -> String {
     let version = env!("CARGO_PKG_VERSION");
     format!("alexandria-node/{version} ({})", device_label())
@@ -371,7 +377,8 @@ pub async fn start_node_with_db(
     // Build the swarm with transport + relay client.
     //
     // Desktop: QUIC transport (UDP, built-in TLS 1.3)
-    // Mobile:  TCP + Noise + Yamux (QUIC causes SIGSEGV on iOS)
+    // Android: TCP + QUIC + relay client
+    // iOS:     TCP + relay client (QUIC still crashes there)
     //
     // The relay client transport enables connecting via circuit relay v2
     // when behind NAT. It requires noise + yamux for the relay hop.
@@ -394,7 +401,54 @@ pub async fn start_node_with_db(
         .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(300)))
         .build();
 
-    #[cfg(mobile)]
+    #[cfg(target_os = "android")]
+    let mut swarm = {
+        diag::log("start_node: with_tcp...");
+        let builder = SwarmBuilder::with_existing_identity(keypair.clone())
+            .with_tokio()
+            .with_tcp(
+                libp2p::tcp::Config::default(),
+                noise::Config::new,
+                yamux::Config::default,
+            )
+            .map_err(|e| {
+                diag::log(&format!("start_node: with_tcp FAILED: {e}"));
+                NetworkError::SwarmBuild(format!("tcp: {e}"))
+            })?;
+        diag::log("start_node: with_tcp OK");
+
+        diag::log("start_node: with_quic...");
+        let builder = builder.with_quic();
+        diag::log("start_node: with_quic OK");
+
+        diag::log("start_node: with_relay_client...");
+        let builder = builder
+            .with_relay_client(noise::Config::new, yamux::Config::default)
+            .map_err(|e| {
+                diag::log(&format!("start_node: with_relay_client FAILED: {e}"));
+                NetworkError::SwarmBuild(format!("relay client: {e}"))
+            })?;
+        diag::log("start_node: with_relay_client OK");
+
+        diag::log("start_node: with_behaviour...");
+        let builder = builder
+            .with_behaviour(|key, relay_behaviour| {
+                diag::log("start_node: inside build_behaviour callback");
+                build_behaviour(key, peer_id, relay_behaviour)
+            })
+            .map_err(|e| {
+                diag::log(&format!("start_node: with_behaviour FAILED: {e}"));
+                NetworkError::SwarmBuild(e.to_string())
+            })?;
+        diag::log("start_node: with_behaviour OK");
+
+        diag::log("start_node: building final swarm...");
+        builder
+            .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(300)))
+            .build()
+    };
+
+    #[cfg(all(mobile, not(target_os = "android")))]
     let mut swarm = {
         diag::log("start_node: with_tcp...");
         let builder = SwarmBuilder::with_existing_identity(keypair.clone())
@@ -476,7 +530,36 @@ pub async fn start_node_with_db(
         }
     }
 
-    #[cfg(mobile)]
+    #[cfg(target_os = "android")]
+    {
+        diag::log("start_node: listen_on /ip4/0.0.0.0/tcp/0...");
+        let listen_addr: libp2p::Multiaddr = "/ip4/0.0.0.0/tcp/0".parse().expect("valid multiaddr");
+        swarm.listen_on(listen_addr).map_err(|e| {
+            diag::log(&format!("start_node: listen_on FAILED: {e}"));
+            NetworkError::Listen(e.to_string())
+        })?;
+        diag::log("start_node: TCP listen_on OK");
+
+        diag::log("start_node: listen_on /ip4/0.0.0.0/udp/0/quic-v1...");
+        let quic_addr: libp2p::Multiaddr = "/ip4/0.0.0.0/udp/0/quic-v1"
+            .parse()
+            .expect("valid multiaddr");
+        swarm.listen_on(quic_addr).map_err(|e| {
+            diag::log(&format!("start_node: QUIC listen_on FAILED: {e}"));
+            NetworkError::Listen(e.to_string())
+        })?;
+        diag::log("start_node: QUIC listen_on OK");
+
+        if let Ok(ipv6_addr) = "/ip6/::/tcp/0".parse::<libp2p::Multiaddr>() {
+            let _ = swarm.listen_on(ipv6_addr);
+        }
+        if let Ok(ipv6_addr) = "/ip6/::/udp/0/quic-v1".parse::<libp2p::Multiaddr>() {
+            let _ = swarm.listen_on(ipv6_addr);
+        }
+        diag::log("start_node: IPv6 TCP/QUIC listen attempted");
+    }
+
+    #[cfg(all(mobile, not(target_os = "android")))]
     {
         diag::log("start_node: listen_on /ip4/0.0.0.0/tcp/0...");
         let listen_addr: libp2p::Multiaddr = "/ip4/0.0.0.0/tcp/0".parse().expect("valid multiaddr");
@@ -698,6 +781,54 @@ fn build_behaviour(
     })
 }
 
+fn refresh_provider_records(
+    swarm: &mut Swarm<AlexandriaBehaviour>,
+    namespace_key: &kad::RecordKey,
+    reason: &str,
+) {
+    diag::log(&format!("Kademlia: refreshing providers ({reason})"));
+    if let Err(e) = swarm
+        .behaviour_mut()
+        .kademlia
+        .start_providing(namespace_key.clone())
+    {
+        diag::log(&format!("Kademlia: start_providing failed ({reason}): {e}"));
+    }
+    let _ = swarm
+        .behaviour_mut()
+        .kademlia
+        .get_providers(namespace_key.clone());
+}
+
+fn dial_peer_with_relay_fallbacks(
+    swarm: &mut Swarm<AlexandriaBehaviour>,
+    peer: &PeerId,
+    reason: &str,
+) {
+    if *peer == *swarm.local_peer_id() || swarm.is_connected(peer) {
+        return;
+    }
+
+    diag::log(&format!(
+        "{reason}: dialing peer {peer} via direct and relay-circuit paths"
+    ));
+    swarm.behaviour_mut().gossipsub.add_explicit_peer(peer);
+
+    if let Err(e) = swarm.dial(peer.clone()) {
+        diag::log(&format!("{reason}: direct dial failed for {peer}: {e}"));
+    }
+
+    for addr in super::discovery::relay_circuit_dial_addrs(peer) {
+        if let Err(e) = swarm.dial(addr.clone()) {
+            log::debug!("{reason}: relay-circuit dial {addr} failed: {e}");
+        }
+    }
+}
+
+fn is_circuit_listener(address: &libp2p::Multiaddr) -> bool {
+    address.to_string().contains("p2p-circuit")
+}
+
 /// The main swarm event loop.
 ///
 /// Runs as a background task, processing both swarm events and
@@ -742,19 +873,23 @@ async fn swarm_event_loop(
     let mut kad_bootstrap_interval = tokio::time::interval(Duration::from_secs(300));
     kad_bootstrap_interval.tick().await; // consume the immediate first tick
 
-    // Periodic provider publish + query — every 3 minutes we:
-    // 1. Re-publish our provider record so other Alexandria nodes can find us
-    // 2. Query for other providers to discover new Alexandria peers
+    // Provider publish + query cadence:
+    // 1. Start quickly after boot so fresh mobile sessions become visible fast
+    // 2. Stay aggressive for the first couple of minutes while peers join
+    // 3. Fall back to a quieter steady-state interval afterward
     let namespace_key = super::discovery::namespace_key();
-    let mut provider_interval = tokio::time::interval(Duration::from_secs(180));
-    // Initial publish after a short delay (30s) to let bootstrap connections establish
-    let provider_initial = tokio::time::sleep(Duration::from_secs(30));
+    let mut provider_interval = tokio::time::interval(PROVIDER_REFRESH_INTERVAL);
+    provider_interval.tick().await; // consume the immediate first tick
+    let mut provider_warmup_interval = tokio::time::interval(PROVIDER_WARMUP_INTERVAL);
+    provider_warmup_interval.tick().await; // consume the immediate first tick
+    let provider_warmup_deadline = tokio::time::Instant::now() + PROVIDER_WARMUP_WINDOW;
+    let provider_initial = tokio::time::sleep(PROVIDER_INITIAL_DELAY);
     tokio::pin!(provider_initial);
     let mut initial_provider_done = false;
 
-    // Periodic peer exchange — broadcast our addresses every 60s
+    // Periodic peer exchange — broadcast our addresses every 30s
     // so peers-of-peers can discover us transitively via GossipSub.
-    let mut peer_exchange_interval = tokio::time::interval(Duration::from_secs(60));
+    let mut peer_exchange_interval = tokio::time::interval(PEER_EXCHANGE_INTERVAL);
     peer_exchange_interval.tick().await; // consume the immediate first tick
 
     /// Helper: build and publish a peer exchange message.
@@ -850,18 +985,18 @@ async fn swarm_event_loop(
             _ = kad_bootstrap_interval.tick() => {
                 let _ = swarm.behaviour_mut().kademlia.bootstrap();
             }
-            // Initial provider publish (30s after start)
+            // Initial provider publish shortly after startup
             _ = &mut provider_initial, if !initial_provider_done => {
                 initial_provider_done = true;
-                diag::log("Publishing provider record for ifftu.alexandria namespace");
-                let _ = swarm.behaviour_mut().kademlia.start_providing(namespace_key.clone());
-                diag::log("Querying providers for ifftu.alexandria namespace");
-                let _ = swarm.behaviour_mut().kademlia.get_providers(namespace_key.clone());
+                refresh_provider_records(&mut swarm, &namespace_key, "initial warm-up");
+            }
+            // Fast provider refresh during the startup window
+            _ = provider_warmup_interval.tick(), if initial_provider_done && tokio::time::Instant::now() < provider_warmup_deadline => {
+                refresh_provider_records(&mut swarm, &namespace_key, "warm-up interval");
             }
             // Periodic provider refresh
             _ = provider_interval.tick(), if initial_provider_done => {
-                let _ = swarm.behaviour_mut().kademlia.start_providing(namespace_key.clone());
-                let _ = swarm.behaviour_mut().kademlia.get_providers(namespace_key.clone());
+                refresh_provider_records(&mut swarm, &namespace_key, "steady-state interval");
             }
             // Periodic peer exchange broadcast
             _ = peer_exchange_interval.tick() => {
@@ -1056,11 +1191,10 @@ async fn swarm_event_loop(
                                 )),
                             }
 
-                            // Start providing on the namespace key so other peers can find us.
-                            let _ = swarm.behaviour_mut().kademlia.start_providing(
-                                namespace_key.clone(),
-                            );
-                            diag::log("Kademlia: started providing on namespace key");
+                            // Refresh our provider record now that the relay path is
+                            // actively coming online, so other peers do not wait for
+                            // the next scheduled query cycle to find us.
+                            refresh_provider_records(&mut swarm, &namespace_key, "relay identify");
                         }
                     }
                     // Kademlia events — DHT routing + provider discovery
@@ -1071,6 +1205,13 @@ async fn swarm_event_loop(
                                     "Kademlia: routing updated for {peer} ({} addrs)",
                                     addresses.len()
                                 ));
+                                if !relay_peer_ids.contains(&peer) {
+                                    dial_peer_with_relay_fallbacks(
+                                        &mut swarm,
+                                        &peer,
+                                        "Kademlia routing update",
+                                    );
+                                }
                             }
                             kad::Event::OutboundQueryProgressed {
                                 result: kad::QueryResult::GetProviders(Ok(
@@ -1093,16 +1234,12 @@ async fn swarm_event_loop(
                                     ));
                                 }
                                 for peer in providers {
-                                    if peer != local && !swarm.is_connected(&peer) {
-                                        diag::log(&format!(
-                                            "DHT: discovered Alexandria peer {peer}, dialing..."
-                                        ));
-                                        // Add to GossipSub so we exchange messages
-                                        swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer);
-                                        // Try to dial them
-                                        if let Err(e) = swarm.dial(peer) {
-                                            diag::log(&format!("DHT: failed to dial {peer}: {e}"));
-                                        }
+                                    if peer != local {
+                                        dial_peer_with_relay_fallbacks(
+                                            &mut swarm,
+                                            &peer,
+                                            "DHT discovery",
+                                        );
                                     }
                                 }
                             }
@@ -1180,7 +1317,7 @@ async fn swarm_event_loop(
                     }
                     // Relay client events — circuit relay v2
                     SwarmEvent::Behaviour(AlexandriaBehaviourEvent::RelayClient(event)) => {
-                        match &event {
+                        match event {
                             relay::client::Event::ReservationReqAccepted {
                                 relay_peer_id, ..
                             } => {
@@ -1194,8 +1331,14 @@ async fn swarm_event_loop(
                                     ));
                                 }
                                 let _ = event_tx.send(P2pEvent::RelayReservation {
-                                    relay_peer: relay_str,
+                                    relay_peer: relay_str.clone(),
                                 }).await;
+                                refresh_provider_records(
+                                    &mut swarm,
+                                    &namespace_key,
+                                    "relay reservation accepted",
+                                );
+                                publish_peer_exchange(&mut swarm);
                             }
                             _ => {
                                 log::debug!("Relay client event: {event:?}");
@@ -1285,6 +1428,10 @@ async fn swarm_event_loop(
                     }
                     SwarmEvent::NewListenAddr { address, .. } => {
                         log::info!("Listening on {address}");
+                        if is_circuit_listener(&address) {
+                            diag::log("Peer exchange: rebroadcasting after relay circuit listen address appeared");
+                            publish_peer_exchange(&mut swarm);
+                        }
                     }
                     SwarmEvent::ConnectionEstablished { peer_id, endpoint, .. } => {
                         log::info!("Connected to peer: {peer_id}");

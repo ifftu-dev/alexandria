@@ -92,6 +92,32 @@ pub fn relay_circuit_addr_for(peer_id: &PeerId) -> Option<Multiaddr> {
     })
 }
 
+/// Build relay-circuit dial addresses for a discovered destination peer.
+///
+/// These are the addresses other peers can use when the destination has an
+/// active relay reservation but has not yet advertised a directly dialable
+/// public address.
+pub fn relay_circuit_dial_addrs(peer_id: &PeerId) -> Vec<Multiaddr> {
+    let mut out = Vec::new();
+    for relay in RELAYS {
+        for tmpl in [
+            format!(
+                "/dns4/{}/tcp/{}/p2p/{}/p2p-circuit/p2p/{}",
+                relay.host, relay.port, relay.peer_id, peer_id
+            ),
+            format!(
+                "/ip4/{}/tcp/{}/p2p/{}/p2p-circuit/p2p/{}",
+                relay.ipv4, relay.port, relay.peer_id, peer_id
+            ),
+        ] {
+            if let Ok(addr) = tmpl.parse::<Multiaddr>() {
+                out.push(addr);
+            }
+        }
+    }
+    out
+}
+
 pub fn bootstrap_peers() -> Vec<Multiaddr> {
     let mut addrs = Vec::new();
 
@@ -223,5 +249,27 @@ mod tests {
             .parse()
             .unwrap();
         assert!(relay_circuit_addr_for(&unknown).is_none());
+    }
+
+    #[test]
+    fn relay_circuit_dial_addrs_returns_both_relays() {
+        let peer: PeerId = "12D3KooWDpJ7As7BWAwRMfu1VU2WCqNjvq387JEYKDBj4kx6nXTN"
+            .parse()
+            .unwrap();
+        let addrs = relay_circuit_dial_addrs(&peer);
+        assert_eq!(
+            addrs.len(),
+            4,
+            "should return DNS + IPv4 circuit addrs for both relays"
+        );
+        assert!(addrs
+            .iter()
+            .all(|addr| addr.to_string().contains("p2p-circuit")));
+        assert!(addrs
+            .iter()
+            .any(|addr| addr.to_string().contains("alexandria-relay.fly.dev")));
+        assert!(addrs
+            .iter()
+            .any(|addr| addr.to_string().contains("alexandria-relay-eu.fly.dev")));
     }
 }
