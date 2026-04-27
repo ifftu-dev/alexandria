@@ -4,6 +4,15 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 
+    <!-- Foreground service for the libp2p mesh — keeps the process alive
+         so Doze / battery optimisation doesn't suspend network traffic
+         when the app is backgrounded. See P2pForegroundService.kt. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- POST_NOTIFICATIONS is a runtime permission on Android 13+; the
+         service notification is required for foreground-service status. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <!-- AndroidTV support -->
     <uses-feature android:name="android.software.leanback" android:required="false" />
 
@@ -35,5 +44,10 @@
             android:name="android.support.FILE_PROVIDER_PATHS"
             android:resource="@xml/file_paths" />
         </provider>
+
+        <service
+            android:name=".P2pForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
     </application>
 </manifest>
