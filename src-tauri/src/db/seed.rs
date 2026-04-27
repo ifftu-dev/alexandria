@@ -58,7 +58,19 @@ pub fn seed_if_empty(conn: &Connection) -> Result<bool, rusqlite::Error> {
 /// invocations are no-ops. Returns the number of rows rewritten across
 /// all targeted tables.
 pub fn bind_current_user_to_seed(conn: &Connection) -> Result<usize, rusqlite::Error> {
-    const SENTINEL: &str = "addr_demo_learner";
+    bind_current_user_to_seed_with_did(conn, None)
+}
+
+/// Like [`bind_current_user_to_seed`], but also rewrites the demo-learner
+/// DID across `credentials`, `derived_skill_states`, `pinboard_observations`,
+/// and adds the user as a member of seeded DAOs — so the SkillGraph and
+/// governance views light up under the real DID after onboarding.
+pub fn bind_current_user_to_seed_with_did(
+    conn: &Connection,
+    real_did: Option<&str>,
+) -> Result<usize, rusqlite::Error> {
+    const ADDRESS_SENTINEL: &str = "addr_demo_learner";
+    const DID_SENTINEL: &str = "did:key:z6MkDemoLearnerPlaceholderXXXXXXXXXXXXXXXXXXXX";
 
     // Read the real wallet address. If none is set yet, skip silently.
     let real_address: Option<String> = conn
@@ -73,18 +85,53 @@ pub fn bind_current_user_to_seed(conn: &Connection) -> Result<usize, rusqlite::E
         return Ok(0);
     };
 
-    if real_address == SENTINEL {
+    if real_address == ADDRESS_SENTINEL {
         return Ok(0);
     }
 
     let mut total: usize = 0;
     total += conn.execute(
         "UPDATE reputation_assertions SET actor_address = ?1 WHERE actor_address = ?2",
-        rusqlite::params![&real_address, SENTINEL],
+        rusqlite::params![&real_address, ADDRESS_SENTINEL],
     )?;
     // Post-migration 040: reputation_impact_deltas was dropped — the
     // per-learner impact table will be reintroduced (repointed at
     // credentials) when the reputation engine is rebuilt.
+
+    if let Some(real_did) = real_did {
+        if real_did != DID_SENTINEL {
+            // Credentials: rewrite both the column and the embedded JSON
+            // so frontend filters on `credential_subject.id` match.
+            total += conn.execute(
+                "UPDATE credentials \
+                 SET subject_did = ?1, \
+                     signed_vc_json = REPLACE(signed_vc_json, ?2, ?1) \
+                 WHERE subject_did = ?2",
+                rusqlite::params![real_did, DID_SENTINEL],
+            )?;
+
+            total += conn.execute(
+                "UPDATE derived_skill_states SET subject_did = ?1 WHERE subject_did = ?2",
+                rusqlite::params![real_did, DID_SENTINEL],
+            )?;
+
+            total += conn.execute(
+                "UPDATE pinboard_observations SET pinner_did = ?1 WHERE pinner_did = ?2",
+                rusqlite::params![real_did, DID_SENTINEL],
+            )?;
+        }
+
+        // Make the user a member of two seeded DAOs so the governance
+        // views show "joined" status, proposals are votable, and the
+        // active election is participatable.
+        for (dao_id, role) in [("dao_cs", "member"), ("dao_web", "member")] {
+            total += conn.execute(
+                "INSERT OR IGNORE INTO governance_dao_members (dao_id, stake_address, role) \
+                 VALUES (?1, ?2, ?3)",
+                rusqlite::params![dao_id, &real_address, role],
+            )?;
+        }
+    }
 
     if total > 0 {
         log::info!("Rebound {total} demo-learner rows to real wallet");

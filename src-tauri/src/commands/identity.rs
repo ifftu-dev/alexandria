@@ -132,7 +132,9 @@ pub async fn unlock_vault(
         // and silently no-op once the sentinel rows are gone.
         #[cfg(feature = "dev-seed")]
         {
-            let _ = crate::db::seed::bind_current_user_to_seed(db.conn());
+            let did = crate::crypto::did::derive_did_key(&w.signing_key);
+            let _ =
+                crate::db::seed::bind_current_user_to_seed_with_did(db.conn(), Some(did.as_str()));
         }
 
         // Read back the full profile in the same DB lock — no extra IPC needed
@@ -234,7 +236,9 @@ pub async fn generate_wallet(
         // identity is committed. See seed::bind_current_user_to_seed.
         #[cfg(feature = "dev-seed")]
         {
-            let _ = crate::db::seed::bind_current_user_to_seed(db.conn());
+            let did = crate::crypto::did::derive_did_key(&w.signing_key);
+            let _ =
+                crate::db::seed::bind_current_user_to_seed_with_did(db.conn(), Some(did.as_str()));
         }
     } // db guard dropped here — before any .await
 
@@ -324,7 +328,9 @@ pub async fn restore_wallet(
         // Bind seeded demo-learner rows to this restored wallet.
         #[cfg(feature = "dev-seed")]
         {
-            let _ = crate::db::seed::bind_current_user_to_seed(db.conn());
+            let did = crate::crypto::did::derive_did_key(&w.signing_key);
+            let _ =
+                crate::db::seed::bind_current_user_to_seed_with_did(db.conn(), Some(did.as_str()));
         }
     } // db guard dropped here — before any .await
 
