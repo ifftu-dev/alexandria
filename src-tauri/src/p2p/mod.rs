@@ -1,4 +1,5 @@
 pub mod catalog;
+pub mod device_id;
 pub mod discovery;
 pub mod gossip;
 pub mod governance;

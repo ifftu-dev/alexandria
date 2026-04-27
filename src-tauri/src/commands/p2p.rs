@@ -6,7 +6,7 @@
 
 use std::sync::Arc;
 
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 
 use crate::classroom::manager as classroom_manager;
 use crate::classroom::types::is_classroom_topic;
@@ -14,8 +14,9 @@ use crate::crypto::wallet;
 use crate::db::Database;
 use crate::diag;
 use crate::p2p::catalog as p2p_catalog;
+use crate::p2p::device_id;
 use crate::p2p::governance as p2p_governance;
-use crate::p2p::network::{self, keypair_from_cardano_key};
+use crate::p2p::network::{self, derive_libp2p_keypair};
 use crate::p2p::opinions as p2p_opinions;
 use crate::p2p::pinboard as p2p_pinboard;
 use crate::p2p::presentation as p2p_presentation;
@@ -67,10 +68,24 @@ pub async fn p2p_start(app: AppHandle, state: State<'_, AppState>) -> Result<Str
         bytes
     };
 
+    diag::log("p2p_start: loading device id...");
+
+    // Per-device secret keeps the libp2p PeerId distinct across installs
+    // unlocked with the same vault. Generated on first launch, persisted
+    // under app_data_dir.
+    let device_id_bytes = {
+        let app_data_dir = app
+            .path()
+            .app_data_dir()
+            .map_err(|e| format!("app_data_dir: {e}"))?;
+        device_id::load_or_create(&app_data_dir).map_err(|e| format!("device_id: {e}"))?
+    };
+
     diag::log("p2p_start: deriving keypair...");
 
-    // Derive libp2p keypair from Cardano key
-    let keypair = keypair_from_cardano_key(&payment_key_bytes).map_err(|e| e.to_string())?;
+    // Derive a per-device libp2p keypair from the wallet payment key + device id
+    let keypair =
+        derive_libp2p_keypair(&payment_key_bytes, &device_id_bytes).map_err(|e| e.to_string())?;
     let peer_id = keypair.public().to_peer_id().to_string();
 
     diag::log(&format!(

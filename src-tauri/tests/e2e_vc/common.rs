@@ -62,7 +62,7 @@ pub const TEST_NOW: &str = "2026-04-13T00:00:00Z";
 // Each test costs ~10–15s wall-clock.
 // ---------------------------------------------------------------------------
 
-use app_lib::p2p::network::{keypair_from_cardano_key, start_node, start_node_with_db, P2pNode};
+use app_lib::p2p::network::{derive_libp2p_keypair, start_node, start_node_with_db, P2pNode};
 use app_lib::p2p::types::P2pEvent;
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
@@ -82,7 +82,7 @@ pub async fn start_test_node(
     for (i, byte) in seed.iter_mut().enumerate() {
         *byte = b[i % b.len().max(1)];
     }
-    let kp = keypair_from_cardano_key(&seed).ok()?;
+    let kp = derive_libp2p_keypair(&seed, &TEST_DEVICE_ID).ok()?;
     let (tx, rx) = mpsc::channel::<P2pEvent>(capacity);
     match start_node(kp, tx, vec![]).await {
         Ok(node) => Some((node, rx)),
@@ -92,6 +92,10 @@ pub async fn start_test_node(
         }
     }
 }
+
+/// Fixed device id for deterministic test PeerIds — real installs use a
+/// random per-device value persisted via `p2p::device_id`.
+const TEST_DEVICE_ID: [u8; 32] = [0xCCu8; 32];
 
 /// Variant that wires a `Database` into the swarm event loop so the
 /// node can answer inbound vc-fetch requests against local
@@ -106,7 +110,7 @@ pub async fn start_test_node_with_db(
     for (i, byte) in seed.iter_mut().enumerate() {
         *byte = b[i % b.len().max(1)];
     }
-    let kp = keypair_from_cardano_key(&seed).ok()?;
+    let kp = derive_libp2p_keypair(&seed, &TEST_DEVICE_ID).ok()?;
     let (tx, rx) = mpsc::channel::<P2pEvent>(capacity);
     let db_arc = Arc::new(StdMutex::new(Some(db)));
     match start_node_with_db(kp, tx, vec![], Some(db_arc)).await {

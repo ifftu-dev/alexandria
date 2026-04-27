@@ -325,19 +325,29 @@ pub enum SwarmCommand {
     Shutdown,
 }
 
-/// Derive a libp2p Ed25519 keypair from the Cardano payment key.
+/// Derive a per-device libp2p Ed25519 keypair from the Cardano payment key
+/// and a device-local secret.
 ///
-/// The architecture spec requires: "PeerId = Ed25519 public key derived
-/// from Cardano signing key for linkability." This creates a cryptographic
-/// link between P2P identity and on-chain identity.
+/// The DID/wallet identity stays linked to the payment key, but each device
+/// install picks up its own 32-byte `device_id` (see `super::device_id`),
+/// so two devices unlocked with the same vault end up with distinct PeerIds.
+/// This avoids the libp2p-layer collision where two installs would otherwise
+/// race for one connection slot under a single PeerId.
 ///
-/// We use the first 32 bytes of the extended payment key (the Ed25519 scalar)
-/// as the libp2p identity key.
-pub fn keypair_from_cardano_key(payment_key_bytes: &[u8; 32]) -> Result<Keypair, NetworkError> {
-    let mut seed = *payment_key_bytes;
-    let keypair = Keypair::ed25519_from_bytes(&mut seed)
-        .map_err(|e| NetworkError::Identity(e.to_string()))?;
-    Ok(keypair)
+/// HKDF-SHA256(ikm = payment_key, salt = device_id, info = "alexandria-libp2p-v1")
+/// → 32 bytes → Ed25519 scalar.
+pub fn derive_libp2p_keypair(
+    payment_key_bytes: &[u8; 32],
+    device_id: &[u8; 32],
+) -> Result<Keypair, NetworkError> {
+    use hkdf::Hkdf;
+    use sha2::Sha256;
+
+    let hk = Hkdf::<Sha256>::new(Some(device_id), payment_key_bytes);
+    let mut seed = [0u8; 32];
+    hk.expand(b"alexandria-libp2p-v1", &mut seed)
+        .map_err(|e| NetworkError::Identity(format!("hkdf expand: {e}")))?;
+    Keypair::ed25519_from_bytes(&mut seed).map_err(|e| NetworkError::Identity(e.to_string()))
 }
 
 /// Build and start the P2P node.
@@ -814,7 +824,7 @@ fn dial_peer_with_relay_fallbacks(
     ));
     swarm.behaviour_mut().gossipsub.add_explicit_peer(peer);
 
-    if let Err(e) = swarm.dial(peer.clone()) {
+    if let Err(e) = swarm.dial(*peer) {
         diag::log(&format!("{reason}: direct dial failed for {peer}: {e}"));
     }
 
@@ -1595,22 +1605,24 @@ impl P2pNode {
 mod tests {
     use super::*;
 
+    const TEST_DEVICE_ID: [u8; 32] = [0xCCu8; 32];
+
     #[test]
-    fn keypair_from_cardano_key_deterministic() {
+    fn derive_libp2p_keypair_deterministic() {
         let key_bytes = [0x42u8; 32];
-        let kp1 = keypair_from_cardano_key(&key_bytes).unwrap();
-        let kp2 = keypair_from_cardano_key(&key_bytes).unwrap();
+        let kp1 = derive_libp2p_keypair(&key_bytes, &TEST_DEVICE_ID).unwrap();
+        let kp2 = derive_libp2p_keypair(&key_bytes, &TEST_DEVICE_ID).unwrap();
         assert_eq!(
             kp1.public().to_peer_id(),
             kp2.public().to_peer_id(),
-            "same key should produce same PeerId"
+            "same key + device_id should produce same PeerId"
         );
     }
 
     #[test]
     fn different_keys_produce_different_peer_ids() {
-        let kp1 = keypair_from_cardano_key(&[0x01u8; 32]).unwrap();
-        let kp2 = keypair_from_cardano_key(&[0x02u8; 32]).unwrap();
+        let kp1 = derive_libp2p_keypair(&[0x01u8; 32], &TEST_DEVICE_ID).unwrap();
+        let kp2 = derive_libp2p_keypair(&[0x02u8; 32], &TEST_DEVICE_ID).unwrap();
         assert_ne!(
             kp1.public().to_peer_id(),
             kp2.public().to_peer_id(),
@@ -1619,8 +1631,20 @@ mod tests {
     }
 
     #[test]
+    fn different_device_ids_produce_different_peer_ids() {
+        let key = [0x42u8; 32];
+        let kp1 = derive_libp2p_keypair(&key, &[0x01u8; 32]).unwrap();
+        let kp2 = derive_libp2p_keypair(&key, &[0x02u8; 32]).unwrap();
+        assert_ne!(
+            kp1.public().to_peer_id(),
+            kp2.public().to_peer_id(),
+            "same key with different device_id should produce different PeerIds"
+        );
+    }
+
+    #[test]
     fn peer_id_is_valid_base58() {
-        let kp = keypair_from_cardano_key(&[0xABu8; 32]).unwrap();
+        let kp = derive_libp2p_keypair(&[0xABu8; 32], &TEST_DEVICE_ID).unwrap();
         let peer_id = kp.public().to_peer_id();
         let peer_id_str = peer_id.to_string();
         // PeerId is base58-encoded (starts with "12D3KooW" for Ed25519)
@@ -1633,7 +1657,7 @@ mod tests {
 
     #[tokio::test]
     async fn start_and_shutdown_node() {
-        let keypair = keypair_from_cardano_key(&[0x42u8; 32]).unwrap();
+        let keypair = derive_libp2p_keypair(&[0x42u8; 32], &TEST_DEVICE_ID).unwrap();
         let (event_tx, _event_rx) = mpsc::channel(16);
 
         let mut node = start_node(keypair, event_tx, vec![])
@@ -1680,7 +1704,7 @@ mod tests {
 
         let mut key_bytes = [0u8; 32];
         key_bytes.copy_from_slice(&w.payment_key_extended[..32]);
-        let keypair = keypair_from_cardano_key(&key_bytes).expect("derive keypair");
+        let keypair = derive_libp2p_keypair(&key_bytes, &TEST_DEVICE_ID).expect("derive keypair");
         let peer_id = keypair.public().to_peer_id();
         assert!(
             peer_id.to_string().starts_with("12D3KooW"),
@@ -1688,15 +1712,15 @@ mod tests {
             peer_id
         );
 
-        // Deterministic: same mnemonic → same PeerId
+        // Deterministic: same mnemonic + same device_id → same PeerId
         let w2 = wallet::wallet_from_mnemonic(&mnemonic).expect("wallet 2");
         let mut kb2 = [0u8; 32];
         kb2.copy_from_slice(&w2.payment_key_extended[..32]);
-        let kp2 = keypair_from_cardano_key(&kb2).expect("kp2");
+        let kp2 = derive_libp2p_keypair(&kb2, &TEST_DEVICE_ID).expect("kp2");
         assert_eq!(
             kp2.public().to_peer_id(),
             peer_id,
-            "same mnemonic should produce same PeerId"
+            "same mnemonic + same device_id should produce same PeerId"
         );
     }
 }

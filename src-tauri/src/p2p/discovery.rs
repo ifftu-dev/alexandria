@@ -97,25 +97,29 @@ pub fn relay_circuit_addr_for(peer_id: &PeerId) -> Option<Multiaddr> {
 /// These are the addresses other peers can use when the destination has an
 /// active relay reservation but has not yet advertised a directly dialable
 /// public address.
+///
+/// Emits one address per relay (DNS variant only), not one-per-transport-
+/// variant. Each address triggers a separate circuit reservation attempt
+/// against the relay, which counts toward the relay's per-source-peer
+/// circuit limit. Earlier versions also fanned out an `/ip4/.../p2p-circuit`
+/// variant for every relay; that doubled the load on the relay for no
+/// real benefit (libp2p already has an open connection to the relay by the
+/// time we reach this codepath, so the circuit dial reuses it). DNS-only
+/// keeps relay pressure proportional to the number of *relays*, not
+/// `relays × transport_variants`.
 pub fn relay_circuit_dial_addrs(peer_id: &PeerId) -> Vec<Multiaddr> {
-    let mut out = Vec::new();
-    for relay in RELAYS {
-        for tmpl in [
+    RELAYS
+        .iter()
+        .filter(|r| !r.peer_id.starts_with("PLACEHOLDER"))
+        .filter_map(|relay| {
             format!(
                 "/dns4/{}/tcp/{}/p2p/{}/p2p-circuit/p2p/{}",
                 relay.host, relay.port, relay.peer_id, peer_id
-            ),
-            format!(
-                "/ip4/{}/tcp/{}/p2p/{}/p2p-circuit/p2p/{}",
-                relay.ipv4, relay.port, relay.peer_id, peer_id
-            ),
-        ] {
-            if let Ok(addr) = tmpl.parse::<Multiaddr>() {
-                out.push(addr);
-            }
-        }
-    }
-    out
+            )
+            .parse::<Multiaddr>()
+            .ok()
+        })
+        .collect()
 }
 
 pub fn bootstrap_peers() -> Vec<Multiaddr> {
@@ -252,19 +256,20 @@ mod tests {
     }
 
     #[test]
-    fn relay_circuit_dial_addrs_returns_both_relays() {
+    fn relay_circuit_dial_addrs_returns_one_per_relay() {
         let peer: PeerId = "12D3KooWDpJ7As7BWAwRMfu1VU2WCqNjvq387JEYKDBj4kx6nXTN"
             .parse()
             .unwrap();
         let addrs = relay_circuit_dial_addrs(&peer);
         assert_eq!(
             addrs.len(),
-            4,
-            "should return DNS + IPv4 circuit addrs for both relays"
+            2,
+            "should return one DNS circuit addr per relay (no IPv4 fanout — keeps relay per-peer circuit limit headroom)"
         );
         assert!(addrs
             .iter()
             .all(|addr| addr.to_string().contains("p2p-circuit")));
+        assert!(addrs.iter().all(|addr| addr.to_string().contains("/dns4/")));
         assert!(addrs
             .iter()
             .any(|addr| addr.to_string().contains("alexandria-relay.fly.dev")));
