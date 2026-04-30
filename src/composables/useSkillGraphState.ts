@@ -1,5 +1,10 @@
 import { ref } from 'vue'
-import type { SkillInfo, SkillGraphEdge, VerifiableCredential } from '@/types'
+import {
+  extractSkillClaim,
+  type SkillInfo,
+  type SkillGraphEdge,
+  type VerifiableCredential,
+} from '@/types'
 
 /**
  * Shared state for the sidebar skill graph widget.
@@ -8,8 +13,9 @@ import type { SkillInfo, SkillGraphEdge, VerifiableCredential } from '@/types'
  * are shared across components via module-level singletons.
  *
  * Post-migration 040: earned state is derived from credentials
- * (SkillClaim with `level >= 0`) for the subject == local DID. The
- * set of earned skill IDs is the distinct `skill_id` across those.
+ * (a SkillClaim on the credentialSubject) for the subject == local
+ * DID. The set of earned skill IDs is the distinct `skillId` across
+ * those credentials.
  */
 
 const skills = ref<SkillInfo[]>([])
@@ -42,8 +48,8 @@ export function useSkillGraphState() {
 
 /**
  * Reduce a credential list to the distinct set of skill IDs
- * represented by SkillClaim-kind credentials held by `subjectDid`
- * (or, when no filter is supplied, every skill-claim in the list).
+ * represented by skill-kind credentials held by `subjectDid`
+ * (or, when no filter is supplied, every skill claim in the list).
  */
 export function earnedSkillIdsFromCredentials(
   creds: VerifiableCredential[],
@@ -51,17 +57,16 @@ export function earnedSkillIdsFromCredentials(
 ): Set<string> {
   const out = new Set<string>()
   for (const vc of creds) {
-    if (subjectDid && vc.credential_subject.id !== subjectDid) continue
-    const claim = vc.credential_subject.claim
-    if (claim.kind !== 'skill') continue
-    if (!claim.skill_id) continue
-    out.add(claim.skill_id)
+    if (subjectDid && vc.credentialSubject.id !== subjectDid) continue
+    const claim = extractSkillClaim(vc.credentialSubject)
+    if (!claim) continue
+    out.add(claim.skillId)
   }
   return out
 }
 
 /**
- * For each skill_id, pick the credential with the highest
+ * For each skillId, pick the credential with the highest
  * `SkillClaim.level`. Used to render per-skill detail pages.
  */
 export function highestLevelBySkill(
@@ -70,18 +75,18 @@ export function highestLevelBySkill(
 ): Map<string, VerifiableCredential> {
   const best = new Map<string, VerifiableCredential>()
   for (const vc of creds) {
-    if (subjectDid && vc.credential_subject.id !== subjectDid) continue
-    const claim = vc.credential_subject.claim
-    if (claim.kind !== 'skill' || !claim.skill_id) continue
-    const existing = best.get(claim.skill_id)
+    if (subjectDid && vc.credentialSubject.id !== subjectDid) continue
+    const claim = extractSkillClaim(vc.credentialSubject)
+    if (!claim) continue
+    const existing = best.get(claim.skillId)
     if (!existing) {
-      best.set(claim.skill_id, vc)
+      best.set(claim.skillId, vc)
       continue
     }
-    const existingClaim = existing.credential_subject.claim
-    if (existingClaim.kind !== 'skill') continue
+    const existingClaim = extractSkillClaim(existing.credentialSubject)
+    if (!existingClaim) continue
     if (claim.level > existingClaim.level) {
-      best.set(claim.skill_id, vc)
+      best.set(claim.skillId, vc)
     }
   }
   return best

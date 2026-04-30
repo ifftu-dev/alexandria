@@ -89,7 +89,7 @@ pub(super) fn b64url_decode(s: &str) -> Option<Vec<u8>> {
 mod tests {
     use super::*;
     use crate::crypto::did::derive_did_key;
-    use crate::domain::vc::{Claim, CredentialSubject, Proof, SkillClaim, VerifiableCredential};
+    use crate::domain::vc::{Claim, Proof, SkillClaim, VerifiableCredential};
 
     fn test_signing_key(role: &str) -> SigningKey {
         let mut bytes = [0u8; 32];
@@ -101,25 +101,23 @@ mod tests {
     }
 
     fn unsigned_skeleton(issuer: Did, subject: Did) -> UnsignedCredential {
+        let claim = Claim::Skill(SkillClaim {
+            skill_id: "skill_x".into(),
+            level: 3,
+            score: 0.65,
+            evidence_refs: vec![],
+            rubric_version: None,
+            assessment_method: None,
+        });
         UnsignedCredential {
             credential: VerifiableCredential {
-                context: vec!["https://www.w3.org/2018/credentials/v1".into()],
-                id: "urn:uuid:sign-unit-test".into(),
+                context: vec!["https://www.w3.org/ns/credentials/v2".into()],
+                id: Some("urn:uuid:sign-unit-test".into()),
                 type_: vec!["VerifiableCredential".into(), "FormalCredential".into()],
                 issuer,
-                issuance_date: "2026-04-13T00:00:00Z".into(),
-                expiration_date: None,
-                credential_subject: CredentialSubject {
-                    id: subject,
-                    claim: Claim::Skill(SkillClaim {
-                        skill_id: "skill_x".into(),
-                        level: 3,
-                        score: 0.65,
-                        evidence_refs: vec![],
-                        rubric_version: None,
-                        assessment_method: None,
-                    }),
-                },
+                valid_from: "2026-04-13T00:00:00Z".into(),
+                valid_until: None,
+                credential_subject: claim.into_subject(subject),
                 credential_status: None,
                 terms_of_use: None,
                 witness: None,
@@ -183,5 +181,22 @@ mod tests {
         assert_eq!(signed.id, original_id);
         assert_eq!(signed.issuer, issuer);
         assert_eq!(signed.credential_subject.id, subject);
+    }
+
+    #[test]
+    fn signed_credential_serializes_with_w3c_v2_field_names() {
+        // The on-disk JSON MUST use W3C VC v2 keys: validFrom (not
+        // issuance_date), credentialSubject (not credential_subject).
+        // External verifiers parsing the bundle rely on this shape.
+        let key = test_signing_key("issuer");
+        let issuer = derive_did_key(&key);
+        let subject = derive_did_key(&test_signing_key("subject"));
+        let signed =
+            sign_credential(unsigned_skeleton(issuer.clone(), subject), &key, &issuer).unwrap();
+        let v = serde_json::to_value(&signed).unwrap();
+        assert!(v.get("validFrom").is_some(), "missing validFrom in {v}");
+        assert!(v.get("credentialSubject").is_some());
+        assert!(v.get("issuance_date").is_none());
+        assert!(v.get("credential_subject").is_none());
     }
 }

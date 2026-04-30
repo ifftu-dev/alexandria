@@ -118,7 +118,7 @@ dependencies = [
 
 [[package]]
 name = "alexandria-node"
-version = "0.1.2-alpha"
+version = "0.2.0-alpha"
 dependencies = [
  "aes-gcm",
  "anyhow",

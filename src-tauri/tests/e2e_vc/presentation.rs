@@ -39,17 +39,17 @@ fn issue_for_subject() -> (
     };
     let vc = issue_credential_impl(db.conn(), &issuer_key, &issuer, &req, TEST_NOW)
         .expect("issue credential");
-    (db, subject_key, subject, vc.id)
+    (db, subject_key, subject, vc.id.expect("issued VC has id"))
 }
 
 #[tokio::test]
 async fn presentation_reveals_only_requested_fields() {
-    // Create presentation with reveal = ["credential_subject.claim.level"].
+    // Create presentation with reveal = ["credentialSubject.level"].
     // Output must not include the raw score or evidence_refs.
     let (db, subject_key, subject, cred_id) = issue_for_subject();
     let req = CreatePresentationRequest {
         credential_ids: vec![cred_id],
-        reveal: vec!["credential_subject.claim.level".into()],
+        reveal: vec!["credentialSubject.level".into()],
         audience: "did:web:hirer.example".into(),
         nonce: "n-fields".into(),
     };
@@ -60,8 +60,8 @@ async fn presentation_reveals_only_requested_fields() {
         env.payload_json
     );
     assert!(
-        !env.payload_json.contains("evidence_refs"),
-        "evidence_refs leaked: {}",
+        !env.payload_json.contains("evidenceRefs"),
+        "evidenceRefs leaked: {}",
         env.payload_json
     );
     assert!(env.payload_json.contains("\"level\""), "level missing");
@@ -78,7 +78,7 @@ async fn nonce_reuse_is_rejected_on_verification_side() {
     let (db, subject_key, subject, cred_id) = issue_for_subject();
     let req = CreatePresentationRequest {
         credential_ids: vec![cred_id],
-        reveal: vec!["credential_subject.claim.level".into()],
+        reveal: vec!["credentialSubject.level".into()],
         audience: "did:web:hirer.example".into(),
         nonce: "n-replay-e2e".into(),
     };
@@ -99,7 +99,7 @@ async fn audience_mismatch_rejected() {
     let (db, subject_key, subject, cred_id) = issue_for_subject();
     let req = CreatePresentationRequest {
         credential_ids: vec![cred_id],
-        reveal: vec!["credential_subject.claim.level".into()],
+        reveal: vec!["credentialSubject.level".into()],
         audience: "did:web:hirer-A".into(),
         nonce: "n-aud-e2e".into(),
     };

@@ -39,7 +39,7 @@ fn issue_one(db: &app_lib::db::Database, skill: &str) -> (app_lib::crypto::did::
         supersedes: None,
     };
     let vc = issue_credential_impl(db.conn(), &issuer_key, &issuer, &req, TEST_NOW).expect("issue");
-    (issuer, vc.id)
+    (issuer, vc.id.expect("issued VC always has an envelope id"))
 }
 
 #[tokio::test]

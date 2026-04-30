@@ -3,12 +3,13 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { invoke } from '@tauri-apps/api/core'
 import { AppButton, AppInput, AppTextarea, AppAlert, AppBadge } from '@/components/ui'
-import type {
-  SubjectFieldInfo,
-  SkillInfo,
-  OpinionRow,
-  PublishOpinionRequest,
-  VerifiableCredential,
+import {
+  extractSkillClaim,
+  type SubjectFieldInfo,
+  type SkillInfo,
+  type OpinionRow,
+  type PublishOpinionRequest,
+  type VerifiableCredential,
 } from '@/types'
 
 const router = useRouter()
@@ -56,7 +57,7 @@ const eligibleFieldsInfo = computed(() =>
  * Credentials that qualify the author to post in the currently
  * selected subject field:
  *   - SkillClaim with level >= apply (2)
- *   - the SkillClaim's `skill_id` lives under the selected
+ *   - the SkillClaim's `skillId` lives under the selected
  *     subject_field_id
  *   - subject == local DID (their own credential)
  */
@@ -64,11 +65,11 @@ const qualifyingCredentialsForField = computed<VerifiableCredential[]>(() => {
   if (!subjectFieldId.value) return []
   const skillById = new Map(allSkills.value.map((s) => [s.id, s]))
   return myCredentials.value.filter((vc) => {
-    if (localDid.value && vc.credential_subject.id !== localDid.value) return false
-    const claim = vc.credential_subject.claim
-    if (claim.kind !== 'skill') return false
+    if (localDid.value && vc.credentialSubject.id !== localDid.value) return false
+    const claim = extractSkillClaim(vc.credentialSubject)
+    if (!claim) return false
     if (claim.level < APPLY_LEVEL) return false
-    const skill = skillById.get(claim.skill_id)
+    const skill = skillById.get(claim.skillId)
     return skill?.subject_field_id === subjectFieldId.value
   })
 })
@@ -123,7 +124,9 @@ function onFieldChange() {
 
 function autoSelectCredentials() {
   selectedCredentialIds.value = new Set(
-    qualifyingCredentialsForField.value.map((vc) => vc.id),
+    qualifyingCredentialsForField.value
+      .map((vc) => vc.id)
+      .filter((id): id is string => typeof id === 'string'),
   )
 }
 
@@ -137,22 +140,21 @@ function toggleCredential(id: string) {
 const bloomOrder = ['remember', 'understand', 'apply', 'analyze', 'evaluate', 'create']
 
 function describeSkill(vc: VerifiableCredential): string {
-  const claim = vc.credential_subject.claim
-  if (claim.kind !== 'skill') return vc.id
-  const skill = allSkills.value.find((s) => s.id === claim.skill_id)
-  return skill?.name ?? claim.skill_id
+  const claim = extractSkillClaim(vc.credentialSubject)
+  if (!claim) return vc.id ?? '(no id)'
+  const skill = allSkills.value.find((s) => s.id === claim.skillId)
+  return skill?.name ?? claim.skillId
 }
 
 function claimLevel(vc: VerifiableCredential): string {
-  const claim = vc.credential_subject.claim
-  if (claim.kind !== 'skill') return ''
+  const claim = extractSkillClaim(vc.credentialSubject)
+  if (!claim) return ''
   return bloomOrder[claim.level] ?? String(claim.level)
 }
 
 function claimScore(vc: VerifiableCredential): number {
-  const claim = vc.credential_subject.claim
-  if (claim.kind !== 'skill') return 0
-  return claim.score
+  const claim = extractSkillClaim(vc.credentialSubject)
+  return claim?.score ?? 0
 }
 
 // -----------------------------------------------------------------------------
@@ -362,13 +364,14 @@ async function submit() {
         <div v-else class="space-y-2">
           <label
             v-for="vc in qualifyingCredentialsForField"
-            :key="vc.id"
+            v-show="vc.id"
+            :key="vc.id ?? vc.issuer + vc.validFrom"
             class="flex items-center gap-3 p-2 rounded-md hover:bg-muted/40 cursor-pointer"
           >
             <input
               type="checkbox"
-              :checked="selectedCredentialIds.has(vc.id)"
-              @change="toggleCredential(vc.id)"
+              :checked="vc.id ? selectedCredentialIds.has(vc.id) : false"
+              @change="vc.id && toggleCredential(vc.id)"
             />
             <div class="min-w-0 flex-1">
               <div class="text-sm font-medium text-foreground">
@@ -377,7 +380,7 @@ async function submit() {
                 <AppBadge v-if="vc.witness" variant="success" class="ml-1">on-chain</AppBadge>
               </div>
               <div class="text-xs text-muted-foreground">
-                score {{ Math.round(claimScore(vc) * 100) }}% · issued {{ vc.issuance_date.slice(0, 10) }}
+                score {{ Math.round(claimScore(vc) * 100) }}% · issued {{ vc.validFrom.slice(0, 10) }}
               </div>
             </div>
           </label>

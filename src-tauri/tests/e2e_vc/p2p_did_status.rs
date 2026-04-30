@@ -191,20 +191,23 @@ async fn credential_queued_until_issuer_did_doc_arrives() {
 
     // Queue a credential whose issuer isn't yet in key_registry.
     let vc_json = serde_json::json!({
-        "@context": ["https://www.w3.org/2018/credentials/v1"],
+        "@context": ["https://www.w3.org/ns/credentials/v2"],
         "id": "urn:uuid:pending-cred",
         "type": ["VerifiableCredential", "FormalCredential"],
         "issuer": "did:key:zPendingIssuer",
-        "issuance_date": "2026-04-13T00:00:00Z",
-        "credential_subject": {
+        "validFrom": "2026-04-13T00:00:00Z",
+        "credentialSubject": {
             "id": "did:key:zPendingSubject",
-            "claim": { "kind": "skill", "skill_id": "s", "level": 4, "score": 0.9, "evidence_refs": [] }
+            "skillId": "s",
+            "level": 4,
+            "score": 0.9,
+            "evidenceRefs": [],
         },
         "proof": {
             "type": "Ed25519Signature2020",
             "created": "2026-04-13T00:00:00Z",
-            "verification_method": "did:key:zPendingIssuer#key-1",
-            "proof_purpose": "assertionMethod",
+            "verificationMethod": "did:key:zPendingIssuer#key-1",
+            "proofPurpose": "assertionMethod",
             "jws": "fake..jws"
         }
     })

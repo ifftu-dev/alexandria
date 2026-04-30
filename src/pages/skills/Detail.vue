@@ -3,7 +3,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { AppBadge, EmptyState } from '@/components/ui'
-import type { SkillDetail, VerifiableCredential } from '@/types'
+import { extractSkillClaim, type SkillDetail, type VerifiableCredential } from '@/types'
 
 const { invoke } = useLocalApi()
 const route = useRoute()
@@ -34,8 +34,8 @@ const bestCredential = computed<VerifiableCredential | null>(() => {
   let best: VerifiableCredential | null = null
   let bestLevel = -1
   for (const vc of myCredentials.value) {
-    const claim = vc.credential_subject.claim
-    if (claim.kind !== 'skill') continue
+    const claim = extractSkillClaim(vc.credentialSubject)
+    if (!claim) continue
     if (claim.level > bestLevel) {
       bestLevel = claim.level
       best = vc
@@ -54,9 +54,9 @@ onMounted(async () => {
     detail.value = d
     localDid.value = did
     myCredentials.value = creds.filter((vc) => {
-      if (did && vc.credential_subject.id !== did) return false
-      const claim = vc.credential_subject.claim
-      return claim.kind === 'skill' && claim.skill_id === skillId
+      if (did && vc.credentialSubject.id !== did) return false
+      const claim = extractSkillClaim(vc.credentialSubject)
+      return claim !== null && claim.skillId === skillId
     })
   } catch (e: any) {
     error.value = typeof e === 'string' ? e : e?.message ?? 'Failed to load skill'
@@ -341,22 +341,22 @@ const relationLabels: Record<string, string> = {
         <div v-else class="space-y-3">
           <div
             v-for="vc in myCredentials"
-            :key="vc.id"
+            :key="vc.id ?? vc.issuer + vc.validFrom"
             class="rounded-lg bg-muted/30 p-4"
           >
             <div class="flex items-center justify-between mb-2 gap-3">
               <div class="min-w-0">
                 <AppBadge
-                  :variant="(bloomColors[bloomOrder[(vc.credential_subject.claim as { kind: 'skill'; level: number }).level] ?? 'apply'] as any) ?? 'secondary'"
+                  :variant="(bloomColors[bloomOrder[extractSkillClaim(vc.credentialSubject)?.level ?? 2] ?? 'apply'] as any) ?? 'secondary'"
                 >
-                  {{ bloomOrder[(vc.credential_subject.claim as { kind: 'skill'; level: number }).level] ?? 'apply' }}
+                  {{ bloomOrder[extractSkillClaim(vc.credentialSubject)?.level ?? 2] ?? 'apply' }}
                 </AppBadge>
                 <span class="ml-2 text-sm font-medium text-foreground">
-                  {{ (((vc.credential_subject.claim as { kind: 'skill'; score: number }).score) * 100).toFixed(0) }}% score
+                  {{ ((extractSkillClaim(vc.credentialSubject)?.score ?? 0) * 100).toFixed(0) }}% score
                 </span>
               </div>
               <span class="text-xs text-muted-foreground font-mono">
-                {{ vc.issuance_date.slice(0, 10) }}
+                {{ vc.validFrom.slice(0, 10) }}
               </span>
             </div>
             <div class="flex flex-wrap gap-1.5 text-[10px]">
@@ -370,7 +370,7 @@ const relationLabels: Record<string, string> = {
         </div>
         <p v-if="bestCredential" class="mt-3 text-xs text-muted-foreground">
           Highest credential: level
-          {{ bloomOrder[(bestCredential.credential_subject.claim as { kind: 'skill'; level: number }).level] ?? 'apply' }}.
+          {{ bloomOrder[extractSkillClaim(bestCredential.credentialSubject)?.level ?? 2] ?? 'apply' }}.
         </p>
       </div>
     </template>

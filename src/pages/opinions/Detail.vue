@@ -10,10 +10,11 @@ import {
   ProvenanceBadge,
 } from '@/components/ui'
 import VideoPlayer from '@/components/course/VideoPlayer.vue'
-import type {
-  OpinionRow,
-  SubjectFieldInfo,
-  VerifiableCredential,
+import {
+  extractSkillClaim,
+  type OpinionRow,
+  type SubjectFieldInfo,
+  type VerifiableCredential,
 } from '@/types'
 
 const route = useRoute()
@@ -38,9 +39,7 @@ const linkedCredentials = ref<VerifiableCredential[]>([])
 const bloomOrder = ['remember', 'understand', 'apply', 'analyze', 'evaluate', 'create']
 
 function skillClaim(vc: VerifiableCredential) {
-  const claim = vc.credential_subject.claim
-  if (claim.kind !== 'skill') return null
-  return claim
+  return extractSkillClaim(vc.credentialSubject)
 }
 
 async function loadOpinion() {
@@ -168,14 +167,14 @@ onMounted(async () => {
         <div v-else class="space-y-3">
           <div
             v-for="vc in linkedCredentials"
-            :key="vc.id"
+            :key="vc.id ?? vc.issuer + vc.validFrom"
             class="rounded-lg bg-muted/30 p-3"
           >
             <div class="flex items-center justify-between gap-3">
               <div class="min-w-0">
                 <div class="text-sm font-medium text-foreground">
                   <template v-if="skillClaim(vc)">
-                    {{ skillClaim(vc)!.skill_id }}
+                    {{ skillClaim(vc)!.skillId }}
                     <AppBadge variant="secondary" class="ml-2 text-[0.6rem]">
                       {{ bloomOrder[skillClaim(vc)!.level] ?? 'apply' }}
                     </AppBadge>
@@ -193,7 +192,7 @@ onMounted(async () => {
                   on-chain witness
                 </AppBadge>
                 <div class="text-[10px] text-muted-foreground">
-                  {{ vc.issuance_date.slice(0, 10) }}
+                  {{ vc.validFrom.slice(0, 10) }}
                 </div>
               </div>
             </div>

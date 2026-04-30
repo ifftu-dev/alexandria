@@ -282,16 +282,13 @@ mod tests {
             .unwrap();
 
         let vc = serde_json::json!({
-            "@context": ["https://www.w3.org/2018/credentials/v1"],
+            "@context": ["https://www.w3.org/ns/credentials/v2"],
             "credentialSubject": {
                 "id": "did:L",
-                "claim": {
-                    "kind": "skill",
-                    "skill_id": "sk",
-                    "level": 2,
-                    "score": 0.77,
-                    "evidence_refs": [],
-                }
+                "skillId": "sk",
+                "level": 2,
+                "score": 0.77,
+                "evidenceRefs": [],
             }
         });
         db.conn()

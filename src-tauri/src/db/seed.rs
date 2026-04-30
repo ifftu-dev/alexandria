@@ -8,7 +8,7 @@
 //! The seed function is idempotent: it only runs when the `subject_fields`
 //! table is empty.
 
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 
 /// Seed the database with demo taxonomy, courses, and governance data.
 /// Returns `Ok(true)` if seed data was inserted, `Ok(false)` if skipped.
@@ -186,11 +186,75 @@ fn backfill_demo_data(conn: &Connection) -> Result<(), rusqlite::Error> {
         )?;
     }
 
+    // Migrate any pre-existing demo VC rows from the old (claim-nested)
+    // shape to W3C VC v2 inline-properties. Existing DBs seeded before
+    // the VC-shape refactor have signed_vc_json blobs the new
+    // VerifiableCredential type can't deserialize, which leaves the
+    // SkillGraph empty. Idempotent — rows already in the new shape get
+    // the same bytes written back.
+    migrate_demo_vc_blobs_in_place(conn)?;
+
     // Always retry the bind after seed/backfill — cheap and idempotent.
     let _ = bind_current_user_to_seed(conn);
 
     Ok(())
 }
+
+/// Rewrite the seeded demo learner's VC blobs to the W3C VC v2 shape
+/// the current `domain::vc` types expect. Preserves whatever
+/// `subject_did` is already on each row (placeholder OR rebound real
+/// DID), so calling this after a rebind is a no-op for the binding
+/// and only refreshes the JSON shape.
+fn migrate_demo_vc_blobs_in_place(conn: &Connection) -> Result<(), rusqlite::Error> {
+    const PLACEHOLDER_DID: &str = "did:key:z6MkDemoLearnerPlaceholderXXXXXXXXXXXXXXXXXXXX";
+    for (id, json_template) in DEMO_VC_TEMPLATES {
+        let current_subject: Option<String> = conn
+            .query_row(
+                "SELECT subject_did FROM credentials WHERE id = ?1",
+                rusqlite::params![id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let Some(current_subject) = current_subject else {
+            // Row doesn't exist yet — fresh DBs cover this via the
+            // INSERT OR IGNORE in BACKFILL_SQL above.
+            continue;
+        };
+        let json = json_template.replace(PLACEHOLDER_DID, &current_subject);
+        conn.execute(
+            "UPDATE credentials SET signed_vc_json = ?1 WHERE id = ?2",
+            rusqlite::params![json, id],
+        )?;
+    }
+    Ok(())
+}
+
+/// (credential_id, signed_vc_json template) for the 5 demo learner VCs.
+/// The placeholder DID inside each template gets swapped for the row's
+/// current `subject_did` at migration time. Keep these in sync with the
+/// SQL `INSERT OR IGNORE INTO credentials` block below.
+const DEMO_VC_TEMPLATES: &[(&str, &str)] = &[
+    (
+        "urn:uuid:cred-demo-algo-completion",
+        r#"{"@context":["https://www.w3.org/ns/credentials/v2"],"id":"urn:uuid:cred-demo-algo-completion","type":["VerifiableCredential","FormalCredential"],"issuer":"did:key:z6MkSeedAuthor1AlgoWebInstructorXXXXXXXXXXXXXXX","validFrom":"2026-03-20T16:45:00Z","credentialSubject":{"id":"did:key:z6MkDemoLearnerPlaceholderXXXXXXXXXXXXXXXXXXXX","skillId":"skill_big_o","level":3,"score":0.85,"evidenceRefs":[],"course":"course_algo_101"},"proof":{"type":"Ed25519Signature2020","created":"2026-03-20T16:45:00Z","verificationMethod":"did:key:z6MkSeedAuthor1AlgoWebInstructorXXXXXXXXXXXXXXX#key-1","proofPurpose":"assertionMethod","jws":"seed..signature"}}"#,
+    ),
+    (
+        "urn:uuid:cred-demo-civics-constitution",
+        r#"{"@context":["https://www.w3.org/ns/credentials/v2"],"id":"urn:uuid:cred-demo-civics-constitution","type":["VerifiableCredential","AssessmentCredential"],"issuer":"did:key:z6MkSeedAuthor5CivicsInstructorXXXXXXXXXXXXXXX","validFrom":"2026-04-08T11:15:00Z","credentialSubject":{"id":"did:key:z6MkDemoLearnerPlaceholderXXXXXXXXXXXXXXXXXXXX","skillId":"skill_constitutional_literacy","level":0,"score":0.82,"evidenceRefs":[]},"proof":{"type":"Ed25519Signature2020","created":"2026-04-08T11:15:00Z","verificationMethod":"did:key:z6MkSeedAuthor5CivicsInstructorXXXXXXXXXXXXXXX#key-1","proofPurpose":"assertionMethod","jws":"seed..signature"}}"#,
+    ),
+    (
+        "urn:uuid:cred-demo-ml-regression",
+        r#"{"@context":["https://www.w3.org/ns/credentials/v2"],"id":"urn:uuid:cred-demo-ml-regression","type":["VerifiableCredential","AssessmentCredential"],"issuer":"did:key:z6MkSeedAuthor2DataCryptoInstructorXXXXXXXXXXXX","validFrom":"2026-03-16T11:00:00Z","credentialSubject":{"id":"did:key:z6MkDemoLearnerPlaceholderXXXXXXXXXXXXXXXXXXXX","skillId":"skill_regression","level":0,"score":0.87,"evidenceRefs":[],"course":"course_ml_foundations"},"proof":{"type":"Ed25519Signature2020","created":"2026-03-16T11:00:00Z","verificationMethod":"did:key:z6MkSeedAuthor2DataCryptoInstructorXXXXXXXXXXXX#key-1","proofPurpose":"assertionMethod","jws":"seed..signature"}}"#,
+    ),
+    (
+        "urn:uuid:cred-demo-design-role",
+        r#"{"@context":["https://www.w3.org/ns/credentials/v2"],"id":"urn:uuid:cred-demo-design-role","type":["VerifiableCredential","RoleCredential"],"issuer":"did:key:z6MkSeedAuthor3DesignInstructorXXXXXXXXXXXXXXX","validFrom":"2026-03-05T10:00:00Z","credentialSubject":{"id":"did:key:z6MkDemoLearnerPlaceholderXXXXXXXXXXXXXXXXXXXX","role":"classroom.member","scope":"class_design_crit"},"proof":{"type":"Ed25519Signature2020","created":"2026-03-05T10:00:00Z","verificationMethod":"did:key:z6MkSeedAuthor3DesignInstructorXXXXXXXXXXXXXXX#key-1","proofPurpose":"assertionMethod","jws":"seed..signature"}}"#,
+    ),
+    (
+        "urn:uuid:cred-demo-civic-interest",
+        r#"{"@context":["https://www.w3.org/ns/credentials/v2"],"id":"urn:uuid:cred-demo-civic-interest","type":["VerifiableCredential","SelfAssertion"],"issuer":"did:key:z6MkDemoLearnerPlaceholderXXXXXXXXXXXXXXXXXXXX","validFrom":"2026-04-10T09:00:00Z","credentialSubject":{"id":"did:key:z6MkDemoLearnerPlaceholderXXXXXXXXXXXXXXXXXXXX","interest":"civic-tech","description":"Building open-data tools for municipal accountability"},"proof":{"type":"Ed25519Signature2020","created":"2026-04-10T09:00:00Z","verificationMethod":"did:key:z6MkDemoLearnerPlaceholderXXXXXXXXXXXXXXXXXXXX#key-1","proofPurpose":"assertionMethod","jws":"seed..signature"}}"#,
+    ),
+];
 
 /// Store element content directly in the `content_inline` column.
 /// This makes content available on all platforms (including mobile without iroh).
@@ -1784,9 +1848,12 @@ INSERT OR IGNORE INTO credential_status_lists (list_id, issuer_did, version, sta
      8,
      'seed_statuslist_sig_civ5');
 
--- Demo learner's 5 Verifiable Credentials. signed_vc_json is a minimal
--- W3C VC shape — the UI renders issuer, subject, type, issuance, and
--- skill from these columns without re-parsing.
+-- Demo learner's 5 Verifiable Credentials. The signed_vc_json column
+-- carries the W3C VC v2 envelope shape that `domain::vc` deserialises;
+-- proof.jws is a placeholder ("seed..signature") since seed VCs are
+-- not signed by a real key. The frontend's SkillGraph reads from
+-- credentialSubject.skillId / level / score directly and does not
+-- require signature validity.
 INSERT OR IGNORE INTO credentials
     (id, issuer_did, subject_did, credential_type, claim_kind, skill_id,
      issuance_date, expiration_date, signed_vc_json, integrity_hash,
@@ -1800,7 +1867,7 @@ VALUES
      'skill_big_o',
      '2026-03-20T16:45:00Z',
      NULL,
-     '{"@context":["https://www.w3.org/ns/credentials/v2"],"type":["VerifiableCredential","FormalCredential"],"issuer":"did:key:z6MkSeedAuthor1AlgoWebInstructorXXXXXXXXXXXXXXX","validFrom":"2026-03-20T16:45:00Z","credentialSubject":{"id":"did:key:z6MkDemoLearnerPlaceholderXXXXXXXXXXXXXXXXXXXX","skill":"skill_big_o","proficiency":"analyze","course":"course_algo_101"}}',
+     '{"@context":["https://www.w3.org/ns/credentials/v2"],"id":"urn:uuid:cred-demo-algo-completion","type":["VerifiableCredential","FormalCredential"],"issuer":"did:key:z6MkSeedAuthor1AlgoWebInstructorXXXXXXXXXXXXXXX","validFrom":"2026-03-20T16:45:00Z","credentialSubject":{"id":"did:key:z6MkDemoLearnerPlaceholderXXXXXXXXXXXXXXXXXXXX","skillId":"skill_big_o","level":3,"score":0.85,"evidenceRefs":[],"course":"course_algo_101"},"proof":{"type":"Ed25519Signature2020","created":"2026-03-20T16:45:00Z","verificationMethod":"did:key:z6MkSeedAuthor1AlgoWebInstructorXXXXXXXXXXXXXXX#key-1","proofPurpose":"assertionMethod","jws":"seed..signature"}}',
      'a1b2c3d4e5f60718293a4b5c6d7e8f9001112233445566778899aabbccddeeff',
      NULL, NULL, 0, '2026-03-21T09:00:00Z'),
 
@@ -1812,7 +1879,7 @@ VALUES
      'skill_constitutional_literacy',
      '2026-04-08T11:15:00Z',
      NULL,
-     '{"@context":["https://www.w3.org/ns/credentials/v2"],"type":["VerifiableCredential","AssessmentCredential"],"issuer":"did:key:z6MkSeedAuthor5CivicsInstructorXXXXXXXXXXXXXXX","validFrom":"2026-04-08T11:15:00Z","credentialSubject":{"id":"did:key:z6MkDemoLearnerPlaceholderXXXXXXXXXXXXXXXXXXXX","skill":"skill_constitutional_literacy","proficiency":"remember","score":0.82}}',
+     '{"@context":["https://www.w3.org/ns/credentials/v2"],"id":"urn:uuid:cred-demo-civics-constitution","type":["VerifiableCredential","AssessmentCredential"],"issuer":"did:key:z6MkSeedAuthor5CivicsInstructorXXXXXXXXXXXXXXX","validFrom":"2026-04-08T11:15:00Z","credentialSubject":{"id":"did:key:z6MkDemoLearnerPlaceholderXXXXXXXXXXXXXXXXXXXX","skillId":"skill_constitutional_literacy","level":0,"score":0.82,"evidenceRefs":[]},"proof":{"type":"Ed25519Signature2020","created":"2026-04-08T11:15:00Z","verificationMethod":"did:key:z6MkSeedAuthor5CivicsInstructorXXXXXXXXXXXXXXX#key-1","proofPurpose":"assertionMethod","jws":"seed..signature"}}',
      'b2c3d4e5f60718293a4b5c6d7e8f900111223344556677889900aabbccddeeff',
      'urn:status-list:seed-author-5-revoke-2026', 0, 0, '2026-04-08T11:20:00Z'),
 
@@ -1824,7 +1891,7 @@ VALUES
      'skill_regression',
      '2026-03-16T11:00:00Z',
      NULL,
-     '{"@context":["https://www.w3.org/ns/credentials/v2"],"type":["VerifiableCredential","AssessmentCredential"],"issuer":"did:key:z6MkSeedAuthor2DataCryptoInstructorXXXXXXXXXXXX","validFrom":"2026-03-16T11:00:00Z","credentialSubject":{"id":"did:key:z6MkDemoLearnerPlaceholderXXXXXXXXXXXXXXXXXXXX","skill":"skill_regression","proficiency":"remember","score":0.87,"course":"course_ml_foundations"}}',
+     '{"@context":["https://www.w3.org/ns/credentials/v2"],"id":"urn:uuid:cred-demo-ml-regression","type":["VerifiableCredential","AssessmentCredential"],"issuer":"did:key:z6MkSeedAuthor2DataCryptoInstructorXXXXXXXXXXXX","validFrom":"2026-03-16T11:00:00Z","credentialSubject":{"id":"did:key:z6MkDemoLearnerPlaceholderXXXXXXXXXXXXXXXXXXXX","skillId":"skill_regression","level":0,"score":0.87,"evidenceRefs":[],"course":"course_ml_foundations"},"proof":{"type":"Ed25519Signature2020","created":"2026-03-16T11:00:00Z","verificationMethod":"did:key:z6MkSeedAuthor2DataCryptoInstructorXXXXXXXXXXXX#key-1","proofPurpose":"assertionMethod","jws":"seed..signature"}}',
      'c3d4e5f607182939abcdef012233445566778899aabbccddee001122334455ff',
      NULL, NULL, 0, '2026-03-17T09:30:00Z'),
 
@@ -1836,7 +1903,7 @@ VALUES
      NULL,
      '2026-03-05T10:00:00Z',
      NULL,
-     '{"@context":["https://www.w3.org/ns/credentials/v2"],"type":["VerifiableCredential","RoleCredential"],"issuer":"did:key:z6MkSeedAuthor3DesignInstructorXXXXXXXXXXXXXXX","validFrom":"2026-03-05T10:00:00Z","credentialSubject":{"id":"did:key:z6MkDemoLearnerPlaceholderXXXXXXXXXXXXXXXXXXXX","role":"classroom.member","classroom":"class_design_crit"}}',
+     '{"@context":["https://www.w3.org/ns/credentials/v2"],"id":"urn:uuid:cred-demo-design-role","type":["VerifiableCredential","RoleCredential"],"issuer":"did:key:z6MkSeedAuthor3DesignInstructorXXXXXXXXXXXXXXX","validFrom":"2026-03-05T10:00:00Z","credentialSubject":{"id":"did:key:z6MkDemoLearnerPlaceholderXXXXXXXXXXXXXXXXXXXX","role":"classroom.member","scope":"class_design_crit"},"proof":{"type":"Ed25519Signature2020","created":"2026-03-05T10:00:00Z","verificationMethod":"did:key:z6MkSeedAuthor3DesignInstructorXXXXXXXXXXXXXXX#key-1","proofPurpose":"assertionMethod","jws":"seed..signature"}}',
      'd4e5f6071829394abcdef0123344556677889900aabbccddee0011223344556',
      NULL, NULL, 0, '2026-03-05T10:05:00Z'),
 
@@ -1848,7 +1915,7 @@ VALUES
      NULL,
      '2026-04-10T09:00:00Z',
      NULL,
-     '{"@context":["https://www.w3.org/ns/credentials/v2"],"type":["VerifiableCredential","SelfAssertion"],"issuer":"did:key:z6MkDemoLearnerPlaceholderXXXXXXXXXXXXXXXXXXXX","validFrom":"2026-04-10T09:00:00Z","credentialSubject":{"id":"did:key:z6MkDemoLearnerPlaceholderXXXXXXXXXXXXXXXXXXXX","interest":"civic-tech","description":"Building open-data tools for municipal accountability"}}',
+     '{"@context":["https://www.w3.org/ns/credentials/v2"],"id":"urn:uuid:cred-demo-civic-interest","type":["VerifiableCredential","SelfAssertion"],"issuer":"did:key:z6MkDemoLearnerPlaceholderXXXXXXXXXXXXXXXXXXXX","validFrom":"2026-04-10T09:00:00Z","credentialSubject":{"id":"did:key:z6MkDemoLearnerPlaceholderXXXXXXXXXXXXXXXXXXXX","interest":"civic-tech","description":"Building open-data tools for municipal accountability"},"proof":{"type":"Ed25519Signature2020","created":"2026-04-10T09:00:00Z","verificationMethod":"did:key:z6MkDemoLearnerPlaceholderXXXXXXXXXXXXXXXXXXXX#key-1","proofPurpose":"assertionMethod","jws":"seed..signature"}}',
      'e5f6071829394abcdef0123344556677889900aabbccddeeff001122334455667',
      NULL, NULL, 0, '2026-04-10T09:00:00Z');
 
@@ -2063,7 +2130,9 @@ mod tests {
             .conn()
             .query_row("SELECT COUNT(*) FROM governance_daos", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(daos, 7);
+        // 6 subject-field DAOs + civics DAO + sentinel DAO from
+        // migration 042 = 8.
+        assert_eq!(daos, 8);
 
         // Courses: 6 original full courses + 1 civics + 5 tutorials (backfill)
         // + 2 civics tutorials = 14 total when backfill runs on first seed.
@@ -2113,6 +2182,39 @@ mod tests {
             "expected >= 90 element-skill tags, got {}",
             tags
         );
+    }
+
+    #[test]
+    fn seeded_vcs_deserialize_and_expose_skill_claims() {
+        // Regression: the SkillGraph was empty when the seeded
+        // signed_vc_json blobs failed to deserialize into the Rust
+        // VerifiableCredential type. Lock in that every seeded VC
+        // round-trips through serde and that the three skill-kind
+        // VCs each surface a SkillClaim view.
+        use crate::commands::credentials::list_credentials_impl;
+        use crate::domain::vc::SkillClaim;
+
+        let db = Database::open_in_memory().expect("open");
+        db.run_migrations().expect("migrate");
+        seed_if_empty(db.conn()).expect("seed");
+
+        let vcs = list_credentials_impl(db.conn(), None, None).expect("list");
+        assert_eq!(vcs.len(), 5, "all 5 seeded VCs must deserialize");
+
+        let skills: Vec<_> = vcs
+            .iter()
+            .filter_map(|vc| SkillClaim::extract(&vc.credential_subject))
+            .collect();
+        assert_eq!(
+            skills.len(),
+            3,
+            "expected 3 skill-kind VCs (algo, civics, ml regression)"
+        );
+        let skill_ids: std::collections::HashSet<_> =
+            skills.iter().map(|s| s.skill_id.as_str()).collect();
+        assert!(skill_ids.contains("skill_big_o"));
+        assert!(skill_ids.contains("skill_constitutional_literacy"));
+        assert!(skill_ids.contains("skill_regression"));
     }
 
     #[test]

@@ -1194,52 +1194,89 @@ export type CredentialType =
 
 export type AcceptanceDecision = 'accept' | 'reject'
 
+/**
+ * Strongly-typed view over a `credentialSubject`'s skill properties.
+ * The on-disk shape is W3C VC v2 — these fields live directly on the
+ * subject (not nested under a `claim` discriminator). Use
+ * `extractSkillClaim` to read one out of a `CredentialSubject`.
+ */
 export interface SkillClaim {
-  kind: 'skill'
-  skill_id: string
+  skillId: string
   level: number
   score: number
-  evidence_refs: string[]
-  rubric_version?: string | null
-  assessment_method?: string | null
+  evidenceRefs: string[]
+  rubricVersion?: string | null
+  assessmentMethod?: string | null
 }
 
 export interface RoleClaim {
-  kind: 'role'
   role: string
   scope?: string | null
 }
 
-export interface CustomClaim {
-  kind: 'custom'
-  [field: string]: unknown
-}
+/**
+ * Request-side IPC enum. The frontend submits this when issuing a
+ * credential; the backend folds the inner fields into a
+ * `CredentialSubject`. NOT the storage shape — see `CredentialSubject`.
+ */
+export type IssueClaimRequest =
+  | ({ kind: 'skill' } & SkillClaim)
+  | ({ kind: 'role' } & RoleClaim)
+  | ({ kind: 'custom' } & Record<string, unknown>)
 
-export type Claim = SkillClaim | RoleClaim | CustomClaim
-
+/**
+ * `credentialSubject` per W3C VC v2 §4.4: an `id` plus open-ended
+ * inline properties. Skill / role claims are read out via the
+ * `extractSkillClaim` / `extractRoleClaim` helpers below.
+ */
 export interface CredentialSubject {
   id: string
-  claim: Claim
+  [property: string]: unknown
+}
+
+/** Read a SkillClaim out of a subject if one is present. */
+export function extractSkillClaim(subject: CredentialSubject): SkillClaim | null {
+  if (typeof subject.skillId !== 'string') return null
+  return {
+    skillId: subject.skillId,
+    level: typeof subject.level === 'number' ? subject.level : 0,
+    score: typeof subject.score === 'number' ? subject.score : 0,
+    evidenceRefs: Array.isArray(subject.evidenceRefs)
+      ? (subject.evidenceRefs as string[])
+      : [],
+    rubricVersion: typeof subject.rubricVersion === 'string' ? subject.rubricVersion : null,
+    assessmentMethod:
+      typeof subject.assessmentMethod === 'string' ? subject.assessmentMethod : null,
+  }
+}
+
+/** Read a RoleClaim out of a subject if one is present. */
+export function extractRoleClaim(subject: CredentialSubject): RoleClaim | null {
+  if (typeof subject.role !== 'string') return null
+  return {
+    role: subject.role,
+    scope: typeof subject.scope === 'string' ? subject.scope : null,
+  }
 }
 
 export interface CredentialStatus {
   id: string
   type: string
-  status_purpose: string
-  status_list_index: string
-  status_list_credential: string
+  statusPurpose: string
+  statusListIndex: string
+  statusListCredential: string
 }
 
 export interface TermsOfUse {
-  policy_version: string
+  policyVersion: string
   usage: string
 }
 
 export interface Proof {
   type: string
   created: string
-  verification_method: string
-  proof_purpose: string
+  verificationMethod: string
+  proofPurpose: string
   jws: string
 }
 
@@ -1256,14 +1293,15 @@ export interface Witness {
 
 export interface VerifiableCredential {
   '@context': string[]
-  id: string
+  /** W3C VC v2 §4.3 — optional. Locally-issued credentials always have one. */
+  id?: string | null
   type: string[]
   issuer: string
-  issuance_date: string
-  expiration_date?: string | null
-  credential_subject: CredentialSubject
-  credential_status?: CredentialStatus | null
-  terms_of_use?: TermsOfUse | null
+  validFrom: string
+  validUntil?: string | null
+  credentialSubject: CredentialSubject
+  credentialStatus?: CredentialStatus | null
+  termsOfUse?: TermsOfUse | null
   witness?: Witness | null
   proof: Proof
 }
@@ -1271,7 +1309,7 @@ export interface VerifiableCredential {
 export interface IssueCredentialRequest {
   credential_type: CredentialType
   subject: string
-  claim: Claim
+  claim: IssueClaimRequest
   evidence_refs: string[]
   expiration_date?: string | null
   /** §11.4 supersession: id of the prior credential this replaces. */
@@ -1325,7 +1363,7 @@ export interface CredentialBundle {
 
 export interface CreatePresentationRequest {
   credential_ids: string[]
-  /** Dot-separated field paths to reveal, e.g. `["credential_subject.claim.level"]`. */
+  /** Dot-separated field paths to reveal, e.g. `["credentialSubject.level"]`. */
   reveal: string[]
   audience: string
   nonce: string

@@ -143,19 +143,31 @@ pub fn promote_pending_for(db: &Database, issuer_did: &str) -> Result<u32, Strin
             .unwrap_or("Credential")
             .to_string();
         let issuance_date = vc
-            .get("issuance_date")
+            .get("validFrom")
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
-        let claim_kind = vc
-            .pointer("/credential_subject/claim/kind")
-            .and_then(|v| v.as_str())
-            .unwrap_or("custom")
-            .to_string();
-        let skill_id = vc
-            .pointer("/credential_subject/claim/skill_id")
+        // W3C VC v2: claim properties are inline on credentialSubject
+        // rather than nested under a `claim` discriminator. We classify
+        // by marker property: `skillId` ⇒ skill, `role` ⇒ role, else
+        // custom.
+        let subject = vc.pointer("/credentialSubject");
+        let skill_id = subject
+            .and_then(|s| s.get("skillId"))
             .and_then(|v| v.as_str())
             .map(str::to_string);
+        let claim_kind = if skill_id.is_some() {
+            "skill"
+        } else if subject
+            .and_then(|s| s.get("role"))
+            .and_then(|v| v.as_str())
+            .is_some()
+        {
+            "role"
+        } else {
+            "custom"
+        }
+        .to_string();
 
         let inserted = conn.execute(
             "INSERT OR IGNORE INTO credentials \

@@ -4,12 +4,13 @@ import { useRouter } from 'vue-router'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { useSkillGraphHover } from '@/composables/useSkillGraphHover'
 import { AppBadge, AppTabs } from '@/components/ui'
-import type {
-  SubjectFieldInfo,
-  SubjectInfo,
-  SkillInfo,
-  SkillGraphEdge,
-  VerifiableCredential,
+import {
+  extractSkillClaim,
+  type SubjectFieldInfo,
+  type SubjectInfo,
+  type SkillInfo,
+  type SkillGraphEdge,
+  type VerifiableCredential,
 } from '@/types'
 import { earnedSkillIdsFromCredentials } from '@/composables/useSkillGraphState'
 
@@ -122,8 +123,8 @@ const earnedSkillIdSet = computed(() =>
 
 const mySkillCredentials = computed(() =>
   myCredentials.value.filter((vc) => {
-    if (localDid.value && vc.credential_subject.id !== localDid.value) return false
-    return vc.credential_subject.claim.kind === 'skill'
+    if (localDid.value && vc.credentialSubject.id !== localDid.value) return false
+    return extractSkillClaim(vc.credentialSubject) !== null
   }),
 )
 
@@ -563,25 +564,25 @@ onBeforeUnmount(() => {
         <div v-else class="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div
             v-for="vc in mySkillCredentials"
-            :key="vc.id"
+            :key="vc.id ?? vc.issuer + vc.validFrom"
             class="rounded-xl bg-card shadow-sm p-5 cursor-pointer transition-shadow hover:shadow-md"
-            @click="goToSkill((vc.credential_subject.claim as { kind: 'skill'; skill_id: string }).skill_id)"
+            @click="extractSkillClaim(vc.credentialSubject) && goToSkill(extractSkillClaim(vc.credentialSubject)!.skillId)"
           >
             <div class="flex items-start justify-between mb-3 gap-3">
               <div class="min-w-0">
                 <div class="text-sm font-medium truncate text-foreground">
-                  {{ skills.find(s => s.id === (vc.credential_subject.claim as { kind: 'skill'; skill_id: string }).skill_id)?.name ?? (vc.credential_subject.claim as { kind: 'skill'; skill_id: string }).skill_id }}
+                  {{ skills.find(s => s.id === extractSkillClaim(vc.credentialSubject)?.skillId)?.name ?? extractSkillClaim(vc.credentialSubject)?.skillId }}
                 </div>
                 <AppBadge
-                  :variant="(bloomColors[bloomOrder[(vc.credential_subject.claim as { kind: 'skill'; level: number }).level] ?? 'apply'] as any) ?? 'secondary'"
+                  :variant="(bloomColors[bloomOrder[extractSkillClaim(vc.credentialSubject)?.level ?? 2] ?? 'apply'] as any) ?? 'secondary'"
                   class="mt-1.5"
                 >
-                  {{ bloomOrder[(vc.credential_subject.claim as { kind: 'skill'; level: number }).level] ?? 'apply' }}
+                  {{ bloomOrder[extractSkillClaim(vc.credentialSubject)?.level ?? 2] ?? 'apply' }}
                 </AppBadge>
               </div>
               <div class="text-right flex-shrink-0">
                 <div class="font-mono text-lg font-bold text-primary">
-                  {{ (((vc.credential_subject.claim as { kind: 'skill'; score: number }).score) * 100).toFixed(0) }}%
+                  {{ ((extractSkillClaim(vc.credentialSubject)?.score ?? 0) * 100).toFixed(0) }}%
                 </div>
                 <div class="text-[10px] text-muted-foreground">score</div>
               </div>
@@ -594,7 +595,7 @@ onBeforeUnmount(() => {
                 {{ vc.type[vc.type.length - 1] }}
               </AppBadge>
               <span class="text-[10px] text-muted-foreground font-mono">
-                {{ vc.issuance_date.slice(0, 10) }}
+                {{ vc.validFrom.slice(0, 10) }}
               </span>
             </div>
           </div>

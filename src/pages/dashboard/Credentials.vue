@@ -3,12 +3,14 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { AppBadge, AppButton, AppModal, AppInput, EmptyState } from '@/components/ui'
 import { useCredentials } from '@/composables/useCredentials'
-import type {
-  Claim,
-  CredentialType,
-  IssueCredentialRequest,
-  PresentationEnvelope,
-  VerifiableCredential,
+import {
+  extractRoleClaim,
+  extractSkillClaim,
+  type CredentialType,
+  type IssueClaimRequest,
+  type IssueCredentialRequest,
+  type PresentationEnvelope,
+  type VerifiableCredential,
 } from '@/types'
 
 const router = useRouter()
@@ -36,7 +38,7 @@ const issueBusy = ref(false)
 const presentOpen = ref(false)
 const presentForm = ref({
   credential_id: '',
-  reveal: 'credential_subject.claim.level',
+  reveal: 'credentialSubject.level',
   audience: '',
   nonce: '',
 })
@@ -88,12 +90,13 @@ function classOf(c: VerifiableCredential): string {
 }
 
 function summary(c: VerifiableCredential): string {
-  const claim = c.credential_subject.claim
-  if (claim.kind === 'skill') {
-    return `${claim.skill_id} · L${claim.level} · ${(claim.score * 100).toFixed(0)}%`
+  const skill = extractSkillClaim(c.credentialSubject)
+  if (skill) {
+    return `${skill.skillId} · L${skill.level} · ${(skill.score * 100).toFixed(0)}%`
   }
-  if (claim.kind === 'role') {
-    return claim.role + (claim.scope ? ` · ${claim.scope}` : '')
+  const role = extractRoleClaim(c.credentialSubject)
+  if (role) {
+    return role.role + (role.scope ? ` · ${role.scope}` : '')
   }
   return 'custom claim'
 }
@@ -104,6 +107,7 @@ function shortDid(did: string): string {
 }
 
 function open(c: VerifiableCredential) {
+  if (!c.id) return
   router.push({ name: 'dashboard-credential-detail', params: { id: c.id } })
 }
 
@@ -125,21 +129,22 @@ function resetIssueForm() {
 async function submitIssue() {
   issueBusy.value = true
   issueError.value = null
-  const claim: Claim = {
+  const evidenceRefs = issueForm.value.evidence_refs
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+  const claim: IssueClaimRequest = {
     kind: 'skill',
-    skill_id: issueForm.value.skill_id,
+    skillId: issueForm.value.skill_id,
     level: Number(issueForm.value.level),
     score: Number(issueForm.value.score),
-    evidence_refs: issueForm.value.evidence_refs
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean),
+    evidenceRefs,
   }
   const req: IssueCredentialRequest = {
     credential_type: issueForm.value.credential_type,
     subject: issueForm.value.subject.trim(),
     claim,
-    evidence_refs: claim.kind === 'skill' ? claim.evidence_refs : [],
+    evidence_refs: evidenceRefs,
     expiration_date: issueForm.value.expiration_date || null,
   }
   const issued = await api.issue(req)
@@ -180,7 +185,7 @@ async function exportBundle() {
 function openPresent(c?: VerifiableCredential) {
   presentForm.value = {
     credential_id: c?.id ?? '',
-    reveal: 'credential_subject.claim.level',
+    reveal: 'credentialSubject.level',
     audience: '',
     nonce: crypto.randomUUID(),
   }
@@ -291,13 +296,13 @@ async function copyEnvelope() {
       <div v-else class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <article
           v-for="c in filtered"
-          :key="c.id"
+          :key="c.id ?? c.issuer + c.validFrom"
           class="rounded-xl bg-card shadow-sm p-5 transition-shadow hover:shadow-md cursor-pointer"
           @click="open(c)"
         >
           <div class="flex items-start justify-between mb-3 gap-2">
             <AppBadge variant="primary">{{ classOf(c) }}</AppBadge>
-            <AppBadge v-if="c.expiration_date" variant="secondary">
+            <AppBadge v-if="c.validUntil" variant="secondary">
               expires
             </AppBadge>
           </div>
@@ -311,13 +316,13 @@ async function copyEnvelope() {
             </div>
             <div class="flex justify-between gap-2">
               <dt class="text-muted-foreground">Subject</dt>
-              <dd class="font-mono truncate" :title="c.credential_subject.id">
-                {{ shortDid(c.credential_subject.id) }}
+              <dd class="font-mono truncate" :title="c.credentialSubject.id">
+                {{ shortDid(c.credentialSubject.id) }}
               </dd>
             </div>
             <div class="flex justify-between gap-2">
               <dt class="text-muted-foreground">Issued</dt>
-              <dd>{{ c.issuance_date.slice(0, 10) }}</dd>
+              <dd>{{ c.validFrom.slice(0, 10) }}</dd>
             </div>
           </dl>
           <div class="mt-4 flex gap-2" @click.stop>
@@ -387,7 +392,7 @@ async function copyEnvelope() {
         <AppInput
           v-model="presentForm.reveal"
           label="Reveal paths (comma-separated)"
-          placeholder="credential_subject.claim.level"
+          placeholder="credentialSubject.level"
         />
         <AppInput
           v-model="presentForm.audience"
