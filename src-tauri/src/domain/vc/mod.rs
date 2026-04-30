@@ -27,17 +27,13 @@ pub enum CredentialType {
     SelfAssertion,
 }
 
-/// A single claim payload. The spec (§7) uses a permissive JSON shape;
-/// we strongly-type the common cases and fall back to free JSON.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum Claim {
-    Skill(SkillClaim),
-    Role(RoleClaim),
-    Custom(serde_json::Value),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Strongly-typed view over a `credentialSubject`'s skill properties.
+/// The on-disk shape is W3C VC v2 — the subject carries these fields
+/// directly, not nested under a `claim` discriminator. Use
+/// `SkillClaim::extract` to read one out of a [`CredentialSubject`],
+/// and `into_properties` when constructing one.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct SkillClaim {
     pub skill_id: String,
     pub level: u8,
@@ -50,19 +46,126 @@ pub struct SkillClaim {
     pub assessment_method: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+impl SkillClaim {
+    /// Read a SkillClaim out of a subject's free-form properties.
+    /// Returns None if the subject doesn't carry the marker `skillId`.
+    pub fn extract(subject: &CredentialSubject) -> Option<Self> {
+        if !subject.properties.contains_key("skillId") {
+            return None;
+        }
+        let v = serde_json::Value::Object(subject.properties.clone());
+        serde_json::from_value(v).ok()
+    }
+
+    /// Render this claim as a property map for embedding in a
+    /// [`CredentialSubject`]. The keys are camelCase JSON.
+    pub fn into_properties(self) -> serde_json::Map<String, serde_json::Value> {
+        match serde_json::to_value(self).expect("SkillClaim serializes") {
+            serde_json::Value::Object(m) => m,
+            _ => unreachable!("SkillClaim always serializes to a JSON object"),
+        }
+    }
+}
+
+/// Strongly-typed view over a `credentialSubject`'s role properties.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct RoleClaim {
     pub role: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scope: Option<String>,
 }
 
+impl RoleClaim {
+    pub fn extract(subject: &CredentialSubject) -> Option<Self> {
+        if !subject.properties.contains_key("role") {
+            return None;
+        }
+        let v = serde_json::Value::Object(subject.properties.clone());
+        serde_json::from_value(v).ok()
+    }
+
+    pub fn into_properties(self) -> serde_json::Map<String, serde_json::Value> {
+        match serde_json::to_value(self).expect("RoleClaim serializes") {
+            serde_json::Value::Object(m) => m,
+            _ => unreachable!("RoleClaim always serializes to a JSON object"),
+        }
+    }
+}
+
+/// Free-form custom claim — any properties the issuer wants to attach
+/// to the subject that aren't covered by [`SkillClaim`] / [`RoleClaim`].
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct CustomClaim {
+    #[serde(flatten)]
+    pub properties: serde_json::Map<String, serde_json::Value>,
+}
+
+impl CustomClaim {
+    pub fn into_properties(self) -> serde_json::Map<String, serde_json::Value> {
+        self.properties
+    }
+}
+
+/// Request-side enum for VC issuance. Carries enough information to
+/// build a [`CredentialSubject`] and the legacy `claim_kind` DB column.
+/// Frontends submit this as `{"kind":"skill"|"role"|"custom", ...}`.
+/// It is **not** part of the on-disk VC shape — that's handled by
+/// [`CredentialSubject`] directly per W3C VC v2.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Claim {
+    Skill(SkillClaim),
+    Role(RoleClaim),
+    Custom(CustomClaim),
+}
+
+impl Claim {
+    /// Discriminator for the legacy `credentials.claim_kind` column.
+    pub fn kind_str(&self) -> &'static str {
+        match self {
+            Claim::Skill(_) => "skill",
+            Claim::Role(_) => "role",
+            Claim::Custom(_) => "custom",
+        }
+    }
+
+    /// Skill id when this is a skill claim, for the
+    /// `credentials.skill_id` index column.
+    pub fn skill_id(&self) -> Option<&str> {
+        match self {
+            Claim::Skill(s) => Some(&s.skill_id),
+            _ => None,
+        }
+    }
+
+    /// Build a [`CredentialSubject`] for `subject_did` from this claim.
+    pub fn into_subject(self, subject_did: Did) -> CredentialSubject {
+        let properties = match self {
+            Claim::Skill(s) => s.into_properties(),
+            Claim::Role(r) => r.into_properties(),
+            Claim::Custom(c) => c.into_properties(),
+        };
+        CredentialSubject {
+            id: subject_did,
+            properties,
+        }
+    }
+}
+
+/// `credentialSubject` per W3C VC v2 §4.4: a `id` plus an open-ended
+/// property bag. Typed views (`SkillClaim::extract`, `RoleClaim::extract`)
+/// read structured claims back out.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CredentialSubject {
     pub id: Did,
-    pub claim: Claim,
+    /// All other properties on the subject, serialized inline.
+    #[serde(flatten)]
+    pub properties: serde_json::Map<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CredentialStatus {
     pub id: String,
     #[serde(rename = "type")]
@@ -73,6 +176,7 @@ pub struct CredentialStatus {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TermsOfUse {
     pub policy_version: String,
     pub usage: String,
@@ -92,6 +196,7 @@ pub struct TermsOfUse {
 /// rejected. A VC without a `Witness` block is a manually-issued
 /// credential and relies on the issuer DID alone.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct Witness {
     /// Confirmed Cardano tx hash that locked at the validator.
     pub tx_hash: String,
@@ -101,18 +206,22 @@ pub struct Witness {
     pub validator_name: String,
 }
 
-/// The signed credential envelope. Serialises to JSON-LD per §7.
+/// The signed credential envelope. Serialises to W3C VC v2 JSON-LD.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct VerifiableCredential {
     #[serde(rename = "@context")]
     pub context: Vec<String>,
-    pub id: String,
+    /// Optional per W3C VC v2 §4.3 — locally-issued credentials always
+    /// populate this, but external VCs without an `id` are still valid.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
     #[serde(rename = "type")]
     pub type_: Vec<String>,
     pub issuer: Did,
-    pub issuance_date: String,
+    pub valid_from: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub expiration_date: Option<String>,
+    pub valid_until: Option<String>,
     pub credential_subject: CredentialSubject,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub credential_status: Option<CredentialStatus>,
@@ -127,6 +236,7 @@ pub struct VerifiableCredential {
 
 /// Ed25519Signature2020 proof block.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Proof {
     #[serde(rename = "type")]
     pub type_: String,
@@ -143,7 +253,10 @@ pub struct Proof {
 /// (e.g. ones hydrated from an earlier schema or an older peer's
 /// gossip) round-trip without a migration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct VerificationResult {
+    /// Echoes the verified credential's envelope `id`. Empty string
+    /// when the credential carries no `id` (W3C VC v2 allows this).
     pub credential_id: String,
     pub valid_signature: bool,
     pub issuer_resolved: bool,
@@ -272,9 +385,10 @@ mod tests {
     }
 
     #[test]
-    fn claim_tag_is_snake_case() {
-        // `Claim::Skill` must serialize with `"kind": "skill"` to
-        // match the payload shape in §7.
+    fn claim_request_tag_is_snake_case() {
+        // The IPC request enum keeps the kind discriminator so the
+        // frontend can submit `{"kind":"skill", ...}`. The tag does
+        // NOT appear on the on-disk subject — it's request-shape only.
         let claim = Claim::Skill(SkillClaim {
             skill_id: "skill_x".into(),
             level: 3,
@@ -285,5 +399,63 @@ mod tests {
         });
         let v = serde_json::to_value(&claim).unwrap();
         assert_eq!(v.get("kind").and_then(|x| x.as_str()), Some("skill"));
+    }
+
+    #[test]
+    fn skill_claim_round_trips_through_subject() {
+        // Constructing a subject from a SkillClaim and reading it
+        // back via `extract` MUST be lossless — this is the contract
+        // issuance + aggregation depend on.
+        let original = SkillClaim {
+            skill_id: "skill_y".into(),
+            level: 4,
+            score: 0.92,
+            evidence_refs: vec!["urn:uuid:e1".into()],
+            rubric_version: Some("v2".into()),
+            assessment_method: Some("project".into()),
+        };
+        let subject = CredentialSubject {
+            id: Did("did:key:zSubject".into()),
+            properties: original.clone().into_properties(),
+        };
+        let recovered = SkillClaim::extract(&subject).expect("skill claim present");
+        assert_eq!(original, recovered);
+    }
+
+    #[test]
+    fn skill_claim_serializes_camel_case() {
+        // On the wire and on disk we conform to W3C VC v2 / JS
+        // convention: `skillId`, `evidenceRefs`, `rubricVersion`,
+        // `assessmentMethod`. The Rust field names stay snake_case.
+        let s = SkillClaim {
+            skill_id: "skill_x".into(),
+            level: 1,
+            score: 0.5,
+            evidence_refs: vec![],
+            rubric_version: None,
+            assessment_method: None,
+        };
+        let v = serde_json::to_value(&s).unwrap();
+        assert!(v.get("skillId").is_some(), "got {v}");
+        assert!(v.get("skill_id").is_none());
+    }
+
+    #[test]
+    fn role_claim_extract_returns_none_for_skill_subject() {
+        // A subject carrying skill properties must not be misread as
+        // a role claim — `extract` keys off the marker property.
+        let subject = CredentialSubject {
+            id: Did("did:key:zS".into()),
+            properties: SkillClaim {
+                skill_id: "x".into(),
+                level: 0,
+                score: 0.0,
+                evidence_refs: vec![],
+                rubric_version: None,
+                assessment_method: None,
+            }
+            .into_properties(),
+        };
+        assert!(RoleClaim::extract(&subject).is_none());
     }
 }

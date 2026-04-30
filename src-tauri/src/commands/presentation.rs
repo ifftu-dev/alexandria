@@ -35,8 +35,8 @@ use crate::AppState;
 pub struct CreatePresentationRequest {
     pub credential_ids: Vec<String>,
     /// Dot-separated field paths to reveal (e.g.
-    /// `["credential_subject.claim.level"]`). Paths use the on-disk
-    /// snake_case shape of the VC, matching the storage format.
+    /// `["credentialSubject.level"]`). Paths use the on-disk W3C VC v2
+    /// camelCase shape of the VC, matching the storage format.
     pub reveal: Vec<String>,
     pub audience: String,
     pub nonce: String,
@@ -74,8 +74,8 @@ const STRUCTURAL_KEYS: &[&str] = &[
     "id",
     "type",
     "issuer",
-    "issuance_date",
-    "expiration_date",
+    "validFrom",
+    "validUntil",
 ];
 
 /// Build a presentation envelope. Pure function — no AppState.
@@ -109,7 +109,7 @@ pub fn create_presentation_impl(
         // Subject binding (§10): MUST be a presentation by the same
         // subject — refuse to wrap someone else's credential.
         if let Some(cs_id) = value
-            .pointer("/credential_subject/id")
+            .pointer("/credentialSubject/id")
             .and_then(|v| v.as_str())
         {
             if cs_id != subject_did.as_str() {
@@ -232,9 +232,9 @@ pub fn verify_presentation_impl(
 
 /// Build a redacted JSON copy keeping only the structural keys plus
 /// the dot-separated `reveal` paths. Paths can target nested keys
-/// inside objects — `credential_subject.claim.level` keeps `level`
-/// inside `claim` inside `credential_subject`. Arrays pass through
-/// the same path filter element-wise.
+/// inside objects — `credentialSubject.level` keeps `level` inside
+/// `credentialSubject`. Arrays pass through the same path filter
+/// element-wise.
 fn redact(value: &serde_json::Value, reveal: &[String]) -> serde_json::Value {
     let mut keep_paths: Vec<Vec<String>> = STRUCTURAL_KEYS
         .iter()
@@ -242,7 +242,7 @@ fn redact(value: &serde_json::Value, reveal: &[String]) -> serde_json::Value {
         .collect();
     // Subject id is always preserved (§10) — without it, the
     // verifier can't bind the presentation to a presenter.
-    keep_paths.push(vec!["credential_subject".into(), "id".into()]);
+    keep_paths.push(vec!["credentialSubject".into(), "id".into()]);
     for r in reveal {
         keep_paths.push(r.split('.').map(String::from).collect());
     }
@@ -353,7 +353,7 @@ mod tests {
     fn create_presentation_request_round_trips() {
         let req = CreatePresentationRequest {
             credential_ids: vec!["urn:uuid:c1".into(), "urn:uuid:c2".into()],
-            reveal: vec!["credential_subject.claim.level".into()],
+            reveal: vec!["credentialSubject.level".into()],
             audience: "did:web:hirer.example".into(),
             nonce: "nonce-1234".into(),
         };
@@ -413,23 +413,23 @@ mod tests {
             supersedes: None,
         };
         let vc = issue_credential_impl(db.conn(), &issuer_key, &issuer, &req, NOW).unwrap();
-        (db, subject_key, subject, vc.id)
+        (db, subject_key, subject, vc.id.unwrap())
     }
 
     #[test]
     fn presentation_redacts_unrevealed_fields() {
-        // `reveal = ["credential_subject.claim.level"]` keeps `level`
-        // but drops `score` and `evidence_refs` from the payload.
+        // `reveal = ["credentialSubject.level"]` keeps `level`
+        // but drops `score` and `evidenceRefs` from the payload.
         let (db, subject_key, subject, cred_id) = setup_with_credential();
         let req = CreatePresentationRequest {
             credential_ids: vec![cred_id],
-            reveal: vec!["credential_subject.claim.level".into()],
+            reveal: vec!["credentialSubject.level".into()],
             audience: "did:web:hirer".into(),
             nonce: "n-1".into(),
         };
         let env = create_presentation_impl(db.conn(), &subject_key, &subject, &req).unwrap();
         assert!(!env.payload_json.contains("\"score\""));
-        assert!(!env.payload_json.contains("evidence_refs"));
+        assert!(!env.payload_json.contains("evidenceRefs"));
         assert!(env.payload_json.contains("\"level\""));
     }
 
@@ -438,7 +438,7 @@ mod tests {
         let (db, subject_key, subject, cred_id) = setup_with_credential();
         let req = CreatePresentationRequest {
             credential_ids: vec![cred_id],
-            reveal: vec!["credential_subject.claim.level".into()],
+            reveal: vec!["credentialSubject.level".into()],
             audience: "did:web:hirer".into(),
             nonce: "n-2".into(),
         };
@@ -452,7 +452,7 @@ mod tests {
         let (db, subject_key, subject, cred_id) = setup_with_credential();
         let req = CreatePresentationRequest {
             credential_ids: vec![cred_id],
-            reveal: vec!["credential_subject.claim.level".into()],
+            reveal: vec!["credentialSubject.level".into()],
             audience: "did:web:hirer".into(),
             nonce: "n-replay".into(),
         };
@@ -472,7 +472,7 @@ mod tests {
         let (db, subject_key, subject, cred_id) = setup_with_credential();
         let req = CreatePresentationRequest {
             credential_ids: vec![cred_id],
-            reveal: vec!["credential_subject.claim.level".into()],
+            reveal: vec!["credentialSubject.level".into()],
             audience: "did:web:hirer-A".into(),
             nonce: "n-aud".into(),
         };
@@ -486,7 +486,7 @@ mod tests {
         let (db, subject_key, subject, cred_id) = setup_with_credential();
         let req = CreatePresentationRequest {
             credential_ids: vec![cred_id.clone()],
-            reveal: vec!["credential_subject.claim.level".into()],
+            reveal: vec!["credentialSubject.level".into()],
             audience: "".into(),
             nonce: "n".into(),
         };
@@ -494,7 +494,7 @@ mod tests {
 
         let req2 = CreatePresentationRequest {
             credential_ids: vec![cred_id],
-            reveal: vec!["credential_subject.claim.level".into()],
+            reveal: vec!["credentialSubject.level".into()],
             audience: "did:web:hirer".into(),
             nonce: "".into(),
         };
@@ -510,7 +510,7 @@ mod tests {
         let imposter_did = derive_did_key(&imposter_key);
         let req = CreatePresentationRequest {
             credential_ids: vec![cred_id],
-            reveal: vec!["credential_subject.claim.level".into()],
+            reveal: vec!["credentialSubject.level".into()],
             audience: "did:web:hirer".into(),
             nonce: "n-imposter".into(),
         };

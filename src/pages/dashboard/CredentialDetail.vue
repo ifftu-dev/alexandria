@@ -41,7 +41,7 @@ async function reverify() {
 }
 
 async function revoke() {
-  if (!credential.value) return
+  if (!credential.value?.id) return
   revoking.value = true
   await api.revoke(credential.value.id, revokeReason.value || 'no reason given')
   revoking.value = false
@@ -77,8 +77,11 @@ const decisionVariant = computed(() => {
     <template v-else-if="credential">
       <div class="mb-6 flex items-start justify-between gap-4">
         <div class="min-w-0">
-          <h1 class="text-2xl font-bold text-foreground truncate" :title="credential.id">
-            {{ credential.id }}
+          <h1
+            class="text-2xl font-bold text-foreground truncate"
+            :title="credential.id ?? '(no envelope id)'"
+          >
+            {{ credential.id ?? '(no envelope id)' }}
           </h1>
           <div class="mt-2 flex items-center gap-2">
             <AppBadge variant="primary">{{ classOf(credential) }}</AppBadge>

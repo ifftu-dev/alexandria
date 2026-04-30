@@ -18,7 +18,7 @@ use crate::aggregation::{
     aggregate_skill_state, AggregationConfig, AggregationInput, DerivedSkillState,
 };
 use crate::crypto::did::Did;
-use crate::domain::vc::{Claim, CredentialType, VerifiableCredential};
+use crate::domain::vc::{CredentialType, SkillClaim, VerifiableCredential};
 use crate::AppState;
 
 /// Read a cached `DerivedSkillState` for `(subject, skill)` if one
@@ -140,20 +140,20 @@ fn load_evidence_for(
             Err(_) => continue,
         };
         let credential_type = parse_credential_type(&vc);
-        let raw_score = match &vc.credential_subject.claim {
-            Claim::Skill(s) => s.score.clamp(0.0, 1.0),
-            // Non-skill claims would have been filtered by the SQL;
-            // defensive default if a future `claim_kind = 'skill'`
-            // ever stores a non-Skill payload.
-            _ => continue,
+        // Read the SkillClaim out of the subject's inline properties.
+        // Non-skill credentials are filtered by the SQL `skill_id`
+        // predicate; this is a defensive guard for any oddly-shaped row.
+        let raw_score = match SkillClaim::extract(&vc.credential_subject) {
+            Some(s) => s.score.clamp(0.0, 1.0),
+            None => continue,
         };
         out.push(AggregationInput {
             credential_id: id,
             issuer: vc.issuer,
             credential_type,
             raw_score,
-            issuance_time: vc.issuance_date,
-            expiration_time: vc.expiration_date,
+            issuance_time: vc.valid_from,
+            expiration_time: vc.valid_until,
             rubric_completeness: 1.0,
             proctoring_reliability: 1.0,
             evidence_traceability: 1.0,
@@ -395,27 +395,25 @@ mod tests {
 
     #[test]
     fn parse_credential_type_handles_known_classes() {
+        let claim = Claim::Skill(SkillClaim {
+            skill_id: "x".into(),
+            level: 1,
+            score: 0.0,
+            evidence_refs: vec![],
+            rubric_version: None,
+            assessment_method: None,
+        });
         let vc = VerifiableCredential {
             context: vec![],
-            id: "x".into(),
+            id: Some("x".into()),
             type_: vec![
                 "VerifiableCredential".into(),
                 "AttestationCredential".into(),
             ],
             issuer: Did("did:key:zI".into()),
-            issuance_date: NOW.into(),
-            expiration_date: None,
-            credential_subject: crate::domain::vc::CredentialSubject {
-                id: Did("did:key:zS".into()),
-                claim: Claim::Skill(SkillClaim {
-                    skill_id: "x".into(),
-                    level: 1,
-                    score: 0.0,
-                    evidence_refs: vec![],
-                    rubric_version: None,
-                    assessment_method: None,
-                }),
-            },
+            valid_from: NOW.into(),
+            valid_until: None,
+            credential_subject: claim.into_subject(Did("did:key:zS".into())),
             credential_status: None,
             terms_of_use: None,
             witness: None,

@@ -144,25 +144,28 @@ mod tests {
     }
 
     fn seed_credential(conn: &rusqlite::Connection, id: &str, subject: &str) {
-        // Matches the on-disk shape produced by `sign_credential` —
-        // snake_case keys, since the Rust structs don't apply
-        // `rename_all = "camelCase"`. Hand-crafted to avoid pulling
-        // sign_credential into this unit test.
+        // Matches the on-disk W3C VC v2 shape produced by
+        // `sign_credential` — camelCase keys, inline subject
+        // properties (no nested `claim` discriminator). Hand-crafted
+        // to avoid pulling sign_credential into this unit test.
         let json = serde_json::json!({
-            "@context": ["https://www.w3.org/2018/credentials/v1"],
+            "@context": ["https://www.w3.org/ns/credentials/v2"],
             "id": id,
             "type": ["VerifiableCredential", "FormalCredential"],
             "issuer": "did:key:zIssuer",
-            "issuance_date": "2026-04-13T00:00:00Z",
-            "credential_subject": {
+            "validFrom": "2026-04-13T00:00:00Z",
+            "credentialSubject": {
                 "id": subject,
-                "claim": { "kind": "skill", "skill_id": "s", "level": 3, "score": 0.7, "evidence_refs": [] }
+                "skillId": "s",
+                "level": 3,
+                "score": 0.7,
+                "evidenceRefs": [],
             },
             "proof": {
                 "type": "Ed25519Signature2020",
                 "created": "2026-04-13T00:00:00Z",
-                "verification_method": "did:key:zIssuer#key-1",
-                "proof_purpose": "assertionMethod",
+                "verificationMethod": "did:key:zIssuer#key-1",
+                "proofPurpose": "assertionMethod",
                 "jws": "fake..jws"
             }
         })

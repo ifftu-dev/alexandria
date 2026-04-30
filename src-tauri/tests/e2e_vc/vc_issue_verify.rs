@@ -4,30 +4,27 @@ use super::common::{new_test_db, test_did, TEST_NOW};
 use app_lib::domain::vc::{
     sign::{sign_credential, UnsignedCredential},
     verify::verify_credential,
-    AcceptanceDecision, Claim, CredentialSubject, Proof, SkillClaim, VerifiableCredential,
-    VerificationPolicy,
+    AcceptanceDecision, Claim, Proof, SkillClaim, VerifiableCredential, VerificationPolicy,
 };
 
 fn sample_unsigned(subject: app_lib::crypto::did::Did) -> UnsignedCredential {
+    let claim = Claim::Skill(SkillClaim {
+        skill_id: "skill_big_o".into(),
+        level: 4,
+        score: 0.82,
+        evidence_refs: vec![],
+        rubric_version: Some("v1".into()),
+        assessment_method: Some("exam".into()),
+    });
     UnsignedCredential {
         credential: VerifiableCredential {
-            context: vec!["https://www.w3.org/2018/credentials/v1".into()],
-            id: "urn:uuid:test-credential".into(),
+            context: vec!["https://www.w3.org/ns/credentials/v2".into()],
+            id: Some("urn:uuid:test-credential".into()),
             type_: vec!["VerifiableCredential".into(), "FormalCredential".into()],
             issuer: test_did("issuer"),
-            issuance_date: TEST_NOW.into(),
-            expiration_date: None,
-            credential_subject: CredentialSubject {
-                id: subject,
-                claim: Claim::Skill(SkillClaim {
-                    skill_id: "skill_big_o".into(),
-                    level: 4,
-                    score: 0.82,
-                    evidence_refs: vec![],
-                    rubric_version: Some("v1".into()),
-                    assessment_method: Some("exam".into()),
-                }),
-            },
+            valid_from: TEST_NOW.into(),
+            valid_until: None,
+            credential_subject: claim.into_subject(subject),
             credential_status: None,
             terms_of_use: None,
             witness: None,
@@ -70,10 +67,13 @@ async fn tampered_payload_fails_verification() {
 
     let mut signed =
         sign_credential(sample_unsigned(subject), &issuer_key, &issuer_did).expect("sign");
-    // Tamper: raise the score after signing
-    if let Claim::Skill(ref mut s) = signed.credential_subject.claim {
-        s.score = 1.0;
-    }
+    // Tamper: raise the score after signing. With the W3C VC v2 shape
+    // the skill claim lives inline on credentialSubject, so mutate the
+    // property directly.
+    signed
+        .credential_subject
+        .properties
+        .insert("score".into(), serde_json::json!(1.0));
     let result = verify_credential(db.conn(), &signed, TEST_NOW, &VerificationPolicy::default());
     assert!(!result.valid_signature);
     assert_eq!(result.acceptance_decision, AcceptanceDecision::Reject);
@@ -113,7 +113,8 @@ async fn revoked_credential_is_rejected() {
     let before = verify_credential(db.conn(), &vc, TEST_NOW, &VerificationPolicy::default());
     assert_eq!(before.acceptance_decision, AcceptanceDecision::Accept);
 
-    revoke_credential_impl(db.conn(), &vc.id, "superseded", TEST_NOW).expect("revoke");
+    revoke_credential_impl(db.conn(), vc.id.as_deref().unwrap(), "superseded", TEST_NOW)
+        .expect("revoke");
 
     // Post-revocation: verifier rejects with revoked=true.
     let after = verify_credential(db.conn(), &vc, TEST_NOW, &VerificationPolicy::default());
@@ -148,7 +149,7 @@ async fn expired_credential_is_rejected_under_strict_policy() {
     let issuer_key = super::common::test_key("issuer");
     let issuer_did = test_did("issuer");
     let mut unsigned = sample_unsigned(test_did("alice"));
-    unsigned.credential.expiration_date = Some("2026-01-01T00:00:00Z".into());
+    unsigned.credential.valid_until = Some("2026-01-01T00:00:00Z".into());
     let signed = sign_credential(unsigned, &issuer_key, &issuer_did).expect("sign");
     let result = verify_credential(db.conn(), &signed, TEST_NOW, &VerificationPolicy::default());
     assert!(result.expired);

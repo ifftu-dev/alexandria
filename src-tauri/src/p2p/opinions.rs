@@ -144,7 +144,7 @@ pub fn handle_opinion_message(
                      AND c.revoked = 0 \
                      AND sub.subject_field_id = ?2 \
                      AND CAST(json_extract(c.signed_vc_json, \
-                         '$.credentialSubject.claim.level') AS INTEGER) >= ?3 \
+                         '$.credentialSubject.level') AS INTEGER) >= ?3 \
                  ) THEN 1 ELSE 0 END",
                 params![proof_id, payload.subject_field_id, APPLY_LEVEL_IDX],
                 |row| row.get(0),
@@ -288,7 +288,7 @@ pub fn promote_pending_opinions(db: &Database) -> Result<u32, String> {
                          AND c.revoked = 0 \
                          AND sub.subject_field_id = ?2 \
                          AND CAST(json_extract(c.signed_vc_json, \
-                             '$.credentialSubject.claim.level') AS INTEGER) >= 2 \
+                             '$.credentialSubject.level') AS INTEGER) >= 2 \
                      ) THEN 1 ELSE 0 END",
                     params![pid, subject_field_id],
                     |row| row.get(0),
@@ -402,19 +402,17 @@ mod tests {
     fn seed_credential(db: &Database, cred_id: &str, level: u8) {
         // Seeds a skill-claim VC with a SkillClaim.level the opinion
         // gate can read via `json_extract`. The signed_vc_json payload
-        // mirrors the actual serialised shape that `sign_credential`
-        // produces so the level check exercises the real json path.
+        // mirrors the actual serialised W3C VC v2 shape that
+        // `sign_credential` produces so the level check exercises the
+        // real json path.
         let vc_value = serde_json::json!({
-            "@context": ["https://www.w3.org/2018/credentials/v1"],
+            "@context": ["https://www.w3.org/ns/credentials/v2"],
             "credentialSubject": {
                 "id": "did:key:zTestAuthor",
-                "claim": {
-                    "kind": "skill",
-                    "skill_id": "skill_graphs",
-                    "level": level,
-                    "score": 0.9,
-                    "evidence_refs": [],
-                }
+                "skillId": "skill_graphs",
+                "level": level,
+                "score": 0.9,
+                "evidenceRefs": [],
             }
         });
         let vc_json = serde_json::to_string(&vc_value).unwrap();

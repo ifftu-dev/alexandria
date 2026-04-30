@@ -124,12 +124,12 @@ fn run_list(ctx: &ProjectContext, password_file: Option<&Path>) -> Result<()> {
             .map(|s| s.as_str())
             .unwrap_or("Credential");
         output::blank();
-        output::kv("ID", &vc.id);
+        output::kv("ID", vc.id.as_deref().unwrap_or("(no envelope id)"));
         output::kv("Type", class);
         output::kv("Issuer", vc.issuer.as_str());
         output::kv("Subject", vc.credential_subject.id.as_str());
-        output::kv("Issued", &vc.issuance_date);
-        if let Some(exp) = &vc.expiration_date {
+        output::kv("Issued", &vc.valid_from);
+        if let Some(exp) = &vc.valid_until {
             output::kv("Expires", exp);
         }
     }

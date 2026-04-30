@@ -29,8 +29,11 @@ pub fn verify_credential(
     policy: &VerificationPolicy,
 ) -> VerificationResult {
     // Default: all flags negative; promote to true as checks pass.
+    // VC envelope `id` is optional in W3C VC v2 §4.3 — fall back to
+    // empty string for the result echo when absent.
+    let credential_id = credential.id.clone().unwrap_or_default();
     let mut result = VerificationResult {
-        credential_id: credential.id.clone(),
+        credential_id: credential_id.clone(),
         valid_signature: false,
         issuer_resolved: false,
         revoked: false,
@@ -54,7 +57,7 @@ pub fn verify_credential(
     // -- expiration ---------------------------------------------------------
     // String comparison on ISO 8601 is well-defined (strings sort lexically
     // the same way the times sort chronologically when all are UTC 'Z').
-    if let Some(exp) = &credential.expiration_date {
+    if let Some(exp) = &credential.valid_until {
         if exp.as_str() < verification_time {
             result.expired = true;
         }
@@ -83,25 +86,29 @@ pub fn verify_credential(
     // Local `credentials.suspended` flag set by `suspend_credential_impl`.
     // `suspended_until` NULL means "suspended indefinitely"; a set value
     // is compared against `verification_time` for automatic reinstatement.
-    if let Some((sus_flag, sus_until)) = lookup_suspension(db, &credential.id) {
-        if sus_flag {
-            let active = match sus_until {
-                Some(until) => until.as_str() > verification_time,
-                None => true,
-            };
-            if active {
-                result.suspended = true;
+    // Skipped when the envelope has no `id` — local revocation/suspension
+    // state is keyed by id and an id-less VC can't have any.
+    if !credential_id.is_empty() {
+        if let Some((sus_flag, sus_until)) = lookup_suspension(db, &credential_id) {
+            if sus_flag {
+                let active = match sus_until {
+                    Some(until) => until.as_str() > verification_time,
+                    None => true,
+                };
+                if active {
+                    result.suspended = true;
+                }
             }
         }
-    }
 
-    // -- supersession (§11.4) -----------------------------------------------
-    // A newer credential in the local store pointing to this one via
-    // `supersedes` marks it as superseded. The match is on id only — the
-    // stricter same-subject/same-claim/same-issuer invariant is enforced
-    // at the INSERT site (see `supersede_credential_impl`).
-    if lookup_is_superseded(db, &credential.id) {
-        result.superseded = true;
+        // -- supersession (§11.4) -------------------------------------------
+        // A newer credential in the local store pointing to this one via
+        // `supersedes` marks it as superseded. The match is on id only — the
+        // stricter same-subject/same-claim/same-issuer invariant is enforced
+        // at the INSERT site (see `supersede_credential_impl`).
+        if lookup_is_superseded(db, &credential_id) {
+            result.superseded = true;
+        }
     }
 
     // -- issuer resolution --------------------------------------------------
@@ -247,7 +254,7 @@ mod tests {
     use crate::crypto::did::{derive_did_key, VerificationMethodRef};
     use crate::db::Database;
     use crate::domain::vc::sign::{sign_credential, UnsignedCredential};
-    use crate::domain::vc::{Claim, CredentialSubject, Proof, SkillClaim, VerifiableCredential};
+    use crate::domain::vc::{Claim, Proof, SkillClaim, VerifiableCredential};
     use ed25519_dalek::SigningKey;
 
     fn test_signing_key(role: &str) -> SigningKey {
@@ -260,24 +267,22 @@ mod tests {
     }
 
     fn skeleton(issuer: Did, subject: Did, expiration: Option<String>) -> VerifiableCredential {
+        let claim = Claim::Skill(SkillClaim {
+            skill_id: "skill_x".into(),
+            level: 3,
+            score: 0.65,
+            evidence_refs: vec![],
+            rubric_version: None,
+            assessment_method: None,
+        });
         VerifiableCredential {
-            context: vec!["https://www.w3.org/2018/credentials/v1".into()],
-            id: "urn:uuid:verify-unit-test".into(),
+            context: vec!["https://www.w3.org/ns/credentials/v2".into()],
+            id: Some("urn:uuid:verify-unit-test".into()),
             type_: vec!["VerifiableCredential".into(), "FormalCredential".into()],
             issuer,
-            issuance_date: "2026-01-01T00:00:00Z".into(),
-            expiration_date: expiration,
-            credential_subject: CredentialSubject {
-                id: subject,
-                claim: Claim::Skill(SkillClaim {
-                    skill_id: "skill_x".into(),
-                    level: 3,
-                    score: 0.65,
-                    evidence_refs: vec![],
-                    rubric_version: None,
-                    assessment_method: None,
-                }),
-            },
+            valid_from: "2026-01-01T00:00:00Z".into(),
+            valid_until: expiration,
+            credential_subject: claim.into_subject(subject),
             credential_status: None,
             terms_of_use: None,
             witness: None,
@@ -317,7 +322,7 @@ mod tests {
             "2026-04-13T00:00:00Z",
             &VerificationPolicy::default(),
         );
-        assert_eq!(result.credential_id, vc.id);
+        assert_eq!(Some(result.credential_id), vc.id);
         assert_eq!(result.verification_time, "2026-04-13T00:00:00Z");
     }
 
@@ -360,13 +365,15 @@ mod tests {
 
     #[test]
     fn tampered_payload_breaks_signature() {
-        // Altering a claim after signing must invalidate the signature —
-        // the whole point of canonical signing is that any change to
-        // non-proof fields breaks verification.
+        // Altering a claim property after signing must invalidate the
+        // signature — the whole point of canonical signing is that any
+        // change to non-proof fields breaks verification. The skill
+        // claim is stored as inline subject properties, so tamper
+        // there directly.
         let (db, mut vc) = signed(None);
-        if let Claim::Skill(ref mut s) = vc.credential_subject.claim {
-            s.score = 1.0;
-        }
+        vc.credential_subject
+            .properties
+            .insert("score".into(), serde_json::json!(1.0));
         let result = verify_credential(
             db.conn(),
             &vc,

@@ -15,8 +15,7 @@ use crate::crypto::did::{derive_did_key, Did, VerificationMethodRef};
 use crate::crypto::wallet;
 use crate::domain::vc::sign::{sign_credential, UnsignedCredential};
 use crate::domain::vc::{
-    Claim, CredentialStatus, CredentialSubject, CredentialType, Proof, VerifiableCredential,
-    VerificationResult,
+    Claim, CredentialStatus, CredentialType, Proof, VerifiableCredential, VerificationResult,
 };
 use crate::AppState;
 
@@ -60,22 +59,23 @@ pub fn issue_credential_impl(
     let type_name = serde_plain_variant(&req.credential_type);
 
     // Build the VC envelope; sign_credential will stamp proof.jws.
+    // For skill claims we fold the request's evidence_refs into the
+    // claim so the inline subject properties carry them.
     let mut claim = req.claim.clone();
     if let Claim::Skill(ref mut s) = claim {
         s.evidence_refs = req.evidence_refs.clone();
     }
+    let claim_kind = claim.kind_str();
+    let skill_id = claim.skill_id().map(str::to_string);
 
     let vc = VerifiableCredential {
         context: vec![W3C_VC_V1.into(), ALEXANDRIA_V1.into()],
-        id: credential_id.clone(),
+        id: Some(credential_id.clone()),
         type_: vec!["VerifiableCredential".into(), type_name.clone()],
         issuer: issuer_did.clone(),
-        issuance_date: now.to_string(),
-        expiration_date: req.expiration_date.clone(),
-        credential_subject: CredentialSubject {
-            id: req.subject.clone(),
-            claim: claim.clone(),
-        },
+        valid_from: now.to_string(),
+        valid_until: req.expiration_date.clone(),
+        credential_subject: claim.into_subject(req.subject.clone()),
         credential_status: Some(CredentialStatus {
             id: format!("{list_id}#{index}"),
             type_: STATUS_LIST_TYPE.into(),
@@ -102,12 +102,6 @@ pub fn issue_credential_impl(
 
     let signed_json = serde_json::to_string(&signed).map_err(|e| e.to_string())?;
     let integrity_hash = integrity_hash_of(&signed)?;
-
-    let (claim_kind, skill_id) = match &claim {
-        Claim::Skill(s) => ("skill", Some(s.skill_id.clone())),
-        Claim::Role(_) => ("role", None),
-        Claim::Custom(_) => ("custom", None),
-    };
 
     // §11.4 supersession invariants: a newer credential may
     // supersede an older only when the same subject, claim kind, and
@@ -817,7 +811,7 @@ mod tests {
         let vc =
             issue_credential_impl(db.conn(), &key, &issuer, &sample_request(subject), NOW).unwrap();
         assert!(!vc.proof.jws.is_empty());
-        assert!(vc.id.starts_with("urn:uuid:"));
+        assert!(vc.id.as_deref().unwrap().starts_with("urn:uuid:"));
         let status = vc.credential_status.expect("status attached");
         assert_eq!(status.status_list_index, "0");
         assert!(status
@@ -857,13 +851,13 @@ mod tests {
         let (db, key, issuer, subject) = setup();
         let vc =
             issue_credential_impl(db.conn(), &key, &issuer, &sample_request(subject), NOW).unwrap();
-        revoke_credential_impl(db.conn(), &vc.id, "superseded", NOW).unwrap();
+        revoke_credential_impl(db.conn(), vc.id.as_deref().unwrap(), "superseded", NOW).unwrap();
 
         let revoked: i64 = db
             .conn()
             .query_row(
                 "SELECT revoked FROM credentials WHERE id = ?1",
-                params![vc.id],
+                params![vc.id.as_deref().unwrap()],
                 |r| r.get(0),
             )
             .unwrap();
@@ -886,8 +880,8 @@ mod tests {
         let (db, key, issuer, subject) = setup();
         let vc =
             issue_credential_impl(db.conn(), &key, &issuer, &sample_request(subject), NOW).unwrap();
-        revoke_credential_impl(db.conn(), &vc.id, "r1", NOW).unwrap();
-        revoke_credential_impl(db.conn(), &vc.id, "r2", NOW).unwrap();
+        revoke_credential_impl(db.conn(), vc.id.as_deref().unwrap(), "r1", NOW).unwrap();
+        revoke_credential_impl(db.conn(), vc.id.as_deref().unwrap(), "r2", NOW).unwrap();
         // One bit set; not doubled up.
         let bits: Vec<u8> = db
             .conn()
@@ -949,7 +943,7 @@ mod tests {
         assert_eq!(accepted.acceptance_decision, AcceptanceDecision::Accept);
         assert!(!accepted.revoked);
 
-        revoke_credential_impl(db.conn(), &vc.id, "test", NOW).unwrap();
+        revoke_credential_impl(db.conn(), vc.id.as_deref().unwrap(), "test", NOW).unwrap();
 
         let rejected = verify_credential(db.conn(), &vc, NOW, &VerificationPolicy::default());
         assert!(rejected.revoked, "revocation bit must propagate to verify");
@@ -1004,7 +998,7 @@ mod tests {
         let (db, key, issuer, subject) = setup();
         let vc =
             issue_credential_impl(db.conn(), &key, &issuer, &sample_request(subject), NOW).unwrap();
-        revoke_credential_impl(db.conn(), &vc.id, "test", NOW).unwrap();
+        revoke_credential_impl(db.conn(), vc.id.as_deref().unwrap(), "test", NOW).unwrap();
         let json = export_bundle_impl(db.conn()).unwrap();
         let (accepted, total) = verify_bundle_offline_impl(&json, NOW).unwrap();
         assert_eq!(total, 1);
@@ -1042,13 +1036,20 @@ mod tests {
         assert!(!pre.suspended);
 
         // Suspend with no upper bound — indefinite suspension.
-        suspend_credential_impl(db.conn(), &vc.id, None, Some("under review"), NOW).unwrap();
+        suspend_credential_impl(
+            db.conn(),
+            vc.id.as_deref().unwrap(),
+            None,
+            Some("under review"),
+            NOW,
+        )
+        .unwrap();
         let mid = verify_credential(db.conn(), &vc, NOW, &VerificationPolicy::default());
         assert!(mid.suspended);
         assert_eq!(mid.acceptance_decision, AcceptanceDecision::Reject);
 
         // Reinstate.
-        reinstate_credential_impl(db.conn(), &vc.id).unwrap();
+        reinstate_credential_impl(db.conn(), vc.id.as_deref().unwrap()).unwrap();
         let after = verify_credential(db.conn(), &vc, NOW, &VerificationPolicy::default());
         assert!(!after.suspended);
         assert_eq!(after.acceptance_decision, AcceptanceDecision::Accept);
@@ -1066,8 +1067,14 @@ mod tests {
         // Suspended until a time before NOW — verifier sees the
         // suspension as auto-expired and treats the credential as
         // active again.
-        suspend_credential_impl(db.conn(), &vc.id, Some("2026-01-01T00:00:00Z"), None, NOW)
-            .unwrap();
+        suspend_credential_impl(
+            db.conn(),
+            vc.id.as_deref().unwrap(),
+            Some("2026-01-01T00:00:00Z"),
+            None,
+            NOW,
+        )
+        .unwrap();
         let result = verify_credential(db.conn(), &vc, NOW, &VerificationPolicy::default());
         assert!(!result.suspended);
     }
@@ -1080,7 +1087,7 @@ mod tests {
         let (db, key, issuer, subject) = setup();
         let vc =
             issue_credential_impl(db.conn(), &key, &issuer, &sample_request(subject), NOW).unwrap();
-        suspend_credential_impl(db.conn(), &vc.id, None, None, NOW).unwrap();
+        suspend_credential_impl(db.conn(), vc.id.as_deref().unwrap(), None, None, NOW).unwrap();
 
         let permissive = VerificationPolicy {
             reject_suspended: false,
@@ -1110,7 +1117,7 @@ mod tests {
 
         // Issue a newer credential that supersedes the old one.
         let mut new_req = sample_request(subject);
-        new_req.supersedes = Some(old.id.clone());
+        new_req.supersedes = old.id.clone();
         let _new = issue_credential_impl(db.conn(), &key, &issuer, &new_req, NOW).unwrap();
 
         let result = verify_credential(db.conn(), &old, NOW, &VerificationPolicy::default());
@@ -1134,7 +1141,7 @@ mod tests {
         let other_key = test_key("other-issuer");
         let other_issuer = derive_did_key(&other_key);
         let mut bad_req = sample_request(subject);
-        bad_req.supersedes = Some(old.id.clone());
+        bad_req.supersedes = old.id.clone();
         let err =
             issue_credential_impl(db.conn(), &other_key, &other_issuer, &bad_req, NOW).unwrap_err();
         assert!(err.contains("issuer"), "got {err}");

@@ -136,31 +136,28 @@ fn load_credential_row(
 }
 
 /// Extract `(level, score, skill_id)` from a SkillClaim VC payload.
-/// Returns `None` when the JSON is a different claim shape.
+/// Reads the W3C VC v2 inline subject properties (`skillId`, `level`,
+/// `score`); returns `None` when the JSON is a different claim shape.
 fn skill_fields(cred: &CredentialRow) -> Result<Option<(i64, f64, String)>, String> {
     let value: serde_json::Value = serde_json::from_str(&cred.signed_vc_json)
         .map_err(|e| format!("parse signed_vc_json: {e}"))?;
-    let claim = value
-        .pointer("/credentialSubject/claim")
-        .ok_or_else(|| "missing credentialSubject.claim".to_string())?;
-    if claim.get("kind").and_then(|v| v.as_str()) != Some("skill") {
+    let subject = value
+        .pointer("/credentialSubject")
+        .ok_or_else(|| "missing credentialSubject".to_string())?;
+    let Some(skill_id) = subject.get("skillId").and_then(|v| v.as_str()) else {
+        // Not a skill credential — no marker property.
         return Ok(None);
-    }
-    let level = claim
+    };
+    let level = subject
         .get("level")
         .and_then(|v| v.as_i64())
         .ok_or_else(|| "skill claim missing integer level".to_string())?;
-    let score = claim
+    let score = subject
         .get("score")
         .and_then(|v| v.as_f64())
         .unwrap_or(0.0)
         .clamp(0.0, 1.0);
-    let skill_id = claim
-        .get("skill_id")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| "skill claim missing skill_id".to_string())?
-        .to_string();
-    Ok(Some((level, score, skill_id)))
+    Ok(Some((level, score, skill_id.to_string())))
 }
 
 fn update_learner(
@@ -207,7 +204,7 @@ fn update_instructor(
         .query_row(
             "SELECT \
                 COALESCE(AVG(CAST(json_extract(signed_vc_json, \
-                    '$.credentialSubject.claim.score') AS REAL)), 0.0), \
+                    '$.credentialSubject.score') AS REAL)), 0.0), \
                 COUNT(*) \
              FROM credentials \
              WHERE issuer_did = ?1 \
@@ -215,7 +212,7 @@ fn update_instructor(
                AND claim_kind = 'skill' \
                AND revoked = 0 \
                AND CAST(json_extract(signed_vc_json, \
-                    '$.credentialSubject.claim.level') AS INTEGER) = ?3",
+                    '$.credentialSubject.level') AS INTEGER) = ?3",
             params![issuer_did, skill_id, level],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
@@ -282,16 +279,13 @@ mod tests {
         score: f64,
     ) {
         let vc = serde_json::json!({
-            "@context": ["https://www.w3.org/2018/credentials/v1"],
+            "@context": ["https://www.w3.org/ns/credentials/v2"],
             "credentialSubject": {
                 "id": subject,
-                "claim": {
-                    "kind": "skill",
-                    "skill_id": skill_id,
-                    "level": level,
-                    "score": score,
-                    "evidence_refs": [],
-                }
+                "skillId": skill_id,
+                "level": level,
+                "score": score,
+                "evidenceRefs": [],
             }
         });
         db.conn()
@@ -443,10 +437,10 @@ mod tests {
     fn non_skill_claims_are_ignored() {
         let db = test_db();
         let role_vc = serde_json::json!({
-            "@context": ["https://www.w3.org/2018/credentials/v1"],
+            "@context": ["https://www.w3.org/ns/credentials/v2"],
             "credentialSubject": {
                 "id": "did:key:zLearner",
-                "claim": { "kind": "role", "role": "mentor" }
+                "role": "mentor",
             }
         });
         db.conn()

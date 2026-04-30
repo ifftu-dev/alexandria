@@ -85,7 +85,7 @@ fn check_proficiency(
              WHERE c.claim_kind = 'skill' AND c.revoked = 0 \
                AND sub.subject_field_id = ?1 \
                AND CAST(json_extract(c.signed_vc_json, \
-                   '$.credentialSubject.claim.level') AS INTEGER) >= ?2",
+                   '$.credentialSubject.level') AS INTEGER) >= ?2",
             params![scope_id, min_idx_i64],
             |row| row.get(0),
         )
@@ -97,7 +97,7 @@ fn check_proficiency(
              WHERE c.claim_kind = 'skill' AND c.revoked = 0 \
                AND sk.subject_id = ?1 \
                AND CAST(json_extract(c.signed_vc_json, \
-                   '$.credentialSubject.claim.level') AS INTEGER) >= ?2",
+                   '$.credentialSubject.level') AS INTEGER) >= ?2",
             params![scope_id, min_idx_i64],
             |row| row.get(0),
         )

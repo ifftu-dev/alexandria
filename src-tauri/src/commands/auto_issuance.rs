@@ -26,7 +26,7 @@ use crate::cardano::completion::{self, CompletionObservation};
 use crate::crypto::did::{did_from_verifying_key, Did, VerificationMethodRef};
 use crate::domain::vc::sign::{sign_credential, UnsignedCredential};
 use crate::domain::vc::{
-    Claim, CredentialStatus, CredentialSubject, Proof, VerifiableCredential, Witness,
+    Claim, CredentialStatus, CustomClaim, Proof, VerifiableCredential, Witness,
 };
 
 const STATUS_LIST_BITS: usize = 16_384;
@@ -139,12 +139,24 @@ pub fn issue_for_observation(
     let credential_id = format!("urn:uuid:{}", Uuid::new_v4());
     let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
 
-    let claim = Claim::Custom(serde_json::json!({
-        "kind": "course_completion",
-        "course_id": obs.course_id,
-        "completion_root": obs.completion_root,
-        "completion_time": obs.completion_time,
-    }));
+    // Self-asserted course-completion claim. The properties land
+    // directly on `credentialSubject` per W3C VC v2 — a `claimType`
+    // discriminator is added so verifiers can route on it without
+    // pattern-matching on individual property names.
+    let claim = Claim::Custom(CustomClaim {
+        properties: serde_json::Map::from_iter([
+            ("claimType".into(), serde_json::json!("course_completion")),
+            ("courseId".into(), serde_json::json!(obs.course_id)),
+            (
+                "completionRoot".into(),
+                serde_json::json!(obs.completion_root),
+            ),
+            (
+                "completionTime".into(),
+                serde_json::json!(obs.completion_time),
+            ),
+        ]),
+    });
 
     let witness = Witness {
         tx_hash: obs.tx_hash.clone(),
@@ -154,15 +166,12 @@ pub fn issue_for_observation(
 
     let vc = VerifiableCredential {
         context: vec![W3C_VC_V1.into(), ALEXANDRIA_V1.into()],
-        id: credential_id.clone(),
+        id: Some(credential_id.clone()),
         type_: vec!["VerifiableCredential".into(), "SelfAssertion".into()],
         issuer: learner_did.clone(),
-        issuance_date: now.clone(),
-        expiration_date: None,
-        credential_subject: CredentialSubject {
-            id: learner_did.clone(),
-            claim,
-        },
+        valid_from: now.clone(),
+        valid_until: None,
+        credential_subject: claim.into_subject(learner_did.clone()),
         credential_status: Some(CredentialStatus {
             id: format!("{list_id}#{index}"),
             type_: STATUS_LIST_TYPE.into(),
