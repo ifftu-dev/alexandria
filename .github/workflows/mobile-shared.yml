@@ -127,7 +127,12 @@ jobs:
     name: Build iOS
     needs: prepare
     if: inputs.include_ios == true
-    runs-on: macos-latest
+    # Pinned to macos-26-arm64 so Xcode 26.x is the default toolchain.
+    # App Store Connect now rejects uploads built with the iOS 18.5 SDK
+    # (Xcode 16.x); it requires the iOS 26 SDK or later. macos-latest
+    # currently lags behind, so name the image explicitly until it
+    # promotes to macos-26.
+    runs-on: macos-26-arm64
     timeout-minutes: 90
     steps:
       - name: Checkout alexandria
