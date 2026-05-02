@@ -1,0 +1,22 @@
+# cargo-audit configuration
+#
+# Ignored advisories should always carry a `# reason:` line so the next
+# person who looks at this file knows why we accept the risk and what
+# to watch for. Re-evaluate on every iroh / libp2p bump.
+
+[advisories]
+ignore = [
+  # RUSTSEC-2026-0119 — hickory-proto: O(n²) name compression CPU exhaustion.
+  # Fix: upgrade to >=0.26.1. Blocked: iroh 0.96.1 pins hickory-resolver = "^0.25",
+  # which transitively forces hickory-proto 0.25.x. Bumping iroh is its own
+  # tracked migration. We do not expose hickory's encoder to attacker-controlled
+  # input on the application path; the resolver is only used for libp2p-dns.
+  "RUSTSEC-2026-0119",
+
+  # RUSTSEC-2026-0118 — hickory-proto: NSEC3 closest-encloser proof
+  # validation enters unbounded loop on cross-zone responses.
+  # Fix: NONE published yet upstream. Same blocker as above (iroh-pinned
+  # 0.25.x). We rely on libp2p-dns for peer discovery and do not validate
+  # DNSSEC NSEC3 chains in our application code path.
+  "RUSTSEC-2026-0118",
+]

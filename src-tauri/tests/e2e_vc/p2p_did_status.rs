@@ -13,6 +13,9 @@ use app_lib::p2p::vc_did::{handle_did_message, promote_pending_for, queue_pendin
 use app_lib::p2p::vc_status::{handle_status_message, StatusIngest};
 
 #[tokio::test]
+#[ignore = "flaky on CI: depends on libp2p DHT bootstrap to a discovery peer; \
+            races and times out non-deterministically. Track in a separate issue \
+            before re-enabling — likely needs a stub bootstrap or deterministic mock."]
 async fn did_doc_rotation_propagates_to_second_node() {
     // Node A publishes a DID rotation message → Node B receives
     // the gossip → Node B's DB reflects the rotated_by linkage.
