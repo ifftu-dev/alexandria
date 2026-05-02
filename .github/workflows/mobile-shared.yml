@@ -127,14 +127,20 @@ jobs:
     name: Build iOS
     needs: prepare
     if: inputs.include_ios == true
-    # Pinned to macos-26-arm64 so Xcode 26.x is the default toolchain.
-    # App Store Connect now rejects uploads built with the iOS 18.5 SDK
-    # (Xcode 16.x); it requires the iOS 26 SDK or later. macos-latest
-    # currently lags behind, so name the image explicitly until it
-    # promotes to macos-26.
-    runs-on: macos-26-arm64
+    # macos-15-arm64 ships Xcode 26.x as a non-default install
+    # (alongside Xcode 16.x). We explicitly select 26.3 below.
+    # `macos-26-arm64` would also work but its runner pool is sparse —
+    # iOS jobs queued there for 7+ hours waiting for capacity. The
+    # macos-15-arm64 pool turns over much faster.
+    runs-on: macos-15-arm64
     timeout-minutes: 90
     steps:
+      - name: Select Xcode 26.3
+        # App Store Connect requires the iOS 26 SDK or later for
+        # uploads. The runner default is Xcode 16.x → iOS 18.5 SDK,
+        # which the App Store rejects with a 409.
+        run: sudo xcode-select --switch /Applications/Xcode_26.3.app
+
       - name: Checkout alexandria
         uses: actions/checkout@v5
         with:
