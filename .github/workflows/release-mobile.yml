@@ -1,6 +1,12 @@
 name: Release (Mobile)
 
+# Tag-push triggers an automatic release with the workflow_dispatch
+# defaults (Android + iOS, App Store Connect export). workflow_dispatch
+# is preserved so a human can override per-run.
 on:
+  push:
+    tags:
+      - 'v*'
   workflow_dispatch:
     inputs:
       tag:
@@ -35,8 +41,10 @@ jobs:
     uses: ./.github/workflows/mobile-shared.yml
     with:
       mode: release
-      tag: ${{ inputs.tag }}
-      include_android: ${{ inputs.include_android }}
-      include_ios: ${{ inputs.include_ios }}
-      ios_export_method: ${{ inputs.ios_export_method }}
+      # On tag push, `inputs.*` is null — fall back to the workflow_dispatch
+      # defaults (see comment in release-desktop.yml).
+      tag: ${{ inputs.tag || github.ref_name }}
+      include_android: ${{ github.event_name == 'push' || inputs.include_android }}
+      include_ios: ${{ github.event_name == 'push' || inputs.include_ios }}
+      ios_export_method: ${{ inputs.ios_export_method || 'app-store-connect' }}
     secrets: inherit
