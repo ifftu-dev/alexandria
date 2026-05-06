@@ -127,12 +127,16 @@ jobs:
     name: Build iOS
     needs: prepare
     if: inputs.include_ios == true
-    # macos-15-arm64 ships Xcode 26.x as a non-default install
+    # macos-15 (x86_64) ships Xcode 26.x as a non-default install
     # (alongside Xcode 16.x). We explicitly select 26.3 below.
-    # `macos-26-arm64` would also work but its runner pool is sparse —
-    # iOS jobs queued there for 7+ hours waiting for capacity. The
-    # macos-15-arm64 pool turns over much faster.
-    runs-on: macos-15-arm64
+    # The host architecture doesn't affect iOS bundle output — the
+    # Rust toolchain cross-compiles to aarch64-apple-ios regardless.
+    # ARM64 macOS pools (macos-26-arm64, macos-15-arm64) were
+    # exhausted at dispatch time: a v0.2.0-alpha iOS run sat queued
+    # for the full 24h GitHub Actions ceiling and was auto-cancelled
+    # without ever picking up a runner. The x86_64 macOS pool turns
+    # over in minutes.
+    runs-on: macos-15
     timeout-minutes: 90
     steps:
       - name: Select Xcode 26.3
