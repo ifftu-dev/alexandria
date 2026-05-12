@@ -127,8 +127,9 @@ blake3 = "1"
 # toolchain out of the box. Vendor OpenSSL here so builds do not depend on runner-specific paths.
 rusqlite = { version = "0.38", features = ["bundled-sqlcipher-vendored-openssl", "uuid"] }
 
-[target.'cfg(target_os = "ios")'.dependencies]
-# ObjC runtime — for configuring WKWebView scrollView insets at startup
+[target.'cfg(any(target_os = "ios", target_os = "macos"))'.dependencies]
+# ObjC runtime — for configuring WKWebView scrollView insets (iOS) and
+# enabling element fullscreen on WKPreferences (macOS).
 objc2 = "0.6"
 
 [target.'cfg(any(target_os = "ios", target_os = "android"))'.dependencies]

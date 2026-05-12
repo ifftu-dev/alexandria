@@ -646,6 +646,58 @@ pub fn run() {
             app.manage(app_state);
             diag::log("app setup complete — webview should be loading");
 
+            // macOS: WKWebView ships with WKPreferences' `fullScreenEnabled`
+            // turned off by default, so HTML5 `Element.requestFullscreen()` is
+            // a silent no-op (or throws). Flip the preference on at startup so
+            // the video player can fullscreen the <video> wrapper directly,
+            // without taking the whole app window into native fullscreen.
+            #[cfg(target_os = "macos")]
+            {
+                if let Some(wv) = app.get_webview_window("main") {
+                    wv.with_webview(|platform_wv| {
+                        use objc2::class;
+                        use objc2::rc::Retained;
+                        use objc2::runtime::AnyObject;
+
+                        let wk_webview = platform_wv.inner();
+                        unsafe {
+                            let wk: &AnyObject = &*(wk_webview as *const AnyObject);
+
+                            // WKWebViewConfiguration *config = [wkWebView configuration];
+                            let config: Retained<AnyObject> =
+                                objc2::msg_send![wk, configuration];
+                            // WKPreferences *prefs = [config preferences];
+                            let prefs: Retained<AnyObject> =
+                                objc2::msg_send![&*config, preferences];
+
+                            // NSNumber *yes = [NSNumber numberWithBool:YES];
+                            let yes: Retained<AnyObject> = objc2::msg_send![
+                                class!(NSNumber),
+                                numberWithBool: true
+                            ];
+                            // NSString *key = [NSString stringWithUTF8String:"fullScreenEnabled"];
+                            let c_key = c"fullScreenEnabled";
+                            let key: Retained<AnyObject> = objc2::msg_send![
+                                class!(NSString),
+                                stringWithUTF8String: c_key.as_ptr()
+                            ];
+
+                            // [prefs setValue:yes forKey:key];
+                            let _: () = objc2::msg_send![
+                                &*prefs,
+                                setValue: &*yes,
+                                forKey: &*key
+                            ];
+                        }
+
+                        log::info!("macOS: enabled WKPreferences fullScreenEnabled");
+                    })
+                    .unwrap_or_else(|e| {
+                        log::warn!("macOS: failed to enable element fullscreen: {e}");
+                    });
+                }
+            }
+
             // iOS: disable automatic scroll view content inset adjustment so the
             // webview truly renders edge-to-edge.  Without this, WKWebView's
             // UIScrollView adds content insets for the safe area (status bar,

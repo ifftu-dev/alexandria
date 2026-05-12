@@ -250,38 +250,33 @@ function onVolumeInput(event: Event) {
 
 async function toggleFullscreen() {
   const wrapper = wrapperRef.value
-  const video = videoRef.value as (HTMLVideoElement & { webkitEnterFullscreen?: () => void }) | null
   if (!wrapper) return
+
+  if (isFullscreen.value && document.fullscreenElement && typeof document.exitFullscreen === 'function') {
+    try { await document.exitFullscreen() } catch { /* ignore */ }
+    return
+  }
 
   if (pseudoFullscreen.value) {
     pseudoFullscreen.value = false
     return
   }
 
-  try {
-    if (!document.fullscreenElement && typeof wrapper.requestFullscreen === 'function') {
+  // Prefer the HTML5 Fullscreen API when the host supports it (browsers,
+  // and Tauri builds where WKWebView's `fullScreenEnabled` preference is
+  // on). macOS WKWebView defaults that preference to false, so we fall
+  // back to a CSS overlay paired with the Tauri window's native
+  // fullscreen so the player still fills the display.
+  if (typeof wrapper.requestFullscreen === 'function') {
+    try {
       await wrapper.requestFullscreen()
-    } else {
-      if (document.fullscreenElement && typeof document.exitFullscreen === 'function') {
-        await document.exitFullscreen()
-      } else if (video?.webkitEnterFullscreen) {
-        video.webkitEnterFullscreen()
-      }
-    }
-  } catch {
-    if (video?.webkitEnterFullscreen) {
-      try {
-        video.webkitEnterFullscreen()
-        return
-      } catch {
-        pseudoFullscreen.value = true
-        setInfo('Using in-app fullscreen')
-      }
-    } else {
-      pseudoFullscreen.value = true
-      setInfo('Using in-app fullscreen')
+      return
+    } catch {
+      /* fall through to pseudo + window fullscreen */
     }
   }
+
+  pseudoFullscreen.value = true
 }
 
 async function togglePiP() {
