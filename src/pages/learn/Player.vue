@@ -86,6 +86,15 @@ const isContentElement = computed(() => {
   return t === 'video' || t === 'text' || t === 'pdf' || t === 'downloadable' || t === 'interactive'
 })
 
+// Standalone tutorial: hide chapter sidebar entirely — tutorials have a
+// single video element, the chapter nav is pure noise.
+const isTutorial = computed(() => course.value?.kind === 'tutorial')
+
+// Widen the content column for video so large displays don't leave
+// huge dead margins around the player. Other element types stay at the
+// readable text width.
+const isVideoElement = computed(() => currentElement.value?.element_type === 'video')
+
 // Check if an element type is MCQ
 function isMcqType(type: string): boolean {
   return type === 'objective_single_mcq' || type === 'objective_multi_mcq' || type === 'subjective_mcq'
@@ -605,7 +614,7 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
       <!-- ======================================= -->
       <!-- MOBILE: Compact chapter/element header  -->
       <!-- ======================================= -->
-      <div class="md:hidden flex items-center gap-2 px-3 py-2 border-b border-border bg-card/70 backdrop-blur shrink-0">
+      <div v-if="!isTutorial" class="md:hidden flex items-center gap-2 px-3 py-2 border-b border-border bg-card/70 backdrop-blur shrink-0">
         <button
           class="p-1 rounded-md text-muted-foreground active:bg-muted"
           @click="router.push(`/courses/${courseId}`)"
@@ -642,7 +651,7 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
       <!-- ============================== -->
       <!-- SIDEBAR: Chapter/Element Nav   -->
       <!-- ============================== -->
-      <div class="hidden md:block w-80 shrink-0 overflow-y-auto border-r border-border bg-card/30">
+      <div v-if="!isTutorial" class="hidden md:block w-80 shrink-0 overflow-y-auto border-r border-border bg-card/30">
         <div class="p-4 space-y-4">
           <!-- Back link -->
           <button
@@ -757,7 +766,7 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
       <!-- ============================== -->
       <div class="flex-1 flex flex-col overflow-hidden">
         <div v-if="currentElement" :key="currentElement.id" class="lesson-body flex-1 overflow-y-auto bg-gradient-to-b from-muted/20 via-transparent to-transparent">
-          <div class="max-w-4xl mx-auto px-4 md:px-6 py-4 md:py-6">
+          <div :class="['mx-auto px-4 md:px-6 py-4 md:py-6', isVideoElement ? 'max-w-7xl' : 'max-w-4xl']">
             <!-- Element header -->
             <div class="sticky top-0 z-10 mb-6 rounded-xl border border-border/70 bg-background/90 px-4 py-4 backdrop-blur supports-[backdrop-filter]:bg-background/70">
               <!-- Breadcrumb -->
@@ -930,7 +939,11 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
             <!-- CONTENT RENDERERS              -->
             <!-- Dispatched via elementRegistry. Phase 0 of plugin system. -->
             <!-- ============================== -->
-            <div class="mb-8 rounded-2xl border border-border/70 bg-card/60 p-4 md:p-6 shadow-[0_1px_0_rgba(255,255,255,0.04),0_8px_28px_rgba(0,0,0,0.08)]">
+            <div
+              :class="isVideoElement
+                ? 'mb-8'
+                : 'mb-8 rounded-2xl border border-border/70 bg-card/60 p-4 md:p-6 shadow-[0_1px_0_rgba(255,255,255,0.04),0_8px_28px_rgba(0,0,0,0.08)]'"
+            >
               <component
                 :is="elementBinding!.component"
                 v-if="elementBinding && elementHostContext"
@@ -959,7 +972,7 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
         <!-- NAVIGATION FOOTER              -->
         <!-- ============================== -->
         <div v-if="currentElement" class="flex-shrink-0 border-t border-border bg-card/60 px-3 pt-2 pb-[calc(0.5rem+var(--sab,env(safe-area-inset-bottom)))] md:px-6 md:py-3">
-          <div class="mx-auto flex max-w-4xl items-center justify-between gap-2">
+          <div :class="['mx-auto flex items-center justify-between gap-2', isVideoElement ? 'max-w-7xl' : 'max-w-4xl']">
             <!-- Previous -->
             <AppButton variant="secondary" size="sm" :disabled="!hasPrevElement" @click="goToPrev">
               <svg class="mr-1.5 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
