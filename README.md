@@ -1,6 +1,6 @@
 # Alexandria
 
-<img alt="Codename: Alexandria — Knowledge belongs to everyone." src="docs/hero.svg" width="100%">
+<img alt="Alexandria — Knowledge belongs to everyone. Free, open-source learning for every platform. Peer-to-peer, offline-first, with Verifiable Credentials anchored to Cardano." src="docs/hero.png" width="100%">
 
 <p align="center">
   <img src="https://github.com/ifftu-dev/alexandria/actions/workflows/ci.yml/badge.svg" alt="CI">
