@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { convertFileSrc } from '@tauri-apps/api/core'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { AppSpinner } from '@/components/ui'
 
@@ -50,6 +51,17 @@ const activeQuality = ref('auto')
 const captionEnabled = ref(false)
 const infoMessage = ref<string | null>(null)
 const infoTimer = ref<number | null>(null)
+
+// iOS WKWebView (and most touch-only browsers) can't drive a custom
+// blob-backed video element reliably — `video.play()` on a custom play
+// button frequently no-ops because Safari's media engine wants the
+// native controls path. Fall back to the platform's native controls on
+// touch devices so the user can always start playback.
+const isTouchDevice = computed(() => {
+  if (typeof navigator === 'undefined' || typeof window === 'undefined') return false
+  if (window.matchMedia?.('(hover: none) and (pointer: coarse)').matches) return true
+  return /iPad|iPhone|iPod|Android/.test(navigator.userAgent)
+})
 
 const speedOptions = [
   { id: '0.25', label: '0.25x' },
@@ -250,33 +262,64 @@ function onVolumeInput(event: Event) {
 
 async function toggleFullscreen() {
   const wrapper = wrapperRef.value
+  const video = videoRef.value as (HTMLVideoElement & {
+    webkitEnterFullscreen?: () => void
+    webkitExitFullscreen?: () => void
+    webkitDisplayingFullscreen?: boolean
+  }) | null
   if (!wrapper) return
 
+  // Exit paths
   if (isFullscreen.value && document.fullscreenElement && typeof document.exitFullscreen === 'function') {
     try { await document.exitFullscreen() } catch { /* ignore */ }
     return
   }
-
+  if (video?.webkitDisplayingFullscreen) {
+    try { video.webkitExitFullscreen?.() } catch { /* ignore */ }
+    return
+  }
   if (pseudoFullscreen.value) {
     pseudoFullscreen.value = false
     return
   }
 
-  // Prefer the HTML5 Fullscreen API when the host supports it (browsers,
-  // and Tauri builds where WKWebView's `fullScreenEnabled` preference is
-  // on). macOS WKWebView defaults that preference to false, so we fall
-  // back to a CSS overlay paired with the Tauri window's native
-  // fullscreen so the player still fills the display.
+  // iOS WKWebView: the only fullscreen path the media engine accepts is
+  // `video.webkitEnterFullscreen()` on the <video> element itself. It
+  // launches the native iOS player, which auto-rotates to landscape.
+  // Try this first on touch devices.
+  if (isTouchDevice.value && typeof video?.webkitEnterFullscreen === 'function') {
+    try {
+      video.webkitEnterFullscreen()
+      return
+    } catch {
+      /* fall through */
+    }
+  }
+
+  // HTML5 Fullscreen API — works in browsers and on Chromium WebView.
   if (typeof wrapper.requestFullscreen === 'function') {
     try {
       await wrapper.requestFullscreen()
+      // Try to lock landscape on mobile while fullscreen.
+      try {
+        const orient = (screen as Screen & { orientation?: { lock?: (o: string) => Promise<void> } }).orientation
+        await orient?.lock?.('landscape')
+      } catch { /* orientation lock not supported / not allowed */ }
       return
     } catch {
-      /* fall through to pseudo + window fullscreen */
+      /* fall through to pseudo */
     }
   }
 
   pseudoFullscreen.value = true
+  // Best-effort orientation lock for mobile pseudo-fullscreen. Most
+  // browsers require fullscreen to be active for this to succeed, but
+  // some WebView builds honor it without — the catch silences the
+  // failure on the rest.
+  try {
+    const orient = (screen as Screen & { orientation?: { lock?: (o: string) => Promise<void> } }).orientation
+    await orient?.lock?.('landscape')
+  } catch { /* orientation lock not allowed outside fullscreen */ }
 }
 
 async function togglePiP() {
@@ -324,20 +367,39 @@ function selectQuality(option: QualityOption) {
 }
 
 async function loadVideo() {
-  if (!props.contentCid) {
+  const cid = props.contentCid
+  if (!cid) {
+    if (videoUrl.value?.startsWith('blob:')) URL.revokeObjectURL(videoUrl.value)
     videoUrl.value = null
     return
   }
 
+  // Rust materializes the content to a real file (`content_cache_file`),
+  // then we fetch that file through Tauri's asset protocol once into a
+  // `Blob` and hand the `<video>` element a `blob:` URL.
+  //
+  // Why blob: rather than the asset URL directly — both WKWebView
+  // (iOS) and Chromium WebView (Android) have media-engine paths that
+  // bypass Tauri's URL scheme handler (`AVURLAsset` on iOS, internal
+  // chromium media loader on Android). Metadata may load via the
+  // scheme, but follow-up byte-range requests fail and playback stalls.
+  // A `blob:` URL is fully resident in the page's memory, so the media
+  // engine never has to hit the scheme handler again.
   loading.value = true
   error.value = null
   try {
-    const bytes = await invoke<number[]>('content_resolve_bytes', { identifier: props.contentCid })
-    const blob = new Blob([new Uint8Array(bytes)], { type: 'video/mp4' })
-    if (videoUrl.value) {
-      URL.revokeObjectURL(videoUrl.value)
-    }
-    videoUrl.value = URL.createObjectURL(blob)
+    const filePath = await invoke<string>('content_cache_file', { identifier: cid })
+    if (props.contentCid !== cid) return
+    const assetUrl = convertFileSrc(filePath)
+
+    const resp = await fetch(assetUrl)
+    if (!resp.ok) throw new Error(`asset fetch ${resp.status}`)
+    const blob = await resp.blob()
+    if (props.contentCid !== cid) return
+    const nextUrl = URL.createObjectURL(blob)
+
+    if (videoUrl.value?.startsWith('blob:')) URL.revokeObjectURL(videoUrl.value)
+    videoUrl.value = nextUrl
     hasEnded.value = false
     currentTime.value = 0
     duration.value = 0
@@ -348,6 +410,13 @@ async function loadVideo() {
   } finally {
     loading.value = false
   }
+}
+
+function onVideoError() {
+  const me = videoRef.value?.error
+  error.value = me
+    ? `Failed to load video (code ${me.code})`
+    : 'Failed to load video — content unavailable on this node.'
 }
 
 function onContainerClick() {
@@ -479,16 +548,23 @@ watch(isPlaying, () => {
 
 watch(pseudoFullscreen, (enabled) => {
   document.body.style.overflow = enabled ? 'hidden' : ''
+  if (!enabled) {
+    try {
+      const orient = (screen as Screen & { orientation?: { unlock?: () => void } }).orientation
+      orient?.unlock?.()
+    } catch { /* noop */ }
+  }
 })
 
 onUnmounted(() => {
-  if (videoUrl.value) URL.revokeObjectURL(videoUrl.value)
+  if (videoUrl.value?.startsWith('blob:')) URL.revokeObjectURL(videoUrl.value)
   document.body.style.overflow = ''
   clearControlsTimer()
   clearInfoTimer()
   window.removeEventListener('keydown', onKeydown)
   document.removeEventListener('fullscreenchange', onFullscreenChange)
 })
+
 </script>
 
 <template>
@@ -502,7 +578,7 @@ onUnmounted(() => {
     <div
       v-else-if="videoUrl"
       ref="wrapperRef"
-      class="group relative aspect-video overflow-hidden rounded-xl bg-black"
+      class="group relative aspect-video overflow-hidden bg-black md:rounded-xl"
       :class="pseudoFullscreen ? 'fixed inset-0 z-[80] aspect-auto rounded-none' : ''"
       @mousemove="revealControls"
       @mouseleave="scheduleControlsHide"
@@ -513,12 +589,16 @@ onUnmounted(() => {
         ref="videoRef"
         :src="videoUrl"
         class="h-full w-full"
+        playsinline
+        webkit-playsinline="true"
+        preload="metadata"
         @timeupdate="onTimeUpdate"
         @loadedmetadata="onLoadedMetadata"
         @progress="updateBuffered"
         @ended="onEnded"
         @play="isPlaying = true"
         @pause="isPlaying = false"
+        @error="onVideoError"
         @enterpictureinpicture="onPiPEnter"
         @leavepictureinpicture="onPiPLeave"
       />
@@ -590,6 +670,7 @@ onUnmounted(() => {
           </button>
 
           <input
+            v-if="!isTouchDevice"
             class="yt-range h-1.5 w-20 rounded-full"
             type="range"
             min="0"
@@ -606,6 +687,7 @@ onUnmounted(() => {
 
           <div class="ml-auto flex items-center gap-1">
             <button
+              v-if="!isTouchDevice"
               type="button"
               class="video-icon-btn video-icon-btn--cc"
               :class="captionEnabled ? 'text-primary-300' : ''"
@@ -654,7 +736,7 @@ onUnmounted(() => {
               </div>
             </div>
 
-            <button type="button" class="video-icon-btn" @click="togglePiP">
+            <button v-if="!isTouchDevice" type="button" class="video-icon-btn" @click="togglePiP">
               <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M3 5h18v14H3V5Zm11 6h6v5h-6v-5Z" />
               </svg>

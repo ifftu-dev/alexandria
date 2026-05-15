@@ -44,7 +44,7 @@ cc = "1"
 
 [dependencies]
 # Tauri
-tauri = { version = "2.10.0", features = [] }
+tauri = { version = "2.10.0", features = ["protocol-asset"] }
 tauri-plugin-log = "2"
 tauri-plugin-biometry = "0.2"
 tauri-plugin-os = "2"

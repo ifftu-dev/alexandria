@@ -150,6 +150,65 @@ pub async fn content_resolve(
     })
 }
 
+/// Resolve content and materialize it as a file in the video cache.
+///
+/// Returns the absolute path of the cached file. The frontend wraps this
+/// with `convertFileSrc()` so the `<video>` element loads it through
+/// Tauri's asset protocol — the only media path WKWebView's AVFoundation
+/// engine reliably honors on iOS (custom URI-scheme handlers are ignored
+/// for `<video>` media loads).
+///
+/// The file is named by its BLAKE3 hash and reused on subsequent calls,
+/// so each blob is written to disk at most once.
+#[tauri::command]
+pub async fn content_cache_file(
+    state: State<'_, AppState>,
+    identifier: String,
+) -> Result<String, String> {
+    let resolver = {
+        let guard = state.resolver.lock().await;
+        guard
+            .as_ref()
+            .cloned()
+            .ok_or_else(|| "content resolver not initialized".to_string())?
+    };
+
+    let result = resolver
+        .resolve(&identifier)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let path = state
+        .video_cache_dir
+        .join(format!("{}.mp4", result.blake3_hash));
+
+    // Reuse the file if it's already materialized at the right size.
+    let needs_write = match std::fs::metadata(&path) {
+        Ok(meta) => meta.len() != result.size,
+        Err(_) => true,
+    };
+    if needs_write {
+        std::fs::write(&path, &result.bytes)
+            .map_err(|e| format!("failed to write video cache file: {e}"))?;
+    }
+
+    // Track resolved content as a cache pin (mirrors content_resolve_bytes).
+    if result.source != resolver::ResolveSource::Local {
+        if let Ok(guard) = state.db.lock() {
+            if let Some(db) = guard.as_ref() {
+                storage::upsert_pin(db.conn(), &result.blake3_hash, "cache", result.size, true);
+            }
+        }
+        storage::maybe_evict(&state.content_node, &state.db).await;
+    } else if let Ok(guard) = state.db.lock() {
+        if let Some(db) = guard.as_ref() {
+            storage::touch_pin(db.conn(), &result.blake3_hash);
+        }
+    }
+
+    Ok(path.to_string_lossy().into_owned())
+}
+
 /// Resolve content and return the raw bytes.
 ///
 /// Same as `content_resolve` but returns the actual content data.

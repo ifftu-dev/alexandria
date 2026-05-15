@@ -60,6 +60,12 @@ pub struct AppState {
     /// Directory where installed plugin bundles live (`<app_data>/plugins/`).
     /// Each plugin is rooted at `plugins_dir/<plugin_cid>/`.
     pub plugins_dir: PathBuf,
+    /// Directory where resolved video blobs are materialized as files
+    /// (`<app_data>/videocache/<blake3>.mp4`) so the webview's `<video>`
+    /// element can load them through Tauri's asset protocol. iOS
+    /// WKWebView's media engine ignores custom URI-scheme handlers, so
+    /// the bytes must exist as a real file `convertFileSrc` can point at.
+    pub video_cache_dir: PathBuf,
     /// Deterministic Wasmtime grader runtime for community plugins (Phase 2).
     /// Cheap to clone; the underlying engine and module cache are shared.
     /// Desktop-only — wasmtime v27 does not support iOS / Android; mobile
@@ -559,6 +565,13 @@ pub fn run() {
                 .expect("failed to create plugins directory");
             log::info!("Plugins directory: {}", plugins_dir.display());
 
+            // Video cache: resolved blobs are materialized here as files
+            // so the webview can load them via the asset protocol.
+            let video_cache_dir = app_dir.join("videocache");
+            std::fs::create_dir_all(&video_cache_dir)
+                .expect("failed to create video cache directory");
+            log::info!("Video cache directory: {}", video_cache_dir.display());
+
             // Deterministic Wasmtime engine for plugin graders (Phase 2).
             // Construction is cheap; the engine + module cache live for
             // the app's lifetime. Desktop-only because wasmtime v27 does
@@ -575,6 +588,7 @@ pub fn run() {
                 keystore,
                 vault_dir,
                 plugins_dir,
+                video_cache_dir,
                 #[cfg(desktop)]
                 grader_runtime,
                 content_node,
@@ -793,6 +807,7 @@ pub fn run() {
             commands::content::content_node_status,
             commands::content::content_resolve,
             commands::content::content_resolve_bytes,
+            commands::content::content_cache_file,
             // Chapters & Elements
             commands::chapters::list_chapters,
             commands::chapters::create_chapter,
