@@ -941,7 +941,7 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
             <!-- ============================== -->
             <div
               :class="isVideoElement
-                ? 'mb-8'
+                ? 'mb-8 -mx-4 md:mx-0'
                 : 'mb-8 rounded-2xl border border-border/70 bg-card/60 p-4 md:p-6 shadow-[0_1px_0_rgba(255,255,255,0.04),0_8px_28px_rgba(0,0,0,0.08)]'"
             >
               <component

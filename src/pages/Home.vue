@@ -168,12 +168,12 @@ onMounted(async () => {
         <div class="flex items-center justify-between mb-4">
           <h2 class="text-base font-semibold text-foreground">Continue Learning</h2>
         </div>
-        <div class="flex gap-4 overflow-x-auto pb-2 scrollbar-thin">
+        <div class="-mx-4 flex gap-5 snap-x snap-mandatory overflow-x-auto px-4 pb-2 scrollbar-thin sm:mx-0 sm:px-0">
           <router-link
             v-for="enrollment in enrollments"
             :key="enrollment.id"
             :to="`/learn/${enrollment.course_id}`"
-            class="w-64 shrink-0 group"
+            class="w-64 shrink-0 snap-start group"
           >
             <div class="card card-interactive overflow-hidden">
               <!-- Thumbnail -->
@@ -232,12 +232,12 @@ onMounted(async () => {
             {{ tutorials.length }} tutorial{{ tutorials.length !== 1 ? 's' : '' }}
           </span>
         </div>
-        <div class="flex gap-4 overflow-x-auto pb-2 scrollbar-thin">
+        <div class="-mx-4 flex gap-5 snap-x snap-mandatory overflow-x-auto px-4 pb-2 scrollbar-thin sm:mx-0 sm:px-0">
           <router-link
             v-for="tut in tutorials"
             :key="tut.id"
             :to="`/learn/${tut.id}`"
-            class="w-72 shrink-0 group"
+            class="w-72 shrink-0 snap-start group"
           >
             <div class="card card-interactive overflow-hidden rounded-xl border border-primary/15">
               <!-- Thumbnail -->

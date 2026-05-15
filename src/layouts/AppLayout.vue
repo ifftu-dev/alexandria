@@ -6,8 +6,15 @@ import MobileTabBar from '@/components/layout/MobileTabBar.vue'
 import TutoringPiP from '@/components/layout/TutoringPiP.vue'
 import OmniSearch from '@/components/omni/OmniSearch.vue'
 import { usePlatform } from '@/composables/usePlatform'
-import { ref, onMounted, onUnmounted } from 'vue'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
+import { useRoute } from 'vue-router'
 import { getCurrentWindow } from '@tauri-apps/api/window'
+
+// The learning player owns its own full-bleed layout (edge-to-edge
+// video, internal sidebar). Skip the shell's content padding for it so
+// the player can reach the screen edges.
+const route = useRoute()
+const isImmersiveRoute = computed(() => route.name === 'learn')
 
 // Persist sidebar state to localStorage
 const STORAGE_KEY = 'alexandria-sidebar'
@@ -87,7 +94,7 @@ function toggleSidebar() {
 
       <!-- Content area -->
       <main class="flex-1 overflow-y-auto mobile-content-padding">
-        <div class="px-4 pt-6 pb-8 sm:px-6 lg:px-8">
+        <div :class="isImmersiveRoute ? '' : 'px-4 pt-6 pb-8 sm:px-6 lg:px-8'">
           <slot />
         </div>
       </main>
