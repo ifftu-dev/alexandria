@@ -11,6 +11,7 @@ pub mod evidence;
 pub mod ipfs;
 pub mod p2p;
 pub mod plugins;
+pub mod sentinel;
 pub mod tutoring;
 
 // Mobile crypto: same modules as desktop but with portable keystore
@@ -925,6 +926,23 @@ pub fn run() {
             commands::sentinel_priors::sentinel_priors_list,
             commands::sentinel_priors::sentinel_priors_sync,
             commands::sentinel_priors::sentinel_priors_load,
+            commands::sentinel_priors::sentinel_get_active_paste_classifier,
+            commands::sentinel_priors::sentinel_set_kill_switch,
+            commands::sentinel_priors::sentinel_get_kill_switch,
+            commands::sentinel_priors::sentinel_blocklist_version,
+            commands::sentinel_priors::sentinel_unblocklist_version,
+            // Sentinel ML — paste classifier (tract) + per-user models (candle)
+            commands::sentinel_ml::sentinel_score_paste,
+            commands::sentinel_ml::sentinel_paste_classifier_info,
+            commands::sentinel_ml::sentinel_load_dao_classifier,
+            commands::sentinel_ml::sentinel_revert_classifier_to_bundled,
+            commands::sentinel_ml::sentinel_train_keystroke_ae,
+            commands::sentinel_ml::sentinel_score_keystroke_ae,
+            commands::sentinel_ml::sentinel_extract_digraphs,
+            commands::sentinel_ml::sentinel_train_mouse_cnn,
+            commands::sentinel_ml::sentinel_score_mouse_cnn,
+            commands::sentinel_ml::sentinel_user_models_status,
+            commands::sentinel_ml::sentinel_reset_user_models,
             // Sentinel holdout evaluation (threshold-sealed)
             commands::sentinel_holdout::sentinel_holdout_upload,
             commands::sentinel_holdout::sentinel_holdout_list,

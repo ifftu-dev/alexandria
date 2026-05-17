@@ -33,6 +33,7 @@ pub struct IntegritySnapshot {
     pub devtools_score: Option<f64>,
     pub camera_score: Option<f64>,
     pub composite_score: Option<f64>,
+    pub ai_paste_anomaly: Option<f64>,
     pub anomaly_flags: Vec<String>,
     pub captured_at: String,
 }
@@ -50,6 +51,7 @@ pub struct SubmitSnapshotRequest {
     pub paste_score: Option<f64>,
     pub devtools_score: Option<f64>,
     pub camera_score: Option<f64>,
+    pub ai_paste_anomaly: Option<f64>,
     pub anomaly_flags: Vec<String>,
 }
 
@@ -80,9 +82,15 @@ enum Severity {
 /// Info so a client/server version skew never auto-suspends a session.
 fn flag_severity(flag: &str) -> Severity {
     match flag {
-        "devtools_detected" | "bot_suspected" | "face_mismatch" => Severity::Critical,
-        "behavior_shift" | "paste_detected" | "multiple_faces" | "prolonged_absence"
-        | "low_integrity" => Severity::Warning,
+        "devtools_detected" | "bot_suspected" | "face_mismatch" | "paste_classifier_critical" => {
+            Severity::Critical
+        }
+        "behavior_shift"
+        | "paste_detected"
+        | "multiple_faces"
+        | "prolonged_absence"
+        | "low_integrity"
+        | "paste_classifier_anomaly" => Severity::Warning,
         "tab_switching" | "no_face" | "frequent_absence" => Severity::Info,
         _ => Severity::Info,
     }
@@ -200,8 +208,9 @@ pub async fn integrity_submit_snapshot(
     db.conn()
         .execute(
             "INSERT INTO integrity_snapshots (id, session_id, typing_score, mouse_score, human_score,
-             tab_score, paste_score, devtools_score, camera_score, composite_score, anomaly_flags)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+             tab_score, paste_score, devtools_score, camera_score, composite_score,
+             ai_paste_anomaly, anomaly_flags)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![
                 snapshot_id,
                 req.session_id,
@@ -213,6 +222,7 @@ pub async fn integrity_submit_snapshot(
                 req.devtools_score,
                 req.camera_score,
                 composite,
+                req.ai_paste_anomaly,
                 anomaly_flags_json,
             ],
         )
@@ -435,7 +445,7 @@ pub async fn integrity_list_snapshots(
         .prepare(
             "SELECT id, session_id, typing_score, mouse_score, human_score,
                     tab_score, paste_score, devtools_score, camera_score,
-                    composite_score, anomaly_flags, captured_at
+                    composite_score, ai_paste_anomaly, anomaly_flags, captured_at
              FROM integrity_snapshots
              WHERE session_id = ?1
              ORDER BY captured_at ASC",
@@ -469,7 +479,7 @@ fn map_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<IntegritySession> {
 }
 
 fn map_snapshot(row: &rusqlite::Row<'_>) -> rusqlite::Result<IntegritySnapshot> {
-    let flags_json: Option<String> = row.get(10)?;
+    let flags_json: Option<String> = row.get(11)?;
     let anomaly_flags: Vec<String> = flags_json
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default();
@@ -484,8 +494,9 @@ fn map_snapshot(row: &rusqlite::Row<'_>) -> rusqlite::Result<IntegritySnapshot> 
         devtools_score: row.get(7)?,
         camera_score: row.get(8)?,
         composite_score: row.get(9)?,
+        ai_paste_anomaly: row.get(10)?,
         anomaly_flags,
-        captured_at: row.get(11)?,
+        captured_at: row.get(12)?,
     })
 }
 
@@ -535,6 +546,12 @@ mod tests {
         assert_eq!(flag_severity("tab_switching"), Severity::Info);
         assert_eq!(flag_severity("no_face"), Severity::Info);
         assert_eq!(flag_severity("frequent_absence"), Severity::Info);
+
+        assert_eq!(flag_severity("paste_classifier_anomaly"), Severity::Warning);
+        assert_eq!(
+            flag_severity("paste_classifier_critical"),
+            Severity::Critical
+        );
 
         // Unknown flags default to Info rather than auto-escalating.
         assert_eq!(flag_severity("totally_made_up"), Severity::Info);

@@ -206,4 +206,120 @@ mod tests {
         db.run_migrations()
             .expect("second migration should be idempotent");
     }
+
+    /// P0 #3 — exercise migration 047 (`sentinel_user_models`) on a DB
+    /// that already has rows in tables that existed before. Catches
+    /// ALTER-TABLE / FK / unique-index regressions a fresh `migrate()`
+    /// run wouldn't surface.
+    #[test]
+    fn migration_047_runs_on_populated_pre_47_state() {
+        // Apply every migration up to 46 inline. We don't run all 47
+        // and then "re-run" — we want to enter mig-47 with a real
+        // pre-47 state.
+        let db = Database::open_in_memory().expect("open in-memory");
+        db.conn()
+            .execute_batch(
+                "CREATE TABLE IF NOT EXISTS _migrations (
+                    version INTEGER PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+                );",
+            )
+            .unwrap();
+        for (version, name, sql) in schema::MIGRATIONS {
+            if *version > 46 {
+                break;
+            }
+            db.conn()
+                .execute_batch(sql)
+                .unwrap_or_else(|e| panic!("pre-47 migration {version} failed: {e}"));
+            db.conn()
+                .execute(
+                    "INSERT INTO _migrations (version, name) VALUES (?1, ?2)",
+                    rusqlite::params![version, name],
+                )
+                .unwrap();
+        }
+
+        // Populate something from the broader schema so we know the
+        // ALTER-free migration 047 doesn't disturb existing rows.
+        db.conn()
+            .execute(
+                "INSERT INTO governance_daos
+                    (id, name, description, icon_emoji, scope_type, scope_id, status,
+                     committee_size, election_interval_days)
+                 VALUES
+                    ('test-dao', 'Test', 'Pre-47 row', '🧪', 'sentinel', 'sentinel-global',
+                     'active', 5, 365)
+                 ON CONFLICT(id) DO NOTHING",
+                [],
+            )
+            .unwrap();
+
+        // Now run all pending migrations (just 47).
+        db.run_migrations().expect("mig 47 should apply cleanly");
+
+        // sentinel_user_models exists and is empty.
+        let count: i64 = db
+            .conn()
+            .query_row("SELECT COUNT(*) FROM sentinel_user_models", [], |row| {
+                row.get(0)
+            })
+            .expect("sentinel_user_models should exist after migration 47");
+        assert_eq!(count, 0);
+
+        // INSERT exercises the composite PK + ON CONFLICT path used by
+        // the production save_user_model helper.
+        db.conn()
+            .execute(
+                "INSERT INTO sentinel_user_models
+                    (user_address, device_fp_prefix, model_kind, weights_json,
+                     train_loss, trained_epochs, training_samples)
+                 VALUES ('addr1xxx', 'fpprefix000', 'keystroke_ae',
+                         '{\"trainedEpochs\":1}', 0.5, 1, 50)
+                 ON CONFLICT(user_address, device_fp_prefix, model_kind) DO UPDATE SET
+                     weights_json = excluded.weights_json",
+                [],
+            )
+            .unwrap();
+        db.conn()
+            .execute(
+                // Idempotent re-insert.
+                "INSERT INTO sentinel_user_models
+                    (user_address, device_fp_prefix, model_kind, weights_json,
+                     train_loss, trained_epochs, training_samples)
+                 VALUES ('addr1xxx', 'fpprefix000', 'keystroke_ae',
+                         '{\"trainedEpochs\":2}', 0.4, 2, 60)
+                 ON CONFLICT(user_address, device_fp_prefix, model_kind) DO UPDATE SET
+                     weights_json = excluded.weights_json,
+                     train_loss = excluded.train_loss,
+                     trained_epochs = excluded.trained_epochs,
+                     training_samples = excluded.training_samples",
+                [],
+            )
+            .unwrap();
+        let (epochs, samples): (i64, i64) = db
+            .conn()
+            .query_row(
+                "SELECT trained_epochs, training_samples FROM sentinel_user_models
+                 WHERE user_address = 'addr1xxx' AND device_fp_prefix = 'fpprefix000'
+                       AND model_kind = 'keystroke_ae'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(epochs, 2);
+        assert_eq!(samples, 60);
+
+        // The pre-47 row we inserted must still be there.
+        let dao_count: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM governance_daos WHERE id = 'test-dao'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(dao_count, 1, "pre-47 governance row should survive");
+    }
 }

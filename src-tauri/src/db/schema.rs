@@ -51,6 +51,10 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (41, "completion_observer", MIGRATION_041),
     (42, "completion_attestation", MIGRATION_042),
     (43, "credential_challenges", MIGRATION_043),
+    (44, "integrity_paste_anomaly", MIGRATION_044),
+    (45, "sentinel_priors_model_weights", MIGRATION_045),
+    (46, "sentinel_kill_switch_and_blocklist", MIGRATION_046),
+    (47, "sentinel_user_models", MIGRATION_047),
 ];
 
 const MIGRATION_001: &str = r#"
@@ -1905,4 +1909,123 @@ CREATE TABLE IF NOT EXISTS credential_challenge_votes (
 
 CREATE INDEX IF NOT EXISTS idx_cred_challenge_votes_challenge
     ON credential_challenge_votes(challenge_id);
+"#;
+
+const MIGRATION_044: &str = r#"
+-- ============================================================
+-- Migration 044: Sentinel paste-classifier anomaly column
+--
+-- Adds the per-snapshot output of the ONNX paste / typing-bot
+-- classifier to integrity_snapshots. Nullable — older snapshots
+-- and snapshots taken before the model artifact ships will leave
+-- it NULL. See docs/sentinel.md §AI Models.
+-- ============================================================
+
+ALTER TABLE integrity_snapshots ADD COLUMN ai_paste_anomaly REAL;
+"#;
+
+const MIGRATION_045: &str = r#"
+-- ============================================================
+-- Migration 045: Sentinel weights priors (paste-classifier model bundle)
+--
+-- Extends sentinel_priors to host DAO-ratified model weights, not
+-- just labeled training samples. A weights row has:
+--
+--   model_kind = 'paste_classifier_weights'
+--   cid        = BLAKE3 of the metadata blob (weights_cid + eval ref)
+--   eval_cid   = BLAKE3 of the JSON eval report
+--   eval_tpr   = macro TPR reported by the eval pipeline
+--   eval_fpr   = macro FPR reported by the eval pipeline
+--   version    = semver-ish tag ('paste-v1', 'paste-v2', …)
+--
+-- A client only auto-loads a weights row whose gate passes:
+--   eval_tpr >= 0.92 AND eval_fpr <= 0.03
+--
+-- Columns are nullable so existing keystroke/mouse priors keep
+-- their NULLs without a backfill. See docs/sentinel-adversarial-priors.md
+-- §Phase 4.
+-- ============================================================
+
+ALTER TABLE sentinel_priors ADD COLUMN weights_cid TEXT;
+ALTER TABLE sentinel_priors ADD COLUMN eval_cid    TEXT;
+ALTER TABLE sentinel_priors ADD COLUMN eval_tpr    REAL;
+ALTER TABLE sentinel_priors ADD COLUMN eval_fpr    REAL;
+ALTER TABLE sentinel_priors ADD COLUMN version     TEXT;
+"#;
+
+const MIGRATION_046: &str = r#"
+-- ============================================================
+-- Migration 046: Sentinel kill switch + version blocklist
+--
+-- Two operator-controlled safety valves for the paste-classifier
+-- pipeline:
+--
+--   sentinel_kill_switch  — single-row table; when active=1, the
+--     client treats the classifier as disabled for that model_kind
+--     even if a ratified row exists.
+--
+--   sentinel_weights_blocklist — set of (model_kind, version) pairs
+--     that the active-classifier selector must skip, regardless of
+--     gate. Used to roll back from a faulty DAO-ratified model
+--     without amending governance history.
+--
+-- Both tables are intended to be populated by DAO governance actions
+-- (a future `governance_proposal` of category 'sentinel_killswitch')
+-- but ship with raw IPC commands first so an operator can react to
+-- an incident before the governance pipeline ratifies the response.
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS sentinel_kill_switch (
+    model_kind  TEXT PRIMARY KEY,    -- e.g. 'paste_classifier_weights'
+    active      INTEGER NOT NULL DEFAULT 0,
+    reason      TEXT,
+    activated_at TEXT,
+    activated_by TEXT                 -- stake address of the operator
+);
+
+CREATE TABLE IF NOT EXISTS sentinel_weights_blocklist (
+    model_kind  TEXT NOT NULL,
+    version     TEXT NOT NULL,
+    reason      TEXT,
+    blocked_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    blocked_by  TEXT,
+    PRIMARY KEY (model_kind, version)
+);
+
+CREATE INDEX IF NOT EXISTS idx_sentinel_blocklist_kind
+    ON sentinel_weights_blocklist(model_kind);
+"#;
+
+const MIGRATION_047: &str = r#"
+-- ============================================================
+-- Migration 047: Per-user Sentinel model weights (backend-side)
+--
+-- The legacy frontend kept per-user keystroke autoencoder + mouse CNN
+-- weights in browser `localStorage` (plaintext). With the backend ML
+-- rewrite (tract + candle), per-user weights now persist in the
+-- already sqlcipher-encrypted SQLite database.
+--
+-- Composite primary key (user_address, device_fp_prefix, model_kind)
+-- mirrors the legacy localStorage key `sentinel_profile_{userId}_{deviceFp[0:16]}`,
+-- so a single user with multiple devices keeps disjoint profiles.
+--
+-- model_kind values:
+--   'keystroke_ae' — KeystrokeAutoencoder weights (JSON)
+--   'mouse_cnn'    — MouseTrajectoryCnn dense-head weights (JSON)
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS sentinel_user_models (
+    user_address      TEXT NOT NULL,
+    device_fp_prefix  TEXT NOT NULL,
+    model_kind        TEXT NOT NULL,
+    weights_json      TEXT NOT NULL,
+    train_loss        REAL,
+    trained_epochs    INTEGER NOT NULL DEFAULT 0,
+    training_samples  INTEGER NOT NULL DEFAULT 0,
+    updated_at        TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (user_address, device_fp_prefix, model_kind)
+);
+
+CREATE INDEX IF NOT EXISTS idx_sentinel_user_models_kind
+    ON sentinel_user_models(model_kind);
 "#;

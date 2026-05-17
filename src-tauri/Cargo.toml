@@ -85,6 +85,14 @@ pallas-codec = "0.35"
 # LRU cache (used for gossip dedup — avoids full-clear replay window)
 lru = "0.12"
 
+# Sentinel ML (Rust backend, replaces TS+onnxruntime-web)
+# tract-onnx: ONNX inference for the frozen paste classifier
+# candle-core/-nn: per-user training for the keystroke AE + mouse CNN
+tract-onnx = { version = "0.21", default-features = false }
+candle-core = { version = "0.8", default-features = false }
+candle-nn = { version = "0.8", default-features = false }
+ndarray = "0.16"
+
 # Common utilities (all platforms)
 anyhow = "1"
 bytes = "1"
