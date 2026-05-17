@@ -231,6 +231,29 @@ jobs:
         working-directory: alexandria
         run: npm test
 
+      - name: Sentinel model artifact integrity
+        if: needs.changes.outputs.backend == 'true'
+        working-directory: alexandria
+        run: |
+          set -euo pipefail
+          cd src-tauri/resources/sentinel
+          # Pinned lockfile. Embedded via `include_bytes!` into the
+          # release binary by the sentinel module — any silent
+          # corruption or accidental swap fails here loudly. Bump both
+          # file + lockfile together when rolling a new bundled model.
+          shasum -a 256 -c paste-v1.onnx.sha256
+
+      - name: Sentinel synthetic golden hash
+        if: needs.changes.outputs.backend == 'true'
+        working-directory: alexandria
+        run: |
+          # The cli synth crate pins blake2b-512 hashes for SYNTH_VERSION=v1
+          # at count=64, seed=42 per attack class (see
+          # cli/src/synth/generators.rs `golden_hashes_match_synth_v1`).
+          # Runs as part of `cargo test`, but call out explicitly so the
+          # log surfaces it clearly.
+          cargo test -p alex --quiet synth::generators::tests::golden_hashes_match_synth_v1
+
   release-readiness:
     name: Release Readiness
     needs: changes
