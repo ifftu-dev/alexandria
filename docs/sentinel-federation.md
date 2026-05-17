@@ -1,8 +1,17 @@
-# Sentinel Federation — Threat Model & Privacy Budget (DRAFT)
+# Sentinel Federation — Threat Model & Privacy Budget
 
-> **Status:** design-phase proposal. No code exists yet. This document frames the decisions we need to make *before* writing any federation logic, so the privacy guarantees in [sentinel.md](sentinel.md) stay enforceable.
+> **Status:** Option B shipped. Option A still design-phase. This document frames the decisions made (and remaining) so the privacy guarantees in [sentinel.md](sentinel.md) stay enforceable.
 >
 > **Goal:** let Sentinel's AI models improve across the user base — keystroke patterns of legitimate humans become sharper, novel cheat techniques get learned once and spread — without any single user's behavioral data being recoverable from what we publish.
+>
+> **What shipped (Option B):**
+> - Labeled adversarial-prior pipeline ([sentinel-adversarial-priors.md](sentinel-adversarial-priors.md) §Phases 1–7)
+> - DAO-signed ONNX classifier-weights distribution ([sentinel-adversarial-priors.md](sentinel-adversarial-priors.md) §Phase 8)
+> - Operator safety valves: kill switch, version blocklist, per-signal opt-out ([sentinel-adversarial-priors.md](sentinel-adversarial-priors.md) §Phase 9, [sentinel-runbook.md](sentinel-runbook.md))
+> - Three-layer content-addressed re-verification, resolver timeout, bytes size caps, mobile gate, SHA-pinned bundled model ([sentinel.md](sentinel.md) §Runtime Model Updates)
+> - On-device ONNX inference for the paste classifier ([sentinel.md](sentinel.md) §AI Models)
+>
+> **What hasn't shipped (Option A):** per-user gradient sharing, DP-SGD, secure aggregation, Cardano-stake-gated submissions — see §10. Also pending: real DAO threshold signature (placeholder Blake2b in `compute_prior_signature`) and real-world FPR measurement (synthetic-only holdout today).
 
 ---
 
@@ -11,9 +20,9 @@
 - **Naive "weights on Iroh" is a privacy regression.** Per-user gradient deltas leak training inputs (gradient-inversion attacks) and reveal participation (membership-inference attacks). Just publishing `.json` weight files under a DAO key *does not* deliver the guarantee most people mean by "no user data is tied to anyone."
 - **To get the guarantee we want, we need five things:** local differential privacy (DP-SGD with a documented ε budget), secure/trimmed aggregation, Sybil resistance tied to Cardano stake, poisoning defense, and a decision that the **face embedder is never federated** under any scheme.
 - **Two viable shapes exist:**
-  - **Option A — Federated learning (per-user deltas, DP-noised, aggregated).** Higher accuracy, real research/engineering cost (months), meaningful residual risk.
-  - **Option B — Federated adversarial priors (DAO publishes labeled cheat patterns; users train privately against them).** Weaker in theory, *much* stronger privacy, ships in weeks, no per-user leakage surface.
-- **Recommendation:** start with Option B, keep the door open to Option A for keystroke-AE only (smallest model, narrowest data, easiest to DP-bound) once there's real usage data showing false-positive rates B doesn't solve.
+  - **Option A — Federated learning (per-user deltas, DP-noised, aggregated).** Higher accuracy, real research/engineering cost (months), meaningful residual risk. **Not shipped.**
+  - **Option B — Federated adversarial priors (DAO publishes labeled cheat patterns; users train privately against them).** Weaker in theory, *much* stronger privacy, ships in weeks, no per-user leakage surface. **Shipped.**
+- **Outcome so far:** Option B's paste classifier ratification pipeline is live. A synthetic-only v1 model hits TPR=1.0 / FPR=0.0 on the synthetic holdout; real-world holdout data will move those numbers and is the trigger for revisiting Option A.
 
 ---
 
@@ -304,3 +313,40 @@ Option A **complies only if** we:
 5. Gate the whole thing behind per-user opt-in with honest language about what DP does and does not guarantee
 
 Option A without any one of those is a mission regression disguised as a feature.
+
+---
+
+## 12. Implementation status (as of 2026-05-16)
+
+| Capability | Status | Reference |
+|------------|--------|-----------|
+| Sentinel DAO scaffolding (migration 037) | ✅ shipped | `db/schema.rs`, `commands/sentinel_dao.rs` |
+| `sentinel_priors` table (migration 038) | ✅ shipped | `commands/sentinel_priors.rs` |
+| Holdout refs (migration 039) | ✅ shipped | `commands/sentinel_holdout.rs` |
+| Per-snapshot AI score plumbing | ✅ shipped | `useSentinel.ts`, migration 044 |
+| Synthetic-data generator | ✅ shipped | `alex synth-sentinel` subcommand, `cli/src/synth/` |
+| Offline training kit | ✅ shipped | `tools/sentinel-train/{featurize,train,eval}.py` |
+| ONNX paste classifier (bundled v1) | ✅ shipped | `src-tauri/resources/sentinel/paste-v1.onnx` (~5 KB), embedded via `include_bytes!`, SHA-pinned |
+| Backend ML rewrite (tract + candle) | ✅ shipped | `sentinel::paste_classifier` (tract), `sentinel::keystroke_ae` + `sentinel::mouse_cnn` (candle). Frontend only buffers events. |
+| Per-user model weights in SQLite | ✅ shipped | Migration 047 added `sentinel_user_models`. Encrypted at rest via sqlcipher. Replaces legacy localStorage. |
+| iOS + Android build verified | ✅ iOS / ⏳ Android | `cargo tauri ios build` produces signed `.ipa`. Android blocked by NDK toolchain in CI env (pre-existing). |
+| tract ONNX op + size caps | ✅ shipped | `MAX_DAO_MODEL_NODES = 256`, `MAX_DAO_MODEL_BYTES = 50 MiB` in `sentinel::paste_classifier::set_dao_session` |
+| Operator-action atomic revert | ✅ shipped | Kill switch + version blocklist both call `paste_classifier::revert_to_bundled()` on activate |
+| DAO-signed classifier-weights distribution (migration 045) | ✅ shipped | `ModelKind::PasteClassifierWeights`, `sentinel_get_active_paste_classifier` |
+| Three-layer content-addressed re-verification | ✅ shipped | `verify_weights_candidate` checks DB ↔ envelope ↔ eval JSON |
+| Resolver timeout + bytes size cap | ✅ shipped | 5 s timeout; 1 MiB envelope/eval; 50 MiB ONNX |
+| Mobile gate retired | ✅ shipped | `pasteClassifierDisabled()` removed post-backend rewrite — pure-Rust ML runs everywhere Tauri does |
+| Tauri CSP allows ONNX WASM | ✅ shipped | `'wasm-unsafe-eval'` in `tauri.conf.json` |
+| Operator kill switch (migration 046) | ✅ shipped | `sentinel_set_kill_switch` / `sentinel_get_kill_switch` |
+| Version blocklist (migration 046) | ✅ shipped | `sentinel_blocklist_version` / `sentinel_unblocklist_version` |
+| Per-signal opt-out toggle | ✅ shipped | `sentinel_paste_classifier_enabled` localStorage flag |
+| Operator runbook | ✅ shipped | `docs/sentinel-runbook.md` (5 procedures + incident template) |
+| Synthetic-data golden hash regression test | ✅ shipped | `golden_hashes_match_synth_v1` in `cli/src/synth/generators.rs` |
+| CI integrity checks | ✅ shipped | model SHA verify + golden-hash test + bundle-size budget |
+| Threshold-sig over weights envelope | ⏳ placeholder | `compute_prior_signature` is Blake2b; threshold-sig replacement pending. Mitigated by default-off toggle + kill switch + blocklist + re-verify |
+| Real-world holdout evaluation | ⏳ pending | Synthetic-only holdout achieves TPR=1.0 / FPR=0.0; real FPR unmeasured |
+| Option A: per-user gradient sharing | ❌ not started | Months of work — DP-SGD, Cardano stake gating, Byzantine-robust agg |
+| Option A: ε budget accounting | ❌ not started | Reset cadence locked at annual (decision 9), no implementation |
+| Option A: secure aggregation | ❌ not started | Trimmed mean / median-of-means design only, no code |
+
+The Option B path covers the immediate "improve the classifier without leaking user data" goal. Option A is the path forward if real-world holdout numbers show Option B isn't enough — re-opening that workstream requires re-validating §§5–7 first. Until threshold-sig + real-holdout land, the operator safety valves (kill switch, blocklist, per-signal toggle, default-off master toggle) are the authoritative escape hatches for production incidents — see [sentinel-runbook.md](sentinel-runbook.md).

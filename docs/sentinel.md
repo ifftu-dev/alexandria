@@ -7,32 +7,49 @@
 1. **Privacy-first** — All behavioral data (keystrokes, mouse movements, video frames) is processed entirely on-device. Only numeric scores and categorical flags are stored in the local database.
 2. **Non-punitive by default** — Sentinel informs rather than punishes. Flagged sessions surface for review; automated suspensions require multiple strong signals.
 3. **Dual scoring** — Rule-based and AI-based systems run in parallel. Rule-based is authoritative today; AI is advisory until validated with labeled data.
-4. **Zero dependencies for AI** — All ML models are hand-written in TypeScript. No external ML frameworks, WASM runtimes, or model downloads.
+4. **On-device ML only — backend-resident.** All ML runs in the Rust backend. The paste classifier uses `tract` (pure-Rust ONNX inference) with weights embedded at compile time via `include_bytes!` or hot-swapped from a DAO-ratified CID. The per-user keystroke autoencoder and mouse-trajectory CNN train + score via `candle` (Apache-2.0, HuggingFace) inside the same crate. The face embedder remains pure-pixel LBP math — no ML framework involved. The frontend only buffers raw events and forwards them to the backend over Tauri IPC.
 5. **Incremental trust** — Behavioral profiles build over time. New users start with generous defaults; consistency scoring activates after 10+ samples.
 
 ## Architecture Overview
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                     CLIENT (Tauri WebView)                       │
-│                                                                 │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐  │
-│  │  Keystroke    │  │  Mouse       │  │  Face                │  │
-│  │  Autoencoder  │  │  Trajectory  │  │  Embedder            │  │
-│  │  (4→8→4→8→4) │  │  CNN (1D)    │  │  (LBP Histogram)     │  │
-│  └──────┬───────┘  └──────┬───────┘  └──────────┬───────────┘  │
-│         │                 │                      │              │
-│  ┌──────▼─────────────────▼──────────────────────▼───────────┐  │
-│  │              useSentinel() Composable                      │  │
-│  │  Rule-based analyzers + AI model scoring + EMA profiling   │  │
-│  └──────────────────────────┬────────────────────────────────┘  │
-│                             │ scores + flags only               │
-│                             ▼                                   │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │  Tauri IPC → Rust Backend                                │   │
-│  │  integrity_sessions + integrity_snapshots (SQLite)       │   │
-│  └──────────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────┘
+┌── Frontend (Tauri WebView, Vue 3) ─────────────────────────────────┐
+│                                                                    │
+│  Event buffers:                                                    │
+│    keystroke[]  ──┐                                                │
+│    mouse[]      ──┼─► useSentinel() composable                     │
+│    canvas pixels┘    - rule analyzers (variance, paste size, etc.) │
+│                      - LBP face embedder (pixel math, local)       │
+│                      - IPC dispatch on snapshot                    │
+└─────────────────────────────────────┬──────────────────────────────┘
+                                      │ Tauri IPC
+                                      ▼
+┌── Backend (Rust crate `app_lib`, src-tauri/) ──────────────────────┐
+│                                                                    │
+│   commands/sentinel_ml ◄─── all ML IPC entry points                │
+│        │                                                           │
+│        ├─► sentinel::paste_classifier (tract, ONNX inference)      │
+│        │     - bundled paste-v1.onnx via include_bytes!            │
+│        │     - hot-swap to DAO-ratified weights at session start   │
+│        │                                                           │
+│        ├─► sentinel::keystroke_ae (candle, autograd)               │
+│        │     - per-user 4→8→4→8→4 autoencoder, contrastive train   │
+│        │                                                           │
+│        ├─► sentinel::mouse_cnn (candle dense + hand-rolled conv)   │
+│        │     - reservoir conv + trainable 160→32→1 head            │
+│        │                                                           │
+│        └─► sentinel::features (12-dim windowed feature extractor)  │
+│                                                                    │
+│   commands/integrity ◄── integrity_sessions + integrity_snapshots  │
+│   commands/sentinel_priors ◄── DAO model distribution + safety     │
+│        valves (kill switch, version blocklist, three-layer verify) │
+│                                                                    │
+│   SQLite (sqlcipher):                                              │
+│     sentinel_user_models      — per-user AE + CNN weights (JSON)   │
+│     sentinel_priors           — labeled attack data + DAO weights  │
+│     sentinel_kill_switch      — operator override                  │
+│     sentinel_weights_blocklist— per-version rollback set           │
+└────────────────────────────────────────────────────────────────────┘
 ```
 
 All processing happens client-side. There is no server-side component — Alexandria is a fully decentralized desktop and mobile application. Integrity scores are stored locally in SQLite; the current implementation does not publish Sentinel snapshots over P2P.
@@ -52,6 +69,7 @@ All processing happens client-side. There is no server-side component — Alexan
 | `ai_mouse_human_prob` | AI | 0-1 | 0.05† | CNN human vs bot classification |
 | `ai_face_similarity` | AI | 0-1 | 0.05† | LBP histogram cosine similarity (every 3s) |
 | `ai_face_match` | AI | bool | advisory | Whether face matches enrollment (drives `face_mismatch` flag when false) |
+| `ai_paste_anomaly` | AI | 0-1 | 0.05† | ONNX classifier — probability snapshot is paste / typing-bot / LLM-paste-edit. Drives `paste_classifier_anomaly` (≥0.95) and `paste_classifier_critical` (≥0.99) flags. |
 
 † Only applied when advisory AI scoring is toggled on (see §Runtime Toggle).
 
@@ -80,6 +98,8 @@ Per-snapshot checks:
 9. Face identity mismatch (enrolled) → `face_mismatch` critical
 10. Prolonged absence (5+ consecutive checks ~15s) → `prolonged_absence` warning
 11. Frequent absence (>50% of checks in snapshot window) → `frequent_absence` info
+12. Paste classifier ≥ 0.95 → `paste_classifier_anomaly` warning
+13. Paste classifier ≥ 0.99 → `paste_classifier_critical` critical
 
 Flag severity is authoritative on the backend (`commands/integrity.rs::flag_severity`). Unknown flags default to info so client/server version skew never auto-suspends a session.
 
@@ -103,9 +123,9 @@ When a session ends `flagged` or `suspended`, the backend applies a weighted tru
 
 ### 1. Keystroke Autoencoder
 
-**Location**: `src/utils/sentinel/keystroke-autoencoder.ts`
+**Location**: `src-tauri/src/sentinel/keystroke_ae.rs`
 
-**Architecture**: 4→8→4→8→4 autoencoder with ReLU activations, trained via SGD with full backpropagation.
+**Architecture**: 4→8→4→8→4 autoencoder with ReLU activations. Real autograd via [candle](https://github.com/huggingface/candle); training runs in the Rust backend with `candle_nn::optim::SGD`.
 
 **Input features** (per digraph pair): `[dwellMs1, dwellMs2, flightMs, speedRatio]` — normalized using per-user mean/std computed during training.
 
@@ -115,11 +135,11 @@ When a session ends `flagged` or `suspended`, the backend applies a weighted tru
 
 **Anomaly threshold**: 0.65 — above this, the typing pattern doesn't match the enrolled user.
 
-**Storage**: ~8KB JSON weights in `localStorage` under `sentinel_profile_{userId}_{deviceFp[0:16]}` → `aiModels.keystrokeAutoencoder`. Never persisted to SQLite or broadcast over P2P.
+**Storage**: weights persist as a JSON blob in `sentinel_user_models` (composite PK `user_address, device_fp_prefix, model_kind='keystroke_ae'`). Backing store is the already-sqlcipher-encrypted SQLite DB — replaces the legacy `localStorage` location. Never broadcast over P2P.
 
 ### 2. Mouse Trajectory CNN
 
-**Location**: `src/utils/sentinel/mouse-trajectory-cnn.ts`
+**Location**: `src-tauri/src/sentinel/mouse_cnn.rs`
 
 **Architecture**: Conv1D(3→8, k=5) → ReLU → MaxPool(2) → Conv1D(8→16, k=3) → ReLU → MaxPool(2) → Dense(160→32) → ReLU → Dense(32→1) → Sigmoid
 
@@ -131,7 +151,7 @@ When a session ends `flagged` or `suspended`, the backend applies a weighted tru
 
 **Human threshold**: 0.50
 
-**Storage**: ~200KB JSON weights in `localStorage` under `sentinel_profile_{userId}_{deviceFp[0:16]}` → `aiModels.mouseCNN`. Never persisted to SQLite or broadcast over P2P.
+**Storage**: weights persist as a JSON blob in `sentinel_user_models` (`model_kind='mouse_cnn'`). Conv kernels are not stored — they are deterministic given the seed, recomputed on load. Only the dense-head parameters (~5 KB) round-trip through the DB.
 
 ### 3. Face Embedder (LBP)
 
@@ -151,20 +171,122 @@ When a session ends `flagged` or `suspended`, the backend applies a weighted tru
 
 **Advantage over skin-ratio**: Can distinguish between different people, not just "face present vs absent". Robust to lighting changes (LBP is contrast-invariant).
 
+### 4. Paste / Typing-Bot Classifier (ONNX)
+
+**Location**: `src-tauri/src/sentinel/paste_classifier.rs` (tract inference), `src-tauri/src/sentinel/features.rs` (12-dim feature extractor)
+
+**Architecture**: MLP 12 → 32 → 16 → 1 (sigmoid). Trained offline on synthetic adversarial data (see [sentinel-adversarial-priors.md](sentinel-adversarial-priors.md) §Phase 2). Per-sample normalization mean/std is **baked into the first linear layer** so the on-device forward pass takes raw 12-dim features without preprocessing.
+
+**Input features** (windowed over the snapshot's keystroke buffer):
+
+| # | Feature |
+|---|---------|
+| 0 | mean dwell ms |
+| 1 | std dwell ms |
+| 2 | mean flight ms |
+| 3 | std flight ms |
+| 4 | fraction of digraphs with flightMs < 5 (paste-burst rate) |
+| 5 | max consecutive near-zero-flight run length, normalized to /200 |
+| 6 | char rate (chars/sec), normalized to /50 |
+| 7 | dwell coefficient of variation (std/mean) |
+| 8 | flight coefficient of variation |
+| 9 | paste event count, capped + normalized to /10 |
+| 10 | pasted character count, capped + normalized to /1000 |
+| 11 | keystroke buffer length, normalized to /200 |
+
+The Rust extractor in `sentinel::features` and the Python featurizer in `tools/sentinel-train/featurize.py` are **bit-identical**. If you change one, change the other in the same commit or the trained model will silently mispredict. There is no third copy on the frontend any more — the JS side only buffers raw events and forwards them via IPC.
+
+**Inference runtime**: `tract-onnx` 0.21 in the Rust backend. Pure Rust, no WASM, no CDN. The ONNX bytes are embedded at compile time via `include_bytes!("../../resources/sentinel/paste-v1.onnx")` so there is no filesystem race or asset-protocol handshake. DAO-supplied weights from `sentinel_load_dao_classifier` go through the same tract parse/optimize/runnable path.
+
+**Platform support**: every Tauri target the Rust crate compiles for — macOS, Linux, Windows, iOS, Android. The previous WKWebView / Android-WebView gate is **gone** because nothing about ML runs in the WebView anymore.
+
+**Anomaly thresholds**:
+- 0.95: emits `paste_classifier_anomaly` (severity: warning)
+- 0.99: emits `paste_classifier_critical` (severity: critical) — combined with one other warning, triggers session suspension per the existing flag-severity rule
+
+**Model artifact**: `src-tauri/resources/sentinel/paste-v1.onnx` (~4.6 KB, weights inline; PyTorch `dynamo=False` export so tract can parse without sidecar `.data` files). Pinned via `src-tauri/resources/sentinel/paste-v1.onnx.sha256` lockfile (CI verifies on every push). The DAO-update path (see §Runtime Model Updates) can replace the active session at runtime without an app upgrade.
+
+**Storage**: No per-user state. The classifier is a global attack detector — calibration is done via the existing `KeystrokeAutoencoder` for per-user personalization. The two scores blend `0.7 * onnx + 0.3 * autoencoder` once both are available.
+
+**Training**: `tools/sentinel-train/{featurize,train,eval}.py`. Outputs ONNX opset 17. Default 30 epochs, AdamW lr=3e-4, batch=128, label smoothing 0.05, 2× class weight on the `llm_paste_edit` class.
+
+**Holdout gate**: A trained model only ratifies if `macro_tpr >= 0.92`, `macro_fpr <= 0.03`, `paste_macro` TPR ≥ 0.98, and `llm_paste_edit` TPR ≥ 0.85. The synthetic-only v1 release achieves macro TPR=1.0 / macro FPR=0.0; expect lower numbers when real-world holdout data joins (Phase 5).
+
+**Bytes caps**: Defense in depth against malicious envelopes pointing at huge CIDs:
+- Envelope + eval JSON: 1 MiB max (`MAX_WEIGHTS_BLOB_BYTES`, Rust side)
+- ONNX weights: 50 MiB max (`MAX_WEIGHTS_BYTES` in `sentinel_priors.rs`, also enforced in `sentinel_ml::sentinel_load_dao_classifier`)
+- Resolver round trips: 5 s timeout (`WEIGHTS_RESOLVE_TIMEOUT`) per CID fetch
+
 ### Runtime Toggle
 
 AI signals are advisory by default and do not contribute to the integrity score. A per-device toggle (`sentinel_ai_scoring_enabled` in localStorage, exposed in the Sentinel dashboard Profile tab) folds them in at a 0.05 weight each:
 - `(1 − ai_keystroke_anomaly)` × 0.05
 - `ai_mouse_human_prob` × 0.05
 - `ai_face_similarity` × 0.05 (only if camera opted in)
+- `(1 − ai_paste_anomaly)` × 0.05 (only if both the master AI toggle AND the per-signal `sentinel_paste_classifier_enabled` toggle are on)
 
-Total advisory contribution is capped at 0.15 (all three signals at once), well under any single rule-based weight. Toggle off if false-positive rate spikes.
+Total advisory contribution is capped at 0.20 (all four signals at once), well under any single rule-based weight. Toggle off if false-positive rate spikes.
+
+**Per-signal opt-out**: the paste classifier has its own toggle in the Sentinel dashboard ("Paste Classifier (ONNX)") backed by `sentinel_paste_classifier_enabled` in localStorage. Defaults to `on`; flipping it off keeps the other AI signals contributing. Useful if the paste classifier specifically generates FPs.
+
+## Runtime Model Updates
+
+The paste classifier supports two model sources at runtime:
+
+1. **Bundled** — `src-tauri/resources/sentinel/paste-v1.onnx`, embedded into the Rust binary at compile time via `include_bytes!`. Always available; loaded once at process start by the `sentinel::paste_classifier` `OnceLock`.
+2. **DAO-ratified** — A `paste_classifier_weights` row in `sentinel_priors`, signed by the Sentinel DAO. Discovered at session start via `sentinel_get_active_paste_classifier`; bytes fetched via `content_resolve_bytes(weights_cid)` and swapped into the active `InferenceSession`.
+
+### Selection + verification
+
+The IPC returns the **newest gate-passing** weights row that survives a three-layer content-addressed re-verification:
+
+1. **Operator overrides** — short-circuit before any DB scan:
+   - If `sentinel_kill_switch` row for `paste_classifier_weights` is `active=1`, return `None`.
+   - `sentinel_weights_blocklist` rows filter the candidate set by `(model_kind, version)`.
+2. **DB filter** — `eval_tpr >= 0.92 AND eval_fpr <= 0.03 AND model_kind = 'paste_classifier_weights' AND weights_cid IS NOT NULL`. Ordered by `(ratified_at DESC, version DESC)`.
+3. **Layer 1 ↔ 2 (envelope re-verify)** — re-fetch the envelope blob at `cid` (5 s timeout, 1 MiB cap), parse, confirm `WeightsBlobMeta` matches DB columns within `1e-6` epsilon, and the envelope-reported gate still passes. Defense against a locally tampered DB.
+4. **Layer 2 ↔ 3 (eval re-verify)** — re-fetch the eval JSON at `meta.eval_cid` (same timeout + size cap), parse, confirm `macro_tpr` / `macro_fpr` match the envelope's claims and pass the gate. Defense against a DAO-published envelope with cooked claimed metrics.
+5. **First survivor wins.** If nothing passes, the IPC returns `None` and the client uses the bundled artifact.
+
+Failure modes — all fall back to bundled, never crash monitoring:
+- Kill switch active → `None`, log a warning naming the model_kind
+- Resolver unavailable (early boot, no peers) → return the gate-only top candidate; client side validates the bytes (size cap still applies on `loadFromDaoBytes`)
+- Envelope missing / timeout / parse error → skip, try next
+- DB column / envelope `weights_cid` mismatch → skip, try next
+- Eval JSON missing / mismatch → skip, try next
+- Bytes don't form a valid ONNX session → `loadFromDaoBytes` returns false, bundled stays active
+
+### Signature
+
+`signature` on a weights row is currently the `compute_prior_signature` Blake2b digest over `(cid|label|model_kind|schema_version)`. **This is not an authenticated signature — anyone can compute it.** It binds metadata to the row but doesn't certify DAO ratification. Until the real threshold-sig infrastructure lands ([sentinel-federation.md](sentinel-federation.md) §12), the safeguards are:
+
+- `sentinel_ai_scoring_enabled` defaults to `false` on every device.
+- Kill switch (`sentinel_set_kill_switch`) globally disables the classifier without an app update.
+- Version blocklist (`sentinel_blocklist_version`) rolls back a single faulty version.
+- Server-side re-verify in `verify_weights_candidate` re-fetches envelope + eval JSON, rejects mismatches.
+
+See [sentinel-runbook.md](sentinel-runbook.md) for operator procedures.
+
+## Operator IPCs
+
+| Command | Description |
+|---------|-------------|
+| `sentinel_set_kill_switch` | Toggle kill switch by `model_kind`. Active=true forces `sentinel_get_active_paste_classifier` to return `null`. |
+| `sentinel_get_kill_switch` | Read current kill-switch state. |
+| `sentinel_blocklist_version` | Block a specific `(model_kind, version)` from selection. Idempotent. |
+| `sentinel_unblocklist_version` | Remove a block. |
 
 ## Database Schema
 
 ```sql
 integrity_sessions       -- One per learning session
-  └── integrity_snapshots  -- Random-interval measurements
+  └── integrity_snapshots  -- Random-interval measurements, includes ai_paste_anomaly REAL (migration 044)
+sentinel_priors          -- DAO-ratified attack patterns AND classifier weights
+                         --   keystroke / mouse: labeled-samples blobs
+                         --   paste_classifier_weights: model bundle (migration 045 adds
+                         --   weights_cid, eval_cid, eval_tpr, eval_fpr, version columns)
+sentinel_kill_switch     -- Operator-controlled disable per model_kind (migration 046)
+sentinel_weights_blocklist -- (model_kind, version) pairs the selector must skip (migration 046)
 ```
 
 Stored in local SQLite. See [Database Schema](database-schema.md) for full DDL.
@@ -176,9 +298,26 @@ Stored in local SQLite. See [Database Schema](database-schema.md) for full DDL.
 | `integrity_start_session` | Start integrity monitoring for an enrolled learning session |
 | `integrity_get_session` | Get session with scores |
 | `integrity_end_session` | End session and compute final score |
-| `integrity_submit_snapshot` | Submit a behavioral snapshot |
+| `integrity_submit_snapshot` | Submit a behavioral snapshot (includes `ai_paste_anomaly`) |
 | `integrity_list_sessions` | List all sessions |
 | `integrity_list_snapshots` | List snapshots for a session |
+| `sentinel_propose_prior` | Propose a labeled-samples or weights blob to the Sentinel DAO |
+| `sentinel_ratify_prior` | Finalize an approved proposal into `sentinel_priors` |
+| `sentinel_priors_list` | List ratified priors (optionally filtered by `model_kind`) |
+| `sentinel_priors_load` | Fetch + re-validate a prior's blob |
+| `sentinel_priors_sync` | Pull newly-ratified priors from peers |
+| `sentinel_get_active_paste_classifier` | Return the newest gate-passing, re-verified weights row, or null |
+| `sentinel_score_paste` | Extract 12-dim features + score via tract. Single round-trip per snapshot. |
+| `sentinel_paste_classifier_info` | Loaded model source + version (`bundled` / `dao`) |
+| `sentinel_load_dao_classifier` | Replace the active tract session with DAO-supplied ONNX bytes |
+| `sentinel_revert_classifier_to_bundled` | Drop the DAO session, fall back to embedded weights |
+| `sentinel_train_keystroke_ae` | Train (or fine-tune) the per-user keystroke autoencoder via candle |
+| `sentinel_score_keystroke_ae` | Score keystrokes against the user's AE; `-1.0` if not yet trained |
+| `sentinel_extract_digraphs` | Pull `DigraphFeatures` from raw keystroke events |
+| `sentinel_train_mouse_cnn` | Train the per-user mouse-trajectory CNN dense head via candle |
+| `sentinel_score_mouse_cnn` | Score mouse points; `-1.0` if not yet trained |
+| `sentinel_user_models_status` | List per-user model rows (epochs, samples, loss, updated_at) |
+| `sentinel_reset_user_models` | Wipe per-user AE + CNN weights for `(user, device)` |
 
 ## UI
 
@@ -216,6 +355,8 @@ These guarantees are architectural — they are enforced by the code structure, 
 1. **Raw keystrokes never stored**: Only anonymized timing features (dwell/flight in ms). The `key` field is set to `'char'` for all printable characters.
 2. **Raw mouse coordinates never transmitted**: Only deltas (dx, dy, dt) used for CNN features; absolute positions stay in the short-lived buffer.
 3. **Video frames never leave the device**: Face processing happens on a `<canvas>` element. Only the derived embedding (944 floats) or skin ratio (single float) is stored.
-4. **AI model weights are not biometric data**: Autoencoder/CNN weights encode statistical patterns of typing/movement, not recoverable input data. LBP embeddings cannot be reverse-engineered into face images. Published *adversarial priors* (labeled cheat patterns, curated by the Sentinel DAO — see [sentinel-adversarial-priors.md](sentinel-adversarial-priors.md)) contain no individual user data; they are catalog content, not per-user telemetry.
+4. **AI model weights are not biometric data**: Autoencoder/CNN weights encode statistical patterns of typing/movement, not recoverable input data. LBP embeddings cannot be reverse-engineered into face images. Published *adversarial priors* (labeled cheat patterns and DAO-ratified classifier weights, curated by the Sentinel DAO — see [sentinel-adversarial-priors.md](sentinel-adversarial-priors.md)) contain no individual user data; they are catalog content, not per-user telemetry.
 5. **Profile keyed to device**: `sentinel_profile_{userId}_{deviceFingerprint[0:16]}` — profiles are device-specific.
-6. **No server-side data**: All behavioral processing happens on-device. The Rust backend stores only numeric scores and categorical flags in local SQLite. The Sentinel DAO-published adversarial-prior library is read-only from each client's perspective and carries no user identifiers — clients consume it, they never produce to it unless the learner explicitly proposes a pattern.
+6. **No server-side data**: All behavioral processing happens on-device. The Rust backend stores only numeric scores and categorical flags in local SQLite. The Sentinel DAO-published prior/weights library is read-only from each client's perspective and carries no user identifiers — clients consume it, they never produce to it unless the learner explicitly proposes a pattern.
+7. **ONNX inference is local**: The paste classifier loads via ONNX Runtime Web's WASM backend with `executionProviders: ['wasm']` only. No remote inference path exists. WASM artifacts are copied into the app bundle at build time so there's no runtime fetch from a CDN.
+8. **DAO weights are bounded**: Incoming weights blobs are capped at 1 MiB (envelope/eval JSON) and 50 MiB (ONNX bytes); resolver round trips time out at 5 s. A malicious envelope cannot trigger unbounded download or memory allocation.
