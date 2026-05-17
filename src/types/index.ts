@@ -837,6 +837,79 @@ export interface SentinelPrior {
   notes: string | null
   ratified_at: string
   signature: string
+  weights_cid?: string | null
+  eval_cid?: string | null
+  eval_tpr?: number | null
+  eval_fpr?: number | null
+  version?: string | null
+}
+
+/** Active DAO-ratified paste classifier returned by
+ *  `sentinel_get_active_paste_classifier`. Null means no entry passes
+ *  the runtime gate and the client should keep its bundled fallback. */
+export interface ActivePasteClassifier {
+  prior_id: string
+  weights_cid: string
+  version: string
+  eval_tpr: number
+  eval_fpr: number
+  signature: string
+  ratified_at: string
+}
+
+// ---------------------------------------------------------------------------
+// Sentinel backend ML (Rust: tract + candle). Mirrors the structs in
+// `src-tauri/src/sentinel/types.rs` + `src-tauri/src/commands/sentinel_ml.rs`.
+// ---------------------------------------------------------------------------
+
+export interface KeystrokeEvent {
+  key: string
+  dwellMs: number
+  flightMs: number
+}
+
+export interface MousePoint {
+  x: number
+  y: number
+  t: number
+}
+
+export interface DigraphFeatures {
+  dwellMs1: number
+  dwellMs2: number
+  flightMs: number
+  speedRatio: number
+}
+
+export interface ScorePasteResponse {
+  features: number[]
+  score: number
+  classifier: LoadedClassifierInfo
+}
+
+export interface LoadedClassifierInfo {
+  source: 'bundled' | 'dao'
+  version: string
+}
+
+export interface UserModelStatus {
+  model_kind: 'keystroke_ae' | 'mouse_cnn' | string
+  trained_epochs: number
+  training_samples: number
+  train_loss: number | null
+  updated_at: string
+}
+
+export interface TrainKeystrokeAeResponse {
+  train_loss: number
+  training_samples: number
+  trained_epochs: number
+}
+
+export interface TrainMouseCnnResponse {
+  train_loss: number
+  training_samples: number
+  trained_epochs: number
 }
 
 /** Parsed labeled-samples blob loaded via `sentinel_priors_load`. */
@@ -860,6 +933,7 @@ export interface IntegritySnapshot {
   devtools_score: number | null
   camera_score: number | null
   composite_score: number | null
+  ai_paste_anomaly: number | null
   anomaly_flags: string[]
   captured_at: string
 }
@@ -882,6 +956,7 @@ export interface SignalData {
   ai_mouse_human_prob?: number
   ai_face_similarity?: number
   ai_face_match?: boolean
+  ai_paste_anomaly?: number
 }
 
 export interface BehavioralProfile {

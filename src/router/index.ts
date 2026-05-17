@@ -215,6 +215,12 @@ const router = createRouter({
       meta: { layout: 'app' },
     },
     {
+      path: '/dashboard/sentinel/cheat-test',
+      name: 'dashboard-sentinel-cheat-test',
+      component: () => import('@/pages/dashboard/sentinel/CheatTest.vue'),
+      meta: { layout: 'app' },
+    },
+    {
       path: '/dashboard/settings',
       name: 'dashboard-settings',
       component: () => import('@/pages/dashboard/Settings.vue'),

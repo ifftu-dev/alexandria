@@ -88,7 +88,7 @@ function onFileChosen(event: Event) {
   fileName.value = file.name
   parseError.value = null
   parsedBlob.value = null
-  file.arrayBuffer().then(buf => {
+  file.arrayBuffer().then(async buf => {
     const bytes = new Uint8Array(buf)
     fileBytes.value = bytes
     try {
@@ -110,7 +110,7 @@ function onFileChosen(event: Event) {
       // actually adversarial. The proposer sees this before submitting;
       // DAO voters would see the same signal (future work).
       const kind = mk as ModelKind
-      const check = testBlobAgainstClassifier(kind, samples)
+      const check = await testBlobAgainstClassifier(kind, samples)
       if (check) {
         classifierCheck.value = check
         classifierCheckStatus.value = 'ok'

@@ -4,7 +4,7 @@
  * profile. Walks the user through typing and mouse exercises to establish
  * baseline patterns. All data stays on-device.
  */
-import { ref, computed, nextTick, onBeforeUnmount } from 'vue'
+import { ref, computed, nextTick, onBeforeUnmount, onMounted } from 'vue'
 import { AppButton } from '@/components/ui'
 import { useSentinel } from '@/composables/useSentinel'
 
@@ -24,7 +24,34 @@ const {
   reportFaceDetection,
   trainAIModels,
   enrollFace,
+  getAIModelStatus,
+  refreshUserModelsStatus,
 } = useSentinel()
+
+// Track which steps were *skipped* (user kept existing model rather than
+// retraining). Wizard review reflects this so the user understands what
+// actually changed in their profile.
+const skipped = ref<Record<'typing' | 'mouse' | 'camera', boolean>>({
+  typing: false,
+  mouse: false,
+  camera: false,
+})
+
+// Snapshot of trained-model status when wizard opens, so each step can
+// show "you already have a trained model — skip to keep it" guidance.
+const initialStatus = ref<ReturnType<typeof getAIModelStatus> | null>(null)
+const hasKeystrokeModel = computed(() => initialStatus.value?.keystrokeAE?.trained ?? false)
+const hasMouseModel = computed(() => initialStatus.value?.mouseCNN?.trained ?? false)
+const hasFaceEnrollment = computed(() => initialStatus.value?.faceEmbedder?.enrolled ?? false)
+
+const skipStep = (which: 'typing' | 'mouse' | 'camera') => {
+  skipped.value[which] = true
+  // Clear any partial buffer collected from this step so it doesn't
+  // accidentally trigger retraining in `trainAIModels`. The user
+  // explicitly chose to keep the existing model.
+  clearTrainingBuffers()
+  nextStep()
+}
 
 type Step = 'welcome' | 'typing' | 'mouse' | 'awareness' | 'camera' | 'review'
 const steps: Step[] = ['welcome', 'typing', 'mouse', 'awareness', 'camera', 'review']
@@ -259,6 +286,7 @@ const stopCamera = () => {
 
 const skipCamera = () => {
   cameraSkipped.value = true
+  skipped.value.camera = true
   nextStep()
 }
 
@@ -290,6 +318,11 @@ const restartWizard = async () => {
   aiTrainingResults.value = null
   goToStep('welcome')
 }
+
+onMounted(async () => {
+  await refreshUserModelsStatus()
+  initialStatus.value = getAIModelStatus()
+})
 
 onBeforeUnmount(() => {
   cleanupCurrentStep()
@@ -348,13 +381,35 @@ onBeforeUnmount(() => {
           Train Sentinel
         </h2>
         <p class="mb-4 text-sm text-muted-foreground">
-          This short calibration teaches Sentinel how you naturally type and move your mouse.
-          It takes about 2 minutes and helps ensure your assessments are accurately attributed to you.
+          This calibration teaches Sentinel how <strong>you specifically</strong> type and move your mouse.
+          Takes ~2 minutes. Catches impersonation attacks the global paste-classifier alone can't.
         </p>
+
+        <!-- What the wizard trains vs what's already protecting you -->
+        <div class="mb-4 rounded-lg border border-border bg-muted/30 p-3 text-left text-xs">
+          <p class="mb-2 font-medium text-foreground">What this wizard trains (per-user, optional):</p>
+          <ul class="space-y-1 text-muted-foreground">
+            <li>• <strong>Keystroke autoencoder</strong> — learns your typing rhythm
+              <span v-if="hasKeystrokeModel" class="text-emerald-600 dark:text-emerald-400">(already trained — you can skip)</span>
+            </li>
+            <li>• <strong>Mouse-trajectory CNN</strong> — learns your mouse movement
+              <span v-if="hasMouseModel" class="text-emerald-600 dark:text-emerald-400">(already trained — you can skip)</span>
+            </li>
+            <li>• <strong>Face enrollment</strong> — LBP embedding (camera opt-in)
+              <span v-if="hasFaceEnrollment" class="text-emerald-600 dark:text-emerald-400">(already enrolled — you can skip)</span>
+            </li>
+          </ul>
+          <p class="mt-3 font-medium text-foreground">Already active without calibration:</p>
+          <ul class="space-y-1 text-muted-foreground">
+            <li>• <strong>Paste / typing-bot classifier (ONNX)</strong> — global cheat detector, ships with every install</li>
+            <li>• Rule-based checks (tab focus, devtools, paste size, velocity variance)</li>
+          </ul>
+        </div>
+
         <div class="mb-6 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-left dark:border-emerald-800/40 dark:bg-emerald-900/20">
           <p class="text-xs text-emerald-700 dark:text-emerald-400">
-            Everything stays on your device. We never store raw keystrokes, mouse coordinates, or video.
-            Only a statistical profile (averages and sample counts) is saved locally.
+            Everything stays on your device. Raw keystrokes / mouse coordinates / video never persist.
+            Per-user model weights live in your encrypted local database (sqlcipher).
           </p>
         </div>
         <AppButton variant="primary" @click="nextStep">
@@ -368,6 +423,10 @@ onBeforeUnmount(() => {
           <h2 class="text-base font-semibold text-foreground">Typing Calibration</h2>
           <p class="mt-1 text-sm text-muted-foreground">
             Type the text below naturally. Sentinel will learn your keystroke rhythm -- how long you hold each key and the gaps between them.
+          </p>
+          <p v-if="hasKeystrokeModel" class="mt-2 rounded-md bg-emerald-50 p-2 text-xs text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400">
+            You already have a trained keystroke model from a previous calibration.
+            Retyping replaces it; <strong>Skip</strong> keeps the existing one.
           </p>
         </div>
 
@@ -441,6 +500,14 @@ onBeforeUnmount(() => {
               />
             </div>
             <AppButton
+              v-if="hasKeystrokeModel"
+              variant="ghost"
+              size="sm"
+              @click="skipStep('typing')"
+            >
+              Skip — keep existing
+            </AppButton>
+            <AppButton
               variant="primary"
               size="sm"
               :disabled="!typingComplete"
@@ -458,6 +525,10 @@ onBeforeUnmount(() => {
           <h2 class="text-base font-semibold text-foreground">Mouse Calibration</h2>
           <p class="mt-1 text-sm text-muted-foreground">
             Click each target as it appears. Move naturally -- Sentinel is learning your mouse velocity and movement patterns.
+          </p>
+          <p v-if="hasMouseModel" class="mt-2 rounded-md bg-emerald-50 p-2 text-xs text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400">
+            You already have a trained mouse model. Recalibrating replaces it;
+            <strong>Skip</strong> keeps the existing one.
           </p>
         </div>
 
@@ -527,14 +598,24 @@ onBeforeUnmount(() => {
 
         <div class="flex items-center justify-between">
           <AppButton variant="ghost" size="sm" @click="prevStep">Back</AppButton>
-          <AppButton
-            variant="primary"
-            size="sm"
-            :disabled="!mouseComplete"
-            @click="finishMouse"
-          >
-            Continue
-          </AppButton>
+          <div class="flex items-center gap-3">
+            <AppButton
+              v-if="hasMouseModel"
+              variant="ghost"
+              size="sm"
+              @click="skipStep('mouse')"
+            >
+              Skip — keep existing
+            </AppButton>
+            <AppButton
+              variant="primary"
+              size="sm"
+              :disabled="!mouseComplete"
+              @click="finishMouse"
+            >
+              Continue
+            </AppButton>
+          </div>
         </div>
       </div>
 
@@ -622,6 +703,10 @@ onBeforeUnmount(() => {
           <p class="mt-1 text-sm text-muted-foreground">
             Optionally enable your camera to confirm you're present during assessments. The video feed is processed entirely
             on your device -- no images or video are ever transmitted.
+          </p>
+          <p v-if="hasFaceEnrollment" class="mt-2 rounded-md bg-emerald-50 p-2 text-xs text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400">
+            You already have a face enrollment. Re-enabling the camera replaces it;
+            <strong>Skip</strong> keeps the existing one.
           </p>
         </div>
 
@@ -747,46 +832,61 @@ onBeforeUnmount(() => {
 
           <!-- AI Models training results -->
           <div v-if="aiTrainingResults" class="rounded-lg border border-primary/30 bg-primary/5 p-4">
-            <p class="mb-3 text-xs font-medium text-primary">AI MODELS TRAINED</p>
+            <p class="mb-3 text-xs font-medium text-primary">AI MODELS</p>
             <div class="space-y-2">
               <div class="flex items-center justify-between text-sm">
                 <span class="text-muted-foreground">Keystroke Autoencoder</span>
                 <span
                   class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium"
-                  :class="aiTrainingResults.keystrokeAE.trained
-                    ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
-                    : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'"
+                  :class="skipped.typing
+                    ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
+                    : aiTrainingResults.keystrokeAE.trained
+                      ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
+                      : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'"
                 >
-                  {{ aiTrainingResults.keystrokeAE.trained ? 'Trained' : 'Insufficient data' }}
+                  {{ skipped.typing
+                    ? 'Kept existing'
+                    : aiTrainingResults.keystrokeAE.trained ? 'Retrained' : 'Insufficient data' }}
                 </span>
               </div>
               <div class="flex items-center justify-between text-sm">
                 <span class="text-muted-foreground">Mouse Trajectory CNN</span>
                 <span
                   class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium"
-                  :class="aiTrainingResults.mouseCNN.trained
-                    ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
-                    : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'"
+                  :class="skipped.mouse
+                    ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
+                    : aiTrainingResults.mouseCNN.trained
+                      ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
+                      : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'"
                 >
-                  {{ aiTrainingResults.mouseCNN.trained ? 'Trained' : 'Insufficient data' }}
+                  {{ skipped.mouse
+                    ? 'Kept existing'
+                    : aiTrainingResults.mouseCNN.trained ? 'Retrained' : 'Insufficient data' }}
                 </span>
               </div>
               <div class="flex items-center justify-between text-sm">
                 <span class="text-muted-foreground">Face Verification</span>
                 <span
                   class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium"
-                  :class="aiTrainingResults.faceEmbedder.enrolled
-                    ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
-                    : cameraSkipped
-                      ? 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400'
-                      : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'"
+                  :class="skipped.camera
+                    ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
+                    : aiTrainingResults.faceEmbedder.enrolled
+                      ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
+                      : cameraSkipped
+                        ? 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400'
+                        : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'"
                 >
-                  {{ aiTrainingResults.faceEmbedder.enrolled ? 'Enrolled' : cameraSkipped ? 'Skipped' : 'Pending' }}
+                  {{ skipped.camera
+                    ? 'Kept existing'
+                    : aiTrainingResults.faceEmbedder.enrolled
+                      ? 'Enrolled'
+                      : cameraSkipped ? 'Skipped' : 'Pending' }}
                 </span>
               </div>
             </div>
             <p class="mt-3 text-xs text-muted-foreground">
-              These models run alongside rule-based checks to verify it's you during assessments. All processing stays on your device.
+              Per-user models. The global paste classifier (always on) is independent of these.
+              All processing stays on your device.
             </p>
           </div>
         </div>

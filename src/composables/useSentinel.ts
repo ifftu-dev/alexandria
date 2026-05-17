@@ -1,17 +1,7 @@
 import { ref, readonly } from 'vue'
+import { invoke as tauriInvoke } from '@tauri-apps/api/core'
 import { useLocalApi } from './useLocalApi'
 import { useAuth } from './useAuth'
-import {
-  KeystrokeAutoencoder,
-  type AutoencoderWeights,
-  type DigraphFeatures,
-  type KeystrokeEvent as AEKeystrokeEvent,
-} from '@/utils/sentinel/keystroke-autoencoder'
-import {
-  MouseTrajectoryCNN,
-  type MouseCNNWeights,
-  type MousePoint,
-} from '@/utils/sentinel/mouse-trajectory-cnn'
 import {
   FaceEmbedder,
   type EnrollmentEmbedding,
@@ -22,7 +12,31 @@ import type {
   StartSessionResponse,
   SentinelPrior,
   SentinelPriorBlob,
+  ActivePasteClassifier,
+  KeystrokeEvent,
+  MousePoint,
+  DigraphFeatures,
+  ScorePasteResponse,
+  LoadedClassifierInfo,
+  UserModelStatus,
+  TrainKeystrokeAeResponse,
+  TrainMouseCnnResponse,
 } from '@/types'
+
+// Threshold helpers were previously inlined in the TS classifier. With
+// the backend rewrite they're plain constants — keep them client-side
+// so flag promotion can run synchronously in `computeScores`.
+const PASTE_ANOMALY_THRESHOLD = 0.95
+const PASTE_ANOMALY_CRITICAL_THRESHOLD = 0.99
+const KEYSTROKE_ANOMALY_THRESHOLD = 0.65
+const MOUSE_HUMAN_THRESHOLD = 0.5
+
+function isAnomalousPasteScore(s: number): boolean {
+  return s >= PASTE_ANOMALY_THRESHOLD
+}
+function isCriticalPasteScore(s: number): boolean {
+  return s >= PASTE_ANOMALY_CRITICAL_THRESHOLD
+}
 
 /**
  * Sentinel Engine — Client-side integrity monitoring composable.
@@ -57,9 +71,26 @@ const AI_SCORING_STORAGE_KEY = 'sentinel_ai_scoring_enabled'
 const AI_ADVISORY_WEIGHT = 0.05
 const aiScoringEnabled = ref<boolean>(readAIScoringPref())
 
+// Per-signal opt-out for the paste classifier. Defaults to true so it
+// contributes when the master AI toggle is on; users can disable it
+// alone if they hit false positives without losing the other AI
+// signals.
+const PASTE_CLASSIFIER_STORAGE_KEY = 'sentinel_paste_classifier_enabled'
+const pasteClassifierEnabled = ref<boolean>(readPasteClassifierPref())
+
 function readAIScoringPref(): boolean {
   try { return localStorage.getItem(AI_SCORING_STORAGE_KEY) === '1' }
   catch { return false }
+}
+
+function readPasteClassifierPref(): boolean {
+  try {
+    const v = localStorage.getItem(PASTE_CLASSIFIER_STORAGE_KEY)
+    // Default ON unless explicitly disabled.
+    return v !== '0'
+  } catch {
+    return true
+  }
 }
 
 // ============================================================================
@@ -67,6 +98,7 @@ function readAIScoringPref(): boolean {
 // ============================================================================
 
 let snapshotTimer: ReturnType<typeof setTimeout> | null = null
+let snapshotWindowStartMs = 0
 let currentElementId = ''
 let currentElementType = ''
 
@@ -97,10 +129,70 @@ let faceAbsentChecks = 0
 // Behavioral profile
 let profile: BehavioralProfile | null = null
 
-// AI models
-let keystrokeAE: KeystrokeAutoencoder | null = null
-let mouseCNN: MouseTrajectoryCNN | null = null
+// Face embedder stays a TS class — pure LBP pixel math, no ML
+// framework required, never federated.
 let faceEmbedder: FaceEmbedder | null = null
+
+// Per-user model status mirrors what the backend reports via
+// `sentinel_user_models_status`. Refreshed on session start so the
+// snapshot path can decide whether to bother invoking the scorer.
+const keystrokeAeStatus = ref<UserModelStatus | null>(null)
+const mouseCnnStatus = ref<UserModelStatus | null>(null)
+
+// Cap incoming ONNX weight blobs — defense against a malicious DAO
+// envelope pointing at a huge CID. 50 MiB matches MAX_WEIGHTS_BYTES on
+// the Rust side (commands/sentinel_priors.rs).
+const MAX_DAO_WEIGHTS_BYTES = 50 * 1024 * 1024
+
+// DAO upgrade is process-wide once-only: lifted to module scope so
+// repeated `start()` calls in the same process don't re-fetch on every
+// session.
+let daoUpgradePromise: Promise<void> | null = null
+const loadedClassifierInfo = ref<LoadedClassifierInfo>({ source: 'bundled', version: 'bundled-v1' })
+
+export function getLoadedClassifierInfo(): LoadedClassifierInfo {
+  return loadedClassifierInfo.value
+}
+
+async function upgradePasteClassifierOnce(): Promise<void> {
+  if (daoUpgradePromise) return daoUpgradePromise
+  daoUpgradePromise = (async () => {
+    try {
+      // Pull the current backend-reported source so dashboard cards
+      // can show "bundled" until / unless the DAO swap succeeds.
+      try {
+        loadedClassifierInfo.value = await tauriInvoke<LoadedClassifierInfo>(
+          'sentinel_paste_classifier_info',
+        )
+      } catch { /* backend not ready yet */ }
+
+      const active = await tauriInvoke<ActivePasteClassifier | null>(
+        'sentinel_get_active_paste_classifier',
+      )
+      if (!active) return
+      const bytes = await tauriInvoke<number[]>('content_resolve_bytes', {
+        identifier: active.weights_cid,
+      })
+      if (bytes.length > MAX_DAO_WEIGHTS_BYTES) {
+        console.warn(
+          `[sentinel] DAO weights blob ${bytes.length} bytes exceeds ${MAX_DAO_WEIGHTS_BYTES}; staying on bundled`,
+        )
+        return
+      }
+      const info = await tauriInvoke<LoadedClassifierInfo>(
+        'sentinel_load_dao_classifier',
+        { req: { bytes, version: active.version } },
+      )
+      loadedClassifierInfo.value = info
+      console.info(
+        `[sentinel] paste classifier upgraded to DAO model ${active.version} (TPR=${active.eval_tpr} FPR=${active.eval_fpr})`,
+      )
+    } catch (err) {
+      console.warn('[sentinel] DAO classifier upgrade skipped:', err)
+    }
+  })()
+  return daoUpgradePromise
+}
 
 // ============================================================================
 // Composable
@@ -182,16 +274,11 @@ export function useSentinel() {
   }
 
   const loadAIModels = (p: BehavioralProfile) => {
+    // Keystroke AE + mouse CNN weights now persist in the backend
+    // `sentinel_user_models` table (encrypted SQLite). Only the face
+    // enrollment remains client-side because the face embedder is
+    // pure pixel math with no ML framework — see docs/sentinel.md.
     if (!p.aiModels) return
-
-    if (p.aiModels.keystrokeAutoencoder) {
-      try { keystrokeAE = new KeystrokeAutoencoder(p.aiModels.keystrokeAutoencoder as unknown as AutoencoderWeights) }
-      catch { keystrokeAE = null }
-    }
-    if (p.aiModels.mouseCNN) {
-      try { mouseCNN = new MouseTrajectoryCNN(p.aiModels.mouseCNN as unknown as MouseCNNWeights) }
-      catch { mouseCNN = null }
-    }
     if (p.aiModels.faceEnrollment) {
       try { faceEmbedder = new FaceEmbedder(p.aiModels.faceEnrollment as EnrollmentEmbedding) }
       catch { faceEmbedder = null }
@@ -200,9 +287,33 @@ export function useSentinel() {
 
   const persistAIModels = (p: BehavioralProfile) => {
     if (!p.aiModels) p.aiModels = {}
-    if (keystrokeAE?.isTrained) p.aiModels.keystrokeAutoencoder = keystrokeAE.exportWeights() as unknown as Record<string, unknown>
-    if (mouseCNN?.isTrained) p.aiModels.mouseCNN = mouseCNN.exportWeights() as unknown as Record<string, unknown>
     if (faceEmbedder?.isEnrolled) p.aiModels.faceEnrollment = faceEmbedder.exportEnrollment() as EnrollmentEmbedding
+    // Backend-stored model status is fetched on demand via
+    // `sentinel_user_models_status`. Don't shadow it in localStorage.
+    delete p.aiModels.keystrokeAutoencoder
+    delete p.aiModels.mouseCNN
+  }
+
+  /**
+   * Pull current per-user model status from the backend. Updates the
+   * module-scoped refs that gate AI scoring in `computeScores()`.
+   */
+  const refreshUserModelsStatus = async () => {
+    const userId = stakeAddress.value
+    if (!userId) return
+    const deviceFp = await computeDeviceFingerprint()
+    try {
+      const rows = await tauriInvoke<UserModelStatus[]>(
+        'sentinel_user_models_status',
+        { userAddress: userId, deviceFpPrefix: deviceFp.substring(0, 16) },
+      )
+      keystrokeAeStatus.value =
+        rows.find(r => r.model_kind === 'keystroke_ae') ?? null
+      mouseCnnStatus.value =
+        rows.find(r => r.model_kind === 'mouse_cnn') ?? null
+    } catch (err) {
+      console.warn('[sentinel] user model status fetch failed:', err)
+    }
   }
 
   // =========================================================================
@@ -273,7 +384,11 @@ export function useSentinel() {
     return { consistency: Math.min(1, Math.max(0, consistency)), isHuman }
   }
 
-  const computeScores = (): { signals: SignalData; integrity: number; consistency: number; anomalies: string[] } => {
+  const computeScores = (opts?: {
+    aiPasteAnomaly?: number
+    aiKeystrokeAnomaly?: number
+    aiMouseHumanProb?: number
+  }): { signals: SignalData; integrity: number; consistency: number; anomalies: string[] } => {
     const { consistency: typingConsistency, speedWpm } = analyzeKeystrokes()
     const { consistency: mouseConsistency, isHuman } = analyzeMouse()
     const anomalies: string[] = []
@@ -297,24 +412,21 @@ export function useSentinel() {
       signals.face_consistency = faceConsistency
     }
 
-    // AI scoring
-    if (keystrokeAE?.isTrained && keystrokeBuffer.length >= 5) {
-      const aeInput: AEKeystrokeEvent[] = keystrokeBuffer.map(k => ({ key: k.key, dwellMs: k.dwellMs, flightMs: k.flightMs }))
-      const anomalyScore = keystrokeAE.score(aeInput)
-      if (anomalyScore >= 0) {
-        signals.ai_keystroke_anomaly = Math.round(anomalyScore * 1000) / 1000
-        if (keystrokeAE.isAnomalous(anomalyScore)) anomalies.push('behavior_shift')
+    // AI scoring — all three signals are pre-computed by async IPC
+    // calls in `scheduleNextSnapshot` (the only consumer of this
+    // function that has access to the keystroke/mouse buffers). Other
+    // consumers (debug state, stop()) call with `opts === undefined`
+    // and simply skip the AI advisory terms.
+    if (opts?.aiKeystrokeAnomaly !== undefined && opts.aiKeystrokeAnomaly >= 0) {
+      signals.ai_keystroke_anomaly = Math.round(opts.aiKeystrokeAnomaly * 1000) / 1000
+      if (signals.ai_keystroke_anomaly >= KEYSTROKE_ANOMALY_THRESHOLD) {
+        anomalies.push('behavior_shift')
       }
     }
-
-    if (mouseCNN?.isTrained) {
-      const mousePoints: MousePoint[] = mouseBuffer.filter(m => m.type === 'move').map(m => ({ x: m.x, y: m.y, t: m.t }))
-      if (mousePoints.length >= 51) {
-        const humanProb = mouseCNN.predict(mousePoints)
-        if (humanProb >= 0) {
-          signals.ai_mouse_human_prob = Math.round(humanProb * 1000) / 1000
-          if (!mouseCNN.isHuman(humanProb)) anomalies.push('bot_suspected')
-        }
+    if (opts?.aiMouseHumanProb !== undefined && opts.aiMouseHumanProb >= 0) {
+      signals.ai_mouse_human_prob = Math.round(opts.aiMouseHumanProb * 1000) / 1000
+      if (signals.ai_mouse_human_prob < MOUSE_HUMAN_THRESHOLD) {
+        anomalies.push('bot_suspected')
       }
     }
 
@@ -322,6 +434,15 @@ export function useSentinel() {
       signals.ai_face_similarity = Math.round(faceSimilarity * 1000) / 1000
       signals.ai_face_match = faceMatch ?? false
       if (faceMatch === false && facePresent) anomalies.push('face_mismatch')
+    }
+
+    if (opts?.aiPasteAnomaly !== undefined && opts.aiPasteAnomaly >= 0) {
+      signals.ai_paste_anomaly = Math.round(opts.aiPasteAnomaly * 1000) / 1000
+      if (isCriticalPasteScore(opts.aiPasteAnomaly)) {
+        anomalies.push('paste_classifier_critical')
+      } else if (isAnomalousPasteScore(opts.aiPasteAnomaly)) {
+        anomalies.push('paste_classifier_anomaly')
+      }
     }
 
     // Rule-based integrity score
@@ -359,6 +480,10 @@ export function useSentinel() {
       }
       if (cameraOptedIn.value && signals.ai_face_similarity !== undefined) {
         integrity += signals.ai_face_similarity * AI_ADVISORY_WEIGHT
+        weights += AI_ADVISORY_WEIGHT
+      }
+      if (signals.ai_paste_anomaly !== undefined && pasteClassifierEnabled.value) {
+        integrity += (1 - signals.ai_paste_anomaly) * AI_ADVISORY_WEIGHT
         weights += AI_ADVISORY_WEIGHT
       }
     }
@@ -454,11 +579,84 @@ export function useSentinel() {
     if (!isActive.value || !sessionId.value) return
 
     const delay = 15000 + Math.random() * 30000
+    if (snapshotWindowStartMs === 0) snapshotWindowStartMs = Date.now()
 
     snapshotTimer = setTimeout(async () => {
       if (!isActive.value || !sessionId.value) return
 
-      const { signals, integrity, consistency, anomalies } = computeScores()
+      // Run the ONNX paste classifier before the (sync) score path so the
+      // signal is folded into the weighted integrity calculation rather
+      // than tacked on after. A score of -1 means the model artifact
+      // wasn't available; the signal is then simply absent, mirroring
+      // the convention used by the other AI signals.
+      const windowMs = snapshotWindowStartMs > 0
+        ? Math.max(1, Date.now() - snapshotWindowStartMs)
+        : 30_000
+
+      // All three AI scores come from the backend now (tract for the
+      // paste classifier, candle for the per-user keystroke AE + mouse
+      // CNN). The frontend just shovels raw events across IPC. A
+      // returned score of -1 means "model not yet trained / not
+      // available" — handled the same way as before: signal absent.
+      const userId = stakeAddress.value
+      const deviceFp = userId ? (await computeDeviceFingerprint()).substring(0, 16) : ''
+
+      let pasteAnomaly = -1
+      try {
+        const resp = await tauriInvoke<ScorePasteResponse>('sentinel_score_paste', {
+          req: {
+            events: keystrokeBuffer.map(k => ({ key: k.key, dwellMs: k.dwellMs, flightMs: k.flightMs })),
+            paste_event_count: pasteEventCount,
+            pasted_char_count: pastedCharCount,
+            window_ms: windowMs,
+          },
+        })
+        pasteAnomaly = resp.score
+        loadedClassifierInfo.value = resp.classifier
+      } catch (err) {
+        console.warn('[sentinel] paste score IPC failed', err)
+      }
+
+      let keystrokeAnomaly = -1
+      if (userId && keystrokeAeStatus.value && keystrokeAeStatus.value.trained_epochs > 0 && keystrokeBuffer.length >= 5) {
+        try {
+          keystrokeAnomaly = await tauriInvoke<number>('sentinel_score_keystroke_ae', {
+            req: {
+              user_address: userId,
+              device_fp_prefix: deviceFp,
+              events: keystrokeBuffer.map(k => ({ key: k.key, dwellMs: k.dwellMs, flightMs: k.flightMs })),
+            },
+          })
+        } catch (err) {
+          console.warn('[sentinel] keystroke AE score IPC failed', err)
+        }
+      }
+
+      let mouseHumanProb = -1
+      const movePoints = mouseBuffer
+        .filter(m => m.type === 'move')
+        .map(m => ({ x: m.x, y: m.y, t: m.t }))
+      if (userId && mouseCnnStatus.value && mouseCnnStatus.value.trained_epochs > 0 && movePoints.length >= 51) {
+        try {
+          mouseHumanProb = await tauriInvoke<number>('sentinel_score_mouse_cnn', {
+            req: {
+              user_address: userId,
+              device_fp_prefix: deviceFp,
+              points: movePoints,
+            },
+          })
+        } catch (err) {
+          console.warn('[sentinel] mouse CNN score IPC failed', err)
+        }
+      }
+
+      const { signals, integrity, consistency, anomalies } = computeScores({
+        aiPasteAnomaly: pasteAnomaly,
+        aiKeystrokeAnomaly: keystrokeAnomaly,
+        aiMouseHumanProb: mouseHumanProb,
+      })
+      const deduped = [...new Set(anomalies)]
+
       integrityScore.value = integrity
       consistencyScore.value = consistency
 
@@ -476,7 +674,8 @@ export function useSentinel() {
             paste_score: Math.max(0, 1 - signals.pasted_chars / 1000),
             devtools_score: signals.devtools_detected ? 0.0 : 1.0,
             camera_score: signals.face_consistency ?? null,
-            anomaly_flags: anomalies,
+            ai_paste_anomaly: signals.ai_paste_anomaly ?? null,
+            anomaly_flags: deduped,
           },
         })
       } catch { /* best effort */ }
@@ -492,6 +691,7 @@ export function useSentinel() {
       environmentChanged = false
       totalFaceChecks = 0
       faceAbsentChecks = 0
+      snapshotWindowStartMs = Date.now()
 
       scheduleNextSnapshot()
     }, delay)
@@ -578,6 +778,16 @@ export function useSentinel() {
       const response = await invoke<StartSessionResponse>('integrity_start_session', { enrollmentId })
       sessionId.value = response.session_id
       isActive.value = true
+      snapshotWindowStartMs = Date.now()
+
+      // Best-effort upgrade to the latest DAO-ratified paste classifier.
+      // Failures fall through to the bundled artifact — never block
+      // session start on a model swap.
+      void tryUpgradePasteClassifier()
+
+      // Refresh per-user model status so the snapshot path knows whether
+      // to call the AE / CNN scoring IPCs.
+      void refreshUserModelsStatus()
 
       document.addEventListener('keydown', onKeyDown, { passive: true })
       document.addEventListener('keyup', onKeyUp, { passive: true })
@@ -592,6 +802,8 @@ export function useSentinel() {
       console.warn('Sentinel: failed to start session', e)
     }
   }
+
+  const tryUpgradePasteClassifier = () => upgradePasteClassifierOnce()
 
   const setElement = (elementId: string, elementType: string) => {
     currentElementId = elementId
@@ -688,6 +900,7 @@ export function useSentinel() {
     devtoolsDetected = false
     environmentChanged = false
     lastKeystrokeTime = 0
+    snapshotWindowStartMs = 0
     facePresent = undefined
     faceCount = undefined
     faceConsistency = undefined
@@ -725,9 +938,11 @@ export function useSentinel() {
     profile: profile ? { ...profile } : null,
     hasSnapshotTimer: snapshotTimer !== null,
     aiModels: {
-      keystrokeAE: keystrokeAE?.isTrained ? keystrokeAE.getStats() : null,
-      mouseCNN: mouseCNN?.isTrained ? mouseCNN.getStats() : null,
-      faceEmbedder: faceEmbedder ? { enrolled: faceEmbedder.isEnrolled, progress: faceEmbedder.enrollmentProgress } : null,
+      keystrokeAE: keystrokeAeStatus.value,
+      mouseCNN: mouseCnnStatus.value,
+      faceEmbedder: faceEmbedder
+        ? { enrolled: faceEmbedder.isEnrolled, progress: faceEmbedder.enrollmentProgress }
+        : null,
     },
     ...(keystrokeBuffer.length >= 5 || mouseBuffer.length >= 10
       ? computeScores()
@@ -836,17 +1051,50 @@ export function useSentinel() {
       }
     }
 
-    // Train AI models
+    // Per-user AI training runs in the Rust backend now (candle).
+    // Fire-and-forget IPCs — failures are logged and don't block the
+    // profile save. Status refs refresh on success.
+    const fpPrefix = deviceFp.substring(0, 16)
     if (keystrokeBuffer.length >= 20) {
-      const aeInput: AEKeystrokeEvent[] = keystrokeBuffer.map(k => ({ key: k.key, dwellMs: k.dwellMs, flightMs: k.flightMs }))
-      if (!keystrokeAE) keystrokeAE = new KeystrokeAutoencoder()
-      keystrokeAE.train(aeInput)
+      try {
+        const r = await tauriInvoke<TrainKeystrokeAeResponse>('sentinel_train_keystroke_ae', {
+          req: {
+            user_address: userId,
+            device_fp_prefix: fpPrefix,
+            events: keystrokeBuffer.map(k => ({ key: k.key, dwellMs: k.dwellMs, flightMs: k.flightMs })),
+          },
+        })
+        keystrokeAeStatus.value = {
+          model_kind: 'keystroke_ae',
+          trained_epochs: r.trained_epochs,
+          training_samples: r.training_samples,
+          train_loss: r.train_loss,
+          updated_at: new Date().toISOString(),
+        }
+      } catch (err) {
+        console.warn('[sentinel] keystroke AE train IPC failed', err)
+      }
     }
 
     if (moves.length >= 51) {
-      const mousePoints: MousePoint[] = moves.map(m => ({ x: m.x, y: m.y, t: m.t }))
-      if (!mouseCNN) mouseCNN = new MouseTrajectoryCNN()
-      mouseCNN.train(mousePoints)
+      try {
+        const r = await tauriInvoke<TrainMouseCnnResponse>('sentinel_train_mouse_cnn', {
+          req: {
+            user_address: userId,
+            device_fp_prefix: fpPrefix,
+            points: moves.map(m => ({ x: m.x, y: m.y, t: m.t })),
+          },
+        })
+        mouseCnnStatus.value = {
+          model_kind: 'mouse_cnn',
+          trained_epochs: r.trained_epochs,
+          training_samples: r.training_samples,
+          train_loss: r.train_loss,
+          updated_at: new Date().toISOString(),
+        }
+      } catch (err) {
+        console.warn('[sentinel] mouse CNN train IPC failed', err)
+      }
     }
 
     profile.lastUpdated = Date.now()
@@ -873,12 +1121,28 @@ export function useSentinel() {
    * cross the per-model anomaly threshold — useful for picking up
    * priors that are a mix of good/bad examples.
    */
-  const testBlobAgainstClassifier = (
+  /**
+   * Score a candidate prior blob against the user's current model.
+   *
+   * `keystroke` mode: builds synthetic event streams that reproduce
+   * the blob's digraph timings, scores them through the backend AE,
+   * and reports mean anomaly + fraction over the 0.65 threshold.
+   *
+   * `mouse` mode: feeds raw trajectories to the backend CNN and
+   * reports `mean(1 - human_prob)`. Higher = more bot-like.
+   *
+   * Returns `null` if the user's model isn't trained yet.
+   */
+  const testBlobAgainstClassifier = async (
     modelKind: 'keystroke' | 'mouse',
     samples: unknown[],
-  ): { meanScore: number; adversarialFraction: number; sampleCount: number } | null => {
+  ): Promise<{ meanScore: number; adversarialFraction: number; sampleCount: number } | null> => {
+    const userId = stakeAddress.value
+    if (!userId) return null
+    const deviceFp = (await computeDeviceFingerprint()).substring(0, 16)
+
     if (modelKind === 'keystroke') {
-      if (!keystrokeAE?.isTrained) return null
+      if (!keystrokeAeStatus.value || keystrokeAeStatus.value.trained_epochs === 0) return null
       const digraphs = samples.filter((s): s is DigraphFeatures =>
         typeof s === 'object' && s !== null
         && typeof (s as DigraphFeatures).dwellMs1 === 'number'
@@ -887,14 +1151,19 @@ export function useSentinel() {
         && typeof (s as DigraphFeatures).speedRatio === 'number',
       )
       if (digraphs.length < 5) return null
-      // Score in small windows so `adversarialFraction` is meaningful.
+
       const WINDOW = 10
       const scores: number[] = []
       for (let i = 0; i + 5 <= digraphs.length; i += WINDOW) {
         const window = digraphs.slice(i, Math.min(i + WINDOW, digraphs.length))
         if (window.length < 5) continue
-        const s = keystrokeAE.scoreFeatures(window)
-        if (s >= 0) scores.push(s)
+        const events = digraphsToEvents(window)
+        try {
+          const s = await tauriInvoke<number>('sentinel_score_keystroke_ae', {
+            req: { user_address: userId, device_fp_prefix: deviceFp, events },
+          })
+          if (s >= 0) scores.push(s)
+        } catch { /* ignore single-window failure */ }
       }
       if (scores.length === 0) return null
       const mean = scores.reduce((a, b) => a + b, 0) / scores.length
@@ -903,7 +1172,7 @@ export function useSentinel() {
     }
 
     // mouse
-    if (!mouseCNN?.isTrained) return null
+    if (!mouseCnnStatus.value || mouseCnnStatus.value.trained_epochs === 0) return null
     const trajectories = samples.filter((s): s is { trajectory: MousePoint[] } =>
       typeof s === 'object' && s !== null
       && Array.isArray((s as { trajectory?: unknown }).trajectory),
@@ -912,14 +1181,32 @@ export function useSentinel() {
     const botScores: number[] = []
     for (const t of trajectories) {
       if (t.trajectory.length < 51) continue
-      const humanProb = mouseCNN.predict(t.trajectory)
-      if (humanProb < 0) continue
-      botScores.push(1 - humanProb)
+      try {
+        const humanProb = await tauriInvoke<number>('sentinel_score_mouse_cnn', {
+          req: { user_address: userId, device_fp_prefix: deviceFp, points: t.trajectory },
+        })
+        if (humanProb >= 0) botScores.push(1 - humanProb)
+      } catch { /* ignore single-trajectory failure */ }
     }
     if (botScores.length === 0) return null
     const mean = botScores.reduce((a, b) => a + b, 0) / botScores.length
     const adversarial = botScores.filter(s => s >= 0.5).length
     return { meanScore: mean, adversarialFraction: adversarial / botScores.length, sampleCount: trajectories.length }
+  }
+
+  /** Reconstruct minimal keystroke events from digraph features so the
+   * backend AE can score them. Mirrors the inverse of the legacy TS
+   * `extractDigraphFeatures` so blobs that came from `DigraphFeatures`
+   * still produce meaningful AE inputs. */
+  function digraphsToEvents(digraphs: DigraphFeatures[]): KeystrokeEvent[] {
+    if (digraphs.length === 0) return []
+    const out: KeystrokeEvent[] = [
+      { key: 'char', dwellMs: digraphs[0]!.dwellMs1, flightMs: 0 },
+    ]
+    for (const d of digraphs) {
+      out.push({ key: 'char', dwellMs: d.dwellMs2, flightMs: d.flightMs })
+    }
+    return out
   }
 
   const fetchPriorTrajectories = async (): Promise<MousePoint[][]> => {
@@ -971,37 +1258,86 @@ export function useSentinel() {
     mouseCNN: { trained: boolean; loss: number; samples: number; priorTrajectories: number }
     faceEmbedder: { enrolled: boolean; progress: number }
   }> => {
-    let aeLoss = -1, aeSamples = 0, priorDigraphs = 0
+    const userId = stakeAddress.value
+    if (!userId) {
+      return {
+        keystrokeAE: { trained: false, loss: -1, samples: 0, priorDigraphs: 0 },
+        mouseCNN: { trained: false, loss: -1, samples: 0, priorTrajectories: 0 },
+        faceEmbedder: {
+          enrolled: faceEmbedder?.isEnrolled ?? false,
+          progress: faceEmbedder?.enrollmentProgress ?? 0,
+        },
+      }
+    }
+    const deviceFp = (await computeDeviceFingerprint()).substring(0, 16)
+
+    let aeLoss = -1
+    let aeSamples = 0
+    let aeTrained = false
+    let priorDigraphs = 0
     if (keystrokeBuffer.length >= 20) {
-      const aeInput: AEKeystrokeEvent[] = keystrokeBuffer.map(k => ({ key: k.key, dwellMs: k.dwellMs, flightMs: k.flightMs }))
-      if (!keystrokeAE) keystrokeAE = new KeystrokeAutoencoder()
       // Hydrate ratified keystroke priors (labeled attack digraphs) to
-      // drive the AE's contrastive "push-away" pass. Empty on first
-      // run — falls back to reconstruction-only training.
+      // drive the AE's contrastive "push-away" pass.
       const ratifiedNegatives = await fetchKeystrokeNegatives()
       priorDigraphs = ratifiedNegatives.length
-      aeLoss = keystrokeAE.train(aeInput, undefined, ratifiedNegatives)
-      aeSamples = keystrokeAE.getStats().samples
+      try {
+        const r = await tauriInvoke<TrainKeystrokeAeResponse>('sentinel_train_keystroke_ae', {
+          req: {
+            user_address: userId,
+            device_fp_prefix: deviceFp,
+            events: keystrokeBuffer.map(k => ({ key: k.key, dwellMs: k.dwellMs, flightMs: k.flightMs })),
+            negative_digraphs: ratifiedNegatives,
+          },
+        })
+        aeLoss = r.train_loss
+        aeSamples = r.training_samples
+        aeTrained = r.trained_epochs > 0 && r.training_samples >= 20
+        keystrokeAeStatus.value = {
+          model_kind: 'keystroke_ae',
+          trained_epochs: r.trained_epochs,
+          training_samples: r.training_samples,
+          train_loss: r.train_loss,
+          updated_at: new Date().toISOString(),
+        }
+      } catch (err) {
+        console.warn('[sentinel] keystroke AE training failed', err)
+      }
     }
 
-    let cnnLoss = -1, cnnSamples = 0
+    let cnnLoss = -1
+    let cnnSamples = 0
+    let cnnTrained = false
     let priorTrajectories = 0
     const moves = mouseBuffer.filter(m => m.type === 'move')
     if (moves.length >= 51) {
-      const mousePoints: MousePoint[] = moves.map(m => ({ x: m.x, y: m.y, t: m.t }))
-      if (!mouseCNN) mouseCNN = new MouseTrajectoryCNN()
-      // Hydrate ratified bot trajectories from the Sentinel DAO library.
-      // Empty array on first run is fine — CNN falls back to its 5
-      // hard-coded synthetic bot patterns.
       const ratifiedBots = await fetchPriorTrajectories()
       priorTrajectories = ratifiedBots.length
-      cnnLoss = mouseCNN.train(mousePoints, undefined, ratifiedBots)
-      cnnSamples = mouseCNN.getStats().samples
+      try {
+        const r = await tauriInvoke<TrainMouseCnnResponse>('sentinel_train_mouse_cnn', {
+          req: {
+            user_address: userId,
+            device_fp_prefix: deviceFp,
+            points: moves.map(m => ({ x: m.x, y: m.y, t: m.t })),
+          },
+        })
+        cnnLoss = r.train_loss
+        cnnSamples = r.training_samples
+        cnnTrained = r.trained_epochs > 0 && r.training_samples >= 1
+        mouseCnnStatus.value = {
+          model_kind: 'mouse_cnn',
+          trained_epochs: r.trained_epochs,
+          training_samples: r.training_samples,
+          train_loss: r.train_loss,
+          updated_at: new Date().toISOString(),
+        }
+      } catch (err) {
+        console.warn('[sentinel] mouse CNN training failed', err)
+      }
     }
 
     return {
-      keystrokeAE: { trained: keystrokeAE?.isTrained ?? false, loss: aeLoss, samples: aeSamples, priorDigraphs },
-      mouseCNN: { trained: mouseCNN?.isTrained ?? false, loss: cnnLoss, samples: cnnSamples, priorTrajectories },
+      keystrokeAE: { trained: aeTrained, loss: aeLoss, samples: aeSamples, priorDigraphs },
+      mouseCNN: { trained: cnnTrained, loss: cnnLoss, samples: cnnSamples, priorTrajectories },
       faceEmbedder: { enrolled: faceEmbedder?.isEnrolled ?? false, progress: faceEmbedder?.enrollmentProgress ?? 0 },
     }
   }
@@ -1012,9 +1348,25 @@ export function useSentinel() {
   }
 
   const getAIModelStatus = () => ({
-    keystrokeAE: keystrokeAE ? { trained: keystrokeAE.isTrained, ...keystrokeAE.getStats() } : null,
-    mouseCNN: mouseCNN ? { trained: mouseCNN.isTrained, ...mouseCNN.getStats() } : null,
-    faceEmbedder: faceEmbedder ? { enrolled: faceEmbedder.isEnrolled, progress: faceEmbedder.enrollmentProgress } : null,
+    keystrokeAE: keystrokeAeStatus.value
+      ? {
+          trained: keystrokeAeStatus.value.trained_epochs > 0,
+          epochs: keystrokeAeStatus.value.trained_epochs,
+          samples: keystrokeAeStatus.value.training_samples,
+          loss: keystrokeAeStatus.value.train_loss ?? 0,
+        }
+      : null,
+    mouseCNN: mouseCnnStatus.value
+      ? {
+          trained: mouseCnnStatus.value.trained_epochs > 0,
+          epochs: mouseCnnStatus.value.trained_epochs,
+          samples: mouseCnnStatus.value.training_samples,
+          loss: mouseCnnStatus.value.train_loss ?? 0,
+        }
+      : null,
+    faceEmbedder: faceEmbedder
+      ? { enrolled: faceEmbedder.isEnrolled, progress: faceEmbedder.enrollmentProgress }
+      : null,
   })
 
   const resetProfile = async () => {
@@ -1024,14 +1376,28 @@ export function useSentinel() {
     const key = `sentinel_profile_${userId}_${deviceFp.substring(0, 16)}`
     try { localStorage.removeItem(key) } catch { /* ignore */ }
     profile = null
-    keystrokeAE = null
-    mouseCNN = null
     faceEmbedder = null
+    keystrokeAeStatus.value = null
+    mouseCnnStatus.value = null
+    try {
+      await tauriInvoke('sentinel_reset_user_models', {
+        userAddress: userId,
+        deviceFpPrefix: deviceFp.substring(0, 16),
+      })
+    } catch (err) {
+      console.warn('[sentinel] reset user models IPC failed', err)
+    }
   }
 
   const setAIScoringEnabled = (enabled: boolean) => {
     aiScoringEnabled.value = enabled
     try { localStorage.setItem(AI_SCORING_STORAGE_KEY, enabled ? '1' : '0') }
+    catch { /* localStorage not available */ }
+  }
+
+  const setPasteClassifierEnabled = (enabled: boolean) => {
+    pasteClassifierEnabled.value = enabled
+    try { localStorage.setItem(PASTE_CLASSIFIER_STORAGE_KEY, enabled ? '1' : '0') }
     catch { /* localStorage not available */ }
   }
 
@@ -1061,6 +1427,10 @@ export function useSentinel() {
     consistencyScore: readonly(consistencyScore),
     cameraOptedIn: readonly(cameraOptedIn),
     aiScoringEnabled: readonly(aiScoringEnabled),
+    pasteClassifierEnabled: readonly(pasteClassifierEnabled),
+    keystrokeAeStatus: readonly(keystrokeAeStatus),
+    mouseCnnStatus: readonly(mouseCnnStatus),
+    loadedClassifierInfo: readonly(loadedClassifierInfo),
 
     // Session controls
     start,
@@ -1086,7 +1456,9 @@ export function useSentinel() {
     trainAIModels,
     enrollFace,
     getAIModelStatus,
+    refreshUserModelsStatus,
     setAIScoringEnabled,
+    setPasteClassifierEnabled,
     setCameraOptedIn,
     testBlobAgainstClassifier,
   }
