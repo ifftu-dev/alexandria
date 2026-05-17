@@ -1,0 +1,10 @@
+# Generated artifacts — not committed. Re-generate via `python featurize.py`
+# and `cargo run -p alex -- synth-sentinel generate-all` per the runbook.
+.venv/
+__pycache__/
+*.npz
+*.onnx
+*.onnx.data
+priors/
+holdout/
+eval.json

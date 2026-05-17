@@ -3,6 +3,7 @@ mod commands;
 mod context;
 mod output;
 mod runner;
+mod synth;
 mod tauri_config;
 
 use std::path::PathBuf;
@@ -10,7 +11,7 @@ use std::path::PathBuf;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
-use commands::{build, clean, config, credentials, db, dev, health, run};
+use commands::{build, clean, config, credentials, db, dev, health, run, synth_sentinel};
 use context::ProjectContext;
 
 #[derive(Parser)]
@@ -62,6 +63,10 @@ enum Commands {
     /// Clean build artifacts and app data
     #[command(subcommand)]
     Clean(clean::CleanCommand),
+
+    /// Generate synthetic adversarial-prior data for the Sentinel paste classifier
+    #[command(subcommand, name = "synth-sentinel")]
+    SynthSentinel(synth_sentinel::SynthSentinelCommand),
 }
 
 fn main() {
@@ -88,5 +93,6 @@ fn run(cli: Cli) -> Result<()> {
         Commands::Config(cmd) => config::execute(cmd, &ctx),
         Commands::Health => health::execute(&ctx),
         Commands::Clean(cmd) => clean::execute(cmd, &ctx),
+        Commands::SynthSentinel(cmd) => synth_sentinel::execute(cmd),
     }
 }

@@ -6,3 +6,4 @@ pub mod db;
 pub mod dev;
 pub mod health;
 pub mod run;
+pub mod synth_sentinel;
