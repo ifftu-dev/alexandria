@@ -108,7 +108,7 @@ async function runEvaluation() {
       evalError.value = `unsupported model_kind: ${kind}`
       return
     }
-    const verdict = testBlobAgainstClassifier(kind, blob.samples)
+    const verdict = await testBlobAgainstClassifier(kind, blob.samples)
     if (verdict === null) {
       evalVerdictUntrained.value = true
     } else {

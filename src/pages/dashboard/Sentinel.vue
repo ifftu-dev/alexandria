@@ -4,8 +4,14 @@ import { useRouter } from 'vue-router'
 import { AppButton, AppBadge, EmptyState } from '@/components/ui'
 import { useSentinel } from '@/composables/useSentinel'
 import { useLocalApi } from '@/composables/useLocalApi'
+import { getLoadedClassifierInfo } from '@/composables/useSentinel'
 import SentinelTrainingWizard from '@/components/integrity/SentinelTrainingWizard.vue'
-import type { IntegritySession, SentinelDaoInfo, SentinelHoldoutRef } from '@/types'
+import type {
+  IntegritySession,
+  SentinelDaoInfo,
+  SentinelHoldoutRef,
+  ActivePasteClassifier,
+} from '@/types'
 
 const router = useRouter()
 
@@ -16,7 +22,12 @@ const {
   resetProfile,
   aiScoringEnabled,
   setAIScoringEnabled,
+  pasteClassifierEnabled,
+  setPasteClassifierEnabled,
 } = useSentinel()
+
+const loadedClassifier = ref(getLoadedClassifierInfo())
+const activeDaoClassifier = ref<ActivePasteClassifier | null>(null)
 
 const showWizard = ref(false)
 const sessions = ref<IntegritySession[]>([])
@@ -25,8 +36,8 @@ const profile = ref<Record<string, unknown> | null>(null)
 const sentinelDao = ref<SentinelDaoInfo | null>(null)
 const holdouts = ref<SentinelHoldoutRef[]>([])
 const aiStatus = ref<{
-  keystrokeAE: { trained: boolean; loss: number; samples: number } | null
-  mouseCNN: { trained: boolean; loss: number; samples: number } | null
+  keystrokeAE: { trained: boolean; epochs: number; samples: number; loss: number } | null
+  mouseCNN: { trained: boolean; epochs: number; samples: number; loss: number } | null
   faceEmbedder: { enrolled: boolean; progress: number } | null
 } | null>(null)
 
@@ -43,6 +54,7 @@ const signalWeights = [
   { name: 'Paste Activity', key: 'paste_events', weight: 10, description: 'Clipboard paste event count and total pasted character volume' },
   { name: 'DevTools Detection', key: 'devtools_detected', weight: 10, description: 'Browser developer tools heuristic — checks for debugger, firebug, and DOM probing' },
   { name: 'Camera Verification', key: 'face_present', weight: 15, description: 'Continuous face verification every 3s via LBP embeddings (camera opt-in only)' },
+  { name: 'Paste Classifier (ONNX)', key: 'ai_paste_anomaly', weight: 5, description: 'ONNX-based paste / typing-bot / LLM-paste-edit detector. Advisory weight when AI scoring enabled. Flags at ≥0.95 (warning) and ≥0.99 (critical).' },
 ]
 
 // ---------------------------------------------------------------------------
@@ -143,6 +155,15 @@ async function loadData() {
     } catch {
       holdouts.value = []
     }
+    try {
+      activeDaoClassifier.value = await invoke<ActivePasteClassifier | null>(
+        'sentinel_get_active_paste_classifier',
+      )
+    } catch (e) {
+      console.warn('Active paste classifier unavailable:', e)
+      activeDaoClassifier.value = null
+    }
+    loadedClassifier.value = getLoadedClassifierInfo()
   } catch (e) {
     console.error('Failed to load sentinel data:', e)
   } finally {
@@ -444,6 +465,23 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
           </div>
         </div>
 
+        <!-- Cheat-test diagnostic -->
+        <div class="card p-5">
+          <div class="flex items-center justify-between">
+            <div>
+              <h2 class="text-sm font-semibold text-foreground">Paste-Classifier Cheat Test</h2>
+              <p class="mt-1 text-xs text-muted-foreground">
+                Drive the active classifier with synthetic attack streams. Reports per-archetype
+                score + flag without typing a single keystroke. Diagnostic only — does not
+                replace real-world FPR measurement.
+              </p>
+            </div>
+            <AppButton size="sm" variant="secondary" @click="router.push('/dashboard/sentinel/cheat-test')">
+              Open
+            </AppButton>
+          </div>
+        </div>
+
         <!-- Engine Status -->
         <div class="card p-5">
           <div class="mb-4 flex items-center justify-between">
@@ -662,6 +700,69 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
       <!-- PROFILE & FLAGS TAB                                              -->
       <!-- ================================================================ -->
       <template v-else-if="activeTab === 'profile'">
+        <!-- Per-model training status (backend candle) -->
+        <div class="card p-5">
+          <h2 class="mb-4 text-sm font-semibold text-foreground">AI Model Training Status</h2>
+          <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
+            <div class="rounded bg-muted/40 p-4">
+              <div class="flex items-center justify-between">
+                <div class="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  Keystroke Autoencoder
+                </div>
+                <AppBadge :variant="aiStatus?.keystrokeAE?.trained ? 'success' : 'secondary'">
+                  {{ aiStatus?.keystrokeAE?.trained ? 'trained' : 'untrained' }}
+                </AppBadge>
+              </div>
+              <div class="mt-3 grid grid-cols-3 gap-2 text-xs">
+                <div>
+                  <div class="text-muted-foreground">Epochs</div>
+                  <div class="font-mono text-foreground">{{ aiStatus?.keystrokeAE?.epochs ?? '—' }}</div>
+                </div>
+                <div>
+                  <div class="text-muted-foreground">Samples</div>
+                  <div class="font-mono text-foreground">{{ aiStatus?.keystrokeAE?.samples ?? '—' }}</div>
+                </div>
+                <div>
+                  <div class="text-muted-foreground">Loss</div>
+                  <div class="font-mono text-foreground">
+                    {{ aiStatus?.keystrokeAE?.loss !== undefined ? aiStatus.keystrokeAE.loss.toFixed(3) : '—' }}
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="rounded bg-muted/40 p-4">
+              <div class="flex items-center justify-between">
+                <div class="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  Mouse Trajectory CNN
+                </div>
+                <AppBadge :variant="aiStatus?.mouseCNN?.trained ? 'success' : 'secondary'">
+                  {{ aiStatus?.mouseCNN?.trained ? 'trained' : 'untrained' }}
+                </AppBadge>
+              </div>
+              <div class="mt-3 grid grid-cols-3 gap-2 text-xs">
+                <div>
+                  <div class="text-muted-foreground">Epochs</div>
+                  <div class="font-mono text-foreground">{{ aiStatus?.mouseCNN?.epochs ?? '—' }}</div>
+                </div>
+                <div>
+                  <div class="text-muted-foreground">Samples</div>
+                  <div class="font-mono text-foreground">{{ aiStatus?.mouseCNN?.samples ?? '—' }}</div>
+                </div>
+                <div>
+                  <div class="text-muted-foreground">Loss</div>
+                  <div class="font-mono text-foreground">
+                    {{ aiStatus?.mouseCNN?.loss !== undefined ? aiStatus.mouseCNN.loss.toFixed(3) : '—' }}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <p class="mt-3 text-xs text-muted-foreground">
+            Weights persist in the encrypted SQLite DB under <code>sentinel_user_models</code>.
+            Retrain via the calibration wizard. Reset wipes the rows entirely.
+          </p>
+        </div>
+
         <!-- Behavioral Profile -->
         <div class="card p-5">
           <div class="mb-4 flex items-center justify-between">
@@ -860,9 +961,9 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
             <div>
               <h2 class="text-sm font-semibold text-foreground">Advisory AI Scoring</h2>
               <p class="mt-1 text-xs text-muted-foreground">
-                Fold keystroke autoencoder, mouse CNN, and face LBP scores into the
-                integrity calculation at a small advisory weight. Off by default — AI
-                signals are considered advisory until validated with labeled data.
+                Fold keystroke autoencoder, mouse CNN, face LBP, and paste-classifier
+                scores into the integrity calculation at a small advisory weight. Off
+                by default — AI signals are advisory until validated with labeled data.
               </p>
             </div>
             <AppButton
@@ -872,6 +973,49 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
             >
               {{ aiScoringEnabled ? 'Enabled' : 'Disabled' }}
             </AppButton>
+          </div>
+        </div>
+
+        <!-- Per-signal opt-out: paste classifier -->
+        <div class="card p-5">
+          <div class="flex items-center justify-between gap-4">
+            <div>
+              <h2 class="text-sm font-semibold text-foreground">Paste Classifier (ONNX)</h2>
+              <p class="mt-1 text-xs text-muted-foreground">
+                Contributes the <code>ai_paste_anomaly</code> signal when AI scoring is on.
+                Disable if false-positive rate proves disruptive; other AI signals stay
+                active.
+              </p>
+            </div>
+            <AppButton
+              :variant="pasteClassifierEnabled ? 'primary' : 'secondary'"
+              size="sm"
+              @click="setPasteClassifierEnabled(!pasteClassifierEnabled)"
+            >
+              {{ pasteClassifierEnabled ? 'Enabled' : 'Disabled' }}
+            </AppButton>
+          </div>
+          <div class="mt-4 grid grid-cols-2 gap-3 text-xs">
+            <div class="rounded bg-muted/40 p-2">
+              <div class="text-muted-foreground">Loaded model</div>
+              <div class="font-mono text-foreground">
+                {{ loadedClassifier.version ?? '—' }}
+                <span v-if="loadedClassifier.source" class="ml-1 text-muted-foreground">
+                  ({{ loadedClassifier.source }})
+                </span>
+              </div>
+            </div>
+            <div class="rounded bg-muted/40 p-2">
+              <div class="text-muted-foreground">Active DAO model</div>
+              <div v-if="activeDaoClassifier" class="font-mono text-foreground">
+                {{ activeDaoClassifier.version }}
+                <span class="ml-1 text-muted-foreground">
+                  TPR={{ activeDaoClassifier.eval_tpr.toFixed(2) }}
+                  FPR={{ activeDaoClassifier.eval_fpr.toFixed(2) }}
+                </span>
+              </div>
+              <div v-else class="font-mono text-muted-foreground">bundled fallback</div>
+            </div>
           </div>
         </div>
 

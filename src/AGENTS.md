@@ -80,10 +80,12 @@ DataRow, EmptyState, StatusBadge
 
 | File | Lines | Role |
 |------|-------|------|
-| `composables/useSentinel.ts` | 903 | Sentinel monitoring + on-device ML |
-| `types/index.ts` | 1332 | All TS domain interfaces |
-| `utils/sentinel/mouse-trajectory-cnn.ts` | 413 | 90 functions — gesture classifier |
-| `utils/sentinel/keystroke-autoencoder.ts` | 397 | 67 functions — keystroke ML |
-| `utils/sentinel/face-embedder.ts` | 380 | 66 functions — face embedding |
+| `composables/useSentinel.ts` | ~1.4k | Sentinel monitoring — event buffers + IPC dispatch to backend ML |
+| `types/index.ts` | ~1.4k | All TS domain interfaces |
+| `utils/sentinel/face-embedder.ts` | 380 | LBP face embedder (pure pixel math, only TS ML left after backend rewrite) |
+| `../src-tauri/src/sentinel/paste_classifier.rs` | ~420 | tract ONNX paste classifier (backend) |
+| `../src-tauri/src/sentinel/keystroke_ae.rs` | ~440 | candle autoencoder (backend) |
+| `../src-tauri/src/sentinel/mouse_cnn.rs` | ~390 | candle dense-head CNN (backend) |
+| `../src-tauri/src/sentinel/features.rs` | ~210 | 12-dim feature extractor (backend) |
 | `pages/learn/Player.vue` | 1037 | Course player with video/quiz |
 | `pages/tutoring/Session.vue` | 1137 | Live tutoring UI |
