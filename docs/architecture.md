@@ -467,6 +467,8 @@ The frontend communicates with the Rust backend via **194 Tauri IPC commands** r
 | challenge | 7 | `submit_challenge`, `cast_challenge_vote`, `resolve_challenge` |
 | opinions | 6 | `submit_opinion`, `list_opinions`, `aggregate_opinions` |
 | integrity | 6 | `start_session`, `submit_snapshot`, `get_session_score` |
+| sentinel_ml | 11 | `sentinel_score_paste`, `sentinel_train_keystroke_ae`, `sentinel_score_keystroke_ae`, `sentinel_train_mouse_cnn`, `sentinel_score_mouse_cnn`, `sentinel_user_models_status`, `sentinel_load_dao_classifier`, `sentinel_paste_classifier_info`, `sentinel_revert_classifier_to_bundled`, `sentinel_extract_digraphs`, `sentinel_reset_user_models` |
+| sentinel_priors | 9 | `sentinel_propose_prior`, `sentinel_ratify_prior`, `sentinel_priors_list`, `sentinel_priors_sync`, `sentinel_priors_load`, `sentinel_get_active_paste_classifier`, `sentinel_set_kill_switch`, `sentinel_blocklist_version`, `sentinel_unblocklist_version` |
 | content | 6 | `store_content`, `get_content`, `resolve_cid` |
 | pinning | 5 | `declare_pinboard_commitment`, `revoke_pinboard_commitment`, `list_my_commitments`, `list_incoming_commitments`, `get_quota_breakdown` |
 | storage | 4 | `get_storage_stats`, `set_storage_quota`, `prune_cache`, `get_storage_settings` |
