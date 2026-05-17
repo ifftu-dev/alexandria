@@ -7,6 +7,42 @@ and this project loosely follows [Semantic Versioning](https://semver.org/spec/v
 
 ## [Unreleased]
 
+### Sentinel — backend ML rewrite (PRs #166, #170, #171, #172)
+
+- **#166** — Synthetic adversarial-prior data generator (`alex
+  synth-sentinel`) + Python training kit (`tools/sentinel-train/`).
+  Deterministic ChaCha20 generators for six attack archetypes
+  (paste_macro, typing_bot_constant / _jitter, llm_paste_edit,
+  remote_control, human_baseline). Per-label blake2b-512 golden
+  hashes pin SYNTH_VERSION = "v1" against drift in CI.
+- **#170** — Backend ML moved into the Rust crate. `tract-onnx` runs
+  the frozen paste classifier (5 KB ONNX embedded via
+  `include_bytes!`); `candle` trains + scores the per-user keystroke
+  autoencoder + mouse-trajectory CNN. New `sentinel_ml` IPC surface
+  (11 commands) + DAO-weights distribution hardening (three-layer
+  re-verify, 256-node + 50 MiB caps, 5 s resolver timeout, atomic
+  revert on kill-switch / blocklist). Migrations 044–047 add
+  `ai_paste_anomaly`, weights columns on `sentinel_priors`,
+  `sentinel_kill_switch`, `sentinel_weights_blocklist`,
+  `sentinel_user_models`. 637 backend tests pass (+28 sentinel module
+  tests).
+- **#171** — `useSentinel.ts` strips every JS ML class and dispatches
+  to the new backend IPCs; module-scope refs source from the backend
+  on session start. New `/dashboard/sentinel/cheat-test` page drives
+  the bundled tract classifier with six synthetic streams. Wizard
+  gains a welcome explainer (per-user models vs always-on classifier),
+  per-step skip buttons that preserve existing models, and a
+  retrained/kept-existing review badge. Mobile gate retired —
+  pure-Rust ML runs on iOS WKWebView + Android WebView with no CSP /
+  WASM constraints. `onnxruntime-web`, `vite-plugin-static-copy`,
+  and `'wasm-unsafe-eval'` all removed. Mac DMG: 30 MB → 16 MB.
+- **#172** — `docs/sentinel-runbook.md` (5 operator procedures + threat
+  model + incident response template); post-rewrite doc sweep on
+  `sentinel.md`, `sentinel-adversarial-priors.md`,
+  `sentinel-federation.md`, `project-structure.md`, `architecture.md`.
+  CI integrity step now verifies the backend `paste-v1.onnx.sha256`
+  pin.
+
 ## [0.1.0-alpha] - 2026-04-14
 
 ### Added — VC-first credential migration (PRs 2–19)

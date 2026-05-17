@@ -107,6 +107,13 @@ src-tauri/
     │   └── stress.rs       # High-volume P2P stress tests
     │
     ├── classroom/          # Classroom manager + gossip/types
+    ├── sentinel/           # Backend Sentinel ML (tract + candle)
+    │   ├── types.rs        # KeystrokeEvent / MousePoint / DigraphFeatures
+    │   ├── features.rs     # 12-dim windowed feature extractor (paste classifier)
+    │   ├── paste_classifier.rs  # tract ONNX inference; embedded paste-v1.onnx
+    │   ├── keystroke_ae.rs # Per-user autoencoder (candle autograd)
+    │   └── mouse_cnn.rs    # Reservoir-style trajectory CNN (candle dense head)
+    │
     ├── tutoring/           # iroh-live integration
     │   ├── mod.rs
     │   ├── manager.rs      # Desktop + Android tutoring manager
@@ -225,10 +232,11 @@ src/
 │
 └── utils/
     ├── sanitize.ts         # DOMPurify wrappers for HTML and SVG sanitization
-    └── sentinel/           # Client-side ML models
-        ├── keystroke-autoencoder.ts
-        ├── mouse-trajectory-cnn.ts
-        └── face-embedder.ts
+    └── sentinel/           # Frontend Sentinel helpers
+        └── face-embedder.ts  # LBP face embedding (pure pixel math)
+                              # Keystroke AE, mouse CNN, paste classifier
+                              # all moved to the backend Rust crate -- see
+                              # src-tauri/src/sentinel/ and docs/sentinel.md
 ```
 
 ---

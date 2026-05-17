@@ -336,7 +336,7 @@ Option A without any one of those is a mission regression disguised as a feature
 | Three-layer content-addressed re-verification | ✅ shipped | `verify_weights_candidate` checks DB ↔ envelope ↔ eval JSON |
 | Resolver timeout + bytes size cap | ✅ shipped | 5 s timeout; 1 MiB envelope/eval; 50 MiB ONNX |
 | Mobile gate retired | ✅ shipped | `pasteClassifierDisabled()` removed post-backend rewrite — pure-Rust ML runs everywhere Tauri does |
-| Tauri CSP allows ONNX WASM | ✅ shipped | `'wasm-unsafe-eval'` in `tauri.conf.json` |
+| Tauri CSP — `'wasm-unsafe-eval'` retired | ✅ shipped | Removed when ML moved off the WebView. No WASM in `script-src`. |
 | Operator kill switch (migration 046) | ✅ shipped | `sentinel_set_kill_switch` / `sentinel_get_kill_switch` |
 | Version blocklist (migration 046) | ✅ shipped | `sentinel_blocklist_version` / `sentinel_unblocklist_version` |
 | Per-signal opt-out toggle | ✅ shipped | `sentinel_paste_classifier_enabled` localStorage flag |

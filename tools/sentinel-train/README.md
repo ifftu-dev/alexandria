@@ -1,6 +1,8 @@
 # Sentinel Paste-Classifier Training Kit
 
-Trains the ONNX model consumed by `src/utils/sentinel/paste-classifier.ts`.
+Trains the ONNX model loaded by `src-tauri/src/sentinel/paste_classifier.rs`
+via `tract-onnx` (embedded into the Rust backend at compile time via
+`include_bytes!` from `src-tauri/resources/sentinel/paste-v1.onnx`).
 
 **Out-of-tree by intent.** Per `docs/sentinel-federation.md`, the training
 side-channel does not ship with the Alexandria client. This directory exists
@@ -48,7 +50,8 @@ synth-sentinel  ->  featurize.py  ->  train.py  ->  paste-v1.onnx
 
 The plan referenced a small transformer encoder over digraph sequences. The
 shipped Sentinel feature path aggregates a snapshot into a 12-dim vector
-*before* inference (see `src/utils/sentinel/paste-features.ts`), so a
+*before* inference (see `src-tauri/src/sentinel/features.rs` and the
+matching `featurize.py` in this directory — both bit-identical), so a
 2-layer MLP is the right model. The transformer option stays open if a
 later sequence-level feature path lands.
 
