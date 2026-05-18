@@ -41,7 +41,8 @@ pub async fn plugin_install_from_file(
     let db = db_guard.as_ref().ok_or("database not initialized")?;
 
     let src = PathBuf::from(&directory);
-    registry::install_from_directory(db, &state.plugins_dir, &src)
+    let plugins_dir = state.plugins_dir()?;
+    registry::install_from_directory(db, &plugins_dir, &src)
 }
 
 /// Uninstall a plugin by CID. Removes the bundle directory and cascades
@@ -59,7 +60,8 @@ pub async fn plugin_uninstall(
         .map_err(|_| "database lock poisoned".to_string())?;
     let db = db_guard.as_ref().ok_or("database not initialized")?;
 
-    registry::uninstall(db, &state.plugins_dir, &plugin_cid)
+    let plugins_dir = state.plugins_dir()?;
+    registry::uninstall(db, &plugins_dir, &plugin_cid)
 }
 
 /// List every plugin installed on this node, newest first.
