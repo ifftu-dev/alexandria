@@ -220,13 +220,6 @@ const router = createRouter({
       component: () => import('@/pages/dashboard/sentinel/CheatTest.vue'),
       meta: { layout: 'app' },
     },
-    {
-      path: '/dashboard/settings',
-      name: 'dashboard-settings',
-      component: () => import('@/pages/dashboard/Settings.vue'),
-      meta: { layout: 'app' },
-    },
-
     // Community plugins.
     {
       path: '/plugins',
