@@ -183,7 +183,7 @@ src/
 │   ├── AppLayout.vue       # Sidebar + content area
 │   └── BlankLayout.vue     # Full-screen (onboarding, unlock)
 │
-├── pages/                  # 30 route views
+├── pages/                  # 29 route views
 │   ├── Home.vue
 │   ├── Onboarding.vue
 │   ├── Unlock.vue
@@ -202,7 +202,6 @@ src/
 │   │   ├── Network.vue
 │   │   ├── Reputation.vue
 │   │   ├── Sentinel.vue
-│   │   ├── Settings.vue
 │   │   └── Sync.vue
 │   ├── governance/
 │   │   ├── DaoDetail.vue
