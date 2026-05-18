@@ -67,7 +67,7 @@ central API, no hosted database, and no Docker infrastructure.
 |  |   Vue 3 UI     |--IPC--->|    Rust Backend      |  |
 |  |   (WebView)    | 194     |                      |  |
 |  |                | cmds    |  +----------------+  |  |
-|  |  30 pages      |         |  |   SQLite DB    |  |  |
+|  |  29 pages      |         |  |   SQLite DB    |  |  |
 |  |  34 components |         |  |   66 tables    |  |  |
 |  |  14 composables|         |  |   30 migrations|  |  |
 |  +----------------+         |  +----------------+  |  |
@@ -408,7 +408,7 @@ Reputation impact computed (instructor attribution)
 
 **Stack**: Vue 3 + TypeScript + Vite + Tailwind CSS v4
 
-### Pages (30 routes)
+### Pages (29 routes)
 
 | Page | Route | Description |
 |------|-------|-------------|
@@ -436,7 +436,6 @@ Reputation impact computed (instructor attribution)
 | Network | `/dashboard/network` | P2P status, connected peers |
 | Sync | `/dashboard/sync` | Cross-device sync status |
 | Sentinel | `/dashboard/sentinel` | Integrity training, sessions |
-| Settings | `/dashboard/settings` | Theme, profile, app config |
 
 ### Design System
 
