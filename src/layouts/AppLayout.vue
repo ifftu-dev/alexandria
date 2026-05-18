@@ -5,6 +5,7 @@ import AppBottomBar from '@/components/layout/AppBottomBar.vue'
 import MobileTabBar from '@/components/layout/MobileTabBar.vue'
 import TutoringPiP from '@/components/layout/TutoringPiP.vue'
 import OmniSearch from '@/components/omni/OmniSearch.vue'
+import SettingsModal from '@/components/settings/SettingsModal.vue'
 import { usePlatform } from '@/composables/usePlatform'
 import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
@@ -109,5 +110,8 @@ function toggleSidebar() {
 
     <!-- Global omni search palette (Cmd+K / Ctrl+K / "/") -->
     <OmniSearch />
+
+    <!-- Global settings modal (Cmd+, / Ctrl+,) -->
+    <SettingsModal />
   </div>
 </template>
