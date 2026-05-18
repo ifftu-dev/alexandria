@@ -5,16 +5,23 @@ const router = createRouter({
   routes: [
     // ---- Auth (blank layout) ----
     {
+      path: '/profiles',
+      name: 'profiles',
+      component: () => import('@/pages/ProfileSelect.vue'),
+      meta: { layout: 'blank' },
+    },
+    {
       path: '/onboarding',
       name: 'onboarding',
       component: () => import('@/pages/Onboarding.vue'),
       meta: { layout: 'blank' },
     },
     {
+      // Legacy /unlock — redirects to picker now. Kept so any cached
+      // deep link from the pre-multi-user release still routes somewhere
+      // sane.
       path: '/unlock',
-      name: 'unlock',
-      component: () => import('@/pages/Unlock.vue'),
-      meta: { layout: 'blank' },
+      redirect: '/profiles',
     },
 
     // ---- App routes (app layout, wallet required) ----

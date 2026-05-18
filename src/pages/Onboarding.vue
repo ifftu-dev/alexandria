@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useAuth } from '@/composables/useAuth'
+import { useProfiles } from '@/composables/useProfiles'
 import { biometricSupported, storeVaultPasswordForBiometric } from '@/composables/useBiometricVault'
 import { listen } from '@tauri-apps/api/event'
 import type { UnlistenFn } from '@tauri-apps/api/event'
@@ -9,9 +9,10 @@ import Starfield from '@/components/auth/Starfield.vue'
 
 const router = useRouter()
 const route = useRoute()
-const { generateWallet: authGenerate, restoreWallet: authRestore, checkVaultExists } = useAuth()
+const { profiles, refreshProfiles, createProfile, restoreProfileWithMnemonic } = useProfiles()
 
-const vaultExists = ref(false)
+const vaultExists = computed(() => profiles.value.length > 0)
+const displayName = ref('')
 
 type Step = 'welcome' | 'password' | 'generating' | 'backup' | 'done'
 type Mode = 'create' | 'import'
@@ -40,12 +41,15 @@ onMounted(async () => {
     progressLines.value.push(event.payload.detail)
   })
 
-  // Check if a vault already exists (user may want to sign in instead)
   try {
-    vaultExists.value = await checkVaultExists()
+    await refreshProfiles()
+    if (!displayName.value) {
+      displayName.value = profiles.value.length === 0
+        ? 'My Profile'
+        : `Profile ${profiles.value.length + 1}`
+    }
     biometricAvailable.value = await biometricSupported()
   } catch {
-    // ignore
     biometricAvailable.value = false
   }
 
@@ -173,7 +177,7 @@ async function createWallet() {
   currentStep.value = ''
 
   try {
-    const result = await authGenerate(password.value)
+    const result = await createProfile(displayName.value.trim() || 'My Profile', password.value)
     mnemonic.value = result.mnemonic
     try {
       if (enableBiometricOnSetup.value && biometricAvailable.value) {
@@ -210,7 +214,11 @@ async function restoreWallet() {
   currentStep.value = ''
 
   try {
-    await authRestore(phrase, password.value)
+    await restoreProfileWithMnemonic(
+      displayName.value.trim() || 'My Profile',
+      phrase,
+      password.value,
+    )
     try {
       if (enableBiometricOnSetup.value && biometricAvailable.value) {
         const mode = await storeVaultPasswordForBiometric(password.value)
@@ -409,9 +417,24 @@ function enterApp() {
           </p>
         </div>
 
-        <!-- Password fields -->
+        <!-- Profile + password fields -->
         <div class="card p-5 mb-4">
           <div class="space-y-4">
+            <div>
+              <label class="block text-xs font-medium text-muted-foreground mb-1.5">
+                Profile name
+              </label>
+              <input
+                v-model="displayName"
+                type="text"
+                maxlength="64"
+                placeholder="Who is this profile for?"
+                class="w-full px-3 py-2 text-sm rounded-md border border-border bg-background focus:outline-none focus:ring-2 focus:ring-ring"
+              >
+              <p class="mt-1 text-xs text-muted-foreground">
+                Shown on the profile picker. You can rename it later.
+              </p>
+            </div>
             <div>
               <label class="block text-xs font-medium text-muted-foreground mb-1.5">
                 Password

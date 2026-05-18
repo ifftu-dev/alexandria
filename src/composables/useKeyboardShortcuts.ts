@@ -56,6 +56,7 @@ const DEFAULT_SHORTCUTS: Record<string, { label: string; keys: KeyCombo }> = {
   'nav-back': { label: 'Navigate back', keys: combo('[') },
   'nav-forward': { label: 'Navigate forward', keys: combo(']') },
   'focus-search': { label: 'Focus search (no modifier)', keys: combo('/', false) },
+  'switch-profile': { label: 'Switch user', keys: combo('u', true, true) },
 }
 
 // ---- Global state (singleton) ----------------------------------------

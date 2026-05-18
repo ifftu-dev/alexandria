@@ -28,6 +28,34 @@ export interface ProfileUpdate {
   avatar_cid?: string | null
 }
 
+// ---- Multi-user profile picker ----
+
+export type Avatar =
+  | { kind: 'emoji'; value: string }
+  | { kind: 'image'; value: { hash: string } }
+  | { kind: 'identicon' }
+
+export interface ProfileSummary {
+  id: string
+  display_name: string
+  avatar: Avatar
+  color: string
+  created_at: string
+  last_unlocked_at: string | null
+}
+
+export interface CreateProfileResponse {
+  summary: ProfileSummary
+  mnemonic: string
+  wallet: WalletInfo
+  profile: Identity | null
+}
+
+export interface UnlockProfileResponse {
+  wallet: WalletInfo
+  profile: Identity | null
+}
+
 export interface PublishProfileResult {
   profile_hash: string
   profile: SignedProfile

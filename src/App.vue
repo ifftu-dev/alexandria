@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow'
 import AppLayout from '@/layouts/AppLayout.vue'
 import BlankLayout from '@/layouts/BlankLayout.vue'
-import { useAuth } from '@/composables/useAuth'
+import { useProfiles } from '@/composables/useProfiles'
 import { initTheme } from '@/composables/useTheme'
 import { isMac } from '@/composables/usePlatform'
 
@@ -29,7 +29,7 @@ function onWheel(e: WheelEvent) {
 
 const route = useRoute()
 const router = useRouter()
-const { initialize } = useAuth()
+const { initialize } = useProfiles()
 
 const ready = ref(false)
 
@@ -47,12 +47,12 @@ onMounted(async () => {
 
     if (state === 'onboarding' && route.name !== 'onboarding') {
       router.replace('/onboarding')
-    } else if (state === 'unlock' && route.name !== 'unlock') {
-      router.replace('/unlock')
+    } else if (state === 'picker' && route.name !== 'profiles' && route.name !== 'onboarding') {
+      router.replace('/profiles')
     }
   } catch {
-    if (route.name !== 'onboarding') {
-      router.replace('/onboarding')
+    if (route.name !== 'onboarding' && route.name !== 'profiles') {
+      router.replace('/profiles')
     }
   }
 
