@@ -38,6 +38,17 @@ const ready = ref(false)
 const loading = ref(false)
 let unlisten: UnlistenFn | null = null
 
+/**
+ * Clear the local cache. Called when the active profile is locked —
+ * keeps composables that derive from `entries` (theme, shortcuts,
+ * recents, sentinel toggles) from showing the previous profile's
+ * values while the picker is up.
+ */
+export function clearSettingsCache(): void {
+  entries.value = []
+  ready.value = false
+}
+
 // `entries` keyed by `key` for O(1) lookup.
 const byKey = computed(() => {
   const out = new Map<string, SettingEntry>()
@@ -58,7 +69,13 @@ async function initialize(): Promise<void> {
     // Listen for in-process writes from other windows + inbound sync.
     if (!unlisten) {
       unlisten = await listen<{ key: string | null }>('settings-changed', async () => {
-        await refresh()
+        try {
+          await refresh()
+        } catch {
+          // Refresh may fail if the active profile was locked between
+          // emit and handler. Treat that as "no overrides".
+          entries.value = []
+        }
       })
     }
     ready.value = true

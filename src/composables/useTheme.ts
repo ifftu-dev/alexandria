@@ -1,16 +1,30 @@
-import { onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, watch } from 'vue'
 
-import { useSettings } from './useSettings'
+import { useSetting, useSettings } from './useSettings'
 
 type Theme = 'light' | 'dark' | 'system'
 
 const SETTING_KEY = 'ui.theme'
-const LEGACY_LOCALSTORAGE_KEY = 'alexandria-theme'
+// Pre-unlock cache — only used by `initTheme()` to avoid a startup
+// theme flash before any profile is unlocked. The per-profile
+// `app_settings` store (via `useSetting`) is the source of truth.
+const PRE_UNLOCK_CACHE_KEY = 'alexandria-theme-pre-unlock'
 
-const theme = ref<Theme>('system')
 let initialized = false
 let mediaQuery: MediaQueryList | null = null
 let mediaHandler: (() => void) | null = null
+
+// Reactive ref bound to the per-profile setting. When the active
+// profile changes (lock + unlock) or a sync delivery updates the
+// theme, this ref tracks automatically via the `useSettings` event
+// bridge.
+const setting = useSetting<string>(SETTING_KEY)
+
+function readTheme(): Theme {
+  const v = setting.ref.value
+  if (v === 'light' || v === 'dark' || v === 'system') return v
+  return 'system'
+}
 
 function applyTheme(t: Theme) {
   const isDark =
@@ -23,41 +37,47 @@ function applyTheme(t: Theme) {
 /**
  * Apply the last-known theme synchronously before the first render.
  *
- * Reads from localStorage as a hint (no async IPC available pre-mount,
- * and the profile may not even be unlocked yet). Once a profile is
- * active, `initThemeFromSettings()` resyncs with the per-profile
- * settings store.
+ * Uses a localStorage hint (no async IPC is available at this point
+ * and no profile has been unlocked yet). The cache is intentionally
+ * NOT keyed per profile because the picker has no concept of an
+ * active user. Once a profile unlocks, `useSetting('ui.theme')`
+ * (above) takes over as the reactive source of truth.
  */
 export function initTheme() {
   if (initialized) return
   initialized = true
 
-  const stored = localStorage.getItem(LEGACY_LOCALSTORAGE_KEY) as Theme | null
-  if (stored) theme.value = stored
-  applyTheme(theme.value)
+  const stored = localStorage.getItem(PRE_UNLOCK_CACHE_KEY) as Theme | null
+  if (stored === 'light' || stored === 'dark' || stored === 'system') {
+    applyTheme(stored)
+  } else {
+    applyTheme('system')
+  }
 }
 
-/** Hydrate from the per-profile settings store. Call once after profile unlock. */
+/**
+ * Reconcile with the active profile's theme. Idempotent — call
+ * after profile unlock from `App.vue::hydrateProfileScopedState`.
+ *
+ * Crucially, this does NOT copy any pre-unlock localStorage value
+ * into the profile's settings store. Each profile owns its theme
+ * independently; the cache is only ever read, never written by this
+ * function. Writes only happen when the user explicitly changes the
+ * theme via `setTheme`/`toggleTheme`.
+ */
 export async function initThemeFromSettings(): Promise<void> {
-  const { entries, initialize } = useSettings()
-  await initialize()
-  const found = entries.value.find((e) => e.key === SETTING_KEY)
-  if (found) {
-    theme.value = found.current_value as Theme
-    applyTheme(theme.value)
-  }
-  // Migrate any pre-multi-user localStorage value into the settings
-  // store the first time we see a fresh profile.
-  const legacy = localStorage.getItem(LEGACY_LOCALSTORAGE_KEY) as Theme | null
-  if (legacy && found?.is_default) {
-    const { setSetting } = useSettings()
-    await setSetting(SETTING_KEY, legacy)
-    theme.value = legacy
-    applyTheme(legacy)
-  }
+  await useSettings().initialize()
+  applyTheme(readTheme())
 }
 
 export function useTheme() {
+  const theme = computed<Theme>({
+    get: () => readTheme(),
+    set: (t: Theme) => {
+      void setting.set(t)
+    },
+  })
+
   onMounted(() => {
     if (!initialized) initTheme()
 
@@ -76,16 +96,20 @@ export function useTheme() {
     }
   })
 
-  watch(theme, (val) => {
-    // Keep localStorage in sync so initTheme() (synchronous, runs
-    // before profile unlock) shows the same theme on next launch.
-    localStorage.setItem(LEGACY_LOCALSTORAGE_KEY, val)
-    applyTheme(val)
-    // Persist to the per-profile settings store; awaiting would
-    // turn this into an async callback and break the watch contract,
-    // so fire-and-forget.
-    void useSettings().setSetting(SETTING_KEY, val)
-  })
+  // React to any change in the per-profile setting — explicit user
+  // toggle, profile switch, or inbound sync from another device.
+  watch(
+    setting.ref,
+    (val) => {
+      const t: Theme =
+        val === 'light' || val === 'dark' || val === 'system' ? val : 'system'
+      // Refresh the pre-unlock cache so the *next* launch paints
+      // the same theme this profile is currently using.
+      localStorage.setItem(PRE_UNLOCK_CACHE_KEY, t)
+      applyTheme(t)
+    },
+    { immediate: true },
+  )
 
   function toggleTheme() {
     const order: Theme[] = ['light', 'dark', 'system']

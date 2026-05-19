@@ -4,12 +4,12 @@ import { useRoute, useRouter } from 'vue-router'
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow'
 import AppLayout from '@/layouts/AppLayout.vue'
 import BlankLayout from '@/layouts/BlankLayout.vue'
-import { useProfiles, onProfileReady } from '@/composables/useProfiles'
+import { useProfiles, onProfileLocked, onProfileReady } from '@/composables/useProfiles'
 import { initTheme, initThemeFromSettings } from '@/composables/useTheme'
 import { initShortcutsFromSettings } from '@/composables/useKeyboardShortcuts'
 import { initOmniRecentsFromSettings } from '@/composables/useOmniSearch'
 import { initSentinelFlagsFromSettings } from '@/composables/useSentinel'
-import { useSettings } from '@/composables/useSettings'
+import { clearSettingsCache, useSettings } from '@/composables/useSettings'
 import { isMac } from '@/composables/usePlatform'
 
 // Apply stored theme immediately (before first render)
@@ -49,6 +49,12 @@ const layout = computed(() => {
  * each `initXFromSettings` is idempotent.
  */
 onProfileReady(() => hydrateProfileScopedState())
+onProfileLocked(() => {
+  // Drop the in-memory settings cache so the picker (and the next
+  // profile that unlocks) does not flash the previously-active
+  // profile's preferences.
+  clearSettingsCache()
+})
 
 async function hydrateProfileScopedState() {
   try {

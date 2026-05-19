@@ -130,6 +130,7 @@ async function lockProfile(): Promise<void> {
   activeProfileId.value = null
   activeWallet.value = null
   activeIdentity.value = null
+  await runProfileLockedCallbacks()
 }
 
 // ── onProfileReady hook ─────────────────────────────────────────
@@ -142,10 +143,16 @@ async function lockProfile(): Promise<void> {
 
 type ProfileReadyCallback = () => void | Promise<void>
 const profileReadyCallbacks = new Set<ProfileReadyCallback>()
+const profileLockedCallbacks = new Set<ProfileReadyCallback>()
 
 export function onProfileReady(cb: ProfileReadyCallback): () => void {
   profileReadyCallbacks.add(cb)
   return () => profileReadyCallbacks.delete(cb)
+}
+
+export function onProfileLocked(cb: ProfileReadyCallback): () => void {
+  profileLockedCallbacks.add(cb)
+  return () => profileLockedCallbacks.delete(cb)
 }
 
 async function runProfileReadyCallbacks(): Promise<void> {
@@ -154,6 +161,16 @@ async function runProfileReadyCallbacks(): Promise<void> {
       await cb()
     } catch (e) {
       console.warn('[useProfiles] onProfileReady callback failed:', e)
+    }
+  }
+}
+
+async function runProfileLockedCallbacks(): Promise<void> {
+  for (const cb of profileLockedCallbacks) {
+    try {
+      await cb()
+    } catch (e) {
+      console.warn('[useProfiles] onProfileLocked callback failed:', e)
     }
   }
 }

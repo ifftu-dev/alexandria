@@ -130,13 +130,20 @@ export async function initShortcutsFromSettings(): Promise<void> {
   const { entries, initialize } = useSettings()
   await initialize()
   const found = entries.value.find((e) => e.key === SETTING_KEY)
-  if (!found) return
-  if (found.is_default) {
-    // Migrate any pre-multi-user localStorage value into the store.
-    const legacy = localStorage.getItem(LEGACY_LOCALSTORAGE_KEY)
-    if (legacy && legacy !== '{}') {
-      await useSettings().setSetting(SETTING_KEY, legacy)
-    }
+
+  // Reset every binding to its factory default before applying the
+  // active profile's overrides. Without this step, a previous
+  // profile's customizations would linger in the singleton on
+  // profile switch.
+  for (const def of Object.values(shortcuts)) {
+    def.keys = { ...def.defaultKeys }
+  }
+
+  if (!found || found.is_default) {
+    // Profile uses defaults — leave the reset above in place.
+    // (The legacy localStorage cache is intentionally NOT imported
+    // here: that would leak the previously-active profile's
+    // customizations into a fresh profile.)
     return
   }
   try {

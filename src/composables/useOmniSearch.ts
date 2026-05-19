@@ -297,14 +297,20 @@ export async function initOmniRecentsFromSettings(): Promise<void> {
   const mod = await import('./useSettings')
   const { entries, initialize } = mod.useSettings()
   await initialize()
+
+  // Clear localStorage + in-memory cache up-front so a previous
+  // profile's recents do not bleed into a fresh one before sync
+  // populates the canonical list.
+  recents.value = []
+  try {
+    if (typeof window !== 'undefined') window.localStorage.removeItem(RECENT_KEY)
+  } catch {
+    /* localStorage may be disabled */
+  }
+
   const found = entries.value.find((e) => e.key === 'ui.omni_recents')
-  if (!found) return
-  if (found.is_default) {
-    // First visit on this profile — migrate localStorage cache.
-    const local = loadRecents()
-    if (local.length > 0) {
-      await mod.useSettings().setSetting('ui.omni_recents', JSON.stringify(local))
-    }
+  if (!found || found.is_default) {
+    // Profile has no recents yet — leave the cleared cache.
     return
   }
   try {
@@ -313,7 +319,7 @@ export async function initOmniRecentsFromSettings(): Promise<void> {
       recents.value = parsed.slice(0, MAX_RECENTS)
     }
   } catch {
-    /* keep cached value */
+    /* keep cleared value */
   }
 }
 
