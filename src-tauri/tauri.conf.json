@@ -38,7 +38,7 @@
       "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'nonce-__TAURI_CSP_NONCE__'; font-src 'self'; img-src 'self' data: blob:; media-src 'self' blob: asset: http://asset.localhost; frame-src plugin:; connect-src 'self' ipc: http://ipc.localhost https://*.blockfrost.io asset: http://asset.localhost",
       "assetProtocol": {
         "enable": true,
-        "scope": ["$APPDATA/videocache/**"]
+        "scope": ["$APPDATA/videocache/**", "$APPDATA/profiles/**/videocache/**"]
       }
     }
   },
