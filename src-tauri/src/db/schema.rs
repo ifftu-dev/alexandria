@@ -55,6 +55,7 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (45, "sentinel_priors_model_weights", MIGRATION_045),
     (46, "sentinel_kill_switch_and_blocklist", MIGRATION_046),
     (47, "sentinel_user_models", MIGRATION_047),
+    (48, "app_settings_scope", MIGRATION_048),
 ];
 
 const MIGRATION_001: &str = r#"
@@ -2028,4 +2029,36 @@ CREATE TABLE IF NOT EXISTS sentinel_user_models (
 
 CREATE INDEX IF NOT EXISTS idx_sentinel_user_models_kind
     ON sentinel_user_models(model_kind);
+"#;
+
+const MIGRATION_048: &str = r#"
+-- ============================================================
+-- Migration 048: App-settings scope discriminator
+--
+-- The single per-profile `app_settings` table is the unified home
+-- for every user-controlled preference (theme, sidebar collapsed,
+-- keyboard shortcuts, sentinel toggles, video defaults, ...).
+-- A `scope` column distinguishes settings that MUST propagate to
+-- every device of the same user (via the existing cross-device
+-- sync) from settings that are inherently local to *this* device
+-- (window geometry, device label).
+--
+-- scope:
+--   'sync'   — replicated across the user's devices (LWW on
+--              `updated_at`). Default for new keys.
+--   'device' — stays on this device only; never enters the sync
+--              feed. Used for window size, device label, etc.
+--
+-- Existing rows seeded at migration 017 (`storage_quota_bytes`)
+-- are reclassified to 'device' because storage quotas depend on
+-- per-device disk capacity.
+-- ============================================================
+
+ALTER TABLE app_settings ADD COLUMN scope TEXT NOT NULL DEFAULT 'sync'
+    CHECK (scope IN ('sync', 'device'));
+
+UPDATE app_settings SET scope = 'device' WHERE key = 'storage_quota_bytes';
+
+CREATE INDEX IF NOT EXISTS idx_app_settings_scope_updated
+    ON app_settings(scope, updated_at);
 "#;

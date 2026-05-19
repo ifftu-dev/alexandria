@@ -13,6 +13,7 @@ pub mod p2p;
 pub mod plugins;
 pub mod profile;
 pub mod sentinel;
+pub mod settings;
 pub mod tutoring;
 
 // Mobile crypto: same modules as desktop but with portable keystore
@@ -801,6 +802,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::health::check_health,
             commands::health::read_diag_log,
+            // App settings (per-profile, scope=sync|device)
+            commands::settings::list_settings,
+            commands::settings::set_setting,
+            commands::settings::reset_setting,
             // Profile lifecycle (multi-user)
             commands::profile::list_profiles,
             commands::profile::get_active_profile_id,

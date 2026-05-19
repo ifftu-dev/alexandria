@@ -256,7 +256,12 @@ function matchesClassroom(c: Classroom, lower: string): boolean {
   return false
 }
 
-// ── Recents (localStorage) ─────────────────────────────────────────
+// ── Recents (per-profile settings, scope=sync) ─────────────────────
+//
+// Read from localStorage first as a synchronous cache so the
+// omni-search opens with results before the per-profile settings
+// store hydrates. `initOmniRecentsFromSettings` (called from
+// App.vue after profile unlock) reconciles with the canonical value.
 
 function loadRecents(): OmniSearchResult[] {
   if (typeof window === 'undefined') return []
@@ -276,6 +281,39 @@ function saveRecents(items: OmniSearchResult[]) {
     window.localStorage.setItem(RECENT_KEY, JSON.stringify(items))
   } catch {
     // storage may be disabled in some contexts — silently ignore
+  }
+  // Persist into the per-profile settings store so the same recents
+  // follow the user across their other devices.
+  void (async () => {
+    const { setSetting } = await import('./useSettings').then((m) => m.useSettings())
+    setSetting('ui.omni_recents', JSON.stringify(items)).catch(() => {
+      /* no profile yet — settings store rejects writes pre-unlock */
+    })
+  })()
+}
+
+/** Reconcile in-memory recents with the per-profile settings store. */
+export async function initOmniRecentsFromSettings(): Promise<void> {
+  const mod = await import('./useSettings')
+  const { entries, initialize } = mod.useSettings()
+  await initialize()
+  const found = entries.value.find((e) => e.key === 'ui.omni_recents')
+  if (!found) return
+  if (found.is_default) {
+    // First visit on this profile — migrate localStorage cache.
+    const local = loadRecents()
+    if (local.length > 0) {
+      await mod.useSettings().setSetting('ui.omni_recents', JSON.stringify(local))
+    }
+    return
+  }
+  try {
+    const parsed = JSON.parse(found.current_value) as OmniSearchResult[]
+    if (Array.isArray(parsed)) {
+      recents.value = parsed.slice(0, MAX_RECENTS)
+    }
+  } catch {
+    /* keep cached value */
   }
 }
 

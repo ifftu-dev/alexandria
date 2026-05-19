@@ -58,26 +58,23 @@ pub struct EvictionResult {
 }
 
 // ── Settings CRUD ───────────────────────────────────────────────────────
+//
+// `storage_quota_bytes` lives in the unified settings store
+// (`settings::registry::keys::STORAGE_QUOTA_BYTES`, scope=device).
+// These wrappers preserve the historical free function signatures so
+// the storage subsystem keeps using a single import path.
 
-/// Read the storage quota from `app_settings`. Returns 0 (unlimited) on error.
+/// Read the storage quota. Returns 0 (unlimited) on error.
 pub fn get_storage_quota(conn: &Connection) -> u64 {
-    conn.query_row(
-        "SELECT value FROM app_settings WHERE key = 'storage_quota_bytes'",
-        [],
-        |row| {
-            let v: String = row.get(0)?;
-            Ok(v.parse::<u64>().unwrap_or(0))
-        },
-    )
-    .unwrap_or(0)
+    crate::settings::SettingsStore::get(conn, crate::settings::registry::keys::STORAGE_QUOTA_BYTES)
 }
 
-/// Persist the storage quota to `app_settings`.
+/// Persist the storage quota.
 pub fn set_storage_quota(conn: &Connection, bytes: u64) {
-    let _ = conn.execute(
-        "INSERT OR REPLACE INTO app_settings (key, value, updated_at) \
-         VALUES ('storage_quota_bytes', ?1, datetime('now'))",
-        params![bytes.to_string()],
+    let _ = crate::settings::SettingsStore::set(
+        conn,
+        crate::settings::registry::keys::STORAGE_QUOTA_BYTES,
+        bytes,
     );
 }
 

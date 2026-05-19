@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import { useLocalApi } from '@/composables/useLocalApi'
+import { useSetting } from '@/composables/useSettings'
 import { AppSpinner } from '@/components/ui'
 
 type QualityOption = {
@@ -32,8 +33,13 @@ const error = ref<string | null>(null)
 const currentTime = ref(0)
 const duration = ref(0)
 const bufferedEnd = ref(0)
-const volume = ref(1)
-const isMuted = ref(false)
+// Volume + mute defaults come from the per-profile settings store
+// (`video.default_volume`, `video.default_muted`, scope=sync). Per-video
+// runtime tweaks stay local to this component instance.
+const volumeSetting = useSetting<number>('video.default_volume')
+const mutedSetting = useSetting<boolean>('video.default_muted')
+const volume = ref(volumeSetting.ref.value ?? 1)
+const isMuted = ref(mutedSetting.ref.value ?? false)
 const isPlaying = ref(false)
 const hasEnded = ref(false)
 const isFullscreen = ref(false)

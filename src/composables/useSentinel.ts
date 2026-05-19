@@ -93,6 +93,37 @@ function readPasteClassifierPref(): boolean {
   }
 }
 
+/**
+ * Reconcile the AI/paste-classifier flags with the per-profile
+ * settings store. Call once after profile unlock so the toggles
+ * reflect the canonical sync'd value (and a fresh profile inherits
+ * the localStorage cache).
+ */
+export async function initSentinelFlagsFromSettings(): Promise<void> {
+  const { useSettings } = await import('./useSettings')
+  const { entries, initialize, setSetting } = useSettings()
+  await initialize()
+  const ai = entries.value.find((e) => e.key === 'sentinel.ai_scoring_enabled')
+  const paste = entries.value.find((e) => e.key === 'sentinel.paste_classifier_enabled')
+
+  if (ai) {
+    if (ai.is_default) {
+      const local = localStorage.getItem(AI_SCORING_STORAGE_KEY)
+      if (local !== null) await setSetting('sentinel.ai_scoring_enabled', local === '1' ? 'true' : 'false')
+    } else {
+      aiScoringEnabled.value = ai.current_value === 'true'
+    }
+  }
+  if (paste) {
+    if (paste.is_default) {
+      const local = localStorage.getItem(PASTE_CLASSIFIER_STORAGE_KEY)
+      if (local !== null) await setSetting('sentinel.paste_classifier_enabled', local === '1' ? 'true' : 'false')
+    } else {
+      pasteClassifierEnabled.value = paste.current_value === 'true'
+    }
+  }
+}
+
 // ============================================================================
 // Module-level internal state
 // ============================================================================
@@ -1393,12 +1424,26 @@ export function useSentinel() {
     aiScoringEnabled.value = enabled
     try { localStorage.setItem(AI_SCORING_STORAGE_KEY, enabled ? '1' : '0') }
     catch { /* localStorage not available */ }
+    // Persist to per-profile settings (scope=sync) so the toggle
+    // propagates to the user's other devices.
+    void (async () => {
+      const { useSettings } = await import('./useSettings')
+      useSettings()
+        .setSetting('sentinel.ai_scoring_enabled', enabled ? 'true' : 'false')
+        .catch(() => { /* no profile yet */ })
+    })()
   }
 
   const setPasteClassifierEnabled = (enabled: boolean) => {
     pasteClassifierEnabled.value = enabled
     try { localStorage.setItem(PASTE_CLASSIFIER_STORAGE_KEY, enabled ? '1' : '0') }
     catch { /* localStorage not available */ }
+    void (async () => {
+      const { useSettings } = await import('./useSettings')
+      useSettings()
+        .setSetting('sentinel.paste_classifier_enabled', enabled ? 'true' : 'false')
+        .catch(() => { /* no profile yet */ })
+    })()
   }
 
   /** Toggle camera opt-in mid-session. Caller is responsible for acquiring

@@ -7,7 +7,8 @@ import TutoringPiP from '@/components/layout/TutoringPiP.vue'
 import OmniSearch from '@/components/omni/OmniSearch.vue'
 import SettingsModal from '@/components/settings/SettingsModal.vue'
 import { usePlatform } from '@/composables/usePlatform'
-import { computed, ref, onMounted, onUnmounted } from 'vue'
+import { useSettings, useSetting } from '@/composables/useSettings'
+import { computed, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 
@@ -17,14 +18,20 @@ import { getCurrentWindow } from '@tauri-apps/api/window'
 const route = useRoute()
 const isImmersiveRoute = computed(() => route.name === 'learn')
 
-// Persist sidebar state to localStorage
-const STORAGE_KEY = 'alexandria-sidebar'
-const sidebarCollapsed = ref(false)
+// Sidebar collapsed state lives in the per-profile settings store
+// (`ui.sidebar_collapsed`, scope=sync) so it propagates to the
+// user's other devices.
+const collapsedSetting = useSetting<boolean>('ui.sidebar_collapsed')
+const sidebarCollapsed = computed({
+  get: () => collapsedSetting.ref.value ?? false,
+  set: (v: boolean) => {
+    void collapsedSetting.set(v)
+  },
+})
 const { isMobilePlatform } = usePlatform()
 
-onMounted(() => {
-  const stored = localStorage.getItem(STORAGE_KEY)
-  if (stored === 'collapsed') sidebarCollapsed.value = true
+onMounted(async () => {
+  await useSettings().initialize()
   if (!isMobilePlatform) {
     document.addEventListener('mousedown', onAppMouseDown)
   }
@@ -74,7 +81,6 @@ async function onAppMouseDown(e: MouseEvent) {
 
 function toggleSidebar() {
   sidebarCollapsed.value = !sidebarCollapsed.value
-  localStorage.setItem(STORAGE_KEY, sidebarCollapsed.value ? 'collapsed' : 'expanded')
 }
 </script>
 

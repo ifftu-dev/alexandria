@@ -1510,14 +1510,9 @@ INSERT INTO tutoring_sessions (id, title, status, created_at, ended_at) VALUES
     ('tutor_002', 'Wireframing Review — Learning Dashboard', 'ended', '2026-03-10T14:02:00', '2026-03-10T15:00:00'),
     ('tutor_003', 'Graph Algorithms — BFS & DFS Walkthrough', 'active', '2026-04-10T16:00:00', NULL);
 
--- App settings
-INSERT INTO app_settings (key, value) VALUES
-    ('theme', 'dark'),
-    ('language', 'en'),
-    ('notifications_enabled', 'true'),
-    ('auto_sync', 'true'),
-    ('sentinel_camera_enabled', 'true'),
-    ('sentinel_keyboard_enabled', 'true');
+-- App settings are no longer seeded here. Defaults live in the
+-- typed registry in `src-tauri/src/settings/registry.rs`; the table
+-- only stores values the user has actually changed.
 
 -- ============================================================
 -- P7: TUTORIALS (kind='tutorial' courses with video_chapters)

@@ -7,6 +7,53 @@ and this project loosely follows [Semantic Versioning](https://semver.org/spec/v
 
 ## [Unreleased]
 
+### Unified per-profile settings store (branch `feat/synced-settings`)
+
+Every user-controlled preference now lives in one place — the
+per-profile `app_settings` table — and propagates to the user's
+other devices via the existing cross-device sync. See
+[`docs/settings.md`](docs/settings.md) for the architecture.
+
+**Highlights:**
+
+- New `src-tauri/src/settings/` module with a typed registry
+  (`registry::keys`), a validated R/W store (`SettingsStore`), and
+  three IPC commands (`list_settings`, `set_setting`, `reset_setting`).
+- Migration `048_app_settings_scope` adds a `scope` column (`sync` /
+  `device`). Existing `storage_quota_bytes` becomes `device`-scoped
+  (per-device disk capacity); every other key defaults to `sync`.
+- 19 settings registered, covering everything previously scattered
+  across `localStorage`, ad-hoc DB rows, hardcoded seed data, and
+  env vars: `ui.theme`, `ui.sidebar_collapsed`, `ui.sidebar_sections`,
+  `input.keyboard_shortcuts`, `ui.omni_recents`,
+  `sentinel.{ai_scoring_enabled,paste_classifier_enabled,camera_enabled,keyboard_enabled}`,
+  `notifications.enabled`, `sync.auto`, `user.language`,
+  `video.{default_volume,default_muted}`,
+  `cardano.{blockfrost_project_id,completion_policy_id}`,
+  `device.label`, `storage.quota_bytes`, `ui.window_geometry`.
+- Sync hooks in `p2p/sync.rs`: `settings_outbound_snapshot` +
+  `settings_apply_inbound` carry only `scope='sync'` rows, LWW on
+  `updated_at`, refuses inbound writes for unknown keys or
+  device-scoped keys.
+- Frontend `useSettings` composable (reactive entries + listens for
+  `settings-changed` events from other windows or inbound sync).
+  Per-key two-way ref via `useSetting<T>(key)`.
+- Migrated callers: `useTheme`, `useKeyboardShortcuts`, `useOmniSearch`,
+  `useSentinel`, `AppLayout` sidebar, `AppSidebar` sections,
+  `VideoPlayer` mute/volume defaults. `localStorage` is kept as a
+  synchronous cache so pre-unlock paint matches; reconciled with
+  the per-profile store via `init*FromSettings` hooks fired from
+  `App.vue` after profile unlock.
+- New "All settings" panel in `SettingsModal` renders every
+  registered setting grouped by category, with the right widget
+  (toggle / textbox / number / JSON), a sync/device chip, and a
+  Reset button when the value differs from the default.
+- Dropped 6 unused `app_settings` seed rows that the app never
+  read.
+
+**Tests:** 674 backend unit + 39 integration pass; 16 new settings
+module tests; `vue-tsc -b --noEmit` clean.
+
 ### Multi-user profiles (branch `feat/multi-user-profiles`)
 
 One device can now host any number of fully-isolated learner profiles —
