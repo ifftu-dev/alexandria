@@ -34,6 +34,7 @@
 - **Peer-to-Peer** — Fully decentralized via libp2p with a private Alexandria Kademlia DHT, GossipSub, Circuit Relay v2, AutoNAT, and DCUtR. Devices discover each other through a relay bootstrap node — no central server required.
 - **Offline-First** — Local SQLite database, iroh content store, and encrypted vault (Stronghold on desktop, AES-256-GCM + Argon2id on mobile). Everything works without connectivity.
 - **Multi-User on One Device** — A single device can host any number of fully-isolated learner profiles. Each profile owns its own vault, SQLCipher database, iroh blob cache, and libp2p peer id; switching profiles tears all per-profile services down and brings the next one online. Designed for households, classrooms, and shared-device contexts in regions where personal hardware isn't a given. See [`docs/multi-user-profiles.md`](docs/multi-user-profiles.md).
+- **Cross-Device Synced Settings** — Every user preference (theme, sidebar layout, keyboard shortcuts, Sentinel toggles, notifications, ...) lives in one per-profile store and propagates to the user's other devices via peer-to-peer sync. Device-local settings (window geometry, disk quota) stay where they belong. See [`docs/settings.md`](docs/settings.md).
 - **Mobile Node** — iOS and Android are first-class targets. The mobile app is a fully functional node — same P2P networking, content storage, and wallet as desktop. Multi-device support via shared BIP-39 mnemonic.
 
 ## Architecture
@@ -56,11 +57,12 @@ alexandria/
 │       ├── ipfs/     # iroh node, BLAKE3 content-addressed blobs, CID resolution
 │       ├── p2p/      # libp2p swarm — DHT, relay, gossip, peer exchange, vc-fetch
 │       ├── profile/  # Multi-user profile manager + public profiles_index.json sidecar + auto-migrator
+│       ├── settings/ # Unified per-profile settings: typed registry + sync/device-scoped store
 │       └── tutoring/ # Live audio/video tutoring (desktop + mobile managers)
 ├── src/              # Vue 3 + TypeScript frontend
 │   ├── pages/        # Route views (ProfileSelect, Onboarding, courses, skills, governance, opinions, tutoring, ...)
 │   ├── components/   # UI components + auth + course + layout + profile (picker tiles + avatar)
-│   ├── composables/  # useProfiles (canonical), useAuth (compat shim), useTheme, useP2P, useSentinel, useLocalApi, useBiometricVault, useClassroom, useContentSync, useCredentials, useOmniSearch, usePlatform, useSkillGraphState, useSkillGraphHover, useTutoringRoom
+│   ├── composables/  # useProfiles (canonical), useSettings (per-profile prefs + cross-device sync), useAuth (compat shim), useTheme, useP2P, useSentinel, useLocalApi, useBiometricVault, useClassroom, useContentSync, useCredentials, useOmniSearch, usePlatform, useSkillGraphState, useSkillGraphHover, useTutoringRoom
 │   └── assets/       # Tailwind CSS v4 design system
 ├── cli/              # Developer CLI (alex) — Rust + clap
 ├── patches/          # Local crate patches (if-watch iOS fix)
@@ -421,7 +423,9 @@ Use `alex config path` to print this directory on any platform.
 | Document | Description |
 |----------|-------------|
 | [Architecture](docs/architecture.md) | System design — offline-first, trustless, multi-platform |
-| [Database Schema](docs/database-schema.md) | All 66 tables, 30 migrations, relationships |
+| [Multi-User Profiles](docs/multi-user-profiles.md) | Per-profile vault + DB + iroh isolation, picker UX, auto-migration |
+| [Settings](docs/settings.md) | Unified per-profile settings store + cross-device sync + how to add a new setting |
+| [Database Schema](docs/database-schema.md) | All 66 tables + per-profile DB layout |
 | [Protocol Specification](docs/protocol-specification.md) | Wire formats, VC protocol, 11 gossip topics, validation, peer scoring |
 | [Project Structure](docs/project-structure.md) | Directory layouts, module responsibilities |
 | [Skills & Reputation](docs/skills-and-reputation.md) | Skill graph, evidence model, reputation system |

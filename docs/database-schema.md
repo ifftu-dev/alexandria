@@ -74,6 +74,8 @@
 | 28 | `vc_credentials_pending_verification` | Queue for inbound credentials awaiting issuer DID resolution |
 | 29 | `vc_credential_suspension` | Add credential suspension metadata and supersession index |
 | 30 | `vc_credential_allowlist` | Subject-controlled allowlist for `/alexandria/vc-fetch/1.0` |
+| … | (migrations 31-47 are unchanged) | |
+| 48 | `app_settings_scope` | Add `scope` column (`sync` / `device`) to `app_settings`. Reclassifies `storage_quota_bytes` as `device`-scoped. Powers the unified per-profile settings store; see [`settings.md`](settings.md). |
 
 ---
 
@@ -206,8 +208,16 @@ columns and indexes, use `src-tauri/src/db/schema.rs`.
 - **`classroom_messages`** — Persisted messages with edit/delete flags.
 - **`classroom_calls`** — Live classroom A/V calls backed by iroh-live tickets.
 - **`classroom_group_keys`** — Encrypted per-classroom group keys for E2E messaging.
-- **`app_settings`** — Backend settings KV store, seeded with
-  `storage_quota_bytes = '0'`.
+- **`app_settings`** — Unified per-profile settings KV store
+  (`key TEXT PRIMARY KEY`, `value TEXT`, `scope TEXT NOT NULL`,
+  `updated_at TEXT`). `scope` is one of `'sync'` (replicated across
+  the user's other devices via cross-device sync; LWW on
+  `updated_at`) or `'device'` (stays on this device only). The
+  Rust-side typed registry (`settings::registry::keys`) is the
+  source of truth for valid keys + defaults — the table only
+  stores values the user has actually changed. See
+  [`settings.md`](settings.md) for the architecture and the
+  current list of registered settings.
 
 ### Verifiable Credentials Layer
 

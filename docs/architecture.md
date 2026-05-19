@@ -190,6 +190,7 @@ Both share the same lock/unlock cycle: lock clears in-memory keys, unlock re-der
 - **Singleton identity**: `local_identity` has `CHECK (id = 1)` — exactly one row, the active profile's owner. Because each profile has its own SQLCipher database, "singleton" is scoped per profile, not per device.
 - **No server tables**: No `refresh_tokens`, `oauth_accounts`, or session management
 - **Content stored externally**: Course HTML and profiles live in iroh blobs, referenced by BLAKE3 hash
+- **Settings live in `app_settings`**: One unified per-profile key-value table with a `scope` discriminator (`'sync'` propagates to the user's other devices; `'device'` stays here). The Rust-side typed registry (`settings::registry::keys`) is the source of truth for valid keys + defaults — the table only stores user-overridden values. See [Settings](settings.md).
 
 See [Database Schema](database-schema.md) for the full DDL.
 
@@ -224,6 +225,17 @@ When resolving content by CID or hash:
 - **User profiles**: Signed JSON with display name, bio, avatar CID, skills
 
 Both use Ed25519 signatures for authenticity verification.
+
+### Per-profile lifecycle
+
+The iroh node is a per-device **singleton** (`AppState::content_node:
+Arc<ContentNode>`) but is repointed at the active profile's blob
+directory on every unlock via `ContentNode::set_data_dir`. Lock
+(`stop_active_profile`) calls both `Router::shutdown` AND
+`Store::shutdown` — the latter is required so the blob-store actor
+exits its private tokio runtime and releases the redb file lock.
+Without `Store::shutdown`, a follow-up `FsStore::load` on the same
+path within the same process hangs indefinitely.
 
 ---
 
@@ -457,7 +469,7 @@ CSS custom properties with light/dark mode via `.dark` class on `<html>`:
 
 ## 11. IPC Boundary
 
-The frontend communicates with the Rust backend via ~197 Tauri IPC commands registered in `tauri::generate_handler!`. The `commands/` directory holds **31 modules** (excluding `mod.rs`); `tutoring_mobile.rs` and `tutoring_stubs.rs` are platform-conditional variants of `tutoring`, and `ratelimit.rs` is an internal helper not registered as IPC. The 27 modules with registered commands:
+The frontend communicates with the Rust backend via ~200 Tauri IPC commands registered in `tauri::generate_handler!`. The `commands/` directory holds **32 modules** (excluding `mod.rs`); `tutoring_mobile.rs` and `tutoring_stubs.rs` are platform-conditional variants of `tutoring`, and `ratelimit.rs` is an internal helper not registered as IPC. The 28 modules with registered commands:
 
 | Module | Commands | Examples |
 |--------|----------|---------|
@@ -467,6 +479,7 @@ The frontend communicates with the Rust backend via ~197 Tauri IPC commands regi
 | taxonomy | 15 | `get_skills`, `get_subjects`, `update_taxonomy`, `get_skill_graph` |
 | profile | 9 | `list_profiles`, `get_active_profile_id`, `create_profile`, `restore_profile_with_mnemonic`, `unlock_profile`, `lock_profile`, `rename_profile`, `set_profile_avatar`, `delete_profile` |
 | identity | 8 | `export_mnemonic`, `is_biometric_available`, `get_wallet_info`, `get_local_did`, `get_profile`, `update_profile`, `publish_profile`, `resolve_profile` (lifecycle commands moved to `profile` module) |
+| settings | 3 | `list_settings`, `set_setting`, `reset_setting` — drives the unified per-profile settings store. See [`settings.md`](settings.md). |
 | credentials | 10 | `issue_credential`, `list_credentials`, `verify_credential_cmd`, `revoke_credential`, `suspend_credential`, `reinstate_credential`, `allow_credential_fetch`, `disallow_credential_fetch`, `export_credentials_bundle`, `verify_bundle_offline` |
 | sync | 8 | `register_device`, `trigger_sync`, `get_sync_status` |
 | courses | 8 | `create_course`, `get_course`, `list_courses` |

@@ -51,6 +51,30 @@ other devices via the existing cross-device sync. See
 - Dropped 6 unused `app_settings` seed rows that the app never
   read.
 
+**Profile-switch bugfixes** (shipped in the same branch):
+
+- **Theme bled across profiles.** `init*FromSettings` was copying
+  the previously-active profile's `localStorage` value into the
+  new profile's settings on every unlock. Removed; each profile
+  starts at the registry default. `useTheme` rewritten to use
+  `useSetting<string>('ui.theme')` so explicit toggles, profile
+  switches, and inbound sync deliveries all repaint immediately.
+  Added `useProfiles::onProfileLocked` callback + `clearSettingsCache()`
+  so the picker (and the next-unlocked profile) does not flash
+  the prior profile's preferences. `useKeyboardShortcuts` +
+  `useOmniSearch` reset their singleton state at the start of
+  every hydrate.
+- **iroh blob store deadlocked on second unlock within a
+  process.** `ContentNode::shutdown` called only
+  `Router::shutdown`; iroh-blobs spawns the blob store on its own
+  tokio runtime whose `Actor` only exits when `Store::shutdown`
+  is invoked, so the redb `blobs.db` file lock persisted across
+  profile switches. The follow-up unlock hit `FsStore::load` on
+  a locked path and hung. Fixed by calling
+  `node.store.shutdown().await` after `Router::shutdown` in
+  `ContentNode::shutdown` (no fork — `Store::shutdown` is the
+  public iroh-blobs 0.98 API). Lock → unlock cycle now works.
+
 **Tests:** 674 backend unit + 39 integration pass; 16 new settings
 module tests; `vue-tsc -b --noEmit` clean.
 
