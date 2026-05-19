@@ -39,7 +39,8 @@
 
 **[UnifiedPush](https://unifiedpush.org/users/faq/)** — Android-and-Linux-desktop standard. User picks a "distributor" app (ntfy, NextPush, KUnifiedPush). **No iOS support and none coming** — iOS forbids background services, so no third-party distributor is possible without jailbreak. Linux/KDE desktop works via KUnifiedPush. **Use it as the preferred Android path for privacy-conscious users**, fall back to FCM.
 
-**[ntfy.sh](https://ntfy.sh)** — HTTP / WebSocket pub-sub written in Go, self-hostable, doubles as a UnifiedPush distributor backend ([docs](https://unifiedpush.org/users/distributors/ntfy/)). **`alexandria-relay` can front an ntfy-protocol endpoint** (or embed the equivalent SSE / WS endpoints directly) — the wire protocol is dead simple (POST to publish, GET / WS to subscribe). No mature Rust _server_ port exists (only client crates: [`ntfy`](https://docs.rs/ntfy/0.3.1/ntfy/), [`ntfy-api`](https://github.com/tomaThomas/ntfy-api)), so either run ntfy-go as a sidecar or implement the ~300-LOC subset directly in axum.
+**[ntfy.sh](https://ntfy.sh)** — HTTP / WebSocket pub-sub written in Go, self-hostable, doubles as a UnifiedPush distributor backend ([docs](https://unifiedpush.org/users/distributors/ntfy/)). **`alexandria-relay` can front an ntfy-protocol endpoint** (or embed the equivalent SSE / WS endpoints directly) —
+the wire protocol is dead simple (POST to publish, GET / WS to subscribe). No mature Rust _server_ port exists (only client crates: [`ntfy`](https://docs.rs/ntfy/0.3.1/ntfy/), [`ntfy-api`](https://github.com/tomaThomas/ntfy-api)), so either run ntfy-go as a sidecar or implement the ~300-LOC subset directly in axum.
 
 **APNs from Rust:** [`a2`](https://github.com/WalletConnect/a2) (now `reown-com/a2`, v0.10.0, May 2024) is the standard. Full HTTP/2 + `.p8` JWT auth + signature caching. MIT, maintenance-mode but functional. Alternative: `apple-apns`.
 

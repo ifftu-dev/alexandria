@@ -66,9 +66,13 @@ If Alexandria the organisation disappeared tomorrow, every learner's credentials
 
 Every operation works without network access. The local SQLite database (66 tables), iroh content store, and encrypted vault provide complete functionality offline. Sync is opportunistic — when connectivity returns, nodes exchange updates via GossipSub topics and cross-device sync.
 
+### Shared Devices, Separate Lives
+
+A single laptop or phone can host any number of fully isolated learner profiles — each with its own vault, database, content cache, and network peer id. This is a first-class capability, not an afterthought: households, classrooms, and internet cafés in regions where personal hardware isn't a given can still give every learner a private, verifiable identity. Switching between profiles is one tap and one password.
+
 ### Mobile Is a First-Class Node
 
-iOS and Android are not thin clients. The mobile app is a fully functional node — same P2P networking, content storage, and wallet as desktop. Multi-device support works via shared BIP-39 mnemonic with encrypted sync. Biometric unlock (Face ID / Touch ID) is supported via platform APIs.
+iOS and Android are not thin clients. The mobile app is a fully functional node — same P2P networking, content storage, and wallet as desktop. Multi-device support works via shared BIP-39 mnemonic with encrypted sync. Biometric unlock (Face ID / Touch ID) unlocks the selected profile via platform APIs.
 
 ---
 
@@ -100,7 +104,7 @@ iOS and Android are not thin clients. The mobile app is a fully functional node 
 - You own your credentials. They live on your device. No platform can revoke them. No institution can gate access to your own record.
 - You control your privacy. You choose what to mint on-chain and what to keep local.
 - You learn for free. Not freemium. Not free-with-ads. Free.
-- Your identity is self-sovereign. A 24-word mnemonic is your account — no email, no password recovery service, no OAuth provider.
+- Your identity is self-sovereign. A 24-word mnemonic is your account — no email, no password recovery service, no OAuth provider. A single device can hold multiple independent identities (profiles) when hardware is shared.
 - Your app works offline. Everything functions without connectivity. Sync happens when you're ready.
 
 ---

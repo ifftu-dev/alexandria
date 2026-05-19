@@ -8,15 +8,18 @@
 
 ## Overview
 
-Vue 3 SPA frontend for the Tauri app. 14 composables, 30 route views, and a 1332-line `types/index.ts`.
+Vue 3 SPA frontend for the Tauri app. Module-level singleton composables (no Pinia/Vuex), 30+ route views, and a 1332-line `types/index.ts`. Supports multiple user profiles on one device — the picker (`/profiles`, `pages/ProfileSelect.vue`) is the first screen on launch when at least one profile exists.
 
 ## WHERE TO LOOK
 
 | Task | Location | Notes |
 |------|----------|-------|
-| State | `composables/` | 14 singleton refs (no Pinia/Vuex) |
-| UI design system | `components/ui/` | 12 components, barrel-exported |
-| Pages | `pages/` | 3 root pages + 9 feature dirs (`classrooms`, `courses`, `dashboard`, `governance`, `instructor`, `learn`, `opinions`, `skills`, `tutoring`) |
+| Multi-user state | `composables/useProfiles.ts` | Canonical surface: profiles, activeProfile, unlock/lock/create/rename/delete/setAvatar |
+| Auth compat shim | `composables/useAuth.ts` | Thin wrapper over `useProfiles` — kept so legacy components compile; removed lifecycle methods throw |
+| State | `composables/` | Module-level singleton refs (no Pinia/Vuex) |
+| UI design system | `components/ui/` | Barrel-exported primitives |
+| Profile picker UI | `components/profile/` | `ProfileTile`, `AddProfileTile`, `ProfileAvatar` |
+| Pages | `pages/` | Root pages (`ProfileSelect`, `Onboarding`, `Home`) + 9 feature dirs (`classrooms`, `courses`, `dashboard`, `governance`, `instructor`, `learn`, `opinions`, `skills`, `tutoring`) |
 | Types | `types/index.ts` | All TS interfaces (mirrors Rust domain) |
 | Styling | `assets/css/` | Tailwind v4 + CSS custom properties |
 | Routing | `router/` | Vue Router config |
@@ -35,7 +38,7 @@ import type { Course, Enrollment } from '@/types'
 <script setup lang="ts">
 import { ref, computed } from 'vue'          // 1. Vue core
 import { useRoute } from 'vue-router'         // 2. external
-import { useAuth } from '@/composables/useAuth' // 3. composables
+import { useProfiles } from '@/composables/useProfiles' // 3. composables (useAuth is a back-compat shim)
 import { AppButton } from '@/components/ui'   // 4. components
 import type { Props } from '@/types'          // 5. types
 

@@ -33,6 +33,7 @@
 - **Assessment Integrity** — Sentinel anti-cheat uses a keystroke autoencoder, mouse trajectory CNN, and face embedder. All processing stays client-side; snapshots are stored locally and feed downstream trust decisions without exposing raw biometrics.
 - **Peer-to-Peer** — Fully decentralized via libp2p with a private Alexandria Kademlia DHT, GossipSub, Circuit Relay v2, AutoNAT, and DCUtR. Devices discover each other through a relay bootstrap node — no central server required.
 - **Offline-First** — Local SQLite database, iroh content store, and encrypted vault (Stronghold on desktop, AES-256-GCM + Argon2id on mobile). Everything works without connectivity.
+- **Multi-User on One Device** — A single device can host any number of fully-isolated learner profiles. Each profile owns its own vault, SQLCipher database, iroh blob cache, and libp2p peer id; switching profiles tears all per-profile services down and brings the next one online. Designed for households, classrooms, and shared-device contexts in regions where personal hardware isn't a given. See [`docs/multi-user-profiles.md`](docs/multi-user-profiles.md).
 - **Mobile Node** — iOS and Android are first-class targets. The mobile app is a fully functional node — same P2P networking, content storage, and wallet as desktop. Multi-device support via shared BIP-39 mnemonic.
 
 ## Architecture
@@ -46,19 +47,20 @@ alexandria/
 │       ├── aggregation/ # Deterministic aggregation engine with anti-gaming penalties, weights, independence
 │       ├── cardano/  # Blockfrost client, Conway tx building, NFT policies, metadata anchoring
 │       ├── classroom/ # Encrypted group messaging, membership, gossip
-│       ├── commands/ # 227 IPC command handlers across 31 modules (frontend ↔ backend)
-│       ├── crypto/   # BIP-39 wallet, vault (Stronghold / portable), Ed25519, did:key
-│       ├── db/       # SQLite (66 tables, 30 migrations, seed data)
+│       ├── commands/ # IPC command handlers across ~32 modules (frontend ↔ backend), including profile/* lifecycle
+│       ├── crypto/   # BIP-39 wallet, per-profile vault (Stronghold / portable), Ed25519, did:key
+│       ├── db/       # SQLite (66 tables, 30 migrations, seed data) — one DB per profile
 │       ├── diag.rs   # File-based diagnostic logger + panic hook
 │       ├── domain/   # Business logic (courses, tutorials, opinions, vc, evidence, governance, ...)
 │       ├── evidence/ # Proficiency taxonomy + thresholds (reputation/attestation/challenge disabled post-VC-first cutover)
 │       ├── ipfs/     # iroh node, BLAKE3 content-addressed blobs, CID resolution
 │       ├── p2p/      # libp2p swarm — DHT, relay, gossip, peer exchange, vc-fetch
+│       ├── profile/  # Multi-user profile manager + public profiles_index.json sidecar + auto-migrator
 │       └── tutoring/ # Live audio/video tutoring (desktop + mobile managers)
 ├── src/              # Vue 3 + TypeScript frontend
-│   ├── pages/        # 30 route views (courses, skills, governance, opinions, tutoring, ...)
-│   ├── components/   # UI components + auth + course + layout
-│   ├── composables/  # useAuth, useTheme, useP2P, useSentinel, useLocalApi, useBiometricVault, useClassroom, useContentSync, useCredentials, useOmniSearch, usePlatform, useSkillGraphState, useSkillGraphHover, useTutoringRoom
+│   ├── pages/        # Route views (ProfileSelect, Onboarding, courses, skills, governance, opinions, tutoring, ...)
+│   ├── components/   # UI components + auth + course + layout + profile (picker tiles + avatar)
+│   ├── composables/  # useProfiles (canonical), useAuth (compat shim), useTheme, useP2P, useSentinel, useLocalApi, useBiometricVault, useClassroom, useContentSync, useCredentials, useOmniSearch, usePlatform, useSkillGraphState, useSkillGraphHover, useTutoringRoom
 │   └── assets/       # Tailwind CSS v4 design system
 ├── cli/              # Developer CLI (alex) — Rust + clap
 ├── patches/          # Local crate patches (if-watch iOS fix)
@@ -73,8 +75,8 @@ alexandria/
 | Database | SQLite + SQLCipher (rusqlite, bundled-sqlcipher) |
 | Content storage | iroh 0.96 (BLAKE3 content-addressed blobs) |
 | P2P networking | libp2p 0.56 (TCP, QUIC, GossipSub, Kademlia, Relay, DCUtR) |
-| Wallet (desktop) | BIP-39 + CIP-1852 (pallas), IOTA Stronghold vault |
-| Wallet (mobile) | BIP-39 + CIP-1852 (pallas), AES-256-GCM + Argon2id vault |
+| Wallet (desktop) | BIP-39 + CIP-1852 (pallas), per-profile IOTA Stronghold vault |
+| Wallet (mobile) | BIP-39 + CIP-1852 (pallas), per-profile AES-256-GCM + Argon2id vault |
 | Cardano | pallas 0.35 (Conway tx builder), Blockfrost preprod |
 | Developer CLI | Rust, clap 4, owo-colors |
 
@@ -97,7 +99,7 @@ After connecting to the relay, each node:
 
 Known peer addresses are persisted to a `peers` table in SQLite and reloaded on subsequent launches. GossipSub peer exchange messages propagate addresses across the mesh.
 
-The P2P node auto-starts after wallet unlock. Home also attempts a content sync (bootstrap + hydrate) after unlock and surfaces completion stats in the bottom status bar.
+The P2P node auto-starts after the active profile is unlocked. Each profile has its own libp2p peer id (derived from that profile's keypair), so two profiles on the same device look like two separate devices to the network. Home also attempts a content sync (bootstrap + hydrate) after unlock and surfaces completion stats in the bottom status bar.
 
 The relay server lives in a [separate repository](https://github.com/ifftu-dev/alexandria-relay).
 
@@ -310,17 +312,17 @@ Prerequisites are checked automatically before each build. Android requires `AND
 
 #### Database & Data
 
-The CLI operates on the same SQLCipher-encrypted database as the app. Commands that access the database prompt for your vault password.
+The CLI operates on the same SQLCipher-encrypted database as the app. Commands that access the database prompt for the active profile's password.
 
 ```bash
-alex db status        # Table row counts, migration version, data sizes
-alex db migrate       # Run pending schema migrations
-alex db seed          # Seed demo data (taxonomy, courses, governance)
-alex db seed --force  # Clear and re-seed
-alex db reset --force # Delete all app data (SQLite + vault + iroh)
+alex db status        # Table row counts, migration version, data sizes (active profile)
+alex db migrate       # Run pending schema migrations on the active profile DB
+alex db seed          # Seed demo data (taxonomy, courses, governance) into the active profile
+alex db seed --force  # Clear and re-seed the active profile
+alex db reset --force # Delete ALL app data on this device (every profile + sidecar index)
 ```
 
-> **Note**: The database is encrypted with a key derived from your vault password (Argon2id + HKDF-SHA256). The app must have been launched at least once to create the vault before CLI database commands will work.
+> **Note**: Each profile's database is encrypted with a key derived from that profile's vault password (Argon2id + HKDF-SHA256). The app must have been launched at least once to create the profile (via onboarding) before CLI database commands will work. `alex db reset --force` is destructive across every profile on the device — use the picker's per-profile delete to remove a single user instead.
 
 #### Configuration
 
@@ -342,19 +344,32 @@ alex clean all --force   # Remove everything
 ### First-Time Onboarding
 
 1. Launch the app — you see the onboarding screen
-2. Create a password — this encrypts the vault
-3. A 24-word BIP-39 mnemonic is generated (CIP-1852 derivation)
-4. Payment and stake addresses are derived (preprod testnet)
-5. Back up the mnemonic — it is your identity and wallet
-6. The P2P node starts automatically and connects to the network
+2. Pick a profile name (shown later on the picker — renameable)
+3. Create a password — this encrypts that profile's vault
+4. A 24-word BIP-39 mnemonic is generated (CIP-1852 derivation)
+5. Payment and stake addresses are derived (preprod testnet)
+6. Back up the mnemonic — it is the identity and wallet for *this profile*
+7. The P2P node starts automatically and connects to the network
 
-To use the same identity on another device, restore the mnemonic on that device.
+Subsequent launches land on the **profile picker** (`/profiles`) — an avatar grid of every profile on the device. Pick one, enter its password, and you're in.
+
+### Switching users
+
+- **From the avatar dropdown** in the top right: **Switch user** locks the current profile and returns to the picker.
+- **Keyboard shortcut**: `Cmd/Ctrl + Shift + U` from anywhere.
+- **Add another profile** from the picker's **Add user** tile — runs onboarding again with a fresh name + password.
+
+Each profile is fully isolated: its own vault, SQLCipher database, iroh blob cache, plugin directory, and libp2p peer id. Switching tears all per-profile services down and brings the next one online — any in-flight tutoring session is ended.
+
+To use the same identity on another device, restore the mnemonic into a new profile on that device.
 
 To reset and start fresh:
 
 ```bash
 alex db reset --force   # Or manually: rm -rf ~/Library/Application\ Support/org.alexandria.node/
 ```
+
+> **Upgrading from a single-vault install?** The first launch after upgrade auto-migrates the legacy `stronghold/`, `alexandria.db`, `iroh/`, `plugins/`, and `videocache/` directories into a new `profiles/<uuid>/` slot named "My Profile". No data loss; rename and add avatars from the picker afterwards.
 
 ## Testing
 
@@ -386,14 +401,18 @@ The test suite includes:
 
 ## Data Storage
 
-All data lives in `~/Library/Application Support/org.alexandria.node/` (macOS):
+All data lives in `~/Library/Application Support/org.alexandria.node/` (macOS). The layout is **per-profile** — each user owns an isolated tree.
 
 | File/Directory | Purpose |
 |----------------|---------|
-| `alexandria.db` | SQLCipher-encrypted SQLite database (66 tables) |
-| `stronghold/` | IOTA Stronghold vault directory — desktop |
-| `vault/` | AES-256-GCM + Argon2id vault directory — mobile |
-| `iroh/` | Content-addressed blob store (course content, profiles) |
+| `profiles_index.json` | Public sidecar — display names, avatars, colors, timestamps. Read by the picker before any vault is unlocked. **No keys, DIDs, or stake addresses.** |
+| `profiles/<uuid>/vault/` | Per-profile encrypted vault (Stronghold on desktop, AES-256-GCM + Argon2id on mobile) |
+| `profiles/<uuid>/alexandria.db` | Per-profile SQLCipher database (66 tables), key derived from that profile's password |
+| `profiles/<uuid>/iroh/` | Per-profile content-addressed blob store (course content, user profiles) and node secret |
+| `profiles/<uuid>/plugins/` | Per-profile installed plugin bundles |
+| `profiles/<uuid>/videocache/` | Per-profile materialized video files (served via Tauri's asset protocol) |
+
+On first launch after upgrading from a single-vault install, the legacy top-level files (`alexandria.db`, `stronghold/` or `vault/`, `iroh/`, `plugins/`, `videocache/`) are atomically moved into a fresh `profiles/<uuid>/` slot.
 
 Use `alex config path` to print this directory on any platform.
 

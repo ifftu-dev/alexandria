@@ -94,20 +94,27 @@ central API, no hosted database, and no Docker infrastructure.
 +-------------------------------------------------------+
 ```
 
-All state lives on the user's machine in three locations:
+All state lives on the user's machine, organised **per profile** so a single device can host multiple isolated learners (see [`multi-user-profiles.md`](multi-user-profiles.md)):
 
-| Store | File/Directory | Purpose |
-|-------|----------------|---------|
-| SQLite | `alexandria.db` | Relational data (courses, skills, evidence, governance) |
-| Vault (desktop) | `vault.stronghold` | IOTA Stronghold encrypted wallet keys and mnemonic |
-| Vault (mobile) | `vault.enc` | AES-256-GCM + Argon2id encrypted wallet keys and mnemonic |
-| iroh | `iroh/` | Content-addressed blobs (course HTML, profiles) |
+| Store | Path (relative to app data dir) | Purpose |
+|-------|--------------------------------|---------|
+| Profile index | `profiles_index.json` | **Public** sidecar — display names, avatars, colors, timestamps. Rendered by the picker before any vault is unlocked. Holds no keys, DIDs, or stake addresses. |
+| SQLite | `profiles/<uuid>/alexandria.db` | Relational data (courses, skills, evidence, governance) — per profile |
+| Vault (desktop) | `profiles/<uuid>/vault/alexandria.stronghold` | IOTA Stronghold encrypted wallet keys and mnemonic — per profile |
+| Vault (mobile) | `profiles/<uuid>/vault/vault.enc` | AES-256-GCM + Argon2id encrypted wallet keys and mnemonic — per profile |
+| iroh | `profiles/<uuid>/iroh/` | Content-addressed blobs (course HTML, profiles) + per-profile node secret |
+| Plugins | `profiles/<uuid>/plugins/` | Installed plugin bundles — per profile |
+| Video cache | `profiles/<uuid>/videocache/` | Materialized video files for the asset protocol — per profile |
 
 Default data directory: `~/Library/Application Support/org.alexandria.node/` (macOS).
 
+On first launch after upgrading from a single-vault install, the legacy top-level layout is atomically migrated into a freshly-created `profiles/<uuid>/` slot named "My Profile" (see `src-tauri/src/profile/migration.rs`).
+
 ---
 
-## 3. Identity & Wallet
+## 3. Per-Profile Identity & Wallet
+
+Each user profile owns an independent identity. Switching profiles tears down all per-profile services (vault, DB, iroh, libp2p) and rebuilds them for the newly-unlocked profile — see `AppState::start_active_profile` / `stop_active_profile` in `src-tauri/src/lib.rs`. Two profiles on the same device are network-indistinguishable from two devices on the same LAN.
 
 ### Key Derivation
 
@@ -140,14 +147,14 @@ Keys are stored in an encrypted vault. The implementation varies by platform:
 - Password → Argon2id (64 MB, 3 iterations, 4 lanes) with random salt → derived key
 - Salt file includes HMAC-SHA256 integrity tag
 - Mnemonic stored encrypted at a fixed vault path
-- Vault file: `vault.stronghold` (binary, encrypted at rest)
+- Vault file: `profiles/<uuid>/vault/alexandria.stronghold` (binary, encrypted at rest)
 
 **Mobile (Portable AES-256-GCM + Argon2id)**:
 - Password → Argon2id (memory-hard KDF, 64 MB, 3 iterations) → 256-bit key
 - Mnemonic encrypted with AES-256-GCM (random 96-bit nonce)
-- Vault file: `vault.enc` (salt + nonce + ciphertext)
+- Vault file: `profiles/<uuid>/vault/vault.enc` (salt + nonce + ciphertext)
 
-Both share the same lock/unlock cycle: lock clears in-memory keys, unlock re-derives from mnemonic.
+Both share the same lock/unlock cycle: lock clears in-memory keys, unlock re-derives from mnemonic. Locking the active profile also tears down its iroh node and libp2p swarm; unlocking a different profile rebuilds them rooted at the new profile's directory.
 
 ---
 
@@ -180,7 +187,7 @@ Both share the same lock/unlock cycle: lock clears in-memory keys, unlock re-der
 ### Key Design Decisions
 
 - **Deterministic IDs**: `hex(blake2b_256(parts.join("|")))` instead of server-generated UUIDs
-- **Singleton identity**: `local_identity` has `CHECK (id = 1)` — exactly one row, the node owner
+- **Singleton identity**: `local_identity` has `CHECK (id = 1)` — exactly one row, the active profile's owner. Because each profile has its own SQLCipher database, "singleton" is scoped per profile, not per device.
 - **No server tables**: No `refresh_tokens`, `oauth_accounts`, or session management
 - **Content stored externally**: Course HTML and profiles live in iroh blobs, referenced by BLAKE3 hash
 
@@ -408,12 +415,12 @@ Reputation impact computed (instructor attribution)
 
 **Stack**: Vue 3 + TypeScript + Vite + Tailwind CSS v4
 
-### Pages (29 routes)
+### Pages
 
 | Page | Route | Description |
 |------|-------|-------------|
-| Onboarding | `/onboarding` | Wallet creation, mnemonic backup, import |
-| Unlock | `/unlock` | Password entry, vault unlock |
+| Profile Select | `/profiles` | Multi-user picker — avatar grid + slide-in password panel. Cmd/Ctrl+Shift+U from anywhere. |
+| Onboarding | `/onboarding` | Display name + password → wallet creation (new) or mnemonic restore (existing). Creates a new profile. |
 | Home | `/home` | Dashboard overview |
 | Courses Index | `/courses` | Browse course catalog |
 | Course Detail | `/courses/:id` | Course info, chapters, enrollment |
@@ -450,7 +457,7 @@ CSS custom properties with light/dark mode via `.dark` class on `<html>`:
 
 ## 11. IPC Boundary
 
-The frontend communicates with the Rust backend via **194 Tauri IPC commands** registered in `tauri::generate_handler!`. The `commands/` directory holds **30 modules** (excluding `mod.rs`); `tutoring_mobile.rs` and `tutoring_stubs.rs` are platform-conditional variants of `tutoring`, and `ratelimit.rs` is an internal helper not registered as IPC. The 26 modules with registered commands:
+The frontend communicates with the Rust backend via ~197 Tauri IPC commands registered in `tauri::generate_handler!`. The `commands/` directory holds **31 modules** (excluding `mod.rs`); `tutoring_mobile.rs` and `tutoring_stubs.rs` are platform-conditional variants of `tutoring`, and `ratelimit.rs` is an internal helper not registered as IPC. The 27 modules with registered commands:
 
 | Module | Commands | Examples |
 |--------|----------|---------|
@@ -458,7 +465,8 @@ The frontend communicates with the Rust backend via **194 Tauri IPC commands** r
 | governance | 19 | `create_dao`, `submit_proposal`, `cast_vote`, `run_election` |
 | tutoring | 15 | `tutoring_create_room`, `tutoring_join_room`, `tutoring_toggle_video` |
 | taxonomy | 15 | `get_skills`, `get_subjects`, `update_taxonomy`, `get_skill_graph` |
-| identity | 13 | `generate_wallet`, `unlock_vault`, `lock_vault`, `get_profile` |
+| profile | 9 | `list_profiles`, `get_active_profile_id`, `create_profile`, `restore_profile_with_mnemonic`, `unlock_profile`, `lock_profile`, `rename_profile`, `set_profile_avatar`, `delete_profile` |
+| identity | 8 | `export_mnemonic`, `is_biometric_available`, `get_wallet_info`, `get_local_did`, `get_profile`, `update_profile`, `publish_profile`, `resolve_profile` (lifecycle commands moved to `profile` module) |
 | credentials | 10 | `issue_credential`, `list_credentials`, `verify_credential_cmd`, `revoke_credential`, `suspend_credential`, `reinstate_credential`, `allow_credential_fetch`, `disallow_credential_fetch`, `export_credentials_bundle`, `verify_bundle_offline` |
 | sync | 8 | `register_device`, `trigger_sync`, `get_sync_status` |
 | courses | 8 | `create_course`, `get_course`, `list_courses` |
@@ -484,7 +492,7 @@ The frontend communicates with the Rust backend via **194 Tauri IPC commands** r
 | health | 2 | `health_check`, `read_diag_log` |
 | cardano | 2 | `get_utxos`, `submit_transaction` |
 
-Note: `tutoring` has platform-specific variants (desktop with video, mobile stubs). The 194 count reflects the unique commands registered for the current build.
+Note: `tutoring` has platform-specific variants (desktop with video, mobile stubs). Counts reflect the unique commands registered for the current build; tally is approximate and shifts with each PR.
 
 ---
 
@@ -494,7 +502,7 @@ Note: `tutoring` has platform-specific variants (desktop with video, mobile stub
 
 | Threat | Mitigation |
 |--------|-----------|
-| Key theft | Encrypted vault — Stronghold (desktop) or AES-256-GCM + Argon2id (mobile) |
+| Key theft | Per-profile encrypted vault — Stronghold (desktop) or AES-256-GCM + Argon2id (mobile). Compromising one profile's vault does not expose any other profile on the same device. |
 | Message forgery | Ed25519 signatures on all gossip messages |
 | Sybil attacks | IP colocation scoring, stake-based challenges |
 | Taxonomy corruption | Committee authority verification, strongest peer scoring penalty |

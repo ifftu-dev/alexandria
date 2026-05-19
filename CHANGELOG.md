@@ -7,6 +7,83 @@ and this project loosely follows [Semantic Versioning](https://semver.org/spec/v
 
 ## [Unreleased]
 
+### Multi-user profiles (branch `feat/multi-user-profiles`)
+
+One device can now host any number of fully-isolated learner profiles —
+the headline change for shared-device contexts (households, classrooms,
+internet cafés). Backend, frontend, and migration land together.
+
+**Data layout** — `<app_data>/profiles/<uuid>/{vault, alexandria.db,
+iroh, plugins, videocache}` instead of single-vault-per-device. Each
+profile owns its own SQLCipher key, iroh node secret, libp2p peer id,
+and plugin directory. A public sidecar `profiles_index.json` (display
+names + avatars only — no crypto material) lets the picker render
+before any vault is unlocked.
+
+**Backend** (`src-tauri/src/`):
+- New `profile/{mod, index, manager, migration}.rs` — ProfileManager
+  (list / create / rename / delete / touch), public sidecar index,
+  and an idempotent first-launch auto-migrator that atomically moves
+  the legacy single-vault layout into `profiles/<new-uuid>/` named
+  "My Profile". 18 unit tests on tempfile fixtures.
+- `AppState` refactored: vault/db/plugin/videocache/iroh paths become
+  methods that read from the active profile. New
+  `start_active_profile` / `stop_active_profile` lifecycle methods
+  bring per-profile services up and down on every switch. The
+  singleton iroh `ContentNode` is repointable via new `set_data_dir` /
+  `clear_content_key` methods so the 20+ existing
+  `&state.content_node` call sites stay unchanged.
+- New IPC commands in `commands/profile.rs`: `list_profiles`,
+  `get_active_profile_id`, `create_profile`,
+  `restore_profile_with_mnemonic`, `unlock_profile`, `lock_profile`,
+  `rename_profile`, `set_profile_avatar`, `delete_profile` (delete
+  re-verifies the profile's vault password).
+- Removed identity commands superseded by the profile lifecycle:
+  `check_vault_exists`, `unlock_vault`, `generate_wallet`,
+  `restore_wallet`, `lock_vault`, `reset_local_wallet`. Remaining
+  identity commands (`export_mnemonic`, `is_biometric_available`,
+  `get_wallet_info`, `get_local_did`, `get_profile`, `update_profile`,
+  `publish_profile`, `resolve_profile`) operate on the active profile.
+- `tauri.conf.json` asset scope broadened from `$APPDATA/videocache/**`
+  to also include `$APPDATA/profiles/**/videocache/**` so the
+  webview's `<video>` element still resolves materialized blobs after
+  migration.
+- 658 backend unit tests + 39 integration tests pass; `cargo fmt`
+  clean; clippy clean.
+
+**Frontend** (`src/`):
+- New canonical composable `composables/useProfiles.ts` —
+  `profiles`, `activeProfile`, `unlock/lock/create/rename/delete`,
+  `setAvatar`. `composables/useAuth.ts` becomes a thin shim over it;
+  removed lifecycle methods throw on call so any stale invocation
+  surfaces loudly.
+- New `pages/ProfileSelect.vue` — avatar grid picker with slide-in
+  password panel and `Esc` to back out. Composed from new
+  `components/profile/{ProfileTile, AddProfileTile, ProfileAvatar}.vue`.
+- `pages/Onboarding.vue` collects a display name in addition to the
+  password and calls `createProfile` / `restoreProfileWithMnemonic`.
+- `pages/Unlock.vue` deleted; `/unlock` is now a router redirect to
+  `/profiles` so any cached deep link still routes somewhere sane.
+- `App.vue` initial routing maps `onboarding | picker | ready` to
+  `/onboarding` / `/profiles` / no-op.
+- `AppTopBar` avatar pill renders the active profile's color +
+  emoji; dropdown gets **Switch user** and **Lock profile** entries;
+  `Cmd/Ctrl + Shift + U` is registered as the `switch-profile`
+  shortcut.
+- New types in `src/types/index.ts`: `Avatar`, `ProfileSummary`,
+  `CreateProfileResponse`, `UnlockProfileResponse`.
+- `vue-tsc -b --noEmit` clean.
+
+**Out of scope** (deferred to follow-up RFCs):
+- Push notifications — researched architecture (relay-mediated APNs +
+  FCM + UnifiedPush + native WS) lives in
+  `docs/push-notifications-rfc.md`.
+- Deep linking.
+- Quick-switch via biometric (would build on the per-profile vault).
+- Cross-profile read-only blob deduplication.
+
+See `docs/multi-user-profiles.md` for the full design.
+
 ### Sentinel — backend ML rewrite (PRs #166, #170, #171, #172)
 
 - **#166** — Synthetic adversarial-prior data generator (`alex

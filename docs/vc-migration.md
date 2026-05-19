@@ -149,8 +149,8 @@ validator + observer work) sitting on top of (1) as a dependency.
 2. `commands::auto_issuance::tick(&conn, &learner_key)` — emits
    VCs for observations whose attestation requirement is satisfied.
 
-Both are silent no-ops if the env var is unset or the vault is
-still locked, matching the posture of the other cardano queues.
+Both are silent no-ops if the env var is unset or no profile is
+currently unlocked, matching the posture of the other cardano queues.
 
 ## Seed updates
 

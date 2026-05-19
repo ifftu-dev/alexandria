@@ -53,7 +53,8 @@ src-tauri/
     │   ├── tutoring_mobile.rs # Mobile tutoring command variant
     │   ├── tutoring_stubs.rs  # Stubbed tutoring surface for unsupported builds
     │   ├── taxonomy.rs     # Subject fields, subjects, skills, taxonomy graph
-    │   ├── identity.rs     # Wallet, vault, profile lifecycle
+    │   ├── profile.rs      # Multi-user profile lifecycle: list/create/unlock/lock/rename/avatar/delete + restore-from-mnemonic
+    │   ├── identity.rs     # Active-profile identity ops: export_mnemonic, get_profile, update_profile, publish_profile, resolve_profile, get_wallet_info, get_local_did
     │   ├── credentials.rs  # VC issue/list/verify/revoke/suspend/export/allowlist
     │   ├── sync.rs         # Cross-device sync
     │   ├── courses.rs      # Course/tutorial CRUD and publish flows
@@ -83,6 +84,12 @@ src-tauri/
     ├── aggregation/        # Trust aggregation / anti-gaming pipeline
     ├── evidence/           # Reputation, attestation, challenge logic
     ├── ipfs/               # iroh node + resolver + gateway fallback
+    │
+    ├── profile/            # Multi-user profile manager
+    │   ├── mod.rs          # Module exports
+    │   ├── index.rs        # profiles_index.json sidecar (public — names/avatars only)
+    │   ├── manager.rs      # ProfileManager: list/create/rename/delete/touch + ProfilePaths
+    │   └── migration.rs    # First-launch auto-migrator from legacy single-vault layout
     │
     ├── p2p/                # libp2p network stack
     │   ├── network.rs      # Swarm, relay bootstrap, event loop
@@ -153,40 +160,48 @@ src/
 │       ├── Inter.woff2
 │       └── JetBrainsMono.woff2
 │
-├── composables/            # 14 shared singletons
-│   ├── useAuth.ts
+├── composables/            # Shared singletons
+│   ├── useProfiles.ts      # Canonical multi-user surface (list/unlock/lock/create/rename/delete/avatar)
+│   ├── useAuth.ts          # Compat shim over useProfiles — removed lifecycle methods throw
 │   ├── useBiometricVault.ts
 │   ├── useClassroom.ts
 │   ├── useContentSync.ts
 │   ├── useCredentials.ts
+│   ├── useKeyboardShortcuts.ts # Includes the `switch-profile` shortcut (Cmd/Ctrl+Shift+U)
 │   ├── useLocalApi.ts
 │   ├── useOmniSearch.ts
 │   ├── useP2P.ts
 │   ├── usePlatform.ts
 │   ├── useSentinel.ts
+│   ├── useSettingsModal.ts
 │   ├── useSkillGraphHover.ts
 │   ├── useSkillGraphState.ts
 │   ├── useTheme.ts
 │   └── useTutoringRoom.ts
 │
-├── components/             # 34 Vue components across feature folders
-│   ├── ui/                 # Barrel-exported primitives (12 total)
-│   ├── auth/               # Onboarding/unlock visuals
+├── components/             # Vue components across feature folders
+│   ├── ui/                 # Barrel-exported primitives
+│   ├── auth/               # Onboarding visuals (Starfield, etc.)
+│   ├── profile/            # Multi-user picker tiles + avatar widget
+│   │   ├── ProfileTile.vue       # Picker tile for an existing profile
+│   │   ├── AddProfileTile.vue    # "+" tile that routes to /onboarding
+│   │   └── ProfileAvatar.vue     # Emoji / identicon / image avatar
 │   ├── course/             # Content renderers + quiz widgets
 │   ├── governance/         # Governance badges/gates/countdowns
 │   ├── integrity/          # Sentinel training/calibration UI
-│   ├── layout/             # Sidebar, top bar, bottom bar, PiP, ticker, modal shell
+│   ├── layout/             # Sidebar, top bar (avatar dropdown), bottom bar, PiP, ticker, modal shell
 │   ├── omni/               # Omni search surface
+│   ├── settings/           # Global settings modal
 │   └── skills/             # Skill graph
 │
 ├── layouts/
 │   ├── AppLayout.vue       # Sidebar + content area
-│   └── BlankLayout.vue     # Full-screen (onboarding, unlock)
+│   └── BlankLayout.vue     # Full-screen (profile picker, onboarding)
 │
-├── pages/                  # 29 route views
+├── pages/                  # Route views
 │   ├── Home.vue
-│   ├── Onboarding.vue
-│   ├── Unlock.vue
+│   ├── ProfileSelect.vue   # Multi-user picker (`/profiles`)
+│   ├── Onboarding.vue      # New-profile creation / mnemonic restore
 │   ├── classrooms/
 │   │   ├── Classroom.vue
 │   │   ├── Index.vue
