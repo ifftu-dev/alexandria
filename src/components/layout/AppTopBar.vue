@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useTheme } from '@/composables/useTheme'
 import { useP2P } from '@/composables/useP2P'
-import { useAuth } from '@/composables/useAuth'
+import { useProfiles } from '@/composables/useProfiles'
 import { usePlatform } from '@/composables/usePlatform'
 import { useOmniSearch } from '@/composables/useOmniSearch'
 import { useSettingsModal } from '@/composables/useSettingsModal'
@@ -17,7 +17,7 @@ const router = useRouter()
 const route = useRoute()
 const { theme, setTheme } = useTheme()
 const { status: p2pStatus, startPolling } = useP2P()
-const { displayName, lockVault } = useAuth()
+const { displayName, lockProfile, activeProfile } = useProfiles()
 const { isMobilePlatform, isMac } = usePlatform()
 const omniSearch = useOmniSearch()
 const { open: openSettingsModal } = useSettingsModal()
@@ -118,13 +118,22 @@ function navigateFromMenu(path: string) {
   router.push(path)
 }
 
-async function handleLockAndSignOut() {
+async function handleSwitchProfile() {
   userMenuOpen.value = false
-  try { await lockVault() } catch (e) { console.warn('lock failed:', e) }
-  router.replace('/unlock')
+  try { await lockProfile() } catch (e) { console.warn('lock failed:', e) }
+  router.replace('/profiles')
 }
 
+registerAction('switch-profile', () => {
+  handleSwitchProfile()
+})
+
 const userInitial = () => displayName.value ? displayName.value.charAt(0).toUpperCase() : 'A'
+const avatarBg = computed(() => activeProfile.value?.color ?? null)
+const avatarEmoji = computed(() => {
+  const a = activeProfile.value?.avatar
+  return a && a.kind === 'emoji' ? a.value : null
+})
 </script>
 
 <template>
@@ -259,13 +268,16 @@ const userInitial = () => displayName.value ? displayName.value.charAt(0).toUppe
       <!-- User avatar with dropdown -->
       <div ref="userMenuRef" class="user-menu relative">
         <button
-          class="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-primary to-accent text-xs font-bold text-white transition-shadow hover:shadow-md"
+          class="flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold text-white transition-shadow hover:shadow-md"
+          :class="avatarBg ? '' : 'bg-gradient-to-br from-primary to-accent'"
+          :style="avatarBg ? { backgroundColor: avatarBg } : {}"
           :aria-label="`User menu for ${displayName || 'User'}`"
           aria-haspopup="true"
           :aria-expanded="userMenuOpen"
           @click.stop="userMenuOpen = !userMenuOpen"
         >
-          {{ userInitial() }}
+          <span v-if="avatarEmoji" class="text-base leading-none">{{ avatarEmoji }}</span>
+          <span v-else>{{ userInitial() }}</span>
         </button>
 
         <Transition
@@ -354,13 +366,23 @@ const userInitial = () => displayName.value ? displayName.value.charAt(0).toUppe
 
             <div class="border-t border-border p-1">
               <button
+                class="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-foreground transition-colors hover:bg-muted"
+                @click="handleSwitchProfile"
+              >
+                <svg class="h-4 w-4 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M17 20h5v-2a4 4 0 00-3-3.87M9 20H4v-2a4 4 0 013-3.87m6-5a4 4 0 11-8 0 4 4 0 018 0zm6 0a4 4 0 11-8 0 4 4 0 018 0z" />
+                </svg>
+                Switch user
+                <span class="ml-auto text-xs text-muted-foreground">{{ shortcuts['switch-profile'] ? formatCombo(shortcuts['switch-profile'].keys) : '' }}</span>
+              </button>
+              <button
                 class="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-error transition-colors hover:bg-error/10"
-                @click="handleLockAndSignOut"
+                @click="handleSwitchProfile"
               >
                 <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
                 </svg>
-                Lock &amp; Sign Out
+                Lock profile
               </button>
             </div>
 
