@@ -62,10 +62,13 @@ struct RunningNode {
 /// The embedded iroh content node.
 ///
 /// Manages the lifecycle of the iroh QUIC endpoint and blob store.
-/// Thread-safe via `Arc<Mutex<>>` — intended to be stored in `AppState`.
+/// Thread-safe via `Arc<Mutex<>>` — intended to be stored in `AppState`
+/// as a per-device singleton. The blob-store directory is swappable
+/// (see [`Self::set_data_dir`]) so the same node instance can be
+/// repointed at a new directory when the active user profile changes.
 pub struct ContentNode {
     inner: Arc<Mutex<Option<RunningNode>>>,
-    data_dir: PathBuf,
+    data_dir: Arc<Mutex<PathBuf>>,
     /// AES-256-GCM key for transparent content encryption.
     /// Set after vault unlock via `set_content_key()`.
     content_key: Arc<Mutex<Option<[u8; 32]>>>,
@@ -78,9 +81,25 @@ impl ContentNode {
     pub fn new(data_dir: &Path) -> Self {
         Self {
             inner: Arc::new(Mutex::new(None)),
-            data_dir: data_dir.to_path_buf(),
+            data_dir: Arc::new(Mutex::new(data_dir.to_path_buf())),
             content_key: Arc::new(Mutex::new(None)),
         }
+    }
+
+    /// Replace the blob-store directory for the next `start()`.
+    ///
+    /// MUST be called while the node is not running (i.e. after
+    /// `shutdown()`). Used to reroute the singleton ContentNode at a
+    /// freshly-unlocked profile's blob directory.
+    pub async fn set_data_dir(&self, new_dir: PathBuf) {
+        *self.data_dir.lock().await = new_dir;
+    }
+
+    /// Clear the in-memory content key (called when the active profile
+    /// is locked). Subsequent encrypt calls will fail until a new key
+    /// is supplied via [`Self::set_content_key`].
+    pub async fn clear_content_key(&self) {
+        *self.content_key.lock().await = None;
     }
 
     /// Set the content encryption key (derived from vault password).
@@ -109,19 +128,20 @@ impl ContentNode {
         }
 
         // Create persistent blob store
+        let data_dir = self.data_dir.lock().await.clone();
         crate::diag::log(&format!(
             "node.start: FsStore::load at {}...",
-            self.data_dir.display()
+            data_dir.display()
         ));
-        let store = FsStore::load(&self.data_dir)
+        let store = FsStore::load(&data_dir)
             .await
             .map_err(|e| NodeError::StoreInit(e.to_string()))?;
         crate::diag::log("node.start: FsStore loaded OK");
 
-        log::info!("iroh blob store loaded at {}", self.data_dir.display());
+        log::info!("iroh blob store loaded at {}", data_dir.display());
 
         // Load or generate the node's persistent identity key
-        let secret_key = load_or_generate_secret_key(&self.data_dir, node_enc_key)?;
+        let secret_key = load_or_generate_secret_key(&data_dir, node_enc_key)?;
 
         // QUIC transport: aggressive timeouts for real-time media.
         // keep_alive=2s ensures the connection stays active during audio DTX gaps.

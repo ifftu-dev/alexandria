@@ -1,371 +1,39 @@
+//! Identity / wallet IPC commands.
+//!
+//! All commands here operate on the *currently active profile*. They
+//! return an error when no profile is unlocked. The lifecycle
+//! commands (create / unlock / lock / delete) live in
+//! [`commands::profile`].
+
 use rusqlite::params;
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, State};
+use tauri::State;
 
-use crate::crypto::keystore::Keystore;
 use crate::crypto::wallet;
 use crate::domain::identity::{Identity, ProfileUpdate, WalletInfo};
 use crate::domain::profile::{ProfilePayload, PublishProfileResult, SignedProfile};
 use crate::ipfs::profile as ipfs_profile;
 use crate::AppState;
 
-/// Minimum password length for vault encryption (NIST SP 800-63B guidance).
-const MIN_PASSWORD_LENGTH: usize = 12;
-
-/// Validate password meets minimum strength requirements.
-fn validate_password(password: &str) -> Result<(), String> {
-    if password.len() < MIN_PASSWORD_LENGTH {
-        return Err(format!(
-            "Your vault password must be at least {MIN_PASSWORD_LENGTH} characters long. Add a few more characters and try again."
-        ));
-    }
-    Ok(())
-}
-
-/// Progress event payload sent to the frontend during wallet operations.
-#[derive(Clone, Serialize)]
-struct VaultProgress {
-    step: String,
-    detail: String,
-}
-
-#[derive(Debug, Serialize)]
-pub struct GenerateWalletResponse {
-    /// The mnemonic phrase — shown once during onboarding so the user
-    /// can write it down. After this, it's only accessible via `export_mnemonic`.
-    pub mnemonic: String,
-    pub stake_address: String,
-    pub payment_address: String,
-}
-
-/// Combined response from unlock/generate that includes wallet + profile,
-/// eliminating the need for a separate `get_profile` IPC call.
+/// Combined response from unlock/create flows.
 #[derive(Debug, Serialize)]
 pub struct UnlockResponse {
     pub wallet: WalletInfo,
     pub profile: Option<Identity>,
 }
 
-/// Emit a vault progress event to the frontend.
-fn emit_progress(app: &AppHandle, step: &str, detail: &str) {
-    let _ = app.emit(
-        "vault-progress",
-        VaultProgress {
-            step: step.to_string(),
-            detail: detail.to_string(),
-        },
-    );
-}
-
-/// Check whether a Stronghold vault file exists.
-///
-/// Used on app startup to decide between onboarding and unlock screen.
-#[tauri::command]
-pub async fn check_vault_exists(state: State<'_, AppState>) -> Result<bool, String> {
-    Ok(Keystore::exists(&state.vault_dir))
-}
-
-/// Unlock the vault with the user's password.
-///
-/// Called on app startup when a vault already exists. Decrypts the
-/// Stronghold snapshot, derives the wallet from the stored mnemonic,
-/// and loads the identity into memory.
-///
-/// Returns both wallet info and profile in a single response to avoid
-/// an extra IPC round-trip.
-#[tauri::command]
-pub async fn unlock_vault(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    password: String,
-) -> Result<UnlockResponse, String> {
-    emit_progress(&app, "vault", "Decrypting vault...");
-
-    // Move all CPU-bound crypto work to a blocking thread so we don't
-    // stall the Tokio async executor. Stronghold snapshot decryption
-    // (scrypt internally) and BIP32-Ed25519 derivation (PBKDF2) are
-    // the main time sinks.
-    let vault_dir = state.vault_dir.clone();
-    let (ks, w) = tokio::task::spawn_blocking(move || {
-        let ks = Keystore::open(&vault_dir, &password).map_err(|e| e.to_string())?;
-        let mnemonic = ks.retrieve_mnemonic().map_err(|e| e.to_string())?;
-        let w = wallet::wallet_from_mnemonic(&mnemonic).map_err(|e| e.to_string())?;
-        Ok::<_, String>((ks, w))
-    })
-    .await
-    .map_err(|e| format!("blocking task failed: {e}"))?
-    .map_err(|e: String| e)?;
-
-    // Derive the DB encryption key and open/migrate the database
-    emit_progress(&app, "db", "Opening encrypted database...");
-    let db_key = ks.derive_db_key();
-    state.open_database(&db_key)?;
-
-    emit_progress(&app, "db", "Loading identity from database...");
-    let profile = {
-        let db_guard = state
-            .db
-            .lock()
-            .map_err(|_| "database lock poisoned".to_string())?;
-        let db = db_guard.as_ref().ok_or("database not initialized")?;
-        let exists: bool = db
-            .conn()
-            .query_row(
-                "SELECT COUNT(*) > 0 FROM local_identity WHERE id = 1",
-                [],
-                |row| row.get(0),
-            )
-            .map_err(|e| e.to_string())?;
-
-        if !exists {
-            // Re-create identity row from the wallet (recovery scenario)
-            db.conn()
-                .execute(
-                    "INSERT INTO local_identity (id, stake_address, payment_address) VALUES (1, ?1, ?2)",
-                    params![w.stake_address.clone(), w.payment_address],
-                )
-                .map_err(|e| e.to_string())?;
-        }
-
-        // Rebind any demo-learner seed rows to this wallet so the
-        // dashboards light up under the user's real address. Idempotent
-        // and silently no-op once the sentinel rows are gone.
-        #[cfg(feature = "dev-seed")]
-        {
-            let did = crate::crypto::did::derive_did_key(&w.signing_key);
-            let _ =
-                crate::db::seed::bind_current_user_to_seed_with_did(db.conn(), Some(did.as_str()));
-        }
-
-        // Read back the full profile in the same DB lock — no extra IPC needed
-        read_profile(db.conn())
-    }; // db guard dropped here — before any .await
-
-    // Store keystore in app state
-    let mut keystore = state.keystore.lock().await;
-    *keystore = Some(ks);
-    drop(keystore);
-
-    emit_progress(&app, "done", "Vault unlocked successfully");
-
-    Ok(UnlockResponse {
-        wallet: WalletInfo {
-            stake_address: w.stake_address.clone(),
-            payment_address: w.payment_address.clone(),
-            has_mnemonic_backup: true,
-        },
-        profile,
-    })
-}
-
-/// Generate a new wallet and store the identity in the local database.
-///
-/// Called during onboarding. Creates a new Stronghold vault, generates
-/// a fresh 24-word mnemonic, stores it encrypted, and returns the
-/// mnemonic once for the user to write down.
-#[tauri::command]
-pub async fn generate_wallet(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    password: String,
-) -> Result<GenerateWalletResponse, String> {
-    validate_password(&password)?;
-    emit_progress(&app, "vault", "Creating encrypted vault...");
-    let had_existing_vault = Keystore::exists(&state.vault_dir);
-
-    // Move all CPU-bound crypto to a blocking thread:
-    // - Keystore::create() sets up Stronghold in memory
-    // - wallet::generate_wallet() does PBKDF2 + BIP32-Ed25519
-    // - ks.store_mnemonic() encrypts + commits to disk (single write)
-    let vault_dir = state.vault_dir.clone();
-    let (ks, w) = tokio::task::spawn_blocking(move || {
-        #[allow(unused_mut)] // portable keystore (mobile) needs mut; desktop stronghold does not
-        let mut ks = Keystore::create(&vault_dir, &password).map_err(|e| e.to_string())?;
-        let w = wallet::generate_wallet().map_err(|e| e.to_string())?;
-        ks.store_mnemonic(&w.mnemonic).map_err(|e| e.to_string())?;
-        Ok::<_, String>((ks, w))
-    })
-    .await
-    .map_err(|e| format!("blocking task failed: {e}"))?
-    .map_err(|e: String| e)?;
-
-    // Derive the DB encryption key and open/migrate the database
-    if !had_existing_vault && state.reset_orphaned_encrypted_database()? {
-        emit_progress(&app, "db", "Resetting stale local database...");
-    }
-    emit_progress(&app, "db", "Opening encrypted database...");
-    let db_key = ks.derive_db_key();
-    state.open_database(&db_key)?;
-
-    emit_progress(&app, "db", "Storing identity in local database...");
-    {
-        let db_guard = state
-            .db
-            .lock()
-            .map_err(|_| "database lock poisoned".to_string())?;
-        let db = db_guard.as_ref().ok_or("database not initialized")?;
-
-        // Check if identity already exists
-        let exists: bool = db
-            .conn()
-            .query_row(
-                "SELECT COUNT(*) > 0 FROM local_identity WHERE id = 1",
-                [],
-                |row| row.get(0),
-            )
-            .map_err(|e| e.to_string())?;
-
-        if exists {
-            // Update existing identity (e.g., re-onboarding after DB wipe recovery)
-            db.conn()
-                .execute(
-                    "UPDATE local_identity SET stake_address = ?1, payment_address = ?2, updated_at = datetime('now') WHERE id = 1",
-                    params![w.stake_address.clone(), w.payment_address],
-                )
-                .map_err(|e| e.to_string())?;
-        } else {
-            db.conn()
-                .execute(
-                    "INSERT INTO local_identity (id, stake_address, payment_address) VALUES (1, ?1, ?2)",
-                    params![w.stake_address.clone(), w.payment_address],
-                )
-                .map_err(|e| e.to_string())?;
-        }
-
-        // Bind seeded demo-learner rows to this wallet now that the
-        // identity is committed. See seed::bind_current_user_to_seed.
-        #[cfg(feature = "dev-seed")]
-        {
-            let did = crate::crypto::did::derive_did_key(&w.signing_key);
-            let _ =
-                crate::db::seed::bind_current_user_to_seed_with_did(db.conn(), Some(did.as_str()));
-        }
-    } // db guard dropped here — before any .await
-
-    // Store keystore in app state
-    let mut keystore = state.keystore.lock().await;
-    *keystore = Some(ks);
-    drop(keystore);
-
-    emit_progress(&app, "done", "Identity created successfully");
-
-    Ok(GenerateWalletResponse {
-        mnemonic: w.mnemonic.clone(),
-        stake_address: w.stake_address.clone(),
-        payment_address: w.payment_address.clone(),
-    })
-}
-
-/// Restore a wallet from an existing mnemonic phrase.
-///
-/// Called from the "Import Wallet" flow. Validates the mnemonic,
-/// creates a new Stronghold vault, and derives the wallet.
-#[tauri::command]
-pub async fn restore_wallet(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    mnemonic: String,
-    password: String,
-) -> Result<WalletInfo, String> {
-    validate_password(&password)?;
-    emit_progress(&app, "validate", "Validating recovery phrase...");
-    let had_existing_vault = Keystore::exists(&state.vault_dir);
-
-    // Move all CPU-bound crypto to a blocking thread
-    let vault_dir = state.vault_dir.clone();
-    let (ks, w) = tokio::task::spawn_blocking(move || {
-        let w = wallet::wallet_from_mnemonic(&mnemonic).map_err(|e| e.to_string())?;
-        #[allow(unused_mut)] // portable keystore (mobile) needs mut; desktop stronghold does not
-        let mut ks = Keystore::create(&vault_dir, &password).map_err(|e| e.to_string())?;
-        ks.store_mnemonic(&mnemonic).map_err(|e| e.to_string())?;
-        Ok::<_, String>((ks, w))
-    })
-    .await
-    .map_err(|e| format!("blocking task failed: {e}"))?
-    .map_err(|e: String| e)?;
-
-    if !had_existing_vault && state.reset_orphaned_encrypted_database()? {
-        emit_progress(&app, "db", "Resetting stale local database...");
-    }
-
-    emit_progress(&app, "db", "Opening encrypted database...");
-    let db_key = ks.derive_db_key();
-    state.open_database(&db_key)?;
-
-    emit_progress(&app, "db", "Storing identity in local database...");
-    {
-        let db_guard = state
-            .db
-            .lock()
-            .map_err(|_| "database lock poisoned".to_string())?;
-        let db = db_guard.as_ref().ok_or("database not initialized")?;
-
-        let exists: bool = db
-            .conn()
-            .query_row(
-                "SELECT COUNT(*) > 0 FROM local_identity WHERE id = 1",
-                [],
-                |row| row.get(0),
-            )
-            .map_err(|e| e.to_string())?;
-
-        if exists {
-            db.conn()
-                .execute(
-                    "UPDATE local_identity SET stake_address = ?1, payment_address = ?2, updated_at = datetime('now') WHERE id = 1",
-                    params![w.stake_address.clone(), w.payment_address],
-                )
-                .map_err(|e| e.to_string())?;
-        } else {
-            db.conn()
-                .execute(
-                    "INSERT INTO local_identity (id, stake_address, payment_address) VALUES (1, ?1, ?2)",
-                    params![w.stake_address.clone(), w.payment_address],
-                )
-                .map_err(|e| e.to_string())?;
-        }
-
-        // Bind seeded demo-learner rows to this restored wallet.
-        #[cfg(feature = "dev-seed")]
-        {
-            let did = crate::crypto::did::derive_did_key(&w.signing_key);
-            let _ =
-                crate::db::seed::bind_current_user_to_seed_with_did(db.conn(), Some(did.as_str()));
-        }
-    } // db guard dropped here — before any .await
-
-    // Store keystore in app state
-    let mut keystore = state.keystore.lock().await;
-    *keystore = Some(ks);
-    drop(keystore);
-
-    emit_progress(&app, "done", "Wallet restored successfully");
-
-    Ok(WalletInfo {
-        stake_address: w.stake_address.clone(),
-        payment_address: w.payment_address.clone(),
-        has_mnemonic_backup: true,
-    })
-}
-
-/// Export the mnemonic phrase from the vault.
-///
-/// Requires the vault to be unlocked **and** re-authentication via
-/// the vault password. This prevents a compromised WebView from
-/// extracting the mnemonic without user interaction.
-///
-/// Rate-limited: 3 attempts per 5 minutes.
+/// Export the mnemonic phrase from the active vault. Requires the
+/// vault to be unlocked **and** re-authentication via the vault
+/// password. Rate-limited: 3 attempts per 5 minutes.
 #[tauri::command]
 pub async fn export_mnemonic(
     state: State<'_, AppState>,
     password: String,
 ) -> Result<String, String> {
-    // Rate limit check
     {
         let mut limiter = state.ipc_limiter.lock().map_err(|e| e.to_string())?;
         limiter.check("export_mnemonic")?;
     }
-    // Touch activity timestamp
     if let Ok(mut ts) = state.last_activity.lock() {
         *ts = std::time::Instant::now();
     }
@@ -376,54 +44,25 @@ pub async fn export_mnemonic(
     ks.retrieve_mnemonic().map_err(|e| e.to_string())
 }
 
-/// Check if biometric credentials are enrolled (frontend-side check).
-///
-/// This is a convenience command — the actual biometric check happens
-/// in the frontend via tauri-plugin-biometry. This just checks if the
-/// vault is unlocked (a prerequisite for biometric enrollment).
+/// Whether the active vault is unlocked. The actual biometric check
+/// happens in the frontend via `tauri-plugin-biometry`; this lets the
+/// frontend know whether biometric enrollment is currently meaningful.
 #[tauri::command]
 pub async fn is_biometric_available(state: State<'_, AppState>) -> Result<bool, String> {
     let keystore = state.keystore.lock().await;
     Ok(keystore.is_some())
 }
 
-/// Lock the vault, clearing in-memory secrets.
-///
-/// After this call, `unlock_vault` must be called again to access
-/// any identity or crypto operations.
-#[tauri::command]
-pub async fn lock_vault(state: State<'_, AppState>) -> Result<(), String> {
-    let mut keystore = state.keystore.lock().await;
-    if let Some(ks) = keystore.take() {
-        ks.lock().map_err(|e| e.to_string())?;
-    }
-    Ok(())
-}
-
-/// Remove the local wallet on this device so the user can recover from a phrase.
-///
-/// This deletes the encrypted vault snapshot and encrypted database for the
-/// current device only. It does not affect any backed-up recovery phrase.
-#[tauri::command]
-pub async fn reset_local_wallet(state: State<'_, AppState>) -> Result<(), String> {
-    let mut keystore = state.keystore.lock().await;
-    if let Some(ks) = keystore.take() {
-        ks.lock().map_err(|e| e.to_string())?;
-    }
-    drop(keystore);
-
-    state.reset_local_wallet_files()?;
-    Ok(())
-}
-
-/// Get the current wallet info (no secrets).
+/// Get the active profile's wallet info (no secrets).
 #[tauri::command]
 pub async fn get_wallet_info(state: State<'_, AppState>) -> Result<Option<WalletInfo>, String> {
     let db_guard = state
         .db
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
+    let Some(db) = db_guard.as_ref() else {
+        return Ok(None);
+    };
 
     let result = db.conn().query_row(
         "SELECT stake_address, payment_address FROM local_identity WHERE id = 1",
@@ -432,7 +71,7 @@ pub async fn get_wallet_info(state: State<'_, AppState>) -> Result<Option<Wallet
             Ok(WalletInfo {
                 stake_address: row.get(0)?,
                 payment_address: row.get(1)?,
-                has_mnemonic_backup: true, // Always true now (Stronghold stores it)
+                has_mnemonic_backup: true,
             })
         },
     );
@@ -444,12 +83,8 @@ pub async fn get_wallet_info(state: State<'_, AppState>) -> Result<Option<Wallet
     }
 }
 
-/// Derive the local user's `did:key` from the unlocked vault.
-///
-/// Returns `None` when the vault is locked — frontend callers use
-/// that as a signal to show the unlock prompt before surfacing VC
-/// features. Failing to unlock is NOT an error for this command, so
-/// the UI can render in locked-read-only mode.
+/// Derive the active profile's `did:key`. Returns `None` when the
+/// vault is locked so the UI can render in locked-read-only mode.
 #[tauri::command]
 pub async fn get_local_did(state: State<'_, AppState>) -> Result<Option<String>, String> {
     let ks_guard = state.keystore.lock().await;
@@ -466,18 +101,19 @@ pub async fn get_local_did(state: State<'_, AppState>) -> Result<Option<String>,
     Ok(Some(did.as_str().to_string()))
 }
 
-/// Get the local user's profile.
+/// Get the active profile's Identity row from the local DB.
 #[tauri::command]
 pub async fn get_profile(state: State<'_, AppState>) -> Result<Option<Identity>, String> {
     let db_guard = state
         .db
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
+    let Some(db) = db_guard.as_ref() else {
+        return Ok(None);
+    };
     Ok(read_profile(db.conn()))
 }
 
-/// Internal helper: read the local user's profile from the database.
 fn read_profile(conn: &rusqlite::Connection) -> Option<Identity> {
     conn.query_row(
         "SELECT stake_address, payment_address, display_name, bio, avatar_cid, profile_hash, created_at, updated_at
@@ -499,7 +135,7 @@ fn read_profile(conn: &rusqlite::Connection) -> Option<Identity> {
     .ok()
 }
 
-/// Update the local user's profile.
+/// Update the active profile's Identity row.
 #[tauri::command]
 pub async fn update_profile(
     state: State<'_, AppState>,
@@ -511,7 +147,6 @@ pub async fn update_profile(
         .map_err(|_| "database lock poisoned".to_string())?;
     let db = db_guard.as_ref().ok_or("database not initialized")?;
 
-    // Build dynamic UPDATE statement
     let mut set_clauses = Vec::new();
     let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
 
@@ -545,7 +180,6 @@ pub async fn update_profile(
         .execute(&sql, params.as_slice())
         .map_err(|e| e.to_string())?;
 
-    // Return the updated profile
     db.conn()
         .query_row(
             "SELECT stake_address, payment_address, display_name, bio, avatar_cid, profile_hash, created_at, updated_at
@@ -567,16 +201,9 @@ pub async fn update_profile(
         .map_err(|e| e.to_string())
 }
 
-/// Publish the local user's profile to iroh.
-///
-/// Reads the current profile from the database, signs it with the
-/// wallet's Ed25519 key, stores the signed JSON on iroh, and saves
-/// the resulting BLAKE3 hash in the database.
-///
-/// Requires the vault to be unlocked (wallet key needed for signing).
+/// Publish the active profile to iroh, signing with the wallet key.
 #[tauri::command]
 pub async fn publish_profile(state: State<'_, AppState>) -> Result<PublishProfileResult, String> {
-    // Get the wallet signing key from the vault
     let keystore = state.keystore.lock().await;
     let ks = keystore.as_ref().ok_or("vault is locked — unlock first")?;
     let mnemonic = ks.retrieve_mnemonic().map_err(|e| e.to_string())?;
@@ -584,7 +211,6 @@ pub async fn publish_profile(state: State<'_, AppState>) -> Result<PublishProfil
 
     let w = wallet::wallet_from_mnemonic(&mnemonic).map_err(|e| e.to_string())?;
 
-    // Read the current profile from the database
     let (stake_address, display_name, bio, avatar_cid, created_at_str): (
         String,
         Option<String>,
@@ -613,13 +239,11 @@ pub async fn publish_profile(state: State<'_, AppState>) -> Result<PublishProfil
                 },
             )
             .map_err(|e| e.to_string())?
-    }; // db guard dropped here — before any .await
+    };
 
-    // Parse created_at to unix timestamp
     let created_at = parse_datetime_to_unix(&created_at_str);
     let updated_at = chrono::Utc::now().timestamp();
 
-    // Build the profile payload
     let payload = ProfilePayload {
         version: 1,
         stake_address,
@@ -630,15 +254,13 @@ pub async fn publish_profile(state: State<'_, AppState>) -> Result<PublishProfil
         updated_at,
     };
 
-    // Sign the profile
     let signed = ipfs_profile::sign_profile(&payload, &w.signing_key).map_err(|e| e.to_string())?;
 
-    // Publish to iroh
-    let result = ipfs_profile::publish_profile(&state.content_node, &signed)
+    let content_node = state.content_node_required().await?;
+    let result = ipfs_profile::publish_profile(&content_node, &signed)
         .await
         .map_err(|e| e.to_string())?;
 
-    // Save the profile_hash in the database
     let db_guard = state
         .db
         .lock()
@@ -655,22 +277,17 @@ pub async fn publish_profile(state: State<'_, AppState>) -> Result<PublishProfil
 }
 
 /// Resolve a profile from iroh by BLAKE3 hash.
-///
-/// Fetches the signed profile document, verifies the Ed25519 signature,
-/// and returns the verified profile. Used for viewing other users'
-/// profiles (received via P2P in Phase 3).
 #[tauri::command]
 pub async fn resolve_profile(
     state: State<'_, AppState>,
     hash: String,
 ) -> Result<SignedProfile, String> {
-    ipfs_profile::resolve_profile(&state.content_node, &hash)
+    let content_node = state.content_node_required().await?;
+    ipfs_profile::resolve_profile(&content_node, &hash)
         .await
         .map_err(|e| e.to_string())
 }
 
-/// Parse a SQLite datetime string to a Unix timestamp.
-/// Falls back to current time if parsing fails.
 fn parse_datetime_to_unix(datetime_str: &str) -> i64 {
     chrono::NaiveDateTime::parse_from_str(datetime_str, "%Y-%m-%d %H:%M:%S")
         .map(|dt| dt.and_utc().timestamp())

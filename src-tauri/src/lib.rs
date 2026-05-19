@@ -11,6 +11,7 @@ pub mod evidence;
 pub mod ipfs;
 pub mod p2p;
 pub mod plugins;
+pub mod profile;
 pub mod sentinel;
 pub mod tutoring;
 
@@ -41,9 +42,30 @@ use ipfs::gateway::GatewayClient;
 use ipfs::node::ContentNode;
 use ipfs::resolver::ContentResolver;
 use p2p::network::P2pNode;
+use profile::{ProfileId, ProfileManager, ProfilePaths};
 use tutoring::TutoringManager;
 
+/// Metadata for the currently-unlocked profile. Held inside
+/// [`AppState::active`]; `None` while the picker / unlock screen is
+/// showing.
+#[derive(Debug, Clone)]
+pub struct ActiveProfile {
+    pub id: ProfileId,
+    pub paths: ProfilePaths,
+}
+
 /// Shared application state accessible from all Tauri commands.
+///
+/// State is split into two tiers:
+///
+/// * **Per-device singletons** — initialized once at app launch and
+///   shared across every profile (`ProfileManager`, `TutoringManager`,
+///   `ClassroomManager`, `last_activity`, `ipc_limiter`, grader runtime).
+/// * **Per-profile resources** — created when a profile is unlocked
+///   via [`AppState::start_active_profile`] and torn down on
+///   [`AppState::stop_active_profile`]. The `Option`-wrapped fields
+///   below (`db`, `keystore`, `content_node`, `resolver`, `p2p_node`)
+///   are populated only while a profile is active.
 ///
 /// The database uses `std::sync::Mutex` (not `tokio::sync::Mutex`)
 /// because rusqlite's `Connection` is `!Sync`.  A blocking mutex
@@ -54,19 +76,12 @@ use tutoring::TutoringManager;
 /// the `RefCell` from different OS threads — causing a SIGSEGV on iOS
 /// where the tokio thread pool is more aggressive about work-stealing.
 pub struct AppState {
-    pub db: Arc<std::sync::Mutex<Option<Database>>>,
-    pub db_path: PathBuf,
-    pub keystore: Arc<Mutex<Option<Keystore>>>,
-    pub vault_dir: PathBuf,
-    /// Directory where installed plugin bundles live (`<app_data>/plugins/`).
-    /// Each plugin is rooted at `plugins_dir/<plugin_cid>/`.
-    pub plugins_dir: PathBuf,
-    /// Directory where resolved video blobs are materialized as files
-    /// (`<app_data>/videocache/<blake3>.mp4`) so the webview's `<video>`
-    /// element can load them through Tauri's asset protocol. iOS
-    /// WKWebView's media engine ignores custom URI-scheme handlers, so
-    /// the bytes must exist as a real file `convertFileSrc` can point at.
-    pub video_cache_dir: PathBuf,
+    // ─── per-device singletons ──────────────────────────────────────
+    pub app_data_dir: PathBuf,
+    pub profile_manager: Arc<ProfileManager>,
+    pub active: Arc<std::sync::RwLock<Option<ActiveProfile>>>,
+    pub tutoring: Arc<TutoringManager>,
+    pub classroom: Arc<ClassroomManager>,
     /// Deterministic Wasmtime grader runtime for community plugins (Phase 2).
     /// Cheap to clone; the underlying engine and module cache are shared.
     /// Desktop-only — wasmtime v27 does not support iOS / Android; mobile
@@ -74,84 +89,157 @@ pub struct AppState {
     /// returns `GraderUnavailable` on mobile.
     #[cfg(desktop)]
     pub grader_runtime: Arc<plugins::wasm_runtime::GraderRuntime>,
-    pub content_node: Arc<ContentNode>,
-    pub resolver: Arc<Mutex<Option<ContentResolver>>>,
-    pub p2p_node: Arc<Mutex<Option<P2pNode>>>,
-    pub tutoring: Arc<TutoringManager>,
-    pub classroom: Arc<ClassroomManager>,
     /// Last IPC activity timestamp for session timeout (auto-lock).
     pub last_activity: Arc<std::sync::Mutex<std::time::Instant>>,
     /// IPC rate limiter for sensitive commands.
     pub ipc_limiter: Arc<std::sync::Mutex<crate::commands::ratelimit::IpcRateLimiter>>,
+
+    // ─── per-profile resources (populated while active) ─────────────
+    pub db: Arc<std::sync::Mutex<Option<Database>>>,
+    pub keystore: Arc<Mutex<Option<Keystore>>>,
+    /// Singleton iroh node — repointed at the active profile's blob
+    /// directory on each unlock. Never replaced, so existing call sites
+    /// that take `&state.content_node` keep working unchanged.
+    pub content_node: Arc<ContentNode>,
+    pub resolver: Arc<Mutex<Option<ContentResolver>>>,
+    pub p2p_node: Arc<Mutex<Option<P2pNode>>>,
 }
 
 impl AppState {
-    /// Open the encrypted database using the vault-derived key.
-    ///
-    /// Handles legacy migration from unencrypted → encrypted on first unlock.
-    /// Called during `unlock_vault` and `generate_wallet`.
-    pub fn open_database(&self, db_key: &[u8; 32]) -> Result<(), String> {
-        // Check if the DB is already open
+    // ─── active-profile accessors ───────────────────────────────────
+
+    /// Identifier of the currently-active profile, if any.
+    pub fn active_id(&self) -> Option<ProfileId> {
+        self.active
+            .read()
+            .expect("active profile lock poisoned")
+            .as_ref()
+            .map(|a| a.id.clone())
+    }
+
+    /// Path bundle for the active profile, or `Err` when none is unlocked.
+    pub fn active_paths(&self) -> Result<ProfilePaths, String> {
+        self.active
+            .read()
+            .map_err(|e| e.to_string())?
+            .as_ref()
+            .map(|a| a.paths.clone())
+            .ok_or_else(|| "no active profile".to_string())
+    }
+
+    pub fn vault_dir(&self) -> Result<PathBuf, String> {
+        self.active_paths().map(|p| p.vault_dir)
+    }
+
+    pub fn db_path(&self) -> Result<PathBuf, String> {
+        self.active_paths().map(|p| p.db_path)
+    }
+
+    pub fn plugins_dir(&self) -> Result<PathBuf, String> {
+        self.active_paths().map(|p| p.plugins_dir)
+    }
+
+    pub fn video_cache_dir(&self) -> Result<PathBuf, String> {
+        self.active_paths().map(|p| p.video_cache_dir)
+    }
+
+    pub fn iroh_dir(&self) -> Result<PathBuf, String> {
+        self.active_paths().map(|p| p.iroh_dir)
+    }
+
+    /// Convenience accessor used by callers that want to fail fast when
+    /// no profile is active. The singleton `content_node` itself is
+    /// always present; this asserts that it has been wired up to a
+    /// concrete profile's blob directory and started.
+    pub async fn content_node_required(&self) -> Result<Arc<ContentNode>, String> {
+        if self.active_id().is_none() {
+            return Err("no active profile".to_string());
+        }
+        Ok(self.content_node.clone())
+    }
+
+    // ─── per-profile lifecycle ──────────────────────────────────────
+
+    /// Bring a freshly-unlocked profile online: open its SQLCipher
+    /// database, start its iroh node, install builtin plugins, and
+    /// register the keystore. Idempotent if the profile is already
+    /// active.
+    pub async fn start_active_profile(
+        &self,
+        paths: ProfilePaths,
+        keystore: Keystore,
+    ) -> Result<(), String> {
+        // Refuse to switch into a profile while another is active —
+        // callers must stop the prior one first.
         {
-            let guard = self.db.lock().map_err(|e| e.to_string())?;
-            if guard.is_some() {
-                return Ok(());
+            let guard = self.active.read().map_err(|e| e.to_string())?;
+            if let Some(current) = guard.as_ref() {
+                if current.id == paths.id {
+                    log::debug!("profile {} already active", paths.id);
+                } else {
+                    return Err(format!(
+                        "profile {} is already active — lock it first",
+                        current.id
+                    ));
+                }
             }
         }
 
-        // Migrate legacy unencrypted DB if needed
-        if Database::is_plaintext(&self.db_path) {
-            log::info!("Migrating legacy unencrypted database to SQLCipher...");
-            Database::migrate_to_encrypted(&self.db_path, db_key)
-                .map_err(|e| format!("database migration failed: {e}"))?;
+        // 1. Open the encrypted DB and run migrations.
+        let db_key = keystore.derive_db_key();
+        self.open_database(&paths, &db_key)?;
+
+        // 2. Stash keystore in shared state so background workers see it.
+        {
+            let mut guard = self.keystore.lock().await;
+            *guard = Some(keystore);
         }
 
-        // Open the encrypted database
-        let database = Database::open_encrypted(&self.db_path, db_key)
-            .map_err(|e| format!("failed to open encrypted database: {e}"))?;
-        database
-            .run_migrations()
-            .map_err(|e| format!("database migrations failed: {e}"))?;
+        // 3. Repoint and start the singleton iroh content node.
+        self.content_node.set_data_dir(paths.iroh_dir.clone()).await;
+        let (node_enc_key, content_key) = {
+            let ks = self.keystore.lock().await;
+            let k = ks.as_ref().ok_or("keystore vanished mid-start")?;
+            (k.derive_node_key(), k.derive_content_key())
+        };
+        self.content_node.set_content_key(content_key).await;
+        self.content_node
+            .start(Some(&node_enc_key))
+            .await
+            .map_err(|e| format!("failed to start iroh content node: {e}"))?;
+        log::info!("iroh content node started for profile {}", paths.id);
 
-        // Seed demo data into the encrypted DB if empty
-        #[cfg(feature = "dev-seed")]
-        {
-            if let Err(e) = crate::db::seed::seed_if_empty(database.conn()) {
-                log::warn!("seed failed (non-fatal): {e}");
+        // 4. Build the resolver (content_node + IPFS gateway fallback).
+        match GatewayClient::with_defaults() {
+            Ok(gateway) => {
+                let r = ContentResolver::new(self.content_node.clone(), gateway, self.db.clone());
+                *self.resolver.lock().await = Some(r);
             }
+            Err(e) => log::error!("failed to create gateway client: {e}"),
         }
 
-        {
-            let mut guard = self.db.lock().map_err(|e| e.to_string())?;
-            *guard = Some(database);
+        // 5. Best-effort startup eviction.
+        let result = ipfs::storage::maybe_evict(&self.content_node, &self.db).await;
+        if result.blobs_evicted > 0 {
+            log::info!(
+                "startup eviction: freed {} bytes from {} blobs",
+                result.bytes_freed,
+                result.blobs_evicted
+            );
         }
-        log::info!("Encrypted database initialized successfully");
 
-        // Install built-in plugins (Phase 2). Idempotent — same CID ≠
-        // reinstall. Runs synchronously after migrations because both
-        // the dispatcher and any pre-existing course_elements pointing
-        // at builtin plugin CIDs need them to resolve from the very
-        // first render.
-        {
-            let guard = self.db.lock().map_err(|e| e.to_string())?;
+        // 6. Backfill pins for older DBs.
+        if let Ok(guard) = self.db.lock() {
             if let Some(db) = guard.as_ref() {
-                let stats = plugins::builtins::install_all(db, &self.plugins_dir);
-                log::info!(
-                    "builtin plugins: installed={} failed={}",
-                    stats.installed,
-                    stats.failed
-                );
+                ipfs::storage::backfill_pins(db.conn());
             }
         }
 
-        // Seed iroh content blobs (videos, PDFs, downloadables) in the
-        // background. This requires network IO and the iroh node to be
-        // up, so we don't block wallet creation on it — the user can
-        // explore the app while content fetches.
+        // 7. Seed iroh content blobs in the background for dev builds.
         #[cfg(feature = "dev-seed")]
         {
             let db_handle = Arc::clone(&self.db);
-            let node_handle = Arc::clone(&self.content_node);
+            let node_handle = self.content_node.clone();
             tokio::spawn(async move {
                 match crate::db::seed_content::seed_content_if_needed(&db_handle, &node_handle)
                     .await
@@ -163,87 +251,136 @@ impl AppState {
             });
         }
 
+        // 8. Publish active profile metadata.
+        {
+            let mut guard = self.active.write().map_err(|e| e.to_string())?;
+            *guard = Some(ActiveProfile {
+                id: paths.id.clone(),
+                paths: paths.clone(),
+            });
+        }
+
+        log::info!("profile {} fully initialized", paths.id);
         Ok(())
     }
 
-    /// Remove an orphaned encrypted database when onboarding starts without
-    /// a vault, but stale SQLCipher files from an older vault are still present.
-    ///
-    /// This intentionally preserves legacy plaintext databases, since those can
-    /// still be migrated with the newly created vault key.
-    pub fn reset_orphaned_encrypted_database(&self) -> Result<bool, String> {
-        if !self.db_path.exists() || Database::is_plaintext(&self.db_path) {
-            return Ok(false);
+    /// Tear down the active profile's resources. Safe to call when no
+    /// profile is active (becomes a no-op).
+    pub async fn stop_active_profile(&self) -> Result<(), String> {
+        // 1. Stop p2p first so its sync workers do not race the DB close.
+        {
+            let mut guard = self.p2p_node.lock().await;
+            if let Some(mut node) = guard.take() {
+                node.shutdown().await;
+            }
         }
 
+        // 2. Stop iroh + clear its content key. The singleton instance
+        // is preserved; `set_data_dir` repoints it on the next unlock.
+        if self.content_node.is_running().await {
+            if let Err(e) = self.content_node.shutdown().await {
+                log::warn!("iroh shutdown error (continuing): {e}");
+            }
+        }
+        self.content_node.clear_content_key().await;
+
+        // 3. Drop resolver (holds Arc<ContentNode>).
+        {
+            let mut guard = self.resolver.lock().await;
+            *guard = None;
+        }
+
+        // 4. Lock keystore — zeroizes the in-memory password.
+        {
+            let mut guard = self.keystore.lock().await;
+            if let Some(ks) = guard.take() {
+                if let Err(e) = ks.lock() {
+                    log::warn!("keystore lock error: {e}");
+                }
+            }
+        }
+
+        // 5. Close DB.
         {
             let mut guard = self.db.lock().map_err(|e| e.to_string())?;
             *guard = None;
         }
 
-        let wal_path = PathBuf::from(format!("{}-wal", self.db_path.display()));
-        let shm_path = PathBuf::from(format!("{}-shm", self.db_path.display()));
-
-        for path in [&self.db_path, &wal_path, &shm_path] {
-            if path.exists() {
-                std::fs::remove_file(path).map_err(|e| {
-                    format!(
-                        "failed to remove stale database file {}: {e}",
-                        path.display()
-                    )
-                })?;
-            }
+        // 6. Clear active profile metadata last.
+        {
+            let mut guard = self.active.write().map_err(|e| e.to_string())?;
+            *guard = None;
         }
 
-        log::warn!(
-            "removed orphaned encrypted database files because no vault existed during onboarding"
-        );
-        Ok(true)
+        log::info!("active profile stopped");
+        Ok(())
     }
 
-    /// Remove the local wallet files for this device, including the vault and
-    /// the encrypted database, while leaving other app data in place.
-    pub fn reset_local_wallet_files(&self) -> Result<(), String> {
+    /// Open the encrypted database for the given profile.
+    ///
+    /// Runs migrations, installs builtin plugins, and seeds dev fixtures.
+    fn open_database(&self, paths: &ProfilePaths, db_key: &[u8; 32]) -> Result<(), String> {
         {
-            let mut guard = self.db.lock().map_err(|e| e.to_string())?;
-            *guard = None;
-        }
-
-        let wal_path = PathBuf::from(format!("{}-wal", self.db_path.display()));
-        let shm_path = PathBuf::from(format!("{}-shm", self.db_path.display()));
-
-        for path in [&self.db_path, &wal_path, &shm_path] {
-            if path.exists() {
-                std::fs::remove_file(path).map_err(|e| {
-                    format!(
-                        "failed to remove local database file {}: {e}",
-                        path.display()
-                    )
-                })?;
+            let guard = self.db.lock().map_err(|e| e.to_string())?;
+            if guard.is_some() {
+                return Ok(());
             }
         }
 
-        if self.vault_dir.exists() {
-            std::fs::remove_dir_all(&self.vault_dir).map_err(|e| {
-                format!(
-                    "failed to remove local vault directory {}: {e}",
-                    self.vault_dir.display()
-                )
-            })?;
+        if Database::is_plaintext(&paths.db_path) {
+            log::info!("Migrating legacy unencrypted database to SQLCipher...");
+            Database::migrate_to_encrypted(&paths.db_path, db_key)
+                .map_err(|e| format!("database migration failed: {e}"))?;
         }
 
-        std::fs::create_dir_all(&self.vault_dir).map_err(|e| {
-            format!(
-                "failed to recreate local vault directory {}: {e}",
-                self.vault_dir.display()
-            )
-        })?;
+        let database = Database::open_encrypted(&paths.db_path, db_key)
+            .map_err(|e| format!("failed to open encrypted database: {e}"))?;
+        database
+            .run_migrations()
+            .map_err(|e| format!("database migrations failed: {e}"))?;
 
-        log::warn!(
-            "removed local wallet files at {} and {}",
-            self.vault_dir.display(),
-            self.db_path.display()
-        );
+        #[cfg(feature = "dev-seed")]
+        {
+            if let Err(e) = crate::db::seed::seed_if_empty(database.conn()) {
+                log::warn!("seed failed (non-fatal): {e}");
+            }
+        }
+
+        {
+            let mut guard = self.db.lock().map_err(|e| e.to_string())?;
+            *guard = Some(database);
+        }
+        log::info!("encrypted database opened for profile {}", paths.id);
+
+        {
+            let guard = self.db.lock().map_err(|e| e.to_string())?;
+            if let Some(db) = guard.as_ref() {
+                let stats = plugins::builtins::install_all(db, &paths.plugins_dir);
+                log::info!(
+                    "builtin plugins: installed={} failed={}",
+                    stats.installed,
+                    stats.failed
+                );
+
+                // Clean up any sessions stuck as 'active' from a previous crash.
+                match db.conn().execute(
+                    "UPDATE tutoring_sessions SET status = 'ended', ended_at = datetime('now') WHERE status = 'active'",
+                    [],
+                ) {
+                    Ok(count) if count > 0 => {
+                        log::info!("tutoring: cleaned up {count} orphaned session(s) from previous run");
+                    }
+                    Err(e) => log::warn!("tutoring: failed to clean up orphaned sessions: {e}"),
+                    _ => {}
+                }
+                if let Err(e) = db.conn().execute(
+                    "UPDATE classroom_calls SET status = 'ended', ended_at = datetime('now') WHERE status = 'active'",
+                    [],
+                ) {
+                    log::warn!("classroom: failed to clean up orphaned calls: {e}");
+                }
+            }
+        }
 
         Ok(())
     }
@@ -327,7 +464,7 @@ pub fn run() {
                     .build(),
             )?;
 
-            // Initialize database
+            // Initialize app-data dir + diagnostic logger
             let app_dir = app
                 .path()
                 .app_data_dir()
@@ -335,104 +472,49 @@ pub fn run() {
             std::fs::create_dir_all(&app_dir)
                 .expect("failed to create app data directory");
 
-            // Initialize diagnostic file logger + panic hook (for iOS debugging)
             diag::init(&app_dir);
             diag::install_panic_hook();
             diag::log("app setup started");
             diag::log(&format!("app_dir={}", app_dir.display()));
 
-            let db_path = app_dir.join("alexandria.db");
-            log::info!("Database path: {}", db_path.display());
-
-            // Database open is deferred until vault unlock, since the
-            // encryption key is derived from the vault password.
-            // For new installs, the DB is created at unlock time.
-            // For legacy unencrypted DBs, migration happens at unlock.
-            let db: Arc<std::sync::Mutex<Option<Database>>> =
-                Arc::new(std::sync::Mutex::new(None));
-
-            log::info!("Database open deferred until vault unlock");
-
-            // Vault directory (Stronghold on desktop, AES-GCM portable vault on mobile)
-            #[cfg(desktop)]
-            let vault_dir = app_dir.join("stronghold");
-            #[cfg(mobile)]
-            let vault_dir = app_dir.join("vault");
-            std::fs::create_dir_all(&vault_dir)
-                .expect("failed to create vault directory");
-            log::info!("Vault directory: {}", vault_dir.display());
-
-            // iroh content node directory
-            let iroh_dir = app_dir.join("iroh");
-            std::fs::create_dir_all(&iroh_dir)
-                .expect("failed to create iroh data directory");
-            log::info!("iroh data directory: {}", iroh_dir.display());
-
-            let content_node = Arc::new(ContentNode::new(&iroh_dir));
-            let resolver: Arc<Mutex<Option<ContentResolver>>> =
-                Arc::new(Mutex::new(None));
-
-            // Start the iroh node and initialize the resolver in the background
-            let content_node_clone = content_node.clone();
-            let db_clone = db.clone();
-            let resolver_clone = resolver.clone();
-            diag::log("spawning iroh node startup task");
-            tauri::async_runtime::spawn(async move {
-                crate::diag::log("iroh startup: calling content_node.start()...");
-                match content_node_clone.start(None).await {
-                    Ok(()) => {
-                        crate::diag::log("iroh startup: content_node started OK");
-                        log::info!("iroh content node started successfully");
-
-                        // Backfill pins table for users upgrading from older versions
-                        if let Ok(guard) = db_clone.lock() {
-                            if let Some(db) = guard.as_ref() {
-                                ipfs::storage::backfill_pins(db.conn());
-                            }
-                        }
-
-                        // Initialize the content resolver with gateway fallback
-                        match GatewayClient::with_defaults() {
-                            Ok(gateway) => {
-                                let r = ContentResolver::new(
-                                    content_node_clone.clone(),
-                                    gateway,
-                                    db_clone.clone(),
-                                );
-                                *resolver_clone.lock().await = Some(r);
-                                log::info!("content resolver initialized with IPFS gateway fallback");
-                            }
-                            Err(e) => {
-                                log::error!("failed to create gateway client: {e}");
-                            }
-                        }
-
-                        // Run eviction at startup to catch incomplete evictions
-                        let result = ipfs::storage::maybe_evict(
-                            &content_node_clone,
-                            &db_clone,
-                        )
-                        .await;
-                        if result.blobs_evicted > 0 {
-                            log::info!(
-                                "startup eviction: freed {} bytes from {} blobs",
-                                result.bytes_freed,
-                                result.blobs_evicted
-                            );
-                        }
-                    }
-                    Err(e) => {
-                        crate::diag::log(&format!("iroh startup: FAILED: {e}"));
-                        log::error!("failed to start iroh content node: {e}");
+            // Migrate any legacy single-vault layout into the new
+            // per-profile layout. Runs at most once; no-op if a
+            // profiles/ dir already exists.
+            let profile_manager = Arc::new(
+                profile::ProfileManager::open(&app_dir)
+                    .expect("failed to open profile manager"),
+            );
+            let legacy = profile::migration::LegacyLayout::at(&app_dir);
+            match profile::migration::migrate_if_needed(&profile_manager, &legacy) {
+                Ok(profile::migration::MigrationReport::Migrated { id, .. }) => {
+                    log::info!("migrated legacy single-vault layout into profile {id}");
+                    diag::log(&format!("legacy migration: created profile {id}"));
+                }
+                Ok(profile::migration::MigrationReport::Failed { error, moved }) => {
+                    log::error!("legacy migration failed: {error}");
+                    diag::log(&format!("legacy migration FAILED: {error}"));
+                    if let Err(e) = profile::migration::rollback(&moved) {
+                        log::error!("legacy migration rollback also failed: {e}");
                     }
                 }
-            });
+                Ok(_) => {}
+                Err(e) => log::error!("legacy migration error: {e}"),
+            }
 
-            // Keystore arc — created early so both the queue processor
-            // background task and AppState share the same handle. The
-            // keystore starts as None; it's populated when the user
-            // unlocks or generates a wallet.
+            // Per-profile resources start empty — populated when a
+            // profile is unlocked via `start_active_profile`.
+            let db: Arc<std::sync::Mutex<Option<Database>>> =
+                Arc::new(std::sync::Mutex::new(None));
             let keystore: Arc<Mutex<Option<Keystore>>> = Arc::new(Mutex::new(None));
+            // Singleton iroh node — initialized to a sentinel path inside
+            // app_dir/iroh-staging. The real per-profile blob directory is
+            // installed by `start_active_profile` before the first start.
+            let content_node = Arc::new(ContentNode::new(&app_dir.join("iroh-staging")));
+            let resolver: Arc<Mutex<Option<ContentResolver>>> =
+                Arc::new(Mutex::new(None));
+            let p2p_node: Arc<Mutex<Option<P2pNode>>> = Arc::new(Mutex::new(None));
+            let active: Arc<std::sync::RwLock<Option<ActiveProfile>>> =
+                Arc::new(std::sync::RwLock::new(None));
 
             // Spawn on-chain queue processor (runs every 60s).
             // Processes both the governance tx queue and the credential
@@ -559,20 +641,6 @@ pub fn run() {
             diag::log("creating ClassroomManager");
             let classroom = Arc::new(ClassroomManager::new());
 
-            // Plugin bundle store. Created eagerly so install commands
-            // don't race the first install.
-            let plugins_dir = app_dir.join("plugins");
-            std::fs::create_dir_all(&plugins_dir)
-                .expect("failed to create plugins directory");
-            log::info!("Plugins directory: {}", plugins_dir.display());
-
-            // Video cache: resolved blobs are materialized here as files
-            // so the webview can load them via the asset protocol.
-            let video_cache_dir = app_dir.join("videocache");
-            std::fs::create_dir_all(&video_cache_dir)
-                .expect("failed to create video cache directory");
-            log::info!("Video cache directory: {}", video_cache_dir.display());
-
             // Deterministic Wasmtime engine for plugin graders (Phase 2).
             // Construction is cheap; the engine + module cache live for
             // the app's lifetime. Desktop-only because wasmtime v27 does
@@ -584,78 +652,26 @@ pub fn run() {
             );
 
             let app_state = AppState {
-                db,
-                db_path,
-                keystore,
-                vault_dir,
-                plugins_dir,
-                video_cache_dir,
-                #[cfg(desktop)]
-                grader_runtime,
-                content_node,
-                resolver,
-                p2p_node: Arc::new(Mutex::new(None)),
+                app_data_dir: app_dir.clone(),
+                profile_manager,
+                active,
                 tutoring,
                 classroom,
+                #[cfg(desktop)]
+                grader_runtime,
                 last_activity: Arc::new(std::sync::Mutex::new(std::time::Instant::now())),
                 ipc_limiter: Arc::new(std::sync::Mutex::new(
                     commands::ratelimit::IpcRateLimiter::new(),
                 )),
+                db,
+                keystore,
+                content_node,
+                resolver,
+                p2p_node,
             };
 
-            // Clean up any sessions stuck as 'active' from a previous crash.
-            // NOTE: These run at startup, before vault unlock opens the DB.
-            // They will be skipped if the DB is not yet initialized; the
-            // cleanup will happen on the next vault unlock when the DB opens.
-            diag::log("cleaning up orphaned tutoring sessions");
-            {
-                match app_state.db.lock() {
-                    Ok(guard) => {
-                        if let Some(db) = guard.as_ref() {
-                            match db.conn().execute(
-                                "UPDATE tutoring_sessions SET status = 'ended', ended_at = datetime('now') WHERE status = 'active'",
-                                [],
-                            ) {
-                                Ok(count) if count > 0 => {
-                                    log::info!("tutoring: cleaned up {count} orphaned session(s) from previous run");
-                                    diag::log(&format!("cleaned up {count} orphaned session(s)"));
-                                }
-                                Ok(_) => {
-                                    diag::log("no orphaned sessions to clean up");
-                                }
-                                Err(e) => {
-                                    log::warn!("tutoring: failed to clean up orphaned sessions: {e}");
-                                    diag::log(&format!("orphan cleanup error: {e}"));
-                                }
-                            }
-                        } else {
-                            diag::log("db not yet initialized — skipping orphan cleanup");
-                        }
-                    }
-                    Err(e) => {
-                        log::error!("tutoring: db mutex poisoned during orphan cleanup: {e}");
-                        diag::log(&format!("CRITICAL: db mutex poisoned: {e}"));
-                    }
-                }
-            }
-
-            // Clean up classroom calls stuck as 'active' from a previous crash
-            diag::log("cleaning up orphaned classroom calls");
-            {
-                match app_state.db.lock() {
-                    Ok(guard) => {
-                        if let Some(db) = guard.as_ref() {
-                            let _ = db.conn().execute(
-                                "UPDATE classroom_calls SET status = 'ended', ended_at = datetime('now') WHERE status = 'active'",
-                                [],
-                            );
-                        }
-                    }
-                    Err(e) => {
-                        log::warn!("classroom: failed to clean up orphaned calls: {e}");
-                    }
-                }
-            }
+            // Orphaned tutoring/classroom session cleanup is now per-profile
+            // and runs from `start_active_profile` once the DB is open.
 
             diag::log("managing app state in Tauri");
             app.manage(app_state);
@@ -765,25 +781,39 @@ pub fn run() {
         // `src/plugins/asset_protocol.rs` and
         // `/Users/hack/.claude/plans/prancy-bubbling-grove.md`.
         .register_uri_scheme_protocol("plugin", |ctx, request| {
-            let plugins_dir = ctx
+            let plugins_dir = match ctx
                 .app_handle()
                 .state::<AppState>()
-                .plugins_dir
-                .clone();
+                .plugins_dir()
+            {
+                Ok(p) => p,
+                Err(_) => {
+                    // No profile unlocked — refuse the asset request so the
+                    // webview falls back to its standard error page.
+                    return tauri::http::Response::builder()
+                        .status(tauri::http::StatusCode::NOT_FOUND)
+                        .body(b"no active profile".to_vec())
+                        .expect("static response is well-formed");
+                }
+            };
             plugins::asset_protocol::handle(&plugins_dir, request)
         })
         .invoke_handler(tauri::generate_handler![
             commands::health::check_health,
             commands::health::read_diag_log,
-            // Identity / Wallet (all platforms — portable keystore)
-            commands::identity::check_vault_exists,
-            commands::identity::unlock_vault,
-            commands::identity::generate_wallet,
-            commands::identity::restore_wallet,
+            // Profile lifecycle (multi-user)
+            commands::profile::list_profiles,
+            commands::profile::get_active_profile_id,
+            commands::profile::create_profile,
+            commands::profile::restore_profile_with_mnemonic,
+            commands::profile::unlock_profile,
+            commands::profile::lock_profile,
+            commands::profile::rename_profile,
+            commands::profile::set_profile_avatar,
+            commands::profile::delete_profile,
+            // Identity / wallet (operate on active profile)
             commands::identity::export_mnemonic,
             commands::identity::is_biometric_available,
-            commands::identity::lock_vault,
-            commands::identity::reset_local_wallet,
             commands::identity::get_wallet_info,
             commands::identity::get_local_did,
             commands::identity::get_profile,

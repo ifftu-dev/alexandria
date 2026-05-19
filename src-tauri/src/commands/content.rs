@@ -179,7 +179,7 @@ pub async fn content_cache_file(
         .map_err(|e| e.to_string())?;
 
     let path = state
-        .video_cache_dir
+        .video_cache_dir()?
         .join(format!("{}.mp4", result.blake3_hash));
 
     // Reuse the file if it's already materialized at the right size.
