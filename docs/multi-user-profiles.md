@@ -1,6 +1,6 @@
 # Multi-User Profiles
 
-**Status:** Design accepted · **Branch:** `feat/multi-user-profiles` · **Date:** 2026-05-18
+**Status:** Implemented on `feat/multi-user-profiles` (backend + frontend landed) · **Date:** 2026-05-19
 
 ## Motivation
 

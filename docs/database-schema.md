@@ -32,8 +32,8 @@
 ## Design Principles
 
 - **Deterministic IDs**: Most application entities use `hex(blake2b_256(parts.join("|")))` instead of server-generated UUIDs.
-- **Singleton identity**: `local_identity` is a one-row table with `CHECK (id = 1)`.
-- **No server tables**: No hosted auth/session model exists; the app is vault-based and local-first.
+- **Singleton identity per profile**: `local_identity` is a one-row table with `CHECK (id = 1)`. Each user profile has its own SQLCipher database (see [`multi-user-profiles.md`](multi-user-profiles.md)), so "singleton" is scoped per-profile, not per-device — a device with three profiles has three independent `local_identity` rows, each in its own encrypted DB file.
+- **No server tables**: No hosted auth/session model exists; the app is profile-based and local-first.
 - **External content**: Course content, published profiles, evidence bundles, and other large artifacts live in iroh/IPFS-addressed blobs. SQLite stores metadata, references, and caches.
 - **Text timestamps**: Time values are stored as ISO-8601-ish `TEXT` for portability and easy inspection.
 - **Canonical source**: The exact DDL, defaults, `CHECK` constraints, indexes, and migration bodies live in `src-tauri/src/db/schema.rs`.
@@ -84,10 +84,15 @@ columns and indexes, use `src-tauri/src/db/schema.rs`.
 
 ### Identity
 
-- **`local_identity`** — Singleton node-owner row. Stores wallet/profile
-  metadata such as `stake_address`, `payment_address`, `display_name`,
-  `bio`, `avatar_cid`, `profile_hash`, encrypted mnemonic fallback,
-  device metadata, and X25519 public key material.
+- **`local_identity`** — Singleton row for the *active profile's* owner.
+  Each profile's SQLCipher DB has exactly one row at `id = 1`. Stores
+  wallet/profile metadata such as `stake_address`, `payment_address`,
+  `display_name`, `bio`, `avatar_cid`, `profile_hash`, encrypted
+  mnemonic fallback, device metadata, and X25519 public key material.
+  The public-facing profile picker metadata (name shown on the
+  picker, avatar, accent color) lives separately in the unencrypted
+  `profiles_index.json` sidecar — see
+  [`multi-user-profiles.md`](multi-user-profiles.md).
 
 ### Taxonomy (6 tables)
 

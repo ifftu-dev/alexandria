@@ -80,9 +80,10 @@ All state lives on the user's device in three locations:
 
 | Store | Purpose |
 |-------|---------|
-| SQLite | Relational data (courses, skills, evidence, governance, verifiable credentials) — 66 tables, 30 migrations |
-| Encrypted vault | Wallet keys and mnemonic — IOTA Stronghold (desktop) or AES-256-GCM + Argon2id (mobile) |
-| iroh | Content-addressed blobs (course HTML, profiles) — BLAKE3 hashes |
+| Profile index | Public sidecar `profiles_index.json` — display names + avatars only (no crypto material). Rendered by the picker before any vault is unlocked. |
+| SQLite | Per-profile relational data (courses, skills, evidence, governance, verifiable credentials) — 66 tables, 30 migrations. One DB per profile at `profiles/<uuid>/alexandria.db`. |
+| Encrypted vault | Per-profile wallet keys and mnemonic — IOTA Stronghold (desktop) or AES-256-GCM + Argon2id (mobile). One vault per profile under `profiles/<uuid>/vault/`. |
+| iroh | Per-profile content-addressed blobs (course HTML, profiles) — BLAKE3 hashes. One blob store + node secret per profile at `profiles/<uuid>/iroh/`. |
 
 ### 2.2 Design Principles
 
@@ -103,13 +104,13 @@ The architecture MUST satisfy:
 | Database | SQLite (rusqlite, bundled) |
 | Content storage | iroh 0.96 (BLAKE3 content-addressed blobs) |
 | P2P networking | libp2p 0.56 (TCP, QUIC, GossipSub, Kademlia, Relay, DCUtR) |
-| Wallet (desktop) | BIP-39 + CIP-1852 (pallas), IOTA Stronghold vault |
-| Wallet (mobile) | BIP-39 + CIP-1852 (pallas), AES-256-GCM + Argon2id vault |
+| Wallet (desktop) | BIP-39 + CIP-1852 (pallas), per-profile IOTA Stronghold vault |
+| Wallet (mobile) | BIP-39 + CIP-1852 (pallas), per-profile AES-256-GCM + Argon2id vault |
 | Cardano | pallas 0.35 (Conway tx builder), Blockfrost preprod |
 
 ### 2.4 IPC Boundary
 
-The frontend communicates with the Rust backend via 194 Tauri IPC commands registered in `tauri::generate_handler!`. Commands are split across 27 domain-facing IPC modules (classroom, governance, taxonomy, tutoring, identity, credentials, sync, courses, attestation, challenge, opinions, integrity, content, pinning, storage, snapshot, reputation, enrollment, elements, chapters, catalog, p2p, evidence, aggregation, presentation, health, cardano), with `commands/` containing 31 Rust source files total (`mod.rs`, `ratelimit.rs`, and the two tutoring platform variants included). Excluding `mod.rs`, the directory contains 30 source files.
+The frontend communicates with the Rust backend via ~197 Tauri IPC commands registered in `tauri::generate_handler!`. Commands are split across 28 domain-facing IPC modules (profile, classroom, governance, taxonomy, tutoring, identity, credentials, sync, courses, attestation, challenge, opinions, integrity, content, pinning, storage, snapshot, reputation, enrollment, elements, chapters, catalog, p2p, evidence, aggregation, presentation, health, cardano), with `commands/` containing 32 Rust source files total (`mod.rs`, `ratelimit.rs`, and the two tutoring platform variants included). The `profile` module owns the multi-user lifecycle (`list_profiles`, `create_profile`, `restore_profile_with_mnemonic`, `unlock_profile`, `lock_profile`, `rename_profile`, `set_profile_avatar`, `delete_profile`, `get_active_profile_id`); the `identity` module is reduced to operations against the active profile (`export_mnemonic`, `is_biometric_available`, `get_wallet_info`, `get_local_did`, `get_profile`, `update_profile`, `publish_profile`, `resolve_profile`).
 
 ---
 
@@ -136,7 +137,7 @@ The same Ed25519 key MUST serve as: (1) Cardano payment signing key, (2) libp2p 
 
 ### 3.2 Vault Storage
 
-Keys MUST be stored in an encrypted vault. The implementation varies by platform:
+Keys MUST be stored in a per-profile encrypted vault under `<app_data>/profiles/<uuid>/vault/`. Each profile owns an independent vault; compromising one profile's vault MUST NOT expose any other profile on the same device. The implementation varies by platform:
 
 **Desktop (IOTA Stronghold)**: Password → Argon2id (64 MB, 3 iterations, 4 lanes) with random salt → derived key. Salt file includes HMAC-SHA256 integrity tag. Mnemonic stored encrypted at a fixed vault path.
 
@@ -803,7 +804,7 @@ These guarantees are architectural — they are enforced by the code structure, 
 
 **Threat**: Compromise of wallet keys or mnemonic.
 
-**Mitigations**: Encrypted vault — Stronghold (desktop) or AES-256-GCM + Argon2id (mobile). 12-character minimum password. Salt file HMAC-SHA256 integrity protection. Wallet struct implements Drop with zeroization; Clone removed. Biometric session password auto-clears after 15 minutes.
+**Mitigations**: Per-profile encrypted vault — Stronghold (desktop) or AES-256-GCM + Argon2id (mobile), one vault per profile. 12-character minimum password. Salt file HMAC-SHA256 integrity protection. Wallet struct implements Drop with zeroization; Clone removed. Biometric session password auto-clears after 15 minutes. A stolen device exposes only the data of profiles whose passwords are also compromised; other profiles on the same device remain encrypted.
 
 ### 13.10 Credential Issuer Compromise
 

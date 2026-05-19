@@ -8,20 +8,22 @@
 
 ## Overview
 
-Rust backend for the Tauri v2 desktop/mobile app. Core responsibilities include 194 registered Tauri commands, a 66-table SQLite schema, libp2p networking, iroh content storage, and Cardano integration.
+Rust backend for the Tauri v2 desktop/mobile app. Core responsibilities include a per-profile data model (each user gets their own vault + SQLCipher DB + iroh blob store under `<app_data>/profiles/<uuid>/`), ~197 registered Tauri commands (including the multi-user `profile` module), a 66-table SQLite schema per profile, libp2p networking, iroh content storage, and Cardano integration. Command/table counts drift with every PR — treat them as approximate.
 
 ## WHERE TO LOOK
 
 | Task | Location | Notes |
 |------|----------|-------|
-| Tauri commands | `commands/` | Domain-oriented IPC handlers plus platform-specific tutoring variants |
+| Profile lifecycle | `profile/` | ProfileManager, public `profiles_index.json` sidecar, first-launch auto-migrator from the legacy single-vault layout |
+| Tauri commands | `commands/` | Domain-oriented IPC handlers plus platform-specific tutoring variants. `commands/profile.rs` owns multi-user lifecycle; `commands/identity.rs` is active-profile-only |
 | Domain models | `domain/` | Core app types plus the `vc/` protocol submodule |
 | P2P networking | `p2p/` | Swarm, gossip, validation, scoring, discovery, vc-fetch, sync, stress |
-| Database | `db/` | SQLite + versioned migrations |
+| Database | `db/` | SQLite + versioned migrations (one DB per profile) |
 | Tutoring | `tutoring/` | Platform-conditional (`desktop`, `mobile`, `ios`, `android`) |
 | Cardano | `cardano/` | Pallas wallet/tx building; reference-script deployment still pending in-tree |
-| Content storage | `ipfs/` | iroh blobs integration |
-| Cryptography | `crypto/` | Ed25519, Blake2b, keystore |
+| Content storage | `ipfs/` | iroh blobs integration. `ContentNode::set_data_dir` repoints the singleton at the active profile's blob dir on each unlock |
+| Cryptography | `crypto/` | Ed25519, Blake2b, per-profile keystore (Stronghold desktop / portable AES-256-GCM mobile) |
+| AppState lifecycle | `lib.rs` | `start_active_profile` / `stop_active_profile` bring per-profile services up and down on switch |
 
 ## CONVENTIONS (Rust)
 

@@ -67,6 +67,8 @@ HMAC-SHA512 is a fast hash. An attacker with the `.stronghold` snapshot file and
 
 **Partial mitigation**: The mobile keystore (`keystore_portable.rs`) already uses Argon2id with 64 MB memory cost and 3 iterations. This finding applies only to the desktop Stronghold path (`keystore.rs`).
 
+**Multi-user note (2026-05-19)**: With per-profile vaults, one stolen `.stronghold` file now compromises only that one profile's BIP-39 mnemonic — other profiles on the same device remain independently encrypted. This reduces blast radius but does not address the underlying weak KDF on desktop.
+
 ---
 
 ## HIGH
@@ -229,9 +231,18 @@ Additionally, `leak_into_bytes` calls in `wallet.rs:161,168` extract raw key mat
 
 ### M-3: No password strength enforcement
 
-**File**: `src-tauri/src/crypto/keystore.rs:86`, `src-tauri/src/commands/identity.rs:137`
+**File**: `src-tauri/src/crypto/keystore.rs:86`, `src-tauri/src/commands/profile.rs` (`create_profile`, `restore_profile_with_mnemonic`, `unlock_profile`)
 
-Neither `Keystore::create()` nor the `generate_wallet`/`unlock_vault` commands enforce any minimum password complexity. A user can set an empty string as their vault password. Combined with C-1 (weak KDF), this means the vault could be cracked instantly.
+> **Status note (2026-05-19):** the multi-user refactor replaced the
+> legacy `generate_wallet`/`unlock_vault` IPC commands with
+> `create_profile`/`restore_profile_with_mnemonic`/`unlock_profile`
+> in `commands/profile.rs`. The 12-character minimum password
+> validation now lives in `validate_password()` at the top of that
+> file; this finding remains as historical context for the
+> `Keystore::create()` API itself, which still does not enforce
+> complexity at the type level.
+
+Neither `Keystore::create()` nor the profile-lifecycle commands enforce any minimum password complexity beyond the 12-character length check. A user can set an extremely common password. Combined with C-1 (weak KDF), this means the vault could be cracked instantly.
 
 **Impact**: Users with weak or empty passwords have effectively unencrypted vaults.
 
@@ -241,9 +252,14 @@ Neither `Keystore::create()` nor the `generate_wallet`/`unlock_vault` commands e
 
 ### M-4: Mnemonic phrase returned over IPC in plaintext
 
-**File**: `src-tauri/src/commands/identity.rs:192-196, 271-274`
+**File**: `src-tauri/src/commands/profile.rs` (`create_profile`, `restore_profile_with_mnemonic`), `src-tauri/src/commands/identity.rs` (`export_mnemonic`)
 
-The `generate_wallet` command returns the mnemonic phrase to the frontend in a `GenerateWalletResponse` struct (line 192). The `export_mnemonic` command returns it as a plain `String` (line 274). These travel over Tauri's IPC bridge as JSON.
+> **Status note (2026-05-19):** post-multi-user refactor, the
+> mnemonic is now returned by `create_profile` (as
+> `CreateProfileResponse.mnemonic`) and `export_mnemonic`. The
+> threat surface is unchanged.
+
+The `create_profile` command returns the freshly-generated mnemonic phrase to the frontend in a `CreateProfileResponse` struct. The `export_mnemonic` command returns it as a plain `String`. These travel over Tauri's IPC bridge as JSON.
 
 While Tauri IPC is internal to the process (not network-exposed), the mnemonic may be logged by developer tools, persisted in JS memory, or captured by browser devtools if CSP is not enforced (see M-8).
 
