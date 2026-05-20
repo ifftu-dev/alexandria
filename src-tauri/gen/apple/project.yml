@@ -2,7 +2,7 @@ name: alexandria-node
 options:
   bundleIdPrefix: org.alexandria.node
   deploymentTarget:
-    iOS: 14.0
+    iOS: 15.4
 fileGroups: [../../src]
 configs:
   debug: debug

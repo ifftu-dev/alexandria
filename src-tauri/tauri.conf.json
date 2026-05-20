@@ -65,7 +65,8 @@
       "signingIdentity": "Developer ID Application: Pratyush Pundir (VLMNL3V44U)"
     },
     "iOS": {
-      "developmentTeam": "VLMNL3V44U"
+      "developmentTeam": "VLMNL3V44U",
+      "minimumSystemVersion": "15.4"
     }
   },
   "plugins": {
