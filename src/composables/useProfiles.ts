@@ -90,6 +90,7 @@ async function createProfile(
   activeWallet.value = result.wallet
   activeIdentity.value = result.profile
   await refreshProfiles()
+  await runProfileReadyCallbacks()
   return result
 }
 
@@ -110,6 +111,7 @@ async function restoreProfileWithMnemonic(
   await refreshProfiles()
   const id = await invoke<string | null>('get_active_profile_id')
   activeProfileId.value = id
+  await runProfileReadyCallbacks()
   return result
 }
 
@@ -119,6 +121,7 @@ async function unlockProfile(id: string, password: string): Promise<UnlockProfil
   activeWallet.value = result.wallet
   activeIdentity.value = result.profile
   await refreshProfiles()
+  await runProfileReadyCallbacks()
   return result
 }
 
@@ -127,6 +130,49 @@ async function lockProfile(): Promise<void> {
   activeProfileId.value = null
   activeWallet.value = null
   activeIdentity.value = null
+  await runProfileLockedCallbacks()
+}
+
+// ── onProfileReady hook ─────────────────────────────────────────
+//
+// Other singletons (settings store, theme, keyboard shortcuts,
+// sentinel flags) need to re-hydrate from the per-profile DB the
+// moment a profile becomes active. They register here so the
+// lifecycle commands fan out without coupling useProfiles to those
+// modules.
+
+type ProfileReadyCallback = () => void | Promise<void>
+const profileReadyCallbacks = new Set<ProfileReadyCallback>()
+const profileLockedCallbacks = new Set<ProfileReadyCallback>()
+
+export function onProfileReady(cb: ProfileReadyCallback): () => void {
+  profileReadyCallbacks.add(cb)
+  return () => profileReadyCallbacks.delete(cb)
+}
+
+export function onProfileLocked(cb: ProfileReadyCallback): () => void {
+  profileLockedCallbacks.add(cb)
+  return () => profileLockedCallbacks.delete(cb)
+}
+
+async function runProfileReadyCallbacks(): Promise<void> {
+  for (const cb of profileReadyCallbacks) {
+    try {
+      await cb()
+    } catch (e) {
+      console.warn('[useProfiles] onProfileReady callback failed:', e)
+    }
+  }
+}
+
+async function runProfileLockedCallbacks(): Promise<void> {
+  for (const cb of profileLockedCallbacks) {
+    try {
+      await cb()
+    } catch (e) {
+      console.warn('[useProfiles] onProfileLocked callback failed:', e)
+    }
+  }
 }
 
 async function renameProfile(id: string, display_name: string): Promise<ProfileSummary> {

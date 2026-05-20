@@ -256,7 +256,12 @@ function matchesClassroom(c: Classroom, lower: string): boolean {
   return false
 }
 
-// ── Recents (localStorage) ─────────────────────────────────────────
+// ── Recents (per-profile settings, scope=sync) ─────────────────────
+//
+// Read from localStorage first as a synchronous cache so the
+// omni-search opens with results before the per-profile settings
+// store hydrates. `initOmniRecentsFromSettings` (called from
+// App.vue after profile unlock) reconciles with the canonical value.
 
 function loadRecents(): OmniSearchResult[] {
   if (typeof window === 'undefined') return []
@@ -276,6 +281,45 @@ function saveRecents(items: OmniSearchResult[]) {
     window.localStorage.setItem(RECENT_KEY, JSON.stringify(items))
   } catch {
     // storage may be disabled in some contexts — silently ignore
+  }
+  // Persist into the per-profile settings store so the same recents
+  // follow the user across their other devices.
+  void (async () => {
+    const { setSetting } = await import('./useSettings').then((m) => m.useSettings())
+    setSetting('ui.omni_recents', JSON.stringify(items)).catch(() => {
+      /* no profile yet — settings store rejects writes pre-unlock */
+    })
+  })()
+}
+
+/** Reconcile in-memory recents with the per-profile settings store. */
+export async function initOmniRecentsFromSettings(): Promise<void> {
+  const mod = await import('./useSettings')
+  const { entries, initialize } = mod.useSettings()
+  await initialize()
+
+  // Clear localStorage + in-memory cache up-front so a previous
+  // profile's recents do not bleed into a fresh one before sync
+  // populates the canonical list.
+  recents.value = []
+  try {
+    if (typeof window !== 'undefined') window.localStorage.removeItem(RECENT_KEY)
+  } catch {
+    /* localStorage may be disabled */
+  }
+
+  const found = entries.value.find((e) => e.key === 'ui.omni_recents')
+  if (!found || found.is_default) {
+    // Profile has no recents yet — leave the cleared cache.
+    return
+  }
+  try {
+    const parsed = JSON.parse(found.current_value) as OmniSearchResult[]
+    if (Array.isArray(parsed)) {
+      recents.value = parsed.slice(0, MAX_RECENTS)
+    }
+  } catch {
+    /* keep cleared value */
   }
 }
 

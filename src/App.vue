@@ -4,8 +4,12 @@ import { useRoute, useRouter } from 'vue-router'
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow'
 import AppLayout from '@/layouts/AppLayout.vue'
 import BlankLayout from '@/layouts/BlankLayout.vue'
-import { useProfiles } from '@/composables/useProfiles'
-import { initTheme } from '@/composables/useTheme'
+import { useProfiles, onProfileLocked, onProfileReady } from '@/composables/useProfiles'
+import { initTheme, initThemeFromSettings } from '@/composables/useTheme'
+import { initShortcutsFromSettings } from '@/composables/useKeyboardShortcuts'
+import { initOmniRecentsFromSettings } from '@/composables/useOmniSearch'
+import { initSentinelFlagsFromSettings } from '@/composables/useSentinel'
+import { clearSettingsCache, useSettings } from '@/composables/useSettings'
 import { isMac } from '@/composables/usePlatform'
 
 // Apply stored theme immediately (before first render)
@@ -39,6 +43,33 @@ const layout = computed(() => {
   return AppLayout
 })
 
+/**
+ * Hydrate all per-profile settings consumers from the backend.
+ * Called once a profile is unlocked. Safe to call repeatedly —
+ * each `initXFromSettings` is idempotent.
+ */
+onProfileReady(() => hydrateProfileScopedState())
+onProfileLocked(() => {
+  // Drop the in-memory settings cache so the picker (and the next
+  // profile that unlocks) does not flash the previously-active
+  // profile's preferences.
+  clearSettingsCache()
+})
+
+async function hydrateProfileScopedState() {
+  try {
+    await useSettings().initialize()
+    await Promise.all([
+      initThemeFromSettings(),
+      initShortcutsFromSettings(),
+      initOmniRecentsFromSettings(),
+      initSentinelFlagsFromSettings(),
+    ])
+  } catch (e) {
+    console.warn('[App] settings hydration failed:', e)
+  }
+}
+
 onMounted(async () => {
   document.addEventListener('wheel', onWheel, { passive: false })
 
@@ -49,6 +80,8 @@ onMounted(async () => {
       router.replace('/onboarding')
     } else if (state === 'picker' && route.name !== 'profiles' && route.name !== 'onboarding') {
       router.replace('/profiles')
+    } else if (state === 'ready') {
+      await hydrateProfileScopedState()
     }
   } catch {
     if (route.name !== 'onboarding' && route.name !== 'profiles') {

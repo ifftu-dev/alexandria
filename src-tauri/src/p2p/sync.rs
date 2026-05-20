@@ -669,6 +669,65 @@ fn sanitize_table_name(name: &str) -> Result<&str, String> {
     }
 }
 
+// ── App-settings sync ───────────────────────────────────────────────
+//
+// `app_settings` is keyed by `key` (not `id`), so it does NOT fit the
+// `merge_lww_rows` path that powers `enrollments`, `element_progress`,
+// and `course_notes`. Settings instead get their own thin pair of
+// helpers built on top of `settings::SettingsStore`.
+//
+// The wire format is a flat list of `SettingsSyncRow`. Each row is
+// independent and merged with LWW on `updated_at`. The store filters
+// outbound to scope='sync' and refuses inbound writes to anything
+// other than registered sync-scope keys, so a peer cannot smuggle
+// device-only or unknown settings into our DB.
+
+/// One settings entry on the sync wire.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SettingsSyncRow {
+    pub key: String,
+    pub value: String,
+    pub updated_at: String,
+}
+
+/// Snapshot every syncable settings row for outbound delivery to a peer.
+pub fn settings_outbound_snapshot(conn: &Connection) -> Result<Vec<SettingsSyncRow>, String> {
+    crate::settings::SettingsStore::list_syncable(conn)
+        .map(|rows| {
+            rows.into_iter()
+                .map(|(key, value, updated_at)| SettingsSyncRow {
+                    key,
+                    value,
+                    updated_at,
+                })
+                .collect()
+        })
+        .map_err(|e| e.to_string())
+}
+
+/// Merge a batch of inbound settings rows from a peer. Returns the
+/// number of rows that actually took effect (i.e. were strictly
+/// newer than the local copy and matched a registered sync key).
+pub fn settings_apply_inbound(
+    conn: &Connection,
+    rows: &[SettingsSyncRow],
+) -> Result<usize, String> {
+    let mut applied = 0usize;
+    for row in rows {
+        match crate::settings::SettingsStore::apply_sync_row(
+            conn,
+            &row.key,
+            &row.value,
+            &row.updated_at,
+        ) {
+            Ok(true) => applied += 1,
+            Ok(false) => {}
+            Err(e) => log::warn!("settings sync: drop {}: {e}", row.key),
+        }
+    }
+    Ok(applied)
+}
+
 /// Get overall sync status.
 pub fn get_sync_status(conn: &Connection) -> Result<SyncStatus, String> {
     let device_count: i64 = conn

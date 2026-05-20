@@ -202,17 +202,36 @@ impl ContentNode {
 
     /// Shut down the iroh node gracefully.
     ///
-    /// Stops the accept loop, closes connections, and flushes the store.
+    /// Stops the accept loop, closes connections, terminates the blob
+    /// store actor, and releases the redb file lock so a subsequent
+    /// `start()` on the same data directory within this process
+    /// (e.g. after a profile switch) succeeds.
+    ///
+    /// `Router::shutdown` alone is NOT enough: iroh-blobs spawns the
+    /// blob store on its own tokio runtime which only terminates when
+    /// `Store::shutdown` is called. Without that explicit shutdown,
+    /// the redb `blobs.db` lock persists and a follow-up `FsStore::load`
+    /// on the same path hangs indefinitely.
     pub async fn shutdown(&self) -> Result<(), NodeError> {
         let mut inner = self.inner.lock().await;
         let node = inner.take().ok_or(NodeError::NotRunning)?;
 
+        crate::diag::log("node.shutdown: router.shutdown()...");
         log::info!("shutting down iroh node...");
         node.router
             .shutdown()
             .await
             .map_err(|e| NodeError::Shutdown(e.to_string()))?;
 
+        // Explicitly terminate the blob store actor so its tokio
+        // runtime drops and releases the redb file lock.
+        crate::diag::log("node.shutdown: store.shutdown()...");
+        if let Err(e) = node.store.shutdown().await {
+            log::warn!("iroh blob store shutdown error (continuing): {e}");
+            crate::diag::log(&format!("node.shutdown: store shutdown error: {e}"));
+        }
+
+        crate::diag::log("node.shutdown: complete");
         log::info!("iroh node shut down");
         Ok(())
     }

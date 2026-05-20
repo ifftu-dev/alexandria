@@ -1,6 +1,11 @@
 import { ref, readonly } from 'vue'
 
-export type SettingsSectionId = 'account' | 'security' | 'personalization' | 'system'
+export type SettingsSectionId =
+  | 'account'
+  | 'security'
+  | 'personalization'
+  | 'system'
+  | 'advanced'
 
 const isOpen = ref(false)
 const activeSection = ref<SettingsSectionId>('account')

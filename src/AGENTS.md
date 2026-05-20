@@ -14,7 +14,8 @@ Vue 3 SPA frontend for the Tauri app. Module-level singleton composables (no Pin
 
 | Task | Location | Notes |
 |------|----------|-------|
-| Multi-user state | `composables/useProfiles.ts` | Canonical surface: profiles, activeProfile, unlock/lock/create/rename/delete/setAvatar |
+| Multi-user state | `composables/useProfiles.ts` | Canonical surface: profiles, activeProfile, unlock/lock/create/rename/delete/setAvatar. Also exports `onProfileReady` / `onProfileLocked` fan-out hooks. |
+| Per-profile settings | `composables/useSettings.ts` | Reactive mirror of the backend registry; `useSetting<T>('ui.theme')` two-way ref. Settings auto-sync across the user's devices (scope=`sync`) or stay local (scope=`device`). See [`docs/settings.md`](../docs/settings.md). |
 | Auth compat shim | `composables/useAuth.ts` | Thin wrapper over `useProfiles` — kept so legacy components compile; removed lifecycle methods throw |
 | State | `composables/` | Module-level singleton refs (no Pinia/Vuex) |
 | UI design system | `components/ui/` | Barrel-exported primitives |

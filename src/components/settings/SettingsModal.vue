@@ -19,6 +19,7 @@ import {
 } from '@/composables/useBiometricVault'
 import { useSettingsModal, type SettingsSectionId } from '@/composables/useSettingsModal'
 import { AppButton, AppInput, AppTextarea, AppModal, AppAlert } from '@/components/ui'
+import AdvancedSettingsPanel from '@/components/settings/AdvancedSettingsPanel.vue'
 import type { Identity } from '@/types'
 
 const { invoke } = useLocalApi()
@@ -360,6 +361,7 @@ const SECTIONS: SectionMeta[] = [
   { id: 'security', label: 'Security & Privacy', desc: 'Recovery, lock, biometric' },
   { id: 'personalization', label: 'Personalization', desc: 'Theme, shortcuts' },
   { id: 'system', label: 'System', desc: 'Storage, network' },
+  { id: 'advanced', label: 'All settings', desc: 'Every per-profile setting' },
 ]
 </script>
 
@@ -775,6 +777,11 @@ const SECTIONS: SectionMeta[] = [
                       </div>
                     </div>
                   </div>
+                </template>
+
+                <!-- ──────────── Advanced — every registered setting ──────────── -->
+                <template v-else-if="activeSection === 'advanced'">
+                  <AdvancedSettingsPanel />
                 </template>
               </div>
             </section>

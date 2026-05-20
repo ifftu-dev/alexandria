@@ -54,6 +54,7 @@ src-tauri/
     │   ├── tutoring_stubs.rs  # Stubbed tutoring surface for unsupported builds
     │   ├── taxonomy.rs     # Subject fields, subjects, skills, taxonomy graph
     │   ├── profile.rs      # Multi-user profile lifecycle: list/create/unlock/lock/rename/avatar/delete + restore-from-mnemonic
+    │   ├── settings.rs     # Per-profile settings IPC: list_settings, set_setting, reset_setting (typed registry)
     │   ├── identity.rs     # Active-profile identity ops: export_mnemonic, get_profile, update_profile, publish_profile, resolve_profile, get_wallet_info, get_local_did
     │   ├── credentials.rs  # VC issue/list/verify/revoke/suspend/export/allowlist
     │   ├── sync.rs         # Cross-device sync
@@ -90,6 +91,11 @@ src-tauri/
     │   ├── index.rs        # profiles_index.json sidecar (public — names/avatars only)
     │   ├── manager.rs      # ProfileManager: list/create/rename/delete/touch + ProfilePaths
     │   └── migration.rs    # First-launch auto-migrator from legacy single-vault layout
+    │
+    ├── settings/           # Unified per-profile settings (sync + device scope)
+    │   ├── mod.rs          # Module exports
+    │   ├── registry.rs     # Typed SettingKey<T> registry — single source of truth for valid keys + defaults
+    │   └── store.rs        # SettingsStore: get/set/reset/list_all/list_syncable/apply_sync_row
     │
     ├── p2p/                # libp2p network stack
     │   ├── network.rs      # Swarm, relay bootstrap, event loop
@@ -161,22 +167,23 @@ src/
 │       └── JetBrainsMono.woff2
 │
 ├── composables/            # Shared singletons
-│   ├── useProfiles.ts      # Canonical multi-user surface (list/unlock/lock/create/rename/delete/avatar)
+│   ├── useProfiles.ts      # Canonical multi-user surface (list/unlock/lock/create/rename/delete/avatar) + onProfileReady / onProfileLocked fan-out hooks
+│   ├── useSettings.ts      # Reactive mirror of the per-profile settings registry; `useSetting<T>(key)` two-way ref
 │   ├── useAuth.ts          # Compat shim over useProfiles — removed lifecycle methods throw
 │   ├── useBiometricVault.ts
 │   ├── useClassroom.ts
 │   ├── useContentSync.ts
 │   ├── useCredentials.ts
-│   ├── useKeyboardShortcuts.ts # Includes the `switch-profile` shortcut (Cmd/Ctrl+Shift+U)
+│   ├── useKeyboardShortcuts.ts # Includes the `switch-profile` shortcut (Cmd/Ctrl+Shift+U); bindings persisted via settings store
 │   ├── useLocalApi.ts
-│   ├── useOmniSearch.ts
+│   ├── useOmniSearch.ts    # Recents synced via `ui.omni_recents`
 │   ├── useP2P.ts
 │   ├── usePlatform.ts
-│   ├── useSentinel.ts
+│   ├── useSentinel.ts      # AI / paste-classifier toggles synced via `sentinel.*` settings
 │   ├── useSettingsModal.ts
 │   ├── useSkillGraphHover.ts
 │   ├── useSkillGraphState.ts
-│   ├── useTheme.ts
+│   ├── useTheme.ts         # Theme bound to `ui.theme` via `useSetting<string>` — reacts to sync deliveries
 │   └── useTutoringRoom.ts
 │
 ├── components/             # Vue components across feature folders

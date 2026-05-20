@@ -21,8 +21,10 @@
 
 import { reactive, onMounted, onUnmounted, readonly } from 'vue'
 import { isMac } from '@/composables/usePlatform'
+import { useSettings } from '@/composables/useSettings'
 
-const STORAGE_KEY = 'alexandria-keyboard-shortcuts'
+const SETTING_KEY = 'input.keyboard_shortcuts'
+const LEGACY_LOCALSTORAGE_KEY = 'alexandria-keyboard-shortcuts'
 
 /** A single key combination: modifier flags + a key name. */
 export interface KeyCombo {
@@ -82,9 +84,12 @@ function init() {
     }
   }
 
-  // Apply user overrides from localStorage.
+  // Synchronous fast path: read whatever localStorage cached from the
+  // last session so shortcuts work before the per-profile settings
+  // store has hydrated. `initShortcutsFromSettings` (called from
+  // App.vue after profile unlock) reconciles with the canonical value.
   try {
-    const stored = localStorage.getItem(STORAGE_KEY)
+    const stored = localStorage.getItem(LEGACY_LOCALSTORAGE_KEY)
     if (stored) {
       const overrides: Record<string, KeyCombo> = JSON.parse(stored)
       for (const [id, keys] of Object.entries(overrides)) {
@@ -98,17 +103,56 @@ function init() {
   }
 }
 
-function persist() {
+function collectOverrides(): Record<string, KeyCombo> {
   const overrides: Record<string, KeyCombo> = {}
   for (const [id, def] of Object.entries(shortcuts)) {
     if (!comboEqual(def.keys, def.defaultKeys)) {
       overrides[id] = def.keys
     }
   }
+  return overrides
+}
+
+function persist() {
+  const overrides = collectOverrides()
+  // localStorage mirror powers the synchronous fast path on next launch.
   if (Object.keys(overrides).length > 0) {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(overrides))
+    localStorage.setItem(LEGACY_LOCALSTORAGE_KEY, JSON.stringify(overrides))
   } else {
-    localStorage.removeItem(STORAGE_KEY)
+    localStorage.removeItem(LEGACY_LOCALSTORAGE_KEY)
+  }
+  // Per-profile settings store — propagates to the user's other devices.
+  void useSettings().setSetting(SETTING_KEY, JSON.stringify(overrides))
+}
+
+/** Hydrate from the per-profile settings store. Call once after profile unlock. */
+export async function initShortcutsFromSettings(): Promise<void> {
+  const { entries, initialize } = useSettings()
+  await initialize()
+  const found = entries.value.find((e) => e.key === SETTING_KEY)
+
+  // Reset every binding to its factory default before applying the
+  // active profile's overrides. Without this step, a previous
+  // profile's customizations would linger in the singleton on
+  // profile switch.
+  for (const def of Object.values(shortcuts)) {
+    def.keys = { ...def.defaultKeys }
+  }
+
+  if (!found || found.is_default) {
+    // Profile uses defaults — leave the reset above in place.
+    // (The legacy localStorage cache is intentionally NOT imported
+    // here: that would leak the previously-active profile's
+    // customizations into a fresh profile.)
+    return
+  }
+  try {
+    const overrides: Record<string, KeyCombo> = JSON.parse(found.current_value)
+    for (const [id, keys] of Object.entries(overrides)) {
+      if (shortcuts[id]) shortcuts[id].keys = { ...keys }
+    }
+  } catch {
+    // Corrupt remote value — leave defaults.
   }
 }
 

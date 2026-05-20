@@ -5,6 +5,7 @@ import SidebarSkillGraph from '@/components/layout/SidebarSkillGraph.vue'
 import TickerText from '@/components/layout/TickerText.vue'
 import { useTutoringRoom } from '@/composables/useTutoringRoom'
 import { useClassroom } from '@/composables/useClassroom'
+import { useSetting } from '@/composables/useSettings'
 
 defineProps<{ collapsed: boolean }>()
 const emit = defineEmits<{ toggle: [] }>()
@@ -22,22 +23,21 @@ function navigate(path: string) {
 }
 
 // =========================================
-// Collapsible section state (persisted)
-// =========================================
+// Collapsible section state — per-profile settings store
+// (`ui.sidebar_sections`, scope=sync) so a user's section preferences
+// follow them across devices.
 type SectionKey = 'tutoring' | 'classrooms'
 
-const sectionState = ref<Record<string, boolean>>({ tutoring: true, classrooms: true })
-
-onMounted(() => {
-  try {
-    const stored = localStorage.getItem('sidebar-sections')
-    if (stored) sectionState.value = JSON.parse(stored)
-  } catch { /* ignore */ }
-})
+const sectionsSetting = useSetting<Record<string, boolean>>('ui.sidebar_sections')
+const sectionState = computed<Record<string, boolean>>(() => ({
+  tutoring: true,
+  classrooms: true,
+  ...(sectionsSetting.ref.value ?? {}),
+}))
 
 function toggleSection(key: SectionKey) {
-  sectionState.value = { ...sectionState.value, [key]: !sectionState.value[key] }
-  localStorage.setItem('sidebar-sections', JSON.stringify(sectionState.value))
+  const next = { ...sectionState.value, [key]: !sectionState.value[key] }
+  void sectionsSetting.set(next)
 }
 
 const isSectionOpen = (key: SectionKey) => sectionState.value[key] !== false
