@@ -15,7 +15,7 @@ pub const SCHEMA_VERSION: u32 = 1;
 
 /// Generator code version. Bump when distributions change so retrained
 /// models can be tied back to the exact code that produced them.
-pub const SYNTH_VERSION: &str = "v1";
+pub const SYNTH_VERSION: &str = "v2";
 
 /// Top-level blob — one published artifact per (label, run).
 #[derive(Debug, Clone, Serialize, Deserialize)]

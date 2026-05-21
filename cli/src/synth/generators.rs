@@ -119,6 +119,36 @@ fn finalize_speed_ratios(dwell_ms: &[f32], flight_ms: &[f32]) -> Vec<f32> {
     out
 }
 
+/// Round timings to whole milliseconds, then derive `speed_ratio` from the
+/// rounded values, and assemble the sample.
+///
+/// The LogNormal/Normal draws go through libm `exp`/`ln`, whose last bits
+/// differ between macOS and Linux — which made the raw f32 timings (and
+/// therefore the golden hashes) platform-dependent. Keystroke timings are
+/// millisecond-resolution anyway, so rounding here collapses that sub-ULP
+/// noise and makes the synthetic output bit-identical across platforms.
+/// `speed_ratio` is then a pure IEEE division of integer-valued floats,
+/// which is deterministic everywhere.
+fn finish_sample(
+    digraphs: Vec<String>,
+    mut dwell_ms: Vec<f32>,
+    mut flight_ms: Vec<f32>,
+) -> KeystrokeSample {
+    for v in dwell_ms.iter_mut() {
+        *v = v.round();
+    }
+    for v in flight_ms.iter_mut() {
+        *v = v.round();
+    }
+    let speed_ratio = finalize_speed_ratios(&dwell_ms, &flight_ms);
+    KeystrokeSample {
+        digraphs,
+        dwell_ms,
+        flight_ms,
+        speed_ratio,
+    }
+}
+
 fn gen_paste_macro(rng: &mut ChaCha20Rng) -> KeystrokeSample {
     let n = sample_len(rng, 150.0, 30.0, 50, 200);
     let mut digraphs = Vec::with_capacity(n);
@@ -131,13 +161,7 @@ fn gen_paste_macro(rng: &mut ChaCha20Rng) -> KeystrokeSample {
         dwell_ms.push(dwell_d.sample(rng));
         flight_ms.push(flight_d.sample(rng));
     }
-    let speed_ratio = finalize_speed_ratios(&dwell_ms, &flight_ms);
-    KeystrokeSample {
-        digraphs,
-        dwell_ms,
-        flight_ms,
-        speed_ratio,
-    }
+    finish_sample(digraphs, dwell_ms, flight_ms)
 }
 
 fn gen_typing_bot_constant(rng: &mut ChaCha20Rng) -> KeystrokeSample {
@@ -152,13 +176,7 @@ fn gen_typing_bot_constant(rng: &mut ChaCha20Rng) -> KeystrokeSample {
         dwell_ms.push(dwell_jitter.sample(rng).max(0.0));
         flight_ms.push(flight_jitter.sample(rng).max(0.0));
     }
-    let speed_ratio = finalize_speed_ratios(&dwell_ms, &flight_ms);
-    KeystrokeSample {
-        digraphs,
-        dwell_ms,
-        flight_ms,
-        speed_ratio,
-    }
+    finish_sample(digraphs, dwell_ms, flight_ms)
 }
 
 fn gen_typing_bot_jitter(rng: &mut ChaCha20Rng) -> KeystrokeSample {
@@ -176,13 +194,7 @@ fn gen_typing_bot_jitter(rng: &mut ChaCha20Rng) -> KeystrokeSample {
         dwell_ms.push(dwell_d.sample(rng).max(1.0));
         flight_ms.push(flight_d.sample(rng).max(1.0));
     }
-    let speed_ratio = finalize_speed_ratios(&dwell_ms, &flight_ms);
-    KeystrokeSample {
-        digraphs,
-        dwell_ms,
-        flight_ms,
-        speed_ratio,
-    }
+    finish_sample(digraphs, dwell_ms, flight_ms)
 }
 
 fn gen_llm_paste_edit(rng: &mut ChaCha20Rng) -> KeystrokeSample {
@@ -212,13 +224,7 @@ fn gen_llm_paste_edit(rng: &mut ChaCha20Rng) -> KeystrokeSample {
         flight_ms.push(edit_flight.sample(rng).clamp(50.0, 800.0));
     }
 
-    let speed_ratio = finalize_speed_ratios(&dwell_ms, &flight_ms);
-    KeystrokeSample {
-        digraphs,
-        dwell_ms,
-        flight_ms,
-        speed_ratio,
-    }
+    finish_sample(digraphs, dwell_ms, flight_ms)
 }
 
 fn gen_remote_control(rng: &mut ChaCha20Rng) -> KeystrokeSample {
@@ -235,13 +241,7 @@ fn gen_remote_control(rng: &mut ChaCha20Rng) -> KeystrokeSample {
         dwell_ms.push(dwell_d.sample(rng).max(1.0));
         flight_ms.push(flight_d.sample(rng).max(10.0));
     }
-    let speed_ratio = finalize_speed_ratios(&dwell_ms, &flight_ms);
-    KeystrokeSample {
-        digraphs,
-        dwell_ms,
-        flight_ms,
-        speed_ratio,
-    }
+    finish_sample(digraphs, dwell_ms, flight_ms)
 }
 
 fn gen_human_baseline(rng: &mut ChaCha20Rng) -> KeystrokeSample {
@@ -269,13 +269,7 @@ fn gen_human_baseline(rng: &mut ChaCha20Rng) -> KeystrokeSample {
         dwell_ms.push(dwell);
         flight_ms.push(flight);
     }
-    let speed_ratio = finalize_speed_ratios(&dwell_ms, &flight_ms);
-    KeystrokeSample {
-        digraphs,
-        dwell_ms,
-        flight_ms,
-        speed_ratio,
-    }
+    finish_sample(digraphs, dwell_ms, flight_ms)
 }
 
 // ============================================================================
@@ -311,7 +305,7 @@ mod tests {
     }
 
     /// Golden hashes pinning the synthetic data distributions at
-    /// `SYNTH_VERSION = "v1"` for `count=64, seed=42`.
+    /// `SYNTH_VERSION = "v2"` for `count=64, seed=42`.
     ///
     /// If a distribution parameter, the RNG sequence, the JSON
     /// serialization order, or the bigram table changes, this test
@@ -329,35 +323,35 @@ mod tests {
     const GOLDEN_HASHES: &[(AttackLabel, &str)] = &[
         (
             AttackLabel::PasteMacro,
-            "09f94b21ba0c51a0fba303e1f823e79cb864aaf7b80c2b637b2f14b396aea4d1242640fc748a05b92387ab35298ebfa5ebcd008a3d792a5aa8863246d91a4243",
+            "ab7a410ca65d9f7350d74f7f489b29b6c613ed4a10853aceeda14f96ff1c12e86bfa500d265015e3d35e98d7d2d23a977e879a5c0e9123c9d914ee20f64d211a",
         ),
         (
             AttackLabel::TypingBotConstant,
-            "73e17c3eaadc06809b6cda8f4793c29a96cab500e08eaa7bed4e53e8d64d773b98d9e09fd17ba1027948b9b8b997637ccce788ea50504f04c42cf8c8d0a11560",
+            "504cde0fec57cd757eac03ae31b49b9578aab6036d31f67b61ce257ba3298c000f479ea7cbb2a77a22f19b429ba85385354c62dd95f9f65d8f57a9461fcb500e",
         ),
         (
             AttackLabel::TypingBotJitter,
-            "a44241f49c40f414580f5e2c204a424830a425934ba97575d60b3b49eba74de18c931c1229878f0b85e0181cfee780762fc5b2272ad1ade7591bd9ff5f4a03b2",
+            "13440c940712801397ae264713cca9eb1ecff3d63b650e7145a982223477c049963a3c6654228afa3aaccbe9a2428ea26f01b9764fdb146640a7d830045ce19b",
         ),
         (
             AttackLabel::LlmPasteEdit,
-            "56585a6e41527c77b961ee077ae40bcafc81a17de5f46750207776ca8aefef4629e6414e63c7b69b1de9c797819451fc48e05dd25c3a2c15f272784572d2397c",
+            "f1e1f4662299e61681a9410f97476c86593c5dfda09965400243af4c91d5c08d74da9cb1ea02ef8aaa53182e1926c066c43198388b59b441078a2344b0bb616e",
         ),
         (
             AttackLabel::RemoteControl,
-            "a2c6e476e9706fca4874854c462e40f1f0cf8656699f026b3cbd1d32115d95f69c1559dc76dad2ae1e32aa2e53552a7bd79f8cd2a94be77bf005a7d5187d696c",
+            "4f89d7ef1d6c21feee5f102f0cb2850c41cbf07d828da1b6d3f635e6bb234868b885595eabbaaf5e9e01e499be5e85eb556db3a45af95932b839bb0d6335c28d",
         ),
         (
             AttackLabel::HumanBaseline,
-            "dbe99a0ba389ba76203026f5e21ddaf511b4ea25b3c77447a824696471b8157ecefddc3ae3ed86d27243284e0c4018e9070b410b8bcefc7b6167af0e99649b49",
+            "47311ffb6d1df51021aa73883492f565244f2f4b095af62d8d5d848081fb4273b64f94a1e79f164f12a0651f6be1c18fde9d94d96800b13afd03cb3b87cbb9b0",
         ),
     ];
 
     #[test]
-    fn golden_hashes_match_synth_v1() {
+    fn golden_hashes_match_synth_v2() {
         assert_eq!(
-            SYNTH_VERSION, "v1",
-            "goldens are pinned to SYNTH_VERSION=v1"
+            SYNTH_VERSION, "v2",
+            "goldens are pinned to SYNTH_VERSION=v2"
         );
         for (label, expected) in GOLDEN_HASHES {
             let bytes = serde_json::to_vec(&run(*label, 64, 42)).unwrap();
@@ -367,6 +361,18 @@ mod tests {
                 "golden drift for {:?} — regenerate after bumping SYNTH_VERSION",
                 label,
             );
+        }
+    }
+
+    /// Regeneration helper: `cargo test -p alex --bin alex -- --ignored \
+    /// --nocapture print_goldens` prints the GOLDEN_HASHES table to paste
+    /// above after an intentional SYNTH_VERSION bump.
+    #[test]
+    #[ignore]
+    fn print_goldens() {
+        for (label, _) in GOLDEN_HASHES {
+            let bytes = serde_json::to_vec(&run(*label, 64, 42)).unwrap();
+            println!("{:?} => {}", label, blake2b_hex(&bytes));
         }
     }
 
