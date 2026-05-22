@@ -149,9 +149,9 @@ mod tests {
         });
         assert_eq!(f[9], 0.3);
         assert_eq!(f[10], 0.2);
-        for i in 0..FEATURE_DIM {
+        for (i, &val) in f.iter().enumerate() {
             if i != 9 && i != 10 {
-                assert_eq!(f[i], 0.0);
+                assert_eq!(val, 0.0);
             }
         }
     }

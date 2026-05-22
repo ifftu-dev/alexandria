@@ -96,7 +96,7 @@ pub fn handle_sync_request(conn: &Connection, peer_id: &str, req: &SyncRequest) 
     };
 
     let merged = match sync::apply_sync_payload(conn, &incoming) {
-        Ok((rows, _settings)) => rows,
+        Ok((rows, settings)) => rows + settings,
         Err(e) => return SyncResponse::Error(format!("apply: {e}")),
     };
 

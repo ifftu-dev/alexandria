@@ -194,7 +194,8 @@ pub(crate) fn finish_exchange(
         SyncResponse::Ok { sealed, merged } => {
             let payload = sync::open_payload(key, &sealed)?;
             let received = sync::payload_row_count(&payload);
-            let (locally_merged, _settings) = sync::apply_sync_payload(conn, &payload)?;
+            let (rows, settings) = sync::apply_sync_payload(conn, &payload)?;
+            let locally_merged = rows + settings;
             let _ = sync::record_sync_event(conn, peer_id, "bidirectional", locally_merged);
             Ok(SyncResult {
                 rows_sent: merged,
