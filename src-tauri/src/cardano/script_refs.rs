@@ -64,40 +64,58 @@ pub const CHALLENGE_ESCROW_SCRIPT_HASH: &str =
 // reference_script_hash was verified to match the SCRIPT_HASH above.
 
 /// Reference UTxO for the DAO registry validator (tx_hash, output_index).
-pub const DAO_REGISTRY_REF_UTXO: (&str, u64) =
-    ("448db85c1fa30e3159ad2aad341a84fb34f71c7966cd1a6392fb186c7c974551", 2);
+pub const DAO_REGISTRY_REF_UTXO: (&str, u64) = (
+    "448db85c1fa30e3159ad2aad341a84fb34f71c7966cd1a6392fb186c7c974551",
+    2,
+);
 
 /// Reference UTxO for the DAO minting policy.
-pub const DAO_MINTING_REF_UTXO: (&str, u64) =
-    ("12daa5f20a61f768a4d8c436e3a693b338ff275fde73149b1832faa4b61cdae0", 4);
+pub const DAO_MINTING_REF_UTXO: (&str, u64) = (
+    "12daa5f20a61f768a4d8c436e3a693b338ff275fde73149b1832faa4b61cdae0",
+    4,
+);
 
 /// Reference UTxO for the election validator.
-pub const ELECTION_REF_UTXO: (&str, u64) =
-    ("448db85c1fa30e3159ad2aad341a84fb34f71c7966cd1a6392fb186c7c974551", 1);
+pub const ELECTION_REF_UTXO: (&str, u64) = (
+    "448db85c1fa30e3159ad2aad341a84fb34f71c7966cd1a6392fb186c7c974551",
+    1,
+);
 
 /// Reference UTxO for the proposal validator.
-pub const PROPOSAL_REF_UTXO: (&str, u64) =
-    ("448db85c1fa30e3159ad2aad341a84fb34f71c7966cd1a6392fb186c7c974551", 0);
+pub const PROPOSAL_REF_UTXO: (&str, u64) = (
+    "448db85c1fa30e3159ad2aad341a84fb34f71c7966cd1a6392fb186c7c974551",
+    0,
+);
 
 /// Reference UTxO for the vote receipt minting policy.
-pub const VOTE_MINTING_REF_UTXO: (&str, u64) =
-    ("12daa5f20a61f768a4d8c436e3a693b338ff275fde73149b1832faa4b61cdae0", 3);
+pub const VOTE_MINTING_REF_UTXO: (&str, u64) = (
+    "12daa5f20a61f768a4d8c436e3a693b338ff275fde73149b1832faa4b61cdae0",
+    3,
+);
 
 /// Reference UTxO for the reputation minting policy.
-pub const REPUTATION_MINTING_REF_UTXO: (&str, u64) =
-    ("12daa5f20a61f768a4d8c436e3a693b338ff275fde73149b1832faa4b61cdae0", 0);
+pub const REPUTATION_MINTING_REF_UTXO: (&str, u64) = (
+    "12daa5f20a61f768a4d8c436e3a693b338ff275fde73149b1832faa4b61cdae0",
+    0,
+);
 
 /// Reference UTxO for the soulbound validator.
-pub const SOULBOUND_REF_UTXO: (&str, u64) =
-    ("12daa5f20a61f768a4d8c436e3a693b338ff275fde73149b1832faa4b61cdae0", 2);
+pub const SOULBOUND_REF_UTXO: (&str, u64) = (
+    "12daa5f20a61f768a4d8c436e3a693b338ff275fde73149b1832faa4b61cdae0",
+    2,
+);
 
 /// Reference UTxO for the completion-witness minting policy.
-pub const COMPLETION_MINTING_REF_UTXO: (&str, u64) =
-    ("12daa5f20a61f768a4d8c436e3a693b338ff275fde73149b1832faa4b61cdae0", 1);
+pub const COMPLETION_MINTING_REF_UTXO: (&str, u64) = (
+    "12daa5f20a61f768a4d8c436e3a693b338ff275fde73149b1832faa4b61cdae0",
+    1,
+);
 
 /// Reference UTxO for the challenge-escrow spending validator.
-pub const CHALLENGE_ESCROW_REF_UTXO: (&str, u64) =
-    ("12daa5f20a61f768a4d8c436e3a693b338ff275fde73149b1832faa4b61cdae0", 5);
+pub const CHALLENGE_ESCROW_REF_UTXO: (&str, u64) = (
+    "12daa5f20a61f768a4d8c436e3a693b338ff275fde73149b1832faa4b61cdae0",
+    5,
+);
 
 // ---- Utility ----
 
