@@ -413,4 +413,18 @@ mod tests {
             "prob drifted after roundtrip: {prob_before} vs {prob_after}"
         );
     }
+
+    /// Guard the F32-only invariant. The Android build forces
+    /// `-C target-feature=+fullfp16` so `gemm-f16` compiles (its fp16 NEON
+    /// intrinsics lack `#[target_feature]`). That is only safe because no
+    /// f16 kernel ever executes — an f16 dtype here would make the fp16
+    /// path live and SIGILL on arm64 devices without ARMv8.2-FP16.
+    /// See `scripts/android-build.sh`.
+    #[test]
+    fn model_params_are_f32_only() {
+        let cnn = MouseTrajectoryCnn::new().unwrap();
+        for var in cnn.varmap.all_vars() {
+            assert_eq!(var.dtype(), DType::F32, "sentinel ML must stay F32-only");
+        }
+    }
 }
