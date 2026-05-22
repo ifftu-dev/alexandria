@@ -95,3 +95,4 @@ scripts/env.completion
 # ── Misc ──────────────────────────────────────────────────────────────
 *.tgz
 *.tsbuildinfo
+cardano/governance/build/

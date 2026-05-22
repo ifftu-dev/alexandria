@@ -638,8 +638,9 @@ mod tests {
 
     #[test]
     fn validators_deployed_reflects_script_refs() {
-        // Currently all are DEPLOY_PENDING
-        assert!(!validators_deployed());
+        // Governance reference scripts were deployed to preprod
+        // 2026-05-22 (see script_refs), so the gate now opens.
+        assert!(validators_deployed());
     }
 
     #[test]

@@ -112,12 +112,12 @@ Session outcome determination:
 
 ### Trust Factor Integration
 
-When a session ends `flagged` or `suspended`, the backend applies a weighted trust penalty to every `evidence_records` row linked by `integrity_session_id`:
+The trust signal is the session itself. When a session ends `flagged` or `suspended`, the backend records the terminal `status` + `integrity_score` on the `integrity_sessions` row; that is what downstream credential issuance reads. For observability it also computes a spec-pinned penalty (logged, not persisted to a row):
 - Critical violation: −0.20 per flag
 - Warning: −0.10 per flag
 - Info: no penalty
 
-`trust_factor` is floored at 0.10. Decay targets `evidence_records.trust_factor` (per-learner, per-session) rather than `skill_assessments.trust_factor` (per-template) — this avoids collateral damage to honest learners who used the same assessment. The aggregator reads `er.trust_factor` at skill-proof computation time, so the penalty propagates through the evidence pipeline into skill proofs and instructor reputation.
+> **Post-VC-first cutover (migration 040):** the legacy per-`evidence_records` `trust_factor` decay — and the SkillProof aggregator that read it — were retired along with the `evidence_records` / `skill_proofs` / `skill_assessments` tables. There is no per-evidence trust column to decay anymore; integrity feeds the credential decision via the session's status/score rather than by mutating an evidence row.
 
 ## AI Models (Advisory)
 
@@ -358,5 +358,5 @@ These guarantees are architectural — they are enforced by the code structure, 
 4. **AI model weights are not biometric data**: Autoencoder/CNN weights encode statistical patterns of typing/movement, not recoverable input data. LBP embeddings cannot be reverse-engineered into face images. Published *adversarial priors* (labeled cheat patterns and DAO-ratified classifier weights, curated by the Sentinel DAO — see [sentinel-adversarial-priors.md](sentinel-adversarial-priors.md)) contain no individual user data; they are catalog content, not per-user telemetry.
 5. **Profile keyed to device**: `sentinel_profile_{userId}_{deviceFingerprint[0:16]}` — profiles are device-specific.
 6. **No server-side data**: All behavioral processing happens on-device. The Rust backend stores only numeric scores and categorical flags in local SQLite. The Sentinel DAO-published prior/weights library is read-only from each client's perspective and carries no user identifiers — clients consume it, they never produce to it unless the learner explicitly proposes a pattern.
-7. **ONNX inference is local**: The paste classifier loads via ONNX Runtime Web's WASM backend with `executionProviders: ['wasm']` only. No remote inference path exists. WASM artifacts are copied into the app bundle at build time so there's no runtime fetch from a CDN.
+7. **Inference is local**: The paste classifier runs entirely in the Rust backend via `tract` (pure Rust); the ONNX bytes are embedded at compile time with `include_bytes!`, so there is no runtime fetch from a CDN and no remote inference path. (The earlier ONNX Runtime Web / WASM backend was retired — see "Inference runtime" above.)
 8. **DAO weights are bounded**: Incoming weights blobs are capped at 1 MiB (envelope/eval JSON) and 50 MiB (ONNX bytes); resolver round trips time out at 5 s. A malicious envelope cannot trigger unbounded download or memory allocation.

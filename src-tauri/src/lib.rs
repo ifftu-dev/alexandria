@@ -524,6 +524,7 @@ pub fn run() {
             {
                 let db_for_queue = db.clone();
                 let ks_for_queue = keystore.clone();
+                let node_for_sync = p2p_node.clone();
                 diag::log("spawning on-chain queue processor (governance + credential anchors)");
                 tauri::async_runtime::spawn(async move {
                     // Wait for app to fully initialize before processing
@@ -629,6 +630,16 @@ pub fn run() {
                                     }
                                 }
                             }
+                        }
+
+                        // Cross-device sync: when auto-sync is enabled,
+                        // reconcile with every paired device. No-op if the
+                        // toggle is off, no profile is unlocked, or the
+                        // node isn't running.
+                        let merged =
+                            commands::sync::auto_sync_all(&db_for_queue, &node_for_sync).await;
+                        if merged > 0 {
+                            log::info!("auto-sync: merged {merged} row(s) from paired devices");
                         }
 
                         tokio::time::sleep(std::time::Duration::from_secs(60)).await;
@@ -899,9 +910,11 @@ pub fn run() {
             commands::governance::retry_onchain_submission,
             // Reputation (VC-sourced engine — see commands::reputation).
             commands::reputation::list_reputation_rows,
+            commands::reputation::get_reputation,
             commands::reputation::recompute_reputation_for_subject,
             // Snapshots
             commands::snapshot::snapshot_reputation,
+            commands::snapshot::submit_snapshot_tx,
             commands::snapshot::list_snapshots,
             commands::snapshot::get_snapshot,
             commands::snapshot::update_snapshot_status,
@@ -930,6 +943,9 @@ pub fn run() {
             commands::sync::sync_now,
             commands::sync::sync_set_auto,
             commands::sync::sync_history,
+            // Device pairing (bootstraps cross-device sync).
+            commands::pairing::pairing_generate_code,
+            commands::pairing::pairing_accept_code,
             // Completion attestation (VC-first gate).
             commands::attestation::set_completion_attestation_requirement,
             commands::attestation::remove_completion_attestation_requirement,
@@ -943,9 +959,13 @@ pub fn run() {
             commands::challenge::list_credential_challenges,
             commands::challenge::get_credential_challenge,
             commands::challenge::expire_overdue_credential_challenges,
+            commands::challenge::lock_challenge_stake,
+            commands::challenge::settle_challenge_stake,
             // Completion-witness flow (Merkle root + tx submission).
             commands::completion::preview_completion_root,
             commands::completion::submit_completion_witness,
+            commands::completion::get_course_completion_status,
+            commands::completion::claim_course_completion,
             // Integrity
             commands::integrity::integrity_start_session,
             commands::integrity::integrity_submit_snapshot,

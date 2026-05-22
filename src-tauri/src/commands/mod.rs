@@ -31,6 +31,7 @@ pub mod taxonomy;
 
 pub mod content;
 pub mod p2p;
+pub mod pairing;
 pub mod ratelimit;
 pub mod storage;
 pub mod sync;

@@ -12,6 +12,31 @@
   },
   "validators": [
     {
+      "title": "challenge_escrow.challenge_escrow.spend",
+      "datum": {
+        "title": "datum",
+        "schema": {
+          "$ref": "#/definitions/challenge_escrow~1ChallengeEscrowDatum"
+        }
+      },
+      "redeemer": {
+        "title": "redeemer",
+        "schema": {
+          "$ref": "#/definitions/challenge_escrow~1EscrowRedeemer"
+        }
+      },
+      "compiledCode": "59019601010029800aba2aba1aab9faab9eaab9dab9a48888896600264653001300700198039804000cc01c0092225980099b8748008c01cdd500144c8cc8a60022b30013001300a375400513322332259800980298071baa00a8acc00400a2660020106eb8c044c03cdd50024528201a8acc00400a2660020106eb8c044c048c03cdd50024528201a40346466446600400400244b30010018a508acc004cdc79bae30120010038a518998010011809800a01c40446eb0c040c044c044c044c044c044c044c044c044c038dd50039bae3001300d37540044464660020026eb0c010c040dd5001912cc00400629422b30013259800980418089baa001899b8f375c602860246ea80040122941010180998089baa301330113754602600314a31330020023014001403c8090c034c02cdd50011180718079807800c590094c028dd50034c03400d2225980098020014566002601c6ea802600716403d15980099b874800800a2b3001300e37540130038b201e8b20184030300b300c001370e900018041baa0028b200c180380098019baa0078a4d1365640041",
+      "hash": "ead373d24790d337c0d94324988b11f760563ec3f09ff1ef48d1e519"
+    },
+    {
+      "title": "challenge_escrow.challenge_escrow.else",
+      "redeemer": {
+        "schema": {}
+      },
+      "compiledCode": "59019601010029800aba2aba1aab9faab9eaab9dab9a48888896600264653001300700198039804000cc01c0092225980099b8748008c01cdd500144c8cc8a60022b30013001300a375400513322332259800980298071baa00a8acc00400a2660020106eb8c044c03cdd50024528201a8acc00400a2660020106eb8c044c048c03cdd50024528201a40346466446600400400244b30010018a508acc004cdc79bae30120010038a518998010011809800a01c40446eb0c040c044c044c044c044c044c044c044c044c038dd50039bae3001300d37540044464660020026eb0c010c040dd5001912cc00400629422b30013259800980418089baa001899b8f375c602860246ea80040122941010180998089baa301330113754602600314a31330020023014001403c8090c034c02cdd50011180718079807800c590094c028dd50034c03400d2225980098020014566002601c6ea802600716403d15980099b874800800a2b3001300e37540130038b201e8b20184030300b300c001370e900018041baa0028b200c180380098019baa0078a4d1365640041",
+      "hash": "ead373d24790d337c0d94324988b11f760563ec3f09ff1ef48d1e519"
+    },
+    {
       "title": "completion.completion_minting.mint",
       "redeemer": {
         "title": "redeemer",
@@ -1119,6 +1144,57 @@
               "$ref": "#/definitions/Int"
             }
           ]
+        }
+      ]
+    },
+    "challenge_escrow/ChallengeEscrowDatum": {
+      "title": "ChallengeEscrowDatum",
+      "description": "Inline datum locked alongside the staked ADA.",
+      "anyOf": [
+        {
+          "title": "ChallengeEscrowDatum",
+          "dataType": "constructor",
+          "index": 0,
+          "fields": [
+            {
+              "title": "challenger",
+              "description": "Challenger's payment key hash — recipient on `Refund`.",
+              "$ref": "#/definitions/aiken~1crypto~1VerificationKeyHash"
+            },
+            {
+              "title": "treasury",
+              "description": "DAO treasury payment key hash — recipient on `Forfeit`.",
+              "$ref": "#/definitions/aiken~1crypto~1VerificationKeyHash"
+            },
+            {
+              "title": "dao_authority",
+              "description": "DAO committee key authorised to settle this escrow.",
+              "$ref": "#/definitions/aiken~1crypto~1VerificationKeyHash"
+            },
+            {
+              "title": "challenge_id",
+              "description": "Hash of the challenge id this stake backs (binds the UTxO to one\n challenge so it can't be replayed against another).",
+              "$ref": "#/definitions/ByteArray"
+            }
+          ]
+        }
+      ]
+    },
+    "challenge_escrow/EscrowRedeemer": {
+      "title": "EscrowRedeemer",
+      "description": "Settlement direction.",
+      "anyOf": [
+        {
+          "title": "Refund",
+          "dataType": "constructor",
+          "index": 0,
+          "fields": []
+        },
+        {
+          "title": "Forfeit",
+          "dataType": "constructor",
+          "index": 1,
+          "fields": []
         }
       ]
     }

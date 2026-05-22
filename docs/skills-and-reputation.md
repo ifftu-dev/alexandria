@@ -6,8 +6,8 @@
 > reference to `skill_proofs`, `evidence_records`, or
 > `skill_assessments` in this doc describes the retired pipeline.
 > Credentials are now W3C VCs auto-earned via a Cardano completion
-> validator. Reputation computation will repoint at credentials
-> (math unchanged). See [`vc-migration.md`](./vc-migration.md).
+> validator. Reputation computation has been repointed at credentials
+> (distribution math unchanged). See [`vc-migration.md`](./vc-migration.md).
 
 **Status:** Draft
 **Audience:** Platform builders, education providers, governments, recruitment services, LLM-based tooling
@@ -83,36 +83,34 @@ Course elements (`course_elements`) are tagged with skills via `element_skill_ta
 
 ## 6. Evidence Model
 
-`evidence_records` bind assessments to verifiable outcomes:
-- `skill_assessment_id`, `skill_id`, `proficiency_level`
-- `score`, `difficulty`, `trust_factor`
-- `course_id`, `instructor_address`, `integrity_session_id`, `integrity_score`
-- optional `cid` and `signature`
+The verifiable outcome of an assessment is now a **W3C Verifiable Credential** (see [`vc-migration.md`](./vc-migration.md) and `domain::vc`), not an `evidence_records` row. Credentials are auto-earned: `claim_course_completion` assembles completion leaves from the learner's graded `element_submissions`, verifies them against the course template (gradeable elements in order, ≥0.6 pass), computes a Merkle root, and submits the completion witness; the observer then auto-issues the VC.
 
-Evidence is broadcast over the `/alexandria/evidence/1.0` GossipSub topic with Ed25519 signatures for authenticity.
+Each credential binds:
+- subject DID, skill / proficiency scope
+- the course and the graded submissions it derives from
+- the issuer DID and an Ed25519 detached-JWS signature
 
-IDs are deterministic: `hex(blake2b_256(parts.join("|")))`.
+There is no `/alexandria/evidence/1.0` topic (it was removed in migration 040). Credentials cross the network via the `vc-did`, `vc-status`, and `vc-fetch/1.0` protocols.
 
 ---
 
-## 7. Skill Proofs (Credentials)
+## 7. Credentials
 
-`skill_proofs` aggregate evidence into learner-owned credentials:
-- Deterministic ID scoped to `(learner, skill_id, proficiency_level)`
-- Confidence score derived from weighted evidence aggregation (`evidence/aggregator.rs`)
-- Evidence linkage via `skill_proof_evidence`
-- Optional `cid`, `nft_policy_id`, `nft_asset_name`, and `nft_tx_hash` columns for export/on-chain wrappers
+Credentials are W3C Verifiable Credentials stored in the `credentials` table (the `skill_proofs` / `skill_proof_evidence` aggregation tables were dropped in migration 040):
+- Subject- and skill-scoped, signed with Ed25519Signature2020 (detached JWS over RFC 8785 JCS bytes)
+- Lifecycle (issue / suspend / reinstate / revoke) tracked via a RevocationList2020 status list (`credential_status_lists`)
+- Credential **integrity** is anchored on Cardano with a metadata-only transaction (label 1697) that timestamps the canonical VC hash — no NFT mint, no on-chain credential content
 
-Proofs can be wrapped as native-script NFTs on Cardano (Conway era) with CIP-25 metadata containing skill, proficiency level, confidence score, and evidence count. More advanced soulbound/CIP-68-style paths exist in the codebase but are not fully deployed yet.
+The legacy native-script SkillProof NFT mint (CIP-25 metadata) was retired in migration 040. A CIP-68 soulbound **reputation snapshot** path exists (`submit_snapshot_tx`) but the mint is gated on its reference script being deployed.
 
 ---
 
 ## 8. Learner Ownership Model
 
 All credentials are stored locally in the learner's SQLite database and iroh content store. The learner controls:
-- Which proofs to mint on-chain (making them publicly verifiable)
-- Which evidence to broadcast over P2P
-- Cross-device sync of credentials via encrypted sync
+- Which credentials to allow other peers to fetch (`allow_credential_fetch` / `disallow_credential_fetch` over the `vc-fetch/1.0` protocol)
+- Which credentials to disclose via selective-disclosure presentations (§18)
+- Cross-device sync of learning state via explicit device pairing (AES-256-GCM-sealed `/alexandria/sync/1.0`)
 
 No server holds or controls credential data.
 
@@ -139,10 +137,10 @@ Schemas are designed as authoritative inputs for LLM reasoning:
 
 ## 11. Security and Trust Considerations
 
-- All evidence is Ed25519 signed with the learner's Cardano payment key
-- Evidence can be challenged via stake-based challenges (5 ADA stake, 2/3 supermajority vote)
-- Multi-party attestation requirements for high-stakes assessments
-- Behavioral integrity scores from the Sentinel anti-cheat system lower `trust_factor` on flagged assessments
+- All credentials are Ed25519 signed by the issuer DID's key
+- A **credential** can be challenged via stake-based challenges (5 ADA staked at the `challenge_escrow.ak` validator, 2/3 supermajority vote); on uphold the credential is revoked via its RevocationList2020 status list
+- Multi-party completion-attestation requirements for high-stakes courses (`commands::attestation`)
+- Behavioral integrity scores from the Sentinel anti-cheat system feed the trust signal on flagged assessments
 - Identity binding via TOFU (Trust On First Use) in the P2P validation pipeline
 
 ---
@@ -176,7 +174,7 @@ ReputationAssertion {
 }
 ```
 
-Stored in `reputation_assertions` with supporting evidence in `reputation_evidence`.
+Stored in `reputation_assertions`, computed directly from the subject's non-revoked `credentials` (the `reputation_evidence` table was dropped in migration 040). The `median_impact`, `impact_p25`, `impact_p75`, `impact_variance`, and `learner_count` columns are persisted; a sample-size confidence (`learner_count / (learner_count + 5)`) is derived on read by `commands::reputation::get_reputation`.
 
 ### 12.4 Instructor Impact
 
@@ -185,9 +183,9 @@ Impact(I, S, P) =
   Σ learners [ ΔConfidence × Attribution ]
 ```
 
-Computed in `evidence/reputation.rs`. Impact deltas stored in `reputation_impact_deltas` with FK to individual evidence records.
+Computed in `evidence/reputation.rs` directly from the subject's non-revoked `credentials` (the `reputation_impact_deltas` table was dropped in migration 040 — there is no per-evidence delta store).
 
-Reputation snapshots can be anchored on-chain as CIP-68 soulbound tokens with CBOR-encoded datums (`reputation_snapshots` table).
+Reputation snapshots can be anchored on-chain as CIP-68 soulbound tokens with CBOR-encoded datums (`reputation_snapshots` table); the mint is gated on its reference script being deployed.
 
 ---
 
@@ -276,7 +274,8 @@ implementation-status preamble.
 
 | Component | Module | PR |
 |-----------|--------|----|
-| Skill proofs (legacy NFT pipeline) | `evidence::aggregator`, `commands::cardano::mint_skill_proof_nft` | Pre-existing |
+| Skill proofs (legacy NFT pipeline) | retired in migration 040 (`evidence::aggregator` and `mint_skill_proof_nft` removed) | — |
+| Auto-earned completion credentials | `commands::completion::claim_course_completion` + observer auto-issuance | VC-first |
 | W3C-style Verifiable Credentials | `domain::vc`, `commands::credentials` | PR 4–5 |
 | Deterministic aggregation engine (Q, M, U, C, T, L) | `aggregation::aggregate_skill_state` | PR 6 |
 | Type weights, freshness, quality, independence (§14) | `aggregation::weights` | PR 6 |

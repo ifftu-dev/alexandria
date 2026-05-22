@@ -142,7 +142,7 @@ src-tauri/
         ├── onchain_queue.rs  # Persistent governance tx queue
         ├── anchor_queue.rs   # VC integrity-anchor queue
         ├── anchor_tx.rs      # Metadata-only anchor transactions
-        └── script_refs.rs    # Reference-script hashes/UTXOs (currently DEPLOY_PENDING in-tree)
+        └── script_refs.rs    # Reference-script hashes/UTXOs (deployed to preprod, block 4736927)
 ```
 
 ---

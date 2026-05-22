@@ -16,7 +16,7 @@
 > [`vc-migration.md`](./vc-migration.md) for the full diff.
 
 **Engine**: SQLite (rusqlite 0.38, bundled)
-**Migrations**: 40
+**Migrations**: 51
 
 ---
 
@@ -74,8 +74,19 @@
 | 28 | `vc_credentials_pending_verification` | Queue for inbound credentials awaiting issuer DID resolution |
 | 29 | `vc_credential_suspension` | Add credential suspension metadata and supersession index |
 | 30 | `vc_credential_allowlist` | Subject-controlled allowlist for `/alexandria/vc-fetch/1.0` |
-| … | (migrations 31-47 are unchanged) | |
+| … | (migrations 31-39: content provenance, plugin system, plugin catalog/attestations, sentinel flags/priors/holdout) | |
+| 40 | `vc_first_cutover` | Hard cut to VC-first. Drops the SkillProof/evidence pipeline (`skill_proofs`, `skill_proof_evidence`, `evidence_records`, `skill_assessments`, `reputation_evidence`, `reputation_impact_deltas`, `evidence_challenges`, `challenge_votes`, `attestation_requirements`, `evidence_attestations`). Adds witness columns to `credentials`. |
+| 41 | `completion_observer` | `completion_observations` — observer memo for Cardano completion-mint events that auto-issue VCs |
+| 42 | `completion_attestation` | `completion_attestation_requirements` + `completion_attestations` — VC-first replacement for evidence cosigning |
+| 43 | `credential_challenges` | `credential_challenges` + `credential_challenge_votes` — VC-first replacement for evidence challenges |
+| 44 | `integrity_paste_anomaly` | Add `ai_paste_anomaly` column to `integrity_snapshots` |
+| 45 | `sentinel_priors_model_weights` | Add DAO-ratified model-weights columns (`weights_cid`, `eval_cid`, `eval_tpr`, `eval_fpr`, `version`) to `sentinel_priors` |
+| 46 | `sentinel_kill_switch_and_blocklist` | `sentinel_kill_switch` + `sentinel_weights_blocklist` — operator safety valves for the paste classifier |
+| 47 | `sentinel_user_models` | `sentinel_user_models` — per-user keystroke/mouse weights moved from browser localStorage into the encrypted DB |
 | 48 | `app_settings_scope` | Add `scope` column (`sync` / `device`) to `app_settings`. Reclassifies `storage_quota_bytes` as `device`-scoped. Powers the unified per-profile settings store; see [`settings.md`](settings.md). |
+| 49 | `device_pairing` | Add `stake_address` / `shared_key` / `paired` to `devices`; new `pending_pairings` table for explicit device pairing |
+| 50 | `challenge_stake_lifecycle` | Add `stake_status` + `settle_tx_hash` to `credential_challenges` for stake-escrow settlement |
+| 51 | `element_submission_grader_version` | Add `grader_version` column to `element_submissions` |
 
 ---
 
@@ -106,7 +117,7 @@ columns and indexes, use `src-tauri/src/db/schema.rs`.
 - **`taxonomy_versions`** — Signed taxonomy version history with `cid`,
   `previous_cid`, `ratified_by`, `ratified_at`, `signature`, and `applied_at`.
 
-### Courses and Learning (9 tables)
+### Courses and Learning (10 tables)
 
 - **`courses`** — Course/tutorial metadata. Important fields include
   `title`, `description`, `author_address`, `author_name`, `content_cid`,
@@ -123,38 +134,59 @@ columns and indexes, use `src-tauri/src/db/schema.rs`.
   `time_spent`, `completed_at`, and `updated_at`.
 - **`course_notes`** — Notes scoped to an enrollment/chapter/element,
   with `content_cid`, `preview_text`, and `video_timestamp_seconds`.
+- **`element_submissions`** — Plugin-graded element submissions, keyed
+  to an `element_id`/`enrollment_id`, with `submission_cid`,
+  `grader_cid`, `content_cid`, `score`, `score_details_json`,
+  `learner_did`, an optional `signed_attestation`, and the grader's
+  self-declared `grader_version` (migration 051; folded into the
+  completion Merkle leaf so the on-chain witness is reproducible).
 - **`catalog`** — Network-discovered course metadata mirroring the
   publishable subset of `courses`.
 
-### Evidence and Reputation (8 tables)
+### Reputation (2 tables)
 
-- **`skill_assessments`** — Assessment metadata. Current columns include
-  `assessment_type`, `proficiency_level`, `difficulty`, `trust_factor`,
-  plus `weight` and `source_element_id`.
-- **`evidence_records`** — Raw skill evidence with score, difficulty,
-  trust factor, course/instructor linkage, integrity linkage, content CID,
-  signature, and timestamp.
-- **`skill_proofs`** — Aggregated skill outputs keyed by learner/skill/level,
-  with `confidence`, `evidence_count`, proof CID, and optional NFT fields.
-- **`skill_proof_evidence`** — Join table from proofs to supporting evidence.
-- **`reputation_assertions`** — Reputation rows keyed by actor/role/skill/window,
-  with distribution metrics such as `median_impact`, `impact_p25`,
+> The SkillProof/evidence pipeline (`skill_assessments`,
+> `evidence_records`, `skill_proofs`, `skill_proof_evidence`,
+> `reputation_evidence`, `reputation_impact_deltas`) was dropped in
+> migration 040. Reputation now derives directly from the
+> `credentials` VC store.
+
+- **`reputation_assertions`** — Reputation rows keyed by
+  `actor_address`/`role`/`skill_id`/`proficiency_level` and a
+  `window_start`/`window_end`, with `score`, `evidence_count`,
+  `computation_spec`, `cid`, and distribution metrics computed over
+  the actor's credentials: `median_impact`, `impact_p25`,
   `impact_p75`, `learner_count`, and `impact_variance`.
-- **`reputation_evidence`** — Join table linking assertions to proofs.
-- **`reputation_impact_deltas`** — Per-learner impact deltas used to
-  compute the distribution metrics.
-- **`reputation_snapshots`** — Snapshot/anchoring records for reputation assertions.
+- **`reputation_snapshots`** — Snapshot/anchoring records for
+  reputation assertions, keyed by actor with `tx_status` and subject.
 
-### Integrity (2 tables)
+### Integrity (Sentinel) (6 tables)
 
 - **`integrity_sessions`** — Sentinel sessions tied to an `enrollment_id`,
   with `status`, `integrity_score`, `started_at`, and `ended_at`.
 - **`integrity_snapshots`** — Snapshot rows keyed by `session_id`, with
   per-signal scores (`typing_score`, `mouse_score`, `human_score`,
   `tab_score`, `paste_score`, `devtools_score`, `camera_score`),
-  `composite_score`, and `captured_at`.
+  `composite_score`, `captured_at`, and the ONNX paste/typing-bot
+  classifier output `ai_paste_anomaly` (nullable; NULL for snapshots
+  taken before the model artifact ships).
+- **`sentinel_priors`** — DAO-ratified training samples and model
+  weights for the paste classifier. Weights rows carry `weights_cid`,
+  `eval_cid`, `eval_tpr`, `eval_fpr`, and `version`; a client only
+  auto-loads a weights row whose gate passes (`eval_tpr >= 0.92 AND
+  eval_fpr <= 0.03`).
+- **`sentinel_kill_switch`** — Single row per `model_kind`; when
+  `active = 1` the client treats that classifier as disabled even if a
+  ratified row exists.
+- **`sentinel_weights_blocklist`** — `(model_kind, version)` pairs the
+  active-classifier selector must skip, for rolling back a faulty
+  ratified model without amending governance history.
+- **`sentinel_user_models`** — Per-user keystroke autoencoder
+  (`keystroke_ae`) and mouse CNN (`mouse_cnn`) weights, keyed by
+  `(user_address, device_fp_prefix, model_kind)`. Moved out of browser
+  localStorage into the encrypted DB.
 
-### P2P, Content, and Sync Support (7 tables)
+### P2P, Content, and Sync Support (8 tables)
 
 - **`peers`** — Known libp2p peers with `addresses`, `roles`, and local `reputation`.
 - **`pins`** — Local iroh pin state, including `size_bytes`,
@@ -162,7 +194,14 @@ columns and indexes, use `src-tauri/src/db/schema.rs`.
 - **`sync_log`** — Broadcast/receive audit trail for gossip-synced entities.
 - **`content_mappings`** — IPFS CID ↔ iroh BLAKE3 bridge table.
 - **`devices`** — Known devices for cross-device sync (`id`, `device_name`,
-  `platform`, `peer_id`, `is_local`, timestamps).
+  `platform`, `peer_id`, `is_local`, timestamps). Explicit pairing
+  (migration 049) adds `stake_address` (sync only proceeds when it
+  matches the local identity), `shared_key` (per-pair AES-256-GCM key,
+  NULL until paired), and `paired` (1 once the two-way handshake
+  completed).
+- **`pending_pairings`** — Short-lived pairing codes generated by this
+  device and awaiting acceptance, keyed by `code_hash` with a
+  `shared_key` and `expires_at`.
 - **`sync_state`** — Per-device per-table watermarks plus `row_count`.
 - **`sync_queue`** — Outbound row-change queue with `row_data`,
   `updated_at`, `queued_at`, and `delivered_to`.
@@ -183,11 +222,26 @@ columns and indexes, use `src-tauri/src/db/schema.rs`.
 
 ### Challenges, Attestations, and Opinions (7 tables)
 
-- **`evidence_challenges`** — Stake-based challenges against evidence.
-- **`challenge_votes`** — Votes on those challenges.
-- **`attestation_requirements`** — Minimum attestor counts, required roles,
-  and optional DAO scoping.
-- **`evidence_attestations`** — Individual attestation records.
+> The evidence-based challenge/attestation tables (`evidence_challenges`,
+> `challenge_votes`, `attestation_requirements`, `evidence_attestations`)
+> were dropped in migration 040 and rebuilt against the `credentials`
+> VC store in migrations 042–043.
+
+- **`completion_attestation_requirements`** — Per-course gate (keyed by
+  `course_id`) for how many attestor signatures a learner's
+  completion-witness tx needs before the observer auto-issues a VC, with
+  `required_attestors`, `dao_id`, and optional `set_by_proposal`.
+- **`completion_attestations`** — Individual attestor signatures over a
+  `witness_tx_hash` (`attestor_did`, `attestor_pubkey`, `signature`,
+  optional `note`; unique per `(witness_tx_hash, attestor_did)`).
+- **`credential_challenges`** — Stake-based challenges against a
+  `credential_id`, with `challenger`, `reason`, `stake_lovelace`,
+  `stake_tx_hash`, `status` (pending/reviewing/upheld/rejected/expired),
+  `dao_id`, `resolution_tx`, `signature`, and the stake-escrow lifecycle
+  fields `stake_status` (none/locked/returned/forfeited) and
+  `settle_tx_hash` (migration 050).
+- **`credential_challenge_votes`** — Committee votes on a `challenge_id`
+  (`voter`, `upheld`, optional `reason`; unique per `(challenge_id, voter)`).
 - **`opinions`** — Field Commentary video takes scoped to a `subject_field_id`,
   with staked `credential_proof_ids`, signature, publication timestamps,
   and withdrawal state.
@@ -228,7 +282,10 @@ These tables back the VC-first protocol described in
   validity windows.
 - **`credentials`** — Canonical signed VC store, with searchable mirrors
   for issuer/subject/type/skill plus revocation, suspension, and
-  supersession state.
+  supersession state. Migration 040 adds on-chain witness metadata:
+  `witness_tx_hash`, `witness_validator_script_hash`,
+  `witness_validator_name`, and `auto_issued` (1 when the credential was
+  auto-issued by the completion observer rather than manually).
 - **`credential_status_lists`** — Versioned RevocationList2020-style status bitmaps.
 - **`credential_anchors`** — Per-credential integrity-anchor queue.
 - **`pinboard_observations`** — Local and remote PinBoard commitments.
@@ -239,6 +296,13 @@ These tables back the VC-first protocol described in
   before the issuer DID document.
 - **`credential_allowlist`** — Per-credential fetch policy for
   `/alexandria/vc-fetch/1.0`.
+- **`completion_observations`** — The completion observer's persistent
+  memo (migration 041). Keyed by `(policy_id, asset_name_hex)`, it
+  records each witnessed Cardano completion mint (`tx_hash`,
+  `subject_pubkey`, `course_id`, `completion_root`, `completion_time`)
+  and the `credential_id` populated once the VC is auto-issued, so the
+  observer neither re-issues nor misses mints that occurred while
+  offline.
 - **Migration 29 additions on `credentials`** — `suspended`,
   `suspended_at`, `suspended_until`, `suspended_reason`, plus an index
   on `supersedes`.
@@ -261,17 +325,13 @@ erDiagram
     courses ||--o{ enrollments : has
     enrollments ||--o{ element_progress : tracks
     enrollments ||--o{ course_notes : has
+    enrollments ||--o{ element_submissions : graded
 
-    skill_assessments ||--o{ evidence_records : produces
-    skill_assessments ||--o{ attestation_requirements : requires
-    evidence_records ||--o{ skill_proof_evidence : supports
-    skill_proofs ||--o{ skill_proof_evidence : aggregates
-    reputation_assertions ||--o{ reputation_evidence : backed
-    reputation_assertions ||--o{ reputation_impact_deltas : computes
+    credentials ||--o{ credential_challenges : challenged
+    credential_challenges ||--o{ credential_challenge_votes : votes
+    completion_observations ||--o| credentials : "auto-issues"
+    completion_attestation_requirements ||--o{ completion_attestations : "gated by"
     reputation_assertions ||--o{ reputation_snapshots : anchors
-    evidence_records ||--o{ evidence_challenges : challenged
-    evidence_challenges ||--o{ challenge_votes : votes
-    evidence_records ||--o{ evidence_attestations : attested
 
     integrity_sessions ||--o{ integrity_snapshots : snapshots
 

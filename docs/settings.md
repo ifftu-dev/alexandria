@@ -8,9 +8,11 @@ collapsed, keyboard shortcuts, sentinel toggles, video defaults,
 storage quota, window geometry — lives in one place: the per-profile
 `app_settings` table. The store has two scopes:
 
-- **`sync`** — replicated across every device of the same user via
-  the existing cross-device sync. Last-write-wins on `updated_at`.
-  Default for new keys.
+- **`sync`** — replicated to the user's other **explicitly paired**
+  devices. Pairing is a one-time exchange of a pairing code that
+  carries a 32-byte shared key; sync payloads are then AES-256-GCM
+  sealed over the `/alexandria/sync/1.0` request-response protocol and
+  merged last-write-wins on `updated_at`. Default for new keys.
 - **`device`** — stays on this device only. Use sparingly: storage
   quota, window geometry, per-device API key overrides.
 

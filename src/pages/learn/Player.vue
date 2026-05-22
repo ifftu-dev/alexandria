@@ -22,6 +22,42 @@ const enrollment = ref<Enrollment | null>(null)
 const progress = ref<Record<string, ElementProgress>>({})
 const loading = ref(true)
 const enrolling = ref(false)
+
+// Auto-earn completion claim
+interface CourseCompletionStatus {
+  ready: boolean
+  missing_elements: string[]
+  required_count: number
+  preview: { leaves: string[]; root: string } | null
+}
+const completionStatus = ref<CourseCompletionStatus | null>(null)
+const claiming = ref(false)
+const claimError = ref<string | null>(null)
+const claimTxHash = ref<string | null>(null)
+
+async function refreshCompletionStatus() {
+  try {
+    completionStatus.value = await invoke<CourseCompletionStatus>('get_course_completion_status', { courseId })
+  } catch (e) {
+    console.error('completion status failed:', e)
+  }
+}
+
+async function claimCredential() {
+  claiming.value = true
+  claimError.value = null
+  try {
+    const result = await invoke<{ tx_hash: string }>('claim_course_completion', {
+      courseId,
+      timestampMs: Date.now(),
+    })
+    claimTxHash.value = result.tx_hash
+  } catch (e) {
+    claimError.value = String(e)
+  } finally {
+    claiming.value = false
+  }
+}
 const sentinelStarted = ref(false)
 const downloadingElementId = ref<string | null>(null)
 const downloadError = ref<string | null>(null)
@@ -183,6 +219,8 @@ onMounted(async () => {
       // Start Sentinel monitoring for this enrollment
       await sentinel.start(enrollment.value.id)
       sentinelStarted.value = true
+
+      await refreshCompletionStatus()
     }
 
     // Select resume point: first incomplete element, fallback to first element
@@ -362,6 +400,9 @@ async function markComplete(score?: number) {
       completed_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     }
+    // A newly-passed assessment may complete the course — refresh the
+    // claim affordance.
+    void refreshCompletionStatus()
     // Auto-advance to next element after a short delay
     setTimeout(() => advanceToNext(), 500)
   } catch (e) {
@@ -682,6 +723,30 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
                   :style="{ width: `${progressPercent}%` }"
                 />
               </div>
+            </div>
+
+            <!-- Claim credential — visible once the assessed elements pass -->
+            <div v-if="completionStatus?.ready" class="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3">
+              <p class="text-xs font-medium text-emerald-700 dark:text-emerald-300">
+                Course complete — claim your Verifiable Credential.
+              </p>
+              <button
+                :disabled="claiming"
+                class="mt-2 w-full rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-emerald-700 disabled:opacity-60"
+                @click="claimCredential"
+              >
+                {{ claiming ? 'Claiming…' : 'Claim Credential' }}
+              </button>
+              <p v-if="claimError" class="mt-2 text-xs text-red-600 dark:text-red-400">{{ claimError }}</p>
+              <p v-if="claimTxHash" class="mt-2 break-all text-xs text-emerald-700 dark:text-emerald-300">
+                Witness submitted: {{ claimTxHash.slice(0, 16) }}…
+              </p>
+            </div>
+            <div
+              v-else-if="completionStatus && completionStatus.required_count > 0"
+              class="text-xs text-muted-foreground"
+            >
+              {{ completionStatus.required_count - completionStatus.missing_elements.length }}/{{ completionStatus.required_count }} assessments passed
             </div>
           </div>
 

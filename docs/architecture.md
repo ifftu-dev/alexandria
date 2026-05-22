@@ -68,8 +68,8 @@ central API, no hosted database, and no Docker infrastructure.
 |  |   (WebView)    | 194     |                      |  |
 |  |                | cmds    |  +----------------+  |  |
 |  |  29 pages      |         |  |   SQLite DB    |  |  |
-|  |  34 components |         |  |   66 tables    |  |  |
-|  |  14 composables|         |  |   30 migrations|  |  |
+|  |  34 components |         |  |   73 tables    |  |  |
+|  |  14 composables|         |  |   51 migrations|  |  |
 |  +----------------+         |  +----------------+  |  |
 |                             |                      |  |
 |                             |  +----------------+  |  |
@@ -162,7 +162,7 @@ Both share the same lock/unlock cycle: lock clears in-memory keys, unlock re-der
 
 **Engine**: SQLite (rusqlite 0.38, bundled)
 
-**Tables**: 66 across 30 migrations
+**Tables**: ~73 across 51 migrations
 
 | Domain | Tables |
 |--------|--------|
@@ -170,15 +170,15 @@ Both share the same lock/unlock cycle: lock clears in-memory keys, unlock re-der
 | Taxonomy | `subject_fields`, `subjects`, `skills`, `skill_prerequisites`, `skill_relations`, `taxonomy_versions` |
 | Courses | `courses`, `course_chapters`, `course_elements`, `element_skill_tags` |
 | Learning | `enrollments`, `element_progress`, `course_notes` |
-| Evidence | `skill_assessments`, `evidence_records`, `skill_proofs`, `skill_proof_evidence` |
-| Reputation | `reputation_assertions`, `reputation_evidence`, `reputation_impact_deltas`, `reputation_snapshots` |
+| Credentials | `credentials`, `credential_status_lists`, `key_registry` |
+| Reputation | derived from `credentials`; `reputation_snapshots` |
 | Integrity | `integrity_sessions`, `integrity_snapshots` |
 | P2P | `peers`, `pins`, `sync_log`, `catalog` |
 | Governance | `governance_daos`, `governance_proposals`, `governance_dao_members`, `governance_elections`, `governance_election_nominees`, `governance_election_votes`, `governance_proposal_votes` |
 | Content | `content_mappings` |
 | Sync | `devices`, `sync_state`, `sync_queue` |
-| Challenges | `evidence_challenges`, `challenge_votes` |
-| Attestation | `attestation_requirements`, `evidence_attestations` |
+| Challenges | `credential_challenges`, `credential_challenge_votes` |
+| Attestation | `completion_attestation_requirements`, `completion_attestations` |
 | Tutoring | `tutoring_sessions` |
 | Classrooms | `classrooms`, `classroom_members`, `classroom_join_requests`, `classroom_channels`, `classroom_messages`, `classroom_calls`, `classroom_group_keys` |
 | Governance (on-chain) | `onchain_governance_queue` |
@@ -260,20 +260,25 @@ path within the same process hangs indefinitely.
 | Topic | Path | Content |
 |-------|------|---------|
 | Catalog | `/alexandria/catalog/1.0` | Course announcements |
-| Evidence | `/alexandria/evidence/1.0` | Skill evidence broadcasts |
 | Taxonomy | `/alexandria/taxonomy/1.0` | DAO-ratified skill graph updates |
 | Governance | `/alexandria/governance/1.0` | Proposals, elections, committee updates |
 | Profiles | `/alexandria/profiles/1.0` | User profile announcements |
-| Opinions | `/alexandria/opinions/1.0` | Subjective ratings on courses, evidence, peers |
+| Opinions | `/alexandria/opinions/1.0` | Subjective ratings on courses, peers |
 | Peer Exchange | `/alexandria/peer-exchange/1.0` | Known peer address propagation |
 | VC DID | `/alexandria/vc-did/1.0` | DID document + key-rotation announcements |
 | VC Status | `/alexandria/vc-status/1.0` | RevocationList2020 status-list snapshots and deltas |
 | VC Presentation | `/alexandria/vc-presentation/1.0` | Opt-in selective-disclosure presentation envelopes |
 | PinBoard | `/alexandria/pinboard/1.0` | PinBoard pinning commitment observations |
+| Plugins | `/alexandria/plugins/1.0` | Community plugin announcements |
+| Plugin Attestations | `/alexandria/plugin-attestations/1.0` | Plugin DAO grader attestations |
+| Sentinel Priors | `/alexandria/sentinel-priors/1.0` | Ratified Sentinel adversarial-prior metadata |
 
-A request-response protocol on `/alexandria/vc-fetch/1.0` (libp2p
-`request-response` + CBOR codec) handles authority-respecting
-credential pull and is not part of the gossip-topic set.
+Two request-response protocols (libp2p `request-response` + CBOR
+codec) run alongside the gossip mesh and are not part of the
+gossip-topic set: `/alexandria/vc-fetch/1.0` handles
+authority-respecting credential pull, and `/alexandria/sync/1.0`
+carries AES-256-GCM-sealed cross-device sync payloads between paired
+devices.
 
 ### Message Flow
 
@@ -341,62 +346,78 @@ See [Protocol Specification](protocol-specification.md) for full wire formats.
 | Protocol parameters | Blockfrost REST (`/epochs/latest/parameters`) |
 | Transaction submission | Blockfrost REST (`/tx/submit`) |
 | Fee estimation | Linear fee model from protocol params |
-| NFT minting | NativeScript signature policy + CIP-25 metadata |
-| Course registration | Mint token with course metadata |
-| Reputation snapshots | Queue + tx builders exist; reference-script deployment is still pending |
+| VC integrity anchoring | Metadata-only tx (label 1697) timestamping the canonical VC hash |
+| Completion-witness minting | Merkle-root completion witness; validator deployed |
+| Challenge-stake escrow | 5 ADA locked at `challenge_escrow.ak`; lock works on preprod, settle gated on reference-script deploy |
+| Reputation snapshots | CIP-68 soulbound builder path with CBOR datum; mint gated on reference-script deploy |
 | Governance metadata | DAO/election/proposal tx builders and queue records; validator-backed enforcement is still pending |
 | Coin selection | Greedy UTxO selection with min-ADA enforcement |
 
 ### Transaction Types
 
-1. **SkillProof NFT** — Mints a token with CIP-25 metadata containing skill, proficiency level, confidence score, and evidence count
-2. **Course Registration** — Mints a token recording course enrollment on-chain
+1. **VC Integrity Anchor** — Metadata-only transaction (label 1697) that timestamps the canonical hash of a W3C Verifiable Credential without publishing credential content. (The legacy SkillProof NFT and course-registration mints were retired in migration 040.)
+2. **Completion Witness** — Mints a completion witness keyed to the Merkle root of a learner's graded element submissions; the completion validator is deployed.
 3. **Reputation Snapshot** — Soulbound/CIP-68-style builder path with CBOR-encoded datum; currently gated on undeployed reference scripts
-4. **Governance Actions** — Metadata-bearing transactions and queue entries for DAO ops, elections, proposals, votes
+4. **Challenge-Stake Escrow** — Locks 5 ADA at the `challenge_escrow.ak` validator; on resolution the DAO authority settles (Refund → challenger / Forfeit → treasury), gated on the escrow reference script being deployed
+5. **Governance Actions** — Metadata-bearing transactions and queue entries for DAO ops, elections, proposals, votes
 
 ---
 
-## 8. Evidence Pipeline
+## 8. Credential Pipeline
+
+> Post-VC-first cutover (migration 040): the legacy evidence →
+> aggregator → SkillProof-NFT pipeline (`evidence_records`,
+> `skill_proofs`, the `evidence/aggregator`, the on-chain NFT mint, and
+> the `/alexandria/evidence/1.0` broadcast) was retired. Credentials are
+> W3C Verifiable Credentials.
 
 ### Flow
 
 ```
-Assessment completion
+Assessment completion (plugin grader → element_submissions row:
+    score, grader_cid, submission_cid, grader_version)
     |
     v
-Evidence record created (score, difficulty, trust_factor, bloom level)
+claim_course_completion: assemble passing element submissions in
+    course-template order → completion Merkle root
     |
     v
-Aggregation: weighted confidence per (skill, proficiency_level)
+Completion-witness tx (completion.ak validator) submitted to Cardano
     |
     v
-Skill proof updated (if threshold met)
+Observer (cardano::completion::tick) ingests the on-chain witness
     |
     v
-Reputation impact computed (instructor attribution)
+auto_issuance::tick self-signs a W3C Verifiable Credential
+    (gated on completion-attestation requirements)
     |
-    +---> (optional) Broadcast via P2P evidence topic
-    +---> (optional) Mint SkillProof NFT on Cardano
+    v
+on_credential_accepted → distribution-based reputation
+    (median/p25/p75/variance per skill, derived from `credentials`)
 ```
 
 ### Components
 
 | Module | Responsibility |
 |--------|---------------|
-| `evidence/aggregator` | Weighted evidence → skill proof confidence |
-| `evidence/attestation` | Multi-party attestation requirements and verification |
-| `evidence/challenge` | Stake-based evidence challenges with voting and resolution |
-| `evidence/reputation` | Instructor impact computation, distribution-based scoring |
+| `evidence/reputation` | Distribution-based reputation derived from `credentials` (median/p25/p75/variance/learner_count) |
 | `evidence/taxonomy` | Bloom's level thresholds and skill graph traversal |
 | `evidence/thresholds` | Configurable proof thresholds per proficiency level |
 
+Completion-attestation requirements and credential challenges are now
+handled by the VC-first command modules (`commands::attestation`,
+`commands::challenge`), not a `skill_proof` aggregator. The
+`evidence/aggregator`, `evidence/attestation`, and `evidence/challenge`
+modules were removed.
+
 ### Challenge Mechanism
 
-- Any peer can challenge evidence by staking 5 ADA (5,000,000 lovelace)
+- Any peer can challenge a **credential** by staking 5 ADA (5,000,000 lovelace), locked at `challenge_escrow.ak`
 - Challenge enters voting period
 - 2/3 supermajority required to uphold
-- Upheld: evidence deleted, challenger's stake returned
-- Rejected: challenger loses stake
+- Upheld: targeted credential **revoked** via its RevocationList2020 status list; DAO authority refunds the stake to the challenger
+- Rejected: DAO authority forfeits the stake to the DAO treasury
+- Settlement is gated on the escrow reference script being deployed
 
 ---
 
@@ -450,8 +471,8 @@ Reputation impact computed (instructor attribution)
 | Tutoring Index | `/tutoring` | Live tutoring sessions list |
 | Tutoring Session | `/tutoring/:id` | Active video/audio/screen session |
 | My Courses | `/dashboard/courses` | Enrolled courses, progress |
-| Credentials | `/dashboard/credentials` | Minted NFT credentials |
-| Reputation | `/dashboard/reputation` | Reputation assertions, impact |
+| Credentials | `/dashboard/credentials` | W3C Verifiable Credentials |
+| Reputation | `/dashboard/reputation` | Distribution-based reputation (median/p25/p75) |
 | Network | `/dashboard/network` | P2P status, connected peers |
 | Sync | `/dashboard/sync` | Cross-device sync status |
 | Sentinel | `/dashboard/sentinel` | Integrity training, sessions |
@@ -474,36 +495,35 @@ The frontend communicates with the Rust backend via ~200 Tauri IPC commands regi
 | Module | Commands | Examples |
 |--------|----------|---------|
 | classroom | 24 | `classroom_create`, `classroom_approve_member`, `classroom_send_message`, `classroom_start_call` |
-| governance | 19 | `create_dao`, `submit_proposal`, `cast_vote`, `run_election` |
+| governance | 19 | `list_daos`, `submit_proposal`, `cast_proposal_vote`, `open_election`, `finalize_election` |
 | tutoring | 15 | `tutoring_create_room`, `tutoring_join_room`, `tutoring_toggle_video` |
-| taxonomy | 15 | `get_skills`, `get_subjects`, `update_taxonomy`, `get_skill_graph` |
+| taxonomy | 15 | `list_skills`, `list_subjects`, `propose_taxonomy_change`, `list_skill_graph_edges` |
 | profile | 9 | `list_profiles`, `get_active_profile_id`, `create_profile`, `restore_profile_with_mnemonic`, `unlock_profile`, `lock_profile`, `rename_profile`, `set_profile_avatar`, `delete_profile` |
 | identity | 8 | `export_mnemonic`, `is_biometric_available`, `get_wallet_info`, `get_local_did`, `get_profile`, `update_profile`, `publish_profile`, `resolve_profile` (lifecycle commands moved to `profile` module) |
 | settings | 3 | `list_settings`, `set_setting`, `reset_setting` — drives the unified per-profile settings store. See [`settings.md`](settings.md). |
-| credentials | 10 | `issue_credential`, `list_credentials`, `verify_credential_cmd`, `revoke_credential`, `suspend_credential`, `reinstate_credential`, `allow_credential_fetch`, `disallow_credential_fetch`, `export_credentials_bundle`, `verify_bundle_offline` |
-| sync | 8 | `register_device`, `trigger_sync`, `get_sync_status` |
+| credentials | 10 | `issue_credential`, `list_credentials`, `get_credential`, `verify_credential_cmd`, `revoke_credential`, `suspend_credential`, `reinstate_credential`, `allow_credential_fetch`, `disallow_credential_fetch`, `export_credentials_bundle` |
+| sync | 8 | `sync_status`, `sync_now`, `sync_set_auto`, `sync_list_devices` |
 | courses | 8 | `create_course`, `get_course`, `list_courses` |
-| attestation | 8 | `create_attestation_requirement`, `submit_attestation` |
-| challenge | 7 | `submit_challenge`, `cast_challenge_vote`, `resolve_challenge` |
-| opinions | 6 | `submit_opinion`, `list_opinions`, `aggregate_opinions` |
-| integrity | 6 | `start_session`, `submit_snapshot`, `get_session_score` |
+| attestation | 5 | `set_completion_attestation_requirement`, `submit_completion_attestation`, `get_completion_attestation_status` |
+| challenge | 8 | `submit_credential_challenge`, `vote_on_credential_challenge`, `resolve_credential_challenge`, `lock_challenge_stake`, `settle_challenge_stake` |
+| opinions | 6 | `publish_opinion`, `list_opinions`, `withdraw_own_opinion` |
+| integrity | 6 | `integrity_start_session`, `integrity_submit_snapshot`, `integrity_get_session` |
 | sentinel_ml | 11 | `sentinel_score_paste`, `sentinel_train_keystroke_ae`, `sentinel_score_keystroke_ae`, `sentinel_train_mouse_cnn`, `sentinel_score_mouse_cnn`, `sentinel_user_models_status`, `sentinel_load_dao_classifier`, `sentinel_paste_classifier_info`, `sentinel_revert_classifier_to_bundled`, `sentinel_extract_digraphs`, `sentinel_reset_user_models` |
 | sentinel_priors | 9 | `sentinel_propose_prior`, `sentinel_ratify_prior`, `sentinel_priors_list`, `sentinel_priors_sync`, `sentinel_priors_load`, `sentinel_get_active_paste_classifier`, `sentinel_set_kill_switch`, `sentinel_blocklist_version`, `sentinel_unblocklist_version` |
-| content | 6 | `store_content`, `get_content`, `resolve_cid` |
+| content | 6 | `content_add`, `content_get`, `content_resolve` |
 | pinning | 5 | `declare_pinboard_commitment`, `revoke_pinboard_commitment`, `list_my_commitments`, `list_incoming_commitments`, `get_quota_breakdown` |
-| storage | 4 | `get_storage_stats`, `set_storage_quota`, `prune_cache`, `get_storage_settings` |
-| snapshot | 4 | `build_snapshot_tx`, `submit_snapshot_tx` |
-| reputation | 4 | `get_reputation`, `compute_impact`, `get_assertions` |
-| enrollment | 4 | `enroll`, `update_progress`, `get_enrollment` |
-| elements | 4 | `get_elements`, `create_element`, `update_element` |
-| chapters | 4 | `get_chapters`, `create_chapter`, `update_chapter` |
+| storage | 4 | `storage_stats`, `storage_get_quota`, `storage_set_quota`, `storage_evict_now` |
+| snapshot | 5 | `snapshot_reputation`, `submit_snapshot_tx`, `list_snapshots`, `get_snapshot`, `update_snapshot_status` |
+| reputation | 3 | `list_reputation_rows`, `get_reputation`, `recompute_reputation_for_subject` |
+| enrollment | 4 | `enroll`, `update_progress`, `get_progress`, `list_enrollments` |
+| elements | 4 | `list_elements`, `create_element`, `update_element`, `delete_element` |
+| chapters | 4 | `list_chapters`, `create_chapter`, `update_chapter`, `delete_chapter` |
 | catalog | 4 | `search_catalog`, `get_catalog_entry`, `bootstrap_public_catalog` |
 | p2p | 4 | `p2p_start`, `p2p_stop`, `p2p_status`, `p2p_peers` |
-| evidence | 3 | `submit_evidence`, `get_evidence`, `broadcast_evidence` |
+| evidence | 1 | `list_reputation` (legacy read surface; `skill_proofs`/`evidence` listings retired in migration 040 — use `list_credentials`) |
 | aggregation | 3 | `get_derived_skill_state`, `list_derived_states`, `recompute_all` |
 | presentation | 2 | `create_presentation`, `verify_presentation` |
-| health | 2 | `health_check`, `read_diag_log` |
-| cardano | 2 | `get_utxos`, `submit_transaction` |
+| health | 2 | `check_health`, `read_diag_log` |
 
 Note: `tutoring` has platform-specific variants (desktop with video, mobile stubs). Counts reflect the unique commands registered for the current build; tally is approximate and shifts with each PR.
 

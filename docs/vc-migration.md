@@ -57,35 +57,40 @@ SkillProof / EvidenceRecord / SkillAssessment artifacts.
 
 1. A learner's identity is a `did:key` Ed25519 derived from their
    BIP-39 mnemonic (unchanged).
-2. Course elements are plugin-defined; each plugin emits a
-   deterministic completion-state hash on completion (**work
-   scheduled**).
-3. Element hashes aggregate to a course-completion Merkle root that
-   matches what a registered course template declared (**work
-   scheduled**).
-4. The learner submits a Cardano tx that locks at the
-   `completion.ak` validator script address, carrying the course ID
-   and completion Merkle root (**validator work scheduled**).
+2. Course elements are gradeable; `claim_course_completion` assembles
+   completion leaves from the learner's graded `element_submissions`
+   (**implemented**).
+3. Element leaves aggregate to a course-completion Merkle root that is
+   verified against the registered course template (gradeable elements
+   in order, ≥0.6 pass) (**implemented**).
+4. The learner submits the completion witness tx against the
+   `completion.ak` validator, carrying the course ID and completion
+   Merkle root. The completion validator **is deployed**
+   (`COMPLETION_MINTING_REF_UTXO` populated).
 5. An observer watches Blockfrost for confirmed txs at that script
-   address. On confirmation it issues a self-signed VC to the
+   address. On confirmation it auto-issues a self-signed VC to the
    learner's local `credentials` table, embedding the witness tx
-   hash (**observer work scheduled**).
+   hash (**implemented** — observer + auto-issuance run on the 60s
+   queue loop).
 6. Verifiers check the VC's JWS signature **and** resolve the
    witness tx on Cardano to confirm the validator accepted the
    completion claim.
 
 ## Cardano's scope going forward
 
-Two roles only:
-
-1. **VC anchoring** — BLAKE3-of-VC metadata txs via
-   `cardano/anchor_queue.rs` (already wired).
-2. **DAO governance** — snapshot submissions, election/proposal/vote
-   txs via `cardano/gov_tx_builder.rs`, `cardano/soulbound_tx_builder.rs`,
-   and `cardano/onchain_queue.rs` (already wired).
-
-Plus the new completion-witness role (coming online with the
-validator + observer work) sitting on top of (1) as a dependency.
+1. **VC integrity anchoring** — BLAKE3-of-VC metadata txs (label 1697)
+   via `cardano/anchor_queue.rs` (wired).
+2. **DAO governance** — election/proposal/vote txs via
+   `cardano/gov_tx_builder.rs` and `cardano/onchain_queue.rs`
+   (wired; on-chain enforcement gated on validator deploy).
+3. **Completion-witness minting** — `completion.ak` validator
+   (deployed) + observer + auto-issuance (live).
+4. **Challenge-stake escrow** — `challenge_escrow.ak` validator; lock
+   works on preprod, settle gated on the escrow reference script
+   deploy.
+5. **CIP-68 soulbound reputation snapshots** — `soulbound_tx_builder.rs`
+   / `submit_snapshot_tx`; mint gated on the reputation-minting
+   reference script deploy.
 
 ## What compiles today
 
@@ -111,7 +116,7 @@ validator + observer work) sitting on top of (1) as a dependency.
 - `src-tauri/src/cardano/completion_tx_builder.rs` — Conway tx
   builder that mints the completion token with the inline
   `CompletionDatum`. Gated on `COMPLETION_MINTING_REF_UTXO` being
-  populated (`DEPLOY_PENDING` until the deploy script has run).
+  populated (deployed to preprod 2026-05-22, block 4736927).
 - Migration 041 adds `completion_observations`.
 - `src-tauri/src/commands/completion.rs` — frontend IPC:
   `preview_completion_root`, `submit_completion_witness`.
@@ -131,12 +136,20 @@ validator + observer work) sitting on top of (1) as a dependency.
   entry point, called after every issuance path. Learner rows
   mirror the max observed `SkillClaim.score`; instructor rows track
   the mean across all credentials they've issued at a given
-  `(skill, level)`. No distribution metrics (variance / p25 / p75)
-  yet — can be layered on with sufficient volume.
-- **Challenge system** (task #16): rebuilt at `evidence::challenge`
-  + `credential_challenges` + `credential_challenge_votes` tables
-  (migration 043). Targets a specific credential; 2/3 supermajority
-  upholds → revocation via status-list bit flip.
+  `(skill, level)`. Distribution metrics (median / p25 / p75 /
+  variance / learner_count) **are now computed and persisted**;
+  `commands::reputation::get_reputation` derives a sample-size
+  confidence (`learner_count / (learner_count + 5)`) on read.
+- **Challenge system** (task #16): rebuilt at
+  `commands::challenge` + `credential_challenges` +
+  `credential_challenge_votes` tables (migration 043). Targets a
+  specific credential; 2/3 supermajority upholds → revocation via
+  status-list bit flip. Stake escrow is now real: 5 ADA locks at the
+  `challenge_escrow.ak` validator (migration 050 added `stake_status`
+  + `settle_tx_hash`); the lock tx works on preprod, and on resolution
+  the DAO authority settles (Refund → challenger / Forfeit →
+  treasury). `CHALLENGE_ESCROW_REF_UTXO` is deployed on preprod
+  (2026-05-22, block 4736927), so settlement is live-capable.
 
 ## Observer daemon wiring
 
@@ -162,32 +175,40 @@ Migration-time SQL seeds (`db::seed`) gain:
 - One demo `completion_attestations` row that partially satisfies
   the requirement.
 
-## Remaining frontend work
+## Frontend wiring
 
-Still degraded — `list_credentials`-based pages are not rewired yet.
-The IPC surface for rewiring is now complete:
-`list_credentials`, `preview_completion_root`, `submit_completion_witness`,
-`list_reputation_rows`, `list_credential_challenges`,
-`get_completion_attestation_status`, etc.
+**Done.** The credential pages are rewired against the VC IPC surface
+(`list_credentials`, `preview_completion_root`,
+`submit_completion_witness`, `claim_course_completion`,
+`list_reputation_rows`, `get_reputation`, `list_credential_challenges`,
+`get_completion_attestation_status`, etc.), and the frontend exposes a
+"Claim Credential" affordance that drives the completion-witness flow.
 
 ## Deploy prerequisites
 
-Before the live end-to-end flow will run:
-1. Run `cardano/governance/deploy_reference_scripts.sh` against
-   preprod. The script now includes `completion_minting`.
-2. Update `COMPLETION_MINTING_REF_UTXO` in `cardano/script_refs.rs`
-   with the returned tx hash.
-3. Export `BLOCKFROST_PROJECT_ID` + `ALEXANDRIA_COMPLETION_POLICY_ID`
+The subsystem rebuilds are **done**: auto-issuance
+(`commands::auto_issuance`), the credential-sourced reputation engine
+(`evidence/reputation.rs`), credential challenges (`commands::challenge`,
+status-list revocation), completion attestation (`commands::attestation`),
+and the frontend rewire all ship.
+
+All nine Aiken/Plutus v3 reference scripts are now deployed on
+**preprod testnet** (2026-05-22, block 4736927) via
+`cardano/governance/deploy_blockfrost.py` (a node-free deployer:
+`cardano-cli build-raw` + Blockfrost submit), and `cardano/script_refs.rs`
+carries their UTxOs. `ref_utxos_deployed()`, `completion_ref_deployed()`,
+and `challenge_escrow_deployed()` all return `true`, so the soulbound
+snapshot mint, challenge-stake settlement, completion-witness, and
+governance tx builders all reference live scripts. The end-to-end
+governance enforcement *flows* (election/proposal lifecycle) are still
+maturing on top of the now-deployed validators.
+
+To run the flows against preprod:
+
+1. (Done — re-run only to redeploy.) Reference scripts are deployed;
+   `cardano/governance/deploy_reference_scripts.sh` (node-based) or
+   `deploy_blockfrost.py` (node-free) regenerate them and update
+   `script_refs.rs`.
+2. Export `BLOCKFROST_PROJECT_ID` + `ALEXANDRIA_COMPLETION_POLICY_ID`
    (= `6380450179a6933acdf76213732f8626e1486b9ed5cc7fe7f46c98e0` or
    a re-compiled hash) before starting the node.
-4. `src-tauri/src/commands/auto_issuance.rs` — observer → self-signed
-   VC pipeline with witness block.
-5. Repoint `evidence/reputation.rs` at credential-issuance events;
-   re-enable the module.
-6. Rebuild `evidence/challenge.rs` against `credentials` (status-list
-   revocation instead of evidence deletion); re-enable.
-7. Rebuild `evidence/attestation.rs` as an observer-side issuance
-   gate; re-enable.
-8. Frontend rewire: credentials page with witness-tx badges,
-   skills/opinions pages querying `list_credentials` for the local
-   DID.

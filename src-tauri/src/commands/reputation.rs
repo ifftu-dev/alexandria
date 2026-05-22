@@ -7,10 +7,13 @@
 //!     credential for a given subject DID, producing a fresh learner
 //!     row (and any issuer rows if that subject also issued credentials).
 //!
-//! The heavy whitepaper pipeline (distribution metrics, impact
-//! deltas, full replay, verification) is deferred — it can be
-//! layered on top of the simpler VC-sourced engine if/when there's
-//! enough accumulated credential volume to warrant it.
+//!   * `get_reputation` — query rows in the full shape the frontend
+//!     consumes (`FullReputationAssertion`), carrying the persisted
+//!     distribution metrics plus a sample-size confidence.
+//!
+//! Distribution metrics (median/p25/p75/variance/learner_count) are
+//! computed and persisted by `evidence::reputation`. Impact-delta
+//! provenance rows and on-chain verification remain deferred.
 
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
@@ -35,14 +38,60 @@ pub struct ReputationRow {
     pub updated_at: String,
 }
 
-/// IPC filter for [`list_reputation_rows`]. All fields are optional.
+/// IPC filter for [`list_reputation_rows`] / [`get_reputation`]. All
+/// fields are optional. Accepts both `actor` and the frontend's
+/// `actor_address` spelling for the actor filter.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct ReputationQuery {
+    #[serde(alias = "actor_address")]
     pub actor: Option<String>,
     pub role: Option<String>,
     pub skill_id: Option<String>,
     pub proficiency_level: Option<String>,
     pub limit: Option<i64>,
+}
+
+/// Distribution metrics for one reputation row. Mirrors the TS
+/// `DistributionMetrics` interface.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DistributionMetrics {
+    pub median_impact: f64,
+    pub impact_p25: f64,
+    pub impact_p75: f64,
+    pub learner_count: i64,
+    pub impact_variance: f64,
+}
+
+/// Full reputation row surfaced to the frontend. Mirrors the TS
+/// `FullReputationAssertion` interface: headline score + a sample-size
+/// `confidence` + the persisted distribution block (or `None` when the
+/// row predates distribution computation).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FullReputationAssertion {
+    pub id: String,
+    pub actor_address: String,
+    pub role: String,
+    pub skill_id: Option<String>,
+    pub proficiency_level: Option<String>,
+    pub score: f64,
+    pub confidence: f64,
+    pub evidence_count: i64,
+    pub distribution: Option<DistributionMetrics>,
+    pub computation_spec: String,
+    pub window_start: Option<String>,
+    pub window_end: Option<String>,
+    pub updated_at: String,
+}
+
+/// Shrinkage smoothing constant for the sample-size confidence:
+/// `confidence = n / (n + K)` where `n` is the distinct-counterparty
+/// (`learner_count`) sample size. K=5 means a row needs ~5 distinct
+/// learners/issuers before it reads as high confidence.
+const CONFIDENCE_SMOOTHING: f64 = 5.0;
+
+fn sample_confidence(learner_count: Option<i64>) -> f64 {
+    let n = learner_count.unwrap_or(0).max(0) as f64;
+    n / (n + CONFIDENCE_SMOOTHING)
 }
 
 #[tauri::command]
@@ -138,6 +187,94 @@ pub async fn recompute_reputation_for_subject(
         )
         .map_err(|e| e.to_string())?;
     Ok(count)
+}
+
+#[tauri::command]
+pub async fn get_reputation(
+    state: State<'_, AppState>,
+    query: ReputationQuery,
+) -> Result<Vec<FullReputationAssertion>, String> {
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
+    let conn = db.conn();
+
+    let mut conditions: Vec<String> = Vec::new();
+    let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+    let mut i = 1;
+    if let Some(ref v) = query.actor {
+        conditions.push(format!("actor_address = ?{i}"));
+        values.push(Box::new(v.clone()));
+        i += 1;
+    }
+    if let Some(ref v) = query.role {
+        conditions.push(format!("role = ?{i}"));
+        values.push(Box::new(v.clone()));
+        i += 1;
+    }
+    if let Some(ref v) = query.skill_id {
+        conditions.push(format!("skill_id = ?{i}"));
+        values.push(Box::new(v.clone()));
+        i += 1;
+    }
+    if let Some(ref v) = query.proficiency_level {
+        conditions.push(format!("proficiency_level = ?{i}"));
+        values.push(Box::new(v.clone()));
+        i += 1;
+    }
+    let where_clause = if conditions.is_empty() {
+        String::new()
+    } else {
+        format!("WHERE {}", conditions.join(" AND "))
+    };
+    let sql = format!(
+        "SELECT id, actor_address, role, skill_id, proficiency_level, \
+                score, evidence_count, median_impact, impact_p25, impact_p75, \
+                learner_count, impact_variance, window_start, window_end, \
+                computation_spec, updated_at \
+         FROM reputation_assertions {where_clause} \
+         ORDER BY updated_at DESC LIMIT ?{i}"
+    );
+    let limit = query.limit.unwrap_or(100);
+    values.push(Box::new(limit));
+    let params_ref: Vec<&dyn rusqlite::types::ToSql> = values.iter().map(|v| v.as_ref()).collect();
+
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(params_ref.as_slice(), |row| {
+            let median_impact: Option<f64> = row.get(7)?;
+            let learner_count: Option<i64> = row.get(10)?;
+            // A row carries a distribution once median_impact is
+            // populated (i.e. computed by the VC-sourced engine).
+            let distribution = median_impact.map(|median_impact| DistributionMetrics {
+                median_impact,
+                impact_p25: row.get::<_, Option<f64>>(8).unwrap_or(None).unwrap_or(0.0),
+                impact_p75: row.get::<_, Option<f64>>(9).unwrap_or(None).unwrap_or(0.0),
+                learner_count: learner_count.unwrap_or(0),
+                impact_variance: row.get::<_, Option<f64>>(11).unwrap_or(None).unwrap_or(0.0),
+            });
+            Ok(FullReputationAssertion {
+                id: row.get(0)?,
+                actor_address: row.get(1)?,
+                role: row.get(2)?,
+                skill_id: row.get(3)?,
+                proficiency_level: row.get(4)?,
+                score: row.get(5)?,
+                confidence: sample_confidence(learner_count),
+                evidence_count: row.get(6)?,
+                distribution,
+                computation_spec: row.get(14)?,
+                window_start: row.get(12)?,
+                window_end: row.get(13)?,
+                updated_at: row.get(15)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(rows)
 }
 
 #[cfg(test)]

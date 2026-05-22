@@ -16,6 +16,50 @@ const deviceCount = computed(() => status.value?.device_count ?? 0)
 const queueLength = computed(() => status.value?.queue_length ?? 0)
 const isAutoSync = computed(() => status.value?.auto_sync ?? false)
 
+// --- Device pairing ---
+const generatedCode = ref<string | null>(null)
+const generatingCode = ref(false)
+const codeInput = ref('')
+const accepting = ref(false)
+const pairingError = ref<string | null>(null)
+const copied = ref(false)
+
+async function generateCode() {
+  generatingCode.value = true
+  pairingError.value = null
+  try {
+    generatedCode.value = await invoke<string>('pairing_generate_code')
+  } catch (e) {
+    pairingError.value = String(e)
+  } finally {
+    generatingCode.value = false
+  }
+}
+
+async function copyCode() {
+  if (!generatedCode.value) return
+  await navigator.clipboard.writeText(generatedCode.value)
+  copied.value = true
+  setTimeout(() => (copied.value = false), 1500)
+}
+
+async function acceptCode() {
+  const code = codeInput.value.trim()
+  if (!code) return
+  accepting.value = true
+  pairingError.value = null
+  try {
+    syncResult.value = await invoke<SyncResult>('pairing_accept_code', { code })
+    codeInput.value = ''
+    status.value = await invoke<SyncStatus>('sync_status')
+    history.value = await invoke<SyncHistoryEntry[]>('sync_history')
+  } catch (e) {
+    pairingError.value = String(e)
+  } finally {
+    accepting.value = false
+  }
+}
+
 onMounted(async () => {
   try {
     const [s, d, h] = await Promise.all([
@@ -103,7 +147,7 @@ async function toggleAutoSync() {
               Cross-Device Sync
             </h1>
             <p class="mt-1.5 text-sm text-muted-foreground">
-              Keep your data synchronized across every device paired with the same recovery phrase.
+              Keep your data synchronized across every device you've paired with this one.
             </p>
           </div>
           <button
@@ -245,6 +289,69 @@ async function toggleAutoSync() {
         </div>
       </div>
 
+      <!-- Pair a device -->
+      <div class="mt-8 px-4 sm:px-6 lg:px-8">
+        <h2 class="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-4">
+          Pair a Device
+        </h2>
+        <div class="grid gap-4 lg:grid-cols-2">
+          <!-- Generate -->
+          <div class="rounded-lg border border-border bg-card p-5">
+            <p class="text-sm font-medium text-foreground">Generate a code</p>
+            <p class="mt-1 text-xs text-muted-foreground">
+              Create a one-time code on this device, then enter it on the other one. The code is a secret and expires in 10 minutes.
+            </p>
+            <button
+              :disabled="generatingCode"
+              class="mt-3 inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-primary/90 disabled:opacity-60"
+              @click="generateCode"
+            >
+              {{ generatingCode ? 'Generating…' : 'Generate Pairing Code' }}
+            </button>
+            <div v-if="generatedCode" class="mt-3">
+              <div class="flex items-center gap-2">
+                <code class="flex-1 min-w-0 truncate rounded-md bg-muted/30 px-3 py-2 font-mono text-xs text-foreground select-all">
+                  {{ generatedCode }}
+                </code>
+                <button
+                  class="shrink-0 rounded-md border border-border px-3 py-2 text-xs font-medium text-foreground transition-colors hover:bg-muted/40"
+                  @click="copyCode"
+                >
+                  {{ copied ? 'Copied' : 'Copy' }}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Accept -->
+          <div class="rounded-lg border border-border bg-card p-5">
+            <p class="text-sm font-medium text-foreground">Enter a code</p>
+            <p class="mt-1 text-xs text-muted-foreground">
+              Paste a code generated on another of your devices to pair it and sync immediately.
+            </p>
+            <div class="mt-3 flex items-center gap-2">
+              <input
+                v-model="codeInput"
+                type="text"
+                placeholder="Paste pairing code"
+                class="flex-1 min-w-0 rounded-md border border-border bg-background px-3 py-2 font-mono text-xs text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                @keyup.enter="acceptCode"
+              />
+              <button
+                :disabled="accepting || !codeInput.trim()"
+                class="shrink-0 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-primary/90 disabled:opacity-60"
+                @click="acceptCode"
+              >
+                {{ accepting ? 'Pairing…' : 'Pair' }}
+              </button>
+            </div>
+          </div>
+        </div>
+        <p v-if="pairingError" class="mt-3 text-xs text-red-600 dark:text-red-400">
+          {{ pairingError }}
+        </p>
+      </div>
+
       <!-- Paired Devices -->
       <div class="mt-6 px-4 sm:px-6 lg:px-8">
         <h2 class="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-4">
@@ -269,7 +376,7 @@ async function toggleAutoSync() {
           </div>
           <p class="text-sm font-medium text-foreground">No other devices paired</p>
           <p class="mt-1 text-xs text-muted-foreground max-w-sm mx-auto">
-            Import the same recovery phrase on another device to pair it with this node and start syncing automatically.
+            Use the pairing panel above — generate a code here and accept it on your other device (or vice versa) to start syncing.
           </p>
         </div>
 

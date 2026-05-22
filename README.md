@@ -28,8 +28,8 @@
 - **Public Content Availability** — Published course media can resolve from public URLs (with local BLAKE3 caching), and fresh installs bootstrap a bundled public catalog before network discovery catches up.
 - **Verifiable Credentials** — Learners earn W3C Verifiable Credentials scoped to individual skills at Bloom's taxonomy levels (remember through create). Credentials are auto-earned: a Cardano completion validator witnesses the learner's element-completion tx, and a local observer auto-issues a self-signed VC referencing that on-chain witness. See [`docs/vc-migration.md`](docs/vc-migration.md) for the current architectural state.
 - **Reputation** — Instructor impact derived from learner outcomes, scoped to `(subject, role, skill, proficiency_level)`. Distribution-based with confidence bounds — no global scores.
-- **Cardano's role** — Two: (1) VC integrity anchoring (BLAKE3-of-VC metadata txs), (2) DAO governance (elections, proposals, reputation snapshots, soulbound reputation tokens). A new `completion.ak` validator will witness learner completion events to authorize VC issuance. Legacy skill-proof / course-registration NFT minting has been retired.
-- **Governance** — DAOs mirror the knowledge taxonomy. Elections, proposals, committee-gated taxonomy updates, and P2P propagation are implemented locally; validator-backed on-chain enforcement is not fully deployed yet.
+- **Cardano's role** — (1) VC integrity anchoring (BLAKE3-of-VC metadata txs), (2) DAO governance (elections, proposals, reputation snapshots, CIP-68 soulbound reputation tokens), (3) the `completion.ak` validator that witnesses learner completion events to authorize VC issuance, and (4) the `challenge_escrow.ak` validator that holds a challenger's stake pending the DAO's revoke/refund decision. All validators are deployed as reference scripts on **preprod testnet** (block 4736927). Legacy skill-proof / course-registration NFT minting has been retired.
+- **Governance** — DAOs mirror the knowledge taxonomy. Elections, proposals, committee-gated taxonomy updates, and P2P propagation are implemented locally. The Aiken/Plutus governance validators are deployed as reference scripts on **preprod testnet** (block 4736927); the on-chain enforcement flows that reference them are still maturing.
 - **Assessment Integrity** — Sentinel anti-cheat uses a keystroke autoencoder, mouse trajectory CNN, and face embedder. All processing stays client-side; snapshots are stored locally and feed downstream trust decisions without exposing raw biometrics.
 - **Peer-to-Peer** — Fully decentralized via libp2p with a private Alexandria Kademlia DHT, GossipSub, Circuit Relay v2, AutoNAT, and DCUtR. Devices discover each other through a relay bootstrap node — no central server required.
 - **Offline-First** — Local SQLite database, iroh content store, and encrypted vault (Stronghold on desktop, AES-256-GCM + Argon2id on mobile). Everything works without connectivity.
@@ -50,7 +50,7 @@ alexandria/
 │       ├── classroom/ # Encrypted group messaging, membership, gossip
 │       ├── commands/ # IPC command handlers across ~32 modules (frontend ↔ backend), including profile/* lifecycle
 │       ├── crypto/   # BIP-39 wallet, per-profile vault (Stronghold / portable), Ed25519, did:key
-│       ├── db/       # SQLite (66 tables, 30 migrations, seed data) — one DB per profile
+│       ├── db/       # SQLite (~73 tables, 51 migrations, seed data) — one DB per profile
 │       ├── diag.rs   # File-based diagnostic logger + panic hook
 │       ├── domain/   # Business logic (courses, tutorials, opinions, vc, evidence, governance, ...)
 │       ├── evidence/ # Proficiency taxonomy + thresholds (reputation/attestation/challenge disabled post-VC-first cutover)
@@ -409,7 +409,7 @@ All data lives in `~/Library/Application Support/org.alexandria.node/` (macOS). 
 |----------------|---------|
 | `profiles_index.json` | Public sidecar — display names, avatars, colors, timestamps. Read by the picker before any vault is unlocked. **No keys, DIDs, or stake addresses.** |
 | `profiles/<uuid>/vault/` | Per-profile encrypted vault (Stronghold on desktop, AES-256-GCM + Argon2id on mobile) |
-| `profiles/<uuid>/alexandria.db` | Per-profile SQLCipher database (66 tables), key derived from that profile's password |
+| `profiles/<uuid>/alexandria.db` | Per-profile SQLCipher database (~73 tables), key derived from that profile's password |
 | `profiles/<uuid>/iroh/` | Per-profile content-addressed blob store (course content, user profiles) and node secret |
 | `profiles/<uuid>/plugins/` | Per-profile installed plugin bundles |
 | `profiles/<uuid>/videocache/` | Per-profile materialized video files (served via Tauri's asset protocol) |
@@ -425,7 +425,7 @@ Use `alex config path` to print this directory on any platform.
 | [Architecture](docs/architecture.md) | System design — offline-first, trustless, multi-platform |
 | [Multi-User Profiles](docs/multi-user-profiles.md) | Per-profile vault + DB + iroh isolation, picker UX, auto-migration |
 | [Settings](docs/settings.md) | Unified per-profile settings store + cross-device sync + how to add a new setting |
-| [Database Schema](docs/database-schema.md) | All 66 tables + per-profile DB layout |
+| [Database Schema](docs/database-schema.md) | All tables + per-profile DB layout |
 | [Protocol Specification](docs/protocol-specification.md) | Wire formats, VC protocol, 11 gossip topics, validation, peer scoring |
 | [Project Structure](docs/project-structure.md) | Directory layouts, module responsibilities |
 | [Skills & Reputation](docs/skills-and-reputation.md) | Skill graph, evidence model, reputation system |

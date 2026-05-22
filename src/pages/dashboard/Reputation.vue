@@ -47,7 +47,7 @@ function formatConfidence(n: number): string {
     <div class="mb-8">
       <h1 class="text-3xl font-bold text-foreground">My Reputation</h1>
       <p class="mt-2 text-muted-foreground">
-        Evidence-based, skill-scoped reputation derived from your teaching impact and learning achievements.
+        Skill-scoped reputation derived from your teaching impact and learning achievements.
       </p>
     </div>
 
@@ -121,8 +121,8 @@ function formatConfidence(n: number): string {
         </h3>
         <p class="mt-1 text-sm text-muted-foreground max-w-sm mx-auto">
           {{ activeTab === 'instructor'
-            ? 'Publish courses and help learners earn skill proofs to build your impact.'
-            : 'Complete courses and earn skill proofs to build your profile.' }}
+            ? 'Publish courses and help learners earn credentials to build your impact.'
+            : 'Complete courses and earn credentials to build your profile.' }}
         </p>
       </div>
 
@@ -142,7 +142,7 @@ function formatConfidence(n: number): string {
                   {{ assertion.proficiency_level }}
                 </AppBadge>
                 <span v-if="assertion.evidence_count" class="text-xs text-muted-foreground">
-                  {{ assertion.evidence_count }} evidence
+                  {{ assertion.evidence_count }} credentials
                 </span>
               </div>
             </div>

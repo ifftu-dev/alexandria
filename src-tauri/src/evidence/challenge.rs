@@ -308,6 +308,72 @@ fn load_status(conn: &Connection, challenge_id: &str) -> Result<ChallengeStatus,
 /// Minimal-viable version — mirrors what
 /// `commands::credentials::revoke_credential_impl` does for the
 /// in-scope columns. A future refactor could share a single helper.
+/// Stake lifecycle bookkeeping for a challenge's escrowed stake.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StakeInfo {
+    /// `none` | `locked` | `returned` | `forfeited`.
+    pub stake_status: String,
+    /// Challenge resolution status (`pending`/`reviewing`/`upheld`/...).
+    pub challenge_status: String,
+    /// Staked amount in lovelace.
+    pub stake_lovelace: i64,
+    /// Lock tx hash, once the stake has been escrowed.
+    pub lock_tx_hash: Option<String>,
+}
+
+/// Read the stake + resolution state for a challenge.
+pub fn get_stake_info(conn: &Connection, challenge_id: &str) -> Result<StakeInfo, String> {
+    conn.query_row(
+        "SELECT stake_status, status, stake_lovelace, stake_tx_hash \
+         FROM credential_challenges WHERE id = ?1",
+        params![challenge_id],
+        |row| {
+            Ok(StakeInfo {
+                stake_status: row.get(0)?,
+                challenge_status: row.get(1)?,
+                stake_lovelace: row.get(2)?,
+                lock_tx_hash: row.get(3)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(|e| e.to_string())?
+    .ok_or_else(|| format!("challenge not found: {challenge_id}"))
+}
+
+/// Mark a challenge's stake as escrowed (locked) at the escrow script.
+pub fn set_stake_locked(
+    conn: &Connection,
+    challenge_id: &str,
+    lock_tx_hash: &str,
+) -> Result<(), String> {
+    conn.execute(
+        "UPDATE credential_challenges \
+         SET stake_status = 'locked', stake_tx_hash = ?2 WHERE id = ?1",
+        params![challenge_id, lock_tx_hash],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Mark a challenge's stake as settled. `returned` selects the terminal
+/// status: returned to challenger (upheld) or forfeited to treasury.
+pub fn set_stake_settled(
+    conn: &Connection,
+    challenge_id: &str,
+    settle_tx_hash: &str,
+    returned: bool,
+) -> Result<(), String> {
+    let status = if returned { "returned" } else { "forfeited" };
+    conn.execute(
+        "UPDATE credential_challenges \
+         SET stake_status = ?2, settle_tx_hash = ?3 WHERE id = ?1",
+        params![challenge_id, status, settle_tx_hash],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 fn revoke_credential(conn: &Connection, credential_id: &str) -> Result<(), String> {
     let (list_id, index): (Option<String>, Option<i64>) = conn
         .query_row(

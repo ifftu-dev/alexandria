@@ -8,7 +8,8 @@
 
 use tauri::State;
 
-use crate::domain::sync::{DeviceInfo, SyncHistoryEntry, SyncStatus};
+use crate::domain::sync::{DeviceInfo, SyncHistoryEntry, SyncResult, SyncStatus};
+use crate::p2p::device_sync::SyncRequest;
 use crate::p2p::sync;
 use crate::AppState;
 
@@ -96,28 +97,147 @@ pub async fn sync_status(state: State<'_, AppState>) -> Result<SyncStatus, Strin
     sync::get_sync_status(db.conn())
 }
 
-/// Manually trigger a sync with all known remote devices.
+/// Manually trigger a sync with every paired device.
 ///
-/// In a full implementation this would initiate the P2P
-/// request-response protocol with each online peer. For now
-/// it processes the local queue and returns what would be sent.
+/// Dials each paired peer over `/alexandria/sync/1.0`, exchanges sealed
+/// payloads, and merges what comes back (LWW). Returns an aggregate
+/// [`SyncResult`] across all peers. Peers that are offline or
+/// unreachable are skipped (logged), not fatal.
 #[tauri::command]
-pub async fn sync_now(state: State<'_, AppState>) -> Result<SyncStatus, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    let conn = db.conn();
+pub async fn sync_now(state: State<'_, AppState>) -> Result<SyncResult, String> {
+    let started = std::time::Instant::now();
 
-    // Prune already-delivered items
-    let pruned = sync::prune_delivered_queue(conn)?;
-    if pruned > 0 {
-        log::info!("sync: pruned {pruned} delivered queue items");
+    // Snapshot the paired peers up front, then release the DB lock
+    // before any network I/O.
+    let targets = {
+        let db_guard = state.db.lock().map_err(|_| "db lock poisoned")?;
+        let db = db_guard.as_ref().ok_or("database not initialized")?;
+        let conn = db.conn();
+        sync::prune_delivered_queue(conn).ok();
+        sync_targets(conn)?
+    };
+
+    let mut total = SyncResult {
+        rows_sent: 0,
+        rows_received: 0,
+        rows_merged: 0,
+        table_stats: vec![],
+        duration_ms: 0,
+    };
+
+    for (peer_id, key, addrs) in targets {
+        match sync_one_peer(&state.db, &state.p2p_node, &peer_id, &key, &addrs).await {
+            Ok(r) => {
+                total.rows_sent += r.rows_sent;
+                total.rows_received += r.rows_received;
+                total.rows_merged += r.rows_merged;
+            }
+            Err(e) => log::warn!("sync: peer {peer_id} skipped: {e}"),
+        }
     }
 
-    // Return updated status
-    sync::get_sync_status(conn)
+    total.duration_ms = started.elapsed().as_millis() as i64;
+    Ok(total)
+}
+
+/// A paired peer worth syncing: `(peer_id, shared_key, addresses)`.
+type SyncTarget = (String, [u8; 32], Vec<String>);
+
+/// Snapshot the paired peers worth syncing.
+fn sync_targets(conn: &rusqlite::Connection) -> Result<Vec<SyncTarget>, String> {
+    let mut out = Vec::new();
+    for (_device_id, peer_id) in sync::list_paired_peers(conn)? {
+        let Some(key) = sync::get_pair_key(conn, &peer_id)? else {
+            continue;
+        };
+        let addrs: Vec<String> = conn
+            .query_row(
+                "SELECT addresses FROM peers WHERE peer_id = ?1",
+                rusqlite::params![peer_id],
+                |r| r.get::<_, String>(0),
+            )
+            .ok()
+            .and_then(|json| serde_json::from_str(&json).ok())
+            .unwrap_or_default();
+        out.push((peer_id, key, addrs));
+    }
+    Ok(out)
+}
+
+/// Background auto-sync driver: if the device-local auto-sync toggle is
+/// on, run one sync exchange with every paired peer. Invoked from the
+/// app's periodic queue loop. Returns rows merged across all peers.
+pub(crate) async fn auto_sync_all(
+    db: &crate::commands::pairing::DbHandle,
+    node: &crate::commands::pairing::NodeHandle,
+) -> usize {
+    let targets = {
+        let Ok(guard) = db.lock() else { return 0 };
+        let Some(database) = guard.as_ref() else {
+            return 0;
+        };
+        let conn = database.conn();
+        if !sync::is_auto_sync_enabled(conn) {
+            return 0;
+        }
+        match sync_targets(conn) {
+            Ok(t) => t,
+            Err(e) => {
+                log::debug!("auto-sync: target query failed: {e}");
+                return 0;
+            }
+        }
+    };
+
+    let mut merged = 0usize;
+    for (peer_id, key, addrs) in targets {
+        match sync_one_peer(db, node, &peer_id, &key, &addrs).await {
+            Ok(r) => merged += r.rows_merged.max(0) as usize,
+            Err(e) => log::debug!("auto-sync: peer {peer_id} skipped: {e}"),
+        }
+    }
+    merged
+}
+
+/// Run a single already-paired sync exchange (no pairing handshake).
+async fn sync_one_peer(
+    db: &crate::commands::pairing::DbHandle,
+    node_handle: &crate::commands::pairing::NodeHandle,
+    peer_id: &str,
+    key: &[u8; 32],
+    addrs: &[String],
+) -> Result<SyncResult, String> {
+    let started = std::time::Instant::now();
+
+    let (device_id, stake_address, sealed) = {
+        let db_guard = db.lock().map_err(|_| "db lock poisoned")?;
+        let database = db_guard.as_ref().ok_or("database not initialized")?;
+        let conn = database.conn();
+        let device_id = sync::get_or_create_local_device(conn, std::env::consts::OS)?;
+        let stake = sync::local_stake_address(conn)?.ok_or("no local identity")?;
+        let payload = sync::build_sync_payload(conn)?;
+        (device_id, stake, sync::seal_payload(key, &payload)?)
+    };
+
+    let peer: libp2p::PeerId = peer_id.parse().map_err(|e| format!("bad peer id: {e}"))?;
+    let multiaddrs: Vec<libp2p::Multiaddr> = addrs.iter().filter_map(|a| a.parse().ok()).collect();
+    let request = SyncRequest {
+        device_id,
+        stake_address,
+        sealed,
+        pairing: None,
+    };
+
+    let response = {
+        let node = node_handle.lock().await;
+        let node = node.as_ref().ok_or("P2P node not running")?;
+        let _ = node.connect_peer(peer, multiaddrs).await;
+        node.sync_with_peer(peer, request)
+            .await
+            .map_err(|e| e.to_string())?
+    };
+
+    crate::commands::pairing::finish_exchange(db, peer_id, key, response, started)
 }
 
 /// Toggle automatic background sync.
@@ -131,17 +251,7 @@ pub async fn sync_set_auto(state: State<'_, AppState>, enabled: bool) -> Result<
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
     let db = db_guard.as_ref().ok_or("database not initialized")?;
-    let conn = db.conn();
-
-    // Store the auto-sync preference in a simple key-value pattern
-    // using the sync_log table (lightweight approach)
-    conn.execute(
-        "INSERT OR REPLACE INTO devices (id, device_name, platform, is_local) \
-         SELECT id, device_name, platform, is_local FROM devices WHERE is_local = 1",
-        [],
-    )
-    .map_err(|e| e.to_string())?;
-
+    sync::set_auto_sync(db.conn(), enabled)?;
     log::info!("sync: auto-sync set to {enabled}");
     Ok(())
 }

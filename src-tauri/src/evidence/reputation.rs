@@ -17,9 +17,14 @@
 //!   self-witnessed VCs (our auto-issuance path) contribute only to
 //!   the learner row — there's no instructor to credit.
 //!
-//! Variance / percentile metrics from the v1 engine are left at
-//! `NULL` / `0` for now; they can be layered on top of the same
-//! aggregation query when there's enough data to warrant them.
+//! Distribution metrics (median, p25/p75, variance, learner count)
+//! are computed over the sampled scores backing each row — instructor
+//! rows distribute over the scores they've issued across distinct
+//! learners; learner rows distribute over the scores they've been
+//! awarded across distinct issuers. They are persisted to the
+//! `median_impact`, `impact_p25`, `impact_p75`, `learner_count`, and
+//! `impact_variance` columns; a sample-size confidence is derived from
+//! `learner_count` on read (see `commands::reputation`).
 //!
 //! Entry point: [`on_credential_accepted`]. Callers — the VC
 //! issuance paths in `commands::credentials` and
@@ -160,32 +165,183 @@ fn skill_fields(cred: &CredentialRow) -> Result<Option<(i64, f64, String)>, Stri
     Ok(Some((level, score, skill_id.to_string())))
 }
 
+/// A computed distribution over a set of sampled scores.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Distribution {
+    pub median: f64,
+    pub p25: f64,
+    pub p75: f64,
+    pub variance: f64,
+}
+
+/// Compute median / quartiles / population variance over `scores`
+/// using linear interpolation between closest ranks (numpy "linear"
+/// / Excel `PERCENTILE.INC`). Empty input yields all-zero metrics.
+pub fn compute_distribution(scores: &[f64]) -> Distribution {
+    if scores.is_empty() {
+        return Distribution {
+            median: 0.0,
+            p25: 0.0,
+            p75: 0.0,
+            variance: 0.0,
+        };
+    }
+    let mut sorted = scores.to_vec();
+    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+
+    let percentile = |q: f64| -> f64 {
+        let n = sorted.len();
+        if n == 1 {
+            return sorted[0];
+        }
+        let rank = q * (n - 1) as f64;
+        let lo = rank.floor() as usize;
+        let hi = rank.ceil() as usize;
+        let frac = rank - lo as f64;
+        sorted[lo] + (sorted[hi] - sorted[lo]) * frac
+    };
+
+    let mean = sorted.iter().sum::<f64>() / sorted.len() as f64;
+    let variance = sorted.iter().map(|s| (s - mean).powi(2)).sum::<f64>() / sorted.len() as f64;
+
+    Distribution {
+        median: percentile(0.5),
+        p25: percentile(0.25),
+        p75: percentile(0.75),
+        variance,
+    }
+}
+
+/// Fetch the `(score, counterparty_did)` samples for one actor at a
+/// given (skill, level). `actor_col` is `subject_did` (learner side)
+/// or `issuer_did` (instructor side); `counterparty_col` is the other.
+fn fetch_samples(
+    conn: &Connection,
+    actor_col: &str,
+    counterparty_col: &str,
+    actor_did: &str,
+    skill_id: &str,
+    level: i64,
+) -> Result<(Vec<f64>, i64), String> {
+    let sql = format!(
+        "SELECT \
+            CAST(json_extract(signed_vc_json, '$.credentialSubject.score') AS REAL), \
+            {counterparty_col} \
+         FROM credentials \
+         WHERE {actor_col} = ?1 \
+           AND skill_id = ?2 \
+           AND claim_kind = 'skill' \
+           AND revoked = 0 \
+           AND CAST(json_extract(signed_vc_json, \
+                '$.credentialSubject.level') AS INTEGER) = ?3"
+    );
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(params![actor_did, skill_id, level], |row| {
+            Ok((
+                row.get::<_, Option<f64>>(0)?.unwrap_or(0.0),
+                row.get::<_, String>(1)?,
+            ))
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+
+    let mut distinct: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut scores = Vec::with_capacity(rows.len());
+    for (score, counterparty) in rows {
+        scores.push(score.clamp(0.0, 1.0));
+        distinct.insert(counterparty);
+    }
+    Ok((scores, distinct.len() as i64))
+}
+
+/// Persist a reputation row with its computed distribution. `score` is
+/// the headline scalar (max for learners, mean for instructors);
+/// `counterparty_count` is the number of distinct learners (instructor
+/// row) or distinct issuers (learner row).
+#[allow(clippy::too_many_arguments)]
+fn upsert_row(
+    conn: &Connection,
+    id: &str,
+    actor_did: &str,
+    role: &str,
+    skill_id: &str,
+    level_str: &str,
+    score: f64,
+    scores: &[f64],
+    counterparty_count: i64,
+) -> Result<(), String> {
+    let dist = compute_distribution(scores);
+    conn.execute(
+        "INSERT INTO reputation_assertions \
+         (id, actor_address, role, skill_id, proficiency_level, \
+          score, evidence_count, median_impact, impact_p25, impact_p75, \
+          learner_count, impact_variance, computation_spec) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 'v3-vc') \
+         ON CONFLICT(id) DO UPDATE SET \
+             score = excluded.score, \
+             evidence_count = excluded.evidence_count, \
+             median_impact = excluded.median_impact, \
+             impact_p25 = excluded.impact_p25, \
+             impact_p75 = excluded.impact_p75, \
+             learner_count = excluded.learner_count, \
+             impact_variance = excluded.impact_variance, \
+             updated_at = datetime('now')",
+        params![
+            id,
+            actor_did,
+            role,
+            skill_id,
+            level_str,
+            score,
+            scores.len() as i64,
+            dist.median,
+            dist.p25,
+            dist.p75,
+            counterparty_count,
+            dist.variance,
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 fn update_learner(
     conn: &Connection,
     subject_did: &str,
     skill_id: &str,
     level: i64,
-    score: f64,
+    _score: f64,
 ) -> Result<(), String> {
     let level_str = level_to_str(level);
     let id = entity_id(&[subject_did, "learner", skill_id, level_str]);
 
-    // Learner score is the max observed on this (skill, level);
-    // later credentials at the same level either match or beat the
-    // score, never lower it.
-    conn.execute(
-        "INSERT INTO reputation_assertions \
-         (id, actor_address, role, skill_id, proficiency_level, \
-          score, evidence_count, computation_spec) \
-         VALUES (?1, ?2, 'learner', ?3, ?4, ?5, 1, 'v3-vc') \
-         ON CONFLICT(id) DO UPDATE SET \
-             score = MAX(score, excluded.score), \
-             evidence_count = evidence_count + 1, \
-             updated_at = datetime('now')",
-        params![id, subject_did, skill_id, level_str, score],
+    // Sample every non-revoked skill credential awarded to this learner
+    // at (skill, level). Headline learner score is the max observed —
+    // later credentials never lower it — while the distribution and
+    // distinct-issuer count come from the full sample.
+    let (scores, issuer_count) = fetch_samples(
+        conn,
+        "subject_did",
+        "issuer_did",
+        subject_did,
+        skill_id,
+        level,
+    )?;
+    let max_score = scores.iter().cloned().fold(0.0_f64, f64::max);
+
+    upsert_row(
+        conn,
+        &id,
+        subject_did,
+        "learner",
+        skill_id,
+        level_str,
+        max_score,
+        &scores,
+        issuer_count,
     )
-    .map_err(|e| e.to_string())?;
-    Ok(())
 }
 
 fn update_instructor(
@@ -197,43 +353,33 @@ fn update_instructor(
     let level_str = level_to_str(level);
     let id = entity_id(&[issuer_did, "instructor", skill_id, level_str]);
 
-    // Recompute the instructor's score as the mean score of every
-    // non-revoked credential they've issued at this (skill, level).
-    // Using json_extract to read the score out of each row.
-    let (mean_score, count): (f64, i64) = conn
-        .query_row(
-            "SELECT \
-                COALESCE(AVG(CAST(json_extract(signed_vc_json, \
-                    '$.credentialSubject.score') AS REAL)), 0.0), \
-                COUNT(*) \
-             FROM credentials \
-             WHERE issuer_did = ?1 \
-               AND skill_id = ?2 \
-               AND claim_kind = 'skill' \
-               AND revoked = 0 \
-               AND CAST(json_extract(signed_vc_json, \
-                    '$.credentialSubject.level') AS INTEGER) = ?3",
-            params![issuer_did, skill_id, level],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .map_err(|e| e.to_string())?;
-    if count == 0 {
+    // Sample every non-revoked skill credential this instructor issued
+    // at (skill, level). Headline instructor score is the mean across
+    // the sample; learner_count is the number of distinct subjects.
+    let (scores, learner_count) = fetch_samples(
+        conn,
+        "issuer_did",
+        "subject_did",
+        issuer_did,
+        skill_id,
+        level,
+    )?;
+    if scores.is_empty() {
         return Ok(());
     }
+    let mean_score = scores.iter().sum::<f64>() / scores.len() as f64;
 
-    conn.execute(
-        "INSERT INTO reputation_assertions \
-         (id, actor_address, role, skill_id, proficiency_level, \
-          score, evidence_count, computation_spec) \
-         VALUES (?1, ?2, 'instructor', ?3, ?4, ?5, ?6, 'v3-vc') \
-         ON CONFLICT(id) DO UPDATE SET \
-             score = excluded.score, \
-             evidence_count = excluded.evidence_count, \
-             updated_at = datetime('now')",
-        params![id, issuer_did, skill_id, level_str, mean_score, count],
+    upsert_row(
+        conn,
+        &id,
+        issuer_did,
+        "instructor",
+        skill_id,
+        level_str,
+        mean_score,
+        &scores,
+        learner_count,
     )
-    .map_err(|e| e.to_string())?;
-    Ok(())
 }
 
 #[cfg(test)]
@@ -463,6 +609,65 @@ mod tests {
             })
             .unwrap();
         assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn compute_distribution_basic_quartiles() {
+        // 0.0..1.0 in 0.25 steps → median 0.5, p25 0.25, p75 0.75.
+        let d = compute_distribution(&[0.0, 0.25, 0.5, 0.75, 1.0]);
+        assert!((d.median - 0.5).abs() < 1e-9);
+        assert!((d.p25 - 0.25).abs() < 1e-9);
+        assert!((d.p75 - 0.75).abs() < 1e-9);
+        // population variance of that set = 0.125.
+        assert!((d.variance - 0.125).abs() < 1e-9);
+    }
+
+    #[test]
+    fn compute_distribution_empty_and_single() {
+        let e = compute_distribution(&[]);
+        assert_eq!(e.median, 0.0);
+        assert_eq!(e.variance, 0.0);
+        let s = compute_distribution(&[0.42]);
+        assert!((s.median - 0.42).abs() < 1e-9);
+        assert!((s.p25 - 0.42).abs() < 1e-9);
+        assert!((s.p75 - 0.42).abs() < 1e-9);
+        assert_eq!(s.variance, 0.0);
+    }
+
+    #[test]
+    fn instructor_row_persists_distribution() {
+        let db = test_db();
+        let instructor = "did:key:zInstructor";
+        insert_skill_credential(&db, "c1", instructor, "did:key:zA", "skill_a", 3, 0.60);
+        insert_skill_credential(&db, "c2", instructor, "did:key:zB", "skill_a", 3, 0.80);
+        insert_skill_credential(&db, "c3", instructor, "did:key:zC", "skill_a", 3, 1.00);
+        on_credential_accepted(db.conn(), "c1").unwrap();
+        on_credential_accepted(db.conn(), "c2").unwrap();
+        on_credential_accepted(db.conn(), "c3").unwrap();
+
+        let (median, p25, p75, learner_count, variance): (f64, f64, f64, i64, f64) = db
+            .conn()
+            .query_row(
+                "SELECT median_impact, impact_p25, impact_p75, learner_count, impact_variance \
+                 FROM reputation_assertions \
+                 WHERE actor_address = 'did:key:zInstructor' AND role = 'instructor'",
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert!((median - 0.80).abs() < 1e-9);
+        assert!((p25 - 0.70).abs() < 1e-9);
+        assert!((p75 - 0.90).abs() < 1e-9);
+        assert_eq!(learner_count, 3); // three distinct subjects
+        assert!(variance > 0.0);
     }
 
     #[test]

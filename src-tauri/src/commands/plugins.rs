@@ -273,6 +273,7 @@ pub async fn plugin_submit_and_grade(
             score: record.score,
             details: &record.details,
             learner_did: &learner_did_str,
+            grader_version: &manifest.version,
         },
     )?;
 
@@ -298,6 +299,7 @@ struct SubmissionRow<'a> {
     score: f64,
     details: &'a serde_json::Value,
     learner_did: &'a str,
+    grader_version: &'a str,
 }
 
 fn persist_submission(db: &Database, row: &SubmissionRow<'_>) -> Result<(), String> {
@@ -314,8 +316,8 @@ fn persist_submission(db: &Database, row: &SubmissionRow<'_>) -> Result<(), Stri
         .execute(
             "INSERT INTO element_submissions \
              (id, element_id, enrollment_id, submission_cid, grader_cid, content_cid, \
-              score, score_details_json, learner_did) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+              score, score_details_json, learner_did, grader_version) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![
                 id,
                 row.element_id,
@@ -326,6 +328,7 @@ fn persist_submission(db: &Database, row: &SubmissionRow<'_>) -> Result<(), Stri
                 row.score,
                 details_json,
                 row.learner_did,
+                row.grader_version,
             ],
         )
         .map_err(|e| format!("failed to record element submission: {e}"))?;

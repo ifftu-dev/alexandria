@@ -487,6 +487,38 @@ pub fn encode_completion_mint_redeemer(
     Ok(buf)
 }
 
+// ---- ChallengeEscrowDatum / EscrowRedeemer ----
+
+/// Encode a `ChallengeEscrowDatum` (challenge_escrow.ak) as Plutus Data:
+/// `Constr 0 [challenger, treasury, dao_authority, challenge_id]`.
+/// The three key hashes are 28-byte payment key hashes; `challenge_id`
+/// is the BLAKE2b hash bytes of the challenge id.
+pub fn encode_challenge_escrow_datum(
+    challenger: &[u8; 28],
+    treasury: &[u8; 28],
+    dao_authority: &[u8; 28],
+    challenge_id: &[u8],
+) -> Result<Vec<u8>, TxBuildError> {
+    let mut buf = Vec::new();
+    let mut encoder = pallas_codec::minicbor::Encoder::new(&mut buf);
+    begin_constr(&mut encoder, 0, 4)?;
+    encode_bytes(&mut encoder, challenger)?;
+    encode_bytes(&mut encoder, treasury)?;
+    encode_bytes(&mut encoder, dao_authority)?;
+    encode_bytes(&mut encoder, challenge_id)?;
+    Ok(buf)
+}
+
+/// Encode an `EscrowRedeemer`: `Refund` (challenge upheld → return to
+/// challenger) is `Constr 0 []`; `Forfeit` (rejected → treasury) is
+/// `Constr 1 []`.
+pub fn encode_challenge_escrow_redeemer(refund: bool) -> Result<Vec<u8>, TxBuildError> {
+    let mut buf = Vec::new();
+    let mut encoder = pallas_codec::minicbor::Encoder::new(&mut buf);
+    begin_constr(&mut encoder, if refund { 0 } else { 1 }, 0)?;
+    Ok(buf)
+}
+
 /// Encode a `CompletionRedeemer::BurnCompletion`.
 pub fn encode_completion_burn_redeemer() -> Result<Vec<u8>, TxBuildError> {
     let mut buf = Vec::new();

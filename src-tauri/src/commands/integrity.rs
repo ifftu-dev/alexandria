@@ -332,20 +332,20 @@ pub async fn integrity_end_session(
         )
         .map_err(|e| e.to_string())?;
 
-    // Apply trust_factor decay only when the session ends in a non-clean state.
-    // The spec pins the per-violation weight at 0.20 for criticals and 0.10 for
-    // warnings, with a trust floor of 0.10 — collateral damage is bounded.
+    // Surface the trust impact when a session ends in a non-clean state.
+    // The legacy per-evidence `trust_factor` decay was retired with the
+    // `evidence_records` table (migration 040, VC-first cutover). The
+    // trust signal now lives on this `integrity_sessions` row — its
+    // terminal `status` + `integrity_score` — which downstream credential
+    // issuance reads. The spec-pinned penalty (0.20/critical, 0.10/warning)
+    // is computed here for observability.
     if final_status == "flagged" || final_status == "suspended" {
         let penalty = trust_penalty(cumulative_critical, cumulative_warning);
         if penalty > 0.0 {
-            db.conn()
-                .execute(
-                    "UPDATE evidence_records
-                        SET trust_factor = MAX(0.10, trust_factor - ?2)
-                      WHERE integrity_session_id = ?1",
-                    params![session_id, penalty],
-                )
-                .map_err(|e| e.to_string())?;
+            log::warn!(
+                "integrity session {session_id} ended '{final_status}': trust penalty {penalty:.2} \
+                 (criticals={cumulative_critical}, warnings={cumulative_warning})"
+            );
         }
     }
 

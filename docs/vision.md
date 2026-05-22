@@ -46,7 +46,7 @@ This means a brilliant calculus instructor isn't automatically assumed to be a b
 
 ### Assessment Integrity Is Built In
 
-The Sentinel anti-cheat system monitors assessment integrity through multi-signal behavioral fingerprinting: a keystroke autoencoder, a mouse trajectory CNN, and a face embedder (LBP histograms). All three models are hand-written in TypeScript with zero external ML dependencies, trained on-device during a calibration wizard.
+The Sentinel anti-cheat system monitors assessment integrity through multi-signal behavioral fingerprinting: a keystroke autoencoder, a mouse trajectory CNN, and a face embedder (LBP histograms). The keystroke autoencoder and mouse-trajectory CNN run in Rust on the `candle` ML framework (`src-tauri/src/sentinel/keystroke_ae.rs`, `mouse_cnn.rs`); only the face embedder is hand-written in TypeScript. All three are trained on-device during a calibration wizard.
 
 Raw behavioral data — keystrokes, mouse movements, video frames — **never leaves the device**. Only derived integrity scores (0.0–1.0) and categorical flags are stored and transmitted. This is enforced by the code architecture, not by policy.
 
@@ -64,7 +64,7 @@ If Alexandria the organisation disappeared tomorrow, every learner's credentials
 
 ### Offline-First by Design
 
-Every operation works without network access. The local SQLite database (66 tables), iroh content store, and encrypted vault provide complete functionality offline. Sync is opportunistic — when connectivity returns, nodes exchange updates via GossipSub topics and cross-device sync.
+Every operation works without network access. The local SQLite database (~73 tables), iroh content store, and encrypted vault provide complete functionality offline. Sync is opportunistic — when connectivity returns, nodes exchange updates via GossipSub topics and cross-device sync.
 
 ### Shared Devices, Separate Lives
 

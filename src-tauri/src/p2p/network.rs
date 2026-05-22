@@ -14,6 +14,7 @@ use libp2p::{
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
 
+use super::device_sync::{SyncRequest, SyncResponse};
 use super::vc_fetch::{FetchRequest, FetchResponse};
 
 use crate::db::Database;
@@ -269,6 +270,10 @@ pub struct AlexandriaBehaviour {
     /// `P2pEvent::FetchRequestReceived`; the application calls
     /// `P2pNode::send_fetch_response` to reply.
     pub vc_fetch: request_response::cbor::Behaviour<FetchRequest, FetchResponse>,
+    /// Cross-device sync — `/alexandria/sync/1.0` request-response
+    /// protocol between explicitly paired devices. Payloads are sealed
+    /// with the pair's shared key (see [`super::device_sync`]).
+    pub device_sync: request_response::cbor::Behaviour<SyncRequest, SyncResponse>,
 }
 
 /// The running P2P network node.
@@ -320,6 +325,26 @@ pub enum SwarmCommand {
     SendFetchResponse {
         channel: ResponseChannel<FetchResponse>,
         response: FetchResponse,
+    },
+    /// Send a sync request to a paired peer. The reply oneshot
+    /// resolves with the peer's sealed response (or a failure).
+    SendSyncRequest {
+        peer: PeerId,
+        request: SyncRequest,
+        reply: oneshot::Sender<Result<SyncResponse, NetworkError>>,
+    },
+    /// Reply to an inbound sync request (handled inline against the DB
+    /// in the event loop, like vc-fetch).
+    SendSyncResponse {
+        channel: ResponseChannel<SyncResponse>,
+        response: SyncResponse,
+    },
+    /// Dial a peer at the given addresses (used to reach a freshly
+    /// paired device whose addresses came in via the pairing code).
+    ConnectPeer {
+        peer: PeerId,
+        addrs: Vec<libp2p::Multiaddr>,
+        reply: mpsc::Sender<Result<(), NetworkError>>,
     },
     /// Shutdown the node.
     Shutdown,
@@ -777,6 +802,17 @@ fn build_behaviour(
         request_response::Config::default(),
     );
 
+    // Cross-device sync (§ device pairing). CBOR codec, full
+    // bidirectional support — every node both serves and initiates
+    // sync with its own paired devices.
+    let device_sync = request_response::cbor::Behaviour::<SyncRequest, SyncResponse>::new(
+        [(
+            StreamProtocol::new("/alexandria/sync/1.0"),
+            ProtocolSupport::Full,
+        )],
+        request_response::Config::default(),
+    );
+
     diag::log("build_behaviour: all sub-behaviours created OK");
 
     Ok(AlexandriaBehaviour {
@@ -787,6 +823,7 @@ fn build_behaviour(
         relay_server,
         relay_client: relay_behaviour,
         vc_fetch,
+        device_sync,
         dcutr,
     })
 }
@@ -865,6 +902,12 @@ async fn swarm_event_loop(
     let mut outbound_fetch_replies: HashMap<
         libp2p::request_response::OutboundRequestId,
         oneshot::Sender<Result<FetchResponse, NetworkError>>,
+    > = HashMap::new();
+
+    // Same bookkeeping for outbound device-sync requests.
+    let mut outbound_sync_replies: HashMap<
+        libp2p::request_response::OutboundRequestId,
+        oneshot::Sender<Result<SyncResponse, NetworkError>>,
     > = HashMap::new();
 
     // Track NAT state locally for the Status command
@@ -1087,6 +1130,36 @@ async fn swarm_event_loop(
                             .behaviour_mut()
                             .vc_fetch
                             .send_response(channel, response);
+                    }
+                    Some(SwarmCommand::SendSyncRequest { peer, request, reply }) => {
+                        let request_id = swarm
+                            .behaviour_mut()
+                            .device_sync
+                            .send_request(&peer, request);
+                        outbound_sync_replies.insert(request_id, reply);
+                    }
+                    Some(SwarmCommand::SendSyncResponse { channel, response }) => {
+                        let _ = swarm
+                            .behaviour_mut()
+                            .device_sync
+                            .send_response(channel, response);
+                    }
+                    Some(SwarmCommand::ConnectPeer { peer, addrs, reply }) => {
+                        let mut dialed = false;
+                        for addr in addrs {
+                            let dial_addr =
+                                addr.with(libp2p::multiaddr::Protocol::P2p(peer));
+                            match swarm.dial(dial_addr.clone()) {
+                                Ok(()) => dialed = true,
+                                Err(e) => log::debug!("connect_peer: dial {dial_addr} failed: {e}"),
+                            }
+                        }
+                        let result = if dialed {
+                            Ok(())
+                        } else {
+                            Err(NetworkError::Publish("no dialable address for peer".into()))
+                        };
+                        let _ = reply.send(result).await;
                     }
                     Some(SwarmCommand::Shutdown) | None => {
                         log::info!("P2P node shutting down");
@@ -1436,6 +1509,68 @@ async fn swarm_event_loop(
                     )) => {
                         // Nothing to do — the outbound peer already got it.
                     }
+                    // ---- device-sync (request-response) --------------
+                    SwarmEvent::Behaviour(AlexandriaBehaviourEvent::DeviceSync(
+                        request_response::Event::Message { peer, message, .. }
+                    )) => {
+                        match message {
+                            request_response::Message::Request { request, channel, .. } => {
+                                log::debug!("device-sync: inbound request from {peer}");
+                                // Answer against the local DB. Without a DB
+                                // handle we MUST still respond (libp2p
+                                // contract) — fall back to an error response.
+                                let response = match db.as_ref() {
+                                    Some(db_arc) => match db_arc.lock() {
+                                        Ok(guard) => match guard.as_ref() {
+                                            Some(database) => super::device_sync::handle_sync_request(
+                                                database.conn(),
+                                                &peer.to_string(),
+                                                &request,
+                                            ),
+                                            None => super::device_sync::SyncResponse::Error(
+                                                "no active profile".into(),
+                                            ),
+                                        },
+                                        Err(_) => super::device_sync::SyncResponse::Error(
+                                            "db lock poisoned".into(),
+                                        ),
+                                    },
+                                    None => super::device_sync::SyncResponse::Error(
+                                        "no database".into(),
+                                    ),
+                                };
+                                let _ = swarm
+                                    .behaviour_mut()
+                                    .device_sync
+                                    .send_response(channel, response);
+                            }
+                            request_response::Message::Response { request_id, response } => {
+                                if let Some(reply) = outbound_sync_replies.remove(&request_id) {
+                                    let _ = reply.send(Ok(response));
+                                } else {
+                                    log::debug!(
+                                        "device-sync: unmatched response for {request_id} from {peer}"
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    SwarmEvent::Behaviour(AlexandriaBehaviourEvent::DeviceSync(
+                        request_response::Event::OutboundFailure { request_id, error, peer, .. }
+                    )) => {
+                        log::warn!("device-sync: outbound to {peer} failed: {error}");
+                        if let Some(reply) = outbound_sync_replies.remove(&request_id) {
+                            let _ = reply.send(Err(NetworkError::Publish(error.to_string())));
+                        }
+                    }
+                    SwarmEvent::Behaviour(AlexandriaBehaviourEvent::DeviceSync(
+                        request_response::Event::InboundFailure { error, peer, .. }
+                    )) => {
+                        log::debug!("device-sync: inbound from {peer} failed: {error}");
+                    }
+                    SwarmEvent::Behaviour(AlexandriaBehaviourEvent::DeviceSync(
+                        request_response::Event::ResponseSent { .. }
+                    )) => {}
                     SwarmEvent::NewListenAddr { address, .. } => {
                         log::info!("Listening on {address}");
                         if is_circuit_listener(&address) {
@@ -1585,6 +1720,53 @@ impl P2pNode {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.command_tx
             .send(SwarmCommand::SendFetchRequest {
+                peer,
+                request,
+                reply: reply_tx,
+            })
+            .await
+            .map_err(|_| NetworkError::NotRunning)?;
+        reply_rx.await.map_err(|_| NetworkError::NotRunning)?
+    }
+
+    /// Dial a peer at the given multiaddresses. Best-effort — returns
+    /// once the dials have been issued, not once connected.
+    pub async fn connect_peer(
+        &self,
+        peer: PeerId,
+        addrs: Vec<libp2p::Multiaddr>,
+    ) -> Result<(), NetworkError> {
+        if !self.running {
+            return Err(NetworkError::NotRunning);
+        }
+        let (reply_tx, mut reply_rx) = mpsc::channel(1);
+        self.command_tx
+            .send(SwarmCommand::ConnectPeer {
+                peer,
+                addrs,
+                reply: reply_tx,
+            })
+            .await
+            .map_err(|_| NetworkError::NotRunning)?;
+        reply_rx
+            .recv()
+            .await
+            .unwrap_or(Err(NetworkError::NotRunning))
+    }
+
+    /// Run a sync exchange with a paired peer over `/alexandria/sync/1.0`.
+    /// Resolves with the peer's sealed [`SyncResponse`].
+    pub async fn sync_with_peer(
+        &self,
+        peer: PeerId,
+        request: SyncRequest,
+    ) -> Result<SyncResponse, NetworkError> {
+        if !self.running {
+            return Err(NetworkError::NotRunning);
+        }
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.command_tx
+            .send(SwarmCommand::SendSyncRequest {
                 peer,
                 request,
                 reply: reply_tx,

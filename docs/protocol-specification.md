@@ -81,7 +81,7 @@ All state lives on the user's device in three locations:
 | Store | Purpose |
 |-------|---------|
 | Profile index | Public sidecar `profiles_index.json` — display names + avatars only (no crypto material). Rendered by the picker before any vault is unlocked. |
-| SQLite | Per-profile relational data (courses, skills, evidence, governance, verifiable credentials) — 66 tables, 30 migrations. One DB per profile at `profiles/<uuid>/alexandria.db`. |
+| SQLite | Per-profile relational data (courses, skills, evidence, governance, verifiable credentials) — ~73 tables, 51 migrations. One DB per profile at `profiles/<uuid>/alexandria.db`. |
 | Encrypted vault | Per-profile wallet keys and mnemonic — IOTA Stronghold (desktop) or AES-256-GCM + Argon2id (mobile). One vault per profile under `profiles/<uuid>/vault/`. |
 | iroh | Per-profile content-addressed blobs (course HTML, profiles) — BLAKE3 hashes. One blob store + node secret per profile at `profiles/<uuid>/iroh/`. |
 
@@ -257,7 +257,7 @@ Only learner-disclosed SkillProofs MAY be used in reputation computation. Platfo
 
 ## 5. Evidence Pipeline
 
-*Evidence in §5 is captured as `evidence_records` rows feeding the legacy `skill_proof` aggregator. The verifiable-credentials path (§14) treats evidence differently: each issuance event produces a signed VC (§14.7) whose lifecycle is governed by §14.11 and whose contribution to subject trust is computed by §14.14.*
+*The `evidence_records` / `skill_proof` aggregator described in this section was retired in migration 040. The verifiable-credentials path (§14) is now the only credential pipeline: each issuance event produces a signed VC (§14.7) whose lifecycle is governed by §14.11 and whose contribution to subject trust is computed by §14.14. §5 is retained for historical context.*
 
 ### 5.1 Flow
 
@@ -276,8 +276,10 @@ Skill proof updated (if threshold met)
     v
 Reputation impact computed (instructor attribution)
     |
-    +---> (optional) Broadcast via P2P evidence topic
-    +---> (optional) Mint SkillProof NFT on Cardano
+    +---> Graded element submissions feed `claim_course_completion`,
+          which produces a W3C Verifiable Credential (§14). There is
+          no evidence-topic broadcast and no SkillProof NFT mint —
+          both were retired in migration 040.
 ```
 
 ### 5.2 Evidence Records
@@ -301,7 +303,7 @@ EvidenceRecord {
 }
 ```
 
-IDs are deterministic: `hex(blake2b_256(parts.join("|")))`. Evidence is broadcast over the `/alexandria/evidence/1.0` GossipSub topic with Ed25519 signatures for authenticity.
+IDs are deterministic: `hex(blake2b_256(parts.join("|")))`. Evidence is local-only — there is no `/alexandria/evidence/1.0` GossipSub topic (it was removed). The verifiable outcome that crosses the network is the W3C Verifiable Credential (§14), broadcast/fetched via the `vc-did`, `vc-status`, and `vc-fetch/1.0` protocols.
 
 ### 5.3 Aggregation
 
@@ -331,7 +333,7 @@ Multi-party attestation requirements MAY be defined for high-stakes assessments.
 
 ### 5.6 Challenge Mechanism
 
-Any peer MAY challenge evidence by staking 5 ADA (5,000,000 lovelace). The challenge enters a voting period. A 2/3 supermajority is required to uphold. If upheld, the evidence is deleted and the challenger's stake is returned. If rejected, the challenger loses their stake.
+Any peer MAY challenge a **credential** by staking 5 ADA (5,000,000 lovelace), locked at the `challenge_escrow.ak` validator. The challenge enters a voting period. A 2/3 supermajority is required to uphold. If upheld, the targeted credential is **revoked** via its RevocationList2020 status list (not deleted). The DAO authority then settles the escrow per the recorded vote: Refund returns the stake to the challenger (upheld), Forfeit sends it to the DAO treasury (rejected). Because challenges are adjudicated off-chain, the escrow trusts the DAO-authority key to settle according to the recorded outcome; the on-chain redeemer still pins each outcome to its correct recipient. The challenge-escrow reference script is deployed on preprod (2026-05-22), so settlement is live-capable; stake locking already works on preprod today.
 
 ---
 
@@ -391,23 +393,26 @@ Seven libp2p protocols compose `AlexandriaBehaviour`:
 | Topic Path | Description |
 |------------|-------------|
 | `/alexandria/catalog/1.0` | Course announcements |
-| `/alexandria/evidence/1.0` | Skill evidence broadcasts |
 | `/alexandria/taxonomy/1.0` | DAO-ratified skill graph updates |
 | `/alexandria/governance/1.0` | Governance events |
 | `/alexandria/profiles/1.0` | User profile updates |
-| `/alexandria/opinions/1.0` | Subjective ratings on courses, evidence, peers (Field Commentary, mig 21) |
+| `/alexandria/opinions/1.0` | Subjective ratings on courses, peers (Field Commentary, mig 21) |
 | `/alexandria/peer-exchange/1.0` | Known peer address propagation |
 | `/alexandria/vc-did/1.0` | DID document + key-rotation announcements (§14.5) |
 | `/alexandria/vc-status/1.0` | RevocationList2020 status-list snapshots and deltas (§14.11.2) |
 | `/alexandria/vc-presentation/1.0` | Opt-in selective-disclosure presentation envelopes (§14.18) |
 | `/alexandria/pinboard/1.0` | PinBoard pinning-commitment observations (§14.12, §14.20.4) |
+| `/alexandria/plugins/1.0` | Community plugin announcements (manifest CID + metadata) |
+| `/alexandria/plugin-attestations/1.0` | Plugin DAO threshold-signed grader attestations |
+| `/alexandria/sentinel-priors/1.0` | Ratified Sentinel adversarial-prior metadata |
 
-All 11 topics MUST be subscribed on node startup. In addition, a
-request-response protocol on `/alexandria/vc-fetch/1.0`
-(libp2p `request-response` + CBOR codec) handles authority-respecting
-credential pull; this is a 1-to-1 protocol, not a gossip topic, and
-is enabled when the node has a `Database` wired into its swarm event
-loop.
+All 13 topics MUST be subscribed on node startup. In addition, two
+request-response protocols (libp2p `request-response` + CBOR codec)
+run alongside the gossip mesh and are 1-to-1, not gossip topics:
+`/alexandria/vc-fetch/1.0` handles authority-respecting credential
+pull (enabled when the node has a `Database` wired into its swarm
+event loop), and `/alexandria/sync/1.0` carries AES-256-GCM-sealed
+cross-device sync payloads between explicitly paired devices.
 
 See §14 for the normative VC payload schemas carried by the
 `vc-did`, `vc-status`, `vc-presentation`, and `pinboard` topics, and
@@ -628,7 +633,7 @@ DAO membership is any actor who holds the relevant skill levels within the scope
 
 ### 10.6 On-Chain Enforcement
 
-**Current state**: Governance rules are enforced at the application level and P2P validation level. Transaction metadata is submitted to Cardano, but no on-chain validators exist.
+**Current state**: Governance rules are enforced at the application level and P2P validation level. The Aiken/Plutus v3 validators (dao_registry, dao_minting, election, proposal, vote_minting, reputation_minting, soulbound, completion, challenge_escrow) are deployed as CIP-33 reference scripts on **preprod testnet** (deployed 2026-05-22, block 4736927; UTxOs in `cardano/script_refs.rs`), so `ref_utxos_deployed()` is now `true` and the tx builders reference them live. The end-to-end on-chain enforcement flows are still maturing.
 
 **Target state**: 7 Aiken/Plutus v3 validators — DAO registration, election, proposal, committee token minting, vote receipt minting (double-vote prevention), reputation soulbound token, and credential NFT.
 
@@ -660,13 +665,11 @@ Once published, content hashes are immutable. Content updates produce a new hash
 
 **Blockchain**: Cardano (Conway era) via pallas 0.35 and Blockfrost.
 
-Two anchoring modes coexist — the legacy NFT-based credential path (§11.3.1) and the W3C-VC integrity-anchoring path (§11.3.2). The two are complementary: the former publishes presentational metadata on-chain; the latter timestamps a verifiable hash of the canonical VC without publishing credential content.
+Credential integrity is anchored via the W3C-VC integrity-anchoring path (§11.3.2), which timestamps a verifiable hash of the canonical VC without publishing credential content.
 
-#### 11.3.1 NFT-based credentials (legacy)
+#### 11.3.1 NFT-based credentials (retired)
 
-Legacy SkillProof credentials MAY be represented as non-fungible tokens minted on-chain with NativeScript signature policy and CIP-25 metadata containing skill, proficiency level, confidence score, and evidence count.
-
-Any third party MUST be able to verify such a credential independently by querying the blockchain for the `policy_id` and `asset_name` and retrieving the metadata. Verification MUST NOT depend on the platform being available.
+The legacy SkillProof NFT path — minting CIP-25 credential metadata on-chain via a NativeScript policy — was **retired** in migration 040 (the `skill_proofs` tables and the `mint_skill_proof_nft` command were dropped). Credentials are now W3C Verifiable Credentials (§14); their on-chain footprint is the metadata-only integrity anchor described in §11.3.2.
 
 **Reputation Snapshots**: CIP-68 soulbound tokens with CBOR-encoded inline datums (reference + user token pair).
 
@@ -701,7 +704,7 @@ Sentinel is a client-side anti-cheat system that monitors assessment integrity t
 1. **Privacy-first** — All behavioral data (keystrokes, mouse movements, video frames) is processed entirely on-device. Only numeric scores and categorical flags are stored and broadcast.
 2. **Non-punitive by default** — Sentinel informs rather than punishes. Flagged sessions surface for review; automated suspensions require multiple strong signals.
 3. **Dual scoring** — Rule-based and AI-based systems run in parallel. Rule-based is authoritative; AI is advisory until validated with labeled data.
-4. **Zero dependencies for AI** — All ML models are hand-written in TypeScript with no external ML frameworks, WASM runtimes, or model downloads.
+4. **On-device, no downloads** — All ML models run on-device with no model downloads or remote inference. The keystroke autoencoder and mouse-trajectory CNN run in Rust on the `candle` framework; the face embedder is hand-written TypeScript (LBP histograms). The retired paste classifier ran via `tract` (pure Rust, weights embedded with `include_bytes!`).
 5. **Incremental trust** — Behavioral profiles build over time. Consistency scoring activates after 10+ samples.
 
 ### 12.3 Signal Taxonomy
@@ -721,7 +724,7 @@ Sentinel is a client-side anti-cheat system that monitors assessment integrity t
 
 ### 12.4 ML Models
 
-Three models, all hand-written in TypeScript with zero external dependencies, trained on-device:
+Three models, trained on-device. The keystroke autoencoder and mouse-trajectory CNN run in Rust on the `candle` ML framework (`src-tauri/src/sentinel/keystroke_ae.rs`, `mouse_cnn.rs`); the face embedder is hand-written TypeScript:
 
 - **Keystroke Autoencoder** (4→8→4→8→4) — Digraph timing features, anomaly detection via reconstruction error. Requires 20+ samples. Threshold: 0.65.
 - **Mouse Trajectory CNN** (Conv1D(3→8)→Conv1D(8→16)→Dense→Sigmoid) — 50-point segments with dx/dy/dt channels. Human threshold: 0.50. Conv layers use reservoir computing (random feature extractors).
@@ -735,7 +738,7 @@ Three models, all hand-written in TypeScript with zero external dependencies, tr
 
 ### 12.6 Trust Factor Propagation
 
-Confirmed violations lower `trust_factor` on `skill_assessments` by 0.20 per violation (floor: 0.10). This propagates through the evidence pipeline — flagged assessment evidence carries less weight in skill proof aggregation and instructor reputation attribution.
+When a session ends `flagged` or `suspended`, the backend records the terminal status + integrity score on the `integrity_sessions` row — that is the trust signal credential issuance reads. A spec-pinned penalty (0.20/critical, 0.10/warning, floor 0.10) is computed for observability and logged. The legacy per-`skill_assessments` / `evidence_records` `trust_factor` decay — and the SkillProof aggregator that consumed it — were retired with those tables in migration 040; there is no per-evidence trust column to mutate anymore.
 
 ### 12.7 Privacy Guarantees
 
@@ -1693,12 +1696,12 @@ The reference implementation is a Tauri v2 application — a single binary that 
 |-----------|------------|---------|
 | Backend | Rust (tokio) | Business logic, wallet, P2P, database, evidence, governance |
 | Frontend | Vue 3, TypeScript, Tailwind CSS v4 | 30 pages, 34 components, 14 composables |
-| Database | SQLite (rusqlite, bundled) | 66 tables, 30 migrations |
+| Database | SQLite (rusqlite, bundled) | ~73 tables, 51 migrations |
 | Content | iroh 0.96 | BLAKE3 content-addressed blob store |
 | P2P | libp2p 0.56 | Kademlia, GossipSub, Relay, DCUtR, request-response/CBOR for `/alexandria/vc-fetch/1.0` |
 | Wallet | pallas 0.35, Stronghold / AES-256-GCM | Conway era transactions, encrypted key storage |
-| Cardano | pallas, Blockfrost | NFT minting, reputation snapshots, governance metadata, VC integrity anchoring (label 1697) |
-| Integrity | TypeScript ML models | Keystroke autoencoder, mouse CNN, face embedder |
+| Cardano | pallas, Blockfrost | VC integrity anchoring (label 1697), DAO governance, completion-witness minting, challenge-stake escrow, CIP-68 soulbound reputation snapshots |
+| Integrity | Rust (candle) + TypeScript | Keystroke autoencoder (candle), mouse CNN (candle), face embedder (hand-written TypeScript LBP) |
 | Tutoring | iroh-live | Video, audio, screenshare (desktop) |
 | CLI | Rust, clap 4 | Developer tooling (`alex`) |
 | **VC sign/verify** | `domain::vc/{mod,canonicalize,context,sign,verify}` | Ed25519Signature2020 detached JWS over RFC 8785 JCS bytes, §14.7 / §14.13 |
@@ -1708,7 +1711,7 @@ The reference implementation is a Tauri v2 application — a single binary that 
 
 ### 15.2 Database
 
-**Engine**: SQLite (rusqlite 0.38, bundled). **Tables**: 66 across 30 migrations.
+**Engine**: SQLite (rusqlite 0.38, bundled). **Tables**: ~73 across 51 migrations.
 
 | Domain | Tables |
 |--------|--------|
@@ -1716,8 +1719,8 @@ The reference implementation is a Tauri v2 application — a single binary that 
 | Taxonomy | `subject_fields`, `subjects`, `skills`, `skill_prerequisites`, `skill_relations`, `taxonomy_versions` |
 | Courses | `courses`, `course_chapters`, `course_elements`, `element_skill_tags` |
 | Learning | `enrollments`, `element_progress`, `course_notes` |
-| Evidence | `skill_assessments`, `evidence_records`, `skill_proofs`, `skill_proof_evidence` |
-| Reputation | `reputation_assertions`, `reputation_evidence`, `reputation_impact_deltas`, `reputation_snapshots` |
+| Credentials | `credentials`, `credential_status_lists`, `key_registry` (the `skill_assessments`, `evidence_records`, `skill_proofs`, `skill_proof_evidence` tables were dropped in migration 040) |
+| Reputation | derived from `credentials`; persisted distribution metrics + `reputation_snapshots` (the `reputation_evidence` and `reputation_impact_deltas` tables were dropped in migration 040) |
 | Integrity | `integrity_sessions`, `integrity_snapshots` |
 | P2P | `peers`, `pins`, `sync_log`, `catalog` |
 | Governance | `governance_daos`, `governance_proposals`, `governance_dao_members`, `governance_elections`, `governance_election_nominees`, `governance_election_votes`, `governance_proposal_votes` |

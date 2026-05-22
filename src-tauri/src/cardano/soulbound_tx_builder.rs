@@ -244,8 +244,11 @@ mod tests {
     }
 
     #[test]
-    fn soulbound_mint_fails_when_validators_not_deployed() {
-        // Since validators aren't deployed, this should return an error
+    fn soulbound_mint_passes_deploy_gate_now_validators_are_deployed() {
+        // The reputation-minting reference script is deployed (preprod,
+        // 2026-05-22), so the builder must get PAST the deploy gate. With
+        // a bogus address + offline test Blockfrost it still fails — but
+        // for a downstream reason, NOT "validators not yet deployed".
         let rt = tokio::runtime::Runtime::new().unwrap();
         let result = rt.block_on(async {
             let bf = BlockfrostClient::new("test_project_id".into()).unwrap();
@@ -264,9 +267,12 @@ mod tests {
             .await
         });
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("validators not yet deployed"));
+        assert!(
+            !result
+                .unwrap_err()
+                .to_string()
+                .contains("validators not yet deployed"),
+            "deploy gate should be open now that the reference script is live"
+        );
     }
 }

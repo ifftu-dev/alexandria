@@ -1,22 +1,26 @@
 //! Cross-device sync protocol.
 //!
 //! Implements private device-to-device synchronization over the P2P
-//! network. Unlike gossip (which is public), sync messages are
-//! encrypted with a key derived from the shared wallet mnemonic.
+//! network. Unlike gossip (which is public), a sync exchange runs over
+//! the `/alexandria/sync/1.0` request-response protocol between two
+//! **explicitly paired** devices (see [`crate::crypto::pairing`]).
 //!
-//! Pairing model: both devices import the same BIP-39 mnemonic.
-//! The sync key is derived via HKDF-SHA256 from the wallet's
-//! Ed25519 signing key + salt "alexandria-cross-device-sync-v1".
+//! Pairing model: the user pairs a new device by transferring a
+//! one-time pairing code (shown on-screen / scanned) out of band. The
+//! code carries a fresh 32-byte `shared_key`; both devices persist it
+//! against the peer in the `devices` table. Every sync payload is then
+//! sealed with AES-256-GCM under that key (on top of the libp2p Noise
+//! transport), so a peer that has not completed pairing — even one
+//! presenting the same stake address — cannot read or inject rows.
 //!
 //! Merge strategies:
-//!   - **LWW** (last-writer-wins by `updated_at`): enrollments,
-//!     element_progress, course_notes
-//!   - **Append-only union** (deduplicate by PK): evidence_records,
-//!     skill_proof_evidence
-//!   - **Derived** (not synced, recomputed): skill_proofs,
-//!     reputation_assertions
+//!   - **LWW** (last-writer-wins by `updated_at`): the tables in
+//!     [`SYNCABLE_TABLES`] (enrollments, element_progress, course_notes).
+//!   - **Settings**: per-key LWW over the `sync`-scoped `app_settings`
+//!     rows (see `settings_outbound_snapshot` / `settings_apply_inbound`).
+//!   - **Derived** (not synced, recomputed locally): reputation_assertions.
 
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::crypto::hash::{blake2b_256, entity_id};
 use crate::domain::sync::{
@@ -777,7 +781,7 @@ pub fn get_sync_status(conn: &Connection) -> Result<SyncStatus, String> {
     Ok(SyncStatus {
         device_count,
         queue_length,
-        auto_sync: false, // Would be loaded from a settings table
+        auto_sync: is_auto_sync_enabled(conn),
         last_sync,
         devices,
     })
@@ -831,6 +835,307 @@ pub fn get_sync_history(conn: &Connection, limit: i64) -> Result<Vec<SyncHistory
         .map_err(|e| e.to_string())?;
 
     Ok(history)
+}
+
+// ===================================================================
+// Explicit device pairing + sealed sync payloads
+// ===================================================================
+
+use crate::crypto::pairing::PairingCode;
+use serde::{Deserialize, Serialize};
+
+/// The full set of rows one device offers another in a sync exchange.
+/// Serialised, sealed with the pair's `shared_key`, and carried inside
+/// a [`crate::p2p::device_sync::SyncRequest`] / `SyncResponse`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SyncPayload {
+    /// `sync`-scoped settings snapshot (per-key LWW on `updated_at`).
+    pub settings: Vec<SettingsSyncRow>,
+    /// Per-table full-state row snapshots, keyed by table name. Only
+    /// tables in [`SYNCABLE_TABLES`] are honoured on apply.
+    pub tables: Vec<(String, Vec<SyncRow>)>,
+}
+
+/// `app_settings` key holding the device-local auto-sync toggle.
+pub const AUTO_SYNC_KEY: &str = "sync.auto_enabled";
+
+/// Whether background auto-sync is enabled on this device.
+pub fn is_auto_sync_enabled(conn: &Connection) -> bool {
+    conn.query_row(
+        "SELECT value FROM app_settings WHERE key = ?1",
+        params![AUTO_SYNC_KEY],
+        |r| r.get::<_, String>(0),
+    )
+    .map(|v| v == "true")
+    .unwrap_or(false)
+}
+
+/// Persist the device-local auto-sync toggle (`scope = 'device'`).
+pub fn set_auto_sync(conn: &Connection, enabled: bool) -> Result<(), String> {
+    conn.execute(
+        "INSERT INTO app_settings (key, value, scope, updated_at) \
+         VALUES (?1, ?2, 'device', datetime('now')) \
+         ON CONFLICT(key) DO UPDATE SET value = ?2, updated_at = datetime('now')",
+        params![AUTO_SYNC_KEY, if enabled { "true" } else { "false" }],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Look up the local identity's stake address (the owning user).
+pub fn local_stake_address(conn: &Connection) -> Result<Option<String>, String> {
+    conn.query_row(
+        "SELECT stake_address FROM local_identity WHERE id = 1",
+        [],
+        |r| r.get::<_, String>(0),
+    )
+    .optional()
+    .map_err(|e| e.to_string())
+}
+
+/// Serialise every row of one syncable table into LWW `SyncRow`s.
+/// Each row's JSON object carries all columns; `id` is the row key and
+/// `updated_at` the LWW timestamp (empty string if the table has none).
+fn table_rows_as_sync(conn: &Connection, table: &str) -> Result<Vec<SyncRow>, String> {
+    use rusqlite::types::ValueRef;
+    let safe = sanitize_table_name(table)?;
+    let mut stmt = conn
+        .prepare(&format!("SELECT * FROM {safe}"))
+        .map_err(|e| e.to_string())?;
+    let col_names: Vec<String> = stmt
+        .column_names()
+        .into_iter()
+        .map(|s| s.to_string())
+        .collect();
+
+    let rows = stmt
+        .query_map([], |row| {
+            let mut obj = serde_json::Map::new();
+            for (i, name) in col_names.iter().enumerate() {
+                let v = match row.get_ref(i)? {
+                    ValueRef::Null => serde_json::Value::Null,
+                    ValueRef::Integer(n) => serde_json::Value::from(n),
+                    ValueRef::Real(f) => serde_json::Value::from(f),
+                    ValueRef::Text(t) => {
+                        serde_json::Value::from(String::from_utf8_lossy(t).to_string())
+                    }
+                    // No blob columns in the syncable tables; base64 keeps
+                    // the snapshot lossless if one is ever added.
+                    ValueRef::Blob(b) => {
+                        use base64::Engine;
+                        serde_json::Value::from(base64::engine::general_purpose::STANDARD.encode(b))
+                    }
+                };
+                obj.insert(name.clone(), v);
+            }
+            let row_id = obj
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string();
+            let updated_at = obj
+                .get("updated_at")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string();
+            Ok(SyncRow {
+                row_id,
+                operation: "update".to_string(),
+                data: Some(serde_json::Value::Object(obj)),
+                updated_at,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(rows)
+}
+
+/// Build this device's outbound sync payload: a settings snapshot plus
+/// a full-state snapshot of every syncable table. Idempotent under the
+/// receiver's LWW merge — re-sending is always safe.
+pub fn build_sync_payload(conn: &Connection) -> Result<SyncPayload, String> {
+    let settings = settings_outbound_snapshot(conn)?;
+    let mut tables = Vec::with_capacity(SYNCABLE_TABLES.len());
+    for table in SYNCABLE_TABLES {
+        tables.push((table.to_string(), table_rows_as_sync(conn, table)?));
+    }
+    Ok(SyncPayload { settings, tables })
+}
+
+/// Apply an inbound payload: per-key settings LWW + per-table row LWW.
+/// Returns `(rows_merged, settings_applied)`. Unknown tables are
+/// skipped (defence against a malformed/hostile payload).
+pub fn apply_sync_payload(conn: &Connection, payload: &SyncPayload) -> Result<(i64, i64), String> {
+    let settings_applied = settings_apply_inbound(conn, &payload.settings)? as i64;
+    let mut merged = 0i64;
+    for (table, rows) in &payload.tables {
+        if !SYNCABLE_TABLES.contains(&table.as_str()) {
+            log::warn!("sync: ignoring non-syncable table '{table}' from peer");
+            continue;
+        }
+        merged += merge_lww_rows(conn, table, rows)?;
+    }
+    Ok((merged, settings_applied))
+}
+
+/// Count of rows carried in a payload (settings + all table rows) —
+/// used for the `rows_received` / `rows_sent` figures in `SyncResult`.
+pub fn payload_row_count(payload: &SyncPayload) -> i64 {
+    payload.settings.len() as i64
+        + payload
+            .tables
+            .iter()
+            .map(|(_, rows)| rows.len() as i64)
+            .sum::<i64>()
+}
+
+/// Seal a payload with the pair's shared key (AES-256-GCM via
+/// [`crate::crypto::content_crypto`]).
+pub fn seal_payload(key: &[u8; 32], payload: &SyncPayload) -> Result<Vec<u8>, String> {
+    let json = serde_json::to_vec(payload).map_err(|e| format!("serialize payload: {e}"))?;
+    crate::crypto::content_crypto::encrypt(key, &json).map_err(|e| format!("seal payload: {e}"))
+}
+
+/// Open a sealed payload produced by [`seal_payload`].
+pub fn open_payload(key: &[u8; 32], sealed: &[u8]) -> Result<SyncPayload, String> {
+    let plaintext = crate::crypto::content_crypto::decrypt(key, sealed)
+        .map_err(|e| format!("open payload: {e}"))?
+        .ok_or_else(|| "payload not encrypted / wrong key".to_string())?;
+    serde_json::from_slice(&plaintext).map_err(|e| format!("parse payload: {e}"))
+}
+
+// ---- pairing persistence ----
+
+/// Record a freshly generated pairing code (by hash) awaiting
+/// acceptance, with a TTL. Old expired rows are swept first.
+pub fn record_pending_pairing(
+    conn: &Connection,
+    code_hash: &str,
+    shared_key: &[u8; 32],
+    ttl_secs: i64,
+) -> Result<(), String> {
+    conn.execute(
+        "DELETE FROM pending_pairings WHERE expires_at < datetime('now')",
+        [],
+    )
+    .map_err(|e| e.to_string())?;
+    conn.execute(
+        "INSERT OR REPLACE INTO pending_pairings (code_hash, shared_key, expires_at) \
+         VALUES (?1, ?2, datetime('now', ?3))",
+        params![code_hash, &shared_key[..], format!("+{ttl_secs} seconds")],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Consume a still-valid pending pairing: return its shared key and
+/// delete the row (single use). Returns `None` if absent or expired.
+/// Called by the initiator when the acceptor makes first contact.
+pub fn take_pending_pairing(
+    conn: &Connection,
+    code_hash: &str,
+) -> Result<Option<[u8; 32]>, String> {
+    let blob: Option<Vec<u8>> = conn
+        .query_row(
+            "SELECT shared_key FROM pending_pairings \
+             WHERE code_hash = ?1 AND expires_at >= datetime('now')",
+            params![code_hash],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+    conn.execute(
+        "DELETE FROM pending_pairings WHERE code_hash = ?1",
+        params![code_hash],
+    )
+    .map_err(|e| e.to_string())?;
+    match blob {
+        Some(b) if b.len() == 32 => {
+            let mut key = [0u8; 32];
+            key.copy_from_slice(&b);
+            Ok(Some(key))
+        }
+        _ => Ok(None),
+    }
+}
+
+/// Persist a completed pairing: upsert the remote device row with its
+/// shared key, peer id, stake address, and `paired = 1`. Also records
+/// the peer's dial addresses in `peers` so the swarm can reconnect.
+pub fn complete_pairing(conn: &Connection, code: &PairingCode) -> Result<(), String> {
+    conn.execute(
+        "INSERT INTO devices \
+         (id, device_name, platform, is_local, peer_id, stake_address, shared_key, paired) \
+         VALUES (?1, ?2, ?3, 0, ?4, ?5, ?6, 1) \
+         ON CONFLICT(id) DO UPDATE SET \
+             device_name = COALESCE(?2, devices.device_name), \
+             platform = COALESCE(?3, devices.platform), \
+             peer_id = ?4, \
+             stake_address = ?5, \
+             shared_key = ?6, \
+             paired = 1, \
+             last_synced = datetime('now')",
+        params![
+            code.device_id,
+            code.device_name,
+            code.platform,
+            code.peer_id,
+            code.stake_address,
+            &code.shared_key[..],
+        ],
+    )
+    .map_err(|e| format!("complete_pairing: {e}"))?;
+
+    if !code.addresses.is_empty() {
+        let addrs_json = serde_json::to_string(&code.addresses).unwrap_or_else(|_| "[]".into());
+        conn.execute(
+            "INSERT INTO peers (peer_id, addresses, last_seen) \
+             VALUES (?1, ?2, datetime('now')) \
+             ON CONFLICT(peer_id) DO UPDATE SET addresses = ?2, last_seen = datetime('now')",
+            params![code.peer_id, addrs_json],
+        )
+        .map_err(|e| format!("complete_pairing peers: {e}"))?;
+    }
+    Ok(())
+}
+
+/// Fetch the shared sync key for a paired peer (by libp2p PeerId).
+pub fn get_pair_key(conn: &Connection, peer_id: &str) -> Result<Option<[u8; 32]>, String> {
+    let blob: Option<Vec<u8>> = conn
+        .query_row(
+            "SELECT shared_key FROM devices WHERE peer_id = ?1 AND paired = 1",
+            params![peer_id],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+    match blob {
+        Some(b) if b.len() == 32 => {
+            let mut key = [0u8; 32];
+            key.copy_from_slice(&b);
+            Ok(Some(key))
+        }
+        Some(_) => Err("stored shared_key is not 32 bytes".to_string()),
+        None => Ok(None),
+    }
+}
+
+/// List paired remote devices as `(device_id, peer_id)` for the sync
+/// driver to dial. Skips rows missing a peer id.
+pub fn list_paired_peers(conn: &Connection) -> Result<Vec<(String, String)>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, peer_id FROM devices \
+             WHERE paired = 1 AND is_local = 0 AND peer_id IS NOT NULL",
+        )
+        .map_err(|e| e.to_string())?;
+    let out = stmt
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(out)
 }
 
 #[cfg(test)]
