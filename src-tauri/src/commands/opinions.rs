@@ -141,14 +141,20 @@ pub async fn publish_opinion(
         for proof_id in &req.credential_proof_ids {
             let ok: bool = conn
                 .query_row(
+                    // Post-VC-first: gate on a W3C VC the user supplies
+                    // (id refers to a `credentials` row). Apply+ proficiency
+                    // is `SkillClaim.level >= 2` read out of `signed_vc_json`.
                     "SELECT CASE WHEN EXISTS ( \
                        SELECT 1 \
-                       FROM skill_proofs p \
-                       JOIN skills s ON s.id = p.skill_id \
+                       FROM credentials c \
+                       JOIN skills s ON s.id = c.skill_id \
                        JOIN subjects sub ON sub.id = s.subject_id \
-                       WHERE p.id = ?1 \
+                       WHERE c.id = ?1 \
+                         AND c.claim_kind = 'skill' \
+                         AND c.revoked = 0 \
                          AND sub.subject_field_id = ?2 \
-                         AND p.proficiency_level IN ('apply','analyze','evaluate','create') \
+                         AND CAST(json_extract(c.signed_vc_json, \
+                                  '$.credentialSubject.level') AS INTEGER) >= 2 \
                      ) THEN 1 ELSE 0 END",
                     rusqlite::params![proof_id, req.subject_field_id],
                     |row| row.get::<_, i64>(0),
@@ -163,7 +169,7 @@ pub async fn publish_opinion(
         if !qualified {
             return Err(format!(
                 "none of the provided credential_proof_ids qualify you to post in '{}' \
-                 — you need at least one skill_proof (level >= apply) under that subject field",
+                 — you need at least one skill credential (apply+ proficiency) under that subject field",
                 req.subject_field_id
             ));
         }
@@ -380,11 +386,18 @@ pub async fn list_eligible_subject_fields_for_posting(
     let mut stmt = db
         .conn()
         .prepare(
+            // Post-VC-first: subject fields where at least one apply+
+            // skill credential exists locally (SkillClaim.level >= 2 in
+            // signed_vc_json). Matches the eligibility check in
+            // `publish_opinion`.
             "SELECT DISTINCT sub.subject_field_id \
-             FROM skill_proofs p \
-             JOIN skills s  ON s.id = p.skill_id \
+             FROM credentials c \
+             JOIN skills s ON s.id = c.skill_id \
              JOIN subjects sub ON sub.id = s.subject_id \
-             WHERE p.proficiency_level IN ('apply','analyze','evaluate','create')",
+             WHERE c.claim_kind = 'skill' \
+               AND c.revoked = 0 \
+               AND CAST(json_extract(c.signed_vc_json, \
+                        '$.credentialSubject.level') AS INTEGER) >= 2",
         )
         .map_err(|e| e.to_string())?;
 
