@@ -209,6 +209,8 @@ To run the flows against preprod:
    `cardano/governance/deploy_reference_scripts.sh` (node-based) or
    `deploy_blockfrost.py` (node-free) regenerate them and update
    `script_refs.rs`.
-2. Export `BLOCKFROST_PROJECT_ID` + `ALEXANDRIA_COMPLETION_POLICY_ID`
+2. Configure Blockfrost: either set `cardano.blockfrost_project_id`
+   in Settings → Cardano (recommended), or export
+   `BLOCKFROST_PROJECT_ID`. Also export `ALEXANDRIA_COMPLETION_POLICY_ID`
    (= `6380450179a6933acdf76213732f8626e1486b9ed5cc7fe7f46c98e0` or
    a re-compiled hash) before starting the node.

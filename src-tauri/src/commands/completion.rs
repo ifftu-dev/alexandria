@@ -255,9 +255,19 @@ async fn submit_witness(
         .try_into()
         .map_err(|_| "root must decode to 32 bytes".to_string())?;
 
-    // Blockfrost — required for tx submission.
-    let project_id = std::env::var("BLOCKFROST_PROJECT_ID").map_err(|_| {
-        "BLOCKFROST_PROJECT_ID not set — cannot submit completion witness".to_string()
+    // Blockfrost — required for tx submission. Prefers the per-device
+    // `cardano.blockfrost_project_id` setting; falls back to the
+    // BLOCKFROST_PROJECT_ID env var.
+    let project_id = {
+        let db_guard = state.db.lock().map_err(|e| e.to_string())?;
+        let conn = db_guard.as_ref().map(|db| db.conn());
+        crate::cardano::blockfrost::resolve_project_id(conn)
+    }
+    .ok_or_else(|| {
+        "Blockfrost project id not configured \
+         (set in Settings → Cardano, or export BLOCKFROST_PROJECT_ID) — \
+         cannot submit completion witness"
+            .to_string()
     })?;
     let bf = BlockfrostClient::new(project_id).map_err(|e| e.to_string())?;
 

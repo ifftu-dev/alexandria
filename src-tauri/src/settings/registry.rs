@@ -322,6 +322,17 @@ pub mod keys {
         default: || String::new(),
     };
 
+    pub const REGISTRY_REFRESH_SECS: SettingKey<u64> = SettingKey {
+        key: "registry.refresh_secs",
+        scope: Scope::Device,
+        category: "Cardano",
+        label: "Stake-pubkey registry refresh interval (seconds)",
+        description: "Cadence at which the stake-pubkey registry reconciles against on-chain \
+             stake_pubkey_registration UTxOs. Clamped up to 60s at runtime to avoid \
+             hammering Blockfrost. Default 3600 (1 hour).",
+        default: || crate::p2p::registry_chain::DEFAULT_REFRESH_SECS,
+    };
+
     // ── Per-device ────────────────────────────────────────────
     pub const DEVICE_LABEL: SettingKey<String> = SettingKey {
         key: "device.label",
@@ -397,6 +408,7 @@ pub fn all_entries(
         entry!(VIDEO_DEFAULT_MUTED),
         entry!(CARDANO_BLOCKFROST_KEY),
         entry!(CARDANO_COMPLETION_POLICY),
+        entry!(REGISTRY_REFRESH_SECS),
         entry!(DEVICE_LABEL),
         entry!(STORAGE_QUOTA_BYTES),
         entry!(WINDOW_GEOMETRY),
@@ -431,6 +443,7 @@ pub fn lookup_meta(key: &str) -> Option<(Scope, &'static str)> {
     check!(VIDEO_DEFAULT_MUTED);
     check!(CARDANO_BLOCKFROST_KEY);
     check!(CARDANO_COMPLETION_POLICY);
+    check!(REGISTRY_REFRESH_SECS);
     check!(DEVICE_LABEL);
     check!(STORAGE_QUOTA_BYTES);
     check!(WINDOW_GEOMETRY);

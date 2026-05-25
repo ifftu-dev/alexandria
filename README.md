@@ -137,14 +137,17 @@ For Android builds:
 
 For on-chain features (NFT wrappers, governance transactions, soulbound/reputation flows):
 
-- **Blockfrost API key**: Sign up at [blockfrost.io](https://blockfrost.io), create a preprod project, set `BLOCKFROST_PROJECT_ID`:
-  ```bash
-  export BLOCKFROST_PROJECT_ID="preprodXXX..."
-  ```
+- **Blockfrost API key**: Sign up at [blockfrost.io](https://blockfrost.io), create a preprod project. Two ways to configure it:
+  - **In-app (recommended)**: Settings → Cardano → "Blockfrost project id". Stored per-device, picked up at runtime without restart.
+  - **Env var (CI / dev scripts)**:
+    ```bash
+    export BLOCKFROST_PROJECT_ID="preprodXXX..."
+    ```
+  The in-app setting takes precedence over the env var.
 - **Testnet ADA**: Fund your wallet address from the [Cardano Faucet](https://docs.cardano.org/cardano-testnets/tools/faucet/) (minimum 5 tADA for wrapper/NFT minting, ~40 tADA for deploying governance validators)
 - **Aiken** (for smart contract development): Install from [aiken-lang.org](https://aiken-lang.org/installation-instructions) v1.1.21+
 
-Without `BLOCKFROST_PROJECT_ID`, the app works fully offline — blockchain features are simply unavailable.
+Without either source set, the app works fully offline — blockchain features are simply unavailable.
 
 ### Development (Desktop)
 
@@ -429,6 +432,8 @@ Use `alex config path` to print this directory on any platform.
 | [Settings](docs/settings.md) | Unified per-profile settings store + cross-device sync + how to add a new setting |
 | [Database Schema](docs/database-schema.md) | All tables + per-profile DB layout |
 | [Protocol Specification](docs/protocol-specification.md) | Wire formats, VC protocol, 13 gossip topics, validation, peer scoring |
+| [Stake-Pubkey Registry](docs/stake-pubkey-registry.md) | Persistent stake-address ↔ gossip pubkey registry that backs privileged-topic authority (replaces in-memory TOFU) |
+| [Stake-Pubkey Runbook](docs/stake-pubkey-registry-runbook.md) | Operational steps: founder keypair ceremony + multisig signing of `bootstrap_registry.json` + preprod smoke test |
 | [Project Structure](docs/project-structure.md) | Directory layouts, module responsibilities |
 | [Skills & Reputation](docs/skills-and-reputation.md) | Skill graph, evidence model, reputation system |
 | [Sentinel](docs/sentinel.md) | Assessment integrity — behavioral fingerprinting, ML models |

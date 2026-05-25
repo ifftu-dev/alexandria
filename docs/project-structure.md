@@ -102,11 +102,12 @@ src-tauri/
     │   ├── types.rs        # 13 gossip topics + shared message types
     │   ├── gossip.rs       # Typed publish helpers
     │   ├── signing.rs      # Gossip envelope signing/verification
-    │   ├── validation.rs   # Freshness/schema/authority checks
-    │   ├── scoring.rs      # Per-topic GossipSub peer scoring
+    │   ├── validation.rs   # Signature, identity (via registry), freshness, dedup, schema, authority
+    │   ├── registry.rs     # stake_pubkey_registry lookups + bootstrap snapshot loader
+    │   ├── registry_chain.rs # Background refresh of registry from on-chain registrations
+    │   ├── scoring.rs      # Per-topic GossipSub peer scoring (12 scored topics)
     │   ├── discovery.rs    # Relay bootstrap + namespace discovery
     │   ├── catalog.rs      # Catalog topic handler
-    │   ├── evidence.rs     # Evidence topic handler
     │   ├── taxonomy.rs     # Taxonomy topic handler
     │   ├── governance.rs   # Governance topic handler
     │   ├── opinions.rs     # Opinions topic handler

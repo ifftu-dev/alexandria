@@ -13,7 +13,7 @@
 | C-1 | **FIXED** | `keystore.rs` now uses Argon2id (64MB/3iter/4lanes) |
 | H-1 | **FIXED** | `signing.rs` now signs SHA-256(topic\|\|timestamp\|\|stake_address\|\|payload) |
 | H-2 | **FIXED** | `governance.rs` verifies sender is committee/chair + transaction-wrapped |
-| H-3 | DEFERRED | Requires identity attestation protocol; TOFU mitigates partially |
+| H-3 | **FIXED** | TOFU replaced by persistent `stake_pubkey_registry` seeded from a multisig-signed bootstrap snapshot and reconciled against on-chain `stake_pubkey_registration` UTxOs (witness-verified). See `docs/stake-pubkey-registry.md`. |
 | H-4 | **FIXED** | `validation.rs` uses LRU cache with capacity eviction |
 | H-5 | **FIXED** | All v-html sites sanitized with DOMPurify |
 | H-6 | PARTIAL | CI warns on placeholder; keypair must be generated manually |

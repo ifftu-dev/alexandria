@@ -8,6 +8,8 @@ pub mod nat;
 pub mod network;
 pub mod opinions;
 pub mod rate_limit;
+pub mod registry;
+pub mod registry_chain;
 pub mod scoring;
 pub mod sentinel;
 pub mod signing;

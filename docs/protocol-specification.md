@@ -135,9 +135,11 @@ BIP32-Ed25519 master key (Icarus / CIP-1852 via pallas-wallet)
     |
     +-- m/1852'/1815'/0'/2/0 --> stake key
                                    +-- bech32: stake_test1...
+                                   +-- signs `stake_pubkey_registration` txs
+                                       (binds stake addr → gossip pubkey)
 ```
 
-The payment key MUST serve as: (1) Cardano payment signing key, (2) GossipSub envelope signing key, (3) content/profile document signing key, and (4) DID-key signing material for the VC layer. The libp2p peer identity is intentionally **not** the payment key — it is derived per device via `HKDF(payment_key, device_id)` so the same mnemonic restored onto multiple devices produces distinct `PeerId`s.
+The payment key MUST serve as: (1) Cardano payment signing key, (2) GossipSub envelope signing key, (3) content/profile document signing key, and (4) DID-key signing material for the VC layer. The libp2p peer identity is intentionally **not** the payment key — it is derived per device via `HKDF(payment_key, device_id)` so the same mnemonic restored onto multiple devices produces distinct `PeerId`s. The stake key signs the `stake_pubkey_registration` transactions that anchor a stake address's gossip-envelope public key on chain (see [`docs/stake-pubkey-registry.md`](./stake-pubkey-registry.md)).
 
 ### 3.2 Vault Storage
 
@@ -156,7 +158,7 @@ Newly-created persistent entity IDs MUST be computed as `hex(blake2b_256(parts.j
 The VC layer follows a versioned variant: a credential's `id` is
 `urn:alexandria:vc:<hex>` where `<hex>` is `entity_id(["vc:v1", issuer_did, subject_did, claim_kind, blake2b(JCS(claim)), valid_from, status_list_id, status_list_index])` (see `domain::vc::id::deterministic_credential_id`). The status-list slot guarantees uniqueness across legitimate re-issuance of the same claim for the same subject.
 
-A handful of legacy entity types (presentation envelopes, PinBoard commitments) still allocate `urn:uuid:` ids; those are tracked as follow-up migrations.
+A handful of legacy entity types (presentation envelopes, PinBoard commitments) still allocate `urn:uuid:` ids; those are tracked as follow-up migrations and SHOULD migrate to deterministic ids before public-launch lock-in.
 
 ### 3.4 DID Identity for the VC Layer
 
@@ -460,13 +462,13 @@ Every incoming gossip message MUST pass through a 6-step validation pipeline. A 
 | Step | Check | Rejection Error |
 |------|-------|-----------------|
 | 1. Signature | Ed25519 verify over canonical bytes | `InvalidSignature` |
-| 2. Identity | Verify public key derives the claimed stake address | `InvalidIdentity` |
+| 2. Identity | For privileged topics (taxonomy, governance, Sentinel priors, plugin DAO attestations), `(stake_address, public_key)` MUST appear in `stake_pubkey_registry` within the current validity window. Non-privileged topics skip. See [`docs/stake-pubkey-registry.md`](./stake-pubkey-registry.md). | `IdentityMismatch` |
 | 3. Freshness | Timestamp within ±5 minutes of local clock | `ExpiredMessage` |
 | 4. Dedup | Blake2b-256 hash not in LRU cache (100,000 entries) | `DuplicateMessage` |
 | 5. Schema | Payload deserialises to expected topic-specific type | `InvalidSchema` |
 | 6. Authority | Topic-specific permission checks (e.g. committee membership for taxonomy) | `Unauthorized` |
 
-The first failing step rejects the message. Validation outcomes MUST feed gossipsub peer scoring via `report_message_validation_result` — `Reject` on protocol-violation failures (signature, envelope parse), `Ignore` on rate-limit drops, `Accept` on success — so the source's per-topic `invalid_message_deliveries` score moves correctly.
+The first failing step rejects the message. Validation outcomes MUST feed gossipsub peer scoring via `report_message_validation_result` — `Reject` on protocol-violation failures (signature, envelope parse, identity binding), `Ignore` on rate-limit drops, `Accept` on success — so the source's per-topic `invalid_message_deliveries` score moves correctly.
 
 ### 6.8 Peer Scoring
 
@@ -508,7 +510,7 @@ Twelve of the thirteen signed topics carry per-topic scoring parameters; peer-ex
 | Profiles | 0.3 | 1.0 | -5.0 | 0.5 |
 | Peer Exchange | *(no scoring profile — unsigned envelopes)* | | | |
 
-Taxonomy and the other privileged-tier topics share the strongest invalid-message penalty because unauthorized publications on those topics are the most dangerous attack vectors. Authoritative values live in `src-tauri/src/p2p/scoring.rs`.
+Taxonomy and the other privileged-tier topics share the strongest invalid-message penalty because unauthorized publications on those topics are the most dangerous attack vectors (corrupt the global skill graph, install rogue committees, poison Sentinel models, or whitelist a malicious plugin). Authoritative values live in `src-tauri/src/p2p/scoring.rs`.
 
 ### 6.9 NAT Traversal
 
@@ -700,7 +702,7 @@ where `H(c)` is `blake3` of the JCS-canonical bytes of the VC (§14.23.2). The f
 
 ### 11.4 Decentralised Identity
 
-The user's 24-word BIP-39 mnemonic IS their identity. Key derivation follows CIP-1852 via pallas-wallet, producing a payment key (m/1852'/1815'/0'/0/0) and a stake key (m/1852'/1815'/0'/2/0). The payment key serves as the Cardano signing key, the message signing key for gossip envelopes, and the DID-key signing material for the VC layer (§14.5). The libp2p peer identity is derived **per device** by HKDF over the payment key plus a device-local secret (`device_id`), so the same mnemonic loaded onto two devices yields distinct `PeerId`s. There is no email, no OAuth, and no custodial wallet service.
+The user's 24-word BIP-39 mnemonic IS their identity. Key derivation follows CIP-1852 via pallas-wallet, producing a payment key (m/1852'/1815'/0'/0/0) and a stake key (m/1852'/1815'/0'/2/0). The payment key serves as the Cardano signing key, the message signing key for gossip envelopes, and the DID-key signing material for the VC layer (§14.5). The libp2p peer identity is derived **per device** by HKDF over the payment key plus a device-local secret (`device_id`), so the same mnemonic loaded onto two devices yields distinct `PeerId`s. The stake key signs `stake_pubkey_registration` transactions that bind the stake address to the gossip-envelope public key for privileged-topic authority (see [`docs/stake-pubkey-registry.md`](./stake-pubkey-registry.md)). There is no email, no OAuth, and no custodial wallet service.
 
 ### 11.5 Selective Disclosure
 

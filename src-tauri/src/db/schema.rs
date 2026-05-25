@@ -59,6 +59,7 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (49, "device_pairing", MIGRATION_049),
     (50, "challenge_stake_lifecycle", MIGRATION_050),
     (51, "element_submission_grader_version", MIGRATION_051),
+    (52, "stake_pubkey_registry", MIGRATION_052),
 ];
 
 const MIGRATION_001: &str = r#"
@@ -2141,4 +2142,36 @@ const MIGRATION_051: &str = r#"
 -- ============================================================
 
 ALTER TABLE element_submissions ADD COLUMN grader_version TEXT NOT NULL DEFAULT '';
+"#;
+
+const MIGRATION_052: &str = r#"
+-- ============================================================
+-- Migration 052: Stake-address → libp2p public-key registry
+--
+-- Replaces the in-memory TOFU binding in
+-- `src-tauri/src/p2p/validation.rs:118-142` with a persistent,
+-- evidence-backed registry. Each row asserts that during the
+-- [valid_from, valid_until) window the named stake address signed
+-- gossip envelopes with the named Ed25519 public key.
+--
+-- Rows are seeded from `bootstrap_registry.json` (multisig-signed by
+-- the org founders) and reconciled in the background against on-chain
+-- StakePubkeyRegistration txs. Chain entries authoritative on conflict.
+-- See docs/stake-pubkey-registry.md for the full design.
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS stake_pubkey_registry (
+    stake_address   TEXT NOT NULL,                       -- Cardano stake addr (bech32)
+    public_key_hex  TEXT NOT NULL,                       -- Ed25519 libp2p pubkey, lowercase hex
+    valid_from      INTEGER NOT NULL,                    -- unix secs
+    valid_until     INTEGER,                             -- unix secs, NULL = open-ended
+    source          TEXT NOT NULL CHECK (source IN ('chain', 'snapshot')),
+    on_chain_tx     TEXT,                                -- tx hash, NULL for snapshot-only
+    snapshot_sig    TEXT,                                -- multisig hex, NULL for chain rows
+    last_verified   INTEGER NOT NULL DEFAULT 0,          -- unix secs of last chain re-check
+    PRIMARY KEY (stake_address, public_key_hex, valid_from)
+);
+
+CREATE INDEX IF NOT EXISTS idx_registry_address_window
+    ON stake_pubkey_registry(stake_address, valid_from, valid_until);
 "#;
