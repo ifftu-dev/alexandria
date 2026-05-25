@@ -1171,7 +1171,11 @@ async fn swarm_event_loop(
             event = swarm.select_next_some() => {
                 match event {
                     SwarmEvent::Behaviour(AlexandriaBehaviourEvent::Gossipsub(
-                        gossipsub::Event::Message { message, .. }
+                        gossipsub::Event::Message {
+                            message,
+                            propagation_source,
+                            message_id,
+                        }
                     )) => {
                         let topic = message.topic.to_string();
                         log::debug!(
@@ -1180,24 +1184,48 @@ async fn swarm_event_loop(
                             message.data.len()
                         );
 
-                        // Rate-limit incoming gossip per source peer
+                        // Rate-limit incoming gossip per source peer. A
+                        // rate-limited peer is not a protocol violation —
+                        // report Ignore so gossipsub drops the message from
+                        // mcache without scoring the sender down.
                         if let Some(source) = message.source {
                             if !rate_limiter.check(&source) {
                                 log::debug!(
                                     "Rate-limited gossip from {source} on {topic} — dropping"
                                 );
+                                let _ = swarm
+                                    .behaviour_mut()
+                                    .gossipsub
+                                    .report_message_validation_result(
+                                        &message_id,
+                                        &propagation_source,
+                                        gossipsub::MessageAcceptance::Ignore,
+                                    );
                                 continue;
                             }
                         }
 
                         // Peer exchange messages are NOT signed envelopes —
-                        // handle them separately before the validation pipeline.
+                        // handle them separately before the validation
+                        // pipeline. We Accept them so gossipsub propagates
+                        // and the peer-exchange handler does the rest.
                         if topic == TOPIC_PEER_EXCHANGE {
                             handle_peer_exchange(&mut swarm, &message.data);
+                            let _ = swarm
+                                .behaviour_mut()
+                                .gossipsub
+                                .report_message_validation_result(
+                                    &message_id,
+                                    &propagation_source,
+                                    gossipsub::MessageAcceptance::Accept,
+                                );
                             continue;
                         }
 
-                        // Step 1: Deserialize the signed envelope
+                        // Step 1: Deserialize the signed envelope. A
+                        // malformed envelope is a protocol violation —
+                        // Reject so gossipsub scores the source down via
+                        // the topic's invalid_message_deliveries weight.
                         let envelope = match serde_json::from_slice::<SignedGossipMessage>(
                             &message.data,
                         ) {
@@ -1206,21 +1234,50 @@ async fn swarm_event_loop(
                                 log::debug!(
                                     "Dropping message on {topic}: invalid envelope: {e}"
                                 );
+                                let _ = swarm
+                                    .behaviour_mut()
+                                    .gossipsub
+                                    .report_message_validation_result(
+                                        &message_id,
+                                        &propagation_source,
+                                        gossipsub::MessageAcceptance::Reject,
+                                    );
                                 continue;
                             }
                         };
 
                         // Step 2: Run the full validation pipeline
-                        // (signature, freshness, dedup, schema, authority)
+                        // (signature, freshness, dedup, schema, authority).
+                        // Failure here is also a protocol violation; Reject
+                        // feeds the per-topic P4 (invalid_message_deliveries)
+                        // weight in `p2p::scoring`.
                         if let Err(e) = validator.validate(&envelope) {
                             log::debug!(
                                 "Dropping message on {topic} from {}: {e}",
                                 envelope.stake_address
                             );
+                            let _ = swarm
+                                .behaviour_mut()
+                                .gossipsub
+                                .report_message_validation_result(
+                                    &message_id,
+                                    &propagation_source,
+                                    gossipsub::MessageAcceptance::Reject,
+                                );
                             continue;
                         }
 
-                        // Step 3: Forward validated message to the application layer
+                        // Step 3: Accept so gossipsub propagates the
+                        // message and rewards first-delivery scoring,
+                        // then forward to the application layer.
+                        let _ = swarm
+                            .behaviour_mut()
+                            .gossipsub
+                            .report_message_validation_result(
+                                &message_id,
+                                &propagation_source,
+                                gossipsub::MessageAcceptance::Accept,
+                            );
                         let _ = event_tx.send(P2pEvent::GossipMessage {
                             topic,
                             message: envelope,

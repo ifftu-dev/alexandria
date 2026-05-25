@@ -9,7 +9,6 @@
 use ed25519_dalek::SigningKey;
 use rusqlite::{params, Connection, OptionalExtension};
 use tauri::State;
-use uuid::Uuid;
 
 use crate::crypto::did::{derive_did_key, Did, VerificationMethodRef};
 use crate::crypto::wallet;
@@ -55,7 +54,6 @@ pub fn issue_credential_impl(
     let list_id = ensure_status_list(conn, issuer_did)?;
     let index = allocate_status_index(conn, &list_id)?;
 
-    let credential_id = format!("urn:uuid:{}", Uuid::new_v4());
     let type_name = serde_plain_variant(&req.credential_type);
 
     // Build the VC envelope; sign_credential will stamp proof.jws.
@@ -67,6 +65,18 @@ pub fn issue_credential_impl(
     }
     let claim_kind = claim.kind_str();
     let skill_id = claim.skill_id().map(str::to_string);
+
+    // Deterministic VC id per spec §3.3 — hash of issuer/subject/claim/
+    // validFrom + status-list slot. Must be derived AFTER evidence_refs
+    // are folded in so the hash covers the final claim contents.
+    let credential_id = crate::domain::vc::id::deterministic_credential_id(
+        issuer_did,
+        &req.subject,
+        &claim,
+        now,
+        &list_id,
+        index,
+    )?;
 
     let vc = VerifiableCredential {
         context: vec![W3C_VC_V1.into(), ALEXANDRIA_V1.into()],
@@ -811,7 +821,7 @@ mod tests {
         let vc =
             issue_credential_impl(db.conn(), &key, &issuer, &sample_request(subject), NOW).unwrap();
         assert!(!vc.proof.jws.is_empty());
-        assert!(vc.id.as_deref().unwrap().starts_with("urn:uuid:"));
+        assert!(vc.id.as_deref().unwrap().starts_with("urn:alexandria:vc:"));
         let status = vc.credential_status.expect("status attached");
         assert_eq!(status.status_list_index, "0");
         assert!(status

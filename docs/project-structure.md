@@ -99,7 +99,7 @@ src-tauri/
     │
     ├── p2p/                # libp2p network stack
     │   ├── network.rs      # Swarm, relay bootstrap, event loop
-    │   ├── types.rs        # 11 gossip topics + shared message types
+    │   ├── types.rs        # 13 gossip topics + shared message types
     │   ├── gossip.rs       # Typed publish helpers
     │   ├── signing.rs      # Gossip envelope signing/verification
     │   ├── validation.rs   # Freshness/schema/authority checks

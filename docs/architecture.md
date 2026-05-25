@@ -133,11 +133,13 @@ BIP32-Ed25519 master key (Icarus / CIP-1852 via pallas-wallet)
                                    +-- bech32: stake_test1...
 ```
 
-The same Ed25519 key serves as:
+The payment key (m/1852'/1815'/0'/0/0) serves as:
 1. Cardano payment signing key
-2. libp2p peer identity
-3. GossipSub message signing key
-4. Content/profile document signing key
+2. GossipSub message signing key (envelope signature in `SignedGossipMessage`)
+3. Content/profile document signing key
+4. DID-key signing material for the VC layer
+
+The libp2p peer identity is derived **per device** via `HKDF(payment_key, device_id)` so the same mnemonic on two devices produces distinct `PeerId`s.
 
 ### Vault Storage
 
@@ -290,11 +292,13 @@ devices.
 ### Validation Pipeline (6 steps)
 
 1. **Signature** — Ed25519 verify (covers all envelope fields: topic, timestamp, stake_address, payload)
-2. **Identity Binding** — TOFU: binds stake_address to public_key on first encounter, rejects mismatches
+2. **Identity Binding** — verify public key matches the claimed stake address
 3. **Freshness** — within ±5 minutes
 4. **Dedup** — Blake2b-256 hash in LRU cache (100K entries, least-recently-used eviction)
 5. **Schema** — valid JSON
-6. **Authority** — taxonomy messages require committee membership
+6. **Authority** — taxonomy/governance handlers re-check committee membership
+
+Validation outcomes feed directly into gossipsub peer scoring: `Reject` on signature or envelope-parse failure penalises the source through the per-topic `invalid_message_deliveries` weight (see `p2p/scoring.rs`); `Accept` rewards first-delivery scoring for valid messages.
 
 ### Rate Limiting
 
@@ -302,7 +306,7 @@ Per-peer token-bucket rate limiter (20 messages per 60 seconds, 1 refill per 3 s
 
 ### Dynamic Topics
 
-In addition to the 11 global topics, classrooms use per-classroom dynamic topics:
+In addition to the 13 global topics, classrooms use per-classroom dynamic topics:
 - Message topic: `/alexandria/classroom/{id}/1.0`
 - Meta topic: `/alexandria/classroom/{id}/meta/1.0`
 

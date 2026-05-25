@@ -15,37 +15,52 @@ use std::time::Duration;
 use libp2p::gossipsub::{IdentTopic, PeerScoreParams, PeerScoreThresholds, TopicScoreParams};
 
 use super::types::{
-    TOPIC_CATALOG, TOPIC_GOVERNANCE, TOPIC_OPINIONS, TOPIC_PROFILES, TOPIC_TAXONOMY,
+    ALL_TOPICS, TOPIC_CATALOG, TOPIC_GOVERNANCE, TOPIC_OPINIONS, TOPIC_PEER_EXCHANGE,
+    TOPIC_PINBOARD, TOPIC_PLUGINS, TOPIC_PLUGIN_ATTESTATIONS, TOPIC_PROFILES,
+    TOPIC_SENTINEL_PRIORS, TOPIC_TAXONOMY, TOPIC_VC_DID, TOPIC_VC_PRESENTATION, TOPIC_VC_STATUS,
 };
+
+/// Classification used to pick a topic's scoring profile.
+///
+/// Tagged so the mapping from `ALL_TOPICS` to scoring parameters is
+/// exhaustive: a new topic added to [`crate::p2p::types::ALL_TOPICS`]
+/// has to be classified here, or `build_peer_score_params` will fail
+/// the regression test that asserts full coverage.
+fn classify_topic(topic: &str) -> Option<TopicScoreParams> {
+    match topic {
+        // ---- Privileged DAO-authorised topics --------------------------
+        TOPIC_TAXONOMY => Some(topic_params_taxonomy()),
+        TOPIC_GOVERNANCE => Some(topic_params_governance()),
+        TOPIC_SENTINEL_PRIORS => Some(topic_params_sentinel_priors()),
+        TOPIC_PLUGIN_ATTESTATIONS => Some(topic_params_plugin_attestations()),
+        // ---- VC layer (medium-value signed credentials / status) -------
+        TOPIC_VC_DID | TOPIC_VC_STATUS | TOPIC_VC_PRESENTATION => Some(topic_params_vc_layer()),
+        TOPIC_PINBOARD => Some(topic_params_vc_layer()),
+        // ---- Community content -----------------------------------------
+        TOPIC_CATALOG => Some(topic_params_catalog()),
+        TOPIC_OPINIONS => Some(topic_params_opinions()),
+        TOPIC_PROFILES => Some(topic_params_profiles()),
+        TOPIC_PLUGINS => Some(topic_params_plugins()),
+        // ---- Peer exchange is not gossiped as signed envelopes; the
+        //      scoring layer doesn't apply to it.
+        TOPIC_PEER_EXCHANGE => None,
+        _ => None,
+    }
+}
 
 /// Build Alexandria-specific GossipSub peer score parameters.
 ///
-/// Configures per-topic scoring for all five gossip topics with
-/// parameters tuned for the Alexandria network's message patterns.
+/// Iterates `ALL_TOPICS` and pulls a [`TopicScoreParams`] for each via
+/// [`classify_topic`]. The peer-exchange topic intentionally has no
+/// scoring entry — it carries unsigned PeerInfo bundles that bypass
+/// the signed-envelope validation pipeline.
 pub fn build_peer_score_params() -> PeerScoreParams {
     let mut topics = HashMap::new();
-
-    // Insert per-topic params for each gossip topic
-    topics.insert(
-        IdentTopic::new(TOPIC_CATALOG).hash(),
-        topic_params_catalog(),
-    );
-    topics.insert(
-        IdentTopic::new(TOPIC_TAXONOMY).hash(),
-        topic_params_taxonomy(),
-    );
-    topics.insert(
-        IdentTopic::new(TOPIC_GOVERNANCE).hash(),
-        topic_params_governance(),
-    );
-    topics.insert(
-        IdentTopic::new(TOPIC_PROFILES).hash(),
-        topic_params_profiles(),
-    );
-    topics.insert(
-        IdentTopic::new(TOPIC_OPINIONS).hash(),
-        topic_params_opinions(),
-    );
+    for &topic in ALL_TOPICS {
+        if let Some(params) = classify_topic(topic) {
+            topics.insert(IdentTopic::new(topic).hash(), params);
+        }
+    }
 
     PeerScoreParams {
         topics,
@@ -252,9 +267,124 @@ fn topic_params_opinions() -> TopicScoreParams {
     }
 }
 
+// ---------------------------------------------------------------------------
+// New-topic profiles (post-migration 040 surface)
+// ---------------------------------------------------------------------------
+
+/// Sentinel adversarial priors — Sentinel DAO threshold-signed
+/// announcements of approved adversarial models. As privileged as
+/// taxonomy: only the Sentinel committee may publish.
+fn topic_params_sentinel_priors() -> TopicScoreParams {
+    TopicScoreParams {
+        topic_weight: 1.0,
+        time_in_mesh_weight: 0.5,
+        time_in_mesh_quantum: Duration::from_secs(1),
+        time_in_mesh_cap: 100.0,
+        first_message_deliveries_weight: 4.0,
+        first_message_deliveries_decay: 0.95,
+        first_message_deliveries_cap: 10.0,
+        mesh_message_deliveries_weight: -0.1,
+        mesh_message_deliveries_decay: 0.95,
+        mesh_message_deliveries_cap: 5.0,
+        mesh_message_deliveries_threshold: 1.0,
+        mesh_message_deliveries_window: Duration::from_millis(500),
+        mesh_message_deliveries_activation: Duration::from_secs(60),
+        mesh_failure_penalty_weight: -0.5,
+        mesh_failure_penalty_decay: 0.95,
+        // Strong penalty: forged Sentinel priors poison every node's
+        // adversarial model library.
+        invalid_message_deliveries_weight: -50.0,
+        invalid_message_deliveries_decay: 0.3,
+    }
+}
+
+/// Plugin DAO attestations — threshold-signed `(plugin_cid,
+/// grader_cid)` approvals. Mirrors taxonomy/governance authority.
+fn topic_params_plugin_attestations() -> TopicScoreParams {
+    TopicScoreParams {
+        topic_weight: 1.0,
+        time_in_mesh_weight: 0.5,
+        time_in_mesh_quantum: Duration::from_secs(1),
+        time_in_mesh_cap: 100.0,
+        first_message_deliveries_weight: 3.0,
+        first_message_deliveries_decay: 0.95,
+        first_message_deliveries_cap: 10.0,
+        mesh_message_deliveries_weight: -0.1,
+        mesh_message_deliveries_decay: 0.95,
+        mesh_message_deliveries_cap: 5.0,
+        mesh_message_deliveries_threshold: 1.0,
+        mesh_message_deliveries_window: Duration::from_millis(500),
+        mesh_message_deliveries_activation: Duration::from_secs(60),
+        mesh_failure_penalty_weight: -0.5,
+        mesh_failure_penalty_decay: 0.95,
+        // As severe as taxonomy: a forged attestation can grant
+        // credential-eligibility to a malicious plugin.
+        invalid_message_deliveries_weight: -50.0,
+        invalid_message_deliveries_decay: 0.3,
+    }
+}
+
+/// VC layer (vc-did, vc-status, vc-presentation, pinboard).
+///
+/// Medium-value signed credentials, credential-status snapshots,
+/// selective-disclosure presentations, and PinBoard commitments. Each
+/// envelope carries a strong intrinsic signature, so most invalid
+/// messages are spam rather than active attacks.
+fn topic_params_vc_layer() -> TopicScoreParams {
+    TopicScoreParams {
+        topic_weight: 0.6,
+        time_in_mesh_weight: 0.5,
+        time_in_mesh_quantum: Duration::from_secs(1),
+        time_in_mesh_cap: 100.0,
+        first_message_deliveries_weight: 2.0,
+        first_message_deliveries_decay: 0.9,
+        first_message_deliveries_cap: 40.0,
+        mesh_message_deliveries_weight: -0.3,
+        mesh_message_deliveries_decay: 0.9,
+        mesh_message_deliveries_cap: 15.0,
+        mesh_message_deliveries_threshold: 1.0,
+        mesh_message_deliveries_window: Duration::from_millis(500),
+        mesh_message_deliveries_activation: Duration::from_secs(30),
+        mesh_failure_penalty_weight: -0.3,
+        mesh_failure_penalty_decay: 0.9,
+        // Moderate: bad VC envelope = wasted bandwidth, not a
+        // governance attack.
+        invalid_message_deliveries_weight: -15.0,
+        invalid_message_deliveries_decay: 0.5,
+    }
+}
+
+/// Plugin announcements — user-published plugin manifest CIDs. Open
+/// publish surface, similar abuse profile to catalog but cheaper to
+/// produce than a full course.
+fn topic_params_plugins() -> TopicScoreParams {
+    TopicScoreParams {
+        topic_weight: 0.4,
+        time_in_mesh_weight: 0.5,
+        time_in_mesh_quantum: Duration::from_secs(1),
+        time_in_mesh_cap: 100.0,
+        first_message_deliveries_weight: 1.5,
+        first_message_deliveries_decay: 0.9,
+        first_message_deliveries_cap: 30.0,
+        mesh_message_deliveries_weight: -0.5,
+        mesh_message_deliveries_decay: 0.9,
+        mesh_message_deliveries_cap: 15.0,
+        mesh_message_deliveries_threshold: 1.0,
+        mesh_message_deliveries_window: Duration::from_millis(500),
+        mesh_message_deliveries_activation: Duration::from_secs(30),
+        mesh_failure_penalty_weight: -0.5,
+        mesh_failure_penalty_decay: 0.9,
+        // Mid-range: plugins can ship grader code, so an invalid
+        // announcement is more interesting than an invalid profile.
+        invalid_message_deliveries_weight: -15.0,
+        invalid_message_deliveries_decay: 0.5,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::p2p::types::ALL_TOPICS;
 
     #[test]
     fn peer_score_params_are_valid() {
@@ -274,30 +404,57 @@ mod tests {
     #[test]
     fn all_scored_topics_have_params() {
         let params = build_peer_score_params();
-        // catalog, taxonomy, governance, profiles, opinions — evidence
-        // topic removed post-migration 040.
+        // Every subscribed topic except peer-exchange must have a
+        // scoring profile. If this fails after adding a topic to
+        // `ALL_TOPICS`, extend `classify_topic` in scoring.rs.
+        let expected = ALL_TOPICS
+            .iter()
+            .filter(|t| **t != TOPIC_PEER_EXCHANGE)
+            .count();
         assert_eq!(
             params.topics.len(),
-            5,
-            "should have params for catalog, taxonomy, governance, profiles, opinions"
+            expected,
+            "expected one scoring profile per non-peer-exchange topic in ALL_TOPICS"
         );
     }
 
     #[test]
-    fn taxonomy_has_strongest_invalid_penalty() {
+    fn taxonomy_has_strongest_invalid_penalty_tie_with_other_privileged() {
         let params = build_peer_score_params();
         let taxonomy_hash = IdentTopic::new(TOPIC_TAXONOMY).hash();
         let taxonomy_params = params.topics.get(&taxonomy_hash).unwrap();
+        for topic_params in params.topics.values() {
+            assert!(
+                taxonomy_params.invalid_message_deliveries_weight
+                    <= topic_params.invalid_message_deliveries_weight,
+                "taxonomy P4 should be <= all other topics"
+            );
+        }
+    }
 
-        // Taxonomy should have the strongest P4 penalty (most negative)
+    #[test]
+    fn privileged_topics_have_strongest_invalid_penalty() {
+        let params = build_peer_score_params();
+        let privileged = [
+            TOPIC_TAXONOMY,
+            TOPIC_GOVERNANCE,
+            TOPIC_SENTINEL_PRIORS,
+            TOPIC_PLUGIN_ATTESTATIONS,
+        ];
+        // Non-privileged topics should have a weaker (less negative)
+        // P4 penalty than each privileged topic.
         for (hash, topic_params) in &params.topics {
-            if *hash != taxonomy_hash {
-                assert!(
-                    taxonomy_params.invalid_message_deliveries_weight
-                        <= topic_params.invalid_message_deliveries_weight,
-                    "taxonomy P4 should be <= all other topics"
-                );
+            let is_privileged = privileged
+                .iter()
+                .any(|t| IdentTopic::new(*t).hash() == *hash);
+            if is_privileged {
+                continue;
             }
+            assert!(
+                topic_params.invalid_message_deliveries_weight >= -30.0,
+                "non-privileged topic P4 {} should be weaker than privileged",
+                topic_params.invalid_message_deliveries_weight
+            );
         }
     }
 
@@ -319,5 +476,20 @@ mod tests {
         assert!(topic_params_taxonomy().validate().is_ok());
         assert!(topic_params_governance().validate().is_ok());
         assert!(topic_params_profiles().validate().is_ok());
+        assert!(topic_params_opinions().validate().is_ok());
+        assert!(topic_params_sentinel_priors().validate().is_ok());
+        assert!(topic_params_plugin_attestations().validate().is_ok());
+        assert!(topic_params_vc_layer().validate().is_ok());
+        assert!(topic_params_plugins().validate().is_ok());
+    }
+
+    #[test]
+    fn peer_exchange_has_no_scoring_profile() {
+        let params = build_peer_score_params();
+        let pe_hash = IdentTopic::new(TOPIC_PEER_EXCHANGE).hash();
+        assert!(
+            !params.topics.contains_key(&pe_hash),
+            "peer-exchange traffic intentionally bypasses scoring"
+        );
     }
 }

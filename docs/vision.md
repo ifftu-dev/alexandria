@@ -58,9 +58,9 @@ Elections use 2/3 supermajority voting. Taxonomy updates are committee-gated and
 
 ### No Single Point of Failure
 
-Course content lives in iroh, a BLAKE3 content-addressed blob store on each device. Credentials can be minted on Cardano (Conway era). Identity is derived from a 24-word BIP-39 mnemonic — the same Ed25519 key serves as Cardano payment key, libp2p peer identity, and message signing key. Peer discovery happens through a private Kademlia DHT with relay-based NAT traversal.
+Course content lives in iroh, a BLAKE3 content-addressed blob store on each device. Credentials can be anchored on Cardano (Conway era). Identity is derived from a 24-word BIP-39 mnemonic: the Cardano payment key (CIP-1852) doubles as the gossip-envelope signing key, while the libp2p peer identity is derived per device via HKDF over the payment key plus a device-local secret — so the same mnemonic on two devices produces distinct `PeerId`s. Peer discovery happens through a private Kademlia DHT with relay-based NAT traversal.
 
-If Alexandria the organisation disappeared tomorrow, every learner's credentials would remain verifiable on-chain, every piece of content would remain in the iroh stores of every node that pinned it, and every reputation record would remain intact.
+If Alexandria the organisation disappeared tomorrow, every learner's locally-held credentials would remain verifiable, every anchored credential would remain provable on-chain, and every piece of content would remain in the iroh stores of every node that pinned it. Discovery of *new* peers still depends on a hardcoded set of Alexandria relay nodes today — fully infrastructure-independent bootstrap (DNS seeds + user-pinned bootstrap lists) is on the post-launch roadmap.
 
 ### Offline-First by Design
 

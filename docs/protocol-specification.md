@@ -126,14 +126,18 @@ BIP32-Ed25519 master key (Icarus / CIP-1852 via pallas-wallet)
     |
     +-- m/1852'/1815'/0'/0/0 --> payment key (signing + verification)
     |                              +-- bech32: addr_test1...
-    |                              +-- libp2p Ed25519 keypair
-    |                                    +-- PeerId: 12D3KooW...
+    |                              +-- GossipSub envelope signing key
+    |                              +-- DID-key signing material (VC §14.5)
+    |                              |
+    |                              +-- HKDF(payment_key, device_id)
+    |                                    +-- per-device libp2p Ed25519 keypair
+    |                                          +-- PeerId: 12D3KooW...
     |
     +-- m/1852'/1815'/0'/2/0 --> stake key
                                    +-- bech32: stake_test1...
 ```
 
-The same Ed25519 key MUST serve as: (1) Cardano payment signing key, (2) libp2p peer identity, (3) GossipSub message signing key, and (4) content/profile document signing key.
+The payment key MUST serve as: (1) Cardano payment signing key, (2) GossipSub envelope signing key, (3) content/profile document signing key, and (4) DID-key signing material for the VC layer. The libp2p peer identity is intentionally **not** the payment key — it is derived per device via `HKDF(payment_key, device_id)` so the same mnemonic restored onto multiple devices produces distinct `PeerId`s.
 
 ### 3.2 Vault Storage
 
@@ -147,7 +151,12 @@ Both platforms MUST enforce a minimum 12-character password. The Wallet struct M
 
 ### 3.3 Deterministic Entity IDs
 
-All entity IDs MUST be computed as `hex(blake2b_256(parts.join("|")))` instead of server-generated UUIDs. This ensures deterministic, collision-resistant identifiers derived from entity properties.
+Newly-created persistent entity IDs MUST be computed as `hex(blake2b_256(parts.join("|")))` (see `crypto::hash::entity_id`) rather than server-generated UUIDs. This ensures deterministic, collision-resistant identifiers derived from entity properties, gives the gossip mesh free dedup, and lets a verifier re-derive an id from the underlying inputs.
+
+The VC layer follows a versioned variant: a credential's `id` is
+`urn:alexandria:vc:<hex>` where `<hex>` is `entity_id(["vc:v1", issuer_did, subject_did, claim_kind, blake2b(JCS(claim)), valid_from, status_list_id, status_list_index])` (see `domain::vc::id::deterministic_credential_id`). The status-list slot guarantees uniqueness across legitimate re-issuance of the same claim for the same subject.
+
+A handful of legacy entity types (presentation envelopes, PinBoard commitments) still allocate `urn:uuid:` ids; those are tracked as follow-up migrations.
 
 ### 3.4 DID Identity for the VC Layer
 
@@ -350,7 +359,7 @@ Alexandria uses libp2p 0.56 to build a fully decentralized P2P network where eve
 | 6 | Sync | Cross-device sync (encrypted, LWW/append-only) |
 | 5 | Domain | Catalog, Evidence, Taxonomy, Governance, Profiles, Classrooms |
 | 4 | Validation | Signature, Identity, Freshness, Dedup, Schema, Authority |
-| 3 | GossipSub | 6 global + per-classroom topics, peer scoring, rate limiting |
+| 3 | GossipSub | 13 global topics + per-classroom dynamic topics, peer scoring, rate limiting |
 | 2 | Transport | QUIC, TCP, Kademlia, AutoNAT, Relay, DCUtR |
 | 1 | Crypto | Ed25519, Blake2b-256, SHA-256 |
 
@@ -457,7 +466,7 @@ Every incoming gossip message MUST pass through a 6-step validation pipeline. A 
 | 5. Schema | Payload deserialises to expected topic-specific type | `InvalidSchema` |
 | 6. Authority | Topic-specific permission checks (e.g. committee membership for taxonomy) | `Unauthorized` |
 
-The first failing step rejects the message.
+The first failing step rejects the message. Validation outcomes MUST feed gossipsub peer scoring via `report_message_validation_result` — `Reject` on protocol-violation failures (signature, envelope parse), `Ignore` on rate-limit drops, `Accept` on success — so the source's per-topic `invalid_message_deliveries` score moves correctly.
 
 ### 6.8 Peer Scoring
 
@@ -484,16 +493,22 @@ The first failing step rejects the message.
 
 #### 6.8.3 Per-Topic Parameters
 
+Twelve of the thirteen signed topics carry per-topic scoring parameters; peer-exchange traffic intentionally bypasses scoring because its payload is unsigned. The privileged-tier topics (taxonomy, governance, Sentinel priors, plugin DAO attestations) share the strongest `invalid_message_deliveries_weight = -50.0` because forging an entry on any of them produces a global, persistent harm.
+
 | Topic | Weight | First Delivery | Invalid Penalty | Invalid Decay |
 |-------|--------|----------------|-----------------|---------------|
-| Catalog | 0.5 | 2.0 | -10.0 | 0.5 |
-| Evidence | 0.7 | 3.0 | -15.0 | 0.5 |
 | **Taxonomy** | **1.0** | **5.0** | **-50.0** | **0.3** |
+| **Sentinel Priors** | **1.0** | **4.0** | **-50.0** | **0.3** |
+| **Plugin Attestations** | **1.0** | **3.0** | **-50.0** | **0.3** |
 | Governance | 0.8 | 3.0 | -30.0 | 0.3 |
+| VC layer (vc-did, vc-status, vc-presentation, pinboard) | 0.6 | 2.0 | -15.0 | 0.5 |
+| Plugins | 0.4 | 1.5 | -15.0 | 0.5 |
+| Catalog | 0.5 | 2.0 | -10.0 | 0.5 |
+| Opinions | 0.4 | 1.5 | -20.0 | 0.5 |
 | Profiles | 0.3 | 1.0 | -5.0 | 0.5 |
-| Peer Exchange | 0.3 | 1.0 | -5.0 | 0.5 |
+| Peer Exchange | *(no scoring profile — unsigned envelopes)* | | | |
 
-Taxonomy has the highest weight and strongest invalid message penalty because unauthorized taxonomy updates are the most dangerous attack vector (could corrupt the global skill graph). Governance is second-most sensitive.
+Taxonomy and the other privileged-tier topics share the strongest invalid-message penalty because unauthorized publications on those topics are the most dangerous attack vectors. Authoritative values live in `src-tauri/src/p2p/scoring.rs`.
 
 ### 6.9 NAT Traversal
 
@@ -685,7 +700,7 @@ where `H(c)` is `blake3` of the JCS-canonical bytes of the VC (§14.23.2). The f
 
 ### 11.4 Decentralised Identity
 
-The user's 24-word BIP-39 mnemonic IS their identity. Key derivation follows CIP-1852 via pallas-wallet. The same Ed25519 key serves as Cardano payment key, libp2p peer identity, and message signing key. There is no email, no OAuth, and no custodial wallet service.
+The user's 24-word BIP-39 mnemonic IS their identity. Key derivation follows CIP-1852 via pallas-wallet, producing a payment key (m/1852'/1815'/0'/0/0) and a stake key (m/1852'/1815'/0'/2/0). The payment key serves as the Cardano signing key, the message signing key for gossip envelopes, and the DID-key signing material for the VC layer (§14.5). The libp2p peer identity is derived **per device** by HKDF over the payment key plus a device-local secret (`device_id`), so the same mnemonic loaded onto two devices yields distinct `PeerId`s. There is no email, no OAuth, and no custodial wallet service.
 
 ### 11.5 Selective Disclosure
 
@@ -1737,7 +1752,7 @@ Key design decisions: deterministic IDs via `hex(blake2b_256(parts.join("|")))`,
 
 ### 15.3 Test Suite
 
-589 library unit tests (`cargo test --lib`) and 40 end-to-end VC tests (`cargo test --test e2e_vc`), all passing with 0 ignored at the v0.1.0-alpha release. Coverage spans the `crypto`, `db`, `p2p`, `evidence`, `cardano`, `domain`, `aggregation`, `commands`, and `ipfs` modules. ~1500 lines of P2P stress tests cover high-volume gossip (200+ messages), concurrent validation (1000 messages / 10 threads), sync conflicts, and adversarial inputs. The §14.26 worked example is locked in by `tests/e2e_vc/aggregation.rs`.
+700+ library unit tests (`cargo test -p alexandria-node --lib`; run for current count) and 40 end-to-end VC tests (`cargo test --test e2e_vc`), all passing with 0 ignored at the latest pre-launch revision. Coverage spans the `crypto`, `db`, `p2p`, `evidence`, `cardano`, `domain`, `aggregation`, `commands`, and `ipfs` modules. ~1500 lines of P2P stress tests cover high-volume gossip (200+ messages), concurrent validation (1000 messages / 10 threads), sync conflicts, and adversarial inputs. The §14.26 worked example is locked in by `tests/e2e_vc/aggregation.rs`.
 
 ---
 

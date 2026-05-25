@@ -20,7 +20,6 @@
 
 use ed25519_dalek::SigningKey;
 use rusqlite::{params, Connection, OptionalExtension};
-use uuid::Uuid;
 
 use crate::cardano::completion::{self, CompletionObservation};
 use crate::crypto::did::{did_from_verifying_key, Did, VerificationMethodRef};
@@ -136,7 +135,6 @@ pub fn issue_for_observation(
     let list_id = ensure_status_list(conn, learner_did)?;
     let index = allocate_status_index(conn, &list_id)?;
 
-    let credential_id = format!("urn:uuid:{}", Uuid::new_v4());
     let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
 
     // Self-asserted course-completion claim. The properties land
@@ -157,6 +155,17 @@ pub fn issue_for_observation(
             ),
         ]),
     });
+
+    // Deterministic VC id per spec §3.3 — derived from issuer + subject
+    // + claim + validFrom + status-list slot, not a random UUID.
+    let credential_id = crate::domain::vc::id::deterministic_credential_id(
+        learner_did,
+        learner_did,
+        &claim,
+        &now,
+        &list_id,
+        index,
+    )?;
 
     let witness = Witness {
         tx_hash: obs.tx_hash.clone(),
