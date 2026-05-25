@@ -386,20 +386,25 @@ pub struct KnownPeer {
     pub addresses: Vec<String>,
 }
 
-pub async fn start_node(
-    keypair: Keypair,
-    event_tx: mpsc::Sender<P2pEvent>,
-    known_peers: Vec<KnownPeer>,
-) -> Result<P2pNode, NetworkError> {
-    start_node_with_db(keypair, event_tx, known_peers, None).await
-}
-
-/// Variant of `start_node` that wires a `Database` into the swarm
-/// event loop so inbound vc-fetch requests can be answered against
-/// local credentials. Without a DB the event loop responds with
-/// `FetchResponse::NotFound` to every request — preserves the
-/// previous "not yet wired" semantics for any caller that doesn't
-/// opt in.
+/// Start the libp2p swarm.
+///
+/// `db` is the active-profile database handle. Pass `Some(...)` in
+/// production so that:
+///
+/// - the gossip validator's registry-backed identity check for
+///   privileged topics is active (without it the check fail-opens
+///   and any peer can publish taxonomy/governance/Sentinel-prior
+///   traffic),
+/// - inbound `/alexandria/vc-fetch/1.0` requests are answered against
+///   local credentials (without it the swarm replies
+///   `FetchResponse::NotFound` to every request).
+///
+/// Pass `None` only from tests / dev tooling that intentionally want
+/// the no-DB behaviour — `start_node_with_db` logs a `WARN` in that
+/// case so a misconfigured production build is loud rather than
+/// silently dormant. The previous `start_node(...)` convenience
+/// wrapper that hard-coded `None` was deleted in 2026-05 after it
+/// shipped silently as the production path for a release window.
 pub async fn start_node_with_db(
     keypair: Keypair,
     event_tx: mpsc::Sender<P2pEvent>,
@@ -670,13 +675,33 @@ pub async fn start_node_with_db(
     // Create command channel
     let (command_tx, command_rx) = mpsc::channel::<SwarmCommand>(256);
 
-    // Create the message validator (shared via Arc for the event loop)
-    let validator = Arc::new(MessageValidator::new());
+    // Create the message validator (shared via Arc for the event
+    // loop). When a DB handle is available, wire it so privileged-
+    // topic messages can be authorized against
+    // `stake_pubkey_registry`; otherwise the validator fails-open on
+    // the identity check.
+    //
+    // Production callers MUST pass a DB. We log a `WARN` on the
+    // no-DB path so a misconfigured release is loud at the very
+    // first line of every node startup — silent dormancy is exactly
+    // how a prior release shipped with the registry check
+    // accidentally disabled.
+    let validator = Arc::new(match db.clone() {
+        Some(handle) => MessageValidator::with_db(handle),
+        None => {
+            log::warn!(
+                "start_node_with_db: no DB handle provided — privileged-topic identity \
+                 binding will fail-open AND inbound /alexandria/vc-fetch/1.0 requests \
+                 will all reply NotFound. Production callers must pass Some(db); \
+                 the no-DB path exists for tests / dev tooling only."
+            );
+            MessageValidator::new()
+        }
+    });
 
-    // Spawn the swarm event loop. The db handle (None for the
-    // legacy `start_node` entry point, populated by
-    // `start_node_with_db`) lets the loop answer inbound vc-fetch
-    // requests synchronously.
+    // Spawn the swarm event loop. The db handle (None for tests /
+    // dev tooling, populated by every production call site) lets
+    // the loop answer inbound vc-fetch requests synchronously.
     tokio::spawn(swarm_event_loop(swarm, command_rx, event_tx, validator, db));
 
     diag::log("start_node: event loop spawned, node running");
@@ -1899,7 +1924,7 @@ mod tests {
         let keypair = derive_libp2p_keypair(&[0x42u8; 32], &TEST_DEVICE_ID).unwrap();
         let (event_tx, _event_rx) = mpsc::channel(16);
 
-        let mut node = start_node(keypair, event_tx, vec![])
+        let mut node = start_node_with_db(keypair, event_tx, vec![], None)
             .await
             .expect("node should start");
 

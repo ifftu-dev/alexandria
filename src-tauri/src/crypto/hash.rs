@@ -1,8 +1,9 @@
-use blake2::digest::consts::U32;
+use blake2::digest::consts::{U28, U32};
 use blake2::{Blake2b, Digest};
 use sha2::Sha256;
 
 type Blake2b256 = Blake2b<U32>;
+type Blake2b224 = Blake2b<U28>;
 
 /// Compute Blake2b-256 hash of the input bytes.
 pub fn blake2b_256(data: &[u8]) -> [u8; 32] {
@@ -10,6 +11,18 @@ pub fn blake2b_256(data: &[u8]) -> [u8; 32] {
     hasher.update(data);
     let result = hasher.finalize();
     let mut output = [0u8; 32];
+    output.copy_from_slice(&result);
+    output
+}
+
+/// Compute Blake2b-224 hash of the input bytes. Used to derive
+/// Cardano key hashes from raw Ed25519 verification keys (stake key
+/// hash = `Blake2b-224(vkey_bytes)`).
+pub fn blake2b_224(data: &[u8]) -> [u8; 28] {
+    let mut hasher = Blake2b224::new();
+    hasher.update(data);
+    let result = hasher.finalize();
+    let mut output = [0u8; 28];
     output.copy_from_slice(&result);
     output
 }

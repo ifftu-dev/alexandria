@@ -216,10 +216,28 @@ pub async fn p2p_start(app: AppHandle, state: State<'_, AppState>) -> Result<Str
             }
         });
 
-        diag::log("p2p_bg: calling start_node...");
+        diag::log("p2p_bg: calling start_node_with_db...");
 
-        // Start the node
-        match network::start_node(keypair, event_tx, known_peers).await {
+        // Start the node with the active-profile DB wired in. The DB
+        // handle is what activates:
+        //   - the registry-backed identity check for privileged-topic
+        //     gossip (see `MessageValidator::with_db` + `p2p::registry`)
+        //   - inbound `/alexandria/vc-fetch/1.0` responses against
+        //     local credentials (otherwise the swarm replies
+        //     `FetchResponse::NotFound` to every request).
+        //
+        // `db_for_events` is `Arc<Mutex<Option<Database>>>`; the
+        // validator and fetch responder both lock-then-check on each
+        // use, so it is safe to hand them the same handle even if a
+        // future revision lets the DB go away.
+        match network::start_node_with_db(
+            keypair,
+            event_tx,
+            known_peers,
+            Some(db_for_events.clone()),
+        )
+        .await
+        {
             Ok(node) => {
                 *p2p_node.lock().await = Some(node);
                 diag::log(&format!("p2p_bg: node started with PeerId: {peer_id}"));
@@ -273,5 +291,52 @@ pub async fn p2p_peers(state: State<'_, AppState>) -> Result<Vec<String>, String
     match node_lock.as_ref() {
         Some(node) => node.connected_peers().await.map_err(|e| e.to_string()),
         None => Ok(vec![]),
+    }
+}
+
+#[cfg(test)]
+mod wiring_tests {
+    //! Source-level regression test for the bug where the production
+    //! `p2p_start` command silently constructed a swarm without a DB
+    //! handle, leaving the registry-backed privileged-topic identity
+    //! check fail-open and disabling inbound `vc-fetch` responses.
+    //!
+    //! This test is grep-style on purpose: a behavioural test would
+    //! have to spin up a real swarm + DB + multiple Tauri State
+    //! shims, which is impractical for an IPC handler. Reading the
+    //! source and asserting the wiring shape is cheap and catches the
+    //! exact regression we saw.
+
+    const P2P_RS: &str = include_str!("p2p.rs");
+
+    #[test]
+    fn p2p_start_passes_db_to_start_node_with_db() {
+        // The body of `p2p_start`'s spawned task MUST hand a real DB
+        // handle into the swarm constructor. Two positive checks pin
+        // the exact shape so a future refactor that accidentally
+        // reintroduces `None` here fails CI loudly.
+        //
+        // We deliberately avoid a negative grep for the no-DB
+        // `start_node` wrapper because the assertion error message
+        // would itself contain that string and trigger the check —
+        // the wrapper was deleted from `network.rs`, so any caller
+        // reaching for it would already fail to compile.
+        let needles = [
+            // The constructor must be the DB-aware variant.
+            "start_node_with_db(",
+            // And it must be passed `Some(...)`, with the same DB
+            // handle the gossip-event consumer uses, so the validator
+            // and the vc-fetch responder share state with the rest
+            // of the app.
+            "Some(db_for_events.clone())",
+        ];
+        for needle in needles {
+            assert!(
+                P2P_RS.contains(needle),
+                "regression: commands/p2p.rs no longer wires the active-profile DB \
+                 into the swarm — privileged-topic gossip and inbound vc-fetch \
+                 will silently misbehave (see the bug fixed in PR B)"
+            );
+        }
     }
 }

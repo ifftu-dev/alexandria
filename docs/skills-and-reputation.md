@@ -141,7 +141,7 @@ Schemas are designed as authoritative inputs for LLM reasoning:
 - A **credential** can be challenged via stake-based challenges (5 ADA staked at the `challenge_escrow.ak` validator, 2/3 supermajority vote); on uphold the credential is revoked via its RevocationList2020 status list
 - Multi-party completion-attestation requirements for high-stakes courses (`commands::attestation`)
 - Behavioral integrity scores from the Sentinel anti-cheat system feed the trust signal on flagged assessments
-- Identity binding via TOFU (Trust On First Use) in the P2P validation pipeline
+- Identity binding via the persistent `stake_pubkey_registry` in the P2P validation pipeline (see [`docs/stake-pubkey-registry.md`](./stake-pubkey-registry.md))
 
 ---
 

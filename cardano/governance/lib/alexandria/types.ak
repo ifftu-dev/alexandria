@@ -316,3 +316,32 @@ pub type VoteReceiptRedeemer {
   /// Burn after finalization
   BurnReceipt
 }
+
+// ─── Stake-address → pubkey registration ────────────────────────────────────
+
+/// On-chain attestation that a stake address has bound itself to a
+/// specific Ed25519 public key for gossip-envelope signing.
+///
+/// Posted as an inline datum on a UTXO sent to the `stake_pubkey_registration`
+/// script address. The script is intentionally immutable (always fails on
+/// spend) — to invalidate a binding the issuer publishes a new
+/// registration with a non-overlapping validity window.
+///
+/// Security is anchored off-chain: the verifier scanning the registry
+/// address rejects any entry whose creating transaction is NOT signed
+/// by the claimed `stake_key_hash` (`tx.extra_signatories`).
+///
+/// Mirrors the SQLite `stake_pubkey_registry` schema (migration 052)
+/// and the Rust types in `src-tauri/src/p2p/registry.rs`.
+pub type StakePubkeyRegistrationDatum {
+  /// Blake2b-224 hash of the stake key being registered. The off-chain
+  /// reader recomputes this from the bech32 stake address (`stake1u…`)
+  /// and matches it against the tx witness set.
+  stake_key_hash: VerificationKeyHash,
+  /// The 32-byte Ed25519 public key the stake address is bound to.
+  public_key: ByteArray,
+  /// POSIX seconds — start of the binding's validity window.
+  valid_from: Int,
+  /// POSIX seconds — end of the window, or 0 for an open-ended binding.
+  valid_until: Int,
+}

@@ -349,6 +349,15 @@ impl AppState {
             .run_migrations()
             .map_err(|e| format!("database migrations failed: {e}"))?;
 
+        // Seed `stake_pubkey_registry` from the bundled
+        // bootstrap snapshot. No-op when the placeholder file is still
+        // empty (pre-launch). See `docs/stake-pubkey-registry.md`.
+        match crate::p2p::registry::load_embedded_bootstrap(database.conn()) {
+            Ok(n) if n > 0 => log::info!("stake-pubkey registry: seeded {n} rows from bootstrap"),
+            Ok(_) => {}
+            Err(e) => log::warn!("stake-pubkey registry: bootstrap seed failed: {e}"),
+        }
+
         #[cfg(feature = "dev-seed")]
         {
             if let Err(e) = crate::db::seed::seed_if_empty(database.conn()) {
@@ -540,12 +549,21 @@ pub fn run() {
                     tokio::time::sleep(std::time::Duration::from_secs(10)).await;
 
                     loop {
-                        // Try to create a Blockfrost client from env
-                        let bf = std::env::var("BLOCKFROST_PROJECT_ID")
-                            .ok()
-                            .and_then(|id| {
-                                cardano::blockfrost::BlockfrostClient::new(id).ok()
-                            });
+                        // Try to create a Blockfrost client from the
+                        // active profile's `cardano.blockfrost_project_id`
+                        // setting (read fresh each tick so the queue
+                        // picks up changes without restart). Falls
+                        // back to the `BLOCKFROST_PROJECT_ID` env var.
+                        let project_id = {
+                            let guard = db_for_queue.lock().ok();
+                            let conn = guard
+                                .as_deref()
+                                .and_then(|opt| opt.as_ref())
+                                .map(|db| db.conn());
+                            cardano::blockfrost::resolve_project_id(conn)
+                        };
+                        let bf = project_id
+                            .and_then(|id| cardano::blockfrost::BlockfrostClient::new(id).ok());
 
                         // Derive wallet from the unlocked keystore. If the vault
                         // is still locked (keystore is None), wallet will be None
@@ -653,6 +671,86 @@ pub fn run() {
 
                         tokio::time::sleep(std::time::Duration::from_secs(60)).await;
                     }
+                });
+            }
+
+            // Stake-address → pubkey registry refresh.
+            //
+            // Polls the on-chain `stake_pubkey_registration` script
+            // address every `registry.refresh_secs` (default 3600) and
+            // reconciles entries into the per-profile
+            // `stake_pubkey_registry` table.
+            //
+            // Both the Blockfrost project id and the refresh
+            // interval are resolved **fresh on every tick** via the
+            // factory closures handed to `spawn_refresh_task`. That
+            // means:
+            //   - the refresh task starts immediately at app boot
+            //     even if no profile has been unlocked yet;
+            //   - once the operator unlocks a profile and sets
+            //     `cardano.blockfrost_project_id`, the next tick
+            //     picks it up without an app restart;
+            //   - tuning `registry.refresh_secs` is live.
+            // Previous shape returned `forever` at app start if the
+            // env var was unset, permanently disabling the chain
+            // refresh for the session.
+            {
+                let db_for_registry = db.clone();
+                diag::log("spawning stake-pubkey registry refresh task");
+                tauri::async_runtime::spawn(async move {
+                    // Tiny startup-grace delay so this task doesn't
+                    // race the profile bootstrap path for the DB
+                    // mutex on first launch. After this, the inner
+                    // loop's `BOOTSTRAP_REFRESH_SECS` cadence handles
+                    // a still-locked profile — first useful tick
+                    // fires within ~30 s of unlock.
+                    tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+
+                    let db_for_resolve = db_for_registry.clone();
+                    let fetcher_factory = move || -> Option<Arc<dyn p2p::registry_chain::ChainFetcher>> {
+                        let project_id = {
+                            let guard = db_for_resolve.lock().ok();
+                            let conn = guard
+                                .as_deref()
+                                .and_then(|opt| opt.as_ref())
+                                .map(|db| db.conn());
+                            cardano::blockfrost::resolve_project_id(conn)
+                        }?;
+                        let bf = cardano::blockfrost::BlockfrostClient::new(project_id).ok()?;
+                        Some(Arc::new(p2p::registry_chain::BlockfrostFetcher::new(
+                            Arc::new(bf),
+                            // Preprod for the launch window; revisit
+                            // when mainnet config selection lands.
+                            cardano::stake_pubkey::Network::Preprod,
+                        )))
+                    };
+
+                    let db_for_interval = db_for_registry.clone();
+                    let interval_factory = move || -> u64 {
+                        let guard = db_for_interval.lock().ok();
+                        let conn = guard
+                            .as_deref()
+                            .and_then(|opt| opt.as_ref())
+                            .map(|db| db.conn());
+                        match conn {
+                            Some(c) => settings::store::SettingsStore::get(
+                                c,
+                                settings::registry::keys::REGISTRY_REFRESH_SECS,
+                            ),
+                            None => p2p::registry_chain::DEFAULT_REFRESH_SECS,
+                        }
+                    };
+
+                    // Refresh task owns itself for the app lifetime; we
+                    // don't hold the JoinHandle because the runtime
+                    // tears it down on shutdown anyway. The interior
+                    // loop in spawn_refresh_task swallows transient
+                    // Blockfrost errors.
+                    let _handle = p2p::registry_chain::spawn_refresh_task(
+                        db_for_registry,
+                        fetcher_factory,
+                        interval_factory,
+                    );
                 });
             }
 

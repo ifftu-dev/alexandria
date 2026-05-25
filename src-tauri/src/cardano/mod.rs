@@ -11,5 +11,6 @@ pub mod plutus_data;
 pub mod script_refs;
 pub mod snapshot;
 pub mod soulbound_tx_builder;
+pub mod stake_pubkey;
 pub mod tx_builder;
 pub mod types;

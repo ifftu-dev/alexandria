@@ -62,7 +62,7 @@ pub const TEST_NOW: &str = "2026-04-13T00:00:00Z";
 // Each test costs ~10–15s wall-clock.
 // ---------------------------------------------------------------------------
 
-use app_lib::p2p::network::{derive_libp2p_keypair, start_node, start_node_with_db, P2pNode};
+use app_lib::p2p::network::{derive_libp2p_keypair, start_node_with_db, P2pNode};
 use app_lib::p2p::types::P2pEvent;
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
@@ -84,7 +84,7 @@ pub async fn start_test_node(
     }
     let kp = derive_libp2p_keypair(&seed, &TEST_DEVICE_ID).ok()?;
     let (tx, rx) = mpsc::channel::<P2pEvent>(capacity);
-    match start_node(kp, tx, vec![]).await {
+    match start_node_with_db(kp, tx, vec![], None).await {
         Ok(node) => Some((node, rx)),
         Err(err) => {
             eprintln!("SKIP: node `{role}` failed to start ({err:?})");

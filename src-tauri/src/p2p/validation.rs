@@ -4,27 +4,33 @@
 //! pipeline before being forwarded to the application layer:
 //!
 //! 1. **Signature**: Ed25519 signature over the payload is valid.
-//! 2. **Freshness**: Timestamp is within ±5 minutes of local time.
-//! 3. **Deduplication**: Blake2b-256 hash of payload not in seen cache.
-//! 4. **Schema**: Payload is valid JSON (topic-specific schema validation
+//! 2. **Identity binding** (privileged topics only): the
+//!    `(stake_address, public_key)` pair is registered in
+//!    `stake_pubkey_registry` for the current timestamp. See
+//!    `docs/stake-pubkey-registry.md` and [`crate::p2p::registry`].
+//! 3. **Freshness**: Timestamp is within ±5 minutes of local time.
+//! 4. **Deduplication**: Blake2b-256 hash of payload not in seen cache.
+//! 5. **Schema**: Payload is valid JSON (topic-specific schema validation
 //!    is deferred to the domain handlers in later PRs).
-//! 5. **Authority**: For taxonomy updates, verify the signer is a DAO
-//!    committee member (stubbed — requires on-chain lookup).
+//! 6. **Authority**: For taxonomy updates, verify the signer is a DAO
+//!    committee member (the domain handler does the heavy check; this
+//!    step is a lightweight gate).
 //!
 //! Per spec (§7.3): "Invalid messages are dropped silently. Peers that
 //! repeatedly send invalid messages are scored down by GossipSub's
 //! peer scoring mechanism, eventually disconnected."
 
-use std::collections::HashMap;
 use std::num::NonZeroUsize;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use lru::LruCache;
 use thiserror::Error;
 
 use crate::crypto::hash::blake2b_256;
+use crate::db::Database;
 
+use super::registry;
 use super::signing::verify_gossip_signature;
 use super::types::{SignedGossipMessage, TOPIC_TAXONOMY};
 
@@ -39,7 +45,7 @@ const DEDUP_CACHE_MAX: usize = 100_000;
 pub enum ValidationError {
     #[error("signature verification failed: {0}")]
     InvalidSignature(String),
-    #[error("identity mismatch: stake_address '{stake_address}' previously bound to different public key")]
+    #[error("identity not in registry: stake_address '{stake_address}' has no current binding for the signing public key (see docs/stake-pubkey-registry.md)")]
     IdentityMismatch { stake_address: String },
     #[error("message too old: timestamp {timestamp} is {age_secs}s in the past (max {FRESHNESS_WINDOW_SECS}s)")]
     TooOld { timestamp: u64, age_secs: u64 },
@@ -60,27 +66,45 @@ pub type ValidationResult = Result<(), ValidationError>;
 
 /// The message validator.
 ///
-/// Maintains an LRU dedup cache of seen payload hashes and an identity
-/// binding table (TOFU: trust-on-first-use) that maps stake addresses
-/// to their first-seen public key. Thread-safe via interior mutability
-/// (`Mutex`) so it can be shared across the async swarm event loop.
+/// Holds an LRU dedup cache and an optional `Database` handle. The
+/// handle is used by [`check_identity_binding`](MessageValidator::check_identity_binding)
+/// to look up `(stake_address, public_key)` bindings in
+/// `stake_pubkey_registry` for privileged topics. Validators without a
+/// DB handle (legacy `start_node` entry, unit tests) fail-open on the
+/// identity check — they're intended for non-privileged paths only.
+///
+/// Thread-safe via interior mutability (`Mutex`) so it can be shared
+/// across the async swarm event loop.
 pub struct MessageValidator {
     /// LRU cache of Blake2b-256 hashes (hex) of previously seen payloads.
     /// When full, the least-recently-used entry is evicted (no replay
     /// window, unlike the previous full-clear strategy).
     seen: Mutex<LruCache<String, ()>>,
-    /// TOFU identity bindings: stake_address → first-seen public_key (hex).
-    /// Once a stake_address is bound to a public key, messages claiming
-    /// the same stake_address with a different key are rejected.
-    identity_bindings: Mutex<HashMap<String, String>>,
+    /// Database handle for `stake_pubkey_registry` lookups. `None` when
+    /// the validator is constructed via [`MessageValidator::new`] (legacy
+    /// path, tests). Production wires this via
+    /// [`MessageValidator::with_db`].
+    db: Option<Arc<Mutex<Option<Database>>>>,
 }
 
 impl MessageValidator {
-    /// Create a new validator with an empty dedup cache and identity table.
+    /// Create a validator with no DB handle. Privileged-topic messages
+    /// will fail-open on the identity check; intended for the legacy
+    /// `start_node` path and tests that only exercise non-privileged
+    /// topics.
     pub fn new() -> Self {
         Self {
             seen: Mutex::new(LruCache::new(NonZeroUsize::new(DEDUP_CACHE_MAX).unwrap())),
-            identity_bindings: Mutex::new(HashMap::new()),
+            db: None,
+        }
+    }
+
+    /// Create a validator wired to the active profile's database so the
+    /// identity binding step can consult `stake_pubkey_registry`.
+    pub fn with_db(db: Arc<Mutex<Option<Database>>>) -> Self {
+        Self {
+            seen: Mutex::new(LruCache::new(NonZeroUsize::new(DEDUP_CACHE_MAX).unwrap())),
+            db: Some(db),
         }
     }
 
@@ -105,42 +129,57 @@ impl MessageValidator {
             .map_err(|e| ValidationError::InvalidSignature(e.to_string()))
     }
 
-    /// Step 1.5: TOFU identity binding — verify public key consistency.
+    /// Step 1.5: identity binding via the persistent stake-pubkey
+    /// registry.
     ///
-    /// On first contact, the (stake_address, public_key) pair is recorded.
-    /// Subsequent messages from the same stake_address MUST use the same
-    /// public_key — otherwise the message is rejected as an impersonation
-    /// attempt.
+    /// For **privileged** topics (taxonomy, governance, Sentinel
+    /// priors, plugin DAO attestations) the
+    /// `(stake_address, public_key)` pair MUST appear in
+    /// `stake_pubkey_registry` within a window covering the current
+    /// time. Non-privileged topics skip the check so arbitrary peers
+    /// can still gossip catalog/profile/opinion traffic.
     ///
-    /// This prevents an attacker from signing with their own key while
-    /// claiming another user's stake_address. Without on-chain lookup,
-    /// this TOFU model is the best available local defense.
+    /// If the validator was constructed without a DB handle
+    /// ([`MessageValidator::new`]) the check fails-open — privileged
+    /// topics aren't expected on that path.
     fn check_identity_binding(&self, message: &SignedGossipMessage) -> ValidationResult {
-        let pubkey_hex = hex::encode(&message.public_key);
-        let mut bindings = self
-            .identity_bindings
-            .lock()
-            .map_err(|_| ValidationError::Internal("identity bindings lock poisoned".into()))?;
-
-        match bindings.get(&message.stake_address) {
-            Some(existing_key) if *existing_key != pubkey_hex => {
-                log::warn!(
-                    "Identity mismatch: stake_address '{}' bound to key '{}' but message has '{}'",
-                    message.stake_address,
-                    &existing_key[..16],
-                    &pubkey_hex[..16],
-                );
-                Err(ValidationError::IdentityMismatch {
-                    stake_address: message.stake_address.clone(),
-                })
-            }
-            Some(_) => Ok(()), // Same key — consistent identity
-            None => {
-                // First time seeing this stake_address — bind it
-                bindings.insert(message.stake_address.clone(), pubkey_hex);
-                Ok(())
-            }
+        if !registry::is_privileged_topic(&message.topic) {
+            return Ok(());
         }
+        let Some(db_handle) = &self.db else {
+            // Fail-open: this validator wasn't given a DB. Production
+            // callers always use `with_db`; tests construct via
+            // `new`. A privileged-topic message reaching this branch
+            // in production means startup wiring is broken — log a
+            // WARN per message so the dormancy is loud rather than
+            // silent. The `start_node_with_db` no-DB warning fires
+            // once at boot; this one fires per offending message so
+            // it survives log rotation.
+            log::warn!(
+                "validator: privileged-topic '{}' accepted WITHOUT registry check \
+                 (no DB handle) — wiring bug or test fixture",
+                message.topic
+            );
+            return Ok(());
+        };
+        let guard = db_handle
+            .lock()
+            .map_err(|_| ValidationError::Internal("db handle lock poisoned".into()))?;
+        let Some(db) = guard.as_ref() else {
+            // DB not open yet (profile not active) — refuse rather
+            // than fail-open. Privileged messages received while the
+            // registry is unavailable must wait for the profile to
+            // come online.
+            return Err(ValidationError::Internal(
+                "no active profile DB; cannot consult stake-pubkey registry".into(),
+            ));
+        };
+        registry::check_message(db.conn(), message).map_err(|e| {
+            log::warn!("registry rejection on {}: {e}", message.topic);
+            ValidationError::IdentityMismatch {
+                stake_address: message.stake_address.clone(),
+            }
+        })
     }
 
     /// Step 2: Check that the message timestamp is within ±5 minutes.
@@ -236,12 +275,6 @@ impl MessageValidator {
     #[cfg(test)]
     pub fn seen_count(&self) -> usize {
         self.seen.lock().unwrap().len()
-    }
-
-    /// Get the number of known identity bindings.
-    #[cfg(test)]
-    pub fn identity_count(&self) -> usize {
-        self.identity_bindings.lock().unwrap().len()
     }
 }
 
@@ -389,17 +422,23 @@ mod tests {
     }
 
     // -- Identity binding tests --
+    //
+    // The old TOFU model is gone (see docs/stake-pubkey-registry.md);
+    // for non-privileged topics every signed message passes the
+    // identity step. The registry-backed checks for privileged topics
+    // are exercised below in
+    // `privileged_topic_*` tests using a real in-memory DB.
 
     #[test]
-    fn identity_binding_accepts_consistent_key() {
+    fn non_privileged_topic_accepts_any_consistent_key() {
         let key = test_key();
         let validator = MessageValidator::new();
 
         let msg1 = valid_message(&key, "/alexandria/catalog/1.0");
         assert!(validator.validate(&msg1).is_ok());
 
-        // Second message from same key + same stake_address should pass
-        // (different payload so dedup doesn't trigger)
+        // Different payload, same key + address — still passes (no
+        // registry check on catalog).
         let msg2 = sign_gossip_message(
             "/alexandria/catalog/1.0",
             b"{\"second\":true}".to_vec(),
@@ -410,13 +449,15 @@ mod tests {
     }
 
     #[test]
-    fn identity_binding_rejects_different_key_same_address() {
+    fn non_privileged_topic_accepts_different_keys_same_address() {
+        // Pre-launch, no TOFU: anyone can sign catalog/profile/opinion
+        // traffic. Authority is enforced at the registry layer for
+        // privileged topics only.
         let key1 = test_key();
         let key2 = test_key();
         let validator = MessageValidator::new();
         let stake_address = "stake_test1uqfu74w3wh4gfzu8m6e7j987h4lq9r3t7ef5gaw497uu8q0kd9u4";
 
-        // First message from key1 — binds the address
         let msg1 = sign_gossip_message(
             "/alexandria/catalog/1.0",
             b"{\"first\":true}".to_vec(),
@@ -425,18 +466,14 @@ mod tests {
         );
         assert!(validator.validate(&msg1).is_ok());
 
-        // Second message from key2 claiming same stake_address — should be rejected
         let msg2 = sign_gossip_message(
             "/alexandria/catalog/1.0",
-            b"{\"impersonation\":true}".to_vec(),
+            b"{\"second\":true}".to_vec(),
             &key2,
             stake_address,
         );
-        let result = validator.validate(&msg2);
-        assert!(
-            matches!(result, Err(ValidationError::IdentityMismatch { .. })),
-            "different key claiming same stake_address should be rejected"
-        );
+        // Catalog is non-privileged — passes despite different key.
+        assert!(validator.validate(&msg2).is_ok());
     }
 
     #[test]
@@ -460,6 +497,127 @@ mod tests {
             "stake_test1user2",
         );
         assert!(validator.validate(&msg2).is_ok());
+    }
+
+    // -- Registry-backed privileged-topic tests --
+
+    fn db_handle() -> Arc<Mutex<Option<Database>>> {
+        let db = Database::open_in_memory().expect("in-memory db");
+        db.run_migrations().expect("migrations");
+        Arc::new(Mutex::new(Some(db)))
+    }
+
+    #[test]
+    fn privileged_topic_rejects_unregistered_key() {
+        let key = test_key();
+        let validator = MessageValidator::with_db(db_handle());
+        let msg = sign_gossip_message(
+            super::TOPIC_TAXONOMY,
+            b"{\"version\":1}".to_vec(),
+            &key,
+            "stake_test1uqfu74w3wh4gfzu8m6e7j987h4lq9r3t7ef5gaw497uu8q0kd9u4",
+        );
+        let res = validator.validate(&msg);
+        assert!(
+            matches!(res, Err(ValidationError::IdentityMismatch { .. })),
+            "unregistered key on a privileged topic must be rejected: {res:?}"
+        );
+    }
+
+    #[test]
+    fn privileged_topic_accepts_registered_key() {
+        use crate::p2p::registry;
+        let key = test_key();
+        let handle = db_handle();
+        // Seed registry with a snapshot entry binding the stake address
+        // to this key for an open-ended window.
+        {
+            let guard = handle.lock().unwrap();
+            let db = guard.as_ref().unwrap();
+            let pubkey_hex = hex::encode(key.verifying_key().to_bytes());
+            registry::upsert_snapshot_entry(
+                db.conn(),
+                &registry::SnapshotEntry {
+                    stake_address:
+                        "stake_test1uqfu74w3wh4gfzu8m6e7j987h4lq9r3t7ef5gaw497uu8q0kd9u4".into(),
+                    public_key_hex: pubkey_hex,
+                    valid_from: 0,
+                    valid_until: None,
+                    on_chain_tx: None,
+                },
+                None,
+            )
+            .unwrap();
+        }
+        let validator = MessageValidator::with_db(handle);
+        let msg = sign_gossip_message(
+            super::TOPIC_TAXONOMY,
+            b"{\"version\":1}".to_vec(),
+            &key,
+            "stake_test1uqfu74w3wh4gfzu8m6e7j987h4lq9r3t7ef5gaw497uu8q0kd9u4",
+        );
+        assert!(validator.validate(&msg).is_ok());
+    }
+
+    #[test]
+    fn privileged_topic_without_db_fails_open() {
+        // `MessageValidator::new()` produces a validator without a DB
+        // handle (legacy path / unit tests). Privileged-topic messages
+        // pass the identity check there because the caller has opted
+        // out — production wires a real DB via `with_db` and
+        // `start_node_with_db` emits a startup WARN if anyone forgets.
+        let key = test_key();
+        let validator = MessageValidator::new();
+        let msg = sign_gossip_message(
+            super::TOPIC_TAXONOMY,
+            b"{\"version\":1}".to_vec(),
+            &key,
+            "stake_test1uqfu74w3wh4gfzu8m6e7j987h4lq9r3t7ef5gaw497uu8q0kd9u4",
+        );
+        assert!(validator.validate(&msg).is_ok());
+    }
+
+    #[test]
+    fn privileged_topic_with_unlocked_profile_fails_closed() {
+        // `with_db(Arc<Mutex<Option<Database>>>)` is the production
+        // constructor. When the inner `Option` is `None` (profile
+        // hasn't been unlocked yet) we MUST refuse privileged-topic
+        // traffic — silently dropping it would be one mistake, but
+        // silently *accepting* it without a registry check is a
+        // worse one. The validator returns `Internal(...)` so the
+        // event loop reports the message as Reject upstream.
+        let key = test_key();
+        let handle: Arc<Mutex<Option<Database>>> = Arc::new(Mutex::new(None));
+        let validator = MessageValidator::with_db(handle);
+        let msg = sign_gossip_message(
+            super::TOPIC_TAXONOMY,
+            b"{\"version\":1}".to_vec(),
+            &key,
+            "stake_test1uqfu74w3wh4gfzu8m6e7j987h4lq9r3t7ef5gaw497uu8q0kd9u4",
+        );
+        let res = validator.validate(&msg);
+        assert!(
+            matches!(res, Err(ValidationError::Internal(_))),
+            "privileged topic w/ no active profile must fail closed, got {res:?}"
+        );
+    }
+
+    #[test]
+    fn non_privileged_topic_with_unlocked_profile_passes() {
+        // Catalog + the other open topics MUST keep working before a
+        // profile is unlocked — the registry check is privileged-
+        // only by design. This is the mirror of the test above and
+        // documents why the gate lives where it does.
+        let key = test_key();
+        let handle: Arc<Mutex<Option<Database>>> = Arc::new(Mutex::new(None));
+        let validator = MessageValidator::with_db(handle);
+        let msg = sign_gossip_message(
+            "/alexandria/catalog/1.0",
+            b"{\"id\":1}".to_vec(),
+            &key,
+            "stake_test1uqfu74w3wh4gfzu8m6e7j987h4lq9r3t7ef5gaw497uu8q0kd9u4",
+        );
+        assert!(validator.validate(&msg).is_ok());
     }
 
     // -- Schema tests --

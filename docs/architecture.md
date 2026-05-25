@@ -139,7 +139,7 @@ The payment key (m/1852'/1815'/0'/0/0) serves as:
 3. Content/profile document signing key
 4. DID-key signing material for the VC layer
 
-The libp2p peer identity is derived **per device** via `HKDF(payment_key, device_id)` so the same mnemonic on two devices produces distinct `PeerId`s.
+The libp2p peer identity is derived **per device** via `HKDF(payment_key, device_id)` so the same mnemonic on two devices produces distinct `PeerId`s. The stake key (m/1852'/1815'/0'/2/0) is used to sign `stake_pubkey_registration` transactions that bind a stake address to a gossip-envelope public key — see [`docs/stake-pubkey-registry.md`](./stake-pubkey-registry.md).
 
 ### Vault Storage
 
@@ -292,13 +292,13 @@ devices.
 ### Validation Pipeline (6 steps)
 
 1. **Signature** — Ed25519 verify (covers all envelope fields: topic, timestamp, stake_address, payload)
-2. **Identity Binding** — verify public key matches the claimed stake address
+2. **Identity Binding** — for privileged topics (taxonomy, governance, Sentinel priors, plugin DAO attestations) the `(stake_address, public_key)` pair MUST appear in the local `stake_pubkey_registry` within the current validity window; non-privileged topics skip this step. See [`docs/stake-pubkey-registry.md`](./stake-pubkey-registry.md).
 3. **Freshness** — within ±5 minutes
 4. **Dedup** — Blake2b-256 hash in LRU cache (100K entries, least-recently-used eviction)
 5. **Schema** — valid JSON
-6. **Authority** — taxonomy/governance handlers re-check committee membership
+6. **Authority** — taxonomy/governance/Sentinel handlers re-check committee membership via on-chain governance tables
 
-Validation outcomes feed directly into gossipsub peer scoring: `Reject` on signature or envelope-parse failure penalises the source through the per-topic `invalid_message_deliveries` weight (see `p2p/scoring.rs`); `Accept` rewards first-delivery scoring for valid messages.
+Validation outcomes feed directly into gossipsub peer scoring: `Reject` on signature, envelope-parse, or identity-binding failure penalises the source through the per-topic `invalid_message_deliveries` weight (see `p2p/scoring.rs`); `Accept` rewards first-delivery scoring for valid messages.
 
 ### Rate Limiting
 
@@ -630,7 +630,7 @@ this on every test run.
 | §6–§7 (credential taxonomy + canonical structure) | PR 4 | Implemented |
 | §8–§10 (required fields, issuance, non-transferability) | PR 4–5 | Implemented |
 | §11 (expiration, revocation, suspension, supersession) | PR 5 | Implemented |
-| §12 (storage, durability, integrity anchoring) | PR 8 + PR 10 + PR 145 | Storage + anchor queue + PinBoard implemented. Anchor tick runs every 60s with wallet derived from the unlocked keystore; metadata-only txs submit to Cardano preprod when `BLOCKFROST_PROJECT_ID` is set. Mainnet reference-script deployment still pending. |
+| §12 (storage, durability, integrity anchoring) | PR 8 + PR 10 + PR 145 | Storage + anchor queue + PinBoard implemented. Anchor tick runs every 60s with wallet derived from the unlocked keystore; metadata-only txs submit to Cardano preprod when a Blockfrost project id is configured (Settings → Cardano, or `BLOCKFROST_PROJECT_ID` env var). Mainnet reference-script deployment still pending. |
 | §13 (verification algorithm + acceptance predicate) | PR 4–5 | Implemented |
 | §14 (trust aggregation, weights, confidence, levels) | PR 6 | Implemented |
 | §15 (anti-gaming controls) | PR 7 | Cluster cap + inflation penalty implemented; cluster_issuers is per-DID until governance signals land |

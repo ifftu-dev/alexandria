@@ -40,6 +40,11 @@ pub struct Wallet {
     /// Raw BIP32-Ed25519 extended payment key (64 bytes: 32-byte scalar + 32-byte extension).
     /// Needed by pallas-txbuilder for Cardano transaction signing (uses `PrivateKey::Extended`).
     pub payment_key_extended: [u8; 64],
+    /// Raw BIP32-Ed25519 extended stake key (64 bytes: 32-byte scalar + 32-byte extension).
+    /// Required to additionally sign txs (e.g. stake-pubkey registration) that
+    /// must carry a vkey witness over the stake credential, not just the
+    /// payment credential.
+    pub stake_key_extended: [u8; 64],
     /// The Cardano stake address (bech32, starts with "stake_test1..." on preprod).
     /// Derived from the stake key at m/1852'/1815'/0'/2/0.
     pub stake_address: String,
@@ -48,6 +53,10 @@ pub struct Wallet {
     /// Blake2b-224 hash of the payment public key (28 bytes).
     /// Used for NativeScript policy creation and disclosed signers.
     pub payment_key_hash: [u8; 28],
+    /// Blake2b-224 hash of the stake public key (28 bytes). Used by
+    /// stake-pubkey registration as the on-chain identifier and to
+    /// populate `required_signers` on registration txs.
+    pub stake_key_hash: [u8; 28],
 }
 
 impl Drop for Wallet {
@@ -60,7 +69,9 @@ impl Drop for Wallet {
             std::ptr::addr_of_mut!(self.signing_key).write(SigningKey::from_bytes(&[0u8; 32]));
         }
         self.payment_key_extended.zeroize();
+        self.stake_key_extended.zeroize();
         self.payment_key_hash.zeroize();
+        self.stake_key_hash.zeroize();
     }
 }
 
@@ -134,6 +145,7 @@ pub fn wallet_from_mnemonic(phrase: &str) -> Result<Wallet, WalletError> {
 
     // Extract the raw extended key bytes (64 bytes) for pallas-txbuilder signing.
     let payment_key_extended = extract_extended_key_bytes(&payment_bip32)?;
+    let stake_key_extended = extract_extended_key_bytes(&stake_bip32)?;
 
     // Extract Ed25519 signing key (first 32 bytes of extended key) for
     // ed25519-dalek compatibility (used in our signing module).
@@ -147,14 +159,18 @@ pub fn wallet_from_mnemonic(phrase: &str) -> Result<Wallet, WalletError> {
     let payment_key_hash_pallas = payment_key_hash;
     let mut pkh_bytes = [0u8; 28];
     pkh_bytes.copy_from_slice(payment_key_hash_pallas.as_ref());
+    let mut skh_bytes = [0u8; 28];
+    skh_bytes.copy_from_slice(stake_key_hash.as_ref());
 
     Ok(Wallet {
         mnemonic: mnemonic_str,
         signing_key,
         payment_key_extended,
+        stake_key_extended,
         stake_address,
         payment_address,
         payment_key_hash: pkh_bytes,
+        stake_key_hash: skh_bytes,
     })
 }
 

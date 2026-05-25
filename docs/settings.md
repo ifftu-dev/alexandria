@@ -91,7 +91,7 @@ Before this work, preferences were scattered:
 | `app_settings` table (ad hoc) | `storage_quota_bytes` | One-off SQL, no schema |
 | Hardcoded seed | `theme`, `language`, `notifications_enabled`, `auto_sync`, `sentinel_camera_enabled`, `sentinel_keyboard_enabled` | Written by `db/seed.rs` but never read |
 | Module-level refs | video volume / mute | Lost on remount |
-| Env vars | `BLOCKFROST_PROJECT_ID`, `ALEXANDRIA_COMPLETION_POLICY_ID`, `ALEXANDRIA_DEVICE_LABEL` | Process-wide, no per-profile override |
+| Env vars | `BLOCKFROST_PROJECT_ID`, `ALEXANDRIA_COMPLETION_POLICY_ID`, `ALEXANDRIA_DEVICE_LABEL` | Process-wide fallback. `BLOCKFROST_PROJECT_ID` is now overridden by the per-device `cardano.blockfrost_project_id` setting (resolved via `cardano::blockfrost::resolve_project_id`); the env var stays as a CI / dev-script convenience. |
 
 All of these now live in one table, with one API, with sync.
 
