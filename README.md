@@ -101,9 +101,9 @@ After connecting to the relay, each node:
 
 Known peer addresses are persisted to a `peers` table in SQLite and reloaded on subsequent launches. GossipSub peer exchange messages propagate addresses across the mesh.
 
-The P2P node auto-starts after the active profile is unlocked. Each profile has its own libp2p peer id (derived from that profile's keypair), so two profiles on the same device look like two separate devices to the network. Home also attempts a content sync (bootstrap + hydrate) after unlock and surfaces completion stats in the bottom status bar.
+The P2P node auto-starts after the active profile is unlocked. Each device gets its own libp2p peer id — derived per-device via `HKDF(payment_key, device_id)` — so the same mnemonic restored onto a second device appears as a separate peer. Home also attempts a content sync (bootstrap + hydrate) after unlock and surfaces completion stats in the bottom status bar.
 
-The relay server lives in a [separate repository](https://github.com/ifftu-dev/alexandria-relay).
+The relay server lives in a [separate repository](https://github.com/ifftu-dev/alexandria-relay). Fresh peer discovery still depends on these hardcoded Alexandria relay nodes today; locally-held credentials and content survive the relay infrastructure disappearing, but bootstrapping new peers into the mesh would not — DNS seeds and user-pinned bootstrap lists are on the post-launch roadmap.
 
 ## Getting Started
 
@@ -371,7 +371,9 @@ To reset and start fresh:
 alex db reset --force   # Or manually: rm -rf ~/Library/Application\ Support/org.alexandria.node/
 ```
 
-> **Upgrading from a single-vault install?** The first launch after upgrade auto-migrates the legacy `stronghold/`, `alexandria.db`, `iroh/`, `plugins/`, and `videocache/` directories into a new `profiles/<uuid>/` slot named "My Profile". No data loss; rename and add avatars from the picker afterwards.
+> **Upgrading from a single-vault install?** The first launch after upgrade auto-migrates the legacy `stronghold/`, `iroh/`, `plugins/`, and `videocache/` directories into a new `profiles/<uuid>/` slot named "My Profile". Rename and add avatars from the picker afterwards.
+>
+> ⚠ **Encrypted databases only:** this build refuses to open an unencrypted legacy `alexandria.db`. If your install ever ran in plaintext mode, move that file aside (or delete it) and re-run onboarding before launching — the app will surface an explicit error rather than touch it. The earlier "no data loss" auto-conversion path was removed because it overwrote the legacy file instead of converting it.
 
 ## Testing
 
@@ -396,7 +398,7 @@ npx vue-tsc -b
 ```
 
 The test suite includes:
-- **570+ synchronous tests** across crypto, database, P2P, evidence, cardano, credentials, aggregation, governance, and domain modules
+- **700+ synchronous tests** across crypto, database, P2P, evidence, cardano, credentials, aggregation, governance, and domain modules (run `cargo test -p alexandria-node --lib` for the exact current count)
 - **30+ async tests** (tokio) for iroh content operations, P2P swarm lifecycle, and network integration
 - **~1500 lines of stress tests** covering high-volume gossip (200+ messages), concurrent validation (1000 messages / 10 threads), sync conflicts, and adversarial inputs
 - **Frontend Vitest suite** — first wave of composable tests (e.g. `useOmniSearch`), expanding
@@ -426,7 +428,7 @@ Use `alex config path` to print this directory on any platform.
 | [Multi-User Profiles](docs/multi-user-profiles.md) | Per-profile vault + DB + iroh isolation, picker UX, auto-migration |
 | [Settings](docs/settings.md) | Unified per-profile settings store + cross-device sync + how to add a new setting |
 | [Database Schema](docs/database-schema.md) | All tables + per-profile DB layout |
-| [Protocol Specification](docs/protocol-specification.md) | Wire formats, VC protocol, 11 gossip topics, validation, peer scoring |
+| [Protocol Specification](docs/protocol-specification.md) | Wire formats, VC protocol, 13 gossip topics, validation, peer scoring |
 | [Project Structure](docs/project-structure.md) | Directory layouts, module responsibilities |
 | [Skills & Reputation](docs/skills-and-reputation.md) | Skill graph, evidence model, reputation system |
 | [Sentinel](docs/sentinel.md) | Assessment integrity — behavioral fingerprinting, ML models |

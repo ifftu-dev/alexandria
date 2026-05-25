@@ -106,33 +106,6 @@ impl Database {
         .is_ok()
     }
 
-    /// Migrate an existing unencrypted database to SQLCipher encryption.
-    ///
-    /// Uses SQLCipher's ATTACH + sqlcipher_export mechanism:
-    /// 1. Open the plaintext DB
-    /// 2. ATTACH a new encrypted DB
-    /// 3. Export all data from plaintext → encrypted
-    /// 4. Swap files
-    pub fn migrate_to_encrypted(path: &Path, _key: &[u8; 32]) -> Result<(), DbError> {
-        // The plaintext seed DB cannot be migrated in-place on all platforms
-        // because SQLCipher's ATTACH...KEY has portability issues with paths
-        // containing spaces (e.g. macOS "Application Support").
-        //
-        // Instead, we simply delete the plaintext DB. The caller (open_database)
-        // will then create a fresh encrypted DB via open_encrypted, run migrations,
-        // and the seed will re-populate it.
-        if path.exists() {
-            std::fs::remove_file(path).map_err(DbError::Io)?;
-            log::info!("removed plaintext database — will re-create as encrypted");
-        }
-        // Clean up any WAL/SHM files
-        let wal = path.with_extension("db-wal");
-        let shm = path.with_extension("db-shm");
-        std::fs::remove_file(&wal).ok();
-        std::fs::remove_file(&shm).ok();
-        Ok(())
-    }
-
     /// Run all schema migrations.
     pub fn run_migrations(&self) -> Result<(), DbError> {
         // Create the migrations tracking table.

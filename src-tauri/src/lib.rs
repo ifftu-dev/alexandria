@@ -329,10 +329,18 @@ impl AppState {
             }
         }
 
+        // Pre-launch: no legacy plaintext DBs exist in the wild. SQLCipher is the
+        // only supported on-disk format. If we ever see a plaintext file, refuse
+        // to touch it — silent deletion would lose data, silent open as encrypted
+        // would corrupt the keystore mapping. Surface the error and let the user
+        // (or `alex db reset`) deal with it explicitly.
         if Database::is_plaintext(&paths.db_path) {
-            log::info!("Migrating legacy unencrypted database to SQLCipher...");
-            Database::migrate_to_encrypted(&paths.db_path, db_key)
-                .map_err(|e| format!("database migration failed: {e}"))?;
+            return Err(format!(
+                "refusing to open: {} is an unencrypted SQLite database. \
+                 This build only supports SQLCipher-encrypted profiles. \
+                 Move or delete the file and run onboarding again.",
+                paths.db_path.display()
+            ));
         }
 
         let database = Database::open_encrypted(&paths.db_path, db_key)
