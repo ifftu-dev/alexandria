@@ -410,9 +410,17 @@ pub async fn submit_snapshot_tx(
         crate::crypto::wallet::wallet_from_mnemonic(&mnemonic).map_err(|e| e.to_string())?;
     drop(ks_guard);
 
-    // 3. Build Blockfrost client
-    let project_id = std::env::var("BLOCKFROST_PROJECT_ID")
-        .map_err(|_| "BLOCKFROST_PROJECT_ID environment variable not set")?;
+    // 3. Build Blockfrost client. Prefers the per-device
+    //    `cardano.blockfrost_project_id` setting; falls back to env.
+    let project_id = {
+        let db_guard = state.db.lock().map_err(|e| e.to_string())?;
+        let conn = db_guard.as_ref().map(|db| db.conn());
+        crate::cardano::blockfrost::resolve_project_id(conn)
+    }
+    .ok_or(
+        "Blockfrost project id not configured \
+         (set in Settings → Cardano, or export BLOCKFROST_PROJECT_ID)",
+    )?;
     let blockfrost =
         crate::cardano::blockfrost::BlockfrostClient::new(project_id).map_err(|e| e.to_string())?;
 

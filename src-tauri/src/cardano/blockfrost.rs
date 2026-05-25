@@ -1,8 +1,34 @@
 use reqwest::Client;
+use rusqlite::Connection;
 use serde::Deserialize;
 use thiserror::Error;
 
 use super::types::{ChainTip, ProtocolParameters, UTxO};
+use crate::settings::registry::keys::CARDANO_BLOCKFROST_KEY;
+use crate::settings::store::SettingsStore;
+
+/// Resolve the Blockfrost project id from (in order):
+/// 1. The per-device `cardano.blockfrost_project_id` setting, when a
+///    DB handle is available and the value is non-empty.
+/// 2. The `BLOCKFROST_PROJECT_ID` environment variable.
+///
+/// Returns `None` if neither source carries a value. Keeps the
+/// settings-UI promise — "When set, overrides the
+/// BLOCKFROST_PROJECT_ID env var" — true at every call site instead of
+/// just where the env var was wired directly.
+pub fn resolve_project_id(conn: Option<&Connection>) -> Option<String> {
+    if let Some(conn) = conn {
+        let from_setting = SettingsStore::get(conn, CARDANO_BLOCKFROST_KEY);
+        let trimmed = from_setting.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_string());
+        }
+    }
+    std::env::var("BLOCKFROST_PROJECT_ID")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
 
 /// Minimal shape of an entry in `GET /assets/policy/{policy_id}`.
 #[derive(Debug, Clone, Deserialize)]
@@ -415,6 +441,35 @@ impl BlockfrostClient {
         resp.json::<TxUtxos>()
             .await
             .map_err(|e| BlockfrostError::Deserialize(e.to_string()))
+    }
+
+    /// Fetch the raw CBOR of a confirmed transaction.
+    ///
+    /// Uses `GET /txs/{hash}/cbor`, which returns JSON of shape
+    /// `{"cbor": "<hex>"}`. Returns the decoded CBOR bytes ready for
+    /// `pallas_primitives::conway::Tx::decode`.
+    pub async fn get_tx_cbor(&self, tx_hash: &str) -> Result<Vec<u8>, BlockfrostError> {
+        let url = format!("{}/txs/{}/cbor", self.base_url, tx_hash);
+        let resp = self
+            .client
+            .get(&url)
+            .header("project_id", &self.project_id)
+            .send()
+            .await?;
+        let status = resp.status().as_u16();
+        if status != 200 {
+            let body = resp.text().await.unwrap_or_default();
+            return Err(BlockfrostError::Api { status, body });
+        }
+        #[derive(serde::Deserialize)]
+        struct CborWrapper {
+            cbor: String,
+        }
+        let wrapped: CborWrapper = resp
+            .json()
+            .await
+            .map_err(|e| BlockfrostError::Deserialize(e.to_string()))?;
+        hex::decode(wrapped.cbor.trim()).map_err(|e| BlockfrostError::Deserialize(e.to_string()))
     }
 
     /// Check if a transaction has been confirmed on-chain.

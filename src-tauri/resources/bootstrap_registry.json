@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "issued_at": "2026-05-25T15:55:00Z",
+  "entries": [
+    {
+      "stake_address": "stake_test1up68vcg5zew6cuhx4sd88g3uvwpfxx0yxk6m5tezex50feqaetrq9",
+      "public_key_hex": "93d751efc45cbb8529777e408d481f4b511d7c8ff49bb1f94defb47c650eb5f4",
+      "valid_from": 1779704715,
+      "valid_until": null,
+      "on_chain_tx": "75cf66c9993fdaa091985fad6382c1a22a1787c6a7f50f961ab0e772581c7d14"
+    }
+  ],
+  "signatures": [
+    {
+      "signer": "founder_a",
+      "sig_hex": "ee0301b1e9db620dbe9b00243f641da0dbb52d1ed9608f09fd94daffca16bb80914792966631a03af5c1503165a8dc7b41a7b378048b397ebc62d4b4da01fa01"
+    },
+    {
+      "signer": "founder_b",
+      "sig_hex": "0f9a8724a409a4f34d987b9e6a24fcfb90c8882363e6ca46507b9e8846f5531e1e5518456b9630aebf08d68d26d5e7e79027b20d9eab9df9191dc509ecb2d004"
+    },
+    {
+      "signer": "founder_c",
+      "sig_hex": "6348306b2470232226b2d3b978cd5a2cf2b72a61d637b86f5b91181b371848bfdf918d4431e68838d553cfd4e8b7a632b81509856d6247512c885a0456b0e10e"
+    }
+  ]
+}

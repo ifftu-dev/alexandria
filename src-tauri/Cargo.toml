@@ -195,3 +195,30 @@ path = "examples/preprod_anchor.rs"
 [[example]]
 name = "deploy_completion"
 path = "examples/deploy_completion.rs"
+
+# Offline founder-keypair generator for bootstrap_registry.json.
+# Run on an air-gapped machine; produces one .sk file + prints the
+# matching pubkey hex for SNAPSHOT_VERIFIERS.
+[[example]]
+name = "snapshot_keygen"
+path = "examples/snapshot_keygen.rs"
+
+# Offline multisig signer for bootstrap_registry.json. Reads a snapshot
+# + a founder .sk and appends one signature.
+[[example]]
+name = "snapshot_sign"
+path = "examples/snapshot_sign.rs"
+
+# Offline verifier for bootstrap_registry.json. Confirms the snapshot
+# parses + meets quorum against the SNAPSHOT_VERIFIERS baked into
+# this build.
+[[example]]
+name = "snapshot_verify"
+path = "examples/snapshot_verify.rs"
+
+# Live preprod round-trip for the stake-pubkey registry pipeline:
+# build_registration_tx → submit → confirm → BlockfrostFetcher.fetch
+# → assert entry roundtrips with valid witness.
+[[example]]
+name = "preprod_registration_roundtrip"
+path = "examples/preprod_registration_roundtrip.rs"

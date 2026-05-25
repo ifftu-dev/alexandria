@@ -282,6 +282,31 @@
       "hash": "2700722e5fb56941388a7813f416a0d1e76ee251dbb3ea248d41890a"
     },
     {
+      "title": "stake_pubkey_registration.stake_pubkey_registration.spend",
+      "datum": {
+        "title": "_datum",
+        "schema": {
+          "$ref": "#/definitions/alexandria~1types~1StakePubkeyRegistrationDatum"
+        }
+      },
+      "redeemer": {
+        "title": "_redeemer",
+        "schema": {
+          "$ref": "#/definitions/Data"
+        }
+      },
+      "compiledCode": "585b01010029800aba2aba1aab9eaab9dab9a4888896600264653001300600198031803800cc0180092225980099b8748008c01cdd500144c8cc898c028004c028c02c004c020dd50014590060c018004c00cdd5003452689b2b200201",
+      "hash": "fc20070d1e5379403add6acbf77b233b2f8240821c187b398525de28"
+    },
+    {
+      "title": "stake_pubkey_registration.stake_pubkey_registration.else",
+      "redeemer": {
+        "schema": {}
+      },
+      "compiledCode": "585b01010029800aba2aba1aab9eaab9dab9a4888896600264653001300600198031803800cc0180092225980099b8748008c01cdd500144c8cc898c028004c028c02c004c020dd50014590060c018004c00cdd5003452689b2b200201",
+      "hash": "fc20070d1e5379403add6acbf77b233b2f8240821c187b398525de28"
+    },
+    {
       "title": "vote_minting.vote_minting.mint",
       "redeemer": {
         "title": "redeemer",
@@ -1096,6 +1121,39 @@
           "dataType": "constructor",
           "index": 1,
           "fields": []
+        }
+      ]
+    },
+    "alexandria/types/StakePubkeyRegistrationDatum": {
+      "title": "StakePubkeyRegistrationDatum",
+      "description": "On-chain attestation that a stake address has bound itself to a\n specific Ed25519 public key for gossip-envelope signing.\n\n Posted as an inline datum on a UTXO sent to the `stake_pubkey_registration`\n script address. The script is intentionally immutable (always fails on\n spend) — to invalidate a binding the issuer publishes a new\n registration with a non-overlapping validity window.\n\n Security is anchored off-chain: the verifier scanning the registry\n address rejects any entry whose creating transaction is NOT signed\n by the claimed `stake_key_hash` (`tx.extra_signatories`).\n\n Mirrors the SQLite `stake_pubkey_registry` schema (migration 052)\n and the Rust types in `src-tauri/src/p2p/registry.rs`.",
+      "anyOf": [
+        {
+          "title": "StakePubkeyRegistrationDatum",
+          "dataType": "constructor",
+          "index": 0,
+          "fields": [
+            {
+              "title": "stake_key_hash",
+              "description": "Blake2b-224 hash of the stake key being registered. The off-chain\n reader recomputes this from the bech32 stake address (`stake1u…`)\n and matches it against the tx witness set.",
+              "$ref": "#/definitions/aiken~1crypto~1VerificationKeyHash"
+            },
+            {
+              "title": "public_key",
+              "description": "The 32-byte Ed25519 public key the stake address is bound to.",
+              "$ref": "#/definitions/ByteArray"
+            },
+            {
+              "title": "valid_from",
+              "description": "POSIX seconds — start of the binding's validity window.",
+              "$ref": "#/definitions/Int"
+            },
+            {
+              "title": "valid_until",
+              "description": "POSIX seconds — end of the window, or 0 for an open-ended binding.",
+              "$ref": "#/definitions/Int"
+            }
+          ]
         }
       ]
     },
