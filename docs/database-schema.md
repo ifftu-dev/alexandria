@@ -87,6 +87,8 @@
 | 49 | `device_pairing` | Add `stake_address` / `shared_key` / `paired` to `devices`; new `pending_pairings` table for explicit device pairing |
 | 50 | `challenge_stake_lifecycle` | Add `stake_status` + `settle_tx_hash` to `credential_challenges` for stake-escrow settlement |
 | 51 | `element_submission_grader_version` | Add `grader_version` column to `element_submissions` |
+| 52 | `stake_pubkey_registry` | `stake_pubkey_registry` — persistent stake-address → libp2p Ed25519 pubkey bindings (chain + multisig-signed snapshot rows). Replaces the in-memory TOFU binding; see [`stake-pubkey-registry.md`](stake-pubkey-registry.md). |
+| 53 | `plugin_enabled_and_irl_review` | Add `enabled` flag to `plugin_installed` (disabled plugins stay installed but the player refuses to mount them). New `plugin_irl_submissions` table — the local instructor-review inbox backing the `irl-review` builtin plugin. See [`plugins.md`](plugins.md). |
 
 ---
 
@@ -142,6 +144,34 @@ columns and indexes, use `src-tauri/src/db/schema.rs`.
   completion Merkle leaf so the on-chain witness is reproducible).
 - **`catalog`** — Network-discovered course metadata mirroring the
   publishable subset of `courses`.
+
+### Community Plugins (5 tables)
+
+The community plugin system (see [`plugins.md`](plugins.md)). Plugins are
+content-addressed iframe bundles; built-ins ship embedded in the host
+binary, community plugins install from a local directory (Phase 1) or P2P
+discovery (Phase 3).
+
+- **`plugin_installed`** — One row per installed plugin CID: `name`,
+  `version`, `author_did`, `install_path`, `source`
+  (`local_file` / `builtin` / `p2p`), the full `manifest_json` captured at
+  install, `installed_at`, and an `enabled` flag (migration 053 — disabled
+  plugins remain installed but the player refuses to mount them).
+- **`plugin_permissions`** — Per-plugin, per-capability consent grants
+  (`scope` ∈ `once` / `session` / `always`). Cascades on uninstall.
+- **`plugin_catalog`** — Discovery cache of plugin announcements seen on
+  the `/alexandria/plugins/1.0` gossip topic (plus built-ins seeded at
+  startup). A row means "heard of", not "installed".
+- **`plugin_attestations`** + **`plugin_advisories`** — Plugin DAO
+  multi-sig attestations binding a `(plugin_cid, grader_cid)` pair as
+  credential-eligible, and advisory-only notes (deprecated / known-flawed)
+  that surface in the UI without affecting recognition.
+- **`plugin_irl_submissions`** — Local instructor-review inbox for the
+  `irl-review` builtin (migration 053). A learner's submission queues a
+  `pending` row (`submission_json` = files + comment, `skills_json` =
+  declared skills); an instructor posts back `score`, `feedback`,
+  `skill_ratings_json`, and flips `status` to `reviewed`. No network —
+  review stays on this node.
 
 ### Reputation (2 tables)
 

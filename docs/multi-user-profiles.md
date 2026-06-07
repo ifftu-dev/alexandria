@@ -65,6 +65,25 @@ Multi-user accounts let one device host several learners, each with their own cr
 - Holds only what's needed for the tile: display name, avatar (emoji or local image hash), accent color, timestamps.
 - Never contains stake addresses, DIDs, keys, or anything cryptographically linked to the user's chain identity. Treat it as user-public listing data.
 
+### Usernames are mandatory
+
+Every profile must have a non-empty `display_name`. This is enforced at
+both layers:
+
+- **Backend** (`commands/profile.rs`, `commands/identity.rs`):
+  `create_profile`, `restore_profile_with_mnemonic`, `rename_profile`, and
+  `update_profile` trim and reject an empty name.
+- **Frontend**: onboarding blocks advancing without a username (no silent
+  "My Profile" default), and Settings → Account refuses to save a blank
+  name.
+
+The username is the primary human label for an identity everywhere in the
+app. DIDs (`did:key:…`) are never shown as the primary identifier — the
+`resolve_display_names` IPC + `useDisplayNames` composable map a DID to a
+username (own DID → your display name; built-in plugin authors →
+"Alexandria"; unknown DIDs → a short-DID fallback). Used across plugins,
+credentials, IRL Review, and other DID-bearing surfaces.
+
 ### `ActiveProfile` (in `AppState`)
 
 ```rust
@@ -184,7 +203,7 @@ async function setAvatar(id: string, avatar: Avatar): Promise<void>
 - `<profile name>` (current, dimmed)
 - **Switch user** — locks current, routes to `/profiles`
 - **Lock** — locks current, routes to `/profiles`
-- **Settings** — opens global settings modal
+- **Settings** — navigates to the full-page settings (`/settings`)
 
 Keyboard shortcut: `Cmd/Ctrl + Shift + U` invokes Switch user from anywhere.
 

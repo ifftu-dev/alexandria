@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { ref } from 'vue'
+
 interface Props {
   modelValue: string
   label?: string
@@ -19,6 +21,17 @@ withDefaults(defineProps<Props>(), {
 defineEmits<{
   'update:modelValue': [value: string]
 }>()
+
+const inputEl = ref<HTMLInputElement | null>(null)
+
+function focus() {
+  inputEl.value?.focus()
+}
+function select() {
+  inputEl.value?.select()
+}
+
+defineExpose({ focus, select })
 </script>
 
 <template>
@@ -27,6 +40,7 @@ defineEmits<{
       {{ label }}
     </label>
     <input
+      ref="inputEl"
       :value="modelValue"
       :type="type"
       :placeholder="placeholder"

@@ -73,8 +73,8 @@ be added, but for now they are reviewed manually).
 
 That's it:
 
-- The setting appears in the "All settings" panel of the settings
-  modal automatically, with the right widget (toggle / textbox /
+- The setting appears in the "All settings" section of the settings
+  page automatically, with the right widget (toggle / textbox /
   number / JSON viewer based on `T::kind()`).
 - The backend gains a typed accessor: `SettingsStore::get(conn,
   keys::NOTIFICATIONS_SOUND)`.
@@ -97,9 +97,10 @@ All of these now live in one table, with one API, with sync.
 
 ## What does **not** belong here
 
-- **Per-session ephemera**: open dropdown flags, modal active section,
-  page filter chips (`courses-kind-filter`, `opinions-field-filter`).
-  Keep these in component-local refs or `sessionStorage`.
+- **Per-session ephemera**: open dropdown flags, the active settings
+  section (now a route param — `/settings/:section?`), page filter chips
+  (`courses-kind-filter`, `opinions-field-filter`). Keep these in
+  component-local refs, the route, or `sessionStorage`.
 - **Per-element drafts**: e.g. `essay_draft_${elementId}`. These are
   content-scoped, not user-preference, and may eventually move into a
   dedicated `drafts` table.
