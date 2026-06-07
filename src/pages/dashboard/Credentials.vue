@@ -3,6 +3,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { AppBadge, AppButton, AppModal, AppInput, EmptyState } from '@/components/ui'
 import { useCredentials } from '@/composables/useCredentials'
+import { useDisplayNames } from '@/composables/useDisplayNames'
 import {
   extractRoleClaim,
   extractSkillClaim,
@@ -47,7 +48,16 @@ const presentResult = ref<PresentationEnvelope | null>(null)
 const presentError = ref<string | null>(null)
 
 // Lifecycle ---------------------------------------------------------------
-onMounted(() => api.list())
+const { displayName, ensureNames } = useDisplayNames()
+onMounted(async () => {
+  await api.list()
+  const dids: string[] = []
+  for (const c of api.credentials.value) {
+    if (c.issuer) dids.push(typeof c.issuer === 'string' ? c.issuer : '')
+    if (c.credentialSubject?.id) dids.push(c.credentialSubject.id)
+  }
+  void ensureNames(dids.filter(Boolean))
+})
 
 // Derived stats -----------------------------------------------------------
 const filtered = computed(() => {
@@ -101,10 +111,6 @@ function summary(c: VerifiableCredential): string {
   return 'custom claim'
 }
 
-function shortDid(did: string): string {
-  if (did.length <= 24) return did
-  return `${did.slice(0, 14)}…${did.slice(-6)}`
-}
 
 function open(c: VerifiableCredential) {
   if (!c.id) return
@@ -312,12 +318,12 @@ async function copyEnvelope() {
           <dl class="mt-3 space-y-1 text-xs">
             <div class="flex justify-between gap-2">
               <dt class="text-muted-foreground">Issuer</dt>
-              <dd class="font-mono truncate" :title="c.issuer">{{ shortDid(c.issuer) }}</dd>
+              <dd class="truncate" :title="typeof c.issuer === 'string' ? c.issuer : ''">{{ displayName(typeof c.issuer === 'string' ? c.issuer : '') }}</dd>
             </div>
             <div class="flex justify-between gap-2">
               <dt class="text-muted-foreground">Subject</dt>
-              <dd class="font-mono truncate" :title="c.credentialSubject.id">
-                {{ shortDid(c.credentialSubject.id) }}
+              <dd class="truncate" :title="c.credentialSubject.id">
+                {{ displayName(c.credentialSubject.id) }}
               </dd>
             </div>
             <div class="flex justify-between gap-2">

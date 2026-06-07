@@ -7,7 +7,7 @@ defineEmits<{
 <template>
   <button
     type="button"
-    class="group flex flex-col items-center gap-3 p-4 rounded-2xl transition-all hover:bg-surface/40 hover:scale-105 active:scale-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+    class="group cursor-pointer flex flex-col items-center gap-3 p-4 rounded-2xl transition-all hover:bg-surface/40 hover:scale-105 active:scale-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
     @click="$emit('click')"
   >
     <div

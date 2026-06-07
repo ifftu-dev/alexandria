@@ -35,7 +35,7 @@ const lastSeen = computed(() => {
 <template>
   <button
     type="button"
-    class="group flex flex-col items-center gap-3 p-4 rounded-2xl transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+    class="group cursor-pointer flex flex-col items-center gap-3 p-4 rounded-2xl transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-background"
     :class="
       selected
         ? 'ring-2 ring-offset-2 ring-offset-background scale-105'

@@ -83,6 +83,11 @@ pub async fn create_profile(
     password: String,
     #[allow(non_snake_case)] avatar: Option<Avatar>,
 ) -> Result<CreateProfileResponse, String> {
+    // Usernames are mandatory.
+    let display_name = display_name.trim().to_string();
+    if display_name.is_empty() {
+        return Err("A username is required to create a profile.".to_string());
+    }
     validate_password(&password)?;
 
     // Refuse if another profile is already active — caller must lock first.
@@ -177,6 +182,10 @@ pub async fn restore_profile_with_mnemonic(
     password: String,
     #[allow(non_snake_case)] avatar: Option<Avatar>,
 ) -> Result<UnlockProfileResponse, String> {
+    let display_name = display_name.trim().to_string();
+    if display_name.is_empty() {
+        return Err("A username is required to create a profile.".to_string());
+    }
     validate_password(&password)?;
     if state.active_id().is_some() {
         return Err("lock the active profile before restoring a new one".to_string());
@@ -350,6 +359,10 @@ pub async fn rename_profile(
     id: String,
     display_name: String,
 ) -> Result<ProfileSummary, String> {
+    let display_name = display_name.trim().to_string();
+    if display_name.is_empty() {
+        return Err("A username is required.".to_string());
+    }
     let id = ProfileId::parse(&id).map_err(|e| e.to_string())?;
     state
         .profile_manager

@@ -17,6 +17,7 @@
   <a href="docs/project-structure.md">Project Structure</a> &middot;
   <a href="docs/skills-and-reputation.md">Skills & Reputation</a> &middot;
   <a href="docs/sentinel.md">Sentinel</a> &middot;
+  <a href="docs/plugins.md">Plugins</a> &middot;
   <a href="CHANGELOG.md">Changelog</a>
 </p>
 

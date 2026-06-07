@@ -181,7 +181,8 @@ src/
 │   ├── useP2P.ts
 │   ├── usePlatform.ts
 │   ├── useSentinel.ts      # AI / paste-classifier toggles synced via `sentinel.*` settings
-│   ├── useSettingsModal.ts
+│   ├── useSettingsModal.ts # Type-only now: the `SettingsSectionId` union (settings is a full page, not a modal)
+│   ├── useDisplayNames.ts  # DID→username resolver (cached) — usernames shown app-wide instead of DIDs
 │   ├── useSkillGraphHover.ts
 │   ├── useSkillGraphState.ts
 │   ├── useTheme.ts         # Theme bound to `ui.theme` via `useSetting<string>` — reacts to sync deliveries
@@ -199,7 +200,7 @@ src/
 │   ├── integrity/          # Sentinel training/calibration UI
 │   ├── layout/             # Sidebar, top bar (avatar dropdown), bottom bar, PiP, ticker, modal shell
 │   ├── omni/               # Omni search surface
-│   ├── settings/           # Global settings modal
+│   ├── settings/           # Settings-page panels (AdvancedSettingsPanel, PluginsPanel)
 │   └── skills/             # Skill graph
 │
 ├── layouts/

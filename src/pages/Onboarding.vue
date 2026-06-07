@@ -155,6 +155,12 @@ function goBack() {
 async function proceedFromPassword() {
   error.value = ''
 
+  // Username is mandatory.
+  if (!displayName.value.trim()) {
+    error.value = 'Choose a username to continue.'
+    return
+  }
+
   if (!passwordValid.value) {
     error.value = 'Your vault password is too short. Use at least 12 characters, then try again.'
     return
@@ -177,7 +183,7 @@ async function createWallet() {
   currentStep.value = ''
 
   try {
-    const result = await createProfile(displayName.value.trim() || 'My Profile', password.value)
+    const result = await createProfile(displayName.value.trim(), password.value)
     mnemonic.value = result.mnemonic
     try {
       if (enableBiometricOnSetup.value && biometricAvailable.value) {
@@ -215,7 +221,7 @@ async function restoreWallet() {
 
   try {
     await restoreProfileWithMnemonic(
-      displayName.value.trim() || 'My Profile',
+      displayName.value.trim(),
       phrase,
       password.value,
     )
