@@ -24,6 +24,13 @@ import type { PluginCapability } from '@/types'
 const props = defineProps<{
   pluginCid: string
   entry: string
+  /** Manifest-declared capabilities. Drives the iframe's Permissions
+   *  Policy `allow` attribute at load time — WKWebView/WebView2 read
+   *  this once and ignore later mutations, so we have to declare the
+   *  full set the plugin might use upfront. Runtime gating happens via
+   *  the host↔plugin `capability_granted`/`capability_revoked` messages
+   *  built from `grantedCapabilities`. */
+  declaredCapabilities: PluginCapability[]
   grantedCapabilities: PluginCapability[]
   /** Arbitrary content config the plugin's `init` sees. */
   content: unknown
@@ -45,10 +52,18 @@ const emit = defineEmits<{
   (e: 'request-capability', requestId: number, name: PluginCapability, reason: string): void
   /** Plugin wants to persist opaque state. */
   (e: 'persist-state', blob: unknown): void
-  /** Plugin emitted a telemetry event. */
-  (e: 'emit-event', type: string, payload: unknown): void
-  /** Plugin submitted a credential-bearing submission (Phase 2+). */
-  (e: 'submit', submission: unknown, metadata: unknown): void
+  /** Plugin emitted a telemetry event. The host can synchronously call
+   *  [`resolveEvent`] with a response payload (e.g. for `irl_refresh` to
+   *  return the learner's submissions). If the host does not resolve
+   *  synchronously, a default `null` response is sent after the emit
+   *  returns. */
+  (e: 'emit-event', requestId: number, type: string, payload: unknown): void
+  /** Plugin submitted a credential-bearing submission. The host can
+   *  synchronously call [`resolveSubmit`] (or asynchronously, once the
+   *  IPC call returns) with the response payload — e.g. `{submission_id}`
+   *  for IRL Review. If not resolved within the emit, a default
+   *  `{submission_received: true}` is sent. */
+  (e: 'submit', requestId: number, submission: unknown, metadata: unknown): void
   /** Plugin marked the element complete. */
   (e: 'complete', progress: number, advisoryScore: number | null): void
   /** Host-internal error (sandbox escape attempt, malformed message, etc.). */
@@ -57,6 +72,8 @@ const emit = defineEmits<{
 
 defineExpose({
   resolveCapabilityRequest,
+  resolveSubmit,
+  resolveEvent,
   sendCapabilityGranted,
   sendCapabilityRevoked,
   sendSubmitAck,
@@ -67,6 +84,8 @@ const iframeEl = ref<HTMLIFrameElement | null>(null)
 const hostPort = shallowRef<MessagePort | null>(null)
 /** Pending capability-request ids awaiting host decision. */
 const pendingCapabilityRequests = new Map<number, { name: PluginCapability; reason: string }>()
+/** Submit / event request ids the host may resolve with a custom payload. */
+const pendingResponses = new Set<number>()
 
 const API_VERSION = '1'
 
@@ -84,7 +103,7 @@ const allowAttribute = computed(() => {
     ml_inference: null, // no browser feature
   }
   const features: string[] = []
-  for (const cap of props.grantedCapabilities) {
+  for (const cap of props.declaredCapabilities) {
     const f = map[cap]
     if (f) features.push(f)
   }
@@ -111,6 +130,18 @@ watch(
 )
 
 function onIframeLoad() {
+  try {
+    const w = window as unknown as { __TAURI_INTERNALS__?: unknown }
+    if (w.__TAURI_INTERNALS__) {
+      import('@tauri-apps/api/core').then(({ invoke }) => {
+        void invoke('frontend_log', {
+          message: `[PluginIframe] onIframeLoad src=${srcUrl.value} declared=${props.declaredCapabilities.join(',')}`,
+        })
+      }).catch(() => {})
+    }
+  } catch {
+    // ignore
+  }
   // Create a fresh channel each load so stale ports never bridge two
   // different plugin sessions.
   teardown()
@@ -139,6 +170,17 @@ function onWindowMessage(ev: MessageEvent) {
     // Our own init echoing back via a buggy user handler — ignore.
     return
   }
+  // Dev-time diagnostics from bootstrap.js / plugin code.
+  if (ev.data && typeof ev.data === 'object' && (ev.data as { __alex_diag__?: unknown }).__alex_diag__) {
+    const msg = String((ev.data as { msg?: unknown }).msg ?? '')
+    const w = window as unknown as { __TAURI_INTERNALS__?: unknown }
+    if (w.__TAURI_INTERNALS__) {
+      import('@tauri-apps/api/core').then(({ invoke }) => {
+        void invoke('frontend_log', { message: `[bootstrap] ${msg}` })
+      }).catch(() => {})
+    }
+    return
+  }
   // Anything else over window.postMessage is a protocol violation.
   emit('error', 'plugin sent an out-of-band window message')
 }
@@ -152,6 +194,24 @@ function onPluginMessage(ev: MessageEvent) {
         payload?: Record<string, unknown>
       }
     | null
+
+  // Dev-time trace — surface every plugin→host message into the Rust log.
+  if (msg && typeof msg === 'object') {
+    try {
+      // Lazy import to avoid pulling Tauri into the bundle path twice.
+      // Errors are swallowed so non-Tauri preview builds keep working.
+      const w = window as unknown as { __TAURI_INTERNALS__?: unknown }
+      if (w.__TAURI_INTERNALS__) {
+        import('@tauri-apps/api/core').then(({ invoke }) => {
+          void invoke('frontend_log', {
+            message: `[PluginIframe] msg type=${msg.type} request_id=${msg.request_id} api=${msg.api_version}`,
+          })
+        }).catch(() => {})
+      }
+    } catch {
+      // ignore
+    }
+  }
 
   if (!msg || typeof msg !== 'object') return
   if (msg.api_version !== API_VERSION) {
@@ -172,7 +232,7 @@ function onPluginMessage(ev: MessageEvent) {
         : []
       emit('ready', declared)
       sendResponse(msg.request_id, null)
-      // After ready, push init so the plugin gets content+state.
+      // After ready, push init so the plugin gets content+state+theme.
       sendHostMessage({
         api_version: API_VERSION,
         type: 'init',
@@ -183,6 +243,7 @@ function onPluginMessage(ev: MessageEvent) {
           granted_capabilities: props.grantedCapabilities,
           locale: props.locale ?? 'en',
           element_id: props.elementId,
+          theme: collectHostThemeVars(),
         },
       })
       return
@@ -205,13 +266,22 @@ function onPluginMessage(ev: MessageEvent) {
     }
     case 'emit_event': {
       const type = typeof payload.type === 'string' ? payload.type : 'unknown'
-      emit('emit-event', type, payload.payload)
-      sendResponse(msg.request_id, null)
+      pendingResponses.add(msg.request_id)
+      emit('emit-event', msg.request_id, type, payload.payload)
+      if (pendingResponses.has(msg.request_id)) {
+        pendingResponses.delete(msg.request_id)
+        sendResponse(msg.request_id, null)
+      }
       return
     }
     case 'submit': {
-      emit('submit', payload.submission, payload.metadata)
-      sendResponse(msg.request_id, { submission_received: true })
+      pendingResponses.add(msg.request_id)
+      emit('submit', msg.request_id, payload.submission, payload.metadata)
+      if (pendingResponses.has(msg.request_id)) {
+        // Host did not resolve synchronously — it will call resolveSubmit
+        // once its async work (e.g. IPC) settles. Leave the entry in
+        // pendingResponses; resolveSubmit / resolveEvent clears it.
+      }
       return
     }
     case 'complete': {
@@ -253,6 +323,40 @@ function sendResponse(requestId: number, payload: unknown, error?: string) {
   })
 }
 
+/** Snapshot the host's `--app-*` theme tokens at iframe init time so the
+ *  plugin can opt into the user's theme (Light / Dark / future custom
+ *  accent). The plugin reads `init.payload.theme` and applies the tokens
+ *  to its own `documentElement` via bootstrap.js. */
+function collectHostThemeVars(): Record<string, string> {
+  const cs = getComputedStyle(document.documentElement)
+  const tokens: Record<string, string> = {}
+  // Surface the full `--app-*` palette plus a small generic alias set so
+  // plugin authors can write `var(--theme-accent)` without knowing the
+  // host's internal naming convention.
+  const APP_TOKENS = [
+    'background', 'foreground',
+    'muted', 'muted-foreground',
+    'card', 'card-foreground',
+    'border', 'input', 'ring',
+    'primary', 'primary-foreground', 'primary-hover',
+    'secondary', 'secondary-foreground',
+    'accent', 'accent-foreground',
+    'success', 'success-foreground',
+    'warning', 'warning-foreground',
+    'error', 'error-foreground',
+    'destructive',
+  ] as const
+  for (const t of APP_TOKENS) {
+    const v = cs.getPropertyValue(`--app-${t}`).trim()
+    if (v) {
+      tokens[`--app-${t}`] = v
+      // Generic mirror — host-agnostic alias plugins should target.
+      tokens[`--theme-${t}`] = v
+    }
+  }
+  return tokens
+}
+
 function sendHostMessage(msg: Record<string, unknown>) {
   const port = hostPort.value
   if (!port) return
@@ -272,6 +376,19 @@ function teardown() {
 function resolveCapabilityRequest(requestId: number, granted: boolean) {
   pendingCapabilityRequests.delete(requestId)
   sendResponse(requestId, { granted })
+}
+
+/** Host resolves a pending `submit` request (e.g. with `{submission_id}`). */
+function resolveSubmit(requestId: number, payload: unknown, error?: string) {
+  if (!pendingResponses.delete(requestId)) return
+  sendResponse(requestId, payload, error)
+}
+
+/** Host resolves a pending `emit_event` request with a custom payload
+ *  (e.g. answering an `irl_refresh` with `{submissions:[…]}`). */
+function resolveEvent(requestId: number, payload: unknown, error?: string) {
+  if (!pendingResponses.delete(requestId)) return
+  sendResponse(requestId, payload, error)
 }
 
 /** Unsolicited notification that a previously-granted capability is now active. */
@@ -302,12 +419,13 @@ function sendSubmitAck(submissionCid: string, score: number | null) {
 
 <template>
   <iframe
+    :key="`${pluginCid}|${entry}|${allowAttribute}`"
     ref="iframeEl"
     :src="srcUrl"
-    sandbox="allow-scripts"
+    sandbox="allow-scripts allow-same-origin"
     :allow="allowAttribute"
     referrerpolicy="no-referrer"
-    class="plugin-iframe block w-full h-full min-h-[400px] rounded-lg border border-border bg-background"
+    class="plugin-iframe block w-full h-full min-h-[400px] bg-background"
     @load="onIframeLoad"
   />
 </template>

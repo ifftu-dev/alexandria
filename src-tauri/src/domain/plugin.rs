@@ -114,6 +114,9 @@ pub struct PluginManifest {
     /// Relative path to the iframe entry HTML. Defaults to `ui/index.html`.
     #[serde(default = "default_entry")]
     pub entry: String,
+    /// Optional external URL where users can donate to the plugin author.
+    /// Surfaced as a button in the Settings → Plugins page.
+    pub donate_url: Option<String>,
 }
 
 fn default_entry() -> String {
@@ -155,6 +158,33 @@ pub struct InstalledPlugin {
     pub manifest_json: String,
     /// Installed-at ISO timestamp.
     pub installed_at: String,
+    /// Whether the plugin is currently enabled. Disabled plugins remain
+    /// installed but the player refuses to mount them. Default true at
+    /// install time; user toggles from the Settings → Plugins page.
+    pub enabled: bool,
+}
+
+/// One row in `plugin_irl_submissions` — a learner's submission to the
+/// local instructor inbox for the IRL Review plugin.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IrlSubmission {
+    pub id: String,
+    pub plugin_cid: String,
+    pub element_id: Option<String>,
+    pub enrollment_id: Option<String>,
+    pub learner_did: String,
+    /// Opaque JSON: { files: [{name, mime, data_b64}], comment }
+    pub submission_json: String,
+    /// JSON array of skill tags the learner self-declared.
+    pub skills_json: String,
+    pub status: String,
+    pub reviewer_did: Option<String>,
+    pub score: Option<f64>,
+    pub feedback: Option<String>,
+    /// JSON object mapping skill tag → 0..=1 rating, set by the instructor.
+    pub skill_ratings_json: Option<String>,
+    pub created_at: String,
+    pub reviewed_at: Option<String>,
 }
 
 /// A persisted per-plugin permission record. Mirrors `plugin_permissions`.

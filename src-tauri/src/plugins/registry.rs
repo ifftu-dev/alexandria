@@ -108,13 +108,14 @@ pub fn install_from_directory(
         manifest_json: String::from_utf8(manifest_bytes.clone())
             .map_err(|e| format!("manifest is not valid UTF-8: {e}"))?,
         installed_at: chrono::Utc::now().to_rfc3339(),
+        enabled: true,
     };
 
     db.conn()
         .execute(
             "INSERT INTO plugin_installed \
-             (plugin_cid, name, version, author_did, install_path, source, manifest_json, installed_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+             (plugin_cid, name, version, author_did, install_path, source, manifest_json, installed_at, enabled) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1)",
             params![
                 record.plugin_cid,
                 record.name,
@@ -155,6 +156,11 @@ pub fn install_builtin(
     let plugin_cid = verifier::compute_plugin_cid(bundle.manifest_json);
 
     if let Some(existing) = get_installed(db, &plugin_cid)? {
+        // Dev iteration: the manifest (and therefore the CID) often stays
+        // stable across edits to ui/*.js / *.html / README, so the early
+        // return would leave stale files on disk. Refresh the embedded
+        // bytes every startup for builtins — they're authoritative.
+        refresh_builtin_files(plugins_dir, &plugin_cid, bundle)?;
         return Ok(existing);
     }
 
@@ -212,13 +218,14 @@ pub fn install_builtin(
         manifest_json: String::from_utf8(bundle.manifest_json.to_vec())
             .map_err(|e| format!("builtin manifest is not UTF-8: {e}"))?,
         installed_at: chrono::Utc::now().to_rfc3339(),
+        enabled: true,
     };
 
     db.conn()
         .execute(
             "INSERT INTO plugin_installed \
-             (plugin_cid, name, version, author_did, install_path, source, manifest_json, installed_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+             (plugin_cid, name, version, author_did, install_path, source, manifest_json, installed_at, enabled) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1)",
             params![
                 record.plugin_cid,
                 record.name,
@@ -238,6 +245,44 @@ pub fn install_builtin(
     Ok(record)
 }
 
+/// Overwrite the on-disk copy of a builtin's bundle files with the
+/// embedded bytes. Used at startup when the DB row for a builtin
+/// already exists (idempotent CID install) but the embedded UI may
+/// have changed in this build. Manifest CID is recomputed from the
+/// embedded bytes by the caller, so paths line up.
+fn refresh_builtin_files(
+    plugins_dir: &Path,
+    plugin_cid: &str,
+    bundle: &BuiltinBundle<'_>,
+) -> Result<(), String> {
+    let dest_dir = plugins_dir.join(plugin_cid);
+    if !dest_dir.exists() {
+        fs::create_dir_all(&dest_dir)
+            .map_err(|e| format!("failed to recreate builtin dir: {e}"))?;
+    }
+    fs::write(dest_dir.join(MANIFEST_FILENAME), bundle.manifest_json)
+        .map_err(|e| format!("failed to refresh builtin manifest: {e}"))?;
+
+    if let Some(grader_bytes) = bundle.grader_wasm {
+        fs::write(dest_dir.join(GRADER_FILENAME), grader_bytes)
+            .map_err(|e| format!("failed to refresh builtin grader: {e}"))?;
+    }
+
+    for (rel_path, bytes) in bundle.ui_files {
+        if rel_path.starts_with('/') || rel_path.contains("..") {
+            return Err(format!("invalid builtin ui path '{rel_path}'"));
+        }
+        let dest_path = dest_dir.join(rel_path);
+        if let Some(parent) = dest_path.parent() {
+            fs::create_dir_all(parent)
+                .map_err(|e| format!("failed to create builtin ui subdir: {e}"))?;
+        }
+        fs::write(&dest_path, bytes)
+            .map_err(|e| format!("failed to refresh builtin ui file '{rel_path}': {e}"))?;
+    }
+    Ok(())
+}
+
 /// Static descriptor of a built-in plugin bundle. The host embeds these
 /// via `include_bytes!`; see `src/plugins/builtins.rs`.
 pub struct BuiltinBundle<'a> {
@@ -252,7 +297,7 @@ pub struct BuiltinBundle<'a> {
 pub fn get_installed(db: &Database, plugin_cid: &str) -> Result<Option<InstalledPlugin>, String> {
     db.conn()
         .query_row(
-            "SELECT plugin_cid, name, version, author_did, install_path, source, manifest_json, installed_at \
+            "SELECT plugin_cid, name, version, author_did, install_path, source, manifest_json, installed_at, enabled \
              FROM plugin_installed WHERE plugin_cid = ?1",
             params![plugin_cid],
             row_to_installed,
@@ -266,7 +311,7 @@ pub fn list_installed(db: &Database) -> Result<Vec<InstalledPlugin>, String> {
     let mut stmt = db
         .conn()
         .prepare(
-            "SELECT plugin_cid, name, version, author_did, install_path, source, manifest_json, installed_at \
+            "SELECT plugin_cid, name, version, author_did, install_path, source, manifest_json, installed_at, enabled \
              FROM plugin_installed ORDER BY installed_at DESC",
         )
         .map_err(|e| e.to_string())?;
@@ -385,6 +430,7 @@ pub fn list_permissions(
 }
 
 fn row_to_installed(row: &rusqlite::Row<'_>) -> rusqlite::Result<InstalledPlugin> {
+    let enabled_int: i64 = row.get(8)?;
     Ok(InstalledPlugin {
         plugin_cid: row.get(0)?,
         name: row.get(1)?,
@@ -394,7 +440,78 @@ fn row_to_installed(row: &rusqlite::Row<'_>) -> rusqlite::Result<InstalledPlugin
         source: row.get(5)?,
         manifest_json: row.get(6)?,
         installed_at: row.get(7)?,
+        enabled: enabled_int != 0,
     })
+}
+
+/// Remove every `source = 'builtin'` install whose CID is not in
+/// `keep_cids` — used at startup to drop stale builtin rows left behind
+/// when a builtin's manifest (and therefore its CID) changes between
+/// releases. Community plugins are never touched. Returns the count
+/// pruned.
+pub fn prune_builtins_except(
+    db: &Database,
+    plugins_dir: &Path,
+    keep_cids: &[String],
+) -> Result<usize, String> {
+    let stale: Vec<String> = {
+        let conn = db.conn();
+        let mut stmt = conn
+            .prepare("SELECT plugin_cid FROM plugin_installed WHERE source = ?1")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(params![SOURCE_BUILTIN], |row| row.get::<_, String>(0))
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        rows.into_iter()
+            .filter(|cid| !keep_cids.iter().any(|k| k == cid))
+            .collect()
+    };
+
+    let mut pruned = 0;
+    for cid in &stale {
+        match uninstall(db, plugins_dir, cid) {
+            Ok(()) => pruned += 1,
+            Err(e) => log::warn!("failed to prune stale builtin {cid}: {e}"),
+        }
+    }
+    Ok(pruned)
+}
+
+/// Enable or disable a plugin. Disabled plugins remain installed but the
+/// player refuses to mount them. Capabilities are preserved across the
+/// flip — re-enabling restores grants without prompting again.
+pub fn set_enabled(db: &Database, plugin_cid: &str, enabled: bool) -> Result<(), String> {
+    let rows = db
+        .conn()
+        .execute(
+            "UPDATE plugin_installed SET enabled = ?1 WHERE plugin_cid = ?2",
+            params![enabled as i64, plugin_cid],
+        )
+        .map_err(|e| e.to_string())?;
+    if rows == 0 {
+        return Err(format!("plugin not installed: {plugin_cid}"));
+    }
+    Ok(())
+}
+
+/// Read the plugin bundle's README markdown if one exists. Returns an
+/// empty string if the bundle ships no README. The asset-path traversal
+/// guard in [`resolve_asset`] is reused.
+pub fn read_docs(plugins_dir: &Path, plugin_cid: &str) -> Result<String, String> {
+    for candidate in ["README.md", "readme.md", "README.txt"] {
+        let path = match resolve_asset(plugins_dir, plugin_cid, candidate) {
+            Ok(p) => p,
+            Err(_) => continue,
+        };
+        match fs::read_to_string(&path) {
+            Ok(s) => return Ok(s),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => continue,
+            Err(e) => return Err(format!("failed to read plugin docs: {e}")),
+        }
+    }
+    Ok(String::new())
 }
 
 /// Recursive directory copy that refuses symlinks (Phase 1 can't verify

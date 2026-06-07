@@ -16,6 +16,9 @@ pub mod sentinel;
 pub mod settings;
 pub mod tutoring;
 
+#[cfg(target_os = "macos")]
+mod macos_media_delegate;
+
 // Mobile crypto: same modules as desktop but with portable keystore
 // (AES-256-GCM + Argon2id instead of IOTA Stronghold)
 #[cfg(mobile)]
@@ -380,6 +383,13 @@ impl AppState {
                     stats.installed,
                     stats.failed
                 );
+
+                // Demo course exercising both first-party plugins.
+                // Idempotent and silent if the builtins haven't landed yet
+                // (e.g. a corrupt embedded bundle); see seed_plugin_demo.
+                if let Err(e) = crate::db::seed_plugin_demo::seed_plugin_demo_course(db.conn()) {
+                    log::warn!("plugin demo course seed failed: {e}");
+                }
 
                 // Clean up any sessions stuck as 'active' from a previous crash.
                 match db.conn().execute(
@@ -820,30 +830,55 @@ pub fn run() {
                             let prefs: Retained<AnyObject> =
                                 objc2::msg_send![&*config, preferences];
 
-                            // NSNumber *yes = [NSNumber numberWithBool:YES];
                             let yes: Retained<AnyObject> = objc2::msg_send![
                                 class!(NSNumber),
                                 numberWithBool: true
                             ];
-                            // NSString *key = [NSString stringWithUTF8String:"fullScreenEnabled"];
-                            let c_key = c"fullScreenEnabled";
-                            let key: Retained<AnyObject> = objc2::msg_send![
-                                class!(NSString),
-                                stringWithUTF8String: c_key.as_ptr()
+                            let no: Retained<AnyObject> = objc2::msg_send![
+                                class!(NSNumber),
+                                numberWithBool: false
                             ];
 
-                            // [prefs setValue:yes forKey:key];
-                            let _: () = objc2::msg_send![
-                                &*prefs,
-                                setValue: &*yes,
-                                forKey: &*key
-                            ];
+                            // Helper closure to set a WKPreferences private
+                            // value-for-key entry. Most of the WebRTC + media
+                            // capture flags live on WKPreferences' KVC surface.
+                            let set_pref = |k: &core::ffi::CStr, val: &AnyObject| {
+                                let key: Retained<AnyObject> = objc2::msg_send![
+                                    class!(NSString),
+                                    stringWithUTF8String: k.as_ptr()
+                                ];
+                                let _: () = objc2::msg_send![
+                                    &*prefs,
+                                    setValue: val,
+                                    forKey: &*key
+                                ];
+                            };
+
+                            set_pref(c"fullScreenEnabled", &yes);
+                            // Enable getUserMedia + RTCPeerConnection so plugin
+                            // iframes can capture audio/video locally for the
+                            // Music Reviews / future camera-based plugins.
+                            set_pref(c"mediaDevicesEnabled", &yes);
+                            set_pref(c"peerConnectionEnabled", &yes);
+                            set_pref(c"mediaStreamEnabled", &yes);
+                            set_pref(c"mediaCaptureRequiresSecureConnection", &no);
+
+                            // Install a UIDelegate that auto-grants
+                            // media-capture requests. WKWebView denies by
+                            // default when no UIDelegate implements
+                            // `_webView:requestMediaCapturePermissionForOrigin:initiatedByFrame:type:decisionHandler:`,
+                            // which blocks getUserMedia inside plugin iframes
+                            // even though the plugin's own consent flow has
+                            // already gone through PermissionPrompt.
+                            crate::macos_media_delegate::install(wk);
                         }
 
-                        log::info!("macOS: enabled WKPreferences fullScreenEnabled");
+                        log::info!(
+                            "macOS: enabled WKPreferences fullScreen + media-capture + UIDelegate"
+                        );
                     })
                     .unwrap_or_else(|e| {
-                        log::warn!("macOS: failed to enable element fullscreen: {e}");
+                        log::warn!("macOS: failed to configure webview: {e}");
                     });
                 }
             }
@@ -920,6 +955,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::health::check_health,
             commands::health::read_diag_log,
+            commands::health::frontend_log,
             // App settings (per-profile, scope=sync|device)
             commands::settings::list_settings,
             commands::settings::set_setting,
@@ -939,6 +975,7 @@ pub fn run() {
             commands::identity::is_biometric_available,
             commands::identity::get_wallet_info,
             commands::identity::get_local_did,
+            commands::identity::resolve_display_names,
             commands::identity::get_profile,
             commands::identity::update_profile,
             commands::identity::publish_profile,
@@ -1190,6 +1227,15 @@ pub fn run() {
             commands::plugins::plugin_grant_capability,
             commands::plugins::plugin_revoke_capability,
             commands::plugins::plugin_list_permissions,
+            commands::plugins::plugin_set_enabled,
+            commands::plugins::plugin_get_docs,
+            commands::plugins::plugin_read_asset_data_url,
+            // IRL Review — local instructor inbox
+            commands::plugins::irl_submit_for_review,
+            commands::plugins::irl_list_my_submissions,
+            commands::plugins::irl_list_pending,
+            commands::plugins::irl_get_submission,
+            commands::plugins::irl_post_review,
             // Phase 2 — submit-and-grade against deterministic WASM graders.
             // Desktop-only: wasmtime v27 lacks iOS / Android support.
             #[cfg(desktop)]

@@ -44,7 +44,7 @@ cc = "1"
 
 [dependencies]
 # Tauri
-tauri = { version = "2.10.0", features = ["protocol-asset"] }
+tauri = { version = "2.10.0", features = ["macos-private-api", "protocol-asset"] }
 tauri-plugin-log = "2"
 tauri-plugin-biometry = "0.2"
 tauri-plugin-os = "2"
@@ -139,6 +139,10 @@ rusqlite = { version = "0.38", features = ["bundled-sqlcipher-vendored-openssl",
 # ObjC runtime — for configuring WKWebView scrollView insets (iOS) and
 # enabling element fullscreen on WKPreferences (macOS).
 objc2 = "0.6"
+# Objective-C blocks — needed to invoke WKUIDelegate decision handlers
+# (e.g. `requestMediaCapturePermissionForOrigin:`) to grant mic / camera
+# access from plugin iframes.
+block2 = "0.6"
 
 [target.'cfg(any(target_os = "ios", target_os = "android"))'.dependencies]
 # Image encoding (JPEG) for bridging video frames to the webview on mobile.

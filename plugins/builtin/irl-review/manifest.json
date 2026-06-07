@@ -1,0 +1,16 @@
+{
+  "id": "did:key:z6MkvDqGT54cXesYGvABpF1UapVNwjCqRcafi4Px6Thv5T3Z#irl-review",
+  "version": "0.1.0",
+  "api_version": "1",
+  "host_min_version": "0.1.0",
+  "name": "IRL Review",
+  "description": "Submit work in any format (image, audio, video, document) to an instructor for review. Receive a score, written feedback, and per-skill ratings back through the local instructor inbox.",
+  "author_did": "did:key:z6MkvDqGT54cXesYGvABpF1UapVNwjCqRcafi4Px6Thv5T3Z",
+  "kinds": ["interactive"],
+  "capabilities": [],
+  "subject_tags": ["review", "instructor", "portfolio"],
+  "platforms": ["macos", "windows", "linux", "android", "ios"],
+  "icon_path": "icon.svg",
+  "entry": "ui/index.html",
+  "donate_url": "https://alexandria.dev/donate/irl-review"
+}

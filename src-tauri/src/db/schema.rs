@@ -60,6 +60,7 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (50, "challenge_stake_lifecycle", MIGRATION_050),
     (51, "element_submission_grader_version", MIGRATION_051),
     (52, "stake_pubkey_registry", MIGRATION_052),
+    (53, "plugin_enabled_and_irl_review", MIGRATION_053),
 ];
 
 const MIGRATION_001: &str = r#"
@@ -2174,4 +2175,46 @@ CREATE TABLE IF NOT EXISTS stake_pubkey_registry (
 
 CREATE INDEX IF NOT EXISTS idx_registry_address_window
     ON stake_pubkey_registry(stake_address, valid_from, valid_until);
+"#;
+
+const MIGRATION_053: &str = r#"
+-- ============================================================
+-- Migration 053: Plugin enable/disable flag + IRL Review inbox
+--
+-- Adds an `enabled` toggle on installed plugins so users can keep
+-- a plugin installed without it being mountable. Player + Settings
+-- page check this; disabled plugins refuse to mount.
+--
+-- Also introduces the IRL Review submission inbox — the local
+-- instructor-review flow for the irl-review builtin plugin.
+-- Submissions are queued here (no network), an instructor browses
+-- pending rows in their own UI, and reviews land back with score +
+-- per-skill ratings + freeform feedback.
+-- ============================================================
+
+ALTER TABLE plugin_installed ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1;
+
+CREATE TABLE IF NOT EXISTS plugin_irl_submissions (
+    id                   TEXT PRIMARY KEY,
+    plugin_cid           TEXT NOT NULL REFERENCES plugin_installed(plugin_cid) ON DELETE CASCADE,
+    element_id           TEXT,
+    enrollment_id        TEXT,
+    learner_did          TEXT NOT NULL,
+    submission_json      TEXT NOT NULL,
+    skills_json          TEXT NOT NULL DEFAULT '[]',
+    status               TEXT NOT NULL CHECK (status IN ('pending','reviewed','rejected')) DEFAULT 'pending',
+    reviewer_did         TEXT,
+    score                REAL,
+    feedback             TEXT,
+    skill_ratings_json   TEXT,
+    created_at           TEXT NOT NULL DEFAULT (datetime('now')),
+    reviewed_at          TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_irl_submissions_status
+    ON plugin_irl_submissions(status);
+CREATE INDEX IF NOT EXISTS idx_irl_submissions_learner
+    ON plugin_irl_submissions(learner_did);
+CREATE INDEX IF NOT EXISTS idx_irl_submissions_plugin
+    ON plugin_irl_submissions(plugin_cid);
 "#;

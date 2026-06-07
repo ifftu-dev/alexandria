@@ -1562,6 +1562,9 @@ export interface PluginManifest {
   platforms: string[]
   icon_path: string | null
   entry: string
+  /** Optional external URL where users can donate to the plugin author.
+   *  Surfaced as a button in the Settings → Plugins page. */
+  donate_url: string | null
 }
 
 /** Phase-2 grader reference. Ignored in Phase 1 even if present. */
@@ -1581,6 +1584,29 @@ export interface InstalledPlugin {
   source: 'local_file' | 'p2p' | 'builtin'
   manifest_json: string
   installed_at: string
+  /** Disabled plugins remain installed but the player refuses to mount them. */
+  enabled: boolean
+}
+
+/** One row in the IRL Review submission inbox. */
+export interface IrlSubmission {
+  id: string
+  plugin_cid: string
+  element_id: string | null
+  enrollment_id: string | null
+  learner_did: string
+  /** Opaque plugin-defined payload (e.g. `{ files: [...], comment: string }`). */
+  submission_json: string
+  /** JSON array of skill tags the learner self-declared. */
+  skills_json: string
+  status: 'pending' | 'reviewed' | 'rejected'
+  reviewer_did: string | null
+  score: number | null
+  feedback: string | null
+  /** JSON object mapping skill tag → 0..=1 rating. */
+  skill_ratings_json: string | null
+  created_at: string
+  reviewed_at: string | null
 }
 
 /** A persisted capability grant record. */

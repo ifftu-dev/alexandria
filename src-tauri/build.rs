@@ -7,6 +7,12 @@ fn main() {
     println!("cargo::rustc-check-cfg=cfg(has_app_lib)");
     println!("cargo:rustc-cfg=has_app_lib");
 
+    // Re-run when any embedded plugin asset or bootstrap script changes
+    // — these are pulled in via include_bytes!/include_str! and Cargo
+    // doesn't track them by default.
+    println!("cargo:rerun-if-changed=src/plugins/bootstrap.js");
+    println!("cargo:rerun-if-changed=../plugins/builtin");
+
     // On iOS, the `if-watch` crate (pulled in by libp2p's QUIC transport)
     // references macOS-only SCDynamicStore symbols from SystemConfiguration.
     // These symbols don't exist in iOS's SystemConfiguration framework.

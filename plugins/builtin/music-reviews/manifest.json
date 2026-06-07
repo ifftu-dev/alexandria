@@ -1,0 +1,16 @@
+{
+  "id": "did:key:z6MkvDqGT54cXesYGvABpF1UapVNwjCqRcafi4Px6Thv5T3Z#music-reviews",
+  "version": "0.1.0",
+  "api_version": "1",
+  "host_min_version": "0.1.0",
+  "name": "Music Reviews",
+  "description": "Plays a target sequence of notes and listens to the learner; flags each note as correct or wrong using live pitch detection.",
+  "author_did": "did:key:z6MkvDqGT54cXesYGvABpF1UapVNwjCqRcafi4Px6Thv5T3Z",
+  "kinds": ["interactive"],
+  "capabilities": ["microphone"],
+  "subject_tags": ["music", "ear-training", "pitch"],
+  "platforms": ["macos", "windows", "linux"],
+  "icon_path": "icon.svg",
+  "entry": "ui/index.html",
+  "donate_url": "https://alexandria.dev/donate/music-reviews"
+}

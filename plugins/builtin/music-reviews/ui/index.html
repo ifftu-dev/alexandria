@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Music Reviews</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+
+        /* Theme tokens — supplied by the host at init via the `theme` field
+           of the init payload (see PluginIframe.collectHostThemeVars). The
+           values below are conservative defaults used only if the host
+           hasn't applied a theme yet (e.g. ad-hoc preview). Plugins should
+           prefer `--theme-*` aliases; `--app-*` is the host's internal
+           name. */
+        --theme-background: #ffffff;
+        --theme-foreground: #0f172a;
+        --theme-muted: rgb(233, 231, 226);
+        --theme-muted-foreground: #475569;
+        --theme-card: #ffffff;
+        --theme-card-foreground: #0f172a;
+        --theme-border: rgb(209, 211, 216);
+        --theme-accent: #4f46e5;
+        --theme-accent-foreground: #ffffff;
+        --theme-primary: #4f46e5;
+        --theme-success: #16a34a;
+        --theme-warning: #f59e0b;
+        --theme-error: #dc2626;
+
+        /* Local convenience aliases over the host tokens. */
+        --bg: var(--theme-background);
+        --bg-soft: var(--theme-card);
+        --panel: color-mix(in srgb, var(--theme-foreground) 6%, transparent);
+        --panel-border: var(--theme-border);
+        --fg: var(--theme-foreground);
+        --fg-dim: var(--theme-muted-foreground);
+        --accent: var(--theme-accent);
+        --accent-soft: color-mix(in srgb, var(--theme-accent) 16%, transparent);
+        --ok: var(--theme-success);
+        --ok-soft: color-mix(in srgb, var(--theme-success) 18%, transparent);
+        --bad: var(--theme-error);
+        --bad-soft: color-mix(in srgb, var(--theme-error) 16%, transparent);
+        --warn: var(--theme-warning);
+
+        --hit-x: 32%;
+      }
+
+      * { box-sizing: border-box; }
+      /* HTML `hidden` must beat the explicit `display: grid` on overlays. */
+      [hidden] { display: none !important; }
+
+      html, body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+      }
+      body {
+        background:
+          radial-gradient(ellipse at 50% -10%, rgba(99, 102, 241, 0.18), transparent 60%),
+          var(--bg);
+        color: var(--fg);
+        display: flex;
+        flex-direction: column;
+      }
+
+      /* ============================ HEADER ============================ */
+      .topbar {
+        display: grid;
+        grid-template-columns: 1fr auto 1fr;
+        align-items: center;
+        gap: 16px;
+        padding: 14px 24px;
+        border-bottom: 1px solid var(--panel-border);
+        background: var(--bg-soft);
+      }
+      .topbar .left, .topbar .right {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+      }
+      .topbar .right { justify-content: flex-end; }
+      .stat {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        line-height: 1;
+      }
+      .stat .num {
+        font-size: 24px;
+        font-weight: 800;
+        font-variant-numeric: tabular-nums;
+        letter-spacing: -0.02em;
+      }
+      .stat .label {
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        color: var(--fg-dim);
+        margin-top: 4px;
+      }
+      .stat .num.ok { color: var(--ok); }
+      .stat .num.bad { color: var(--bad); }
+
+      .title-stack { text-align: center; }
+      .title-stack .h {
+        font-size: 13px;
+        text-transform: uppercase;
+        letter-spacing: 0.18em;
+        color: var(--fg-dim);
+      }
+      .title-stack .t {
+        margin-top: 2px;
+        font-size: 18px;
+        font-weight: 700;
+      }
+
+      /* ============================ STAGE ============================= */
+      .stage {
+        position: relative;
+        flex: 1;
+        min-height: 360px;
+        overflow: hidden;
+        background:
+          linear-gradient(180deg, rgba(255,255,255,0.02) 0%, transparent 8%, transparent 92%, rgba(255,255,255,0.02) 100%),
+          repeating-linear-gradient(0deg, transparent 0, transparent 39px, rgba(255,255,255,0.04) 39px, rgba(255,255,255,0.04) 40px);
+      }
+      /* Five-line staff overlay */
+      .staff {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+      }
+      .staff::before {
+        content: '';
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 50%;
+        height: 200px;
+        transform: translateY(-50%);
+        background:
+          repeating-linear-gradient(
+            0deg,
+            transparent 0,
+            transparent 39px,
+            color-mix(in srgb, var(--fg) 18%, transparent) 39px,
+            color-mix(in srgb, var(--fg) 18%, transparent) 40px
+          );
+      }
+
+      /* The vertical "hit line" — notes get scored when they cross it */
+      .hit-line {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: var(--hit-x);
+        width: 4px;
+        background: linear-gradient(180deg,
+          transparent 0%,
+          var(--accent) 15%,
+          var(--accent) 85%,
+          transparent 100%);
+        box-shadow: 0 0 24px var(--accent);
+        pointer-events: none;
+        z-index: 5;
+      }
+      .hit-line::before {
+        content: '';
+        position: absolute;
+        left: -22px;
+        top: 50%;
+        width: 48px;
+        height: 48px;
+        border-radius: 999px;
+        background: var(--accent-soft);
+        transform: translateY(-50%);
+        filter: blur(8px);
+      }
+
+      .notes-layer {
+        position: absolute;
+        inset: 0;
+        z-index: 4;
+      }
+
+      .note {
+        position: absolute;
+        top: 50%;
+        transform: translateY(-50%);
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 4px;
+        will-change: left, width;
+      }
+      .note .pill {
+        position: relative;
+        height: 56px;
+        min-width: 56px;
+        border-radius: 999px;
+        background: var(--bg-soft);
+        border: 2px solid var(--accent);
+        box-shadow: 0 6px 22px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.18);
+        display: flex;
+        align-items: center;
+        padding: 0 18px 0 18px;
+        font-weight: 700;
+        font-size: 16px;
+        color: var(--fg);
+        white-space: nowrap;
+        position: relative;
+      }
+      /* The note head — a darker dot at the start of the pill, like the
+         note's "attack" point. The hit line snaps to this. */
+      .note .pill::after {
+        content: '';
+        position: absolute;
+        left: 0;
+        top: 50%;
+        width: 22px;
+        height: 22px;
+        border-radius: 999px;
+        background: var(--accent);
+        transform: translate(-50%, -50%);
+        box-shadow: 0 0 14px var(--accent);
+      }
+      .note .meta { margin-left: 8px; }
+      .note.active .pill {
+        border-color: var(--warn);
+        box-shadow: 0 6px 22px rgba(0,0,0,0.35), 0 0 28px var(--warn);
+        animation: pulse-glow 1.2s ease-in-out infinite;
+      }
+      .note.active .pill::after { background: var(--warn); box-shadow: 0 0 18px var(--warn); }
+      .note.ok .pill {
+        background: var(--ok-soft);
+        border-color: var(--ok);
+        box-shadow: 0 6px 22px rgba(0,0,0,0.35), 0 0 28px var(--ok);
+      }
+      .note.ok .pill::after { background: var(--ok); box-shadow: 0 0 14px var(--ok); }
+      .note.bad .pill {
+        background: var(--bad-soft);
+        border-color: var(--bad);
+        box-shadow: 0 6px 22px rgba(0,0,0,0.35), 0 0 28px var(--bad);
+      }
+      .note.bad .pill::after { background: var(--bad); box-shadow: 0 0 14px var(--bad); }
+      /* Progress fill that grows from the note head as the play head
+         traverses the note. Lets the learner see how much of the note
+         they've held — like a sustained-note progress bar. */
+      .note .progress {
+        position: absolute;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: 0;
+        background: linear-gradient(90deg,
+          color-mix(in srgb, var(--ok) 30%, transparent) 0%,
+          color-mix(in srgb, var(--ok) 12%, transparent) 100%);
+        border-radius: 999px 0 0 999px;
+        pointer-events: none;
+        transition: width .08s linear, background .15s;
+      }
+      .note.bad .progress {
+        background: linear-gradient(90deg,
+          color-mix(in srgb, var(--bad) 30%, transparent) 0%,
+          color-mix(in srgb, var(--bad) 12%, transparent) 100%);
+      }
+      .note .meta {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 2px;
+        font-variant-numeric: tabular-nums;
+        min-height: 24px;
+      }
+      .note .played {
+        font-size: 11px;
+        font-weight: 700;
+        padding: 2px 8px;
+        border-radius: 999px;
+        line-height: 1;
+      }
+      .note .played.ok {
+        background: var(--ok-soft);
+        color: var(--ok);
+      }
+      .note .played.bad {
+        background: var(--bad-soft);
+        color: var(--bad);
+      }
+      .note .cents {
+        font-size: 10px;
+        color: var(--fg-dim);
+      }
+      /* Pulse the glow only — `.pill` is a static flex child, so a
+         `transform` on it would knock its layout. Animate box-shadow. */
+      @keyframes pulse-glow {
+        0%, 100% { box-shadow: 0 6px 22px rgba(0,0,0,0.35), 0 0 14px var(--warn); }
+        50%      { box-shadow: 0 6px 22px rgba(0,0,0,0.35), 0 0 36px var(--warn); }
+      }
+
+      /* Beat ticks at bottom */
+      .ticks {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 12px;
+        height: 16px;
+        z-index: 3;
+        pointer-events: none;
+      }
+      .tick {
+        position: absolute;
+        bottom: 0;
+        width: 1px;
+        background: color-mix(in srgb, var(--fg) 20%, transparent);
+      }
+      .tick.big { height: 14px; background: color-mix(in srgb, var(--fg) 40%, transparent); }
+      .tick.small { height: 6px; }
+
+      /* ============================ FOOTER ============================ */
+      .footer {
+        padding: 16px 24px 22px;
+        display: grid;
+        grid-template-columns: 1fr auto 1fr;
+        gap: 16px;
+        align-items: center;
+        background: var(--bg-soft);
+        border-top: 1px solid var(--panel-border);
+      }
+      .footer .left, .footer .right { display: flex; align-items: center; gap: 12px; }
+      .footer .right { justify-content: flex-end; }
+
+      .pitch-display {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        padding: 8px 14px;
+        background: var(--panel);
+        border: 1px solid var(--panel-border);
+        border-radius: 12px;
+        min-width: 200px;
+      }
+      .vu-meter {
+        position: relative;
+        height: 8px;
+        border-radius: 999px;
+        background: color-mix(in srgb, var(--fg) 10%, transparent);
+        overflow: hidden;
+      }
+      .vu-meter .fill {
+        height: 100%;
+        width: 0%;
+        background: linear-gradient(90deg,
+          color-mix(in srgb, var(--ok) 80%, transparent) 0%,
+          color-mix(in srgb, var(--ok) 80%, transparent) 60%,
+          color-mix(in srgb, var(--warn) 90%, transparent) 80%,
+          color-mix(in srgb, var(--bad) 90%, transparent) 100%);
+        transition: width 60ms linear;
+      }
+      .vu-meter .silent-indicator {
+        position: absolute;
+        right: 0;
+        top: -2px;
+        bottom: -2px;
+        width: 8px;
+        border-radius: 999px;
+        background: color-mix(in srgb, var(--fg) 18%, transparent);
+        opacity: 0;
+        transition: opacity .15s;
+      }
+      .vu-meter.silent .silent-indicator { opacity: 1; }
+      .pitch-display .row {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 8px;
+      }
+      .pitch-display .row .lbl {
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        color: var(--fg-dim);
+      }
+      .pitch-display .row .val {
+        font-size: 16px;
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+      }
+      .pitch-display .row .val.dim { color: var(--fg-dim); font-weight: 400; }
+      .tune-bar {
+        position: relative;
+        height: 6px;
+        border-radius: 999px;
+        background: color-mix(in srgb, var(--fg) 10%, transparent);
+        overflow: hidden;
+      }
+      .tune-bar::before {
+        content: '';
+        position: absolute;
+        left: 50%;
+        top: 0;
+        bottom: 0;
+        width: 2px;
+        background: color-mix(in srgb, var(--fg) 30%, transparent);
+        transform: translateX(-50%);
+      }
+      .tune-bar .needle {
+        position: absolute;
+        left: 50%;
+        top: 0;
+        bottom: 0;
+        width: 4px;
+        background: var(--accent);
+        border-radius: 999px;
+        transform: translateX(-50%);
+        transition: left .08s linear, background .12s;
+        box-shadow: 0 0 12px var(--accent);
+      }
+
+      button {
+        font: inherit;
+        padding: 10px 18px;
+        border-radius: 999px;
+        border: 1px solid var(--panel-border);
+        background: var(--panel);
+        color: var(--fg);
+        cursor: pointer;
+        transition: background .15s, border-color .15s, transform .12s;
+      }
+      button:hover { background: color-mix(in srgb, var(--fg) 6%, var(--panel)); }
+      button:active { transform: translateY(1px); }
+      button.primary {
+        background: linear-gradient(180deg, var(--accent), color-mix(in srgb, var(--accent) 80%, black));
+        border-color: transparent;
+        color: white;
+        box-shadow: 0 8px 22px rgba(99, 102, 241, 0.45);
+      }
+      button.primary:hover { filter: brightness(1.08); }
+      button[disabled] { opacity: 0.5; cursor: not-allowed; box-shadow: none; }
+      .icon-btn {
+        width: 40px; height: 40px;
+        padding: 0;
+        display: grid; place-items: center;
+        border-radius: 999px;
+      }
+
+      /* Tempo control */
+      .tempo {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        background: var(--panel);
+        border: 1px solid var(--panel-border);
+        border-radius: 999px;
+        padding: 4px 8px 4px 14px;
+      }
+      .tempo .label {
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: var(--fg-dim);
+      }
+      .tempo .bpm {
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+        font-size: 16px;
+        min-width: 36px;
+        text-align: center;
+      }
+      .tempo button {
+        width: 26px; height: 26px;
+        padding: 0;
+        font-size: 14px;
+        border-radius: 999px;
+        line-height: 1;
+      }
+
+      /* ============================ COUNT-IN ========================== */
+      .countin {
+        position: absolute;
+        inset: 0;
+        z-index: 10;
+        display: grid;
+        place-items: center;
+        background: rgba(0, 0, 0, 0.45);
+        backdrop-filter: blur(4px);
+        pointer-events: none;
+      }
+      .countin .num {
+        font-size: 160px;
+        font-weight: 900;
+        line-height: 1;
+        color: white;
+        text-shadow: 0 8px 40px rgba(0,0,0,0.6);
+        animation: countpop .9s ease-out;
+      }
+      @keyframes countpop {
+        from { transform: scale(0.6); opacity: 0; }
+        50%  { transform: scale(1.1); opacity: 1; }
+        to   { transform: scale(1.0); opacity: 1; }
+      }
+
+      /* ============================ RESULTS =========================== */
+      .results {
+        position: absolute;
+        inset: 0;
+        z-index: 20;
+        display: grid;
+        place-items: center;
+        background: rgba(0, 0, 0, 0.55);
+        backdrop-filter: blur(8px);
+      }
+      .results .card {
+        background: var(--bg-soft);
+        border: 1px solid var(--panel-border);
+        border-radius: 18px;
+        padding: 28px 32px;
+        min-width: min(480px, 90vw);
+        box-shadow: 0 30px 80px rgba(0,0,0,0.5);
+      }
+      .results h2 {
+        margin: 0 0 4px;
+        font-size: 14px;
+        text-transform: uppercase;
+        letter-spacing: 0.15em;
+        color: var(--fg-dim);
+      }
+      .results .score {
+        font-size: 64px;
+        font-weight: 900;
+        letter-spacing: -0.03em;
+        line-height: 1;
+      }
+      .results .sub {
+        margin-top: 4px;
+        color: var(--fg-dim);
+        font-size: 13px;
+      }
+      .results .grid {
+        margin-top: 18px;
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
+        gap: 6px;
+      }
+      .results .cell {
+        font-size: 12px;
+        padding: 8px 4px;
+        border-radius: 8px;
+        text-align: center;
+        font-weight: 600;
+      }
+      .results .cell.ok { background: var(--ok-soft); color: var(--ok); }
+      .results .cell.bad { background: var(--bad-soft); color: var(--bad); }
+      .results .actions {
+        display: flex;
+        gap: 10px;
+        justify-content: flex-end;
+        margin-top: 20px;
+      }
+
+      /* Status toast */
+      .toast {
+        position: absolute;
+        top: 80px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 8;
+        padding: 8px 16px;
+        background: rgba(0,0,0,0.6);
+        color: white;
+        border-radius: 999px;
+        font-size: 13px;
+        opacity: 0;
+        transition: opacity .25s;
+        pointer-events: none;
+      }
+      .toast.show { opacity: 1; }
+    </style>
+  </head>
+  <body>
+    <div class="topbar">
+      <div class="left">
+        <div class="stat"><div class="num" id="stat-score">0%</div><div class="label">Accuracy</div></div>
+        <div class="stat"><div class="num ok" id="stat-streak">0</div><div class="label">Streak</div></div>
+        <div class="stat"><div class="num" id="stat-progress">0/0</div><div class="label">Notes</div></div>
+      </div>
+      <div class="title-stack">
+        <div class="h">Now playing</div>
+        <div class="t" id="exercise-title">Warm-up scale</div>
+      </div>
+      <div class="right">
+        <div class="tempo">
+          <span class="label">BPM</span>
+          <button type="button" id="bpm-down" aria-label="Decrease tempo">−</button>
+          <span class="bpm" id="bpm-value">60</span>
+          <button type="button" id="bpm-up" aria-label="Increase tempo">+</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="stage" id="stage">
+      <div class="staff"></div>
+      <div class="notes-layer" id="notes"></div>
+      <div class="hit-line"></div>
+      <div class="ticks" id="ticks"></div>
+      <div class="toast" id="toast"></div>
+      <div class="countin" id="countin" hidden><div class="num" id="countin-num">3</div></div>
+      <div class="results" id="results" hidden></div>
+    </div>
+
+    <div class="footer">
+      <div class="left">
+        <div class="pitch-display">
+          <div class="row">
+            <span class="lbl">You</span>
+            <span class="val dim" id="live-note">—</span>
+          </div>
+          <div class="tune-bar"><div class="needle" id="needle"></div></div>
+          <div class="row" style="margin-top:2px;">
+            <span class="lbl">Mic level</span>
+            <span class="lbl" id="mic-state">idle</span>
+          </div>
+          <div class="vu-meter" id="vu-meter">
+            <div class="fill" id="vu-fill"></div>
+            <div class="silent-indicator"></div>
+          </div>
+        </div>
+      </div>
+      <div style="display:flex; gap:10px;">
+        <button class="primary" id="start-btn" type="button">▶ Start</button>
+        <button id="pause-btn" type="button" disabled>Pause</button>
+        <button id="restart-btn" type="button" disabled>Restart</button>
+      </div>
+      <div class="right">
+        <button id="finish-btn" type="button" disabled>Finish</button>
+      </div>
+    </div>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

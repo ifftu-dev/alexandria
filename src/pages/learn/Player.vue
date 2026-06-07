@@ -403,8 +403,12 @@ async function markComplete(score?: number) {
     // A newly-passed assessment may complete the course — refresh the
     // claim affordance.
     void refreshCompletionStatus()
-    // Auto-advance to next element after a short delay
-    setTimeout(() => advanceToNext(), 500)
+    // Auto-advance to next element after a short delay — but skip for
+    // element types where staying put is more useful (replay results,
+    // try again, review the score) than jumping ahead.
+    if (shouldAutoAdvance(currentElement.value?.element_type)) {
+      setTimeout(() => advanceToNext(), 500)
+    }
   } catch (e) {
     console.error('Failed to update progress:', e)
   }
@@ -479,6 +483,16 @@ async function onDownloadClick() {
   } finally {
     downloadingElementId.value = null
   }
+}
+
+/** Element types that should NOT auto-advance on `markComplete`. Plugin
+ *  elements are interactive (replay, retry, review results), so jumping
+ *  forward on completion is almost always wrong. The learner clicks Next
+ *  themselves. Future: plugin manifest can opt back into auto-advance. */
+function shouldAutoAdvance(elementType: string | undefined): boolean {
+  if (!elementType) return true
+  const NO_AUTO_ADVANCE: ReadonlyArray<string> = ['plugin']
+  return !NO_AUTO_ADVANCE.includes(elementType)
 }
 
 function advanceToNext() {
@@ -601,9 +615,9 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
 </script>
 
 <template>
-  <div>
+  <div class="flex-1 min-h-0 flex flex-col">
     <!-- Loading skeleton -->
-    <div v-if="loading" class="flex gap-0 h-[calc(100vh-8rem)] md:h-[calc(100vh-8rem)]">
+    <div v-if="loading" class="flex-1 min-h-0 flex gap-0">
       <!-- Sidebar skeleton — hidden on mobile -->
       <div class="hidden md:block w-72 shrink-0 border-r border-border p-4 space-y-4">
         <div class="h-4 w-24 animate-pulse rounded bg-muted/40" />
@@ -635,7 +649,7 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
     </div>
 
     <!-- Course not found -->
-    <div v-else-if="!course" class="flex items-center justify-center h-[calc(100vh-8rem)] px-4">
+    <div v-else-if="!course" class="flex items-center justify-center flex-1 min-h-0 px-4">
       <div class="text-center">
         <div class="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-muted/30">
           <svg class="h-8 w-8 text-muted-foreground/50" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
@@ -651,7 +665,7 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
     </div>
 
     <!-- Main Player Layout -->
-    <div v-else class="flex flex-col md:flex-row gap-0 min-h-[calc(100dvh-9rem)] md:h-[calc(100vh-8rem)]">
+    <div v-else class="flex flex-col md:flex-row gap-0 flex-1 min-h-0">
       <!-- ======================================= -->
       <!-- MOBILE: Compact chapter/element header  -->
       <!-- ======================================= -->
@@ -830,10 +844,9 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
       <!-- MAIN CONTENT AREA              -->
       <!-- ============================== -->
       <div class="flex-1 flex flex-col overflow-hidden">
-        <div v-if="currentElement" :key="currentElement.id" class="lesson-body flex-1 overflow-y-auto bg-gradient-to-b from-muted/20 via-transparent to-transparent">
-          <div :class="['mx-auto px-4 md:px-6 py-4 md:py-6', isVideoElement ? 'max-w-7xl' : 'max-w-4xl']">
+        <div v-if="currentElement" :key="currentElement.id" class="lesson-body flex-1 min-h-0 flex flex-col overflow-hidden bg-gradient-to-b from-muted/20 via-transparent to-transparent">
             <!-- Element header -->
-            <div class="sticky top-0 z-10 mb-6 rounded-xl border border-border/70 bg-background/90 px-4 py-4 backdrop-blur supports-[backdrop-filter]:bg-background/70">
+            <div class="shrink-0 z-10 border-b border-border/70 bg-background/90 px-4 md:px-6 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/70">
               <!-- Breadcrumb -->
               <div class="flex items-center gap-1.5 text-xs text-muted-foreground mb-3">
                 <span>{{ currentChapter?.title }}</span>
@@ -1005,19 +1018,17 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
             <!-- Dispatched via elementRegistry. Phase 0 of plugin system. -->
             <!-- ============================== -->
             <div
-              :class="isVideoElement
-                ? 'mb-8 -mx-4 md:mx-0'
-                : 'mb-8 rounded-2xl border border-border/70 bg-card/60 p-4 md:p-6 shadow-[0_1px_0_rgba(255,255,255,0.04),0_8px_28px_rgba(0,0,0,0.08)]'"
+              class="lesson-content flex-1 min-h-0 flex"
             >
               <component
                 :is="elementBinding!.component"
                 v-if="elementBinding && elementHostContext"
                 :key="`${currentElement.element_type}-${activeChapter}-${activeElement}`"
+                class="flex-1 min-h-0 min-w-0"
                 v-bind="elementBinding.props(elementHostContext)"
                 v-on="elementBinding.events(elementHostContext)"
               />
             </div>
-          </div>
         </div>
 
         <!-- Empty state when no element selected -->

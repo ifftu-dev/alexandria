@@ -3,6 +3,7 @@ pub mod schema;
 pub mod seed;
 #[cfg(feature = "dev-seed")]
 pub mod seed_content;
+pub mod seed_plugin_demo;
 
 use rusqlite::{Connection, OpenFlags};
 use std::path::Path;
