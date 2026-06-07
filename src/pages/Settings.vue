@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref, watch, onMounted, onUnmounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, computed, onMounted } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { useAuth } from '@/composables/useAuth'
 import { useP2P } from '@/composables/useP2P'
@@ -17,9 +17,10 @@ import {
   getBiometricStatus,
   storeVaultPasswordForBiometric,
 } from '@/composables/useBiometricVault'
-import { useSettingsModal, type SettingsSectionId } from '@/composables/useSettingsModal'
+import type { SettingsSectionId } from '@/composables/useSettingsModal'
 import { AppButton, AppInput, AppTextarea, AppModal, AppAlert } from '@/components/ui'
 import AdvancedSettingsPanel from '@/components/settings/AdvancedSettingsPanel.vue'
+import PluginsPanel from '@/components/settings/PluginsPanel.vue'
 import type { Identity } from '@/types'
 
 const { invoke } = useLocalApi()
@@ -28,8 +29,72 @@ const { status: p2pStatus, refreshStatus: refreshP2pStatus } = useP2P()
 const { theme, setTheme } = useTheme()
 const { shortcuts, updateShortcut, resetShortcut, resetAll: resetAllShortcuts } =
   useKeyboardShortcuts()
-const { isOpen, activeSection, close, setSection } = useSettingsModal()
 const router = useRouter()
+const route = useRoute()
+
+// ---- Section nav metadata + search index ----
+interface SectionMeta {
+  id: SettingsSectionId
+  label: string
+  desc: string
+  /** Free-text terms the search box matches against, beyond label/desc. */
+  keywords: string[]
+}
+const SECTIONS: SectionMeta[] = [
+  { id: 'account', label: 'Account & Identity', desc: 'Profile, addresses, peer',
+    keywords: ['display name', 'bio', 'stake address', 'payment address', 'peer id', 'profile hash', 'publish', 'did'] },
+  { id: 'security', label: 'Security & Privacy', desc: 'Recovery, lock, biometric',
+    keywords: ['recovery phrase', 'mnemonic', 'export', 'seed', 'lock wallet', 'vault', 'biometric', 'touch id', 'face id', 'password'] },
+  { id: 'personalization', label: 'Personalization', desc: 'Theme, shortcuts',
+    keywords: ['theme', 'light', 'dark', 'system', 'appearance', 'keyboard shortcuts', 'keybindings', 'hotkeys'] },
+  { id: 'system', label: 'System', desc: 'Storage, network',
+    keywords: ['storage', 'disk', 'quota', 'cache', 'free space', 'evict', 'network', 'p2p', 'node', 'peers'] },
+  { id: 'plugins', label: 'Plugins', desc: 'Install, enable, review submissions',
+    keywords: ['plugin', 'install', 'uninstall', 'enable', 'disable', 'capability', 'donate', 'instructor', 'review', 'irl', 'music'] },
+  { id: 'advanced', label: 'All settings', desc: 'Every per-profile setting',
+    keywords: ['advanced', 'all settings', 'sync', 'sentinel', 'notifications', 'flags'] },
+]
+const SECTION_IDS = SECTIONS.map((s) => s.id)
+
+// ---- Search ----
+const searchQuery = ref('')
+const filteredSections = computed<SectionMeta[]>(() => {
+  const q = searchQuery.value.trim().toLowerCase()
+  if (!q) return SECTIONS
+  return SECTIONS.filter((s) => {
+    const hay = [s.label, s.desc, ...s.keywords].join(' ').toLowerCase()
+    return q.split(/\s+/).every((term) => hay.includes(term))
+  })
+})
+
+/** Per-section match terms shown as chips under a section in search mode,
+ *  so the user sees WHY a section matched (e.g. searching "touch id" under
+ *  Security). */
+function matchedKeywords(s: SectionMeta): string[] {
+  const q = searchQuery.value.trim().toLowerCase()
+  if (!q) return []
+  const terms = q.split(/\s+/)
+  return s.keywords.filter((k) => terms.some((t) => k.toLowerCase().includes(t))).slice(0, 4)
+}
+
+function onSearchEnter() {
+  const first = filteredSections.value[0]
+  if (first) setSection(first.id)
+}
+
+// Active section is driven by the route param so settings is deep-linkable
+// (e.g. /settings/security) and the browser back button works.
+const activeSection = computed<SettingsSectionId>(() => {
+  const s = route.params.section as string | undefined
+  return (s && (SECTION_IDS as string[]).includes(s))
+    ? (s as SettingsSectionId)
+    : 'account'
+})
+
+function setSection(id: SettingsSectionId) {
+  if (id === activeSection.value) return
+  void router.push(`/settings/${id}`)
+}
 
 // ---- Profile ----
 const displayName = ref('')
@@ -161,34 +226,8 @@ async function hydrate() {
   void refreshP2pStatus()
 }
 
-watch(isOpen, (val) => {
-  if (val) void hydrate()
-  else {
-    // reset transient state on close
-    message.value = ''
-    publishMessage.value = ''
-    storageMessage.value = ''
-    biometricMessage.value = ''
-    biometricPassword.value = ''
-    recordingShortcutId.value = null
-  }
-})
-
-function onBackdropKeydown(e: KeyboardEvent) {
-  if (!isOpen.value) return
-  if (e.key === 'Escape' && !showExportModal.value) close()
-}
-
 onMounted(() => {
-  document.addEventListener('keydown', onBackdropKeydown)
-})
-onUnmounted(() => {
-  document.removeEventListener('keydown', onBackdropKeydown)
-})
-
-watch(isOpen, (val) => {
-  if (typeof document === 'undefined') return
-  document.body.style.overflow = val ? 'hidden' : ''
+  void hydrate()
 })
 
 // ---- Section actions ----
@@ -211,12 +250,16 @@ async function refreshBiometricState() {
 }
 
 async function saveProfile() {
+  if (!displayName.value.trim()) {
+    message.value = 'A username is required.'
+    return
+  }
   saving.value = true
   message.value = ''
   try {
     await invoke<Identity>('update_profile', {
       update: {
-        display_name: displayName.value || null,
+        display_name: displayName.value.trim(),
         bio: bio.value || null,
       },
     })
@@ -280,7 +323,6 @@ async function lockWallet() {
   locking.value = true
   try {
     await authLock()
-    close()
     router.replace('/unlock')
   } catch (e) {
     console.error('Failed to lock:', e)
@@ -337,7 +379,6 @@ async function disableBiometric() {
 }
 
 function gotoNetwork() {
-  close()
   router.push('/dashboard/network')
 }
 
@@ -350,76 +391,54 @@ async function copyText(value: string | undefined | null) {
   }
 }
 
-// ---- Section nav metadata ----
-interface SectionMeta {
-  id: SettingsSectionId
-  label: string
-  desc: string
+function onSectionClick(id: SettingsSectionId) {
+  setSection(id)
 }
-const SECTIONS: SectionMeta[] = [
-  { id: 'account', label: 'Account & Identity', desc: 'Profile, addresses, peer' },
-  { id: 'security', label: 'Security & Privacy', desc: 'Recovery, lock, biometric' },
-  { id: 'personalization', label: 'Personalization', desc: 'Theme, shortcuts' },
-  { id: 'system', label: 'System', desc: 'Storage, network' },
-  { id: 'advanced', label: 'All settings', desc: 'Every per-profile setting' },
-]
 </script>
 
 <template>
-  <Teleport to="body">
-    <Transition
-      enter-active-class="transition duration-200 ease-out"
-      enter-from-class="opacity-0"
-      enter-to-class="opacity-100"
-      leave-active-class="transition duration-150 ease-in"
-      leave-from-class="opacity-100"
-      leave-to-class="opacity-0"
-    >
-      <div
-        v-if="isOpen"
-        class="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4"
-        @mousedown.self.stop
-        @click.self="close"
-      >
-        <Transition
-          enter-active-class="transition duration-200 ease-out"
-          enter-from-class="opacity-0 scale-95"
-          enter-to-class="opacity-100 scale-100"
-          leave-active-class="transition duration-150 ease-in"
-          leave-from-class="opacity-100 scale-100"
-          leave-to-class="opacity-0 scale-95"
-        >
-          <div
-            v-if="isOpen"
-            class="settings-shell w-full max-w-4xl flex flex-col sm:flex-row overflow-hidden rounded-2xl border border-border bg-card shadow-2xl"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="settings-title"
-          >
+  <div class="settings-page flex w-full flex-1 min-h-0 flex-col sm:flex-row gap-0 overflow-hidden bg-background">
             <!-- Sidebar nav -->
-            <aside class="settings-sidebar shrink-0 sm:w-60 border-b sm:border-b-0 sm:border-r border-border bg-muted/20">
-              <div class="px-4 pt-5 pb-3 flex items-center justify-between">
-                <h2 id="settings-title" class="text-sm font-semibold tracking-wide uppercase text-muted-foreground">
+            <aside class="settings-sidebar shrink-0 sm:w-64 border-b sm:border-b-0 sm:border-r border-border bg-muted/20 flex flex-col">
+              <div class="px-4 pt-5 pb-3">
+                <h2 class="text-sm font-semibold tracking-wide uppercase text-muted-foreground mb-3">
                   Settings
                 </h2>
-                <button
-                  class="sm:hidden p-1 rounded-md text-muted-foreground hover:bg-muted/50"
-                  aria-label="Close settings"
-                  @click="close"
-                >
-                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                <!-- Search -->
+                <div class="relative">
+                  <svg class="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0z" />
                   </svg>
-                </button>
+                  <input
+                    v-model="searchQuery"
+                    type="text"
+                    placeholder="Search settings…"
+                    class="w-full rounded-lg border border-border bg-background py-1.5 pl-8 pr-7 text-sm text-foreground outline-none focus:border-primary"
+                    @keyup.enter="onSearchEnter"
+                  >
+                  <button
+                    v-if="searchQuery"
+                    class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    aria-label="Clear search"
+                    @click="searchQuery = ''"
+                  >
+                    <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
               </div>
 
-              <nav class="px-2 pb-4 flex sm:block overflow-x-auto sm:overflow-visible gap-1 sm:gap-0">
+              <nav class="flex-1 overflow-y-auto px-2 pb-4 flex sm:block overflow-x-auto sm:overflow-visible gap-1 sm:gap-0">
+                <p v-if="filteredSections.length === 0" class="px-3 py-4 text-xs text-muted-foreground">
+                  No settings match "{{ searchQuery }}".
+                </p>
                 <button
-                  v-for="s in SECTIONS"
+                  v-for="s in filteredSections"
                   :key="s.id"
                   class="settings-nav-item"
                   :class="{ 'settings-nav-item--active': activeSection === s.id }"
-                  @click="setSection(s.id)"
+                  @click="onSectionClick(s.id)"
                 >
                   <span class="settings-nav-icon" aria-hidden="true">
                     <!-- Account -->
@@ -434,6 +453,10 @@ const SECTIONS: SectionMeta[] = [
                     <svg v-else-if="s.id === 'personalization'" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
                       <path stroke-linecap="round" stroke-linejoin="round" d="M7 21a4 4 0 01-4-4 4 4 0 014-4h1m11-7l-7 7m0 0l-3-3m3 3v6a4 4 0 11-4-4" />
                     </svg>
+                    <!-- Plugins -->
+                    <svg v-else-if="s.id === 'plugins'" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M14.7 6.3a1 1 0 001.4 0l1.6-1.6a1 1 0 011.4 1.4l-1.6 1.6a1 1 0 000 1.4l3 3a1 1 0 010 1.4l-1.6 1.6a1 1 0 01-1.4 0l-3-3a1 1 0 00-1.4 0L9 17a4 4 0 11-5.6-5.6L9 6a1 1 0 011.4 0l4.3 4.3" />
+                    </svg>
                     <!-- System -->
                     <svg v-else class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
                       <path stroke-linecap="round" stroke-linejoin="round" d="M4 7h16M4 12h16M4 17h16" />
@@ -442,6 +465,13 @@ const SECTIONS: SectionMeta[] = [
                   <span class="flex flex-col text-left min-w-0">
                     <span class="text-sm font-medium truncate">{{ s.label }}</span>
                     <span class="hidden sm:block text-[11px] text-muted-foreground truncate">{{ s.desc }}</span>
+                    <span v-if="matchedKeywords(s).length" class="hidden sm:flex flex-wrap gap-1 mt-1">
+                      <span
+                        v-for="kw in matchedKeywords(s)"
+                        :key="kw"
+                        class="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary"
+                      >{{ kw }}</span>
+                    </span>
                   </span>
                 </button>
               </nav>
@@ -453,15 +483,6 @@ const SECTIONS: SectionMeta[] = [
                 <h3 class="text-base font-semibold text-foreground">
                   {{ SECTIONS.find(s => s.id === activeSection)?.label }}
                 </h3>
-                <button
-                  class="hidden sm:inline-flex p-1 rounded-md text-muted-foreground hover:bg-muted/50 transition-colors"
-                  aria-label="Close settings"
-                  @click="close"
-                >
-                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
               </header>
 
               <div class="flex-1 overflow-y-auto px-6 py-5 space-y-8">
@@ -779,16 +800,19 @@ const SECTIONS: SectionMeta[] = [
                   </div>
                 </template>
 
+                <!-- ──────────── Plugins ──────────── -->
+                <template v-else-if="activeSection === 'plugins'">
+                  <PluginsPanel />
+                </template>
+
                 <!-- ──────────── Advanced — every registered setting ──────────── -->
                 <template v-else-if="activeSection === 'advanced'">
                   <AdvancedSettingsPanel />
                 </template>
               </div>
             </section>
-          </div>
-        </Transition>
 
-        <!-- Nested Export Recovery Phrase modal — sits above the settings shell -->
+        <!-- Export Recovery Phrase modal -->
         <AppModal
           :open="showExportModal"
           title="Export Recovery Phrase"
@@ -857,22 +881,13 @@ const SECTIONS: SectionMeta[] = [
             <AppButton class="w-full" @click="closeExportModal">Done</AppButton>
           </div>
         </AppModal>
-      </div>
-    </Transition>
-  </Teleport>
+  </div>
 </template>
 
 <style scoped>
-.settings-shell {
-  height: min(85vh, 720px);
-  max-height: 85vh;
-}
-
-@media (max-width: 640px) {
-  .settings-shell {
-    height: 100%;
-    max-height: 100%;
-  }
+.settings-page {
+  height: 100%;
+  min-height: 0;
 }
 
 .settings-sidebar {

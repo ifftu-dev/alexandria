@@ -125,6 +125,7 @@ const classroomPreviews = computed(() =>
           <span class="sb-label">Skills</span>
           <div v-if="false" class="sb-tooltip">Skills</div>
         </button>
+
       </div>
 
       <div class="sb-separator" />

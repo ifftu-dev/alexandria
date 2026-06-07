@@ -5,7 +5,6 @@ import AppBottomBar from '@/components/layout/AppBottomBar.vue'
 import MobileTabBar from '@/components/layout/MobileTabBar.vue'
 import TutoringPiP from '@/components/layout/TutoringPiP.vue'
 import OmniSearch from '@/components/omni/OmniSearch.vue'
-import SettingsModal from '@/components/settings/SettingsModal.vue'
 import { usePlatform } from '@/composables/usePlatform'
 import { useSettings, useSetting } from '@/composables/useSettings'
 import { computed, onMounted, onUnmounted } from 'vue'
@@ -16,7 +15,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window'
 // video, internal sidebar). Skip the shell's content padding for it so
 // the player can reach the screen edges.
 const route = useRoute()
-const isImmersiveRoute = computed(() => route.name === 'learn')
+const isImmersiveRoute = computed(() => route.name === 'learn' || route.name === 'settings')
 
 // Sidebar collapsed state lives in the per-profile settings store
 // (`ui.sidebar_collapsed`, scope=sync) so it propagates to the
@@ -101,7 +100,7 @@ function toggleSidebar() {
 
       <!-- Content area -->
       <main class="flex-1 overflow-y-auto mobile-content-padding">
-        <div :class="isImmersiveRoute ? '' : 'px-4 pt-6 pb-8 sm:px-6 lg:px-8'">
+        <div :class="isImmersiveRoute ? 'h-full flex flex-col' : 'px-4 pt-6 pb-8 sm:px-6 lg:px-8'">
           <slot />
         </div>
       </main>
@@ -116,8 +115,5 @@ function toggleSidebar() {
 
     <!-- Global omni search palette (Cmd+K / Ctrl+K / "/") -->
     <OmniSearch />
-
-    <!-- Global settings modal (Cmd+, / Ctrl+,) -->
-    <SettingsModal />
   </div>
 </template>

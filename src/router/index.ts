@@ -240,6 +240,24 @@ const router = createRouter({
       component: () => import('@/pages/plugins/Browse.vue'),
       meta: { layout: 'app' },
     },
+
+    // Plugin documentation — full page (reached from Settings → Plugins).
+    // Declared before the catch-all settings route so it isn't swallowed
+    // by `/settings/:section?`.
+    {
+      path: '/settings/plugins/:cid/docs',
+      name: 'plugin-docs',
+      component: () => import('@/pages/PluginDocs.vue'),
+      meta: { layout: 'app' },
+    },
+
+    // Settings — full-page, section-deep-linkable (/settings/:section).
+    {
+      path: '/settings/:section?',
+      name: 'settings',
+      component: () => import('@/pages/Settings.vue'),
+      meta: { layout: 'app' },
+    },
   ],
 })
 

@@ -1,34 +1,14 @@
-import { ref, readonly } from 'vue'
-
+/**
+ * Settings section identifiers.
+ *
+ * Settings is a full page now (`pages/Settings.vue`, route
+ * `/settings/:section?`) — not a modal. This module survives only to
+ * export the shared section-id union used by the page and its panels.
+ */
 export type SettingsSectionId =
   | 'account'
   | 'security'
   | 'personalization'
   | 'system'
+  | 'plugins'
   | 'advanced'
-
-const isOpen = ref(false)
-const activeSection = ref<SettingsSectionId>('account')
-
-export function useSettingsModal() {
-  function open(section?: SettingsSectionId) {
-    if (section) activeSection.value = section
-    isOpen.value = true
-  }
-
-  function close() {
-    isOpen.value = false
-  }
-
-  function setSection(section: SettingsSectionId) {
-    activeSection.value = section
-  }
-
-  return {
-    isOpen: readonly(isOpen),
-    activeSection: readonly(activeSection),
-    open,
-    close,
-    setSection,
-  }
-}
