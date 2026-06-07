@@ -131,6 +131,7 @@ dependencies = [
  "bip39",
  "blake2",
  "blake3",
+ "block2",
  "bs58",
  "bytes",
  "candle-core",

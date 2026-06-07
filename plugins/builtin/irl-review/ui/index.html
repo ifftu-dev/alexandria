@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>IRL Review</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+        /* Theme tokens — supplied by the host (see PluginIframe).
+           Conservative defaults when no theme is applied. */
+        --theme-background: #ffffff;
+        --theme-foreground: #0f172a;
+        --theme-muted-foreground: #475569;
+        --theme-border: rgb(209, 211, 216);
+        --theme-accent: #4f46e5;
+        --theme-accent-foreground: #ffffff;
+        --theme-success: var(--theme-success);
+        --theme-warning: var(--theme-warning);
+        --theme-error: var(--theme-error);
+      }
+      body {
+        margin: 0;
+        padding: 24px;
+        background: var(--theme-background);
+        color: var(--theme-foreground);
+      }
+      h1 { font-size: 18px; margin: 0 0 4px; }
+      .sub { font-size: 12px; color: color-mix(in srgb, currentColor 60%, transparent); }
+
+      .prompt {
+        margin: 14px 0 16px;
+        padding: 12px 14px;
+        border-radius: 10px;
+        background: color-mix(in srgb, currentColor 6%, transparent);
+        font-size: 13px;
+        line-height: 1.5;
+      }
+
+      .field { margin-bottom: 16px; }
+      .field label {
+        display: block;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: color-mix(in srgb, currentColor 55%, transparent);
+        margin-bottom: 6px;
+      }
+
+      .drop {
+        border: 1.5px dashed color-mix(in srgb, currentColor 30%, transparent);
+        border-radius: 10px;
+        padding: 16px;
+        text-align: center;
+        font-size: 13px;
+        cursor: pointer;
+        transition: border-color .15s, background .15s;
+      }
+      .drop:hover, .drop.drag-over {
+        border-color: var(--theme-accent);
+        background: color-mix(in srgb, var(--theme-accent) 10%, transparent);
+      }
+      .drop input[type=file] { display: none; }
+
+      .file-list { margin-top: 8px; }
+      .file-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 8px 10px;
+        background: color-mix(in srgb, currentColor 6%, transparent);
+        border-radius: 8px;
+        font-size: 12px;
+        margin-top: 6px;
+      }
+      .file-row .meta {
+        color: color-mix(in srgb, currentColor 60%, transparent);
+        margin-left: 8px;
+      }
+      .file-row button { padding: 4px 8px; font-size: 11px; }
+
+      textarea, input[type=text] {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 10px;
+        font: inherit;
+        border-radius: 8px;
+        border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+        background: color-mix(in srgb, currentColor 4%, transparent);
+        color: inherit;
+      }
+      textarea { min-height: 80px; resize: vertical; }
+
+      .skill-tags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-top: 8px;
+      }
+      .skill-tag {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 4px 10px;
+        border-radius: 999px;
+        background: color-mix(in srgb, var(--theme-accent) 18%, transparent);
+        font-size: 12px;
+      }
+      .skill-tag button {
+        background: transparent;
+        border: 0;
+        padding: 0;
+        color: inherit;
+        cursor: pointer;
+        font-size: 14px;
+        line-height: 1;
+      }
+
+      .actions {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-top: 18px;
+      }
+      button.primary {
+        padding: 10px 18px;
+        border-radius: 8px;
+        border: 1px solid var(--theme-accent);
+        background: var(--theme-accent);
+        color: var(--theme-accent-foreground);
+        font: inherit;
+        cursor: pointer;
+      }
+      button.primary[disabled] { opacity: 0.5; cursor: not-allowed; }
+      button.ghost {
+        padding: 8px 14px;
+        border-radius: 8px;
+        border: 1px solid color-mix(in srgb, currentColor 30%, transparent);
+        background: transparent;
+        color: inherit;
+        font: inherit;
+        cursor: pointer;
+      }
+
+      .status {
+        margin-top: 8px;
+        font-size: 12px;
+        color: color-mix(in srgb, currentColor 70%, transparent);
+        min-height: 16px;
+      }
+
+      .reviews { margin-top: 22px; }
+      .reviews h2 {
+        font-size: 14px;
+        margin: 0 0 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: color-mix(in srgb, currentColor 60%, transparent);
+      }
+      .review-card {
+        padding: 12px 14px;
+        border-radius: 10px;
+        background: color-mix(in srgb, currentColor 6%, transparent);
+        margin-bottom: 10px;
+      }
+      .review-card .row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 6px;
+      }
+      .badge {
+        display: inline-block;
+        padding: 2px 8px;
+        font-size: 11px;
+        border-radius: 999px;
+      }
+      .badge.pending { background: color-mix(in srgb, var(--theme-warning) 30%, transparent); }
+      .badge.reviewed { background: color-mix(in srgb, var(--theme-success) 30%, transparent); }
+      .badge.rejected { background: color-mix(in srgb, var(--theme-error) 30%, transparent); }
+
+      .skill-ratings {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 4px 12px;
+        font-size: 12px;
+        margin-top: 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>IRL Review</h1>
+    <p class="sub">Submit your work for a human review. An instructor will rate the skills you used.</p>
+
+    <div id="prompt" class="prompt" hidden></div>
+
+    <form id="submit-form">
+      <div class="field">
+        <label>Attachments</label>
+        <label class="drop" id="drop">
+          <input type="file" id="files" multiple />
+          <div>Drop files here or click to browse</div>
+          <div class="sub" id="accept-hint" style="margin-top:4px"></div>
+        </label>
+        <div class="file-list" id="file-list"></div>
+      </div>
+
+      <div class="field">
+        <label>Skills you used</label>
+        <input type="text" id="skill-input" placeholder="Type a skill and press Enter" />
+        <div class="skill-tags" id="skill-tags"></div>
+      </div>
+
+      <div class="field">
+        <label>Comment</label>
+        <textarea id="comment" placeholder="Anything you want the reviewer to know…"></textarea>
+      </div>
+
+      <div class="actions">
+        <button type="button" class="ghost" id="refresh">Refresh my submissions</button>
+        <button type="submit" class="primary" id="submit-btn">Submit for review</button>
+      </div>
+    </form>
+
+    <p id="status" class="status"></p>
+
+    <div class="reviews">
+      <h2>My submissions</h2>
+      <div id="reviews-list"><p class="sub">No submissions yet.</p></div>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>

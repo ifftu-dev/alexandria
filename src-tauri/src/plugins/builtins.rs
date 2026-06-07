@@ -56,10 +56,77 @@ const MUSIC_TRAINER_BUNDLE: BuiltinBundle<'static> = BuiltinBundle {
     ],
 };
 
+/// Music Reviews — listens to a learner's instrument and marks each note
+/// in a target sequence correct or wrong using live autocorrelation
+/// pitch detection. Interactive (no grader). Requests microphone.
+const MUSIC_REVIEWS_BUNDLE: BuiltinBundle<'static> = BuiltinBundle {
+    slug: "music-reviews",
+    manifest_json: include_bytes!("../../../plugins/builtin/music-reviews/manifest.json"),
+    grader_wasm: None,
+    ui_files: &[
+        (
+            "ui/index.html",
+            include_bytes!("../../../plugins/builtin/music-reviews/ui/index.html"),
+        ),
+        (
+            "ui/app.js",
+            include_bytes!("../../../plugins/builtin/music-reviews/ui/app.js"),
+        ),
+        (
+            "ui/pitch.js",
+            include_bytes!("../../../plugins/builtin/music-reviews/ui/pitch.js"),
+        ),
+        (
+            "icon.svg",
+            include_bytes!("../../../plugins/builtin/music-reviews/icon.svg"),
+        ),
+        (
+            "screenshots/timeline.svg",
+            include_bytes!("../../../plugins/builtin/music-reviews/screenshots/timeline.svg"),
+        ),
+        (
+            "README.md",
+            include_bytes!("../../../plugins/builtin/music-reviews/README.md"),
+        ),
+    ],
+};
+
+/// IRL Review — learner submits work in any format to the local
+/// instructor inbox; an instructor posts back a score, written feedback,
+/// and per-skill ratings. Interactive (no grader). No capabilities.
+const IRL_REVIEW_BUNDLE: BuiltinBundle<'static> = BuiltinBundle {
+    slug: "irl-review",
+    manifest_json: include_bytes!("../../../plugins/builtin/irl-review/manifest.json"),
+    grader_wasm: None,
+    ui_files: &[
+        (
+            "ui/index.html",
+            include_bytes!("../../../plugins/builtin/irl-review/ui/index.html"),
+        ),
+        (
+            "ui/app.js",
+            include_bytes!("../../../plugins/builtin/irl-review/ui/app.js"),
+        ),
+        (
+            "icon.svg",
+            include_bytes!("../../../plugins/builtin/irl-review/icon.svg"),
+        ),
+        (
+            "README.md",
+            include_bytes!("../../../plugins/builtin/irl-review/README.md"),
+        ),
+    ],
+};
+
 /// Every built-in plugin shipped with this binary. Order is irrelevant —
 /// installs are idempotent, so a future entry being added partway through
 /// the list won't reorder anything.
-pub const BUILTIN_PLUGINS: &[BuiltinBundle<'static>] = &[MCQ_BUNDLE, MUSIC_TRAINER_BUNDLE];
+pub const BUILTIN_PLUGINS: &[BuiltinBundle<'static>] = &[
+    MCQ_BUNDLE,
+    MUSIC_TRAINER_BUNDLE,
+    MUSIC_REVIEWS_BUNDLE,
+    IRL_REVIEW_BUNDLE,
+];
 
 /// Install every embedded built-in plugin if not already present. Called
 /// from `AppState::open_database` once the DB is unlocked and migrated.
@@ -68,10 +135,12 @@ pub const BUILTIN_PLUGINS: &[BuiltinBundle<'static>] = &[MCQ_BUNDLE, MUSIC_TRAIN
 /// a corrupt embedded bundle should not block app startup.
 pub fn install_all(db: &Database, plugins_dir: &Path) -> InstallStats {
     let mut stats = InstallStats::default();
+    let mut current_cids: Vec<String> = Vec::with_capacity(BUILTIN_PLUGINS.len());
     for bundle in BUILTIN_PLUGINS {
         match registry::install_builtin(db, plugins_dir, bundle) {
             Ok(plugin) => {
                 stats.installed += 1;
+                current_cids.push(plugin.plugin_cid.clone());
                 log::info!(
                     "builtin plugin installed: {} v{} ({})",
                     plugin.name,
@@ -98,5 +167,19 @@ pub fn install_all(db: &Database, plugins_dir: &Path) -> InstallStats {
             }
         }
     }
+
+    // Prune stale builtin rows. When a builtin's manifest changes, its CID
+    // changes, so the previous row lingers as a duplicate (old bundle, no
+    // longer shipped). Drop any source='builtin' install whose CID isn't in
+    // the set we just installed. Community plugins (other sources) are never
+    // touched.
+    if !current_cids.is_empty() {
+        match registry::prune_builtins_except(db, plugins_dir, &current_cids) {
+            Ok(n) if n > 0 => log::info!("pruned {n} stale builtin plugin(s)"),
+            Ok(_) => {}
+            Err(e) => log::warn!("failed to prune stale builtins: {e}"),
+        }
+    }
+
     stats
 }

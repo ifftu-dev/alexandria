@@ -9,15 +9,20 @@
  * microphone device) without breaking this contract.
  */
 
+import { onMounted } from 'vue'
 import type { PluginCapability } from '@/types'
 import { AppButton } from '@/components/ui'
+import { useDisplayNames } from '@/composables/useDisplayNames'
 
-defineProps<{
+const props = defineProps<{
   pluginName: string
   authorDid: string
   capability: PluginCapability
   reason: string
 }>()
+
+const { displayName, ensureNames } = useDisplayNames()
+onMounted(() => void ensureNames([props.authorDid]))
 
 const emit = defineEmits<{
   (e: 'decide', scope: 'once' | 'session' | 'always' | 'deny'): void
@@ -42,11 +47,6 @@ function capabilityLabel(c: PluginCapability): string {
   }
 }
 
-function shortDid(did: string): string {
-  // did:key:z6Mk... — show first 20 chars plus last 6 for auditability.
-  if (did.length <= 32) return did
-  return `${did.slice(0, 20)}…${did.slice(-6)}`
-}
 </script>
 
 <template>
@@ -75,7 +75,7 @@ function shortDid(did: string): string {
             <p>Plugins are community-authored and run in a sandbox.</p>
             <p>
               Author:
-              <code class="font-mono text-[11px]">{{ shortDid(authorDid) }}</code>
+              <span class="font-medium">{{ displayName(authorDid) }}</span>
             </p>
             <p>The plugin cannot access the network or any other data on this device.</p>
           </div>

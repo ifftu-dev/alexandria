@@ -15,12 +15,12 @@ use crate::crypto::hash::entity_id;
 use crate::crypto::wallet;
 use crate::db::Database;
 use crate::domain::plugin::{
-    InstalledPlugin, PluginAttestationEvent, PluginAttestationStatus, PluginCapability,
-    PluginCatalogEntry, PluginManifest, PluginPermissionRecord,
+    InstalledPlugin, IrlSubmission, PluginAttestationEvent, PluginAttestationStatus,
+    PluginCapability, PluginCatalogEntry, PluginManifest, PluginPermissionRecord,
 };
 #[cfg(desktop)]
 use crate::plugins::wasm_runtime::{GraderBudgets, ScoreRecord};
-use crate::plugins::{attestation, catalog, registry};
+use crate::plugins::{attestation, catalog, irl_review, registry};
 use crate::AppState;
 
 /// Install a plugin from a directory on the user's local filesystem.
@@ -132,6 +132,87 @@ pub async fn plugin_revoke_capability(
     let db = db_guard.as_ref().ok_or("database not initialized")?;
 
     registry::revoke_capability(db, &plugin_cid, cap)
+}
+
+/// Enable or disable an installed plugin. Disabled plugins remain on
+/// disk and keep their capability grants, but the player refuses to
+/// mount them. Used by Settings → Plugins.
+#[tauri::command]
+pub async fn plugin_set_enabled(
+    state: State<'_, AppState>,
+    plugin_cid: String,
+    enabled: bool,
+) -> Result<(), String> {
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
+
+    registry::set_enabled(db, &plugin_cid, enabled)
+}
+
+/// Return the README markdown bundled with a plugin (empty string if
+/// none). The Settings page renders this in the docs viewer.
+#[tauri::command]
+pub async fn plugin_get_docs(
+    state: State<'_, AppState>,
+    plugin_cid: String,
+) -> Result<String, String> {
+    let plugins_dir = state.plugins_dir()?;
+    registry::read_docs(&plugins_dir, &plugin_cid)
+}
+
+/// Read an arbitrary in-bundle asset (icon, README screenshot, …) and
+/// return it as a `data:` URL. The main app window's CSP forbids the
+/// `plugin://` scheme for `<img>`, so thumbnails and README images are
+/// inlined as data URLs instead. Path-traversal is guarded by
+/// `registry::resolve_asset`. Returns an empty string if the path is
+/// missing.
+#[tauri::command]
+pub async fn plugin_read_asset_data_url(
+    state: State<'_, AppState>,
+    plugin_cid: String,
+    path: String,
+) -> Result<String, String> {
+    use base64::Engine as _;
+
+    let plugins_dir = state.plugins_dir()?;
+    let resolved = match registry::resolve_asset(&plugins_dir, &plugin_cid, &path) {
+        Ok(p) => p,
+        Err(_) => return Ok(String::new()),
+    };
+    let bytes = match std::fs::read(&resolved) {
+        Ok(b) => b,
+        Err(_) => return Ok(String::new()),
+    };
+    // Cap at 8 MiB so a hostile bundle can't blow up the webview with a
+    // giant data URL.
+    if bytes.len() > 8 * 1024 * 1024 {
+        return Err("plugin asset too large to inline (8 MiB cap)".into());
+    }
+    let mime = mime_for_path(&path);
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    Ok(format!("data:{mime};base64,{b64}"))
+}
+
+fn mime_for_path(path: &str) -> &'static str {
+    let lower = path.to_ascii_lowercase();
+    if lower.ends_with(".png") {
+        "image/png"
+    } else if lower.ends_with(".jpg") || lower.ends_with(".jpeg") {
+        "image/jpeg"
+    } else if lower.ends_with(".gif") {
+        "image/gif"
+    } else if lower.ends_with(".webp") {
+        "image/webp"
+    } else if lower.ends_with(".svg") {
+        "image/svg+xml"
+    } else if lower.ends_with(".avif") {
+        "image/avif"
+    } else {
+        "application/octet-stream"
+    }
 }
 
 /// List all current capability grants for a plugin. Used by the Installed
@@ -354,6 +435,122 @@ fn check_rate_limit(state: &State<'_, AppState>, command: &str) -> Result<(), St
         .lock()
         .map_err(|_| "rate limiter poisoned".to_string())?;
     limiter.check(command)
+}
+
+// ---- IRL Review inbox -----------------------------------------------------
+
+/// Submit a learner's work to the IRL Review local instructor inbox.
+/// `submission_json` is the opaque plugin-defined payload (files +
+/// comment); `skills_json` is the JSON array of self-declared skill tags.
+/// Returns the new submission id.
+#[tauri::command]
+pub async fn irl_submit_for_review(
+    state: State<'_, AppState>,
+    plugin_cid: String,
+    element_id: Option<String>,
+    enrollment_id: Option<String>,
+    submission_json: String,
+    skills_json: String,
+) -> Result<String, String> {
+    check_rate_limit(&state, "irl_submit_for_review")?;
+
+    let (_sk, learner_did) = load_learner_did(&state).await?;
+
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
+
+    irl_review::submit(
+        db,
+        &plugin_cid,
+        element_id.as_deref(),
+        enrollment_id.as_deref(),
+        &learner_did.0,
+        &submission_json,
+        &skills_json,
+    )
+}
+
+/// List the caller's own IRL Review submissions, newest first. Optionally
+/// filtered to a single plugin CID.
+#[tauri::command]
+pub async fn irl_list_my_submissions(
+    state: State<'_, AppState>,
+    plugin_cid: Option<String>,
+) -> Result<Vec<IrlSubmission>, String> {
+    let (_sk, learner_did) = load_learner_did(&state).await?;
+
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
+
+    irl_review::list_for_learner(db, &learner_did.0, plugin_cid.as_deref())
+}
+
+/// List IRL Review submissions awaiting an instructor review. Optional
+/// filter by plugin CID. Used by the instructor inbox UI in Settings.
+#[tauri::command]
+pub async fn irl_list_pending(
+    state: State<'_, AppState>,
+    plugin_cid: Option<String>,
+) -> Result<Vec<IrlSubmission>, String> {
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
+
+    irl_review::list_pending(db, plugin_cid.as_deref())
+}
+
+/// Fetch a single submission by id (for instructors to open the review
+/// form, or learners to view their feedback).
+#[tauri::command]
+pub async fn irl_get_submission(
+    state: State<'_, AppState>,
+    submission_id: String,
+) -> Result<Option<IrlSubmission>, String> {
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
+
+    irl_review::get(db, &submission_id)
+}
+
+/// Post a review on a pending submission. Score is 0..=1; feedback is
+/// freeform; `skill_ratings_json` maps each declared skill to its rating.
+#[tauri::command]
+pub async fn irl_post_review(
+    state: State<'_, AppState>,
+    submission_id: String,
+    score: f64,
+    feedback: String,
+    skill_ratings_json: String,
+) -> Result<(), String> {
+    check_rate_limit(&state, "irl_post_review")?;
+
+    let (_sk, reviewer_did) = load_learner_did(&state).await?;
+
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
+
+    irl_review::post_review(
+        db,
+        &submission_id,
+        &reviewer_did.0,
+        score,
+        &feedback,
+        &skill_ratings_json,
+    )
 }
 
 // ---- Phase 3: discovery + DAO attestation IPC -----------------------------

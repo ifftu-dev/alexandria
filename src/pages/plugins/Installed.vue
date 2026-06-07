@@ -13,6 +13,7 @@
 
 import { ref, onMounted, computed } from 'vue'
 import { useLocalApi } from '@/composables/useLocalApi'
+import { useDisplayNames } from '@/composables/useDisplayNames'
 import { AppButton, AppInput, AppSpinner, AppAlert, EmptyState, AppBadge } from '@/components/ui'
 import type {
   InstalledPlugin,
@@ -23,6 +24,7 @@ import type {
 } from '@/types'
 
 const { invoke } = useLocalApi()
+const { displayName, ensureNames } = useDisplayNames()
 
 const plugins = ref<InstalledPlugin[]>([])
 const loading = ref(true)
@@ -47,6 +49,7 @@ async function refresh() {
   loading.value = true
   try {
     plugins.value = await invoke<InstalledPlugin[]>('plugin_list')
+    void ensureNames(plugins.value.map((p) => p.author_did))
     const lookups = await Promise.all(
       plugins.value.map((p) =>
         invoke<PluginAttestationStatus>('plugin_attestation_status', {
@@ -160,9 +163,6 @@ function shortCid(cid: string): string {
   return cid.length > 16 ? `${cid.slice(0, 12)}…${cid.slice(-4)}` : cid
 }
 
-function shortDid(did: string): string {
-  return did.length > 24 ? `${did.slice(0, 16)}…${did.slice(-6)}` : did
-}
 </script>
 
 <template>
@@ -228,7 +228,7 @@ function shortDid(did: string): string {
                 </AppBadge>
               </div>
               <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
-                <span>Author: <code class="font-mono">{{ shortDid(p.author_did) }}</code></span>
+                <span>Author: {{ displayName(p.author_did) }}</span>
                 <span>CID: <code class="font-mono">{{ shortCid(p.plugin_cid) }}</code></span>
                 <span>Installed: {{ new Date(p.installed_at).toLocaleString() }}</span>
               </div>

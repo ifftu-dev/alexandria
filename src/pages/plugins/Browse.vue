@@ -12,6 +12,7 @@
 
 import { ref, onMounted, computed } from 'vue'
 import { useLocalApi } from '@/composables/useLocalApi'
+import { useDisplayNames } from '@/composables/useDisplayNames'
 import { AppSpinner, AppAlert, AppBadge, EmptyState } from '@/components/ui'
 import type {
   PluginCatalogEntry,
@@ -19,6 +20,7 @@ import type {
 } from '@/types'
 
 const { invoke } = useLocalApi()
+const { displayName, ensureNames } = useDisplayNames()
 
 const entries = ref<PluginCatalogEntry[]>([])
 const loading = ref(true)
@@ -30,6 +32,7 @@ const status = ref<Record<string, PluginAttestationStatus>>({})
 onMounted(async () => {
   try {
     entries.value = await invoke<PluginCatalogEntry[]>('plugin_browse_catalog')
+    void ensureNames(entries.value.map((e) => e.author_did))
     // Fan out attestation lookups in parallel.
     const lookups = await Promise.all(
       entries.value.map((e) =>
@@ -73,10 +76,6 @@ function attestationBadge(cid: string): { label: string; variant: 'success' | 'w
 
 function shortCid(cid: string): string {
   return cid.length > 16 ? `${cid.slice(0, 12)}…${cid.slice(-4)}` : cid
-}
-
-function shortDid(did: string): string {
-  return did.length > 24 ? `${did.slice(0, 16)}…${did.slice(-6)}` : did
 }
 </script>
 
@@ -159,7 +158,7 @@ function shortDid(did: string): string {
                 {{ e.description }}
               </p>
               <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
-                <span>Author: <code class="font-mono">{{ shortDid(e.author_did) }}</code></span>
+                <span>Author: {{ displayName(e.author_did) }}</span>
                 <span>Kinds: {{ e.kinds.join(', ') }}</span>
                 <span v-if="e.capabilities.length > 0">
                   Caps: {{ e.capabilities.join(', ') }}

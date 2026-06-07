@@ -101,6 +101,84 @@ pub async fn get_local_did(state: State<'_, AppState>) -> Result<Option<String>,
     Ok(Some(did.as_str().to_string()))
 }
 
+/// Resolve a batch of `did:key` strings to human display names.
+///
+/// DIDs are opaque to humans, so the UI shows names wherever possible.
+/// We can only name DIDs we actually know:
+///  - the active profile's own DID → its `display_name`
+///  - any built-in plugin's author DID → "Alexandria" (first-party)
+///
+/// Unknown DIDs are simply omitted from the returned map; the frontend
+/// falls back to a shortened DID for those. Best-effort + cheap: callers
+/// pass every DID they want to render and cache the result.
+#[tauri::command]
+pub async fn resolve_display_names(
+    state: State<'_, AppState>,
+    dids: Vec<String>,
+) -> Result<std::collections::HashMap<String, String>, String> {
+    use std::collections::{HashMap, HashSet};
+
+    let mut out: HashMap<String, String> = HashMap::new();
+    if dids.is_empty() {
+        return Ok(out);
+    }
+    let requested: HashSet<&str> = dids.iter().map(|s| s.as_str()).collect();
+
+    // Own DID → own display name (best-effort; needs the vault unlocked).
+    let local_did: Option<String> = {
+        let ks_guard = state.keystore.lock().await;
+        match ks_guard.as_ref().and_then(|ks| ks.retrieve_mnemonic().ok()) {
+            Some(mnemonic) => {
+                drop(ks_guard);
+                wallet::wallet_from_mnemonic(&mnemonic).ok().map(|w| {
+                    crate::crypto::did::derive_did_key(&w.signing_key)
+                        .as_str()
+                        .to_string()
+                })
+            }
+            None => None,
+        }
+    };
+
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
+
+    if let Some(did) = local_did {
+        if requested.contains(did.as_str()) {
+            if let Some(profile) = read_profile(db.conn()) {
+                if let Some(name) = profile.display_name {
+                    if !name.trim().is_empty() {
+                        out.insert(did, name);
+                    }
+                }
+            }
+        }
+    }
+
+    // Built-in plugin authors → first-party label.
+    {
+        let mut stmt = db
+            .conn()
+            .prepare("SELECT DISTINCT author_did FROM plugin_installed WHERE source = 'builtin'")
+            .map_err(|e| e.to_string())?;
+        let authors = stmt
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|e| e.to_string())?
+            .filter_map(|r| r.ok())
+            .collect::<Vec<_>>();
+        for a in authors {
+            if requested.contains(a.as_str()) && !out.contains_key(&a) {
+                out.insert(a, "Alexandria".to_string());
+            }
+        }
+    }
+
+    Ok(out)
+}
+
 /// Get the active profile's Identity row from the local DB.
 #[tauri::command]
 pub async fn get_profile(state: State<'_, AppState>) -> Result<Option<Identity>, String> {
@@ -151,8 +229,12 @@ pub async fn update_profile(
     let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
 
     if let Some(ref name) = update.display_name {
+        // Usernames are mandatory — refuse to blank an existing name.
+        if name.trim().is_empty() {
+            return Err("Display name is required and cannot be empty.".into());
+        }
         set_clauses.push("display_name = ?");
-        values.push(Box::new(name.clone()));
+        values.push(Box::new(name.trim().to_string()));
     }
     if let Some(ref bio) = update.bio {
         set_clauses.push("bio = ?");

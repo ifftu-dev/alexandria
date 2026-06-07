@@ -17,6 +17,20 @@
 (function () {
   'use strict';
 
+  function diag(msg) {
+    try {
+      window.parent.postMessage({ __alex_diag__: true, msg: String(msg) }, '*');
+    } catch (_) {}
+  }
+  diag('bootstrap.js IIFE start');
+
+  document.addEventListener('securitypolicyviolation', (e) => {
+    diag('CSP violation: directive=' + e.violatedDirective + ' blocked=' + e.blockedURI + ' src=' + e.sourceFile);
+  });
+  window.addEventListener('error', (e) => {
+    diag('window error: ' + (e.message || 'unknown') + ' at ' + (e.filename || '?') + ':' + e.lineno);
+  });
+
   // -- Scrub Tauri globals (belt-and-suspenders; sandbox already blocks them).
   try { delete window.__TAURI__; } catch (_) {}
   try { delete window.__TAURI_INTERNALS__; } catch (_) {}
@@ -55,12 +69,31 @@
     );
   }
 
+  function applyTheme(themeVars) {
+    if (!themeVars || typeof themeVars !== 'object') return;
+    const root = document.documentElement;
+    for (const k of Object.keys(themeVars)) {
+      const v = themeVars[k];
+      if (typeof k === 'string' && k.startsWith('--') && typeof v === 'string') {
+        root.style.setProperty(k, v);
+      }
+    }
+  }
+
   function handleHostMessage(ev) {
     const msg = ev.data;
     if (!msg || typeof msg !== 'object') return;
     if (msg.api_version !== API_VERSION) {
       // Ignore silently; the host will log its side.
       return;
+    }
+    // Intercept theme tokens at the bootstrap layer so plugin authors can
+    // rely on `var(--theme-*)` / `var(--app-*)` being live before their own
+    // init handler runs.
+    if (msg.type === 'init' && msg.payload && msg.payload.theme) {
+      applyTheme(msg.payload.theme);
+    } else if (msg.type === 'theme_changed' && msg.payload) {
+      applyTheme(msg.payload);
     }
     if (typeof msg.response_id === 'number' && pending.has(msg.response_id)) {
       const entry = pending.get(msg.response_id);
@@ -85,13 +118,16 @@
   // message. We listen on the window — ports cannot traverse sandbox
   // boundaries any other way.
   window.addEventListener('message', (ev) => {
+    diag('window message received; has_data=' + !!ev.data + ' has_ports=' + !!(ev.ports && ev.ports[0]));
     if (ev.data && ev.data.__alex_init__ === true && ev.ports && ev.ports[0]) {
-      if (hostPort) return; // already initialized — ignore replays
+      if (hostPort) { diag('hostPort already set — ignoring'); return; }
       hostPort = ev.ports[0];
       hostPort.onmessage = handleHostMessage;
       for (const w of portReadyWaiters.splice(0)) w();
+      diag('hostPort set up; waiters=' + portReadyWaiters.length);
     }
   });
+  diag('window message listener registered');
 
   const alex = Object.freeze({
     apiVersion: API_VERSION,

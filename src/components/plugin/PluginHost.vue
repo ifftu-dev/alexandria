@@ -24,6 +24,8 @@ import PermissionPrompt from './PermissionPrompt.vue'
 import { AppSpinner, AppAlert } from '@/components/ui'
 import type {
   Element,
+  InstalledPlugin,
+  IrlSubmission,
   PluginManifest,
   PluginCapability,
   PluginPermissionRecord,
@@ -73,6 +75,19 @@ const iframeRef = ref<InstanceType<typeof PluginIframe> | null>(null)
 
 const pluginCid = computed(() => props.element.plugin_cid ?? '')
 
+/** Parsed `content_inline` JSON passed to the iframe in `init`. Plugins
+ *  see this as `msg.payload.content` and use it to configure their UI
+ *  (e.g. Music Reviews reads its target-notes sequence here). */
+const elementContent = computed<unknown>(() => {
+  const raw = props.element.content_inline
+  if (!raw) return null
+  try {
+    return JSON.parse(raw)
+  } catch {
+    return raw
+  }
+})
+
 const grantedCapabilities = computed<PluginCapability[]>(() => {
   const granted = new Set<PluginCapability>()
   for (const p of permissions.value) {
@@ -87,16 +102,26 @@ const grantedCapabilities = computed<PluginCapability[]>(() => {
 // to the iframe for this single render. We clear it on teardown.
 
 onMounted(async () => {
+  void invoke('frontend_log', { message: `[PluginHost] onMounted pluginCid=${pluginCid.value || '<empty>'} elementId=${props.element.id}` })
   if (!pluginCid.value) {
     loadError.value = 'This element references a plugin, but no plugin CID is set.'
     loading.value = false
     return
   }
   try {
-    const [m, perms] = await Promise.all([
+    const [list, m, perms] = await Promise.all([
+      invoke<InstalledPlugin[]>('plugin_list'),
       invoke<PluginManifest>('plugin_get_manifest', { pluginCid: pluginCid.value }),
       invoke<PluginPermissionRecord[]>('plugin_list_permissions', { pluginCid: pluginCid.value }),
     ])
+    const installed = list.find((p) => p.plugin_cid === pluginCid.value)
+    if (installed && !installed.enabled) {
+      refusalReason.value =
+        'This plugin is disabled. Re-enable it from Settings → Plugins to use it.'
+      manifest.value = m
+      permissions.value = perms
+      return
+    }
     manifest.value = m
     permissions.value = perms
 
@@ -129,9 +154,15 @@ function onReady(declared: string[]) {
 }
 
 function onRequestCapability(requestId: number, name: PluginCapability, reason: string) {
-  // If a prompt is already open, auto-deny the new request — concurrent
-  // capability prompts are not supported in Phase 1 and would produce a
-  // confusing UX.
+  // Already granted (always / session / once for this mount)? Auto-resolve
+  // without re-prompting the user — the consent has been recorded.
+  if (grantedCapabilities.value.includes(name)) {
+    iframeRef.value?.resolveCapabilityRequest(requestId, true)
+    iframeRef.value?.sendCapabilityGranted(name, 'session')
+    return
+  }
+  // A second concurrent prompt is auto-denied — Phase 1 only supports
+  // one active consent dialog at a time.
   if (pendingCapability.value) {
     iframeRef.value?.resolveCapabilityRequest(requestId, false)
     return
@@ -184,26 +215,68 @@ function onPersistState(blob: unknown) {
   console.debug('[alex] plugin persist_state (not yet durable)', blob)
 }
 
-function onEmitEvent(type: string, payload: unknown) {
+async function onEmitEvent(requestId: number, type: string, payload: unknown) {
+  if (type === 'debug_log') {
+    const msg = (payload as { msg?: string } | null)?.msg ?? ''
+    void invoke('frontend_log', { message: `[plugin:${manifest.value?.name}] ${msg}` })
+    iframeRef.value?.resolveEvent(requestId, null)
+    return
+  }
+  // Special-cased events the plugin awaits a real response from.
+  if (type === 'irl_refresh') {
+    try {
+      const submissions = await invoke<IrlSubmission[]>('irl_list_my_submissions', {
+        pluginCid: pluginCid.value,
+      })
+      iframeRef.value?.resolveEvent(requestId, { submissions })
+    } catch (e) {
+      iframeRef.value?.resolveEvent(requestId, null, String(e))
+    }
+    return
+  }
   console.debug('[alex] plugin event', type, payload)
 }
 
-async function onSubmit(submission: unknown, _metadata: unknown) {
+async function onSubmit(requestId: number, submission: unknown, metadata: unknown) {
   const m = manifest.value
-  if (!m) return
+  if (!m) {
+    iframeRef.value?.resolveSubmit(requestId, null, 'manifest unavailable')
+    return
+  }
+
+  // IRL Review path — route to the local instructor inbox IPC.
+  const meta = (metadata as { type?: string } | null) ?? null
+  if (meta?.type === 'irl_review') {
+    const skills = Array.isArray((meta as { skills?: unknown }).skills)
+      ? ((meta as { skills?: unknown[] }).skills as unknown[])
+      : []
+    try {
+      const submissionId = await invoke<string>('irl_submit_for_review', {
+        pluginCid: pluginCid.value,
+        elementId: props.element.id,
+        enrollmentId: props.enrollmentId ?? null,
+        submissionJson: JSON.stringify(submission ?? {}),
+        skillsJson: JSON.stringify(skills),
+      })
+      iframeRef.value?.resolveSubmit(requestId, { submission_id: submissionId })
+    } catch (e) {
+      iframeRef.value?.resolveSubmit(requestId, null, String(e))
+    }
+    return
+  }
+
+  // Graded plugin path — run the WASM grader.
   if (!m.grader) {
+    iframeRef.value?.resolveSubmit(requestId, { submission_received: true })
     console.warn('[alex] plugin submitted but manifest has no grader — ignoring')
     return
   }
   if (!props.enrollmentId) {
-    console.warn('[alex] graded plugin submission requires an enrollment — refusing')
+    iframeRef.value?.resolveSubmit(requestId, null, 'no enrollment')
     iframeRef.value?.sendSubmitAck('', null)
     return
   }
 
-  // Build content_json from element.content_inline. If content_cid is the
-  // primary source (Phase 3+), the host will resolve it to bytes here.
-  // For Phase 2 session 1, content_inline is sufficient.
   const contentJson = props.element.content_inline ?? '{}'
   const submissionJson = JSON.stringify(submission ?? {})
 
@@ -215,10 +288,12 @@ async function onSubmit(submission: unknown, _metadata: unknown) {
       contentJson,
       submissionJson,
     })
+    iframeRef.value?.resolveSubmit(requestId, { score: score.score })
     iframeRef.value?.sendSubmitAck(blake3HexHint(), score.score)
     emit('scored-complete', score.score)
   } catch (e) {
     console.error('[alex] grade failed', e)
+    iframeRef.value?.resolveSubmit(requestId, null, String(e))
     iframeRef.value?.sendSubmitAck('', null)
   }
 }
@@ -247,7 +322,7 @@ function onIframeError(msg: string) {
 </script>
 
 <template>
-  <div class="plugin-host space-y-3">
+  <div class="plugin-host flex flex-col h-full min-h-0">
     <div v-if="loading" class="flex items-center justify-center p-10">
       <AppSpinner />
     </div>
@@ -261,36 +336,27 @@ function onIframeError(msg: string) {
     </AppAlert>
 
     <template v-else-if="manifest">
-      <div class="flex items-center justify-between rounded-lg border border-border/50 bg-card/40 px-3 py-2 text-xs">
-        <div class="flex items-center gap-2">
-          <span class="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 font-medium text-primary">
-            Plugin
-          </span>
-          <span class="font-medium text-foreground">{{ manifest.name }}</span>
-          <span class="text-muted-foreground">v{{ manifest.version }}</span>
-        </div>
-        <span class="font-mono text-[10px] text-muted-foreground">
-          {{ pluginCid.slice(0, 12) }}…
-        </span>
+      <div class="flex-1 min-h-0 flex flex-col">
+        <PluginIframe
+          ref="iframeRef"
+          :plugin-cid="pluginCid"
+          :entry="manifest.entry"
+          :declared-capabilities="manifest.capabilities"
+          :granted-capabilities="grantedCapabilities"
+          :content="elementContent"
+          :state="null"
+          :mode="props.mode ?? 'learn'"
+          :element-id="props.element.id"
+          class="flex-1 min-h-0"
+          @ready="onReady"
+          @request-capability="onRequestCapability"
+          @persist-state="onPersistState"
+          @emit-event="onEmitEvent"
+          @submit="onSubmit"
+          @complete="onComplete"
+          @error="onIframeError"
+        />
       </div>
-
-      <PluginIframe
-        ref="iframeRef"
-        :plugin-cid="pluginCid"
-        :entry="manifest.entry"
-        :granted-capabilities="grantedCapabilities"
-        :content="null"
-        :state="null"
-        :mode="props.mode ?? 'learn'"
-        :element-id="props.element.id"
-        @ready="onReady"
-        @request-capability="onRequestCapability"
-        @persist-state="onPersistState"
-        @emit-event="onEmitEvent"
-        @submit="onSubmit"
-        @complete="onComplete"
-        @error="onIframeError"
-      />
     </template>
 
     <PermissionPrompt

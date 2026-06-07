@@ -36,3 +36,12 @@ pub async fn check_health(state: State<'_, AppState>) -> Result<HealthResponse, 
 pub async fn read_diag_log() -> Result<String, String> {
     Ok(crate::diag::read())
 }
+
+/// Frontend → backend log bridge for dev-time debugging. Writes the
+/// message to the app log at INFO level so it surfaces in `tauri dev`
+/// output without needing a Safari Web Inspector attach.
+#[tauri::command]
+pub async fn frontend_log(message: String) -> Result<(), String> {
+    log::info!("[frontend] {message}");
+    Ok(())
+}

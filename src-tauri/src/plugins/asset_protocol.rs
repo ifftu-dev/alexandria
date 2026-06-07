@@ -27,12 +27,14 @@ use crate::plugins::registry;
 const BOOTSTRAP_JS: &str = include_str!("bootstrap.js");
 
 /// Per-plugin CSP. `{cid}` is replaced with the plugin's content address.
+/// `{nonce}` is replaced with a per-response random nonce so the injected
+/// bootstrap script can run without enabling broad `'unsafe-inline'`.
 const PLUGIN_CSP_TEMPLATE: &str = "default-src 'self' plugin://{cid}; \
     connect-src 'none'; \
     img-src 'self' data: blob:; \
     media-src 'self' blob:; \
     style-src 'self' 'unsafe-inline'; \
-    script-src 'self' 'wasm-unsafe-eval'; \
+    script-src 'self' plugin://{cid} 'nonce-{nonce}' 'wasm-unsafe-eval'; \
     font-src 'self' data:; \
     object-src 'none'; \
     base-uri 'none'; \
@@ -87,13 +89,21 @@ pub fn handle(plugins_dir: &Path, request: Request<Vec<u8>>) -> Response<Vec<u8>
     let content_type = guess_content_type(&resolved);
     let is_html = content_type == "text/html; charset=utf-8";
 
+    // Per-response nonce so the inline bootstrap script can execute under
+    // a strict `script-src 'self' 'nonce-…'` policy. Inline scripts the
+    // plugin author writes are still blocked (they would need this nonce,
+    // which they can't observe), so the no-inline guarantee for plugin
+    // authors is preserved.
+    let nonce = generate_nonce();
     let body = if is_html {
-        inject_bootstrap(&bytes)
+        inject_bootstrap(&bytes, &nonce)
     } else {
         bytes
     };
 
-    let csp = PLUGIN_CSP_TEMPLATE.replace("{cid}", &plugin_cid);
+    let csp = PLUGIN_CSP_TEMPLATE
+        .replace("{cid}", &plugin_cid)
+        .replace("{nonce}", &nonce);
 
     Response::builder()
         .status(StatusCode::OK)
@@ -153,10 +163,14 @@ fn guess_content_type(path: &Path) -> &'static str {
 
 /// Inject the bootstrap script at the earliest point inside the HTML so
 /// plugin authors can rely on `window.alex` being defined before any of
-/// their own scripts run.
-fn inject_bootstrap(html_bytes: &[u8]) -> Vec<u8> {
+/// their own scripts run. The script carries a per-response nonce that
+/// matches the `script-src 'nonce-…'` directive in the CSP header.
+fn inject_bootstrap(html_bytes: &[u8], nonce: &str) -> Vec<u8> {
     let html = String::from_utf8_lossy(html_bytes);
-    let script_tag = format!("<script>/* alex:bootstrap */\n{}\n</script>", BOOTSTRAP_JS);
+    let script_tag = format!(
+        "<script nonce=\"{nonce}\">/* alex:bootstrap */\n{}\n</script>",
+        BOOTSTRAP_JS
+    );
 
     let lower = html.to_ascii_lowercase();
     // Preferred injection point: right after `<head>` so the bootstrap
@@ -187,6 +201,20 @@ fn inject_bootstrap(html_bytes: &[u8]) -> Vec<u8> {
             out
         }
     }
+}
+
+/// 128-bit base16 nonce for the per-response bootstrap script tag. The
+/// CSP header references this nonce so the inline bootstrap is allowed
+/// while arbitrary plugin-author inline scripts remain blocked.
+fn generate_nonce() -> String {
+    use rand::RngCore;
+    let mut bytes = [0u8; 16];
+    rand::rngs::OsRng.fill_bytes(&mut bytes);
+    let mut hex = String::with_capacity(32);
+    for b in bytes {
+        hex.push_str(&format!("{b:02x}"));
+    }
+    hex
 }
 
 /// Minimal percent-decoder: only handles `%XX` sequences, returns `None`
@@ -229,10 +257,10 @@ mod tests {
     #[test]
     fn injects_after_head() {
         let html = b"<html><head></head><body></body></html>";
-        let out = inject_bootstrap(html);
+        let out = inject_bootstrap(html, "testnonce");
         let s = String::from_utf8(out).unwrap();
         let head_idx = s.find("<head>").unwrap();
-        let script_idx = s.find("<script>").unwrap();
+        let script_idx = s.find("<script nonce=").unwrap();
         assert!(script_idx > head_idx);
         // Script must land before </head> closer.
         let close_idx = s.find("</head>").unwrap();
@@ -242,9 +270,9 @@ mod tests {
     #[test]
     fn falls_back_to_prepending_on_malformed_html() {
         let html = b"no tags at all";
-        let out = inject_bootstrap(html);
+        let out = inject_bootstrap(html, "testnonce");
         let s = String::from_utf8(out).unwrap();
-        assert!(s.starts_with("<script>"));
+        assert!(s.starts_with("<script nonce="));
         assert!(s.ends_with("no tags at all"));
     }
 
