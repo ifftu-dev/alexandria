@@ -15,7 +15,9 @@ const { invoke } = useLocalApi()
 const { displayName, ensureNames } = useDisplayNames()
 const { targets, addTarget, removeTarget } = useTargets()
 
-const did = computed(() => String(route.params.did ?? ''))
+// Normalize the scheme prefix — mobile keyboards capitalize pasted/typed
+// DIDs ("Did:key:…") and the owner-match on the serving node is exact.
+const did = computed(() => String(route.params.did ?? '').replace(/^did:key:/i, 'did:key:'))
 
 const loading = ref(true)
 const error = ref<string | null>(null)

@@ -17,7 +17,10 @@ const { targets, removeTarget, pathFor, combinedPath } = useTargets()
 const lookupDid = ref('')
 const myDid = ref<string | null>(null)
 function openInstructorGraph() {
-  const did = lookupDid.value.trim()
+  // Mobile keyboards auto-capitalize the first letter ("Did:key:…").
+  // The DID scheme + method are case-insensitive per the DID spec, but
+  // the base58 identifier is not — normalize only the prefix.
+  const did = lookupDid.value.trim().replace(/^did:key:/i, 'did:key:')
   if (did) router.push(`/u/${encodeURIComponent(did)}`)
 }
 
