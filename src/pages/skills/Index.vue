@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { useSkillGraphHover } from '@/composables/useSkillGraphHover'
 import { AppBadge, AppTabs } from '@/components/ui'
+import GraphVisibilityEditor from '@/components/skills/GraphVisibilityEditor.vue'
 import {
   extractSkillClaim,
   type SubjectFieldInfo,
@@ -13,9 +14,11 @@ import {
   type VerifiableCredential,
 } from '@/types'
 import { earnedSkillIdsFromCredentials } from '@/composables/useSkillGraphState'
+import { useTargets } from '@/composables/useTargets'
 
 const { invoke } = useLocalApi()
 const router = useRouter()
+const { addTarget } = useTargets()
 
 const loading = ref(true)
 const fields = ref<SubjectFieldInfo[]>([])
@@ -104,6 +107,11 @@ function selectSubject(id: string | null) {
 
 function goToSkill(id: string) {
   router.push(`/skills/${id}`)
+}
+
+async function targetSkill(skill: SkillInfo) {
+  await addTarget({ label: skill.name, goalSkillIds: [skill.id] })
+  router.push('/targets')
 }
 
 const bloomColors: Record<string, string> = {
@@ -505,6 +513,13 @@ onBeforeUnmount(() => {
                     </div>
                   </div>
 
+                  <button
+                    class="target-btn shrink-0"
+                    :title="`Target ${skill.name}`"
+                    @click.stop="targetSkill(skill)"
+                  >
+                    🎯 Target
+                  </button>
                 </div>
               </div>
             </div>
@@ -513,7 +528,10 @@ onBeforeUnmount(() => {
       </div>
 
       <!-- ============ GRAPH TAB ============ -->
-      <div v-if="activeTab === 'graph'">
+      <div v-if="activeTab === 'graph'" class="space-y-6">
+        <!-- Visibility + teaching editor (feature: choose public parts) -->
+        <GraphVisibilityEditor />
+
         <div v-if="forceGraphNodes.length === 0" class="py-16 text-center">
           <div class="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-muted/30">
             <svg class="h-8 w-8 text-muted-foreground/50" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
@@ -604,3 +622,19 @@ onBeforeUnmount(() => {
     </template>
   </div>
 </template>
+
+<style scoped>
+.target-btn {
+  font-size: 0.7rem;
+  font-weight: 500;
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--app-primary) 12%, transparent);
+  color: var(--app-primary);
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+.target-btn:hover {
+  background: color-mix(in srgb, var(--app-primary) 22%, transparent);
+}
+</style>

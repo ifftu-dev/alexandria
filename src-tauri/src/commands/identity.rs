@@ -98,7 +98,22 @@ pub async fn get_local_did(state: State<'_, AppState>) -> Result<Option<String>,
     drop(ks_guard);
     let w = wallet::wallet_from_mnemonic(&mnemonic).map_err(|e| e.to_string())?;
     let did = crate::crypto::did::derive_did_key(&w.signing_key);
-    Ok(Some(did.as_str().to_string()))
+    let did_str = did.as_str().to_string();
+
+    // Cache the DID (device scope) so the swarm event loop — which has
+    // no keystore access — can answer graph-fetch requests for its own
+    // owner. Best-effort: a failure here must not break DID resolution.
+    if let Ok(guard) = state.db.lock() {
+        if let Some(db) = guard.as_ref() {
+            let _ = crate::settings::SettingsStore::set(
+                db.conn(),
+                crate::settings::registry::keys::IDENTITY_LOCAL_DID,
+                did_str.clone(),
+            );
+        }
+    }
+
+    Ok(Some(did_str))
 }
 
 /// Resolve a batch of `did:key` strings to human display names.

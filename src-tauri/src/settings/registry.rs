@@ -360,6 +360,43 @@ pub mod keys {
         description: "Persisted across launches as {x, y, width, height} JSON.",
         default: || JsonSetting(serde_json::json!(null)),
     };
+
+    // ── Skill graph / reputation ───────────────────────────────
+    /// Per-skill visibility + teaching preferences for the owner's
+    /// skill graph. Shape: `{ "<skill_id>": { "public": bool,
+    /// "teaching": bool } }`. Earned skills are public by default; an
+    /// absent entry means public + not-teaching.
+    pub const INSTRUCTOR_GRAPH_PREFS: SettingKey<JsonSetting> = SettingKey {
+        key: "instructor.graph_prefs",
+        scope: Scope::Sync,
+        category: "Skill graph",
+        label: "Skill graph visibility",
+        description: "Which earned skills are public and which you teach, keyed by skill id.",
+        default: || JsonSetting(serde_json::json!({})),
+    };
+
+    /// The learner's targeted skill graphs. Shape: array of
+    /// `{ id, label, source_did?, goal_skill_ids: [..], created_at }`.
+    pub const LEARNER_TARGETS: SettingKey<JsonSetting> = SettingKey {
+        key: "learner.targets",
+        scope: Scope::Sync,
+        category: "Skill graph",
+        label: "Learning targets",
+        description: "Skill graphs you are working toward, with their goal skills.",
+        default: || JsonSetting(serde_json::json!([])),
+    };
+
+    /// Device-local cache of the active profile's `did:key`. Written by
+    /// `get_local_did` so the swarm event loop (which has no keystore
+    /// access) can answer graph-fetch requests for its own owner.
+    pub const IDENTITY_LOCAL_DID: SettingKey<String> = SettingKey {
+        key: "identity.local_did",
+        scope: Scope::Device,
+        category: "Identity",
+        label: "Local DID cache",
+        description: "Cached did:key of the active profile (internal).",
+        default: String::new,
+    };
 }
 
 /// Walk every declared setting and produce its type-erased entry.
@@ -412,6 +449,9 @@ pub fn all_entries(
         entry!(DEVICE_LABEL),
         entry!(STORAGE_QUOTA_BYTES),
         entry!(WINDOW_GEOMETRY),
+        entry!(INSTRUCTOR_GRAPH_PREFS),
+        entry!(LEARNER_TARGETS),
+        entry!(IDENTITY_LOCAL_DID),
     ]
 }
 
@@ -447,6 +487,9 @@ pub fn lookup_meta(key: &str) -> Option<(Scope, &'static str)> {
     check!(DEVICE_LABEL);
     check!(STORAGE_QUOTA_BYTES);
     check!(WINDOW_GEOMETRY);
+    check!(INSTRUCTOR_GRAPH_PREFS);
+    check!(LEARNER_TARGETS);
+    check!(IDENTITY_LOCAL_DID);
     None
 }
 

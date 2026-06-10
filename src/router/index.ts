@@ -152,6 +152,20 @@ const router = createRouter({
       meta: { layout: 'app' },
     },
 
+    // Learning targets + instructor public graphs
+    {
+      path: '/targets',
+      name: 'targets',
+      component: () => import('@/pages/targets/Index.vue'),
+      meta: { layout: 'app' },
+    },
+    {
+      path: '/u/:did',
+      name: 'instructor-graph',
+      component: () => import('@/pages/u/InstructorGraph.vue'),
+      meta: { layout: 'app' },
+    },
+
     // Governance
     {
       path: '/governance',

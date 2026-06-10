@@ -218,6 +218,85 @@ ReputationConstraint {
 
 ---
 
+## 14. Public Skill Graphs & Learning Targets (Normative)
+
+The skill graph and reputation are the core surface of the app — they
+are promoted to the home screen and made shareable + actionable.
+
+### 14.1 Owner graph & visibility
+
+A user's skill graph is every skill they hold a non-revoked credential
+for (the "earned" set, `credentials WHERE subject_did = self AND
+skill_id IS NOT NULL AND revoked = 0`), wired together by the global
+`skill_prerequisites` taxonomy edges among that set.
+
+Each earned skill carries two owner-controlled flags, stored in the
+**synced** `instructor.graph_prefs` setting
+(`{ "<skill_id>": { "public": bool, "teaching": bool } }`):
+
+- `public` — whether the skill is exposed to other peers. **Earned
+  skills are public by default**; the owner flips individual skills
+  private.
+- `teaching` — a highlight marking skills the owner opts to instruct.
+  Defaults `false`; orthogonal to `public`.
+
+Editor: Skills → *My Graph* tab (`GraphVisibilityEditor.vue`), per-skill
+toggles + bulk show/hide.
+
+### 14.2 Viewing another user's graph (P2P)
+
+Public graphs are fetched over the `/alexandria/graph-fetch/1.0`
+request-response protocol (CBOR, §protocol-spec 6.5). The wire payload
+(`PublicSkillGraph`) carries only public nodes; private skills never
+leave the device. `teaching` nodes are flagged for highlight.
+
+Because there is no DID→PeerId registry, `fetch_public_graph(did)`
+broadcasts to the requester's connected peers and returns the first
+peer that owns the DID; a self-DID request is served locally
+(loopback), which also powers "preview my public graph". Handler:
+`p2p::graph_fetch::handle_graph_fetch_request` (answers `NotOwner`
+unless `identity.local_did` matches the requested `subject_did`).
+
+UI: `/u/:did` (`InstructorGraph.vue`) renders the DAG + a "Teaches"
+list and a **Target this graph** action.
+
+### 14.3 Targets & learning paths
+
+A user may target any skill graph — an instructor's whole public graph,
+or a single skill (rooted subtree). Targets are stored in the **synced**
+`learner.targets` setting (array of `{ id, label, source_did?,
+goal_skill_ids, created_at }`); a user may hold many.
+
+`compute_learning_path(goal_skill_ids)` (`commands::graph::compute_path`)
+computes, against the user's earned set:
+
+1. the transitive prerequisite closure of the goals (the *relevant* set),
+2. a topological order by longest-prerequisite-chain depth (cycle-safe),
+3. a per-skill status — `earned` / `available` (all direct prereqs
+   earned) / `locked`, and
+4. up to 3 published-course recommendations per unproven skill, matched
+   against the JSON `courses.skill_ids` column.
+
+Multiple targets merge into one deduped path (`combinedPath`). The home
+screen shows progress rings + the next unlocked step per target;
+`/targets` lists them with the full path (`LearningPathView.vue`).
+
+### 14.4 Commands & settings
+
+| IPC command | Purpose |
+|---|---|
+| `get_my_skill_graph` | Owner's full graph incl. private (editor) |
+| `fetch_public_graph(did)` | Public graph for a DID (loopback or P2P broadcast) |
+| `compute_learning_path(goal_skill_ids)` | Topo path + course recs from earned set |
+
+| Setting key | Scope | Shape |
+|---|---|---|
+| `instructor.graph_prefs` | sync | `{ skill_id: { public, teaching } }` |
+| `learner.targets` | sync | `Target[]` |
+| `identity.local_did` | device | cached `did:key` (lets the swarm loop answer graph-fetch) |
+
+---
+
 ## Appendix A: Threat Model
 
 ### A.1 Reputation Gaming

@@ -81,6 +81,17 @@ That's it:
 - The frontend gains a reactive accessor: `useSetting<boolean>('notifications.sound')`.
 - The setting propagates to the user's other devices (if scope is `sync`).
 
+## Skill-graph & learning-target keys
+
+Three keys back the skill-graph/reputation home surface (see
+[`skills-and-reputation.md`](./skills-and-reputation.md) §14):
+
+| Key | Scope | Kind | Use |
+|---|---|---|---|
+| `instructor.graph_prefs` | sync | json | `{ skill_id: { public, teaching } }` — per-skill visibility + teaching highlight. Read by `p2p::graph_fetch` when serving the owner's public graph. |
+| `learner.targets` | sync | json | `Target[]` the user is working toward. |
+| `identity.local_did` | device | string | Cached `did:key` of the active profile, written by `get_local_did`. Lets the swarm event loop (no keystore access) answer `graph-fetch` requests for its own owner. Internal — not user-facing. |
+
 ## Where settings used to live
 
 Before this work, preferences were scattered:

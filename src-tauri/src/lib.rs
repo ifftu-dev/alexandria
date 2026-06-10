@@ -1056,6 +1056,10 @@ pub fn run() {
             commands::reputation::list_reputation_rows,
             commands::reputation::get_reputation,
             commands::reputation::recompute_reputation_for_subject,
+            // Skill graph + learning path
+            commands::graph::get_my_skill_graph,
+            commands::graph::fetch_public_graph,
+            commands::graph::compute_learning_path,
             // Snapshots
             commands::snapshot::snapshot_reputation,
             commands::snapshot::submit_snapshot_tx,

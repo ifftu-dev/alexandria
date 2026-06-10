@@ -417,13 +417,22 @@ Seven libp2p protocols compose `AlexandriaBehaviour`:
 | `/alexandria/plugin-attestations/1.0` | Plugin DAO threshold-signed grader attestations |
 | `/alexandria/sentinel-priors/1.0` | Ratified Sentinel adversarial-prior metadata |
 
-All 13 topics MUST be subscribed on node startup. In addition, two
+All 13 topics MUST be subscribed on node startup. In addition, three
 request-response protocols (libp2p `request-response` + CBOR codec)
 run alongside the gossip mesh and are 1-to-1, not gossip topics:
 `/alexandria/vc-fetch/1.0` handles authority-respecting credential
 pull (enabled when the node has a `Database` wired into its swarm
-event loop), and `/alexandria/sync/1.0` carries AES-256-GCM-sealed
-cross-device sync payloads between explicitly paired devices.
+event loop); `/alexandria/sync/1.0` carries AES-256-GCM-sealed
+cross-device sync payloads between explicitly paired devices; and
+`/alexandria/graph-fetch/1.0` serves a node owner's **public skill
+graph** on demand. A graph-fetch request carries the `subject_did`
+being asked for; a node answers `Ok(PublicSkillGraph)` only if it
+owns that DID (matched against the device-local `identity.local_did`
+setting), else `NotOwner`. The graph exposes every earned skill the
+owner has marked public, flagging the subset they teach. There is no
+DID→PeerId registry, so a fetch is broadcast across the requester's
+connected peers and the first `Ok` wins; a same-DID call is served
+locally (loopback). Handler + payloads: `p2p::graph_fetch`.
 
 See §14 for the normative VC payload schemas carried by the
 `vc-did`, `vc-status`, `vc-presentation`, and `pinboard` topics, and

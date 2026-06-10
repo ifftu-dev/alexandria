@@ -1665,3 +1665,70 @@ export interface PluginAdvisoryRecord {
   message: string
   issued_at: string
 }
+
+// ---- Skill graph (public) + learning path ----
+// Mirrors src-tauri/src/p2p/graph_fetch.rs + commands/graph.rs.
+
+export interface PublicGraphNode {
+  id: string
+  name: string
+  bloom_level: string
+  subject_name: string | null
+  /** Whether the owner exposes this earned skill publicly. */
+  public: boolean
+  /** Whether the owner has opted to teach this skill (highlight). */
+  teaching: boolean
+}
+
+export interface PublicGraphEdge {
+  skill_id: string
+  prerequisite_id: string
+}
+
+export interface PublicSkillGraph {
+  subject_did: string
+  nodes: PublicGraphNode[]
+  edges: PublicGraphEdge[]
+}
+
+/** Per-skill preference stored in the `instructor.graph_prefs` setting. */
+export interface GraphNodePref {
+  public: boolean
+  teaching: boolean
+}
+
+export interface CourseRec {
+  id: string
+  title: string
+}
+
+export type LearningStepStatus = 'earned' | 'available' | 'locked'
+
+export interface LearningPathStep {
+  skill_id: string
+  name: string
+  bloom_level: string
+  subject_name: string | null
+  status: LearningStepStatus
+  is_goal: boolean
+  prerequisite_ids: string[]
+  course_recs: CourseRec[]
+}
+
+export interface LearningPath {
+  goal_skill_ids: string[]
+  steps: LearningPathStep[]
+  total: number
+  earned_count: number
+}
+
+/** A skill graph the learner is working toward. Stored as a JSON array
+ *  in the `learner.targets` synced setting. */
+export interface Target {
+  id: string
+  label: string
+  /** DID of the instructor whose graph this target came from, if any. */
+  source_did?: string | null
+  goal_skill_ids: string[]
+  created_at: string
+}

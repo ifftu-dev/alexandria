@@ -15,6 +15,7 @@ use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
 
 use super::device_sync::{SyncRequest, SyncResponse};
+use super::graph_fetch::{GraphFetchRequest, GraphFetchResponse};
 use super::vc_fetch::{FetchRequest, FetchResponse};
 
 use crate::db::Database;
@@ -274,6 +275,11 @@ pub struct AlexandriaBehaviour {
     /// protocol between explicitly paired devices. Payloads are sealed
     /// with the pair's shared key (see [`super::device_sync`]).
     pub device_sync: request_response::cbor::Behaviour<SyncRequest, SyncResponse>,
+    /// Pull-based public skill-graph fetch — `/alexandria/graph-fetch/1.0`
+    /// request-response protocol with CBOR codec. A node serves its own
+    /// owner's public skill graph; inbound requests are answered inline
+    /// against the local DB (see [`super::graph_fetch`]).
+    pub graph_fetch: request_response::cbor::Behaviour<GraphFetchRequest, GraphFetchResponse>,
 }
 
 /// The running P2P network node.
@@ -311,6 +317,9 @@ pub enum SwarmCommand {
     Status { reply: mpsc::Sender<NetworkStatus> },
     /// Get the list of connected peers.
     Peers { reply: mpsc::Sender<Vec<PeerId>> },
+    /// Get every peer in the Kademlia routing table (connected or not).
+    /// Request-response sends to these auto-dial via their known addrs.
+    KnownPeers { reply: mpsc::Sender<Vec<PeerId>> },
     /// Send a vc-fetch request to a peer. The reply oneshot
     /// resolves when the peer's response (or an outbound failure)
     /// comes back.
@@ -338,6 +347,19 @@ pub enum SwarmCommand {
     SendSyncResponse {
         channel: ResponseChannel<SyncResponse>,
         response: SyncResponse,
+    },
+    /// Send a graph-fetch request to a peer. The reply oneshot resolves
+    /// with the peer's [`GraphFetchResponse`] (or an outbound failure).
+    SendGraphFetchRequest {
+        peer: PeerId,
+        request: GraphFetchRequest,
+        reply: oneshot::Sender<Result<GraphFetchResponse, NetworkError>>,
+    },
+    /// Reply to an inbound graph-fetch request (handled inline against
+    /// the DB in the event loop, like vc-fetch).
+    SendGraphFetchResponse {
+        channel: ResponseChannel<GraphFetchResponse>,
+        response: GraphFetchResponse,
     },
     /// Dial a peer at the given addresses (used to reach a freshly
     /// paired device whose addresses came in via the pairing code).
@@ -838,6 +860,18 @@ fn build_behaviour(
         request_response::Config::default(),
     );
 
+    // Public skill-graph fetch (§ graph-fetch). CBOR codec, full
+    // bidirectional support — every node both serves its owner's graph
+    // and requests other owners' graphs.
+    let graph_fetch =
+        request_response::cbor::Behaviour::<GraphFetchRequest, GraphFetchResponse>::new(
+            [(
+                StreamProtocol::new("/alexandria/graph-fetch/1.0"),
+                ProtocolSupport::Full,
+            )],
+            request_response::Config::default(),
+        );
+
     diag::log("build_behaviour: all sub-behaviours created OK");
 
     Ok(AlexandriaBehaviour {
@@ -849,6 +883,7 @@ fn build_behaviour(
         relay_client: relay_behaviour,
         vc_fetch,
         device_sync,
+        graph_fetch,
         dcutr,
     })
 }
@@ -933,6 +968,12 @@ async fn swarm_event_loop(
     let mut outbound_sync_replies: HashMap<
         libp2p::request_response::OutboundRequestId,
         oneshot::Sender<Result<SyncResponse, NetworkError>>,
+    > = HashMap::new();
+
+    // Same bookkeeping for outbound graph-fetch requests.
+    let mut outbound_graph_fetch_replies: HashMap<
+        libp2p::request_response::OutboundRequestId,
+        oneshot::Sender<Result<GraphFetchResponse, NetworkError>>,
     > = HashMap::new();
 
     // Track NAT state locally for the Status command
@@ -1141,6 +1182,29 @@ async fn swarm_event_loop(
                             .collect();
                         let _ = reply.send(peers).await;
                     }
+                    Some(SwarmCommand::KnownPeers { reply }) => {
+                        let mut peers: Vec<PeerId> = swarm
+                            .connected_peers()
+                            .cloned()
+                            .collect();
+                        let in_buckets: Vec<PeerId> = swarm
+                            .behaviour_mut()
+                            .kademlia
+                            .kbuckets()
+                            .flat_map(|bucket| {
+                                bucket
+                                    .iter()
+                                    .map(|entry| *entry.node.key.preimage())
+                                    .collect::<Vec<_>>()
+                            })
+                            .collect();
+                        for p in in_buckets {
+                            if !peers.contains(&p) {
+                                peers.push(p);
+                            }
+                        }
+                        let _ = reply.send(peers).await;
+                    }
                     Some(SwarmCommand::SendFetchRequest { peer, request, reply }) => {
                         let request_id = swarm
                             .behaviour_mut()
@@ -1167,6 +1231,19 @@ async fn swarm_event_loop(
                         let _ = swarm
                             .behaviour_mut()
                             .device_sync
+                            .send_response(channel, response);
+                    }
+                    Some(SwarmCommand::SendGraphFetchRequest { peer, request, reply }) => {
+                        let request_id = swarm
+                            .behaviour_mut()
+                            .graph_fetch
+                            .send_request(&peer, request);
+                        outbound_graph_fetch_replies.insert(request_id, reply);
+                    }
+                    Some(SwarmCommand::SendGraphFetchResponse { channel, response }) => {
+                        let _ = swarm
+                            .behaviour_mut()
+                            .graph_fetch
                             .send_response(channel, response);
                     }
                     Some(SwarmCommand::ConnectPeer { peer, addrs, reply }) => {
@@ -1653,6 +1730,71 @@ async fn swarm_event_loop(
                     SwarmEvent::Behaviour(AlexandriaBehaviourEvent::DeviceSync(
                         request_response::Event::ResponseSent { .. }
                     )) => {}
+                    // ---- graph-fetch (request-response) --------------
+                    SwarmEvent::Behaviour(AlexandriaBehaviourEvent::GraphFetch(
+                        request_response::Event::Message { peer, message, .. }
+                    )) => {
+                        match message {
+                            request_response::Message::Request { request, channel, .. } => {
+                                log::info!(
+                                    "graph-fetch: inbound request from {peer} for {}",
+                                    request.subject_did
+                                );
+                                // Answer against the local DB. Without a DB
+                                // handle we MUST still respond (libp2p
+                                // contract) — fall back to NotOwner.
+                                let response = match db.as_ref() {
+                                    Some(db_arc) => match db_arc.lock() {
+                                        Ok(guard) => match guard.as_ref() {
+                                            Some(database) => {
+                                                super::graph_fetch::handle_graph_fetch_request(
+                                                    database.conn(),
+                                                    &request,
+                                                )
+                                                .unwrap_or(
+                                                    super::graph_fetch::GraphFetchResponse::NotOwner,
+                                                )
+                                            }
+                                            None => super::graph_fetch::GraphFetchResponse::NotOwner,
+                                        },
+                                        Err(_) => super::graph_fetch::GraphFetchResponse::NotOwner,
+                                    },
+                                    None => super::graph_fetch::GraphFetchResponse::NotOwner,
+                                };
+                                let _ = swarm
+                                    .behaviour_mut()
+                                    .graph_fetch
+                                    .send_response(channel, response);
+                            }
+                            request_response::Message::Response { request_id, response } => {
+                                if let Some(reply) =
+                                    outbound_graph_fetch_replies.remove(&request_id)
+                                {
+                                    let _ = reply.send(Ok(response));
+                                } else {
+                                    log::debug!(
+                                        "graph-fetch: unmatched response for {request_id} from {peer}"
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    SwarmEvent::Behaviour(AlexandriaBehaviourEvent::GraphFetch(
+                        request_response::Event::OutboundFailure { request_id, error, peer, .. }
+                    )) => {
+                        log::warn!("graph-fetch: outbound to {peer} failed: {error}");
+                        if let Some(reply) = outbound_graph_fetch_replies.remove(&request_id) {
+                            let _ = reply.send(Err(NetworkError::Publish(error.to_string())));
+                        }
+                    }
+                    SwarmEvent::Behaviour(AlexandriaBehaviourEvent::GraphFetch(
+                        request_response::Event::InboundFailure { error, peer, .. }
+                    )) => {
+                        log::debug!("graph-fetch: inbound from {peer} failed: {error}");
+                    }
+                    SwarmEvent::Behaviour(AlexandriaBehaviourEvent::GraphFetch(
+                        request_response::Event::ResponseSent { .. }
+                    )) => {}
                     SwarmEvent::NewListenAddr { address, .. } => {
                         log::info!("Listening on {address}");
                         if is_circuit_listener(&address) {
@@ -1849,6 +1991,48 @@ impl P2pNode {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.command_tx
             .send(SwarmCommand::SendSyncRequest {
+                peer,
+                request,
+                reply: reply_tx,
+            })
+            .await
+            .map_err(|_| NetworkError::NotRunning)?;
+        reply_rx.await.map_err(|_| NetworkError::NotRunning)?
+    }
+
+    /// Every peer in the Kademlia routing table plus current
+    /// connections. Sending a request-response message to a
+    /// not-currently-connected peer auto-dials it via its known addrs,
+    /// so these are all valid graph-fetch targets even when idle
+    /// connections have been reaped.
+    pub async fn known_peers(&self) -> Result<Vec<String>, NetworkError> {
+        if !self.running {
+            return Err(NetworkError::NotRunning);
+        }
+        let (reply_tx, mut reply_rx) = mpsc::channel(1);
+        self.command_tx
+            .send(SwarmCommand::KnownPeers { reply: reply_tx })
+            .await
+            .map_err(|_| NetworkError::NotRunning)?;
+        let peers = reply_rx.recv().await.ok_or(NetworkError::NotRunning)?;
+        Ok(peers.iter().map(|p| p.to_string()).collect())
+    }
+
+    /// Send a graph-fetch request to a specific peer over
+    /// `/alexandria/graph-fetch/1.0`. Resolves the protocol-level
+    /// [`GraphFetchResponse`] directly — the caller matches on
+    /// `Ok(graph) | NotOwner | Empty`.
+    pub async fn fetch_graph(
+        &self,
+        peer: PeerId,
+        request: GraphFetchRequest,
+    ) -> Result<GraphFetchResponse, NetworkError> {
+        if !self.running {
+            return Err(NetworkError::NotRunning);
+        }
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.command_tx
+            .send(SwarmCommand::SendGraphFetchRequest {
                 peer,
                 request,
                 reply: reply_tx,

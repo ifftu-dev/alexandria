@@ -56,7 +56,7 @@ alexandria/
 │       ├── domain/   # Business logic (courses, tutorials, opinions, vc, evidence, governance, ...)
 │       ├── evidence/ # Proficiency taxonomy + thresholds (reputation/attestation/challenge disabled post-VC-first cutover)
 │       ├── ipfs/     # iroh node, BLAKE3 content-addressed blobs, CID resolution
-│       ├── p2p/      # libp2p swarm — DHT, relay, gossip, peer exchange, vc-fetch
+│       ├── p2p/      # libp2p swarm — DHT, relay, gossip, peer exchange, vc-fetch, graph-fetch
 │       ├── profile/  # Multi-user profile manager + public profiles_index.json sidecar + auto-migrator
 │       ├── settings/ # Unified per-profile settings: typed registry + sync/device-scoped store
 │       └── tutoring/ # Live audio/video tutoring (desktop + mobile managers)

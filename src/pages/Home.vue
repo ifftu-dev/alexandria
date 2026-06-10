@@ -1,25 +1,81 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { useAuth } from '@/composables/useAuth'
 import { useP2P } from '@/composables/useP2P'
 import { useContentSync } from '@/composables/useContentSync'
 import { usePlatform } from '@/composables/usePlatform'
-import { StatusBadge } from '@/components/ui'
+import { useSettings } from '@/composables/useSettings'
+import { useTargets } from '@/composables/useTargets'
+import { StatusBadge, AppButton } from '@/components/ui'
 import { sanitizeSvg } from '@/utils/sanitize'
 import CourseCard from '@/components/course/CourseCard.vue'
-import type { Course, Enrollment } from '@/types'
+import type {
+  Course,
+  Enrollment,
+  FullReputationAssertion,
+  LearningPath,
+  PublicSkillGraph,
+} from '@/types'
 
 const { invoke } = useLocalApi()
+const router = useRouter()
 const { displayName } = useAuth()
 const { status: p2pStatus, start: startP2P, startPolling } = useP2P()
 const { startContentSync, completeContentSync, failContentSync } = useContentSync()
 const { isMobilePlatform } = usePlatform()
+const { targets, pathFor } = useTargets()
 
 const loading = ref(true)
 const enrollments = ref<Enrollment[]>([])
 const courses = ref<Course[]>([])
 const enrolledCourseMap = ref<Record<string, Course>>({})
+
+// ── Reputation + skill graph + targets (Option C cockpit) ──────────
+const reputation = ref<FullReputationAssertion[]>([])
+const myGraph = ref<PublicSkillGraph | null>(null)
+const targetPaths = ref<Record<string, LearningPath>>({})
+const graphExpanded = ref(false)
+
+const teachingImpact = computed(() =>
+  Math.round(reputation.value.filter((a) => a.role === 'instructor').reduce((s, a) => s + a.score, 0)),
+)
+const learningImpact = computed(() =>
+  Math.round(reputation.value.filter((a) => a.role === 'learner').reduce((s, a) => s + a.score, 0)),
+)
+const avgConfidence = computed(() => {
+  if (reputation.value.length === 0) return 0
+  return Math.round(
+    (reputation.value.reduce((s, a) => s + a.confidence, 0) / reputation.value.length) * 100,
+  )
+})
+const skillsProven = computed(() => myGraph.value?.nodes.length ?? 0)
+
+const ringDash = 2 * Math.PI * 18
+function pathPct(p: LearningPath | undefined): number {
+  if (!p || p.total === 0) return 0
+  return Math.round((p.earned_count / p.total) * 100)
+}
+function pathNext(p: LearningPath | undefined): string | null {
+  return p?.steps.find((s) => s.status === 'available')?.name ?? null
+}
+
+async function loadCockpit() {
+  await useSettings().initialize()
+  const [rep, graph] = await Promise.all([
+    invoke<FullReputationAssertion[]>('get_reputation', { query: {} }).catch(() => []),
+    invoke<PublicSkillGraph>('get_my_skill_graph').catch(() => null),
+  ])
+  reputation.value = rep
+  myGraph.value = graph
+  const entries = await Promise.all(
+    targets.value.map(async (t) => [t.id, await pathFor(t).catch(() => null)] as const),
+  )
+  const map: Record<string, LearningPath> = {}
+  for (const [id, p] of entries) if (p) map[id] = p
+  targetPaths.value = map
+}
 
 // Diagnostic log viewer (for iOS debugging)
 const showDiag = ref(false)
@@ -48,6 +104,11 @@ onMounted(() => {
     startP2P().catch(() => {})
     startPolling(15000)
   }, 2000)
+})
+
+// Load the reputation / skill-graph / targets cockpit (non-blocking).
+onMounted(() => {
+  loadCockpit().catch(() => {})
 })
 
 const firstName = computed(() => {
@@ -124,6 +185,119 @@ onMounted(async () => {
         Your decentralized learning node is {{ p2pStatus?.is_running ? 'online' : p2pStatus != null ? 'offline' : 'starting up' }}.
       </p>
     </div>
+
+    <!-- ═══ Reputation stat band ═══ -->
+    <section class="mb-6">
+      <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <button class="stat-card" @click="router.push('/dashboard/reputation')">
+          <span class="stat-label">Teaching impact</span>
+          <span class="stat-value">{{ teachingImpact }}</span>
+        </button>
+        <button class="stat-card" @click="router.push('/dashboard/reputation')">
+          <span class="stat-label">Learning impact</span>
+          <span class="stat-value">{{ learningImpact }}</span>
+        </button>
+        <button class="stat-card" @click="router.push('/skills')">
+          <span class="stat-label">Skills proven</span>
+          <span class="stat-value">{{ skillsProven }}</span>
+        </button>
+        <button class="stat-card" @click="router.push('/dashboard/reputation')">
+          <span class="stat-label">Confidence</span>
+          <span class="stat-value">{{ avgConfidence }}%</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- ═══ Targets rail ═══ -->
+    <section class="mb-8">
+      <div class="mb-3 flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <h2 class="text-base font-semibold text-foreground">Your targets</h2>
+          <span v-if="targets.length" class="text-xs text-muted-foreground">{{ targets.length }}</span>
+        </div>
+        <button class="sb-view-all text-xs text-primary hover:underline" @click="router.push('/targets')">
+          View all
+        </button>
+      </div>
+
+      <div class="-mx-4 flex gap-4 overflow-x-auto px-4 pb-2 scrollbar-thin sm:mx-0 sm:px-0">
+        <!-- target cards -->
+        <button
+          v-for="t in targets"
+          :key="t.id"
+          class="target-card group"
+          @click="router.push('/targets')"
+        >
+          <svg width="46" height="46" viewBox="0 0 46 46" class="shrink-0">
+            <circle cx="23" cy="23" r="18" fill="none" stroke="var(--app-border)" stroke-width="4" />
+            <circle
+              cx="23" cy="23" r="18" fill="none" stroke="var(--app-primary)" stroke-width="4"
+              stroke-linecap="round" :stroke-dasharray="ringDash"
+              :stroke-dashoffset="ringDash * (1 - pathPct(targetPaths[t.id]) / 100)"
+              transform="rotate(-90 23 23)" class="transition-all duration-500"
+            />
+            <text x="23" y="23" text-anchor="middle" dominant-baseline="central"
+              font-size="11" font-weight="600" fill="var(--app-foreground)">
+              {{ pathPct(targetPaths[t.id]) }}%
+            </text>
+          </svg>
+          <div class="min-w-0 text-left">
+            <p class="truncate text-sm font-medium text-foreground group-hover:text-primary">
+              {{ t.label }}
+            </p>
+            <p v-if="pathNext(targetPaths[t.id])" class="mt-0.5 truncate text-xs text-muted-foreground">
+              Next: {{ pathNext(targetPaths[t.id]) }}
+            </p>
+            <p v-else class="mt-0.5 truncate text-xs text-success">Prereqs cleared 🎉</p>
+          </div>
+        </button>
+
+        <!-- add target -->
+        <button class="target-card target-card--add" @click="router.push('/skills')">
+          <span class="text-2xl leading-none text-muted-foreground">+</span>
+          <span class="text-sm font-medium text-muted-foreground">Add a target</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- ═══ Skill graph summary (collapsible) ═══ -->
+    <section class="mb-8">
+      <div class="card overflow-hidden">
+        <button
+          class="flex w-full items-center justify-between p-4 text-left"
+          @click="graphExpanded = !graphExpanded"
+        >
+          <div class="flex items-center gap-2">
+            <span class="text-base font-semibold text-foreground">Your skill graph</span>
+            <span class="text-xs text-muted-foreground">
+              {{ skillsProven }} skill{{ skillsProven === 1 ? '' : 's' }} proven
+            </span>
+          </div>
+          <span class="text-xs text-muted-foreground">{{ graphExpanded ? 'Hide ▴' : 'Expand ▾' }}</span>
+        </button>
+        <div v-if="graphExpanded" class="border-t border-border p-4">
+          <div v-if="skillsProven === 0" class="text-sm text-muted-foreground">
+            No proven skills yet. Earn credentials by completing courses, then they'll appear here.
+          </div>
+          <div v-else class="flex flex-wrap gap-2">
+            <button
+              v-for="n in myGraph?.nodes ?? []"
+              :key="n.id"
+              class="graph-chip"
+              :class="{ 'graph-chip--teaching': n.teaching, 'graph-chip--private': !n.public }"
+              @click="router.push(`/skills/${n.id}`)"
+            >
+              {{ n.name }}
+            </button>
+          </div>
+          <div class="mt-4">
+            <AppButton variant="outline" size="sm" @click="router.push('/skills')">
+              Manage visibility & teaching
+            </AppButton>
+          </div>
+        </div>
+      </div>
+    </section>
 
     <!-- Loading skeleton -->
     <div v-if="loading">
@@ -349,6 +523,82 @@ onMounted(async () => {
   .home-greeting {
     font-size: 1.75rem;
   }
+}
+
+/* Reputation stat band */
+.stat-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.75rem 0.9rem;
+  border-radius: 0.75rem;
+  background: var(--app-card);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 5%);
+  text-align: left;
+  transition:
+    box-shadow 0.15s,
+    transform 0.15s;
+}
+.stat-card:hover {
+  box-shadow: 0 4px 12px rgb(0 0 0 / 8%);
+  transform: translateY(-1px);
+}
+.stat-label {
+  font-size: 0.7rem;
+  color: var(--app-muted-foreground);
+}
+.stat-value {
+  font-size: 1.35rem;
+  font-weight: 600;
+  color: var(--app-foreground);
+  line-height: 1.1;
+}
+
+/* Targets rail */
+.target-card {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 16rem;
+  flex-shrink: 0;
+  padding: 0.85rem;
+  border-radius: 0.85rem;
+  background: var(--app-card);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 5%);
+  transition:
+    box-shadow 0.15s,
+    transform 0.15s;
+}
+.target-card:hover {
+  box-shadow: 0 4px 12px rgb(0 0 0 / 8%);
+  transform: translateY(-1px);
+}
+.target-card--add {
+  justify-content: center;
+  border: 1px dashed var(--app-border);
+  background: transparent;
+  box-shadow: none;
+}
+
+/* Skill graph chips */
+.graph-chip {
+  font-size: 0.75rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  background: var(--app-muted);
+  color: var(--app-foreground);
+  transition: background 0.15s;
+}
+.graph-chip:hover {
+  background: color-mix(in srgb, var(--app-primary) 16%, var(--app-muted));
+}
+.graph-chip--teaching {
+  background: color-mix(in srgb, var(--app-primary) 85%, black);
+  color: white;
+}
+.graph-chip--private {
+  opacity: 0.55;
+  border: 1px dashed var(--app-border);
 }
 
 </style>
