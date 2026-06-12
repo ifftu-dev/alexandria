@@ -176,11 +176,47 @@ pub async fn check_username_availability(
         });
     }
     let (winner, dht_reachable) = resolve_claims(&state, &username).await?;
+    if dht_reachable || winner.is_some() {
+        return Ok(AvailabilityResult {
+            username,
+            available: winner.is_none(),
+            taken_by: winner.map(|c| c.did),
+            authoritative: dht_reachable,
+        });
+    }
+
+    // No P2P yet (e.g. signup runs before any profile/wallet exists) —
+    // ask a relay's HTTP registry endpoint instead. The relay's
+    // receipt store is the tier-1 first-seen record, so its answer is
+    // authoritative for practical purposes.
+    for endpoint in crate::p2p::discovery::relay_http_endpoints() {
+        let url = format!("{endpoint}/username/{username}");
+        let resp = timeout(Duration::from_secs(5), async {
+            reqwest::get(&url).await?.json::<serde_json::Value>().await
+        })
+        .await;
+        if let Ok(Ok(body)) = resp {
+            let available = body
+                .get("available")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true);
+            return Ok(AvailabilityResult {
+                username,
+                available,
+                taken_by: body
+                    .get("did")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+                authoritative: true,
+            });
+        }
+    }
+
     Ok(AvailabilityResult {
         username,
-        available: winner.is_none(),
-        taken_by: winner.map(|c| c.did),
-        authoritative: dht_reachable,
+        available: true,
+        taken_by: None,
+        authoritative: false,
     })
 }
 

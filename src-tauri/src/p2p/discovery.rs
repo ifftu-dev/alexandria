@@ -44,6 +44,16 @@ const RELAYS: &[RelayInfo] = &[
     },
 ];
 
+/// Relay HTTP endpoints (metrics/registry server, port 9090). Used by
+/// the signup-time username availability check, which runs before the
+/// profile (and thus the P2P identity) exists.
+pub fn relay_http_endpoints() -> Vec<String> {
+    RELAYS
+        .iter()
+        .map(|r| format!("http://{}:9090", r.host))
+        .collect()
+}
+
 /// Return the set of all configured relay PeerIds.
 ///
 /// Used by the event loop to identify relay peers after Identify handshake
