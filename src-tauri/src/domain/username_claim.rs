@@ -24,6 +24,27 @@ use crate::crypto::did::{parse_did_key, resolve_did_key, Did};
 
 pub const CLAIM_VERSION: u32 = 1;
 
+/// How long a released username stays reserved for its old owner
+/// before anyone may claim it (anti-squat + accidental-release undo).
+pub const RELEASE_GRACE_SECS: i64 = 30 * 24 * 3600;
+
+/// Owner-signed release of a username — the tombstone. After
+/// [`RELEASE_GRACE_SECS`] the claim stops counting in conflict
+/// ordering and relays free the name for new claimants. Within the
+/// grace window the owner can undo by republishing without the
+/// release.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Release {
+    pub released_at: i64,
+    /// Ed25519 (hex) by the claim's DID key over
+    /// [`canonical_release_bytes`].
+    pub sig: String,
+}
+
+pub fn canonical_release_bytes(username: &str, did: &str, released_at: i64) -> Vec<u8> {
+    format!("alexandria-username-release-v1|{username}|{did}|{released_at}").into_bytes()
+}
+
 /// Relay countersignature (Phase 2). The relay attests it first saw
 /// this claim at `received_at`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -64,6 +85,9 @@ pub struct UsernameClaim {
     pub receipts: Vec<RelayReceipt>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub anchor: Option<CardanoAnchor>,
+    /// Owner-signed tombstone — see [`Release`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub release: Option<Release>,
 }
 
 /// The DHT record key for a username.
@@ -93,6 +117,56 @@ impl UsernameClaim {
             receipt: None,
             receipts: Vec::new(),
             anchor: None,
+            release: None,
+        }
+    }
+
+    /// Sign + attach a release tombstone.
+    pub fn release(&mut self, released_at: i64, key: &SigningKey) {
+        let sig = key.sign(&canonical_release_bytes(
+            &self.username,
+            &self.did,
+            released_at,
+        ));
+        self.release = Some(Release {
+            released_at,
+            sig: hex::encode(sig.to_bytes()),
+        });
+    }
+
+    /// Verify the release signature (when present) against the
+    /// claim's own DID key. Invalid releases are treated as absent —
+    /// nobody but the owner can tombstone a name.
+    pub fn release_valid(&self) -> bool {
+        let Some(ref rel) = self.release else {
+            return false;
+        };
+        let Ok(did) = parse_did_key(&self.did) else {
+            return false;
+        };
+        let Ok(vk) = resolve_did_key(&did) else {
+            return false;
+        };
+        let Ok(bytes) = hex::decode(&rel.sig) else {
+            return false;
+        };
+        let Ok(sig_bytes) = <[u8; 64]>::try_from(bytes) else {
+            return false;
+        };
+        let sig = ed25519_dalek::Signature::from_bytes(&sig_bytes);
+        vk.verify_strict(
+            &canonical_release_bytes(&self.username, &self.did, rel.released_at),
+            &sig,
+        )
+        .is_ok()
+    }
+
+    /// `true` once a valid release has aged past the grace window —
+    /// the claim no longer counts and the name is free.
+    pub fn is_expired(&self, now: i64) -> bool {
+        match self.release {
+            Some(ref rel) if self.release_valid() => now >= rel.released_at + RELEASE_GRACE_SECS,
+            _ => false,
         }
     }
 
@@ -199,11 +273,13 @@ impl UsernameClaim {
     }
 }
 
-/// Pick the winning claim among verified candidates.
-pub fn best_claim(claims: Vec<UsernameClaim>) -> Option<UsernameClaim> {
+/// Pick the winning claim among verified candidates. `now` gates
+/// release tombstones: claims whose release has aged past
+/// [`RELEASE_GRACE_SECS`] are skipped entirely.
+pub fn best_claim_at(claims: Vec<UsernameClaim>, now: i64) -> Option<UsernameClaim> {
     let mut best: Option<UsernameClaim> = None;
     for c in claims {
-        if c.verify().is_err() {
+        if c.verify().is_err() || c.is_expired(now) {
             continue;
         }
         best = match best {
@@ -218,6 +294,15 @@ pub fn best_claim(claims: Vec<UsernameClaim>) -> Option<UsernameClaim> {
         };
     }
     best
+}
+
+/// [`best_claim_at`] with the current wall-clock time.
+pub fn best_claim(claims: Vec<UsernameClaim>) -> Option<UsernameClaim> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    best_claim_at(claims, now)
 }
 
 #[cfg(test)]
@@ -340,6 +425,38 @@ mod tests {
         assert_eq!(n.receipts.len(), 1);
         assert!(n.receipt.is_some()); // legacy mirror kept
         assert_eq!(n.tier(), 1);
+    }
+
+    #[test]
+    fn release_tombstone_lifecycle() {
+        let (k1, d1) = keypair(1);
+        let (k2, d2) = keypair(2);
+        let mut released = UsernameClaim::create("x_name", &d1, 100, &k1);
+        released.release(1000, &k1);
+        assert!(released.release_valid());
+        // Within grace: still wins against a later claimant.
+        let newcomer = UsernameClaim::create("x_name", &d2, 2000, &k2);
+        let in_grace = 1000 + RELEASE_GRACE_SECS - 1;
+        assert_eq!(
+            best_claim_at(vec![released.clone(), newcomer.clone()], in_grace),
+            Some(released.clone())
+        );
+        // After grace: the released claim stops counting.
+        let after = 1000 + RELEASE_GRACE_SECS;
+        assert!(released.is_expired(after));
+        assert_eq!(
+            best_claim_at(vec![released.clone(), newcomer.clone()], after),
+            Some(newcomer)
+        );
+        // Forged release (wrong key) is ignored entirely.
+        let mut forged = UsernameClaim::create("x_name", &d1, 100, &k1);
+        let bogus = UsernameClaim::create("x_name", &d1, 100, &k2); // sig by k2
+        forged.release = Some(Release {
+            released_at: 1000,
+            sig: bogus.sig.clone(),
+        });
+        assert!(!forged.release_valid());
+        assert!(!forged.is_expired(after));
     }
 
     #[test]

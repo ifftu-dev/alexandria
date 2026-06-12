@@ -283,9 +283,13 @@ pub async fn claim_username(state: State<'_, AppState>) -> Result<UsernameClaim,
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
     // Re-publishing keeps the ORIGINAL claim time — refreshing a
-    // record must not reset your priority.
+    // record must not reset your priority. Re-claiming your own
+    // released name within the grace window undoes the release.
     let claim = match existing {
-        Some(e) if e.did == did.as_str() => e,
+        Some(mut e) if e.did == did.as_str() => {
+            e.release = None;
+            e
+        }
         _ => UsernameClaim::create(&username, &did, claimed_at, &signing_key),
     };
 
@@ -463,6 +467,26 @@ pub async fn set_username(
         }
     }
 
+    // Tombstone the old handle: a signed release frees it (at relays
+    // and in ordering) after the grace window, instead of leaving it
+    // squatted-by-absence forever.
+    let old_released: Option<UsernameClaim> = {
+        let guard = state.db.lock().map_err(|_| "database lock poisoned")?;
+        let db = guard.as_ref().ok_or("database not initialized")?;
+        let old_username: Option<String> = db
+            .conn()
+            .query_row(
+                "SELECT username FROM local_identity WHERE id = 1",
+                [],
+                |r| r.get(0),
+            )
+            .ok()
+            .flatten();
+        old_username
+            .filter(|old| *old != username)
+            .and_then(|old| cached_claim(db.conn(), &old))
+    };
+
     {
         let guard = state.db.lock().map_err(|_| "database lock poisoned")?;
         let db = guard.as_ref().ok_or("database not initialized")?;
@@ -493,15 +517,23 @@ pub async fn set_username(
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
     let claim = UsernameClaim::create(&username, &did, claimed_at, &signing_key);
+    let released_old = old_released.filter(|c| c.did == did.as_str()).map(|mut c| {
+        c.release(claimed_at, &signing_key);
+        c
+    });
     {
         let guard = state.db.lock().map_err(|_| "database lock poisoned")?;
         let db = guard.as_ref().ok_or("database not initialized")?;
         cache_claim(db.conn(), &claim)?;
+        if let Some(ref old) = released_old {
+            cache_claim(db.conn(), old)?;
+        }
     }
 
     let db = state.db.clone();
     let node_handle = state.p2p_node.clone();
     let bg_claim = claim.clone();
+    let bg_released = released_old;
     tauri::async_runtime::spawn(async move {
         let node_guard = node_handle.lock().await;
         let Some(node) = node_guard.as_ref() else {
@@ -534,6 +566,22 @@ pub async fn set_username(
                 node.put_dht_record(dht_key(&enriched.username), payload),
             )
             .await;
+        }
+        // Publish the old handle's tombstone: DHT record + a receipt
+        // round to each relay so their first-seen stores learn the
+        // release and free the name after grace.
+        if let Some(old) = bg_released {
+            if let Ok(payload) = serde_json::to_vec(&old) {
+                let _ = timeout(
+                    DHT_OP_TIMEOUT,
+                    node.put_dht_record(dht_key(&old.username), payload),
+                )
+                .await;
+            }
+            for relay in crate::p2p::discovery::relay_peer_ids() {
+                let req = crate::p2p::username_reg::ReceiptRequest { claim: old.clone() };
+                let _ = timeout(DHT_OP_TIMEOUT, node.request_username_receipt(relay, req)).await;
+            }
         }
     });
 
