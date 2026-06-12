@@ -1,6 +1,8 @@
 use std::collections::HashSet;
+use std::sync::RwLock;
 
 use libp2p::{Multiaddr, PeerId};
+use serde::{Deserialize, Serialize};
 
 /// Alexandria relay bootstrap nodes.
 ///
@@ -23,6 +25,35 @@ struct RelayInfo {
     host: &'static str,
     ipv4: &'static str,
     port: u16,
+}
+
+/// User-configured additional relays (federation step 1): anyone can
+/// run `alexandria-relay` and point their node at it via the
+/// `p2p.extra_relays` setting. Loaded at `p2p_start`; merged into every
+/// discovery surface below alongside the built-in [`RELAYS`].
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ExtraRelay {
+    pub peer_id: String,
+    pub host: String,
+    pub port: u16,
+}
+
+static EXTRA_RELAYS: RwLock<Vec<ExtraRelay>> = RwLock::new(Vec::new());
+
+/// Replace the extra-relay set (called from `p2p_start` with the
+/// parsed `p2p.extra_relays` setting). Invalid entries are dropped.
+pub fn set_extra_relays(relays: Vec<ExtraRelay>) {
+    let valid: Vec<ExtraRelay> = relays
+        .into_iter()
+        .filter(|r| r.peer_id.parse::<PeerId>().is_ok() && !r.host.is_empty() && r.port > 0)
+        .collect();
+    if let Ok(mut guard) = EXTRA_RELAYS.write() {
+        *guard = valid;
+    }
+}
+
+fn extra_relays() -> Vec<ExtraRelay> {
+    EXTRA_RELAYS.read().map(|g| g.clone()).unwrap_or_default()
 }
 
 /// All known relay nodes. The client bootstraps to all of them and
@@ -51,6 +82,11 @@ pub fn relay_http_endpoints() -> Vec<String> {
     RELAYS
         .iter()
         .map(|r| format!("http://{}:9090", r.host))
+        .chain(
+            extra_relays()
+                .iter()
+                .map(|r| format!("http://{}:9090", r.host)),
+        )
         .collect()
 }
 
@@ -63,6 +99,7 @@ pub fn relay_peer_ids() -> HashSet<PeerId> {
         .iter()
         .filter(|r| !r.peer_id.starts_with("PLACEHOLDER"))
         .filter_map(|r| r.peer_id.parse().ok())
+        .chain(extra_relays().iter().filter_map(|r| r.peer_id.parse().ok()))
         .collect()
 }
 
@@ -86,20 +123,39 @@ pub fn relay_circuit_addrs() -> Vec<Multiaddr> {
             .parse()
             .ok()
         })
+        .chain(extra_relays().iter().filter_map(|r| {
+            format!(
+                "/dns4/{}/tcp/{}/p2p/{}/p2p-circuit",
+                r.host, r.port, r.peer_id
+            )
+            .parse()
+            .ok()
+        }))
         .collect()
 }
 
 /// Build the circuit address for a specific relay peer.
 pub fn relay_circuit_addr_for(peer_id: &PeerId) -> Option<Multiaddr> {
     let pid_str = peer_id.to_string();
-    RELAYS.iter().find(|r| r.peer_id == pid_str).and_then(|r| {
-        format!(
+    if let Some(r) = RELAYS.iter().find(|r| r.peer_id == pid_str) {
+        return format!(
             "/ip4/{}/tcp/{}/p2p/{}/p2p-circuit",
             r.ipv4, r.port, r.peer_id
         )
         .parse()
-        .ok()
-    })
+        .ok();
+    }
+    extra_relays()
+        .iter()
+        .find(|r| r.peer_id == pid_str)
+        .and_then(|r| {
+            format!(
+                "/dns4/{}/tcp/{}/p2p/{}/p2p-circuit",
+                r.host, r.port, r.peer_id
+            )
+            .parse()
+            .ok()
+        })
 }
 
 /// Build relay-circuit dial addresses for a discovered destination peer.
@@ -129,6 +185,14 @@ pub fn relay_circuit_dial_addrs(peer_id: &PeerId) -> Vec<Multiaddr> {
             .parse::<Multiaddr>()
             .ok()
         })
+        .chain(extra_relays().into_iter().filter_map(|relay| {
+            format!(
+                "/dns4/{}/tcp/{}/p2p/{}/p2p-circuit/p2p/{}",
+                relay.host, relay.port, relay.peer_id, peer_id
+            )
+            .parse::<Multiaddr>()
+            .ok()
+        }))
         .collect()
 }
 
@@ -178,6 +242,23 @@ pub fn bootstrap_peers() -> Vec<Multiaddr> {
         .parse::<Multiaddr>()
         {
             addrs.push(addr);
+        }
+    }
+
+    for relay in extra_relays() {
+        for proto in [
+            format!(
+                "/dns4/{}/tcp/{}/p2p/{}",
+                relay.host, relay.port, relay.peer_id
+            ),
+            format!(
+                "/dns4/{}/udp/{}/quic-v1/p2p/{}",
+                relay.host, relay.port, relay.peer_id
+            ),
+        ] {
+            if let Ok(addr) = proto.parse::<Multiaddr>() {
+                addrs.push(addr);
+            }
         }
     }
 

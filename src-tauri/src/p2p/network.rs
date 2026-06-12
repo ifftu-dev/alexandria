@@ -472,6 +472,7 @@ pub async fn start_node_with_db(
     event_tx: mpsc::Sender<P2pEvent>,
     known_peers: Vec<KnownPeer>,
     db: Option<Arc<StdMutex<Option<Database>>>>,
+    dht_server: bool,
 ) -> Result<P2pNode, NetworkError> {
     let peer_id = keypair.public().to_peer_id();
     diag::log(&format!("start_node: PeerId: {peer_id}"));
@@ -764,7 +765,9 @@ pub async fn start_node_with_db(
     // Spawn the swarm event loop. The db handle (None for tests /
     // dev tooling, populated by every production call site) lets
     // the loop answer inbound vc-fetch requests synchronously.
-    tokio::spawn(swarm_event_loop(swarm, command_rx, event_tx, validator, db));
+    tokio::spawn(swarm_event_loop(
+        swarm, command_rx, event_tx, validator, db, dht_server,
+    ));
 
     diag::log("start_node: event loop spawned, node running");
 
@@ -849,6 +852,22 @@ fn build_behaviour(
     kademlia_config.set_provider_record_ttl(Some(Duration::from_secs(24 * 3600)));
     // Republish provider records every 12h to refresh TTL on other nodes.
     kademlia_config.set_provider_publication_interval(Some(Duration::from_secs(12 * 3600)));
+    // Surface inbound PutRecord requests so DHT-server nodes can store
+    // and mirror them explicitly (no-op for client-mode nodes — they
+    // never receive puts).
+    kademlia_config.set_record_filtering(kad::StoreInserts::FilterBoth);
+    // Mobile is ALWAYS a pure DHT client: backgrounded apps churn the
+    // routing table (peers route into dead entries) and serving over
+    // CGNAT rides relay circuits anyway. Desktop stays in auto mode
+    // unless the owner opts into serving (handled in the event loop).
+    #[cfg(any(target_os = "ios", target_os = "android"))]
+    let kademlia = {
+        let mut k =
+            kad::Behaviour::with_config(peer_id, MemoryStore::new(peer_id), kademlia_config);
+        k.set_mode(Some(kad::Mode::Client));
+        k
+    };
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
     let kademlia = kad::Behaviour::with_config(peer_id, MemoryStore::new(peer_id), kademlia_config);
 
     diag::log("build_behaviour: creating identify...");
@@ -1010,10 +1029,56 @@ async fn swarm_event_loop(
     event_tx: mpsc::Sender<P2pEvent>,
     validator: Arc<MessageValidator>,
     db: Option<Arc<std::sync::Mutex<Option<Database>>>>,
+    dht_server: bool,
 ) {
     use libp2p::swarm::SwarmEvent;
 
     use super::types::{PeerExchangeMessage, TOPIC_PEER_EXCHANGE};
+
+    // Desktop DHT server (opt-in): announce server mode and warm-load
+    // the persistent record mirror so this node's slice of the DHT
+    // survives restarts.
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    if dht_server {
+        swarm
+            .behaviour_mut()
+            .kademlia
+            .set_mode(Some(kad::Mode::Server));
+        if let Some(db_arc) = db.as_ref() {
+            if let Ok(guard) = db_arc.lock() {
+                if let Some(database) = guard.as_ref() {
+                    let records: Vec<(Vec<u8>, Vec<u8>)> = database
+                        .conn()
+                        .prepare("SELECT key, value FROM dht_records")
+                        .ok()
+                        .map(|mut stmt| {
+                            stmt.query_map([], |r| {
+                                Ok((r.get::<_, Vec<u8>>(0)?, r.get::<_, Vec<u8>>(1)?))
+                            })
+                            .map(|rows| rows.filter_map(|r| r.ok()).collect())
+                            .unwrap_or_default()
+                        })
+                        .unwrap_or_default();
+                    let n = records.len();
+                    for (key, value) in records {
+                        let record = kad::Record {
+                            key: kad::RecordKey::new(&key),
+                            value,
+                            publisher: None,
+                            expires: None,
+                        };
+                        use libp2p::kad::store::RecordStore;
+                        let _ = swarm.behaviour_mut().kademlia.store_mut().put(record);
+                    }
+                    if n > 0 {
+                        diag::log(&format!("DHT server: warm-loaded {n} records"));
+                    }
+                }
+            }
+        }
+    }
+    #[cfg(any(target_os = "ios", target_os = "android"))]
+    let _ = dht_server; // mobile never serves
 
     // Per-peer gossip rate limiter (token bucket: 20 msgs, 1 refill/3s)
     let mut rate_limiter = PeerRateLimiter::new();
@@ -1567,6 +1632,39 @@ async fn swarm_event_loop(
                     // Kademlia events — DHT routing + provider discovery
                     SwarmEvent::Behaviour(AlexandriaBehaviourEvent::Kademlia(event)) => {
                         match event {
+                            kad::Event::InboundRequest {
+                                request:
+                                    kad::InboundRequest::PutRecord {
+                                        record: Some(record),
+                                        ..
+                                    },
+                            } => {
+                                if dht_server {
+                                    if let Some(db_arc) = db.as_ref() {
+                                        if let Ok(guard) = db_arc.lock() {
+                                            if let Some(database) = guard.as_ref() {
+                                                let _ = database.conn().execute(
+                                                    "INSERT INTO dht_records (key, value, updated_at)
+                                                     VALUES (?1, ?2, datetime('now'))
+                                                     ON CONFLICT(key) DO UPDATE SET
+                                                         value = excluded.value,
+                                                         updated_at = excluded.updated_at",
+                                                    rusqlite::params![
+                                                        record.key.as_ref(),
+                                                        record.value
+                                                    ],
+                                                );
+                                            }
+                                        }
+                                    }
+                                    use libp2p::kad::store::RecordStore;
+                                    let _ = swarm
+                                        .behaviour_mut()
+                                        .kademlia
+                                        .store_mut()
+                                        .put(record.clone());
+                                }
+                            }
                             kad::Event::RoutingUpdated { peer, addresses, .. } => {
                                 diag::log(&format!(
                                     "Kademlia: routing updated for {peer} ({} addrs)",
@@ -2446,7 +2544,7 @@ mod tests {
         let keypair = derive_libp2p_keypair(&[0x42u8; 32], &TEST_DEVICE_ID).unwrap();
         let (event_tx, _event_rx) = mpsc::channel(16);
 
-        let mut node = start_node_with_db(keypair, event_tx, vec![], None)
+        let mut node = start_node_with_db(keypair, event_tx, vec![], None, false)
             .await
             .expect("node should start");
 

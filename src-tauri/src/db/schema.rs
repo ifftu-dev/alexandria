@@ -64,6 +64,7 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (54, "usernames_profile_visibility", MIGRATION_054),
     (55, "username_claim_cache", MIGRATION_055),
     (56, "username_anchor_verified", MIGRATION_056),
+    (57, "dht_record_mirror", MIGRATION_057),
 ];
 
 const MIGRATION_001: &str = r#"
@@ -2274,4 +2275,20 @@ const MIGRATION_056: &str = r#"
 -- Set when this node has confirmed the claim digest appears in the
 -- anchoring Cardano tx (or when this node submitted the batch itself).
 ALTER TABLE username_claims ADD COLUMN anchor_verified INTEGER NOT NULL DEFAULT 0;
+"#;
+
+const MIGRATION_057: &str = r#"
+-- ============================================================
+-- Migration 057: local DHT record mirror (desktop DHT servers)
+-- ============================================================
+
+-- When p2p.dht_server is enabled (desktop only), inbound Kademlia
+-- records are stored here and warm-loaded into the in-memory kad
+-- store at startup, so this node's slice of the DHT survives
+-- restarts — spreading durable registry storage beyond the relays.
+CREATE TABLE IF NOT EXISTS dht_records (
+    key        BLOB PRIMARY KEY,
+    value      BLOB NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 "#;

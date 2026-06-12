@@ -386,6 +386,31 @@ pub mod keys {
         default: || JsonSetting(serde_json::json!([])),
     };
 
+    /// Additional relay nodes (federation): `[{ peer_id, host, port }]`.
+    /// Merged into bootstrap, circuit, receipt, and availability
+    /// surfaces at p2p start. Device-scoped — relay trust is a
+    /// per-device decision.
+    pub const P2P_EXTRA_RELAYS: SettingKey<JsonSetting> = SettingKey {
+        key: "p2p.extra_relays",
+        scope: Scope::Device,
+        category: "Network",
+        label: "Additional relay nodes",
+        description: "Extra alexandria-relay servers to bootstrap through, as JSON: [{\"peer_id\", \"host\", \"port\"}].",
+        default: || JsonSetting(serde_json::json!([])),
+    };
+
+    /// Desktop-only: serve the Kademlia DHT (server mode + persistent
+    /// record mirror). Mobile is always a pure client — backgrounded
+    /// apps churn the routing table and degrade everyone's lookups.
+    pub const P2P_DHT_SERVER: SettingKey<bool> = SettingKey {
+        key: "p2p.dht_server",
+        scope: Scope::Device,
+        category: "Network",
+        label: "Serve the DHT (desktop only)",
+        description: "Run Kademlia in server mode and persist records locally, strengthening the network's storage layer.",
+        default: || false,
+    };
+
     /// Device-local cache of the active profile's `did:key`. Written by
     /// `get_local_did` so the swarm event loop (which has no keystore
     /// access) can answer graph-fetch requests for its own owner.
@@ -449,6 +474,8 @@ pub fn all_entries(
         entry!(DEVICE_LABEL),
         entry!(STORAGE_QUOTA_BYTES),
         entry!(WINDOW_GEOMETRY),
+        entry!(P2P_EXTRA_RELAYS),
+        entry!(P2P_DHT_SERVER),
         entry!(INSTRUCTOR_GRAPH_PREFS),
         entry!(LEARNER_TARGETS),
         entry!(IDENTITY_LOCAL_DID),
@@ -487,6 +514,8 @@ pub fn lookup_meta(key: &str) -> Option<(Scope, &'static str)> {
     check!(DEVICE_LABEL);
     check!(STORAGE_QUOTA_BYTES);
     check!(WINDOW_GEOMETRY);
+    check!(P2P_EXTRA_RELAYS);
+    check!(P2P_DHT_SERVER);
     check!(INSTRUCTOR_GRAPH_PREFS);
     check!(LEARNER_TARGETS);
     check!(IDENTITY_LOCAL_DID);

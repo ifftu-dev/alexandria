@@ -230,11 +230,35 @@ pub async fn p2p_start(app: AppHandle, state: State<'_, AppState>) -> Result<Str
         // validator and fetch responder both lock-then-check on each
         // use, so it is safe to hand them the same handle even if a
         // future revision lets the DB go away.
+        // Federation + DHT-server settings, read before the swarm spins
+        // up so discovery surfaces and kad mode reflect them.
+        let dht_server = {
+            let mut extras: Vec<crate::p2p::discovery::ExtraRelay> = Vec::new();
+            let mut serve = false;
+            if let Ok(guard) = db_for_events.lock() {
+                if let Some(database) = guard.as_ref() {
+                    let raw = crate::settings::SettingsStore::get(
+                        database.conn(),
+                        crate::settings::registry::keys::P2P_EXTRA_RELAYS,
+                    )
+                    .0;
+                    extras = serde_json::from_value(raw).unwrap_or_default();
+                    serve = crate::settings::SettingsStore::get(
+                        database.conn(),
+                        crate::settings::registry::keys::P2P_DHT_SERVER,
+                    );
+                }
+            }
+            crate::p2p::discovery::set_extra_relays(extras);
+            serve
+        };
+
         match network::start_node_with_db(
             keypair,
             event_tx,
             known_peers,
             Some(db_for_events.clone()),
+            dht_server,
         )
         .await
         {
