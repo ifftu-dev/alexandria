@@ -1009,6 +1009,8 @@ pub fn run() {
             commands::username_registry::claim_username,
             commands::username_registry::check_username_availability,
             commands::username_registry::resolve_username,
+            commands::username_registry::check_my_username_conflict,
+            commands::username_registry::set_username,
             commands::identity::get_profile,
             commands::identity::update_profile,
             commands::identity::publish_profile,

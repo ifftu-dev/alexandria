@@ -307,3 +307,94 @@ pub async fn claim_username(state: State<'_, AppState>) -> Result<UsernameClaim,
 
     Ok(claim)
 }
+
+/// Conflict status for the active profile's username: someone else's
+/// claim deterministically beats ours.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UsernameConflict {
+    pub username: String,
+    pub winner_did: String,
+}
+
+/// Check whether the active profile still holds its username. Returns
+/// a conflict when the registry's winning claim belongs to another DID
+/// — the UI prompts the deterministic loser to pick a new handle.
+#[tauri::command]
+pub async fn check_my_username_conflict(
+    state: State<'_, AppState>,
+) -> Result<Option<UsernameConflict>, String> {
+    let (username, my_did) = {
+        let guard = state.db.lock().map_err(|_| "database lock poisoned")?;
+        let db = guard.as_ref().ok_or("database not initialized")?;
+        let username: Option<String> = db
+            .conn()
+            .query_row(
+                "SELECT username FROM local_identity WHERE id = 1",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        let my_did = crate::settings::SettingsStore::get(
+            db.conn(),
+            crate::settings::registry::keys::IDENTITY_LOCAL_DID,
+        );
+        (username, my_did)
+    };
+    let Some(username) = username else {
+        return Ok(None);
+    };
+    if my_did.is_empty() {
+        return Ok(None);
+    }
+    let (winner, _) = resolve_claims(&state, &username).await?;
+    Ok(match winner {
+        Some(c) if c.did != my_did => Some(UsernameConflict {
+            username,
+            winner_did: c.did,
+        }),
+        _ => None,
+    })
+}
+
+/// Change the active profile's username (conflict recovery, or by
+/// choice). Validates, checks availability, updates the identity row,
+/// and publishes a fresh claim. The old claim is simply no longer
+/// refreshed — it ages out of the DHT at record expiry.
+#[tauri::command]
+pub async fn set_username(
+    state: State<'_, AppState>,
+    username: String,
+) -> Result<UsernameClaim, String> {
+    let username = crate::domain::identity::validate_username(&username)?;
+    if is_reserved(&username) {
+        return Err("this username is reserved".to_string());
+    }
+
+    let my_did = {
+        let guard = state.db.lock().map_err(|_| "database lock poisoned")?;
+        let db = guard.as_ref().ok_or("database not initialized")?;
+        crate::settings::SettingsStore::get(
+            db.conn(),
+            crate::settings::registry::keys::IDENTITY_LOCAL_DID,
+        )
+    };
+    let (winner, _) = resolve_claims(&state, &username).await?;
+    if let Some(w) = winner {
+        if w.did != my_did {
+            return Err(format!("@{username} is already taken"));
+        }
+    }
+
+    {
+        let guard = state.db.lock().map_err(|_| "database lock poisoned")?;
+        let db = guard.as_ref().ok_or("database not initialized")?;
+        db.conn()
+            .execute(
+                "UPDATE local_identity SET username = ?1, updated_at = datetime('now') WHERE id = 1",
+                [&username],
+            )
+            .map_err(|e| e.to_string())?;
+    }
+
+    claim_username(state).await
+}

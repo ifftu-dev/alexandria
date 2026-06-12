@@ -34,6 +34,7 @@ const enrolledCourseMap = ref<Record<string, Course>>({})
 
 // ── Reputation + skill graph + targets (Option C cockpit) ──────────
 const reputation = ref<FullReputationAssertion[]>([])
+const usernameConflict = ref<{ username: string; winner_did: string } | null>(null)
 const myGraph = ref<PublicSkillGraph | null>(null)
 const targetPaths = ref<Record<string, LearningPath>>({})
 const graphExpanded = ref(false)
@@ -69,6 +70,9 @@ async function loadCockpit() {
   ])
   reputation.value = rep
   myGraph.value = graph
+  usernameConflict.value = await invoke<{ username: string; winner_did: string } | null>(
+    'check_my_username_conflict',
+  ).catch(() => null)
   const entries = await Promise.all(
     targets.value.map(async (t) => [t.id, await pathFor(t).catch(() => null)] as const),
   )
@@ -184,6 +188,20 @@ onMounted(async () => {
       <p class="mt-1 text-sm text-muted-foreground">
         Your decentralized learning node is {{ p2pStatus?.is_running ? 'online' : p2pStatus != null ? 'offline' : 'starting up' }}.
       </p>
+    </div>
+
+    <!-- Username conflict banner (deterministic registry loser) -->
+    <div
+      v-if="usernameConflict"
+      class="mb-6 rounded-xl border border-warning/40 bg-warning/10 px-4 py-3 text-sm"
+    >
+      <span class="font-semibold text-foreground">@{{ usernameConflict.username }} is held by another user.</span>
+      <span class="text-muted-foreground">
+        Their claim predates yours in the username registry, so lookups resolve to them.
+      </span>
+      <button class="ml-1 font-medium text-primary hover:underline" @click="router.push('/settings/account')">
+        Pick a new username →
+      </button>
     </div>
 
     <!-- ═══ Reputation stat band ═══ -->

@@ -100,6 +100,26 @@ function setSection(id: SettingsSectionId) {
 const displayName = ref('')
 const bio = ref('')
 const profileVisibility = ref<'public' | 'private'>('public')
+
+// Username rename (conflict recovery or by choice).
+const editingUsername = ref(false)
+const newUsername = ref('')
+const usernameMessage = ref('')
+const usernameSaving = ref(false)
+async function saveUsername() {
+  usernameSaving.value = true
+  usernameMessage.value = ''
+  try {
+    await invoke('set_username', { username: newUsername.value.trim() })
+    await refreshProfile()
+    editingUsername.value = false
+    usernameMessage.value = 'Username updated.'
+  } catch (e) {
+    usernameMessage.value = `${e}`
+  } finally {
+    usernameSaving.value = false
+  }
+}
 const saving = ref(false)
 const message = ref('')
 
@@ -496,12 +516,24 @@ function onSectionClick(id: SettingsSectionId) {
                     <div class="space-y-4">
                       <div>
                         <label class="label text-xs text-muted-foreground">Username</label>
-                        <div class="flex items-center gap-2">
+                        <div v-if="!editingUsername" class="flex items-center gap-2">
                           <span class="rounded-md border border-border bg-muted/40 px-3 py-2 text-sm text-foreground">
                             @{{ identity?.username ?? '—' }}
                           </span>
-                          <span class="text-xs text-muted-foreground">Set at signup · how others find you</span>
+                          <AppButton variant="ghost" size="xs" @click="editingUsername = true; newUsername = identity?.username ?? ''">
+                            Change
+                          </AppButton>
+                          <span class="text-xs text-muted-foreground">How others find you</span>
                         </div>
+                        <div v-else class="flex items-center gap-2">
+                          <AppInput v-model="newUsername" placeholder="new_handle" />
+                          <AppButton size="sm" :loading="usernameSaving" @click="saveUsername">Save</AppButton>
+                          <AppButton variant="ghost" size="sm" @click="editingUsername = false">Cancel</AppButton>
+                        </div>
+                        <p v-if="usernameMessage" class="mt-1 text-xs text-muted-foreground">{{ usernameMessage }}</p>
+                        <p v-if="editingUsername" class="mt-1 text-xs text-warning">
+                          Changing your handle releases the old one once its registry record expires — links using it will stop resolving.
+                        </p>
                       </div>
                       <AppInput
                         v-model="displayName"
