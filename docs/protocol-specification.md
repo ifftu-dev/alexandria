@@ -417,7 +417,7 @@ Seven libp2p protocols compose `AlexandriaBehaviour`:
 | `/alexandria/plugin-attestations/1.0` | Plugin DAO threshold-signed grader attestations |
 | `/alexandria/sentinel-priors/1.0` | Ratified Sentinel adversarial-prior metadata |
 
-All 13 topics MUST be subscribed on node startup. In addition, three
+All 13 topics MUST be subscribed on node startup. In addition, five
 request-response protocols (libp2p `request-response` + CBOR codec)
 run alongside the gossip mesh and are 1-to-1, not gossip topics:
 `/alexandria/vc-fetch/1.0` handles authority-respecting credential
@@ -433,6 +433,20 @@ owner has marked public, flagging the subset they teach. There is no
 DID→PeerId registry, so a fetch is broadcast across the requester's
 connected peers and the first `Ok` wins; a same-DID call is served
 locally (loopback). Handler + payloads: `p2p::graph_fetch`.
+
+`/alexandria/profile-fetch/1.0` serves a node owner's **public
+profile** (username, display name, bio, avatar) addressable by DID or
+by username. Private profiles answer `Private` by DID and `NotOwner`
+by username so the username→DID binding never leaks. Handler:
+`p2p::profile_fetch`.
+
+`/alexandria/username-reg/1.0` is client→relay only: a node submits
+its signed username claim and the relay counters­igns a first-seen
+receipt (see [`docs/username-registry.md`](./username-registry.md)).
+Username uniqueness itself rides on Kademlia **records** (not a
+request-response protocol) under
+`SHA256("alexandria:username:v1:" + name)`, with batched Cardano
+anchoring under metadata label 1698.
 
 See §14 for the normative VC payload schemas carried by the
 `vc-did`, `vc-status`, `vc-presentation`, and `pinboard` topics, and

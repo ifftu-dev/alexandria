@@ -18,7 +18,7 @@ Rust backend for the Tauri v2 desktop/mobile app. Core responsibilities include 
 | Settings | `settings/` | Typed registry (`registry::keys`) + R/W store. Drives the unified per-profile `app_settings` table; `scope='sync'` rows propagate via cross-device sync (`p2p::sync::settings_outbound_snapshot` / `settings_apply_inbound`). See [`docs/settings.md`](../../docs/settings.md). |
 | Tauri commands | `commands/` | Domain-oriented IPC handlers plus platform-specific tutoring variants. `commands/profile.rs` owns multi-user lifecycle; `commands/identity.rs` is active-profile-only; `commands/settings.rs` owns the per-profile settings store IPC. |
 | Domain models | `domain/` | Core app types plus the `vc/` protocol submodule |
-| P2P networking | `p2p/` | Swarm, gossip, validation, scoring, discovery, vc-fetch, graph-fetch (public skill graphs), sync, stress. `sync.rs` also fans settings rows out/in. |
+| P2P networking | `p2p/` | Swarm, gossip, validation, scoring, discovery, vc-fetch, graph-fetch (public skill graphs), profile-fetch, username-reg (registry receipts), sync, stress. `sync.rs` also fans settings rows out/in. |
 | Database | `db/` | SQLite + versioned migrations (one DB per profile). Migration 048 added `app_settings.scope`. |
 | Tutoring | `tutoring/` | Platform-conditional (`desktop`, `mobile`, `ios`, `android`) |
 | Cardano | `cardano/` | Pallas wallet/tx building; reference-script deployment still pending in-tree |
