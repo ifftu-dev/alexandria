@@ -108,6 +108,33 @@ pub(crate) async fn resolve_claims(
                         }
                     }
                 }
+                // Anchors are only trusted once this node has verified
+                // the digest on-chain (anchor_verified, set by the
+                // username_anchor tick). An unverified anchor is
+                // stripped so a forged tx_hash can't fake tier 2.
+                let verified_sig: Option<String> = {
+                    let guard = state.db.lock().map_err(|_| "database lock poisoned")?;
+                    guard.as_ref().and_then(|db| {
+                        db.conn()
+                            .query_row(
+                                "SELECT claim_json FROM username_claims
+                                 WHERE username = ?1 AND anchor_verified = 1",
+                                [username],
+                                |r| r.get::<_, String>(0),
+                            )
+                            .ok()
+                            .and_then(|json| {
+                                serde_json::from_str::<UsernameClaim>(&json)
+                                    .ok()
+                                    .map(|c| c.sig)
+                            })
+                    })
+                };
+                for c in candidates.iter_mut() {
+                    if c.anchor.is_some() && verified_sig.as_deref() != Some(c.sig.as_str()) {
+                        c.anchor = None;
+                    }
+                }
             }
         }
     }

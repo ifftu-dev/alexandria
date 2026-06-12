@@ -611,6 +611,34 @@ pub fn run() {
                             _ => {}
                         }
 
+                        // Username claim batch anchoring (registry phase 3):
+                        // one metadata tx (label 1698) anchors up to 80
+                        // unanchored claims. Silent no-op without chain creds.
+                        match cardano::username_anchor::tick(&db_for_queue, &bf, &wallet).await {
+                            Ok(anchored) if !anchored.is_empty() => {
+                                log::info!(
+                                    "username anchors: {} claims anchored",
+                                    anchored.len()
+                                );
+                                // Republish enriched (tier 2) claims to the DHT.
+                                let node_guard = node_for_sync.lock().await;
+                                if let Some(node) = node_guard.as_ref() {
+                                    for claim in anchored {
+                                        if let Ok(payload) = serde_json::to_vec(&claim) {
+                                            let key = crate::domain::username_claim::dht_key(
+                                                &claim.username,
+                                            );
+                                            let _ = node.put_dht_record(key, payload).await;
+                                        }
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                log::debug!("username anchors: {e}");
+                            }
+                            _ => {}
+                        }
+
                         // Completion-witness observer + auto-issuance pipeline.
                         // Gated on ALEXANDRIA_COMPLETION_POLICY_ID + the vault
                         // being unlocked (wallet present). Silent no-op otherwise.

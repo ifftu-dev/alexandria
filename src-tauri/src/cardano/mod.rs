@@ -14,3 +14,4 @@ pub mod soulbound_tx_builder;
 pub mod stake_pubkey;
 pub mod tx_builder;
 pub mod types;
+pub mod username_anchor;

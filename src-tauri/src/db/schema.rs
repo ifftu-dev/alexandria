@@ -63,6 +63,7 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (53, "plugin_enabled_and_irl_review", MIGRATION_053),
     (54, "usernames_profile_visibility", MIGRATION_054),
     (55, "username_claim_cache", MIGRATION_055),
+    (56, "username_anchor_verified", MIGRATION_056),
 ];
 
 const MIGRATION_001: &str = r#"
@@ -2263,4 +2264,14 @@ CREATE TABLE IF NOT EXISTS username_claims (
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_username_claims_did ON username_claims(did);
+"#;
+
+const MIGRATION_056: &str = r#"
+-- ============================================================
+-- Migration 056: anchor verification flag for username claims
+-- ============================================================
+
+-- Set when this node has confirmed the claim digest appears in the
+-- anchoring Cardano tx (or when this node submitted the batch itself).
+ALTER TABLE username_claims ADD COLUMN anchor_verified INTEGER NOT NULL DEFAULT 0;
 "#;
