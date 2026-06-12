@@ -83,9 +83,24 @@ pub async fn fetch_user_profile(
     force: Option<bool>,
 ) -> Result<PublicProfile, String> {
     let force = force.unwrap_or(false);
+    let mut did = did;
     let username = username.map(|u| u.trim().trim_start_matches('@').to_lowercase());
     if did.is_none() && username.is_none() {
         return Err("provide a DID or a username".to_string());
+    }
+
+    // Username lookups go through the DHT registry first: the winning
+    // signed claim is the authoritative @username → DID binding, which
+    // stops a malicious node answering profile-fetch for a handle it
+    // doesn't hold. Falls back to broadcast-by-username when no claim
+    // is resolvable (registry empty or DHT unreachable).
+    if did.is_none() {
+        if let Some(ref u) = username {
+            if let Ok((Some(claim), _)) = super::username_registry::resolve_claims(&state, u).await
+            {
+                did = Some(claim.did);
+            }
+        }
     }
 
     // 1 + 2: local answers, releasing the std lock before any await.

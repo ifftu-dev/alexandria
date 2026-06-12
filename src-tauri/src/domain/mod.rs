@@ -16,4 +16,5 @@ pub mod reputation;
 pub mod sentinel;
 pub mod sync;
 pub mod taxonomy;
+pub mod username_claim;
 pub mod vc;

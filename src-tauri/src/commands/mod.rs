@@ -29,6 +29,7 @@ pub mod sentinel_priors;
 pub mod settings;
 pub mod snapshot;
 pub mod taxonomy;
+pub mod username_registry;
 pub mod users;
 
 pub mod content;

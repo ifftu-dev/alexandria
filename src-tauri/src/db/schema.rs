@@ -62,6 +62,7 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (52, "stake_pubkey_registry", MIGRATION_052),
     (53, "plugin_enabled_and_irl_review", MIGRATION_053),
     (54, "usernames_profile_visibility", MIGRATION_054),
+    (55, "username_claim_cache", MIGRATION_055),
 ];
 
 const MIGRATION_001: &str = r#"
@@ -2244,4 +2245,22 @@ CREATE TABLE IF NOT EXISTS peer_profiles (
     updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_peer_profiles_username ON peer_profiles(username);
+"#;
+
+const MIGRATION_055: &str = r#"
+-- ============================================================
+-- Migration 055: username claim cache (DHT username registry)
+-- ============================================================
+
+-- Locally cached, signature-verified username claims resolved from
+-- the DHT. One row per username — the deterministic winner.
+CREATE TABLE IF NOT EXISTS username_claims (
+    username   TEXT PRIMARY KEY,
+    did        TEXT NOT NULL,
+    claimed_at INTEGER NOT NULL,
+    tier       INTEGER NOT NULL DEFAULT 0,   -- 0 bare | 1 receipted | 2 anchored
+    claim_json TEXT NOT NULL,                -- full UsernameClaim
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_username_claims_did ON username_claims(did);
 "#;

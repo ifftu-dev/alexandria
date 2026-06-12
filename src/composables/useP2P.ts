@@ -26,6 +26,9 @@ async function start(): Promise<void> {
   if (status.value?.is_running) return
   try {
     await invoke('p2p_start')
+    // (Re)publish this profile's username claim — kad records expire,
+    // and claims made while offline defer their DHT publish to here.
+    invoke('claim_username').catch(() => {})
   } catch {
     // Fire-and-forget: the backend spawns startup in the background.
     // Any error here (e.g. wallet locked) is non-fatal.

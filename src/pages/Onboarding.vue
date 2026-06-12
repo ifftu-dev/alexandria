@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useProfiles } from '@/composables/useProfiles'
+import { useLocalApi } from '@/composables/useLocalApi'
 import { biometricSupported, storeVaultPasswordForBiometric } from '@/composables/useBiometricVault'
 import { listen } from '@tauri-apps/api/event'
 import type { UnlistenFn } from '@tauri-apps/api/event'
@@ -10,6 +11,7 @@ import Starfield from '@/components/auth/Starfield.vue'
 const router = useRouter()
 const route = useRoute()
 const { profiles, refreshProfiles, createProfile, restoreProfileWithMnemonic } = useProfiles()
+const { invoke } = useLocalApi()
 
 const vaultExists = computed(() => profiles.value.length > 0)
 const username = ref('')
@@ -22,6 +24,33 @@ watch(username, (u) => {
 })
 const USERNAME_RE = /^[a-z0-9_]{3,32}$/
 const usernameValid = computed(() => USERNAME_RE.test(username.value.trim().toLowerCase()))
+
+// Live availability against the DHT username registry (debounced).
+// 'unknown' = network unreachable — warn but don't block signup; the
+// claim publishes (and conflicts resolve deterministically) once online.
+type Availability = 'idle' | 'checking' | 'available' | 'taken' | 'unknown'
+const availability = ref<Availability>('idle')
+let availabilityTimer: ReturnType<typeof setTimeout> | null = null
+watch(username, (u) => {
+  availability.value = 'idle'
+  if (availabilityTimer) clearTimeout(availabilityTimer)
+  const candidate = u.trim().toLowerCase()
+  if (!USERNAME_RE.test(candidate)) return
+  availabilityTimer = setTimeout(async () => {
+    availability.value = 'checking'
+    try {
+      const res = await invoke<{ available: boolean; authoritative: boolean }>(
+        'check_username_availability',
+        { username: candidate },
+      )
+      availability.value = res.available
+        ? res.authoritative ? 'available' : 'unknown'
+        : 'taken'
+    } catch {
+      availability.value = 'unknown'
+    }
+  }, 400)
+})
 
 type Step = 'welcome' | 'password' | 'generating' | 'backup' | 'done'
 type Mode = 'create' | 'import'
@@ -162,6 +191,10 @@ async function proceedFromPassword() {
   // Username and display name are both mandatory.
   if (!usernameValid.value) {
     error.value = 'Choose a username: 3–32 characters, lowercase letters, numbers, and underscores only.'
+    return
+  }
+  if (availability.value === 'taken') {
+    error.value = 'That username is already taken — pick another.'
     return
   }
   if (!displayName.value.trim()) {
@@ -458,6 +491,18 @@ function enterApp() {
               </div>
               <p class="mt-1 text-xs" :class="username && !usernameValid ? 'text-warning' : 'text-muted-foreground'">
                 3–32 characters · lowercase letters, numbers, underscores. How others find you.
+              </p>
+              <p v-if="availability === 'checking'" class="mt-0.5 text-xs text-muted-foreground">
+                Checking availability…
+              </p>
+              <p v-else-if="availability === 'available'" class="mt-0.5 text-xs text-success">
+                ✓ @{{ username.trim().toLowerCase() }} is available
+              </p>
+              <p v-else-if="availability === 'taken'" class="mt-0.5 text-xs text-error">
+                ✕ @{{ username.trim().toLowerCase() }} is already taken
+              </p>
+              <p v-else-if="availability === 'unknown'" class="mt-0.5 text-xs text-warning">
+                ⚠ Can't verify availability right now — you can continue, but the name may conflict once online.
               </p>
             </div>
             <div>

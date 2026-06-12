@@ -378,6 +378,18 @@ pub enum SwarmCommand {
         channel: ResponseChannel<ProfileFetchResponse>,
         response: ProfileFetchResponse,
     },
+    /// Store a record in the Kademlia DHT (username claims, etc.).
+    PutDhtRecord {
+        key: Vec<u8>,
+        value: Vec<u8>,
+        reply: oneshot::Sender<Result<(), NetworkError>>,
+    },
+    /// Fetch all records for a DHT key. Conflicting writers can leave
+    /// multiple records — the caller picks the winner.
+    GetDhtRecords {
+        key: Vec<u8>,
+        reply: oneshot::Sender<Result<Vec<Vec<u8>>, NetworkError>>,
+    },
     /// Dial a peer at the given addresses (used to reach a freshly
     /// paired device whose addresses came in via the pairing code).
     ConnectPeer {
@@ -1012,6 +1024,14 @@ async fn swarm_event_loop(
         oneshot::Sender<Result<ProfileFetchResponse, NetworkError>>,
     > = HashMap::new();
 
+    // Pending DHT record queries (username registry). Get queries
+    // accumulate records until the query finishes.
+    type GetRecordsReply = oneshot::Sender<Result<Vec<Vec<u8>>, NetworkError>>;
+    let mut pending_put_queries: HashMap<kad::QueryId, oneshot::Sender<Result<(), NetworkError>>> =
+        HashMap::new();
+    let mut pending_get_queries: HashMap<kad::QueryId, (GetRecordsReply, Vec<Vec<u8>>)> =
+        HashMap::new();
+
     // Track NAT state locally for the Status command
     let mut current_nat_state = NatState::Unknown;
     let mut relay_addrs: Vec<String> = Vec::new();
@@ -1295,6 +1315,28 @@ async fn swarm_event_loop(
                             .profile_fetch
                             .send_response(channel, response);
                     }
+                    Some(SwarmCommand::PutDhtRecord { key, value, reply }) => {
+                        let record = kad::Record::new(key, value);
+                        match swarm
+                            .behaviour_mut()
+                            .kademlia
+                            .put_record(record, kad::Quorum::One)
+                        {
+                            Ok(qid) => {
+                                pending_put_queries.insert(qid, reply);
+                            }
+                            Err(e) => {
+                                let _ = reply.send(Err(NetworkError::Publish(e.to_string())));
+                            }
+                        }
+                    }
+                    Some(SwarmCommand::GetDhtRecords { key, reply }) => {
+                        let qid = swarm
+                            .behaviour_mut()
+                            .kademlia
+                            .get_record(kad::RecordKey::new(&key));
+                        pending_get_queries.insert(qid, (reply, Vec::new()));
+                    }
                     Some(SwarmCommand::ConnectPeer { peer, addrs, reply }) => {
                         let mut dialed = false;
                         for addr in addrs {
@@ -1562,6 +1604,66 @@ async fn swarm_event_loop(
                                 ..
                             } => {
                                 diag::log("DHT: GetProviders query finished (no more records)");
+                            }
+                            kad::Event::OutboundQueryProgressed {
+                                id,
+                                result: kad::QueryResult::PutRecord(result),
+                                ..
+                            } => {
+                                if let Some(reply) = pending_put_queries.remove(&id) {
+                                    let _ = reply.send(match result {
+                                        Ok(_) => Ok(()),
+                                        Err(e) => Err(NetworkError::Publish(e.to_string())),
+                                    });
+                                }
+                            }
+                            kad::Event::OutboundQueryProgressed {
+                                id,
+                                result: kad::QueryResult::GetRecord(result),
+                                step,
+                                ..
+                            } => {
+                                match result {
+                                    Ok(kad::GetRecordOk::FoundRecord(peer_record)) => {
+                                        if let Some((_, acc)) = pending_get_queries.get_mut(&id) {
+                                            acc.push(peer_record.record.value.clone());
+                                        }
+                                        if step.last {
+                                            if let Some((reply, acc)) =
+                                                pending_get_queries.remove(&id)
+                                            {
+                                                let _ = reply.send(Ok(acc));
+                                            }
+                                        }
+                                    }
+                                    Ok(kad::GetRecordOk::FinishedWithNoAdditionalRecord {
+                                        ..
+                                    }) => {
+                                        if let Some((reply, acc)) = pending_get_queries.remove(&id)
+                                        {
+                                            let _ = reply.send(Ok(acc));
+                                        }
+                                    }
+                                    Err(e) => {
+                                        if let Some((reply, acc)) = pending_get_queries.remove(&id)
+                                        {
+                                            // NotFound with nothing accumulated is an
+                                            // empty result, not a failure.
+                                            if acc.is_empty()
+                                                && !matches!(
+                                                    e,
+                                                    kad::GetRecordError::NotFound { .. }
+                                                )
+                                            {
+                                                let _ = reply.send(Err(NetworkError::Publish(
+                                                    e.to_string(),
+                                                )));
+                                            } else {
+                                                let _ = reply.send(Ok(acc));
+                                            }
+                                        }
+                                    }
+                                }
                             }
                             _ => {
                                 log::debug!("Kademlia: {event:?}");
@@ -2161,6 +2263,41 @@ impl P2pNode {
             .send(SwarmCommand::SendProfileFetchRequest {
                 peer,
                 request,
+                reply: reply_tx,
+            })
+            .await
+            .map_err(|_| NetworkError::NotRunning)?;
+        reply_rx.await.map_err(|_| NetworkError::NotRunning)?
+    }
+
+    /// Store a record in the DHT. Resolves when the put query
+    /// completes (quorum one).
+    pub async fn put_dht_record(&self, key: Vec<u8>, value: Vec<u8>) -> Result<(), NetworkError> {
+        if !self.running {
+            return Err(NetworkError::NotRunning);
+        }
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.command_tx
+            .send(SwarmCommand::PutDhtRecord {
+                key,
+                value,
+                reply: reply_tx,
+            })
+            .await
+            .map_err(|_| NetworkError::NotRunning)?;
+        reply_rx.await.map_err(|_| NetworkError::NotRunning)?
+    }
+
+    /// Fetch all records stored under a DHT key (possibly from
+    /// multiple conflicting writers).
+    pub async fn get_dht_records(&self, key: Vec<u8>) -> Result<Vec<Vec<u8>>, NetworkError> {
+        if !self.running {
+            return Err(NetworkError::NotRunning);
+        }
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.command_tx
+            .send(SwarmCommand::GetDhtRecords {
+                key,
                 reply: reply_tx,
             })
             .await
