@@ -7,9 +7,18 @@
 //! `username_claims`. Relay receipts (P2) and Cardano anchoring (P3 —
 //! batched, ~0.011 ADA/user) strengthen the same record format later.
 
+use std::time::Duration;
+
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use tauri::State;
+use tokio::time::timeout;
+
+/// Hard ceiling per network operation in the registry path. Kademlia
+/// queries run up to 60 s on a sparse DHT — unacceptable behind a
+/// button press. Registry ops are best-effort by design (local cache +
+/// republish-on-start heal), so we cut them short and move on.
+const DHT_OP_TIMEOUT: Duration = Duration::from_secs(8);
 
 use crate::crypto::wallet;
 use crate::domain::username_claim::{best_claim, dht_key, UsernameClaim};
@@ -97,7 +106,9 @@ pub(crate) async fn resolve_claims(
     {
         let node_guard = state.p2p_node.lock().await;
         if let Some(node) = node_guard.as_ref() {
-            if let Ok(records) = node.get_dht_records(dht_key(username)).await {
+            if let Ok(Ok(records)) =
+                timeout(DHT_OP_TIMEOUT, node.get_dht_records(dht_key(username))).await
+            {
                 dht_reachable = true;
                 for raw in records {
                     if let Ok(c) = serde_json::from_slice::<UsernameClaim>(&raw) {
@@ -255,7 +266,13 @@ pub async fn claim_username(state: State<'_, AppState>) -> Result<UsernameClaim,
                 let req = crate::p2p::username_reg::ReceiptRequest {
                     claim: claim.clone(),
                 };
-                match node.request_username_receipt(relay, req).await {
+                let attempt =
+                    timeout(DHT_OP_TIMEOUT, node.request_username_receipt(relay, req)).await;
+                let Ok(attempt) = attempt else {
+                    log::debug!("relay receipt request timed out");
+                    continue;
+                };
+                match attempt {
                     Ok(crate::p2p::username_reg::ReceiptResponse::Granted(receipt)) => {
                         if crate::p2p::username_reg::verify_receipt(&claim.sig, &receipt) {
                             claim.receipt = Some(receipt);
@@ -297,8 +314,19 @@ pub async fn claim_username(state: State<'_, AppState>) -> Result<UsernameClaim,
     {
         let node_guard = state.p2p_node.lock().await;
         if let Some(node) = node_guard.as_ref() {
-            if let Err(e) = node.put_dht_record(dht_key(&username), payload).await {
-                log::warn!("username claim DHT publish failed (will retry on unlock): {e}");
+            match timeout(
+                DHT_OP_TIMEOUT,
+                node.put_dht_record(dht_key(&username), payload),
+            )
+            .await
+            {
+                Ok(Err(e)) => {
+                    log::warn!("username claim DHT publish failed (will retry on unlock): {e}");
+                }
+                Err(_) => {
+                    log::warn!("username claim DHT publish timed out (will retry on unlock)");
+                }
+                Ok(Ok(())) => {}
             }
         } else {
             log::info!("username claim cached; DHT publish deferred until P2P starts");
@@ -396,5 +424,69 @@ pub async fn set_username(
             .map_err(|e| e.to_string())?;
     }
 
-    claim_username(state).await
+    // Sign + cache the claim locally so the rename is durable and the
+    // UI returns immediately. Receipt + DHT publish run in the
+    // background — they're best-effort (republished on every p2p
+    // start) and can take several network round-trips.
+    let signing_key = {
+        let ks_guard = state.keystore.lock().await;
+        let ks = ks_guard.as_ref().ok_or("vault is locked — unlock first")?;
+        let mnemonic = ks.retrieve_mnemonic().map_err(|e| e.to_string())?;
+        drop(ks_guard);
+        let w =
+            crate::crypto::wallet::wallet_from_mnemonic(&mnemonic).map_err(|e| e.to_string())?;
+        w.signing_key.clone()
+    };
+    let did = crate::crypto::did::derive_did_key(&signing_key);
+    let claimed_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let claim = UsernameClaim::create(&username, &did, claimed_at, &signing_key);
+    {
+        let guard = state.db.lock().map_err(|_| "database lock poisoned")?;
+        let db = guard.as_ref().ok_or("database not initialized")?;
+        cache_claim(db.conn(), &claim)?;
+    }
+
+    let db = state.db.clone();
+    let node_handle = state.p2p_node.clone();
+    let bg_claim = claim.clone();
+    tauri::async_runtime::spawn(async move {
+        let node_guard = node_handle.lock().await;
+        let Some(node) = node_guard.as_ref() else {
+            return;
+        };
+        // Receipt (tier 1) — best-effort.
+        let mut enriched = bg_claim;
+        for relay in crate::p2p::discovery::relay_peer_ids() {
+            let req = crate::p2p::username_reg::ReceiptRequest {
+                claim: enriched.clone(),
+            };
+            if let Ok(Ok(crate::p2p::username_reg::ReceiptResponse::Granted(receipt))) =
+                timeout(DHT_OP_TIMEOUT, node.request_username_receipt(relay, req)).await
+            {
+                if crate::p2p::username_reg::verify_receipt(&enriched.sig, &receipt) {
+                    enriched.receipt = Some(receipt);
+                    break;
+                }
+            }
+        }
+        if enriched.receipt.is_some() {
+            if let Ok(guard) = db.lock() {
+                if let Some(database) = guard.as_ref() {
+                    let _ = cache_claim(database.conn(), &enriched);
+                }
+            }
+        }
+        if let Ok(payload) = serde_json::to_vec(&enriched) {
+            let _ = timeout(
+                DHT_OP_TIMEOUT,
+                node.put_dht_record(dht_key(&enriched.username), payload),
+            )
+            .await;
+        }
+    });
+
+    Ok(claim)
 }
