@@ -51,8 +51,17 @@ pub struct UsernameClaim {
     pub claimed_at: i64,
     /// Ed25519 signature (hex) by the DID key over [`canonical_bytes`].
     pub sig: String,
+    /// Legacy single receipt — superseded by `receipts`, kept so
+    /// claims written by earlier builds still parse (and so this
+    /// build's claims stay readable by them). [`normalize`] folds it
+    /// into `receipts`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub receipt: Option<RelayReceipt>,
+    /// Receipts from independent relays. Ordering uses the UPPER
+    /// MEDIAN of verified receipt times, so a minority of lying
+    /// relays cannot backdate (or meaningfully delay) a claim.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub receipts: Vec<RelayReceipt>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub anchor: Option<CardanoAnchor>,
 }
@@ -82,8 +91,45 @@ impl UsernameClaim {
             claimed_at,
             sig: hex::encode(sig.to_bytes()),
             receipt: None,
+            receipts: Vec::new(),
             anchor: None,
         }
+    }
+
+    /// Fold the legacy single `receipt` into `receipts` and dedupe by
+    /// relay (one receipt per relay counts). Call after deserializing.
+    pub fn normalize(mut self) -> Self {
+        if let Some(r) = self.receipt.take() {
+            if !self
+                .receipts
+                .iter()
+                .any(|x| x.relay_peer_id == r.relay_peer_id)
+            {
+                self.receipts.push(r);
+            }
+        }
+        self.receipts
+            .sort_by(|a, b| a.relay_peer_id.cmp(&b.relay_peer_id));
+        self.receipts
+            .dedup_by(|a, b| a.relay_peer_id == b.relay_peer_id);
+        // Keep the legacy field mirroring the first receipt so older
+        // builds reading this claim still see tier 1.
+        self.receipt = self.receipts.first().cloned();
+        self
+    }
+
+    /// Add a receipt (one per relay; first wins).
+    pub fn add_receipt(&mut self, r: RelayReceipt) {
+        if !self
+            .receipts
+            .iter()
+            .any(|x| x.relay_peer_id == r.relay_peer_id)
+        {
+            self.receipts.push(r);
+            self.receipts
+                .sort_by(|a, b| a.relay_peer_id.cmp(&b.relay_peer_id));
+        }
+        self.receipt = self.receipts.first().cloned();
     }
 
     /// Verify the owner signature against the key embedded in the DID.
@@ -109,20 +155,33 @@ impl UsernameClaim {
     pub fn tier(&self) -> u8 {
         if self.anchor.is_some() {
             2
-        } else if self.receipt.is_some() {
+        } else if !self.receipts.is_empty() || self.receipt.is_some() {
             1
         } else {
             0
         }
     }
 
-    /// The timestamp that counts for ordering, per tier.
+    /// The timestamp that counts for ordering, per tier. Receipted
+    /// claims use the UPPER MEDIAN of receipt times: with a minority
+    /// of dishonest relays, the median is bounded by honest receipts,
+    /// so a lying relay can neither backdate a friend nor stall a
+    /// victim past the honest timestamps.
     fn effective_time(&self) -> i64 {
-        match (self.anchor.as_ref(), self.receipt.as_ref()) {
-            (Some(a), _) => a.slot as i64,
-            (None, Some(r)) => r.received_at,
-            (None, None) => self.claimed_at,
+        if let Some(a) = self.anchor.as_ref() {
+            return a.slot as i64;
         }
+        let mut times: Vec<i64> = self.receipts.iter().map(|r| r.received_at).collect();
+        if times.is_empty() {
+            if let Some(r) = self.receipt.as_ref() {
+                times.push(r.received_at);
+            }
+        }
+        if times.is_empty() {
+            return self.claimed_at;
+        }
+        times.sort_unstable();
+        times[times.len() / 2]
     }
 
     /// `true` if `self` beats `other` for the same username.
@@ -238,6 +297,49 @@ mod tests {
             (b, a)
         };
         assert!(lo.beats(&hi));
+    }
+
+    #[test]
+    fn median_receipt_time_resists_one_liar() {
+        let (k1, d1) = keypair(1);
+        let (k2, d2) = keypair(2);
+        let rcpt = |id: &str, t: i64| RelayReceipt {
+            relay_peer_id: id.into(),
+            received_at: t,
+            sig: String::new(),
+        };
+        // Honest claim: receipts at 100 and 110 from two relays.
+        let mut honest = UsernameClaim::create("x_name", &d1, 100, &k1);
+        honest.add_receipt(rcpt("relayA", 100));
+        honest.add_receipt(rcpt("relayB", 110));
+        // Attacker claimed later (real time 500) but one colluding
+        // relay backdates to 1; the honest relay says 500.
+        let mut attacker = UsernameClaim::create("x_name", &d2, 1, &k2);
+        attacker.add_receipt(rcpt("relayA", 500));
+        attacker.add_receipt(rcpt("evil", 1));
+        // Upper median: honest = 110, attacker = 500 → honest wins.
+        assert!(honest.beats(&attacker));
+        assert!(!attacker.beats(&honest));
+    }
+
+    #[test]
+    fn normalize_folds_legacy_receipt_and_dedupes() {
+        let (k1, d1) = keypair(1);
+        let mut c = UsernameClaim::create("x_name", &d1, 100, &k1);
+        c.receipt = Some(RelayReceipt {
+            relay_peer_id: "relayA".into(),
+            received_at: 100,
+            sig: "s".into(),
+        });
+        c.receipts = vec![RelayReceipt {
+            relay_peer_id: "relayA".into(),
+            received_at: 100,
+            sig: "s".into(),
+        }];
+        let n = c.normalize();
+        assert_eq!(n.receipts.len(), 1);
+        assert!(n.receipt.is_some()); // legacy mirror kept
+        assert_eq!(n.tier(), 1);
     }
 
     #[test]

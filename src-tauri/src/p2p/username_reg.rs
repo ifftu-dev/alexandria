@@ -59,15 +59,15 @@ pub fn verify_receipt(claim_sig: &str, receipt: &RelayReceipt) -> bool {
     )
 }
 
-/// Drop an untrusted/invalid receipt from a claim so it cannot
-/// inflate the claim's tier during conflict ordering. (Anchors are
-/// verified in the Cardano observer instead — phase 3.)
-pub fn sanitize_claim(mut claim: UsernameClaim) -> UsernameClaim {
-    if let Some(ref receipt) = claim.receipt {
-        if !verify_receipt(&claim.sig, receipt) {
-            claim.receipt = None;
-        }
-    }
+/// Drop untrusted/invalid receipts from a claim so they cannot
+/// inflate the claim's tier or skew its median time during conflict
+/// ordering. (Anchors are verified in the Cardano observer instead —
+/// phase 3.)
+pub fn sanitize_claim(claim: UsernameClaim) -> UsernameClaim {
+    let mut claim = claim.normalize();
+    let sig = claim.sig.clone();
+    claim.receipts.retain(|r| verify_receipt(&sig, r));
+    claim.receipt = claim.receipts.first().cloned();
     claim
 }
 

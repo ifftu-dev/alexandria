@@ -8,6 +8,9 @@ const props = defineProps<{
   isOwn?: boolean
   /** Own profile only: "public" | "private". */
   visibility?: string | null
+  /** Username registry standing: 'anchored' (Cardano-verified),
+   *  'receipted' (relay countersigned), or null/undefined (bare). */
+  registry?: 'anchored' | 'receipted' | null
 }>()
 
 defineEmits<{ edit: [] }>()
@@ -71,8 +74,18 @@ async function copyDid() {
       </div>
 
       <h1 class="ph-name">{{ name }}</h1>
-      <p v-if="profile.username" class="mt-0.5 text-sm font-medium text-primary">
+      <p v-if="profile.username" class="mt-0.5 flex items-center gap-1.5 text-sm font-medium text-primary">
         @{{ profile.username }}
+        <span
+          v-if="registry === 'anchored'"
+          class="ph-reg ph-reg--anchored"
+          title="Username anchored on Cardano — the binding is verified on-chain"
+        >⛓ Verified</span>
+        <span
+          v-else-if="registry === 'receipted'"
+          class="ph-reg ph-reg--receipted"
+          title="Username registered with relay-countersigned first-seen receipts"
+        >✓ Registered</span>
       </p>
 
       <p v-if="profile.bio" class="mt-3 max-w-prose text-sm text-foreground/85">
@@ -132,5 +145,19 @@ async function copyDid() {
 .ph-vis--private {
   background: color-mix(in srgb, var(--app-warning) 18%, transparent);
   color: var(--app-warning);
+}
+.ph-reg {
+  font-size: 0.6rem;
+  font-weight: 700;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+}
+.ph-reg--anchored {
+  background: color-mix(in srgb, var(--app-primary) 16%, transparent);
+  color: var(--app-primary);
+}
+.ph-reg--receipted {
+  background: color-mix(in srgb, var(--app-success) 14%, transparent);
+  color: var(--app-success);
 }
 </style>

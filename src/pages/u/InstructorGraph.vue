@@ -7,7 +7,7 @@ import { useTargets } from '@/composables/useTargets'
 import { AppButton, AppBadge, AppSpinner, AppAlert, EmptyState } from '@/components/ui'
 import ProfileHeader from '@/components/profile/ProfileHeader.vue'
 import SkillGraph from '@/components/skills/SkillGraph.vue'
-import type { PublicProfile, PublicSkillGraph, SkillInfo, SkillGraphEdge } from '@/types'
+import type { PublicProfile, PublicSkillGraph, SkillInfo, SkillGraphEdge, UsernameClaim } from '@/types'
 
 const route = useRoute()
 const router = useRouter()
@@ -30,6 +30,7 @@ const loading = ref(true)
 const error = ref<string | null>(null)
 const profile = ref<PublicProfile | null>(null)
 const graph = ref<PublicSkillGraph | null>(null)
+const registry = ref<'anchored' | 'receipted' | null>(null)
 const adding = ref(false)
 
 const name = computed(
@@ -78,6 +79,14 @@ const edges = computed<SkillGraphEdge[]>(() => {
   )
 })
 
+
+function registryStanding(claim: UsernameClaim | null): 'anchored' | 'receipted' | null {
+  if (!claim) return null
+  if (claim.anchor) return 'anchored'
+  if ((claim.receipts && claim.receipts.length > 0) || claim.receipt) return 'receipted'
+  return null
+}
+
 async function load() {
   loading.value = true
   error.value = null
@@ -93,6 +102,13 @@ async function load() {
     graph.value = await invoke<PublicSkillGraph>('fetch_public_graph', {
       did: profile.value.did,
     })
+    if (profile.value.username) {
+      const claim = await invoke<UsernameClaim | null>('resolve_username', {
+        username: profile.value.username,
+      }).catch(() => null)
+      registry.value =
+        claim && claim.did === profile.value.did ? registryStanding(claim) : null
+    }
   } catch (e) {
     error.value = String(e)
   } finally {
@@ -142,7 +158,7 @@ async function onUntarget() {
     </AppAlert>
 
     <div v-else-if="profile" class="space-y-6">
-      <ProfileHeader :profile="profile">
+      <ProfileHeader :profile="profile" :registry="registry">
         <template #actions>
           <AppButton
             v-if="!existingTarget"

@@ -10,6 +10,7 @@ import type {
   Identity,
   PublicProfile,
   PublicSkillGraph,
+  UsernameClaim,
 } from '@/types'
 
 const router = useRouter()
@@ -20,6 +21,14 @@ const identity = ref<Identity | null>(null)
 const did = ref<string | null>(null)
 const graph = ref<PublicSkillGraph | null>(null)
 const reputation = ref<FullReputationAssertion[]>([])
+const registry = ref<'anchored' | 'receipted' | null>(null)
+
+function registryStanding(claim: UsernameClaim | null): 'anchored' | 'receipted' | null {
+  if (!claim) return null
+  if (claim.anchor) return 'anchored'
+  if ((claim.receipts && claim.receipts.length > 0) || claim.receipt) return 'receipted'
+  return null
+}
 
 const profile = computed<PublicProfile | null>(() => {
   if (!identity.value || !did.value) return null
@@ -55,6 +64,12 @@ onMounted(async () => {
     did.value = d
     graph.value = g
     reputation.value = rep
+    if (id?.username) {
+      const claim = await invoke<UsernameClaim | null>('resolve_username', {
+        username: id.username,
+      }).catch(() => null)
+      registry.value = claim && claim.did === d ? registryStanding(claim) : null
+    }
   } finally {
     loading.value = false
   }
@@ -75,7 +90,7 @@ onMounted(async () => {
     />
 
     <div v-else class="space-y-6">
-      <ProfileHeader :profile="profile" :is-own="true" :visibility="identity?.visibility ?? 'public'">
+      <ProfileHeader :profile="profile" :is-own="true" :visibility="identity?.visibility ?? 'public'" :registry="registry">
         <template #actions>
           <AppButton size="sm" variant="outline" @click="router.push('/settings/account')">
             ✏️ Edit profile

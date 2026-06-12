@@ -82,7 +82,8 @@ fn cached_claim(conn: &Connection, username: &str) -> Option<UsernameClaim> {
         |r| r.get::<_, String>(0),
     )
     .ok()
-    .and_then(|json| serde_json::from_str(&json).ok())
+    .and_then(|json| serde_json::from_str::<UsernameClaim>(&json).ok())
+    .map(UsernameClaim::normalize)
 }
 
 /// Gather every claim visible for a username: DHT records (when the
@@ -296,13 +297,22 @@ pub async fn claim_username(state: State<'_, AppState>) -> Result<UsernameClaim,
         cache_claim(db.conn(), &claim)?;
     }
 
-    // Upgrade to tier 1: ask a trusted relay to countersign with its
-    // first-seen timestamp. Best-effort — bare claims still publish.
-    let mut claim = claim;
-    if claim.receipt.is_none() {
+    // Upgrade to tier 1: gather countersignatures from EVERY trusted
+    // relay (receipt diversity — ordering uses the median time, so one
+    // relay can't move the clock). Best-effort: bare claims publish.
+    let mut claim = claim.normalize();
+    {
         let node_guard = state.p2p_node.lock().await;
         if let Some(node) = node_guard.as_ref() {
+            let mut refused_for_other = 0u32;
             for relay in crate::p2p::discovery::relay_peer_ids() {
+                if claim
+                    .receipts
+                    .iter()
+                    .any(|r| r.relay_peer_id == relay.to_string())
+                {
+                    continue; // already hold this relay's receipt
+                }
                 let req = crate::p2p::username_reg::ReceiptRequest {
                     claim: claim.clone(),
                 };
@@ -315,24 +325,18 @@ pub async fn claim_username(state: State<'_, AppState>) -> Result<UsernameClaim,
                 match attempt {
                     Ok(crate::p2p::username_reg::ReceiptResponse::Granted(receipt)) => {
                         if crate::p2p::username_reg::verify_receipt(&claim.sig, &receipt) {
-                            claim.receipt = Some(receipt);
-                            break;
+                            claim.add_receipt(receipt);
+                        } else {
+                            log::warn!("relay receipt failed verification — ignoring");
                         }
-                        log::warn!("relay receipt failed verification — ignoring");
                     }
                     Ok(crate::p2p::username_reg::ReceiptResponse::Refused {
                         reason,
                         existing_did,
                         ..
                     }) => {
-                        // A refusal for another DID means we lost the
-                        // first-seen race at the relay.
-                        if let Some(other) = existing_did {
-                            if other != claim.did {
-                                return Err(format!(
-                                    "@{username} is already registered to another user ({reason})"
-                                ));
-                            }
+                        if existing_did.as_deref().is_some_and(|d| d != claim.did) {
+                            refused_for_other += 1;
                         }
                         log::warn!("relay refused receipt: {reason}");
                     }
@@ -341,10 +345,16 @@ pub async fn claim_username(state: State<'_, AppState>) -> Result<UsernameClaim,
                     }
                 }
             }
+            // Only "someone else holds this" with zero receipts of our
+            // own is a hard error — a single relay's view is no longer
+            // authoritative under receipt diversity.
+            if claim.receipts.is_empty() && refused_for_other > 0 {
+                return Err(format!("@{username} is already registered to another user"));
+            }
         }
     }
 
-    // Re-cache with the receipt attached (tier 1) and publish.
+    // Re-cache with receipts attached (tier 1) and publish.
     {
         let guard = state.db.lock().map_err(|_| "database lock poisoned")?;
         let db = guard.as_ref().ok_or("database not initialized")?;
@@ -497,7 +507,7 @@ pub async fn set_username(
         let Some(node) = node_guard.as_ref() else {
             return;
         };
-        // Receipt (tier 1) — best-effort.
+        // Receipts (tier 1) from every relay — best-effort.
         let mut enriched = bg_claim;
         for relay in crate::p2p::discovery::relay_peer_ids() {
             let req = crate::p2p::username_reg::ReceiptRequest {
@@ -507,12 +517,11 @@ pub async fn set_username(
                 timeout(DHT_OP_TIMEOUT, node.request_username_receipt(relay, req)).await
             {
                 if crate::p2p::username_reg::verify_receipt(&enriched.sig, &receipt) {
-                    enriched.receipt = Some(receipt);
-                    break;
+                    enriched.add_receipt(receipt);
                 }
             }
         }
-        if enriched.receipt.is_some() {
+        if !enriched.receipts.is_empty() {
             if let Ok(guard) = db.lock() {
                 if let Some(database) = guard.as_ref() {
                     let _ = cache_claim(database.conn(), &enriched);

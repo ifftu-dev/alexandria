@@ -1742,6 +1742,16 @@ export interface LearningPath {
   earned_count: number
 }
 
+/** Registry claim for a username (subset the UI cares about). */
+export interface UsernameClaim {
+  username: string
+  did: string
+  claimed_at: number
+  receipts?: { relay_peer_id: string; received_at: number }[] | null
+  receipt?: { relay_peer_id: string; received_at: number } | null
+  anchor?: { tx_hash: string; slot: number } | null
+}
+
 /** A skill graph the learner is working toward. Stored as a JSON array
  *  in the `learner.targets` synced setting. */
 export interface Target {
