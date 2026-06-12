@@ -160,9 +160,15 @@ const router = createRouter({
       meta: { layout: 'app' },
     },
     {
-      path: '/u/:did',
-      name: 'instructor-graph',
+      path: '/u/:id',
+      name: 'user-profile',
       component: () => import('@/pages/u/InstructorGraph.vue'),
+      meta: { layout: 'app' },
+    },
+    {
+      path: '/profile',
+      name: 'my-profile',
+      component: () => import('@/pages/ProfileMe.vue'),
       meta: { layout: 'app' },
     },
 

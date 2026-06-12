@@ -79,14 +79,16 @@ pub async fn get_active_profile_id(state: State<'_, AppState>) -> Result<Option<
 pub async fn create_profile(
     app: AppHandle,
     state: State<'_, AppState>,
+    username: String,
     display_name: String,
     password: String,
     #[allow(non_snake_case)] avatar: Option<Avatar>,
 ) -> Result<CreateProfileResponse, String> {
-    // Usernames are mandatory.
+    // Username (@handle) and display name are both mandatory.
+    let username = crate::domain::identity::validate_username(&username)?;
     let display_name = display_name.trim().to_string();
     if display_name.is_empty() {
-        return Err("A username is required to create a profile.".to_string());
+        return Err("A display name is required to create a profile.".to_string());
     }
     validate_password(&password)?;
 
@@ -134,8 +136,14 @@ pub async fn create_profile(
         let db = db_guard.as_ref().ok_or("database not initialized")?;
         db.conn()
             .execute(
-                "INSERT OR REPLACE INTO local_identity (id, stake_address, payment_address) VALUES (1, ?1, ?2)",
-                params![w.stake_address.clone(), w.payment_address.clone()],
+                "INSERT OR REPLACE INTO local_identity (id, stake_address, payment_address, username, display_name, visibility) \
+                 VALUES (1, ?1, ?2, ?3, ?4, 'public')",
+                params![
+                    w.stake_address.clone(),
+                    w.payment_address.clone(),
+                    username.clone(),
+                    display_name.clone()
+                ],
             )
             .map_err(|e| e.to_string())?;
 
@@ -177,14 +185,16 @@ pub async fn create_profile(
 pub async fn restore_profile_with_mnemonic(
     app: AppHandle,
     state: State<'_, AppState>,
+    username: String,
     display_name: String,
     mnemonic: String,
     password: String,
     #[allow(non_snake_case)] avatar: Option<Avatar>,
 ) -> Result<UnlockProfileResponse, String> {
+    let username = crate::domain::identity::validate_username(&username)?;
     let display_name = display_name.trim().to_string();
     if display_name.is_empty() {
-        return Err("A username is required to create a profile.".to_string());
+        return Err("A display name is required to create a profile.".to_string());
     }
     validate_password(&password)?;
     if state.active_id().is_some() {
@@ -229,8 +239,14 @@ pub async fn restore_profile_with_mnemonic(
         let db = db_guard.as_ref().ok_or("database not initialized")?;
         db.conn()
             .execute(
-                "INSERT OR REPLACE INTO local_identity (id, stake_address, payment_address) VALUES (1, ?1, ?2)",
-                params![w.stake_address.clone(), w.payment_address.clone()],
+                "INSERT OR REPLACE INTO local_identity (id, stake_address, payment_address, username, display_name, visibility) \
+                 VALUES (1, ?1, ?2, ?3, ?4, 'public')",
+                params![
+                    w.stake_address.clone(),
+                    w.payment_address.clone(),
+                    username.clone(),
+                    display_name.clone()
+                ],
             )
             .map_err(|e| e.to_string())?;
 
@@ -438,19 +454,21 @@ fn read_profile_from_db(state: &State<'_, AppState>) -> Result<Option<Identity>,
     Ok(db
         .conn()
         .query_row(
-            "SELECT stake_address, payment_address, display_name, bio, avatar_cid, profile_hash, created_at, updated_at
+            "SELECT stake_address, payment_address, username, display_name, bio, avatar_cid, visibility, profile_hash, created_at, updated_at
              FROM local_identity WHERE id = 1",
             [],
             |row| {
                 Ok(Identity {
                     stake_address: row.get(0)?,
                     payment_address: row.get(1)?,
-                    display_name: row.get(2)?,
-                    bio: row.get(3)?,
-                    avatar_cid: row.get(4)?,
-                    profile_hash: row.get(5)?,
-                    created_at: row.get(6)?,
-                    updated_at: row.get(7)?,
+                    username: row.get(2)?,
+                    display_name: row.get(3)?,
+                    bio: row.get(4)?,
+                    avatar_cid: row.get(5)?,
+                    visibility: row.get(6)?,
+                    profile_hash: row.get(7)?,
+                    created_at: row.get(8)?,
+                    updated_at: row.get(9)?,
                 })
             },
         )

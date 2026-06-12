@@ -976,6 +976,8 @@ pub fn run() {
             commands::identity::get_wallet_info,
             commands::identity::get_local_did,
             commands::identity::resolve_display_names,
+            commands::users::resolve_profiles,
+            commands::users::fetch_user_profile,
             commands::identity::get_profile,
             commands::identity::update_profile,
             commands::identity::publish_profile,

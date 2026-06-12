@@ -3,30 +3,42 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { useLocalApi } from '@/composables/useLocalApi'
-import { useDisplayNames, shortDid } from '@/composables/useDisplayNames'
 import { useTargets } from '@/composables/useTargets'
 import { AppButton, AppBadge, AppSpinner, AppAlert, EmptyState } from '@/components/ui'
+import ProfileHeader from '@/components/profile/ProfileHeader.vue'
 import SkillGraph from '@/components/skills/SkillGraph.vue'
-import type { PublicSkillGraph, SkillInfo, SkillGraphEdge } from '@/types'
+import type { PublicProfile, PublicSkillGraph, SkillInfo, SkillGraphEdge } from '@/types'
 
 const route = useRoute()
 const router = useRouter()
 const { invoke } = useLocalApi()
-const { displayName, ensureNames } = useDisplayNames()
 const { targets, addTarget, removeTarget } = useTargets()
 
-// Normalize the scheme prefix — mobile keyboards capitalize pasted/typed
-// DIDs ("Did:key:…") and the owner-match on the serving node is exact.
-const did = computed(() => String(route.params.did ?? '').replace(/^did:key:/i, 'did:key:'))
+// The route accepts a DID or a username (with or without a leading @).
+// Mobile keyboards capitalize typed input, and the owner-match on the
+// serving node is exact — normalize the did:key: scheme prefix only.
+const param = computed(() => String(route.params.id ?? '').trim())
+const isDid = computed(() => /^did:key:/i.test(param.value))
+const lookupDid = computed(() =>
+  isDid.value ? param.value.replace(/^did:key:/i, 'did:key:') : null,
+)
+const lookupUsername = computed(() =>
+  isDid.value ? null : param.value.replace(/^@/, '').toLowerCase(),
+)
 
 const loading = ref(true)
 const error = ref<string | null>(null)
+const profile = ref<PublicProfile | null>(null)
 const graph = ref<PublicSkillGraph | null>(null)
 const adding = ref(false)
 
-const name = computed(() => displayName(did.value) || shortDid(did.value))
+const name = computed(
+  () => profile.value?.display_name || profile.value?.username || 'this user',
+)
 
-const existingTarget = computed(() => targets.value.find((t) => t.source_did === did.value))
+const existingTarget = computed(() =>
+  targets.value.find((t) => t.source_did === profile.value?.did),
+)
 
 const teachingNodes = computed(() => graph.value?.nodes.filter((n) => n.teaching) ?? [])
 
@@ -69,10 +81,18 @@ const edges = computed<SkillGraphEdge[]>(() => {
 async function load() {
   loading.value = true
   error.value = null
+  profile.value = null
   graph.value = null
   try {
-    await ensureNames([did.value])
-    graph.value = await invoke<PublicSkillGraph>('fetch_public_graph', { did: did.value })
+    // Resolve the profile first — by DID or username — then fetch the
+    // skill graph for the resolved DID.
+    profile.value = await invoke<PublicProfile>('fetch_user_profile', {
+      did: lookupDid.value,
+      username: lookupUsername.value,
+    })
+    graph.value = await invoke<PublicSkillGraph>('fetch_public_graph', {
+      did: profile.value.did,
+    })
   } catch (e) {
     error.value = String(e)
   } finally {
@@ -81,16 +101,16 @@ async function load() {
 }
 
 onMounted(load)
-watch(did, load)
+watch(param, load)
 
 async function onTarget() {
-  if (!graph.value || graph.value.nodes.length === 0) return
+  if (!profile.value || !graph.value || graph.value.nodes.length === 0) return
   adding.value = true
   try {
     await addTarget({
       label: `${name.value} · skill graph`,
       goalSkillIds: graph.value.nodes.map((n) => n.id),
-      sourceDid: did.value,
+      sourceDid: profile.value.did,
     })
     router.push('/targets')
   } finally {
@@ -109,47 +129,37 @@ async function onUntarget() {
       ‹ back
     </button>
 
-    <div class="mb-6 flex flex-wrap items-start justify-between gap-4">
-      <div>
-        <h1 class="page-title">{{ name }}</h1>
-        <p class="mt-1 text-xs text-muted-foreground break-all">{{ did }}</p>
-      </div>
-      <div class="flex items-center gap-2">
-        <AppButton
-          v-if="!existingTarget"
-          :loading="adding"
-          :disabled="!graph || graph.nodes.length === 0"
-          @click="onTarget"
-        >
-          🎯 Target this graph
-        </AppButton>
-        <template v-else>
-          <AppBadge variant="success">Targeted</AppBadge>
-          <AppButton variant="outline" size="sm" @click="onUntarget">Remove target</AppButton>
-        </template>
-      </div>
-    </div>
-
     <div v-if="loading" class="flex justify-center py-16">
-      <AppSpinner size="lg" label="Fetching public graph…" />
+      <AppSpinner size="lg" label="Fetching profile…" />
     </div>
 
     <AppAlert v-else-if="error" variant="error">
-      Couldn't fetch this graph: {{ error }}
+      Couldn't load this profile: {{ error }}
       <div class="mt-1 text-xs opacity-80">
-        Remote graphs are fetched over P2P from connected peers. The owner's node must be online and
-        reachable.
+        Profiles are fetched over P2P. The owner's node must be online and reachable, and their
+        profile public.
       </div>
     </AppAlert>
 
-    <EmptyState
-      v-else-if="!graph || graph.nodes.length === 0"
-      icon="📭"
-      title="No public skills"
-      description="This person hasn't made any earned skills public yet."
-    />
+    <div v-else-if="profile" class="space-y-6">
+      <ProfileHeader :profile="profile">
+        <template #actions>
+          <AppButton
+            v-if="!existingTarget"
+            size="sm"
+            :loading="adding"
+            :disabled="!graph || graph.nodes.length === 0"
+            @click="onTarget"
+          >
+            🎯 Target this graph
+          </AppButton>
+          <template v-else>
+            <AppBadge variant="success">Targeted</AppBadge>
+            <AppButton variant="outline" size="sm" @click="onUntarget">Remove</AppButton>
+          </template>
+        </template>
+      </ProfileHeader>
 
-    <div v-else class="space-y-6">
       <!-- Teaching highlight -->
       <div v-if="teachingNodes.length > 0" class="card p-4">
         <div class="mb-2 flex items-center gap-2">
@@ -169,7 +179,7 @@ async function onUntarget() {
       </div>
 
       <!-- Full public DAG -->
-      <div>
+      <div v-if="graph && graph.nodes.length > 0">
         <div class="mb-2 flex items-center justify-between">
           <h2 class="text-base font-semibold text-foreground">Public skill graph</h2>
           <span class="text-xs text-muted-foreground">
@@ -178,18 +188,17 @@ async function onUntarget() {
         </div>
         <SkillGraph :skills="skills" :edges="edges" @select="(id) => router.push(`/skills/${id}`)" />
       </div>
+      <EmptyState
+        v-else
+        icon="📭"
+        title="No public skills"
+        :description="`${name} hasn't made any earned skills public yet.`"
+      />
     </div>
   </div>
 </template>
 
 <style scoped>
-.page-title {
-  font-family: 'Libre Baskerville', 'DM Serif Display', Georgia, serif;
-  font-size: 1.6rem;
-  font-weight: 400;
-  letter-spacing: -0.01em;
-  color: var(--app-foreground);
-}
 .teach-pill {
   font-size: 0.75rem;
   font-weight: 500;

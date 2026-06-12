@@ -16,6 +16,7 @@ import { useLocalApi } from '@/composables/useLocalApi'
 
 // Shared across all callers for the session.
 const cache = ref<Record<string, string>>({})
+const usernameCache = ref<Record<string, string>>({})
 const inFlight = new Set<string>()
 
 export function shortDid(did: string | null | undefined): string {
@@ -40,6 +41,18 @@ export function useDisplayNames() {
     return !!did && !!cache.value[did]
   }
 
+  /** The @username for a DID when known (no fallback). */
+  function username(did: string | null | undefined): string | null {
+    if (!did) return null
+    return usernameCache.value[did] ?? null
+  }
+
+  /** "@handle" string for a DID, falling back to a short DID. */
+  function handle(did: string | null | undefined): string {
+    const u = username(did)
+    return u ? `@${u}` : shortDid(did)
+  }
+
   /** Resolve + cache any DIDs not already known. Safe to call repeatedly. */
   async function ensureNames(dids: Array<string | null | undefined>): Promise<void> {
     const want = Array.from(
@@ -50,10 +63,22 @@ export function useDisplayNames() {
     if (want.length === 0) return
     for (const d of want) inFlight.add(d)
     try {
-      const resolved = await invoke<Record<string, string>>('resolve_display_names', {
-        dids: want,
-      })
-      cache.value = { ...cache.value, ...resolved }
+      const [names, profiles] = await Promise.all([
+        invoke<Record<string, string>>('resolve_display_names', { dids: want }),
+        invoke<Record<string, { username: string | null; display_name: string | null }>>(
+          'resolve_profiles',
+          { dids: want },
+        ).catch(() => ({}) as Record<string, { username: string | null; display_name: string | null }>),
+      ])
+      cache.value = { ...cache.value, ...names }
+      const usernames: Record<string, string> = {}
+      for (const [did, r] of Object.entries(profiles)) {
+        if (r.username) usernames[did] = r.username
+        if (r.display_name && !(did in names)) {
+          cache.value = { ...cache.value, [did]: r.display_name }
+        }
+      }
+      usernameCache.value = { ...usernameCache.value, ...usernames }
     } catch {
       // Leave unresolved → callers fall back to shortDid.
     } finally {
@@ -61,5 +86,5 @@ export function useDisplayNames() {
     }
   }
 
-  return { displayName, hasName, ensureNames, shortDid }
+  return { displayName, username, handle, hasName, ensureNames, shortDid }
 }

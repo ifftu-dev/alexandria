@@ -191,6 +191,36 @@ pub async fn resolve_display_names(
         }
     }
 
+    // Cached peer profiles (filled by /alexandria/profile-fetch/1.0).
+    // Display name preferred, @username as fallback.
+    {
+        let mut stmt = db
+            .conn()
+            .prepare("SELECT did, username, display_name FROM peer_profiles")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
+            })
+            .map_err(|e| e.to_string())?
+            .filter_map(|r| r.ok())
+            .collect::<Vec<_>>();
+        for (did, username, display_name) in rows {
+            if requested.contains(did.as_str()) && !out.contains_key(&did) {
+                let name = display_name
+                    .filter(|n| !n.trim().is_empty())
+                    .or_else(|| username.map(|u| format!("@{u}")));
+                if let Some(name) = name {
+                    out.insert(did, name);
+                }
+            }
+        }
+    }
+
     Ok(out)
 }
 
@@ -209,19 +239,21 @@ pub async fn get_profile(state: State<'_, AppState>) -> Result<Option<Identity>,
 
 fn read_profile(conn: &rusqlite::Connection) -> Option<Identity> {
     conn.query_row(
-        "SELECT stake_address, payment_address, display_name, bio, avatar_cid, profile_hash, created_at, updated_at
+        "SELECT stake_address, payment_address, username, display_name, bio, avatar_cid, visibility, profile_hash, created_at, updated_at
          FROM local_identity WHERE id = 1",
         [],
         |row| {
             Ok(Identity {
                 stake_address: row.get(0)?,
                 payment_address: row.get(1)?,
-                display_name: row.get(2)?,
-                bio: row.get(3)?,
-                avatar_cid: row.get(4)?,
-                profile_hash: row.get(5)?,
-                created_at: row.get(6)?,
-                updated_at: row.get(7)?,
+                username: row.get(2)?,
+                display_name: row.get(3)?,
+                bio: row.get(4)?,
+                avatar_cid: row.get(5)?,
+                visibility: row.get(6)?,
+                profile_hash: row.get(7)?,
+                created_at: row.get(8)?,
+                updated_at: row.get(9)?,
             })
         },
     )
@@ -259,6 +291,13 @@ pub async fn update_profile(
         set_clauses.push("avatar_cid = ?");
         values.push(Box::new(avatar.clone()));
     }
+    if let Some(ref vis) = update.visibility {
+        if vis != "public" && vis != "private" {
+            return Err("Visibility must be \"public\" or \"private\".".into());
+        }
+        set_clauses.push("visibility = ?");
+        values.push(Box::new(vis.clone()));
+    }
 
     if set_clauses.is_empty() {
         return Err("no fields to update".into());
@@ -279,19 +318,21 @@ pub async fn update_profile(
 
     db.conn()
         .query_row(
-            "SELECT stake_address, payment_address, display_name, bio, avatar_cid, profile_hash, created_at, updated_at
+            "SELECT stake_address, payment_address, username, display_name, bio, avatar_cid, visibility, profile_hash, created_at, updated_at
              FROM local_identity WHERE id = 1",
             [],
             |row| {
                 Ok(Identity {
                     stake_address: row.get(0)?,
                     payment_address: row.get(1)?,
-                    display_name: row.get(2)?,
-                    bio: row.get(3)?,
-                    avatar_cid: row.get(4)?,
-                    profile_hash: row.get(5)?,
-                    created_at: row.get(6)?,
-                    updated_at: row.get(7)?,
+                    username: row.get(2)?,
+                    display_name: row.get(3)?,
+                    bio: row.get(4)?,
+                    avatar_cid: row.get(5)?,
+                    visibility: row.get(6)?,
+                    profile_hash: row.get(7)?,
+                    created_at: row.get(8)?,
+                    updated_at: row.get(9)?,
                 })
             },
         )

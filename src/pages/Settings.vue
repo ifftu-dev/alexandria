@@ -99,6 +99,7 @@ function setSection(id: SettingsSectionId) {
 // ---- Profile ----
 const displayName = ref('')
 const bio = ref('')
+const profileVisibility = ref<'public' | 'private'>('public')
 const saving = ref(false)
 const message = ref('')
 
@@ -220,6 +221,7 @@ async function hydrate() {
   if (identity.value) {
     displayName.value = identity.value.display_name ?? ''
     bio.value = identity.value.bio ?? ''
+    profileVisibility.value = identity.value.visibility === 'private' ? 'private' : 'public'
   }
   void refreshBiometricState()
   void loadStorageStats()
@@ -251,7 +253,7 @@ async function refreshBiometricState() {
 
 async function saveProfile() {
   if (!displayName.value.trim()) {
-    message.value = 'A username is required.'
+    message.value = 'A display name is required.'
     return
   }
   saving.value = true
@@ -261,6 +263,7 @@ async function saveProfile() {
       update: {
         display_name: displayName.value.trim(),
         bio: bio.value || null,
+        visibility: profileVisibility.value,
       },
     })
     await refreshProfile()
@@ -491,6 +494,15 @@ function onSectionClick(id: SettingsSectionId) {
                   <div>
                     <h4 class="settings-group-title">Profile</h4>
                     <div class="space-y-4">
+                      <div>
+                        <label class="label text-xs text-muted-foreground">Username</label>
+                        <div class="flex items-center gap-2">
+                          <span class="rounded-md border border-border bg-muted/40 px-3 py-2 text-sm text-foreground">
+                            @{{ identity?.username ?? '—' }}
+                          </span>
+                          <span class="text-xs text-muted-foreground">Set at signup · how others find you</span>
+                        </div>
+                      </div>
                       <AppInput
                         v-model="displayName"
                         label="Display Name"
@@ -501,6 +513,27 @@ function onSectionClick(id: SettingsSectionId) {
                         label="Bio"
                         placeholder="A short description about yourself"
                       />
+                      <div>
+                        <label class="label text-xs text-muted-foreground">Profile visibility</label>
+                        <div class="flex gap-2">
+                          <button
+                            class="vis-option"
+                            :class="{ 'vis-option--active': profileVisibility === 'public' }"
+                            @click="profileVisibility = 'public'"
+                          >
+                            🌐 Public
+                            <span class="vis-desc">Anyone can view your profile and find you by @username.</span>
+                          </button>
+                          <button
+                            class="vis-option"
+                            :class="{ 'vis-option--active': profileVisibility === 'private' }"
+                            @click="profileVisibility = 'private'"
+                          >
+                            🔒 Private
+                            <span class="vis-desc">Profile hidden from other users; username not discoverable.</span>
+                          </button>
+                        </div>
+                      </div>
                       <div class="flex flex-wrap items-center gap-3">
                         <AppButton :loading="saving" @click="saveProfile">
                           Save Profile
@@ -1016,5 +1049,31 @@ function onSectionClick(id: SettingsSectionId) {
 
 .theme-card-swatch--system {
   background: linear-gradient(135deg, #ffffff 50%, #0b0b0e 50%);
+}
+
+.vis-option {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  align-items: flex-start;
+  padding: 0.6rem 0.8rem;
+  border-radius: 0.6rem;
+  border: 1px solid var(--app-border);
+  background: var(--app-card);
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--app-foreground);
+  text-align: left;
+  transition: border-color 0.15s, background 0.15s;
+}
+.vis-option--active {
+  border-color: var(--app-primary);
+  background: color-mix(in srgb, var(--app-primary) 7%, var(--app-card));
+}
+.vis-desc {
+  font-size: 0.68rem;
+  font-weight: 400;
+  color: var(--app-muted-foreground);
 }
 </style>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useProfiles } from '@/composables/useProfiles'
 import { biometricSupported, storeVaultPasswordForBiometric } from '@/composables/useBiometricVault'
@@ -12,7 +12,16 @@ const route = useRoute()
 const { profiles, refreshProfiles, createProfile, restoreProfileWithMnemonic } = useProfiles()
 
 const vaultExists = computed(() => profiles.value.length > 0)
+const username = ref('')
 const displayName = ref('')
+// Display name mirrors the username until the user edits it directly
+// (Instagram-style: same by default, separable on demand).
+const displayNameDirty = ref(false)
+watch(username, (u) => {
+  if (!displayNameDirty.value) displayName.value = u
+})
+const USERNAME_RE = /^[a-z0-9_]{3,32}$/
+const usernameValid = computed(() => USERNAME_RE.test(username.value.trim().toLowerCase()))
 
 type Step = 'welcome' | 'password' | 'generating' | 'backup' | 'done'
 type Mode = 'create' | 'import'
@@ -43,11 +52,6 @@ onMounted(async () => {
 
   try {
     await refreshProfiles()
-    if (!displayName.value) {
-      displayName.value = profiles.value.length === 0
-        ? 'My Profile'
-        : `Profile ${profiles.value.length + 1}`
-    }
     biometricAvailable.value = await biometricSupported()
   } catch {
     biometricAvailable.value = false
@@ -155,9 +159,13 @@ function goBack() {
 async function proceedFromPassword() {
   error.value = ''
 
-  // Username is mandatory.
+  // Username and display name are both mandatory.
+  if (!usernameValid.value) {
+    error.value = 'Choose a username: 3–32 characters, lowercase letters, numbers, and underscores only.'
+    return
+  }
   if (!displayName.value.trim()) {
-    error.value = 'Choose a username to continue.'
+    error.value = 'Choose a display name to continue.'
     return
   }
 
@@ -183,7 +191,11 @@ async function createWallet() {
   currentStep.value = ''
 
   try {
-    const result = await createProfile(displayName.value.trim(), password.value)
+    const result = await createProfile(
+      username.value.trim().toLowerCase(),
+      displayName.value.trim(),
+      password.value,
+    )
     mnemonic.value = result.mnemonic
     try {
       if (enableBiometricOnSetup.value && biometricAvailable.value) {
@@ -221,6 +233,7 @@ async function restoreWallet() {
 
   try {
     await restoreProfileWithMnemonic(
+      username.value.trim().toLowerCase(),
       displayName.value.trim(),
       phrase,
       password.value,
@@ -428,17 +441,39 @@ function enterApp() {
           <div class="space-y-4">
             <div>
               <label class="block text-xs font-medium text-muted-foreground mb-1.5">
-                Profile name
+                Username
+              </label>
+              <div class="relative">
+                <span class="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">@</span>
+                <input
+                  v-model="username"
+                  type="text"
+                  maxlength="32"
+                  autocapitalize="none"
+                  autocorrect="off"
+                  spellcheck="false"
+                  placeholder="your_handle"
+                  class="w-full pl-8 pr-3 py-2 text-sm rounded-md border border-border bg-background focus:outline-none focus:ring-2 focus:ring-ring"
+                >
+              </div>
+              <p class="mt-1 text-xs" :class="username && !usernameValid ? 'text-warning' : 'text-muted-foreground'">
+                3–32 characters · lowercase letters, numbers, underscores. How others find you.
+              </p>
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-muted-foreground mb-1.5">
+                Display name
               </label>
               <input
                 v-model="displayName"
                 type="text"
                 maxlength="64"
-                placeholder="Who is this profile for?"
+                placeholder="Your name as others see it"
                 class="w-full px-3 py-2 text-sm rounded-md border border-border bg-background focus:outline-none focus:ring-2 focus:ring-ring"
+                @input="displayNameDirty = true"
               >
               <p class="mt-1 text-xs text-muted-foreground">
-                Shown on the profile picker. You can rename it later.
+                Defaults to your username — change it any time.
               </p>
             </div>
             <div>

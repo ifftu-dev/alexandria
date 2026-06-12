@@ -8,6 +8,7 @@ pub mod graph_fetch;
 pub mod nat;
 pub mod network;
 pub mod opinions;
+pub mod profile_fetch;
 pub mod rate_limit;
 pub mod registry;
 pub mod registry_chain;

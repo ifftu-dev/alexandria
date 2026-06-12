@@ -13,15 +13,20 @@ const router = useRouter()
 const { invoke } = useLocalApi()
 const { targets, removeTarget, pathFor, combinedPath } = useTargets()
 
-// Look up another user's public skill graph by DID.
-const lookupDid = ref('')
-const myDid = ref<string | null>(null)
-function openInstructorGraph() {
-  // Mobile keyboards auto-capitalize the first letter ("Did:key:…").
-  // The DID scheme + method are case-insensitive per the DID spec, but
-  // the base58 identifier is not — normalize only the prefix.
-  const did = lookupDid.value.trim().replace(/^did:key:/i, 'did:key:')
-  if (did) router.push(`/u/${encodeURIComponent(did)}`)
+// Look up another user by @username (or, as a power-user fallback, DID).
+const lookupQuery = ref('')
+const myUsername = ref<string | null>(null)
+function openUserProfile() {
+  // Mobile keyboards auto-capitalize typed input. Usernames are
+  // lowercase by definition; for DIDs only the scheme prefix is
+  // case-insensitive — normalize accordingly.
+  let q = lookupQuery.value.trim()
+  if (/^did:key:/i.test(q)) {
+    q = q.replace(/^did:key:/i, 'did:key:')
+  } else {
+    q = q.replace(/^@/, '').toLowerCase()
+  }
+  if (q) router.push(`/u/${encodeURIComponent(q)}`)
 }
 
 const loading = ref(true)
@@ -47,7 +52,8 @@ async function loadAll() {
 
 onMounted(async () => {
   await useSettings().initialize()
-  myDid.value = await invoke<string | null>('get_local_did').catch(() => null)
+  const me = await invoke<{ username: string | null } | null>('get_profile').catch(() => null)
+  myUsername.value = me?.username ?? null
   await loadAll()
 })
 
@@ -87,24 +93,24 @@ const dash = computed(() => 2 * Math.PI * 20)
       </AppButton>
     </div>
 
-    <!-- Instructor graph lookup -->
+    <!-- User lookup -->
     <div class="card mb-6 p-4">
-      <p class="mb-2 text-sm font-semibold text-foreground">View someone's skill graph</p>
+      <p class="mb-2 text-sm font-semibold text-foreground">Find someone</p>
       <div class="flex items-end gap-2">
         <div class="min-w-0 flex-1">
           <AppInput
-            v-model="lookupDid"
-            placeholder="did:key:…"
-            data-testid="did-lookup-input"
-            @keyup.enter="openInstructorGraph"
+            v-model="lookupQuery"
+            placeholder="@username"
+            data-testid="user-lookup-input"
+            @keyup.enter="openUserProfile"
           />
         </div>
-        <AppButton :disabled="!lookupDid.trim()" data-testid="did-lookup-go" @click="openInstructorGraph">
-          View graph
+        <AppButton :disabled="!lookupQuery.trim()" data-testid="user-lookup-go" @click="openUserProfile">
+          View profile
         </AppButton>
       </div>
-      <p v-if="myDid" class="mt-2 break-all text-[0.65rem] text-muted-foreground" data-testid="my-did">
-        Your DID: {{ myDid }}
+      <p v-if="myUsername" class="mt-2 text-[0.65rem] text-muted-foreground" data-testid="my-username">
+        You are <span class="font-medium text-primary">@{{ myUsername }}</span> — share your handle so others can find you.
       </p>
     </div>
 

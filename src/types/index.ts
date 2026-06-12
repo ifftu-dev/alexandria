@@ -8,12 +8,31 @@
 export interface Identity {
   stake_address: string
   payment_address: string
+  /** Stable @handle, set at signup. Lowercase [a-z0-9_]{3,32}. */
+  username: string | null
   display_name: string | null
   bio: string | null
   avatar_cid: string | null
+  /** "public" (default) or "private". */
+  visibility: string | null
   profile_hash: string | null
   created_at: string
   updated_at: string
+}
+
+/** Public view of a user profile, served over /alexandria/profile-fetch/1.0. */
+export interface PublicProfile {
+  did: string
+  username: string | null
+  display_name: string | null
+  bio: string | null
+  avatar_cid: string | null
+}
+
+/** Username + display name for one DID (resolve_profiles). */
+export interface ResolvedName {
+  username: string | null
+  display_name: string | null
 }
 
 export interface WalletInfo {
@@ -23,6 +42,7 @@ export interface WalletInfo {
 }
 
 export interface ProfileUpdate {
+  visibility?: string | null
   display_name?: string | null
   bio?: string | null
   avatar_cid?: string | null

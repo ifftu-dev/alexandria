@@ -16,6 +16,7 @@ use tokio::sync::{mpsc, oneshot};
 
 use super::device_sync::{SyncRequest, SyncResponse};
 use super::graph_fetch::{GraphFetchRequest, GraphFetchResponse};
+use super::profile_fetch::{ProfileFetchRequest, ProfileFetchResponse};
 use super::vc_fetch::{FetchRequest, FetchResponse};
 
 use crate::db::Database;
@@ -280,6 +281,11 @@ pub struct AlexandriaBehaviour {
     /// owner's public skill graph; inbound requests are answered inline
     /// against the local DB (see [`super::graph_fetch`]).
     pub graph_fetch: request_response::cbor::Behaviour<GraphFetchRequest, GraphFetchResponse>,
+    /// Pull-based public profile fetch — `/alexandria/profile-fetch/1.0`
+    /// request-response protocol with CBOR codec. A node serves its own
+    /// owner's public profile by DID or username (see
+    /// [`super::profile_fetch`]).
+    pub profile_fetch: request_response::cbor::Behaviour<ProfileFetchRequest, ProfileFetchResponse>,
 }
 
 /// The running P2P network node.
@@ -360,6 +366,17 @@ pub enum SwarmCommand {
     SendGraphFetchResponse {
         channel: ResponseChannel<GraphFetchResponse>,
         response: GraphFetchResponse,
+    },
+    /// Send a profile-fetch request to a peer.
+    SendProfileFetchRequest {
+        peer: PeerId,
+        request: ProfileFetchRequest,
+        reply: oneshot::Sender<Result<ProfileFetchResponse, NetworkError>>,
+    },
+    /// Reply to an inbound profile-fetch request.
+    SendProfileFetchResponse {
+        channel: ResponseChannel<ProfileFetchResponse>,
+        response: ProfileFetchResponse,
     },
     /// Dial a peer at the given addresses (used to reach a freshly
     /// paired device whose addresses came in via the pairing code).
@@ -872,6 +889,18 @@ fn build_behaviour(
             request_response::Config::default(),
         );
 
+    // Public profile fetch (§ profile-fetch). CBOR codec, full
+    // bidirectional support — every node serves its owner's profile and
+    // requests other owners' profiles by DID or username.
+    let profile_fetch =
+        request_response::cbor::Behaviour::<ProfileFetchRequest, ProfileFetchResponse>::new(
+            [(
+                StreamProtocol::new("/alexandria/profile-fetch/1.0"),
+                ProtocolSupport::Full,
+            )],
+            request_response::Config::default(),
+        );
+
     diag::log("build_behaviour: all sub-behaviours created OK");
 
     Ok(AlexandriaBehaviour {
@@ -884,6 +913,7 @@ fn build_behaviour(
         vc_fetch,
         device_sync,
         graph_fetch,
+        profile_fetch,
         dcutr,
     })
 }
@@ -974,6 +1004,12 @@ async fn swarm_event_loop(
     let mut outbound_graph_fetch_replies: HashMap<
         libp2p::request_response::OutboundRequestId,
         oneshot::Sender<Result<GraphFetchResponse, NetworkError>>,
+    > = HashMap::new();
+
+    // Same bookkeeping for outbound profile-fetch requests.
+    let mut outbound_profile_fetch_replies: HashMap<
+        libp2p::request_response::OutboundRequestId,
+        oneshot::Sender<Result<ProfileFetchResponse, NetworkError>>,
     > = HashMap::new();
 
     // Track NAT state locally for the Status command
@@ -1244,6 +1280,19 @@ async fn swarm_event_loop(
                         let _ = swarm
                             .behaviour_mut()
                             .graph_fetch
+                            .send_response(channel, response);
+                    }
+                    Some(SwarmCommand::SendProfileFetchRequest { peer, request, reply }) => {
+                        let request_id = swarm
+                            .behaviour_mut()
+                            .profile_fetch
+                            .send_request(&peer, request);
+                        outbound_profile_fetch_replies.insert(request_id, reply);
+                    }
+                    Some(SwarmCommand::SendProfileFetchResponse { channel, response }) => {
+                        let _ = swarm
+                            .behaviour_mut()
+                            .profile_fetch
                             .send_response(channel, response);
                     }
                     Some(SwarmCommand::ConnectPeer { peer, addrs, reply }) => {
@@ -1795,6 +1844,61 @@ async fn swarm_event_loop(
                     SwarmEvent::Behaviour(AlexandriaBehaviourEvent::GraphFetch(
                         request_response::Event::ResponseSent { .. }
                     )) => {}
+                    // ---- profile-fetch (request-response) ------------
+                    SwarmEvent::Behaviour(AlexandriaBehaviourEvent::ProfileFetch(
+                        request_response::Event::Message { peer, message, .. }
+                    )) => {
+                        match message {
+                            request_response::Message::Request { request, channel, .. } => {
+                                log::info!("profile-fetch: inbound request from {peer}");
+                                let response = match db.as_ref() {
+                                    Some(db_arc) => match db_arc.lock() {
+                                        Ok(guard) => match guard.as_ref() {
+                                            Some(database) => {
+                                                super::profile_fetch::handle_profile_fetch_request(
+                                                    database.conn(),
+                                                    &request,
+                                                )
+                                                .unwrap_or(
+                                                    super::profile_fetch::ProfileFetchResponse::NotOwner,
+                                                )
+                                            }
+                                            None => super::profile_fetch::ProfileFetchResponse::NotOwner,
+                                        },
+                                        Err(_) => super::profile_fetch::ProfileFetchResponse::NotOwner,
+                                    },
+                                    None => super::profile_fetch::ProfileFetchResponse::NotOwner,
+                                };
+                                let _ = swarm
+                                    .behaviour_mut()
+                                    .profile_fetch
+                                    .send_response(channel, response);
+                            }
+                            request_response::Message::Response { request_id, response } => {
+                                if let Some(reply) =
+                                    outbound_profile_fetch_replies.remove(&request_id)
+                                {
+                                    let _ = reply.send(Ok(response));
+                                }
+                            }
+                        }
+                    }
+                    SwarmEvent::Behaviour(AlexandriaBehaviourEvent::ProfileFetch(
+                        request_response::Event::OutboundFailure { request_id, error, peer, .. }
+                    )) => {
+                        log::warn!("profile-fetch: outbound to {peer} failed: {error}");
+                        if let Some(reply) = outbound_profile_fetch_replies.remove(&request_id) {
+                            let _ = reply.send(Err(NetworkError::Publish(error.to_string())));
+                        }
+                    }
+                    SwarmEvent::Behaviour(AlexandriaBehaviourEvent::ProfileFetch(
+                        request_response::Event::InboundFailure { error, peer, .. }
+                    )) => {
+                        log::debug!("profile-fetch: inbound from {peer} failed: {error}");
+                    }
+                    SwarmEvent::Behaviour(AlexandriaBehaviourEvent::ProfileFetch(
+                        request_response::Event::ResponseSent { .. }
+                    )) => {}
                     SwarmEvent::NewListenAddr { address, .. } => {
                         log::info!("Listening on {address}");
                         if is_circuit_listener(&address) {
@@ -2033,6 +2137,28 @@ impl P2pNode {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.command_tx
             .send(SwarmCommand::SendGraphFetchRequest {
+                peer,
+                request,
+                reply: reply_tx,
+            })
+            .await
+            .map_err(|_| NetworkError::NotRunning)?;
+        reply_rx.await.map_err(|_| NetworkError::NotRunning)?
+    }
+
+    /// Send a profile-fetch request to a specific peer over
+    /// `/alexandria/profile-fetch/1.0`.
+    pub async fn fetch_profile(
+        &self,
+        peer: PeerId,
+        request: ProfileFetchRequest,
+    ) -> Result<ProfileFetchResponse, NetworkError> {
+        if !self.running {
+            return Err(NetworkError::NotRunning);
+        }
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.command_tx
+            .send(SwarmCommand::SendProfileFetchRequest {
                 peer,
                 request,
                 reply: reply_tx,

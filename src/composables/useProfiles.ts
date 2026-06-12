@@ -77,11 +77,13 @@ async function initialize(): Promise<'onboarding' | 'picker' | 'ready'> {
 }
 
 async function createProfile(
+  username: string,
   display_name: string,
   password: string,
   avatar?: Avatar,
 ): Promise<CreateProfileResponse> {
   const result = await invoke<CreateProfileResponse>('create_profile', {
+    username,
     displayName: display_name,
     password,
     avatar,
@@ -95,12 +97,14 @@ async function createProfile(
 }
 
 async function restoreProfileWithMnemonic(
+  username: string,
   display_name: string,
   mnemonic: string,
   password: string,
   avatar?: Avatar,
 ): Promise<UnlockProfileResponse> {
   const result = await invoke<UnlockProfileResponse>('restore_profile_with_mnemonic', {
+    username,
     displayName: display_name,
     mnemonic,
     password,

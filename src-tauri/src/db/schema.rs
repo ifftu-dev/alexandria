@@ -61,6 +61,7 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (51, "element_submission_grader_version", MIGRATION_051),
     (52, "stake_pubkey_registry", MIGRATION_052),
     (53, "plugin_enabled_and_irl_review", MIGRATION_053),
+    (54, "usernames_profile_visibility", MIGRATION_054),
 ];
 
 const MIGRATION_001: &str = r#"
@@ -2217,4 +2218,30 @@ CREATE INDEX IF NOT EXISTS idx_irl_submissions_learner
     ON plugin_irl_submissions(learner_did);
 CREATE INDEX IF NOT EXISTS idx_irl_submissions_plugin
     ON plugin_irl_submissions(plugin_cid);
+"#;
+
+const MIGRATION_054: &str = r#"
+-- ============================================================
+-- Migration 054: usernames, profile visibility, peer profile cache
+-- ============================================================
+
+-- Username is the user's stable @handle; display_name remains the
+-- free-form name shown alongside it. Visibility gates what the
+-- profile-fetch protocol serves to other peers.
+ALTER TABLE local_identity ADD COLUMN username TEXT;
+ALTER TABLE local_identity ADD COLUMN visibility TEXT NOT NULL DEFAULT 'public';
+
+-- Cache of other users' public profiles, filled by the
+-- /alexandria/profile-fetch/1.0 protocol. Drives username display
+-- across the UI without re-querying the network.
+CREATE TABLE IF NOT EXISTS peer_profiles (
+    did          TEXT PRIMARY KEY,
+    username     TEXT,
+    display_name TEXT,
+    bio          TEXT,
+    avatar_cid   TEXT,
+    visibility   TEXT NOT NULL DEFAULT 'public',
+    updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_peer_profiles_username ON peer_profiles(username);
 "#;
