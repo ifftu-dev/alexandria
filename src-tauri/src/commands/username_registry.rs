@@ -186,9 +186,10 @@ pub async fn check_username_availability(
     }
 
     // No P2P yet (e.g. signup runs before any profile/wallet exists) —
-    // ask a relay's HTTP registry endpoint instead. The relay's
-    // receipt store is the tier-1 first-seen record, so its answer is
-    // authoritative for practical purposes.
+    // ask the relays' HTTP registry endpoints instead. Receipt stores
+    // are per-relay (and one region may run ephemeral), so query ALL
+    // relays: taken if any says taken; authoritative if any answered.
+    let mut any_answered = false;
     for endpoint in crate::p2p::discovery::relay_http_endpoints() {
         let url = format!("{endpoint}/username/{username}");
         let resp = timeout(Duration::from_secs(5), async {
@@ -196,19 +197,22 @@ pub async fn check_username_availability(
         })
         .await;
         if let Ok(Ok(body)) = resp {
+            any_answered = true;
             let available = body
                 .get("available")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(true);
-            return Ok(AvailabilityResult {
-                username,
-                available,
-                taken_by: body
-                    .get("did")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string()),
-                authoritative: true,
-            });
+            if !available {
+                return Ok(AvailabilityResult {
+                    username,
+                    available: false,
+                    taken_by: body
+                        .get("did")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string()),
+                    authoritative: true,
+                });
+            }
         }
     }
 
@@ -216,7 +220,7 @@ pub async fn check_username_availability(
         username,
         available: true,
         taken_by: None,
-        authoritative: false,
+        authoritative: any_answered,
     })
 }
 
