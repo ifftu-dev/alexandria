@@ -257,7 +257,7 @@ peer that owns the DID; a self-DID request is served locally
 `p2p::graph_fetch::handle_graph_fetch_request` (answers `NotOwner`
 unless `identity.local_did` matches the requested `subject_did`).
 
-UI: `/u/:did` (`InstructorGraph.vue`) renders the DAG + a "Teaches"
+UI: `/u/:id` (accepts a DID or @username) (`InstructorGraph.vue`) renders the DAG + a "Teaches"
 list and a **Target this graph** action.
 
 ### 14.3 Targets & learning paths

@@ -17,10 +17,13 @@ UsernameClaim {
   did:        "did:key:z6Mk…",
   claimed_at: unix_ts,               // self-asserted (tier 0)
   sig:        Ed25519(did key) over "alexandria-username-claim-v1|u|did|t",
-  receipt?:   { relay_peer_id, received_at, sig },   // tier 1
+  receipts?:  [{ relay_peer_id, received_at, sig }], // tier 1 (one per relay)
   anchor?:    { tx_hash, slot },                     // tier 2
 }
 ```
+
+(A legacy single `receipt` field is folded into `receipts` on read and
+mirrored back for older builds.)
 
 `did:key` embeds the public key, so claims verify offline with no PKI.
 Forging a claim *for someone else's DID* is impossible; the attack
@@ -35,7 +38,10 @@ surface is competing claims, resolved by deterministic ordering.
 ## Conflict ordering (identical on every node)
 
 1. **Tier** — anchored (2) > receipted (1) > bare (0).
-2. **Time** — anchor slot / receipt `received_at` / `claimed_at`.
+2. **Time** — anchor slot / the **upper median** of verified receipt
+   times / `claimed_at`. The median means a minority of dishonest
+   relays can neither backdate a friend nor stall a victim — no single
+   relay's clock decides anything.
 3. **Lexicographic DID** as final tiebreak.
 
 Partitions converge after heal; the deterministic loser sees a Home
@@ -57,9 +63,15 @@ mirror of inbound DHT records persist in sqlite under
 `RELAY_DATA_DIR`; mirrored records warm-load into the kad store at
 boot, so the registry survives relay restarts.
 
-Trust anchor: the relay's ed25519 PeerId embeds its public key — no
-key distribution needed, but the relay **must** run with a stable
-`RELAY_SEED`.
+Claims gather receipts from **every** configured relay (receipt
+diversity). Trust anchor: the relay's ed25519 PeerId embeds its public
+key — no key distribution needed, but relays **must** run with a
+stable `RELAY_SEED`.
+
+The relay also serves `GET /username/:name` on its HTTP port (9090):
+signup runs before any wallet (and therefore P2P identity) exists, so
+availability checks fall back to these endpoints — all relays are
+queried, and a name is taken if any relay says so.
 
 ## Batched Cardano anchoring (label 1698)
 
@@ -106,6 +118,11 @@ any whose digest is absent from the anchoring tx.
 
 ## Operator checklist
 
-1. `fly volumes create relay_data` (once) — receipts + record mirror.
+1. `relay_data` volume per region (CI provisions it; `bom` currently
+   refuses volume creation, so Mumbai runs an ephemeral store —
+   issued receipts stay valid there, only refusal history resets).
 2. `RELAY_SEED` set as a Fly secret — stable countersigning identity.
 3. Batcher node: `BLOCKFROST_PROJECT_ID` + funded payment address.
+4. Deploys are tag-triggered (`v*`) via the relay repo's CI, which
+   scales each region to one machine (the receipt store is
+   single-writer sqlite).

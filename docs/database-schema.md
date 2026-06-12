@@ -16,7 +16,7 @@
 > [`vc-migration.md`](./vc-migration.md) for the full diff.
 
 **Engine**: SQLite (rusqlite 0.38, bundled)
-**Migrations**: 51
+**Migrations**: 56
 
 ---
 
@@ -88,6 +88,9 @@
 | 50 | `challenge_stake_lifecycle` | Add `stake_status` + `settle_tx_hash` to `credential_challenges` for stake-escrow settlement |
 | 51 | `element_submission_grader_version` | Add `grader_version` column to `element_submissions` |
 | 52 | `stake_pubkey_registry` | `stake_pubkey_registry` — persistent stake-address → libp2p Ed25519 pubkey bindings (chain + multisig-signed snapshot rows). Replaces the in-memory TOFU binding; see [`stake-pubkey-registry.md`](stake-pubkey-registry.md). |
+| 54 | `usernames_profile_visibility` | `username` + `visibility` on `local_identity`; `peer_profiles` cache (filled by `/alexandria/profile-fetch/1.0`) |
+| 55 | `username_claim_cache` | `username_claims` — verified DHT registry winners (`tier` 0 bare / 1 receipted / 2 anchored) |
+| 56 | `username_anchor_verified` | `anchor_verified` flag gating tier 2 in conflict ordering |
 | 53 | `plugin_enabled_and_irl_review` | Add `enabled` flag to `plugin_installed` (disabled plugins stay installed but the player refuses to mount them). New `plugin_irl_submissions` table — the local instructor-review inbox backing the `irl-review` builtin plugin. See [`plugins.md`](plugins.md). |
 
 ---

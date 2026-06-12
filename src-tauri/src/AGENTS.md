@@ -8,7 +8,7 @@
 
 ## Overview
 
-Rust backend for the Tauri v2 desktop/mobile app. Core responsibilities include a per-profile data model (each user gets their own vault + SQLCipher DB + iroh blob store under `<app_data>/profiles/<uuid>/`), ~200 registered Tauri commands (multi-user `profile` module + unified per-profile `settings` store), a 66-table SQLite schema per profile, libp2p networking, iroh content storage, and Cardano integration. Command/table counts drift with every PR — treat them as approximate.
+Rust backend for the Tauri v2 desktop/mobile app. Core responsibilities include a per-profile data model (each user gets their own vault + SQLCipher DB + iroh blob store under `<app_data>/profiles/<uuid>/`), ~260 registered Tauri commands (multi-user `profile` module + unified per-profile `settings` store), a ~75-table SQLite schema per profile, libp2p networking, iroh content storage, and Cardano integration. Command/table counts drift with every PR — treat them as approximate.
 
 ## WHERE TO LOOK
 

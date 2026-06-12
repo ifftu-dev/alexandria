@@ -68,8 +68,8 @@ central API, no hosted database, and no Docker infrastructure.
 |  |   (WebView)    | 194     |                      |  |
 |  |                | cmds    |  +----------------+  |  |
 |  |  29 pages      |         |  |   SQLite DB    |  |  |
-|  |  34 components |         |  |   73 tables    |  |  |
-|  |  14 composables|         |  |   51 migrations|  |  |
+|  |  34 components |         |  |   ~75 tables    |  |  |
+|  |  14 composables|         |  |   56 migrations|  |  |
 |  +----------------+         |  +----------------+  |  |
 |                             |                      |  |
 |                             |  +----------------+  |  |
@@ -164,11 +164,11 @@ Both share the same lock/unlock cycle: lock clears in-memory keys, unlock re-der
 
 **Engine**: SQLite (rusqlite 0.38, bundled)
 
-**Tables**: ~73 across 51 migrations
+**Tables**: ~75 across 56 migrations
 
 | Domain | Tables |
 |--------|--------|
-| Identity | `local_identity` |
+| Identity | `local_identity`, `peer_profiles`, `username_claims` |
 | Taxonomy | `subject_fields`, `subjects`, `skills`, `skill_prerequisites`, `skill_relations`, `taxonomy_versions` |
 | Courses | `courses`, `course_chapters`, `course_elements`, `element_skill_tags` |
 | Learning | `enrollments`, `element_progress`, `course_notes` |
@@ -275,7 +275,7 @@ path within the same process hangs indefinitely.
 | Plugin Attestations | `/alexandria/plugin-attestations/1.0` | Plugin DAO grader attestations |
 | Sentinel Priors | `/alexandria/sentinel-priors/1.0` | Ratified Sentinel adversarial-prior metadata |
 
-Two request-response protocols (libp2p `request-response` + CBOR
+Five request-response protocols (libp2p `request-response` + CBOR
 codec) run alongside the gossip mesh and are not part of the
 gossip-topic set: `/alexandria/vc-fetch/1.0` handles
 authority-respecting credential pull, and `/alexandria/sync/1.0`

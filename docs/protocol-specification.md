@@ -81,7 +81,7 @@ All state lives on the user's device in three locations:
 | Store | Purpose |
 |-------|---------|
 | Profile index | Public sidecar `profiles_index.json` — display names + avatars only (no crypto material). Rendered by the picker before any vault is unlocked. |
-| SQLite | Per-profile relational data (courses, skills, evidence, governance, verifiable credentials) — ~73 tables, 51 migrations. One DB per profile at `profiles/<uuid>/alexandria.db`. |
+| SQLite | Per-profile relational data (courses, skills, evidence, governance, verifiable credentials) — ~75 tables, 56 migrations. One DB per profile at `profiles/<uuid>/alexandria.db`. |
 | Encrypted vault | Per-profile wallet keys and mnemonic — IOTA Stronghold (desktop) or AES-256-GCM + Argon2id (mobile). One vault per profile under `profiles/<uuid>/vault/`. |
 | iroh | Per-profile content-addressed blobs (course HTML, profiles) — BLAKE3 hashes. One blob store + node secret per profile at `profiles/<uuid>/iroh/`. |
 
@@ -387,7 +387,7 @@ All messages are JSON-encoded, wrapped in a signed envelope, and published via G
 
 ### 6.4 Network Behaviour
 
-Seven libp2p protocols compose `AlexandriaBehaviour`:
+Seven base libp2p protocols plus five request-response protocols (§6.5) compose `AlexandriaBehaviour`:
 
 | Protocol | Version | Purpose |
 |----------|---------|---------|
@@ -1736,9 +1736,9 @@ The reference implementation is a Tauri v2 application — a single binary that 
 |-----------|------------|---------|
 | Backend | Rust (tokio) | Business logic, wallet, P2P, database, evidence, governance |
 | Frontend | Vue 3, TypeScript, Tailwind CSS v4 | 30 pages, 34 components, 14 composables |
-| Database | SQLite (rusqlite, bundled) | ~73 tables, 51 migrations |
+| Database | SQLite (rusqlite, bundled) | ~75 tables, 56 migrations |
 | Content | iroh 0.96 | BLAKE3 content-addressed blob store |
-| P2P | libp2p 0.56 | Kademlia, GossipSub, Relay, DCUtR, request-response/CBOR for `/alexandria/vc-fetch/1.0` |
+| P2P | libp2p 0.56 | Kademlia, GossipSub, Relay, DCUtR, request-response/CBOR for vc-fetch, sync, graph-fetch, profile-fetch, username-reg |
 | Wallet | pallas 0.35, Stronghold / AES-256-GCM | Conway era transactions, encrypted key storage |
 | Cardano | pallas, Blockfrost | VC integrity anchoring (label 1697), DAO governance, completion-witness minting, challenge-stake escrow, CIP-68 soulbound reputation snapshots |
 | Integrity | Rust (candle) + TypeScript | Keystroke autoencoder (candle), mouse CNN (candle), face embedder (hand-written TypeScript LBP) |
@@ -1751,7 +1751,7 @@ The reference implementation is a Tauri v2 application — a single binary that 
 
 ### 15.2 Database
 
-**Engine**: SQLite (rusqlite 0.38, bundled). **Tables**: ~73 across 51 migrations.
+**Engine**: SQLite (rusqlite 0.38, bundled). **Tables**: ~75 across 56 migrations.
 
 | Domain | Tables |
 |--------|--------|
