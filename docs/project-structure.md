@@ -52,9 +52,9 @@ src-tauri/
     │   ├── tutoring.rs     # Desktop tutoring/session commands
     │   ├── tutoring_mobile.rs # Mobile tutoring command variant
     │   ├── tutoring_stubs.rs  # Stubbed tutoring surface for unsupported builds
-    │   ├── taxonomy.rs
-│   ├── users.rs            # Public profile fetch + name resolution
-│   ├── username_registry.rs # DHT username claims (claim/resolve/availability)     # Subject fields, subjects, skills, taxonomy graph
+    │   ├── taxonomy.rs     # Subject fields, subjects, skills, taxonomy graph
+    │   ├── users.rs        # Public profile fetch + name resolution
+    │   ├── username_registry.rs # DHT username claims (claim/resolve/availability)
     │   ├── profile.rs      # Multi-user profile lifecycle: list/create/unlock/lock/rename/avatar/delete + restore-from-mnemonic
     │   ├── settings.rs     # Per-profile settings IPC: list_settings, set_setting, reset_setting (typed registry)
     │   ├── identity.rs     # Active-profile identity ops: export_mnemonic, get_profile, update_profile, publish_profile, resolve_profile, get_wallet_info, get_local_did
@@ -116,10 +116,10 @@ src-tauri/
     │   ├── sync.rs         # Cross-device sync
     │   ├── vc_did.rs       # DID doc + key rotation gossip
     │   ├── vc_status.rs    # Status-list snapshots/deltas
-    │   ├── vc_fetch.rs
-│   ├── graph_fetch.rs      # Public skill-graph fetch protocol
-│   ├── profile_fetch.rs    # Public profile fetch protocol
-│   ├── username_reg.rs     # Relay receipt client + verification     # `/alexandria/vc-fetch/1.0` pull protocol
+    │   ├── vc_fetch.rs     # `/alexandria/vc-fetch/1.0` pull protocol
+    │   ├── graph_fetch.rs  # Public skill-graph fetch protocol
+    │   ├── profile_fetch.rs # Public profile fetch protocol
+    │   ├── username_reg.rs # Relay receipt client + verification
     │   ├── presentation.rs # Inbound presentation parse/accept path
     │   ├── pinboard.rs     # PinBoard commitment observations
     │   ├── archive.rs      # Replay/archive helpers
@@ -140,8 +140,8 @@ src-tauri/
     │
     └── cardano/            # Cardano integration
         ├── blockfrost.rs   # REST client (preprod)
-        ├── tx_builder.rs
-│   ├── username_anchor.rs  # Batched label-1698 username-claim anchoring   # Native-script/NFT tx building
+        ├── tx_builder.rs   # Native-script/NFT tx building
+        ├── username_anchor.rs # Batched label-1698 username-claim anchoring
         ├── gov_tx_builder.rs # Governance tx builders
         ├── soulbound_tx_builder.rs # Soulbound/reputation tx builder path
         ├── snapshot.rs     # Asset names, datum encoding, metadata
@@ -175,9 +175,9 @@ src/
 │
 ├── composables/            # Shared singletons
 │   ├── useProfiles.ts      # Canonical multi-user surface (list/unlock/lock/create/rename/delete/avatar) + onProfileReady / onProfileLocked fan-out hooks
-│   ├── useSettings.ts
-│   ├── useTargets.ts        # Learning targets (synced)
-│   ├── useGraphPrefs.ts     # Skill-graph visibility prefs      # Reactive mirror of the per-profile settings registry; `useSetting<T>(key)` two-way ref
+│   ├── useSettings.ts      # Reactive mirror of the per-profile settings registry; `useSetting<T>(key)` two-way ref
+│   ├── useTargets.ts       # Learning targets (synced)
+│   ├── useGraphPrefs.ts    # Skill-graph visibility prefs
 │   ├── useAuth.ts          # Compat shim over useProfiles — removed lifecycle methods throw
 │   ├── useBiometricVault.ts
 │   ├── useClassroom.ts

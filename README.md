@@ -416,7 +416,7 @@ All data lives in `~/Library/Application Support/org.alexandria.node/` (macOS). 
 |----------------|---------|
 | `profiles_index.json` | Public sidecar — display names, avatars, colors, timestamps. Read by the picker before any vault is unlocked. **No keys, DIDs, or stake addresses.** |
 | `profiles/<uuid>/vault/` | Per-profile encrypted vault (Stronghold on desktop, AES-256-GCM + Argon2id on mobile) |
-| `profiles/<uuid>/alexandria.db` | Per-profile SQLCipher database (~73 tables), key derived from that profile's password |
+| `profiles/<uuid>/alexandria.db` | Per-profile SQLCipher database (~75 tables), key derived from that profile's password |
 | `profiles/<uuid>/iroh/` | Per-profile content-addressed blob store (course content, user profiles) and node secret |
 | `profiles/<uuid>/plugins/` | Per-profile installed plugin bundles |
 | `profiles/<uuid>/videocache/` | Per-profile materialized video files (served via Tauri's asset protocol) |
