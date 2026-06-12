@@ -17,6 +17,7 @@ use tokio::sync::{mpsc, oneshot};
 use super::device_sync::{SyncRequest, SyncResponse};
 use super::graph_fetch::{GraphFetchRequest, GraphFetchResponse};
 use super::profile_fetch::{ProfileFetchRequest, ProfileFetchResponse};
+use super::username_reg::{ReceiptRequest, ReceiptResponse};
 use super::vc_fetch::{FetchRequest, FetchResponse};
 
 use crate::db::Database;
@@ -286,6 +287,10 @@ pub struct AlexandriaBehaviour {
     /// owner's public profile by DID or username (see
     /// [`super::profile_fetch`]).
     pub profile_fetch: request_response::cbor::Behaviour<ProfileFetchRequest, ProfileFetchResponse>,
+    /// Username receipt requests to the relay —
+    /// `/alexandria/username-reg/1.0`. Outbound only: clients ask, the
+    /// relay countersigns.
+    pub username_reg: request_response::cbor::Behaviour<ReceiptRequest, ReceiptResponse>,
 }
 
 /// The running P2P network node.
@@ -377,6 +382,12 @@ pub enum SwarmCommand {
     SendProfileFetchResponse {
         channel: ResponseChannel<ProfileFetchResponse>,
         response: ProfileFetchResponse,
+    },
+    /// Request a username receipt from a relay.
+    SendReceiptRequest {
+        peer: PeerId,
+        request: ReceiptRequest,
+        reply: oneshot::Sender<Result<ReceiptResponse, NetworkError>>,
     },
     /// Store a record in the Kademlia DHT (username claims, etc.).
     PutDhtRecord {
@@ -901,6 +912,15 @@ fn build_behaviour(
             request_response::Config::default(),
         );
 
+    // Username receipt protocol — outbound to the relay only.
+    let username_reg = request_response::cbor::Behaviour::<ReceiptRequest, ReceiptResponse>::new(
+        [(
+            StreamProtocol::new("/alexandria/username-reg/1.0"),
+            ProtocolSupport::Outbound,
+        )],
+        request_response::Config::default(),
+    );
+
     // Public profile fetch (§ profile-fetch). CBOR codec, full
     // bidirectional support — every node serves its owner's profile and
     // requests other owners' profiles by DID or username.
@@ -926,6 +946,7 @@ fn build_behaviour(
         device_sync,
         graph_fetch,
         profile_fetch,
+        username_reg,
         dcutr,
     })
 }
@@ -1022,6 +1043,12 @@ async fn swarm_event_loop(
     let mut outbound_profile_fetch_replies: HashMap<
         libp2p::request_response::OutboundRequestId,
         oneshot::Sender<Result<ProfileFetchResponse, NetworkError>>,
+    > = HashMap::new();
+
+    // Outbound username receipt requests to the relay.
+    let mut outbound_receipt_replies: HashMap<
+        libp2p::request_response::OutboundRequestId,
+        oneshot::Sender<Result<ReceiptResponse, NetworkError>>,
     > = HashMap::new();
 
     // Pending DHT record queries (username registry). Get queries
@@ -1314,6 +1341,13 @@ async fn swarm_event_loop(
                             .behaviour_mut()
                             .profile_fetch
                             .send_response(channel, response);
+                    }
+                    Some(SwarmCommand::SendReceiptRequest { peer, request, reply }) => {
+                        let request_id = swarm
+                            .behaviour_mut()
+                            .username_reg
+                            .send_request(&peer, request);
+                        outbound_receipt_replies.insert(request_id, reply);
                     }
                     Some(SwarmCommand::PutDhtRecord { key, value, reply }) => {
                         let record = kad::Record::new(key, value);
@@ -2001,6 +2035,26 @@ async fn swarm_event_loop(
                     SwarmEvent::Behaviour(AlexandriaBehaviourEvent::ProfileFetch(
                         request_response::Event::ResponseSent { .. }
                     )) => {}
+                    // ---- username-reg (outbound receipts) ------------
+                    SwarmEvent::Behaviour(AlexandriaBehaviourEvent::UsernameReg(
+                        request_response::Event::Message {
+                            message: request_response::Message::Response { request_id, response },
+                            ..
+                        }
+                    )) => {
+                        if let Some(reply) = outbound_receipt_replies.remove(&request_id) {
+                            let _ = reply.send(Ok(response));
+                        }
+                    }
+                    SwarmEvent::Behaviour(AlexandriaBehaviourEvent::UsernameReg(
+                        request_response::Event::OutboundFailure { request_id, error, peer, .. }
+                    )) => {
+                        log::debug!("username-reg: outbound to {peer} failed: {error}");
+                        if let Some(reply) = outbound_receipt_replies.remove(&request_id) {
+                            let _ = reply.send(Err(NetworkError::Publish(error.to_string())));
+                        }
+                    }
+                    SwarmEvent::Behaviour(AlexandriaBehaviourEvent::UsernameReg(_)) => {}
                     SwarmEvent::NewListenAddr { address, .. } => {
                         log::info!("Listening on {address}");
                         if is_circuit_listener(&address) {
@@ -2298,6 +2352,27 @@ impl P2pNode {
         self.command_tx
             .send(SwarmCommand::GetDhtRecords {
                 key,
+                reply: reply_tx,
+            })
+            .await
+            .map_err(|_| NetworkError::NotRunning)?;
+        reply_rx.await.map_err(|_| NetworkError::NotRunning)?
+    }
+
+    /// Request a username receipt from a relay peer.
+    pub async fn request_username_receipt(
+        &self,
+        peer: PeerId,
+        request: ReceiptRequest,
+    ) -> Result<ReceiptResponse, NetworkError> {
+        if !self.running {
+            return Err(NetworkError::NotRunning);
+        }
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.command_tx
+            .send(SwarmCommand::SendReceiptRequest {
+                peer,
+                request,
                 reply: reply_tx,
             })
             .await

@@ -19,6 +19,7 @@ pub mod stress;
 pub mod sync;
 pub mod taxonomy;
 pub mod types;
+pub mod username_reg;
 pub mod validation;
 
 // VC / credential / pinning / archive propagation (VC-first migration)

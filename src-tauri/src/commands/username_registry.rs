@@ -102,7 +102,9 @@ pub(crate) async fn resolve_claims(
                 for raw in records {
                     if let Ok(c) = serde_json::from_slice::<UsernameClaim>(&raw) {
                         if c.username == username {
-                            candidates.push(c);
+                            // Strip receipts that aren't from a trusted
+                            // relay — they must not inflate the tier.
+                            candidates.push(crate::p2p::username_reg::sanitize_claim(c));
                         }
                     }
                 }
@@ -216,6 +218,54 @@ pub async fn claim_username(state: State<'_, AppState>) -> Result<UsernameClaim,
         cache_claim(db.conn(), &claim)?;
     }
 
+    // Upgrade to tier 1: ask a trusted relay to countersign with its
+    // first-seen timestamp. Best-effort — bare claims still publish.
+    let mut claim = claim;
+    if claim.receipt.is_none() {
+        let node_guard = state.p2p_node.lock().await;
+        if let Some(node) = node_guard.as_ref() {
+            for relay in crate::p2p::discovery::relay_peer_ids() {
+                let req = crate::p2p::username_reg::ReceiptRequest {
+                    claim: claim.clone(),
+                };
+                match node.request_username_receipt(relay, req).await {
+                    Ok(crate::p2p::username_reg::ReceiptResponse::Granted(receipt)) => {
+                        if crate::p2p::username_reg::verify_receipt(&claim.sig, &receipt) {
+                            claim.receipt = Some(receipt);
+                            break;
+                        }
+                        log::warn!("relay receipt failed verification — ignoring");
+                    }
+                    Ok(crate::p2p::username_reg::ReceiptResponse::Refused {
+                        reason,
+                        existing_did,
+                        ..
+                    }) => {
+                        // A refusal for another DID means we lost the
+                        // first-seen race at the relay.
+                        if let Some(other) = existing_did {
+                            if other != claim.did {
+                                return Err(format!(
+                                    "@{username} is already registered to another user ({reason})"
+                                ));
+                            }
+                        }
+                        log::warn!("relay refused receipt: {reason}");
+                    }
+                    Err(e) => {
+                        log::debug!("relay receipt request failed: {e}");
+                    }
+                }
+            }
+        }
+    }
+
+    // Re-cache with the receipt attached (tier 1) and publish.
+    {
+        let guard = state.db.lock().map_err(|_| "database lock poisoned")?;
+        let db = guard.as_ref().ok_or("database not initialized")?;
+        cache_claim(db.conn(), &claim)?;
+    }
     let payload = serde_json::to_vec(&claim).map_err(|e| e.to_string())?;
     {
         let node_guard = state.p2p_node.lock().await;
