@@ -501,7 +501,7 @@ function onSectionClick(id: SettingsSectionId) {
             </aside>
 
             <!-- Content panel -->
-            <section class="settings-content flex-1 flex flex-col min-w-0">
+            <section class="settings-content flex-1 flex flex-col min-w-0 min-h-0">
               <header class="flex items-center justify-between px-6 py-4 border-b border-border">
                 <h3 class="text-base font-semibold text-foreground">
                   {{ SECTIONS.find(s => s.id === activeSection)?.label }}
