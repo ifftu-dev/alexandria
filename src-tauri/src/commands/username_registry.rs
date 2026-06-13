@@ -20,6 +20,13 @@ use tokio::time::timeout;
 /// republish-on-start heal), so we cut them short and move on.
 const DHT_OP_TIMEOUT: Duration = Duration::from_secs(8);
 
+/// Generous ceiling for background publish/receipt round-trips. The
+/// claim flow and the rename publish run off the UI thread (or at
+/// p2p-start), and the path mobile→relay over a circuit can take far
+/// longer than the interactive budget above. Still bounded so a dead
+/// relay can't wedge the task forever.
+const DHT_PUBLISH_TIMEOUT: Duration = Duration::from_secs(25);
+
 use crate::crypto::wallet;
 use crate::domain::username_claim::{best_claim, dht_key, UsernameClaim};
 use crate::AppState;
@@ -320,10 +327,13 @@ pub async fn claim_username(state: State<'_, AppState>) -> Result<UsernameClaim,
                 let req = crate::p2p::username_reg::ReceiptRequest {
                     claim: claim.clone(),
                 };
-                let attempt =
-                    timeout(DHT_OP_TIMEOUT, node.request_username_receipt(relay, req)).await;
+                let attempt = timeout(
+                    DHT_PUBLISH_TIMEOUT,
+                    node.request_username_receipt(relay, req),
+                )
+                .await;
                 let Ok(attempt) = attempt else {
-                    log::debug!("relay receipt request timed out");
+                    log::warn!("relay receipt request timed out for @{username}");
                     continue;
                 };
                 match attempt {
@@ -369,7 +379,7 @@ pub async fn claim_username(state: State<'_, AppState>) -> Result<UsernameClaim,
         let node_guard = state.p2p_node.lock().await;
         if let Some(node) = node_guard.as_ref() {
             match timeout(
-                DHT_OP_TIMEOUT,
+                DHT_PUBLISH_TIMEOUT,
                 node.put_dht_record(dht_key(&username), payload),
             )
             .await
@@ -545,8 +555,11 @@ pub async fn set_username(
             let req = crate::p2p::username_reg::ReceiptRequest {
                 claim: enriched.clone(),
             };
-            if let Ok(Ok(crate::p2p::username_reg::ReceiptResponse::Granted(receipt))) =
-                timeout(DHT_OP_TIMEOUT, node.request_username_receipt(relay, req)).await
+            if let Ok(Ok(crate::p2p::username_reg::ReceiptResponse::Granted(receipt))) = timeout(
+                DHT_PUBLISH_TIMEOUT,
+                node.request_username_receipt(relay, req),
+            )
+            .await
             {
                 if crate::p2p::username_reg::verify_receipt(&enriched.sig, &receipt) {
                     enriched.add_receipt(receipt);
@@ -562,7 +575,7 @@ pub async fn set_username(
         }
         if let Ok(payload) = serde_json::to_vec(&enriched) {
             let _ = timeout(
-                DHT_OP_TIMEOUT,
+                DHT_PUBLISH_TIMEOUT,
                 node.put_dht_record(dht_key(&enriched.username), payload),
             )
             .await;
@@ -573,14 +586,18 @@ pub async fn set_username(
         if let Some(old) = bg_released {
             if let Ok(payload) = serde_json::to_vec(&old) {
                 let _ = timeout(
-                    DHT_OP_TIMEOUT,
+                    DHT_PUBLISH_TIMEOUT,
                     node.put_dht_record(dht_key(&old.username), payload),
                 )
                 .await;
             }
             for relay in crate::p2p::discovery::relay_peer_ids() {
                 let req = crate::p2p::username_reg::ReceiptRequest { claim: old.clone() };
-                let _ = timeout(DHT_OP_TIMEOUT, node.request_username_receipt(relay, req)).await;
+                let _ = timeout(
+                    DHT_PUBLISH_TIMEOUT,
+                    node.request_username_receipt(relay, req),
+                )
+                .await;
             }
         }
     });
