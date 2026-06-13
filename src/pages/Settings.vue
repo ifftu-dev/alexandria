@@ -3,6 +3,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { useAuth } from '@/composables/useAuth'
+import { useProfiles } from '@/composables/useProfiles'
 import { useP2P } from '@/composables/useP2P'
 import { useTheme } from '@/composables/useTheme'
 import {
@@ -25,6 +26,7 @@ import type { Identity } from '@/types'
 
 const { invoke } = useLocalApi()
 const { identity, lockVault: authLock, exportMnemonic: authExport, refreshProfile } = useAuth()
+const { activeProfileId } = useProfiles()
 const { status: p2pStatus, refreshStatus: refreshP2pStatus } = useP2P()
 const { theme, setTheme } = useTheme()
 const { shortcuts, updateShortcut, resetShortcut, resetAll: resetAllShortcuts } =
@@ -257,7 +259,7 @@ async function refreshBiometricState() {
   try {
     const [status, enabled] = await Promise.all([
       getBiometricStatus(),
-      biometricCredentialExists(),
+      activeProfileId.value ? biometricCredentialExists(activeProfileId.value) : Promise.resolve(false),
     ])
     biometricAvailable.value = status.isAvailable
     biometricEnabled.value = enabled
@@ -367,7 +369,11 @@ async function enableBiometric() {
       biometricMessage.value = 'Biometric support is unavailable right now on this runtime.'
       return
     }
-    const mode = await storeVaultPasswordForBiometric(biometricPassword.value)
+    if (!activeProfileId.value) {
+      biometricMessage.value = 'No active profile — unlock a profile before enabling biometrics.'
+      return
+    }
+    const mode = await storeVaultPasswordForBiometric(activeProfileId.value, biometricPassword.value)
     biometricEnabled.value = true
     biometricPassword.value = ''
     biometricMessage.value = mode === 'secure'
@@ -390,9 +396,11 @@ async function disableBiometric() {
   biometricBusy.value = true
   biometricMessage.value = ''
   try {
-    await clearBiometricVaultPassword()
+    if (activeProfileId.value) {
+      await clearBiometricVaultPassword(activeProfileId.value)
+    }
     biometricEnabled.value = false
-    biometricMessage.value = 'Biometric credential cleared for this device.'
+    biometricMessage.value = 'Biometric credential cleared for this profile.'
   } catch (e) {
     biometricMessage.value = `Failed to clear biometric credential: ${String(e)}`
   } finally {

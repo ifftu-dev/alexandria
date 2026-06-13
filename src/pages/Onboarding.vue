@@ -10,7 +10,7 @@ import Starfield from '@/components/auth/Starfield.vue'
 
 const router = useRouter()
 const route = useRoute()
-const { profiles, refreshProfiles, createProfile, restoreProfileWithMnemonic } = useProfiles()
+const { profiles, refreshProfiles, createProfile, restoreProfileWithMnemonic, activeProfileId } = useProfiles()
 const { invoke } = useLocalApi()
 
 const vaultExists = computed(() => profiles.value.length > 0)
@@ -232,7 +232,7 @@ async function createWallet() {
     mnemonic.value = result.mnemonic
     try {
       if (enableBiometricOnSetup.value && biometricAvailable.value) {
-        const mode = await storeVaultPasswordForBiometric(password.value)
+        const mode = await storeVaultPasswordForBiometric(result.summary.id, password.value)
         biometricHint.value = mode === 'secure'
           ? 'Biometric unlock enabled on this device.'
           : 'Biometric unlock enabled for this app session (dev runtime keychain limitation).'
@@ -272,8 +272,8 @@ async function restoreWallet() {
       password.value,
     )
     try {
-      if (enableBiometricOnSetup.value && biometricAvailable.value) {
-        const mode = await storeVaultPasswordForBiometric(password.value)
+      if (enableBiometricOnSetup.value && biometricAvailable.value && activeProfileId.value) {
+        const mode = await storeVaultPasswordForBiometric(activeProfileId.value, password.value)
         biometricHint.value = mode === 'secure'
           ? 'Biometric unlock enabled on this device.'
           : 'Biometric unlock enabled for this app session (dev runtime keychain limitation).'
