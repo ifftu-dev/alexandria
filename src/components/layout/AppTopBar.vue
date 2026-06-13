@@ -2,6 +2,8 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { getCurrentWindow } from '@tauri-apps/api/window'
+import { getVersion } from '@tauri-apps/api/app'
+import { AppBadge } from '@/components/ui'
 import { useTheme } from '@/composables/useTheme'
 import { useP2P } from '@/composables/useP2P'
 import { useProfiles } from '@/composables/useProfiles'
@@ -130,6 +132,18 @@ registerAction('switch-profile', () => {
   handleSwitchProfile()
 })
 
+// Pre-release marker. Label is a static stage flag; the exact version is
+// surfaced in the tooltip, fetched from Tauri at runtime (no-op on web).
+const appVersion = ref('')
+const alphaTitle = computed(() =>
+  appVersion.value
+    ? `Pre-release v${appVersion.value} — not for production use`
+    : 'Pre-release build — not for production use',
+)
+onMounted(async () => {
+  try { appVersion.value = await getVersion() } catch { /* non-tauri context */ }
+})
+
 const userInitial = () => displayName.value ? displayName.value.charAt(0).toUpperCase() : 'A'
 const avatarBg = computed(() => activeProfile.value?.color ?? null)
 const avatarEmoji = computed(() => {
@@ -183,6 +197,8 @@ const avatarEmoji = computed(() => {
           <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
         </svg>
       </button>
+
+      <AppBadge variant="warning" class="topbar-alpha-badge" :title="alphaTitle">Alpha</AppBadge>
     </div>
 
     <!-- Center: Omni-search trigger -->
@@ -431,6 +447,15 @@ const avatarEmoji = computed(() => {
   align-items: center;
   gap: 0;
   flex-shrink: 0;
+}
+
+.topbar-alpha-badge {
+  margin-left: 0.5rem;
+  padding: 0.0625rem 0.4375rem;
+  font-size: 0.6875rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  cursor: default;
 }
 
 .topbar-right {

@@ -327,6 +327,28 @@ function selectElement(chapterId: string, elementId: string) {
   activeElement.value = elementId
 }
 
+// --- Mobile chapter navigator (bottom sheet) ---
+const mobileNavOpen = ref(false)
+const expandedChapters = ref<Set<string>>(new Set())
+
+function openMobileNav() {
+  // Expand the chapter the learner is currently in so it's visible on open.
+  expandedChapters.value = new Set(activeChapter.value ? [activeChapter.value] : [])
+  mobileNavOpen.value = true
+}
+
+function toggleChapterExpanded(chapterId: string) {
+  const next = new Set(expandedChapters.value)
+  if (next.has(chapterId)) next.delete(chapterId)
+  else next.add(chapterId)
+  expandedChapters.value = next
+}
+
+function selectFromMobileNav(chapterId: string, elementId: string) {
+  selectElement(chapterId, elementId)
+  mobileNavOpen.value = false
+}
+
 async function enrollFromPlayer() {
   if (!course.value || enrollment.value) return
   enrolling.value = true
@@ -547,6 +569,10 @@ function goToPrev() {
 }
 
 function onGlobalKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape' && mobileNavOpen.value) {
+    mobileNavOpen.value = false
+    return
+  }
   if (event.key === 'ArrowRight') {
     goToNext()
   }
@@ -669,38 +695,47 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
       <!-- ======================================= -->
       <!-- MOBILE: Compact chapter/element header  -->
       <!-- ======================================= -->
-      <div v-if="!isTutorial" class="md:hidden flex items-center gap-2 px-3 py-2 border-b border-border bg-card/70 backdrop-blur shrink-0">
-        <button
-          class="p-1 rounded-md text-muted-foreground active:bg-muted"
-          @click="router.push(`/courses/${courseId}`)"
-        >
-          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
-          </svg>
-        </button>
-        <div class="flex-1 min-w-0">
-          <select
-            class="w-full text-xs font-medium bg-transparent text-foreground border-none outline-none truncate appearance-none"
-            :value="`${activeChapter}|${activeElement}`"
-            @change="(e: Event) => {
-              const val = (e.target as HTMLSelectElement).value;
-              const parts = val.split('|');
-              activeChapter = parts[0] ?? null;
-              activeElement = parts[1] ?? null;
-            }"
+      <div v-if="!isTutorial" class="md:hidden shrink-0 border-b border-border bg-card/70 backdrop-blur">
+        <div class="flex items-center gap-2 px-3 py-2">
+          <button
+            class="p-1 rounded-md text-muted-foreground active:bg-muted"
+            aria-label="Back to course"
+            @click="router.push(`/courses/${courseId}`)"
           >
-            <template v-for="ch in chapters" :key="ch.id">
-              <option
-                v-for="elem in (elements[ch.id] ?? [])"
-                :key="elem.id"
-                :value="`${ch.id}|${elem.id}`"
-              >{{ ch.title }} — {{ elem.title }}</option>
-            </template>
-          </select>
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
+            </svg>
+          </button>
+
+          <!-- Opens the chapter navigator sheet -->
+          <button
+            class="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-1 text-left active:bg-muted"
+            aria-label="Open chapter navigator"
+            @click="openMobileNav"
+          >
+            <svg class="h-4 w-4 shrink-0 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+            </svg>
+            <span class="min-w-0 flex-1">
+              <span class="block truncate text-[10px] uppercase tracking-wide text-muted-foreground">{{ currentChapter?.title }}</span>
+              <span class="block truncate text-xs font-medium text-foreground">{{ currentElement?.title }}</span>
+            </span>
+            <svg class="h-4 w-4 shrink-0 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+
+          <span class="shrink-0 text-[10px] text-muted-foreground">
+            {{ completedElements }}/{{ totalElements }}
+          </span>
         </div>
-        <span class="text-[10px] text-muted-foreground shrink-0">
-          {{ completedElements }}/{{ totalElements }}
-        </span>
+        <div class="h-0.5 bg-muted/40">
+          <div
+            class="progress-fill h-full"
+            :class="progressPercent === 100 ? 'bg-emerald-500' : 'bg-primary'"
+            :style="{ width: `${progressPercent}%` }"
+          />
+        </div>
       </div>
 
       <!-- ============================== -->
@@ -1102,6 +1137,127 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
         </div>
       </div>
     </div>
+
+    <!-- ============================== -->
+    <!-- MOBILE: Chapter navigator sheet -->
+    <!-- ============================== -->
+    <Teleport to="body">
+      <Transition
+        enter-active-class="transition-opacity duration-150 ease-out"
+        enter-from-class="opacity-0"
+        leave-active-class="transition-opacity duration-150 ease-in"
+        leave-to-class="opacity-0"
+      >
+        <div
+          v-if="mobileNavOpen && !isTutorial"
+          class="fixed inset-0 z-[120] bg-black/50 md:hidden"
+          @click.self="mobileNavOpen = false"
+        >
+          <Transition
+            enter-active-class="transition-transform duration-200 ease-out"
+            enter-from-class="translate-y-full"
+            leave-active-class="transition-transform duration-150 ease-in"
+            leave-to-class="translate-y-full"
+            appear
+          >
+            <div
+              v-if="mobileNavOpen"
+              class="absolute inset-x-0 bottom-0 max-h-[80vh] overflow-y-auto rounded-t-2xl border-t border-border bg-card pb-[calc(1rem+var(--sab,env(safe-area-inset-bottom)))]"
+            >
+              <!-- Grab handle + header -->
+              <div class="sticky top-0 z-10 bg-card px-4 pt-2.5 pb-3">
+                <div class="mx-auto mb-3 h-1 w-9 rounded-full bg-muted" />
+                <div class="flex items-center justify-between">
+                  <h2 class="text-sm font-semibold text-foreground">Chapters</h2>
+                  <button
+                    class="rounded-md p-1 text-muted-foreground active:bg-muted"
+                    aria-label="Close chapter navigator"
+                    @click="mobileNavOpen = false"
+                  >
+                    <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+                <div class="mt-2 flex items-center gap-2">
+                  <div class="h-1.5 flex-1 overflow-hidden rounded-full bg-muted/40">
+                    <div
+                      class="progress-fill h-full rounded-full"
+                      :class="progressPercent === 100 ? 'bg-emerald-500' : 'bg-primary'"
+                      :style="{ width: `${progressPercent}%` }"
+                    />
+                  </div>
+                  <span class="text-[11px] text-muted-foreground">{{ completedElements }}/{{ totalElements }}</span>
+                </div>
+              </div>
+
+              <!-- Chapter accordion -->
+              <div class="px-2 pb-2">
+                <div v-for="(ch, chIndex) in chapters" :key="ch.id" class="mb-1">
+                  <button
+                    class="flex w-full items-center gap-2 rounded-lg px-2 py-2.5 text-left active:bg-muted/50"
+                    @click="toggleChapterExpanded(ch.id)"
+                  >
+                    <span
+                      class="flex h-5 w-5 shrink-0 items-center justify-center rounded text-[10px] font-bold"
+                      :class="(elements[ch.id] ?? []).length > 0 && (elements[ch.id] ?? []).every(el => elementStatus(el.id) === 'completed')
+                        ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
+                        : 'bg-muted/40 text-muted-foreground'"
+                    >
+                      <svg v-if="(elements[ch.id] ?? []).length > 0 && (elements[ch.id] ?? []).every(el => elementStatus(el.id) === 'completed')" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
+                      </svg>
+                      <template v-else>{{ chIndex + 1 }}</template>
+                    </span>
+                    <span class="min-w-0 flex-1 truncate text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      {{ ch.title }}
+                    </span>
+                    <svg
+                      class="h-4 w-4 shrink-0 text-muted-foreground transition-transform"
+                      :class="expandedChapters.has(ch.id) ? 'rotate-180' : ''"
+                      fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
+                    >
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </button>
+
+                  <div v-show="expandedChapters.has(ch.id)" class="pl-1">
+                    <button
+                      v-for="el in elements[ch.id] ?? []"
+                      :key="el.id"
+                      class="flex w-full items-center gap-2.5 rounded-lg px-2 py-2.5 text-sm active:bg-muted/50"
+                      :class="activeElement === el.id
+                        ? 'bg-primary/10 text-primary font-medium ring-1 ring-primary/20'
+                        : 'text-muted-foreground'"
+                      @click="selectFromMobileNav(ch.id, el.id)"
+                    >
+                      <span
+                        class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border"
+                        :class="elementStatus(el.id) === 'completed'
+                          ? 'border-emerald-500 bg-emerald-500 text-white'
+                          : activeElement === el.id
+                            ? 'border-primary bg-primary/10'
+                            : elementStatus(el.id) === 'in_progress'
+                              ? 'border-amber-400 bg-amber-400/10'
+                              : 'border-border'"
+                      >
+                        <svg v-if="elementStatus(el.id) === 'completed'" class="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
+                          <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
+                        </svg>
+                        <svg v-else class="h-2.5 w-2.5" :class="activeElement === el.id ? '' : 'opacity-50'" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                          <path stroke-linecap="round" stroke-linejoin="round" :d="elementTypeIcon(el.element_type)" />
+                        </svg>
+                      </span>
+                      <span class="truncate text-left text-[13px]">{{ el.title }}</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </Transition>
+        </div>
+      </Transition>
+    </Teleport>
   </div>
 </template>
 

@@ -8,7 +8,7 @@ import { useContentSync } from '@/composables/useContentSync'
 import { usePlatform } from '@/composables/usePlatform'
 import { useSettings } from '@/composables/useSettings'
 import { useTargets } from '@/composables/useTargets'
-import { StatusBadge, AppButton } from '@/components/ui'
+import { StatusBadge, AppButton, InfoTip } from '@/components/ui'
 import { sanitizeSvg } from '@/utils/sanitize'
 import CourseCard from '@/components/course/CourseCard.vue'
 import type {
@@ -81,7 +81,9 @@ async function loadCockpit() {
   targetPaths.value = map
 }
 
-// Diagnostic log viewer (for iOS debugging)
+// Diagnostic log viewer (for iOS debugging). Dev-only — never shown in
+// production/alpha builds.
+const isDev = import.meta.env.DEV
 const showDiag = ref(false)
 const diagLog = ref<string | null>(null)
 async function readDiagLog() {
@@ -128,6 +130,50 @@ const recommendedCourses = computed(() =>
 const tutorials = computed(() =>
   courses.value.filter(c => c.kind === 'tutorial')
 )
+
+// Single highest-value next action, surfaced as the dashboard hero. Priority:
+// resume an in-progress course → set a first target → start a first course →
+// browse. Keeps the landing screen action-oriented rather than passive.
+interface HeroAction {
+  eyebrow: string
+  title: string
+  cta: string
+  to: string
+}
+const heroAction = computed<HeroAction>(() => {
+  const enrolled = enrollments.value[0]
+  if (enrolled) {
+    return {
+      eyebrow: 'Pick up where you left off',
+      title: enrolledCourseMap.value[enrolled.course_id]?.title ?? 'Your course',
+      cta: 'Resume course',
+      to: `/learn/${enrolled.course_id}`,
+    }
+  }
+  if (targets.value.length === 0) {
+    return {
+      eyebrow: 'Get started',
+      title: 'Set your first learning target',
+      cta: 'Browse skills',
+      to: '/skills',
+    }
+  }
+  const next = recommendedCourses.value[0]
+  if (next) {
+    return {
+      eyebrow: 'Recommended for you',
+      title: next.title,
+      cta: 'Open course',
+      to: `/courses/${next.id}`,
+    }
+  }
+  return {
+    eyebrow: 'Explore',
+    title: 'Discover courses from your peers',
+    cta: 'Browse courses',
+    to: '/courses',
+  }
+})
 
 onMounted(async () => {
   try {
@@ -204,25 +250,91 @@ onMounted(async () => {
       </button>
     </div>
 
+    <!-- ═══ Hero: single highest-value next action ═══ -->
+    <button
+      v-if="!loading"
+      class="home-hero group mb-6"
+      @click="router.push(heroAction.to)"
+    >
+      <div class="min-w-0 text-left">
+        <p class="home-hero-eyebrow">{{ heroAction.eyebrow }}</p>
+        <p class="home-hero-title">{{ heroAction.title }}</p>
+      </div>
+      <span class="home-hero-cta">
+        {{ heroAction.cta }}
+        <svg class="h-4 w-4 transition-transform group-hover:translate-x-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14m0 0l-6-6m6 6l-6 6" />
+        </svg>
+      </span>
+    </button>
+
     <!-- ═══ Reputation stat band ═══ -->
     <section class="mb-6">
       <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <button class="stat-card" @click="router.push('/dashboard/reputation')">
-          <span class="stat-label">Teaching impact</span>
-          <span class="stat-value">{{ teachingImpact }}</span>
-        </button>
-        <button class="stat-card" @click="router.push('/dashboard/reputation')">
-          <span class="stat-label">Learning impact</span>
-          <span class="stat-value">{{ learningImpact }}</span>
-        </button>
-        <button class="stat-card" @click="router.push('/skills')">
-          <span class="stat-label">Skills proven</span>
-          <span class="stat-value">{{ skillsProven }}</span>
-        </button>
-        <button class="stat-card" @click="router.push('/dashboard/reputation')">
-          <span class="stat-label">Confidence</span>
-          <span class="stat-value">{{ avgConfidence }}%</span>
-        </button>
+        <div class="relative">
+          <button class="stat-card w-full" @click="router.push('/dashboard/reputation')">
+            <span class="stat-head">
+              <span class="stat-icon stat-icon--teaching">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path stroke-linecap="round" stroke-linejoin="round" d="M12 14l9-5-9-5-9 5 9 5z"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 14l6.16-3.42A12 12 0 0112 21a12 12 0 01-6.16-10.42L12 14z"/></svg>
+              </span>
+              <span class="stat-label">Teaching impact</span>
+            </span>
+            <span class="stat-value">{{ teachingImpact }}</span>
+          </button>
+          <InfoTip
+            class="absolute right-2 top-2"
+            label="What is teaching impact?"
+            text="Reputation you've earned by teaching — the weighted value of credentials learners claimed from your courses and tutorials."
+          />
+        </div>
+        <div class="relative">
+          <button class="stat-card w-full" @click="router.push('/dashboard/reputation')">
+            <span class="stat-head">
+              <span class="stat-icon stat-icon--learning">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6.5C10.5 5.5 8.5 5 6.5 5 5.5 5 4.7 5.1 4 5.3v12.4c.7-.2 1.5-.3 2.5-.3 2 0 4 .5 5.5 1.5m0-13.4c1.5-1 3.5-1.5 5.5-1.5 1 0 1.8.1 2.5.3v12.4c-.7-.2-1.5-.3-2.5-.3-2 0-4 .5-5.5 1.5m0-13.4V19.9"/></svg>
+              </span>
+              <span class="stat-label">Learning impact</span>
+            </span>
+            <span class="stat-value">{{ learningImpact }}</span>
+          </button>
+          <InfoTip
+            class="absolute right-2 top-2"
+            label="What is learning impact?"
+            text="Reputation you've earned as a learner — the weighted value of credentials you've claimed by completing courses."
+          />
+        </div>
+        <div class="relative">
+          <button class="stat-card w-full" @click="router.push('/skills')">
+            <span class="stat-head">
+              <span class="stat-icon stat-icon--skills">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.5l2 2 4-4.5M12 3l2.09 1.26 2.43-.1.99 2.22 1.99 1.4-.55 2.37.55 2.37-1.99 1.4-.99 2.22-2.43-.1L12 21l-2.09-1.26-2.43.1-.99-2.22-1.99-1.4.55-2.37L4.5 10l1.99-1.4.99-2.22 2.43.1L12 3z"/></svg>
+              </span>
+              <span class="stat-label">Skills proven</span>
+            </span>
+            <span class="stat-value">{{ skillsProven }}</span>
+          </button>
+          <InfoTip
+            class="absolute right-2 top-2"
+            label="What does skills proven mean?"
+            text="Distinct skills backed by at least one verifiable credential in your graph."
+          />
+        </div>
+        <div class="relative">
+          <button class="stat-card w-full" @click="router.push('/dashboard/reputation')">
+            <span class="stat-head">
+              <span class="stat-icon stat-icon--confidence">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3l7 3v5c0 4.5-3 8.5-7 10-4-1.5-7-5.5-7-10V6l7-3z"/><path stroke-linecap="round" stroke-linejoin="round" d="M9.5 12l1.8 1.8 3.2-3.6"/></svg>
+              </span>
+              <span class="stat-label">Confidence</span>
+            </span>
+            <span class="stat-value">{{ avgConfidence }}%</span>
+          </button>
+          <InfoTip
+            class="absolute right-2 top-2"
+            label="What is confidence?"
+            text="Average integrity score across your credentials — how strongly the network trusts the assessments behind them."
+          />
+        </div>
       </div>
     </section>
 
@@ -275,6 +387,9 @@ onMounted(async () => {
           <span class="text-2xl leading-none text-muted-foreground">+</span>
           <span class="text-sm font-medium text-muted-foreground">Add a target</span>
         </button>
+
+        <!-- trailing gap: WebKit drops a scroll container's right padding -->
+        <div class="w-4 shrink-0 sm:hidden" aria-hidden="true" />
       </div>
     </section>
 
@@ -407,6 +522,9 @@ onMounted(async () => {
               </div>
             </div>
           </router-link>
+
+          <!-- trailing gap: WebKit drops a scroll container's right padding -->
+          <div class="w-4 shrink-0 sm:hidden" aria-hidden="true" />
         </div>
       </section>
 
@@ -457,6 +575,9 @@ onMounted(async () => {
               </div>
             </div>
           </router-link>
+
+          <!-- trailing gap: WebKit drops a scroll container's right padding -->
+          <div class="w-4 shrink-0 sm:hidden" aria-hidden="true" />
         </div>
       </section>
 
@@ -504,7 +625,7 @@ onMounted(async () => {
 
     <!-- Floating diagnostic button (mobile only, for iOS freeze debugging) -->
     <button
-      v-if="isMobilePlatform"
+      v-if="isMobilePlatform && isDev"
       class="fixed bottom-20 right-3 z-50 flex h-8 w-8 items-center justify-center rounded-full bg-destructive/80 text-white shadow-lg text-xs font-bold"
       @click="readDiagLog"
       title="Read diag.log"
@@ -543,11 +664,60 @@ onMounted(async () => {
   }
 }
 
+/* Hero: highest-value next action */
+.home-hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  width: 100%;
+  padding: 1.1rem 1.25rem;
+  border-radius: 1rem;
+  text-align: left;
+  color: white;
+  background:
+    radial-gradient(120% 140% at 0% 0%, color-mix(in srgb, var(--app-accent) 65%, transparent), transparent 60%),
+    linear-gradient(120deg, color-mix(in srgb, var(--app-primary) 92%, black), color-mix(in srgb, var(--app-primary) 70%, black));
+  box-shadow: 0 8px 24px -10px color-mix(in srgb, var(--app-primary) 60%, transparent);
+  transition: box-shadow 0.15s, transform 0.15s;
+}
+.home-hero:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 30px -10px color-mix(in srgb, var(--app-primary) 70%, transparent);
+}
+.home-hero-eyebrow {
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, white 80%, transparent);
+}
+.home-hero-title {
+  margin-top: 0.15rem;
+  font-size: 1.1rem;
+  font-weight: 600;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.home-hero-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-shrink: 0;
+  padding: 0.5rem 0.9rem;
+  border-radius: 0.625rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  background: rgb(255 255 255 / 0.16);
+}
+
 /* Reputation stat band */
 .stat-card {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  gap: 0.4rem;
   padding: 0.75rem 0.9rem;
   border-radius: 0.75rem;
   background: var(--app-card);
@@ -560,6 +730,40 @@ onMounted(async () => {
 .stat-card:hover {
   box-shadow: 0 4px 12px rgb(0 0 0 / 8%);
   transform: translateY(-1px);
+}
+.stat-head {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+.stat-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  flex-shrink: 0;
+  border-radius: 0.5rem;
+}
+.stat-icon svg {
+  width: 0.9rem;
+  height: 0.9rem;
+}
+.stat-icon--teaching {
+  background: color-mix(in srgb, var(--app-primary) 15%, transparent);
+  color: var(--app-primary);
+}
+.stat-icon--learning {
+  background: color-mix(in srgb, var(--app-accent) 15%, transparent);
+  color: var(--app-accent);
+}
+.stat-icon--skills {
+  background: color-mix(in srgb, var(--app-success) 15%, transparent);
+  color: var(--app-success);
+}
+.stat-icon--confidence {
+  background: color-mix(in srgb, var(--app-governance) 15%, transparent);
+  color: var(--app-governance);
 }
 .stat-label {
   font-size: 0.7rem;
