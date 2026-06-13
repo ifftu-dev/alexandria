@@ -14,3 +14,9 @@ rustflags = []
 
 [target.armv7-linux-androideabi]
 rustflags = []
+
+# iOS device target. gemm-f16's fp16 NEON intrinsics (gemm-common simd.rs)
+# require the +fullfp16 target-feature to compile; Apple Silicon all supports
+# FP16, and the app's candle use is F32-only so these kernels never execute.
+[target.aarch64-apple-ios]
+rustflags = ["-C", "target-feature=+fp16,+fullfp16"]
