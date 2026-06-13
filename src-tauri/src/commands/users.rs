@@ -157,6 +157,9 @@ pub async fn fetch_user_profile(
 
     let node_guard = state.p2p_node.lock().await;
     let node = node_guard.as_ref().ok_or("P2P node not running")?;
+    // Discover + dial Alexandria peers we haven't met yet (the owner
+    // of this DID may not be in our routing table), then broadcast.
+    let _ = node.discover_peers(std::time::Duration::from_secs(4)).await;
     let peers = node
         .known_peers()
         .await

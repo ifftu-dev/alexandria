@@ -331,6 +331,11 @@ pub enum SwarmCommand {
     /// Get every peer in the Kademlia routing table (connected or not).
     /// Request-response sends to these auto-dial via their known addrs.
     KnownPeers { reply: mpsc::Sender<Vec<PeerId>> },
+    /// Kick an on-demand provider-discovery sweep: republish our own
+    /// provider record + query for Alexandria peers. Discovered peers
+    /// are dialed by the existing GetProviders handler. Fire-and-forget
+    /// — the caller settles, then reads `KnownPeers`.
+    DiscoverPeers { reply: mpsc::Sender<()> },
     /// Send a vc-fetch request to a peer. The reply oneshot
     /// resolves when the peer's response (or an outbound failure)
     /// comes back.
@@ -1353,6 +1358,19 @@ async fn swarm_event_loop(
                         }
                         let _ = reply.send(peers).await;
                     }
+                    Some(SwarmCommand::DiscoverPeers { reply }) => {
+                        // Re-announce + query. Results flow to the
+                        // GetProviders arm, which dials each discovered
+                        // peer (direct + relay circuit). Also nudge a
+                        // bootstrap so the routing table widens.
+                        refresh_provider_records(
+                            &mut swarm,
+                            &namespace_key,
+                            "on-demand fetch discovery",
+                        );
+                        let _ = swarm.behaviour_mut().kademlia.bootstrap();
+                        let _ = reply.send(()).await;
+                    }
                     Some(SwarmCommand::SendFetchRequest { peer, request, reply }) => {
                         let request_id = swarm
                             .behaviour_mut()
@@ -2374,6 +2392,25 @@ impl P2pNode {
             .map_err(|_| NetworkError::NotRunning)?;
         let peers = reply_rx.recv().await.ok_or(NetworkError::NotRunning)?;
         Ok(peers.iter().map(|p| p.to_string()).collect())
+    }
+
+    /// Kick an on-demand provider-discovery sweep and let it settle so
+    /// freshly-discovered peers (e.g. a profile/graph owner this node
+    /// hadn't met yet) get dialed and added to the routing table before
+    /// a broadcast. Behind a user-initiated fetch spinner, so the
+    /// settle delay is acceptable.
+    pub async fn discover_peers(&self, settle: Duration) -> Result<(), NetworkError> {
+        if !self.running {
+            return Err(NetworkError::NotRunning);
+        }
+        let (reply_tx, mut reply_rx) = mpsc::channel(1);
+        self.command_tx
+            .send(SwarmCommand::DiscoverPeers { reply: reply_tx })
+            .await
+            .map_err(|_| NetworkError::NotRunning)?;
+        let _ = reply_rx.recv().await;
+        tokio::time::sleep(settle).await;
+        Ok(())
     }
 
     /// Send a graph-fetch request to a specific peer over

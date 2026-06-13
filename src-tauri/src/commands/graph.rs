@@ -79,10 +79,11 @@ pub async fn fetch_public_graph(
 
     let node_guard = state.p2p_node.lock().await;
     let node = node_guard.as_ref().ok_or("P2P node not running")?;
-    // Known peers = current connections + the Kademlia routing table.
-    // Idle connections get reaped between UI actions, so broadcasting
-    // only to live connections misses peers we can perfectly well
-    // reach — request-response auto-dials table entries.
+    // Discover + dial peers we haven't met yet (the graph owner may not
+    // be in our routing table), then broadcast. Known peers = current
+    // connections + Kademlia routing table; request-response auto-dials
+    // table entries.
+    let _ = node.discover_peers(std::time::Duration::from_secs(4)).await;
     let peers = node
         .known_peers()
         .await
