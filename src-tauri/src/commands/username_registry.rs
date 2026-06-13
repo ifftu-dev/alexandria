@@ -604,3 +604,24 @@ pub async fn set_username(
 
     Ok(claim)
 }
+
+/// Resolve `@username → DID` via the relays' HTTP registry endpoint.
+/// Last-resort binding source when the signed claim isn't fetchable
+/// from the DHT (slow mobile link, sparse DHT). Returns the DID the
+/// first answering relay reports as the current holder.
+pub async fn resolve_username_did_via_relay(username: &str) -> Option<String> {
+    let username = username.trim().trim_start_matches('@').to_lowercase();
+    for endpoint in crate::p2p::discovery::relay_http_endpoints() {
+        let url = format!("{endpoint}/username/{username}");
+        let resp = timeout(Duration::from_secs(5), async {
+            reqwest::get(&url).await?.json::<serde_json::Value>().await
+        })
+        .await;
+        if let Ok(Ok(body)) = resp {
+            if let Some(did) = body.get("did").and_then(|v| v.as_str()) {
+                return Some(did.to_string());
+            }
+        }
+    }
+    None
+}

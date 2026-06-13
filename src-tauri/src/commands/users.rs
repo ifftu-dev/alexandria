@@ -100,6 +100,15 @@ pub async fn fetch_user_profile(
             {
                 did = Some(claim.did);
             }
+            // DHT reads can be slow/unreachable on mobile links. The
+            // relays' HTTP registry maps @username → DID directly — a
+            // last-resort binding source so profile lookup works even
+            // when the signed claim isn't fetchable from the DHT in
+            // time. (Authority still holds: profile-fetch only returns
+            // a profile from the node that actually owns the DID.)
+            if did.is_none() {
+                did = super::username_registry::resolve_username_did_via_relay(u).await;
+            }
         }
     }
 
