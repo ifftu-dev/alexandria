@@ -64,14 +64,20 @@ onMounted(async () => {
     did.value = d
     graph.value = g
     reputation.value = rep
-    if (id?.username) {
-      const claim = await invoke<UsernameClaim | null>('resolve_username', {
-        username: id.username,
-      }).catch(() => null)
-      registry.value = claim && claim.did === d ? registryStanding(claim) : null
-    }
   } finally {
     loading.value = false
+  }
+
+  // Registry standing is a secondary badge that requires a DHT/relay
+  // lookup (slow on mobile links). Resolve it in the background so the
+  // profile renders instantly from local data instead of blocking the
+  // spinner on a network round-trip.
+  const id = identity.value
+  if (id?.username) {
+    const claim = await invoke<UsernameClaim | null>('resolve_username', {
+      username: id.username,
+    }).catch(() => null)
+    registry.value = claim && claim.did === did.value ? registryStanding(claim) : null
   }
 })
 </script>
