@@ -2,6 +2,7 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
+import Starfield from '@/components/auth/Starfield.vue'
 import AddProfileTile from '@/components/profile/AddProfileTile.vue'
 import ProfileAvatar from '@/components/profile/ProfileAvatar.vue'
 import ProfileTile from '@/components/profile/ProfileTile.vue'
@@ -194,10 +195,12 @@ function onKeydown(event: KeyboardEvent) {
 
 <template>
   <div
-    class="min-h-screen flex items-center justify-center p-6 safe-area-top"
+    class="min-h-screen flex items-center justify-center p-6 safe-area-top relative overflow-hidden"
     @keydown="onKeydown"
   >
-    <div class="w-full max-w-3xl">
+    <Starfield />
+
+    <div class="w-full max-w-3xl relative z-10">
       <header class="text-center mb-12">
         <h1 class="text-3xl font-semibold text-foreground">Who's learning today?</h1>
         <p class="text-muted-foreground mt-2">
