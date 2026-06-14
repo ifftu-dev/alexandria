@@ -23,7 +23,12 @@ Multi-user accounts let one device host several learners, each with their own cr
 - Deep linking (covered in a follow-up RFC; multi-profile must land first because deep links queue until a profile is unlocked).
 - Cross-profile content deduplication. Each profile keeps its own iroh blob cache for now; a shared read-only blob pool can come later.
 - Per-profile parental controls / content filtering.
-- Quick-switch by biometric only (deferred — Phase 2.5).
+
+> **Update:** biometric unlock at the picker has since shipped (see _Security
+> properties_ below). Selecting a profile offers Touch ID / Face ID, with the
+> vault password held in the OS keychain keyed per profile. Fully
+> password-free switching across _every_ profile still depends on each having
+> enrolled biometrics on the device.
 
 ## Architecture
 
@@ -213,7 +218,7 @@ Keyboard shortcut: `Cmd/Ctrl + Shift + U` invokes Switch user from anywhere.
 - **In memory:** only the active profile's keystore and database connection are held. Lock zeroes them.
 - **Auto-lock:** existing inactivity timeout applies, scoped to the active profile.
 - **Peer ID rotation:** distinct profiles cannot be linked through libp2p observation. Two profiles on one device look like two separate devices to the network.
-- **No "remember me":** the picker shows display names by default but does not auto-fill passwords. Quick-switch by biometric is deferred to a Phase 2.5 RFC.
+- **No "remember me":** the picker shows display names by default but does not auto-fill passwords. Biometric unlock is the password-free path — when a profile has enrolled Touch ID / Face ID, selecting it prompts the OS and retrieves that profile's vault password from the keychain. Credentials are keyed per profile (`vault_password_<profileId>`) so one device can biometric-unlock any enrolled profile; see `useBiometricVault.ts` and `ProfileSelect.vue`.
 - **Delete profile:** wipes the profile's directory and removes its index entry. Best-effort overwrite (not cryptographic erasure — the user already has password protection).
 
 ## File-surface impact
@@ -239,7 +244,6 @@ From the investigation pass:
 
 - Deep linking (`tauri-plugin-deep-link`). Requires multi-profile because cold-start deep links must queue per-profile.
 - Push notifications. See [push-notifications-rfc.md](./push-notifications-rfc.md) for the researched architecture (relay-mediated APNs + FCM + UnifiedPush + native WS).
-- Quick-switch via biometric.
 - Cross-profile content deduplication.
 
 ## Test plan

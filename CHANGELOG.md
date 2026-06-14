@@ -7,6 +7,40 @@ and this project loosely follows [Semantic Versioning](https://semver.org/spec/v
 
 ## [Unreleased]
 
+### Launch-readiness UI pass + biometric unlock
+
+User-facing polish for the alpha, plus a fix that restored biometric
+unlock after the multi-user picker landed.
+
+**UI:**
+
+- Preview/Alpha badge in the top bar (exact version shown in the tooltip).
+- Dashboard: a hero "next action" card (resume course / set a target /
+  start a course) and accent-iconed stat tiles.
+- New reusable `InfoTip` popover (touch-safe, no popover library) with
+  explanations on the reputation metrics.
+- Mobile horizontal rails get correct right-edge padding (WebKit drops a
+  scroll container's `padding-right`).
+- Course player: the mobile chapter `<select>` is replaced by a bottom-sheet
+  chapter navigator (accordion + per-chapter progress).
+- Profile selection screen gains the onboarding Starfield background.
+- The diagnostic overlay is gated behind `import.meta.env.DEV`.
+
+**Auth:**
+
+- Biometric unlock restored. The multi-user picker (`ProfileSelect`) replaced
+  the old unlock screen but never wired up biometric retrieval; Touch ID /
+  Face ID now fires at the picker again.
+- Keychain credentials are keyed per profile (`vault_password_<profileId>`),
+  so any enrolled profile on a multi-user device can biometric-unlock — not
+  just the last one enabled.
+
+**Build:**
+
+- `+fullfp16` enabled for `aarch64-apple-ios` so `gemm-f16` compiles for iOS
+  device builds (its fp16 NEON intrinsics require the target-feature; the
+  app's candle use is F32-only so the kernels never execute).
+
 ### Unified per-profile settings store (branch `feat/synced-settings`)
 
 Every user-controlled preference now lives in one place — the

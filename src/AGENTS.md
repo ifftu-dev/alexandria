@@ -77,7 +77,8 @@ No Pinia/Vuex. All state as `readonly()` singletons.
 // src/components/ui/index.ts exports:
 AppButton, AppModal, AppInput, AppSpinner, AppAlert, 
 AppBadge, AppTabs, AppTextarea, ConfirmDialog, 
-DataRow, EmptyState, StatusBadge
+DataRow, EmptyState, InfoTip, StatusBadge, 
+ProvenanceBadge
 ```
 
 ## COMPLEXITY HOTSPOTS
