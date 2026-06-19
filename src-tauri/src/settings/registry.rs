@@ -411,6 +411,20 @@ pub mod keys {
         default: || false,
     };
 
+    /// Last-known-good on-chain relay registry, cached so the authorized
+    /// receipt-issuer set survives a cold start before the chain fetch
+    /// completes (and an offline session entirely). JSON:
+    /// `{ "seq": N, "issuers": ["<peer_id>", …] }`. Internal — written by
+    /// the relay-registry refresh, read at p2p start.
+    pub const P2P_RELAY_REGISTRY_CACHE: SettingKey<JsonSetting> = SettingKey {
+        key: "p2p.relay_registry_cache",
+        scope: Scope::Device,
+        category: "Network",
+        label: "Relay registry cache",
+        description: "Cached on-chain relay registry (internal).",
+        default: || JsonSetting(serde_json::json!({ "seq": 0, "issuers": [] })),
+    };
+
     /// Device-local cache of the active profile's `did:key`. Written by
     /// `get_local_did` so the swarm event loop (which has no keystore
     /// access) can answer graph-fetch requests for its own owner.
@@ -476,6 +490,7 @@ pub fn all_entries(
         entry!(WINDOW_GEOMETRY),
         entry!(P2P_EXTRA_RELAYS),
         entry!(P2P_DHT_SERVER),
+        entry!(P2P_RELAY_REGISTRY_CACHE),
         entry!(INSTRUCTOR_GRAPH_PREFS),
         entry!(LEARNER_TARGETS),
         entry!(IDENTITY_LOCAL_DID),
@@ -516,6 +531,7 @@ pub fn lookup_meta(key: &str) -> Option<(Scope, &'static str)> {
     check!(WINDOW_GEOMETRY);
     check!(P2P_EXTRA_RELAYS);
     check!(P2P_DHT_SERVER);
+    check!(P2P_RELAY_REGISTRY_CACHE);
     check!(INSTRUCTOR_GRAPH_PREFS);
     check!(LEARNER_TARGETS);
     check!(IDENTITY_LOCAL_DID);
