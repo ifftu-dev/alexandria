@@ -5,8 +5,11 @@
 //! first-seen time, relay peer id). It lifts a claim from tier 0
 //! (bare, self-asserted time) to tier 1 (relay-attested time) in the
 //! deterministic conflict ordering. Receipts are only trusted from
-//! the configured relay set ([`super::discovery::relay_peer_ids`]) —
-//! the relay's ed25519 PeerId embeds its public key, so verification
+//! *authorized issuers* ([`super::relay_registry::is_authorized_issuer`])
+//! — genesis operator relays plus the governed on-chain registry. This
+//! is narrower than the connectivity relay set, so a community relay
+//! anyone can run cannot forge handle ownership by issuing receipts.
+//! The relay's ed25519 PeerId embeds its public key, so verification
 //! needs no extra key distribution.
 
 use libp2p::PeerId;
@@ -40,7 +43,7 @@ pub fn verify_receipt(claim_sig: &str, receipt: &RelayReceipt) -> bool {
     let Ok(peer_id) = receipt.relay_peer_id.parse::<PeerId>() else {
         return false;
     };
-    if !super::discovery::relay_peer_ids().contains(&peer_id) {
+    if !super::relay_registry::is_authorized_issuer(&peer_id) {
         return false;
     }
     // Ed25519 peer ids use an identity multihash — the public key is
