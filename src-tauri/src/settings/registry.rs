@@ -399,16 +399,19 @@ pub mod keys {
         default: || JsonSetting(serde_json::json!([])),
     };
 
-    /// Desktop-only: serve the Kademlia DHT (server mode + persistent
-    /// record mirror). Mobile is always a pure client — backgrounded
-    /// apps churn the routing table and degrade everyone's lookups.
+    /// Desktop-only: contribute to running the network — relay traffic
+    /// for NATted peers (circuit relay) and serve the Kademlia DHT
+    /// (server mode + persistent record mirror). Mobile is always a pure
+    /// client: backgrounded apps churn the routing table, degrade
+    /// everyone's lookups, and can't be reached to relay. Defaults on so
+    /// the network has capacity; users can opt out to save bandwidth.
     pub const P2P_DHT_SERVER: SettingKey<bool> = SettingKey {
         key: "p2p.dht_server",
         scope: Scope::Device,
         category: "Network",
-        label: "Serve the DHT (desktop only)",
-        description: "Run Kademlia in server mode and persist records locally, strengthening the network's storage layer.",
-        default: || false,
+        label: "Help run the network",
+        description: "Relay traffic for peers behind NAT and serve the directory (DHT). Uses some bandwidth and keeps connections open while the app is running, and peers you relay can see your IP address. Desktop only — turning this off still lets you use the network normally.",
+        default: || true,
     };
 
     /// Device-local cache of the active profile's `did:key`. Written by

@@ -250,7 +250,11 @@ pub async fn p2p_start(app: AppHandle, state: State<'_, AppState>) -> Result<Str
                 }
             }
             crate::p2p::discovery::set_extra_relays(extras);
-            serve
+            // Contributing (relay-serving + DHT-serving) is desktop-only.
+            // Mobile stays a pure client regardless of the stored setting:
+            // backgrounded apps churn the routing table and can't be
+            // reached to relay anyway.
+            serve && cfg!(desktop)
         };
 
         match network::start_node_with_db(
