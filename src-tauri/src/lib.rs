@@ -1062,6 +1062,8 @@ pub fn run() {
             commands::p2p::p2p_stop,
             commands::p2p::p2p_status,
             commands::p2p::p2p_peers,
+            commands::p2p::get_extra_relays,
+            commands::p2p::save_extra_relays,
             // Catalog
             commands::catalog::search_catalog,
             commands::catalog::get_catalog_entry,

@@ -318,6 +318,68 @@ pub async fn p2p_peers(state: State<'_, AppState>) -> Result<Vec<String>, String
     }
 }
 
+/// Return the user-configured extra (community) relays. These extend the
+/// built-in operator relays for *connectivity* (circuit relay + DHT) —
+/// they do NOT gain username-receipt trust (that stays with the
+/// on-chain registry).
+#[tauri::command]
+pub async fn get_extra_relays(
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::p2p::discovery::ExtraRelay>, String> {
+    let guard = state.db.lock().map_err(|_| "database lock poisoned")?;
+    let db = guard.as_ref().ok_or("database not initialized")?;
+    let raw = crate::settings::SettingsStore::get(
+        db.conn(),
+        crate::settings::registry::keys::P2P_EXTRA_RELAYS,
+    )
+    .0;
+    Ok(serde_json::from_value(raw).unwrap_or_default())
+}
+
+/// Validate + persist the extra-relay set, and apply it to the running
+/// node's discovery surface immediately. New circuit reservations are
+/// established on the next p2p start. Returns the saved list.
+#[tauri::command]
+pub async fn save_extra_relays(
+    state: State<'_, AppState>,
+    relays: Vec<crate::p2p::discovery::ExtraRelay>,
+) -> Result<Vec<crate::p2p::discovery::ExtraRelay>, String> {
+    use libp2p::PeerId;
+
+    // Validate every entry up front so a single bad row rejects the
+    // whole save with an actionable message (rather than silently
+    // dropping it the way the discovery filter does).
+    for (i, r) in relays.iter().enumerate() {
+        if r.peer_id.parse::<PeerId>().is_err() {
+            return Err(format!("relay {}: invalid peer id '{}'", i + 1, r.peer_id));
+        }
+        if r.host.trim().is_empty() {
+            return Err(format!("relay {}: host is empty", i + 1));
+        }
+        if r.port == 0 {
+            return Err(format!("relay {}: port must be non-zero", i + 1));
+        }
+    }
+
+    {
+        let guard = state.db.lock().map_err(|_| "database lock poisoned")?;
+        let db = guard.as_ref().ok_or("database not initialized")?;
+        crate::settings::SettingsStore::set(
+            db.conn(),
+            crate::settings::registry::keys::P2P_EXTRA_RELAYS,
+            crate::settings::registry::JsonSetting(
+                serde_json::to_value(&relays).map_err(|e| e.to_string())?,
+            ),
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
+    // Apply to the live discovery surface so availability/bootstrap pick
+    // it up without a restart (circuit reservations come on next start).
+    crate::p2p::discovery::set_extra_relays(relays.clone());
+    Ok(relays)
+}
+
 #[cfg(test)]
 mod wiring_tests {
     //! Source-level regression test for the bug where the production
