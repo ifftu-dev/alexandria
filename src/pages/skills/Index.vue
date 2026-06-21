@@ -158,23 +158,6 @@ const availableSkillIdSet = computed(() => {
   return set
 })
 
-const personalSkillIdSet = computed(() => {
-  const include = new Set<string>()
-  const earned = earnedSkillIdSet.value
-
-  function includePrereqClosure(skillId: string, seen = new Set<string>()) {
-    if (seen.has(skillId)) return
-    seen.add(skillId)
-    include.add(skillId)
-    const prereqs = prereqMap.value.get(skillId) ?? []
-    for (const p of prereqs) includePrereqClosure(p, seen)
-  }
-
-  for (const id of earned) includePrereqClosure(id)
-  for (const id of availableSkillIdSet.value) include.add(id)
-  return include
-})
-
 const earnedSkillsCount = computed(() => earnedSkillIdSet.value.size)
 const availableSkillsCount = computed(() => availableSkillIdSet.value.size)
 const lockedSkillsCount = computed(() =>
@@ -190,18 +173,17 @@ const { buildAdjacency, createHoverHandler, renderNode, renderLink } = useSkillG
 
 const forceGraphNodes = computed(() => {
   const earned = earnedSkillIdSet.value
-  const ids = personalSkillIdSet.value
-  return skills.value
-    .filter(s => ids.has(s.id))
-    .map(skill => {
-      const prereqs = prereqMap.value.get(skill.id) ?? []
-      const status = earned.has(skill.id)
-        ? 'earned'
-        : (prereqs.length === 0 || prereqs.every(p => earned.has(p)))
-            ? 'available'
-            : 'locked'
-      return { id: skill.id, name: skill.name, routeId: skill.id, status, prerequisites: prereqs }
-    })
+  // Full taxonomy (respecting the active field/subject/search filter),
+  // matching the sidebar graph. Status colours every node.
+  return filteredSkills.value.map(skill => {
+    const prereqs = prereqMap.value.get(skill.id) ?? []
+    const status = earned.has(skill.id)
+      ? 'earned'
+      : (prereqs.length === 0 || prereqs.every(p => earned.has(p)))
+          ? 'available'
+          : 'locked'
+    return { id: skill.id, name: skill.name, routeId: skill.id, status, prerequisites: prereqs }
+  })
 })
 
 function destroyForceGraph() {
@@ -220,10 +202,11 @@ async function initForceGraph() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const ForceGraph = (await import('force-graph')).default as any
 
+  const visibleIds = new Set(forceGraphNodes.value.map(n => n.id))
   const links: Array<{ source: string; target: string }> = []
   for (const node of forceGraphNodes.value) {
     for (const prereqId of node.prerequisites) {
-      if (personalSkillIdSet.value.has(prereqId)) {
+      if (visibleIds.has(prereqId)) {
         links.push({ source: prereqId, target: node.id })
       }
     }
