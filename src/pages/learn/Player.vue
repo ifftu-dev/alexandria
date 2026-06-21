@@ -58,6 +58,29 @@ async function claimCredential() {
     claiming.value = false
   }
 }
+
+// "Finish Course" on the last element: mark the final content element
+// complete (so the course can qualify), then claim the on-chain
+// completion credential. The earned credential surfaces on the course
+// page, so navigate there once the claim resolves. On a claim error we
+// stay put so the message is visible.
+async function finishCourse() {
+  if (
+    enrollment.value &&
+    isContentElement.value &&
+    currentElement.value &&
+    elementStatus(currentElement.value.id) !== 'completed'
+  ) {
+    await markComplete()
+  }
+  await refreshCompletionStatus()
+  if (completionStatus.value?.ready) {
+    await claimCredential()
+    if (claimError.value) return
+  }
+  router.push(`/courses/${courseId}`)
+}
+
 const sentinelStarted = ref(false)
 const downloadingElementId = ref<string | null>(null)
 const downloadError = ref<string | null>(null)
@@ -1086,6 +1109,9 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
         <!-- NAVIGATION FOOTER              -->
         <!-- ============================== -->
         <div v-if="currentElement" class="flex-shrink-0 border-t border-border bg-card/60 px-3 pt-2 pb-[calc(0.5rem+var(--sab,env(safe-area-inset-bottom)))] md:px-6 md:py-3">
+          <p v-if="claimError" class="mx-auto mb-2 max-w-4xl text-xs text-destructive">
+            Couldn't finish the course: {{ claimError }}
+          </p>
           <div :class="['mx-auto flex items-center justify-between gap-2', isVideoElement ? 'max-w-7xl' : 'max-w-4xl']">
             <!-- Previous -->
             <AppButton variant="secondary" size="sm" :disabled="!hasPrevElement" @click="goToPrev">
@@ -1123,7 +1149,8 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
             <AppButton
               v-if="isLastElement"
               size="sm"
-              @click="router.push(`/courses/${courseId}`)"
+              :loading="claiming"
+              @click="finishCourse"
             >
               Finish Course
               <svg class="ml-1.5 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">

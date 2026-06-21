@@ -584,7 +584,7 @@ onUnmounted(() => {
     <div
       v-else-if="videoUrl"
       ref="wrapperRef"
-      class="group relative aspect-video overflow-hidden bg-black md:rounded-xl"
+      class="group relative aspect-video overflow-hidden bg-black"
       :class="pseudoFullscreen ? 'fixed inset-0 z-[80] aspect-auto rounded-none' : ''"
       @mousemove="revealControls"
       @mouseleave="scheduleControlsHide"
