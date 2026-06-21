@@ -1,5 +1,12 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, useId } from 'vue'
+import { ref, computed, onMounted, onUnmounted, useId } from 'vue'
+
+// Module-level: the id of the single tip allowed open at a time. Shared
+// across every InfoTip instance, so opening one closes any other —
+// otherwise each tip kept independent state and several could stack open
+// (the trigger's @click.stop also prevents the others' outside-click
+// handler from firing).
+const activeTip = ref<string | null>(null)
 
 withDefaults(defineProps<{
   /** Tooltip body. Use the default slot instead for rich content. */
@@ -17,20 +24,22 @@ withDefaults(defineProps<{
 // Click-to-toggle rather than hover-only: hover popovers are unreachable on
 // touch (the app ships to iOS via WKWebView), so the trigger must respond to
 // tap. Hover still previews on pointer devices via CSS.
-const open = ref(false)
 const root = ref<HTMLElement | null>(null)
 const popId = useId()
+const open = computed(() => activeTip.value === popId)
 
 function toggle() {
-  open.value = !open.value
+  activeTip.value = open.value ? null : popId
 }
 
 function onOutside(e: MouseEvent) {
-  if (root.value && !root.value.contains(e.target as Node)) open.value = false
+  if (open.value && root.value && !root.value.contains(e.target as Node)) {
+    activeTip.value = null
+  }
 }
 
 function onKey(e: KeyboardEvent) {
-  if (e.key === 'Escape') open.value = false
+  if (e.key === 'Escape' && open.value) activeTip.value = null
 }
 
 onMounted(() => {

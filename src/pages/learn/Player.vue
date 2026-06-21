@@ -1053,7 +1053,10 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
             <!-- Dispatched via elementRegistry. Phase 0 of plugin system. -->
             <!-- ============================== -->
             <div
-              class="lesson-content flex-1 min-h-0 flex overflow-y-auto px-4 md:px-6 pb-[calc(1rem+var(--sab,env(safe-area-inset-bottom)))]"
+              class="lesson-content flex-1 min-h-0 flex overflow-y-auto"
+              :class="isVideoElement
+                ? ''
+                : 'px-4 md:px-6 py-4 md:py-6 pb-[calc(1rem+var(--sab,env(safe-area-inset-bottom)))]'"
             >
               <component
                 :is="elementBinding!.component"
