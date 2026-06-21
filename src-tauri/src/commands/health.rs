@@ -45,3 +45,20 @@ pub async fn frontend_log(message: String) -> Result<(), String> {
     log::info!("[frontend] {message}");
     Ok(())
 }
+
+/// Clear a leaked macOS Secure Event Input state (see
+/// [`crate::macos_secure_input`]). The frontend calls this when the app
+/// regains focus and no password field is actually focused, so global
+/// hotkey tools keep working while Alexandria is foreground. Returns
+/// `true` if Secure Event Input is disabled afterward. No-op off macOS.
+#[tauri::command]
+pub async fn release_secure_input() -> Result<bool, String> {
+    #[cfg(target_os = "macos")]
+    {
+        Ok(crate::macos_secure_input::release_secure_event_input())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok(true)
+    }
+}

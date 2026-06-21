@@ -19,6 +19,9 @@ pub mod tutoring;
 #[cfg(target_os = "macos")]
 mod macos_media_delegate;
 
+#[cfg(target_os = "macos")]
+mod macos_secure_input;
+
 // Mobile crypto: same modules as desktop but with portable keystore
 // (AES-256-GCM + Argon2id instead of IOTA Stronghold)
 #[cfg(mobile)]
@@ -984,6 +987,7 @@ pub fn run() {
             commands::health::check_health,
             commands::health::read_diag_log,
             commands::health::frontend_log,
+            commands::health::release_secure_input,
             // App settings (per-profile, scope=sync|device)
             commands::settings::list_settings,
             commands::settings::set_setting,

@@ -20,6 +20,12 @@ fn main() {
     // linker succeeds. The code paths using SCDynamicStore are never reached
     // on iOS (mDNS is disabled, and if-watch falls back to polling).
     let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    if target_os == "macos" {
+        // Carbon provides IsSecureEventInputEnabled / DisableSecureEventInput,
+        // used to clear a WKWebView Secure Event Input leak that otherwise
+        // blocks global hotkey tools while the app is foreground.
+        println!("cargo:rustc-link-lib=framework=Carbon");
+    }
     if target_os == "ios" {
         let out_dir = std::env::var("OUT_DIR").unwrap();
         let stub_path = format!("{out_dir}/sc_dynamic_store_stubs.c");
