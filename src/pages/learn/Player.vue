@@ -74,9 +74,13 @@ async function finishCourse() {
     await markComplete()
   }
   await refreshCompletionStatus()
+  // Best-effort credential claim when the course qualifies. Never block
+  // leaving the player on it: claiming needs on-chain infra (Blockfrost +
+  // a funded wallet) that may be absent, and the course may not yet be
+  // fully complete — a failed/skipped claim must still let the user out
+  // to the course page (where completion + claim status is shown).
   if (completionStatus.value?.ready) {
-    await claimCredential()
-    if (claimError.value) return
+    await claimCredential().catch(() => {})
   }
   router.push(`/courses/${courseId}`)
 }
