@@ -30,8 +30,11 @@ function focus() {
 function select() {
   inputEl.value?.select()
 }
+function blur() {
+  inputEl.value?.blur()
+}
 
-defineExpose({ focus, select })
+defineExpose({ focus, select, blur })
 </script>
 
 <template>
