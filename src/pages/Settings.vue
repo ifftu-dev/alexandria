@@ -21,6 +21,7 @@ import {
 import type { SettingsSectionId } from '@/composables/useSettingsModal'
 import { AppButton, AppInput, AppTextarea, AppModal, AppAlert } from '@/components/ui'
 import AdvancedSettingsPanel from '@/components/settings/AdvancedSettingsPanel.vue'
+import RelayManager from '@/components/settings/RelayManager.vue'
 import PluginsPanel from '@/components/settings/PluginsPanel.vue'
 import type { Identity } from '@/types'
 
@@ -869,6 +870,10 @@ function onSectionClick(id: SettingsSectionId) {
                           Open network →
                         </AppButton>
                       </div>
+                    </div>
+
+                    <div class="mt-3">
+                      <RelayManager />
                     </div>
                   </div>
                 </template>
