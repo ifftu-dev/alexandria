@@ -124,8 +124,11 @@ pub fn encode_reputation_datum(
         .bytes(&sid_padded)
         .map_err(|e| TxBuildError::Cbor(e.to_string()))?;
 
-    // Field 2: role (integer enum)
-    let role_int: i64 = match role {
+    // Field 2: role — an Aiken enum (ReputationRole), so it must be a
+    // Plutus Constr (tag 121+index, empty fields), NOT a plain Int.
+    // Aiken order: Instructor=0, Learner=1. (The extra Rust variants have
+    // no on-chain counterpart and will be rejected by the validator.)
+    let role_index: u64 = match role {
         ReputationRole::Instructor => 0,
         ReputationRole::Learner => 1,
         ReputationRole::Assessor => 2,
@@ -133,7 +136,10 @@ pub fn encode_reputation_datum(
         ReputationRole::Mentor => 4,
     };
     encoder
-        .i64(role_int)
+        .tag(minicbor::data::Tag::new(121 + role_index))
+        .map_err(|e| TxBuildError::Cbor(e.to_string()))?;
+    encoder
+        .array(0)
         .map_err(|e| TxBuildError::Cbor(e.to_string()))?;
 
     // Field 3: skills (List<SkillScore>)
@@ -159,8 +165,15 @@ pub fn encode_reputation_datum(
             .bytes(&skill_padded)
             .map_err(|e| TxBuildError::Cbor(e.to_string()))?;
 
+        // proficiency — Aiken enum ProficiencyLevel (Remember=0 … Create=5),
+        // so a Plutus Constr (tag 121+level, empty fields), not an Int.
         encoder
-            .i64(skill.proficiency as i64)
+            .tag(minicbor::data::Tag::new(
+                121 + skill.proficiency.min(5) as u64,
+            ))
+            .map_err(|e| TxBuildError::Cbor(e.to_string()))?;
+        encoder
+            .array(0)
             .map_err(|e| TxBuildError::Cbor(e.to_string()))?;
         encoder
             .i64(skill.impact_score)
