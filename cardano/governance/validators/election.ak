@@ -12,7 +12,7 @@ use cardano/assets
 use cardano/transaction.{InlineDatum, Output, OutputReference, Transaction}
 use alexandria/types.{
   AcceptNomination, ElectionDatum, ElectionRedeemer, FinalizeElection,
-  Finalized, Nomination, Nominee, OpenElection, StartVoting, Voting,
+  Finalized, Nominate, Nomination, Nominee, OpenElection, StartVoting, Voting,
 }
 use alexandria/reputation
 use alexandria/state_token
@@ -53,6 +53,50 @@ validator election {
           old.phase == Nomination && list.length(old.nominees) == 0
 
         dao_present && valid_initial
+      }
+
+      Nominate -> {
+        // Must be in Nomination phase
+        expect old.phase == Nomination
+
+        // Must be before nomination deadline
+        let in_time = utils.before_deadline(tx.validity_range, old.nomination_end)
+
+        // Find continuing output
+        let cont = find_continuing_output(tx.outputs, own_hash, old)
+        expect InlineDatum(new_raw) = cont.datum
+        expect new: ElectionDatum = new_raw
+
+        // Exactly one nominee appended at the end; the prefix (all prior
+        // nominees) must be unchanged.
+        expect Some(added) = list.last(new.nominees)
+        let appended_one = new.nominees == list.concat(old.nominees, [added])
+
+        // The self-nominee must have signed and be marked accepted (their
+        // signature + qualifying reputation make a separate accept step
+        // redundant).
+        let nominee_signed = list.has(tx.extra_signatories, added.key_hash)
+        let is_accepted = added.accepted
+
+        // No duplicate nominations.
+        let not_dup =
+          !list.any(old.nominees, fn(n) { n.key_hash == added.key_hash })
+
+        // Nominee must prove qualifying reputation via reference input.
+        let has_reputation =
+          reputation.has_qualifying_reputation(
+            tx.reference_inputs,
+            old.reputation_policy,
+            old.membership_subjects,
+            old.nominee_min_proficiency,
+            added.key_hash,
+          )
+
+        // Everything except the nominees list must stay the same.
+        let rest_preserved =
+          new.phase == old.phase && new.election_id == old.election_id && new.seats == old.seats && new.nomination_end == old.nomination_end && new.voting_end == old.voting_end && new.dao_state_token_policy == old.dao_state_token_policy && new.dao_state_token_name == old.dao_state_token_name
+
+        in_time && appended_one && nominee_signed && is_accepted && not_dup && has_reputation && rest_preserved
       }
 
       AcceptNomination { nominee_index } -> {

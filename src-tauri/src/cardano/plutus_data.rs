@@ -267,6 +267,7 @@ pub fn encode_election_redeemer(action: &str, extra: Option<i64>) -> Result<Vec<
         }
         "start_voting" => begin_constr(&mut encoder, 2, 0)?,
         "finalize" => begin_constr(&mut encoder, 3, 0)?,
+        "nominate" => begin_constr(&mut encoder, 4, 0)?,
         _ => {
             return Err(TxBuildError::Cbor(format!(
                 "unknown election redeemer: {action}"

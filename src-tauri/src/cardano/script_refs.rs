@@ -19,14 +19,23 @@ pub const DAO_MINTING_SCRIPT_HASH: &str =
     "e275a9e8418282f84e5baa39aa57627e72d5f25550780c4cb28c4db8";
 
 /// Script hash for the election spending validator.
-pub const ELECTION_SCRIPT_HASH: &str = "b292f0e842766af40a800d0c53cbe7a7f9faab7b85f68802e6468d25";
+///
+/// Redeployed 2026-06-22 after adding the `Nominate` self-nomination
+/// redeemer (the prior election validator could never populate its
+/// nominee list, so every post-bootstrap transition was unreachable).
+/// New UPLC → new hash. The vote_minting policy is parameterized on this
+/// hash, so it was re-applied + redeployed in the same tx (4b70ae95).
+pub const ELECTION_SCRIPT_HASH: &str = "5f1ed12dcabd36f3b45cc0bd36c45112a5d2cfb6156a0259d83d6b82";
 
 /// Script hash for the proposal spending validator.
 pub const PROPOSAL_SCRIPT_HASH: &str = "7888035da181d26498ebe1b6fbe4c515007155e120e30fc3fcdf2c0d";
 
 /// Script hash for the vote receipt minting policy.
+///
+/// Parameterized on the election + proposal script hashes. Re-applied
+/// with the new election hash and redeployed 2026-06-22 (tx 4b70ae95).
 pub const VOTE_MINTING_SCRIPT_HASH: &str =
-    "4ab759540562e73715a879a4bef188da5b0ef216592a0f04f8c50ba6";
+    "f46302af773f5fa8ff554ff25d2034af38e709fbb642a9ff85497c14";
 
 /// Script hash for the CIP-68 reputation minting policy.
 pub const REPUTATION_MINTING_SCRIPT_HASH: &str =
@@ -75,10 +84,10 @@ pub const DAO_MINTING_REF_UTXO: (&str, u64) = (
     1,
 );
 
-/// Reference UTxO for the election validator.
+/// Reference UTxO for the election validator (redeployed 2026-06-22).
 pub const ELECTION_REF_UTXO: (&str, u64) = (
-    "448db85c1fa30e3159ad2aad341a84fb34f71c7966cd1a6392fb186c7c974551",
-    1,
+    "4b70ae95f951f3d828d8805972d9b4533707550fdbe1cbae6286e6c9645d8987",
+    0,
 );
 
 /// Reference UTxO for the proposal validator.
@@ -87,10 +96,10 @@ pub const PROPOSAL_REF_UTXO: (&str, u64) = (
     0,
 );
 
-/// Reference UTxO for the vote receipt minting policy.
+/// Reference UTxO for the vote receipt minting policy (redeployed 2026-06-22).
 pub const VOTE_MINTING_REF_UTXO: (&str, u64) = (
-    "bcc9ea10ab2e5fd23ca7d94a3cd16c275e03e565d9c375381bfec440770f1194",
-    4,
+    "4b70ae95f951f3d828d8805972d9b4533707550fdbe1cbae6286e6c9645d8987",
+    1,
 );
 
 /// Reference UTxO for the reputation minting policy.
