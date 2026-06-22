@@ -4,6 +4,7 @@ pub mod blockfrost;
 pub mod challenge_escrow_tx_builder;
 pub mod completion;
 pub mod completion_tx_builder;
+pub mod cost_models;
 pub mod gov_tx_builder;
 pub mod governance;
 pub mod onchain_queue;

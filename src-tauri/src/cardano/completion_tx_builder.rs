@@ -17,16 +17,36 @@ use blake2::{Blake2b, Digest};
 use pallas_addresses::Address as PallasAddress;
 use pallas_crypto::hash::Hash;
 use pallas_crypto::key::ed25519::SecretKeyExtended;
-use pallas_txbuilder::{BuildConway, Input, Output, StagingTransaction};
+use pallas_txbuilder::{BuildConway, ExUnits, Input, Output, ScriptKind, StagingTransaction};
 use pallas_wallet::PrivateKey;
 
 use super::blockfrost::BlockfrostClient;
+use super::cost_models::PLUTUS_V3_COST_MODEL;
 use super::gov_tx_builder::{self, GovTxResult};
 use super::plutus_data;
 use super::script_refs;
-use super::tx_builder::{
-    parse_tx_hash, sign_raw_tx, TxBuildError, MIN_NFT_LOVELACE, MIN_UTXO_LOVELACE, TTL_OFFSET,
-};
+use super::tx_builder::{parse_tx_hash, sign_raw_tx, TxBuildError, MIN_NFT_LOVELACE, TTL_OFFSET};
+
+/// Execution-unit prices (preprod/mainnet, current protocol version):
+/// price_mem = 0.0577, price_step = 0.0000721. Expressed as rationals to
+/// keep the fee math integer-only.
+const PRICE_MEM_NUM: u64 = 577;
+const PRICE_MEM_DEN: u64 = 10_000;
+const PRICE_STEP_NUM: u64 = 721;
+const PRICE_STEP_DEN: u64 = 10_000_000;
+
+/// Collateral must cover `collateral_percent` (150%) of the fee. A small
+/// dedicated pure-ADA UTxO (≥ 5 ADA) comfortably covers any mint fee.
+const MIN_COLLATERAL_LOVELACE: u64 = 5_000_000;
+
+/// Total fee = size fee + Plutus execution fee, with a safety buffer so
+/// the on-chain recomputation never undershoots.
+fn plutus_fee(min_fee_a: u64, min_fee_b: u64, tx_size: u64, mem: u64, steps: u64) -> u64 {
+    let size_fee = min_fee_a * tx_size + min_fee_b;
+    let exec_fee = (mem * PRICE_MEM_NUM).div_ceil(PRICE_MEM_DEN)
+        + (steps * PRICE_STEP_NUM).div_ceil(PRICE_STEP_DEN);
+    size_fee + exec_fee + 30_000 // buffer
+}
 
 /// Minimum ADA to attach to the output that carries the completion
 /// token + inline datum. The datum is small (~80 bytes) so `MIN_NFT_LOVELACE`
@@ -135,83 +155,124 @@ pub async fn build_completion_mint_tx(
     if utxos.is_empty() {
         return Err(TxBuildError::NoUtxos);
     }
-    let selected = BlockfrostClient::select_utxo(&utxos, MIN_UTXO_LOVELACE).ok_or(
-        TxBuildError::InsufficientFunds {
-            needed: MIN_UTXO_LOVELACE,
-            available: utxos.iter().map(|u| u.lovelace()).sum(),
-        },
-    )?;
 
-    // 4. Addresses + fee.
+    // 4. UTxO selection. The spend input funds the mint; collateral MUST
+    //    be a *distinct* pure-ADA UTxO (a UTxO cannot be both a regular
+    //    input and collateral). Pick the largest as the spend input and a
+    //    separate ≥5-ADA UTxO as collateral.
+    let pure: Vec<&_> = {
+        let mut v: Vec<_> = utxos.iter().filter(|u| u.lovelace() > 0).collect();
+        v.sort_by_key(|u| std::cmp::Reverse(u.lovelace()));
+        v
+    };
+    let selected = *pure.first().ok_or(TxBuildError::NoUtxos)?;
+    let collateral = pure
+        .iter()
+        .skip(1)
+        .find(|u| u.lovelace() >= MIN_COLLATERAL_LOVELACE)
+        .copied()
+        .ok_or(TxBuildError::InsufficientFunds {
+            needed: MIN_COLLATERAL_LOVELACE,
+            available: pure.iter().skip(1).map(|u| u.lovelace()).max().unwrap_or(0),
+        })?;
+
     let pallas_addr = PallasAddress::from_bech32(payment_address)
         .map_err(|e| TxBuildError::AddressParse(e.to_string()))?;
     let input_tx_hash = parse_tx_hash(&selected.tx_hash)?;
-    let fee = params.calculate_min_fee(1200).max(500_000);
     let input_lovelace = selected.lovelace();
-    let needed = MIN_COMPLETION_UTXO_LOVELACE + fee;
-    if input_lovelace < needed {
-        return Err(TxBuildError::InsufficientFunds {
-            needed,
-            available: input_lovelace,
-        });
-    }
-    let change = input_lovelace - MIN_COMPLETION_UTXO_LOVELACE - fee;
 
-    // 5. Build skeleton. Output 0 is the token + inline-datum output
-    //    (pallas_txbuilder can't emit inline datums; we inject below).
-    //    `inject_plutus_fields` writes the datum on the first output.
-    let staging_tx = StagingTransaction::new()
-        .input(Input::new(input_tx_hash, selected.tx_index))
-        .output(
-            Output::new(pallas_addr.clone(), MIN_COMPLETION_UTXO_LOVELACE)
-                .add_asset(policy_id, asset_name.to_vec(), 1)
-                .map_err(|e| TxBuildError::Builder(e.to_string()))?,
-        )
-        .output(Output::new(pallas_addr, change))
-        .mint_asset(policy_id, asset_name.to_vec(), 1)
-        .map_err(|e| TxBuildError::Builder(e.to_string()))?
-        .disclosed_signer(Hash::<28>::from(*payment_key_hash))
-        .fee(fee)
-        .invalid_from_slot(tip_slot + TTL_OFFSET)
-        .network_id(0);
-
-    let built = staging_tx
-        .build_conway_raw()
-        .map_err(|e| TxBuildError::Builder(e.to_string()))?;
-
-    // 6. Inject the Plutus fields — reference script UTxO, collateral,
-    //    redeemer, and inline datum on output 0.
     let ref_utxo = script_refs::COMPLETION_MINTING_REF_UTXO;
-    let ref_hash: [u8; 32] = hex::decode(ref_utxo.0)
-        .map_err(|e| TxBuildError::TxDecode(format!("invalid ref utxo hash: {e}")))?
-        .try_into()
-        .map_err(|_| TxBuildError::TxDecode("ref utxo hash must be 32 bytes".into()))?;
+    let ref_hash = parse_tx_hash(ref_utxo.0)?;
+    let coll_hash = parse_tx_hash(&collateral.tx_hash)?;
 
-    let coll_hash: [u8; 32] = hex::decode(&selected.tx_hash)
-        .map_err(|e| TxBuildError::TxDecode(format!("invalid collateral hash: {e}")))?
-        .try_into()
-        .map_err(|_| TxBuildError::TxDecode("collateral hash must be 32 bytes".into()))?;
+    // Build the staging tx for a given fee + ex-units. Output 0 carries
+    // the minted token + inline CompletionDatum; output 1 is change.
+    // pallas-txbuilder's native Plutus support sets the Mint-purpose
+    // redeemer and computes script_data_hash (from `language_view`) —
+    // both of which the previous `inject_plutus_fields` path got wrong.
+    let build = |fee: u64, ex: ExUnits| -> Result<Vec<u8>, TxBuildError> {
+        let change = input_lovelace
+            .checked_sub(MIN_COMPLETION_UTXO_LOVELACE + fee)
+            .ok_or(TxBuildError::InsufficientFunds {
+                needed: MIN_COMPLETION_UTXO_LOVELACE + fee,
+                available: input_lovelace,
+            })?;
+        let staging = StagingTransaction::new()
+            .input(Input::new(input_tx_hash, selected.tx_index))
+            .output(
+                Output::new(pallas_addr.clone(), MIN_COMPLETION_UTXO_LOVELACE)
+                    .add_asset(policy_id, asset_name.to_vec(), 1)
+                    .map_err(|e| TxBuildError::Builder(e.to_string()))?
+                    .set_inline_datum(datum_cbor.clone()),
+            )
+            .output(Output::new(pallas_addr.clone(), change))
+            .mint_asset(policy_id, asset_name.to_vec(), 1)
+            .map_err(|e| TxBuildError::Builder(e.to_string()))?
+            .reference_input(Input::new(ref_hash, ref_utxo.1))
+            .collateral_input(Input::new(coll_hash, collateral.tx_index))
+            .add_mint_redeemer(policy_id, redeemer_cbor.clone(), Some(ex))
+            .language_view(ScriptKind::PlutusV3, PLUTUS_V3_COST_MODEL.to_vec())
+            .disclosed_signer(Hash::<28>::from(*payment_key_hash))
+            .fee(fee)
+            .invalid_from_slot(tip_slot + TTL_OFFSET)
+            .network_id(0);
+        Ok(staging
+            .build_conway_raw()
+            .map_err(|e| TxBuildError::Builder(e.to_string()))?
+            .tx_bytes
+            .0)
+    };
 
-    let (tx_with_plutus, _) = gov_tx_builder::inject_plutus_fields(
-        &built.tx_bytes.0,
-        &[(ref_hash, ref_utxo.1)],
-        &[(coll_hash, selected.tx_index)],
-        &redeemer_cbor,
-        Some(&datum_cbor),
+    // 5. Pass 1 — generous estimate so evaluate_tx can run.
+    const EST_MEM: u64 = 2_000_000;
+    const EST_STEPS: u64 = 700_000_000;
+    let est_fee = plutus_fee(
+        params.min_fee_a,
+        params.min_fee_b,
+        2_000,
+        EST_MEM,
+        EST_STEPS,
+    );
+    let draft = build(
+        est_fee,
+        ExUnits {
+            mem: EST_MEM,
+            steps: EST_STEPS,
+        },
     )?;
 
-    // 7. Evaluate ex units (non-fatal log — real exec units are
-    //    computed by the cardano-node during submission; our initial
-    //    estimate lives inside `inject_plutus_fields`).
-    if let Err(e) = blockfrost.evaluate_tx(&tx_with_plutus).await {
-        log::debug!("completion_mint: evaluate_tx failed (non-fatal): {e}");
-    }
+    // 6. Evaluate real execution units, then recompute fee from the
+    //    drafted size + true ex-units. Falls back to the estimate if the
+    //    evaluator is unavailable.
+    let (mem, steps) = match blockfrost.evaluate_tx(&draft).await {
+        Ok(units) => units
+            .into_iter()
+            .fold((0u64, 0u64), |(m, s), (um, us)| (m.max(um), s.max(us))),
+        Err(e) => {
+            log::debug!("completion_mint: evaluate_tx failed, using estimate: {e}");
+            (EST_MEM, EST_STEPS)
+        }
+    };
+    let real_ex = ExUnits {
+        mem: if mem == 0 { EST_MEM } else { mem },
+        steps: if steps == 0 { EST_STEPS } else { steps },
+    };
+    // +200 bytes covers the witness signature added at signing time.
+    let tx_size = draft.len() as u64 + 200;
+    let fee = plutus_fee(
+        params.min_fee_a,
+        params.min_fee_b,
+        tx_size,
+        real_ex.mem,
+        real_ex.steps,
+    );
 
-    // 8. Sign.
+    // 7. Pass 2 — rebuild with true ex-units + fee, then sign.
+    let final_tx = build(fee, real_ex)?;
     let private_key = PrivateKey::Extended(unsafe {
         SecretKeyExtended::from_bytes_unchecked(*payment_key_extended)
     });
-    let signed_tx_bytes = sign_raw_tx(&tx_with_plutus, &private_key)?;
+    let signed_tx_bytes = sign_raw_tx(&final_tx, &private_key)?;
     let tx_hash = super::tx_builder::compute_tx_hash(&signed_tx_bytes)?;
 
     Ok(GovTxResult {
@@ -305,5 +366,48 @@ mod tests {
     #[test]
     fn min_utxo_matches_nft_budget() {
         assert_eq!(MIN_NFT_UTXO, super::super::tx_builder::MIN_NFT_LOVELACE);
+    }
+
+    /// Live preprod end-to-end mint. Ignored by default; run with a
+    /// funded wallet:
+    ///   BLOCKFROST_PROJECT_ID=preprod… TEST_MNEMONIC="…24 words…" \
+    ///     cargo test -p alexandria-node live_completion_mint_preprod -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn live_completion_mint_preprod() {
+        let pid = std::env::var("BLOCKFROST_PROJECT_ID").expect("BLOCKFROST_PROJECT_ID");
+        let mnemonic = std::env::var("TEST_MNEMONIC").expect("TEST_MNEMONIC");
+        let course_id = b"course_plugin_demo";
+        let leaves: Vec<[u8; 32]> = vec![[7u8; 32]];
+        let root = crate::domain::completion::merkle_root(&leaves);
+        let ts_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let outcome = rt.block_on(async {
+            let bf = BlockfrostClient::new(pid).unwrap();
+            let wallet = crate::crypto::wallet::wallet_from_mnemonic(&mnemonic).unwrap();
+            let subject_pubkey: [u8; 32] = *wallet.signing_key.verifying_key().as_bytes();
+            let built = build_completion_mint_tx(
+                &bf,
+                &wallet.payment_address,
+                &wallet.payment_key_hash,
+                &wallet.payment_key_extended,
+                &subject_pubkey,
+                course_id,
+                &leaves,
+                &root,
+                ts_ms,
+            )
+            .await
+            .map_err(|e| format!("build: {e}"))?;
+            bf.submit_tx(&built.tx_cbor)
+                .await
+                .map_err(|e| format!("submit: {e}"))
+        });
+        println!("LIVE_MINT_RESULT: {outcome:?}");
+        outcome.expect("mint accepted on preprod");
     }
 }
