@@ -339,17 +339,28 @@ pub async fn build_create_dao_tx(
 
     let redeemer = plutus_data::encode_dao_redeemer("create", None)?;
 
-    build_gov_tx(
+    // The dao_minting policy requires: tx signed by authorized_admin,
+    // exactly +1 token minted, and that token sent to the dao_registry
+    // script. State-token name = "dao" ++ scope_id (see dao_registry.ak
+    // get_dao_token_name). The minted token + DAO datum land at the
+    // registry address; the admin is the funding wallet (payment_key).
+    let mut asset_name = b"dao".to_vec();
+    asset_name.extend_from_slice(scope_id);
+
+    crate::cardano::plutus_mint::build_mint_to_address_tx(
         blockfrost,
-        payment_address,
-        payment_key_hash,
-        payment_key_extended,
-        script_refs::DAO_REGISTRY_SCRIPT_HASH,
-        script_refs::DAO_REGISTRY_REF_UTXO,
-        &datum,
-        &redeemer,
-        None,
-        None,
+        crate::cardano::plutus_mint::MintToAddress {
+            payment_address,
+            payment_key_extended,
+            required_signers: std::slice::from_ref(payment_key_hash),
+            policy_id: Hash::<28>::from(hash_from_hex(script_refs::DAO_MINTING_SCRIPT_HASH)?),
+            asset_name,
+            mint_redeemer: redeemer,
+            ref_script: script_refs::DAO_MINTING_REF_UTXO,
+            recipient_address: script_address(script_refs::DAO_REGISTRY_SCRIPT_HASH)?,
+            recipient_lovelace: MIN_SCRIPT_UTXO_LOVELACE,
+            recipient_datum: Some(datum),
+        },
     )
     .await
 }
@@ -721,5 +732,72 @@ mod tests {
         } else {
             panic!("expected redeemers list");
         }
+    }
+
+    /// Live preprod DAO-create: builds the UNSIGNED mint tx and prints
+    /// its CBOR. The deployed dao_minting admin is the treasury
+    /// cardano-cli key (normal Ed25519), so the witness is attached
+    /// out-of-band by the test harness (cardano-cli), not the app's
+    /// extended key. Run:
+    ///   BLOCKFROST_PROJECT_ID=preprod… cargo test -p alexandria-node \
+    ///     live_dao_create_unsigned -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn live_dao_create_unsigned() {
+        let pid = std::env::var("BLOCKFROST_PROJECT_ID").expect("BLOCKFROST_PROJECT_ID");
+        let treasury_addr =
+            "addr_test1qps9dhjrekj8d7nuf94ltzeslzwfj30u0f5tgy6ddmecxvm5wes3g9ja43ewdtq6ww3rccuzjvv7gdd4hghj9jdg7njqpu4uns";
+        let admin_pkh: [u8; 28] =
+            hash_from_hex("6056de43cda476fa7c496bf58b30f89c9945fc7a68b4134d6ef38333")
+                .expect("admin pkh");
+        let scope_id: &[u8] = b"d1";
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        let interval = 2_592_000_000i64;
+        let datum = plutus_data::encode_dao_datum(
+            "dao_design",
+            scope_id,
+            &hash_from_hex(script_refs::REPUTATION_MINTING_SCRIPT_HASH).unwrap(),
+            &[],
+            "remember",
+            &hash_from_hex(script_refs::DAO_MINTING_SCRIPT_HASH).unwrap(),
+            &[&admin_pkh],
+            1,
+            interval,
+            now,
+            now + interval,
+        )
+        .unwrap();
+        let redeemer = plutus_data::encode_dao_redeemer("create", None).unwrap();
+        let mut asset_name = b"dao".to_vec();
+        asset_name.extend_from_slice(scope_id);
+
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let unsigned = rt.block_on(async {
+            let bf = BlockfrostClient::new(pid).unwrap();
+            crate::cardano::plutus_mint::build_mint_to_address_unsigned(
+                &bf,
+                &crate::cardano::plutus_mint::MintToAddress {
+                    payment_address: treasury_addr,
+                    payment_key_extended: &[0u8; 64],
+                    required_signers: std::slice::from_ref(&admin_pkh),
+                    policy_id: Hash::<28>::from(
+                        hash_from_hex(script_refs::DAO_MINTING_SCRIPT_HASH).unwrap(),
+                    ),
+                    asset_name,
+                    mint_redeemer: redeemer,
+                    ref_script: script_refs::DAO_MINTING_REF_UTXO,
+                    recipient_address: script_address(script_refs::DAO_REGISTRY_SCRIPT_HASH)
+                        .unwrap(),
+                    recipient_lovelace: 3_000_000,
+                    recipient_datum: Some(datum),
+                },
+            )
+            .await
+            .expect("build unsigned dao tx")
+        });
+        println!("UNSIGNED_CBOR:{}", hex::encode(&unsigned));
     }
 }
