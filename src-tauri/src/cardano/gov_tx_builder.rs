@@ -298,6 +298,76 @@ async fn build_gov_tx(
     })
 }
 
+/// Build a plain output-creation tx that pays a script address with an
+/// inline datum, returning the UNSIGNED CBOR. No Plutus machinery
+/// (collateral / redeemer / reference input / language view) is needed:
+/// creating an output *at* a script address runs no validator — the
+/// validator only runs when that output is later spent. Used to
+/// bootstrap state UTxOs (e.g. the initial election UTxO) that spend
+/// flows then consume.
+async fn build_plain_create_unsigned(
+    blockfrost: &BlockfrostClient,
+    payment_address: &str,
+    script_hash: &str,
+    lovelace: u64,
+    datum_cbor: &[u8],
+) -> Result<Vec<u8>, TxBuildError> {
+    let (utxos_res, params_res, tip_res) = tokio::join!(
+        blockfrost.get_utxos(payment_address),
+        blockfrost.get_protocol_params(),
+        blockfrost.get_tip_slot(),
+    );
+    let utxos = utxos_res?;
+    let params = params_res?;
+    let tip_slot = tip_res?;
+    if utxos.is_empty() {
+        return Err(TxBuildError::NoUtxos);
+    }
+
+    let selected = BlockfrostClient::select_utxo(&utxos, lovelace + 1_000_000).ok_or(
+        TxBuildError::InsufficientFunds {
+            needed: lovelace + 1_000_000,
+            available: utxos.iter().map(|u| u.lovelace()).sum(),
+        },
+    )?;
+    let change_addr = PallasAddress::from_bech32(payment_address)
+        .map_err(|e| TxBuildError::AddressParse(e.to_string()))?;
+    let script_addr = script_address(script_hash)?;
+    let input_tx_hash = parse_tx_hash(&selected.tx_hash)?;
+    let input_lovelace = selected.lovelace();
+
+    let build = |fee: u64| -> Result<Vec<u8>, TxBuildError> {
+        let change =
+            input_lovelace
+                .checked_sub(lovelace + fee)
+                .ok_or(TxBuildError::InsufficientFunds {
+                    needed: lovelace + fee,
+                    available: input_lovelace,
+                })?;
+        let staging = StagingTransaction::new()
+            .input(Input::new(input_tx_hash, selected.tx_index))
+            .output(
+                Output::new(script_addr.clone(), lovelace).set_inline_datum(datum_cbor.to_vec()),
+            )
+            .output(Output::new(change_addr.clone(), change))
+            .fee(fee)
+            .invalid_from_slot(tip_slot + TTL_OFFSET)
+            .network_id(0);
+        Ok(staging
+            .build_conway_raw()
+            .map_err(|e| TxBuildError::Builder(e.to_string()))?
+            .tx_bytes
+            .0)
+    };
+
+    // Draft to measure the real serialized size (the inline datum can be
+    // large), then size the fee off it with a witness allowance.
+    let draft = build(200_000)?;
+    let tx_size = draft.len() as u64 + 150; // +1 vkey witness
+    let fee = params.min_fee_a * tx_size + params.min_fee_b + 5_000;
+    build(fee)
+}
+
 // ---- DAO Transaction Builders ----
 
 /// Build a CreateDao transaction.
@@ -365,15 +435,27 @@ pub async fn build_create_dao_tx(
     .await
 }
 
-/// Build an OpenElection transaction.
+/// Build an OpenElection (bootstrap) transaction.
+///
+/// Creates the initial election UTxO at the election script address with
+/// an inline `ElectionDatum` in the `Nomination` phase and an empty
+/// nominee list. This is a plain output-creation: no validator runs when
+/// an output is *created* at a script address, so creation is
+/// permissionless (any funded wallet works) and needs no
+/// collateral/redeemer/reference-script. The election validator only runs
+/// once this UTxO is spent (AcceptNomination / StartVoting / Finalize).
+///
+/// `dao_token_name` is the DAO state token name (`"dao" ++ scope_id`);
+/// the spend transitions reference the DAO UTxO bearing this token to
+/// authorize phase changes, so it is baked into the datum here.
 #[allow(clippy::too_many_arguments)]
 pub async fn build_open_election_tx(
     blockfrost: &BlockfrostClient,
     payment_address: &str,
     payment_key_hash: &[u8; 28],
     payment_key_extended: &[u8; 64],
-    _dao_policy: &[u8; 28],
-    _dao_token_name: &[u8],
+    dao_policy: &[u8; 28],
+    dao_token_name: &[u8],
     election_id: i64,
     seats: i64,
     nominee_min_proficiency: &str,
@@ -381,6 +463,7 @@ pub async fn build_open_election_tx(
     nomination_end_ms: i64,
     voting_end_ms: i64,
 ) -> Result<GovTxResult, TxBuildError> {
+    let _ = payment_key_hash;
     if !validators_deployed() {
         return Err(TxBuildError::Cbor(
             "OpenElection: validators not yet deployed".into(),
@@ -388,8 +471,8 @@ pub async fn build_open_election_tx(
     }
 
     let datum = plutus_data::encode_election_datum(
-        &hash_from_hex(script_refs::DAO_MINTING_SCRIPT_HASH)?,
-        &[],
+        dao_policy,
+        dao_token_name,
         election_id,
         "nomination",
         seats,
@@ -403,21 +486,24 @@ pub async fn build_open_election_tx(
         &hash_from_hex(script_refs::VOTE_MINTING_SCRIPT_HASH)?,
     )?;
 
-    let redeemer = plutus_data::encode_election_redeemer("open", None)?;
-
-    build_gov_tx(
+    let unsigned = build_plain_create_unsigned(
         blockfrost,
         payment_address,
-        payment_key_hash,
-        payment_key_extended,
         script_refs::ELECTION_SCRIPT_HASH,
-        script_refs::ELECTION_REF_UTXO,
+        MIN_SCRIPT_UTXO_LOVELACE,
         &datum,
-        &redeemer,
-        None,
-        None,
     )
-    .await
+    .await?;
+
+    let private_key = PrivateKey::Extended(unsafe {
+        SecretKeyExtended::from_bytes_unchecked(*payment_key_extended)
+    });
+    let signed = sign_raw_tx(&unsigned, &private_key)?;
+    let tx_hash = super::tx_builder::compute_tx_hash(&signed)?;
+    Ok(GovTxResult {
+        tx_cbor: signed,
+        tx_hash,
+    })
 }
 
 /// Build a CastVote transaction (election or proposal) with vote receipt mint.
@@ -797,6 +883,60 @@ mod tests {
             )
             .await
             .expect("build unsigned dao tx")
+        });
+        println!("UNSIGNED_CBOR:{}", hex::encode(&unsigned));
+    }
+
+    /// Live preprod election bootstrap: builds the UNSIGNED plain-create
+    /// tx that lands the initial election UTxO (Nomination phase, empty
+    /// nominees) at the election script address with its inline datum.
+    /// Creation is permissionless, but we fund + sign with the treasury
+    /// cardano-cli key out-of-band (same harness as the DAO create). The
+    /// DAO state token is `daod1` under policy DAO_MINTING (the verified
+    /// DAO from tx d554c635). Run:
+    ///   BLOCKFROST_PROJECT_ID=preprod… cargo test -p alexandria-node \
+    ///     live_election_bootstrap_unsigned -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn live_election_bootstrap_unsigned() {
+        let pid = std::env::var("BLOCKFROST_PROJECT_ID").expect("BLOCKFROST_PROJECT_ID");
+        let treasury_addr =
+            "addr_test1qps9dhjrekj8d7nuf94ltzeslzwfj30u0f5tgy6ddmecxvm5wes3g9ja43ewdtq6ww3rccuzjvv7gdd4hghj9jdg7njqpu4uns";
+        let dao_policy = hash_from_hex(script_refs::DAO_MINTING_SCRIPT_HASH).unwrap();
+        let dao_token_name = b"daod1".to_vec();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        let datum = plutus_data::encode_election_datum(
+            &dao_policy,
+            &dao_token_name,
+            1,
+            "nomination",
+            1,
+            "remember",
+            "remember",
+            &[],
+            &hash_from_hex(script_refs::REPUTATION_MINTING_SCRIPT_HASH).unwrap(),
+            &[],
+            now + 86_400_000,
+            now + 172_800_000,
+            &hash_from_hex(script_refs::VOTE_MINTING_SCRIPT_HASH).unwrap(),
+        )
+        .unwrap();
+
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let unsigned = rt.block_on(async {
+            let bf = BlockfrostClient::new(pid).unwrap();
+            build_plain_create_unsigned(
+                &bf,
+                treasury_addr,
+                script_refs::ELECTION_SCRIPT_HASH,
+                MIN_SCRIPT_UTXO_LOVELACE,
+                &datum,
+            )
+            .await
+            .expect("build unsigned election tx")
         });
         println!("UNSIGNED_CBOR:{}", hex::encode(&unsigned));
     }

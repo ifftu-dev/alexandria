@@ -16,6 +16,12 @@ pub struct UTxO {
     pub tx_index: u64,
     /// Multi-asset amounts on this UTxO.
     pub amount: Vec<AmountEntry>,
+    /// Script hash when this UTxO carries a CIP-33 reference script.
+    /// Such UTxOs must never be selected as ordinary spend inputs:
+    /// consuming one destroys the deployed reference script and incurs
+    /// the Conway reference-script fee.
+    #[serde(default)]
+    pub reference_script_hash: Option<String>,
 }
 
 impl<'de> Deserialize<'de> for UTxO {
@@ -28,6 +34,8 @@ impl<'de> Deserialize<'de> for UTxO {
             #[serde(default)]
             output_index: Option<u64>,
             amount: Vec<AmountEntry>,
+            #[serde(default)]
+            reference_script_hash: Option<String>,
         }
         let raw = Shadow::deserialize(d)?;
         let idx = raw
@@ -38,6 +46,7 @@ impl<'de> Deserialize<'de> for UTxO {
             tx_hash: raw.tx_hash,
             tx_index: idx,
             amount: raw.amount,
+            reference_script_hash: raw.reference_script_hash,
         })
     }
 }
@@ -59,6 +68,12 @@ impl UTxO {
             .find(|a| a.unit == "lovelace")
             .and_then(|a| a.quantity.parse::<u64>().ok())
             .unwrap_or(0)
+    }
+
+    /// True when this UTxO carries a CIP-33 reference script and so must
+    /// not be consumed as an ordinary spend input.
+    pub fn has_reference_script(&self) -> bool {
+        self.reference_script_hash.is_some()
     }
 
     /// Check if this UTxO holds a specific asset (policy_id + asset_name_hex).
@@ -138,6 +153,7 @@ mod tests {
                     quantity: "1".into(),
                 },
             ],
+            reference_script_hash: None,
         };
         assert_eq!(utxo.lovelace(), 5_000_000);
     }
@@ -148,6 +164,7 @@ mod tests {
             tx_hash: "abc".into(),
             tx_index: 0,
             amount: vec![],
+            reference_script_hash: None,
         };
         assert_eq!(utxo.lovelace(), 0);
     }
