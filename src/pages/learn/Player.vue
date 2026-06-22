@@ -58,6 +58,33 @@ async function claimCredential() {
     claiming.value = false
   }
 }
+
+// "Finish Course" on the last element: mark the final content element
+// complete (so the course can qualify), then claim the on-chain
+// completion credential. The earned credential surfaces on the course
+// page, so navigate there once the claim resolves. On a claim error we
+// stay put so the message is visible.
+async function finishCourse() {
+  if (
+    enrollment.value &&
+    isContentElement.value &&
+    currentElement.value &&
+    elementStatus(currentElement.value.id) !== 'completed'
+  ) {
+    await markComplete()
+  }
+  await refreshCompletionStatus()
+  // Best-effort credential claim when the course qualifies. Never block
+  // leaving the player on it: claiming needs on-chain infra (Blockfrost +
+  // a funded wallet) that may be absent, and the course may not yet be
+  // fully complete — a failed/skipped claim must still let the user out
+  // to the course page (where completion + claim status is shown).
+  if (completionStatus.value?.ready) {
+    await claimCredential().catch(() => {})
+  }
+  router.push(`/courses/${courseId}`)
+}
+
 const sentinelStarted = ref(false)
 const downloadingElementId = ref<string | null>(null)
 const downloadError = ref<string | null>(null)
@@ -1053,7 +1080,10 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
             <!-- Dispatched via elementRegistry. Phase 0 of plugin system. -->
             <!-- ============================== -->
             <div
-              class="lesson-content flex-1 min-h-0 flex"
+              class="lesson-content flex-1 min-h-0 flex overflow-y-auto"
+              :class="isVideoElement
+                ? ''
+                : 'px-4 md:px-6 py-4 md:py-6 pb-[calc(1rem+var(--sab,env(safe-area-inset-bottom)))]'"
             >
               <component
                 :is="elementBinding!.component"
@@ -1083,6 +1113,9 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
         <!-- NAVIGATION FOOTER              -->
         <!-- ============================== -->
         <div v-if="currentElement" class="flex-shrink-0 border-t border-border bg-card/60 px-3 pt-2 pb-[calc(0.5rem+var(--sab,env(safe-area-inset-bottom)))] md:px-6 md:py-3">
+          <p v-if="claimError" class="mx-auto mb-2 max-w-4xl text-xs text-destructive">
+            Couldn't finish the course: {{ claimError }}
+          </p>
           <div :class="['mx-auto flex items-center justify-between gap-2', isVideoElement ? 'max-w-7xl' : 'max-w-4xl']">
             <!-- Previous -->
             <AppButton variant="secondary" size="sm" :disabled="!hasPrevElement" @click="goToPrev">
@@ -1120,7 +1153,8 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
             <AppButton
               v-if="isLastElement"
               size="sm"
-              @click="router.push(`/courses/${courseId}`)"
+              :loading="claiming"
+              @click="finishCourse"
             >
               Finish Course
               <svg class="ml-1.5 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
