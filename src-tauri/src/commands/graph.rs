@@ -97,7 +97,13 @@ pub async fn fetch_public_graph(
         peers.len()
     );
 
-    let (mut not_owner, mut empty, mut unreachable) = (0u32, 0u32, 0u32);
+    // Broadcast concurrently and return the first owner that answers,
+    // with a per-request cap so unreachable peers fail fast in parallel
+    // instead of stacking their timeouts serially.
+    use futures::stream::StreamExt;
+    const PER_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+    let mut inflight = futures::stream::FuturesUnordered::new();
     for peer_str in peers {
         let Ok(peer) = peer_str.parse::<libp2p::PeerId>() else {
             continue;
@@ -107,12 +113,26 @@ pub async fn fetch_public_graph(
             requestor: requestor.clone(),
             nonce: nonce.clone(),
         };
-        match node.fetch_graph(peer, req).await {
-            Ok(GraphFetchResponse::Ok(graph)) => return Ok(*graph),
-            Ok(GraphFetchResponse::NotOwner) => not_owner += 1,
-            Ok(GraphFetchResponse::Empty) => empty += 1,
-            Err(e) => {
+        inflight.push(async move {
+            (
+                peer,
+                tokio::time::timeout(PER_REQUEST_TIMEOUT, node.fetch_graph(peer, req)).await,
+            )
+        });
+    }
+
+    let (mut not_owner, mut empty, mut unreachable) = (0u32, 0u32, 0u32);
+    while let Some((peer, res)) = inflight.next().await {
+        match res {
+            Ok(Ok(GraphFetchResponse::Ok(graph))) => return Ok(*graph),
+            Ok(Ok(GraphFetchResponse::NotOwner)) => not_owner += 1,
+            Ok(Ok(GraphFetchResponse::Empty)) => empty += 1,
+            Ok(Err(e)) => {
                 log::info!("graph-fetch: peer {peer} unreachable: {e}");
+                unreachable += 1;
+            }
+            Err(_) => {
+                log::info!("graph-fetch: peer {peer} timed out");
                 unreachable += 1;
             }
         }

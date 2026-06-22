@@ -168,7 +168,15 @@ pub async fn fetch_user_profile(
         return Err("no known peers to fetch profile from".to_string());
     }
 
-    let (mut private, mut not_owner, mut unreachable) = (0u32, 0u32, 0u32);
+    // Broadcast to all known peers concurrently and return the first
+    // owner that answers. A serial loop pays each unreachable peer's
+    // timeout in sequence; fanning out bounds the total wait to the
+    // slowest single response, capped per-request below so a dead or
+    // unresponsive peer can't stall the whole fetch.
+    use futures::stream::StreamExt;
+    const PER_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+    let mut inflight = futures::stream::FuturesUnordered::new();
     for peer_str in peers {
         let Ok(peer) = peer_str.parse::<libp2p::PeerId>() else {
             continue;
@@ -179,17 +187,25 @@ pub async fn fetch_user_profile(
             requestor: requestor.clone(),
             nonce: nonce.clone(),
         };
-        match node.fetch_profile(peer, req).await {
-            Ok(ProfileFetchResponse::Ok(profile)) => {
+        inflight.push(async move {
+            tokio::time::timeout(PER_REQUEST_TIMEOUT, node.fetch_profile(peer, req)).await
+        });
+    }
+
+    let (mut private, mut not_owner, mut unreachable) = (0u32, 0u32, 0u32);
+    while let Some(res) = inflight.next().await {
+        match res {
+            Ok(Ok(ProfileFetchResponse::Ok(profile))) => {
                 let guard = state.db.lock().map_err(|_| "database lock poisoned")?;
                 if let Some(db) = guard.as_ref() {
                     let _ = cache_peer_profile(db.conn(), &profile);
                 }
                 return Ok(*profile);
             }
-            Ok(ProfileFetchResponse::Private) => private += 1,
-            Ok(ProfileFetchResponse::NotOwner) => not_owner += 1,
-            Err(_) => unreachable += 1,
+            Ok(Ok(ProfileFetchResponse::Private)) => private += 1,
+            Ok(Ok(ProfileFetchResponse::NotOwner)) => not_owner += 1,
+            Ok(Err(_)) => unreachable += 1, // network error
+            Err(_) => unreachable += 1,     // per-request timeout
         }
     }
 
