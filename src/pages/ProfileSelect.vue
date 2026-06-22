@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 import Starfield from '@/components/auth/Starfield.vue'
@@ -21,7 +21,7 @@ const selectedId = ref<string | null>(null)
 const password = ref('')
 const unlocking = ref(false)
 const error = ref<string | null>(null)
-const passwordInput = ref<{ focus: () => void; select: () => void } | null>(null)
+const passwordInput = ref<{ focus: () => void; select: () => void; blur: () => void } | null>(null)
 const unlockStatus = ref<string>('')
 
 // Biometric unlock. Credentials are keyed per profile, so availability is
@@ -59,13 +59,25 @@ const selectedProfile = computed(() =>
   profiles.value.find((p) => p.id === selectedId.value) ?? null,
 )
 
+// Safety net for the macOS Secure Event Input leak: if the app loses key
+// focus while the password field is still focused, release it so global
+// hotkey tools (CGEventTaps) keep working in other apps.
+function releaseSecureInputOnBlur() {
+  passwordInput.value?.blur()
+}
+
 onMounted(async () => {
+  window.addEventListener('blur', releaseSecureInputOnBlur)
   await refreshProfiles()
   try {
     biometricAvailable.value = await biometricSupported()
   } catch {
     biometricAvailable.value = false
   }
+})
+
+onUnmounted(() => {
+  window.removeEventListener('blur', releaseSecureInputOnBlur)
 })
 
 function onSelect(id: string) {
@@ -122,6 +134,12 @@ async function onUnlock() {
   try {
     await unlockProfile(selectedId.value, password.value)
     unlockStatus.value = 'Welcome back — taking you home…'
+    // Blur the password field *before* navigating away. On macOS a focused
+    // password input holds Secure Event Input on; WKWebView can leak that
+    // state if the field unmounts while focused, which suppresses global
+    // hotkey tools (CGEventTaps) app-wide until restart. Explicitly blurring
+    // first makes macOS release it.
+    passwordInput.value?.blur()
     router.replace('/home')
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
@@ -169,6 +187,8 @@ async function unlockWithBiometric(auto = false) {
   try {
     await unlockProfile(profileId, vaultPassword)
     unlockStatus.value = 'Welcome back — taking you home…'
+    // See onUnlock: release Secure Event Input before unmounting.
+    passwordInput.value?.blur()
     router.replace('/home')
   } catch (e) {
     // Stored credential was rejected by the vault. Drop to the password
