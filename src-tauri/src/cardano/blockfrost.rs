@@ -49,12 +49,36 @@ pub struct AssetHistoryEntry {
 }
 
 /// Outputs attached to a confirmed transaction, surfaced by
-/// `GET /txs/{hash}/utxos`. We only consume the outputs side — inline
-/// datums and asset lists — but Blockfrost also returns inputs here.
+/// `GET /txs/{hash}/utxos`. We consume the outputs side — inline datums
+/// and asset lists — and the inputs side (source addresses) for tx
+/// provenance checks.
 #[derive(Debug, Clone, Deserialize)]
 pub struct TxUtxos {
     #[serde(default)]
+    pub inputs: Vec<TxInput>,
+    #[serde(default)]
     pub outputs: Vec<TxOutput>,
+}
+
+/// A single input from `GET /txs/{hash}/utxos`. Only the source address
+/// is needed — verifying it proves who authored (signed) the tx.
+#[derive(Debug, Clone, Deserialize)]
+pub struct TxInput {
+    pub address: String,
+    /// Collateral inputs are also listed; skip them when checking
+    /// authorship of the spend.
+    #[serde(default)]
+    pub collateral: bool,
+}
+
+/// One transaction carrying metadata under a queried label, from
+/// `GET /metadata/txs/labels/{label}`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct LabelMetadataTx {
+    pub tx_hash: String,
+    /// The metadata content under the label, as JSON.
+    #[serde(default)]
+    pub json_metadata: serde_json::Value,
 }
 
 /// A single output from `GET /txs/{hash}/utxos`.
@@ -439,6 +463,38 @@ impl BlockfrostClient {
         }
 
         resp.json::<TxUtxos>()
+            .await
+            .map_err(|e| BlockfrostError::Deserialize(e.to_string()))
+    }
+
+    /// Fetch transactions carrying metadata under `label`, most recent
+    /// first. Uses `GET /metadata/txs/labels/{label}?order=desc`. Returns
+    /// up to the first page (100) — registry updates are rare, and only
+    /// the latest valid entry is used. A 404 (no such label yet) maps to
+    /// an empty list.
+    pub async fn get_metadata_by_label(
+        &self,
+        label: u64,
+    ) -> Result<Vec<LabelMetadataTx>, BlockfrostError> {
+        let url = format!(
+            "{}/metadata/txs/labels/{}?order=desc&count=100",
+            self.base_url, label
+        );
+        let resp = self
+            .client
+            .get(&url)
+            .header("project_id", &self.project_id)
+            .send()
+            .await?;
+        let status = resp.status().as_u16();
+        if status == 404 {
+            return Ok(vec![]);
+        }
+        if status != 200 {
+            let body = resp.text().await.unwrap_or_default();
+            return Err(BlockfrostError::Api { status, body });
+        }
+        resp.json::<Vec<LabelMetadataTx>>()
             .await
             .map_err(|e| BlockfrostError::Deserialize(e.to_string()))
     }

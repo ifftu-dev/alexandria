@@ -28,6 +28,17 @@ const GENESIS_ISSUERS: &[&str] = &[
     "12D3KooWFDVfPBwa6EVEp8v8cqXpgmiksV7qMarHCYLF174XV9xj", // Frankfurt
 ];
 
+/// Cardano transaction-metadata label carrying the relay registry.
+/// Sits alongside the credential (1697) and username (1698) anchors.
+pub const REGISTRY_LABEL: u64 = 1699;
+
+/// Governance address (preprod). A label-[`REGISTRY_LABEL`] metadata tx
+/// is only honoured as a registry update if it was authored by this
+/// address (one of its UTxOs is spent as an input — only the gov key
+/// can do that). Phase 1: a dedicated gov key; migrates to a DAO script
+/// address later. Clients pin it so no single relay can rewrite the set.
+pub const GOV_ADDRESS: &str = "addr_test1vzdrft6lj8p2ca7t0ru0wc3tsjtgcws2cyhaa3zemw7hgechm5qry";
+
 /// On-chain / cached authorized issuers, layered over genesis.
 /// Populated by the Cardano relay-registry reader once it has fetched
 /// and verified the governance-signed registry. Empty == genesis only.

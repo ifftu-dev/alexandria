@@ -253,6 +253,73 @@ pub async fn p2p_start(app: AppHandle, state: State<'_, AppState>) -> Result<Str
             serve
         };
 
+        // On-chain relay registry: install the last-known-good authorized
+        // issuer set immediately (so receipt verification has it before
+        // any network round-trip), then refresh from chain in the
+        // background. Genesis issuers stay trusted regardless, so this
+        // only ever *adds* — naming works offline / pre-registry.
+        {
+            let cached = if let Ok(guard) = db_for_events.lock() {
+                guard.as_ref().map(|db| {
+                    crate::settings::SettingsStore::get(
+                        db.conn(),
+                        crate::settings::registry::keys::P2P_RELAY_REGISTRY_CACHE,
+                    )
+                    .0
+                })
+            } else {
+                None
+            };
+            if let Some(list) = cached
+                .as_ref()
+                .and_then(|v| v.get("issuers"))
+                .and_then(|v| v.as_array())
+            {
+                let issuers: Vec<String> = list
+                    .iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect();
+                if !issuers.is_empty() {
+                    crate::p2p::relay_registry::set_onchain_issuers(issuers);
+                }
+            }
+
+            let db_for_registry = db_for_events.clone();
+            tokio::spawn(async move {
+                // Resolve the Blockfrost project id, dropping the std lock
+                // before any await.
+                let project_id = {
+                    db_for_registry.lock().ok().and_then(|g| {
+                        g.as_ref().and_then(|db| {
+                            crate::cardano::blockfrost::resolve_project_id(Some(db.conn()))
+                        })
+                    })
+                };
+                let Some(pid) = project_id else {
+                    return;
+                };
+                let Ok(bf) = crate::cardano::blockfrost::BlockfrostClient::new(pid) else {
+                    return;
+                };
+                if let Some((seq, issuers)) =
+                    crate::cardano::relay_registry_chain::refresh_from_chain(&bf).await
+                {
+                    if let Ok(guard) = db_for_registry.lock() {
+                        if let Some(db) = guard.as_ref() {
+                            let _ = crate::settings::SettingsStore::set(
+                                db.conn(),
+                                crate::settings::registry::keys::P2P_RELAY_REGISTRY_CACHE,
+                                crate::settings::registry::JsonSetting(serde_json::json!({
+                                    "seq": seq,
+                                    "issuers": issuers,
+                                })),
+                            );
+                        }
+                    }
+                }
+            });
+        }
+
         match network::start_node_with_db(
             keypair,
             event_tx,

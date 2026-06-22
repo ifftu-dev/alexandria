@@ -9,6 +9,7 @@ pub mod gov_tx_builder;
 pub mod governance;
 pub mod onchain_queue;
 pub mod plutus_data;
+pub mod relay_registry_chain;
 pub mod script_refs;
 pub mod snapshot;
 pub mod soulbound_tx_builder;
