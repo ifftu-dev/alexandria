@@ -91,8 +91,12 @@ pub const ELECTION_REF_UTXO: (&str, u64) = (
 );
 
 /// Reference UTxO for the proposal validator.
+///
+/// The original batch-A ref script (448db85c#0) was spent in an earlier
+/// session, so the proposal validator (unparameterized, hash unchanged
+/// 7888035d) was redeployed 2026-06-22 in tx 8138bad4.
 pub const PROPOSAL_REF_UTXO: (&str, u64) = (
-    "448db85c1fa30e3159ad2aad341a84fb34f71c7966cd1a6392fb186c7c974551",
+    "8138bad4fcada5ac9a846b0826aa75d09af382cc8354bdfafe680c3be14458ce",
     0,
 );
 

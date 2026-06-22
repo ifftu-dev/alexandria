@@ -1123,4 +1123,173 @@ mod tests {
             .expect("build spend");
         println!("UNSIGNED_CBOR:{}", hex::encode(&unsigned));
     }
+
+    /// Live preprod proposal lifecycle driver, mirroring
+    /// `live_election_step`:
+    ///   bootstrap (Draft) → approve (committee, Draft→Published) →
+    ///   vote (tally +1) → resolve (after deadline, Published→Approved)
+    ///
+    /// Env:
+    ///   STEP             bootstrap | approve | vote | resolve
+    ///   VOTE_DEADLINE_MS proposal voting deadline (POSIX ms); the
+    ///                    `approve` step prints a fresh value, later steps
+    ///                    must be passed the SAME value.
+    ///   PROPOSAL_UTXO    `txhash#idx` of the proposal UTxO to spend
+    ///                    (non-bootstrap steps).
+    ///   PROPOSAL_LOVELACE lovelace on that UTxO.
+    ///
+    /// The committee + voter are the treasury key (sole DAO committee
+    /// member, and owner of the reputation reference NFT). The DAO state
+    /// UTxO (daod1) is read as a reference input for committee/quorum.
+    #[test]
+    #[ignore]
+    fn live_proposal_step() {
+        let pid = std::env::var("BLOCKFROST_PROJECT_ID").expect("BLOCKFROST_PROJECT_ID");
+        let step = std::env::var("STEP").expect("STEP");
+        let treasury_addr =
+            "addr_test1qps9dhjrekj8d7nuf94ltzeslzwfj30u0f5tgy6ddmecxvm5wes3g9ja43ewdtq6ww3rccuzjvv7gdd4hghj9jdg7njqpu4uns";
+        let actor =
+            hash_from_hex("6056de43cda476fa7c496bf58b30f89c9945fc7a68b4134d6ef38333").unwrap();
+        let dao_policy = hash_from_hex(script_refs::DAO_MINTING_SCRIPT_HASH).unwrap();
+        let dao_token = b"daod1".to_vec();
+        let subject = hex::decode("72657031000000000000000000000000").unwrap();
+        let rep_policy = hash_from_hex(script_refs::REPUTATION_MINTING_SCRIPT_HASH).unwrap();
+        let vote_policy = hash_from_hex(script_refs::VOTE_MINTING_SCRIPT_HASH).unwrap();
+        let content_cid = b"Qmproposal1".to_vec();
+        let proposal_id = 3i64;
+        // DAO state UTxO (daod1) for the committee reference input.
+        let dao_ref = (
+            "d554c635ec17f1d6db2e8b49e7cf78fcdf042c23078a8055fa5a48814bc553ef",
+            0u64,
+        );
+        // Soulbound UTxO holding the treasury's reputation reference NFT.
+        let rep_ref = (
+            "3eb0620bdd0c5a124c9ce7212295fe7b34b0933174cfed20b05b48c0bbc19a39",
+            0u64,
+        );
+
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let bf = BlockfrostClient::new(pid).unwrap();
+
+        let datum = |status: &str, deadline_ms: i64, vf: i64, va: i64| {
+            plutus_data::encode_proposal_datum(
+                &dao_policy,
+                &dao_token,
+                proposal_id,
+                &actor,
+                status,
+                "general",
+                "remember",
+                &[&subject[..]],
+                &rep_policy,
+                &content_cid,
+                deadline_ms,
+                vf,
+                va,
+                &vote_policy,
+            )
+            .unwrap()
+        };
+
+        if step == "bootstrap" {
+            // Draft proposal: voting_deadline 0, tallies 0.
+            let d = datum("draft", 0, 0, 0);
+            let unsigned = rt
+                .block_on(build_plain_create_unsigned(
+                    &bf,
+                    treasury_addr,
+                    script_refs::PROPOSAL_SCRIPT_HASH,
+                    MIN_SCRIPT_UTXO_LOVELACE,
+                    &d,
+                ))
+                .expect("build proposal bootstrap");
+            println!("UNSIGNED_CBOR:{}", hex::encode(&unsigned));
+            return;
+        }
+
+        let pu = std::env::var("PROPOSAL_UTXO").unwrap();
+        let (ph, pi_s) = pu.split_once('#').unwrap();
+        let pi: u64 = pi_s.parse().unwrap();
+        let plov: u64 = std::env::var("PROPOSAL_LOVELACE").unwrap().parse().unwrap();
+
+        let tip = rt.block_on(bf.get_tip_slot()).expect("tip");
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        let before_slot =
+            |ms: i64| -> u64 { (tip as i64 + (ms - now_ms) / 1000 - 60).max(1) as u64 };
+        let after_slot =
+            |ms: i64| -> u64 { (tip as i64 + (ms - now_ms) / 1000 + 60).max(1) as u64 };
+
+        let (redeemer, cont_datum, refs, signers, inval, valfrom): (
+            Vec<u8>,
+            Vec<u8>,
+            Vec<(&str, u64)>,
+            Vec<[u8; 28]>,
+            Option<u64>,
+            Option<u64>,
+        ) = match step.as_str() {
+            "approve" => {
+                // Draft → Published; set a voting deadline 10 min out.
+                let vd = now_ms + 600_000;
+                let duration = 600_000i64;
+                println!("VOTE_DEADLINE_MS={vd}");
+                (
+                    plutus_data::encode_proposal_approve_redeemer(duration).unwrap(),
+                    datum("published", vd, 0, 0),
+                    vec![script_refs::PROPOSAL_REF_UTXO, dao_ref],
+                    vec![actor],
+                    None,
+                    None,
+                )
+            }
+            "vote" => {
+                let vd: i64 = std::env::var("VOTE_DEADLINE_MS").unwrap().parse().unwrap();
+                (
+                    plutus_data::encode_proposal_redeemer("vote", Some(true)).unwrap(),
+                    datum("published", vd, 1, 0),
+                    vec![script_refs::PROPOSAL_REF_UTXO, rep_ref],
+                    vec![actor],
+                    Some(before_slot(vd)),
+                    None,
+                )
+            }
+            "resolve" => {
+                let vd: i64 = std::env::var("VOTE_DEADLINE_MS").unwrap().parse().unwrap();
+                (
+                    plutus_data::encode_proposal_redeemer("resolve", None).unwrap(),
+                    datum("approved", vd, 1, 0),
+                    vec![script_refs::PROPOSAL_REF_UTXO],
+                    vec![actor],
+                    None,
+                    Some(after_slot(vd)),
+                )
+            }
+            other => panic!("unknown STEP: {other}"),
+        };
+
+        let unsigned = rt
+            .block_on(crate::cardano::plutus_spend::build_spend_unsigned(
+                &bf,
+                &crate::cardano::plutus_spend::SpendScript {
+                    payment_address: treasury_addr,
+                    payment_key_extended: &[0u8; 64],
+                    required_signers: &signers,
+                    script_input: (ph, pi),
+                    script_input_lovelace: plov,
+                    spend_redeemer: redeemer,
+                    continuing_address: script_address(script_refs::PROPOSAL_SCRIPT_HASH).unwrap(),
+                    continuing_lovelace: MIN_SCRIPT_UTXO_LOVELACE,
+                    continuing_datum: cont_datum,
+                    continuing_assets: &[],
+                    reference_inputs: &refs,
+                    mint: None,
+                    invalid_from_slot: inval,
+                    valid_from_slot: valfrom,
+                },
+            ))
+            .expect("build proposal spend");
+        println!("UNSIGNED_CBOR:{}", hex::encode(&unsigned));
+    }
 }

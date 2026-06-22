@@ -373,6 +373,18 @@ pub fn encode_proposal_datum(
     Ok(buf)
 }
 
+/// Encode a `ProposalRedeemer::ApproveForVoting { voting_duration }`.
+/// The plain `encode_proposal_redeemer("approve", _)` helper emits
+/// `Constr 1 []` (no fields); use this when the validator needs the
+/// voting-duration field.
+pub fn encode_proposal_approve_redeemer(voting_duration_ms: i64) -> Result<Vec<u8>, TxBuildError> {
+    let mut buf = Vec::new();
+    let mut encoder = pallas_codec::minicbor::Encoder::new(&mut buf);
+    begin_constr(&mut encoder, 1, 1)?;
+    encode_int(&mut encoder, voting_duration_ms)?;
+    Ok(buf)
+}
+
 /// Encode a `ProposalRedeemer` as Plutus Data CBOR.
 pub fn encode_proposal_redeemer(
     action: &str,
