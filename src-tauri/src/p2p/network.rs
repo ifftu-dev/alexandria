@@ -1156,6 +1156,14 @@ async fn swarm_event_loop(
     let mut relay_reservations_requested: std::collections::HashSet<libp2p::PeerId> =
         std::collections::HashSet::new();
 
+    // Auto-discovered relays (connectivity only): nodes that contribute
+    // advertise under the relay namespace; we adopt a capped, reputation
+    // -scored subset and request reservations from them via the same
+    // identify flow as the built-in relays.
+    let relay_namespace_key = super::discovery::relay_namespace_key();
+    let mut discovered_relays = super::relay_discovery::DiscoveredRelays::new();
+    let mut relay_providers_query: Option<kad::QueryId> = None;
+
     // Periodic Kademlia bootstrap — re-run every 5 minutes to keep
     // the routing table fresh and discover new peers.
     let mut kad_bootstrap_interval = tokio::time::interval(Duration::from_secs(300));
@@ -1285,6 +1293,23 @@ async fn swarm_event_loop(
             // Periodic provider refresh
             _ = provider_interval.tick(), if initial_provider_done => {
                 refresh_provider_records(&mut swarm, &namespace_key, "steady-state interval");
+                // Advertise as a relay when contributing, and always look
+                // for relays to adopt (capped + reputation-scored).
+                if dht_server {
+                    if let Err(e) = swarm
+                        .behaviour_mut()
+                        .kademlia
+                        .start_providing(relay_namespace_key.clone())
+                    {
+                        diag::log(&format!("Kademlia: relay start_providing failed: {e}"));
+                    }
+                }
+                relay_providers_query = Some(
+                    swarm
+                        .behaviour_mut()
+                        .kademlia
+                        .get_providers(relay_namespace_key.clone()),
+                );
             }
             // Periodic peer exchange broadcast
             _ = peer_exchange_interval.tick() => {
@@ -1631,14 +1656,26 @@ async fn swarm_event_loop(
                         // 1. Request a relay reservation so other NATted peers can reach us
                         // 2. Bootstrap Kademlia now that we have a relay in our routing table
                         // 3. Start providing on the namespace key for peer discovery
-                        if relay_peer_ids.contains(&peer_id) && !relay_reservations_requested.contains(&peer_id) {
+                        let is_known_relay = relay_peer_ids.contains(&peer_id);
+                        let is_discovered_relay = discovered_relays.contains(&peer_id);
+                        if (is_known_relay || is_discovered_relay)
+                            && !relay_reservations_requested.contains(&peer_id)
+                        {
                             relay_reservations_requested.insert(peer_id);
                             diag::log(&format!(
                                 "Identified relay peer {peer_id} — requesting reservation"
                             ));
 
-                            // Request relay reservation via listen_on with the circuit address.
-                            if let Some(circuit_addr) = super::discovery::relay_circuit_addr_for(&peer_id) {
+                            // Built-in relays have explicit circuit addresses;
+                            // discovered relays use a relative circuit addr
+                            // (resolved via the connection we just dialed).
+                            let circuit_addr = super::discovery::relay_circuit_addr_for(&peer_id)
+                                .or_else(|| {
+                                    format!("/p2p/{peer_id}/p2p-circuit")
+                                        .parse::<libp2p::Multiaddr>()
+                                        .ok()
+                                });
+                            if let Some(circuit_addr) = circuit_addr {
                                 match swarm.listen_on(circuit_addr.clone()) {
                                     Ok(_) => diag::log(&format!(
                                         "Relay: listening on circuit {circuit_addr}"
@@ -1713,33 +1750,46 @@ async fn swarm_event_loop(
                                 }
                             }
                             kad::Event::OutboundQueryProgressed {
+                                id,
                                 result: kad::QueryResult::GetProviders(Ok(
                                     kad::GetProvidersOk::FoundProviders { providers, .. }
                                 )),
                                 ..
                             } => {
-                                // Found Alexandria peers in the DHT!
-                                // `providers` is a HashSet<PeerId>
                                 let local = *swarm.local_peer_id();
+                                let is_relay_query = Some(id) == relay_providers_query;
                                 diag::log(&format!(
-                                    "DHT: GetProviders returned {} provider(s)",
-                                    providers.len()
+                                    "DHT: GetProviders returned {} provider(s){}",
+                                    providers.len(),
+                                    if is_relay_query { " [relay]" } else { "" }
                                 ));
-                                for peer in &providers {
-                                    diag::log(&format!(
-                                        "DHT: provider peer={peer} is_self={} is_connected={}",
-                                        *peer == local,
-                                        swarm.is_connected(peer)
-                                    ));
-                                }
                                 for peer in providers {
-                                    if peer != local {
-                                        dial_peer_with_relay_fallbacks(
-                                            &mut swarm,
-                                            &peer,
-                                            "DHT discovery",
-                                        );
+                                    if peer == local {
+                                        continue;
                                     }
+                                    // Relay-namespace providers: adopt a
+                                    // capped subset as circuit relays. The
+                                    // built-in relays already self-reserve,
+                                    // so skip those. Dialing a newly-admitted
+                                    // relay triggers the identify flow, which
+                                    // requests the reservation.
+                                    if is_relay_query
+                                        && !relay_peer_ids.contains(&peer)
+                                        && discovered_relays.admit(peer)
+                                    {
+                                        diag::log(&format!(
+                                            "DHT: adopting discovered relay {peer}"
+                                        ));
+                                    }
+                                    dial_peer_with_relay_fallbacks(
+                                        &mut swarm,
+                                        &peer,
+                                        if is_relay_query {
+                                            "relay discovery"
+                                        } else {
+                                            "DHT discovery"
+                                        },
+                                    );
                                 }
                             }
                             kad::Event::OutboundQueryProgressed {
@@ -2206,11 +2256,25 @@ async fn swarm_event_loop(
                         // Persist the peer's address so we reconnect on next startup.
                         let addr = endpoint.get_remote_address().to_string();
                         save_peer_to_db(&db, &peer_id.to_string(), &[addr]);
+                        // Reward a discovered relay that connected.
+                        if discovered_relays.contains(&peer_id) {
+                            discovered_relays.note_success(&peer_id);
+                        }
                     }
                     SwarmEvent::ConnectionClosed { peer_id, .. } => {
                         log::debug!("Disconnected from peer: {peer_id}");
                         diag::log(&format!("P2P event: peer disconnected — {peer_id}"));
                         rate_limiter.remove_peer(&peer_id);
+                        // Decay a discovered relay's reputation; evict if it
+                        // has proven unreliable so its slot frees up.
+                        if discovered_relays.contains(&peer_id)
+                            && discovered_relays.note_failure(&peer_id)
+                        {
+                            relay_reservations_requested.remove(&peer_id);
+                            diag::log(&format!(
+                                "Relay: evicted unreliable discovered relay {peer_id}"
+                            ));
+                        }
                         let _ = event_tx.send(P2pEvent::PeerDisconnected {
                             peer_id: peer_id.to_string(),
                         }).await;

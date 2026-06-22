@@ -284,6 +284,16 @@ pub fn namespace_key() -> libp2p::kad::RecordKey {
     libp2p::kad::RecordKey::new(&hash)
 }
 
+/// Provider-record key under which contributing (publicly reachable)
+/// nodes advertise themselves as circuit relays. Distinct from
+/// [`namespace_key`] so clients can discover *relays* specifically and
+/// request reservations from them, rather than learning every peer.
+pub fn relay_namespace_key() -> libp2p::kad::RecordKey {
+    use sha2::{Digest, Sha256};
+    let hash = Sha256::digest(b"ifftu.alexandria.relays");
+    libp2p::kad::RecordKey::new(&hash)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

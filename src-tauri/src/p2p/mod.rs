@@ -12,6 +12,7 @@ pub mod profile_fetch;
 pub mod rate_limit;
 pub mod registry;
 pub mod registry_chain;
+pub mod relay_discovery;
 pub mod relay_registry;
 pub mod scoring;
 pub mod sentinel;
