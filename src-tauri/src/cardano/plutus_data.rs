@@ -278,6 +278,23 @@ pub fn encode_election_redeemer(action: &str, extra: Option<i64>) -> Result<Vec<
     Ok(buf)
 }
 
+/// Encode an `ElectionRedeemer::FinalizeElection { winners }` carrying
+/// the list of winning verification key hashes. The plain
+/// `encode_election_redeemer("finalize", _)` helper emits `Constr 3 []`
+/// (no fields); use this when the validator needs the winners list.
+pub fn encode_election_finalize_redeemer(winners: &[&[u8; 28]]) -> Result<Vec<u8>, TxBuildError> {
+    let mut buf = Vec::new();
+    let mut encoder = pallas_codec::minicbor::Encoder::new(&mut buf);
+    begin_constr(&mut encoder, 3, 1)?;
+    encoder
+        .array(winners.len() as u64)
+        .map_err(|e| TxBuildError::Cbor(e.to_string()))?;
+    for w in winners {
+        encode_bytes(&mut encoder, *w)?;
+    }
+    Ok(buf)
+}
+
 // ---- ProposalDatum / ProposalRedeemer ----
 
 /// Encode a `ProposalDatum` as Plutus Data CBOR.

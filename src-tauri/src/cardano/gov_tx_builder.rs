@@ -940,4 +940,187 @@ mod tests {
         });
         println!("UNSIGNED_CBOR:{}", hex::encode(&unsigned));
     }
+
+    /// Live preprod election lifecycle driver. One ignored test, one
+    /// `STEP` env var, so a shell harness can drive the full sequence
+    /// (each step spends the previous step's continuing output and is
+    /// signed out-of-band by the treasury cardano-cli key):
+    ///   bootstrap → nominate → start_voting → finalize
+    ///
+    /// Env:
+    ///   STEP               bootstrap | nominate | start_voting | finalize
+    ///   T_NOM_MS, T_VOT_MS nomination/voting deadlines (POSIX ms). The
+    ///                      bootstrap step prints fresh values; later
+    ///                      steps must be passed the SAME values.
+    ///   ELECTION_UTXO      `txhash#idx` of the election UTxO to spend
+    ///                      (non-bootstrap steps).
+    ///   ELECTION_LOVELACE  lovelace on that UTxO.
+    ///
+    /// The self-nominee is the treasury key, which owns the reputation
+    /// reference NFT (subject 72657031…, skill proficiency Analyze) at
+    /// the soulbound UTxO referenced below. Run e.g.:
+    ///   STEP=bootstrap BLOCKFROST_PROJECT_ID=… cargo test -p \
+    ///     alexandria-node live_election_step -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn live_election_step() {
+        let pid = std::env::var("BLOCKFROST_PROJECT_ID").expect("BLOCKFROST_PROJECT_ID");
+        let step = std::env::var("STEP").expect("STEP");
+        let treasury_addr =
+            "addr_test1qps9dhjrekj8d7nuf94ltzeslzwfj30u0f5tgy6ddmecxvm5wes3g9ja43ewdtq6ww3rccuzjvv7gdd4hghj9jdg7njqpu4uns";
+        let nominee =
+            hash_from_hex("6056de43cda476fa7c496bf58b30f89c9945fc7a68b4134d6ef38333").unwrap();
+        let dao_policy = hash_from_hex(script_refs::DAO_MINTING_SCRIPT_HASH).unwrap();
+        let dao_token = b"daod1".to_vec();
+        let subject = hex::decode("72657031000000000000000000000000").unwrap();
+        let rep_policy = hash_from_hex(script_refs::REPUTATION_MINTING_SCRIPT_HASH).unwrap();
+        let vote_policy = hash_from_hex(script_refs::VOTE_MINTING_SCRIPT_HASH).unwrap();
+        let election_id = 7i64;
+        let seats = 1i64;
+        // Soulbound UTxO holding the treasury's reputation reference NFT.
+        let rep_ref = (
+            "3eb0620bdd0c5a124c9ce7212295fe7b34b0933174cfed20b05b48c0bbc19a39",
+            0u64,
+        );
+
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let bf = BlockfrostClient::new(pid).unwrap();
+
+        if step == "bootstrap" {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis() as i64;
+            let t_nom = now + 600_000;
+            let t_vot = now + 1_200_000;
+            let datum = plutus_data::encode_election_datum(
+                &dao_policy,
+                &dao_token,
+                election_id,
+                "nomination",
+                seats,
+                "remember",
+                "remember",
+                &[&subject[..]],
+                &rep_policy,
+                &[],
+                t_nom,
+                t_vot,
+                &vote_policy,
+            )
+            .unwrap();
+            let unsigned = rt
+                .block_on(build_plain_create_unsigned(
+                    &bf,
+                    treasury_addr,
+                    script_refs::ELECTION_SCRIPT_HASH,
+                    MIN_SCRIPT_UTXO_LOVELACE,
+                    &datum,
+                ))
+                .expect("build bootstrap");
+            println!("T_NOM_MS={t_nom}");
+            println!("T_VOT_MS={t_vot}");
+            println!("UNSIGNED_CBOR:{}", hex::encode(&unsigned));
+            return;
+        }
+
+        let t_nom: i64 = std::env::var("T_NOM_MS").unwrap().parse().unwrap();
+        let t_vot: i64 = std::env::var("T_VOT_MS").unwrap().parse().unwrap();
+
+        // Validity-range bounds must be SLOTS the ledger can convert to
+        // POSIX time. Preprod's Byron era ran 20s slots, so an absolute
+        // posix→slot conversion (PREPROD_SHELLEY_EPOCH_START) overshoots
+        // by ~16 days and trips PastHorizon. Derive bounds from the live
+        // chain tip instead: in the post-Shelley 1s-slot era, tip + N
+        // seconds ≈ the slot N seconds from now.
+        let tip = rt.block_on(bf.get_tip_slot()).expect("tip");
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        let secs_to = |deadline_ms: i64| -> i64 { (deadline_ms - now_ms) / 1000 };
+        let before_slot =
+            |deadline_ms: i64| -> u64 { (tip as i64 + secs_to(deadline_ms) - 60).max(1) as u64 };
+        let after_slot =
+            |deadline_ms: i64| -> u64 { (tip as i64 + secs_to(deadline_ms) + 60).max(1) as u64 };
+
+        let eu = std::env::var("ELECTION_UTXO").unwrap();
+        let (eh, ei_s) = eu.split_once('#').unwrap();
+        let ei: u64 = ei_s.parse().unwrap();
+        let elov: u64 = std::env::var("ELECTION_LOVELACE").unwrap().parse().unwrap();
+
+        let datum = |phase: &str, noms: &[(&[u8; 28], bool)]| {
+            plutus_data::encode_election_datum(
+                &dao_policy,
+                &dao_token,
+                election_id,
+                phase,
+                seats,
+                "remember",
+                "remember",
+                &[&subject[..]],
+                &rep_policy,
+                noms,
+                t_nom,
+                t_vot,
+                &vote_policy,
+            )
+            .unwrap()
+        };
+
+        let (redeemer, cont_datum, refs, inval, valfrom): (
+            Vec<u8>,
+            Vec<u8>,
+            Vec<(&str, u64)>,
+            Option<u64>,
+            Option<u64>,
+        ) = match step.as_str() {
+            "nominate" => (
+                plutus_data::encode_election_redeemer("nominate", None).unwrap(),
+                datum("nomination", &[(&nominee, true)]),
+                vec![script_refs::ELECTION_REF_UTXO, rep_ref],
+                Some(before_slot(t_nom)),
+                None,
+            ),
+            "start_voting" => (
+                plutus_data::encode_election_redeemer("start_voting", None).unwrap(),
+                datum("voting", &[(&nominee, true)]),
+                vec![script_refs::ELECTION_REF_UTXO],
+                None,
+                Some(after_slot(t_nom)),
+            ),
+            "finalize" => (
+                plutus_data::encode_election_finalize_redeemer(&[&nominee]).unwrap(),
+                datum("finalized", &[(&nominee, true)]),
+                vec![script_refs::ELECTION_REF_UTXO],
+                None,
+                Some(after_slot(t_vot)),
+            ),
+            other => panic!("unknown STEP: {other}"),
+        };
+
+        let signers = [nominee];
+        let unsigned = rt
+            .block_on(crate::cardano::plutus_spend::build_spend_unsigned(
+                &bf,
+                &crate::cardano::plutus_spend::SpendScript {
+                    payment_address: treasury_addr,
+                    payment_key_extended: &[0u8; 64],
+                    required_signers: &signers,
+                    script_input: (eh, ei),
+                    script_input_lovelace: elov,
+                    spend_redeemer: redeemer,
+                    continuing_address: script_address(script_refs::ELECTION_SCRIPT_HASH).unwrap(),
+                    continuing_lovelace: MIN_SCRIPT_UTXO_LOVELACE,
+                    continuing_datum: cont_datum,
+                    continuing_assets: &[],
+                    reference_inputs: &refs,
+                    mint: None,
+                    invalid_from_slot: inval,
+                    valid_from_slot: valfrom,
+                },
+            ))
+            .expect("build spend");
+        println!("UNSIGNED_CBOR:{}", hex::encode(&unsigned));
+    }
 }

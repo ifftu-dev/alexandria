@@ -40,7 +40,7 @@ fn plutus_fee(min_fee_a: u64, min_fee_b: u64, tx_size: u64, mem: u64, steps: u64
     let size_fee = min_fee_a * tx_size + min_fee_b;
     let exec_fee = (mem * PRICE_MEM_NUM).div_ceil(PRICE_MEM_DEN)
         + (steps * PRICE_STEP_NUM).div_ceil(PRICE_STEP_DEN);
-    size_fee + exec_fee + 50_000
+    size_fee + exec_fee + 100_000
 }
 
 /// A token amount carried on an output (policy, asset name, quantity).
