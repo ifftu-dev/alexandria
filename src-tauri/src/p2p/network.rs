@@ -504,7 +504,9 @@ pub async fn start_node_with_db(
         .with_quic()
         .with_relay_client(noise::Config::new, yamux::Config::default)
         .map_err(|e| NetworkError::SwarmBuild(format!("relay client: {e}")))?
-        .with_behaviour(|key, relay_behaviour| build_behaviour(key, peer_id, relay_behaviour))
+        .with_behaviour(|key, relay_behaviour| {
+            build_behaviour(key, peer_id, relay_behaviour, dht_server)
+        })
         .map_err(|e| NetworkError::SwarmBuild(e.to_string()))?
         .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(300)))
         .build();
@@ -542,7 +544,7 @@ pub async fn start_node_with_db(
         let builder = builder
             .with_behaviour(|key, relay_behaviour| {
                 diag::log("start_node: inside build_behaviour callback");
-                build_behaviour(key, peer_id, relay_behaviour)
+                build_behaviour(key, peer_id, relay_behaviour, dht_server)
             })
             .map_err(|e| {
                 diag::log(&format!("start_node: with_behaviour FAILED: {e}"));
@@ -585,7 +587,7 @@ pub async fn start_node_with_db(
         let builder = builder
             .with_behaviour(|key, relay_behaviour| {
                 diag::log("start_node: inside build_behaviour callback");
-                build_behaviour(key, peer_id, relay_behaviour)
+                build_behaviour(key, peer_id, relay_behaviour, dht_server)
             })
             .map_err(|e| {
                 diag::log(&format!("start_node: with_behaviour FAILED: {e}"));
@@ -791,6 +793,7 @@ fn build_behaviour(
     keypair: &Keypair,
     peer_id: PeerId,
     relay_behaviour: relay::client::Behaviour,
+    contribute: bool,
 ) -> Result<AlexandriaBehaviour, Box<dyn std::error::Error + Send + Sync>> {
     diag::log("build_behaviour: creating gossipsub config...");
 
@@ -895,7 +898,20 @@ fn build_behaviour(
     // traffic for NATted peers. The server is inert on NATted nodes
     // (nobody can reach it to make HOP requests). When AutoNAT detects
     // public reachability, the relay server naturally becomes active.
-    let relay_server = relay::Behaviour::new(peer_id, relay::Config::default());
+    //
+    // When the user opts out of contributing (`contribute == false`),
+    // grant no reservations or circuits so a publicly-reachable node
+    // still refuses to carry others' traffic. The behaviour stays in the
+    // swarm (the type is fixed) but becomes a no-op responder.
+    let relay_config = {
+        let mut cfg = relay::Config::default();
+        if !contribute {
+            cfg.max_reservations = 0;
+            cfg.max_circuits = 0;
+        }
+        cfg
+    };
+    let relay_server = relay::Behaviour::new(peer_id, relay_config);
 
     diag::log("build_behaviour: creating dcutr...");
 
