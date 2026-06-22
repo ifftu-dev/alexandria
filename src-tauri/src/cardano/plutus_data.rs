@@ -161,10 +161,10 @@ pub fn encode_dao_redeemer(
                 TxBuildError::Cbor("install_committee requires election_ref".into())
             })?;
             begin_constr(&mut encoder, 2, 1)?;
-            // OutputReference = Constr(0, [tx_id, idx])
+            // OutputReference = Constr(0, [transaction_id, output_index]).
+            // In the modern cardano/transaction stdlib `transaction_id`
+            // is a raw ByteArray (no TransactionId Constr wrapper).
             begin_constr(&mut encoder, 0, 2)?;
-            // TransactionId = Constr(0, [hash])
-            begin_constr(&mut encoder, 0, 1)?;
             encode_bytes(&mut encoder, tx_hash)?;
             encode_int(&mut encoder, idx as i64)?;
         }

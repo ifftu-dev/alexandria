@@ -1292,4 +1292,90 @@ mod tests {
             .expect("build proposal spend");
         println!("UNSIGNED_CBOR:{}", hex::encode(&unsigned));
     }
+
+    /// Live preprod committee install: spends the DAO state UTxO with the
+    /// `InstallCommittee { election_ref }` redeemer, references the
+    /// finalized election as a read-only input, and writes a new DaoDatum
+    /// whose committee is the election winners. Closes the governance
+    /// loop election → committee. No signature is required by the
+    /// validator once the election is finalized.
+    ///
+    /// Env: DAO_UTXO (`txhash#idx`), DAO_LOVELACE, ELECTION_REF
+    /// (`txhash#idx` of the finalized election).
+    #[test]
+    #[ignore]
+    fn live_install_committee() {
+        let pid = std::env::var("BLOCKFROST_PROJECT_ID").expect("BLOCKFROST_PROJECT_ID");
+        let treasury_addr =
+            "addr_test1qps9dhjrekj8d7nuf94ltzeslzwfj30u0f5tgy6ddmecxvm5wes3g9ja43ewdtq6ww3rccuzjvv7gdd4hghj9jdg7njqpu4uns";
+        let winner =
+            hash_from_hex("6056de43cda476fa7c496bf58b30f89c9945fc7a68b4134d6ef38333").unwrap();
+        let dao_policy = hash_from_hex(script_refs::DAO_MINTING_SCRIPT_HASH).unwrap();
+        let rep_policy = hash_from_hex(script_refs::REPUTATION_MINTING_SCRIPT_HASH).unwrap();
+
+        let du = std::env::var("DAO_UTXO").unwrap();
+        let (dh, di_s) = du.split_once('#').unwrap();
+        let di: u64 = di_s.parse().unwrap();
+        let dlov: u64 = std::env::var("DAO_LOVELACE").unwrap().parse().unwrap();
+        let er = std::env::var("ELECTION_REF").unwrap();
+        let (erh, eri_s) = er.split_once('#').unwrap();
+        let eri: u64 = eri_s.parse().unwrap();
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        let interval = 2_592_000_000i64;
+        // New DAO datum: scope (SubjectDao "d1") and state_token_policy
+        // MUST be preserved; committee becomes the winners; new term.
+        let new_datum = plutus_data::encode_dao_datum(
+            "subject",
+            b"d1",
+            &rep_policy,
+            &[],
+            "remember",
+            &dao_policy,
+            &[&winner],
+            1,
+            interval,
+            now,
+            now + interval,
+        )
+        .unwrap();
+
+        // InstallCommittee { election_ref = OutputReference(erh, eri) }.
+        let erh_bytes = hex::decode(erh).unwrap();
+        let redeemer =
+            plutus_data::encode_dao_redeemer("install_committee", Some((&erh_bytes, eri))).unwrap();
+
+        let dao_token = b"daod1".to_vec();
+        let assets = [(Hash::<28>::from(dao_policy), dao_token, 1i64)];
+        let refs = vec![script_refs::DAO_REGISTRY_REF_UTXO, (erh, eri)];
+
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let bf = BlockfrostClient::new(pid).unwrap();
+        let unsigned = rt
+            .block_on(crate::cardano::plutus_spend::build_spend_unsigned(
+                &bf,
+                &crate::cardano::plutus_spend::SpendScript {
+                    payment_address: treasury_addr,
+                    payment_key_extended: &[0u8; 64],
+                    required_signers: &[],
+                    script_input: (dh, di),
+                    script_input_lovelace: dlov,
+                    spend_redeemer: redeemer,
+                    continuing_address: script_address(script_refs::DAO_REGISTRY_SCRIPT_HASH)
+                        .unwrap(),
+                    continuing_lovelace: MIN_SCRIPT_UTXO_LOVELACE,
+                    continuing_datum: new_datum,
+                    continuing_assets: &assets,
+                    reference_inputs: &refs,
+                    mint: None,
+                    invalid_from_slot: None,
+                    valid_from_slot: None,
+                },
+            ))
+            .expect("build install_committee");
+        println!("UNSIGNED_CBOR:{}", hex::encode(&unsigned));
+    }
 }
