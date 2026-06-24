@@ -270,3 +270,37 @@ pub async fn install_committee(
     .map_err(e2s)?;
     sign_raw_tx(&unsigned, &op.private_key).map_err(e2s)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Live preprod check for the operator-signed metadata anchor — the
+    /// one new tx shape in the queue rewrite (finalize-publish reuses the
+    /// verified plain-create; install reuses verified plutus_spend). Run:
+    ///   BLOCKFROST_PROJECT_ID=… OPERATOR_SKEY_PATH=…/treasury.skey \
+    ///   OPERATOR_ADDRESS=addr_test1q… cargo test -p alexandria-node \
+    ///     live_governance_anchor -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn live_governance_anchor() {
+        let pid = std::env::var("BLOCKFROST_PROJECT_ID").expect("BLOCKFROST_PROJECT_ID");
+        let op = super::super::operator::load_operator_key().expect("operator key");
+        let meta = proposal_outcome_metadata(
+            "testproposal000000000000000000000000000000000000000000000000abcd",
+            "approved",
+            3,
+            1,
+            Some("aa".repeat(32)),
+        );
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let tx_hash = rt.block_on(async {
+            let bf = BlockfrostClient::new(pid).unwrap();
+            let signed = build_governance_anchor(&bf, &op, meta)
+                .await
+                .expect("build anchor");
+            bf.submit_tx(&signed).await.expect("submit")
+        });
+        println!("ANCHOR_TX:{tx_hash}");
+    }
+}
