@@ -240,6 +240,9 @@ pub type ElectionRedeemer {
   StartVoting
   /// Finalize the election after voting ends
   FinalizeElection { winners: List<VerificationKeyHash> }
+  /// A member self-nominates (appends an accepted nominee). Appended last
+  /// to preserve the constructor indices of the variants above.
+  Nominate
 }
 
 // ─── Proposals ──────────────────────────────────────────────────────────────

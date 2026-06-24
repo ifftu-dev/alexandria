@@ -10,6 +10,7 @@ pub mod governance;
 pub mod onchain_queue;
 pub mod plutus_data;
 pub mod plutus_mint;
+pub mod plutus_spend;
 pub mod relay_registry_chain;
 pub mod script_refs;
 pub mod snapshot;

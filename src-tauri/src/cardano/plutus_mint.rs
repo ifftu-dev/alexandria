@@ -100,7 +100,12 @@ pub async fn build_mint_to_address_unsigned(
     }
 
     // Distinct spend input (largest) + collateral (separate ≥5-ADA UTxO).
-    let mut pure: Vec<_> = utxos.iter().filter(|u| u.lovelace() > 0).collect();
+    // Exclude reference-script UTxOs: consuming one destroys a deployed
+    // validator's reference script and adds the Conway ref-script fee.
+    let mut pure: Vec<_> = utxos
+        .iter()
+        .filter(|u| u.lovelace() > 0 && !u.has_reference_script())
+        .collect();
     pure.sort_by_key(|u| std::cmp::Reverse(u.lovelace()));
     let selected = *pure.first().ok_or(TxBuildError::NoUtxos)?;
     let collateral = pure

@@ -258,9 +258,14 @@ impl BlockfrostClient {
     /// Select the first UTxO with at least `min_lovelace` from the list.
     ///
     /// This is a simple linear-scan coin selection matching v1 behavior.
-    /// Returns `None` if no UTxO meets the threshold.
+    /// Returns `None` if no UTxO meets the threshold. UTxOs carrying a
+    /// reference script are skipped — consuming one would destroy a
+    /// deployed validator's reference script and add the Conway
+    /// reference-script fee.
     pub fn select_utxo(utxos: &[UTxO], min_lovelace: u64) -> Option<&UTxO> {
-        utxos.iter().find(|u| u.lovelace() >= min_lovelace)
+        utxos
+            .iter()
+            .find(|u| u.lovelace() >= min_lovelace && !u.has_reference_script())
     }
 
     // ---- Governance-specific endpoints ----
@@ -583,6 +588,7 @@ mod tests {
                     unit: "lovelace".into(),
                     quantity: "2000000".into(),
                 }],
+                reference_script_hash: None,
             },
             UTxO {
                 tx_hash: "bbb".into(),
@@ -591,6 +597,7 @@ mod tests {
                     unit: "lovelace".into(),
                     quantity: "10000000".into(),
                 }],
+                reference_script_hash: None,
             },
         ];
         let selected = BlockfrostClient::select_utxo(&utxos, 5_000_000);
@@ -608,6 +615,7 @@ mod tests {
                 unit: "lovelace".into(),
                 quantity: "1000000".into(),
             }],
+            reference_script_hash: None,
         }];
         let selected = BlockfrostClient::select_utxo(&utxos, 5_000_000);
         assert!(selected.is_none());

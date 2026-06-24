@@ -161,10 +161,10 @@ pub fn encode_dao_redeemer(
                 TxBuildError::Cbor("install_committee requires election_ref".into())
             })?;
             begin_constr(&mut encoder, 2, 1)?;
-            // OutputReference = Constr(0, [tx_id, idx])
+            // OutputReference = Constr(0, [transaction_id, output_index]).
+            // In the modern cardano/transaction stdlib `transaction_id`
+            // is a raw ByteArray (no TransactionId Constr wrapper).
             begin_constr(&mut encoder, 0, 2)?;
-            // TransactionId = Constr(0, [hash])
-            begin_constr(&mut encoder, 0, 1)?;
             encode_bytes(&mut encoder, tx_hash)?;
             encode_int(&mut encoder, idx as i64)?;
         }
@@ -267,6 +267,7 @@ pub fn encode_election_redeemer(action: &str, extra: Option<i64>) -> Result<Vec<
         }
         "start_voting" => begin_constr(&mut encoder, 2, 0)?,
         "finalize" => begin_constr(&mut encoder, 3, 0)?,
+        "nominate" => begin_constr(&mut encoder, 4, 0)?,
         _ => {
             return Err(TxBuildError::Cbor(format!(
                 "unknown election redeemer: {action}"
@@ -274,6 +275,23 @@ pub fn encode_election_redeemer(action: &str, extra: Option<i64>) -> Result<Vec<
         }
     }
 
+    Ok(buf)
+}
+
+/// Encode an `ElectionRedeemer::FinalizeElection { winners }` carrying
+/// the list of winning verification key hashes. The plain
+/// `encode_election_redeemer("finalize", _)` helper emits `Constr 3 []`
+/// (no fields); use this when the validator needs the winners list.
+pub fn encode_election_finalize_redeemer(winners: &[&[u8; 28]]) -> Result<Vec<u8>, TxBuildError> {
+    let mut buf = Vec::new();
+    let mut encoder = pallas_codec::minicbor::Encoder::new(&mut buf);
+    begin_constr(&mut encoder, 3, 1)?;
+    encoder
+        .array(winners.len() as u64)
+        .map_err(|e| TxBuildError::Cbor(e.to_string()))?;
+    for w in winners {
+        encode_bytes(&mut encoder, *w)?;
+    }
     Ok(buf)
 }
 
@@ -352,6 +370,18 @@ pub fn encode_proposal_datum(
     encode_int(&mut encoder, votes_against)?;
     encode_bytes(&mut encoder, vote_receipt_policy)?;
 
+    Ok(buf)
+}
+
+/// Encode a `ProposalRedeemer::ApproveForVoting { voting_duration }`.
+/// The plain `encode_proposal_redeemer("approve", _)` helper emits
+/// `Constr 1 []` (no fields); use this when the validator needs the
+/// voting-duration field.
+pub fn encode_proposal_approve_redeemer(voting_duration_ms: i64) -> Result<Vec<u8>, TxBuildError> {
+    let mut buf = Vec::new();
+    let mut encoder = pallas_codec::minicbor::Encoder::new(&mut buf);
+    begin_constr(&mut encoder, 1, 1)?;
+    encode_int(&mut encoder, voting_duration_ms)?;
     Ok(buf)
 }
 
