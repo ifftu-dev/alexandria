@@ -66,6 +66,7 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (56, "username_anchor_verified", MIGRATION_056),
     (57, "dht_record_mirror", MIGRATION_057),
     (58, "governance_vote_signatures", MIGRATION_058),
+    (59, "governance_dao_onchain_links", MIGRATION_059),
 ];
 
 const MIGRATION_001: &str = r#"
@@ -2310,4 +2311,30 @@ ALTER TABLE governance_election_votes ADD COLUMN signature TEXT;
 ALTER TABLE governance_election_votes ADD COLUMN public_key TEXT;
 ALTER TABLE governance_proposal_votes ADD COLUMN signature TEXT;
 ALTER TABLE governance_proposal_votes ADD COLUMN public_key TEXT;
+"#;
+
+const MIGRATION_059: &str = r#"
+-- ============================================================
+-- Migration 059: DAO ↔ on-chain link columns
+-- ============================================================
+
+-- Populated when a DAO is created on-chain (the operator mints its state
+-- token). Governance tx builders need these to construct datums and to
+-- locate the current DAO state UTxO to spend (committee install).
+--
+--   state_token_policy      dao_minting policy id (hex)
+--   state_token_name         asset name = "dao" ++ scope_id (hex)
+--   reputation_policy        reputation minting policy id (hex)
+--   membership_subjects_json JSON array of 16-byte subject ids (hex) that
+--                            qualify for membership (unused under the lean
+--                            model where eligibility is off-chain, but
+--                            stored for the Option-1 upgrade path)
+--   dao_state_utxo           "txhash#index" of the live DAO state UTxO;
+--                            updated each time it is spent (e.g. committee
+--                            install) so the next spend can find it
+ALTER TABLE governance_daos ADD COLUMN state_token_policy TEXT;
+ALTER TABLE governance_daos ADD COLUMN state_token_name TEXT;
+ALTER TABLE governance_daos ADD COLUMN reputation_policy TEXT;
+ALTER TABLE governance_daos ADD COLUMN membership_subjects_json TEXT;
+ALTER TABLE governance_daos ADD COLUMN dao_state_utxo TEXT;
 "#;
