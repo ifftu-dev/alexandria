@@ -444,7 +444,15 @@ async fn build_and_submit(
             gov_onchain::install_committee(blockfrost, operator, &params).await?
         }
         "resolve_proposal" => {
-            return Err("proposal-outcome anchoring not yet wired (lean bridge phase 5)".into());
+            let o = read_proposal_outcome(db, &item.target_id)?;
+            let metadata = gov_onchain::proposal_outcome_metadata(
+                &item.target_id,
+                &o.status,
+                o.votes_for,
+                o.votes_against,
+                o.vote_merkle_root_hex,
+            );
+            gov_onchain::build_governance_anchor(blockfrost, operator, metadata).await?
         }
         "open_election" | "cast_election_vote" | "cast_proposal_vote" | "submit_proposal"
         | "approve_proposal" => {
@@ -664,6 +672,71 @@ fn read_install_data(
 
 /// DAO state UTxOs are created with this min-ADA (see create_dao).
 const MIN_SCRIPT_DAO_LOVELACE: u64 = 3_000_000;
+
+/// Resolved-proposal data for the outcome anchor.
+struct ProposalOutcome {
+    status: String,
+    votes_for: i64,
+    votes_against: i64,
+    /// Merkle root (hex) over the signed off-chain votes, or `None` if
+    /// no signed votes were recorded locally.
+    vote_merkle_root_hex: Option<String>,
+}
+
+fn read_proposal_outcome(
+    db: &std::sync::Arc<std::sync::Mutex<Option<crate::db::Database>>>,
+    proposal_id: &str,
+) -> Result<ProposalOutcome, String> {
+    let guard = db.lock().map_err(|_| "db lock poisoned".to_string())?;
+    let dbref = guard.as_ref().ok_or("database not initialized")?;
+    let conn = dbref.conn();
+
+    let (status, votes_for, votes_against): (String, i64, i64) = conn
+        .query_row(
+            "SELECT status, votes_for, votes_against FROM governance_proposals WHERE id = ?1",
+            params![proposal_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .map_err(|e| format!("proposal not found: {e}"))?;
+
+    // Merkle-commit the signed votes (auditable tally). Leaf binds the
+    // voter, choice, and their signature.
+    let mut leaves: Vec<[u8; 32]> = Vec::new();
+    {
+        let mut stmt = conn
+            .prepare(
+                "SELECT voter, in_favor, signature FROM governance_proposal_votes \
+                 WHERE proposal_id = ?1 AND signature IS NOT NULL ORDER BY id",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(params![proposal_id], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, i64>(1)?,
+                    r.get::<_, String>(2)?,
+                ))
+            })
+            .map_err(|e| e.to_string())?;
+        for row in rows {
+            let (voter, in_favor, sig) = row.map_err(|e| e.to_string())?;
+            let canonical = format!("{voter}:{in_favor}:{sig}");
+            leaves.push(crate::crypto::hash::blake2b_256(canonical.as_bytes()));
+        }
+    }
+    let vote_merkle_root_hex = if leaves.is_empty() {
+        None
+    } else {
+        Some(hex::encode(crate::domain::completion::merkle_root(&leaves)))
+    };
+
+    Ok(ProposalOutcome {
+        status,
+        votes_for,
+        votes_against,
+        vote_merkle_root_hex,
+    })
+}
 
 fn update_dao_state_pointer(
     db: &std::sync::Arc<std::sync::Mutex<Option<crate::db::Database>>>,

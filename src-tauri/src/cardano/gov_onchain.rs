@@ -14,12 +14,16 @@
 //! gossip + an anchored Merkle root). These builders return signed CBOR;
 //! the caller submits.
 
+use pallas_addresses::Address as PallasAddress;
+use pallas_codec::utils::KeyValuePairs;
 use pallas_crypto::hash::{Hash, Hasher};
+use pallas_primitives::{Metadatum, MetadatumLabel};
+use pallas_txbuilder::{BuildConway, Input, Output, StagingTransaction};
 use rusqlite::{params, Connection};
 
 use super::blockfrost::BlockfrostClient;
 use super::operator::OperatorKey;
-use super::tx_builder::{sign_raw_tx, TxBuildError};
+use super::tx_builder::{self, sign_raw_tx, TxBuildError, MIN_UTXO_LOVELACE, TTL_OFFSET};
 use super::{gov_tx_builder, plutus_data, plutus_spend, script_refs};
 
 const MIN_SCRIPT_UTXO_LOVELACE: u64 = 3_000_000;
@@ -90,6 +94,93 @@ pub async fn publish_finalized_election(
     .await
     .map_err(e2s)?;
     sign_raw_tx(&unsigned, &op.private_key).map_err(e2s)
+}
+
+/// Build the `{1697: {…}}` metadata for a resolved proposal: its id,
+/// outcome, final tally, and an optional Merkle root committing to the
+/// signed off-chain votes (so the tally is independently auditable).
+/// Each `Metadatum::Text` stays within the 64-byte ledger limit (the id
+/// and root are 64-hex / 64-byte values).
+pub fn proposal_outcome_metadata(
+    proposal_id: &str,
+    status: &str,
+    votes_for: i64,
+    votes_against: i64,
+    vote_merkle_root_hex: Option<String>,
+) -> KeyValuePairs<MetadatumLabel, Metadatum> {
+    let mut fields = vec![
+        (
+            Metadatum::Text("kind".into()),
+            Metadatum::Text("proposal_outcome".into()),
+        ),
+        (
+            Metadatum::Text("proposal_id".into()),
+            Metadatum::Text(proposal_id.into()),
+        ),
+        (
+            Metadatum::Text("status".into()),
+            Metadatum::Text(status.into()),
+        ),
+        (
+            Metadatum::Text("votes_for".into()),
+            Metadatum::Int(votes_for.into()),
+        ),
+        (
+            Metadatum::Text("votes_against".into()),
+            Metadatum::Int(votes_against.into()),
+        ),
+        (Metadatum::Text("v".into()), Metadatum::Int(1.into())),
+    ];
+    if let Some(root) = vote_merkle_root_hex {
+        fields.push((
+            Metadatum::Text("vote_merkle_root".into()),
+            Metadatum::Text(root),
+        ));
+    }
+    KeyValuePairs::from(vec![(
+        script_refs::ALEXANDRIA_ANCHOR_LABEL,
+        Metadatum::Map(KeyValuePairs::from(fields)),
+    )])
+}
+
+/// Operator-signed metadata anchor: a plain self-payment tx carrying the
+/// given auxiliary-data map. Used to record proposal outcomes on-chain
+/// (lean model — proposals don't run a spend validator). Returns signed
+/// CBOR.
+pub async fn build_governance_anchor(
+    bf: &BlockfrostClient,
+    op: &OperatorKey,
+    metadata: KeyValuePairs<MetadatumLabel, Metadatum>,
+) -> Result<Vec<u8>, String> {
+    let (utxos_res, params_res, tip_res) = tokio::join!(
+        bf.get_utxos(&op.address),
+        bf.get_protocol_params(),
+        bf.get_tip_slot(),
+    );
+    let utxos = utxos_res.map_err(|e| e.to_string())?;
+    let params = params_res.map_err(|e| e.to_string())?;
+    let tip_slot = tip_res.map_err(|e| e.to_string())?;
+
+    let selected = BlockfrostClient::select_utxo(&utxos, MIN_UTXO_LOVELACE)
+        .ok_or("no operator UTxO with sufficient lovelace for anchor")?;
+    let addr = PallasAddress::from_bech32(&op.address).map_err(|e| e.to_string())?;
+    let fee = tx_builder::estimate_fee(&params, 1);
+    let change = selected
+        .lovelace()
+        .checked_sub(fee)
+        .ok_or("operator UTxO cannot cover anchor fee")?;
+    let input_hash = tx_builder::parse_tx_hash(&selected.tx_hash).map_err(e2s)?;
+
+    let staging = StagingTransaction::new()
+        .input(Input::new(input_hash, selected.tx_index))
+        .output(Output::new(addr, change))
+        .disclosed_signer(Hash::<28>::from(op.payment_key_hash()))
+        .fee(fee)
+        .invalid_from_slot(tip_slot + TTL_OFFSET)
+        .network_id(0);
+    let built = staging.build_conway_raw().map_err(|e| e.to_string())?;
+    let (with_meta, _) = tx_builder::inject_metadata(&built.tx_bytes.0, metadata).map_err(e2s)?;
+    sign_raw_tx(&with_meta, &op.private_key).map_err(e2s)
 }
 
 /// Parameters to install a new committee (read from the DB row set).

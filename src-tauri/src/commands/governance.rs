@@ -1654,8 +1654,10 @@ pub async fn resolve_proposal(
     .map_err(|e| e.to_string())?;
 
     let proposal = query_proposal(conn, &proposal_id)?;
-    // Proposal-outcome anchoring (operator-signed metadata) is wired in a
-    // later phase; not enqueued yet to avoid spurious failed queue items.
+    // Anchor the resolved outcome on-chain (operator-signed metadata +
+    // Merkle root of the signed votes). Processed by the queue on the
+    // operator node.
+    try_enqueue(db, "resolve_proposal", "governance_proposals", &proposal_id);
     Ok(proposal)
 }
 
