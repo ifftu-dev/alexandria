@@ -2,7 +2,9 @@
 
 On-chain governance for the Alexandria learning platform, implementing whitepaper Section 4. Written in [Aiken](https://aiken-lang.org) v1.1.21 targeting Plutus v3 (Conway era).
 
-> **⚠ Status: compiled but not deployed.** The validators below are built and their hashes are hardcoded in `src-tauri/src/cardano/script_refs.rs`, but the reference UTxOs are still `DEPLOY_PENDING`. Until someone runs [`deploy_reference_scripts.sh`](#deploying-to-preprod) and updates `script_refs.rs`, `cardano::gov_tx_builder::validators_deployed()` returns `false` and the on-chain governance queue silently skips every item — nothing actually hits the chain. The off-chain lifecycle (DAOs, elections, proposals in SQLite, P2P gossip) works regardless; only Cardano-side settlement is gated on deployment.
+> **Status: deployed + verified on preprod.** All validators are deployed as CIP-33 reference scripts (parameterized validators applied; hashes + ref UTxOs in `src-tauri/src/cardano/script_refs.rs`) and every flow has been verified on-chain.
+>
+> **Governance runs a lean on-chain model.** The live state machine (DAOs, elections, proposals, votes) lives in local SQLite; the lifecycle propagates as **signed P2P gossip**, and votes are tallied off-chain. Only four operator-signed facts touch Cardano: DAO create (mint), election finalize (publish UTxO), committee install (spend), and proposal resolve (a metadata anchor with the tally + a Merkle root over the signed votes). The per-transition **spend** validators below (`election`, `proposal`) and the per-user reputation validators (`reputation_minting`, `soulbound`) are deployed + verified but **not on the lean live path** — they are the upgrade path to full on-chain enforcement. See `src-tauri/src/cardano/gov_onchain.rs` and `onchain_queue.rs`.
 
 ## Validators
 

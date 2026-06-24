@@ -669,13 +669,24 @@ Nominations for all DAO committee elections MUST be automatic and reputation-bas
 
 Each DAO MUST accept proposals from its members. The proposal lifecycle proceeds through: Draft Stage (any member may submit; draft specifies minimum skill level to vote), Committee Review (committee must approve advancement to published state), Published Stage (all qualified members may cast a vote; skill-level gate enforced at vote time).
 
-DAO membership is any actor who holds the relevant skill levels within the scope of that DAO. Membership MUST be computed dynamically from current SkillProofs and MUST NOT be granted through manual assignment.
+DAO membership is any actor who holds the relevant skill levels within the scope of that DAO. Membership MUST be computed dynamically from current credentials and MUST NOT be granted through manual assignment.
 
-### 10.6 On-Chain Enforcement
+To participate in governance (open an election, nominate, accept a nomination, start/finalize voting, submit/approve/vote on proposals), an actor's stake address MUST be bound to its signing public key in the persistent `stake_pubkey_registry`. Peers verify this binding before accepting a gossiped governance action, and the local node refuses to produce one without it. The binding is established by a signed on-chain `stake_pubkey_registration` or a multisig-signed bootstrap snapshot.
 
-**Current state**: Governance rules are enforced at the application level and P2P validation level. The Aiken/Plutus v3 validators (dao_registry, dao_minting, election, proposal, vote_minting, reputation_minting, soulbound, completion, challenge_escrow) are deployed as CIP-33 reference scripts on **preprod testnet** (deployed 2026-05-22, block 4736927; UTxOs in `cardano/script_refs.rs`), so `ref_utxos_deployed()` is now `true` and the tx builders reference them live. The end-to-end on-chain enforcement flows are still maturing.
+### 10.6 On-Chain Footprint (lean model)
 
-**Target state**: 7 Aiken/Plutus v3 validators — DAO registration, election, proposal, committee token minting, vote receipt minting (double-vote prevention), reputation soulbound token, and credential NFT.
+Governance runs a **lean** model. The live state machine is local SQLite; the full lifecycle — elections, nominations, and votes — propagates as **signed P2P gossip** on `/alexandria/governance/1.0`, and each node tallies the verified votes itself. **Votes are not on-chain transactions.**
+
+Only these facts are written to Cardano, all **operator-signed** (the platform's `authorized_admin` key; see `cardano/operator.rs`):
+
+- **DAO create** — mints the DAO state token to the `dao_registry` script (`dao_minting`).
+- **Election finalize** — publishes a finalized-election UTxO at the `election` script (plain output creation).
+- **Committee install** — spends the DAO state UTxO and recreates it with the new committee, referencing the finalized election (`dao_registry`).
+- **Proposal resolve** — a metadata anchor (label 1697) carrying the outcome, tally, and a Merkle root over the signed votes, so the off-chain tally is independently auditable.
+
+The Aiken/Plutus v3 validators (dao_registry, dao_minting, election, proposal, vote_minting, reputation_minting, soulbound, completion, challenge_escrow) are deployed as CIP-33 reference scripts on **preprod testnet** and verified, but the per-transition spend validators (election/proposal state machine, per-user reputation soulbound tokens) are **not on the lean live path** — they are the upgrade path to full on-chain enforcement.
+
+**Upgrade path**: move the election/proposal state machine and per-user reputation tokens fully on-chain (the verified spend validators), trading higher cost + UTxO contention for trustless enforcement.
 
 ### 10.7 Spec Stewardship
 

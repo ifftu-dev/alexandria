@@ -437,14 +437,21 @@ modules were removed.
 
 | Feature | Status |
 |---------|--------|
-| DAO creation | Implemented |
+| DAO creation | Implemented (operator-signed state-token mint) |
 | Committee management | Implemented |
-| Proposal lifecycle (draft → published → approved/rejected) | Implemented |
-| Election lifecycle (nomination → voting → finalized) | Implemented |
-| 2/3 supermajority voting | Implemented |
-| P2P gossip for governance events | Implemented |
-| On-chain metadata transactions | Implemented |
-| Aiken/Plutus smart contract enforcement | **Not implemented** |
+| Proposal lifecycle (draft → published → approved/rejected) | Implemented (off-chain; outcome anchored) |
+| Election lifecycle (nomination → voting → finalized) | Implemented (off-chain; finalized election published on-chain) |
+| 2/3 supermajority voting | Implemented (off-chain tally over signed gossiped votes) |
+| Signed-vote + full-lifecycle P2P gossip | Implemented |
+| On-chain (operator-signed): DAO create, election finalize, committee install, proposal-outcome anchor | Implemented |
+| Per-vote / per-transition on-chain Plutus spends | Not used (lean model — validators deployed as the upgrade path) |
+
+Governance runs a **lean** on-chain model: the live state machine is local
+SQLite, votes and the election lifecycle propagate as signed P2P gossip, and
+only the four operator-signed facts above are written to Cardano (the proposal
+anchor carries the tally plus a Merkle root over the signed votes, so the
+off-chain tally is auditable). The full per-transition Plutus spend validators
+are deployed + verified on preprod but are not on the live path.
 
 ---
 

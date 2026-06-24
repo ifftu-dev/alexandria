@@ -141,83 +141,42 @@ pub async fn build_settle_tx(
         ));
     }
 
-    let (utxos_res, params_res, tip_res) = tokio::join!(
-        blockfrost.get_utxos(authority_address),
-        blockfrost.get_protocol_params(),
-        blockfrost.get_tip_slot(),
-    );
-    let utxos = utxos_res?;
-    let params = params_res?;
-    let tip_slot = tip_res?;
-    if utxos.is_empty() {
-        return Err(TxBuildError::NoUtxos);
-    }
-
-    // A wallet UTxO from the authority funds the fee + collateral.
-    let funding = BlockfrostClient::select_utxo(&utxos, MIN_UTXO_LOVELACE).ok_or(
-        TxBuildError::InsufficientFunds {
-            needed: MIN_UTXO_LOVELACE,
-            available: utxos.iter().map(|u| u.lovelace()).sum(),
-        },
-    )?;
-
+    // Settlement is a Plutus SPEND of the escrow UTxO: it needs a
+    // Spend-purpose redeemer keyed to that input plus a script_data_hash,
+    // which the legacy `inject_plutus_fields` path never produced (it
+    // hardcoded a Spend redeemer at index 0 and omitted script_data_hash,
+    // so every settle tx was rejected on-chain). Delegate to the native
+    // `plutus_spend` builder — the path verified on preprod for the escrow
+    // refund. The escrow holds no continuing state, so the output simply
+    // pays the recipient (challenger on Refund, treasury on Forfeit) at a
+    // vkey address; the validator's `pays_to` check is satisfied by its
+    // payment credential.
     let recipient_addr = enterprise_address(recipient_key_hash)?;
-    let authority_addr = PallasAddress::from_bech32(authority_address)
-        .map_err(|e| TxBuildError::AddressParse(e.to_string()))?;
-    let escrow_input_hash = parse_tx_hash(escrow_utxo.0)?;
-    let funding_hash = parse_tx_hash(&funding.tx_hash)?;
-
-    let fee = params.calculate_min_fee(1400).max(400_000);
-    let funding_lovelace = funding.lovelace();
-    if funding_lovelace < fee {
-        return Err(TxBuildError::InsufficientFunds {
-            needed: fee,
-            available: funding_lovelace,
-        });
-    }
-    let change = funding_lovelace - fee;
-
     let redeemer = plutus_data::encode_challenge_escrow_redeemer(refund)?;
+    let signers = [*authority_key_hash];
 
-    // Inputs: the escrow UTxO (script spend) + the authority funding UTxO.
-    let built_tx = StagingTransaction::new()
-        .input(Input::new(escrow_input_hash, escrow_utxo.1))
-        .input(Input::new(funding_hash, funding.tx_index))
-        // Output 0: the stake to its destination (challenger / treasury).
-        .output(Output::new(recipient_addr, stake_lovelace))
-        // Output 1: fee change back to the authority.
-        .output(Output::new(authority_addr, change))
-        .disclosed_signer(Hash::<28>::from(*authority_key_hash))
-        .fee(fee)
-        .invalid_from_slot(tip_slot + TTL_OFFSET)
-        .network_id(0)
-        .build_conway_raw()
-        .map_err(|e| TxBuildError::Builder(e.to_string()))?;
-
-    // Reference the deployed escrow script; collateral from the funding
-    // UTxO; spend redeemer selects Refund / Forfeit.
-    let ref_hash = parse_tx_hash(script_refs::CHALLENGE_ESCROW_REF_UTXO.0)?;
-    let (tx_bytes, _) = inject_plutus_fields(
-        &built_tx.tx_bytes.0,
-        &[(*ref_hash, script_refs::CHALLENGE_ESCROW_REF_UTXO.1)],
-        &[(*funding_hash, funding.tx_index)],
-        &redeemer,
-        None,
-    )?;
-
-    let tx_bytes_final = match blockfrost.evaluate_tx(&tx_bytes).await {
-        Ok(_) | Err(_) => tx_bytes, // ex-unit refinement happens at deploy time
-    };
-
-    let private_key = PrivateKey::Extended(unsafe {
-        SecretKeyExtended::from_bytes_unchecked(*authority_key_extended)
-    });
-    let signed = sign_raw_tx(&tx_bytes_final, &private_key)?;
-    let tx_hash = compute_tx_hash(&signed)?;
-    Ok(GovTxResult {
-        tx_cbor: signed,
-        tx_hash,
-    })
+    crate::cardano::plutus_spend::build_spend_tx(
+        blockfrost,
+        crate::cardano::plutus_spend::SpendScript {
+            payment_address: authority_address,
+            payment_key_extended: authority_key_extended,
+            required_signers: &signers,
+            script_input: escrow_utxo,
+            script_input_lovelace: stake_lovelace,
+            spend_redeemer: redeemer,
+            continuing_address: recipient_addr,
+            continuing_lovelace: stake_lovelace,
+            // Constr(0, []) placeholder datum; the recipient is a vkey
+            // address and the escrow keeps no continuing state.
+            continuing_datum: vec![0xd8, 0x79, 0x80],
+            continuing_assets: &[],
+            reference_inputs: &[script_refs::CHALLENGE_ESCROW_REF_UTXO],
+            mint: None,
+            invalid_from_slot: None,
+            valid_from_slot: None,
+        },
+    )
+    .await
 }
 
 /// Build a preprod enterprise address (payment-only, no staking part)

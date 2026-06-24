@@ -1,9 +1,20 @@
 //! Governance domain types for the DAO coordination protocol.
 //!
 //! DAOs mirror the knowledge taxonomy (Subject Field → top-level DAO,
-//! Subject → sub-DAO). Governance announcements propagate via
-//! `/alexandria/governance/1.0` gossip for proposal awareness and
-//! coordination. Actual voting happens on-chain (Cardano smart contracts).
+//! Subject → sub-DAO). The live state machine runs off-chain in local
+//! SQLite; the full lifecycle — elections, nominations and votes —
+//! propagates as signed P2P gossip on `/alexandria/governance/1.0`, and
+//! every node tallies the verified votes itself. Votes are NOT on-chain
+//! transactions.
+//!
+//! Only three facts are written to Cardano, all operator-signed (see
+//! `cardano/onchain_queue` + `cardano/gov_onchain`): a DAO's creation
+//! (state-token mint), an election's finalization (a published
+//! finalized-election UTxO), committee installation (spending the DAO
+//! state UTxO), and a proposal's resolution (a metadata anchor carrying
+//! the tally + a Merkle root over the signed votes, so the off-chain
+//! tally is auditable). The Plutus spend validators for the full
+//! on-chain state machine are deployed but unused by this lean path.
 //!
 //! Lifecycle states:
 //!   Election: nomination → voting → finalized (or cancelled)
