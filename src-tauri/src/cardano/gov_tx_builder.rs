@@ -305,7 +305,7 @@ async fn build_gov_tx(
 /// validator only runs when that output is later spent. Used to
 /// bootstrap state UTxOs (e.g. the initial election UTxO) that spend
 /// flows then consume.
-async fn build_plain_create_unsigned(
+pub(crate) async fn build_plain_create_unsigned(
     blockfrost: &BlockfrostClient,
     payment_address: &str,
     script_hash: &str,

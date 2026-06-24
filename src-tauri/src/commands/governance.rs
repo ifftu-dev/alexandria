@@ -575,10 +575,9 @@ pub async fn open_election(
         .map_err(|e| e.to_string())?;
 
         let election = query_election(conn, &id)?;
-        // Bootstrap the election UTxO on-chain (lean 2′: the election
-        // state machine has an on-chain anchor the committee install
-        // later references).
-        try_enqueue(db, "open_election", "governance_elections", &id);
+        // No on-chain tx at open under the lean model: the election lives
+        // off-chain (DB + gossip) until finalize publishes the finalized
+        // election UTxO that committee-install references.
 
         let signed = sign_governance_event(
             &w,
@@ -1316,7 +1315,8 @@ pub async fn submit_proposal(
     .map_err(|e| e.to_string())?;
 
     let proposal = query_proposal(conn, &id)?;
-    try_enqueue(db, "submit_proposal", "governance_proposals", &id);
+    // Off-chain under the lean model — only the resolved outcome is
+    // anchored on-chain (at resolve), not draft submission.
     Ok(proposal)
 }
 
@@ -1436,7 +1436,7 @@ pub async fn approve_proposal(
     .map_err(|e| e.to_string())?;
 
     let proposal = query_proposal(conn, &proposal_id)?;
-    try_enqueue(db, "approve_proposal", "governance_proposals", &proposal_id);
+    // Off-chain (committee approval to open voting); no on-chain tx.
     Ok(proposal)
 }
 
@@ -1654,7 +1654,8 @@ pub async fn resolve_proposal(
     .map_err(|e| e.to_string())?;
 
     let proposal = query_proposal(conn, &proposal_id)?;
-    try_enqueue(db, "resolve_proposal", "governance_proposals", &proposal_id);
+    // Proposal-outcome anchoring (operator-signed metadata) is wired in a
+    // later phase; not enqueued yet to avoid spurious failed queue items.
     Ok(proposal)
 }
 
