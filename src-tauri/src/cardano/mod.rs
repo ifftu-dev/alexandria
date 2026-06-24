@@ -8,6 +8,7 @@ pub mod cost_models;
 pub mod gov_tx_builder;
 pub mod governance;
 pub mod onchain_queue;
+pub mod operator;
 pub mod plutus_data;
 pub mod plutus_mint;
 pub mod plutus_spend;
