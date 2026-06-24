@@ -39,6 +39,57 @@
 - **Cross-Device Synced Settings** — Every user preference (theme, sidebar layout, keyboard shortcuts, Sentinel toggles, notifications, ...) lives in one per-profile store and propagates to the user's other devices via peer-to-peer sync. Device-local settings (window geometry, disk quota) stay where they belong. See [`docs/settings.md`](docs/settings.md).
 - **Mobile Node** — iOS and Android are first-class targets. The mobile app is a fully functional node — same P2P networking, content storage, and wallet as desktop. Multi-device support via shared BIP-39 mnemonic.
 
+## System Requirements
+
+Alexandria is a full peer-to-peer node, not a thin client — every device runs the
+P2P swarm (DHT, relay, username registry), content store, encrypted database, and
+(during live tutoring) real-time audio/video. Requirements are higher than a
+typical "viewer" app.
+
+### Desktop
+
+| Platform | Minimum |
+|----------|---------|
+| macOS    | 10.15 Catalina or later (Intel or Apple Silicon) |
+| Windows  | Windows 10+ with WebView2 (preinstalled on Windows 11) |
+| Linux    | x86_64 with webkit2gtk 4.1 |
+
+### iOS
+
+- **iOS 16.4 or later.** The build's deployment target is iOS 14, but the UI
+  requires a WebKit version shipped in iOS 16.4+ — older versions will not
+  render correctly.
+- **Recommended**: iPhone SE (3rd gen), iPhone 13, or newer. Live tutoring uses
+  the hardware H.264 encoder (VideoToolbox), so any supported iPhone handles
+  video well.
+- **Face ID / Touch ID** enables one-tap vault unlock. Without it, you unlock
+  each profile with its password.
+
+### Android
+
+- **Android 9 (API 28) or later** with Android System WebView (Chromium) 111+.
+  WebView auto-updates through Google Play.
+- **Minimum hardware**: 4 GB RAM. The app runs, but live tutoring may stutter on
+  entry-level chipsets.
+- **Recommended hardware**: 6–8 GB RAM and a mid-range 2023+ chipset (Snapdragon
+  7-series, Dimensity 7300-class, Tensor G3, or better). Unlike iOS, Android
+  video tutoring encodes in software (FFmpeg/x264) — the most CPU-intensive
+  thing the app does.
+- **Fingerprint / face unlock** enables one-tap vault unlock; otherwise use the
+  profile password.
+
+### Storage
+
+Plan for **2–4 GB free** beyond the app: each profile keeps its own encrypted
+database, content-addressed blob store, and video cache, which grow with
+downloaded course content.
+
+### Battery
+
+The P2P node maintains live network connections while the app is open. On phones,
+expect higher battery use than a typical content app — comparable to a messaging
+app doing an active sync.
+
 ## Architecture
 
 Alexandria is a **Tauri v2 application** — a single binary that bundles a Rust backend with a Vue 3 frontend. It runs on macOS, Linux, Windows, iOS, and Android. There are no servers, no Docker containers, and no external databases.
