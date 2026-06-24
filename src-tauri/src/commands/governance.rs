@@ -363,6 +363,149 @@ pub async fn get_dao(
     Ok((dao, members))
 }
 
+/// Create a DAO on-chain (operator-only).
+///
+/// Mints the DAO's state token under the `dao_minting` policy to the
+/// `dao_registry` script with an inline `DaoDatum`, signed by the
+/// operator key (the validators' `authorized_admin`). Persists the DAO
+/// row plus its on-chain links (state-token policy/name, reputation
+/// policy, and the live state-UTxO pointer the committee-install spend
+/// later consumes). Non-operator nodes reject this.
+#[tauri::command]
+pub async fn create_dao(
+    state: State<'_, AppState>,
+    name: String,
+    scope_type: String,
+    scope_id: String,
+    committee_size: Option<i64>,
+    election_interval_days: Option<i64>,
+) -> Result<DaoInfo, String> {
+    use crate::cardano::{gov_tx_builder, plutus_data, plutus_mint, script_refs};
+
+    let op = crate::cardano::operator::load_operator_key()
+        .ok_or("this node is not configured as a governance operator (set OPERATOR_SKEY_*)")?;
+    let op_pkh = op.payment_key_hash();
+
+    let project_id = {
+        let db_guard = state.db.lock().map_err(|e| e.to_string())?;
+        let conn = db_guard.as_ref().map(|db| db.conn());
+        crate::cardano::blockfrost::resolve_project_id(conn)
+    }
+    .ok_or("Blockfrost project id not configured")?;
+    let bf =
+        crate::cardano::blockfrost::BlockfrostClient::new(project_id).map_err(|e| e.to_string())?;
+
+    let interval_days = election_interval_days.unwrap_or(30);
+    let interval_ms = interval_days * 86_400_000;
+    let committee_n = committee_size.unwrap_or(1);
+    let now_ms = chrono::Utc::now().timestamp_millis();
+
+    // DaoDatum: scope + policies + the operator as sole initial committee.
+    let e2s = |e: crate::cardano::tx_builder::TxBuildError| e.to_string();
+    let datum = plutus_data::encode_dao_datum(
+        &scope_type,
+        scope_id.as_bytes(),
+        &gov_tx_builder::hash_from_hex_pub(script_refs::REPUTATION_MINTING_SCRIPT_HASH)
+            .map_err(e2s)?,
+        &[],
+        "remember",
+        &gov_tx_builder::hash_from_hex_pub(script_refs::DAO_MINTING_SCRIPT_HASH).map_err(e2s)?,
+        &[&op_pkh],
+        committee_n,
+        interval_ms,
+        now_ms,
+        now_ms + interval_ms,
+    )
+    .map_err(e2s)?;
+    let redeemer = plutus_data::encode_dao_redeemer("create", None).map_err(e2s)?;
+
+    // State token name = "dao" ++ scope_id (matches dao_registry validator).
+    let mut asset_name = b"dao".to_vec();
+    asset_name.extend_from_slice(scope_id.as_bytes());
+
+    let policy = pallas_crypto::hash::Hash::<28>::from(
+        gov_tx_builder::hash_from_hex_pub(script_refs::DAO_MINTING_SCRIPT_HASH).map_err(e2s)?,
+    );
+    let unsigned = plutus_mint::build_mint_to_address_unsigned(
+        &bf,
+        &plutus_mint::MintToAddress {
+            payment_address: &op.address,
+            payment_key_extended: &[0u8; 64], // unused on the unsigned path
+            required_signers: std::slice::from_ref(&op_pkh),
+            policy_id: policy,
+            asset_name: asset_name.clone(),
+            mint_redeemer: redeemer,
+            ref_script: script_refs::DAO_MINTING_REF_UTXO,
+            recipient_address: gov_tx_builder::script_address(
+                script_refs::DAO_REGISTRY_SCRIPT_HASH,
+            )
+            .map_err(e2s)?,
+            recipient_lovelace: 3_000_000,
+            recipient_datum: Some(datum),
+        },
+    )
+    .await
+    .map_err(e2s)?;
+
+    let signed =
+        crate::cardano::tx_builder::sign_raw_tx(&unsigned, &op.private_key).map_err(e2s)?;
+    let tx_hash = bf
+        .submit_tx(&signed)
+        .await
+        .map_err(|e| format!("DAO create submission failed: {e}"))?;
+
+    // Persist the DAO + its on-chain links. The state token + datum land
+    // at output #0 (the recipient), so that's the live state UTxO.
+    let dao_id = entity_id(&[&scope_type, &scope_id, &name]);
+    let asset_name_hex = hex::encode(&asset_name);
+    let dao_state_utxo = format!("{tx_hash}#0");
+    {
+        let db_guard = state
+            .db
+            .lock()
+            .map_err(|_| "database lock poisoned".to_string())?;
+        let db = db_guard.as_ref().ok_or("database not initialized")?;
+        db.conn()
+            .execute(
+                "INSERT INTO governance_daos \
+                 (id, name, scope_type, scope_id, status, committee_size, \
+                  election_interval_days, on_chain_tx, state_token_policy, \
+                  state_token_name, reputation_policy, dao_state_utxo) \
+                 VALUES (?1, ?2, ?3, ?4, 'active', ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                params![
+                    dao_id,
+                    name,
+                    scope_type,
+                    scope_id,
+                    committee_n,
+                    interval_days,
+                    tx_hash,
+                    script_refs::DAO_MINTING_SCRIPT_HASH,
+                    asset_name_hex,
+                    script_refs::REPUTATION_MINTING_SCRIPT_HASH,
+                    dao_state_utxo,
+                ],
+            )
+            .map_err(|e| format!("failed to persist DAO: {e}"))?;
+    }
+
+    log::info!("Created DAO '{name}' on-chain (tx {tx_hash})");
+    Ok(DaoInfo {
+        id: dao_id,
+        name,
+        description: None,
+        icon_emoji: None,
+        scope_type,
+        scope_id,
+        status: "active".into(),
+        committee_size: committee_n,
+        election_interval_days: interval_days,
+        on_chain_tx: Some(tx_hash),
+        created_at: chrono::Utc::now().to_rfc3339(),
+        updated_at: chrono::Utc::now().to_rfc3339(),
+    })
+}
+
 // ---- Election Commands ----
 
 /// Open a new election for a DAO.

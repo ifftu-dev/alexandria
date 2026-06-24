@@ -1076,6 +1076,7 @@ pub fn run() {
             // Governance
             commands::governance::list_daos,
             commands::governance::get_dao,
+            commands::governance::create_dao,
             commands::governance::open_election,
             commands::governance::list_elections,
             commands::governance::get_election,

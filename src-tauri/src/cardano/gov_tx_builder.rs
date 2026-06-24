@@ -887,6 +887,74 @@ mod tests {
         println!("UNSIGNED_CBOR:{}", hex::encode(&unsigned));
     }
 
+    /// Live preprod operator-signed DAO create — the linchpin check for
+    /// the app-held operator model: builds the DAO mint, signs it IN-RUST
+    /// with the operator's NORMAL Ed25519 key (`PrivateKey::Normal` via
+    /// `sign_raw_tx`), and submits. Proves the in-process witness is
+    /// accepted by the ledger (every prior gov tx was signed out-of-band
+    /// by cardano-cli). Run:
+    ///   BLOCKFROST_PROJECT_ID=… OPERATOR_SKEY_PATH=…/treasury.skey \
+    ///   OPERATOR_ADDRESS=addr_test1q… cargo test -p alexandria-node \
+    ///     live_operator_dao_create -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn live_operator_dao_create() {
+        let pid = std::env::var("BLOCKFROST_PROJECT_ID").expect("BLOCKFROST_PROJECT_ID");
+        let op = crate::cardano::operator::load_operator_key().expect("operator key");
+        let op_pkh = op.payment_key_hash();
+        let scope_id: &[u8] = b"opx";
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        let interval = 2_592_000_000i64;
+        let datum = plutus_data::encode_dao_datum(
+            "subject",
+            scope_id,
+            &hash_from_hex(script_refs::REPUTATION_MINTING_SCRIPT_HASH).unwrap(),
+            &[],
+            "remember",
+            &hash_from_hex(script_refs::DAO_MINTING_SCRIPT_HASH).unwrap(),
+            &[&op_pkh],
+            1,
+            interval,
+            now,
+            now + interval,
+        )
+        .unwrap();
+        let redeemer = plutus_data::encode_dao_redeemer("create", None).unwrap();
+        let mut asset_name = b"dao".to_vec();
+        asset_name.extend_from_slice(scope_id);
+
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let tx_hash = rt.block_on(async {
+            let bf = BlockfrostClient::new(pid).unwrap();
+            let unsigned = crate::cardano::plutus_mint::build_mint_to_address_unsigned(
+                &bf,
+                &crate::cardano::plutus_mint::MintToAddress {
+                    payment_address: &op.address,
+                    payment_key_extended: &[0u8; 64],
+                    required_signers: std::slice::from_ref(&op_pkh),
+                    policy_id: Hash::<28>::from(
+                        hash_from_hex(script_refs::DAO_MINTING_SCRIPT_HASH).unwrap(),
+                    ),
+                    asset_name,
+                    mint_redeemer: redeemer,
+                    ref_script: script_refs::DAO_MINTING_REF_UTXO,
+                    recipient_address: script_address(script_refs::DAO_REGISTRY_SCRIPT_HASH)
+                        .unwrap(),
+                    recipient_lovelace: 3_000_000,
+                    recipient_datum: Some(datum),
+                },
+            )
+            .await
+            .expect("build unsigned");
+            let signed = sign_raw_tx(&unsigned, &op.private_key).expect("sign");
+            bf.submit_tx(&signed).await.expect("submit")
+        });
+        println!("DAO_CREATE_TX:{tx_hash}");
+    }
+
     /// Live preprod election bootstrap: builds the UNSIGNED plain-create
     /// tx that lands the initial election UTxO (Nomination phase, empty
     /// nominees) at the election script address with its inline datum.
