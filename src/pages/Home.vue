@@ -9,6 +9,7 @@ import { usePlatform } from '@/composables/usePlatform'
 import { useSettings } from '@/composables/useSettings'
 import { useTargets } from '@/composables/useTargets'
 import { StatusBadge, AppButton, InfoTip } from '@/components/ui'
+import { bloomFill } from '@/utils/bloom'
 import { sanitizeSvg } from '@/utils/sanitize'
 import CourseCard from '@/components/course/CourseCard.vue'
 import type {
@@ -418,8 +419,10 @@ onMounted(async () => {
               :key="n.id"
               class="graph-chip"
               :class="{ 'graph-chip--teaching': n.teaching, 'graph-chip--private': !n.public }"
+              :title="`Bloom level: ${n.bloom_level}`"
               @click="router.push(`/skills/${n.id}`)"
             >
+              <span class="graph-chip-dot" :style="{ background: bloomFill(n.bloom_level) }" />
               {{ n.name }}
             </button>
           </div>
@@ -804,12 +807,21 @@ onMounted(async () => {
 
 /* Skill graph chips */
 .graph-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
   font-size: 0.75rem;
   padding: 0.2rem 0.6rem;
   border-radius: 999px;
   background: var(--app-muted);
   color: var(--app-foreground);
   transition: background 0.15s;
+}
+.graph-chip-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 9999px;
+  flex-shrink: 0;
 }
 .graph-chip:hover {
   background: color-mix(in srgb, var(--app-primary) 16%, var(--app-muted));

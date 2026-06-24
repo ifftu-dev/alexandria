@@ -6,21 +6,13 @@ import { useSettings } from '@/composables/useSettings'
 import { useGraphPrefs } from '@/composables/useGraphPrefs'
 import { AppButton, AppBadge, AppSpinner } from '@/components/ui'
 import type { PublicSkillGraph, PublicGraphNode } from '@/types'
+import { bloomBadge } from '@/utils/bloom'
 
 const { invoke } = useLocalApi()
 const { prefFor, setPublic, setTeaching, updateMany } = useGraphPrefs()
 
 const loading = ref(true)
 const graph = ref<PublicSkillGraph | null>(null)
-
-const bloomColors: Record<string, string> = {
-  remember: 'secondary',
-  understand: 'primary',
-  apply: 'accent',
-  analyze: 'warning',
-  evaluate: 'success',
-  create: 'governance',
-}
 
 const nodes = computed<PublicGraphNode[]>(() => graph.value?.nodes ?? [])
 const allIds = computed(() => nodes.value.map((n) => n.id))
@@ -88,7 +80,7 @@ onMounted(async () => {
             :class="{ 'opacity-55': !prefFor(n.id).public }"
           >
             <span class="min-w-0 flex-1 truncate text-sm text-foreground">{{ n.name }}</span>
-            <AppBadge :variant="(bloomColors[n.bloom_level] ?? 'primary') as any">
+            <AppBadge :variant="bloomBadge(n.bloom_level)">
               {{ n.bloom_level }}
             </AppBadge>
 

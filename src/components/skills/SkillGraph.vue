@@ -12,6 +12,7 @@
  */
 import { ref, computed } from 'vue'
 import type { SkillInfo, SkillGraphEdge } from '@/types'
+import { BLOOM_FILLS, bloomFill, bloomRank } from '@/utils/bloom'
 
 const props = defineProps<{
   skills: SkillInfo[]
@@ -23,16 +24,6 @@ const emit = defineEmits<{
 }>()
 
 const hoveredNode = ref<string | null>(null)
-
-// Bloom level colors (RGB values matching design tokens)
-const bloomFills: Record<string, string> = {
-  remember: '#94a3b8',
-  understand: '#6366f1',
-  apply: '#a855f7',
-  analyze: '#f59e0b',
-  evaluate: '#10b981',
-  create: '#e11d48',
-}
 
 interface LayoutNode {
   id: string
@@ -57,6 +48,12 @@ const NODE_H = 36
 const LAYER_GAP = 100
 const NODE_GAP = 24
 const PADDING = 40
+
+// Bloom-scaled rect width (never wider than the cell, so the fixed-grid
+// layout and edge anchors are unaffected): remember ≈ 0.62·W … create = W.
+function nodeWidth(bloom: string): number {
+  return NODE_W * (0.62 + 0.076 * bloomRank(bloom))
+}
 
 const layout = computed(() => {
   const skillMap = new Map(props.skills.map(s => [s.id, s]))
@@ -185,7 +182,7 @@ function isEdgeHighlighted(e: LayoutEdge): boolean {
         {{ layout.nodes.length }} skills, {{ layout.edges.length }} prerequisite edges
       </div>
       <div class="flex items-center gap-3">
-        <div v-for="(color, level) in bloomFills" :key="level" class="flex items-center gap-1">
+        <div v-for="(color, level) in BLOOM_FILLS" :key="level" class="flex items-center gap-1">
           <span class="w-2.5 h-2.5 rounded-full" :style="{ backgroundColor: color }" />
           <span class="text-[0.6rem] text-muted-foreground">{{ level }}</span>
         </div>
@@ -242,12 +239,12 @@ function isEdgeHighlighted(e: LayoutEdge): boolean {
         >
           <!-- Node background -->
           <rect
-            :x="node.x"
+            :x="node.x + (NODE_W - nodeWidth(node.bloom)) / 2"
             :y="node.y"
-            :width="NODE_W"
+            :width="nodeWidth(node.bloom)"
             :height="NODE_H"
             rx="8"
-            :fill="bloomFills[node.bloom] ?? '#6366f1'"
+            :fill="bloomFill(node.bloom)"
             :opacity="hoveredNode === node.id ? 1 : 0.85"
             class="transition-opacity duration-150"
           />

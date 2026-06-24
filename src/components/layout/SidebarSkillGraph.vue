@@ -19,6 +19,7 @@ import {
 } from '@/composables/useSkillGraphState'
 import type { SkillInfo, SkillGraphEdge, VerifiableCredential } from '@/types'
 import SkillGraphModal from '@/components/layout/SkillGraphModal.vue'
+import { bloomRadius } from '@/utils/bloom'
 
 const router = useRouter()
 const { invoke } = useLocalApi()
@@ -66,6 +67,7 @@ const miniGraphNodes = computed(() => {
       routeId: skill.id,
       status,
       prerequisites: prereqs,
+      bloom_level: skill.bloom_level,
     }
   })
 })
@@ -219,7 +221,8 @@ async function initGraph() {
       const status = (node as { status?: string }).status ?? 'locked'
       const isEarned = status === 'earned'
       const isAvailable = status === 'available'
-      const r = isEarned ? 3 : isAvailable ? 2.5 : 2
+      // Radius encodes Bloom level (bigger = higher); color still = status.
+      const r = bloomRadius((node as { bloom_level?: string }).bloom_level, 2, 0.45)
       const x = node.x as number
       const y = node.y as number
 
@@ -243,6 +246,13 @@ async function initGraph() {
       ctx.beginPath()
       ctx.arc(x, y, r, 0, 2 * Math.PI)
       ctx.fillStyle = isEarned ? '#22c55e' : isAvailable ? '#eab308' : 'rgba(100, 116, 139, 0.4)'
+      ctx.fill()
+    })
+    .nodePointerAreaPaint((node: Record<string, unknown>, color: string, ctx: CanvasRenderingContext2D) => {
+      const r = bloomRadius((node as { bloom_level?: string }).bloom_level, 2, 0.45)
+      ctx.fillStyle = color
+      ctx.beginPath()
+      ctx.arc(node.x as number, node.y as number, r, 0, 2 * Math.PI)
       ctx.fill()
     })
     .linkColor(() => 'rgba(148, 163, 184, 0.1)')

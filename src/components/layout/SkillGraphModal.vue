@@ -10,6 +10,7 @@ interface ModalSkillNode {
   routeId: string
   status: SkillStatus
   prerequisites: string[]
+  bloom_level: string
 }
 
 const props = defineProps<{
@@ -29,7 +30,7 @@ const containerRef = ref<HTMLElement | null>(null)
 const graphInstance = ref<any>(null)
 let resizeObserver: ResizeObserver | null = null
 
-const { buildAdjacency, createHoverHandler, renderNode, renderLink } = useSkillGraphHover()
+const { buildAdjacency, createHoverHandler, renderNode, renderLink, nodePointerAreaPaint } = useSkillGraphHover()
 
 function onKeydown(e: KeyboardEvent) {
   if (e.key === 'Escape') emit('close')
@@ -96,6 +97,7 @@ async function initGraph() {
       renderLink(link, ctx)
     })
     .linkCanvasObjectMode(() => 'replace' as const)
+    .nodePointerAreaPaint(nodePointerAreaPaint)
     .backgroundColor('transparent')
     .onNodeClick((node: Record<string, unknown>) => {
       const routeId = String(node.routeId ?? node.id ?? '')
@@ -169,6 +171,8 @@ onBeforeUnmount(() => {
                 <span class="inline-block h-2 w-2 rounded-full bg-slate-500/40" />
                 <span class="text-slate-300/80">Locked ({{ lockedCount }})</span>
               </span>
+              <span class="text-slate-500/70">·</span>
+              <span class="text-slate-300/80">size = Bloom level (Remember→Create)</span>
             </div>
 
             <div class="pointer-events-none absolute bottom-0 left-0 right-0 h-16 bg-gradient-to-t from-slate-950 to-transparent" />

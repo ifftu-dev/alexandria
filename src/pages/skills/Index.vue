@@ -15,6 +15,7 @@ import {
 } from '@/types'
 import { earnedSkillIdsFromCredentials } from '@/composables/useSkillGraphState'
 import { useTargets } from '@/composables/useTargets'
+import { BLOOM_ORDER, bloomBadge } from '@/utils/bloom'
 
 const { invoke } = useLocalApi()
 const router = useRouter()
@@ -114,17 +115,6 @@ async function targetSkill(skill: SkillInfo) {
   router.push('/targets')
 }
 
-const bloomColors: Record<string, string> = {
-  remember: 'secondary',
-  understand: 'primary',
-  apply: 'accent',
-  analyze: 'warning',
-  evaluate: 'success',
-  create: 'governance',
-}
-
-const bloomOrder = ['remember', 'understand', 'apply', 'analyze', 'evaluate', 'create']
-
 const earnedSkillIdSet = computed(() =>
   earnedSkillIdsFromCredentials(myCredentials.value, localDid.value),
 )
@@ -169,7 +159,7 @@ const graphContainerRef = ref<HTMLElement | null>(null)
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const forceGraphInstance = ref<any>(null)
 let graphResizeObserver: ResizeObserver | null = null
-const { buildAdjacency, createHoverHandler, renderNode, renderLink } = useSkillGraphHover()
+const { buildAdjacency, createHoverHandler, renderNode, renderLink, nodePointerAreaPaint } = useSkillGraphHover()
 
 const forceGraphNodes = computed(() => {
   const earned = earnedSkillIdSet.value
@@ -182,7 +172,7 @@ const forceGraphNodes = computed(() => {
       : (prereqs.length === 0 || prereqs.every(p => earned.has(p)))
           ? 'available'
           : 'locked'
-    return { id: skill.id, name: skill.name, routeId: skill.id, status, prerequisites: prereqs }
+    return { id: skill.id, name: skill.name, routeId: skill.id, status, prerequisites: prereqs, bloom_level: skill.bloom_level }
   })
 })
 
@@ -230,6 +220,7 @@ async function initForceGraph() {
       renderLink(link, ctx)
     })
     .linkCanvasObjectMode(() => 'replace' as const)
+    .nodePointerAreaPaint(nodePointerAreaPaint)
     .backgroundColor('transparent')
     .onNodeClick((node: Record<string, unknown>) => {
       const routeId = String(node.routeId ?? node.id ?? '')
@@ -448,8 +439,8 @@ onBeforeUnmount(() => {
             <div class="rounded-xl bg-card shadow-sm p-4">
               <p class="text-[10px] font-semibold text-muted-foreground mb-3 tracking-wider uppercase">Bloom's Levels</p>
               <div class="space-y-1.5">
-                <div v-for="level in bloomOrder" :key="level" class="flex items-center gap-2 text-xs">
-                  <AppBadge :variant="(bloomColors[level] as any) ?? 'secondary'" class="text-[0.6rem] min-w-[5rem] justify-center">
+                <div v-for="level in BLOOM_ORDER" :key="level" class="flex items-center gap-2 text-xs">
+                  <AppBadge :variant="bloomBadge(level)" class="text-[0.6rem] min-w-[5rem] justify-center">
                     {{ level }}
                   </AppBadge>
                 </div>
@@ -482,7 +473,7 @@ onBeforeUnmount(() => {
                       <h3 class="text-sm font-medium text-foreground truncate">
                         {{ skill.name }}
                       </h3>
-                      <AppBadge :variant="(bloomColors[skill.bloom_level] as any) ?? 'secondary'" class="text-[0.6rem] flex-shrink-0">
+                      <AppBadge :variant="bloomBadge(skill.bloom_level)" class="text-[0.6rem] flex-shrink-0">
                         {{ skill.bloom_level }}
                       </AppBadge>
                     </div>
@@ -543,6 +534,8 @@ onBeforeUnmount(() => {
               <span class="inline-block h-2 w-2 rounded-full" style="background: rgba(148, 163, 184, 0.4)" />
               <span class="text-muted-foreground">Locked ({{ lockedSkillsCount }})</span>
             </span>
+            <span class="text-muted-foreground/50">·</span>
+            <span class="text-muted-foreground">node size = Bloom level (Remember→Create)</span>
           </div>
         </div>
       </div>
@@ -575,10 +568,10 @@ onBeforeUnmount(() => {
                   {{ skills.find(s => s.id === extractSkillClaim(vc.credentialSubject)?.skillId)?.name ?? extractSkillClaim(vc.credentialSubject)?.skillId }}
                 </div>
                 <AppBadge
-                  :variant="(bloomColors[bloomOrder[extractSkillClaim(vc.credentialSubject)?.level ?? 2] ?? 'apply'] as any) ?? 'secondary'"
+                  :variant="bloomBadge(BLOOM_ORDER[extractSkillClaim(vc.credentialSubject)?.level ?? 2] ?? 'apply')"
                   class="mt-1.5"
                 >
-                  {{ bloomOrder[extractSkillClaim(vc.credentialSubject)?.level ?? 2] ?? 'apply' }}
+                  {{ BLOOM_ORDER[extractSkillClaim(vc.credentialSubject)?.level ?? 2] ?? 'apply' }}
                 </AppBadge>
               </div>
               <div class="text-right flex-shrink-0">

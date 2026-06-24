@@ -1,5 +1,13 @@
+import { bloomRadius } from '@/utils/bloom'
+
 const HOVER_ALPHA_KEY = '__hoverAlpha' as const
 const LABEL_ALPHA_KEY = '__labelAlpha' as const
+
+// Node radius now encodes Bloom level (bigger = higher); status is still
+// conveyed by color + glow. base 4 (remember) … 9 (create).
+function nodeRadius(node: Record<string, unknown>): number {
+  return bloomRadius((node as { bloom_level?: string }).bloom_level, 4, 1)
+}
 
 const LERP_SPEED = 0.12
 
@@ -54,7 +62,7 @@ export function useSkillGraphHover() {
     const status = (node as { status?: string }).status ?? 'locked'
     const isEarned = status === 'earned'
     const isAvailable = status === 'available'
-    const radius = isEarned ? 6 : isAvailable ? 5 : 4
+    const radius = nodeRadius(node)
     const x = node.x as number
     const y = node.y as number
 
@@ -162,10 +170,24 @@ export function useSkillGraphHover() {
     ctx.stroke()
   }
 
+  // Keep the clickable/hover hit-area aligned with the Bloom-scaled drawn
+  // radius — force-graph otherwise sizes the pointer area from `nodeVal`.
+  function nodePointerAreaPaint(
+    node: Record<string, unknown>,
+    color: string,
+    ctx: CanvasRenderingContext2D,
+  ) {
+    ctx.fillStyle = color
+    ctx.beginPath()
+    ctx.arc(node.x as number, node.y as number, nodeRadius(node), 0, 2 * Math.PI)
+    ctx.fill()
+  }
+
   return {
     buildAdjacency,
     createHoverHandler,
     renderNode,
     renderLink,
+    nodePointerAreaPaint,
   }
 }

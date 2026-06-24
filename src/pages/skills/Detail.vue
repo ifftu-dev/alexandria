@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { AppBadge, EmptyState } from '@/components/ui'
 import { extractSkillClaim, type SkillDetail, type VerifiableCredential } from '@/types'
+import { BLOOM_ORDER, bloomBadge } from '@/utils/bloom'
 
 const { invoke } = useLocalApi()
 const route = useRoute()
@@ -21,14 +22,6 @@ const error = ref<string | null>(null)
 const myCredentials = ref<VerifiableCredential[]>([])
 const localDid = ref<string | null>(null)
 
-const bloomOrder = [
-  'remember',
-  'understand',
-  'apply',
-  'analyze',
-  'evaluate',
-  'create',
-] as const
 
 const bestCredential = computed<VerifiableCredential | null>(() => {
   let best: VerifiableCredential | null = null
@@ -70,14 +63,6 @@ function goToSkill(id: string) {
   router.push(`/skills/${id}`)
 }
 
-const bloomColors: Record<string, string> = {
-  remember: 'secondary',
-  understand: 'primary',
-  apply: 'accent',
-  analyze: 'warning',
-  evaluate: 'success',
-  create: 'governance',
-}
 
 const relationLabels: Record<string, string> = {
   related: 'Related',
@@ -196,7 +181,7 @@ const relationLabels: Record<string, string> = {
                 {{ detail.skill.name }}
               </h1>
               <AppBadge
-                :variant="(bloomColors[detail.skill.bloom_level] as any) ?? 'secondary'"
+                :variant="bloomBadge(detail.skill.bloom_level)"
               >
                 {{ detail.skill.bloom_level }}
               </AppBadge>
@@ -263,7 +248,7 @@ const relationLabels: Record<string, string> = {
                 </svg>
                 <span class="text-sm truncate">{{ prereq.name }}</span>
               </div>
-              <AppBadge :variant="(bloomColors[prereq.bloom_level] as any) ?? 'secondary'" class="text-[0.6rem] flex-shrink-0">
+              <AppBadge :variant="bloomBadge(prereq.bloom_level)" class="text-[0.6rem] flex-shrink-0">
                 {{ prereq.bloom_level }}
               </AppBadge>
             </div>
@@ -294,7 +279,7 @@ const relationLabels: Record<string, string> = {
                 </svg>
                 <span class="text-sm truncate">{{ dep.name }}</span>
               </div>
-              <AppBadge :variant="(bloomColors[dep.bloom_level] as any) ?? 'secondary'" class="text-[0.6rem] flex-shrink-0">
+              <AppBadge :variant="bloomBadge(dep.bloom_level)" class="text-[0.6rem] flex-shrink-0">
                 {{ dep.bloom_level }}
               </AppBadge>
             </div>
@@ -319,7 +304,7 @@ const relationLabels: Record<string, string> = {
           >
             <div class="flex items-center gap-2 min-w-0">
               <span class="text-sm truncate">{{ rel.skill_name }}</span>
-              <AppBadge :variant="(bloomColors[rel.bloom_level] as any) ?? 'secondary'" class="text-[0.6rem]">
+              <AppBadge :variant="bloomBadge(rel.bloom_level)" class="text-[0.6rem]">
                 {{ rel.bloom_level }}
               </AppBadge>
             </div>
@@ -347,9 +332,9 @@ const relationLabels: Record<string, string> = {
             <div class="flex items-center justify-between mb-2 gap-3">
               <div class="min-w-0">
                 <AppBadge
-                  :variant="(bloomColors[bloomOrder[extractSkillClaim(vc.credentialSubject)?.level ?? 2] ?? 'apply'] as any) ?? 'secondary'"
+                  :variant="bloomBadge(BLOOM_ORDER[extractSkillClaim(vc.credentialSubject)?.level ?? 2] ?? 'apply')"
                 >
-                  {{ bloomOrder[extractSkillClaim(vc.credentialSubject)?.level ?? 2] ?? 'apply' }}
+                  {{ BLOOM_ORDER[extractSkillClaim(vc.credentialSubject)?.level ?? 2] ?? 'apply' }}
                 </AppBadge>
                 <span class="ml-2 text-sm font-medium text-foreground">
                   {{ ((extractSkillClaim(vc.credentialSubject)?.score ?? 0) * 100).toFixed(0) }}% score
@@ -370,7 +355,7 @@ const relationLabels: Record<string, string> = {
         </div>
         <p v-if="bestCredential" class="mt-3 text-xs text-muted-foreground">
           Highest credential: level
-          {{ bloomOrder[extractSkillClaim(bestCredential.credentialSubject)?.level ?? 2] ?? 'apply' }}.
+          {{ BLOOM_ORDER[extractSkillClaim(bestCredential.credentialSubject)?.level ?? 2] ?? 'apply' }}.
         </p>
       </div>
     </template>
