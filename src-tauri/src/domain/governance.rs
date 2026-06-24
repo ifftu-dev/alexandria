@@ -73,6 +73,39 @@ pub enum GovernanceEventType {
         voter: String,
         in_favor: bool,
     },
+    /// A committee member opened an election — propagated so every node
+    /// can hold the election (and therefore tally its votes). Sender must
+    /// be a committee member of the DAO.
+    ElectionOpened {
+        election_id: String,
+        title: String,
+        seats: i64,
+        nominee_min_proficiency: String,
+        voter_min_proficiency: String,
+        nomination_end: Option<String>,
+        voting_end: Option<String>,
+    },
+    /// A member self-nominated. Sender (envelope `stake_address`) must
+    /// equal `nominee`.
+    NomineeSubmitted {
+        election_id: String,
+        nominee_id: String,
+        nominee: String,
+    },
+    /// A nominee accepted their nomination. Sender must equal the
+    /// nominee's stake address.
+    NomineeAccepted {
+        election_id: String,
+        nominee_id: String,
+    },
+    /// Election moved nomination → voting. Sender must be committee.
+    ElectionStarted { election_id: String },
+    /// Election finalized; the listed nominees won. Sender must be
+    /// committee.
+    ElectionFinalized {
+        election_id: String,
+        winner_nominee_ids: Vec<String>,
+    },
 }
 
 // ---- DAO Types ----

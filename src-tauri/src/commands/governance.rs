@@ -55,6 +55,43 @@ async fn broadcast_signed(state: &AppState, signed: &crate::p2p::types::SignedGo
     }
 }
 
+/// Enforce that the local identity is a registered Alexandria user.
+///
+/// Participating in governance (opening elections, nominating, accepting,
+/// starting/finalizing, voting) requires the wallet's stake address to be
+/// bound to its signing pubkey in the `stake_pubkey_registry` — the same
+/// binding peers check before accepting the gossiped action. Checking it
+/// up-front gives a clear error instead of a silent drop on the receiver
+/// side. Being a registered user is a hard requirement to act on anything
+/// in Alexandria governance.
+fn ensure_registered(conn: &rusqlite::Connection, w: &wallet::Wallet) -> Result<(), String> {
+    let pubkey_hex = hex::encode(w.signing_key.verifying_key().to_bytes());
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| e.to_string())?
+        .as_secs();
+    let registered = crate::p2p::registry::lookup(conn, &w.stake_address, &pubkey_hex, now)
+        .map_err(|e| format!("registry lookup failed: {e}"))?;
+    if !registered {
+        return Err(
+            "you must be a registered Alexandria user to participate in governance — \
+             register this device's signing key (stake-pubkey registry) first"
+                .into(),
+        );
+    }
+    Ok(())
+}
+
+/// Load the local wallet from the unlocked vault (needed to sign
+/// governance actions). Errors if the vault is locked.
+async fn load_wallet(state: &AppState) -> Result<wallet::Wallet, String> {
+    let keystore = state.keystore.lock().await;
+    let ks = keystore.as_ref().ok_or("vault is locked — unlock first")?;
+    let mnemonic = ks.retrieve_mnemonic().map_err(|e| e.to_string())?;
+    drop(keystore);
+    wallet::wallet_from_mnemonic(&mnemonic).map_err(|e| e.to_string())
+}
+
 /// Default proposal voting deadline: 14 days from approval.
 const DEFAULT_VOTING_DAYS: i64 = 14;
 
@@ -334,61 +371,89 @@ pub async fn open_election(
     state: State<'_, AppState>,
     params: OpenElectionParams,
 ) -> Result<Election, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    let conn = db.conn();
+    let w = load_wallet(&state).await?;
 
-    // Verify DAO exists and is active
-    let dao_status: String = conn
-        .query_row(
-            "SELECT status FROM governance_daos WHERE id = ?1",
-            params![params.dao_id],
-            |row| row.get(0),
+    let (election, signed) = {
+        let db_guard = state
+            .db
+            .lock()
+            .map_err(|_| "database lock poisoned".to_string())?;
+        let db = db_guard.as_ref().ok_or("database not initialized")?;
+        let conn = db.conn();
+
+        ensure_registered(conn, &w)?;
+
+        // Verify DAO exists and is active
+        let dao_status: String = conn
+            .query_row(
+                "SELECT status FROM governance_daos WHERE id = ?1",
+                params![params.dao_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| format!("DAO not found: {e}"))?;
+
+        if dao_status != "active" {
+            return Err(format!("DAO is not active (status: {dao_status})"));
+        }
+
+        let id = entity_id(&[
+            &params.dao_id,
+            &params.title,
+            &chrono::Utc::now().to_rfc3339(),
+        ]);
+        let seats = params.seats.unwrap_or(5);
+        let nominee_prof = params
+            .nominee_min_proficiency
+            .clone()
+            .unwrap_or_else(|| "apply".into());
+        let voter_prof = params
+            .voter_min_proficiency
+            .clone()
+            .unwrap_or_else(|| "remember".into());
+
+        conn.execute(
+            "INSERT INTO governance_elections \
+             (id, dao_id, title, description, phase, seats, \
+              nominee_min_proficiency, voter_min_proficiency, \
+              nomination_end, voting_end) \
+             VALUES (?1, ?2, ?3, ?4, 'nomination', ?5, ?6, ?7, ?8, ?9)",
+            params![
+                id,
+                params.dao_id,
+                params.title,
+                params.description,
+                seats,
+                nominee_prof,
+                voter_prof,
+                params.nomination_end,
+                params.voting_end,
+            ],
         )
-        .map_err(|e| format!("DAO not found: {e}"))?;
+        .map_err(|e| e.to_string())?;
 
-    if dao_status != "active" {
-        return Err(format!("DAO is not active (status: {dao_status})"));
-    }
+        let election = query_election(conn, &id)?;
+        // Bootstrap the election UTxO on-chain (lean 2′: the election
+        // state machine has an on-chain anchor the committee install
+        // later references).
+        try_enqueue(db, "open_election", "governance_elections", &id);
 
-    let id = entity_id(&[
-        &params.dao_id,
-        &params.title,
-        &chrono::Utc::now().to_rfc3339(),
-    ]);
-    let seats = params.seats.unwrap_or(5);
-    let nominee_prof = params
-        .nominee_min_proficiency
-        .unwrap_or_else(|| "apply".into());
-    let voter_prof = params
-        .voter_min_proficiency
-        .unwrap_or_else(|| "remember".into());
+        let signed = sign_governance_event(
+            &w,
+            &params.dao_id,
+            GovernanceEventType::ElectionOpened {
+                election_id: id.clone(),
+                title: params.title.clone(),
+                seats,
+                nominee_min_proficiency: nominee_prof,
+                voter_min_proficiency: voter_prof,
+                nomination_end: params.nomination_end.clone(),
+                voting_end: params.voting_end.clone(),
+            },
+        )?;
+        (election, signed)
+    };
 
-    conn.execute(
-        "INSERT INTO governance_elections \
-         (id, dao_id, title, description, phase, seats, \
-          nominee_min_proficiency, voter_min_proficiency, \
-          nomination_end, voting_end) \
-         VALUES (?1, ?2, ?3, ?4, 'nomination', ?5, ?6, ?7, ?8, ?9)",
-        params![
-            id,
-            params.dao_id,
-            params.title,
-            params.description,
-            seats,
-            nominee_prof,
-            voter_prof,
-            params.nomination_end,
-            params.voting_end,
-        ],
-    )
-    .map_err(|e| e.to_string())?;
-
-    let election = query_election(conn, &id)?;
-    try_enqueue(db, "open_election", "governance_elections", &id);
+    broadcast_signed(&state, &signed).await;
     Ok(election)
 }
 
@@ -493,59 +558,82 @@ pub async fn nominate(
     election_id: String,
     stake_address: String,
 ) -> Result<ElectionNominee, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    let conn = db.conn();
+    // Self-nomination: the nominee is the local wallet (it signs).
+    let _ = stake_address;
+    let w = load_wallet(&state).await?;
+    let stake_address = w.stake_address.clone();
 
-    // Verify election is in nomination phase
-    let phase: String = conn
-        .query_row(
-            "SELECT phase FROM governance_elections WHERE id = ?1",
-            params![election_id],
-            |row| row.get(0),
-        )
-        .map_err(|e| format!("election not found: {e}"))?;
+    let (nominee, signed) = {
+        let db_guard = state
+            .db
+            .lock()
+            .map_err(|_| "database lock poisoned".to_string())?;
+        let db = db_guard.as_ref().ok_or("database not initialized")?;
+        let conn = db.conn();
 
-    if phase != "nomination" {
-        return Err(format!(
-            "election is not in nomination phase (phase: {phase})"
-        ));
-    }
+        ensure_registered(conn, &w)?;
 
-    // Check nomination deadline
-    let (nomination_end, dao_id_for_prof): (Option<String>, String) = conn
-        .query_row(
-            "SELECT nomination_end, dao_id FROM governance_elections WHERE id = ?1",
-            params![election_id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+        // Verify election is in nomination phase
+        let phase: String = conn
+            .query_row(
+                "SELECT phase FROM governance_elections WHERE id = ?1",
+                params![election_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| format!("election not found: {e}"))?;
+
+        if phase != "nomination" {
+            return Err(format!(
+                "election is not in nomination phase (phase: {phase})"
+            ));
+        }
+
+        // Check nomination deadline
+        let (nomination_end, dao_id_for_prof): (Option<String>, String) = conn
+            .query_row(
+                "SELECT nomination_end, dao_id FROM governance_elections WHERE id = ?1",
+                params![election_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .map_err(|e| e.to_string())?;
+        check_before_deadline(nomination_end.as_deref(), "nomination")?;
+
+        // Proficiency gate: nominee must have at least "remember" in DAO scope
+        check_proficiency(conn, &stake_address, &dao_id_for_prof, "remember")?;
+
+        let id = entity_id(&[&election_id, &stake_address]);
+
+        conn.execute(
+            "INSERT INTO governance_election_nominees \
+             (id, election_id, stake_address) VALUES (?1, ?2, ?3)",
+            params![id, election_id, stake_address],
         )
         .map_err(|e| e.to_string())?;
-    check_before_deadline(nomination_end.as_deref(), "nomination")?;
 
-    // Proficiency gate: nominee must have at least "remember" in DAO scope
-    check_proficiency(conn, &stake_address, &dao_id_for_prof, "remember")?;
+        let signed = sign_governance_event(
+            &w,
+            &dao_id_for_prof,
+            GovernanceEventType::NomineeSubmitted {
+                election_id: election_id.clone(),
+                nominee_id: id.clone(),
+                nominee: stake_address.clone(),
+            },
+        )?;
 
-    let id = entity_id(&[&election_id, &stake_address]);
+        let nominee = ElectionNominee {
+            id,
+            election_id: election_id.clone(),
+            stake_address: stake_address.clone(),
+            accepted: false,
+            votes_received: 0,
+            is_winner: false,
+            nominated_at: chrono::Utc::now().to_rfc3339(),
+        };
+        (nominee, signed)
+    };
 
-    conn.execute(
-        "INSERT INTO governance_election_nominees \
-         (id, election_id, stake_address) VALUES (?1, ?2, ?3)",
-        params![id, election_id, stake_address],
-    )
-    .map_err(|e| e.to_string())?;
-
-    Ok(ElectionNominee {
-        id,
-        election_id,
-        stake_address,
-        accepted: false,
-        votes_received: 0,
-        is_winner: false,
-        nominated_at: chrono::Utc::now().to_rfc3339(),
-    })
+    broadcast_signed(&state, &signed).await;
+    Ok(nominee)
 }
 
 /// Accept a nomination (nominee confirms their candidacy).
@@ -554,48 +642,69 @@ pub async fn accept_nomination(
     state: State<'_, AppState>,
     nominee_id: String,
 ) -> Result<(), String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    let conn = db.conn();
+    let w = load_wallet(&state).await?;
 
-    // Look up the nominee's election context for proficiency + deadline checks
-    let (stake_address, election_id): (String, String) = conn
-        .query_row(
-            "SELECT stake_address, election_id FROM governance_election_nominees WHERE id = ?1",
-            params![nominee_id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .map_err(|_| "nominee not found".to_string())?;
+    let signed = {
+        let db_guard = state
+            .db
+            .lock()
+            .map_err(|_| "database lock poisoned".to_string())?;
+        let db = db_guard.as_ref().ok_or("database not initialized")?;
+        let conn = db.conn();
 
-    let (nominee_min_prof, nomination_end, dao_id): (String, Option<String>, String) = conn
-        .query_row(
-            "SELECT nominee_min_proficiency, nomination_end, dao_id \
-             FROM governance_elections WHERE id = ?1",
-            params![election_id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-        )
-        .map_err(|e| e.to_string())?;
+        ensure_registered(conn, &w)?;
 
-    // Deadline check: must be before nomination_end
-    check_before_deadline(nomination_end.as_deref(), "accepting nomination")?;
+        // Look up the nominee's election context for proficiency + deadline checks
+        let (stake_address, election_id): (String, String) = conn
+            .query_row(
+                "SELECT stake_address, election_id FROM governance_election_nominees WHERE id = ?1",
+                params![nominee_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .map_err(|_| "nominee not found".to_string())?;
 
-    // Proficiency gate: nominee must meet nominee_min_proficiency
-    check_proficiency(conn, &stake_address, &dao_id, &nominee_min_prof)?;
+        // A nominee may only accept their OWN nomination.
+        if stake_address != w.stake_address {
+            return Err("you can only accept your own nomination".into());
+        }
 
-    let affected = conn
-        .execute(
-            "UPDATE governance_election_nominees SET accepted = 1 WHERE id = ?1",
-            params![nominee_id],
-        )
-        .map_err(|e| e.to_string())?;
+        let (nominee_min_prof, nomination_end, dao_id): (String, Option<String>, String) = conn
+            .query_row(
+                "SELECT nominee_min_proficiency, nomination_end, dao_id \
+                 FROM governance_elections WHERE id = ?1",
+                params![election_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .map_err(|e| e.to_string())?;
 
-    if affected == 0 {
-        return Err("nominee not found".into());
-    }
+        // Deadline check: must be before nomination_end
+        check_before_deadline(nomination_end.as_deref(), "accepting nomination")?;
 
+        // Proficiency gate: nominee must meet nominee_min_proficiency
+        check_proficiency(conn, &stake_address, &dao_id, &nominee_min_prof)?;
+
+        let affected = conn
+            .execute(
+                "UPDATE governance_election_nominees SET accepted = 1 WHERE id = ?1",
+                params![nominee_id],
+            )
+            .map_err(|e| e.to_string())?;
+
+        if affected == 0 {
+            return Err("nominee not found".into());
+        }
+
+        sign_governance_event(
+            &w,
+            &dao_id,
+            GovernanceEventType::NomineeAccepted {
+                election_id,
+                nominee_id: nominee_id.clone(),
+            },
+        )?
+    };
+
+    broadcast_signed(&state, &signed).await;
     Ok(())
 }
 
@@ -605,61 +714,76 @@ pub async fn start_election_voting(
     state: State<'_, AppState>,
     election_id: String,
 ) -> Result<(), String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    let conn = db.conn();
+    let w = load_wallet(&state).await?;
 
-    let phase: String = conn
-        .query_row(
-            "SELECT phase FROM governance_elections WHERE id = ?1",
+    let signed = {
+        let db_guard = state
+            .db
+            .lock()
+            .map_err(|_| "database lock poisoned".to_string())?;
+        let db = db_guard.as_ref().ok_or("database not initialized")?;
+        let conn = db.conn();
+
+        ensure_registered(conn, &w)?;
+
+        let (phase, dao_id): (String, String) = conn
+            .query_row(
+                "SELECT phase, dao_id FROM governance_elections WHERE id = ?1",
+                params![election_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .map_err(|e| format!("election not found: {e}"))?;
+
+        if phase != "nomination" {
+            return Err(format!(
+                "election must be in nomination phase to start voting (phase: {phase})"
+            ));
+        }
+
+        // Deadline check: nomination period must have ended
+        let nomination_end: Option<String> = conn
+            .query_row(
+                "SELECT nomination_end FROM governance_elections WHERE id = ?1",
+                params![election_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        check_after_deadline(nomination_end.as_deref(), "starting voting")?;
+
+        // Verify at least `seats` accepted nominees
+        let (seats, accepted_count): (i64, i64) = conn
+            .query_row(
+                "SELECT e.seats, \
+                 (SELECT COUNT(*) FROM governance_election_nominees n \
+                  WHERE n.election_id = e.id AND n.accepted = 1) \
+                 FROM governance_elections e WHERE e.id = ?1",
+                params![election_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .map_err(|e| e.to_string())?;
+
+        if accepted_count < seats {
+            return Err(format!(
+                "need at least {seats} accepted nominees to start voting, have {accepted_count}"
+            ));
+        }
+
+        conn.execute(
+            "UPDATE governance_elections SET phase = 'voting' WHERE id = ?1",
             params![election_id],
-            |row| row.get(0),
-        )
-        .map_err(|e| format!("election not found: {e}"))?;
-
-    if phase != "nomination" {
-        return Err(format!(
-            "election must be in nomination phase to start voting (phase: {phase})"
-        ));
-    }
-
-    // Deadline check: nomination period must have ended
-    let nomination_end: Option<String> = conn
-        .query_row(
-            "SELECT nomination_end FROM governance_elections WHERE id = ?1",
-            params![election_id],
-            |row| row.get(0),
         )
         .map_err(|e| e.to_string())?;
-    check_after_deadline(nomination_end.as_deref(), "starting voting")?;
 
-    // Verify at least `seats` accepted nominees
-    let (seats, accepted_count): (i64, i64) = conn
-        .query_row(
-            "SELECT e.seats, \
-             (SELECT COUNT(*) FROM governance_election_nominees n \
-              WHERE n.election_id = e.id AND n.accepted = 1) \
-             FROM governance_elections e WHERE e.id = ?1",
-            params![election_id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .map_err(|e| e.to_string())?;
+        sign_governance_event(
+            &w,
+            &dao_id,
+            GovernanceEventType::ElectionStarted {
+                election_id: election_id.clone(),
+            },
+        )?
+    };
 
-    if accepted_count < seats {
-        return Err(format!(
-            "need at least {seats} accepted nominees to start voting, have {accepted_count}"
-        ));
-    }
-
-    conn.execute(
-        "UPDATE governance_elections SET phase = 'voting' WHERE id = ?1",
-        params![election_id],
-    )
-    .map_err(|e| e.to_string())?;
-
+    broadcast_signed(&state, &signed).await;
     Ok(())
 }
 
@@ -675,11 +799,7 @@ pub async fn cast_election_vote(
     // signed identity is the local wallet's stake address; the incoming
     // `voter` argument is ignored in favour of it.
     let _ = voter;
-    let keystore = state.keystore.lock().await;
-    let ks = keystore.as_ref().ok_or("vault is locked — unlock first")?;
-    let mnemonic = ks.retrieve_mnemonic().map_err(|e| e.to_string())?;
-    drop(keystore);
-    let w = wallet::wallet_from_mnemonic(&mnemonic).map_err(|e| e.to_string())?;
+    let w = load_wallet(&state).await?;
     let voter = w.stake_address.clone();
 
     let (vote, signed) = {
@@ -689,6 +809,9 @@ pub async fn cast_election_vote(
             .map_err(|_| "database lock poisoned".to_string())?;
         let db = db_guard.as_ref().ok_or("database not initialized")?;
         let conn = db.conn();
+
+        // Must be a registered user to vote.
+        ensure_registered(conn, &w)?;
 
         // Verify election is in voting phase
         let phase: String = conn
@@ -806,76 +929,96 @@ pub async fn finalize_election(
     state: State<'_, AppState>,
     election_id: String,
 ) -> Result<Vec<ElectionNominee>, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    let conn = db.conn();
+    let w = load_wallet(&state).await?;
 
-    let (phase, seats): (String, i64) = conn
-        .query_row(
-            "SELECT phase, seats FROM governance_elections WHERE id = ?1",
-            params![election_id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .map_err(|e| format!("election not found: {e}"))?;
+    let (nominees, signed) = {
+        let db_guard = state
+            .db
+            .lock()
+            .map_err(|_| "database lock poisoned".to_string())?;
+        let db = db_guard.as_ref().ok_or("database not initialized")?;
+        let conn = db.conn();
 
-    if phase != "voting" {
-        return Err(format!(
-            "election must be in voting phase to finalize (phase: {phase})"
-        ));
-    }
+        ensure_registered(conn, &w)?;
 
-    // Deadline check: voting period must have ended
-    let voting_end: Option<String> = conn
-        .query_row(
-            "SELECT voting_end FROM governance_elections WHERE id = ?1",
-            params![election_id],
-            |row| row.get(0),
-        )
-        .map_err(|e| e.to_string())?;
-    check_after_deadline(voting_end.as_deref(), "finalizing election")?;
+        let (phase, seats, dao_id): (String, i64, String) = conn
+            .query_row(
+                "SELECT phase, seats, dao_id FROM governance_elections WHERE id = ?1",
+                params![election_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .map_err(|e| format!("election not found: {e}"))?;
 
-    // Get top N accepted nominees by votes_received
-    let mut stmt = conn
-        .prepare(
-            "SELECT id FROM governance_election_nominees \
-             WHERE election_id = ?1 AND accepted = 1 \
-             ORDER BY votes_received DESC LIMIT ?2",
-        )
-        .map_err(|e| e.to_string())?;
+        if phase != "voting" {
+            return Err(format!(
+                "election must be in voting phase to finalize (phase: {phase})"
+            ));
+        }
 
-    let winner_ids: Vec<String> = stmt
-        .query_map(params![election_id, seats], |row| row.get(0))
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
+        // Deadline check: voting period must have ended
+        let voting_end: Option<String> = conn
+            .query_row(
+                "SELECT voting_end FROM governance_elections WHERE id = ?1",
+                params![election_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        check_after_deadline(voting_end.as_deref(), "finalizing election")?;
 
-    // Mark winners
-    for wid in &winner_ids {
+        // Get top N accepted nominees by votes_received
+        let winner_ids: Vec<String> = {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id FROM governance_election_nominees \
+                     WHERE election_id = ?1 AND accepted = 1 \
+                     ORDER BY votes_received DESC LIMIT ?2",
+                )
+                .map_err(|e| e.to_string())?;
+            let ids = stmt
+                .query_map(params![election_id, seats], |row| row.get(0))
+                .map_err(|e| e.to_string())?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| e.to_string())?;
+            ids
+        };
+
+        // Mark winners
+        for wid in &winner_ids {
+            conn.execute(
+                "UPDATE governance_election_nominees SET is_winner = 1 WHERE id = ?1",
+                params![wid],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+
+        // Transition to finalized
         conn.execute(
-            "UPDATE governance_election_nominees SET is_winner = 1 WHERE id = ?1",
-            params![wid],
+            "UPDATE governance_elections SET phase = 'finalized', finalized_at = datetime('now') \
+             WHERE id = ?1",
+            params![election_id],
         )
         .map_err(|e| e.to_string())?;
-    }
 
-    // Transition to finalized
-    conn.execute(
-        "UPDATE governance_elections SET phase = 'finalized', finalized_at = datetime('now') \
-         WHERE id = ?1",
-        params![election_id],
-    )
-    .map_err(|e| e.to_string())?;
+        let nominees = query_nominees(conn, &election_id)?;
+        try_enqueue(
+            db,
+            "finalize_election",
+            "governance_elections",
+            &election_id,
+        );
 
-    let nominees = query_nominees(conn, &election_id)?;
-    try_enqueue(
-        db,
-        "finalize_election",
-        "governance_elections",
-        &election_id,
-    );
+        let signed = sign_governance_event(
+            &w,
+            &dao_id,
+            GovernanceEventType::ElectionFinalized {
+                election_id: election_id.clone(),
+                winner_nominee_ids: winner_ids,
+            },
+        )?;
+        (nominees, signed)
+    };
+
+    broadcast_signed(&state, &signed).await;
     Ok(nominees)
 }
 
@@ -1200,11 +1343,7 @@ pub async fn cast_proposal_vote(
 ) -> Result<ProposalVote, String> {
     // Only the local wallet's own vote can be signed; ignore `voter`.
     let _ = voter;
-    let keystore = state.keystore.lock().await;
-    let ks = keystore.as_ref().ok_or("vault is locked — unlock first")?;
-    let mnemonic = ks.retrieve_mnemonic().map_err(|e| e.to_string())?;
-    drop(keystore);
-    let w = wallet::wallet_from_mnemonic(&mnemonic).map_err(|e| e.to_string())?;
+    let w = load_wallet(&state).await?;
     let voter = w.stake_address.clone();
 
     let (vote, signed) = {
@@ -1214,6 +1353,9 @@ pub async fn cast_proposal_vote(
             .map_err(|_| "database lock poisoned".to_string())?;
         let db = db_guard.as_ref().ok_or("database not initialized")?;
         let conn = db.conn();
+
+        // Must be a registered user to vote.
+        ensure_registered(conn, &w)?;
 
         // Verify proposal is published
         let status: String = conn
