@@ -65,6 +65,7 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (55, "username_claim_cache", MIGRATION_055),
     (56, "username_anchor_verified", MIGRATION_056),
     (57, "dht_record_mirror", MIGRATION_057),
+    (58, "governance_vote_signatures", MIGRATION_058),
 ];
 
 const MIGRATION_001: &str = r#"
@@ -2291,4 +2292,22 @@ CREATE TABLE IF NOT EXISTS dht_records (
     value      BLOB NOT NULL,
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+"#;
+
+const MIGRATION_058: &str = r#"
+-- ============================================================
+-- Migration 058: signatures on governance votes
+-- ============================================================
+
+-- Governance votes are now signed by the voter's Cardano key and
+-- gossiped on /alexandria/governance/1.0 so every node can build a
+-- verifiable off-chain tally (the operator commits a Merkle root of
+-- these signed votes on-chain at finalize/resolve). The signature is
+-- the Ed25519 signature from the gossip envelope (covers the vote
+-- payload); public_key is the voter's verifying key. NULL on legacy
+-- rows cast before this migration.
+ALTER TABLE governance_election_votes ADD COLUMN signature TEXT;
+ALTER TABLE governance_election_votes ADD COLUMN public_key TEXT;
+ALTER TABLE governance_proposal_votes ADD COLUMN signature TEXT;
+ALTER TABLE governance_proposal_votes ADD COLUMN public_key TEXT;
 "#;

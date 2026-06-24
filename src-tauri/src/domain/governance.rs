@@ -56,6 +56,23 @@ pub enum GovernanceEventType {
         /// On-chain transaction that finalized the election.
         on_chain_tx: Option<String>,
     },
+    /// A signed election vote, gossiped so every node can build the
+    /// off-chain tally. The voter's signature lives in the enclosing
+    /// `SignedGossipMessage` envelope (it covers this payload); the
+    /// receiving handler persists it alongside the vote. `voter` must
+    /// equal the envelope's `stake_address` — a node can only cast its
+    /// own vote.
+    ElectionVoteRecorded {
+        election_id: String,
+        voter: String,
+        nominee_id: String,
+    },
+    /// A signed proposal vote (see `ElectionVoteRecorded`).
+    ProposalVoteRecorded {
+        proposal_id: String,
+        voter: String,
+        in_favor: bool,
+    },
 }
 
 // ---- DAO Types ----

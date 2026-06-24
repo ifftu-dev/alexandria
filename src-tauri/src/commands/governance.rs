@@ -13,11 +13,47 @@ use tauri::State;
 
 use crate::cardano::onchain_queue;
 use crate::crypto::hash::entity_id;
+use crate::crypto::wallet;
 use crate::domain::governance::{
-    DaoInfo, DaoMember, Election, ElectionNominee, ElectionVote, OpenElectionParams, Proposal,
-    ProposalVote, SubmitProposalParams,
+    DaoInfo, DaoMember, Election, ElectionNominee, ElectionVote, GovernanceAnnouncement,
+    GovernanceEventType, OpenElectionParams, Proposal, ProposalVote, SubmitProposalParams,
 };
 use crate::AppState;
+
+/// Sign a governance event with the local wallet and broadcast it on the
+/// governance gossip topic (best-effort). Returns the signed envelope so
+/// callers can persist its signature + public key alongside the local
+/// row. Signing is synchronous; the actual broadcast is awaited after the
+/// caller has dropped its DB lock.
+fn sign_governance_event(
+    w: &wallet::Wallet,
+    dao_id: &str,
+    event: GovernanceEventType,
+) -> Result<crate::p2p::types::SignedGossipMessage, String> {
+    let ann = GovernanceAnnouncement {
+        event_type: event,
+        dao_id: dao_id.to_string(),
+        timestamp: chrono::Utc::now().timestamp(),
+    };
+    let payload = serde_json::to_vec(&ann).map_err(|e| e.to_string())?;
+    Ok(crate::p2p::signing::sign_gossip_message(
+        crate::p2p::types::TOPIC_GOVERNANCE,
+        payload,
+        &w.signing_key,
+        &w.stake_address,
+    ))
+}
+
+/// Broadcast an already-signed gossip message via the P2P node, if one is
+/// running. Best-effort — never fails the parent command.
+async fn broadcast_signed(state: &AppState, signed: &crate::p2p::types::SignedGossipMessage) {
+    let node = state.p2p_node.lock().await;
+    if let Some(ref n) = *node {
+        if let Err(e) = n.publish_signed(signed).await {
+            log::warn!("governance gossip broadcast failed: {e}");
+        }
+    }
+}
 
 /// Default proposal voting deadline: 14 days from approval.
 const DEFAULT_VOTING_DAYS: i64 = 14;
@@ -635,97 +671,133 @@ pub async fn cast_election_vote(
     voter: String,
     nominee_id: String,
 ) -> Result<ElectionVote, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    let conn = db.conn();
+    // A node can only cast its OWN vote — the wallet key signs it. The
+    // signed identity is the local wallet's stake address; the incoming
+    // `voter` argument is ignored in favour of it.
+    let _ = voter;
+    let keystore = state.keystore.lock().await;
+    let ks = keystore.as_ref().ok_or("vault is locked — unlock first")?;
+    let mnemonic = ks.retrieve_mnemonic().map_err(|e| e.to_string())?;
+    drop(keystore);
+    let w = wallet::wallet_from_mnemonic(&mnemonic).map_err(|e| e.to_string())?;
+    let voter = w.stake_address.clone();
 
-    // Verify election is in voting phase
-    let phase: String = conn
-        .query_row(
-            "SELECT phase FROM governance_elections WHERE id = ?1",
-            params![election_id],
-            |row| row.get(0),
-        )
-        .map_err(|e| format!("election not found: {e}"))?;
+    let (vote, signed) = {
+        let db_guard = state
+            .db
+            .lock()
+            .map_err(|_| "database lock poisoned".to_string())?;
+        let db = db_guard.as_ref().ok_or("database not initialized")?;
+        let conn = db.conn();
 
-    if phase != "voting" {
-        return Err(format!("election is not in voting phase (phase: {phase})"));
-    }
+        // Verify election is in voting phase
+        let phase: String = conn
+            .query_row(
+                "SELECT phase FROM governance_elections WHERE id = ?1",
+                params![election_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| format!("election not found: {e}"))?;
 
-    // Deadline check: must be before voting_end
-    let (voting_end, voter_min_prof, dao_id_for_vote): (Option<String>, String, String) = conn
-        .query_row(
-            "SELECT voting_end, voter_min_proficiency, dao_id \
-             FROM governance_elections WHERE id = ?1",
-            params![election_id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        if phase != "voting" {
+            return Err(format!("election is not in voting phase (phase: {phase})"));
+        }
+
+        // Deadline check: must be before voting_end
+        let (voting_end, voter_min_prof, dao_id_for_vote): (Option<String>, String, String) = conn
+            .query_row(
+                "SELECT voting_end, voter_min_proficiency, dao_id \
+                 FROM governance_elections WHERE id = ?1",
+                params![election_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .map_err(|e| e.to_string())?;
+        check_before_deadline(voting_end.as_deref(), "voting")?;
+
+        // Proficiency gate: voter must meet voter_min_proficiency
+        check_proficiency(conn, &voter, &dao_id_for_vote, &voter_min_prof)?;
+
+        // Check double-vote
+        let already_voted: bool = conn
+            .query_row(
+                "SELECT COUNT(*) FROM governance_election_votes \
+                 WHERE election_id = ?1 AND voter = ?2",
+                params![election_id, voter],
+                |row| Ok(row.get::<_, i64>(0)? > 0),
+            )
+            .map_err(|e| e.to_string())?;
+
+        if already_voted {
+            return Err("already voted in this election".into());
+        }
+
+        // Verify nominee exists and is accepted
+        let nominee_accepted: bool = conn
+            .query_row(
+                "SELECT accepted FROM governance_election_nominees WHERE id = ?1",
+                params![nominee_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| format!("nominee not found: {e}"))?;
+
+        if !nominee_accepted {
+            return Err("nominee has not accepted their nomination".into());
+        }
+
+        // Sign the vote before persisting so the signature + public key
+        // can be stored on the row (and reused for the broadcast).
+        let signed = sign_governance_event(
+            &w,
+            &dao_id_for_vote,
+            GovernanceEventType::ElectionVoteRecorded {
+                election_id: election_id.clone(),
+                voter: voter.clone(),
+                nominee_id: nominee_id.clone(),
+            },
+        )?;
+        let signature_hex = hex::encode(&signed.signature);
+        let public_key_hex = hex::encode(&signed.public_key);
+
+        let vote_id = entity_id(&[&election_id, &voter]);
+
+        conn.execute(
+            "INSERT INTO governance_election_votes \
+             (id, election_id, voter, nominee_id, signature, public_key) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                vote_id,
+                election_id,
+                voter,
+                nominee_id,
+                signature_hex,
+                public_key_hex
+            ],
         )
         .map_err(|e| e.to_string())?;
-    check_before_deadline(voting_end.as_deref(), "voting")?;
 
-    // Proficiency gate: voter must meet voter_min_proficiency
-    check_proficiency(conn, &voter, &dao_id_for_vote, &voter_min_prof)?;
-
-    // Check double-vote
-    let already_voted: bool = conn
-        .query_row(
-            "SELECT COUNT(*) FROM governance_election_votes \
-             WHERE election_id = ?1 AND voter = ?2",
-            params![election_id, voter],
-            |row| Ok(row.get::<_, i64>(0)? > 0),
-        )
-        .map_err(|e| e.to_string())?;
-
-    if already_voted {
-        return Err("already voted in this election".into());
-    }
-
-    // Verify nominee exists and is accepted
-    let nominee_accepted: bool = conn
-        .query_row(
-            "SELECT accepted FROM governance_election_nominees WHERE id = ?1",
+        // Increment nominee vote count
+        conn.execute(
+            "UPDATE governance_election_nominees SET votes_received = votes_received + 1 WHERE id = ?1",
             params![nominee_id],
-            |row| row.get(0),
         )
-        .map_err(|e| format!("nominee not found: {e}"))?;
+        .map_err(|e| e.to_string())?;
 
-    if !nominee_accepted {
-        return Err("nominee has not accepted their nomination".into());
-    }
+        let vote = ElectionVote {
+            id: vote_id,
+            election_id: election_id.clone(),
+            voter: voter.clone(),
+            nominee_id: nominee_id.clone(),
+            on_chain_tx: None,
+            voted_at: chrono::Utc::now().to_rfc3339(),
+        };
+        (vote, signed)
+    }; // db guard dropped before any .await
 
-    let vote_id = entity_id(&[&election_id, &voter]);
-
-    conn.execute(
-        "INSERT INTO governance_election_votes \
-         (id, election_id, voter, nominee_id) VALUES (?1, ?2, ?3, ?4)",
-        params![vote_id, election_id, voter, nominee_id],
-    )
-    .map_err(|e| e.to_string())?;
-
-    // Increment nominee vote count
-    conn.execute(
-        "UPDATE governance_election_nominees SET votes_received = votes_received + 1 WHERE id = ?1",
-        params![nominee_id],
-    )
-    .map_err(|e| e.to_string())?;
-
-    try_enqueue(
-        db,
-        "cast_election_vote",
-        "governance_election_votes",
-        &vote_id,
-    );
-    Ok(ElectionVote {
-        id: vote_id,
-        election_id,
-        voter,
-        nominee_id,
-        on_chain_tx: None,
-        voted_at: chrono::Utc::now().to_rfc3339(),
-    })
+    // Votes are off-chain under the lean governance model: gossip the
+    // signed vote so peers can build the tally; the operator commits a
+    // Merkle root of the signed votes on-chain at finalize.
+    broadcast_signed(&state, &signed).await;
+    Ok(vote)
 }
 
 /// Finalize an election: determine winners and transition to finalized.
@@ -1126,93 +1198,119 @@ pub async fn cast_proposal_vote(
     voter: String,
     in_favor: bool,
 ) -> Result<ProposalVote, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    let conn = db.conn();
+    // Only the local wallet's own vote can be signed; ignore `voter`.
+    let _ = voter;
+    let keystore = state.keystore.lock().await;
+    let ks = keystore.as_ref().ok_or("vault is locked — unlock first")?;
+    let mnemonic = ks.retrieve_mnemonic().map_err(|e| e.to_string())?;
+    drop(keystore);
+    let w = wallet::wallet_from_mnemonic(&mnemonic).map_err(|e| e.to_string())?;
+    let voter = w.stake_address.clone();
 
-    // Verify proposal is published
-    let status: String = conn
-        .query_row(
-            "SELECT status FROM governance_proposals WHERE id = ?1",
-            params![proposal_id],
-            |row| row.get(0),
-        )
-        .map_err(|e| format!("proposal not found: {e}"))?;
+    let (vote, signed) = {
+        let db_guard = state
+            .db
+            .lock()
+            .map_err(|_| "database lock poisoned".to_string())?;
+        let db = db_guard.as_ref().ok_or("database not initialized")?;
+        let conn = db.conn();
 
-    if status != "published" {
-        return Err(format!(
-            "proposal is not open for voting (status: {status})"
-        ));
-    }
+        // Verify proposal is published
+        let status: String = conn
+            .query_row(
+                "SELECT status FROM governance_proposals WHERE id = ?1",
+                params![proposal_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| format!("proposal not found: {e}"))?;
 
-    // Deadline + proficiency checks
-    let (voting_deadline, min_prof, dao_id_for_vote): (Option<String>, String, String) = conn
-        .query_row(
-            "SELECT voting_deadline, min_vote_proficiency, dao_id \
-             FROM governance_proposals WHERE id = ?1",
-            params![proposal_id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-        )
-        .map_err(|e| e.to_string())?;
-    check_before_deadline(voting_deadline.as_deref(), "proposal voting")?;
-    check_proficiency(conn, &voter, &dao_id_for_vote, &min_prof)?;
+        if status != "published" {
+            return Err(format!(
+                "proposal is not open for voting (status: {status})"
+            ));
+        }
 
-    // Check double-vote
-    let already_voted: bool = conn
-        .query_row(
-            "SELECT COUNT(*) FROM governance_proposal_votes \
-             WHERE proposal_id = ?1 AND voter = ?2",
-            params![proposal_id, voter],
-            |row| Ok(row.get::<_, i64>(0)? > 0),
-        )
-        .map_err(|e| e.to_string())?;
+        // Deadline + proficiency checks
+        let (voting_deadline, min_prof, dao_id_for_vote): (Option<String>, String, String) = conn
+            .query_row(
+                "SELECT voting_deadline, min_vote_proficiency, dao_id \
+                 FROM governance_proposals WHERE id = ?1",
+                params![proposal_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .map_err(|e| e.to_string())?;
+        check_before_deadline(voting_deadline.as_deref(), "proposal voting")?;
+        check_proficiency(conn, &voter, &dao_id_for_vote, &min_prof)?;
 
-    if already_voted {
-        return Err("already voted on this proposal".into());
-    }
+        // Check double-vote
+        let already_voted: bool = conn
+            .query_row(
+                "SELECT COUNT(*) FROM governance_proposal_votes \
+                 WHERE proposal_id = ?1 AND voter = ?2",
+                params![proposal_id, voter],
+                |row| Ok(row.get::<_, i64>(0)? > 0),
+            )
+            .map_err(|e| e.to_string())?;
 
-    let vote_id = entity_id(&[&proposal_id, &voter]);
-    let in_favor_int: i64 = if in_favor { 1 } else { 0 };
+        if already_voted {
+            return Err("already voted on this proposal".into());
+        }
 
-    conn.execute(
-        "INSERT INTO governance_proposal_votes \
-         (id, proposal_id, voter, in_favor) VALUES (?1, ?2, ?3, ?4)",
-        params![vote_id, proposal_id, voter, in_favor_int],
-    )
-    .map_err(|e| e.to_string())?;
+        let signed = sign_governance_event(
+            &w,
+            &dao_id_for_vote,
+            GovernanceEventType::ProposalVoteRecorded {
+                proposal_id: proposal_id.clone(),
+                voter: voter.clone(),
+                in_favor,
+            },
+        )?;
+        let signature_hex = hex::encode(&signed.signature);
+        let public_key_hex = hex::encode(&signed.public_key);
 
-    // Update tally
-    if in_favor {
+        let vote_id = entity_id(&[&proposal_id, &voter]);
+        let in_favor_int: i64 = if in_favor { 1 } else { 0 };
+
         conn.execute(
-            "UPDATE governance_proposals SET votes_for = votes_for + 1 WHERE id = ?1",
-            params![proposal_id],
+            "INSERT INTO governance_proposal_votes \
+             (id, proposal_id, voter, in_favor, signature, public_key) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                vote_id,
+                proposal_id,
+                voter,
+                in_favor_int,
+                signature_hex,
+                public_key_hex
+            ],
         )
         .map_err(|e| e.to_string())?;
-    } else {
-        conn.execute(
-            "UPDATE governance_proposals SET votes_against = votes_against + 1 WHERE id = ?1",
-            params![proposal_id],
-        )
-        .map_err(|e| e.to_string())?;
-    }
 
-    try_enqueue(
-        db,
-        "cast_proposal_vote",
-        "governance_proposal_votes",
-        &vote_id,
-    );
-    Ok(ProposalVote {
-        id: vote_id,
-        proposal_id,
-        voter,
-        in_favor,
-        on_chain_tx: None,
-        voted_at: chrono::Utc::now().to_rfc3339(),
-    })
+        // Update tally
+        let col = if in_favor {
+            "votes_for"
+        } else {
+            "votes_against"
+        };
+        conn.execute(
+            &format!("UPDATE governance_proposals SET {col} = {col} + 1 WHERE id = ?1"),
+            params![proposal_id],
+        )
+        .map_err(|e| e.to_string())?;
+
+        let vote = ProposalVote {
+            id: vote_id,
+            proposal_id: proposal_id.clone(),
+            voter: voter.clone(),
+            in_favor,
+            on_chain_tx: None,
+            voted_at: chrono::Utc::now().to_rfc3339(),
+        };
+        (vote, signed)
+    }; // db guard dropped before any .await
+
+    broadcast_signed(&state, &signed).await;
+    Ok(vote)
 }
 
 /// Resolve a proposal using supermajority (2/3 votes_for).
