@@ -247,8 +247,13 @@ pub async fn process_queue(
         Some(ref client) => client,
         None => return Ok(0),
     };
-    let w = match wallet {
-        Some(ref w) => w,
+    // Governance admin/committee txs are operator-signed (3-A). Only an
+    // operator-configured node builds + submits them; everyone else skips
+    // the queue entirely. The user `wallet` is no longer used here (votes
+    // and nominations are off-chain gossip, not queued).
+    let _ = wallet;
+    let operator = match super::operator::load_operator_key() {
+        Some(op) => op,
         None => return Ok(0),
     };
 
@@ -283,7 +288,7 @@ pub async fn process_queue(
         );
 
         // Attempt to build and submit the transaction
-        match build_and_submit(&item.action_type, item, bf, w).await {
+        match build_and_submit(&item.action_type, item, bf, db, &operator).await {
             Ok(tx_hash) => {
                 let db_guard = db.lock().map_err(|_| "db lock poisoned".to_string())?;
                 let db_ref = db_guard.as_ref().ok_or("database not initialized")?;
@@ -384,124 +389,370 @@ fn get_submitted(db: &crate::db::Database) -> Result<Vec<QueueItem>, String> {
     Ok(items)
 }
 
-/// Build and submit an on-chain transaction for a specific governance action.
-///
-/// Dispatches to the appropriate gov_tx_builder function based on action_type.
-/// Returns the transaction hash on success.
+/// Build, sign (operator key) and submit the on-chain tx for a queued
+/// governance action under the lean model. Only three actions touch the
+/// chain — `finalize_election` (publish the finalized-election UTxO),
+/// `install_committee` (spend + recreate the DAO state UTxO), and
+/// `resolve_proposal` (anchor the outcome). Everything else is off-chain
+/// (votes/nominations gossip; open/submit/approve are DB-only) and any
+/// legacy queue rows for them are dropped.
 async fn build_and_submit(
     action_type: &str,
     item: &QueueItem,
     blockfrost: &super::blockfrost::BlockfrostClient,
-    wallet: &crate::crypto::wallet::Wallet,
+    db: &std::sync::Arc<std::sync::Mutex<Option<crate::db::Database>>>,
+    operator: &super::operator::OperatorKey,
 ) -> Result<String, String> {
-    let payment_address = &wallet.payment_address;
-    let payment_key_hash = &wallet.payment_key_hash;
-    let payment_key_extended = &wallet.payment_key_extended;
+    use super::gov_onchain;
 
-    let result = match action_type {
-        "open_election" => {
-            let params: serde_json::Value = serde_json::from_str(&item.payload_json)
-                .map_err(|e| format!("invalid payload: {e}"))?;
-            super::gov_tx_builder::build_open_election_tx(
-                blockfrost,
-                payment_address,
-                payment_key_hash,
-                payment_key_extended,
-                &[0u8; 28],
-                &[],
-                params["election_id"].as_i64().unwrap_or(0),
-                params["seats"].as_i64().unwrap_or(5),
-                params["nominee_min_proficiency"]
-                    .as_str()
-                    .unwrap_or("apply"),
-                params["voter_min_proficiency"]
-                    .as_str()
-                    .unwrap_or("remember"),
-                params["nomination_end_ms"].as_i64().unwrap_or(0),
-                params["voting_end_ms"].as_i64().unwrap_or(0),
-            )
-            .await
-        }
-        "cast_election_vote" => {
-            super::gov_tx_builder::build_cast_vote_tx(
-                blockfrost,
-                payment_address,
-                payment_key_hash,
-                payment_key_extended,
-                "election",
-                None,
-            )
-            .await
-        }
+    let signed: Vec<u8> = match action_type {
         "finalize_election" => {
-            super::gov_tx_builder::build_finalize_election_tx(
+            let f = read_finalize_data(db, &item.target_id)?;
+            gov_onchain::publish_finalized_election(
                 blockfrost,
-                payment_address,
-                payment_key_hash,
-                payment_key_extended,
+                operator,
+                &f.dao_policy,
+                &f.dao_token_name,
+                &f.reputation_policy,
+                f.seats,
+                f.nomination_end_ms,
+                f.voting_end_ms,
             )
-            .await
+            .await?
         }
         "install_committee" => {
-            let params: serde_json::Value = serde_json::from_str(&item.payload_json)
-                .map_err(|e| format!("invalid payload: {e}"))?;
-            let election_tx = params["election_tx_hash"].as_str().unwrap_or("");
-            let election_tx_bytes =
-                hex::decode(election_tx).map_err(|e| format!("invalid election tx hash: {e}"))?;
-            super::gov_tx_builder::build_install_committee_tx(
-                blockfrost,
-                payment_address,
-                payment_key_hash,
-                payment_key_extended,
-                (&election_tx_bytes, 0),
-            )
-            .await
-        }
-        "submit_proposal" | "approve_proposal" => {
-            // Both create/approve a proposal UTxO at the proposal script address
-            super::gov_tx_builder::build_resolve_proposal_tx(
-                blockfrost,
-                payment_address,
-                payment_key_hash,
-                payment_key_extended,
-            )
-            .await
-        }
-        "cast_proposal_vote" => {
-            let params: serde_json::Value = serde_json::from_str(&item.payload_json)
-                .map_err(|e| format!("invalid payload: {e}"))?;
-            let in_favor = params["in_favor"].as_bool();
-            super::gov_tx_builder::build_cast_vote_tx(
-                blockfrost,
-                payment_address,
-                payment_key_hash,
-                payment_key_extended,
-                "proposal",
-                in_favor,
-            )
-            .await
+            let mut d = read_install_data(db, &item.target_id)?;
+            // No registry-resolvable winners → install the operator as the
+            // sole committee so the DAO stays governable.
+            if d.committee_vkhs.is_empty() {
+                d.committee_vkhs = vec![operator.payment_key_hash()];
+            }
+            let params = gov_onchain::InstallParams {
+                dao_state_utxo: (&d.dao_state_tx, d.dao_state_idx),
+                dao_state_lovelace: d.dao_state_lovelace,
+                dao_policy: d.dao_policy,
+                dao_token_name: d.dao_token_name.clone(),
+                scope_type: d.scope_type.clone(),
+                scope_id: d.scope_id.clone(),
+                reputation_policy: d.reputation_policy,
+                committee_size: d.committee_size,
+                election_interval_ms: d.election_interval_ms,
+                election_ref: (&d.election_ref_tx, d.election_ref_idx),
+                committee_vkhs: d.committee_vkhs.clone(),
+                term_start_ms: chrono::Utc::now().timestamp_millis(),
+            };
+            gov_onchain::install_committee(blockfrost, operator, &params).await?
         }
         "resolve_proposal" => {
-            super::gov_tx_builder::build_resolve_proposal_tx(
-                blockfrost,
-                payment_address,
-                payment_key_hash,
-                payment_key_extended,
-            )
-            .await
+            let o = read_proposal_outcome(db, &item.target_id)?;
+            let metadata = gov_onchain::proposal_outcome_metadata(
+                &item.target_id,
+                &o.status,
+                o.votes_for,
+                o.votes_against,
+                o.vote_merkle_root_hex,
+            );
+            gov_onchain::build_governance_anchor(blockfrost, operator, metadata).await?
+        }
+        "open_election" | "cast_election_vote" | "cast_proposal_vote" | "submit_proposal"
+        | "approve_proposal" => {
+            return Err(format!(
+                "action '{action_type}' is off-chain under the lean governance model"
+            ));
         }
         other => return Err(format!("unknown governance action type: {other}")),
     };
 
-    match result {
-        Ok(gov_result) => {
-            // Submit signed tx to Blockfrost
-            let tx_hash = blockfrost
-                .submit_tx(&gov_result.tx_cbor)
-                .await
-                .map_err(|e| format!("tx submission failed: {e}"))?;
-            Ok(tx_hash)
-        }
-        Err(e) => Err(format!("tx build failed: {e}")),
+    let tx_hash = blockfrost
+        .submit_tx(&signed)
+        .await
+        .map_err(|e| format!("tx submission failed: {e}"))?;
+
+    // Committee install moves the DAO state token to a new UTxO; advance
+    // the pointer so the next spend finds it.
+    if action_type == "install_committee" {
+        update_dao_state_pointer(db, &item.target_id, &tx_hash)?;
     }
+    Ok(tx_hash)
+}
+
+/// Row data for `finalize_election`, read under a brief DB lock.
+struct FinalizeData {
+    dao_policy: [u8; 28],
+    dao_token_name: Vec<u8>,
+    reputation_policy: [u8; 28],
+    seats: i64,
+    nomination_end_ms: i64,
+    voting_end_ms: i64,
+}
+
+/// Row data for `install_committee`.
+struct InstallData {
+    dao_state_tx: String,
+    dao_state_idx: u64,
+    dao_state_lovelace: u64,
+    dao_policy: [u8; 28],
+    dao_token_name: Vec<u8>,
+    scope_type: String,
+    scope_id: Vec<u8>,
+    reputation_policy: [u8; 28],
+    committee_size: i64,
+    election_interval_ms: i64,
+    election_ref_tx: String,
+    election_ref_idx: u64,
+    committee_vkhs: Vec<[u8; 28]>,
+}
+
+fn hash28(hex_str: &str) -> Result<[u8; 28], String> {
+    super::gov_tx_builder::hash_from_hex_pub(hex_str).map_err(|e| e.to_string())
+}
+
+/// Parse a `"txhash#index"` UTxO pointer.
+fn parse_utxo_ref(s: &str) -> Result<(String, u64), String> {
+    let (h, i) = s
+        .split_once('#')
+        .ok_or("malformed utxo ref (want txhash#index)")?;
+    Ok((h.to_string(), i.parse().map_err(|_| "bad utxo index")?))
+}
+
+/// ISO-8601 → POSIX ms, or 0 when absent/unparseable.
+fn iso_to_ms(s: Option<String>) -> i64 {
+    s.and_then(|d| chrono::DateTime::parse_from_rfc3339(&d).ok())
+        .map(|dt| dt.timestamp_millis())
+        .unwrap_or(0)
+}
+
+fn read_finalize_data(
+    db: &std::sync::Arc<std::sync::Mutex<Option<crate::db::Database>>>,
+    election_id: &str,
+) -> Result<FinalizeData, String> {
+    let guard = db.lock().map_err(|_| "db lock poisoned".to_string())?;
+    let dbref = guard.as_ref().ok_or("database not initialized")?;
+    let (seats, nom, vot, pol, name_hex, rep): (
+        i64,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    ) = dbref
+        .conn()
+        .query_row(
+            "SELECT e.seats, e.nomination_end, e.voting_end, \
+             d.state_token_policy, d.state_token_name, d.reputation_policy \
+             FROM governance_elections e JOIN governance_daos d ON d.id = e.dao_id \
+             WHERE e.id = ?1",
+            params![election_id],
+            |r| {
+                Ok((
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    r.get(3)?,
+                    r.get(4)?,
+                    r.get(5)?,
+                ))
+            },
+        )
+        .map_err(|e| format!("election/DAO not found: {e}"))?;
+    let pol = pol.ok_or("DAO has no on-chain state-token policy (not created on-chain)")?;
+    let name_hex = name_hex.ok_or("DAO has no on-chain state-token name")?;
+    let rep = rep.ok_or("DAO has no reputation policy")?;
+    Ok(FinalizeData {
+        dao_policy: hash28(&pol)?,
+        dao_token_name: hex::decode(&name_hex).map_err(|e| format!("token name hex: {e}"))?,
+        reputation_policy: hash28(&rep)?,
+        seats,
+        nomination_end_ms: iso_to_ms(nom),
+        voting_end_ms: iso_to_ms(vot),
+    })
+}
+
+#[allow(clippy::type_complexity)]
+fn read_install_data(
+    db: &std::sync::Arc<std::sync::Mutex<Option<crate::db::Database>>>,
+    election_id: &str,
+) -> Result<InstallData, String> {
+    let guard = db.lock().map_err(|_| "db lock poisoned".to_string())?;
+    let dbref = guard.as_ref().ok_or("database not initialized")?;
+    let conn = dbref.conn();
+    let now_secs = chrono::Utc::now().timestamp();
+
+    let (
+        _dao_id,
+        elec_ref,
+        dao_utxo,
+        pol,
+        name_hex,
+        scope_type,
+        scope_id,
+        rep,
+        csize,
+        interval_days,
+    ): (
+        String,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        String,
+        String,
+        Option<String>,
+        i64,
+        i64,
+    ) = conn
+        .query_row(
+            "SELECT e.dao_id, e.on_chain_tx, d.dao_state_utxo, d.state_token_policy, \
+             d.state_token_name, d.scope_type, d.scope_id, d.reputation_policy, \
+             d.committee_size, d.election_interval_days \
+             FROM governance_elections e JOIN governance_daos d ON d.id = e.dao_id \
+             WHERE e.id = ?1",
+            params![election_id],
+            |r| {
+                Ok((
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    r.get(3)?,
+                    r.get(4)?,
+                    r.get(5)?,
+                    r.get(6)?,
+                    r.get(7)?,
+                    r.get(8)?,
+                    r.get(9)?,
+                ))
+            },
+        )
+        .map_err(|e| format!("election/DAO not found: {e}"))?;
+
+    let elec_ref = elec_ref.ok_or("election has no finalized on-chain tx (finalize first)")?;
+    let dao_utxo = dao_utxo.ok_or("DAO has no on-chain state UTxO")?;
+    let (dao_state_tx, dao_state_idx) = parse_utxo_ref(&dao_utxo)?;
+    let pol = pol.ok_or("DAO has no state-token policy")?;
+    let name_hex = name_hex.ok_or("DAO has no state-token name")?;
+    let rep = rep.ok_or("DAO has no reputation policy")?;
+
+    // Winners → on-chain VKHs via the stake-pubkey registry.
+    let mut committee_vkhs = Vec::new();
+    {
+        let mut stmt = conn
+            .prepare(
+                "SELECT stake_address FROM governance_election_nominees \
+                 WHERE election_id = ?1 AND is_winner = 1",
+            )
+            .map_err(|e| e.to_string())?;
+        let winners: Vec<String> = stmt
+            .query_map(params![election_id], |r| r.get(0))
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        for w in winners {
+            if let Some(vkh) = super::gov_onchain::stake_to_vkh(conn, &w, now_secs) {
+                committee_vkhs.push(vkh);
+            }
+        }
+    }
+
+    Ok(InstallData {
+        dao_state_tx,
+        dao_state_idx,
+        dao_state_lovelace: MIN_SCRIPT_DAO_LOVELACE,
+        dao_policy: hash28(&pol)?,
+        dao_token_name: hex::decode(&name_hex).map_err(|e| format!("token name hex: {e}"))?,
+        scope_type,
+        scope_id: scope_id.into_bytes(),
+        reputation_policy: hash28(&rep)?,
+        committee_size: csize,
+        election_interval_ms: interval_days * 86_400_000,
+        election_ref_tx: elec_ref,
+        election_ref_idx: 0,
+        committee_vkhs,
+    })
+}
+
+/// DAO state UTxOs are created with this min-ADA (see create_dao).
+const MIN_SCRIPT_DAO_LOVELACE: u64 = 3_000_000;
+
+/// Resolved-proposal data for the outcome anchor.
+struct ProposalOutcome {
+    status: String,
+    votes_for: i64,
+    votes_against: i64,
+    /// Merkle root (hex) over the signed off-chain votes, or `None` if
+    /// no signed votes were recorded locally.
+    vote_merkle_root_hex: Option<String>,
+}
+
+fn read_proposal_outcome(
+    db: &std::sync::Arc<std::sync::Mutex<Option<crate::db::Database>>>,
+    proposal_id: &str,
+) -> Result<ProposalOutcome, String> {
+    let guard = db.lock().map_err(|_| "db lock poisoned".to_string())?;
+    let dbref = guard.as_ref().ok_or("database not initialized")?;
+    let conn = dbref.conn();
+
+    let (status, votes_for, votes_against): (String, i64, i64) = conn
+        .query_row(
+            "SELECT status, votes_for, votes_against FROM governance_proposals WHERE id = ?1",
+            params![proposal_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .map_err(|e| format!("proposal not found: {e}"))?;
+
+    // Merkle-commit the signed votes (auditable tally). Leaf binds the
+    // voter, choice, and their signature.
+    let mut leaves: Vec<[u8; 32]> = Vec::new();
+    {
+        let mut stmt = conn
+            .prepare(
+                "SELECT voter, in_favor, signature FROM governance_proposal_votes \
+                 WHERE proposal_id = ?1 AND signature IS NOT NULL ORDER BY id",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(params![proposal_id], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, i64>(1)?,
+                    r.get::<_, String>(2)?,
+                ))
+            })
+            .map_err(|e| e.to_string())?;
+        for row in rows {
+            let (voter, in_favor, sig) = row.map_err(|e| e.to_string())?;
+            let canonical = format!("{voter}:{in_favor}:{sig}");
+            leaves.push(crate::crypto::hash::blake2b_256(canonical.as_bytes()));
+        }
+    }
+    let vote_merkle_root_hex = if leaves.is_empty() {
+        None
+    } else {
+        Some(hex::encode(crate::domain::completion::merkle_root(&leaves)))
+    };
+
+    Ok(ProposalOutcome {
+        status,
+        votes_for,
+        votes_against,
+        vote_merkle_root_hex,
+    })
+}
+
+fn update_dao_state_pointer(
+    db: &std::sync::Arc<std::sync::Mutex<Option<crate::db::Database>>>,
+    election_id: &str,
+    install_tx: &str,
+) -> Result<(), String> {
+    let guard = db.lock().map_err(|_| "db lock poisoned".to_string())?;
+    let dbref = guard.as_ref().ok_or("database not initialized")?;
+    let new_ptr = format!("{install_tx}#0");
+    dbref
+        .conn()
+        .execute(
+            "UPDATE governance_daos SET dao_state_utxo = ?1 \
+             WHERE id = (SELECT dao_id FROM governance_elections WHERE id = ?2)",
+            params![new_ptr, election_id],
+        )
+        .map_err(|e| format!("failed to advance DAO state pointer: {e}"))?;
+    Ok(())
 }

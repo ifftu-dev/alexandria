@@ -10,26 +10,19 @@
 
 use pallas_addresses::Address as PallasAddress;
 use pallas_codec::utils::MaybeIndefArray;
-use pallas_crypto::hash::Hash;
-use pallas_crypto::key::ed25519::SecretKeyExtended;
 use pallas_primitives::conway::{self, Redeemer, RedeemerTag, Redeemers, Tx};
 use pallas_primitives::{Fragment, NonEmptySet};
 use pallas_traverse::ComputeHash;
 use pallas_txbuilder::{BuildConway, Input, Output, StagingTransaction};
-use pallas_wallet::PrivateKey;
 
 use super::blockfrost::BlockfrostClient;
-use super::plutus_data;
 use super::script_refs;
-use super::tx_builder::{
-    inject_metadata, parse_tx_hash, sign_raw_tx, TxBuildError, MIN_UTXO_LOVELACE, TTL_OFFSET,
-};
+use super::tx_builder::{parse_tx_hash, TxBuildError, TTL_OFFSET};
 
-/// Minimum ADA for a script UTxO with inline datum (~3 ADA).
+/// Minimum ADA for a script UTxO with inline datum (~3 ADA). Used by the
+/// live governance tests that build state-UTxO transactions.
+#[cfg(test)]
 const MIN_SCRIPT_UTXO_LOVELACE: u64 = 3_000_000;
-
-/// Estimated size of a Plutus governance tx for fee estimation.
-const ESTIMATED_PLUTUS_TX_SIZE: u64 = 1200;
 
 /// Result of building a governance transaction.
 #[derive(Debug)]
@@ -140,164 +133,6 @@ pub fn inject_plutus_fields(
     Ok((new_tx_bytes, new_tx_hash))
 }
 
-/// Common flow for building a Plutus governance transaction.
-///
-/// Steps: query chain state -> build skeleton -> inject plutus fields ->
-/// evaluate ex-units -> rebuild -> inject metadata -> sign
-#[allow(clippy::too_many_arguments)]
-async fn build_gov_tx(
-    blockfrost: &BlockfrostClient,
-    payment_address: &str,
-    payment_key_hash: &[u8; 28],
-    payment_key_extended: &[u8; 64],
-    script_hash: &str,
-    ref_utxo: (&str, u64),
-    datum_cbor: &[u8],
-    redeemer_cbor: &[u8],
-    metadata: Option<
-        pallas_codec::utils::KeyValuePairs<
-            pallas_primitives::MetadatumLabel,
-            pallas_primitives::Metadatum,
-        >,
-    >,
-    mint_asset: Option<(Hash<28>, Vec<u8>, i64)>, // (policy_id, asset_name, quantity)
-) -> Result<GovTxResult, TxBuildError> {
-    // 1. Query chain state (parallel)
-    let (utxos_res, params_res, tip_res) = tokio::join!(
-        blockfrost.get_utxos(payment_address),
-        blockfrost.get_protocol_params(),
-        blockfrost.get_tip_slot(),
-    );
-    let utxos = utxos_res?;
-    let params = params_res?;
-    let tip_slot = tip_res?;
-
-    if utxos.is_empty() {
-        return Err(TxBuildError::NoUtxos);
-    }
-    let selected = BlockfrostClient::select_utxo(&utxos, MIN_UTXO_LOVELACE).ok_or(
-        TxBuildError::InsufficientFunds {
-            needed: MIN_UTXO_LOVELACE,
-            available: utxos.iter().map(|u| u.lovelace()).sum(),
-        },
-    )?;
-
-    // 2. Parse addresses
-    let pallas_addr = PallasAddress::from_bech32(payment_address)
-        .map_err(|e| TxBuildError::AddressParse(e.to_string()))?;
-    let script_addr = script_address(script_hash)?;
-    let input_tx_hash = parse_tx_hash(&selected.tx_hash)?;
-
-    // 3. Calculate fees
-    let fee = params
-        .calculate_min_fee(ESTIMATED_PLUTUS_TX_SIZE)
-        .max(400_000);
-    let input_lovelace = selected.lovelace();
-    let needed = MIN_SCRIPT_UTXO_LOVELACE + fee;
-    if input_lovelace < needed {
-        return Err(TxBuildError::InsufficientFunds {
-            needed,
-            available: input_lovelace,
-        });
-    }
-    let change = input_lovelace - MIN_SCRIPT_UTXO_LOVELACE - fee;
-
-    // 4. Build transaction skeleton
-    let mut staging_tx = StagingTransaction::new()
-        .input(Input::new(input_tx_hash, selected.tx_index))
-        // Output 0: script UTxO with inline datum
-        .output(Output::new(script_addr, MIN_SCRIPT_UTXO_LOVELACE))
-        // Output 1: change back to sender
-        .output(Output::new(pallas_addr, change))
-        .disclosed_signer(Hash::<28>::from(*payment_key_hash))
-        .fee(fee)
-        .invalid_from_slot(tip_slot + TTL_OFFSET)
-        .network_id(0);
-
-    // Add minting if needed
-    if let Some((policy_id, ref asset_name, quantity)) = mint_asset {
-        staging_tx = staging_tx
-            .mint_asset(policy_id, asset_name.clone(), quantity)
-            .map_err(|e| TxBuildError::Builder(e.to_string()))?;
-    }
-
-    let built_tx = staging_tx
-        .build_conway_raw()
-        .map_err(|e| TxBuildError::Builder(e.to_string()))?;
-
-    // 5. Inject Plutus fields (reference inputs, collateral, redeemers, inline datum)
-    let ref_utxo_hash = hex::decode(ref_utxo.0)
-        .map_err(|e| TxBuildError::TxDecode(format!("invalid ref utxo hash: {e}")))?;
-    let ref_hash: [u8; 32] = ref_utxo_hash
-        .try_into()
-        .map_err(|_| TxBuildError::TxDecode("ref utxo hash must be 32 bytes".into()))?;
-
-    let collateral_hash = selected.tx_hash.clone();
-    let coll_bytes = hex::decode(&collateral_hash)
-        .map_err(|e| TxBuildError::TxDecode(format!("invalid collateral hash: {e}")))?;
-    let coll_hash: [u8; 32] = coll_bytes
-        .try_into()
-        .map_err(|_| TxBuildError::TxDecode("collateral hash must be 32 bytes".into()))?;
-
-    let (tx_with_plutus, _) = inject_plutus_fields(
-        &built_tx.tx_bytes.0,
-        &[(ref_hash, ref_utxo.1)],
-        &[(coll_hash, selected.tx_index)],
-        redeemer_cbor,
-        Some(datum_cbor),
-    )?;
-
-    // 6. Inject metadata if provided
-    let tx_bytes = if let Some(meta) = metadata {
-        let (tx_with_meta, _) = inject_metadata(&tx_with_plutus, meta)?;
-        tx_with_meta
-    } else {
-        tx_with_plutus
-    };
-
-    // 7. Evaluate execution units and patch redeemers with actual values
-    let tx_bytes_final = match blockfrost.evaluate_tx(&tx_bytes).await {
-        Ok(units) if !units.is_empty() => {
-            log::info!("Plutus execution units: {:?}", units);
-            let mut tx = Tx::decode_fragment(&tx_bytes)
-                .map_err(|e| TxBuildError::TxDecode(e.to_string()))?;
-            if let Some(Redeemers::List(list)) = tx.transaction_witness_set.redeemer.take() {
-                let mut vec: Vec<Redeemer> = list.into();
-                for (i, rdmr) in vec.iter_mut().enumerate() {
-                    if let Some(&(mem, steps)) = units.get(i) {
-                        rdmr.ex_units = conway::ExUnits { mem, steps };
-                    }
-                }
-                tx.transaction_witness_set.redeemer =
-                    Some(Redeemers::List(MaybeIndefArray::Def(vec)));
-            }
-            tx.encode_fragment()
-                .map_err(|e| TxBuildError::Cbor(e.to_string()))?
-        }
-        Ok(_) => tx_bytes,
-        Err(e) => {
-            log::warn!("Failed to evaluate tx (using estimates): {e}");
-            tx_bytes
-        }
-    };
-
-    // 8. Sign
-    let private_key = PrivateKey::Extended(unsafe {
-        SecretKeyExtended::from_bytes_unchecked(*payment_key_extended)
-    });
-    let signed_tx_bytes = sign_raw_tx(&tx_bytes_final, &private_key)?;
-
-    // Compute tx hash
-    let tx =
-        Tx::decode_fragment(&signed_tx_bytes).map_err(|e| TxBuildError::TxDecode(e.to_string()))?;
-    let tx_hash = hex::encode(tx.transaction_body.compute_hash().as_ref());
-
-    Ok(GovTxResult {
-        tx_cbor: signed_tx_bytes,
-        tx_hash,
-    })
-}
-
 /// Build a plain output-creation tx that pays a script address with an
 /// inline datum, returning the UNSIGNED CBOR. No Plutus machinery
 /// (collateral / redeemer / reference input / language view) is needed:
@@ -305,7 +140,7 @@ async fn build_gov_tx(
 /// validator only runs when that output is later spent. Used to
 /// bootstrap state UTxOs (e.g. the initial election UTxO) that spend
 /// flows then consume.
-async fn build_plain_create_unsigned(
+pub(crate) async fn build_plain_create_unsigned(
     blockfrost: &BlockfrostClient,
     payment_address: &str,
     script_hash: &str,
@@ -368,293 +203,6 @@ async fn build_plain_create_unsigned(
     build(fee)
 }
 
-// ---- DAO Transaction Builders ----
-
-/// Build a CreateDao transaction.
-///
-/// Mints a DAO state token via the dao_minting policy and creates the
-/// initial DAO UTxO at the dao_registry script address with inline datum.
-#[allow(clippy::too_many_arguments)]
-pub async fn build_create_dao_tx(
-    blockfrost: &BlockfrostClient,
-    payment_address: &str,
-    payment_key_hash: &[u8; 28],
-    payment_key_extended: &[u8; 64],
-    scope_type: &str,
-    scope_id: &[u8],
-    committee: &[&[u8; 28]],
-    committee_size: i64,
-    election_interval_ms: i64,
-) -> Result<GovTxResult, TxBuildError> {
-    if !validators_deployed() {
-        return Err(TxBuildError::Cbor(
-            "CreateDao: validators not yet deployed as reference scripts".into(),
-        ));
-    }
-
-    let now_ms = chrono::Utc::now().timestamp_millis();
-    let datum = plutus_data::encode_dao_datum(
-        scope_type,
-        scope_id,
-        &hash_from_hex(script_refs::REPUTATION_MINTING_SCRIPT_HASH)?,
-        &[],
-        "remember",
-        &hash_from_hex(script_refs::DAO_MINTING_SCRIPT_HASH)?,
-        committee,
-        committee_size,
-        election_interval_ms,
-        now_ms,
-        now_ms + election_interval_ms,
-    )?;
-
-    let redeemer = plutus_data::encode_dao_redeemer("create", None)?;
-
-    // The dao_minting policy requires: tx signed by authorized_admin,
-    // exactly +1 token minted, and that token sent to the dao_registry
-    // script. State-token name = "dao" ++ scope_id (see dao_registry.ak
-    // get_dao_token_name). The minted token + DAO datum land at the
-    // registry address; the admin is the funding wallet (payment_key).
-    let mut asset_name = b"dao".to_vec();
-    asset_name.extend_from_slice(scope_id);
-
-    crate::cardano::plutus_mint::build_mint_to_address_tx(
-        blockfrost,
-        crate::cardano::plutus_mint::MintToAddress {
-            payment_address,
-            payment_key_extended,
-            required_signers: std::slice::from_ref(payment_key_hash),
-            policy_id: Hash::<28>::from(hash_from_hex(script_refs::DAO_MINTING_SCRIPT_HASH)?),
-            asset_name,
-            mint_redeemer: redeemer,
-            ref_script: script_refs::DAO_MINTING_REF_UTXO,
-            recipient_address: script_address(script_refs::DAO_REGISTRY_SCRIPT_HASH)?,
-            recipient_lovelace: MIN_SCRIPT_UTXO_LOVELACE,
-            recipient_datum: Some(datum),
-        },
-    )
-    .await
-}
-
-/// Build an OpenElection (bootstrap) transaction.
-///
-/// Creates the initial election UTxO at the election script address with
-/// an inline `ElectionDatum` in the `Nomination` phase and an empty
-/// nominee list. This is a plain output-creation: no validator runs when
-/// an output is *created* at a script address, so creation is
-/// permissionless (any funded wallet works) and needs no
-/// collateral/redeemer/reference-script. The election validator only runs
-/// once this UTxO is spent (AcceptNomination / StartVoting / Finalize).
-///
-/// `dao_token_name` is the DAO state token name (`"dao" ++ scope_id`);
-/// the spend transitions reference the DAO UTxO bearing this token to
-/// authorize phase changes, so it is baked into the datum here.
-#[allow(clippy::too_many_arguments)]
-pub async fn build_open_election_tx(
-    blockfrost: &BlockfrostClient,
-    payment_address: &str,
-    payment_key_hash: &[u8; 28],
-    payment_key_extended: &[u8; 64],
-    dao_policy: &[u8; 28],
-    dao_token_name: &[u8],
-    election_id: i64,
-    seats: i64,
-    nominee_min_proficiency: &str,
-    voter_min_proficiency: &str,
-    nomination_end_ms: i64,
-    voting_end_ms: i64,
-) -> Result<GovTxResult, TxBuildError> {
-    let _ = payment_key_hash;
-    if !validators_deployed() {
-        return Err(TxBuildError::Cbor(
-            "OpenElection: validators not yet deployed".into(),
-        ));
-    }
-
-    let datum = plutus_data::encode_election_datum(
-        dao_policy,
-        dao_token_name,
-        election_id,
-        "nomination",
-        seats,
-        nominee_min_proficiency,
-        voter_min_proficiency,
-        &[],
-        &hash_from_hex(script_refs::REPUTATION_MINTING_SCRIPT_HASH)?,
-        &[],
-        nomination_end_ms,
-        voting_end_ms,
-        &hash_from_hex(script_refs::VOTE_MINTING_SCRIPT_HASH)?,
-    )?;
-
-    let unsigned = build_plain_create_unsigned(
-        blockfrost,
-        payment_address,
-        script_refs::ELECTION_SCRIPT_HASH,
-        MIN_SCRIPT_UTXO_LOVELACE,
-        &datum,
-    )
-    .await?;
-
-    let private_key = PrivateKey::Extended(unsafe {
-        SecretKeyExtended::from_bytes_unchecked(*payment_key_extended)
-    });
-    let signed = sign_raw_tx(&unsigned, &private_key)?;
-    let tx_hash = super::tx_builder::compute_tx_hash(&signed)?;
-    Ok(GovTxResult {
-        tx_cbor: signed,
-        tx_hash,
-    })
-}
-
-/// Build a CastVote transaction (election or proposal) with vote receipt mint.
-pub async fn build_cast_vote_tx(
-    blockfrost: &BlockfrostClient,
-    payment_address: &str,
-    payment_key_hash: &[u8; 28],
-    payment_key_extended: &[u8; 64],
-    target_type: &str,
-    vote_for: Option<bool>,
-) -> Result<GovTxResult, TxBuildError> {
-    if !validators_deployed() {
-        return Err(TxBuildError::Cbor(
-            "CastVote: validators not yet deployed".into(),
-        ));
-    }
-
-    let (script_hash, ref_utxo, redeemer) = match target_type {
-        "election" => (
-            script_refs::ELECTION_SCRIPT_HASH,
-            script_refs::ELECTION_REF_UTXO,
-            plutus_data::encode_election_redeemer("accept_nomination", Some(0))?,
-        ),
-        "proposal" => (
-            script_refs::PROPOSAL_SCRIPT_HASH,
-            script_refs::PROPOSAL_REF_UTXO,
-            plutus_data::encode_proposal_redeemer("vote", vote_for)?,
-        ),
-        _ => {
-            return Err(TxBuildError::Cbor(format!(
-                "unknown vote target type: {target_type}"
-            )))
-        }
-    };
-
-    let _receipt_redeemer = plutus_data::encode_vote_receipt_redeemer("mint")?;
-    // Use empty datum for voting (state UTxO is consumed and recreated)
-    let empty_datum = vec![0xd8, 0x79, 0x80]; // Constr(0, [])
-
-    build_gov_tx(
-        blockfrost,
-        payment_address,
-        payment_key_hash,
-        payment_key_extended,
-        script_hash,
-        ref_utxo,
-        &empty_datum,
-        &redeemer,
-        None,
-        None,
-    )
-    .await
-}
-
-/// Build a ResolveProposal transaction.
-pub async fn build_resolve_proposal_tx(
-    blockfrost: &BlockfrostClient,
-    payment_address: &str,
-    payment_key_hash: &[u8; 28],
-    payment_key_extended: &[u8; 64],
-) -> Result<GovTxResult, TxBuildError> {
-    if !validators_deployed() {
-        return Err(TxBuildError::Cbor(
-            "ResolveProposal: validators not yet deployed".into(),
-        ));
-    }
-
-    let redeemer = plutus_data::encode_proposal_redeemer("resolve", None)?;
-    let empty_datum = vec![0xd8, 0x79, 0x80];
-
-    build_gov_tx(
-        blockfrost,
-        payment_address,
-        payment_key_hash,
-        payment_key_extended,
-        script_refs::PROPOSAL_SCRIPT_HASH,
-        script_refs::PROPOSAL_REF_UTXO,
-        &empty_datum,
-        &redeemer,
-        None,
-        None,
-    )
-    .await
-}
-
-/// Build a FinalizeElection transaction.
-pub async fn build_finalize_election_tx(
-    blockfrost: &BlockfrostClient,
-    payment_address: &str,
-    payment_key_hash: &[u8; 28],
-    payment_key_extended: &[u8; 64],
-) -> Result<GovTxResult, TxBuildError> {
-    if !validators_deployed() {
-        return Err(TxBuildError::Cbor(
-            "FinalizeElection: validators not yet deployed".into(),
-        ));
-    }
-
-    let redeemer = plutus_data::encode_election_redeemer("finalize", None)?;
-    let empty_datum = vec![0xd8, 0x79, 0x80];
-
-    build_gov_tx(
-        blockfrost,
-        payment_address,
-        payment_key_hash,
-        payment_key_extended,
-        script_refs::ELECTION_SCRIPT_HASH,
-        script_refs::ELECTION_REF_UTXO,
-        &empty_datum,
-        &redeemer,
-        None,
-        None,
-    )
-    .await
-}
-
-/// Build an InstallCommittee transaction.
-pub async fn build_install_committee_tx(
-    blockfrost: &BlockfrostClient,
-    payment_address: &str,
-    payment_key_hash: &[u8; 28],
-    payment_key_extended: &[u8; 64],
-    election_ref: (&[u8], u64),
-) -> Result<GovTxResult, TxBuildError> {
-    if !validators_deployed() {
-        return Err(TxBuildError::Cbor(
-            "InstallCommittee: validators not yet deployed".into(),
-        ));
-    }
-
-    let redeemer = plutus_data::encode_dao_redeemer(
-        "install_committee",
-        Some((election_ref.0, election_ref.1)),
-    )?;
-    let empty_datum = vec![0xd8, 0x79, 0x80];
-
-    build_gov_tx(
-        blockfrost,
-        payment_address,
-        payment_key_hash,
-        payment_key_extended,
-        script_refs::DAO_REGISTRY_SCRIPT_HASH,
-        script_refs::DAO_REGISTRY_REF_UTXO,
-        &empty_datum,
-        &redeemer,
-        None,
-        None,
-    )
-    .await
-}
-
 /// Check if governance validators have been deployed as reference scripts.
 pub fn validators_deployed() -> bool {
     script_refs::ref_utxos_deployed()
@@ -676,6 +224,9 @@ fn hash_from_hex(hex_str: &str) -> Result<[u8; 28], TxBuildError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cardano::plutus_data;
+    use crate::cardano::tx_builder::sign_raw_tx;
+    use pallas_crypto::hash::Hash;
 
     #[test]
     fn script_address_produces_valid_testnet_address() {
@@ -885,6 +436,74 @@ mod tests {
             .expect("build unsigned dao tx")
         });
         println!("UNSIGNED_CBOR:{}", hex::encode(&unsigned));
+    }
+
+    /// Live preprod operator-signed DAO create — the linchpin check for
+    /// the app-held operator model: builds the DAO mint, signs it IN-RUST
+    /// with the operator's NORMAL Ed25519 key (`PrivateKey::Normal` via
+    /// `sign_raw_tx`), and submits. Proves the in-process witness is
+    /// accepted by the ledger (every prior gov tx was signed out-of-band
+    /// by cardano-cli). Run:
+    ///   BLOCKFROST_PROJECT_ID=… OPERATOR_SKEY_PATH=…/treasury.skey \
+    ///   OPERATOR_ADDRESS=addr_test1q… cargo test -p alexandria-node \
+    ///     live_operator_dao_create -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn live_operator_dao_create() {
+        let pid = std::env::var("BLOCKFROST_PROJECT_ID").expect("BLOCKFROST_PROJECT_ID");
+        let op = crate::cardano::operator::load_operator_key().expect("operator key");
+        let op_pkh = op.payment_key_hash();
+        let scope_id: &[u8] = b"opx";
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        let interval = 2_592_000_000i64;
+        let datum = plutus_data::encode_dao_datum(
+            "subject",
+            scope_id,
+            &hash_from_hex(script_refs::REPUTATION_MINTING_SCRIPT_HASH).unwrap(),
+            &[],
+            "remember",
+            &hash_from_hex(script_refs::DAO_MINTING_SCRIPT_HASH).unwrap(),
+            &[&op_pkh],
+            1,
+            interval,
+            now,
+            now + interval,
+        )
+        .unwrap();
+        let redeemer = plutus_data::encode_dao_redeemer("create", None).unwrap();
+        let mut asset_name = b"dao".to_vec();
+        asset_name.extend_from_slice(scope_id);
+
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let tx_hash = rt.block_on(async {
+            let bf = BlockfrostClient::new(pid).unwrap();
+            let unsigned = crate::cardano::plutus_mint::build_mint_to_address_unsigned(
+                &bf,
+                &crate::cardano::plutus_mint::MintToAddress {
+                    payment_address: &op.address,
+                    payment_key_extended: &[0u8; 64],
+                    required_signers: std::slice::from_ref(&op_pkh),
+                    policy_id: Hash::<28>::from(
+                        hash_from_hex(script_refs::DAO_MINTING_SCRIPT_HASH).unwrap(),
+                    ),
+                    asset_name,
+                    mint_redeemer: redeemer,
+                    ref_script: script_refs::DAO_MINTING_REF_UTXO,
+                    recipient_address: script_address(script_refs::DAO_REGISTRY_SCRIPT_HASH)
+                        .unwrap(),
+                    recipient_lovelace: 3_000_000,
+                    recipient_datum: Some(datum),
+                },
+            )
+            .await
+            .expect("build unsigned");
+            let signed = sign_raw_tx(&unsigned, &op.private_key).expect("sign");
+            bf.submit_tx(&signed).await.expect("submit")
+        });
+        println!("DAO_CREATE_TX:{tx_hash}");
     }
 
     /// Live preprod election bootstrap: builds the UNSIGNED plain-create

@@ -56,6 +56,56 @@ pub enum GovernanceEventType {
         /// On-chain transaction that finalized the election.
         on_chain_tx: Option<String>,
     },
+    /// A signed election vote, gossiped so every node can build the
+    /// off-chain tally. The voter's signature lives in the enclosing
+    /// `SignedGossipMessage` envelope (it covers this payload); the
+    /// receiving handler persists it alongside the vote. `voter` must
+    /// equal the envelope's `stake_address` — a node can only cast its
+    /// own vote.
+    ElectionVoteRecorded {
+        election_id: String,
+        voter: String,
+        nominee_id: String,
+    },
+    /// A signed proposal vote (see `ElectionVoteRecorded`).
+    ProposalVoteRecorded {
+        proposal_id: String,
+        voter: String,
+        in_favor: bool,
+    },
+    /// A committee member opened an election — propagated so every node
+    /// can hold the election (and therefore tally its votes). Sender must
+    /// be a committee member of the DAO.
+    ElectionOpened {
+        election_id: String,
+        title: String,
+        seats: i64,
+        nominee_min_proficiency: String,
+        voter_min_proficiency: String,
+        nomination_end: Option<String>,
+        voting_end: Option<String>,
+    },
+    /// A member self-nominated. Sender (envelope `stake_address`) must
+    /// equal `nominee`.
+    NomineeSubmitted {
+        election_id: String,
+        nominee_id: String,
+        nominee: String,
+    },
+    /// A nominee accepted their nomination. Sender must equal the
+    /// nominee's stake address.
+    NomineeAccepted {
+        election_id: String,
+        nominee_id: String,
+    },
+    /// Election moved nomination → voting. Sender must be committee.
+    ElectionStarted { election_id: String },
+    /// Election finalized; the listed nominees won. Sender must be
+    /// committee.
+    ElectionFinalized {
+        election_id: String,
+        winner_nominee_ids: Vec<String>,
+    },
 }
 
 // ---- DAO Types ----

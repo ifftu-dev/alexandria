@@ -12,6 +12,7 @@
 
 use rusqlite::params;
 
+use crate::crypto::hash::entity_id;
 use crate::db::Database;
 use crate::domain::governance::{GovernanceAnnouncement, GovernanceEventType};
 use crate::p2p::types::SignedGossipMessage;
@@ -75,6 +76,86 @@ pub fn handle_governance_message(
         } => {
             handle_committee_updated(db, &announcement.dao_id, members, &message.stake_address)?;
         }
+        GovernanceEventType::ElectionVoteRecorded {
+            election_id,
+            voter,
+            nominee_id,
+        } => {
+            handle_election_vote_recorded(
+                db,
+                election_id,
+                voter,
+                nominee_id,
+                &message.stake_address,
+                &signature_hex,
+                &hex::encode(&message.public_key),
+            )?;
+        }
+        GovernanceEventType::ProposalVoteRecorded {
+            proposal_id,
+            voter,
+            in_favor,
+        } => {
+            handle_proposal_vote_recorded(
+                db,
+                proposal_id,
+                voter,
+                *in_favor,
+                &message.stake_address,
+                &signature_hex,
+                &hex::encode(&message.public_key),
+            )?;
+        }
+        GovernanceEventType::ElectionOpened {
+            election_id,
+            title,
+            seats,
+            nominee_min_proficiency,
+            voter_min_proficiency,
+            nomination_end,
+            voting_end,
+        } => {
+            handle_election_opened(
+                db,
+                &announcement.dao_id,
+                election_id,
+                title,
+                *seats,
+                nominee_min_proficiency,
+                voter_min_proficiency,
+                nomination_end.as_deref(),
+                voting_end.as_deref(),
+                &message.stake_address,
+            )?;
+        }
+        GovernanceEventType::NomineeSubmitted {
+            election_id,
+            nominee_id,
+            nominee,
+        } => {
+            handle_nominee_submitted(db, election_id, nominee_id, nominee, &message.stake_address)?;
+        }
+        GovernanceEventType::NomineeAccepted {
+            election_id,
+            nominee_id,
+        } => {
+            handle_nominee_accepted(db, election_id, nominee_id, &message.stake_address)?;
+        }
+        GovernanceEventType::ElectionStarted { election_id } => {
+            handle_election_phase(db, election_id, "voting", &[], &message.stake_address)?;
+        }
+        GovernanceEventType::ElectionFinalized {
+            election_id,
+            winner_nominee_ids,
+        } => {
+            handle_election_phase(
+                db,
+                election_id,
+                "finalized",
+                winner_nominee_ids,
+                &message.stake_address,
+            )?;
+        }
     }
 
     // Record in sync_log
@@ -84,6 +165,17 @@ pub fn handle_governance_message(
         GovernanceEventType::CommitteeUpdated { .. } => {
             format!("{}_committee", announcement.dao_id)
         }
+        GovernanceEventType::ElectionVoteRecorded {
+            election_id, voter, ..
+        } => entity_id(&[election_id, voter]),
+        GovernanceEventType::ProposalVoteRecorded {
+            proposal_id, voter, ..
+        } => entity_id(&[proposal_id, voter]),
+        GovernanceEventType::ElectionOpened { election_id, .. }
+        | GovernanceEventType::NomineeSubmitted { election_id, .. }
+        | GovernanceEventType::NomineeAccepted { election_id, .. }
+        | GovernanceEventType::ElectionStarted { election_id }
+        | GovernanceEventType::ElectionFinalized { election_id, .. } => election_id.clone(),
     };
 
     db.conn()
@@ -185,6 +277,335 @@ fn handle_proposal_resolved(
         );
     }
 
+    Ok(())
+}
+
+/// Handle a signed election vote gossiped by a peer.
+///
+/// Persists the vote (with the voter's signature + public key) and
+/// increments the nominee tally — but only on the node that holds the
+/// referenced election + nominee. Nominees aren't gossiped yet, so a
+/// node lacking them skips gracefully (best-effort, like
+/// `handle_proposal_created`); the authoritative tally is built by the
+/// operator node (which holds the full election) and committed as a
+/// Merkle root on-chain at finalize.
+#[allow(clippy::too_many_arguments)]
+fn handle_election_vote_recorded(
+    db: &Database,
+    election_id: &str,
+    voter: &str,
+    nominee_id: &str,
+    sender_address: &str,
+    signature_hex: &str,
+    public_key_hex: &str,
+) -> Result<(), String> {
+    // A node may only cast its own vote: the gossip author must be the voter.
+    if voter != sender_address {
+        return Err(format!(
+            "election vote voter '{voter}' does not match gossip sender '{sender_address}'"
+        ));
+    }
+
+    // Best-effort: skip if the election or accepted nominee isn't local.
+    let nominee_ok: bool = db
+        .conn()
+        .query_row(
+            "SELECT accepted FROM governance_election_nominees \
+             WHERE id = ?1 AND election_id = ?2",
+            params![nominee_id, election_id],
+            |row| row.get(0),
+        )
+        .unwrap_or(false);
+    if !nominee_ok {
+        log::debug!(
+            "Governance: election '{election_id}' / accepted nominee '{nominee_id}' not local — skipping gossiped vote",
+        );
+        return Ok(());
+    }
+
+    let vote_id = entity_id(&[election_id, voter]);
+    let inserted = db
+        .conn()
+        .execute(
+            "INSERT OR IGNORE INTO governance_election_votes \
+             (id, election_id, voter, nominee_id, signature, public_key) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                vote_id,
+                election_id,
+                voter,
+                nominee_id,
+                signature_hex,
+                public_key_hex
+            ],
+        )
+        .map_err(|e| format!("failed to insert election vote: {e}"))?;
+
+    if inserted > 0 {
+        db.conn()
+            .execute(
+                "UPDATE governance_election_nominees \
+                 SET votes_received = votes_received + 1 WHERE id = ?1",
+                params![nominee_id],
+            )
+            .map_err(|e| format!("failed to increment nominee tally: {e}"))?;
+        log::info!("Governance: recorded gossiped election vote for nominee '{nominee_id}'");
+    }
+
+    Ok(())
+}
+
+/// Handle a signed proposal vote gossiped by a peer. Mirrors
+/// `handle_election_vote_recorded`; proposals ARE gossiped, so the
+/// referenced proposal is usually present.
+#[allow(clippy::too_many_arguments)]
+fn handle_proposal_vote_recorded(
+    db: &Database,
+    proposal_id: &str,
+    voter: &str,
+    in_favor: bool,
+    sender_address: &str,
+    signature_hex: &str,
+    public_key_hex: &str,
+) -> Result<(), String> {
+    if voter != sender_address {
+        return Err(format!(
+            "proposal vote voter '{voter}' does not match gossip sender '{sender_address}'"
+        ));
+    }
+
+    // Best-effort: only count votes on a proposal that is locally Published.
+    let is_published: bool = db
+        .conn()
+        .query_row(
+            "SELECT status = 'published' FROM governance_proposals WHERE id = ?1",
+            params![proposal_id],
+            |row| row.get(0),
+        )
+        .unwrap_or(false);
+    if !is_published {
+        log::debug!(
+            "Governance: proposal '{proposal_id}' not locally published — skipping gossiped vote",
+        );
+        return Ok(());
+    }
+
+    let vote_id = entity_id(&[proposal_id, voter]);
+    let in_favor_int: i64 = if in_favor { 1 } else { 0 };
+    let inserted = db
+        .conn()
+        .execute(
+            "INSERT OR IGNORE INTO governance_proposal_votes \
+             (id, proposal_id, voter, in_favor, signature, public_key) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                vote_id,
+                proposal_id,
+                voter,
+                in_favor_int,
+                signature_hex,
+                public_key_hex
+            ],
+        )
+        .map_err(|e| format!("failed to insert proposal vote: {e}"))?;
+
+    if inserted > 0 {
+        let col = if in_favor {
+            "votes_for"
+        } else {
+            "votes_against"
+        };
+        db.conn()
+            .execute(
+                &format!("UPDATE governance_proposals SET {col} = {col} + 1 WHERE id = ?1"),
+                params![proposal_id],
+            )
+            .map_err(|e| format!("failed to increment proposal tally: {e}"))?;
+        log::info!("Governance: recorded gossiped proposal vote ({in_favor}) on '{proposal_id}'");
+    }
+
+    Ok(())
+}
+
+/// Handle a gossiped election open. Replicates the election locally so
+/// the node can hold + tally it. Sender must be a committee member of
+/// the DAO (mirrors the on-chain "committee opens elections" rule).
+#[allow(clippy::too_many_arguments)]
+fn handle_election_opened(
+    db: &Database,
+    dao_id: &str,
+    election_id: &str,
+    title: &str,
+    seats: i64,
+    nominee_min_proficiency: &str,
+    voter_min_proficiency: &str,
+    nomination_end: Option<&str>,
+    voting_end: Option<&str>,
+    sender_address: &str,
+) -> Result<(), String> {
+    let dao_exists: bool = db
+        .conn()
+        .query_row(
+            "SELECT COUNT(*) > 0 FROM governance_daos WHERE id = ?1",
+            params![dao_id],
+            |row| row.get(0),
+        )
+        .unwrap_or(false);
+    if !dao_exists {
+        log::debug!("Governance: DAO '{dao_id}' not local — skipping election '{election_id}'");
+        return Ok(());
+    }
+    if !is_committee_authority(db, dao_id, sender_address) {
+        return Err(format!(
+            "unauthorized election open: '{sender_address}' is not committee of DAO '{dao_id}'"
+        ));
+    }
+
+    db.conn()
+        .execute(
+            "INSERT OR IGNORE INTO governance_elections \
+             (id, dao_id, title, phase, seats, nominee_min_proficiency, \
+              voter_min_proficiency, nomination_end, voting_end) \
+             VALUES (?1, ?2, ?3, 'nomination', ?4, ?5, ?6, ?7, ?8)",
+            params![
+                election_id,
+                dao_id,
+                title,
+                seats,
+                nominee_min_proficiency,
+                voter_min_proficiency,
+                nomination_end,
+                voting_end
+            ],
+        )
+        .map_err(|e| format!("failed to insert election: {e}"))?;
+    log::info!("Governance: replicated election '{election_id}' in DAO '{dao_id}'");
+    Ok(())
+}
+
+/// Handle a gossiped self-nomination. Sender must be the nominee.
+fn handle_nominee_submitted(
+    db: &Database,
+    election_id: &str,
+    nominee_id: &str,
+    nominee: &str,
+    sender_address: &str,
+) -> Result<(), String> {
+    if nominee != sender_address {
+        return Err(format!(
+            "nomination nominee '{nominee}' does not match gossip sender '{sender_address}'"
+        ));
+    }
+    let election_exists: bool = db
+        .conn()
+        .query_row(
+            "SELECT COUNT(*) > 0 FROM governance_elections WHERE id = ?1",
+            params![election_id],
+            |row| row.get(0),
+        )
+        .unwrap_or(false);
+    if !election_exists {
+        log::debug!("Governance: election '{election_id}' not local — skipping nominee");
+        return Ok(());
+    }
+    db.conn()
+        .execute(
+            "INSERT OR IGNORE INTO governance_election_nominees \
+             (id, election_id, stake_address, accepted) VALUES (?1, ?2, ?3, 0)",
+            params![nominee_id, election_id, nominee],
+        )
+        .map_err(|e| format!("failed to insert nominee: {e}"))?;
+    Ok(())
+}
+
+/// Handle a gossiped nomination acceptance. Sender must be the nominee
+/// whose row is being accepted.
+fn handle_nominee_accepted(
+    db: &Database,
+    election_id: &str,
+    nominee_id: &str,
+    sender_address: &str,
+) -> Result<(), String> {
+    let nominee_addr: Option<String> = db
+        .conn()
+        .query_row(
+            "SELECT stake_address FROM governance_election_nominees \
+             WHERE id = ?1 AND election_id = ?2",
+            params![nominee_id, election_id],
+            |row| row.get(0),
+        )
+        .ok();
+    let Some(addr) = nominee_addr else {
+        log::debug!("Governance: nominee '{nominee_id}' not local — skipping accept");
+        return Ok(());
+    };
+    if addr != sender_address {
+        return Err(format!(
+            "nominee accept by '{sender_address}' but nominee belongs to '{addr}'"
+        ));
+    }
+    db.conn()
+        .execute(
+            "UPDATE governance_election_nominees SET accepted = 1 WHERE id = ?1",
+            params![nominee_id],
+        )
+        .map_err(|e| format!("failed to accept nominee: {e}"))?;
+    Ok(())
+}
+
+/// Handle a gossiped election phase transition (voting / finalized).
+/// Sender must be committee. Transitions are guarded (voting only from
+/// nomination, finalized only from voting). For `finalized`, the winning
+/// nominee rows are flagged.
+fn handle_election_phase(
+    db: &Database,
+    election_id: &str,
+    new_phase: &str,
+    winner_nominee_ids: &[String],
+    sender_address: &str,
+) -> Result<(), String> {
+    let dao_id: Option<String> = db
+        .conn()
+        .query_row(
+            "SELECT dao_id FROM governance_elections WHERE id = ?1",
+            params![election_id],
+            |row| row.get(0),
+        )
+        .ok();
+    let Some(dao_id) = dao_id else {
+        log::debug!("Governance: election '{election_id}' not local — skipping phase change");
+        return Ok(());
+    };
+    if !is_committee_authority(db, &dao_id, sender_address) {
+        return Err(format!(
+            "unauthorized election phase change by '{sender_address}' for DAO '{dao_id}'"
+        ));
+    }
+
+    let from_phase = if new_phase == "voting" {
+        "nomination"
+    } else {
+        "voting"
+    };
+    db.conn()
+        .execute(
+            "UPDATE governance_elections SET phase = ?1 WHERE id = ?2 AND phase = ?3",
+            params![new_phase, election_id, from_phase],
+        )
+        .map_err(|e| format!("failed to update election phase: {e}"))?;
+
+    if new_phase == "finalized" {
+        for wid in winner_nominee_ids {
+            db.conn()
+                .execute(
+                    "UPDATE governance_election_nominees SET is_winner = 1 \
+                     WHERE id = ?1 AND election_id = ?2",
+                    params![wid, election_id],
+                )
+                .map_err(|e| format!("failed to flag winner: {e}"))?;
+        }
+    }
+    log::info!("Governance: election '{election_id}' → {new_phase}");
     Ok(())
 }
 
@@ -524,6 +945,378 @@ mod tests {
         };
 
         assert!(handle_governance_message(&db, &make_message(&ann)).is_err());
+    }
+
+    /// Insert an election in the voting phase with one accepted nominee.
+    /// Returns (election_id, nominee_id).
+    fn insert_voting_election(db: &Database) -> (String, String) {
+        let elec_id = "elec1".to_string();
+        db.conn()
+            .execute(
+                "INSERT INTO governance_elections \
+                 (id, dao_id, title, phase, seats) VALUES (?1, 'dao1', 'E', 'voting', 1)",
+                params![elec_id],
+            )
+            .unwrap();
+        let nom_id = "nom1".to_string();
+        db.conn()
+            .execute(
+                "INSERT INTO governance_election_nominees \
+                 (id, election_id, stake_address, accepted) VALUES (?1, ?2, 'stake_test1nom', 1)",
+                params![nom_id, elec_id],
+            )
+            .unwrap();
+        (elec_id, nom_id)
+    }
+
+    fn election_vote_ann(
+        election_id: &str,
+        nominee_id: &str,
+        voter: &str,
+    ) -> GovernanceAnnouncement {
+        GovernanceAnnouncement {
+            event_type: GovernanceEventType::ElectionVoteRecorded {
+                election_id: election_id.into(),
+                voter: voter.into(),
+                nominee_id: nominee_id.into(),
+            },
+            dao_id: "dao1".into(),
+            timestamp: 1_700_000_000,
+        }
+    }
+
+    #[test]
+    fn election_vote_inserts_and_tallies() {
+        let db = test_db();
+        insert_test_dao(&db);
+        let (elec, nom) = insert_voting_election(&db);
+
+        // make_message signs as "stake_test1proposer" — voter must match.
+        let ann = election_vote_ann(&elec, &nom, "stake_test1proposer");
+        handle_governance_message(&db, &make_message(&ann)).unwrap();
+
+        let votes: i64 = db
+            .conn()
+            .query_row(
+                "SELECT votes_received FROM governance_election_nominees WHERE id = ?1",
+                params![nom],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(votes, 1);
+
+        // Signature + public key persisted on the vote row.
+        let has_sig: bool = db
+            .conn()
+            .query_row(
+                "SELECT signature IS NOT NULL AND public_key IS NOT NULL \
+                 FROM governance_election_votes WHERE election_id = ?1",
+                params![elec],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(has_sig);
+    }
+
+    #[test]
+    fn election_vote_rejects_voter_mismatch() {
+        let db = test_db();
+        insert_test_dao(&db);
+        let (elec, nom) = insert_voting_election(&db);
+
+        // voter ("stake_test1someoneelse") != gossip sender ("stake_test1proposer")
+        let ann = election_vote_ann(&elec, &nom, "stake_test1someoneelse");
+        let result = handle_governance_message(&db, &make_message(&ann));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("does not match gossip sender"));
+    }
+
+    #[test]
+    fn election_vote_skips_unknown_nominee() {
+        let db = test_db();
+        insert_test_dao(&db);
+        insert_voting_election(&db);
+
+        let ann = election_vote_ann("elec1", "nonexistent_nominee", "stake_test1proposer");
+        // Graceful skip — no error, no vote row.
+        assert!(handle_governance_message(&db, &make_message(&ann)).is_ok());
+        let count: i64 = db
+            .conn()
+            .query_row("SELECT COUNT(*) FROM governance_election_votes", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn election_vote_dedup_counts_once() {
+        let db = test_db();
+        insert_test_dao(&db);
+        let (elec, nom) = insert_voting_election(&db);
+
+        let ann = election_vote_ann(&elec, &nom, "stake_test1proposer");
+        handle_governance_message(&db, &make_message(&ann)).unwrap();
+        // Same voter, same election — INSERT OR IGNORE, tally stays 1.
+        handle_governance_message(&db, &make_message(&ann)).unwrap();
+
+        let votes: i64 = db
+            .conn()
+            .query_row(
+                "SELECT votes_received FROM governance_election_nominees WHERE id = ?1",
+                params![nom],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(votes, 1, "duplicate gossiped vote must not double-count");
+    }
+
+    #[test]
+    fn proposal_vote_inserts_and_tallies() {
+        let db = test_db();
+        insert_test_dao(&db);
+        db.conn()
+            .execute(
+                "INSERT INTO governance_proposals \
+                 (id, dao_id, title, category, proposer, status) \
+                 VALUES ('prop1', 'dao1', 'P', 'policy', 'stake_test1', 'published')",
+                [],
+            )
+            .unwrap();
+
+        let ann = GovernanceAnnouncement {
+            event_type: GovernanceEventType::ProposalVoteRecorded {
+                proposal_id: "prop1".into(),
+                voter: "stake_test1proposer".into(),
+                in_favor: true,
+            },
+            dao_id: "dao1".into(),
+            timestamp: 1_700_000_000,
+        };
+        handle_governance_message(&db, &make_message(&ann)).unwrap();
+
+        let (vf, va): (i64, i64) = db
+            .conn()
+            .query_row(
+                "SELECT votes_for, votes_against FROM governance_proposals WHERE id = 'prop1'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!((vf, va), (1, 0));
+    }
+
+    #[test]
+    fn proposal_vote_skips_unpublished() {
+        let db = test_db();
+        insert_test_dao(&db);
+        db.conn()
+            .execute(
+                "INSERT INTO governance_proposals \
+                 (id, dao_id, title, category, proposer, status) \
+                 VALUES ('prop1', 'dao1', 'P', 'policy', 'stake_test1', 'draft')",
+                [],
+            )
+            .unwrap();
+
+        let ann = GovernanceAnnouncement {
+            event_type: GovernanceEventType::ProposalVoteRecorded {
+                proposal_id: "prop1".into(),
+                voter: "stake_test1proposer".into(),
+                in_favor: true,
+            },
+            dao_id: "dao1".into(),
+            timestamp: 1_700_000_000,
+        };
+        // Draft proposal — vote skipped gracefully.
+        assert!(handle_governance_message(&db, &make_message(&ann)).is_ok());
+        let count: i64 = db
+            .conn()
+            .query_row("SELECT COUNT(*) FROM governance_proposal_votes", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(count, 0);
+    }
+
+    /// Make the gossip sender ("stake_test1proposer") a committee member.
+    fn make_sender_committee(db: &Database) {
+        db.conn()
+            .execute(
+                "INSERT OR IGNORE INTO governance_dao_members (dao_id, stake_address, role) \
+                 VALUES ('dao1', 'stake_test1proposer', 'committee')",
+                [],
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn election_opened_replicates_for_committee_sender() {
+        let db = test_db();
+        insert_test_dao(&db);
+        make_sender_committee(&db);
+
+        let ann = GovernanceAnnouncement {
+            event_type: GovernanceEventType::ElectionOpened {
+                election_id: "e1".into(),
+                title: "T".into(),
+                seats: 1,
+                nominee_min_proficiency: "remember".into(),
+                voter_min_proficiency: "remember".into(),
+                nomination_end: None,
+                voting_end: None,
+            },
+            dao_id: "dao1".into(),
+            timestamp: 1_700_000_000,
+        };
+        handle_governance_message(&db, &make_message(&ann)).unwrap();
+
+        let phase: String = db
+            .conn()
+            .query_row(
+                "SELECT phase FROM governance_elections WHERE id = 'e1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(phase, "nomination");
+    }
+
+    #[test]
+    fn election_opened_rejects_non_committee_sender() {
+        let db = test_db();
+        insert_test_dao(&db);
+        // sender NOT committee
+        let ann = GovernanceAnnouncement {
+            event_type: GovernanceEventType::ElectionOpened {
+                election_id: "e1".into(),
+                title: "T".into(),
+                seats: 1,
+                nominee_min_proficiency: "remember".into(),
+                voter_min_proficiency: "remember".into(),
+                nomination_end: None,
+                voting_end: None,
+            },
+            dao_id: "dao1".into(),
+            timestamp: 1_700_000_000,
+        };
+        let r = handle_governance_message(&db, &make_message(&ann));
+        assert!(r.is_err());
+        assert!(r.unwrap_err().contains("unauthorized"));
+    }
+
+    #[test]
+    fn nominee_submitted_then_accepted_flow() {
+        let db = test_db();
+        insert_test_dao(&db);
+        make_sender_committee(&db);
+        // Election present (committee opened it).
+        db.conn()
+            .execute(
+                "INSERT INTO governance_elections (id, dao_id, title, phase, seats) \
+                 VALUES ('e1', 'dao1', 'T', 'nomination', 1)",
+                [],
+            )
+            .unwrap();
+
+        // Self-nominate: sender == nominee.
+        let nom_id = "nomX".to_string();
+        let sub = GovernanceAnnouncement {
+            event_type: GovernanceEventType::NomineeSubmitted {
+                election_id: "e1".into(),
+                nominee_id: nom_id.clone(),
+                nominee: "stake_test1proposer".into(),
+            },
+            dao_id: "dao1".into(),
+            timestamp: 1_700_000_000,
+        };
+        handle_governance_message(&db, &make_message(&sub)).unwrap();
+
+        let accepted: bool = db
+            .conn()
+            .query_row(
+                "SELECT accepted FROM governance_election_nominees WHERE id = ?1",
+                params![nom_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(!accepted);
+
+        // Accept (sender is the nominee).
+        let acc = GovernanceAnnouncement {
+            event_type: GovernanceEventType::NomineeAccepted {
+                election_id: "e1".into(),
+                nominee_id: nom_id.clone(),
+            },
+            dao_id: "dao1".into(),
+            timestamp: 1_700_000_000,
+        };
+        handle_governance_message(&db, &make_message(&acc)).unwrap();
+
+        let accepted: bool = db
+            .conn()
+            .query_row(
+                "SELECT accepted FROM governance_election_nominees WHERE id = ?1",
+                params![nom_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(accepted);
+    }
+
+    #[test]
+    fn nominee_submitted_rejects_sender_mismatch() {
+        let db = test_db();
+        insert_test_dao(&db);
+        db.conn()
+            .execute(
+                "INSERT INTO governance_elections (id, dao_id, title, phase, seats) \
+                 VALUES ('e1', 'dao1', 'T', 'nomination', 1)",
+                [],
+            )
+            .unwrap();
+        let sub = GovernanceAnnouncement {
+            event_type: GovernanceEventType::NomineeSubmitted {
+                election_id: "e1".into(),
+                nominee_id: "nomX".into(),
+                nominee: "stake_test1someoneelse".into(),
+            },
+            dao_id: "dao1".into(),
+            timestamp: 1_700_000_000,
+        };
+        assert!(handle_governance_message(&db, &make_message(&sub)).is_err());
+    }
+
+    #[test]
+    fn election_phase_transition_requires_committee_and_guards() {
+        let db = test_db();
+        insert_test_dao(&db);
+        make_sender_committee(&db);
+        db.conn()
+            .execute(
+                "INSERT INTO governance_elections (id, dao_id, title, phase, seats) \
+                 VALUES ('e1', 'dao1', 'T', 'nomination', 1)",
+                [],
+            )
+            .unwrap();
+
+        let started = GovernanceAnnouncement {
+            event_type: GovernanceEventType::ElectionStarted {
+                election_id: "e1".into(),
+            },
+            dao_id: "dao1".into(),
+            timestamp: 1_700_000_000,
+        };
+        handle_governance_message(&db, &make_message(&started)).unwrap();
+        let phase: String = db
+            .conn()
+            .query_row(
+                "SELECT phase FROM governance_elections WHERE id = 'e1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(phase, "voting");
     }
 
     #[test]
