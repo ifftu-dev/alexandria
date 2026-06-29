@@ -1348,4 +1348,125 @@ mod tests {
             .unwrap();
         assert_eq!(count, 0);
     }
+
+    /// End-to-end of the signed-vote gossip RECEIVE path: a real
+    /// Ed25519-signed vote envelope from a registered identity passes the
+    /// full `MessageValidator` pipeline (signature → stake↔pubkey
+    /// registry identity-binding → freshness → dedup → schema →
+    /// authority) and is then tallied by `handle_governance_message`.
+    /// This exercises the actual crypto + registry checks, not the stub
+    /// signatures used by the other handler tests.
+    #[test]
+    fn signed_vote_e2e_validate_then_tally() {
+        use crate::p2p::signing::sign_gossip_message;
+        use crate::p2p::types::TOPIC_GOVERNANCE;
+        use crate::p2p::validation::MessageValidator;
+        use ed25519_dalek::SigningKey;
+        use std::sync::{Arc, Mutex};
+
+        let db = test_db();
+        insert_test_dao(&db);
+        let (elec, nom) = insert_voting_election(&db);
+
+        // A real signing key + its registered stake↔pubkey binding.
+        let key = SigningKey::generate(&mut rand::thread_rng());
+        let pubkey_hex = hex::encode(key.verifying_key().to_bytes());
+        let voter = "stake_test1uevoter".to_string();
+        db.conn()
+            .execute(
+                "INSERT INTO stake_pubkey_registry \
+                 (stake_address, public_key_hex, valid_from, valid_until, source) \
+                 VALUES (?1, ?2, 0, NULL, 'snapshot')",
+                params![voter, pubkey_hex],
+            )
+            .unwrap();
+
+        // Build + sign the vote envelope exactly as the cast path does.
+        let ann = GovernanceAnnouncement {
+            event_type: GovernanceEventType::ElectionVoteRecorded {
+                election_id: elec.clone(),
+                voter: voter.clone(),
+                nominee_id: nom.clone(),
+            },
+            dao_id: "dao1".into(),
+            timestamp: 0,
+        };
+        let payload = serde_json::to_vec(&ann).unwrap();
+        let signed = sign_gossip_message(TOPIC_GOVERNANCE, payload, &key, &voter);
+
+        // Full validation pipeline (with DB so the registry check runs).
+        let arc = Arc::new(Mutex::new(Some(db)));
+        MessageValidator::with_db(arc.clone())
+            .validate(&signed)
+            .expect("vote must pass the full validation pipeline");
+
+        // Then handle + assert the tally moved.
+        {
+            let guard = arc.lock().unwrap();
+            let dbref = guard.as_ref().unwrap();
+            handle_governance_message(dbref, &signed).expect("handle");
+
+            let votes: i64 = dbref
+                .conn()
+                .query_row(
+                    "SELECT votes_received FROM governance_election_nominees WHERE id = ?1",
+                    params![nom],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(votes, 1);
+
+            // The voter's signature + pubkey were persisted on the row.
+            let (sig, pk): (Option<String>, Option<String>) = dbref
+                .conn()
+                .query_row(
+                    "SELECT signature, public_key FROM governance_election_votes \
+                     WHERE election_id = ?1",
+                    params![elec],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .unwrap();
+            assert!(sig.is_some() && pk.is_some());
+            assert_eq!(pk.unwrap(), pubkey_hex);
+        }
+    }
+
+    /// A vote from an UNREGISTERED identity (no stake↔pubkey binding) must
+    /// be rejected by the validation pipeline's identity-binding step —
+    /// registration is required to participate.
+    #[test]
+    fn signed_vote_rejected_when_unregistered() {
+        use crate::p2p::signing::sign_gossip_message;
+        use crate::p2p::types::TOPIC_GOVERNANCE;
+        use crate::p2p::validation::MessageValidator;
+        use ed25519_dalek::SigningKey;
+        use std::sync::{Arc, Mutex};
+
+        let db = test_db();
+        insert_test_dao(&db);
+        let (elec, nom) = insert_voting_election(&db);
+
+        let key = SigningKey::generate(&mut rand::thread_rng());
+        let voter = "stake_test1uunregistered".to_string();
+        // NOTE: no stake_pubkey_registry row inserted.
+
+        let ann = GovernanceAnnouncement {
+            event_type: GovernanceEventType::ElectionVoteRecorded {
+                election_id: elec,
+                voter: voter.clone(),
+                nominee_id: nom,
+            },
+            dao_id: "dao1".into(),
+            timestamp: 0,
+        };
+        let payload = serde_json::to_vec(&ann).unwrap();
+        let signed = sign_gossip_message(TOPIC_GOVERNANCE, payload, &key, &voter);
+
+        let arc = Arc::new(Mutex::new(Some(db)));
+        let result = MessageValidator::with_db(arc).validate(&signed);
+        assert!(
+            result.is_err(),
+            "unregistered identity must fail the registry identity-binding check"
+        );
+    }
 }
