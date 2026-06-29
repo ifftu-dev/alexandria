@@ -21,7 +21,19 @@ import type {
   UserModelStatus,
   TrainKeystrokeAeResponse,
   TrainMouseCnnResponse,
+  GazeEstimate,
+  ScoreGazeResponse,
+  GazeFeatures,
+  GazeCalibSample,
+  TrainGazeCalibResponse,
 } from '@/types'
+
+// Gaze flag thresholds (mirror docs/sentinel.md §Gaze). Off-screen
+// ratio over GAZE_WANDER → warning; repeated downward glances →
+// critical (the phone-in-lap tell).
+const GAZE_WANDER_RATIO = 0.30
+const GAZE_DOWN_GLANCE_COUNT = 3
+const GAZE_OCCLUDED_RATIO = 0.40
 
 // Threshold helpers were previously inlined in the TS classifier. With
 // the backend rewrite they're plain constants — keep them client-side
@@ -154,6 +166,17 @@ let faceMatch: boolean | undefined
 let consecutiveNoFaceChecks = 0
 let totalFaceChecks = 0
 let faceAbsentChecks = 0
+
+// Gaze / second-device tracking, accumulated per snapshot window by
+// scoreGaze() and drained in the snapshot dispatch. All gaze inference
+// runs in the Rust backend (YuNet + head-pose); the frontend only
+// forwards downscaled frames and tallies the verdicts.
+let gazeTotalChecks = 0
+let gazeOffscreenChecks = 0
+let gazeOccludedChecks = 0
+let gazeDownGlances = 0
+// Reusable offscreen canvas for frame downscaling to the detector size.
+let gazeCanvas: HTMLCanvasElement | null = null
 
 // Behavioral profile
 let profile: BehavioralProfile | null = null
@@ -684,6 +707,19 @@ export function useSentinel() {
         aiKeystrokeAnomaly: keystrokeAnomaly,
         aiMouseHumanProb: mouseHumanProb,
       })
+
+      // Drain the gaze accumulators for this window and promote flags.
+      // Only meaningful when the camera is opted in and the backend
+      // returned at least one usable estimate this window.
+      let gazeOffscreenRatio: number | null = null
+      if (cameraOptedIn.value && gazeTotalChecks > 0) {
+        gazeOffscreenRatio = gazeOffscreenChecks / gazeTotalChecks
+        const occludedRatio = gazeOccludedChecks / gazeTotalChecks
+        if (gazeDownGlances >= GAZE_DOWN_GLANCE_COUNT) anomalies.push('device_glance')
+        if (gazeOffscreenRatio > GAZE_WANDER_RATIO) anomalies.push('gaze_wander')
+        if (occludedRatio > GAZE_OCCLUDED_RATIO) anomalies.push('gaze_occluded')
+      }
+
       const deduped = [...new Set(anomalies)]
 
       integrityScore.value = integrity
@@ -704,12 +740,17 @@ export function useSentinel() {
             devtools_score: signals.devtools_detected ? 0.0 : 1.0,
             camera_score: signals.face_consistency ?? null,
             ai_paste_anomaly: signals.ai_paste_anomaly ?? null,
+            gaze_offscreen_ratio: gazeOffscreenRatio,
             anomaly_flags: deduped,
           },
         })
       } catch { /* best effort */ }
 
       // Reset per-snapshot accumulators
+      gazeTotalChecks = 0
+      gazeOffscreenChecks = 0
+      gazeOccludedChecks = 0
+      gazeDownGlances = 0
       keystrokeBuffer = []
       mouseBuffer = []
       tabSwitchCount = 0
@@ -720,6 +761,10 @@ export function useSentinel() {
       environmentChanged = false
       totalFaceChecks = 0
       faceAbsentChecks = 0
+      gazeTotalChecks = 0
+      gazeOffscreenChecks = 0
+      gazeOccludedChecks = 0
+      gazeDownGlances = 0
       snapshotWindowStartMs = Date.now()
 
       scheduleNextSnapshot()
@@ -884,6 +929,107 @@ export function useSentinel() {
     return { present: false, count: 0, consistency: 0.2 }
   }
 
+  // Backend gaze / second-device check. Draws a downscaled frame and
+  // forwards it to the Rust YuNet + head-pose pipeline; tallies the
+  // verdict into the per-window gaze accumulators. Returns the estimate
+  // for callers that want to surface it live, or null on any failure
+  // (gaze is advisory — failures never break the monitoring loop).
+  const scoreGaze = async (
+    video: HTMLVideoElement,
+  ): Promise<GazeEstimate | null> => {
+    if (!video || video.readyState < 2) return null
+    const userId = stakeAddress.value
+    if (!userId) return null
+    try {
+      // Cap the longest side at 320px — YuNet letterboxes into 640²
+      // internally, so larger frames cost IPC bytes for no accuracy.
+      const vw = video.videoWidth || 640
+      const vh = video.videoHeight || 480
+      const scale = Math.min(1, 320 / Math.max(vw, vh))
+      const w = Math.max(1, Math.round(vw * scale))
+      const h = Math.max(1, Math.round(vh * scale))
+      if (!gazeCanvas) gazeCanvas = document.createElement('canvas')
+      gazeCanvas.width = w
+      gazeCanvas.height = h
+      const ctx = gazeCanvas.getContext('2d', { willReadFrequently: true })
+      if (!ctx) return null
+      ctx.drawImage(video, 0, 0, w, h)
+      const img = ctx.getImageData(0, 0, w, h)
+      const deviceFp = (await computeDeviceFingerprint()).substring(0, 16)
+      const resp = await tauriInvoke<ScoreGazeResponse>('sentinel_score_gaze', {
+        req: {
+          frame: { width: w, height: h, rgba: Array.from(img.data) },
+          user_address: userId,
+          device_fp_prefix: deviceFp,
+        },
+      })
+      const est = resp.estimate
+      gazeTotalChecks++
+      if (est.occluded) {
+        gazeOccludedChecks++
+      } else if (!est.onScreen) {
+        gazeOffscreenChecks++
+        // Down-glance heuristic: calibrated → predicted point below the
+        // screen; uncalibrated → positive pitch proxy (head tilted down).
+        const lookingDown =
+          est.screenY != null ? est.screenY > 1.0 : est.pitch > 0.12
+        if (lookingDown) gazeDownGlances++
+      }
+      return est
+    } catch (err) {
+      console.warn('[sentinel] gaze score IPC failed', err)
+      return null
+    }
+  }
+
+  // Draw a downscaled frame and extract gaze features (head-pose +
+  // iris) for the highest-confidence face. Used by the wizard's
+  // 9-point calibration capture. Returns null if no usable face.
+  const extractGazeFeatures = async (
+    video: HTMLVideoElement,
+  ): Promise<GazeFeatures | null> => {
+    if (!video || video.readyState < 2) return null
+    try {
+      const vw = video.videoWidth || 640
+      const vh = video.videoHeight || 480
+      const scale = Math.min(1, 320 / Math.max(vw, vh))
+      const w = Math.max(1, Math.round(vw * scale))
+      const h = Math.max(1, Math.round(vh * scale))
+      if (!gazeCanvas) gazeCanvas = document.createElement('canvas')
+      gazeCanvas.width = w
+      gazeCanvas.height = h
+      const ctx = gazeCanvas.getContext('2d', { willReadFrequently: true })
+      if (!ctx) return null
+      ctx.drawImage(video, 0, 0, w, h)
+      const img = ctx.getImageData(0, 0, w, h)
+      return await tauriInvoke<GazeFeatures | null>('sentinel_extract_gaze_features', {
+        frame: { width: w, height: h, rgba: Array.from(img.data) },
+      })
+    } catch (err) {
+      console.warn('[sentinel] extract gaze features IPC failed', err)
+      return null
+    }
+  }
+
+  // Fit the per-user gaze calibration MLP from collected samples.
+  const trainGazeCalibration = async (
+    samples: GazeCalibSample[],
+  ): Promise<TrainGazeCalibResponse | null> => {
+    const userId = stakeAddress.value
+    if (!userId || samples.length === 0) return null
+    try {
+      const deviceFp = (await computeDeviceFingerprint()).substring(0, 16)
+      const resp = await tauriInvoke<TrainGazeCalibResponse>('sentinel_train_gaze_calib', {
+        req: { user_address: userId, device_fp_prefix: deviceFp, samples },
+      })
+      await refreshUserModelsStatus()
+      return resp
+    } catch (err) {
+      console.warn('[sentinel] train gaze calibration IPC failed', err)
+      return null
+    }
+  }
+
   const stop = async () => {
     if (!isActive.value || !sessionId.value) return
 
@@ -938,6 +1084,10 @@ export function useSentinel() {
     consecutiveNoFaceChecks = 0
     totalFaceChecks = 0
     faceAbsentChecks = 0
+    gazeTotalChecks = 0
+    gazeOffscreenChecks = 0
+    gazeOccludedChecks = 0
+    gazeDownGlances = 0
 
     return currentSessionId
   }
@@ -1482,6 +1632,9 @@ export function useSentinel() {
     isAssessmentElement,
     reportFaceDetection,
     verifyFace,
+    scoreGaze,
+    extractGazeFeatures,
+    trainGazeCalibration,
     getDebugState,
     getFinalScore,
     getSessionId,

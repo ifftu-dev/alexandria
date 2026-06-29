@@ -67,6 +67,7 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (57, "dht_record_mirror", MIGRATION_057),
     (58, "governance_vote_signatures", MIGRATION_058),
     (59, "governance_dao_onchain_links", MIGRATION_059),
+    (60, "integrity_gaze_offscreen_ratio", MIGRATION_060),
 ];
 
 const MIGRATION_001: &str = r#"
@@ -2337,4 +2338,20 @@ ALTER TABLE governance_daos ADD COLUMN state_token_name TEXT;
 ALTER TABLE governance_daos ADD COLUMN reputation_policy TEXT;
 ALTER TABLE governance_daos ADD COLUMN membership_subjects_json TEXT;
 ALTER TABLE governance_daos ADD COLUMN dao_state_utxo TEXT;
+"#;
+
+const MIGRATION_060: &str = r#"
+-- ============================================================
+-- Migration 060: Sentinel gaze off-screen ratio column
+--
+-- Adds the per-snapshot fraction of camera ticks in which the
+-- learner's gaze was estimated off-screen (second-device / look-away
+-- detection). Nullable — snapshots taken with the camera off, or
+-- before the gaze pipeline ships, leave it NULL. See docs/sentinel.md
+-- §Gaze. The actionable flags (gaze_wander / device_glance /
+-- gaze_occluded) ride in anomaly_flags; this column is for dashboard
+-- observability and offline analysis.
+-- ============================================================
+
+ALTER TABLE integrity_snapshots ADD COLUMN gaze_offscreen_ratio REAL;
 "#;

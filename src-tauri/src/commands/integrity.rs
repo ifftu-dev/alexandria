@@ -34,6 +34,7 @@ pub struct IntegritySnapshot {
     pub camera_score: Option<f64>,
     pub composite_score: Option<f64>,
     pub ai_paste_anomaly: Option<f64>,
+    pub gaze_offscreen_ratio: Option<f64>,
     pub anomaly_flags: Vec<String>,
     pub captured_at: String,
 }
@@ -52,6 +53,8 @@ pub struct SubmitSnapshotRequest {
     pub devtools_score: Option<f64>,
     pub camera_score: Option<f64>,
     pub ai_paste_anomaly: Option<f64>,
+    #[serde(default)]
+    pub gaze_offscreen_ratio: Option<f64>,
     pub anomaly_flags: Vec<String>,
 }
 
@@ -82,15 +85,19 @@ enum Severity {
 /// Info so a client/server version skew never auto-suspends a session.
 fn flag_severity(flag: &str) -> Severity {
     match flag {
-        "devtools_detected" | "bot_suspected" | "face_mismatch" | "paste_classifier_critical" => {
-            Severity::Critical
-        }
+        "devtools_detected"
+        | "bot_suspected"
+        | "face_mismatch"
+        | "paste_classifier_critical"
+        | "device_glance" => Severity::Critical,
         "behavior_shift"
         | "paste_detected"
         | "multiple_faces"
         | "prolonged_absence"
         | "low_integrity"
-        | "paste_classifier_anomaly" => Severity::Warning,
+        | "paste_classifier_anomaly"
+        | "gaze_wander"
+        | "gaze_occluded" => Severity::Warning,
         "tab_switching" | "no_face" | "frequent_absence" => Severity::Info,
         _ => Severity::Info,
     }
@@ -209,8 +216,8 @@ pub async fn integrity_submit_snapshot(
         .execute(
             "INSERT INTO integrity_snapshots (id, session_id, typing_score, mouse_score, human_score,
              tab_score, paste_score, devtools_score, camera_score, composite_score,
-             ai_paste_anomaly, anomaly_flags)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+             ai_paste_anomaly, gaze_offscreen_ratio, anomaly_flags)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
             params![
                 snapshot_id,
                 req.session_id,
@@ -223,6 +230,7 @@ pub async fn integrity_submit_snapshot(
                 req.camera_score,
                 composite,
                 req.ai_paste_anomaly,
+                req.gaze_offscreen_ratio,
                 anomaly_flags_json,
             ],
         )
@@ -445,7 +453,8 @@ pub async fn integrity_list_snapshots(
         .prepare(
             "SELECT id, session_id, typing_score, mouse_score, human_score,
                     tab_score, paste_score, devtools_score, camera_score,
-                    composite_score, ai_paste_anomaly, anomaly_flags, captured_at
+                    composite_score, ai_paste_anomaly, gaze_offscreen_ratio,
+                    anomaly_flags, captured_at
              FROM integrity_snapshots
              WHERE session_id = ?1
              ORDER BY captured_at ASC",
@@ -479,7 +488,7 @@ fn map_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<IntegritySession> {
 }
 
 fn map_snapshot(row: &rusqlite::Row<'_>) -> rusqlite::Result<IntegritySnapshot> {
-    let flags_json: Option<String> = row.get(11)?;
+    let flags_json: Option<String> = row.get(12)?;
     let anomaly_flags: Vec<String> = flags_json
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default();
@@ -495,8 +504,9 @@ fn map_snapshot(row: &rusqlite::Row<'_>) -> rusqlite::Result<IntegritySnapshot> 
         camera_score: row.get(8)?,
         composite_score: row.get(9)?,
         ai_paste_anomaly: row.get(10)?,
+        gaze_offscreen_ratio: row.get(11)?,
         anomaly_flags,
-        captured_at: row.get(12)?,
+        captured_at: row.get(13)?,
     })
 }
 
@@ -515,7 +525,8 @@ fn read_snapshot(conn: &rusqlite::Connection, id: &str) -> Result<IntegritySnaps
     conn.query_row(
         "SELECT id, session_id, typing_score, mouse_score, human_score,
                 tab_score, paste_score, devtools_score, camera_score,
-                composite_score, anomaly_flags, captured_at
+                composite_score, ai_paste_anomaly, gaze_offscreen_ratio,
+                anomaly_flags, captured_at
          FROM integrity_snapshots WHERE id = ?1",
         params![id],
         map_snapshot,

@@ -940,6 +940,55 @@ export interface LoadedClassifierInfo {
   version: string
 }
 
+// One detected face from the backend YuNet detector. Bbox is
+// `[x, y, w, h]` and landmarks are `[right_eye, left_eye, nose,
+// right_mouth, left_mouth]`, all in original-frame pixels.
+export interface FaceDetection {
+  bbox: [number, number, number, number]
+  landmarks5: [number, number][]
+  score: number
+}
+
+// Head-pose / gaze estimate for one camera frame. `screenX/Y` are the
+// calibrated point-of-regard in normalized screen space, present only
+// when a per-user calibration model exists.
+export interface GazeEstimate {
+  yaw: number
+  pitch: number
+  screenX: number | null
+  screenY: number | null
+  onScreen: boolean
+  occluded: boolean
+  confidence: number
+}
+
+export interface ScoreGazeResponse {
+  estimate: GazeEstimate
+  faceCount: number
+}
+
+// Per-frame gaze features (head-pose proxies + coarse iris offset),
+// captured during the wizard's 9-point calibration step.
+export interface GazeFeatures {
+  yaw: number
+  pitch: number
+  roll: number
+  irisDx: number
+  irisDy: number
+}
+
+// One labeled calibration sample: features paired with the known
+// screen target the user was looking at.
+export interface GazeCalibSample {
+  yaw: number
+  pitch: number
+  roll: number
+  irisDx: number
+  irisDy: number
+  targetX: number
+  targetY: number
+}
+
 export interface UserModelStatus {
   model_kind: 'keystroke_ae' | 'mouse_cnn' | string
   trained_epochs: number
@@ -955,6 +1004,12 @@ export interface TrainKeystrokeAeResponse {
 }
 
 export interface TrainMouseCnnResponse {
+  train_loss: number
+  training_samples: number
+  trained_epochs: number
+}
+
+export interface TrainGazeCalibResponse {
   train_loss: number
   training_samples: number
   trained_epochs: number

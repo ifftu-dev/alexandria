@@ -322,7 +322,7 @@ pub async fn sentinel_score_mouse_cnn(
 // Storage helpers
 // ============================================================================
 
-fn load_user_model<W: for<'de> Deserialize<'de>>(
+pub(crate) fn load_user_model<W: for<'de> Deserialize<'de>>(
     state: &State<'_, AppState>,
     user_address: &str,
     device_fp_prefix: &str,
@@ -357,7 +357,7 @@ fn load_user_model<W: for<'de> Deserialize<'de>>(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn save_user_model<W: Serialize>(
+pub(crate) fn save_user_model<W: Serialize>(
     state: &State<'_, AppState>,
     user_address: &str,
     device_fp_prefix: &str,
