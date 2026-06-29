@@ -303,4 +303,107 @@ mod tests {
         });
         println!("ANCHOR_TX:{tx_hash}");
     }
+
+    /// Live preprod END-TO-END of the SHIPPED on-chain bridge builders,
+    /// chained against the existing `daoopx` DAO (tx 3a3e56b0, state UTxO
+    /// #0): publish a finalized election → install the committee
+    /// (spends the DAO state UTxO, references the finalized election) →
+    /// anchor a proposal outcome. Each tx is operator-signed in-process
+    /// and waited for confirmation. Run:
+    ///   BLOCKFROST_PROJECT_ID=… OPERATOR_SKEY_PATH=…/treasury.skey \
+    ///   OPERATOR_ADDRESS=addr_test1q… cargo test -p alexandria-node \
+    ///     live_gov_onchain_e2e -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn live_gov_onchain_e2e() {
+        use std::time::Duration;
+        let pid = std::env::var("BLOCKFROST_PROJECT_ID").expect("BLOCKFROST_PROJECT_ID");
+        let op = super::super::operator::load_operator_key().expect("operator key");
+
+        // The `daoopx` DAO created on preprod (tx 3a3e56b0). Its state
+        // token "daoopx" sits at the registry at output #0 (3 ADA).
+        let dao_state_tx = "3a3e56b070e5b3b582fe497c6d7a7bba3f40b3f18b3581549e288aba0be37e3c";
+        let dao_policy =
+            gov_tx_builder::hash_from_hex_pub(script_refs::DAO_MINTING_SCRIPT_HASH).unwrap();
+        let rep_policy =
+            gov_tx_builder::hash_from_hex_pub(script_refs::REPUTATION_MINTING_SCRIPT_HASH).unwrap();
+        let dao_token = b"daoopx".to_vec();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        let interval = 2_592_000_000i64;
+
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            let bf = BlockfrostClient::new(pid).unwrap();
+
+            async fn wait_conf(bf: &BlockfrostClient, tx: &str) {
+                for _ in 0..50 {
+                    if bf.is_tx_confirmed(tx).await.unwrap_or(false) {
+                        return;
+                    }
+                    tokio::time::sleep(Duration::from_secs(6)).await;
+                }
+                panic!("timeout waiting for {tx}");
+            }
+
+            // 1. Publish a finalized-election UTxO (operator-signed).
+            let signed_f = publish_finalized_election(
+                &bf,
+                &op,
+                &dao_policy,
+                &dao_token,
+                &rep_policy,
+                1,
+                now - 172_800_000,
+                now - 86_400_000,
+            )
+            .await
+            .expect("build finalize");
+            let tx_f = bf.submit_tx(&signed_f).await.expect("submit finalize");
+            println!("E2E_FINALIZE_TX:{tx_f}");
+            wait_conf(&bf, &tx_f).await;
+
+            // 2. Install the committee: spend the DAO state UTxO,
+            //    referencing the finalized election just published.
+            let params = InstallParams {
+                dao_state_utxo: (dao_state_tx, 0),
+                dao_state_lovelace: 3_000_000,
+                dao_policy,
+                dao_token_name: dao_token.clone(),
+                scope_type: "subject".into(),
+                scope_id: b"opx".to_vec(),
+                reputation_policy: rep_policy,
+                committee_size: 1,
+                election_interval_ms: interval,
+                election_ref: (&tx_f, 0),
+                committee_vkhs: vec![op.payment_key_hash()],
+                term_start_ms: now,
+            };
+            let signed_i = install_committee(&bf, &op, &params)
+                .await
+                .expect("build install");
+            let tx_i = bf.submit_tx(&signed_i).await.expect("submit install");
+            println!("E2E_INSTALL_TX:{tx_i}");
+            wait_conf(&bf, &tx_i).await;
+
+            // 3. Anchor a resolved proposal outcome (operator metadata).
+            let meta = proposal_outcome_metadata(
+                "e2eproposal0000000000000000000000000000000000000000000000000abc",
+                "approved",
+                5,
+                2,
+                Some("bb".repeat(32)),
+            );
+            let signed_a = build_governance_anchor(&bf, &op, meta)
+                .await
+                .expect("build anchor");
+            let tx_a = bf.submit_tx(&signed_a).await.expect("submit anchor");
+            println!("E2E_ANCHOR_TX:{tx_a}");
+            wait_conf(&bf, &tx_a).await;
+
+            println!("E2E_ALL_CONFIRMED");
+        });
+    }
 }
