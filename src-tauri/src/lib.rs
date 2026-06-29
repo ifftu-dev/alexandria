@@ -1188,6 +1188,11 @@ pub fn run() {
             commands::sentinel_ml::sentinel_score_mouse_cnn,
             commands::sentinel_ml::sentinel_user_models_status,
             commands::sentinel_ml::sentinel_reset_user_models,
+            // Sentinel gaze / second-device detection
+            commands::sentinel_gaze::sentinel_detect_face,
+            commands::sentinel_gaze::sentinel_extract_gaze_features,
+            commands::sentinel_gaze::sentinel_score_gaze,
+            commands::sentinel_gaze::sentinel_train_gaze_calib,
             // Sentinel holdout evaluation (threshold-sealed)
             commands::sentinel_holdout::sentinel_holdout_upload,
             commands::sentinel_holdout::sentinel_holdout_list,

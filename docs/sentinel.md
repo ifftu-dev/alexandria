@@ -70,6 +70,7 @@ All processing happens client-side. There is no server-side component — Alexan
 | `ai_face_similarity` | AI | 0-1 | 0.05† | LBP histogram cosine similarity (every 3s) |
 | `ai_face_match` | AI | bool | advisory | Whether face matches enrollment (drives `face_mismatch` flag when false) |
 | `ai_paste_anomaly` | AI | 0-1 | 0.05† | ONNX classifier — probability snapshot is paste / typing-bot / LLM-paste-edit. Drives `paste_classifier_anomaly` (≥0.95) and `paste_classifier_critical` (≥0.99) flags. |
+| `gaze_offscreen_ratio` | AI | 0-1 | advisory | Fraction of camera ticks the learner's gaze was estimated off-screen (second-device / look-away detection). Drives `gaze_wander` (>0.30), `device_glance` (≥3 downward glances), `gaze_occluded` (>0.40 occluded). See §Gaze. |
 
 † Only applied when advisory AI scoring is toggled on (see §Runtime Toggle).
 
@@ -100,6 +101,9 @@ Per-snapshot checks:
 11. Frequent absence (>50% of checks in snapshot window) → `frequent_absence` info
 12. Paste classifier ≥ 0.95 → `paste_classifier_anomaly` warning
 13. Paste classifier ≥ 0.99 → `paste_classifier_critical` critical
+14. Gaze off-screen ratio > 0.30 (camera opted in) → `gaze_wander` warning
+15. ≥ 3 downward off-screen glances in the window → `device_glance` critical
+16. Gaze-occluded ratio > 0.40 (eyes hidden while camera opted in) → `gaze_occluded` warning
 
 Flag severity is authoritative on the backend (`commands/integrity.rs::flag_severity`). Unknown flags default to info so client/server version skew never auto-suspends a session.
 
@@ -217,6 +221,35 @@ The Rust extractor in `sentinel::features` and the Python featurizer in `tools/s
 - ONNX weights: 50 MiB max (`MAX_WEIGHTS_BYTES` in `sentinel_priors.rs`, also enforced in `sentinel_ml::sentinel_load_dao_classifier`)
 - Resolver round trips: 5 s timeout (`WEIGHTS_RESOLVE_TIMEOUT`) per CID fetch
 
+### 5. Gaze / Second-Device Detector
+
+**Location**: `src-tauri/src/sentinel/face_detect.rs` (YuNet detection via tract), `src-tauri/src/sentinel/gaze.rs` (head-pose + calibration), `src-tauri/src/commands/sentinel_gaze.rs` (IPC).
+
+**Purpose**: catch the second-device cheat class — glancing down at a phone or sideways at a second monitor during an assessment. Honest scope: it flags off-screen *gaze*, so it catches look-away behaviour but not an earpiece + reader, nor a device propped directly beside the webcam. A strong add, not a gate on its own.
+
+**Pipeline** (all backend, frames never leave the device):
+
+1. **Face detection** — YuNet (`face_detection_yunet_2023mar`, OpenCV Zoo, **MIT**) embedded via `include_bytes!`, run through `tract`. The model is baked at a fixed **640×640** input (its declared input fact; other sizes fail tract shape inference), so the frame is letterboxed in and detections are inverted back to original coordinates. Anchor-free 3-stride decode (8/16/32) yields bbox + **5 landmarks** (right/left eye, nose, right/left mouth) + score, then NMS. Output contract (12 tensors) is asserted in `model_contract_holds`.
+2. **Head-pose proxies** — derived geometrically from the 5 landmarks (dep-free, no solvePnP): `yaw` = horizontal nose offset from the eye midpoint over inter-ocular distance; `pitch` = nose position between the eye line and mouth line; `roll` = eye-line angle. Plus a coarse `iris` offset (darkness-weighted centroid in an eye box).
+3. **Gaze estimate** — two paths:
+   - **Uncalibrated**: threshold the raw yaw/pitch proxies against a generous on-screen cone. No enrollment needed; coarse look-away detection.
+   - **Calibrated**: a per-user `5 → 16 → 2` MLP (candle SGD) maps `[yaw, pitch, roll, iris_dx, iris_dy]` to a normalized screen point; off-screen = predicted point outside the unit square + margin. Trained from the wizard's 9-point capture.
+
+**Calibration is license-clean by construction**: it trains on the user's *own* 9-point look-at-the-dot capture, so no external gaze dataset (e.g. Gaze360 / MPIIGaze, which forbid commercial models-trained-on-dataset) is ever involved.
+
+**Storage**: calibration weights persist as a JSON blob in `sentinel_user_models` (`model_kind='gaze_calib'`), same convention as the keystroke AE / mouse CNN. Never broadcast over P2P. Reset by `sentinel_reset_user_models`.
+
+**Flags** (computed per snapshot window in `useSentinel`, severity authoritative in `commands/integrity.rs::flag_severity`):
+- `gaze_wander` (warning) — off-screen ratio > 0.30
+- `device_glance` (critical) — ≥ 3 downward off-screen glances in the window (the phone-in-lap tell)
+- `gaze_occluded` (warning) — eyes hidden (no usable face geometry) for > 0.40 of ticks
+
+The per-window `gaze_offscreen_ratio` is persisted on `integrity_snapshots` (migration 060) for dashboard observability.
+
+**Frontend**: `Player.vue`'s camera loop calls `sentinel.scoreGaze(video)` (fire-and-forget) alongside the existing LBP presence check. It downscales the frame to ≤320px and forwards RGBA over IPC; cadence is intended to be assurance-level dependent (faster in high-assurance mode). The 9-point calibration is a step in `SentinelTrainingWizard.vue`.
+
+**Phase 2 (deferred)**: precise point-of-regard via a MediaPipe iris model (Apache-2.0, needs a tflite→ONNX conversion); a gaze × keystroke-timing correlation signal (the high-confidence "copying" flag); face *recognition* via ArcFace (runtime-trivial on tract, but weights are license-gated — buy an InsightFace commercial license). See [sentinel-gaze.md](sentinel-gaze.md) for the full design.
+
 ### Runtime Toggle
 
 AI signals are advisory by default and do not contribute to the integrity score. A per-device toggle (`sentinel_ai_scoring_enabled` in localStorage, exposed in the Sentinel dashboard Profile tab) folds them in at a 0.05 weight each:
@@ -281,6 +314,8 @@ See [sentinel-runbook.md](sentinel-runbook.md) for operator procedures.
 ```sql
 integrity_sessions       -- One per learning session
   └── integrity_snapshots  -- Random-interval measurements, includes ai_paste_anomaly REAL (migration 044)
+                         --   and gaze_offscreen_ratio REAL (migration 060)
+sentinel_user_models     -- Per-user candle weights: keystroke_ae, mouse_cnn, gaze_calib (JSON blobs)
 sentinel_priors          -- DAO-ratified attack patterns AND classifier weights
                          --   keystroke / mouse: labeled-samples blobs
                          --   paste_classifier_weights: model bundle (migration 045 adds
@@ -317,7 +352,11 @@ Stored in local SQLite. See [Database Schema](database-schema.md) for full DDL.
 | `sentinel_train_mouse_cnn` | Train the per-user mouse-trajectory CNN dense head via candle |
 | `sentinel_score_mouse_cnn` | Score mouse points; `-1.0` if not yet trained |
 | `sentinel_user_models_status` | List per-user model rows (epochs, samples, loss, updated_at) |
-| `sentinel_reset_user_models` | Wipe per-user AE + CNN weights for `(user, device)` |
+| `sentinel_reset_user_models` | Wipe per-user AE + CNN + gaze-calib weights for `(user, device)` |
+| `sentinel_detect_face` | Run YuNet on a frame; return bbox + 5 landmarks + score per face |
+| `sentinel_extract_gaze_features` | Head-pose + iris features for the best face (wizard calibration capture) |
+| `sentinel_score_gaze` | Detect → load per-user calibration → return `GazeEstimate` + face count |
+| `sentinel_train_gaze_calib` | Fit/refit the per-user gaze calibration MLP from 9-point samples |
 
 ## UI
 
@@ -354,7 +393,7 @@ These guarantees are architectural — they are enforced by the code structure, 
 
 1. **Raw keystrokes never stored**: Only anonymized timing features (dwell/flight in ms). The `key` field is set to `'char'` for all printable characters.
 2. **Raw mouse coordinates never transmitted**: Only deltas (dx, dy, dt) used for CNN features; absolute positions stay in the short-lived buffer.
-3. **Video frames never leave the device**: Face processing happens on a `<canvas>` element. Only the derived embedding (944 floats) or skin ratio (single float) is stored.
+3. **Video frames never leave the device**: Face processing happens on a `<canvas>` element. Frames are forwarded to the Rust backend over in-process Tauri IPC for YuNet detection + gaze estimation, processed in memory, and **never persisted** — only derived values (944-float embedding, skin ratio, gaze yaw/pitch, off-screen ratio) are stored. The gaze calibration model encodes a statistical pose→screen mapping, not recoverable imagery.
 4. **AI model weights are not biometric data**: Autoencoder/CNN weights encode statistical patterns of typing/movement, not recoverable input data. LBP embeddings cannot be reverse-engineered into face images. Published *adversarial priors* (labeled cheat patterns and DAO-ratified classifier weights, curated by the Sentinel DAO — see [sentinel-adversarial-priors.md](sentinel-adversarial-priors.md)) contain no individual user data; they are catalog content, not per-user telemetry.
 5. **Profile keyed to device**: `sentinel_profile_{userId}_{deviceFingerprint[0:16]}` — profiles are device-specific.
 6. **No server-side data**: All behavioral processing happens on-device. The Rust backend stores only numeric scores and categorical flags in local SQLite. The Sentinel DAO-published prior/weights library is read-only from each client's perspective and carries no user identifiers — clients consume it, they never produce to it unless the learner explicitly proposes a pattern.

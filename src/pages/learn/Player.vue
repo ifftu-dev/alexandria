@@ -337,8 +337,13 @@ function startFaceLoop() {
   faceLoopTimer = setInterval(() => {
     const video = cameraVideoRef.value
     if (!video) return
+    // LBP identity/presence check (sync, advisory). Gaze /
+    // second-device detection runs in the Rust backend (YuNet +
+    // head-pose) and is fire-and-forget — it tallies into the
+    // per-snapshot gaze accumulators inside the composable.
     const result = sentinel.verifyFace(video)
     lastFacePresent.value = result.present
+    void sentinel.scoreGaze(video)
   }, FACE_LOOP_INTERVAL_MS)
 }
 

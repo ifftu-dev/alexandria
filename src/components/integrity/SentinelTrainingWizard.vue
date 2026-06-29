@@ -26,6 +26,8 @@ const {
   enrollFace,
   getAIModelStatus,
   refreshUserModelsStatus,
+  extractGazeFeatures,
+  trainGazeCalibration,
 } = useSentinel()
 
 // Track which steps were *skipped* (user kept existing model rather than
@@ -53,8 +55,8 @@ const skipStep = (which: 'typing' | 'mouse' | 'camera') => {
   nextStep()
 }
 
-type Step = 'welcome' | 'typing' | 'mouse' | 'awareness' | 'camera' | 'review'
-const steps: Step[] = ['welcome', 'typing', 'mouse', 'awareness', 'camera', 'review']
+type Step = 'welcome' | 'typing' | 'mouse' | 'awareness' | 'camera' | 'gaze' | 'review'
+const steps: Step[] = ['welcome', 'typing', 'mouse', 'awareness', 'camera', 'gaze', 'review']
 
 const currentStep = ref<Step>('welcome')
 const currentStepIndex = computed(() => steps.indexOf(currentStep.value))
@@ -83,6 +85,31 @@ const cameraSkipped = ref(false)
 const videoRef = ref<HTMLVideoElement | null>(null)
 let cameraStream: MediaStream | null = null
 let faceDetectionInterval: ReturnType<typeof setInterval> | null = null
+
+// Gaze calibration state — a 9-point look-at-the-dot capture. Each dot
+// contributes a few labeled samples (head-pose + iris features paired
+// with the dot's normalized screen position); the backend then fits the
+// per-user calibration MLP. Calibration data is the user's own, so no
+// external gaze dataset is involved.
+const GAZE_DOTS: { x: number; y: number }[] = [
+  { x: 0.1, y: 0.1 }, { x: 0.5, y: 0.1 }, { x: 0.9, y: 0.1 },
+  { x: 0.1, y: 0.5 }, { x: 0.5, y: 0.5 }, { x: 0.9, y: 0.5 },
+  { x: 0.1, y: 0.9 }, { x: 0.5, y: 0.9 }, { x: 0.9, y: 0.9 },
+]
+const gazeVideoRef = ref<HTMLVideoElement | null>(null)
+const gazeError = ref<string | null>(null)
+const gazeRunning = ref(false)
+const gazeSkipped = ref(false)
+const gazeDotIndex = ref(-1) // -1 = idle, 0..8 active dot, 9 = done
+const gazeResult = ref<{ samples: number; loss: number } | null>(null)
+let gazeStream: MediaStream | null = null
+let gazeSamples: import('@/types').GazeCalibSample[] = []
+
+const activeGazeDot = computed(() =>
+  gazeDotIndex.value >= 0 && gazeDotIndex.value < GAZE_DOTS.length
+    ? GAZE_DOTS[gazeDotIndex.value]!
+    : null,
+)
 
 // Review state
 const savedProfile = ref<Record<string, unknown> | null>(null)
@@ -152,6 +179,14 @@ const initStep = (step: Step) => {
       }
     }, 300)
   }
+  else if (step === 'gaze') {
+    gazeError.value = null
+    gazeResult.value = null
+    gazeRunning.value = false
+    gazeDotIndex.value = -1
+    gazeSkipped.value = false
+    gazeSamples = []
+  }
   else if (step === 'review') {
     loadReviewData()
   }
@@ -163,6 +198,8 @@ const cleanupCurrentStep = () => {
   if (mouseCleanup) { mouseCleanup(); mouseCleanup = null }
   if (mousePollTimer) { clearInterval(mousePollTimer); mousePollTimer = null }
   stopCamera()
+  gazeRunning.value = false
+  stopGazeCamera()
 }
 
 // =========================================================================
@@ -287,6 +324,80 @@ const stopCamera = () => {
 const skipCamera = () => {
   cameraSkipped.value = true
   skipped.value.camera = true
+  nextStep()
+}
+
+// =========================================================================
+// Gaze calibration step
+// =========================================================================
+const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms))
+
+const startGazeCalibration = async () => {
+  gazeError.value = null
+  gazeResult.value = null
+  gazeSamples = []
+  try {
+    gazeStream = await navigator.mediaDevices.getUserMedia({
+      video: { width: 640, height: 480, facingMode: 'user' },
+      audio: false,
+    })
+    await nextTick()
+    if (gazeVideoRef.value) {
+      gazeVideoRef.value.srcObject = gazeStream
+      await gazeVideoRef.value.play()
+    }
+  }
+  catch {
+    gazeError.value = 'Could not access the camera for gaze calibration.'
+    return
+  }
+
+  gazeRunning.value = true
+  // Walk each dot: settle, then capture a handful of framed samples.
+  for (let d = 0; d < GAZE_DOTS.length; d++) {
+    if (!gazeRunning.value) break
+    gazeDotIndex.value = d
+    const dot = GAZE_DOTS[d]!
+    await sleep(700) // let the eyes settle on the dot
+    for (let s = 0; s < 5; s++) {
+      if (!gazeRunning.value) break
+      const video = gazeVideoRef.value
+      if (!video) break
+      const f = await extractGazeFeatures(video)
+      if (f) {
+        gazeSamples.push({
+          yaw: f.yaw, pitch: f.pitch, roll: f.roll,
+          irisDx: f.irisDx, irisDy: f.irisDy,
+          targetX: dot.x, targetY: dot.y,
+        })
+      }
+      await sleep(150)
+    }
+  }
+  gazeDotIndex.value = GAZE_DOTS.length
+
+  if (gazeSamples.length >= 9) {
+    const resp = await trainGazeCalibration(gazeSamples)
+    if (resp) {
+      gazeResult.value = { samples: resp.training_samples, loss: resp.train_loss }
+    } else {
+      gazeError.value = 'Calibration training failed.'
+    }
+  } else {
+    gazeError.value = `Not enough usable frames (${gazeSamples.length}). Ensure your face is well-lit and centered, then retry.`
+  }
+  stopGazeCamera()
+  gazeRunning.value = false
+}
+
+const stopGazeCamera = () => {
+  if (gazeStream) { gazeStream.getTracks().forEach(t => t.stop()); gazeStream = null }
+}
+
+const skipGaze = () => {
+  gazeSkipped.value = true
+  stopGazeCamera()
+  gazeRunning.value = false
   nextStep()
 }
 
@@ -760,6 +871,72 @@ onBeforeUnmount(() => {
         <div class="mt-5 flex items-center justify-between">
           <AppButton variant="ghost" size="sm" @click="prevStep">Back</AppButton>
           <AppButton v-if="cameraSkipped" variant="primary" size="sm" @click="nextStep">Continue</AppButton>
+        </div>
+      </div>
+
+      <!-- ================ GAZE CALIBRATION ================ -->
+      <div v-else-if="currentStep === 'gaze'">
+        <div class="mb-4">
+          <h2 class="text-base font-semibold text-foreground">Gaze Calibration (Optional)</h2>
+          <p class="mt-1 text-sm text-muted-foreground">
+            Follow the dots with your eyes. This teaches Sentinel where you look on this screen so it can tell
+            when your gaze drifts to a second device during an assessment. Video is processed on-device only --
+            no images are stored or transmitted.
+          </p>
+          <p v-if="gazeSkipped || !cameraEnabled && cameraSkipped" class="mt-2 text-xs text-muted-foreground">
+            Without calibration, gaze still works in a coarser look-away mode.
+          </p>
+        </div>
+
+        <div class="mx-auto max-w-md">
+          <!-- Idle: start / skip -->
+          <div v-if="gazeDotIndex === -1 && !gazeResult" class="text-center">
+            <div class="flex justify-center gap-3">
+              <AppButton variant="primary" size="sm" @click="startGazeCalibration">
+                Start Calibration
+              </AppButton>
+              <AppButton variant="ghost" size="sm" @click="skipGaze">
+                Skip
+              </AppButton>
+            </div>
+            <div v-if="gazeError" class="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-2 dark:border-amber-800/40 dark:bg-amber-900/20">
+              <p class="text-xs text-amber-700 dark:text-amber-400">{{ gazeError }}</p>
+            </div>
+          </div>
+
+          <!-- Running: dot board + hidden video -->
+          <div v-show="gazeRunning" class="text-center">
+            <div class="relative mx-auto aspect-video w-full overflow-hidden rounded-lg border border-border bg-muted/30">
+              <div
+                v-if="activeGazeDot"
+                class="absolute h-5 w-5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-primary ring-4 ring-primary/30 transition-all duration-300"
+                :style="{ left: `${activeGazeDot.x * 100}%`, top: `${activeGazeDot.y * 100}%` }"
+              />
+            </div>
+            <p class="mt-3 text-sm text-muted-foreground">
+              Look at the dot. Point {{ Math.min(gazeDotIndex + 1, GAZE_DOTS.length) }} of {{ GAZE_DOTS.length }}.
+            </p>
+            <video ref="gazeVideoRef" class="sr-only" muted playsinline />
+          </div>
+
+          <!-- Done -->
+          <div v-if="gazeResult" class="text-center">
+            <div class="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-100 dark:bg-emerald-900/30">
+              <svg class="h-6 w-6 text-emerald-600 dark:text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+              </svg>
+            </div>
+            <p class="text-sm text-foreground">
+              Gaze calibrated from {{ gazeResult.samples }} samples.
+            </p>
+            <p class="mt-1 text-xs text-muted-foreground">Calibration loss: {{ gazeResult.loss.toFixed(4) }}</p>
+            <AppButton variant="ghost" size="sm" class="mt-3" @click="startGazeCalibration">Recalibrate</AppButton>
+          </div>
+        </div>
+
+        <div class="mt-5 flex items-center justify-between">
+          <AppButton variant="ghost" size="sm" :disabled="gazeRunning" @click="prevStep">Back</AppButton>
+          <AppButton variant="primary" size="sm" :disabled="gazeRunning" @click="nextStep">Continue</AppButton>
         </div>
       </div>
 
