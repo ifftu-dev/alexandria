@@ -309,12 +309,45 @@ See [sentinel-runbook.md](sentinel-runbook.md) for operator procedures.
 | `sentinel_blocklist_version` | Block a specific `(model_kind, version)` from selection. Idempotent. |
 | `sentinel_unblocklist_version` | Remove a block. |
 
+## Automated Attestation (High-Assurance)
+
+Local integrity flags are device-reported — a determined attacker who controls the client could suppress them. High-assurance mode makes integrity **independently verifiable without any human in the loop**, layered into an assurance ladder embedded in the issued credential (see [protocol-specification.md](protocol-specification.md) §14.9.5):
+
+| Level | Meaning | How |
+|-------|---------|-----|
+| `local` | Device-reported only (default). | No attestation. |
+| `anchored` | Snapshot stream is timestamped + immutable. | Commitment root anchored (DHT/chain). |
+| `high_assurance` | An independent party witnessed the session. | ≥2/3 of the Sentinel DAO committee co-signed. |
+
+### Commitment chain
+
+Every `integrity_submit_snapshot` folds the snapshot into a running hash (`fold_commitment`, `domain::integrity_attestation`): `root_n = blake2b(tag | root_{n-1} | canonical(snapshot_n))`. The chain fixes the order and contents of the flag stream — changing or reordering any snapshot changes the terminal `commitment_root`. Per-snapshot hashes persist on `integrity_snapshots.commitment_hash`; the running root on `integrity_sessions.commitment_root`.
+
+### Attestation (no manual signing)
+
+- **Anchor (baseline)** — the terminal `commitment_root` is anchored; `integrity_set_anchor` records the reference and promotes the session to `anchored`. Proves timing + immutability (the data existed before the learner saw the result).
+- **Committee co-sign (upgrade)** — committee-operated **attestor nodes auto-counter-sign** the terminal attestation payload (`attestation_payload`, binding session_id/status/score/counts/commitment_root/ended_at). Signatures are plain ed25519 collected M-of-N (no aggregate threshold crypto); a 2/3 supermajority of valid committee co-signatures promotes the session to `high_assurance`. No person ever hand-signs — committee keys sign programmatically.
+
+`integrity_record_attestation` is the ingest sink (called by the P2P co-sign path). It rejects non-committee signers, **unregistered key bindings** (`stake_pubkey_registry` — blocks pairing a real member's stake address with an attacker pubkey), and signatures that don't verify over the terminal payload, then re-resolves the ladder (`recompute_assurance` → `resolve_assurance`). `integrity_get_assurance` reads the current level + valid co-sign count.
+
+The issued credential carries the resolved `assuranceLevel` plus `commitmentRoot` / `anchorRef` in its signed `integrity` block, and `IssuancePolicy.requiredAssuranceLevel` can gate issuance on it.
+
+### Operator / committee IPCs
+
+| Command | Description |
+|---------|-------------|
+| `integrity_record_attestation` | Ingest + verify a committee co-signature; re-resolve assurance. |
+| `integrity_set_anchor` | Record the commitment-root anchor reference; promote to `anchored`. |
+| `integrity_get_assurance` | Read assurance level + valid attestation count for a session. |
+
 ## Database Schema
 
 ```sql
-integrity_sessions       -- One per learning session
-  └── integrity_snapshots  -- Random-interval measurements, includes ai_paste_anomaly REAL (migration 044)
-                         --   and gaze_offscreen_ratio REAL (migration 060)
+integrity_sessions       -- One per learning session; assurance_level +
+                         --   commitment_root + anchor_ref (migration 061)
+  └── integrity_snapshots  -- Random-interval measurements, includes ai_paste_anomaly REAL (migration 044),
+                         --   gaze_offscreen_ratio REAL (migration 060), commitment_hash (migration 061)
+integrity_attestations   -- Committee co-signatures per session (migration 061)
 sentinel_user_models     -- Per-user candle weights: keystroke_ae, mouse_cnn, gaze_calib (JSON blobs)
 sentinel_priors          -- DAO-ratified attack patterns AND classifier weights
                          --   keystroke / mouse: labeled-samples blobs

@@ -1163,6 +1163,9 @@ pub fn run() {
             commands::integrity::integrity_get_session,
             commands::integrity::integrity_list_sessions,
             commands::integrity::integrity_list_snapshots,
+            commands::integrity::integrity_record_attestation,
+            commands::integrity::integrity_set_anchor,
+            commands::integrity::integrity_get_assurance,
             // Sentinel DAO (adversarial-prior governance)
             commands::sentinel_dao::sentinel_dao_get_info,
             // Sentinel adversarial priors (propose / ratify / list / sync / load)
