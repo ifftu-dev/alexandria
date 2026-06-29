@@ -69,6 +69,7 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (59, "governance_dao_onchain_links", MIGRATION_059),
     (60, "integrity_gaze_offscreen_ratio", MIGRATION_060),
     (61, "integrity_attestation", MIGRATION_061),
+    (62, "org_role_assessments", MIGRATION_062),
 ];
 
 const MIGRATION_001: &str = r#"
@@ -2396,4 +2397,42 @@ CREATE TABLE IF NOT EXISTS integrity_attestations (
 
 CREATE INDEX IF NOT EXISTS idx_integrity_attestations_session
     ON integrity_attestations(session_id);
+"#;
+
+const MIGRATION_062: &str = r#"
+-- ============================================================
+-- Migration 062: Enterprise sponsors + role/JD assessments
+--
+-- The monetization layer (§ Integrity→VC bridge productization P2):
+-- an organization sponsors a role-specific assessment tied to a job
+-- description, with a per-role issuance policy (the P0 IssuancePolicy)
+-- and required assurance level. Completing the backing assessment with
+-- a satisfying integrity session yields a gated RoleCredential.
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS organizations (
+    id            TEXT PRIMARY KEY,                 -- blake2b(name + owner_address)
+    name          TEXT NOT NULL,
+    owner_address TEXT NOT NULL,                    -- sponsor admin stake address
+    did           TEXT,                             -- optional org issuer DID
+    created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_organizations_owner ON organizations(owner_address);
+
+CREATE TABLE IF NOT EXISTS role_assessments (
+    id                       TEXT PRIMARY KEY,
+    org_id                   TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    role_title               TEXT NOT NULL,         -- e.g. "SRE L4"
+    job_description          TEXT,                  -- JD text
+    course_id                TEXT REFERENCES courses(id),  -- backing assessment
+    skill_ids                TEXT,                  -- JSON array of required skill ids
+    issuance_policy_json     TEXT,                  -- serialized IssuancePolicy (P0)
+    required_assurance_level TEXT,                  -- local|anchored|high_assurance
+    status                   TEXT NOT NULL DEFAULT 'draft',  -- draft|published|archived
+    created_at               TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at               TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_role_assessments_org ON role_assessments(org_id);
 "#;

@@ -1526,6 +1526,40 @@ export interface IssueCredentialRequest {
   integrity_policy?: IssuancePolicy | null
 }
 
+// --- Enterprise sponsors + role/JD assessments (productization P2) -------
+
+export interface Organization {
+  id: string
+  name: string
+  owner_address: string
+  did?: string | null
+  created_at: string
+}
+
+export interface RoleAssessment {
+  id: string
+  org_id: string
+  role_title: string
+  job_description?: string | null
+  course_id?: string | null
+  skill_ids: string[]
+  issuance_policy?: IssuancePolicy | null
+  required_assurance_level?: string | null
+  status: string
+  created_at: string
+  updated_at: string
+}
+
+export interface CreateRoleAssessmentRequest {
+  org_id: string
+  role_title: string
+  job_description?: string | null
+  course_id?: string | null
+  skill_ids?: string[]
+  issuance_policy?: IssuancePolicy | null
+  required_assurance_level?: string | null
+}
+
 export interface VerificationResult {
   credential_id: string
   valid_signature: boolean

@@ -1129,11 +1129,21 @@ A credential MAY be bound to a Sentinel integrity session at issuance. The reque
 When a session is bound, the issuer summarises its terminal state into the `integrity` attestation block (§14.7) and embeds it in the signed envelope. The attestation carries `assuranceLevel`:
 
 - `"local"` — privacy-first default. Figures are device-reported; under this level a determined attacker could suppress flags, so verifiers SHOULD weight `local` attestations accordingly.
-- `"high_assurance"` — figures are independently attested (future mode; see the productization roadmap). Not yet emitted.
+- `"anchored"` — the session's snapshot-commitment root is anchored (timestamp + immutability proof).
+- `"high_assurance"` — a Sentinel-DAO committee supermajority independently co-signed the session. The on-device attestation core, ladder resolution, and co-sign ingest exist; the committee attestor-node daemon that auto-produces co-signatures is integration-pending (see docs/sentinel.md §Automated Attestation).
 
 The `integrityPolicy` bounds — `minIntegrity`, `maxCritical`, `maxWarning`, `requireClean`, `requiredAssuranceLevel` — are each optional. If **any** set bound is violated, issuance MUST be refused (no credential is minted); the issuer returns the first violated bound. A policy without a bound session is a request error. A bound session without a policy embeds the attestation but gates on nothing.
 
 This makes a "trusted" credential one that was only minted when the assessment behind it satisfied the sponsor's integrity rules, with the evidence travelling inside the signed credential for any verifier to check.
+
+#### 14.9.6 Role assessments (enterprise sponsorship)
+
+An **organization** (sponsor) defines **role assessments** that map a job description to a backing assessment plus an issuance gate, so completing the assessment yields a trusted, role-specific credential:
+
+- `Organization` — `{ id, name, owner_address, did? }`. The sponsor's admin identity (stake address) owns the org.
+- `RoleAssessment` — `{ org_id, role_title, job_description, course_id?, skill_ids[], issuance_policy, required_assurance_level }`. The `issuance_policy` is the §14.9.5 `IssuancePolicy`; `required_assurance_level` is folded into it at issuance.
+
+`issue_role_credential(role_assessment_id, subject, integrity_session_id)` is the keystone: it loads the role's policy, folds in the required assurance level, and issues a `RoleCredential` (claim `{ role: role_title, scope: org_name }`) through the §14.9.5 gated pipeline — so the role credential is refused unless the bound integrity session satisfies the sponsor's rules, and carries the integrity attestation for verifiers. Backing IPCs: `create_organization`, `list_organizations`, `create_role_assessment`, `list_role_assessments`, `get_role_assessment`, `set_role_assessment_status`, `issue_role_credential`.
 
 ### 14.10 Non-Transferability Semantics
 

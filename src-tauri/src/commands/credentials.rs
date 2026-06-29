@@ -555,11 +555,13 @@ fn integrity_hash_of(vc: &VerifiableCredential) -> Result<String, String> {
     Ok(hex::encode(blake3::hash(&bytes).as_bytes()))
 }
 
-fn now_rfc3339() -> String {
+pub(crate) fn now_rfc3339() -> String {
     chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
 }
 
-async fn load_issuer_key(state: &State<'_, AppState>) -> Result<(SigningKey, Did), String> {
+pub(crate) async fn load_issuer_key(
+    state: &State<'_, AppState>,
+) -> Result<(SigningKey, Did), String> {
     let ks_guard = state.keystore.lock().await;
     let ks = ks_guard.as_ref().ok_or("vault is locked — unlock first")?;
     let mnemonic = ks.retrieve_mnemonic().map_err(|e| e.to_string())?;
