@@ -200,6 +200,12 @@ const router = createRouter({
       meta: { layout: 'app' },
     },
     {
+      path: '/dashboard/sponsor',
+      name: 'dashboard-sponsor',
+      component: () => import('@/pages/dashboard/Sponsor.vue'),
+      meta: { layout: 'app' },
+    },
+    {
       path: '/dashboard/credentials/:id',
       name: 'dashboard-credential-detail',
       component: () => import('@/pages/dashboard/CredentialDetail.vue'),

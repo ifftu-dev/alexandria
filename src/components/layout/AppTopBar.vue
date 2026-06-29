@@ -347,6 +347,14 @@ const avatarEmoji = computed(() => {
                 My Credentials
               </button>
 
+              <!-- Sponsor -->
+              <button class="flex items-center gap-2 rounded-lg px-3 py-2 w-full text-sm text-foreground transition-colors hover:bg-muted" @click="navigateFromMenu('/dashboard/sponsor')">
+                <svg class="h-4 w-4 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M3 21v-2a4 4 0 014-4h10a4 4 0 014 4v2M7 7a4 4 0 108 0 4 4 0 00-8 0z" />
+                </svg>
+                Sponsor
+              </button>
+
               <!-- My Skills -->
               <button class="flex items-center gap-2 rounded-lg px-3 py-2 w-full text-sm text-foreground transition-colors hover:bg-muted" @click="navigateFromMenu('/skills')">
                 <svg class="h-4 w-4 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">

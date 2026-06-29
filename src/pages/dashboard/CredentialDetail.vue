@@ -156,6 +156,43 @@ const decisionVariant = computed(() => {
         </p>
       </section>
 
+      <!-- Integrity attestation (§ Integrity→VC bridge) -->
+      <section v-if="credential.integrity" class="mb-6 rounded-xl bg-card shadow-sm p-6">
+        <h2 class="text-base font-semibold mb-3">Assessment integrity</h2>
+        <div class="grid gap-2 text-sm">
+          <div class="flex items-center justify-between">
+            <span class="text-muted-foreground">Assurance</span>
+            <AppBadge :variant="credential.integrity.assuranceLevel === 'high_assurance' ? 'success' : credential.integrity.assuranceLevel === 'anchored' ? 'accent' : 'secondary'">
+              {{ credential.integrity.assuranceLevel }}
+            </AppBadge>
+          </div>
+          <div class="flex items-center justify-between">
+            <span class="text-muted-foreground">Session status</span>
+            <span class="text-foreground">{{ credential.integrity.status }}</span>
+          </div>
+          <div class="flex items-center justify-between">
+            <span class="text-muted-foreground">Integrity score</span>
+            <span class="text-foreground">{{ credential.integrity.integrityScore ?? 'n/a' }}</span>
+          </div>
+          <div class="flex items-center justify-between">
+            <span class="text-muted-foreground">Flags</span>
+            <span class="text-foreground">{{ credential.integrity.criticalCount }} critical · {{ credential.integrity.warningCount }} warning</span>
+          </div>
+          <div v-if="credential.integrity.commitmentRoot" class="flex items-center justify-between gap-3">
+            <span class="text-muted-foreground">Commitment root</span>
+            <span class="truncate font-mono text-xs text-muted-foreground">{{ credential.integrity.commitmentRoot }}</span>
+          </div>
+          <div v-if="credential.integrity.anchorRef" class="flex items-center justify-between gap-3">
+            <span class="text-muted-foreground">Anchor</span>
+            <span class="truncate font-mono text-xs text-muted-foreground">{{ credential.integrity.anchorRef }}</span>
+          </div>
+        </div>
+        <p class="mt-3 text-xs text-muted-foreground">
+          Signed into the credential envelope — the issuer attests to these figures.
+          <span v-if="credential.integrity.assuranceLevel === 'local'">Local: device-reported.</span>
+        </p>
+      </section>
+
       <!-- Raw payload -->
       <section class="rounded-xl bg-card shadow-sm p-6">
         <h2 class="text-base font-semibold mb-3">Raw credential</h2>
