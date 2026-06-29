@@ -1469,6 +1469,18 @@ export interface Witness {
   validator_name: string
 }
 
+// Sentinel assessment-integrity attestation embedded in a credential at
+// issuance (§ Integrity→VC bridge). Part of the signed envelope.
+export interface IntegrityAssertion {
+  sessionId: string
+  status: string
+  integrityScore?: number | null
+  criticalCount: number
+  warningCount: number
+  assuranceLevel: string
+  generatedAt: string
+}
+
 export interface VerifiableCredential {
   '@context': string[]
   /** W3C VC v2 §4.3 — optional. Locally-issued credentials always have one. */
@@ -1481,7 +1493,18 @@ export interface VerifiableCredential {
   credentialStatus?: CredentialStatus | null
   termsOfUse?: TermsOfUse | null
   witness?: Witness | null
+  integrity?: IntegrityAssertion | null
   proof: Proof
+}
+
+// Issuance-time integrity gate (§ Integrity→VC bridge). Evaluated
+// against the bound session; on violation, issuance is refused.
+export interface IssuancePolicy {
+  min_integrity?: number | null
+  max_critical?: number | null
+  max_warning?: number | null
+  require_clean?: boolean
+  required_assurance_level?: string | null
 }
 
 export interface IssueCredentialRequest {
@@ -1492,6 +1515,10 @@ export interface IssueCredentialRequest {
   expiration_date?: string | null
   /** §11.4 supersession: id of the prior credential this replaces. */
   supersedes?: string | null
+  /** § Integrity→VC bridge: bind issuance to a Sentinel session. */
+  integrity_session_id?: string | null
+  /** Optional issuance gate; requires integrity_session_id. */
+  integrity_policy?: IssuancePolicy | null
 }
 
 export interface VerificationResult {

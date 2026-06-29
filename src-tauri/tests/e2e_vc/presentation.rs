@@ -36,6 +36,8 @@ fn issue_for_subject() -> (
         evidence_refs: vec!["urn:uuid:e1".into()],
         expiration_date: None,
         supersedes: None,
+        integrity_session_id: None,
+        integrity_policy: None,
     };
     let vc = issue_credential_impl(db.conn(), &issuer_key, &issuer, &req, TEST_NOW)
         .expect("issue credential");

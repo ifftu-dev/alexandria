@@ -324,6 +324,8 @@ mod tests {
             evidence_refs: vec![],
             expiration_date: None,
             supersedes: None,
+            integrity_session_id: None,
+            integrity_policy: None,
         };
         issue_credential_impl(db.conn(), &issuer_key, &issuer, &req, NOW).unwrap();
         (db, subject, skill.to_string())
@@ -417,6 +419,7 @@ mod tests {
             credential_status: None,
             terms_of_use: None,
             witness: None,
+            integrity: None,
             proof: crate::domain::vc::Proof {
                 type_: "Ed25519Signature2020".into(),
                 created: NOW.into(),

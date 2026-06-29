@@ -121,6 +121,7 @@ mod tests {
                 credential_status: None,
                 terms_of_use: None,
                 witness: None,
+                integrity: None,
                 proof: Proof {
                     type_: "Ed25519Signature2020".into(),
                     created: "2026-04-13T00:00:00Z".into(),

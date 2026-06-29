@@ -14,9 +14,128 @@ use crate::crypto::did::{derive_did_key, Did, VerificationMethodRef};
 use crate::crypto::wallet;
 use crate::domain::vc::sign::{sign_credential, UnsignedCredential};
 use crate::domain::vc::{
-    Claim, CredentialStatus, CredentialType, Proof, VerifiableCredential, VerificationResult,
+    Claim, CredentialStatus, CredentialType, IntegrityAssertion, Proof, VerifiableCredential,
+    VerificationResult,
 };
 use crate::AppState;
+
+/// Issuance-time integrity gate (§ Integrity→VC bridge). When an
+/// `IssueCredentialRequest` carries both an `integrity_session_id` and
+/// an `IssuancePolicy`, the session's terminal state must satisfy every
+/// set bound or issuance is refused — so a "trusted" credential is only
+/// minted when the assessment that backed it passed the sponsor's
+/// integrity rules. All fields are optional/opt-in; an absent policy
+/// means "embed the attestation but gate on nothing".
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct IssuancePolicy {
+    /// Minimum final integrity score in `[0,1]`.
+    #[serde(default)]
+    pub min_integrity: Option<f64>,
+    /// Maximum tolerated critical flags.
+    #[serde(default)]
+    pub max_critical: Option<i64>,
+    /// Maximum tolerated warning flags.
+    #[serde(default)]
+    pub max_warning: Option<i64>,
+    /// If true, the session status must be `completed` (clean) —
+    /// `flagged` / `suspended` are rejected.
+    #[serde(default)]
+    pub require_clean: bool,
+    /// If set, the assertion's `assurance_level` must equal this
+    /// (e.g. `"high_assurance"`).
+    #[serde(default)]
+    pub required_assurance_level: Option<String>,
+}
+
+impl IssuancePolicy {
+    /// Returns `Err(reason)` for the first bound the assertion violates.
+    fn evaluate(&self, a: &IntegrityAssertion) -> Result<(), String> {
+        if self.require_clean && a.status != "completed" {
+            return Err(format!(
+                "issuance policy: session status is '{}', requires 'completed'",
+                a.status
+            ));
+        }
+        if let Some(min) = self.min_integrity {
+            match a.integrity_score {
+                Some(score) if score >= min => {}
+                Some(score) => {
+                    return Err(format!(
+                        "issuance policy: integrity score {score:.3} below minimum {min:.3}"
+                    ))
+                }
+                None => {
+                    return Err(
+                        "issuance policy: minimum integrity required but session has no score"
+                            .into(),
+                    )
+                }
+            }
+        }
+        if let Some(max) = self.max_critical {
+            if a.critical_count > max {
+                return Err(format!(
+                    "issuance policy: {} critical flags exceed maximum {max}",
+                    a.critical_count
+                ));
+            }
+        }
+        if let Some(max) = self.max_warning {
+            if a.warning_count > max {
+                return Err(format!(
+                    "issuance policy: {} warning flags exceed maximum {max}",
+                    a.warning_count
+                ));
+            }
+        }
+        if let Some(req) = &self.required_assurance_level {
+            if &a.assurance_level != req {
+                return Err(format!(
+                    "issuance policy: assurance level '{}' does not meet required '{req}'",
+                    a.assurance_level
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Load an integrity session and summarise it as an `IntegrityAssertion`
+/// for embedding at issuance. `assurance_level` is `"local"` until the
+/// independently-attested high-assurance mode lands.
+fn build_integrity_assertion(
+    conn: &Connection,
+    session_id: &str,
+    now: &str,
+) -> Result<IntegrityAssertion, String> {
+    let row = conn
+        .query_row(
+            "SELECT status, integrity_score, critical_count, warning_count
+             FROM integrity_sessions WHERE id = ?1",
+            params![session_id],
+            |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, Option<f64>>(1)?,
+                    r.get::<_, i64>(2)?,
+                    r.get::<_, i64>(3)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("integrity session {session_id} not found"))?;
+    let (status, integrity_score, critical_count, warning_count) = row;
+    Ok(IntegrityAssertion {
+        session_id: session_id.to_string(),
+        status,
+        integrity_score,
+        critical_count,
+        warning_count,
+        assurance_level: "local".to_string(),
+        generated_at: now.to_string(),
+    })
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct IssueCredentialRequest {
@@ -30,6 +149,16 @@ pub struct IssueCredentialRequest {
     /// /claim-kind invariants from §11.4 are enforced at insert time.
     #[serde(default)]
     pub supersedes: Option<String>,
+    /// § Integrity→VC bridge: if set, the credential is bound to this
+    /// integrity session — its terminal state is summarised into an
+    /// `IntegrityAssertion` and embedded in the signed envelope.
+    #[serde(default)]
+    pub integrity_session_id: Option<String>,
+    /// Optional issuance gate evaluated against the bound session.
+    /// Requires `integrity_session_id`. On violation, issuance is
+    /// refused (no credential is minted).
+    #[serde(default)]
+    pub integrity_policy: Option<IssuancePolicy>,
 }
 
 const STATUS_LIST_BITS: usize = 16_384; // 2 KiB bitmap per list
@@ -78,6 +207,28 @@ pub fn issue_credential_impl(
         index,
     )?;
 
+    // § Integrity→VC bridge: summarise the bound session, enforce the
+    // optional issuance gate, and embed the attestation in the envelope.
+    // A policy without a session is a caller error; a session without a
+    // policy embeds the attestation but gates on nothing.
+    let integrity = match &req.integrity_session_id {
+        Some(session_id) => {
+            let assertion = build_integrity_assertion(conn, session_id, now)?;
+            if let Some(policy) = &req.integrity_policy {
+                policy.evaluate(&assertion)?;
+            }
+            Some(assertion)
+        }
+        None => {
+            if req.integrity_policy.is_some() {
+                return Err(
+                    "integrity_policy requires integrity_session_id to evaluate against".into(),
+                );
+            }
+            None
+        }
+    };
+
     let vc = VerifiableCredential {
         context: vec![W3C_VC_V1.into(), ALEXANDRIA_V1.into()],
         id: Some(credential_id.clone()),
@@ -95,6 +246,7 @@ pub fn issue_credential_impl(
         }),
         terms_of_use: None,
         witness: None,
+        integrity,
         proof: Proof {
             type_: "Ed25519Signature2020".into(),
             created: now.to_string(),
@@ -812,7 +964,89 @@ mod tests {
             evidence_refs: vec!["urn:uuid:e1".into()],
             expiration_date: None,
             supersedes: None,
+            integrity_session_id: None,
+            integrity_policy: None,
         }
+    }
+
+    /// Insert a terminal integrity session row for bridge tests.
+    fn seed_session(
+        conn: &Connection,
+        id: &str,
+        status: &str,
+        score: Option<f64>,
+        critical: i64,
+        warning: i64,
+    ) {
+        conn.execute(
+            "INSERT INTO integrity_sessions
+                (id, enrollment_id, status, integrity_score, critical_count, warning_count, started_at)
+             VALUES (?1, NULL, ?2, ?3, ?4, ?5, ?6)",
+            params![id, status, score, critical, warning, NOW],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn integrity_assertion_embedded_when_session_bound() {
+        let (db, key, issuer, subject) = setup();
+        seed_session(db.conn(), "sess_ok", "completed", Some(0.91), 0, 1);
+        let mut req = sample_request(subject);
+        req.integrity_session_id = Some("sess_ok".into());
+        let vc = issue_credential_impl(db.conn(), &key, &issuer, &req, NOW).unwrap();
+        let a = vc.integrity.as_ref().expect("integrity assertion embedded");
+        assert_eq!(a.session_id, "sess_ok");
+        assert_eq!(a.status, "completed");
+        assert_eq!(a.integrity_score, Some(0.91));
+        assert_eq!(a.warning_count, 1);
+        assert_eq!(a.assurance_level, "local");
+        // Assertion is inside the signed envelope.
+        let v = serde_json::to_value(&vc).unwrap();
+        assert!(v.get("integrity").is_some(), "integrity not serialized");
+    }
+
+    #[test]
+    fn issuance_policy_blocks_when_session_fails_gate() {
+        let (db, key, issuer, subject) = setup();
+        seed_session(db.conn(), "sess_bad", "suspended", Some(0.30), 2, 1);
+        let mut req = sample_request(subject);
+        req.integrity_session_id = Some("sess_bad".into());
+        req.integrity_policy = Some(IssuancePolicy {
+            min_integrity: Some(0.70),
+            require_clean: true,
+            ..Default::default()
+        });
+        let err = issue_credential_impl(db.conn(), &key, &issuer, &req, NOW).unwrap_err();
+        assert!(err.contains("issuance policy"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn issuance_policy_passes_when_session_meets_gate() {
+        let (db, key, issuer, subject) = setup();
+        seed_session(db.conn(), "sess_pass", "completed", Some(0.88), 0, 0);
+        let mut req = sample_request(subject);
+        req.integrity_session_id = Some("sess_pass".into());
+        req.integrity_policy = Some(IssuancePolicy {
+            min_integrity: Some(0.70),
+            max_critical: Some(0),
+            require_clean: true,
+            ..Default::default()
+        });
+        let vc = issue_credential_impl(db.conn(), &key, &issuer, &req, NOW).unwrap();
+        assert!(vc.integrity.is_some());
+        assert!(!vc.proof.jws.is_empty());
+    }
+
+    #[test]
+    fn issuance_policy_without_session_is_rejected() {
+        let (db, key, issuer, subject) = setup();
+        let mut req = sample_request(subject);
+        req.integrity_policy = Some(IssuancePolicy {
+            require_clean: true,
+            ..Default::default()
+        });
+        let err = issue_credential_impl(db.conn(), &key, &issuer, &req, NOW).unwrap_err();
+        assert!(err.contains("requires integrity_session_id"), "got: {err}");
     }
 
     #[test]
