@@ -63,6 +63,10 @@ pub struct ScoreGazeResponse {
     pub estimate: GazeEstimate,
     #[serde(rename = "faceCount")]
     pub face_count: usize,
+    /// Highest-confidence detection (bbox + landmarks) for overlay, so a
+    /// caller needs only this one YuNet pass — no separate detect call.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detection: Option<FaceDetection>,
 }
 
 /// Detect → load per-user calibration (if any) → estimate gaze. The
@@ -99,6 +103,7 @@ pub async fn sentinel_score_gaze(
     Ok(ScoreGazeResponse {
         estimate,
         face_count: dets.len(),
+        detection: best.cloned(),
     })
 }
 
@@ -154,6 +159,14 @@ pub async fn sentinel_train_gaze_calib(
         training_samples: weights.training_samples,
         trained_epochs: weights.trained_epochs,
     })
+}
+
+/// Report the OS frontmost application — used when the assessment window
+/// loses focus to identify what the learner switched to. `None` if it
+/// can't be resolved (unsupported platform, Wayland, permission).
+#[tauri::command]
+pub async fn sentinel_frontmost_app() -> Option<crate::sentinel::active_app::ActiveApp> {
+    crate::sentinel::active_app::frontmost_app()
 }
 
 /// Highest-score detection in the set.

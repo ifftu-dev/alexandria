@@ -10,6 +10,9 @@ import { initTheme, initThemeFromSettings } from '@/composables/useTheme'
 import { initShortcutsFromSettings } from '@/composables/useKeyboardShortcuts'
 import { initOmniRecentsFromSettings } from '@/composables/useOmniSearch'
 import { initSentinelFlagsFromSettings } from '@/composables/useSentinel'
+import SentinelDebugPip from '@/components/integrity/SentinelDebugPip.vue'
+
+const isDev = import.meta.env.DEV
 import { clearSettingsCache, useSettings } from '@/composables/useSettings'
 import { isMac } from '@/composables/usePlatform'
 
@@ -131,4 +134,7 @@ onUnmounted(() => {
   <component v-else :is="layout">
     <router-view />
   </component>
+
+  <!-- Dev-only live Sentinel observability PiP. -->
+  <SentinelDebugPip v-if="isDev" />
 </template>

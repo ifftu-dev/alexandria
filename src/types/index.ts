@@ -965,6 +965,8 @@ export interface GazeEstimate {
 export interface ScoreGazeResponse {
   estimate: GazeEstimate
   faceCount: number
+  /** Best detection for overlay — present when a face was found. */
+  detection?: FaceDetection | null
 }
 
 // Per-frame gaze features (head-pose proxies + coarse iris offset),

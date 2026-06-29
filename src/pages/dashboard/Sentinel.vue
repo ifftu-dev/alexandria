@@ -203,6 +203,16 @@ function outcomeBadgeVariant(outcome: string): 'success' | 'warning' | 'error' {
   return 'error'
 }
 
+// Copy a session id to the clipboard (used to feed the Sponsor issue flow).
+const copiedSessionId = ref<string | null>(null)
+async function copySessionId(id: string) {
+  try {
+    await navigator.clipboard.writeText(id)
+    copiedSessionId.value = id
+    setTimeout(() => { if (copiedSessionId.value === id) copiedSessionId.value = null }, 1500)
+  } catch { /* clipboard unavailable */ }
+}
+
 function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error' {
   if (severity === 'info') return 'primary'
   if (severity === 'warning') return 'warning'
@@ -594,6 +604,17 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
                     {{ formatDate(session.ended_at) }}
                   </span>
                 </div>
+                <!-- Session id — copy to feed the Sponsor issuance flow. -->
+                <button
+                  class="mt-1.5 flex max-w-full items-center gap-1 font-mono text-xs text-muted-foreground transition-colors hover:text-foreground"
+                  title="Copy session id"
+                  @click="copySessionId(session.id)"
+                >
+                  <svg class="h-3 w-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                  </svg>
+                  <span class="truncate">{{ copiedSessionId === session.id ? 'copied!' : session.id }}</span>
+                </button>
               </div>
 
               <!-- Right: integrity score -->
