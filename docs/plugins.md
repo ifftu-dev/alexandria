@@ -26,6 +26,40 @@ own UI flows through the same contract, which keeps it production-grade.
 - The manifest shape is frozen at `api_version = "1"`. New fields are
   additive and optional so a 2026 manifest still parses in 2046.
 
+### Dependencies
+
+A manifest may declare other plugins it requires via an optional
+`dependencies` array of plugin **ids** (`did:key:<author>#<slug>`):
+
+```json
+"dependencies": [
+  "did:key:z6Mk…#codejudge-javascript",
+  "did:key:z6Mk…#codejudge-lua"
+]
+```
+
+When a plugin is installed the host resolves each dependency to an
+already-installed bundle (a built-in, or one installed earlier / by the
+user) and records the edge in `plugin_dependencies` (migration 063). A
+dependency that can't be resolved fails the install and rolls it back —
+Phase 1 has no on-demand bundle fetch, so dependencies must already be
+present (built-ins always are). Resolution is by id, not CID, so it
+survives a dependency being reinstalled at a new version.
+
+Two guarantees follow:
+
+- **Auto-install** — installing a plugin pulls its dependencies in first.
+  For built-ins this just means registering a plugin *after* the plugins
+  it depends on in `builtins::BUILTIN_PLUGINS` (the umbrella
+  `codejudge-multilang` is registered last, after its language plugins).
+- **Uninstall guard** — `plugin_uninstall` refuses to remove a plugin that
+  other installed plugins still depend on ("still required by …"); the
+  dependents must be removed first.
+
+The Settings → Plugins UI shows both directions on each card (*Requires* /
+*Required by*) via `plugin_list_dependencies` + the manifest. Edges cascade
+away automatically when either endpoint is uninstalled.
+
 ## Architecture
 
 ### Backend (Rust, `src-tauri/src/plugins/`)
@@ -168,6 +202,15 @@ are interactive (replay, retry, review results), so the learner clicks
 | `music-trainer` | interactive | Capability-prompt demo (mic + amplitude meter) |
 | `music-reviews` | interactive | Scrolling-timeline pitch trainer; see its `README.md`. Pitch detection unit-tested via `ui/pitch.test.js` |
 | `irl-review` | interactive | Upload work for human instructor review |
+| `codejudge-javascript` | interactive | Solve coding challenges in JS; runs the solution locally in a QuickJS WebAssembly sandbox against stdin/stdout test cases |
+| `codejudge-lua` | interactive | Same, in Lua via the fengari VM |
+| `codejudge-multilang` | interactive | Umbrella that `depends on` the codejudge language plugins; installing it auto-installs them |
+
+The codejudge plugins' in-browser runtimes (QuickJS, fengari) and
+CodeMirror are not committed — they are fetched/built into each bundle's
+`ui/vendor/` (and the problem bank baked into `ui/problems.js`) by
+`plugins/builtin/codejudge-shared/fetch-runtimes.sh`, then embedded via
+`include_bytes!`. Run that script before building.
 
 ## IRL Review flow
 
