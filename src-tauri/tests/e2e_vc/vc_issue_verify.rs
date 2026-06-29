@@ -28,6 +28,7 @@ fn sample_unsigned(subject: app_lib::crypto::did::Did) -> UnsignedCredential {
             credential_status: None,
             terms_of_use: None,
             witness: None,
+            integrity: None,
             proof: Proof {
                 type_: "Ed25519Signature2020".into(),
                 created: TEST_NOW.into(),
@@ -105,6 +106,8 @@ async fn revoked_credential_is_rejected() {
         evidence_refs: vec![],
         expiration_date: None,
         supersedes: None,
+        integrity_session_id: None,
+        integrity_policy: None,
     };
     let vc =
         issue_credential_impl(db.conn(), &issuer_key, &issuer_did, &req, TEST_NOW).expect("issue");

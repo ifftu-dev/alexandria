@@ -190,6 +190,7 @@ pub fn issue_for_observation(
         }),
         terms_of_use: None,
         witness: Some(witness),
+        integrity: None,
         proof: Proof {
             type_: "Ed25519Signature2020".into(),
             created: now.clone(),

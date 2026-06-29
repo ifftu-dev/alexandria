@@ -207,6 +207,38 @@ pub struct Witness {
     pub validator_name: String,
 }
 
+/// Sentinel assessment-integrity attestation, embedded in a credential
+/// at issuance time (§ Integrity→VC bridge). It records the terminal
+/// state of the integrity session that backed the assessment so a
+/// verifier can see *how the credential was earned*, not just that it
+/// was issued. Part of the signed envelope — the JWS covers it, so the
+/// issuer attests to these numbers and they cannot be altered after the
+/// fact.
+///
+/// `assurance_level` distinguishes the privacy-first local default
+/// (`"local"`) from a future independently-attested high-assurance mode
+/// (`"high_assurance"`); under the local level the figures are
+/// device-reported and a determined attacker could suppress flags, so
+/// downstream verifiers should weight `local` accordingly.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct IntegrityAssertion {
+    /// The `integrity_sessions.id` this attestation summarises.
+    pub session_id: String,
+    /// Terminal session status: `completed` / `flagged` / `suspended`.
+    pub status: String,
+    /// Final weighted integrity score in `[0,1]`, if the session
+    /// recorded one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub integrity_score: Option<f64>,
+    pub critical_count: i64,
+    pub warning_count: i64,
+    /// `"local"` (privacy-first default) or `"high_assurance"`.
+    pub assurance_level: String,
+    /// RFC3339 timestamp the assertion was generated (issuance time).
+    pub generated_at: String,
+}
+
 /// The signed credential envelope. Serialises to W3C VC v2 JSON-LD.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -232,6 +264,11 @@ pub struct VerifiableCredential {
     /// over by the JWS when present.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub witness: Option<Witness>,
+    /// Sentinel assessment-integrity attestation (§ Integrity→VC
+    /// bridge). Present when the credential was issued against a
+    /// monitored assessment session. Signed over by the JWS.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub integrity: Option<IntegrityAssertion>,
     pub proof: Proof,
 }
 

@@ -1051,6 +1051,15 @@ Each credential MUST conform to the following logical structure.
     "policyVersion": "1.0",
     "usage": "verification-permitted"
   },
+  "integrity": {
+    "sessionId": "isess_...",
+    "status": "completed",
+    "integrityScore": 0.91,
+    "criticalCount": 0,
+    "warningCount": 1,
+    "assuranceLevel": "local",
+    "generatedAt": "2026-04-13T00:00:00Z"
+  },
   "proof": {
     "type": "Ed25519Signature2020",
     "created": "2026-04-13T00:00:00Z",
@@ -1060,6 +1069,8 @@ Each credential MUST conform to the following logical structure.
   }
 }
 ```
+
+The optional `integrity` block is the **Sentinel integrity attestation** (§14.9.5). When present it is part of the signed envelope — the JWS covers it, so the issuer attests to the figures and a verifier reads how the credential was earned, not merely that it was issued. Absent on credentials not backed by a monitored assessment session.
 
 ### 14.8 Required Credential Fields
 
@@ -1107,6 +1118,22 @@ Before issuance, the issuer MUST verify:
 4. evidence integrity
 5. policy compatibility
 6. issuer authorization to issue that credential type
+
+#### 14.9.5 Integrity-gated issuance (Integrity→VC bridge)
+
+A credential MAY be bound to a Sentinel integrity session at issuance. The request carries:
+
+- `integritySessionId` — the `integrity_sessions.id` whose terminal state backs the assessment.
+- `integrityPolicy` (optional) — an issuance gate evaluated against that session.
+
+When a session is bound, the issuer summarises its terminal state into the `integrity` attestation block (§14.7) and embeds it in the signed envelope. The attestation carries `assuranceLevel`:
+
+- `"local"` — privacy-first default. Figures are device-reported; under this level a determined attacker could suppress flags, so verifiers SHOULD weight `local` attestations accordingly.
+- `"high_assurance"` — figures are independently attested (future mode; see the productization roadmap). Not yet emitted.
+
+The `integrityPolicy` bounds — `minIntegrity`, `maxCritical`, `maxWarning`, `requireClean`, `requiredAssuranceLevel` — are each optional. If **any** set bound is violated, issuance MUST be refused (no credential is minted); the issuer returns the first violated bound. A policy without a bound session is a request error. A bound session without a policy embeds the attestation but gates on nothing.
+
+This makes a "trusted" credential one that was only minted when the assessment behind it satisfied the sponsor's integrity rules, with the evidence travelling inside the signed credential for any verifier to check.
 
 ### 14.10 Non-Transferability Semantics
 
