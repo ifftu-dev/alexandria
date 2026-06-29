@@ -110,7 +110,8 @@ fn build_integrity_assertion(
 ) -> Result<IntegrityAssertion, String> {
     let row = conn
         .query_row(
-            "SELECT status, integrity_score, critical_count, warning_count
+            "SELECT status, integrity_score, critical_count, warning_count,
+                    assurance_level, commitment_root, anchor_ref
              FROM integrity_sessions WHERE id = ?1",
             params![session_id],
             |r| {
@@ -119,20 +120,33 @@ fn build_integrity_assertion(
                     r.get::<_, Option<f64>>(1)?,
                     r.get::<_, i64>(2)?,
                     r.get::<_, i64>(3)?,
+                    r.get::<_, String>(4)?,
+                    r.get::<_, Option<String>>(5)?,
+                    r.get::<_, Option<String>>(6)?,
                 ))
             },
         )
         .optional()
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("integrity session {session_id} not found"))?;
-    let (status, integrity_score, critical_count, warning_count) = row;
+    let (
+        status,
+        integrity_score,
+        critical_count,
+        warning_count,
+        assurance_level,
+        commitment_root,
+        anchor_ref,
+    ) = row;
     Ok(IntegrityAssertion {
         session_id: session_id.to_string(),
         status,
         integrity_score,
         critical_count,
         warning_count,
-        assurance_level: "local".to_string(),
+        assurance_level,
+        commitment_root,
+        anchor_ref,
         generated_at: now.to_string(),
     })
 }

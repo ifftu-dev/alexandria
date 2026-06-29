@@ -68,6 +68,7 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (58, "governance_vote_signatures", MIGRATION_058),
     (59, "governance_dao_onchain_links", MIGRATION_059),
     (60, "integrity_gaze_offscreen_ratio", MIGRATION_060),
+    (61, "integrity_attestation", MIGRATION_061),
 ];
 
 const MIGRATION_001: &str = r#"
@@ -2354,4 +2355,45 @@ const MIGRATION_060: &str = r#"
 -- ============================================================
 
 ALTER TABLE integrity_snapshots ADD COLUMN gaze_offscreen_ratio REAL;
+"#;
+
+const MIGRATION_061: &str = r#"
+-- ============================================================
+-- Migration 061: Automated integrity attestation (Integrity→VC bridge P1)
+--
+-- Layered, fully-automated high-assurance for integrity sessions — no
+-- human ever hand-signs. Two layers:
+--   * Anchored  — the client folds each snapshot into a running
+--     commitment chain; the terminal `commitment_root` is anchored
+--     (DHT/chain, referenced by `anchor_ref`) for a timestamp +
+--     immutability proof.
+--   * High-assurance — committee-operated attestor nodes auto-counter-
+--     sign the live commitment; a 2/3 supermajority of valid committee
+--     co-signatures promotes the session.
+-- `assurance_level` is the resolved ladder: 'local' | 'anchored' |
+-- 'high_assurance'. See docs/sentinel.md §Attestation.
+-- ============================================================
+
+ALTER TABLE integrity_sessions ADD COLUMN assurance_level TEXT NOT NULL DEFAULT 'local';
+ALTER TABLE integrity_sessions ADD COLUMN commitment_root TEXT;
+ALTER TABLE integrity_sessions ADD COLUMN anchor_ref TEXT;
+
+-- Per-snapshot running commitment hash (chained with the prior). Lets
+-- the terminal root be re-derived + audited from the snapshot stream.
+ALTER TABLE integrity_snapshots ADD COLUMN commitment_hash TEXT;
+
+-- Committee co-signatures over a session's attestation payload. One row
+-- per (session, attestor); the attestor is a Sentinel-DAO committee
+-- member identified by stake address. public_key/signature are hex.
+CREATE TABLE IF NOT EXISTS integrity_attestations (
+    session_id        TEXT NOT NULL REFERENCES integrity_sessions(id) ON DELETE CASCADE,
+    attestor_address  TEXT NOT NULL,
+    public_key        TEXT NOT NULL,
+    signature         TEXT NOT NULL,
+    signed_at         TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (session_id, attestor_address)
+);
+
+CREATE INDEX IF NOT EXISTS idx_integrity_attestations_session
+    ON integrity_attestations(session_id);
 "#;

@@ -1477,7 +1477,12 @@ export interface IntegrityAssertion {
   integrityScore?: number | null
   criticalCount: number
   warningCount: number
+  /** Assurance ladder: 'local' | 'anchored' | 'high_assurance'. */
   assuranceLevel: string
+  /** Terminal commitment root of the snapshot stream, if attested. */
+  commitmentRoot?: string | null
+  /** Anchor reference (DHT/chain) for the commitment root, if anchored. */
+  anchorRef?: string | null
   generatedAt: string
 }
 

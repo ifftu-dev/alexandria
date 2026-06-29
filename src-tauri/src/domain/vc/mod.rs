@@ -233,8 +233,17 @@ pub struct IntegrityAssertion {
     pub integrity_score: Option<f64>,
     pub critical_count: i64,
     pub warning_count: i64,
-    /// `"local"` (privacy-first default) or `"high_assurance"`.
+    /// Resolved assurance ladder: `"local"` (privacy-first default) /
+    /// `"anchored"` (commitment chain anchored) / `"high_assurance"`
+    /// (committee-co-signed).
     pub assurance_level: String,
+    /// Terminal commitment root of the snapshot stream, when the session
+    /// was attested. Lets a verifier tie the attestation to the anchor.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commitment_root: Option<String>,
+    /// Anchor reference (DHT/chain) for the commitment root, if anchored.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub anchor_ref: Option<String>,
     /// RFC3339 timestamp the assertion was generated (issuance time).
     pub generated_at: String,
 }
