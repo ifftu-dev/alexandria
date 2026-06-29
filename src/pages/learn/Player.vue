@@ -89,16 +89,21 @@ const sentinelStarted = ref(false)
 const downloadingElementId = ref<string | null>(null)
 const downloadError = ref<string | null>(null)
 
-// Camera verification — see docs/sentinel.md §Camera. Opt-in only; if
-// granted, a 3s loop drives sentinel.verifyFace() against a hidden
-// <video>. All face processing is on-device; no frames are stored or sent.
-const FACE_LOOP_INTERVAL_MS = 3000
+// Camera verification — see docs/sentinel.md §Camera. Opt-in only; all
+// processing is on-device, no frames stored or sent. Two cadences:
+//   - gaze (second-device / look-away): fast, to catch brief glances.
+//   - face identity (LBP): slower; identity doesn't change tick-to-tick
+//     and the LBP pass is synchronous, so we run it less often.
+const GAZE_LOOP_INTERVAL_MS = 1000
+const FACE_ID_LOOP_INTERVAL_MS = 3000
 const cameraVideoRef = ref<HTMLVideoElement | null>(null)
 const cameraStream = ref<MediaStream | null>(null)
 const cameraError = ref<string | null>(null)
 const cameraStarting = ref(false)
 const lastFacePresent = ref<boolean | null>(null)
-let faceLoopTimer: ReturnType<typeof setInterval> | null = null
+let gazeLoopTimer: ReturnType<typeof setInterval> | null = null
+let faceIdLoopTimer: ReturnType<typeof setInterval> | null = null
+let gazeInFlight = false
 
 const activeChapter = ref<string | null>(null)
 const activeElement = ref<string | null>(null)
@@ -333,25 +338,28 @@ function releaseCameraStream() {
 }
 
 function startFaceLoop() {
-  if (faceLoopTimer) return
-  faceLoopTimer = setInterval(() => {
+  if (gazeLoopTimer || faceIdLoopTimer) return
+  // Fast gaze loop — catches brief look-aways. Backend YuNet + head-pose;
+  // an in-flight guard prevents pile-up if a tick is slower than the
+  // interval (e.g. on mobile).
+  gazeLoopTimer = setInterval(() => {
+    const video = cameraVideoRef.value
+    if (!video || gazeInFlight) return
+    gazeInFlight = true
+    void sentinel.scoreGaze(video).finally(() => { gazeInFlight = false })
+  }, GAZE_LOOP_INTERVAL_MS)
+  // Slower LBP identity/presence loop (synchronous, advisory).
+  faceIdLoopTimer = setInterval(() => {
     const video = cameraVideoRef.value
     if (!video) return
-    // LBP identity/presence check (sync, advisory). Gaze /
-    // second-device detection runs in the Rust backend (YuNet +
-    // head-pose) and is fire-and-forget — it tallies into the
-    // per-snapshot gaze accumulators inside the composable.
-    const result = sentinel.verifyFace(video)
-    lastFacePresent.value = result.present
-    void sentinel.scoreGaze(video)
-  }, FACE_LOOP_INTERVAL_MS)
+    lastFacePresent.value = sentinel.verifyFace(video).present
+  }, FACE_ID_LOOP_INTERVAL_MS)
 }
 
 function stopFaceLoop() {
-  if (faceLoopTimer) {
-    clearInterval(faceLoopTimer)
-    faceLoopTimer = null
-  }
+  if (gazeLoopTimer) { clearInterval(gazeLoopTimer); gazeLoopTimer = null }
+  if (faceIdLoopTimer) { clearInterval(faceIdLoopTimer); faceIdLoopTimer = null }
+  gazeInFlight = false
 }
 
 function selectElement(chapterId: string, elementId: string) {

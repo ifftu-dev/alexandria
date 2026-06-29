@@ -153,6 +153,24 @@ image = { version = "0.25", default-features = false, features = ["jpeg"] }
 # macOS/Linux desktop builds can link SQLCipher against the runner's native crypto stack.
 rusqlite = { version = "0.38", features = ["bundled-sqlcipher", "uuid"] }
 
+# ── Active-app detection (Sentinel, per-OS) ──────────────────────────
+# macOS: NSWorkspace.frontmostApplication for the focused app's name + bundle id.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-app-kit = "0.3"
+objc2-foundation = "0.3"
+
+# Windows: GetForegroundWindow → process image name.
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_System_Threading",
+] }
+
+# Linux (X11): _NET_ACTIVE_WINDOW → WM_CLASS. Wayland returns None.
+[target.'cfg(target_os = "linux")'.dependencies]
+x11rb = "0.13"
+
 # ── Desktop-only dependencies ────────────────────────────────────────
 [target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
 # Secure secret storage (IOTA Stronghold encrypted vault — desktop uses this instead of portable)

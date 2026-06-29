@@ -103,7 +103,8 @@ fn flag_severity(flag: &str) -> Severity {
         | "low_integrity"
         | "paste_classifier_anomaly"
         | "gaze_wander"
-        | "gaze_occluded" => Severity::Warning,
+        | "gaze_occluded"
+        | "app_switch" => Severity::Warning,
         "tab_switching" | "no_face" | "frequent_absence" => Severity::Info,
         _ => Severity::Info,
     }

@@ -488,6 +488,62 @@ pub fn run() {
     tracing::subscriber::set_global_default(TracingToLog).ok();
 
     tauri::Builder::default()
+        .on_window_event(|window, event| {
+            // Native app-focus signal for Sentinel: when the assessment
+            // window loses focus, report which OS app took the
+            // foreground (webview can't see this). Emitted to the
+            // frontend, which folds it into the integrity snapshot.
+            if let tauri::WindowEvent::Focused(focused) = event {
+                use tauri::Emitter;
+                let app = if *focused {
+                    None
+                } else {
+                    crate::sentinel::active_app::frontmost_app()
+                };
+                let _ = window.emit(
+                    "sentinel://focus",
+                    serde_json::json!({ "focused": *focused, "app": app }),
+                );
+            }
+        })
+        .menu(|handle| {
+            // Standard macOS menus. In dev builds only, append a Develop
+            // submenu with "Reload Webviews" (reload all webviews without
+            // restarting) and "Sentinel Live View" (toggle the debug PiP).
+            let menu = tauri::menu::Menu::default(handle)?;
+            if cfg!(debug_assertions) {
+                let reload =
+                    tauri::menu::MenuItemBuilder::with_id("reload_webviews", "Reload Webviews")
+                        .accelerator("CmdOrCtrl+R")
+                        .build(handle)?;
+                let pip = tauri::menu::MenuItemBuilder::with_id(
+                    "toggle_sentinel_pip",
+                    "Sentinel Live View",
+                )
+                .accelerator("CmdOrCtrl+Shift+S")
+                .build(handle)?;
+                let develop = tauri::menu::SubmenuBuilder::new(handle, "Develop")
+                    .item(&reload)
+                    .item(&pip)
+                    .build()?;
+                menu.append(&develop)?;
+            }
+            Ok(menu)
+        })
+        .on_menu_event(|app, event| {
+            use tauri::{Emitter, Manager};
+            match event.id().0.as_str() {
+                "reload_webviews" => {
+                    for (_, w) in app.webview_windows() {
+                        let _ = w.eval("window.location.reload()");
+                    }
+                }
+                "toggle_sentinel_pip" => {
+                    let _ = app.emit("develop://toggle-sentinel", ());
+                }
+                _ => {}
+            }
+        })
         .setup(|app| {
             // Initialize logging (always enabled so we can diagnose mobile crashes)
             app.handle().plugin(
@@ -1203,6 +1259,7 @@ pub fn run() {
             commands::sentinel_gaze::sentinel_extract_gaze_features,
             commands::sentinel_gaze::sentinel_score_gaze,
             commands::sentinel_gaze::sentinel_train_gaze_calib,
+            commands::sentinel_gaze::sentinel_frontmost_app,
             // Sentinel holdout evaluation (threshold-sealed)
             commands::sentinel_holdout::sentinel_holdout_upload,
             commands::sentinel_holdout::sentinel_holdout_list,

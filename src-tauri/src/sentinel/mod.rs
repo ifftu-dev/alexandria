@@ -14,6 +14,7 @@
 //! events and sends them across IPC; everything else runs in this
 //! crate.
 
+pub mod active_app;
 pub mod face_detect;
 pub mod features;
 pub mod gaze;

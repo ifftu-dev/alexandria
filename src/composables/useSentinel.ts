@@ -1,5 +1,6 @@
-import { ref, readonly } from 'vue'
+import { ref, readonly, reactive } from 'vue'
 import { invoke as tauriInvoke } from '@tauri-apps/api/core'
+import { listen as tauriListen, type UnlistenFn } from '@tauri-apps/api/event'
 import { useLocalApi } from './useLocalApi'
 import { useAuth } from './useAuth'
 import {
@@ -42,6 +43,13 @@ const PASTE_ANOMALY_THRESHOLD = 0.95
 const PASTE_ANOMALY_CRITICAL_THRESHOLD = 0.99
 const KEYSTROKE_ANOMALY_THRESHOLD = 0.65
 const MOUSE_HUMAN_THRESHOLD = 0.5
+// Minimum typed keystrokes before the paste classifier's timing features
+// are meaningful. Below this (e.g. a click-only MCQ with no typing) the
+// 12-dim feature vector is degenerate — near-zero flight reads as a paste
+// burst — so we treat the signal as absent rather than emit a false
+// paste_classifier_anomaly. A genuine paste (pasteEventCount > 0) still
+// scores regardless.
+const MIN_PASTE_KEYSTROKES = 12
 
 function isAnomalousPasteScore(s: number): boolean {
   return s >= PASTE_ANOMALY_THRESHOLD
@@ -73,6 +81,50 @@ const sessionId = ref<string | null>(null)
 const isActive = ref(false)
 const integrityScore = ref(1.0)
 const consistencyScore = ref(1.0)
+
+// Live debug snapshot — populated each snapshot dispatch so the dev-only
+// Sentinel PiP can mirror exactly what the engine is computing. Module-
+// scoped + reactive so any useSentinel() consumer shares one view.
+const sentinelDebug = reactive({
+  active: false,
+  cameraOptedIn: false,
+  lastSnapshotAt: 0,
+  integrity: 1.0,
+  consistency: 1.0,
+  flags: [] as string[],
+  tabSwitches: 0,
+  pastedChars: 0,
+  keystrokeBufferLen: 0,
+  mouseBufferLen: 0,
+  gazeOffscreenRatio: null as number | null,
+  gazeTotalChecks: 0,
+  gazeOffscreenChecks: 0,
+  gazeOccludedChecks: 0,
+  gazeDownGlances: 0,
+  aiPasteAnomaly: -1,
+  aiKeystrokeAnomaly: -1,
+  aiMouseHumanProb: -1,
+  facePresent: false,
+  faceCount: 0,
+  appFocusLostCount: 0,
+  appFocusLostMs: 0,
+  lastApp: '' as string,
+  // Full rule + AI signal snapshot (computed each window).
+  signals: null as SignalData | null,
+  // Live session-gaze mirror (every camera tick, not just at snapshot) —
+  // lets the dev PiP show the real session sampling rate + latest read.
+  sessionGazeChecks: 0,
+  lastGazeAt: 0,
+  sessionGazeYaw: 0,
+  sessionGazePitch: 0,
+  sessionGazeOnScreen: true,
+  sessionGazeOccluded: false,
+})
+
+// Fast timer (dev PiP) mirroring live event buffers between snapshots so
+// typing / mouse activity is visible in real time, not just at snapshot
+// cadence.
+let liveTimer: ReturnType<typeof setInterval> | null = null
 const cameraOptedIn = ref(false)
 
 // AI scoring is advisory until validated with labeled data (see
@@ -166,6 +218,15 @@ let faceMatch: boolean | undefined
 let consecutiveNoFaceChecks = 0
 let totalFaceChecks = 0
 let faceAbsentChecks = 0
+
+// Native app-focus tracking — driven by the Rust `sentinel://focus`
+// event (window blur/focus + the OS app that took the foreground).
+// Per-snapshot-window counters; `focusLostAt` carries an open blur.
+let appFocusLostCount = 0
+let appFocusLostMs = 0
+let focusLostAt = 0
+let lastFocusApp = ''
+let unlistenFocus: UnlistenFn | null = null
 
 // Gaze / second-device tracking, accumulated per snapshot window by
 // scoreGaze() and drained in the snapshot dispatch. All gaze inference
@@ -654,19 +715,25 @@ export function useSentinel() {
       const deviceFp = userId ? (await computeDeviceFingerprint()).substring(0, 16) : ''
 
       let pasteAnomaly = -1
-      try {
-        const resp = await tauriInvoke<ScorePasteResponse>('sentinel_score_paste', {
-          req: {
-            events: keystrokeBuffer.map(k => ({ key: k.key, dwellMs: k.dwellMs, flightMs: k.flightMs })),
-            paste_event_count: pasteEventCount,
-            pasted_char_count: pastedCharCount,
-            window_ms: windowMs,
-          },
-        })
-        pasteAnomaly = resp.score
-        loadedClassifierInfo.value = resp.classifier
-      } catch (err) {
-        console.warn('[sentinel] paste score IPC failed', err)
+      // Only run the paste classifier when there's enough typing for its
+      // timing features to be meaningful, or an actual paste occurred.
+      // Otherwise the signal is absent (-1) — avoids false positives on
+      // low-/no-typing snapshots (e.g. MCQ clicking).
+      if (keystrokeBuffer.length >= MIN_PASTE_KEYSTROKES || pasteEventCount > 0) {
+        try {
+          const resp = await tauriInvoke<ScorePasteResponse>('sentinel_score_paste', {
+            req: {
+              events: keystrokeBuffer.map(k => ({ key: k.key, dwellMs: k.dwellMs, flightMs: k.flightMs })),
+              paste_event_count: pasteEventCount,
+              pasted_char_count: pastedCharCount,
+              window_ms: windowMs,
+            },
+          })
+          pasteAnomaly = resp.score
+          loadedClassifierInfo.value = resp.classifier
+        } catch (err) {
+          console.warn('[sentinel] paste score IPC failed', err)
+        }
       }
 
       let keystrokeAnomaly = -1
@@ -720,10 +787,41 @@ export function useSentinel() {
         if (occludedRatio > GAZE_OCCLUDED_RATIO) anomalies.push('gaze_occluded')
       }
 
+      // Native app-switch: the assessment window lost focus to another OS
+      // app this window. Roll any still-open blur into the elapsed total.
+      if (focusLostAt) { appFocusLostMs += Date.now() - focusLostAt; focusLostAt = Date.now() }
+      if (appFocusLostCount > 0) anomalies.push('app_switch')
+
       const deduped = [...new Set(anomalies)]
 
       integrityScore.value = integrity
       consistencyScore.value = consistency
+
+      // Mirror this snapshot into the live debug view (dev PiP).
+      sentinelDebug.active = isActive.value
+      sentinelDebug.cameraOptedIn = cameraOptedIn.value
+      sentinelDebug.lastSnapshotAt = Date.now()
+      sentinelDebug.integrity = integrity
+      sentinelDebug.consistency = consistency
+      sentinelDebug.flags = deduped
+      sentinelDebug.tabSwitches = signals.tab_switches
+      sentinelDebug.pastedChars = signals.pasted_chars
+      sentinelDebug.keystrokeBufferLen = keystrokeBuffer.length
+      sentinelDebug.mouseBufferLen = mouseBuffer.length
+      sentinelDebug.gazeOffscreenRatio = gazeOffscreenRatio
+      sentinelDebug.gazeTotalChecks = gazeTotalChecks
+      sentinelDebug.gazeOffscreenChecks = gazeOffscreenChecks
+      sentinelDebug.gazeOccludedChecks = gazeOccludedChecks
+      sentinelDebug.gazeDownGlances = gazeDownGlances
+      sentinelDebug.aiPasteAnomaly = pasteAnomaly
+      sentinelDebug.aiKeystrokeAnomaly = keystrokeAnomaly
+      sentinelDebug.aiMouseHumanProb = mouseHumanProb
+      sentinelDebug.facePresent = facePresent ?? false
+      sentinelDebug.faceCount = faceCount ?? 0
+      sentinelDebug.appFocusLostCount = appFocusLostCount
+      sentinelDebug.appFocusLostMs = appFocusLostMs
+      sentinelDebug.lastApp = lastFocusApp
+      sentinelDebug.signals = signals
 
       try {
         await invoke('integrity_submit_snapshot', {
@@ -751,6 +849,8 @@ export function useSentinel() {
       gazeOffscreenChecks = 0
       gazeOccludedChecks = 0
       gazeDownGlances = 0
+      appFocusLostCount = 0
+      appFocusLostMs = 0
       keystrokeBuffer = []
       mouseBuffer = []
       tabSwitchCount = 0
@@ -852,6 +952,8 @@ export function useSentinel() {
       const response = await invoke<StartSessionResponse>('integrity_start_session', { enrollmentId })
       sessionId.value = response.session_id
       isActive.value = true
+      sentinelDebug.active = true
+      sentinelDebug.sessionGazeChecks = 0
       snapshotWindowStartMs = Date.now()
 
       // Best-effort upgrade to the latest DAO-ratified paste classifier.
@@ -870,6 +972,40 @@ export function useSentinel() {
       document.addEventListener('visibilitychange', onVisibilityChange)
       document.addEventListener('paste', onPaste)
       window.addEventListener('resize', onDevToolsCheck)
+
+      // Native window-focus signal — fires when the OS switches the
+      // foreground app away from the assessment (webview can't see this).
+      appFocusLostCount = 0
+      appFocusLostMs = 0
+      focusLostAt = 0
+      lastFocusApp = ''
+      try {
+        unlistenFocus = await tauriListen<{ focused: boolean; app?: { name: string; identifier: string } | null }>(
+          'sentinel://focus',
+          (e) => {
+            if (!isActive.value) return
+            if (e.payload.focused) {
+              if (focusLostAt) { appFocusLostMs += Date.now() - focusLostAt; focusLostAt = 0 }
+            } else {
+              appFocusLostCount++
+              focusLostAt = Date.now()
+              if (e.payload.app?.name) {
+                lastFocusApp = e.payload.app.name
+                sentinelDebug.lastApp = lastFocusApp // live PiP feedback
+              }
+            }
+          },
+        )
+      } catch (err) {
+        console.warn('[sentinel] focus listener failed', err)
+      }
+
+      // Live activity mirror for the dev PiP (typing / mouse between snapshots).
+      if (liveTimer) clearInterval(liveTimer)
+      liveTimer = setInterval(() => {
+        sentinelDebug.keystrokeBufferLen = keystrokeBuffer.length
+        sentinelDebug.mouseBufferLen = mouseBuffer.length
+      }, 400)
 
       scheduleNextSnapshot()
     } catch (e) {
@@ -937,15 +1073,16 @@ export function useSentinel() {
   const scoreGaze = async (
     video: HTMLVideoElement,
   ): Promise<GazeEstimate | null> => {
-    if (!video || video.readyState < 2) return null
+    if (!video || video.readyState < 2 || document.hidden) return null
     const userId = stakeAddress.value
     if (!userId) return null
     try {
-      // Cap the longest side at 320px — YuNet letterboxes into 640²
-      // internally, so larger frames cost IPC bytes for no accuracy.
+      // Cap the longest side at 224px — YuNet letterboxes into 640²
+      // internally, so a smaller frame only trims IPC payload, not
+      // detection (the model runs at a fixed input size regardless).
       const vw = video.videoWidth || 640
       const vh = video.videoHeight || 480
-      const scale = Math.min(1, 320 / Math.max(vw, vh))
+      const scale = Math.min(1, 224 / Math.max(vw, vh))
       const w = Math.max(1, Math.round(vw * scale))
       const h = Math.max(1, Math.round(vh * scale))
       if (!gazeCanvas) gazeCanvas = document.createElement('canvas')
@@ -965,6 +1102,14 @@ export function useSentinel() {
       })
       const est = resp.estimate
       gazeTotalChecks++
+      // Live mirror so the dev PiP shows the real session sampling rate
+      // + latest read (distinct from the PiP's own preview loop).
+      sentinelDebug.sessionGazeChecks++
+      sentinelDebug.lastGazeAt = Date.now()
+      sentinelDebug.sessionGazeYaw = est.yaw
+      sentinelDebug.sessionGazePitch = est.pitch
+      sentinelDebug.sessionGazeOnScreen = est.onScreen
+      sentinelDebug.sessionGazeOccluded = est.occluded
       if (est.occluded) {
         gazeOccludedChecks++
       } else if (!est.onScreen) {
@@ -992,7 +1137,7 @@ export function useSentinel() {
     try {
       const vw = video.videoWidth || 640
       const vh = video.videoHeight || 480
-      const scale = Math.min(1, 320 / Math.max(vw, vh))
+      const scale = Math.min(1, 224 / Math.max(vw, vh))
       const w = Math.max(1, Math.round(vw * scale))
       const h = Math.max(1, Math.round(vh * scale))
       if (!gazeCanvas) gazeCanvas = document.createElement('canvas')
@@ -1034,6 +1179,7 @@ export function useSentinel() {
     if (!isActive.value || !sessionId.value) return
 
     isActive.value = false
+    sentinelDebug.active = false
 
     if (snapshotTimer) { clearTimeout(snapshotTimer); snapshotTimer = null }
 
@@ -1044,6 +1190,9 @@ export function useSentinel() {
     document.removeEventListener('visibilitychange', onVisibilityChange)
     document.removeEventListener('paste', onPaste)
     window.removeEventListener('resize', onDevToolsCheck)
+    if (unlistenFocus) { unlistenFocus(); unlistenFocus = null }
+    if (liveTimer) { clearInterval(liveTimer); liveTimer = null }
+    sentinelDebug.active = false
 
     const { integrity, consistency } = computeScores()
     integrityScore.value = integrity
@@ -1635,6 +1784,7 @@ export function useSentinel() {
     scoreGaze,
     extractGazeFeatures,
     trainGazeCalibration,
+    debug: readonly(sentinelDebug),
     getDebugState,
     getFinalScore,
     getSessionId,
