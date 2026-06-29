@@ -548,8 +548,27 @@ pub async fn integrity_record_attestation(
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
     let db = db_guard.as_ref().ok_or("database not initialized")?;
-    let conn = db.conn();
+    record_attestation_impl(
+        db.conn(),
+        &session_id,
+        &attestor_address,
+        &public_key,
+        &signature,
+    )
+}
 
+/// Verify + store one committee co-signature over a finalized session's
+/// terminal payload, then re-resolve the assurance ladder. Shared by the
+/// IPC command and the P2P co-sign ingest handler. Rejects non-committee
+/// signers, unregistered key bindings, unfinalized sessions, and
+/// signatures that don't verify.
+pub(crate) fn record_attestation_impl(
+    conn: &rusqlite::Connection,
+    session_id: &str,
+    attestor_address: &str,
+    public_key: &str,
+    signature: &str,
+) -> Result<String, String> {
     // Session must be finalized — co-signatures are over the terminal
     // payload (status/score/root/ended_at).
     let ended: Option<String> = conn
@@ -567,21 +586,21 @@ pub async fn integrity_record_attestation(
     }
 
     // Authorization: committee membership + registered key binding.
-    if !load_committee(conn)?.contains(&attestor_address) {
+    if !load_committee(conn)?.contains(attestor_address) {
         return Err("attestor is not a Sentinel DAO committee member".into());
     }
-    if !pubkey_registered(conn, &attestor_address, &public_key)? {
+    if !pubkey_registered(conn, attestor_address, public_key)? {
         return Err("attestor public key is not a registered binding".into());
     }
 
     // Signature must verify over the terminal payload before we store it.
-    let committee: HashSet<String> = std::iter::once(attestor_address.clone()).collect();
+    let committee: HashSet<String> = std::iter::once(attestor_address.to_string()).collect();
     let cosig = CoSignature {
-        attestor_address: attestor_address.clone(),
-        public_key_hex: public_key.clone(),
-        signature_hex: signature.clone(),
+        attestor_address: attestor_address.to_string(),
+        public_key_hex: public_key.to_string(),
+        signature_hex: signature.to_string(),
     };
-    let payload = terminal_payload(conn, &session_id)?;
+    let payload = terminal_payload(conn, session_id)?;
     if count_valid_committee_cosigs(&payload, std::slice::from_ref(&cosig), &committee) != 1 {
         return Err("attestation signature failed verification".into());
     }
@@ -602,7 +621,7 @@ pub async fn integrity_record_attestation(
     )
     .map_err(|e| e.to_string())?;
 
-    recompute_assurance(conn, &session_id)
+    recompute_assurance(conn, session_id)
 }
 
 /// Record a confirmed anchor reference (DHT/chain) for the session's

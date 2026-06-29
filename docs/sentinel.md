@@ -328,7 +328,11 @@ Every `integrity_submit_snapshot` folds the snapshot into a running hash (`fold_
 - **Anchor (baseline)** — the terminal `commitment_root` is anchored; `integrity_set_anchor` records the reference and promotes the session to `anchored`. Proves timing + immutability (the data existed before the learner saw the result).
 - **Committee co-sign (upgrade)** — committee-operated **attestor nodes auto-counter-sign** the terminal attestation payload (`attestation_payload`, binding session_id/status/score/counts/commitment_root/ended_at). Signatures are plain ed25519 collected M-of-N (no aggregate threshold crypto); a 2/3 supermajority of valid committee co-signatures promotes the session to `high_assurance`. No person ever hand-signs — committee keys sign programmatically.
 
-`integrity_record_attestation` is the ingest sink (called by the P2P co-sign path). It rejects non-committee signers, **unregistered key bindings** (`stake_pubkey_registry` — blocks pairing a real member's stake address with an attacker pubkey), and signatures that don't verify over the terminal payload, then re-resolves the ladder (`recompute_assurance` → `resolve_assurance`). `integrity_get_assurance` reads the current level + valid co-sign count.
+`record_attestation_impl` is the shared ingest core (behind the `integrity_record_attestation` IPC and the P2P handler). It rejects non-committee signers, **unregistered key bindings** (`stake_pubkey_registry` — blocks pairing a real member's stake address with an attacker pubkey), and signatures that don't verify over the terminal payload, then re-resolves the ladder (`recompute_assurance` → `resolve_assurance`). `integrity_get_assurance` reads the current level + valid co-sign count.
+
+### Propagation
+
+Co-signatures travel on `/alexandria/integrity-attestation/1.0`. `p2p::integrity_attest::handle_integrity_cosign_message` is the learner-side inbound handler (mirrors `p2p::sentinel`): it binds the gossip broadcaster to the claimed attestor, then feeds the announcement through `record_attestation_impl` so every trust check re-runs on receipt. The committee attestor-node daemon (which auto-produces co-signatures after independently witnessing the live snapshot-commitment stream) and the network-layer topic dispatch are the remaining integration work — see the productization roadmap.
 
 The issued credential carries the resolved `assuranceLevel` plus `commitmentRoot` / `anchorRef` in its signed `integrity` block, and `IssuancePolicy.requiredAssuranceLevel` can gate issuance on it.
 
