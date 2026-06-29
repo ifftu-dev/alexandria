@@ -118,14 +118,187 @@ const IRL_REVIEW_BUNDLE: BuiltinBundle<'static> = BuiltinBundle {
     ],
 };
 
-/// Every built-in plugin shipped with this binary. Order is irrelevant —
-/// installs are idempotent, so a future entry being added partway through
-/// the list won't reorder anything.
+/// codejudge: Lua — interactive coding-challenge element. The learner writes
+/// Lua; it runs locally in the bundled fengari VM (pure-JS Lua, no eval/wasm/
+/// network) against the problem's test cases. No grader (interactive only).
+///
+/// The `ui/vendor/*` and `ui/problems.js` files are build-time fetched/baked by
+/// `plugins/builtin/codejudge-shared/fetch-runtimes.sh lua` — run it before
+/// building or these `include_bytes!` paths won't exist.
+const CODEJUDGE_LUA_BUNDLE: BuiltinBundle<'static> = BuiltinBundle {
+    slug: "codejudge-lua",
+    manifest_json: include_bytes!("../../../plugins/builtin/codejudge-lua/manifest.json"),
+    grader_wasm: None,
+    ui_files: &[
+        (
+            "ui/index.html",
+            include_bytes!("../../../plugins/builtin/codejudge-lua/ui/index.html"),
+        ),
+        (
+            "ui/style.css",
+            include_bytes!("../../../plugins/builtin/codejudge-lua/ui/style.css"),
+        ),
+        (
+            "ui/app.js",
+            include_bytes!("../../../plugins/builtin/codejudge-lua/ui/app.js"),
+        ),
+        (
+            "ui/runner.js",
+            include_bytes!("../../../plugins/builtin/codejudge-lua/ui/runner.js"),
+        ),
+        (
+            "ui/problems.js",
+            include_bytes!("../../../plugins/builtin/codejudge-lua/ui/problems.js"),
+        ),
+        (
+            "ui/vendor/codemirror.js",
+            include_bytes!("../../../plugins/builtin/codejudge-lua/ui/vendor/codemirror.js"),
+        ),
+        (
+            "ui/vendor/codemirror.css",
+            include_bytes!("../../../plugins/builtin/codejudge-lua/ui/vendor/codemirror.css"),
+        ),
+        (
+            "ui/vendor/theme-material-darker.css",
+            include_bytes!(
+                "../../../plugins/builtin/codejudge-lua/ui/vendor/theme-material-darker.css"
+            ),
+        ),
+        (
+            "ui/vendor/mode.js",
+            include_bytes!("../../../plugins/builtin/codejudge-lua/ui/vendor/mode.js"),
+        ),
+        (
+            "ui/vendor/fengari-web.js",
+            include_bytes!("../../../plugins/builtin/codejudge-lua/ui/vendor/fengari-web.js"),
+        ),
+        (
+            "icon.svg",
+            include_bytes!("../../../plugins/builtin/codejudge-lua/icon.svg"),
+        ),
+        (
+            "README.md",
+            include_bytes!("../../../plugins/builtin/codejudge-lua/README.md"),
+        ),
+    ],
+};
+
+/// codejudge: JavaScript — interactive coding-challenge element. The learner
+/// writes JS; it runs locally in the bundled QuickJS WebAssembly engine (wasm
+/// embedded as base64, no eval, no network) against the problem's test cases.
+/// No grader (interactive only). `ui/vendor/*` and `ui/problems.js` are
+/// build-time produced by `fetch-runtimes.sh javascript`.
+const CODEJUDGE_JS_BUNDLE: BuiltinBundle<'static> = BuiltinBundle {
+    slug: "codejudge-javascript",
+    manifest_json: include_bytes!("../../../plugins/builtin/codejudge-javascript/manifest.json"),
+    grader_wasm: None,
+    ui_files: &[
+        (
+            "ui/index.html",
+            include_bytes!("../../../plugins/builtin/codejudge-javascript/ui/index.html"),
+        ),
+        (
+            "ui/style.css",
+            include_bytes!("../../../plugins/builtin/codejudge-javascript/ui/style.css"),
+        ),
+        (
+            "ui/app.js",
+            include_bytes!("../../../plugins/builtin/codejudge-javascript/ui/app.js"),
+        ),
+        (
+            "ui/runner.js",
+            include_bytes!("../../../plugins/builtin/codejudge-javascript/ui/runner.js"),
+        ),
+        (
+            "ui/problems.js",
+            include_bytes!("../../../plugins/builtin/codejudge-javascript/ui/problems.js"),
+        ),
+        (
+            "ui/vendor/codemirror.js",
+            include_bytes!("../../../plugins/builtin/codejudge-javascript/ui/vendor/codemirror.js"),
+        ),
+        (
+            "ui/vendor/codemirror.css",
+            include_bytes!(
+                "../../../plugins/builtin/codejudge-javascript/ui/vendor/codemirror.css"
+            ),
+        ),
+        (
+            "ui/vendor/theme-material-darker.css",
+            include_bytes!(
+                "../../../plugins/builtin/codejudge-javascript/ui/vendor/theme-material-darker.css"
+            ),
+        ),
+        (
+            "ui/vendor/mode.js",
+            include_bytes!("../../../plugins/builtin/codejudge-javascript/ui/vendor/mode.js"),
+        ),
+        (
+            "ui/vendor/quickjs.js",
+            include_bytes!("../../../plugins/builtin/codejudge-javascript/ui/vendor/quickjs.js"),
+        ),
+        (
+            "icon.svg",
+            include_bytes!("../../../plugins/builtin/codejudge-javascript/icon.svg"),
+        ),
+        (
+            "README.md",
+            include_bytes!("../../../plugins/builtin/codejudge-javascript/README.md"),
+        ),
+    ],
+};
+
+/// codejudge (umbrella) — runs no code itself; its manifest declares the
+/// per-language judge plugins as `dependencies`, so installing it pulls them
+/// in. Must be registered AFTER its dependencies in `BUILTIN_PLUGINS` so
+/// dependency resolution finds them already installed. Interactive landing UI.
+const CODEJUDGE_MULTILANG_BUNDLE: BuiltinBundle<'static> = BuiltinBundle {
+    slug: "codejudge-multilang",
+    manifest_json: include_bytes!("../../../plugins/builtin/codejudge-multilang/manifest.json"),
+    grader_wasm: None,
+    ui_files: &[
+        (
+            "ui/index.html",
+            include_bytes!("../../../plugins/builtin/codejudge-multilang/ui/index.html"),
+        ),
+        (
+            "ui/style.css",
+            include_bytes!("../../../plugins/builtin/codejudge-multilang/ui/style.css"),
+        ),
+        (
+            "ui/app.js",
+            include_bytes!("../../../plugins/builtin/codejudge-multilang/ui/app.js"),
+        ),
+        (
+            "ui/problems.js",
+            include_bytes!("../../../plugins/builtin/codejudge-multilang/ui/problems.js"),
+        ),
+        (
+            "icon.svg",
+            include_bytes!("../../../plugins/builtin/codejudge-multilang/icon.svg"),
+        ),
+        (
+            "README.md",
+            include_bytes!("../../../plugins/builtin/codejudge-multilang/README.md"),
+        ),
+    ],
+};
+
+/// Every built-in plugin shipped with this binary. Mostly order-independent
+/// (installs are idempotent), but a plugin that declares `dependencies` must
+/// appear *after* the plugins it depends on, since dependency resolution at
+/// install time requires the dependencies to already be installed. The
+/// codejudge language plugins therefore precede the `codejudge-multilang`
+/// umbrella.
 pub const BUILTIN_PLUGINS: &[BuiltinBundle<'static>] = &[
     MCQ_BUNDLE,
     MUSIC_TRAINER_BUNDLE,
     MUSIC_REVIEWS_BUNDLE,
     IRL_REVIEW_BUNDLE,
+    CODEJUDGE_LUA_BUNDLE,
+    CODEJUDGE_JS_BUNDLE,
+    // Umbrella last: it depends on the two language plugins above.
+    CODEJUDGE_MULTILANG_BUNDLE,
 ];
 
 /// Install every embedded built-in plugin if not already present. Called
@@ -182,4 +355,45 @@ pub fn install_all(db: &Database, plugins_dir: &Path) -> InstallStats {
     }
 
     stats
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::plugins::verifier;
+    use tempfile::TempDir;
+
+    fn test_db() -> Database {
+        let db = Database::open_in_memory().expect("db");
+        db.run_migrations().expect("migrations");
+        db
+    }
+
+    #[test]
+    fn install_all_installs_builtins_and_records_codejudge_deps() {
+        let db = test_db();
+        let dir = TempDir::new().unwrap();
+
+        let stats = install_all(&db, dir.path());
+        assert_eq!(stats.failed, 0, "no builtin should fail to install");
+        assert_eq!(stats.installed, BUILTIN_PLUGINS.len());
+
+        // The umbrella declares the two language plugins as dependencies; after
+        // install_all (umbrella registered last) those edges must exist.
+        let umbrella_cid = verifier::compute_plugin_cid(CODEJUDGE_MULTILANG_BUNDLE.manifest_json);
+        let mut dep_names: Vec<String> = registry::list_dependencies(&db, &umbrella_cid)
+            .unwrap()
+            .into_iter()
+            .map(|p| p.name)
+            .collect();
+        dep_names.sort();
+        assert_eq!(dep_names, vec!["codejudge: JavaScript", "codejudge: Lua"]);
+
+        // Reverse edge: the Lua plugin reports the umbrella as a dependent, so
+        // a user-facing uninstall of it would be refused while the umbrella is
+        // installed.
+        let lua_cid = verifier::compute_plugin_cid(CODEJUDGE_LUA_BUNDLE.manifest_json);
+        let dependents = registry::list_dependents(&db, &lua_cid).unwrap();
+        assert!(dependents.iter().any(|p| p.plugin_cid == umbrella_cid));
+    }
 }

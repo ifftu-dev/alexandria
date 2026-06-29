@@ -72,8 +72,10 @@ pub fn install_from_directory(
     }
 
     // Idempotent install: if the CID is already present, just return
-    // the existing record. Same content ≠ reinstall.
+    // the existing record. Same content ≠ reinstall — but re-resolve
+    // dependency edges in case they were cleared (CASCADE) or are new.
     if let Some(existing) = get_installed(db, &plugin_cid)? {
+        resolve_and_record_dependencies(db, &plugin_cid, &manifest.dependencies)?;
         return Ok(existing);
     }
 
@@ -134,6 +136,18 @@ pub fn install_from_directory(
             format!("failed to record plugin install: {e}")
         })?;
 
+    // Record dependency edges now that the dependent row exists. A missing
+    // dependency rolls the whole install back (row + bundle dir) so we never
+    // leave a plugin installed whose dependencies aren't satisfied.
+    if let Err(e) = resolve_and_record_dependencies(db, &plugin_cid, &manifest.dependencies) {
+        let _ = db.conn().execute(
+            "DELETE FROM plugin_installed WHERE plugin_cid = ?1",
+            params![plugin_cid],
+        );
+        let _ = fs::remove_dir_all(&dest_dir);
+        return Err(e);
+    }
+
     Ok(record)
 }
 
@@ -161,6 +175,7 @@ pub fn install_builtin(
         // return would leave stale files on disk. Refresh the embedded
         // bytes every startup for builtins — they're authoritative.
         refresh_builtin_files(plugins_dir, &plugin_cid, bundle)?;
+        resolve_and_record_dependencies(db, &plugin_cid, &manifest.dependencies)?;
         return Ok(existing);
     }
 
@@ -241,6 +256,15 @@ pub fn install_builtin(
             let _ = fs::remove_dir_all(&dest_dir);
             format!("failed to record builtin install: {e}")
         })?;
+
+    if let Err(e) = resolve_and_record_dependencies(db, &plugin_cid, &manifest.dependencies) {
+        let _ = db.conn().execute(
+            "DELETE FROM plugin_installed WHERE plugin_cid = ?1",
+            params![plugin_cid],
+        );
+        let _ = fs::remove_dir_all(&dest_dir);
+        return Err(e);
+    }
 
     Ok(record)
 }
@@ -331,6 +355,113 @@ pub fn get_manifest(db: &Database, plugin_cid: &str) -> Result<PluginManifest, S
     let record = get_installed(db, plugin_cid)?
         .ok_or_else(|| format!("plugin not installed: {plugin_cid}"))?;
     manifest::parse_and_validate(record.manifest_json.as_bytes())
+}
+
+/// Find an installed plugin by its manifest `id` (`did:key:<author>#<slug>`)
+/// rather than by CID. Dependencies are declared by id (stable across
+/// reinstalls), so resolution maps id → the concrete installed bundle.
+pub fn get_installed_by_id(
+    db: &Database,
+    plugin_id: &str,
+) -> Result<Option<InstalledPlugin>, String> {
+    for p in list_installed(db)? {
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&p.manifest_json) {
+            if value.get("id").and_then(|v| v.as_str()) == Some(plugin_id) {
+                return Ok(Some(p));
+            }
+        }
+    }
+    Ok(None)
+}
+
+/// Resolve a freshly-installed plugin's declared dependencies and record the
+/// edges. Each dependency must already be installed (a built-in, or installed
+/// earlier in the same pass / by the user). Phase 1 has no on-demand bundle
+/// fetch, so an unresolved dependency is a hard error listing what's missing.
+///
+/// Idempotent: edges are upserted, so re-running on an already-recorded
+/// plugin is a no-op. Call *after* the dependent's `plugin_installed` row
+/// exists (both columns are FKs into it).
+pub fn resolve_and_record_dependencies(
+    db: &Database,
+    dependent_cid: &str,
+    dependencies: &[String],
+) -> Result<(), String> {
+    let mut missing = Vec::new();
+    let mut resolved: Vec<(String, String)> = Vec::new();
+    for dep_id in dependencies {
+        match get_installed_by_id(db, dep_id)? {
+            Some(dep) => resolved.push((dep_id.clone(), dep.plugin_cid)),
+            None => missing.push(dep_id.clone()),
+        }
+    }
+    if !missing.is_empty() {
+        return Err(format!(
+            "missing plugin dependencies (install them first): {}",
+            missing.join(", ")
+        ));
+    }
+    for (dep_id, dep_cid) in resolved {
+        db.conn()
+            .execute(
+                "INSERT INTO plugin_dependencies (plugin_cid, dependency_id, dependency_cid) \
+                 VALUES (?1, ?2, ?3) \
+                 ON CONFLICT(plugin_cid, dependency_id) DO UPDATE SET dependency_cid = excluded.dependency_cid",
+                params![dependent_cid, dep_id, dep_cid],
+            )
+            .map_err(|e| format!("failed to record plugin dependency: {e}"))?;
+    }
+    Ok(())
+}
+
+/// The installed plugins that `plugin_cid` depends on.
+pub fn list_dependencies(db: &Database, plugin_cid: &str) -> Result<Vec<InstalledPlugin>, String> {
+    let dep_cids: Vec<String> = {
+        let conn = db.conn();
+        let mut stmt = conn
+            .prepare("SELECT dependency_cid FROM plugin_dependencies WHERE plugin_cid = ?1")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(params![plugin_cid], |row| row.get::<_, String>(0))
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        rows
+    };
+    let mut out = Vec::new();
+    for cid in dep_cids {
+        if let Some(p) = get_installed(db, &cid)? {
+            out.push(p);
+        }
+    }
+    Ok(out)
+}
+
+/// The installed plugins that depend on `dependency_cid` (reverse edges).
+/// Used to refuse uninstalling a plugin others still need.
+pub fn list_dependents(
+    db: &Database,
+    dependency_cid: &str,
+) -> Result<Vec<InstalledPlugin>, String> {
+    let dependent_cids: Vec<String> = {
+        let conn = db.conn();
+        let mut stmt = conn
+            .prepare("SELECT plugin_cid FROM plugin_dependencies WHERE dependency_cid = ?1")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(params![dependency_cid], |row| row.get::<_, String>(0))
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        rows
+    };
+    let mut out = Vec::new();
+    for cid in dependent_cids {
+        if let Some(p) = get_installed(db, &cid)? {
+            out.push(p);
+        }
+    }
+    Ok(out)
 }
 
 /// Remove a plugin bundle from disk and its rows from the DB.
@@ -614,6 +745,96 @@ mod tests {
         fs::write(dir.join("ui/index.html"), "<html></html>").unwrap();
 
         (manifest_json, sk)
+    }
+
+    /// Build a signed bundle with a given slug + declared dependencies.
+    /// Returns the plugin's manifest id (`did:key:...#slug`).
+    fn build_bundle_slug(dir: &Path, slug: &str, deps: &[String]) -> String {
+        let sk = SigningKey::generate(&mut OsRng);
+        let did = did_from_verifying_key(&sk.verifying_key());
+        let id = format!("{}#{}", did.as_str(), slug);
+        let deps_json = serde_json::to_string(deps).unwrap();
+        let manifest_json = format!(
+            r#"{{
+                "id": "{id}",
+                "version": "0.1.0",
+                "api_version": "1",
+                "host_min_version": "0.1.0",
+                "name": "Plugin {slug}",
+                "author_did": "{did}",
+                "kinds": ["interactive"],
+                "entry": "ui/index.html",
+                "dependencies": {deps_json}
+            }}"#,
+            did = did.as_str()
+        );
+        fs::write(dir.join(MANIFEST_FILENAME), &manifest_json).unwrap();
+        let sig = sk.sign(manifest_json.as_bytes());
+        fs::write(dir.join(SIGNATURE_FILENAME), sig.to_bytes()).unwrap();
+        fs::create_dir_all(dir.join("ui")).unwrap();
+        fs::write(dir.join("ui/index.html"), "<html></html>").unwrap();
+        id
+    }
+
+    #[test]
+    fn install_with_satisfied_dependency_records_edges() {
+        let db = test_db();
+        let plugins_dir = TempDir::new().unwrap();
+
+        let dep_src = TempDir::new().unwrap();
+        let dep_id = build_bundle_slug(dep_src.path(), "dep", &[]);
+        let dep = install_from_directory(&db, plugins_dir.path(), dep_src.path()).unwrap();
+
+        let parent_src = TempDir::new().unwrap();
+        build_bundle_slug(parent_src.path(), "parent", &[dep_id.clone()]);
+        let parent = install_from_directory(&db, plugins_dir.path(), parent_src.path()).unwrap();
+
+        let deps = list_dependencies(&db, &parent.plugin_cid).unwrap();
+        assert_eq!(deps.len(), 1);
+        assert_eq!(deps[0].plugin_cid, dep.plugin_cid);
+
+        let dependents = list_dependents(&db, &dep.plugin_cid).unwrap();
+        assert_eq!(dependents.len(), 1);
+        assert_eq!(dependents[0].plugin_cid, parent.plugin_cid);
+
+        // Resolving by id maps to the concrete installed bundle.
+        let by_id = get_installed_by_id(&db, &dep_id).unwrap().unwrap();
+        assert_eq!(by_id.plugin_cid, dep.plugin_cid);
+    }
+
+    #[test]
+    fn install_with_missing_dependency_is_rejected_and_rolled_back() {
+        let db = test_db();
+        let plugins_dir = TempDir::new().unwrap();
+
+        let parent_src = TempDir::new().unwrap();
+        let bogus = "did:key:z6MkubM4drVzMMYqS5wyWo2tqtWgLrGCMY4qNsEaUjHbLbAN#nope".to_string();
+        build_bundle_slug(parent_src.path(), "parent", &[bogus]);
+
+        let err = install_from_directory(&db, plugins_dir.path(), parent_src.path());
+        assert!(err.is_err());
+        // Rolled back: nothing installed, no bundle dir left behind.
+        assert_eq!(list_installed(&db).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn dependency_edges_cascade_when_dependency_removed() {
+        let db = test_db();
+        let plugins_dir = TempDir::new().unwrap();
+
+        let dep_src = TempDir::new().unwrap();
+        let dep_id = build_bundle_slug(dep_src.path(), "dep", &[]);
+        let dep = install_from_directory(&db, plugins_dir.path(), dep_src.path()).unwrap();
+
+        let parent_src = TempDir::new().unwrap();
+        build_bundle_slug(parent_src.path(), "parent", &[dep_id]);
+        let parent = install_from_directory(&db, plugins_dir.path(), parent_src.path()).unwrap();
+
+        // Mechanical uninstall of the dependency cascades its edges away.
+        uninstall(&db, plugins_dir.path(), &dep.plugin_cid).unwrap();
+        assert!(list_dependencies(&db, &parent.plugin_cid)
+            .unwrap()
+            .is_empty());
     }
 
     #[test]

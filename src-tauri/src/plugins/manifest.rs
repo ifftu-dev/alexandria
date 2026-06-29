@@ -94,6 +94,32 @@ pub fn validate(manifest: &PluginManifest) -> Result<(), String> {
         }
     }
 
+    // Dependencies: each must be a plausible plugin id (`<did>#<slug>`),
+    // must not be self-referential, and must not be duplicated. We do not
+    // verify the dependency's author DID here — a plugin may legitimately
+    // depend on another author's plugin; that the bytes resolve to a real,
+    // installed bundle is enforced at install time, not parse time.
+    let mut seen_deps = std::collections::HashSet::new();
+    for dep in &manifest.dependencies {
+        let Some((dep_did, dep_slug)) = dep.split_once('#') else {
+            return Err(format!(
+                "dependency '{dep}' must be of the form '<author_did>#<slug>'"
+            ));
+        };
+        if dep_did.trim().is_empty()
+            || dep_slug.trim().is_empty()
+            || !dep_slug.chars().all(is_slug_char)
+        {
+            return Err(format!("dependency '{dep}' has a malformed id"));
+        }
+        if dep == &manifest.id {
+            return Err("a plugin cannot depend on itself".into());
+        }
+        if !seen_deps.insert(dep.as_str()) {
+            return Err(format!("duplicate dependency declared: {dep}"));
+        }
+    }
+
     // Entry path must be relative, no traversal. This is re-checked
     // at the asset-protocol layer too, but fail early on install.
     validate_relative_path(&manifest.entry, "entry")?;
@@ -227,6 +253,61 @@ mod tests {
                 "entry": "../outside/index.html"
             }"#;
         assert!(parse_and_validate(bad.as_bytes()).is_err());
+    }
+
+    #[test]
+    fn parses_dependencies() {
+        let did = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
+        let json = format!(
+            r#"{{
+                "id": "{did}#parent",
+                "version": "0.1.0",
+                "api_version": "1",
+                "host_min_version": "0.1.0",
+                "name": "Parent",
+                "author_did": "{did}",
+                "kinds": ["interactive"],
+                "dependencies": ["{did}#child-a", "{did}#child-b"]
+            }}"#
+        );
+        let m = parse_and_validate(json.as_bytes()).unwrap();
+        assert_eq!(m.dependencies.len(), 2);
+    }
+
+    #[test]
+    fn rejects_self_dependency() {
+        let did = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
+        let json = format!(
+            r#"{{
+                "id": "{did}#x",
+                "version": "0.1.0",
+                "api_version": "1",
+                "host_min_version": "0.1.0",
+                "name": "X",
+                "author_did": "{did}",
+                "kinds": ["interactive"],
+                "dependencies": ["{did}#x"]
+            }}"#
+        );
+        assert!(parse_and_validate(json.as_bytes()).is_err());
+    }
+
+    #[test]
+    fn rejects_malformed_dependency_id() {
+        let did = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
+        let json = format!(
+            r#"{{
+                "id": "{did}#x",
+                "version": "0.1.0",
+                "api_version": "1",
+                "host_min_version": "0.1.0",
+                "name": "X",
+                "author_did": "{did}",
+                "kinds": ["interactive"],
+                "dependencies": ["not-a-plugin-id"]
+            }}"#
+        );
+        assert!(parse_and_validate(json.as_bytes()).is_err());
     }
 
     #[test]

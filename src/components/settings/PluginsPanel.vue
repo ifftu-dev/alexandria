@@ -96,6 +96,31 @@ function monogram(name: string): string {
   return (name.trim()[0] || '?').toUpperCase()
 }
 
+// Resolve a dependency plugin id (`did:key:…#slug`) to a friendly name: the
+// installed plugin carrying that manifest id, else the slug.
+function nameForPluginId(id: string): string {
+  for (const p of plugins.value) {
+    if (manifests.value[p.plugin_cid]?.id === id) return p.name
+  }
+  const hash = id.indexOf('#')
+  return hash >= 0 ? id.slice(hash + 1) : id
+}
+
+// Plugins this one depends on (declared in its manifest), as names.
+function dependencyNames(cid: string): string[] {
+  return (manifests.value[cid]?.dependencies ?? []).map(nameForPluginId)
+}
+
+// Installed plugins that depend on this one (reverse edge), as names. These
+// block uninstalling this plugin until they are removed first.
+function requiredByNames(cid: string): string[] {
+  const myId = manifests.value[cid]?.id
+  if (!myId) return []
+  return plugins.value
+    .filter((p) => (manifests.value[p.plugin_cid]?.dependencies ?? []).includes(myId))
+    .map((p) => p.name)
+}
+
 // Uninstall confirm
 const uninstallTarget = ref<InstalledPlugin | null>(null)
 
@@ -473,6 +498,29 @@ async function loadMySubmissions() {
                 <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
+          </div>
+
+          <!-- Dependency relationships (auto-installed together) -->
+          <div
+            v-if="dependencyNames(p.plugin_cid).length || requiredByNames(p.plugin_cid).length"
+            class="mt-2 flex flex-col gap-1 text-[10px] text-muted-foreground"
+          >
+            <div v-if="dependencyNames(p.plugin_cid).length" class="flex flex-wrap items-center gap-1">
+              <span class="opacity-70">Requires</span>
+              <span
+                v-for="dep in dependencyNames(p.plugin_cid)"
+                :key="`req-${p.plugin_cid}-${dep}`"
+                class="rounded-md bg-muted/30 px-1.5 py-0.5"
+              >{{ dep }}</span>
+            </div>
+            <div v-if="requiredByNames(p.plugin_cid).length" class="flex flex-wrap items-center gap-1">
+              <span class="opacity-70">Required by</span>
+              <span
+                v-for="dep in requiredByNames(p.plugin_cid)"
+                :key="`reqby-${p.plugin_cid}-${dep}`"
+                class="rounded-md bg-muted/30 px-1.5 py-0.5"
+              >{{ dep }}</span>
+            </div>
           </div>
 
           <!-- Actions — stop propagation so they don't open docs -->

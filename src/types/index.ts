@@ -1708,6 +1708,10 @@ export interface PluginManifest {
   /** Optional external URL where users can donate to the plugin author.
    *  Surfaced as a button in the Settings → Plugins page. */
   donate_url: string | null
+  /** Plugin ids this plugin depends on (`did:key:<author>#<slug>`). Installing
+   *  this plugin auto-installs them; uninstalling a still-depended-on plugin
+   *  is refused. */
+  dependencies: string[]
 }
 
 /** Phase-2 grader reference. Ignored in Phase 1 even if present. */

@@ -70,6 +70,7 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (60, "integrity_gaze_offscreen_ratio", MIGRATION_060),
     (61, "integrity_attestation", MIGRATION_061),
     (62, "org_role_assessments", MIGRATION_062),
+    (63, "plugin_dependencies", MIGRATION_063),
 ];
 
 const MIGRATION_001: &str = r#"
@@ -2435,4 +2436,30 @@ CREATE TABLE IF NOT EXISTS role_assessments (
 );
 
 CREATE INDEX IF NOT EXISTS idx_role_assessments_org ON role_assessments(org_id);
+"#;
+
+const MIGRATION_063: &str = r#"
+-- ============================================================
+-- Migration 063: Plugin dependencies
+--
+-- A plugin manifest may declare other plugins as dependencies (by their
+-- manifest id, `did:key:<author>#<slug>`). When a plugin is installed the
+-- host resolves + installs its dependencies first, then records the edge
+-- here so the UI can show "pulled in by" relationships and uninstall can
+-- refuse to remove a plugin that others still depend on.
+--
+-- Edges are keyed by the *dependent's* CID; the dependency is recorded by
+-- both its declared id (stable across reinstalls) and its resolved CID
+-- (the concrete bundle that satisfied it at install time).
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS plugin_dependencies (
+    plugin_cid      TEXT NOT NULL REFERENCES plugin_installed(plugin_cid) ON DELETE CASCADE,
+    dependency_id   TEXT NOT NULL,                 -- manifest id: did:key:<author>#<slug>
+    dependency_cid  TEXT NOT NULL REFERENCES plugin_installed(plugin_cid) ON DELETE CASCADE,
+    PRIMARY KEY (plugin_cid, dependency_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_plugin_dependencies_dep
+    ON plugin_dependencies(dependency_cid);
 "#;

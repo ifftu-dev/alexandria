@@ -1,0 +1,4 @@
+# Build-time fetched / generated — see codejudge-shared/fetch-runtimes.sh.
+# Not committed; regenerated before `cargo build` and embedded via include_bytes!.
+ui/vendor/
+ui/problems.js

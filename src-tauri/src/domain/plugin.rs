@@ -117,6 +117,12 @@ pub struct PluginManifest {
     /// Optional external URL where users can donate to the plugin author.
     /// Surfaced as a button in the Settings → Plugins page.
     pub donate_url: Option<String>,
+    /// Plugin ids this plugin depends on (`did:key:<author>#<slug>` each).
+    /// When this plugin is installed the host installs every listed
+    /// dependency first; uninstalling a still-depended-on plugin is refused.
+    /// Additive/optional — empty for plugins with no dependencies.
+    #[serde(default)]
+    pub dependencies: Vec<String>,
 }
 
 fn default_entry() -> String {

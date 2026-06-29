@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>codejudge: Lua</title>
+    <link rel="stylesheet" href="vendor/codemirror.css" />
+    <link rel="stylesheet" href="vendor/theme-material-darker.css" />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main id="app">
+      <section class="problem">
+        <header>
+          <h2 id="title">Loading…</h2>
+          <span id="difficulty" class="badge"></span>
+        </header>
+        <div id="statement" class="statement"></div>
+        <div id="samples" class="samples"></div>
+      </section>
+
+      <section class="editor-pane">
+        <div class="toolbar">
+          <span class="lang">Lua</span>
+          <div class="spacer"></div>
+          <button id="run" class="btn">Run sample tests</button>
+          <button id="submit" class="btn btn-primary">Submit</button>
+        </div>
+        <textarea id="code"></textarea>
+        <div id="results" class="results" aria-live="polite"></div>
+      </section>
+    </main>
+
+    <!-- Vendored, offline. CSP-clean: fengari is a pure-JS Lua VM (no eval),
+         CodeMirror needs no eval. Nothing here touches the network. -->
+    <script src="vendor/codemirror.js"></script>
+    <script src="vendor/mode.js"></script>
+    <script src="vendor/fengari-web.js"></script>
+    <script src="problems.js"></script>
+    <script src="runner.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>

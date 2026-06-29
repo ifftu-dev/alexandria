@@ -60,8 +60,36 @@ pub async fn plugin_uninstall(
         .map_err(|_| "database lock poisoned".to_string())?;
     let db = db_guard.as_ref().ok_or("database not initialized")?;
 
+    // Refuse to remove a plugin that other installed plugins still depend
+    // on — otherwise the dependents would silently break. The user must
+    // uninstall the dependents first.
+    let dependents = registry::list_dependents(db, &plugin_cid)?;
+    if !dependents.is_empty() {
+        let names: Vec<String> = dependents.into_iter().map(|p| p.name).collect();
+        return Err(format!(
+            "cannot uninstall: still required by {}",
+            names.join(", ")
+        ));
+    }
+
     let plugins_dir = state.plugins_dir()?;
     registry::uninstall(db, &plugins_dir, &plugin_cid)
+}
+
+/// List the plugins that an installed plugin depends on (its resolved
+/// dependency bundles).
+#[tauri::command]
+pub async fn plugin_list_dependencies(
+    state: State<'_, AppState>,
+    plugin_cid: String,
+) -> Result<Vec<InstalledPlugin>, String> {
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
+
+    registry::list_dependencies(db, &plugin_cid)
 }
 
 /// List every plugin installed on this node, newest first.

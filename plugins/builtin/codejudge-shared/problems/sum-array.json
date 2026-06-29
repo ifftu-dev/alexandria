@@ -1,0 +1,20 @@
+{
+  "version": "1",
+  "id": "sum-array",
+  "title": "Sum of an Array",
+  "difficulty": "easy",
+  "statement_md": "The first line contains an integer **N**. The second line contains **N** space-separated integers. Read them from stdin and print their sum to stdout.",
+  "io": "stdin-stdout",
+  "limits": { "time_ms": 2000 },
+  "tests": {
+    "visible": [
+      { "input": "3\n1 2 3\n", "output": "6\n", "explain": "1 + 2 + 3 = 6" }
+    ],
+    "hidden": [
+      { "input": "1\n-5\n", "output": "-5\n" },
+      { "input": "5\n10 20 30 40 50\n", "output": "150\n" },
+      { "input": "4\n0 0 0 0\n", "output": "0\n" },
+      { "input": "6\n-1 -2 -3 100 1 5\n", "output": "100\n" }
+    ]
+  }
+}
