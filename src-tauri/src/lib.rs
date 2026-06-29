@@ -1166,6 +1166,13 @@ pub fn run() {
             commands::integrity::integrity_record_attestation,
             commands::integrity::integrity_set_anchor,
             commands::integrity::integrity_get_assurance,
+            commands::role_assessment::create_organization,
+            commands::role_assessment::list_organizations,
+            commands::role_assessment::create_role_assessment,
+            commands::role_assessment::list_role_assessments,
+            commands::role_assessment::get_role_assessment,
+            commands::role_assessment::set_role_assessment_status,
+            commands::role_assessment::issue_role_credential,
             // Sentinel DAO (adversarial-prior governance)
             commands::sentinel_dao::sentinel_dao_get_info,
             // Sentinel adversarial priors (propose / ratify / list / sync / load)
