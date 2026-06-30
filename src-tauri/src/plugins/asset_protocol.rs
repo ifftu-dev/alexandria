@@ -7,8 +7,13 @@
 //! Responses carry a per-plugin Content-Security-Policy header:
 //! - `default-src 'self' plugin://<cid>`  — only load from this plugin's origin
 //! - `connect-src 'none'`                  — no network of any kind
-//! - `script-src 'self' 'wasm-unsafe-eval'` — WASM for on-device inference,
-//!   no inline scripts, no `eval`, no remote scripts
+//! - `script-src … plugin://<cid> 'wasm-unsafe-eval'` — the plugin's own
+//!   scripts + WASM for on-device inference; no inline scripts (except the
+//!   nonce'd bootstrap), no `eval`, no remote scripts
+//! - `style-src 'self' plugin://<cid> 'unsafe-inline'` — the plugin's own
+//!   stylesheet files plus inline styles (the iframe's opaque sandbox origin
+//!   doesn't match `'self'`, so the `plugin://` origin is what actually lets a
+//!   bundle ship external CSS, e.g. CodeMirror)
 //!
 //! HTML responses additionally have a small bootstrap script injected that
 //! removes `window.__TAURI__` (defense in depth — the sandbox should already
@@ -33,7 +38,7 @@ const PLUGIN_CSP_TEMPLATE: &str = "default-src 'self' plugin://{cid}; \
     connect-src 'none'; \
     img-src 'self' data: blob:; \
     media-src 'self' blob:; \
-    style-src 'self' 'unsafe-inline'; \
+    style-src 'self' plugin://{cid} 'unsafe-inline'; \
     script-src 'self' plugin://{cid} 'nonce-{nonce}' 'wasm-unsafe-eval'; \
     font-src 'self' data:; \
     object-src 'none'; \
