@@ -815,7 +815,10 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(skill_count, 4, "expected self + instructor skill VC per course skill");
+        assert_eq!(
+            skill_count, 4,
+            "expected self + instructor skill VC per course skill"
+        );
 
         let attestation_count: i64 = db
             .conn()
@@ -826,7 +829,10 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(attestation_count, 2, "one instructor attestation per course skill");
+        assert_eq!(
+            attestation_count, 2,
+            "one instructor attestation per course skill"
+        );
 
         // The instructor attestation is issued by the deterministic course
         // authority (derived from the author address), not the learner.
