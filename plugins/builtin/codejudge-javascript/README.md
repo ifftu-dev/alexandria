@@ -32,16 +32,18 @@ host via `alex.complete()`. Hidden tests never reveal their data.
 
 ## Build
 
-Third-party runtimes are **not committed**. The fetch step downloads CodeMirror,
-bakes the problem bank into `ui/problems.js`, and **builds** the offline QuickJS
-bundle (`esbuild` over the singlefile-browser variant) into `ui/vendor/`:
+CodeMirror, the baked problem bank (`ui/problems.js`), and the offline QuickJS
+bundle (`esbuild` over the singlefile-browser variant) are vendored into
+`ui/vendor/`. These generated files **are committed** (so the app and CI build
+with no extra step). Regenerate them after changing the runtime version or the
+problem bank:
 
 ```bash
 plugins/builtin/codejudge-shared/fetch-runtimes.sh javascript
 ```
 
-The host then embeds the bundle via `include_bytes!` and installs it as a
-built-in at startup. End users never fetch anything.
+The host embeds the bundle via `include_bytes!` and installs it as a built-in at
+startup. End users never fetch anything.
 
 ## Related
 

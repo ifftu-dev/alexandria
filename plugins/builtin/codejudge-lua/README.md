@@ -8,10 +8,12 @@ process — everything happens inside the plugin iframe.
 
 ## How it runs code locally
 
-- **Runtime:** [fengari](https://fengari.io) — a complete Lua 5.3 VM written in
-  pure JavaScript. It interprets Lua directly, so it needs neither WebAssembly
-  `eval` nor JS `eval`, which keeps it within the plugin iframe's strict CSP
-  (`connect-src 'none'`, no `unsafe-eval`).
+- **Runtime:** [wasmoon](https://github.com/ceifa/wasmoon) — Lua 5.4 compiled to
+  WebAssembly. Lua runs *inside* the wasm sandbox, so it never calls JS `eval`,
+  which keeps it within the plugin iframe's strict CSP (`wasm-unsafe-eval`
+  allowed, but `unsafe-eval` and network are not). The wasm is embedded in the
+  bundle and instantiated with no fetch. (We started on fengari, a pure-JS Lua
+  VM, but it needs `unsafe-eval` internally, which the CSP forbids.)
 - **I/O contract:** the solution reads the test input from **stdin**
   (`io.read("l")`, `io.read("n")`, `io.read("a")`, `io.lines()`) and writes its
   answer to **stdout** (`print`, `io.write`). `runner.js` rebinds those to a
@@ -29,16 +31,17 @@ the host via `alex.complete()`. Hidden tests never reveal their data.
 
 ## Build
 
-Third-party runtimes (fengari, CodeMirror) are **not committed**. Fetch them
-into `ui/vendor/` and bake the problem bank into `ui/problems.js` before
-building the app:
+The third-party runtime (wasmoon — Lua 5.4 → WebAssembly) and CodeMirror are
+vendored into `ui/vendor/`, and the problem bank is baked into `ui/problems.js`.
+These generated files **are committed** (so the app and CI build with no extra
+step). Regenerate them after changing the runtime versions or the problem bank:
 
 ```bash
 plugins/builtin/codejudge-shared/fetch-runtimes.sh lua
 ```
 
-The host then embeds the bundle via `include_bytes!` and installs it as a
-built-in at startup. End users never fetch anything.
+The host embeds the bundle via `include_bytes!` and installs it as a built-in at
+startup. End users never fetch anything.
 
 ## Related
 
