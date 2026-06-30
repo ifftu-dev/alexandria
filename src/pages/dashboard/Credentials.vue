@@ -1,28 +1,167 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
-import { AppBadge, AppButton, AppModal, AppInput, EmptyState } from '@/components/ui'
+import { useRoute, useRouter } from 'vue-router'
+import { AppButton, AppModal, AppInput, EmptyState } from '@/components/ui'
 import { useCredentials } from '@/composables/useCredentials'
-import { useDisplayNames } from '@/composables/useDisplayNames'
+import { useLocalApi } from '@/composables/useLocalApi'
+import SourceCredentialsModal from '@/components/credential/SourceCredentialsModal.vue'
 import {
-  extractRoleClaim,
-  extractSkillClaim,
+  classNameOf,
+  CREDENTIAL_KINDS,
+  type CredentialClass,
+} from '@/components/credential/credentialKind'
+import {
   type CredentialType,
+  type DerivedSkillState,
   type IssueClaimRequest,
   type IssueCredentialRequest,
   type PresentationEnvelope,
+  type SkillInfo,
   type VerifiableCredential,
 } from '@/types'
 
+const route = useRoute()
 const router = useRouter()
 const api = useCredentials()
+const { invoke } = useLocalApi()
 
-const filterType = ref<'all' | CredentialType>('all')
+// Core data ---------------------------------------------------------------
+const derived = ref<DerivedSkillState[]>([])
+const localDid = ref<string | null>(null)
+const skillNames = ref<Map<string, string>>(new Map())
+// id → input credential, for resolving each derived state's `sources`.
+const credById = ref<Map<string, VerifiableCredential>>(new Map())
+const initialLoading = ref(true)
+const recomputing = ref(false)
+
+// Optional skill pre-filter, set via `?skill=` (e.g. the "View credential"
+// link from My Learning lands here filtered to a course's skill).
+const skillFilter = ref<string | null>(
+  typeof route.query.skill === 'string' ? route.query.skill : null,
+)
+
+// Search + sort -----------------------------------------------------------
+const search = ref('')
+type SortKey = 'level' | 'confidence' | 'trust' | 'evidence' | 'name' | 'recent'
+const sortKey = ref<SortKey>('level')
+
+// Drill-down --------------------------------------------------------------
+const sourceOpen = ref(false)
+const activeState = ref<DerivedSkillState | null>(null)
+
+// Lifecycle ---------------------------------------------------------------
+onMounted(async () => {
+  await refresh()
+  initialLoading.value = false
+})
+
+async function refresh() {
+  localDid.value = (await invoke<string | null>('get_local_did').catch(() => null)) ?? null
+
+  const skills = (await invoke<SkillInfo[]>('list_skills', {}).catch(() => [])) ?? []
+  skillNames.value = new Map(skills.map((s) => [s.id, s.name]))
+
+  // All credentials — used to resolve each derived state's source ids.
+  await api.list()
+  const map = new Map<string, VerifiableCredential>()
+  for (const c of api.credentials.value) if (c.id) map.set(c.id, c)
+  credById.value = map
+
+  let states = localDid.value
+    ? (await api.listDerivedStates(localDid.value)) ?? []
+    : []
+  // Nothing cached yet → compute once, then re-read.
+  if (states.length === 0) {
+    await api.recomputeAll()
+    states = localDid.value ? (await api.listDerivedStates(localDid.value)) ?? [] : []
+  }
+  derived.value = states
+}
+
+async function recompute() {
+  recomputing.value = true
+  await api.recomputeAll()
+  await refresh()
+  recomputing.value = false
+}
+
+// Helpers -----------------------------------------------------------------
+function skillLabel(id: string): string {
+  return skillNames.value.get(id) ?? id
+}
+
+const LEVEL_LABELS = ['—', 'Novice', 'Beginner', 'Competent', 'Proficient', 'Expert']
+function levelLabel(n: number): string {
+  return LEVEL_LABELS[n] ?? `L${n}`
+}
+
+/** Resolve a derived state's source ids to loaded input credentials. */
+function resolvedSources(s: DerivedSkillState): VerifiableCredential[] {
+  return s.sources.map((id) => credById.value.get(id)).filter((c): c is VerifiableCredential => !!c)
+}
+
+/** Distinct input classes feeding a derived state (for the card icon row). */
+function sourceClasses(s: DerivedSkillState): CredentialClass[] {
+  const set = new Set<string>()
+  for (const c of resolvedSources(s)) set.add(classNameOf(c.type))
+  return [...set].filter((k): k is CredentialClass => k in CREDENTIAL_KINDS)
+}
+
+// Filter + sort -----------------------------------------------------------
+const filtered = computed(() => {
+  const q = search.value.trim().toLowerCase()
+  let list = derived.value.filter((s) => {
+    if (skillFilter.value && s.skill_id !== skillFilter.value) return false
+    if (!q) return true
+    return skillLabel(s.skill_id).toLowerCase().includes(q) || s.skill_id.toLowerCase().includes(q)
+  })
+
+  list = [...list].sort((a, b) => {
+    switch (sortKey.value) {
+      case 'level':
+        return b.level - a.level || b.confidence - a.confidence
+      case 'confidence':
+        return b.confidence - a.confidence
+      case 'trust':
+        return b.trust_score - a.trust_score
+      case 'evidence':
+        return b.active_evidence_count - a.active_evidence_count
+      case 'recent':
+        return (b.computed_at ?? '').localeCompare(a.computed_at ?? '')
+      case 'name':
+        return skillLabel(a.skill_id).localeCompare(skillLabel(b.skill_id))
+      default:
+        return 0
+    }
+  })
+  return list
+})
+
+const stats = computed(() => {
+  const list = derived.value
+  const count = list.length
+  const avgLevel = count ? list.reduce((s, d) => s + d.level, 0) / count : 0
+  const avgConf = count ? list.reduce((s, d) => s + d.confidence, 0) / count : 0
+  return { count, avgLevel, avgConf }
+})
+
+function clearSkillFilter() {
+  skillFilter.value = null
+  void router.replace({ name: 'dashboard-credentials' })
+}
+
+function openSources(s: DerivedSkillState) {
+  activeState.value = s
+  sourceOpen.value = true
+}
+
+function openCredential(id: string) {
+  sourceOpen.value = false
+  router.push({ name: 'dashboard-credential-detail', params: { id } })
+}
 
 // Issue modal -------------------------------------------------------------
 const issueOpen = ref(false)
-// Form fields are kept as strings so AppInput's `modelValue: string` prop
-// matches; we coerce to numbers at submit time.
 const issueForm = ref({
   credential_type: 'FormalCredential' as CredentialType,
   subject: '',
@@ -35,94 +174,17 @@ const issueForm = ref({
 const issueError = ref<string | null>(null)
 const issueBusy = ref(false)
 
-// Presentation modal ------------------------------------------------------
-const presentOpen = ref(false)
-const presentForm = ref({
-  credential_id: '',
-  reveal: 'credentialSubject.level',
-  audience: '',
-  nonce: '',
-})
-const presentBusy = ref(false)
-const presentResult = ref<PresentationEnvelope | null>(null)
-const presentError = ref<string | null>(null)
-
-// Lifecycle ---------------------------------------------------------------
-const { displayName, ensureNames } = useDisplayNames()
-onMounted(async () => {
-  await api.list()
-  const dids: string[] = []
-  for (const c of api.credentials.value) {
-    if (c.issuer) dids.push(typeof c.issuer === 'string' ? c.issuer : '')
-    if (c.credentialSubject?.id) dids.push(c.credentialSubject.id)
-  }
-  void ensureNames(dids.filter(Boolean))
-})
-
-// Derived stats -----------------------------------------------------------
-const filtered = computed(() => {
-  if (filterType.value === 'all') return api.credentials.value
-  return api.credentials.value.filter((c) =>
-    c.type.includes(filterType.value as string),
-  )
-})
-
-const stats = computed(() => {
-  const list = api.credentials.value
-  const active = list.filter((c) => !revokedFlag(c)).length
-  const revoked = list.length - active
-  return { total: list.length, active, revoked }
-})
-
-const credentialTypes: { value: 'all' | CredentialType; label: string }[] = [
-  { value: 'all', label: 'All' },
-  { value: 'FormalCredential', label: 'Formal' },
-  { value: 'AssessmentCredential', label: 'Assessment' },
-  { value: 'AttestationCredential', label: 'Attestation' },
-  { value: 'RoleCredential', label: 'Role' },
-  { value: 'SelfAssertion', label: 'Self' },
-]
-
-// Helpers -----------------------------------------------------------------
-
-/** True if the credential's status_list_index has been flipped on its issuer's list. */
-function revokedFlag(_c: VerifiableCredential): boolean {
-  // The presence of credential_status doesn't mean revoked — we'd need
-  // to consult the local status list to know for sure. The backend
-  // `verify` IPC carries a `revoked` boolean; the list view skips
-  // that round-trip and shows "active" optimistically. The detail
-  // page does the real check.
-  return false
+function openIssue() {
+  resetIssueForm()
+  issueOpen.value = true
 }
-
-function classOf(c: VerifiableCredential): string {
-  return c.type.find((t) => t !== 'VerifiableCredential') ?? 'Credential'
-}
-
-function summary(c: VerifiableCredential): string {
-  const skill = extractSkillClaim(c.credentialSubject)
-  if (skill) {
-    return `${skill.skillId} · L${skill.level} · ${(skill.score * 100).toFixed(0)}%`
-  }
-  const role = extractRoleClaim(c.credentialSubject)
-  if (role) {
-    return role.role + (role.scope ? ` · ${role.scope}` : '')
-  }
-  return 'custom claim'
-}
-
-
-function open(c: VerifiableCredential) {
-  if (!c.id) return
-  router.push({ name: 'dashboard-credential-detail', params: { id: c.id } })
-}
-
-// Issue flow --------------------------------------------------------------
 
 function resetIssueForm() {
   issueForm.value = {
     credential_type: 'FormalCredential',
-    subject: '',
+    // Default to self-issuance: a credential about your own DID feeds
+    // your derived skill state and shows up on this page immediately.
+    subject: localDid.value ?? '',
     skill_id: '',
     level: '4',
     score: '0.85',
@@ -158,39 +220,27 @@ async function submitIssue() {
   if (issued) {
     issueOpen.value = false
     resetIssueForm()
-    await api.list()
+    await recompute()
   } else {
     issueError.value = api.error.value
   }
 }
 
-// Export flow -------------------------------------------------------------
+// Present modal -----------------------------------------------------------
+const presentOpen = ref(false)
+const presentForm = ref({
+  credential_id: '',
+  reveal: 'credentialSubject.level',
+  audience: '',
+  nonce: '',
+})
+const presentBusy = ref(false)
+const presentResult = ref<PresentationEnvelope | null>(null)
+const presentError = ref<string | null>(null)
 
-const exporting = ref(false)
-async function exportBundle() {
-  exporting.value = true
-  const json = await api.exportBundle()
-  if (json) {
-    // Browser-side download — the webview hands the file off to the
-    // OS Save panel without us needing the @tauri-apps/plugin-fs dep.
-    const blob = new Blob([json], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `alexandria-credentials-${new Date().toISOString().slice(0, 10)}.json`
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    URL.revokeObjectURL(url)
-  }
-  exporting.value = false
-}
-
-// Presentation flow -------------------------------------------------------
-
-function openPresent(c?: VerifiableCredential) {
+function openPresent() {
   presentForm.value = {
-    credential_id: c?.id ?? '',
+    credential_id: '',
     reveal: 'credentialSubject.level',
     audience: '',
     nonce: crypto.randomUUID(),
@@ -213,16 +263,32 @@ async function submitPresent() {
     nonce: presentForm.value.nonce,
   })
   presentBusy.value = false
-  if (env) {
-    presentResult.value = env
-  } else {
-    presentError.value = api.error.value
-  }
+  if (env) presentResult.value = env
+  else presentError.value = api.error.value
 }
 
 async function copyEnvelope() {
   if (!presentResult.value) return
   await navigator.clipboard.writeText(JSON.stringify(presentResult.value, null, 2))
+}
+
+// Export ------------------------------------------------------------------
+const exporting = ref(false)
+async function exportBundle() {
+  exporting.value = true
+  const json = await api.exportBundle()
+  if (json) {
+    const blob = new Blob([json], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `alexandria-credentials-${new Date().toISOString().slice(0, 10)}.json`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+  exporting.value = false
 }
 </script>
 
@@ -232,21 +298,27 @@ async function copyEnvelope() {
     <div class="mb-8 flex items-start justify-between gap-4 flex-wrap">
       <div>
         <h1 class="text-3xl font-bold text-foreground">Credentials</h1>
-        <p class="mt-2 text-muted-foreground">
-          Verifiable Credentials issued to or by you. Signed with your
-          DID, verifiable offline, portable to any W3C-compatible verifier.
+        <p class="mt-2 max-w-2xl text-muted-foreground">
+          Your derived skill credentials — each is computed from the
+          underlying evidence (assessments, attestations, formal certs)
+          and updates as new credentials arrive. Open one to see the
+          input credentials behind it.
         </p>
       </div>
       <div class="flex gap-2 flex-wrap">
+        <AppButton variant="outline" :loading="recomputing" @click="recompute">
+          Recompute
+        </AppButton>
         <AppButton variant="outline" :loading="exporting" @click="exportBundle">
           Export bundle
         </AppButton>
-        <AppButton @click="issueOpen = true">Issue credential</AppButton>
+        <AppButton variant="ghost" @click="openPresent">Present</AppButton>
+        <AppButton @click="openIssue">Issue credential</AppButton>
       </div>
     </div>
 
     <!-- Skeleton -->
-    <div v-if="api.loading.value && api.credentials.value.length === 0" class="space-y-6">
+    <div v-if="initialLoading" class="space-y-6">
       <div class="grid gap-4 sm:grid-cols-3">
         <div v-for="i in 3" :key="i" class="animate-pulse rounded-xl bg-card shadow-sm p-6">
           <div class="h-3 w-20 rounded bg-muted-foreground/15 mb-3" />
@@ -259,85 +331,139 @@ async function copyEnvelope() {
       <!-- Stats -->
       <div class="mb-6 grid gap-4 sm:grid-cols-3">
         <div class="rounded-xl bg-card shadow-sm p-6">
-          <p class="text-sm text-muted-foreground">Total credentials</p>
-          <p class="mt-2 text-3xl font-bold text-foreground">{{ stats.total }}</p>
+          <p class="text-sm text-muted-foreground">Derived skills</p>
+          <p class="mt-2 text-3xl font-bold text-foreground">{{ stats.count }}</p>
         </div>
         <div class="rounded-xl bg-card shadow-sm p-6">
-          <p class="text-sm text-muted-foreground">Active</p>
-          <p class="mt-2 text-3xl font-bold text-primary">{{ stats.active }}</p>
+          <p class="text-sm text-muted-foreground">Avg. level</p>
+          <p class="mt-2 text-3xl font-bold text-primary">{{ stats.avgLevel.toFixed(1) }}<span class="text-base text-muted-foreground">/5</span></p>
         </div>
         <div class="rounded-xl bg-card shadow-sm p-6">
-          <p class="text-sm text-muted-foreground">Revoked</p>
-          <p class="mt-2 text-3xl font-bold text-foreground">{{ stats.revoked }}</p>
+          <p class="text-sm text-muted-foreground">Avg. confidence</p>
+          <p class="mt-2 text-3xl font-bold text-foreground">{{ (stats.avgConf * 100).toFixed(0) }}<span class="text-base text-muted-foreground">%</span></p>
         </div>
       </div>
 
-      <!-- Filter tabs -->
-      <div class="mb-6 flex gap-1 rounded-lg bg-muted p-1 overflow-x-auto">
-        <button
-          v-for="t in credentialTypes"
-          :key="t.value"
-          class="flex-1 min-w-fit rounded-md px-3 py-1.5 text-xs font-medium transition-colors"
-          :class="filterType === t.value
-            ? 'bg-card text-foreground shadow-sm'
-            : 'text-muted-foreground hover:text-foreground'"
-          @click="filterType = t.value"
-        >
-          {{ t.label }}
-        </button>
+      <!-- Search + sort -->
+      <div class="mb-4 flex flex-wrap items-center gap-2">
+        <div class="min-w-[14rem] flex-1">
+          <AppInput v-model="search" placeholder="Search skills…" />
+        </div>
+        <select v-model="sortKey" class="input w-auto text-sm">
+          <option value="level">Sort: level</option>
+          <option value="confidence">Sort: confidence</option>
+          <option value="trust">Sort: trust score</option>
+          <option value="evidence">Sort: evidence count</option>
+          <option value="recent">Sort: recently updated</option>
+          <option value="name">Sort: name (A–Z)</option>
+        </select>
+      </div>
+
+      <!-- Active skill filter chip -->
+      <div v-if="skillFilter" class="mb-4 flex items-center gap-2">
+        <span class="inline-flex items-center gap-2 rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
+          Skill: {{ skillLabel(skillFilter) }}
+          <button
+            type="button"
+            class="text-primary/70 transition-colors hover:text-primary"
+            aria-label="Clear skill filter"
+            @click="clearSkillFilter"
+          >
+            <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </span>
       </div>
 
       <!-- Empty state -->
       <EmptyState
         v-if="filtered.length === 0"
-        title="No credentials yet"
-        description="Issue your first credential, or wait for one to arrive over the network."
+        title="No derived credentials yet"
+        :description="derived.length === 0
+          ? 'Complete a course or earn a credential — your skill credentials are computed from that evidence.'
+          : 'No skill matches your search.'"
       >
         <template #action>
-          <AppButton @click="issueOpen = true">Issue credential</AppButton>
+          <AppButton @click="openIssue">Issue credential</AppButton>
         </template>
       </EmptyState>
 
-      <!-- Card grid -->
+      <!-- Derived credential grid -->
       <div v-else class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <article
-          v-for="c in filtered"
-          :key="c.id ?? c.issuer + c.validFrom"
-          class="rounded-xl bg-card shadow-sm p-5 transition-shadow hover:shadow-md cursor-pointer"
-          @click="open(c)"
+          v-for="s in filtered"
+          :key="s.skill_id"
+          class="group rounded-xl bg-card shadow-sm p-5 transition-shadow hover:shadow-md cursor-pointer"
+          @click="openSources(s)"
         >
-          <div class="flex items-start justify-between mb-3 gap-2">
-            <AppBadge variant="primary">{{ classOf(c) }}</AppBadge>
-            <AppBadge v-if="c.validUntil" variant="secondary">
-              expires
-            </AppBadge>
+          <div class="mb-3 flex items-start justify-between gap-2">
+            <span class="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-semibold" :class="CREDENTIAL_KINDS.DerivedCredential.badge">
+              <span class="h-1.5 w-1.5 rounded-full" :class="CREDENTIAL_KINDS.DerivedCredential.dot" />
+              Derived
+            </span>
+            <span class="text-xs font-semibold text-foreground">L{{ s.level }}<span class="text-muted-foreground">/5</span></span>
           </div>
-          <p class="text-sm font-semibold text-foreground truncate" :title="summary(c)">
-            {{ summary(c) }}
+
+          <p class="truncate text-sm font-semibold text-foreground" :title="skillLabel(s.skill_id)">
+            {{ skillLabel(s.skill_id) }}
           </p>
-          <dl class="mt-3 space-y-1 text-xs">
-            <div class="flex justify-between gap-2">
-              <dt class="text-muted-foreground">Issuer</dt>
-              <dd class="truncate" :title="typeof c.issuer === 'string' ? c.issuer : ''">{{ displayName(typeof c.issuer === 'string' ? c.issuer : '') }}</dd>
+          <p class="text-xs text-muted-foreground">{{ levelLabel(s.level) }}</p>
+
+          <!-- Confidence bar -->
+          <div class="mt-3">
+            <div class="mb-1 flex justify-between text-[11px] text-muted-foreground">
+              <span>Confidence</span>
+              <span>{{ (s.confidence * 100).toFixed(0) }}%</span>
             </div>
-            <div class="flex justify-between gap-2">
-              <dt class="text-muted-foreground">Subject</dt>
-              <dd class="truncate" :title="c.credentialSubject.id">
-                {{ displayName(c.credentialSubject.id) }}
-              </dd>
+            <div class="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+              <div class="h-full rounded-full bg-violet-500" :style="{ width: `${Math.round(s.confidence * 100)}%` }" />
             </div>
-            <div class="flex justify-between gap-2">
-              <dt class="text-muted-foreground">Issued</dt>
-              <dd>{{ c.validFrom.slice(0, 10) }}</dd>
+          </div>
+
+          <dl class="mt-3 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px]">
+            <div class="flex justify-between">
+              <dt class="text-muted-foreground">Trust</dt>
+              <dd class="font-medium">{{ (s.trust_score * 100).toFixed(0) }}%</dd>
+            </div>
+            <div class="flex justify-between">
+              <dt class="text-muted-foreground">Issuers</dt>
+              <dd class="font-medium">{{ s.unique_issuer_clusters }}</dd>
             </div>
           </dl>
-          <div class="mt-4 flex gap-2" @click.stop>
-            <AppButton size="xs" variant="outline" @click="open(c)">View</AppButton>
-            <AppButton size="xs" variant="ghost" @click="openPresent(c)">Present</AppButton>
+
+          <!-- Evidence footer -->
+          <div class="mt-4 flex items-center justify-between border-t border-border pt-3">
+            <div class="flex items-center gap-1">
+              <span
+                v-for="k in sourceClasses(s)"
+                :key="k"
+                class="flex h-5 w-5 items-center justify-center rounded text-white"
+                :class="CREDENTIAL_KINDS[k].dot"
+                :title="CREDENTIAL_KINDS[k].label"
+              >
+                <svg viewBox="0 0 24 24" class="h-3 w-3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path :d="CREDENTIAL_KINDS[k].icon" />
+                </svg>
+              </span>
+            </div>
+            <span class="text-[11px] text-primary opacity-0 transition-opacity group-hover:opacity-100">
+              {{ s.active_evidence_count }} evidence →
+            </span>
           </div>
         </article>
       </div>
     </template>
+
+    <!-- Source / evidence drill-down -->
+    <SourceCredentialsModal
+      :open="sourceOpen"
+      :skill-name="activeState ? skillLabel(activeState.skill_id) : ''"
+      :source-count="activeState?.active_evidence_count ?? 0"
+      :sources="activeState ? resolvedSources(activeState) : []"
+      @close="sourceOpen = false"
+      @open-credential="openCredential"
+    />
 
     <!-- Issue modal -->
     <AppModal :open="issueOpen" title="Issue credential" max-width="32rem" @close="issueOpen = false">
@@ -352,11 +478,7 @@ async function copyEnvelope() {
             <option value="SelfAssertion">Self assertion</option>
           </select>
         </div>
-        <AppInput
-          v-model="issueForm.subject"
-          label="Subject DID"
-          placeholder="did:key:z…"
-        />
+        <AppInput v-model="issueForm.subject" label="Subject DID" placeholder="did:key:z…" />
         <AppInput v-model="issueForm.skill_id" label="Skill ID" placeholder="skill_x" />
         <div class="grid grid-cols-2 gap-3">
           <AppInput v-model="issueForm.level" label="Level (1–5)" type="number" />
@@ -390,21 +512,13 @@ async function copyEnvelope() {
       @close="presentOpen = false"
     >
       <div v-if="!presentResult" class="space-y-4">
-        <AppInput
-          v-model="presentForm.credential_id"
-          label="Credential ID"
-          placeholder="urn:uuid:…"
-        />
+        <AppInput v-model="presentForm.credential_id" label="Credential ID" placeholder="urn:uuid:…" />
         <AppInput
           v-model="presentForm.reveal"
           label="Reveal paths (comma-separated)"
           placeholder="credentialSubject.level"
         />
-        <AppInput
-          v-model="presentForm.audience"
-          label="Audience"
-          placeholder="did:web:hirer.example"
-        />
+        <AppInput v-model="presentForm.audience" label="Audience" placeholder="did:web:hirer.example" />
         <AppInput v-model="presentForm.nonce" label="Nonce" />
         <p v-if="presentError" class="text-xs text-error">{{ presentError }}</p>
       </div>
@@ -415,9 +529,7 @@ async function copyEnvelope() {
       <template #footer>
         <div class="flex justify-end gap-2">
           <AppButton variant="ghost" @click="presentOpen = false">Close</AppButton>
-          <AppButton v-if="!presentResult" :loading="presentBusy" @click="submitPresent">
-            Create
-          </AppButton>
+          <AppButton v-if="!presentResult" :loading="presentBusy" @click="submitPresent">Create</AppButton>
           <AppButton v-else variant="outline" @click="copyEnvelope">Copy JSON</AppButton>
         </div>
       </template>
