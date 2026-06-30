@@ -5,6 +5,7 @@ import AppBottomBar from '@/components/layout/AppBottomBar.vue'
 import MobileTabBar from '@/components/layout/MobileTabBar.vue'
 import TutoringPiP from '@/components/layout/TutoringPiP.vue'
 import OmniSearch from '@/components/omni/OmniSearch.vue'
+import CourseCompletionModal from '@/components/course/CourseCompletionModal.vue'
 import { usePlatform } from '@/composables/usePlatform'
 import { useSettings, useSetting } from '@/composables/useSettings'
 import { computed, onMounted, onUnmounted } from 'vue'
@@ -115,5 +116,8 @@ function toggleSidebar() {
 
     <!-- Global omni search palette (Cmd+K / Ctrl+K / "/") -->
     <OmniSearch />
+
+    <!-- Global course-completion celebration (survives navigating away) -->
+    <CourseCompletionModal />
   </div>
 </template>

@@ -5,11 +5,13 @@ import { useLocalApi } from '@/composables/useLocalApi'
 import { useSentinel } from '@/composables/useSentinel'
 import { AppButton, ProvenanceBadge } from '@/components/ui'
 import { resolveElementBinding, type ElementHostContext } from '@/components/course/elementRegistry'
+import { useCourseCompletion } from '@/composables/useCourseCompletion'
 import type { Course, Chapter, Element, Enrollment, ElementProgress, UpdateProgressRequest, QuizResult } from '@/types'
 
 const { invoke } = useLocalApi()
 const route = useRoute()
 const router = useRouter()
+const courseCompletion = useCourseCompletion()
 
 const sentinel = useSentinel()
 
@@ -34,6 +36,7 @@ const completionStatus = ref<CourseCompletionStatus | null>(null)
 const claiming = ref(false)
 const claimError = ref<string | null>(null)
 const claimTxHash = ref<string | null>(null)
+const claimCredentialIds = ref<string[]>([])
 
 async function refreshCompletionStatus() {
   try {
@@ -47,11 +50,12 @@ async function claimCredential() {
   claiming.value = true
   claimError.value = null
   try {
-    const result = await invoke<{ tx_hash: string }>('claim_course_completion', {
-      courseId,
-      timestampMs: Date.now(),
-    })
+    const result = await invoke<{ tx_hash: string; credential_ids: string[] }>(
+      'claim_course_completion',
+      { courseId, timestampMs: Date.now() },
+    )
     claimTxHash.value = result.tx_hash
+    claimCredentialIds.value = result.credential_ids ?? []
   } catch (e) {
     claimError.value = String(e)
   } finally {
@@ -59,11 +63,38 @@ async function claimCredential() {
   }
 }
 
+// Set once we've minted (auto or manual) for this session so the auto-mint
+// trigger in markComplete fires at most once per visit.
+const autoMintFired = ref(false)
+
+// Claim the completion credentials and raise the celebration modal. Skills are
+// minted by default at the end of a course/tutorial, so this runs automatically
+// when the final element completes (see markComplete) — the "Get completion
+// credential" button and "Finish Course" reuse it. Best-effort: never block on
+// it. claim_course_completion always issues local credentials (even for
+// content-only courses); on-chain anchoring is an upgrade, not required. We do
+// NOT navigate away — the modal's "View credential" / "Continue" own that.
+async function mintAndCelebrate() {
+  autoMintFired.value = true
+  await refreshCompletionStatus()
+  claimTxHash.value = null
+  claimCredentialIds.value = []
+  await claimCredential().catch(() => {})
+
+  courseCompletion.open({
+    courseTitle: course.value?.title ?? 'Course',
+    courseId,
+    skillIds: course.value?.skill_ids ?? [],
+    txHash: claimTxHash.value,
+    credentialIds: claimCredentialIds.value,
+    isTutorial: isTutorial.value,
+  })
+}
+
 // "Finish Course" on the last element: mark the final content element
-// complete (so the course can qualify), then claim the on-chain
-// completion credential. The earned credential surfaces on the course
-// page, so navigate there once the claim resolves. On a claim error we
-// stay put so the message is visible.
+// complete (so the course can qualify), then mint. (markComplete also
+// auto-mints, but a content element the user hasn't explicitly completed
+// needs the mark first.)
 async function finishCourse() {
   if (
     enrollment.value &&
@@ -73,16 +104,9 @@ async function finishCourse() {
   ) {
     await markComplete()
   }
-  await refreshCompletionStatus()
-  // Best-effort credential claim when the course qualifies. Never block
-  // leaving the player on it: claiming needs on-chain infra (Blockfrost +
-  // a funded wallet) that may be absent, and the course may not yet be
-  // fully complete — a failed/skipped claim must still let the user out
-  // to the course page (where completion + claim status is shown).
-  if (completionStatus.value?.ready) {
-    await claimCredential().catch(() => {})
-  }
-  router.push(`/courses/${courseId}`)
+  // markComplete auto-mints when it completes the final element; only mint
+  // here if it didn't (e.g. the course was already fully complete).
+  if (!autoMintFired.value) await mintAndCelebrate()
 }
 
 const sentinelStarted = ref(false)
@@ -154,6 +178,10 @@ const isContentElement = computed(() => {
   return t === 'video' || t === 'text' || t === 'pdf' || t === 'downloadable' || t === 'interactive'
 })
 
+// Once the enrollment is completed, assessment responses are locked: the
+// learner can review their past answers but not re-submit them.
+const courseCompleted = computed(() => enrollment.value?.status === 'completed')
+
 // Standalone tutorial: hide chapter sidebar entirely — tutorials have a
 // single video element, the chapter nav is pure noise.
 const isTutorial = computed(() => course.value?.kind === 'tutorial')
@@ -193,6 +221,18 @@ const completedElements = computed(() => {
 const progressPercent = computed(() => {
   if (totalElements.value === 0) return 0
   return Math.round((completedElements.value / totalElements.value) * 100)
+})
+
+// You can only finish once the course is actually complete: every element
+// done, or just the current last *content* element outstanding (which Finish
+// itself marks complete). A still-incomplete element (incl. an unpassed
+// assessment, which stays non-'completed') keeps Finish disabled.
+const canFinish = computed(() => {
+  const total = totalElements.value
+  if (total === 0) return false
+  const done = completedElements.value
+  if (done >= total) return true
+  return done === total - 1 && isLastElement.value && isContentElement.value
 })
 
 // Check if current element is the very last in the course
@@ -465,6 +505,19 @@ async function markComplete(score?: number) {
     // A newly-passed assessment may complete the course — refresh the
     // claim affordance.
     void refreshCompletionStatus()
+    // Skills mint by default at the end of a course/tutorial: when this
+    // completes the final element, auto-claim the completion credentials and
+    // celebrate. Guarded so it fires at most once and never on a course that
+    // was already complete when opened.
+    if (
+      totalElements.value > 0 &&
+      completedElements.value === totalElements.value &&
+      !autoMintFired.value &&
+      !courseCompleted.value
+    ) {
+      void mintAndCelebrate()
+      return
+    }
     // Auto-advance to next element after a short delay — but skip for
     // element types where staying put is more useful (replay results,
     // try again, review the score) than jumping ahead.
@@ -670,6 +723,7 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
     downloading: downloadingElementId.value === el.id,
     downloadError: downloadError.value,
     enrollmentId: enrollment.value?.id ?? null,
+    readOnly: courseCompleted.value,
     onDownload: onDownloadClick,
     onComplete: () => { void markComplete() },
     onScoredComplete: (score: number) => { void markComplete(score) },
@@ -836,6 +890,26 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
               class="text-xs text-muted-foreground"
             >
               {{ completionStatus.required_count - completionStatus.missing_elements.length }}/{{ completionStatus.required_count }} assessments passed
+            </div>
+            <!-- Content-only / already-finished course: no gradeable gate, so
+                 offer the completion credential once everything is consumed.
+                 Re-claiming is idempotent, so this also re-mints for a course
+                 finished before credentials existed. -->
+            <div
+              v-else-if="progressPercent === 100 || courseCompleted"
+              class="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3"
+            >
+              <p class="text-xs font-medium text-emerald-700 dark:text-emerald-300">
+                Course complete — get your completion credential.
+              </p>
+              <button
+                :disabled="claiming"
+                class="mt-2 w-full rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-emerald-700 disabled:opacity-60"
+                @click="finishCourse"
+              >
+                {{ claiming ? 'Minting…' : 'Get completion credential' }}
+              </button>
+              <p v-if="claimError" class="mt-2 text-xs text-red-600 dark:text-red-400">{{ claimError }}</p>
             </div>
           </div>
 
@@ -1167,6 +1241,8 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
               v-if="isLastElement"
               size="sm"
               :loading="claiming"
+              :disabled="!canFinish"
+              :title="canFinish ? undefined : 'Complete every element first'"
               @click="finishCourse"
             >
               Finish Course
