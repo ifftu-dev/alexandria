@@ -57,6 +57,7 @@
       mode: "javascript",
       theme: "material-darker",
       lineNumbers: true,
+      lineWrapping: true,
       indentUnit: 2,
       tabSize: 2,
       matchBrackets: true,
