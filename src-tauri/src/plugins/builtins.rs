@@ -119,8 +119,8 @@ const IRL_REVIEW_BUNDLE: BuiltinBundle<'static> = BuiltinBundle {
 };
 
 /// codejudge: Lua — interactive coding-challenge element. The learner writes
-/// Lua; it runs locally in the bundled fengari VM (pure-JS Lua, no eval/wasm/
-/// network) against the problem's test cases. No grader (interactive only).
+/// Lua; it runs locally in the bundled wasmoon VM (Lua 5.4 compiled to wasm,
+/// no JS eval, no network) against the problem's test cases. No grader.
 ///
 /// The `ui/vendor/*` and `ui/problems.js` files are build-time fetched/baked by
 /// `plugins/builtin/codejudge-shared/fetch-runtimes.sh lua` — run it before
@@ -169,8 +169,8 @@ const CODEJUDGE_LUA_BUNDLE: BuiltinBundle<'static> = BuiltinBundle {
             include_bytes!("../../../plugins/builtin/codejudge-lua/ui/vendor/mode.js"),
         ),
         (
-            "ui/vendor/fengari-web.js",
-            include_bytes!("../../../plugins/builtin/codejudge-lua/ui/vendor/fengari-web.js"),
+            "ui/vendor/lua.js",
+            include_bytes!("../../../plugins/builtin/codejudge-lua/ui/vendor/lua.js"),
         ),
         (
             "icon.svg",

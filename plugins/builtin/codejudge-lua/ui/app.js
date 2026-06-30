@@ -1,9 +1,10 @@
 // codejudge: Lua — plugin UI harness.
 //
 // Interactive plugin (no host grader): the learner writes Lua, we run it
-// locally in the fengari VM (runner.js) against the problem's test cases and
-// report pass/fail. Progress is reported to the host via alex.complete(frac).
-// Hidden tests never reveal their input/output — only pass/fail counts.
+// locally in the wasmoon Lua VM (runner.js) against the problem's test cases
+// and report pass/fail. The wasm runtime loads asynchronously, so Run/Submit
+// stay disabled until it's ready and each run is awaited. Progress goes to the
+// host via alex.complete(frac); hidden tests reveal only pass/fail counts.
 
 (function () {
   "use strict";
@@ -24,6 +25,7 @@
 
   var problem = null;
   var editor = null;
+  var runtime = null; // { run } once the wasm Lua runtime is ready
   var saveTimer = null;
 
   // --- output comparison (identical rule across all codejudge plugins) ---
@@ -52,6 +54,7 @@
       mode: "lua",
       theme: "material-darker",
       lineNumbers: true,
+      lineWrapping: true,
       indentUnit: 2,
       tabSize: 2,
       matchBrackets: true,
@@ -88,14 +91,16 @@
   }
 
   // Run a set of cases; returns { passed, total, firstError, details[] }.
-  function runCases(cases, reveal) {
+  // Async: wasmoon's run is awaited per case.
+  async function runCases(cases, reveal) {
     var source = editor.getValue();
+    var limitMs = (problem.limits && problem.limits.time_ms) || 2000;
     var passed = 0;
     var details = [];
     var firstError = null;
     for (var i = 0; i < cases.length; i++) {
       var c = cases[i];
-      var r = CodejudgeRunner.run(source, c.input);
+      var r = await runtime.run(source, c.input, { timeoutMs: limitMs });
       var ok = !r.error && normalize(r.stdout) === normalize(c.output);
       if (ok) passed++;
       else if (!firstError && r.error) firstError = r.error;
@@ -131,21 +136,40 @@
     });
   }
 
-  function onRun() {
-    var visible = (problem.tests && problem.tests.visible) || [];
-    renderResults("Sample tests", runCases(visible, true));
+  function setBusy(b) {
+    els.run.disabled = b || !runtime;
+    els.submit.disabled = b || !runtime;
   }
 
-  function onSubmit() {
+  async function onRun() {
+    if (!runtime) return;
+    var visible = (problem.tests && problem.tests.visible) || [];
+    setBusy(true);
+    els.results.textContent = "Running…";
+    try {
+      renderResults("Sample tests", await runCases(visible, true));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onSubmit() {
+    if (!runtime) return;
     var all = ((problem.tests && problem.tests.visible) || [])
       .concat((problem.tests && problem.tests.hidden) || []);
-    // Reveal details only for visible cases; hidden cases show pass/fail only.
     var visibleCount = ((problem.tests && problem.tests.visible) || []).length;
-    var res = runCases(all, false);
-    res.details.forEach(function (d) { d.reveal = d.index < visibleCount; });
-    renderResults("Submission", res);
-    var frac = res.total ? res.passed / res.total : 0;
-    try { alex.complete(frac, frac); } catch (e) {}
+    setBusy(true);
+    els.results.textContent = "Running…";
+    try {
+      var res = await runCases(all, false);
+      // Reveal details only for visible cases; hidden cases show pass/fail only.
+      res.details.forEach(function (d) { d.reveal = d.index < visibleCount; });
+      renderResults("Submission", res);
+      var frac = res.total ? res.passed / res.total : 0;
+      try { alex.complete(frac, frac); } catch (e) {}
+    } finally {
+      setBusy(false);
+    }
   }
 
   // --- host bridge (with a standalone fallback for dev/preview) ---
@@ -165,8 +189,22 @@
       (state && state.source) || DEFAULT_STUB;
     renderProblem();
     setupEditor(starter);
-    els.run.disabled = false;
-    els.submit.disabled = false;
+    initRuntime();
+  }
+
+  function initRuntime() {
+    els.run.disabled = true;
+    els.submit.disabled = true;
+    els.results.textContent = "Loading Lua runtime…";
+    CodejudgeRunnerInit().then(function (rt) {
+      runtime = rt;
+      els.results.textContent = "";
+      els.run.disabled = false;
+      els.submit.disabled = false;
+    }).catch(function (e) {
+      els.results.innerHTML = '<div class="error">Failed to load runtime: ' +
+        escapeText(e && e.message ? e.message : String(e)) + "</div>";
+    });
   }
 
   function boot() {

@@ -17,7 +17,6 @@ PROBLEMS="$HERE/problems"
 # --- pinned versions ---
 CM_VER="5.65.16"                                  # CodeMirror 5 (single-file, no bundler)
 CM="https://cdnjs.cloudflare.com/ajax/libs/codemirror/$CM_VER"
-FENGARI="https://cdn.jsdelivr.net/npm/fengari-web@0.1.4/dist/fengari-web.js"
 
 fetch() { # url dest
   echo "  fetch $(basename "$2")"
@@ -52,7 +51,40 @@ do_lua() {
   echo "== codejudge-lua =="
   local plug="$BUILTIN/codejudge-lua"
   vendor_common "$plug" "mode/lua/lua.min.js"
-  fetch "$FENGARI" "$plug/ui/vendor/fengari-web.js"
+  # Build the offline wasmoon (Lua 5.4 -> WASM) bundle: embed glue.wasm as
+  # base64 and patch the emscripten loader's fetch() to instantiate the embedded
+  # bytes (this build doesn't whitelist wasmBinary/instantiateWasm). CSP-safe:
+  # Lua runs inside wasm (wasm-unsafe-eval), no JS eval, no network.
+  local work; work="$(mktemp -d)"
+  ( cd "$work"
+    npm init -y >/dev/null 2>&1
+    npm i wasmoon@1.16.0 esbuild@0.24.0 >/dev/null 2>&1
+    node -e 'const fs=require("fs");const b=fs.readFileSync("node_modules/wasmoon/dist/glue.wasm").toString("base64");fs.writeFileSync("wasmb64.js","export default \""+b+"\";")'
+    cat > entry.js <<'JS'
+import { LuaFactory } from "wasmoon";
+import B64 from "./wasmb64.js";
+globalThis.__CJLUA_WASM = Uint8Array.from(atob(B64), (c) => c.charCodeAt(0));
+globalThis.CodejudgeLua = { newFactory: () => new LuaFactory("glue.wasm") };
+JS
+    cat > build.mjs <<'JS'
+import * as esbuild from "esbuild";
+import fs from "fs";
+const SHIM = 'Promise.resolve(new Response(globalThis.__CJLUA_WASM,{headers:{"content-type":"application/wasm"}}))';
+const patch = { name: "offline-wasm", setup(b) { b.onLoad({ filter: /wasmoon[\/\\]dist[\/\\]index\.js$/ }, async (a) => {
+  let code = await fs.promises.readFile(a.path, "utf8");
+  for (const v of ['fetch(a,{credentials:"same-origin"})', 'fetch(c,{credentials:"same-origin"})']) {
+    if (!code.includes(v)) throw new Error("wasm fetch patch target missing: " + v);
+    code = code.split(v).join(SHIM);
+  }
+  return { contents: code, loader: "js" };
+}); } };
+await esbuild.build({ entryPoints: ["entry.js"], bundle: true, format: "iife", platform: "browser", minify: true, outfile: process.argv[2], external: ["url", "module", "fs", "path", "crypto"], plugins: [patch] });
+JS
+    node build.mjs "$plug/ui/vendor/lua.js" >/dev/null 2>&1
+  )
+  rm -rf "$work"
+  rm -f "$plug/ui/vendor/fengari-web.js"
+  echo "  built lua.js ($(du -h "$plug/ui/vendor/lua.js" | cut -f1))"
 }
 
 do_javascript() {
