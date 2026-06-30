@@ -17,9 +17,15 @@ import {
   earnedSkillIdsFromCredentials,
   type SkillStatus,
 } from '@/composables/useSkillGraphState'
-import type { SkillInfo, SkillGraphEdge, VerifiableCredential } from '@/types'
+import type {
+  SkillInfo,
+  SkillGraphEdge,
+  VerifiableCredential,
+  DerivedSkillState,
+} from '@/types'
 import SkillGraphModal from '@/components/layout/SkillGraphModal.vue'
-import { bloomRadius } from '@/utils/bloom'
+import { bloomRadius, BLOOM_ORDER } from '@/utils/bloom'
+import { useCredentials } from '@/composables/useCredentials'
 
 const router = useRouter()
 const { invoke } = useLocalApi()
@@ -41,7 +47,10 @@ const {
   totalCount,
   loaded,
   isModalOpen,
+  skillStates,
 } = useSkillGraphState()
+
+const { listDerivedStates } = useCredentials()
 
 const prereqMap = computed(() => {
   const map = new Map<string, string[]>()
@@ -61,6 +70,18 @@ const miniGraphNodes = computed(() => {
       : (prereqs.length === 0 || prereqs.every(p => earned.has(p)))
           ? 'available'
           : 'locked'
+    // User proficiency (shown on hover) — distinct from the skill's intrinsic
+    // Bloom level (which sizes the node). Only earned skills have a proven
+    // proficiency: it defaults to "Remember" on first completion and climbs as
+    // VC evidence accumulates (confidence = the derived shrinkage score).
+    let proficiency: string | undefined
+    let confidence: number | undefined
+    if (status === 'earned') {
+      const st = skillStates.value[skill.id]
+      const lvl = st ? Math.max(0, Math.min(5, Math.round(st.level))) : 0
+      proficiency = BLOOM_ORDER[lvl] ?? 'remember'
+      confidence = st?.confidence ?? 0
+    }
     return {
       id: skill.id,
       name: skill.name,
@@ -68,6 +89,8 @@ const miniGraphNodes = computed(() => {
       status,
       prerequisites: prereqs,
       bloom_level: skill.bloom_level,
+      proficiency,
+      confidence,
     }
   })
 })
@@ -96,6 +119,12 @@ async function loadData() {
     const earned = earnedSkillIdsFromCredentials(creds, localDid)
     earnedSkillIds.value = earned
     earnedCount.value = earned.size
+
+    // VC-derived proficiency states for the local subject (level + confidence).
+    const states = localDid ? (await listDerivedStates(localDid).catch(() => [])) ?? [] : []
+    const stateMap: Record<string, DerivedSkillState> = {}
+    for (const s of states) stateMap[s.skill_id] = s
+    skillStates.value = stateMap
 
     const prereqMap = new Map<string, string[]>()
     for (const e of edgeList) {

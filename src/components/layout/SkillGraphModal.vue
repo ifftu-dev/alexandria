@@ -1,7 +1,12 @@
 <script setup lang="ts">
 import { ref, watch, nextTick, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
-import { useSkillGraphHover } from '@/composables/useSkillGraphHover'
+import {
+  useSkillGraphHover,
+  createLabelCollisionForce,
+  measureLabelBoxes,
+  labelLinkDistance,
+} from '@/composables/useSkillGraphHover'
 import type { SkillStatus } from '@/composables/useSkillGraphState'
 
 interface ModalSkillNode {
@@ -11,6 +16,10 @@ interface ModalSkillNode {
   status: SkillStatus
   prerequisites: string[]
   bloom_level: string
+  /** User's proven proficiency (VC-derived Bloom level); undefined until earned. */
+  proficiency?: string
+  /** Derived confidence in `proficiency`, 0..1. */
+  confidence?: number
 }
 
 const props = defineProps<{
@@ -112,7 +121,25 @@ async function initGraph() {
     })
 
   graph.d3Force('charge')?.strength(-80)
-  graph.d3Force('link')?.distance(50)
+
+  // Obsidian-style: spread nodes so labels never overlap. First reserve each
+  // node's label box, then (a) size the link rest-length from those boxes so
+  // directly-connected nodes sit far enough apart for their labels, and
+  // (b) add a label-box collision force for everything else.
+  measureLabelBoxes(props.nodes)
+  const linkForce = graph.d3Force('link')
+  if (linkForce) {
+    linkForce.distance((l: Record<string, unknown>) =>
+      labelLinkDistance(
+        l.source as { __halfW?: number } | undefined,
+        l.target as { __halfW?: number } | undefined,
+      ),
+    )
+    // Re-register so d3 recomputes per-link distances with the new accessor.
+    graph.d3Force('link', linkForce)
+  }
+  graph.d3Force('collide', createLabelCollisionForce())
+  graph.d3ReheatSimulation?.()
 
   graphInstance.value = graph
 
