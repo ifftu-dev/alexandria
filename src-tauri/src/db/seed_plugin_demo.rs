@@ -1,7 +1,8 @@
-//! Seed a single demo course that exercises both first-party plugins
-//! (Music Reviews + IRL Review). Runs after `builtins::install_all` so
-//! the plugin CIDs are resolvable, and is idempotent against
-//! re-invocation (uses `INSERT OR IGNORE` against deterministic ids).
+//! Seed a single demo course that exercises the first-party plugins
+//! (Music Reviews, IRL Review, and the codejudge language plugins). Runs
+//! after `builtins::install_all` so the plugin CIDs are resolvable, and is
+//! idempotent against re-invocation (uses `INSERT OR IGNORE` against
+//! deterministic ids).
 
 use rusqlite::{params, Connection};
 
@@ -9,22 +10,70 @@ use rusqlite::{params, Connection};
 const COURSE_ID: &str = "course_plugin_demo";
 const CHAPTER_MUSIC: &str = "ch_plugin_demo_music";
 const CHAPTER_IRL: &str = "ch_plugin_demo_irl";
+const CHAPTER_CODE: &str = "ch_plugin_demo_code";
 const EL_MUSIC: &str = "el_plugin_demo_music_reviews";
 const EL_IRL: &str = "el_plugin_demo_irl_review";
+const EL_CODE_JS_TWOSUM: &str = "el_plugin_demo_code_js_twosum";
+const EL_CODE_LUA_REVERSE: &str = "el_plugin_demo_code_lua_reverse";
+const EL_CODE_JS_PRIMES: &str = "el_plugin_demo_code_js_primes";
 const ENROLLMENT_ID: &str = "enroll_plugin_demo";
 
-/// Resolve a builtin plugin's CID by matching the `id` field embedded in
-/// its `manifest_json`. The full id is `did:key:<author>#<slug>`, so a
-/// `LIKE '%#<slug>"%'` match is enough to disambiguate.
+/// Resolve a builtin plugin's CID by its manifest `id` slug. The full id is
+/// `did:key:<author>#<slug>`, so we match on the parsed `id` field ending in
+/// `#<slug>` — NOT a substring of the whole manifest. A substring match would
+/// also hit a plugin that merely *lists* this slug in its `dependencies`
+/// array (e.g. the `codejudge-multilang` umbrella lists the language plugins),
+/// which previously caused code elements to be pointed at the umbrella.
 fn find_plugin_cid(conn: &Connection, slug: &str) -> Option<String> {
-    conn.query_row(
-        "SELECT plugin_cid FROM plugin_installed \
-         WHERE source = 'builtin' AND manifest_json LIKE ?1 \
-         ORDER BY installed_at DESC LIMIT 1",
-        params![format!("%#{slug}\"%")],
-        |row| row.get::<_, String>(0),
-    )
-    .ok()
+    let suffix = format!("#{slug}");
+    let mut stmt = conn
+        .prepare("SELECT plugin_cid, manifest_json FROM plugin_installed WHERE source = 'builtin'")
+        .ok()?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .ok()?;
+    for (cid, manifest_json) in rows.flatten() {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&manifest_json) else {
+            continue;
+        };
+        if value
+            .get("id")
+            .and_then(|v| v.as_str())
+            .is_some_and(|id| id.ends_with(&suffix))
+        {
+            return Some(cid);
+        }
+    }
+    None
+}
+
+/// Seed (and refresh) one codejudge element: a coding problem pinned to a
+/// specific language plugin. The content is `{ problem_id }` — the plugin
+/// resolves it against its own bundled problem bank at render time.
+fn seed_code_element(
+    conn: &Connection,
+    id: &str,
+    chapter_id: &str,
+    title: &str,
+    position: i64,
+    plugin_cid: &str,
+    problem_id: &str,
+) -> Result<(), rusqlite::Error> {
+    let content = serde_json::json!({ "version": "1", "problem_id": problem_id }).to_string();
+    conn.execute(
+        "INSERT OR IGNORE INTO course_elements \
+         (id, chapter_id, title, element_type, position, duration_seconds, plugin_cid, plugin_version, content_inline) \
+         VALUES (?1, ?2, ?3, 'plugin', ?4, NULL, ?5, '0.1.0', ?6)",
+        params![id, chapter_id, title, position, plugin_cid, content],
+    )?;
+    // Refresh so edits to the pinned problem id propagate without a DB reset.
+    conn.execute(
+        "UPDATE course_elements SET content_inline = ?1, plugin_cid = ?2 WHERE id = ?3",
+        params![content, plugin_cid, id],
+    )?;
+    Ok(())
 }
 
 /// Insert (or refresh) the demo plugin course. Skips silently if either
@@ -47,7 +96,7 @@ pub fn seed_plugin_demo_course(conn: &Connection) -> Result<(), rusqlite::Error>
         params![
             COURSE_ID,
             "Plugins Showcase",
-            "A short course that demonstrates the two first-party plugins: Music Reviews (live pitch-matched note review) and IRL Review (human-instructor review of uploaded work).",
+            "A short course that demonstrates the first-party plugins: Music Reviews (live pitch-matched note review), IRL Review (human-instructor review of uploaded work), and codejudge (solve coding challenges in JavaScript and Lua, run locally against test cases).",
             "addr_demo_learner",
             "[\"demo\",\"plugins\"]",
             "[]",
@@ -131,6 +180,60 @@ pub fn seed_plugin_demo_course(conn: &Connection) -> Result<(), rusqlite::Error>
         params![irl_content, irl_cid, EL_IRL],
     )?;
 
+    // Chapter 3 — Code challenges (codejudge language plugins). Additive:
+    // only seeded when the codejudge language plugins are installed, so the
+    // music/IRL demo still works if they were skipped. Each element pins a
+    // shared problem (by id) at a specific language plugin.
+    match (
+        find_plugin_cid(conn, "codejudge-javascript"),
+        find_plugin_cid(conn, "codejudge-lua"),
+    ) {
+        (Some(js_cid), Some(lua_cid)) => {
+            conn.execute(
+                "INSERT OR IGNORE INTO course_chapters (id, course_id, title, description, position) \
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![
+                    CHAPTER_CODE,
+                    COURSE_ID,
+                    "Code challenges",
+                    "Solve coding problems in different languages. Each solution runs locally in a sandboxed in-browser engine against hidden test cases.",
+                    2,
+                ],
+            )?;
+            seed_code_element(
+                conn,
+                EL_CODE_JS_TWOSUM,
+                CHAPTER_CODE,
+                "Two Sum (JavaScript)",
+                0,
+                &js_cid,
+                "two-sum",
+            )?;
+            seed_code_element(
+                conn,
+                EL_CODE_LUA_REVERSE,
+                CHAPTER_CODE,
+                "Reverse a String (Lua)",
+                1,
+                &lua_cid,
+                "reverse-string",
+            )?;
+            seed_code_element(
+                conn,
+                EL_CODE_JS_PRIMES,
+                CHAPTER_CODE,
+                "Count Primes (JavaScript)",
+                2,
+                &js_cid,
+                "count-primes",
+            )?;
+            log::info!("plugin demo course: codejudge chapter seeded (js + lua)");
+        }
+        _ => {
+            log::debug!("plugin demo seed: codejudge language plugins not installed — skipping code chapter");
+        }
+    }
+
     // Auto-enroll the demo learner so the course appears on the dashboard
     // immediately. Single-user app: enrollments are not scoped to a
     // stake address column in the schema.
@@ -146,4 +249,81 @@ pub fn seed_plugin_demo_course(conn: &Connection) -> Result<(), rusqlite::Error>
         &irl_cid[..irl_cid.len().min(12)]
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::Database;
+    use crate::plugins::builtins;
+    use tempfile::TempDir;
+
+    #[test]
+    fn seeds_codejudge_code_chapter() {
+        let db = Database::open_in_memory().expect("db");
+        db.run_migrations().expect("migrations");
+        let dir = TempDir::new().unwrap();
+        builtins::install_all(&db, dir.path());
+
+        seed_plugin_demo_course(db.conn()).expect("seed");
+
+        // Three codejudge plugin elements land in the code chapter.
+        let count: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM course_elements \
+                 WHERE chapter_id = ?1 AND element_type = 'plugin'",
+                params![CHAPTER_CODE],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 3);
+
+        // The three CIDs must be distinct. The umbrella lists the language
+        // plugins in its `dependencies`, so a substring-based resolver would
+        // alias them — pointing code elements at the umbrella (no editor).
+        // Regression guard for exactly that bug.
+        let js_cid = find_plugin_cid(db.conn(), "codejudge-javascript").unwrap();
+        let lua_cid = find_plugin_cid(db.conn(), "codejudge-lua").unwrap();
+        let umbrella_cid = find_plugin_cid(db.conn(), "codejudge-multilang").unwrap();
+        assert_ne!(js_cid, lua_cid);
+        assert_ne!(js_cid, umbrella_cid);
+        assert_ne!(lua_cid, umbrella_cid);
+
+        // The JS element pins the JS plugin (not the umbrella) + a problem_id.
+        let (cid, content): (String, String) = db
+            .conn()
+            .query_row(
+                "SELECT plugin_cid, content_inline FROM course_elements WHERE id = ?1",
+                params![EL_CODE_JS_TWOSUM],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(cid, js_cid);
+        assert_ne!(cid, umbrella_cid);
+        assert!(content.contains("\"problem_id\":\"two-sum\""));
+
+        // The Lua element pins the Lua plugin.
+        let lua_el_cid: String = db
+            .conn()
+            .query_row(
+                "SELECT plugin_cid FROM course_elements WHERE id = ?1",
+                params![EL_CODE_LUA_REVERSE],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(lua_el_cid, lua_cid);
+
+        // Idempotent: a second seed doesn't duplicate.
+        seed_plugin_demo_course(db.conn()).expect("reseed");
+        let count2: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM course_elements WHERE chapter_id = ?1",
+                params![CHAPTER_CODE],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count2, 3);
+    }
 }
