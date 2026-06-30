@@ -522,6 +522,7 @@ fn iso_to_ms(s: Option<String>) -> i64 {
         .unwrap_or(0)
 }
 
+#[allow(clippy::type_complexity)]
 fn read_finalize_data(
     db: &std::sync::Arc<std::sync::Mutex<Option<crate::db::Database>>>,
     election_id: &str,

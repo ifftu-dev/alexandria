@@ -25,9 +25,7 @@ use super::blockfrost::BlockfrostClient;
 use super::gov_tx_builder::{inject_plutus_fields, script_address, GovTxResult};
 use super::plutus_data;
 use super::script_refs;
-use super::tx_builder::{
-    compute_tx_hash, parse_tx_hash, sign_raw_tx, TxBuildError, MIN_UTXO_LOVELACE, TTL_OFFSET,
-};
+use super::tx_builder::{compute_tx_hash, parse_tx_hash, sign_raw_tx, TxBuildError, TTL_OFFSET};
 
 /// Minimum ADA at the escrow UTxO (covers the inline datum storage).
 const MIN_ESCROW_UTXO_LOVELACE: u64 = 2_000_000;
