@@ -76,6 +76,61 @@ pub async fn plugin_uninstall(
     registry::uninstall(db, &plugins_dir, &plugin_cid)
 }
 
+/// Persist a plugin's opaque per-element state (the `alex.persistState` blob —
+/// e.g. a codejudge editor's unsubmitted source). Upserts one row per element
+/// so the latest write wins; the state is returned to the plugin in its `init`
+/// payload by [`plugin_load_element_state`].
+#[tauri::command]
+pub async fn plugin_save_element_state(
+    state: State<'_, AppState>,
+    element_id: String,
+    plugin_cid: String,
+    state_json: String,
+) -> Result<(), String> {
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
+
+    db.conn()
+        .execute(
+            "INSERT INTO plugin_element_state (element_id, plugin_cid, state_json, updated_at) \
+             VALUES (?1, ?2, ?3, datetime('now')) \
+             ON CONFLICT(element_id) DO UPDATE SET \
+               plugin_cid = excluded.plugin_cid, \
+               state_json = excluded.state_json, \
+               updated_at = excluded.updated_at",
+            params![element_id, plugin_cid, state_json],
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Load a plugin's saved per-element state, if any. Returns the opaque
+/// `state_json` string the plugin last persisted for this element.
+#[tauri::command]
+pub async fn plugin_load_element_state(
+    state: State<'_, AppState>,
+    element_id: String,
+) -> Result<Option<String>, String> {
+    use rusqlite::OptionalExtension;
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
+
+    db.conn()
+        .query_row(
+            "SELECT state_json FROM plugin_element_state WHERE element_id = ?1",
+            params![element_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())
+}
+
 /// List the plugins that an installed plugin depends on (its resolved
 /// dependency bundles).
 #[tauri::command]

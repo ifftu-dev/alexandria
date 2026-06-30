@@ -71,6 +71,7 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (61, "integrity_attestation", MIGRATION_061),
     (62, "org_role_assessments", MIGRATION_062),
     (63, "plugin_dependencies", MIGRATION_063),
+    (64, "plugin_element_state", MIGRATION_064),
 ];
 
 const MIGRATION_001: &str = r#"
@@ -2462,4 +2463,23 @@ CREATE TABLE IF NOT EXISTS plugin_dependencies (
 
 CREATE INDEX IF NOT EXISTS idx_plugin_dependencies_dep
     ON plugin_dependencies(dependency_cid);
+"#;
+
+const MIGRATION_064: &str = r#"
+-- ============================================================
+-- Migration 064: Plugin element state (durable persistState)
+--
+-- Opaque per-element state a plugin saves via `alex.persistState(blob)` —
+-- e.g. a codejudge editor's in-progress (unsubmitted) source. Keyed by the
+-- course element; the host returns it in the plugin's `init` payload so work
+-- survives navigating away and restarting the app. One row per element
+-- (single-user local DB); the newest write wins.
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS plugin_element_state (
+    element_id   TEXT PRIMARY KEY,
+    plugin_cid   TEXT NOT NULL,
+    state_json   TEXT NOT NULL,
+    updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
 "#;

@@ -1343,6 +1343,8 @@ pub fn run() {
             commands::plugins::plugin_list,
             commands::plugins::plugin_get_manifest,
             commands::plugins::plugin_list_dependencies,
+            commands::plugins::plugin_save_element_state,
+            commands::plugins::plugin_load_element_state,
             commands::plugins::plugin_grant_capability,
             commands::plugins::plugin_revoke_capability,
             commands::plugins::plugin_list_permissions,

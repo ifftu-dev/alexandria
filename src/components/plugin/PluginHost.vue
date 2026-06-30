@@ -58,6 +58,10 @@ const permissions = ref<PluginPermissionRecord[]>([])
 const loading = ref(true)
 const loadError = ref<string | null>(null)
 const refusalReason = ref<string | null>(null)
+// Opaque state the plugin last persisted for this element (e.g. an editor's
+// unsubmitted source). Loaded before the iframe mounts so it reaches the
+// plugin's `init`; the iframe is keyed on it so a late load still re-inits.
+const elementState = ref<unknown>(null)
 
 // Session-scoped capability grants live in-memory only. Database rows
 // are for 'always' grants (persistent across vault sessions).
@@ -109,11 +113,21 @@ onMounted(async () => {
     return
   }
   try {
-    const [list, m, perms] = await Promise.all([
+    const [list, m, perms, savedState] = await Promise.all([
       invoke<InstalledPlugin[]>('plugin_list'),
       invoke<PluginManifest>('plugin_get_manifest', { pluginCid: pluginCid.value }),
       invoke<PluginPermissionRecord[]>('plugin_list_permissions', { pluginCid: pluginCid.value }),
+      invoke<string | null>('plugin_load_element_state', { elementId: props.element.id }).catch(
+        () => null,
+      ),
     ])
+    if (savedState) {
+      try {
+        elementState.value = JSON.parse(savedState)
+      } catch {
+        // Corrupt/legacy blob — ignore and start fresh.
+      }
+    }
     const installed = list.find((p) => p.plugin_cid === pluginCid.value)
     if (installed && !installed.enabled) {
       refusalReason.value =
@@ -208,11 +222,16 @@ async function onPermissionDecision(decision: 'once' | 'session' | 'always' | 'd
 }
 
 function onPersistState(blob: unknown) {
-  // Phase 1: state persistence is in-process only (the iframe is
-  // teardowned on element change, so state is effectively per-session).
-  // The full `persist_state` SQLite path ships with the built-in plugins
-  // migration in Phase 2, when element_submissions lands.
-  console.debug('[alex] plugin persist_state (not yet durable)', blob)
+  // Durably persist the plugin's opaque per-element state so unsubmitted work
+  // (e.g. a codejudge editor's source) survives navigating away and restarting
+  // the app. Best-effort + fire-and-forget: a failed save must not disrupt the
+  // plugin. Reloaded into the plugin's `init` payload on next mount.
+  elementState.value = blob
+  void invoke('plugin_save_element_state', {
+    elementId: props.element.id,
+    pluginCid: pluginCid.value,
+    stateJson: JSON.stringify(blob),
+  }).catch((e) => console.debug('[alex] persist_state save failed', e))
 }
 
 async function onEmitEvent(requestId: number, type: string, payload: unknown) {
@@ -344,7 +363,7 @@ function onIframeError(msg: string) {
           :declared-capabilities="manifest.capabilities"
           :granted-capabilities="grantedCapabilities"
           :content="elementContent"
-          :state="null"
+          :state="elementState"
           :mode="props.mode ?? 'learn'"
           :element-id="props.element.id"
           class="flex-1 min-h-0"
