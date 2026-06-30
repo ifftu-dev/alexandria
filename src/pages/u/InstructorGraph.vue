@@ -3,7 +3,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { useLocalApi } from '@/composables/useLocalApi'
-import { useTargets } from '@/composables/useTargets'
+import { useGoals } from '@/composables/useGoals'
 import { AppButton, AppBadge, AppSpinner, AppAlert, EmptyState } from '@/components/ui'
 import ProfileHeader from '@/components/profile/ProfileHeader.vue'
 import SkillGraph from '@/components/skills/SkillGraph.vue'
@@ -12,7 +12,7 @@ import type { PublicProfile, PublicSkillGraph, SkillInfo, SkillGraphEdge, Userna
 const route = useRoute()
 const router = useRouter()
 const { invoke } = useLocalApi()
-const { targets, addTarget, removeTarget } = useTargets()
+const { goals, addGoal, removeGoal } = useGoals()
 
 // The route accepts a DID or a username (with or without a leading @).
 // Mobile keyboards capitalize typed input, and the owner-match on the
@@ -37,8 +37,8 @@ const name = computed(
   () => profile.value?.display_name || profile.value?.username || 'this user',
 )
 
-const existingTarget = computed(() =>
-  targets.value.find((t) => t.source_did === profile.value?.did),
+const existingGoal = computed(() =>
+  goals.value.find((t) => t.source_did === profile.value?.did),
 )
 
 const teachingNodes = computed(() => graph.value?.nodes.filter((n) => n.teaching) ?? [])
@@ -119,23 +119,23 @@ async function load() {
 onMounted(load)
 watch(param, load)
 
-async function onTarget() {
+async function onAddGoal() {
   if (!profile.value || !graph.value || graph.value.nodes.length === 0) return
   adding.value = true
   try {
-    await addTarget({
+    await addGoal({
       label: `${name.value} · skill graph`,
       goalSkillIds: graph.value.nodes.map((n) => n.id),
       sourceDid: profile.value.did,
     })
-    router.push('/targets')
+    router.push('/goals')
   } finally {
     adding.value = false
   }
 }
 
-async function onUntarget() {
-  if (existingTarget.value) await removeTarget(existingTarget.value.id)
+async function onRemoveGoal() {
+  if (existingGoal.value) await removeGoal(existingGoal.value.id)
 }
 </script>
 
@@ -161,17 +161,17 @@ async function onUntarget() {
       <ProfileHeader :profile="profile" :registry="registry">
         <template #actions>
           <AppButton
-            v-if="!existingTarget"
+            v-if="!existingGoal"
             size="sm"
             :loading="adding"
             :disabled="!graph || graph.nodes.length === 0"
-            @click="onTarget"
+            @click="onAddGoal"
           >
-            🎯 Target this graph
+            🎯 Set as goal
           </AppButton>
           <template v-else>
-            <AppBadge variant="success">Targeted</AppBadge>
-            <AppButton variant="outline" size="sm" @click="onUntarget">Remove</AppButton>
+            <AppBadge variant="success">Goal set</AppBadge>
+            <AppButton variant="outline" size="sm" @click="onRemoveGoal">Remove</AppButton>
           </template>
         </template>
       </ProfileHeader>

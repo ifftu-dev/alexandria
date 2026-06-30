@@ -7,7 +7,7 @@ import { useP2P } from '@/composables/useP2P'
 import { useContentSync } from '@/composables/useContentSync'
 import { usePlatform } from '@/composables/usePlatform'
 import { useSettings } from '@/composables/useSettings'
-import { useTargets } from '@/composables/useTargets'
+import { useGoals } from '@/composables/useGoals'
 import { StatusBadge, AppButton, InfoTip } from '@/components/ui'
 import { bloomFill } from '@/utils/bloom'
 import { sanitizeSvg } from '@/utils/sanitize'
@@ -26,18 +26,18 @@ const { displayName } = useAuth()
 const { status: p2pStatus, start: startP2P, startPolling } = useP2P()
 const { startContentSync, completeContentSync, failContentSync } = useContentSync()
 const { isMobilePlatform } = usePlatform()
-const { targets, pathFor } = useTargets()
+const { goals, pathFor } = useGoals()
 
 const loading = ref(true)
 const enrollments = ref<Enrollment[]>([])
 const courses = ref<Course[]>([])
 const enrolledCourseMap = ref<Record<string, Course>>({})
 
-// ── Reputation + skill graph + targets (Option C cockpit) ──────────
+// ── Reputation + skill graph + goals (Option C cockpit) ──────────
 const reputation = ref<FullReputationAssertion[]>([])
 const usernameConflict = ref<{ username: string; winner_did: string } | null>(null)
 const myGraph = ref<PublicSkillGraph | null>(null)
-const targetPaths = ref<Record<string, LearningPath>>({})
+const goalPaths = ref<Record<string, LearningPath>>({})
 const graphExpanded = ref(false)
 
 const teachingImpact = computed(() =>
@@ -75,11 +75,11 @@ async function loadCockpit() {
     'check_my_username_conflict',
   ).catch(() => null)
   const entries = await Promise.all(
-    targets.value.map(async (t) => [t.id, await pathFor(t).catch(() => null)] as const),
+    goals.value.map(async (t) => [t.id, await pathFor(t).catch(() => null)] as const),
   )
   const map: Record<string, LearningPath> = {}
   for (const [id, p] of entries) if (p) map[id] = p
-  targetPaths.value = map
+  goalPaths.value = map
 }
 
 // Diagnostic log viewer (for iOS debugging). Dev-only — never shown in
@@ -151,10 +151,10 @@ const heroAction = computed<HeroAction>(() => {
       to: `/learn/${enrolled.course_id}`,
     }
   }
-  if (targets.value.length === 0) {
+  if (goals.value.length === 0) {
     return {
       eyebrow: 'Get started',
-      title: 'Set your first learning target',
+      title: 'Set your first learning goal',
       cta: 'Browse skills',
       to: '/skills',
     }
@@ -339,54 +339,54 @@ onMounted(async () => {
       </div>
     </section>
 
-    <!-- ═══ Targets rail ═══ -->
+    <!-- ═══ Goals rail ═══ -->
     <section class="mb-8">
       <div class="mb-3 flex items-center justify-between">
         <div class="flex items-center gap-2">
-          <h2 class="text-base font-semibold text-foreground">Your targets</h2>
-          <span v-if="targets.length" class="text-xs text-muted-foreground">{{ targets.length }}</span>
+          <h2 class="text-base font-semibold text-foreground">Your goals</h2>
+          <span v-if="goals.length" class="text-xs text-muted-foreground">{{ goals.length }}</span>
         </div>
-        <button class="sb-view-all text-xs text-primary hover:underline" @click="router.push('/targets')">
+        <button class="sb-view-all text-xs text-primary hover:underline" @click="router.push('/goals')">
           View all
         </button>
       </div>
 
       <div class="-mx-4 flex gap-4 overflow-x-auto px-4 pb-2 scrollbar-thin sm:mx-0 sm:px-0">
-        <!-- target cards -->
+        <!-- goal cards -->
         <button
-          v-for="t in targets"
+          v-for="t in goals"
           :key="t.id"
-          class="target-card group"
-          @click="router.push('/targets')"
+          class="goal-card group"
+          @click="router.push('/goals')"
         >
           <svg width="46" height="46" viewBox="0 0 46 46" class="shrink-0">
             <circle cx="23" cy="23" r="18" fill="none" stroke="var(--app-border)" stroke-width="4" />
             <circle
               cx="23" cy="23" r="18" fill="none" stroke="var(--app-primary)" stroke-width="4"
               stroke-linecap="round" :stroke-dasharray="ringDash"
-              :stroke-dashoffset="ringDash * (1 - pathPct(targetPaths[t.id]) / 100)"
+              :stroke-dashoffset="ringDash * (1 - pathPct(goalPaths[t.id]) / 100)"
               transform="rotate(-90 23 23)" class="transition-all duration-500"
             />
             <text x="23" y="23" text-anchor="middle" dominant-baseline="central"
               font-size="11" font-weight="600" fill="var(--app-foreground)">
-              {{ pathPct(targetPaths[t.id]) }}%
+              {{ pathPct(goalPaths[t.id]) }}%
             </text>
           </svg>
           <div class="min-w-0 text-left">
             <p class="truncate text-sm font-medium text-foreground group-hover:text-primary">
               {{ t.label }}
             </p>
-            <p v-if="pathNext(targetPaths[t.id])" class="mt-0.5 truncate text-xs text-muted-foreground">
-              Next: {{ pathNext(targetPaths[t.id]) }}
+            <p v-if="pathNext(goalPaths[t.id])" class="mt-0.5 truncate text-xs text-muted-foreground">
+              Next: {{ pathNext(goalPaths[t.id]) }}
             </p>
             <p v-else class="mt-0.5 truncate text-xs text-success">Prereqs cleared 🎉</p>
           </div>
         </button>
 
-        <!-- add target -->
-        <button class="target-card target-card--add" @click="router.push('/skills')">
+        <!-- add goal -->
+        <button class="goal-card goal-card--add" @click="router.push('/skills')">
           <span class="text-2xl leading-none text-muted-foreground">+</span>
-          <span class="text-sm font-medium text-muted-foreground">Add a target</span>
+          <span class="text-sm font-medium text-muted-foreground">Add a goal</span>
         </button>
 
         <!-- trailing gap: WebKit drops a scroll container's right padding -->
@@ -779,8 +779,8 @@ onMounted(async () => {
   line-height: 1.1;
 }
 
-/* Targets rail */
-.target-card {
+/* Goals rail */
+.goal-card {
   display: flex;
   align-items: center;
   gap: 0.75rem;
@@ -794,11 +794,11 @@ onMounted(async () => {
     box-shadow 0.15s,
     transform 0.15s;
 }
-.target-card:hover {
+.goal-card:hover {
   box-shadow: 0 4px 12px rgb(0 0 0 / 8%);
   transform: translateY(-1px);
 }
-.target-card--add {
+.goal-card--add {
   justify-content: center;
   border: 1px dashed var(--app-border);
   background: transparent;

@@ -152,11 +152,11 @@ const router = createRouter({
       meta: { layout: 'app' },
     },
 
-    // Learning targets + instructor public graphs
+    // Learning goals + instructor public graphs
     {
-      path: '/targets',
-      name: 'targets',
-      component: () => import('@/pages/targets/Index.vue'),
+      path: '/goals',
+      name: 'goals',
+      component: () => import('@/pages/goals/Index.vue'),
       meta: { layout: 'app' },
     },
     {
