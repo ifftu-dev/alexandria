@@ -1086,6 +1086,8 @@ pub fn run() {
             commands::enrollment::enroll,
             commands::enrollment::update_progress,
             commands::enrollment::get_progress,
+            commands::enrollment::record_element_submission,
+            commands::enrollment::get_element_submission,
             // Content (iroh blob store)
             commands::content::content_add,
             commands::content::content_get,

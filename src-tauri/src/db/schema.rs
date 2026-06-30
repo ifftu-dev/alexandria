@@ -72,6 +72,7 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (62, "org_role_assessments", MIGRATION_062),
     (63, "plugin_dependencies", MIGRATION_063),
     (64, "plugin_element_state", MIGRATION_064),
+    (65, "element_submission_answers", MIGRATION_065),
 ];
 
 const MIGRATION_001: &str = r#"
@@ -2482,4 +2483,25 @@ CREATE TABLE IF NOT EXISTS plugin_element_state (
     state_json   TEXT NOT NULL,
     updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
+"#;
+
+const MIGRATION_065: &str = r#"
+-- ============================================================
+-- Migration 065: Built-in assessment responses (raw answers)
+--
+-- The reproducibility bundle in `element_submissions` was originally
+-- written only by graded plugins. Built-in quiz/MCQ/assessment/essay
+-- elements graded entirely in the UI and never persisted a row, so a
+-- learner's responses vanished on reload and the completion-witness
+-- assembler (which reads `element_submissions`) never saw them.
+--
+-- Built-in assessments now persist a row per submission too. This column
+-- carries the learner's RAW chosen answers (component-defined JSON: the
+-- selected option indices, short-answer text, essay body, per-question
+-- result) so the player can restore and display the prior response when
+-- the learner revisits the element. NULL for plugin submissions, whose
+-- inputs live in the iroh-stored `submission_cid` bundle.
+-- ============================================================
+
+ALTER TABLE element_submissions ADD COLUMN answers_json TEXT;
 "#;
