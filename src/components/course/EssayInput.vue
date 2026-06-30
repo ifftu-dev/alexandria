@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { AppButton } from '@/components/ui'
+import type { ElementSubmissionRecord } from '@/types'
 
 interface EssayContent {
   question: string
@@ -16,6 +17,11 @@ const props = defineProps<{
   contentInline?: string | null
   elementId: string
   isCompleted?: boolean
+  /** Enrollment the response is recorded under. Null while browsing
+   *  unenrolled; persistence is skipped in that case. */
+  enrollmentId?: string | null
+  /** Course completed → review-only: prior response shown, no re-submit. */
+  readOnly?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -126,12 +132,30 @@ function autoSave() {
   saving.value = false
 }
 
-function submitEssay() {
-  if (!canSubmit.value) return
+async function submitEssay() {
+  if (!canSubmit.value || props.readOnly) return
   submitted.value = true
   // Clean up draft
   try { localStorage.removeItem(`essay_draft_${props.elementId}`) } catch { /* ignore */ }
+  await persistSubmission()
   emit('complete', 1) // Essay always scored as submitted (reviewed later)
+}
+
+// Persist the written response so it survives reload and counts toward
+// course completion. Best-effort.
+async function persistSubmission() {
+  if (!props.enrollmentId) return
+  try {
+    await invoke('record_element_submission', {
+      enrollmentId: props.enrollmentId,
+      elementId: props.elementId,
+      elementType: 'essay',
+      answersJson: JSON.stringify({ text: text.value }),
+      score: 1,
+    })
+  } catch (e) {
+    console.error('Failed to record essay submission:', e)
+  }
 }
 
 // Restore draft on mount
@@ -142,17 +166,39 @@ function restoreDraft() {
   } catch { /* ignore */ }
 }
 
-onMounted(() => {
-  loadContent()
+// Restore a previously-submitted response. Takes precedence over the local
+// draft so revisiting shows the answer the learner actually submitted.
+async function loadPriorSubmission() {
+  if (!props.enrollmentId) return
+  try {
+    const prior = await invoke<ElementSubmissionRecord | null>('get_element_submission', {
+      enrollmentId: props.enrollmentId,
+      elementId: props.elementId,
+    })
+    if (!prior?.answers_json) return
+    const parsed = JSON.parse(prior.answers_json) as { text?: string }
+    if (typeof parsed.text === 'string') {
+      text.value = parsed.text
+      submitted.value = true
+    }
+  } catch (e) {
+    console.error('Failed to load prior essay submission:', e)
+  }
+}
+
+onMounted(async () => {
+  await loadContent()
   restoreDraft()
+  await loadPriorSubmission()
 })
 
 watch(() => props.contentCid, loadContent)
-watch(() => props.elementId, () => {
+watch(() => props.elementId, async () => {
   text.value = ''
   submitted.value = false
   restoreDraft()
-  loadContent()
+  await loadContent()
+  await loadPriorSubmission()
 })
 </script>
 
@@ -215,7 +261,7 @@ watch(() => props.elementId, () => {
           v-model="text"
           rows="12"
           :placeholder="submitted ? '' : 'Write your response here...'"
-          :disabled="submitted || isCompleted"
+          :disabled="submitted || isCompleted || readOnly"
           class="w-full resize-y rounded-lg border border-border bg-background px-4 py-3 text-sm text-foreground placeholder-muted-foreground/50 transition-colors focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-60"
           @input="onInput"
         />
@@ -254,7 +300,7 @@ watch(() => props.elementId, () => {
       </div>
 
       <!-- Submit button -->
-      <div v-if="!submitted && !isCompleted" class="flex items-center gap-3">
+      <div v-if="!submitted && !isCompleted && !readOnly" class="flex items-center gap-3">
         <AppButton
           :disabled="!canSubmit"
           @click="submitEssay"

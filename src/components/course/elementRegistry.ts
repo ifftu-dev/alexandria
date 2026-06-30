@@ -31,6 +31,9 @@ export interface ElementHostContext {
    *  browsing without enrolling — graded plugin submissions require an
    *  enrollment id and refuse to grade otherwise. */
   enrollmentId: string | null
+  /** True once the course/enrollment is completed. Assessment elements
+   *  become read-only: prior responses are shown but can't be re-submitted. */
+  readOnly: boolean
   onDownload: () => void
   onComplete: () => void
   onScoredComplete: (score: number) => void
@@ -80,62 +83,76 @@ const builtinRegistry = new Map<string, ElementBinding>([
   }],
   ['quiz', {
     component: QuizEngine,
-    props: ({ element }) => ({
+    props: ({ element, enrollmentId, readOnly }) => ({
       contentCid: element.content_cid,
       contentInline: element.content_inline,
       elementId: element.id,
+      elementType: element.element_type,
+      enrollmentId,
+      readOnly,
     }),
     events: ({ onQuizComplete }) => ({ complete: onQuizComplete as (...args: never[]) => void }),
   }],
   ['assessment', {
     component: QuizEngine,
-    props: ({ element }) => ({
+    props: ({ element, enrollmentId, readOnly }) => ({
       contentCid: element.content_cid,
       contentInline: element.content_inline,
       elementId: element.id,
+      elementType: element.element_type,
+      enrollmentId,
+      readOnly,
     }),
     events: ({ onQuizComplete }) => ({ complete: onQuizComplete as (...args: never[]) => void }),
   }],
   ['objective_single_mcq', {
     component: McqQuestion,
-    props: ({ element, isCompleted }) => ({
+    props: ({ element, isCompleted, enrollmentId, readOnly }) => ({
       contentCid: element.content_cid,
       contentInline: element.content_inline,
       elementId: element.id,
       type: 'objective_single_mcq',
       isCompleted,
+      enrollmentId,
+      readOnly,
     }),
     events: ({ onScoredComplete }) => ({ complete: onScoredComplete as (...args: never[]) => void }),
   }],
   ['objective_multi_mcq', {
     component: McqQuestion,
-    props: ({ element, isCompleted }) => ({
+    props: ({ element, isCompleted, enrollmentId, readOnly }) => ({
       contentCid: element.content_cid,
       contentInline: element.content_inline,
       elementId: element.id,
       type: 'objective_multi_mcq',
       isCompleted,
+      enrollmentId,
+      readOnly,
     }),
     events: ({ onScoredComplete }) => ({ complete: onScoredComplete as (...args: never[]) => void }),
   }],
   ['subjective_mcq', {
     component: McqQuestion,
-    props: ({ element, isCompleted }) => ({
+    props: ({ element, isCompleted, enrollmentId, readOnly }) => ({
       contentCid: element.content_cid,
       contentInline: element.content_inline,
       elementId: element.id,
       type: 'subjective_mcq',
       isCompleted,
+      enrollmentId,
+      readOnly,
     }),
     events: ({ onScoredComplete }) => ({ complete: onScoredComplete as (...args: never[]) => void }),
   }],
   ['essay', {
     component: EssayInput,
-    props: ({ element, isCompleted }) => ({
+    props: ({ element, isCompleted, enrollmentId, readOnly }) => ({
       contentCid: element.content_cid,
       contentInline: element.content_inline,
       elementId: element.id,
       isCompleted,
+      enrollmentId,
+      readOnly,
     }),
     events: ({ onScoredComplete }) => ({ complete: onScoredComplete as (...args: never[]) => void }),
   }],

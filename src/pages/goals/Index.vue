@@ -2,16 +2,16 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 
-import { useTargets } from '@/composables/useTargets'
+import { useGoals } from '@/composables/useGoals'
 import { useSettings } from '@/composables/useSettings'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { AppButton, AppInput, EmptyState, AppSpinner } from '@/components/ui'
 import LearningPathView from '@/components/skills/LearningPathView.vue'
-import type { LearningPath, Target } from '@/types'
+import type { LearningPath, Goal } from '@/types'
 
 const router = useRouter()
 const { invoke } = useLocalApi()
-const { targets, removeTarget, pathFor, combinedPath } = useTargets()
+const { goals, removeGoal, pathFor, combinedPath } = useGoals()
 
 // Look up another user by @username (or, as a power-user fallback, DID).
 const lookupQuery = ref('')
@@ -39,12 +39,12 @@ async function loadAll() {
   loading.value = true
   try {
     const entries = await Promise.all(
-      targets.value.map(async (t) => [t.id, await pathFor(t).catch(() => null)] as const),
+      goals.value.map(async (t) => [t.id, await pathFor(t).catch(() => null)] as const),
     )
     const map: Record<string, LearningPath> = {}
     for (const [id, p] of entries) if (p) map[id] = p
     paths.value = map
-    combined.value = targets.value.length > 0 ? await combinedPath().catch(() => null) : null
+    combined.value = goals.value.length > 0 ? await combinedPath().catch(() => null) : null
   } finally {
     loading.value = false
   }
@@ -66,8 +66,8 @@ function nextStep(p: LearningPath | undefined): string | null {
   return p?.steps.find((s) => s.status === 'available')?.name ?? null
 }
 
-async function onRemove(t: Target) {
-  await removeTarget(t.id)
+async function onRemove(t: Goal) {
+  await removeGoal(t.id)
   await loadAll()
 }
 
@@ -78,18 +78,18 @@ const dash = computed(() => 2 * Math.PI * 20)
   <div>
     <div class="mb-6 flex items-end justify-between">
       <div>
-        <h1 class="page-title">Your Targets</h1>
+        <h1 class="page-title">Your Goals</h1>
         <p class="mt-1 text-sm text-muted-foreground">
           Skill graphs you're working toward. Alexandria charts the path from what you've proven.
         </p>
       </div>
       <AppButton
-        v-if="targets.length > 1"
+        v-if="goals.length > 1"
         variant="outline"
         size="sm"
         @click="showCombined = !showCombined"
       >
-        {{ showCombined ? 'Per target' : 'Combined path' }}
+        {{ showCombined ? 'Per goal' : 'Combined path' }}
       </AppButton>
     </div>
 
@@ -119,10 +119,10 @@ const dash = computed(() => 2 * Math.PI * 20)
     </div>
 
     <EmptyState
-      v-else-if="targets.length === 0"
+      v-else-if="goals.length === 0"
       icon="🎯"
-      title="No targets yet"
-      description="Pick a skill graph to aim for — browse the taxonomy or an instructor's public graph and hit “Target this”."
+      title="No goals yet"
+      description="Pick a skill graph to aim for — browse the taxonomy or an instructor's public graph and hit “Set as goal”."
     >
       <template #action>
         <AppButton class="mt-4" @click="router.push('/skills')">Browse skills</AppButton>
@@ -134,15 +134,15 @@ const dash = computed(() => 2 * Math.PI * 20)
       <div class="mb-4 flex items-center justify-between">
         <h2 class="text-base font-semibold text-foreground">Combined path</h2>
         <span class="text-xs text-muted-foreground">
-          {{ combined.earned_count }} / {{ combined.total }} skills across {{ targets.length }} targets
+          {{ combined.earned_count }} / {{ combined.total }} skills across {{ goals.length }} goals
         </span>
       </div>
       <LearningPathView :path="combined" />
     </div>
 
-    <!-- Per-target cards -->
+    <!-- Per-goal cards -->
     <div v-else class="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
-      <div v-for="t in targets" :key="t.id" class="card flex flex-col p-5">
+      <div v-for="t in goals" :key="t.id" class="card flex flex-col p-5">
         <div class="flex items-start gap-4">
           <!-- progress ring -->
           <svg width="52" height="52" viewBox="0 0 52 52" class="shrink-0">

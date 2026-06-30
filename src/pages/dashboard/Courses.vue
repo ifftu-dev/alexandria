@@ -1,11 +1,22 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import type { RouteLocationRaw } from 'vue-router'
 import { useLocalApi } from '@/composables/useLocalApi'
+import { useCredentials } from '@/composables/useCredentials'
 import { AppButton } from '@/components/ui'
 import { sanitizeSvg } from '@/utils/sanitize'
-import type { Enrollment, Course, Chapter, Element, ElementProgress } from '@/types'
+import {
+  extractSkillClaim,
+  type Enrollment,
+  type Course,
+  type Chapter,
+  type Element,
+  type ElementProgress,
+  type VerifiableCredential,
+} from '@/types'
 
 const { invoke } = useLocalApi()
+const { list: listCredentials, credentials } = useCredentials()
 
 const enrollments = ref<Enrollment[]>([])
 const courseMap = ref<Record<string, Course>>({})
@@ -78,15 +89,63 @@ function isProgressReady(enrollment: Enrollment): boolean {
   return enrollment.completed_at !== null || enrollmentProgress.value[enrollment.id] !== undefined
 }
 
+/** Whether the enrolled content is a standalone tutorial vs a full course. */
+function isTutorial(courseId: string): boolean {
+  return courseMap.value[courseId]?.kind === 'tutorial'
+}
+
+/** Display label for the kind badge. */
+function kindLabel(courseId: string): string {
+  return isTutorial(courseId) ? 'Tutorial' : 'Course'
+}
+
+/**
+ * Credentials earned for a course, matched by skill. Completion VCs link
+ * to a course only via a backend-only table, so we match the credential's
+ * skill claim against the course's `skill_ids` — the best signal exposed
+ * to the frontend.
+ */
+function credentialsForCourse(courseId: string): VerifiableCredential[] {
+  const skills = courseMap.value[courseId]?.skill_ids ?? []
+  if (skills.length === 0) return []
+  return credentials.value.filter((c) => {
+    const claim = extractSkillClaim(c.credentialSubject)
+    return claim ? skills.includes(claim.skillId) : false
+  })
+}
+
+/**
+ * Where the "View credential" action navigates: straight to the credential
+ * detail when exactly one matches, the credentials list filtered to the
+ * course's skill when several match, or the plain credentials list as a
+ * fallback (skill matching can miss).
+ */
+function credentialLinkFor(enrollment: Enrollment): RouteLocationRaw {
+  const matches = credentialsForCourse(enrollment.course_id)
+  const only = matches.length === 1 ? matches[0] : undefined
+  if (only?.id) {
+    return { name: 'dashboard-credential-detail', params: { id: only.id } }
+  }
+  const firstSkill = courseMap.value[enrollment.course_id]?.skill_ids?.[0]
+  if (matches.length > 1 && firstSkill) {
+    return { name: 'dashboard-credentials', query: { skill: firstSkill } }
+  }
+  return { name: 'dashboard-credentials' }
+}
+
 onMounted(async () => {
   try {
     enrollments.value = await invoke<Enrollment[]>('list_enrollments')
 
-    // Fetch course details for enrolled courses
+    // Fetch course details for enrolled courses (includes tutorials —
+    // they are `courses` rows with `kind = 'tutorial'`).
     const courses = await invoke<Course[]>('list_courses')
     for (const c of courses) {
       courseMap.value[c.id] = c
     }
+
+    // Load credentials so completed content can link to what was earned.
+    void listCredentials()
 
     progressLoading.value = true
     const progressEntries = await Promise.all(
@@ -111,9 +170,9 @@ onMounted(async () => {
   <div class="min-h-screen">
     <!-- Header -->
     <div>
-      <h1 class="text-3xl font-bold">My Courses</h1>
+      <h1 class="text-3xl font-bold">My Learning</h1>
       <p class="mt-2 text-muted-foreground">
-        Track your learning progress and continue where you left off.
+        Track your courses and tutorials, and continue where you left off.
       </p>
     </div>
 
@@ -192,7 +251,7 @@ onMounted(async () => {
               : 'bg-muted/30 text-muted-foreground hover:bg-muted/50'"
             @click="showCompleted = true"
           >
-            All Courses
+            All
           </button>
         </div>
 
@@ -216,9 +275,9 @@ onMounted(async () => {
               />
             </svg>
           </div>
-          <h3 class="text-lg font-semibold mb-2">No courses yet</h3>
+          <h3 class="text-lg font-semibold mb-2">Nothing here yet</h3>
           <p class="text-sm text-muted-foreground max-w-sm mb-6">
-            Browse available courses and enroll to start your learning journey.
+            Browse available courses and tutorials, and enroll to start your learning journey.
           </p>
           <AppButton @click="$router.push('/courses')">
             Browse Courses
@@ -231,7 +290,7 @@ onMounted(async () => {
           class="flex flex-col items-center justify-center py-16 text-center"
         >
           <p class="text-sm text-muted-foreground">
-            No in-progress courses. Switch to "All Courses" to see completed ones.
+            Nothing in progress. Switch to "All" to see completed courses and tutorials.
           </p>
         </div>
 
@@ -286,6 +345,16 @@ onMounted(async () => {
               <div class="flex-1 p-5">
                 <div class="flex items-start justify-between gap-4">
                   <div class="min-w-0 flex-1">
+                    <div class="mb-1.5">
+                      <span
+                        class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
+                        :class="isTutorial(enrollment.course_id)
+                          ? 'bg-purple-500/10 text-purple-400'
+                          : 'bg-primary/10 text-primary'"
+                      >
+                        {{ kindLabel(enrollment.course_id) }}
+                      </span>
+                    </div>
                     <h3 class="text-base font-semibold leading-tight">
                       {{ courseMap[enrollment.course_id]?.title ?? enrollment.course_id }}
                     </h3>
@@ -335,17 +404,33 @@ onMounted(async () => {
                       Completed {{ formatDate(enrollment.completed_at) }}
                     </span>
                   </div>
-                  <span
-                    class="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors"
-                    :class="enrollment.completed_at
-                      ? 'bg-muted/30 text-muted-foreground group-hover:bg-muted/50'
-                      : 'bg-primary/10 text-primary group-hover:bg-primary/20'"
-                  >
-                    {{ enrollment.completed_at ? 'Review Course' : 'Continue Learning' }}
-                    <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                      <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
-                    </svg>
-                  </span>
+                  <div class="flex flex-wrap items-center gap-2">
+                    <!-- View earned credential(s) for completed content -->
+                    <button
+                      v-if="enrollment.completed_at"
+                      type="button"
+                      class="inline-flex items-center gap-1.5 rounded-lg bg-green-500/10 px-3 py-1.5 text-xs font-medium text-green-400 transition-colors hover:bg-green-500/20"
+                      @click.stop.prevent="$router.push(credentialLinkFor(enrollment))"
+                    >
+                      <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                      </svg>
+                      View credential
+                    </button>
+                    <span
+                      class="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors"
+                      :class="enrollment.completed_at
+                        ? 'bg-muted/30 text-muted-foreground group-hover:bg-muted/50'
+                        : 'bg-primary/10 text-primary group-hover:bg-primary/20'"
+                    >
+                      {{ enrollment.completed_at
+                        ? (isTutorial(enrollment.course_id) ? 'Rewatch Tutorial' : 'Review Course')
+                        : 'Continue Learning' }}
+                      <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
+                      </svg>
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>

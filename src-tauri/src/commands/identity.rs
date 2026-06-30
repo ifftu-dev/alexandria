@@ -221,6 +221,45 @@ pub async fn resolve_display_names(
         }
     }
 
+    // Course-authority DIDs → "Instructor" label. The instructor attestation
+    // issued on course completion is signed by a key deterministically
+    // derived from the course's `author_address` (see commands::completion),
+    // so derive that DID for every course author and label any that were
+    // requested. Disambiguated by a short author tag when several exist.
+    {
+        let mut stmt = db
+            .conn()
+            .prepare("SELECT DISTINCT author_address FROM courses WHERE author_address <> ''")
+            .map_err(|e| e.to_string())?;
+        let authors = stmt
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|e| e.to_string())?
+            .filter_map(|r| r.ok())
+            .collect::<Vec<_>>();
+        for author in authors {
+            let did = crate::crypto::did::course_authority_did(&author)
+                .as_str()
+                .to_string();
+            if requested.contains(did.as_str()) && !out.contains_key(&did) {
+                let short = if author.chars().count() > 16 {
+                    let head: String = author.chars().take(10).collect();
+                    let tail: String = author
+                        .chars()
+                        .rev()
+                        .take(4)
+                        .collect::<String>()
+                        .chars()
+                        .rev()
+                        .collect();
+                    format!("{head}…{tail}")
+                } else {
+                    author.clone()
+                };
+                out.insert(did, format!("Instructor · {short}"));
+            }
+        }
+    }
+
     Ok(out)
 }
 

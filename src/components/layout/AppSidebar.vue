@@ -126,14 +126,14 @@ const classroomPreviews = computed(() =>
           <div v-if="false" class="sb-tooltip">Skills</div>
         </button>
 
-        <button :class="['sb-item', { 'sb-item--active': isActive('/targets') }]" :title="collapsed ? 'Targets' : undefined" @click="navigate('/targets')">
+        <button :class="['sb-item', { 'sb-item--active': isActive('/goals') }]" :title="collapsed ? 'Goals' : undefined" @click="navigate('/goals')">
           <svg class="sb-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
             <circle cx="12" cy="12" r="8.25" />
             <circle cx="12" cy="12" r="4.5" />
             <circle cx="12" cy="12" r="0.75" fill="currentColor" />
           </svg>
-          <span class="sb-label">Targets</span>
-          <div v-if="false" class="sb-tooltip">Targets</div>
+          <span class="sb-label">Goals</span>
+          <div v-if="false" class="sb-tooltip">Goals</div>
         </button>
 
       </div>

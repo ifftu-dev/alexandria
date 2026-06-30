@@ -20,7 +20,7 @@ Vue 3 SPA frontend for the Tauri app. Module-level singleton composables (no Pin
 | State | `composables/` | Module-level singleton refs (no Pinia/Vuex) |
 | UI design system | `components/ui/` | Barrel-exported primitives |
 | Profile picker UI | `components/profile/` | `ProfileTile`, `AddProfileTile`, `ProfileAvatar` |
-| Pages | `pages/` | Root pages (`ProfileSelect`, `Onboarding`, `Home`) + 12 feature dirs (`classrooms`, `courses`, `dashboard`, `governance`, `instructor`, `learn`, `opinions`, `plugins`, `skills`, `targets`, `tutoring`, `u` — public user profiles) + `ProfileMe.vue` (/profile) |
+| Pages | `pages/` | Root pages (`ProfileSelect`, `Onboarding`, `Home`) + 12 feature dirs (`classrooms`, `courses`, `dashboard`, `goals`, `governance`, `instructor`, `learn`, `opinions`, `plugins`, `skills`, `tutoring`, `u` — public user profiles) + `ProfileMe.vue` (/profile) |
 | Types | `types/index.ts` | All TS interfaces (mirrors Rust domain) |
 | Styling | `assets/css/` | Tailwind v4 + CSS custom properties |
 | Routing | `router/` | Vue Router config |

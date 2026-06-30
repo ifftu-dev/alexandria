@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { AppButton } from '@/components/ui'
+import type { ElementSubmissionRecord } from '@/types'
 
 type McqType = 'objective_single_mcq' | 'objective_multi_mcq' | 'subjective_mcq'
 
@@ -25,6 +26,11 @@ const props = defineProps<{
   elementId: string
   type: McqType
   isCompleted?: boolean
+  /** Enrollment the response is recorded under. Null while browsing
+   *  unenrolled; persistence is skipped in that case. */
+  enrollmentId?: string | null
+  /** Course completed → review-only: prior answer shown, no re-submit. */
+  readOnly?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -86,7 +92,7 @@ async function loadContent() {
 }
 
 function toggleOption(idx: number) {
-  if (submitted.value || props.isCompleted) return
+  if (submitted.value || props.isCompleted || props.readOnly) return
   if (isSingle.value) {
     selectedIndices.value = [idx]
   } else {
@@ -99,8 +105,8 @@ function toggleOption(idx: number) {
   }
 }
 
-function submitAnswer() {
-  if (!mcq.value || selectedIndices.value.length === 0) return
+async function submitAnswer() {
+  if (!mcq.value || selectedIndices.value.length === 0 || props.readOnly) return
   submitted.value = true
 
   if (isSubjective.value) {
@@ -118,10 +124,54 @@ function submitAnswer() {
     score.value = Math.max(0, (correctSelected - incorrectSelected) / totalCorrect)
   }
 
+  await persistSubmission()
   emit('complete', score.value)
 }
 
+// Persist the chosen options + score so the response survives reload and
+// counts toward course completion. Best-effort.
+async function persistSubmission() {
+  if (!props.enrollmentId) return
+  try {
+    await invoke('record_element_submission', {
+      enrollmentId: props.enrollmentId,
+      elementId: props.elementId,
+      elementType: props.type,
+      answersJson: JSON.stringify({ selectedIndices: selectedIndices.value, score: score.value }),
+      score: score.value,
+    })
+  } catch (e) {
+    console.error('Failed to record MCQ submission:', e)
+  }
+}
+
+// Restore the learner's last response so revisiting shows their answer.
+async function loadPriorSubmission() {
+  if (!props.enrollmentId) return
+  try {
+    const prior = await invoke<ElementSubmissionRecord | null>('get_element_submission', {
+      enrollmentId: props.enrollmentId,
+      elementId: props.elementId,
+    })
+    if (!prior?.answers_json) return
+    const parsed = JSON.parse(prior.answers_json) as { selectedIndices?: number[]; score?: number }
+    if (parsed.selectedIndices) {
+      selectedIndices.value = parsed.selectedIndices
+      score.value = parsed.score ?? 0
+      submitted.value = true
+    }
+  } catch (e) {
+    console.error('Failed to load prior MCQ submission:', e)
+  }
+}
+
+async function init() {
+  await loadContent()
+  await loadPriorSubmission()
+}
+
 function tryAgain() {
+  if (props.readOnly) return
   selectedIndices.value = []
   submitted.value = false
   score.value = 0
@@ -138,13 +188,13 @@ function isCorrectOption(idx: number): boolean {
   return false
 }
 
-onMounted(loadContent)
-watch(() => props.contentCid, loadContent)
+onMounted(init)
+watch(() => props.contentCid, init)
 watch(() => props.elementId, () => {
   selectedIndices.value = []
   submitted.value = false
   score.value = 0
-  loadContent()
+  void init()
 })
 </script>
 
@@ -204,7 +254,7 @@ watch(() => props.elementId, () => {
               ? 'border-red-500 bg-red-50 dark:border-red-500/50 dark:bg-red-900/20'
               : '',
           ]"
-          :disabled="submitted || isCompleted"
+          :disabled="submitted || isCompleted || readOnly"
           @click="toggleOption(idx)"
         >
           <!-- Radio/Checkbox indicator -->
@@ -275,14 +325,14 @@ watch(() => props.elementId, () => {
       <!-- Actions -->
       <div class="flex items-center gap-3">
         <AppButton
-          v-if="!submitted && !isCompleted"
+          v-if="!submitted && !isCompleted && !readOnly"
           :disabled="selectedIndices.length === 0"
           @click="submitAnswer"
         >
           Submit Answer
         </AppButton>
         <AppButton
-          v-if="submitted && !isSubjective && score < 0.7"
+          v-if="submitted && !isSubjective && score < 0.7 && !readOnly"
           variant="secondary"
           size="sm"
           @click="tryAgain"
