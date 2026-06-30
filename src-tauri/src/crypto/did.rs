@@ -82,6 +82,29 @@ pub fn did_from_verifying_key(vk: &VerifyingKey) -> Did {
     Did(out)
 }
 
+/// Deterministic "course authority" signing key for a course's author.
+///
+/// A learner completing a course doesn't hold the instructor's key, so the
+/// instructor [`AttestationCredential`](crate::domain::vc::CredentialType)
+/// issued on completion is signed with this stable per-author keypair,
+/// derived from the course `author_address`. Domain-separated so it can't
+/// collide with any other derived key; deterministic so the same author
+/// always maps to the same issuer DID (repeated completions don't spawn
+/// fresh issuer clusters in the aggregator).
+pub fn course_authority_key(author_address: &str) -> SigningKey {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(b"alexandria:course-authority:v1\x00");
+    hasher.update(author_address.as_bytes());
+    let seed: [u8; 32] = *hasher.finalize().as_bytes();
+    SigningKey::from_bytes(&seed)
+}
+
+/// The `did:key` of a course's authority — the issuer of its instructor
+/// attestations. See [`course_authority_key`].
+pub fn course_authority_did(author_address: &str) -> Did {
+    derive_did_key(&course_authority_key(author_address))
+}
+
 /// Parse a `did:key:...` string into a `Did`, validating the method,
 /// multibase prefix, multicodec header and key length.
 pub fn parse_did_key(s: &str) -> Result<Did, DidError> {
