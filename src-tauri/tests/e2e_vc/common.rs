@@ -84,7 +84,7 @@ pub async fn start_test_node(
     }
     let kp = derive_libp2p_keypair(&seed, &TEST_DEVICE_ID).ok()?;
     let (tx, rx) = mpsc::channel::<P2pEvent>(capacity);
-    match start_node_with_db(kp, tx, vec![], None).await {
+    match start_node_with_db(kp, tx, vec![], None, false).await {
         Ok(node) => Some((node, rx)),
         Err(err) => {
             eprintln!("SKIP: node `{role}` failed to start ({err:?})");
@@ -113,7 +113,7 @@ pub async fn start_test_node_with_db(
     let kp = derive_libp2p_keypair(&seed, &TEST_DEVICE_ID).ok()?;
     let (tx, rx) = mpsc::channel::<P2pEvent>(capacity);
     let db_arc = Arc::new(StdMutex::new(Some(db)));
-    match start_node_with_db(kp, tx, vec![], Some(db_arc)).await {
+    match start_node_with_db(kp, tx, vec![], Some(db_arc), false).await {
         Ok(node) => Some((node, rx)),
         Err(err) => {
             eprintln!("SKIP: node `{role}` failed to start ({err:?})");
