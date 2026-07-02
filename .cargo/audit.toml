@@ -19,4 +19,14 @@ ignore = [
   # 0.25.x). We rely on libp2p-dns for peer discovery and do not validate
   # DNSSEC NSEC3 chains in our application code path.
   "RUSTSEC-2026-0118",
+  # RUSTSEC-2026-0194 / RUSTSEC-2026-0195 — quick-xml: unbounded
+  # allocation in NsReader / attribute parsing enables memory-exhaustion
+  # DoS on attacker-controlled XML. Fix: upgrade to >=0.41.0. Blocked:
+  # every dependent caps below it — plist 1.9 (^0.39), wayland-scanner
+  # 0.31 (^0.39), xcb 1.7 (^0.30). All three parse local/build-time XML
+  # (macOS plists, Wayland protocol codegen, X11 descriptors), never
+  # network- or user-supplied documents, so the DoS vector doesn't reach
+  # our application path. Re-evaluate on tauri / wayland / xcb bumps.
+  "RUSTSEC-2026-0194",
+  "RUSTSEC-2026-0195",
 ]
