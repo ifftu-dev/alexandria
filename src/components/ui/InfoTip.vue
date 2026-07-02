@@ -1,12 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, useId } from 'vue'
-
-// Module-level: the id of the single tip allowed open at a time. Shared
-// across every InfoTip instance, so opening one closes any other —
-// otherwise each tip kept independent state and several could stack open
-// (the trigger's @click.stop also prevents the others' outside-click
-// handler from firing).
-const activeTip = ref<string | null>(null)
+import { ref, onMounted, onUnmounted, useId } from 'vue'
 
 withDefaults(defineProps<{
   /** Tooltip body. Use the default slot instead for rich content. */
@@ -21,40 +14,38 @@ withDefaults(defineProps<{
   placement: 'top',
 })
 
-// Click-to-toggle rather than hover-only: hover popovers are unreachable on
-// touch (the app ships to iOS via WKWebView), so the trigger must respond to
-// tap. Hover still previews on pointer devices via CSS.
-const root = ref<HTMLElement | null>(null)
+// Hover-to-reveal (mouseenter/mouseleave) plus keyboard focus/blur, so the tip
+// is reachable without a click and stays accessible to keyboard users.
 const popId = useId()
-const open = computed(() => activeTip.value === popId)
+const open = ref(false)
 
-function toggle() {
-  activeTip.value = open.value ? null : popId
+function show() {
+  open.value = true
 }
 
-function onOutside(e: MouseEvent) {
-  if (open.value && root.value && !root.value.contains(e.target as Node)) {
-    activeTip.value = null
-  }
+function hide() {
+  open.value = false
 }
 
 function onKey(e: KeyboardEvent) {
-  if (e.key === 'Escape' && open.value) activeTip.value = null
+  if (e.key === 'Escape' && open.value) open.value = false
 }
 
 onMounted(() => {
-  document.addEventListener('click', onOutside)
   document.addEventListener('keydown', onKey)
 })
 onUnmounted(() => {
-  document.removeEventListener('click', onOutside)
   document.removeEventListener('keydown', onKey)
 })
 </script>
 
 <template>
-  <span ref="root" class="infotip">
-    <span class="infotip-anchor">
+  <span class="infotip">
+    <span
+      class="infotip-anchor"
+      @mouseenter="show"
+      @mouseleave="hide"
+    >
       <button
         type="button"
         class="infotip-trigger"
@@ -62,7 +53,8 @@ onUnmounted(() => {
         :aria-label="label"
         :aria-expanded="open"
         :aria-describedby="popId"
-        @click.stop="toggle"
+        @focus="show"
+        @blur="hide"
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
           <circle cx="12" cy="12" r="9" />
@@ -157,12 +149,5 @@ onUnmounted(() => {
 
 .infotip-pop--bottom {
   top: calc(100% + 0.375rem);
-}
-
-/* Hover preview on pointer devices; touch relies on the click toggle above. */
-@media (hover: hover) {
-  .infotip:hover .infotip-pop {
-    opacity: 1;
-  }
 }
 </style>

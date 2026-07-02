@@ -314,6 +314,27 @@ fn insert_observation(
     Ok(())
 }
 
+/// Record a completion observation locally, idempotent on
+/// `(policy_id, asset_name_hex)`.
+///
+/// Used by the self-issue-on-claim path
+/// ([`crate::commands::completion`]): right after the learner submits
+/// their own completion-mint tx, we already know every field the
+/// observer would later decode from the chain, so we persist the row
+/// immediately. Recording it here means the async Blockfrost observer
+/// dedups against this same row (via [`observation_exists`]) instead of
+/// re-ingesting the mint it eventually sees on-chain and issuing a
+/// duplicate VC.
+pub fn record_observation(
+    conn: &Connection,
+    obs: &CompletionObservation,
+) -> Result<(), CompletionError> {
+    if observation_exists(conn, &obs.policy_id, &obs.asset_name_hex)? {
+        return Ok(());
+    }
+    insert_observation(conn, obs)
+}
+
 /// List observations that have not yet been resolved into a VC. The
 /// auto-issuance pipeline consumes this list each tick.
 pub fn pending_observations(

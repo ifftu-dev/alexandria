@@ -4,6 +4,7 @@ import {
   type SkillInfo,
   type SkillGraphEdge,
   type VerifiableCredential,
+  type DerivedSkillState,
 } from '@/types'
 
 /**
@@ -28,6 +29,10 @@ const lockedCount = ref(0)
 const totalCount = ref(0)
 const loaded = ref(false)
 const isModalOpen = ref(false)
+// VC-derived per-skill proficiency (level + confidence), keyed by skill_id.
+// Drives the user's *proficiency* shown on a graph node (vs the skill's
+// intrinsic Bloom level, which only sizes the node).
+const skillStates = ref<Record<string, DerivedSkillState>>({})
 
 export type SkillStatus = 'earned' | 'available' | 'locked'
 
@@ -43,6 +48,7 @@ export function useSkillGraphState() {
     totalCount,
     loaded,
     isModalOpen,
+    skillStates,
   }
 }
 

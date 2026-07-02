@@ -14,12 +14,12 @@ import {
   type VerifiableCredential,
 } from '@/types'
 import { earnedSkillIdsFromCredentials } from '@/composables/useSkillGraphState'
-import { useTargets } from '@/composables/useTargets'
+import { useGoals } from '@/composables/useGoals'
 import { BLOOM_ORDER, bloomBadge } from '@/utils/bloom'
 
 const { invoke } = useLocalApi()
 const router = useRouter()
-const { addTarget } = useTargets()
+const { addGoal } = useGoals()
 
 const loading = ref(true)
 const fields = ref<SubjectFieldInfo[]>([])
@@ -110,9 +110,9 @@ function goToSkill(id: string) {
   router.push(`/skills/${id}`)
 }
 
-async function targetSkill(skill: SkillInfo) {
-  await addTarget({ label: skill.name, goalSkillIds: [skill.id] })
-  router.push('/targets')
+async function goalSkill(skill: SkillInfo) {
+  await addGoal({ label: skill.name, goalSkillIds: [skill.id] })
+  router.push('/goals')
 }
 
 const earnedSkillIdSet = computed(() =>
@@ -488,11 +488,11 @@ onBeforeUnmount(() => {
                   </div>
 
                   <button
-                    class="target-btn shrink-0"
-                    :title="`Target ${skill.name}`"
-                    @click.stop="targetSkill(skill)"
+                    class="goal-btn shrink-0"
+                    :title="`Set ${skill.name} as a goal`"
+                    @click.stop="goalSkill(skill)"
                   >
-                    🎯 Target
+                    🎯 Goal
                   </button>
                 </div>
               </div>
@@ -600,7 +600,7 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.target-btn {
+.goal-btn {
   font-size: 0.7rem;
   font-weight: 500;
   padding: 0.25rem 0.6rem;
@@ -610,7 +610,7 @@ onBeforeUnmount(() => {
   white-space: nowrap;
   transition: background 0.15s;
 }
-.target-btn:hover {
+.goal-btn:hover {
   background: color-mix(in srgb, var(--app-primary) 22%, transparent);
 }
 </style>

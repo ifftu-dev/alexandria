@@ -16,7 +16,7 @@ const statusMeta: Record<LearningStepStatus, { dot: string; label: string; cls: 
 <template>
   <div>
     <div v-if="path.steps.length === 0" class="text-sm text-muted-foreground">
-      Nothing to learn — you've already proven everything in this target.
+      Nothing to learn — you've already proven everything in this goal.
     </div>
 
     <ol v-else class="space-y-1.5">

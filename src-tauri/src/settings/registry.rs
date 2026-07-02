@@ -381,7 +381,7 @@ pub mod keys {
         key: "learner.targets",
         scope: Scope::Sync,
         category: "Skill graph",
-        label: "Learning targets",
+        label: "Learning goals",
         description: "Skill graphs you are working toward, with their goal skills.",
         default: || JsonSetting(serde_json::json!([])),
     };

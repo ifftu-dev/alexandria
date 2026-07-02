@@ -1,4 +1,5 @@
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
+use serde::Serialize;
 use tauri::State;
 
 use crate::crypto::hash::entity_id;
@@ -17,19 +18,30 @@ pub async fn list_enrollments(
         .map_err(|_| "database lock poisoned".to_string())?;
     let db = db_guard.as_ref().ok_or("database not initialized")?;
 
+    // Order by most recent learner activity so the dashboard "pick up where
+    // you left off" card surfaces the course/tutorial the user last
+    // viewed/progressed. Activity is the latest element_progress.updated_at
+    // (written whenever an element is opened or completed); enrollments with
+    // no progress yet fall back to enrolled_at.
+    const LAST_ACTIVITY: &str = "COALESCE(\
+        (SELECT MAX(ep.updated_at) FROM element_progress ep \
+         WHERE ep.enrollment_id = enrollments.id), enrolled_at)";
+
     let (sql, param_values): (String, Vec<Box<dyn rusqlite::types::ToSql>>) =
         if let Some(ref s) = status {
             (
-                "SELECT id, course_id, enrolled_at, completed_at, status, updated_at \
-                 FROM enrollments WHERE status = ?1 ORDER BY enrolled_at DESC"
-                    .to_string(),
+                format!(
+                    "SELECT id, course_id, enrolled_at, completed_at, status, updated_at \
+                     FROM enrollments WHERE status = ?1 ORDER BY {LAST_ACTIVITY} DESC"
+                ),
                 vec![Box::new(s.clone())],
             )
         } else {
             (
-                "SELECT id, course_id, enrolled_at, completed_at, status, updated_at \
-                 FROM enrollments ORDER BY enrolled_at DESC"
-                    .to_string(),
+                format!(
+                    "SELECT id, course_id, enrolled_at, completed_at, status, updated_at \
+                     FROM enrollments ORDER BY {LAST_ACTIVITY} DESC"
+                ),
                 vec![],
             )
         };
@@ -446,4 +458,142 @@ pub async fn get_progress(
         .map_err(|e| e.to_string())?;
 
     Ok(progress)
+}
+
+/// A learner's stored response to a built-in assessment element.
+#[derive(Debug, Clone, Serialize)]
+pub struct ElementSubmissionRecord {
+    pub element_id: String,
+    /// Raw, component-defined answer payload (selected option indices,
+    /// short-answer text, essay body, per-question result). `None` for
+    /// plugin submissions, whose inputs live in the iroh bundle.
+    pub answers_json: Option<String>,
+    pub score: f64,
+    pub created_at: String,
+}
+
+/// Record a built-in assessment response (raw answers + score) to
+/// `element_submissions`.
+///
+/// Quiz/MCQ/essay/assessment elements are graded entirely in the UI. This
+/// persists the result so (a) it survives reload and can be reviewed when
+/// the learner revisits the element, and (b) the completion-witness
+/// assembler — which reads `element_submissions` — counts the element
+/// toward course completion (it previously never saw built-in answers).
+///
+/// `answers_json` is the component-defined raw response payload. The row id
+/// is deterministic from (element, enrollment, answers hash): resubmitting
+/// identical answers is idempotent, while a changed answer records a new
+/// attempt. Completion uses the best score; revisit shows the latest.
+#[tauri::command]
+pub async fn record_element_submission(
+    state: State<'_, AppState>,
+    enrollment_id: String,
+    element_id: String,
+    element_type: String,
+    answers_json: String,
+    score: f64,
+) -> Result<(), String> {
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
+    let conn = db.conn();
+
+    let score = score.clamp(0.0, 1.0);
+
+    // Learner identifier — the local node's stake address. The completion
+    // assembler doesn't read this column for built-ins, but the schema
+    // requires it NOT NULL and it ties the row to the local learner.
+    let learner_did: String = conn
+        .query_row(
+            "SELECT stake_address FROM local_identity WHERE id = 1",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or_else(|_| "local-learner".to_string());
+
+    // Reproducibility-bundle fields. Built-in assessments have no wasm
+    // grader, so the grader id is a stable synthetic marker per element type
+    // and the submission cid is the BLAKE3 of the raw answers.
+    let submission_cid = blake3::hash(answers_json.as_bytes()).to_hex().to_string();
+    let grader_cid = format!("builtin:{element_type}");
+    let grader_version = "builtin-1";
+
+    // Content the grader saw: the element's stored content cid, else a hash
+    // of its inline content, else empty (the column is NOT NULL).
+    let (content_cid, content_inline): (Option<String>, Option<String>) = conn
+        .query_row(
+            "SELECT content_cid, content_inline FROM course_elements WHERE id = ?1",
+            params![element_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap_or((None, None));
+    let content_cid = content_cid
+        .filter(|c| !c.is_empty())
+        .or_else(|| content_inline.map(|c| blake3::hash(c.as_bytes()).to_hex().to_string()))
+        .unwrap_or_default();
+
+    let id = entity_id(&[&element_id, &enrollment_id, &submission_cid]);
+
+    conn.execute(
+        "INSERT INTO element_submissions \
+         (id, element_id, enrollment_id, submission_cid, grader_cid, content_cid, \
+          score, answers_json, learner_did, grader_version, created_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, datetime('now')) \
+         ON CONFLICT(id) DO UPDATE SET \
+            score = ?7, answers_json = ?8, created_at = datetime('now')",
+        params![
+            id,
+            element_id,
+            enrollment_id,
+            submission_cid,
+            grader_cid,
+            content_cid,
+            score,
+            answers_json,
+            learner_did,
+            grader_version,
+        ],
+    )
+    .map_err(|e| format!("failed to record element submission: {e}"))?;
+
+    Ok(())
+}
+
+/// Return the learner's latest recorded response for an element so the
+/// player can restore and display it on revisit. `None` if never submitted.
+#[tauri::command]
+pub async fn get_element_submission(
+    state: State<'_, AppState>,
+    enrollment_id: String,
+    element_id: String,
+) -> Result<Option<ElementSubmissionRecord>, String> {
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
+
+    let row = db
+        .conn()
+        .query_row(
+            "SELECT element_id, answers_json, score, created_at FROM element_submissions \
+             WHERE enrollment_id = ?1 AND element_id = ?2 \
+             ORDER BY created_at DESC LIMIT 1",
+            params![enrollment_id, element_id],
+            |row| {
+                Ok(ElementSubmissionRecord {
+                    element_id: row.get(0)?,
+                    answers_json: row.get(1)?,
+                    score: row.get(2)?,
+                    created_at: row.get(3)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+
+    Ok(row)
 }

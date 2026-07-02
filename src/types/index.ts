@@ -251,6 +251,16 @@ export interface UpdateProgressRequest {
   time_spent?: number | null
 }
 
+/// A learner's persisted response to a built-in assessment element. Used by
+/// the player to restore and display a prior response on revisit.
+export interface ElementSubmissionRecord {
+  element_id: string
+  /** Raw, component-defined answer payload (JSON string). */
+  answers_json: string | null
+  score: number
+  created_at: string
+}
+
 // ---- Proficiency + Reputation ----
 //
 // Post-migration 040: SkillProof / EvidenceRecord / SkillAssessment
@@ -1881,10 +1891,10 @@ export interface UsernameClaim {
 
 /** A skill graph the learner is working toward. Stored as a JSON array
  *  in the `learner.targets` synced setting. */
-export interface Target {
+export interface Goal {
   id: string
   label: string
-  /** DID of the instructor whose graph this target came from, if any. */
+  /** DID of the instructor whose graph this goal came from, if any. */
   source_did?: string | null
   goal_skill_ids: string[]
   created_at: string

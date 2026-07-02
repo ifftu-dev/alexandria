@@ -2,12 +2,20 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { AppButton, AppSpinner, AppAlert } from '@/components/ui'
-import type { QuizDefinition, QuizResult } from '@/types'
+import type { QuizDefinition, QuizResult, ElementSubmissionRecord } from '@/types'
 
 const props = defineProps<{
   contentCid: string | null
   contentInline?: string | null
   elementId: string
+  /** Element type ('quiz' | 'assessment') — recorded with the submission. */
+  elementType?: string
+  /** Enrollment the response is recorded under. Null while browsing
+   *  unenrolled; persistence is skipped in that case. */
+  enrollmentId?: string | null
+  /** Course completed → review-only: the prior response is shown but the
+   *  quiz can't be re-submitted. */
+  readOnly?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -72,7 +80,7 @@ async function loadQuiz() {
 }
 
 function selectOption(questionId: string, optionIndex: number, multi: boolean) {
-  if (submitted.value) return
+  if (submitted.value || props.readOnly) return
   if (multi) {
     const current = (answers.value[questionId] as number[] | undefined) ?? []
     const idx = current.indexOf(optionIndex)
@@ -87,7 +95,7 @@ function selectOption(questionId: string, optionIndex: number, multi: boolean) {
 }
 
 function setTextAnswer(questionId: string, text: string) {
-  if (submitted.value) return
+  if (submitted.value || props.readOnly) return
   answers.value[questionId] = text
 }
 
@@ -103,8 +111,8 @@ function prevQuestion() {
   }
 }
 
-function gradeQuiz() {
-  if (!quiz.value) return
+async function gradeQuiz() {
+  if (!quiz.value || props.readOnly) return
 
   const questionResults: { question_id: string; correct: boolean; points: number }[] = []
   let totalPoints = 0
@@ -152,7 +160,55 @@ function gradeQuiz() {
   }
 
   submitted.value = true
+  await persistSubmission()
   emit('complete', result.value)
+}
+
+// Persist the raw answers + graded result so the response survives reload
+// and feeds the course-completion assembler. Best-effort: a persistence
+// hiccup never blocks the learner from seeing their score.
+async function persistSubmission() {
+  if (!props.enrollmentId || !result.value) return
+  try {
+    await invoke('record_element_submission', {
+      enrollmentId: props.enrollmentId,
+      elementId: props.elementId,
+      elementType: props.elementType ?? 'quiz',
+      answersJson: JSON.stringify({ answers: answers.value, result: result.value }),
+      score: result.value.score,
+    })
+  } catch (e) {
+    console.error('Failed to record quiz submission:', e)
+  }
+}
+
+// Restore the learner's last response (answers + graded result) so revisiting
+// the element shows what they did rather than a blank quiz.
+async function loadPriorSubmission() {
+  if (!props.enrollmentId) return
+  try {
+    const prior = await invoke<ElementSubmissionRecord | null>('get_element_submission', {
+      enrollmentId: props.enrollmentId,
+      elementId: props.elementId,
+    })
+    if (!prior?.answers_json) return
+    const parsed = JSON.parse(prior.answers_json) as {
+      answers?: Record<string, number[] | string>
+      result?: QuizResult
+    }
+    if (parsed.answers) answers.value = parsed.answers
+    if (parsed.result) {
+      result.value = parsed.result
+      submitted.value = true
+    }
+  } catch (e) {
+    console.error('Failed to load prior quiz submission:', e)
+  }
+}
+
+async function init() {
+  await loadQuiz()
+  await loadPriorSubmission()
 }
 
 function isOptionSelected(questionId: string, optionIndex: number): boolean {
@@ -166,8 +222,8 @@ function questionResult(questionId: string): boolean | null {
   return result.value.answers.find(a => a.question_id === questionId)?.correct ?? null
 }
 
-onMounted(loadQuiz)
-watch(() => props.contentCid, loadQuiz)
+onMounted(init)
+watch(() => props.contentCid, init)
 </script>
 
 <template>
@@ -239,7 +295,7 @@ watch(() => props.contentCid, loadQuiz)
                 ? 'border-destructive bg-destructive/8'
                 : '',
             ]"
-            :disabled="submitted"
+            :disabled="submitted || readOnly"
             @click="selectOption(currentQuestion.id, idx, currentQuestion.type === 'multiple_choice')"
           >
             <span class="inline-flex items-center gap-2">
@@ -260,7 +316,7 @@ watch(() => props.contentCid, loadQuiz)
             class="input w-full"
             placeholder="Type your answer..."
             :value="(currentAnswer as string) ?? ''"
-            :disabled="submitted"
+            :disabled="submitted || readOnly"
             @input="setTextAnswer(currentQuestion.id, ($event.target as HTMLInputElement).value)"
           />
         </div>
@@ -292,7 +348,7 @@ watch(() => props.contentCid, loadQuiz)
             Next
           </AppButton>
           <AppButton
-            v-if="isLastQuestion && !submitted"
+            v-if="isLastQuestion && !submitted && !readOnly"
             size="sm"
             @click="gradeQuiz"
           >
