@@ -961,6 +961,7 @@ b = b - lr * ∂MSE/∂b</code></pre>
 </ul>
 <p>Civic tech fails when it is built by engineers who never leave their chairs. It works when built <em>with</em> the communities it serves, starting from their actual questions (usually: "where did my tax money go?" or "why is this service broken?"). Tooling is not the bottleneck; trust is.</p>"#,
     ),
+    ("el_civ_4_4", ESSAY_CIVIC_CAMPAIGN),
     (
         "el_civ_5_1",
         r#"<h2>How to Read a National Budget</h2>
@@ -1004,6 +1005,7 @@ b = b - lr * ∂MSE/∂b</code></pre>
 </ul>
 <p>Recognising this legacy doesn't absolve modern governments; it locates some of the problems they inherited. Reforms that ignore structural inheritance often fail for reasons that look local but are actually historical.</p>"#,
     ),
+    ("el_civ_5_4", ASSESSMENT_CIVIC),
 ];
 
 // ---------------------------------------------------------------------------
@@ -1918,6 +1920,97 @@ const ASSESSMENT_MATH: &str = r#"{
       "explanation": "Intersection A ∩ B returns shared elements.",
       "points": 1,
       "difficulty": 1
+    }
+  ]
+}"#;
+
+const ESSAY_CIVIC_CAMPAIGN: &str = r#"{
+  "question": "Design a civic campaign for a real issue in your community. Describe the problem, who is affected, the change you want, and the concrete steps — organising, media, and civic-tech tools — you would use to achieve it on a small budget.",
+  "guidelines": "Pick a specific, local issue (not a global abstraction). Name the decision-maker who can actually grant your change, and explain how each step builds pressure or accountability. Draw on the chapter: community organising, political media literacy, and civic tech in practice.",
+  "min_words": 150,
+  "max_words": 600,
+  "rubric_criteria": [
+    "Clearly defines a specific problem and who it affects",
+    "States a concrete, achievable change and the decision-maker who can grant it",
+    "Lays out realistic steps across organising, media, and civic-tech",
+    "Accounts for a small budget and real-world constraints"
+  ]
+}"#;
+
+const ASSESSMENT_CIVIC: &str = r#"{
+  "title": "Civic Sense Final Assessment",
+  "description": "A short final check across constitutions, rights, elections, and accountability.",
+  "pass_threshold": 0.7,
+  "questions": [
+    {
+      "id": "q1",
+      "type": "single_choice",
+      "prompt": "What is the primary purpose of the separation of powers?",
+      "options": [
+        "To make government faster at passing laws",
+        "To prevent any single branch from concentrating power",
+        "To guarantee a two-party system",
+        "To remove the judiciary from politics entirely"
+      ],
+      "correct_indices": [1],
+      "explanation": "Dividing power across legislature, executive, and judiciary creates checks that limit concentration.",
+      "points": 1,
+      "difficulty": 1
+    },
+    {
+      "id": "q2",
+      "type": "single_choice",
+      "prompt": "In a federal system, sovereignty is:",
+      "options": [
+        "Held entirely by the central government",
+        "Held entirely by regional governments",
+        "Shared between central and regional governments",
+        "Held by the judiciary"
+      ],
+      "correct_indices": [2],
+      "explanation": "Federalism divides authority between a central government and constituent regions.",
+      "points": 1,
+      "difficulty": 1
+    },
+    {
+      "id": "q3",
+      "type": "true_false",
+      "prompt": "An independent judiciary means judges' tenure and pay are shielded from executive retaliation.",
+      "options": ["True", "False"],
+      "correct_indices": [0],
+      "explanation": "Security of tenure and protected remuneration are core to judicial independence.",
+      "points": 1,
+      "difficulty": 1
+    },
+    {
+      "id": "q4",
+      "type": "multiple_choice",
+      "prompt": "Which of the following are structural anti-corruption mechanisms? (Select all that apply.)",
+      "options": [
+        "Asset disclosure for officials",
+        "Whistleblower protection",
+        "Independent audit offices",
+        "Banning all political opposition"
+      ],
+      "correct_indices": [0, 1, 2],
+      "explanation": "Disclosure, whistleblower protection, and independent audits are structural safeguards; banning opposition is anti-democratic, not anti-corruption.",
+      "points": 2,
+      "difficulty": 2
+    },
+    {
+      "id": "q5",
+      "type": "single_choice",
+      "prompt": "A budget spends over 30% of revenue on debt interest. This is best read as:",
+      "options": [
+        "A sign of strong public investment",
+        "A warning sign about fiscal space",
+        "Proof of low corruption",
+        "Irrelevant to citizens"
+      ],
+      "correct_indices": [1],
+      "explanation": "High debt-service ratios crowd out development spending and signal fiscal stress.",
+      "points": 1,
+      "difficulty": 2
     }
   ]
 }"#;

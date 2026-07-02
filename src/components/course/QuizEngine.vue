@@ -80,7 +80,10 @@ async function loadQuiz() {
 }
 
 function selectOption(questionId: string, optionIndex: number, multi: boolean) {
-  if (submitted.value || props.readOnly) return
+  // Answered quizzes (fresh or restored from a prior submission) lock via
+  // `submitted`; an unanswered quiz stays answerable even in a read-only
+  // (completed) course — there's no saved response to protect.
+  if (submitted.value) return
   if (multi) {
     const current = (answers.value[questionId] as number[] | undefined) ?? []
     const idx = current.indexOf(optionIndex)
@@ -95,7 +98,7 @@ function selectOption(questionId: string, optionIndex: number, multi: boolean) {
 }
 
 function setTextAnswer(questionId: string, text: string) {
-  if (submitted.value || props.readOnly) return
+  if (submitted.value) return
   answers.value[questionId] = text
 }
 
@@ -112,7 +115,7 @@ function prevQuestion() {
 }
 
 async function gradeQuiz() {
-  if (!quiz.value || props.readOnly) return
+  if (!quiz.value || submitted.value) return
 
   const questionResults: { question_id: string; correct: boolean; points: number }[] = []
   let totalPoints = 0
@@ -295,7 +298,7 @@ watch(() => props.contentCid, init)
                 ? 'border-destructive bg-destructive/8'
                 : '',
             ]"
-            :disabled="submitted || readOnly"
+            :disabled="submitted"
             @click="selectOption(currentQuestion.id, idx, currentQuestion.type === 'multiple_choice')"
           >
             <span class="inline-flex items-center gap-2">
@@ -316,7 +319,7 @@ watch(() => props.contentCid, init)
             class="input w-full"
             placeholder="Type your answer..."
             :value="(currentAnswer as string) ?? ''"
-            :disabled="submitted || readOnly"
+            :disabled="submitted"
             @input="setTextAnswer(currentQuestion.id, ($event.target as HTMLInputElement).value)"
           />
         </div>
@@ -348,7 +351,7 @@ watch(() => props.contentCid, init)
             Next
           </AppButton>
           <AppButton
-            v-if="isLastQuestion && !submitted && !readOnly"
+            v-if="isLastQuestion && !submitted"
             size="sm"
             @click="gradeQuiz"
           >

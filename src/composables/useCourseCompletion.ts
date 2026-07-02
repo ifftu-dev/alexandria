@@ -51,12 +51,26 @@ const mintStage = ref<MintStage>('minting')
 const items = ref<MintItem[]>([])
 /** First credential id — the target of "View credential" when unambiguous. */
 const primaryCredentialId = ref<string | null>(null)
+/** Live elapsed time since the mint started (ms). */
+const elapsedMs = ref(0)
+/** Estimated time remaining until the batch finishes (ms). */
+const etaMs = ref(0)
+/** Overall completion 0..100, spanning local minting AND on-chain anchoring. */
+const progressPct = ref(0)
 
 let pollTimer: ReturnType<typeof setInterval> | null = null
+let tickTimer: ReturnType<typeof setInterval> | null = null
 let revealTimers: ReturnType<typeof setTimeout>[] = []
 let skillCache: SkillInfo[] | null = null
+let hasAnchor = false
+let anchorStartTs = 0
 
 const REVEAL_INTERVAL_MS = 450
+// Soft estimate for an on-chain anchor to confirm (Cardano block cadence).
+const ANCHOR_ETA_MS = 60_000
+// When a completion anchors on-chain, local minting fills this fraction of the
+// bar and the anchoring phase fills the rest.
+const LOCAL_SHARE = 0.5
 
 export function useCourseCompletion() {
   const { invoke } = useLocalApi()
@@ -73,8 +87,63 @@ export function useCourseCompletion() {
       clearInterval(pollTimer)
       pollTimer = null
     }
+    if (tickTimer) {
+      clearInterval(tickTimer)
+      tickTimer = null
+    }
     for (const t of revealTimers) clearTimeout(t)
     revealTimers = []
+  }
+
+  /** Freeze the ETA clock (keeps the final elapsed time on screen). */
+  function stopTicker() {
+    if (tickTimer) {
+      clearInterval(tickTimer)
+      tickTimer = null
+    }
+    etaMs.value = 0
+  }
+
+  /** Drive the live elapsed / ETA readout + the phase-spanning progress bar. */
+  function startTicker(startTs: number) {
+    tickTimer = setInterval(() => {
+      elapsedMs.value = Date.now() - startTs
+
+      const total = items.value.length
+      const minted = items.value.filter((x) => x.status === 'minted').length
+      const localFrac = total ? minted / total : mintStage.value === 'issued' ? 1 : 0
+
+      if (mintStage.value === 'issued') {
+        progressPct.value = 100
+        etaMs.value = 0
+        stopTicker()
+        return
+      }
+      if (mintStage.value === 'unavailable') {
+        stopTicker()
+        return
+      }
+
+      if (!hasAnchor) {
+        // Local-only: the bar is just the batch reveal.
+        progressPct.value = Math.round(localFrac * 100)
+        etaMs.value = items.value.filter((x) => x.status !== 'minted').length * REVEAL_INTERVAL_MS
+        return
+      }
+
+      // Anchored: local minting fills LOCAL_SHARE, anchoring fills the rest
+      // over ANCHOR_ETA_MS (creeping to 98% until the tx actually confirms).
+      if (mintStage.value === 'anchoring') {
+        const anchorElapsed = Date.now() - anchorStartTs
+        const anchorFrac = Math.min(anchorElapsed / ANCHOR_ETA_MS, 0.98)
+        progressPct.value = Math.round((LOCAL_SHARE + (1 - LOCAL_SHARE) * anchorFrac) * 100)
+        etaMs.value = Math.max(0, ANCHOR_ETA_MS - anchorElapsed)
+      } else {
+        progressPct.value = Math.round(LOCAL_SHARE * localFrac * 100)
+        const remaining = items.value.filter((x) => x.status !== 'minted').length
+        etaMs.value = remaining * REVEAL_INTERVAL_MS + ANCHOR_ETA_MS
+      }
+    }, 100)
   }
 
   function labelFor(c: VerifiableCredential, skills: Map<string, string>): string {
@@ -107,13 +176,20 @@ export function useCourseCompletion() {
   }
 
   /** Flip each item to "minted" on a stagger; resolve the overall stage. */
-  function revealBatch(hasAnchor: boolean) {
+  function revealBatch() {
     items.value.forEach((_, i) => {
       const t = setTimeout(() => {
         const it = items.value[i]
         if (it) it.status = 'minted'
         const allMinted = items.value.every((x) => x.status === 'minted')
-        if (allMinted) mintStage.value = hasAnchor ? 'anchoring' : 'issued'
+        if (allMinted && mintStage.value === 'minting') {
+          if (hasAnchor) {
+            anchorStartTs = Date.now()
+            mintStage.value = 'anchoring'
+          } else {
+            mintStage.value = 'issued'
+          }
+        }
       }, REVEAL_INTERVAL_MS * (i + 1))
       revealTimers.push(t)
     })
@@ -126,6 +202,8 @@ export function useCourseCompletion() {
     const hit = creds.find((c) => c.witness?.tx_hash === txHash.value)
     if (hit) {
       mintStage.value = 'issued'
+      progressPct.value = 100
+      etaMs.value = 0
       stopTimers()
       return true
     }
@@ -140,9 +218,12 @@ export function useCourseCompletion() {
     txHash.value = p.txHash
     primaryCredentialId.value = p.credentialIds[0] ?? null
     items.value = []
+    elapsedMs.value = 0
+    etaMs.value = 0
+    progressPct.value = 0
+    anchorStartTs = 0
+    hasAnchor = !!p.txHash // non-empty tx → on-chain anchor in flight
     isOpen.value = true
-
-    const hasAnchor = !!p.txHash // non-empty tx → on-chain anchor in flight
 
     if (p.credentialIds.length === 0 && !hasAnchor) {
       mintStage.value = 'unavailable'
@@ -150,13 +231,19 @@ export function useCourseCompletion() {
     }
 
     mintStage.value = 'minting'
+    startTicker(Date.now())
     items.value = await resolveItems(p.credentialIds)
 
     if (items.value.length === 0) {
-      // Anchored but locals not resolvable yet — fall back to polling.
-      mintStage.value = hasAnchor ? 'anchoring' : 'issued'
+      // Anchored but locals not resolvable yet — jump straight to anchoring.
+      if (hasAnchor) {
+        anchorStartTs = Date.now()
+        mintStage.value = 'anchoring'
+      } else {
+        mintStage.value = 'issued'
+      }
     } else {
-      revealBatch(hasAnchor)
+      revealBatch()
     }
 
     if (hasAnchor) {
@@ -186,6 +273,9 @@ export function useCourseCompletion() {
     mintStage,
     items,
     primaryCredentialId,
+    elapsedMs,
+    etaMs,
+    progressPct,
     open,
     close,
   }

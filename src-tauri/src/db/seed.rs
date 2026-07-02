@@ -19,6 +19,10 @@ pub fn seed_if_empty(conn: &Connection) -> Result<bool, rusqlite::Error> {
         log::info!("Database already has taxonomy data — skipping seed");
         // Still backfill new demo data for existing databases
         backfill_demo_data(conn)?;
+        // Re-apply inline element content (idempotent UPDATEs keyed by element
+        // id). Cheap, and it backfills content added to SEED_CONTENT after the
+        // user first seeded — e.g. gradeable elements that shipped empty.
+        seed_inline_content(conn)?;
         return Ok(false);
     }
 
