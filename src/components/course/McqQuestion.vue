@@ -92,7 +92,10 @@ async function loadContent() {
 }
 
 function toggleOption(idx: number) {
-  if (submitted.value || props.isCompleted || props.readOnly) return
+  // Only a submitted answer (fresh or restored from a prior submission) locks
+  // selection — an unanswered element stays answerable even if the element was
+  // marked complete before or the course is read-only (nothing to protect).
+  if (submitted.value) return
   if (isSingle.value) {
     selectedIndices.value = [idx]
   } else {
@@ -106,7 +109,7 @@ function toggleOption(idx: number) {
 }
 
 async function submitAnswer() {
-  if (!mcq.value || selectedIndices.value.length === 0 || props.readOnly) return
+  if (!mcq.value || selectedIndices.value.length === 0 || submitted.value) return
   submitted.value = true
 
   if (isSubjective.value) {
@@ -254,7 +257,7 @@ watch(() => props.elementId, () => {
               ? 'border-red-500 bg-red-50 dark:border-red-500/50 dark:bg-red-900/20'
               : '',
           ]"
-          :disabled="submitted || isCompleted || readOnly"
+          :disabled="submitted"
           @click="toggleOption(idx)"
         >
           <!-- Radio/Checkbox indicator -->
@@ -325,7 +328,7 @@ watch(() => props.elementId, () => {
       <!-- Actions -->
       <div class="flex items-center gap-3">
         <AppButton
-          v-if="!submitted && !isCompleted && !readOnly"
+          v-if="!submitted"
           :disabled="selectedIndices.length === 0"
           @click="submitAnswer"
         >

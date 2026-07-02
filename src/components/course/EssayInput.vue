@@ -133,7 +133,7 @@ function autoSave() {
 }
 
 async function submitEssay() {
-  if (!canSubmit.value || props.readOnly) return
+  if (!canSubmit.value || submitted.value) return
   submitted.value = true
   // Clean up draft
   try { localStorage.removeItem(`essay_draft_${props.elementId}`) } catch { /* ignore */ }
@@ -261,7 +261,7 @@ watch(() => props.elementId, async () => {
           v-model="text"
           rows="12"
           :placeholder="submitted ? '' : 'Write your response here...'"
-          :disabled="submitted || isCompleted || readOnly"
+          :disabled="submitted"
           class="w-full resize-y rounded-lg border border-border bg-background px-4 py-3 text-sm text-foreground placeholder-muted-foreground/50 transition-colors focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-60"
           @input="onInput"
         />
@@ -300,7 +300,7 @@ watch(() => props.elementId, async () => {
       </div>
 
       <!-- Submit button -->
-      <div v-if="!submitted && !isCompleted && !readOnly" class="flex items-center gap-3">
+      <div v-if="!submitted" class="flex items-center gap-3">
         <AppButton
           :disabled="!canSubmit"
           @click="submitEssay"
