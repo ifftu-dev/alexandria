@@ -107,24 +107,32 @@ pub fn parse_tx_hash(hex_str: &str) -> Result<Hash<32>, TxBuildError> {
 /// Decodes the tx, computes the body hash, signs it, adds the
 /// VKeyWitness to the witness set, and re-encodes.
 pub fn sign_raw_tx(tx_bytes: &[u8], private_key: &PrivateKey) -> Result<Vec<u8>, TxBuildError> {
+    sign_raw_tx_many(tx_bytes, &[private_key])
+}
+
+/// Sign raw transaction CBOR bytes with several private keys — one
+/// VKeyWitness per key. Used for two-party txs, e.g. the treasury pays
+/// the fee/collateral while the learner satisfies the validator's
+/// signer check.
+pub fn sign_raw_tx_many(tx_bytes: &[u8], keys: &[&PrivateKey]) -> Result<Vec<u8>, TxBuildError> {
     let mut tx =
         Tx::decode_fragment(tx_bytes).map_err(|e| TxBuildError::TxDecode(e.to_string()))?;
 
     let tx_hash = tx.transaction_body.compute_hash();
-    let signature = private_key.sign(*tx_hash);
-    let pub_key = private_key.public_key();
-
-    let vkey_witness = pallas_primitives::conway::VKeyWitness {
-        vkey: pub_key.as_ref().to_vec().into(),
-        signature: signature.as_ref().to_vec().into(),
-    };
 
     let mut witnesses = tx
         .transaction_witness_set
         .vkeywitness
         .map(|set| set.to_vec())
         .unwrap_or_default();
-    witnesses.push(vkey_witness);
+    for private_key in keys {
+        let signature = private_key.sign(*tx_hash);
+        let pub_key = private_key.public_key();
+        witnesses.push(pallas_primitives::conway::VKeyWitness {
+            vkey: pub_key.as_ref().to_vec().into(),
+            signature: signature.as_ref().to_vec().into(),
+        });
+    }
 
     tx.transaction_witness_set.vkeywitness = pallas_primitives::NonEmptySet::from_vec(witnesses);
 
