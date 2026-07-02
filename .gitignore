@@ -96,3 +96,6 @@ scripts/env.completion
 *.tgz
 *.tsbuildinfo
 cardano/governance/build/
+
+# Cardano signing keys (treasury etc.) — never commit
+keys/
