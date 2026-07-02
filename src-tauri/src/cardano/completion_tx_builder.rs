@@ -105,6 +105,11 @@ pub fn completion_asset_name(
 ///     derived the root from a trusted course template.
 ///   * `timestamp_ms` — learner-supplied POSIX milliseconds; the
 ///     validator requires it to fall inside the tx validity window.
+///   * `treasury` — optional treasury payer. When present, spend input,
+///     collateral, and change all come from / return to the treasury
+///     wallet and the tx carries both the treasury's and the learner's
+///     signatures (the validator's `extra_signatories` check still
+///     binds the learner). When absent, the learner wallet funds the tx.
 ///
 /// On success returns the signed tx CBOR + its hash; the hash is what
 /// the observer will index via `list_policy_assets` and eventually
@@ -120,6 +125,7 @@ pub async fn build_completion_mint_tx(
     element_leaves: &[[u8; 32]],
     completion_root: &[u8; 32],
     timestamp_ms: i64,
+    treasury: Option<&crate::cardano::treasury::TreasuryPayer>,
 ) -> Result<GovTxResult, TxBuildError> {
     if !script_refs::completion_ref_deployed() {
         return Err(TxBuildError::Cbor(
@@ -142,9 +148,14 @@ pub async fn build_completion_mint_tx(
     )?;
     let redeemer_cbor = plutus_data::encode_completion_mint_redeemer(element_leaves)?;
 
-    // 3. Chain state (fan-out).
+    // 3. Chain state (fan-out). The funding wallet — treasury when
+    //    configured, else the learner — provides the spend input,
+    //    collateral, and receives the change.
+    let funding_address = treasury
+        .map(|t| t.address.as_str())
+        .unwrap_or(payment_address);
     let (utxos_res, params_res, tip_res) = tokio::join!(
-        blockfrost.get_utxos(payment_address),
+        blockfrost.get_utxos(funding_address),
         blockfrost.get_protocol_params(),
         blockfrost.get_tip_slot(),
     );
@@ -159,9 +170,19 @@ pub async fn build_completion_mint_tx(
     // 4. UTxO selection. The spend input funds the mint; collateral MUST
     //    be a *distinct* pure-ADA UTxO (a UTxO cannot be both a regular
     //    input and collateral). Pick the largest as the spend input and a
-    //    separate ≥5-ADA UTxO as collateral.
+    //    separate ≥5-ADA UTxO as collateral. Only ADA-only UTxOs qualify:
+    //    change is lovelace-only, so consuming a UTxO that carries other
+    //    assets (treasury rep tokens, prior completion NFTs) would strand
+    //    them — and reference-script UTxOs must never be spent.
     let pure: Vec<&_> = {
-        let mut v: Vec<_> = utxos.iter().filter(|u| u.lovelace() > 0).collect();
+        let mut v: Vec<_> = utxos
+            .iter()
+            .filter(|u| {
+                u.lovelace() > 0
+                    && !u.has_reference_script()
+                    && u.amount.iter().all(|a| a.unit == "lovelace")
+            })
+            .collect();
         v.sort_by_key(|u| std::cmp::Reverse(u.lovelace()));
         v
     };
@@ -177,6 +198,8 @@ pub async fn build_completion_mint_tx(
         })?;
 
     let pallas_addr = PallasAddress::from_bech32(payment_address)
+        .map_err(|e| TxBuildError::AddressParse(e.to_string()))?;
+    let change_addr = PallasAddress::from_bech32(funding_address)
         .map_err(|e| TxBuildError::AddressParse(e.to_string()))?;
     let input_tx_hash = parse_tx_hash(&selected.tx_hash)?;
     let input_lovelace = selected.lovelace();
@@ -205,7 +228,7 @@ pub async fn build_completion_mint_tx(
                     .map_err(|e| TxBuildError::Builder(e.to_string()))?
                     .set_inline_datum(datum_cbor.clone()),
             )
-            .output(Output::new(pallas_addr.clone(), change))
+            .output(Output::new(change_addr.clone(), change))
             .mint_asset(policy_id, asset_name.to_vec(), 1)
             .map_err(|e| TxBuildError::Builder(e.to_string()))?
             .reference_input(Input::new(ref_hash, ref_utxo.1))
@@ -267,12 +290,17 @@ pub async fn build_completion_mint_tx(
         real_ex.steps,
     );
 
-    // 7. Pass 2 — rebuild with true ex-units + fee, then sign.
+    // 7. Pass 2 — rebuild with true ex-units + fee, then sign. The
+    //    learner always witnesses (validator identity); the treasury
+    //    additionally witnesses when it funded the inputs.
     let final_tx = build(fee, real_ex)?;
-    let private_key = PrivateKey::Extended(unsafe {
+    let learner_key = PrivateKey::Extended(unsafe {
         SecretKeyExtended::from_bytes_unchecked(*payment_key_extended)
     });
-    let signed_tx_bytes = sign_raw_tx(&final_tx, &private_key)?;
+    let signed_tx_bytes = match treasury {
+        Some(t) => super::tx_builder::sign_raw_tx_many(&final_tx, &[&learner_key, &t.key])?,
+        None => sign_raw_tx(&final_tx, &learner_key)?,
+    };
     let tx_hash = super::tx_builder::compute_tx_hash(&signed_tx_bytes)?;
 
     Ok(GovTxResult {
@@ -342,6 +370,7 @@ mod tests {
                 &[[0u8; 32]],
                 &[0u8; 32],
                 1_700_000_000_000,
+                None,
             )
             .await
         });
@@ -390,6 +419,9 @@ mod tests {
             let bf = BlockfrostClient::new(pid).unwrap();
             let wallet = crate::crypto::wallet::wallet_from_mnemonic(&mnemonic).unwrap();
             let subject_pubkey: [u8; 32] = *wallet.signing_key.verifying_key().as_bytes();
+            // Exercises the treasury-payer path when ALEXANDRIA_TREASURY_*
+            // env config is present, else the learner-funded path.
+            let treasury = crate::cardano::treasury::TreasuryPayer::from_env();
             let built = build_completion_mint_tx(
                 &bf,
                 &wallet.payment_address,
@@ -400,6 +432,7 @@ mod tests {
                 &leaves,
                 &root,
                 ts_ms,
+                treasury.as_ref(),
             )
             .await
             .map_err(|e| format!("build: {e}"))?;

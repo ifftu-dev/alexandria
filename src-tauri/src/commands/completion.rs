@@ -413,6 +413,15 @@ async fn submit_witness(
             None
         }
         Some(pid) => {
+            // Policy: on-chain txs are funded by the Alexandria treasury when
+            // configured — the learner still signs (validator identity) but
+            // pays nothing. Without treasury config the learner wallet funds
+            // its own tx.
+            let treasury = crate::cardano::treasury::TreasuryPayer::from_env();
+            match &treasury {
+                Some(t) => log::info!("completion mint funded by treasury {}", t.address),
+                None => log::info!("completion mint funded by learner wallet"),
+            }
             let minted: Result<String, String> = async {
                 let bf = BlockfrostClient::new(pid).map_err(|e| e.to_string())?;
                 let built = completion_tx_builder::build_completion_mint_tx(
@@ -425,6 +434,7 @@ async fn submit_witness(
                     &leaves,
                     &root_bytes,
                     timestamp_ms,
+                    treasury.as_ref(),
                 )
                 .await
                 .map_err(|e| e.to_string())?;

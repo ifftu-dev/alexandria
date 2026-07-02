@@ -9,6 +9,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
+    "check": "bash scripts/check.sh",
+    "check:fast": "bash scripts/check.sh --fast",
     "bump": "bash scripts/bump-version.sh"
   },
   "dependencies": {
