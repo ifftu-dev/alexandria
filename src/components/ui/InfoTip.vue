@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, useId } from 'vue'
+import { ref, onMounted, onUnmounted, useId, nextTick } from 'vue'
 
-withDefaults(defineProps<{
+const props = withDefaults(defineProps<{
   /** Tooltip body. Use the default slot instead for rich content. */
   text?: string
   /** Accessible name for the trigger button. */
@@ -15,12 +15,38 @@ withDefaults(defineProps<{
 })
 
 // Hover-to-reveal (mouseenter/mouseleave) plus keyboard focus/blur, so the tip
-// is reachable without a click and stays accessible to keyboard users.
+// is reachable without a click and stays accessible to keyboard users. The
+// popover is teleported to <body> and fixed-positioned from the trigger's
+// rect, so it never gets clipped by an ancestor's `overflow` (e.g. a
+// scrollable sidebar).
 const popId = useId()
 const open = ref(false)
+const triggerRef = ref<HTMLButtonElement | null>(null)
+const pos = ref({ top: 0, left: 0 })
+
+// Keep in sync with `.infotip-pop { max-width }` below.
+const MAX_WIDTH = 256
+const MARGIN = 8
+const GAP = 6
+
+function place() {
+  const el = triggerRef.value
+  if (!el) return
+  const r = el.getBoundingClientRect()
+  const half = MAX_WIDTH / 2
+  const cx = r.left + r.width / 2
+  const left = Math.min(
+    Math.max(cx, MARGIN + half),
+    window.innerWidth - MARGIN - half,
+  )
+  const top = props.placement === 'top' ? r.top - GAP : r.bottom + GAP
+  pos.value = { top, left }
+}
 
 function show() {
+  place()
   open.value = true
+  void nextTick(place)
 }
 
 function hide() {
@@ -41,28 +67,27 @@ onUnmounted(() => {
 
 <template>
   <span class="infotip">
-    <span
-      class="infotip-anchor"
+    <button
+      ref="triggerRef"
+      type="button"
+      class="infotip-trigger"
+      :class="{ 'infotip-trigger--active': open }"
+      :aria-label="label"
+      :aria-expanded="open"
+      :aria-describedby="popId"
       @mouseenter="show"
       @mouseleave="hide"
+      @focus="show"
+      @blur="hide"
     >
-      <button
-        type="button"
-        class="infotip-trigger"
-        :class="{ 'infotip-trigger--active': open }"
-        :aria-label="label"
-        :aria-expanded="open"
-        :aria-describedby="popId"
-        @focus="show"
-        @blur="hide"
-      >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-          <circle cx="12" cy="12" r="9" />
-          <path stroke-linecap="round" stroke-linejoin="round" d="M12 11v5" />
-          <path stroke-linecap="round" d="M12 8h.01" />
-        </svg>
-      </button>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+        <circle cx="12" cy="12" r="9" />
+        <path stroke-linecap="round" stroke-linejoin="round" d="M12 11v5" />
+        <path stroke-linecap="round" d="M12 8h.01" />
+      </svg>
+    </button>
 
+    <Teleport to="body">
       <Transition
         enter-active-class="transition duration-100 ease-out"
         enter-from-class="opacity-0 scale-95"
@@ -77,27 +102,19 @@ onUnmounted(() => {
           role="tooltip"
           class="infotip-pop"
           :class="placement === 'top' ? 'infotip-pop--top' : 'infotip-pop--bottom'"
+          :style="{ top: `${pos.top}px`, left: `${pos.left}px` }"
         >
           <slot>{{ text }}</slot>
         </span>
       </Transition>
-    </span>
+    </Teleport>
   </span>
 </template>
 
 <style scoped>
-/* No position here so an external `absolute`/`relative` utility class can
-   place the icon (e.g. a card corner). The popover anchors to the inner
-   .infotip-anchor instead. */
 .infotip {
   display: inline-flex;
   vertical-align: middle;
-  line-height: 0;
-}
-
-.infotip-anchor {
-  position: relative;
-  display: inline-flex;
   line-height: 0;
 }
 
@@ -122,14 +139,17 @@ onUnmounted(() => {
 .infotip-trigger--active {
   color: var(--app-foreground);
 }
+</style>
 
+<style>
+/* Unscoped: the popover is teleported to <body>, so scoped styles wouldn't
+   apply. Positioned fixed from the trigger rect; translate centers it and
+   flips above/below per placement. */
 .infotip-pop {
-  position: absolute;
-  left: 50%;
-  z-index: 50;
+  position: fixed;
+  z-index: 200;
   width: max-content;
   max-width: 16rem;
-  transform: translateX(-50%);
   padding: 0.5rem 0.625rem;
   border-radius: 0.5rem;
   border: 1px solid var(--app-border);
@@ -143,11 +163,11 @@ onUnmounted(() => {
   box-shadow: 0 8px 24px -8px rgb(0 0 0 / 0.28);
 }
 
-.infotip-pop--top {
-  bottom: calc(100% + 0.375rem);
+.infotip-pop--bottom {
+  transform: translateX(-50%);
 }
 
-.infotip-pop--bottom {
-  top: calc(100% + 0.375rem);
+.infotip-pop--top {
+  transform: translate(-50%, -100%);
 }
 </style>

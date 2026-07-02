@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { useSentinel } from '@/composables/useSentinel'
 import { AppButton, ProvenanceBadge } from '@/components/ui'
+import InfoTip from '@/components/ui/InfoTip.vue'
 import { resolveElementBinding, type ElementHostContext } from '@/components/course/elementRegistry'
 import { useCourseCompletion } from '@/composables/useCourseCompletion'
 import type { Course, Chapter, Element, Enrollment, ElementProgress, UpdateProgressRequest, QuizResult } from '@/types'
@@ -913,32 +914,91 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
             </div>
           </div>
 
-          <!-- Sentinel indicator -->
+          <!-- Sentinel integrity monitoring (assessments only) -->
           <div
-            v-if="sentinel.isActive.value"
-            class="flex items-center gap-2 rounded-lg border border-border/50 bg-card/50 px-3 py-2"
+            v-if="sentinelStarted"
+            class="space-y-2.5 rounded-lg border border-border/60 bg-card/60 p-3"
           >
-            <span class="relative flex h-2 w-2">
+            <div class="flex items-center gap-2">
+              <span class="relative flex h-2 w-2">
+                <span
+                  class="absolute inline-flex h-full w-full animate-ping rounded-full opacity-75"
+                  :class="sentinel.integrityScore.value > 0.7 ? 'bg-emerald-500' : sentinel.integrityScore.value > 0.4 ? 'bg-amber-400' : 'bg-red-500'"
+                />
+                <span
+                  class="relative inline-flex h-2 w-2 rounded-full"
+                  :class="sentinel.integrityScore.value > 0.7 ? 'bg-emerald-500' : sentinel.integrityScore.value > 0.4 ? 'bg-amber-400' : 'bg-red-500'"
+                />
+              </span>
+              <span class="text-xs font-medium text-foreground">Integrity monitoring</span>
+              <InfoTip label="Why integrity monitoring is on" placement="bottom" class="ml-auto">
+                <span class="mb-1 block font-semibold text-foreground">Why this is on</span>
+                This is a graded assessment, so Sentinel confirms it's you doing the
+                work — that's what makes the credential you earn trustworthy to others.
+                <span class="mt-2 mb-1 block font-semibold text-foreground">Your privacy</span>
+                Everything runs on your device. No video, audio, or images are ever
+                recorded, stored, or sent anywhere — only an integrity score. The camera
+                is optional and you can turn it off at any time.
+              </InfoTip>
+            </div>
+
+            <div class="flex items-center justify-between text-xs">
+              <span class="text-muted-foreground">Integrity score</span>
               <span
-                class="absolute inline-flex h-full w-full animate-ping rounded-full opacity-75"
-                :class="sentinel.integrityScore.value > 0.7 ? 'bg-emerald-500' : sentinel.integrityScore.value > 0.4 ? 'bg-amber-400' : 'bg-red-500'"
-              />
-              <span
-                class="relative inline-flex h-2 w-2 rounded-full"
-                :class="sentinel.integrityScore.value > 0.7 ? 'bg-emerald-500' : sentinel.integrityScore.value > 0.4 ? 'bg-amber-400' : 'bg-red-500'"
-              />
-            </span>
-            <span class="text-xs text-muted-foreground">
-              Sentinel {{ Math.round(sentinel.integrityScore.value * 100) }}%
-            </span>
+                class="font-semibold"
+                :class="sentinel.integrityScore.value > 0.7 ? 'text-emerald-600 dark:text-emerald-400' : sentinel.integrityScore.value > 0.4 ? 'text-amber-600 dark:text-amber-400' : 'text-red-600 dark:text-red-400'"
+              >
+                {{ Math.round(sentinel.integrityScore.value * 100) }}%
+              </span>
+            </div>
+
+            <!-- Optional camera presence check -->
+            <div class="flex items-center justify-between gap-2 border-t border-border/50 pt-2">
+              <span class="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                <template v-if="cameraStream">
+                  <span
+                    class="h-1.5 w-1.5 rounded-full"
+                    :class="lastFacePresent ? 'bg-emerald-500' : 'bg-muted-foreground/50'"
+                  />
+                  {{ lastFacePresent === null ? 'Camera connecting…' : lastFacePresent ? 'Face verified' : 'No face detected' }}
+                </template>
+                <template v-else>Camera off</template>
+              </span>
+              <button
+                class="rounded-md px-2 py-1 text-[11px] font-medium transition-colors disabled:opacity-60"
+                :class="cameraStream
+                  ? 'text-muted-foreground hover:text-foreground'
+                  : 'bg-primary/10 text-primary hover:bg-primary/15'"
+                :disabled="cameraStarting"
+                @click="cameraStream ? disableCamera() : enableCamera()"
+              >
+                {{ cameraStarting ? 'Starting…' : cameraStream ? 'Turn off' : 'Enable camera' }}
+              </button>
+            </div>
+            <p v-if="cameraError" class="text-[11px] text-red-600 dark:text-red-400">{{ cameraError }}</p>
+
+            <!-- Video drives on-device face detection. Rendered off-screen
+                 (fixed, far off-viewport) rather than display:none — WKWebView
+                 does not paint frames from a display:none video, so a hidden
+                 one yields blank frames and "no face detected". -->
+            <video
+              ref="cameraVideoRef"
+              class="pointer-events-none fixed -left-[10000px] top-0 h-[240px] w-[320px] opacity-0"
+              playsinline
+              autoplay
+              muted
+              width="320"
+              height="240"
+            />
           </div>
         </div>
 
         <!-- Chapter list -->
         <div class="px-2 pb-4">
-          <div v-for="(ch, chIndex) in chapters" :key="ch.id" class="mb-1">
-            <!-- Chapter header -->
-            <div class="flex items-center gap-2 px-2 py-2">
+          <div v-for="(ch, chIndex) in chapters" :key="ch.id" class="mb-4">
+            <!-- Chapter header — a quiet section label so the lessons beneath
+                 it read as the primary content. -->
+            <div class="flex items-center gap-2 px-2 pb-1.5 pt-1">
               <span
                 class="flex h-5 w-5 items-center justify-center rounded text-[10px] font-bold"
                 :class="(elements[ch.id] ?? []).every(el => elementStatus(el.id) === 'completed')
@@ -950,19 +1010,19 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
                 </svg>
                 <template v-else>{{ chIndex + 1 }}</template>
               </span>
-              <span class="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              <span class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/80">
                 {{ ch.title }}
               </span>
             </div>
 
-            <!-- Element buttons -->
+            <!-- Element (lesson) buttons — title is the visual anchor. -->
             <button
               v-for="el in elements[ch.id] ?? []"
               :key="el.id"
-              class="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-sm transition-all duration-200 md:hover:-translate-y-px md:hover:shadow-sm"
+              class="group flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left transition-all duration-200 md:hover:-translate-y-px md:hover:shadow-sm"
               :class="activeElement === el.id
-                ? 'bg-primary/10 text-primary font-medium shadow-sm ring-1 ring-primary/20'
-                : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'"
+                ? 'bg-primary/10 shadow-sm ring-1 ring-primary/20'
+                : 'hover:bg-muted/50'"
               @click="selectElement(ch.id, el.id)"
             >
               <!-- Status/type indicator -->
@@ -983,7 +1043,21 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
                   <path stroke-linecap="round" stroke-linejoin="round" :d="elementTypeIcon(el.element_type)" />
                 </svg>
               </span>
-              <span class="truncate text-left text-[13px]">{{ el.title }}</span>
+              <span class="min-w-0 flex-1">
+                <span
+                  class="block truncate text-[13px] font-medium leading-tight"
+                  :class="activeElement === el.id
+                    ? 'text-primary'
+                    : elementStatus(el.id) === 'completed'
+                      ? 'text-foreground/70'
+                      : 'text-foreground group-hover:text-foreground'"
+                >
+                  {{ el.title }}
+                </span>
+                <span class="mt-0.5 block truncate text-[11px] leading-tight text-muted-foreground">
+                  {{ elementTypeLabel(el.element_type) }}<template v-if="el.duration_seconds"> · {{ Math.round(el.duration_seconds / 60) }} min</template>
+                </span>
+              </span>
             </button>
           </div>
         </div>
@@ -1037,26 +1111,6 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
                       </svg>
                       Monitored
                     </span>
-                    <!-- Camera verification status (only while active) -->
-                    <span
-                      v-if="isAssessment && cameraStream"
-                      class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium"
-                      :class="lastFacePresent
-                        ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
-                        : 'bg-muted/60 text-muted-foreground'"
-                    >
-                      <span class="relative flex h-1.5 w-1.5">
-                        <span
-                          class="absolute inline-flex h-full w-full animate-ping rounded-full opacity-75"
-                          :class="lastFacePresent ? 'bg-emerald-500' : 'bg-muted-foreground/50'"
-                        />
-                        <span
-                          class="relative inline-flex h-1.5 w-1.5 rounded-full"
-                          :class="lastFacePresent ? 'bg-emerald-500' : 'bg-muted-foreground/50'"
-                        />
-                      </span>
-                      {{ lastFacePresent === null ? 'Camera connecting…' : lastFacePresent ? 'Face verified' : 'No face detected' }}
-                    </span>
                   </div>
                 </div>
 
@@ -1104,62 +1158,6 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
                   {{ skill.skill_name || skill.name }}
                 </router-link>
               </div>
-            </div>
-
-            <!-- ============================== -->
-            <!-- CAMERA OPT-IN (assessments only)-->
-            <!-- ============================== -->
-            <div
-              v-if="isAssessment && sentinelStarted"
-              class="mb-4 rounded-xl border border-border/70 bg-card/60 p-4"
-            >
-              <div class="flex items-start gap-3">
-                <div class="flex-1 min-w-0">
-                  <div class="flex items-center gap-2">
-                    <svg class="h-4 w-4 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-                      <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z" />
-                    </svg>
-                    <h3 class="text-sm font-semibold text-foreground">Camera Verification</h3>
-                  </div>
-                  <p class="mt-1 text-xs text-muted-foreground">
-                    Optional: verify your presence every 3 seconds using on-device face detection.
-                    Video frames never leave your device — only derived scores are stored locally.
-                  </p>
-                  <p v-if="cameraError" class="mt-2 text-xs text-red-600 dark:text-red-400">
-                    {{ cameraError }}
-                  </p>
-                </div>
-                <div class="flex-shrink-0">
-                  <AppButton
-                    v-if="!cameraStream"
-                    size="sm"
-                    variant="secondary"
-                    :loading="cameraStarting"
-                    @click="enableCamera"
-                  >
-                    Enable camera
-                  </AppButton>
-                  <AppButton
-                    v-else
-                    size="sm"
-                    variant="ghost"
-                    @click="disableCamera"
-                  >
-                    Disable
-                  </AppButton>
-                </div>
-              </div>
-              <!-- Hidden video element driving verifyFace(). Kept off-screen
-                   rather than display:none so the decoder stays active. -->
-              <video
-                v-show="false"
-                ref="cameraVideoRef"
-                playsinline
-                autoplay
-                muted
-                width="320"
-                height="240"
-              />
             </div>
 
             <!-- ============================== -->

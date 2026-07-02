@@ -11,8 +11,26 @@ import { useCourseCompletion } from '@/composables/useCourseCompletion'
 import { CREDENTIAL_KINDS, type CredentialClass } from '@/components/credential/credentialKind'
 
 const router = useRouter()
-const { isOpen, courseTitle, isTutorial, txHash, mintStage, items, primaryCredentialId, close } =
-  useCourseCompletion()
+const {
+  isOpen, courseTitle, isTutorial, txHash, mintStage, items, primaryCredentialId,
+  elapsedMs, etaMs, progressPct, close,
+} = useCourseCompletion()
+
+function fmtSecs(ms: number): string {
+  const s = ms / 1000
+  return s < 10 ? s.toFixed(1) : `${Math.round(s)}`
+}
+
+// Right-hand readout on the progress bar: a live ETA while minting/anchoring,
+// then the final elapsed time once the batch is done.
+const etaLabel = computed(() => {
+  if (mintStage.value === 'issued') return `Done in ${fmtSecs(elapsedMs.value)}s`
+  if (mintStage.value === 'unavailable') return ''
+  if (mintStage.value === 'anchoring') {
+    return etaMs.value > 0 ? `~${fmtSecs(etaMs.value)}s on-chain` : 'confirming…'
+  }
+  return etaMs.value > 0 ? `~${fmtSecs(etaMs.value)}s left` : 'finishing…'
+})
 
 function kindMeta(kind: string) {
   return kind in CREDENTIAL_KINDS
@@ -21,16 +39,6 @@ function kindMeta(kind: string) {
 }
 
 const mintedCount = computed(() => items.value.filter((i) => i.status === 'minted').length)
-
-// Realtime mint progress: fraction of the batch minted. While anchoring the
-// locals are all minted (bar full) but we add a striped shimmer to signal the
-// on-chain confirmation still in flight.
-const progressPct = computed(() => {
-  if (mintStage.value === 'unavailable') return 0
-  const total = items.value.length
-  if (!total) return mintStage.value === 'issued' ? 100 : 0
-  return Math.round((mintedCount.value / total) * 100)
-})
 
 // Confetti burst — generated once per open. Each piece radiates from the emblem
 // then falls, with a randomized angle/distance/spin/colour/delay.
@@ -192,13 +200,19 @@ function continueToDashboard() {
               <span class="mint-note">{{ mint.note }}</span>
             </div>
 
-            <!-- Realtime progress bar -->
-            <div v-if="mintStage !== 'unavailable'" class="mint-bar">
-              <div
-                class="mint-bar-fill"
-                :class="{ anchoring: mintStage === 'anchoring' }"
-                :style="{ width: `${progressPct}%` }"
-              />
+            <!-- Realtime progress bar with % + live ETA -->
+            <div v-if="mintStage !== 'unavailable'">
+              <div class="mint-meter">
+                <span>{{ progressPct }}%</span>
+                <span>{{ etaLabel }}</span>
+              </div>
+              <div class="mint-bar">
+                <div
+                  class="mint-bar-fill"
+                  :class="{ anchoring: mintStage === 'anchoring' }"
+                  :style="{ width: `${progressPct}%` }"
+                />
+              </div>
             </div>
 
             <!-- Per-credential batch -->
@@ -396,6 +410,19 @@ function continueToDashboard() {
   border: 2px solid rgba(52, 211, 153, 0.25);
   border-top-color: #34d399;
   animation: spin 0.8s linear infinite;
+}
+.mint-meter {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 0.3rem;
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--app-muted-foreground, #94a3b8);
+}
+.mint-meter span:first-child {
+  font-weight: 700;
+  color: var(--app-foreground, #e2e8f0);
 }
 .mint-bar {
   height: 6px;
