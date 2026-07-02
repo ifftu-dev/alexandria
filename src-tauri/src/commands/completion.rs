@@ -125,29 +125,35 @@ fn assemble_from_template(
     // Template = gradeable elements in chapter→element position order.
     let mut stmt = conn
         .prepare(
-            "SELECT ce.id FROM course_elements ce \
+            "SELECT ce.id, ce.element_type FROM course_elements ce \
              JOIN course_chapters cc ON cc.id = ce.chapter_id \
              WHERE cc.course_id = ?1 \
                AND ce.element_type IN ('quiz', 'interactive', 'assessment') \
              ORDER BY cc.position ASC, ce.position ASC",
         )
         .map_err(|e| e.to_string())?;
-    let element_ids: Vec<String> = stmt
-        .query_map(rusqlite::params![course_id], |r| r.get::<_, String>(0))
+    let elements: Vec<(String, String)> = stmt
+        .query_map(rusqlite::params![course_id], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
 
-    let required_count = element_ids.len();
+    let required_count = elements.len();
     let mut inputs = Vec::new();
     let mut missing = Vec::new();
 
     let Some(enrollment_id) = enrollment_id else {
         // Not enrolled → everything is missing.
-        return Ok((inputs, element_ids, required_count));
+        return Ok((
+            inputs,
+            elements.into_iter().map(|(id, _)| id).collect(),
+            required_count,
+        ));
     };
 
-    for element_id in element_ids {
+    for (element_id, element_type) in elements {
         // Best passing submission for this element on this enrollment.
         let row: Option<(String, String, String, f64)> = conn
             .query_row(
@@ -171,10 +177,37 @@ fn assemble_from_template(
                     score,
                 });
             }
+            // `interactive` elements are viewers (no gradeable submission by
+            // design), so they'd otherwise block the whole course from ever
+            // being claimable. Accept them as passed once the learner has
+            // marked them complete, with a deterministic synthetic leaf.
+            _ if element_type == "interactive"
+                && element_progress_completed(conn, &enrollment_id, &element_id) =>
+            {
+                inputs.push(ElementCompletionInput {
+                    element_id: element_id.clone(),
+                    grader_cid: "builtin:interactive".to_string(),
+                    submission_hash: format!("interactive-complete:{element_id}"),
+                    grader_version: "viewer-1".to_string(),
+                    score: 1.0,
+                });
+            }
             _ => missing.push(element_id),
         }
     }
     Ok((inputs, missing, required_count))
+}
+
+/// Whether the learner has marked an element complete on this enrollment.
+fn element_progress_completed(conn: &Connection, enrollment_id: &str, element_id: &str) -> bool {
+    conn.query_row(
+        "SELECT 1 FROM element_progress \
+         WHERE enrollment_id = ?1 AND element_id = ?2 AND status = 'completed' LIMIT 1",
+        rusqlite::params![enrollment_id, element_id],
+        |_| Ok(()),
+    )
+    .ok()
+    .is_some()
 }
 
 /// Read-only completion status for a course — drives the "Claim
