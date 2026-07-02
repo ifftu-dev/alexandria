@@ -420,6 +420,11 @@ impl AppState {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Load a local `.env` if present (dev convenience) so config like
+    // BLOCKFROST_PROJECT_ID is picked up by `resolve_project_id`'s env
+    // fallback. No-op in a packaged build with no `.env`.
+    let _ = dotenvy::dotenv();
+
     // Bridge tracing → log so that tracing events from iroh / iroh-live
     // are forwarded to tauri_plugin_log and become visible in the console.
     // We install a tracing Subscriber that converts tracing events into

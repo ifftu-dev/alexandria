@@ -43,6 +43,9 @@ tauri-build = { version = "2.5.4", features = [] }
 cc = "1"
 
 [dependencies]
+# Loads a local .env (dev) so BLOCKFROST_PROJECT_ID etc. are available; no-op in
+# a packaged build where no .env is present.
+dotenvy = "0.15"
 # Tauri
 tauri = { version = "2.10.0", features = ["macos-private-api", "protocol-asset"] }
 tauri-plugin-log = "2"

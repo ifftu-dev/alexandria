@@ -97,6 +97,7 @@ pub async fn get_local_did(state: State<'_, AppState>) -> Result<Option<String>,
     };
     drop(ks_guard);
     let w = wallet::wallet_from_mnemonic(&mnemonic).map_err(|e| e.to_string())?;
+    log::info!("[diag] learner payment address: {}", w.payment_address);
     let did = crate::crypto::did::derive_did_key(&w.signing_key);
     let did_str = did.as_str().to_string();
 
