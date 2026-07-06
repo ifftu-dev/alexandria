@@ -131,6 +131,24 @@ mod tests {
         assert_eq!(payload.updated_at, 1700100000);
     }
 
+    /// Privacy invariant: the published profile document must never carry
+    /// the local-only account fields (birthdate, role, activation state).
+    /// If a field is ever added to `SignedProfile`/`ProfilePayload` with one
+    /// of these names, this test forces a deliberate decision.
+    #[test]
+    fn published_profile_carries_no_account_private_fields() {
+        let signed = sample_signed_profile();
+        for doc in [
+            serde_json::to_value(&signed).unwrap(),
+            serde_json::to_value(signed.payload()).unwrap(),
+        ] {
+            let obj = doc.as_object().unwrap();
+            for key in ["birthdate", "account_role", "activation_state", "age"] {
+                assert!(!obj.contains_key(key), "public profile leaks `{key}`");
+            }
+        }
+    }
+
     #[test]
     fn profile_payload_equality() {
         let signed = sample_signed_profile();

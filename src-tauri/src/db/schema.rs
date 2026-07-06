@@ -73,6 +73,8 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (63, "plugin_dependencies", MIGRATION_063),
     (64, "plugin_element_state", MIGRATION_064),
     (65, "element_submission_answers", MIGRATION_065),
+    (66, "account_role_birthdate_activation", MIGRATION_066),
+    (67, "guardian_links", MIGRATION_067),
 ];
 
 const MIGRATION_001: &str = r#"
@@ -2504,4 +2506,83 @@ const MIGRATION_065: &str = r#"
 -- ============================================================
 
 ALTER TABLE element_submissions ADD COLUMN answers_json TEXT;
+"#;
+
+const MIGRATION_066: &str = r#"
+-- ============================================================
+-- Migration 066: Account role, birthdate, activation state
+--
+-- Onboarding now asks whether the node owner is a learner, an
+-- instructor, or a parent/guardian of a learner. Learners supply a
+-- birthdate (ISO-8601 date, self-asserted). Age is NEVER stored —
+-- minority is recomputed from the birthdate at each unlock so turning
+-- 18 resolves without a scheduled job.
+--
+-- A learner who is a minor starts in `pending_guardian`: the profile
+-- is gated until a parent/guardian on their own device accepts a
+-- guardian invite (cross-device P2P link, later migration). The
+-- birthdate is local-only: it must never appear in the published
+-- profile document or any gossip topic.
+-- ============================================================
+
+ALTER TABLE local_identity ADD COLUMN account_role TEXT NOT NULL DEFAULT 'learner'
+    CHECK (account_role IN ('learner','instructor','parent'));
+ALTER TABLE local_identity ADD COLUMN birthdate TEXT;
+ALTER TABLE local_identity ADD COLUMN activation_state TEXT NOT NULL DEFAULT 'active'
+    CHECK (activation_state IN ('active','pending_guardian'));
+"#;
+
+const MIGRATION_067: &str = r#"
+-- ============================================================
+-- Migration 067: Guardian links (cross-device parental oversight)
+--
+-- A minor learner's profile activates only after a parent/guardian on
+-- their own device accepts a guardian invite. The link is a mutual
+-- record: the child holds a `ward` row, the parent a `guardian` row,
+-- both sharing a 32-byte AEAD key (same trust model as device
+-- pairing: possession of the key authorises the sealed
+-- /alexandria/guardian/1.0 exchange, the Noise-authenticated PeerId
+-- identifies the counterparty).
+--
+-- Privacy: none of these tables may ever join device sync
+-- (SYNCABLE_TABLES) or any gossip topic. The child's activity reaches
+-- the guardian exclusively as sealed payloads over the guardian
+-- protocol.
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS guardian_links (
+    id                 TEXT PRIMARY KEY,
+    side               TEXT NOT NULL CHECK (side IN ('ward','guardian')),
+    peer_did           TEXT NOT NULL,
+    peer_stake_address TEXT,
+    peer_peer_id       TEXT,          -- libp2p PeerId once known
+    peer_display_name  TEXT,
+    shared_key         BLOB NOT NULL, -- 32-byte AEAD key (profile DB is vault-scoped)
+    status             TEXT NOT NULL CHECK (status IN ('pending','active','revoked')),
+    guardian_vc_id     TEXT,          -- parent-issued RoleCredential(role='guardian')
+    invite_code_hash   TEXT,          -- guardian side: for retrying Link while pending
+    child_birthdate    TEXT,          -- guardian side only, from sealed payload
+    created_at         TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at         TEXT NOT NULL DEFAULT (datetime('now')),
+    last_sync_at       TEXT
+);
+
+-- Child-side single-use invites, mirroring `pending_pairings`.
+CREATE TABLE IF NOT EXISTS guardian_pending_invites (
+    code_hash  TEXT PRIMARY KEY,
+    shared_key BLOB NOT NULL,
+    expires_at TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Guardian-side mirror of the child's activity (one row per synced
+-- entity, LWW on updated_at).
+CREATE TABLE IF NOT EXISTS guardian_activity_rows (
+    link_id      TEXT NOT NULL REFERENCES guardian_links(id) ON DELETE CASCADE,
+    table_name   TEXT NOT NULL,
+    entity_id    TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    updated_at   TEXT NOT NULL,
+    PRIMARY KEY (link_id, table_name, entity_id)
+);
 "#;

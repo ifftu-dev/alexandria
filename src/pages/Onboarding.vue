@@ -7,6 +7,7 @@ import { biometricSupported, storeVaultPasswordForBiometric } from '@/composable
 import { listen } from '@tauri-apps/api/event'
 import type { UnlistenFn } from '@tauri-apps/api/event'
 import Starfield from '@/components/auth/Starfield.vue'
+import type { AccountRole } from '@/types'
 
 const router = useRouter()
 const route = useRoute()
@@ -52,11 +53,63 @@ watch(username, (u) => {
   }, 400)
 })
 
-type Step = 'welcome' | 'password' | 'generating' | 'backup' | 'done'
+type Step =
+  | 'welcome'
+  | 'role'
+  | 'birthdate'
+  | 'password'
+  | 'generating'
+  | 'backup'
+  | 'link-child'
+  | 'done'
 type Mode = 'create' | 'import'
 
 const mode = ref<Mode>('create')
 const step = ref<Step>('welcome')
+
+// ── Role & birthdate (learners only) ────────────────────────────
+const selectedRole = ref<AccountRole | null>(null)
+const birthdate = ref('')
+
+const roleCards: { id: AccountRole; title: string; desc: string; icon: string }[] = [
+  {
+    id: 'learner',
+    title: 'Learner',
+    desc: 'Take courses, earn verifiable credentials, and grow your skills.',
+    icon: 'M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253',
+  },
+  {
+    id: 'instructor',
+    title: 'Instructor',
+    desc: 'Author courses and tutorials, review submissions, and mentor learners. You can switch into learner mode any time.',
+    icon: 'M8.25 6.75h12M8.25 12h12m-12 5.25h12M3.75 6.75h.007v.008H3.75V6.75zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zM3.75 12h.007v.008H3.75V12zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm-.375 5.25h.007v.008H3.75v-.008zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z',
+  },
+  {
+    id: 'parent',
+    title: 'Parent / Guardian',
+    desc: "Oversee your child's learning: link their profile and follow their progress from your own device.",
+    icon: 'M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z',
+  },
+]
+
+const BIRTHDATE_RE = /^\d{4}-\d{2}-\d{2}$/
+const ageYears = computed<number | null>(() => {
+  if (!BIRTHDATE_RE.test(birthdate.value)) return null
+  const born = new Date(`${birthdate.value}T00:00:00Z`)
+  if (Number.isNaN(born.getTime())) return null
+  const now = new Date()
+  let age = now.getUTCFullYear() - born.getUTCFullYear()
+  const monthDay = (d: Date) => (d.getUTCMonth() + 1) * 100 + d.getUTCDate()
+  if (monthDay(now) < monthDay(born)) age -= 1
+  return age
+})
+const birthdateValid = computed(() => {
+  const a = ageYears.value
+  return a !== null && a >= 0 && a <= 120 && new Date(`${birthdate.value}T00:00:00Z`) <= new Date()
+})
+const isMinorLearner = computed(
+  () => selectedRole.value === 'learner' && ageYears.value !== null && ageYears.value < 18,
+)
 const mnemonic = ref('')
 const importMnemonic = ref('')
 const password = ref('')
@@ -117,22 +170,46 @@ const importWordCountValid = computed(() => {
   return [12, 15, 24].includes(importWordCount.value)
 })
 
-const createWizardSteps: { id: Step; label: string }[] = [
-  { id: 'welcome', label: 'Welcome' },
-  { id: 'password', label: 'Secure Vault' },
-  { id: 'generating', label: 'Generate Keys' },
-  { id: 'backup', label: 'Backup Phrase' },
-  { id: 'done', label: 'Complete' },
-]
+const wizardSteps = computed<{ id: Step; label: string }[]>(() => {
+  const steps: { id: Step; label: string }[] = [
+    { id: 'welcome', label: 'Welcome' },
+    { id: 'role', label: 'Your Role' },
+  ]
+  if (selectedRole.value === 'learner') steps.push({ id: 'birthdate', label: 'Birthdate' })
+  steps.push({ id: 'password', label: 'Secure Vault' })
+  if (mode.value === 'create') {
+    steps.push({ id: 'generating', label: 'Generate Keys' }, { id: 'backup', label: 'Backup Phrase' })
+  } else {
+    steps.push({ id: 'generating', label: 'Restore Keys' })
+  }
+  if (selectedRole.value === 'parent') steps.push({ id: 'link-child', label: 'Link Your Child' })
+  steps.push({ id: 'done', label: 'Complete' })
+  return steps
+})
 
-const importWizardSteps: { id: Step; label: string }[] = [
-  { id: 'welcome', label: 'Welcome' },
-  { id: 'password', label: 'Secure Vault' },
-  { id: 'generating', label: 'Restore Keys' },
-  { id: 'done', label: 'Complete' },
-]
+// ── Parent: link-child step ─────────────────────────────────────
+const childInviteCode = ref('')
+const linkingChild = ref(false)
+const linkChildError = ref('')
+const linkedChildName = ref<string | null>(null)
 
-const wizardSteps = computed(() => (mode.value === 'create' ? createWizardSteps : importWizardSteps))
+async function linkChild() {
+  if (!childInviteCode.value.trim()) return
+  linkingChild.value = true
+  linkChildError.value = ''
+  try {
+    const link = await invoke<{ peer_display_name: string | null; status: string }>(
+      'guardian_accept_invite',
+      { code: childInviteCode.value.trim() },
+    )
+    linkedChildName.value = link.peer_display_name ?? 'your child'
+    step.value = 'done'
+  } catch (e) {
+    linkChildError.value = String(e)
+  } finally {
+    linkingChild.value = false
+  }
+}
 const activeStepIndex = computed(() => {
   const idx = wizardSteps.value.findIndex((s) => s.id === step.value)
   return idx >= 0 ? idx : 0
@@ -165,23 +242,43 @@ function formatOnboardingError(cause: unknown, action: 'create' | 'restore'): st
 
 function startCreate() {
   mode.value = 'create'
-  step.value = 'password'
+  step.value = 'role'
   error.value = ''
 }
 
 function startImport() {
   mode.value = 'import'
-  step.value = 'password'
+  step.value = 'role'
   error.value = ''
 }
 
+function chooseRole(role: AccountRole) {
+  selectedRole.value = role
+  error.value = ''
+  if (role !== 'learner') birthdate.value = ''
+  step.value = role === 'learner' ? 'birthdate' : 'password'
+}
+
+function proceedFromBirthdate() {
+  error.value = ''
+  if (!birthdateValid.value) {
+    error.value = 'Enter a valid birthdate — it cannot be in the future or more than 120 years ago.'
+    return
+  }
+  step.value = 'password'
+}
+
 function goBack() {
-  if (step.value === 'password') {
+  error.value = ''
+  if (step.value === 'role') {
     step.value = 'welcome'
+  } else if (step.value === 'birthdate') {
+    step.value = 'role'
+  } else if (step.value === 'password') {
     password.value = ''
     confirmPassword.value = ''
     importMnemonic.value = ''
-    error.value = ''
+    step.value = selectedRole.value === 'learner' ? 'birthdate' : 'role'
   }
 }
 
@@ -228,6 +325,11 @@ async function createWallet() {
       username.value.trim().toLowerCase(),
       displayName.value.trim(),
       password.value,
+      undefined,
+      {
+        role: selectedRole.value ?? undefined,
+        birthdate: selectedRole.value === 'learner' ? birthdate.value : undefined,
+      },
     )
     mnemonic.value = result.mnemonic
     try {
@@ -270,6 +372,11 @@ async function restoreWallet() {
       displayName.value.trim(),
       phrase,
       password.value,
+      undefined,
+      {
+        role: selectedRole.value ?? undefined,
+        birthdate: selectedRole.value === 'learner' ? birthdate.value : undefined,
+      },
     )
     try {
       if (enableBiometricOnSetup.value && biometricAvailable.value && activeProfileId.value) {
@@ -281,7 +388,7 @@ async function restoreWallet() {
     } catch {
       biometricHint.value = 'Biometric unlock setup skipped. You can still unlock with password.'
     }
-    step.value = 'done'
+    step.value = selectedRole.value === 'parent' ? 'link-child' : 'done'
   } catch (e) {
     error.value = formatOnboardingError(e, 'restore')
     step.value = 'password'
@@ -295,11 +402,20 @@ async function copyMnemonic() {
 }
 
 function confirmBackup() {
-  step.value = 'done'
+  step.value = selectedRole.value === 'parent' ? 'link-child' : 'done'
 }
 
 function enterApp() {
-  router.replace('/home')
+  // Minors are gated until a parent/guardian accepts their invite;
+  // the backend created the profile in `pending_guardian` state.
+  // Parents land on their oversight dashboard.
+  if (isMinorLearner.value) {
+    router.replace('/guardian-gate')
+  } else if (selectedRole.value === 'parent') {
+    router.replace('/guardian')
+  } else {
+    router.replace('/home')
+  }
 }
 </script>
 
@@ -422,6 +538,103 @@ function enterApp() {
           @click="router.replace('/unlock')"
         >
           Sign in to existing vault
+        </button>
+      </div>
+
+      <!-- ============================================ -->
+      <!-- ROLE SELECTION                               -->
+      <!-- ============================================ -->
+      <div v-else-if="step === 'role'">
+        <button
+          class="mb-4 text-sm text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
+          @click="goBack"
+        >
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
+          </svg>
+          Back
+        </button>
+
+        <h1 class="text-2xl font-bold mb-2 text-center">How will you use Alexandria?</h1>
+        <p class="text-sm text-muted-foreground mb-6 text-center">
+          This shapes your home screen and tools. Instructors can switch into learner mode any time.
+        </p>
+
+        <div class="space-y-3">
+          <button
+            v-for="card in roleCards"
+            :key="card.id"
+            class="w-full card p-5 text-left flex items-start gap-4 transition-colors border hover:border-primary/60 hover:bg-primary/5"
+            :class="selectedRole === card.id ? 'border-primary bg-primary/5' : 'border-border'"
+            @click="chooseRole(card.id)"
+          >
+            <span class="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+              <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                <path stroke-linecap="round" stroke-linejoin="round" :d="card.icon" />
+              </svg>
+            </span>
+            <span>
+              <span class="block text-sm font-semibold text-foreground">{{ card.title }}</span>
+              <span class="mt-0.5 block text-sm text-muted-foreground">{{ card.desc }}</span>
+            </span>
+          </button>
+        </div>
+      </div>
+
+      <!-- ============================================ -->
+      <!-- BIRTHDATE (learners only)                    -->
+      <!-- ============================================ -->
+      <div v-else-if="step === 'birthdate'">
+        <button
+          class="mb-4 text-sm text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
+          @click="goBack"
+        >
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
+          </svg>
+          Back
+        </button>
+
+        <h1 class="text-2xl font-bold mb-2 text-center">When were you born?</h1>
+        <p class="text-sm text-muted-foreground mb-6 text-center">
+          Your birthdate stays on this device — it is never published to the network.
+        </p>
+
+        <div class="card p-5 mb-4">
+          <label class="block text-xs font-medium text-muted-foreground mb-1.5">
+            Birthdate
+          </label>
+          <input
+            v-model="birthdate"
+            type="date"
+            class="w-full px-3 py-2 text-sm rounded-md border border-border bg-background focus:outline-none focus:ring-2 focus:ring-ring"
+            @keyup.enter.exact.prevent="proceedFromBirthdate"
+          >
+          <p v-if="ageYears !== null && birthdateValid" class="mt-2 text-sm text-foreground">
+            You are <span class="font-semibold">{{ ageYears }}</span> years old.
+          </p>
+        </div>
+
+        <div v-if="isMinorLearner" class="card p-4 mb-4 border-warning bg-warning/5">
+          <p class="text-sm text-warning font-medium">
+            Because you're under 18, a parent or guardian must activate your profile before you can start learning.
+            You'll get an invite code for them at the end of setup.
+          </p>
+        </div>
+
+        <div
+          v-if="error"
+          class="mb-3 rounded-md border border-error/30 bg-error/5 px-3 py-2"
+        >
+          <p class="mt-1 text-sm text-error">{{ error }}</p>
+        </div>
+
+        <button
+          class="w-full py-2.5 px-4 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary-hover transition-colors disabled:opacity-50"
+          :disabled="!birthdateValid"
+          @click="proceedFromBirthdate"
+        >
+          Continue
         </button>
       </div>
 
@@ -714,6 +927,54 @@ function enterApp() {
       </div>
 
       <!-- ============================================ -->
+      <!-- LINK CHILD (parents)                         -->
+      <!-- ============================================ -->
+      <div v-else-if="step === 'link-child'">
+        <h1 class="text-2xl font-bold mb-2 text-center">Link your child</h1>
+        <p class="text-sm text-muted-foreground mb-6 text-center">
+          Your child's activation screen shows an invite code. Paste it here to
+          activate their profile and follow their learning from this account.
+        </p>
+
+        <div class="card p-5 mb-4">
+          <label class="block text-xs font-medium text-muted-foreground mb-1.5">
+            Invite code
+          </label>
+          <textarea
+            v-model="childInviteCode"
+            rows="3"
+            placeholder="Paste the invite code from your child's device"
+            class="w-full px-3 py-2 text-sm font-mono rounded-md border border-border bg-background focus:outline-none focus:ring-2 focus:ring-ring resize-none"
+          />
+          <p class="mt-1 text-xs text-muted-foreground">
+            Both devices need to be online to complete the link.
+          </p>
+        </div>
+
+        <div
+          v-if="linkChildError"
+          class="mb-3 rounded-md border border-error/30 bg-error/5 px-3 py-2"
+        >
+          <p class="text-sm text-error">{{ linkChildError }}</p>
+        </div>
+
+        <button
+          class="w-full py-2.5 px-4 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary-hover transition-colors disabled:opacity-50"
+          :disabled="!childInviteCode.trim() || linkingChild"
+          @click="linkChild"
+        >
+          {{ linkingChild ? 'Linking…' : 'Link Child' }}
+        </button>
+
+        <button
+          class="w-full mt-3 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+          @click="step = 'done'"
+        >
+          Skip for now — I'll add them from my dashboard
+        </button>
+      </div>
+
+      <!-- ============================================ -->
       <!-- DONE                                         -->
       <!-- ============================================ -->
       <div v-else-if="step === 'done'" class="text-center">
@@ -736,11 +997,23 @@ function enterApp() {
           {{ biometricHint }}
         </p>
 
+        <div v-if="isMinorLearner" class="card p-4 mb-4 border-warning bg-warning/5 text-left">
+          <p class="text-sm text-warning font-medium">
+            One more step: your profile needs a parent or guardian.
+            Next you'll get an invite code to share with them — your profile
+            activates as soon as they accept it from their own device.
+          </p>
+        </div>
+
+        <p v-if="linkedChildName" class="text-sm text-success mb-4">
+          Linked with {{ linkedChildName }} — their profile is now active.
+        </p>
+
         <button
           class="w-full py-2.5 px-4 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary-hover transition-colors"
           @click="enterApp"
         >
-          Start Learning
+          {{ isMinorLearner ? 'Invite My Guardian' : selectedRole === 'parent' ? 'Open My Dashboard' : 'Start Learning' }}
         </button>
 
         <p class="text-xs text-muted-foreground mt-4 italic tracking-wide">

@@ -6,6 +6,7 @@ import { invoke } from '@tauri-apps/api/core'
 import AppLayout from '@/layouts/AppLayout.vue'
 import BlankLayout from '@/layouts/BlankLayout.vue'
 import { useProfiles, onProfileLocked, onProfileReady } from '@/composables/useProfiles'
+import { useAccountStatus } from '@/composables/useAccountStatus'
 import { initTheme, initThemeFromSettings } from '@/composables/useTheme'
 import { initShortcutsFromSettings } from '@/composables/useKeyboardShortcuts'
 import { initOmniRecentsFromSettings } from '@/composables/useOmniSearch'
@@ -38,6 +39,7 @@ function onWheel(e: WheelEvent) {
 const route = useRoute()
 const router = useRouter()
 const { initialize } = useProfiles()
+const { refreshAccountStatus } = useAccountStatus()
 
 const ready = ref(false)
 
@@ -105,6 +107,13 @@ onMounted(async () => {
       router.replace('/profiles')
     } else if (state === 'ready') {
       await hydrateProfileScopedState()
+      // A gated minor profile (awaiting guardian activation) must land on
+      // the gate, not the app. The router guard covers later navigations;
+      // this covers the initial one, which resolves before initialize().
+      const account = await refreshAccountStatus()
+      if (account?.activation_state === 'pending_guardian' && route.name !== 'guardian-gate') {
+        router.replace('/guardian-gate')
+      }
     }
   } catch {
     if (route.name !== 'onboarding' && route.name !== 'profiles') {

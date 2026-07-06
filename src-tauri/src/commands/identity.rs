@@ -10,7 +10,7 @@ use serde::Serialize;
 use tauri::State;
 
 use crate::crypto::wallet;
-use crate::domain::identity::{Identity, ProfileUpdate, WalletInfo};
+use crate::domain::identity::{AccountStatus, Identity, ProfileUpdate, WalletInfo, ACCOUNT_ROLES};
 use crate::domain::profile::{ProfilePayload, PublishProfileResult, SignedProfile};
 use crate::ipfs::profile as ipfs_profile;
 use crate::AppState;
@@ -81,6 +81,87 @@ pub async fn get_wallet_info(state: State<'_, AppState>) -> Result<Option<Wallet
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
         Err(e) => Err(e.to_string()),
     }
+}
+
+/// Role + gating status for the active profile. `is_minor` is computed
+/// from the stored birthdate at call time — never persisted — so a ward
+/// crossing 18 is recognised on the next check.
+#[tauri::command]
+pub async fn get_account_status(
+    state: State<'_, AppState>,
+) -> Result<Option<AccountStatus>, String> {
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
+    let Some(db) = db_guard.as_ref() else {
+        return Ok(None);
+    };
+
+    let result = db.conn().query_row(
+        "SELECT account_role, birthdate, activation_state FROM local_identity WHERE id = 1",
+        [],
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        },
+    );
+
+    match result {
+        Ok((role, birthdate, activation_state)) => {
+            let today = chrono::Utc::now().date_naive();
+            let is_minor = birthdate
+                .as_deref()
+                .map(|b| crate::domain::identity::is_minor(b, today))
+                .unwrap_or(false);
+            Ok(Some(AccountStatus {
+                role,
+                birthdate,
+                is_minor,
+                activation_state,
+            }))
+        }
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+/// Change the account role. Supports the learner → instructor upgrade
+/// from settings; a gated minor cannot re-role their way out of the
+/// guardian requirement.
+#[tauri::command]
+pub async fn set_account_role(state: State<'_, AppState>, role: String) -> Result<(), String> {
+    if !ACCOUNT_ROLES.contains(&role.as_str()) {
+        return Err(format!("unknown account role '{role}'"));
+    }
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
+
+    let activation_state: String = db
+        .conn()
+        .query_row(
+            "SELECT activation_state FROM local_identity WHERE id = 1",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if activation_state == "pending_guardian" {
+        return Err("profile is awaiting guardian activation".to_string());
+    }
+
+    db.conn()
+        .execute(
+            "UPDATE local_identity SET account_role = ?1, updated_at = datetime('now') WHERE id = 1",
+            params![role],
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 /// Derive the active profile's `did:key`. Returns `None` when the

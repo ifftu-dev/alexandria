@@ -5,18 +5,39 @@
 # which is incompatible with CMake 4.x.
 [env]
 CMAKE_POLICY_VERSION_MINIMUM = "3.5"
+# audiopus_sys (Opus) cross-builds via the `cmake` crate. CMake's Android
+# toolchain cannot resolve the default "Unix Makefiles" generator without an
+# explicit CMAKE_MAKE_PROGRAM, so force Ninja (bundled with Homebrew + the
+# Android SDK) — it works for desktop and every mobile target. Requires ninja
+# on PATH during the build.
+CMAKE_GENERATOR = "Ninja"
+# Pin the iOS deployment target for C dependencies (blake3's NEON stubs,
+# etc.). Without it the `cc` crate stamps the .o files with the host SDK
+# version (e.g. 26.4), and the linker warns they were "built for newer
+# iOS than being linked" against the app's 16.4 target. Ignored on
+# non-iOS builds. Keep in sync with tauri.conf.json `iOS.minimumSystemVersion`.
+IPHONEOS_DEPLOYMENT_TARGET = "16.4"
 
-# Android targets — linker is managed by cargo-ndk / Tauri Android build toolchain.
-# Do not hardcode NDK paths here; let `cargo tauri android build` handle NDK detection.
-# These target sections are needed for build configurations but do not specify linker overrides.
+# Android + iOS targets — linker is managed by cargo-ndk / Tauri build toolchains.
+# Do not hardcode NDK paths here; let the tauri mobile build handle SDK detection.
+#
+# gemm-f16's fp16 NEON intrinsics (gemm-common simd.rs) require the
+# +fullfp16 target-feature to *compile* (the assembler rejects `fmul v0.8h`
+# otherwise). arm64-v8a Android and Apple Silicon all support FP16, and the
+# app's candle use is F32-only so these kernels never execute — the flag only
+# unblocks the build. armv7 (32-bit) lacks scalar FP16 so its kernels stay off.
 [target.aarch64-linux-android]
-rustflags = []
+rustflags = ["-C", "target-feature=+fp16,+fullfp16"]
 
 [target.armv7-linux-androideabi]
 rustflags = []
 
-# iOS device target. gemm-f16's fp16 NEON intrinsics (gemm-common simd.rs)
-# require the +fullfp16 target-feature to compile; Apple Silicon all supports
-# FP16, and the app's candle use is F32-only so these kernels never execute.
+[target.x86_64-linux-android]
+rustflags = ["-C", "target-feature=+f16c"]
+
 [target.aarch64-apple-ios]
+rustflags = ["-C", "target-feature=+fp16,+fullfp16"]
+
+# iOS simulator on Apple Silicon — same FP16 requirement as the device target.
+[target.aarch64-apple-ios-sim]
 rustflags = ["-C", "target-feature=+fp16,+fullfp16"]

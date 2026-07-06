@@ -175,10 +175,16 @@ pub async fn create_course(
         .as_ref()
         .map(|s| serde_json::to_string(s).unwrap());
 
+    let kind = match req.kind.as_deref() {
+        None | Some("course") => "course",
+        Some("tutorial") => "tutorial",
+        Some(other) => return Err(format!("unknown course kind '{other}'")),
+    };
+
     db.conn()
         .execute(
-            "INSERT INTO courses (id, title, description, author_address, tags, skill_ids) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            "INSERT INTO courses (id, title, description, author_address, tags, skill_ids, kind) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![
                 id,
                 req.title,
@@ -186,6 +192,7 @@ pub async fn create_course(
                 author_address,
                 tags_json,
                 skill_ids_json,
+                kind,
             ],
         )
         .map_err(|e| e.to_string())?;

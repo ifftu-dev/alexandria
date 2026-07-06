@@ -74,6 +74,18 @@ export CARGO_NDK_SYSROOT_PATH="$SYSROOT"
 export "CC_${ANDROID_TARGET}_linux_android=$CC_PATH"
 export RUSTFLAGS="${RUSTFLAGS:-} -C target-feature=+fullfp16"
 
+# --- cargo-ndk (Tauri shells out to it for the NDK linker config) ---------
+if ! cargo ndk --version >/dev/null 2>&1; then
+    echo "cargo-ndk not installed — installing…"
+    cargo install cargo-ndk
+fi
+
+# --- clear stale cmake caches (audiopus_sys / opus) -----------------------
+# A build dir generated with a different CMake generator aborts the Ninja
+# build with "generator does not match the one used previously". Cheap to
+# regenerate, so drop it before every build to stay deterministic.
+rm -rf target/*-linux-android*/*/build/audiopus_sys-* 2>/dev/null || true
+
 echo "NDK:     $NDK_HOME"
 echo "target:  ${ANDROID_TARGET} (API $ANDROID_API)"
 echo "CC:      $CC_PATH"

@@ -188,6 +188,16 @@ pub mod keys {
         default: || false,
     };
 
+    pub const UI_ACTIVE_MODE: SettingKey<String> = SettingKey {
+        key: "ui.active_mode",
+        scope: Scope::Device,
+        category: "Appearance",
+        label: "Active mode",
+        description: "Whether the app presents the learner or the instructor surface. \
+                      Only instructor accounts can switch; one mode is active at a time.",
+        default: || "learner".to_string(),
+    };
+
     pub const UI_SIDEBAR_SECTIONS: SettingKey<JsonSetting> = SettingKey {
         key: "ui.sidebar_sections",
         scope: Scope::Sync,
@@ -472,6 +482,7 @@ pub fn all_entries(
 
     vec![
         entry!(UI_THEME),
+        entry!(UI_ACTIVE_MODE),
         entry!(UI_SIDEBAR_COLLAPSED),
         entry!(UI_SIDEBAR_SECTIONS),
         entry!(UI_KEYBOARD_SHORTCUTS),
@@ -513,6 +524,7 @@ pub fn lookup_meta(key: &str) -> Option<(Scope, &'static str)> {
         };
     }
     check!(UI_THEME);
+    check!(UI_ACTIVE_MODE);
     check!(UI_SIDEBAR_COLLAPSED);
     check!(UI_SIDEBAR_SECTIONS);
     check!(UI_KEYBOARD_SHORTCUTS);

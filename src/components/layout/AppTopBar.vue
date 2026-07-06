@@ -4,6 +4,9 @@ import { useRouter, useRoute } from 'vue-router'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { getVersion } from '@tauri-apps/api/app'
 import { AppBadge } from '@/components/ui'
+import ModeSwitcher from '@/components/layout/ModeSwitcher.vue'
+import { useMode } from '@/composables/useMode'
+import { useAccountStatus } from '@/composables/useAccountStatus'
 import { useTheme } from '@/composables/useTheme'
 import { useP2P } from '@/composables/useP2P'
 import { useProfiles } from '@/composables/useProfiles'
@@ -19,6 +22,8 @@ const route = useRoute()
 const { theme, setTheme } = useTheme()
 const { status: p2pStatus, startPolling } = useP2P()
 const { displayName, lockProfile, activeProfile } = useProfiles()
+const { isInstructorMode, toggleMode, canSwitchModes } = useMode()
+const { role } = useAccountStatus()
 const { isMobilePlatform, isMac } = usePlatform()
 const omniSearch = useOmniSearch()
 const { shortcuts, registerAction } = useKeyboardShortcuts()
@@ -132,6 +137,10 @@ registerAction('switch-profile', () => {
   handleSwitchProfile()
 })
 
+registerAction('toggle-mode', () => {
+  if (canSwitchModes.value) void toggleMode()
+})
+
 // Pre-release marker. Label is a static stage flag; the exact version is
 // surfaced in the tooltip, fetched from Tauri at runtime (no-op on web).
 const appVersion = ref('')
@@ -199,6 +208,23 @@ const avatarEmoji = computed(() => {
       </button>
 
       <AppBadge variant="warning" class="topbar-alpha-badge" :title="alphaTitle">Alpha</AppBadge>
+
+      <!-- Unmissable surface indicator: which hat is the user wearing? -->
+      <AppBadge
+        v-if="isInstructorMode"
+        variant="governance"
+        class="topbar-mode-badge"
+        title="You are in instructor mode — composing and reviewing, not learning"
+      >
+        Instructor Mode
+      </AppBadge>
+      <AppBadge
+        v-else-if="role === 'parent'"
+        class="topbar-mode-badge topbar-mode-badge--guardian"
+        title="Guardian account — overseeing your children's learning"
+      >
+        Guardian
+      </AppBadge>
     </div>
 
     <!-- Center: Omni-search trigger -->
@@ -219,8 +245,11 @@ const avatarEmoji = computed(() => {
       </button>
     </div>
 
-    <!-- Right: P2P + theme + avatar -->
+    <!-- Right: mode switch + P2P + theme + avatar -->
     <div class="topbar-right">
+      <!-- Learner ⇄ Instructor switch (instructor accounts only) -->
+      <ModeSwitcher class="hidden sm:flex" />
+
       <!-- P2P status — hidden on mobile -->
       <div class="hidden md:flex items-center gap-1.5 text-xs text-muted-foreground">
         <span
@@ -314,7 +343,7 @@ const avatarEmoji = computed(() => {
                   {{ displayName || 'Anonymous' }}
                 </p>
                 <span class="inline-block rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium capitalize leading-none text-muted-foreground">
-                  learner
+                  {{ role === 'instructor' ? (isInstructorMode ? 'instructor' : 'instructor · learner mode') : role }}
                 </span>
               </div>
               <p class="truncate text-xs text-muted-foreground mt-0.5">
@@ -464,6 +493,21 @@ const avatarEmoji = computed(() => {
   letter-spacing: 0.02em;
   text-transform: uppercase;
   cursor: default;
+}
+
+.topbar-mode-badge {
+  margin-left: 0.375rem;
+  padding: 0.0625rem 0.4375rem;
+  font-size: 0.6875rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  cursor: default;
+  white-space: nowrap;
+}
+
+.topbar-mode-badge--guardian {
+  background: color-mix(in srgb, var(--mode-guardian-accent) 15%, transparent);
+  color: var(--mode-guardian-accent);
 }
 
 .topbar-right {

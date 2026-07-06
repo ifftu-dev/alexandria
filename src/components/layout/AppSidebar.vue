@@ -1,22 +1,89 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import SidebarSkillGraph from '@/components/layout/SidebarSkillGraph.vue'
 import TickerText from '@/components/layout/TickerText.vue'
 import { useTutoringRoom } from '@/composables/useTutoringRoom'
 import { useClassroom } from '@/composables/useClassroom'
 import { useSetting } from '@/composables/useSettings'
+import { useMode } from '@/composables/useMode'
+import { useAccountStatus } from '@/composables/useAccountStatus'
+import { useLocalApi } from '@/composables/useLocalApi'
 
 defineProps<{ collapsed: boolean }>()
 const emit = defineEmits<{ toggle: [] }>()
 const router = useRouter()
 const route = useRoute()
 const { sessions: tutoringSessionsList, refreshSessions } = useTutoringRoom()
+const { invoke } = useLocalApi()
 
 const isActive = (path: string) => {
   if (path === '/home') return route.path === '/home'
+  if (path === '/instructor') return route.path === '/instructor'
   return route.path.startsWith(path)
 }
+
+// =========================================
+// Primary nav — branches by surface: learner mode, instructor mode,
+// or parent role (parents get the oversight-first nav).
+const { isInstructorMode } = useMode()
+const { role } = useAccountStatus()
+
+interface NavItem {
+  path: string
+  label: string
+  icon: string
+}
+
+const LEARNER_NAV: NavItem[] = [
+  { path: '/home', label: 'Home', icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6' },
+  { path: '/opinions', label: 'Opinions', icon: 'M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z' },
+  { path: '/governance', label: 'Governance', icon: 'M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3' },
+  { path: '/skills', label: 'Skills', icon: 'M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z' },
+  { path: '/goals', label: 'Goals', icon: '' }, // circles drawn separately below
+]
+
+const INSTRUCTOR_NAV: NavItem[] = [
+  { path: '/instructor', label: 'Dashboard', icon: 'M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z' },
+  { path: '/instructor/courses', label: 'My Courses', icon: 'M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253' },
+  { path: '/instructor/inbox', label: 'Inbox', icon: 'M2.25 13.5h3.86a2.25 2.25 0 012.012 1.244l.256.512a2.25 2.25 0 002.013 1.244h3.218a2.25 2.25 0 002.013-1.244l.256-.512a2.25 2.25 0 012.013-1.244h3.859m-19.5.338V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18v-4.162c0-.224-.034-.447-.1-.661L19.24 5.338a2.25 2.25 0 00-2.15-1.588H6.911a2.25 2.25 0 00-2.15 1.588L2.35 13.177a2.25 2.25 0 00-.1.661z' },
+  { path: '/skills', label: 'Skills', icon: 'M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z' },
+  { path: '/governance', label: 'Governance', icon: 'M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3' },
+]
+
+const PARENT_NAV: NavItem[] = [
+  { path: '/guardian', label: 'My Children', icon: 'M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z' },
+  { path: '/opinions', label: 'Opinions', icon: 'M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z' },
+  { path: '/governance', label: 'Governance', icon: 'M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3' },
+]
+
+const primaryNav = computed<NavItem[]>(() => {
+  if (role.value === 'parent') return PARENT_NAV
+  if (isInstructorMode.value) return INSTRUCTOR_NAV
+  return LEARNER_NAV
+})
+
+// Parents oversee rather than participate — hide the learner-centric
+// live sections for them.
+const showLiveSections = computed(() => role.value !== 'parent')
+
+// Pending-review count for the instructor Inbox badge. Refreshed on
+// route change so acting on an item clears the badge promptly.
+const inboxCount = ref(0)
+async function refreshInboxCount() {
+  if (!isInstructorMode.value) {
+    inboxCount.value = 0
+    return
+  }
+  try {
+    const items = await invoke<{ id: string }[]>('instructor_inbox')
+    inboxCount.value = items.length
+  } catch {
+    inboxCount.value = 0
+  }
+}
+onMounted(refreshInboxCount)
+watch([() => route.path, isInstructorMode], () => void refreshInboxCount())
 
 function navigate(path: string) {
   router.push(path)
@@ -94,56 +161,37 @@ const classroomPreviews = computed(() =>
       <!-- Primary nav — flat items                -->
       <!-- ═══════════════════════════════════════ -->
       <div class="sb-group">
-        <button :class="['sb-item', { 'sb-item--active': isActive('/home') }]" :title="collapsed ? 'Home' : undefined" @click="navigate('/home')">
-          <svg class="sb-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+        <button
+          v-for="item in primaryNav"
+          :key="item.path"
+          :class="['sb-item', { 'sb-item--active': isActive(item.path) }]"
+          :title="collapsed ? item.label : undefined"
+          @click="navigate(item.path)"
+        >
+          <svg v-if="item.icon" class="sb-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
+            <path stroke-linecap="round" stroke-linejoin="round" :d="item.icon" />
           </svg>
-          <span class="sb-label">Home</span>
-          <div v-if="false" class="sb-tooltip">Home</div>
-        </button>
-
-        <button :class="['sb-item', { 'sb-item--active': isActive('/opinions') }]" :title="collapsed ? 'Opinions' : undefined" @click="navigate('/opinions')">
-          <svg class="sb-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
-          </svg>
-          <span class="sb-label">Opinions</span>
-          <div v-if="false" class="sb-tooltip">Opinions</div>
-        </button>
-
-        <button :class="['sb-item', { 'sb-item--active': isActive('/governance') }]" :title="collapsed ? 'Governance' : undefined" @click="navigate('/governance')">
-          <svg class="sb-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3" />
-          </svg>
-          <span class="sb-label">Governance</span>
-          <div v-if="false" class="sb-tooltip">Governance</div>
-        </button>
-
-        <button :class="['sb-item', { 'sb-item--active': isActive('/skills') }]" :title="collapsed ? 'Skills' : undefined" @click="navigate('/skills')">
-          <svg class="sb-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
-          </svg>
-          <span class="sb-label">Skills</span>
-          <div v-if="false" class="sb-tooltip">Skills</div>
-        </button>
-
-        <button :class="['sb-item', { 'sb-item--active': isActive('/goals') }]" :title="collapsed ? 'Goals' : undefined" @click="navigate('/goals')">
-          <svg class="sb-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
+          <svg v-else class="sb-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
             <circle cx="12" cy="12" r="8.25" />
             <circle cx="12" cy="12" r="4.5" />
             <circle cx="12" cy="12" r="0.75" fill="currentColor" />
           </svg>
-          <span class="sb-label">Goals</span>
-          <div v-if="false" class="sb-tooltip">Goals</div>
+          <span class="sb-label">{{ item.label }}</span>
+          <span
+            v-if="item.path === '/instructor/inbox' && inboxCount > 0 && !collapsed"
+            class="ml-auto rounded-full bg-error px-1.5 text-[10px] font-bold leading-4 text-white"
+          >
+            {{ inboxCount }}
+          </span>
         </button>
-
       </div>
 
-      <div class="sb-separator" />
+      <div v-if="showLiveSections" class="sb-separator" />
 
       <!-- ═══════════════════════════════════════ -->
       <!-- Live Tutoring — collapsible previews    -->
       <!-- ═══════════════════════════════════════ -->
-      <div class="sb-group">
+      <div v-if="showLiveSections" class="sb-group">
         <!-- Collapsed: icon-only -->
         <button
           v-if="collapsed"
@@ -206,12 +254,12 @@ const classroomPreviews = computed(() =>
         </Transition>
       </div>
 
-      <div class="sb-separator" />
+      <div v-if="showLiveSections" class="sb-separator" />
 
       <!-- ═══════════════════════════════════════ -->
       <!-- Classrooms — collapsible previews       -->
       <!-- ═══════════════════════════════════════ -->
-      <div class="sb-group">
+      <div v-if="showLiveSections" class="sb-group">
         <!-- Collapsed: icon-only -->
         <button
           v-if="collapsed"
