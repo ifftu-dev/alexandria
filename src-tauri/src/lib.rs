@@ -2,7 +2,6 @@ pub mod aggregation;
 pub mod cardano;
 pub mod classroom;
 pub mod commands;
-#[cfg(desktop)]
 pub mod crypto;
 pub mod db;
 pub mod diag;
@@ -21,22 +20,6 @@ mod macos_media_delegate;
 
 #[cfg(target_os = "macos")]
 mod macos_secure_input;
-
-// Mobile crypto: same modules as desktop but with portable keystore
-// (AES-256-GCM + Argon2id instead of IOTA Stronghold)
-#[cfg(mobile)]
-pub mod crypto {
-    pub mod content_crypto;
-    pub mod did;
-    pub mod group_key;
-    pub mod hash;
-    #[path = "keystore_portable.rs"]
-    pub mod keystore;
-    pub mod pairing;
-    pub mod shamir;
-    pub mod signing;
-    pub mod wallet;
-}
 
 use db::Database;
 use std::path::PathBuf;
@@ -492,25 +475,30 @@ pub fn run() {
     }
     tracing::subscriber::set_global_default(TracingToLog).ok();
 
-    tauri::Builder::default()
-        .on_window_event(|window, event| {
-            // Native app-focus signal for Sentinel: when the assessment
-            // window loses focus, report which OS app took the
-            // foreground (webview can't see this). Emitted to the
-            // frontend, which folds it into the integrity snapshot.
-            if let tauri::WindowEvent::Focused(focused) = event {
-                use tauri::Emitter;
-                let app = if *focused {
-                    None
-                } else {
-                    crate::sentinel::active_app::frontmost_app()
-                };
-                let _ = window.emit(
-                    "sentinel://focus",
-                    serde_json::json!({ "focused": *focused, "app": app }),
-                );
-            }
-        })
+    let builder = tauri::Builder::default().on_window_event(|window, event| {
+        // Native app-focus signal for Sentinel: when the assessment
+        // window loses focus, report which OS app took the
+        // foreground (webview can't see this). Emitted to the
+        // frontend, which folds it into the integrity snapshot.
+        if let tauri::WindowEvent::Focused(focused) = event {
+            use tauri::Emitter;
+            let app = if *focused {
+                None
+            } else {
+                crate::sentinel::active_app::frontmost_app()
+            };
+            let _ = window.emit(
+                "sentinel://focus",
+                serde_json::json!({ "focused": *focused, "app": app }),
+            );
+        }
+    });
+
+    // Native menus (and their events) exist only on desktop — tauri has
+    // no `menu` module on iOS. Gate the whole block so the mobile build
+    // keeps a valid builder type.
+    #[cfg(desktop)]
+    let builder = builder
         .menu(|handle| {
             // Standard macOS menus. In dev builds only, append a Develop
             // submenu with "Reload Webviews" (reload all webviews without
@@ -548,7 +536,9 @@ pub fn run() {
                 }
                 _ => {}
             }
-        })
+        });
+
+    builder
         .setup(|app| {
             // Initialize logging (always enabled so we can diagnose mobile crashes)
             app.handle().plugin(
@@ -557,11 +547,20 @@ pub fn run() {
                     .build(),
             )?;
 
-            // Initialize app-data dir + diagnostic logger
-            let app_dir = app
-                .path()
-                .app_data_dir()
-                .expect("failed to resolve app data directory");
+            // Initialize app-data dir + diagnostic logger.
+            //
+            // `ALEXANDRIA_DATA_DIR` overrides the OS app-data location. This
+            // lets several instances run side by side on one host with fully
+            // isolated vaults / DBs / P2P identities — used for local
+            // cross-device testing (e.g. a "child" and a "parent" instance
+            // that pair over LAN mDNS). Desktop-only; ignored on mobile.
+            let app_dir = match std::env::var_os("ALEXANDRIA_DATA_DIR") {
+                Some(dir) if !dir.is_empty() => std::path::PathBuf::from(dir),
+                _ => app
+                    .path()
+                    .app_data_dir()
+                    .expect("failed to resolve app data directory"),
+            };
             std::fs::create_dir_all(&app_dir)
                 .expect("failed to create app data directory");
 
@@ -769,6 +768,20 @@ pub fn run() {
                             commands::sync::auto_sync_all(&db_for_queue, &node_for_sync).await;
                         if merged > 0 {
                             log::info!("auto-sync: merged {merged} row(s) from paired devices");
+                        }
+
+                        // Guardian oversight: wards push activity to
+                        // their guardians, guardians pull from wards,
+                        // and pending link exchanges retry. No-op
+                        // without guardian links.
+                        match commands::guardian::guardian_sync_all(&db_for_queue, &node_for_sync)
+                            .await
+                        {
+                            Ok(rows) if rows > 0 => {
+                                log::info!("guardian-sync: exchanged {rows} row(s)");
+                            }
+                            Ok(_) => {}
+                            Err(e) => log::debug!("guardian-sync: {e}"),
                         }
 
                         tokio::time::sleep(std::time::Duration::from_secs(60)).await;
@@ -1068,6 +1081,8 @@ pub fn run() {
             commands::identity::is_biometric_available,
             commands::identity::get_wallet_info,
             commands::identity::get_local_did,
+            commands::identity::get_account_status,
+            commands::identity::set_account_role,
             commands::identity::resolve_display_names,
             commands::users::resolve_profiles,
             commands::users::fetch_user_profile,
@@ -1106,10 +1121,26 @@ pub fn run() {
             commands::chapters::create_chapter,
             commands::chapters::update_chapter,
             commands::chapters::delete_chapter,
+            commands::chapters::reorder_chapters,
             commands::elements::list_elements,
             commands::elements::create_element,
             commands::elements::update_element,
             commands::elements::delete_element,
+            commands::elements::reorder_elements,
+            commands::elements::move_element,
+            commands::elements::set_video_chapters,
+            commands::elements::list_video_chapters,
+            // Guardian links (parental oversight)
+            commands::guardian::guardian_create_invite,
+            commands::guardian::guardian_accept_invite,
+            commands::guardian::guardian_list_links,
+            commands::guardian::guardian_sync_now,
+            commands::guardian::guardian_revoke_link,
+            commands::guardian::guardian_get_child_activity,
+            // Instructor dashboard + inbox
+            commands::instructor::instructor_overview,
+            commands::instructor::instructor_course_learners,
+            commands::instructor::instructor_inbox,
             // Course publishing (iroh)
             commands::courses::publish_course,
             commands::courses::publish_tutorial,

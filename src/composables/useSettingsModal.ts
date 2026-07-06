@@ -11,4 +11,5 @@ export type SettingsSectionId =
   | 'personalization'
   | 'system'
   | 'plugins'
+  | 'guardian'
   | 'advanced'

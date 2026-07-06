@@ -42,6 +42,10 @@ pub struct CreateCourseRequest {
     pub description: Option<String>,
     pub tags: Option<Vec<String>>,
     pub skill_ids: Option<Vec<String>>,
+    /// `"course"` (default) or `"tutorial"` — the composer creates
+    /// draft tutorials as one-implicit-chapter courses.
+    #[serde(default)]
+    pub kind: Option<String>,
 }
 
 /// Request to update an existing course.
@@ -112,6 +116,17 @@ pub struct CreateElementRequest {
     pub element_type: String,
     pub content_hash: Option<String>,
     pub duration_seconds: Option<i64>,
+    /// Inline JSON/markdown body (quizzes, text lessons) — the composer
+    /// authors these without a round-trip through the blob store.
+    #[serde(default)]
+    pub content_inline: Option<String>,
+    /// Plugin binding for `element_type == "plugin"`.
+    #[serde(default)]
+    pub plugin_cid: Option<String>,
+    #[serde(default)]
+    pub plugin_version: Option<String>,
+    #[serde(default)]
+    pub plugin_config_cid: Option<String>,
 }
 
 /// Request to update an existing element.
@@ -122,6 +137,16 @@ pub struct UpdateElementRequest {
     pub content_hash: Option<String>,
     pub position: Option<i64>,
     pub duration_seconds: Option<i64>,
+    /// `Some(...)` overwrites; `None` leaves untouched. Clearing an
+    /// inline body is done by sending `Some("")`.
+    #[serde(default)]
+    pub content_inline: Option<String>,
+    #[serde(default)]
+    pub plugin_cid: Option<String>,
+    #[serde(default)]
+    pub plugin_version: Option<String>,
+    #[serde(default)]
+    pub plugin_config_cid: Option<String>,
 }
 
 /// A single video chapter marker (title + start second), used when

@@ -13,7 +13,8 @@ use tauri::{AppHandle, Emitter, State};
 
 use crate::crypto::keystore::Keystore;
 use crate::crypto::wallet;
-use crate::domain::identity::{Identity, WalletInfo};
+use crate::domain::identity::{Identity, WalletInfo, ACCOUNT_ROLES};
+use crate::domain::vc::{Claim, CredentialType, CustomClaim};
 use crate::profile::{Avatar, ProfileId, ProfileSummary};
 use crate::AppState;
 
@@ -43,6 +44,64 @@ fn emit_progress(app: &AppHandle, step: &str, detail: &str) {
             detail: detail.to_string(),
         },
     );
+}
+
+/// Validate the onboarding role/birthdate pair and derive the initial
+/// activation state. Legacy callers pass neither and get the pre-role
+/// behavior (`learner`, no birthdate, `active`). A caller that explicitly
+/// declares the learner role must supply a birthdate — that's what gates
+/// minors behind guardian enrollment.
+fn resolve_account_fields(
+    role: Option<String>,
+    birthdate: Option<String>,
+) -> Result<(String, Option<String>, String), String> {
+    let today = chrono::Utc::now().date_naive();
+    let explicit_role = role.is_some();
+    let role = role.unwrap_or_else(|| "learner".to_string());
+    if !ACCOUNT_ROLES.contains(&role.as_str()) {
+        return Err(format!("unknown account role '{role}'"));
+    }
+
+    let birthdate = match (&role[..], birthdate) {
+        ("learner", Some(b)) => Some(crate::domain::identity::validate_birthdate(&b, today)?),
+        ("learner", None) if explicit_role => {
+            return Err("A birthdate is required for learner accounts.".to_string());
+        }
+        // Instructors/parents (and legacy role-less calls) carry no birthdate.
+        (_, _) => None,
+    };
+
+    let activation = match &birthdate {
+        Some(b) if crate::domain::identity::is_minor(b, today) => "pending_guardian",
+        _ => "active",
+    };
+    Ok((role, birthdate, activation.to_string()))
+}
+
+/// Record the self-asserted birthdate as a `SelfAssertion` VC (subject =
+/// own DID). The credentials table is the canonical local record store;
+/// this VC is local-only and must never be announced or exported publicly.
+fn issue_birthdate_vc(
+    conn: &rusqlite::Connection,
+    signing_key: &ed25519_dalek::SigningKey,
+    birthdate: &str,
+) -> Result<(), String> {
+    let did = crate::crypto::did::derive_did_key(signing_key);
+    let mut properties = serde_json::Map::new();
+    properties.insert("birthdate".to_string(), birthdate.into());
+    let req = crate::commands::credentials::IssueCredentialRequest {
+        credential_type: CredentialType::SelfAssertion,
+        subject: did.clone(),
+        claim: Claim::Custom(CustomClaim { properties }),
+        evidence_refs: vec![],
+        expiration_date: None,
+        supersedes: None,
+        integrity_session_id: None,
+        integrity_policy: None,
+    };
+    let now = crate::commands::credentials::now_rfc3339();
+    crate::commands::credentials::issue_credential_impl(conn, signing_key, &did, &req, &now)?;
+    Ok(())
 }
 
 #[derive(Debug, Serialize)]
@@ -76,6 +135,7 @@ pub async fn get_active_profile_id(state: State<'_, AppState>) -> Result<Option<
 /// generates a wallet, opens the DB, and marks the profile active. Returns
 /// the mnemonic once so the user can write it down.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn create_profile(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -83,6 +143,8 @@ pub async fn create_profile(
     display_name: String,
     password: String,
     #[allow(non_snake_case)] avatar: Option<Avatar>,
+    role: Option<String>,
+    birthdate: Option<String>,
 ) -> Result<CreateProfileResponse, String> {
     // Username (@handle) and display name are both mandatory.
     let username = crate::domain::identity::validate_username(&username)?;
@@ -91,6 +153,7 @@ pub async fn create_profile(
         return Err("A display name is required to create a profile.".to_string());
     }
     validate_password(&password)?;
+    let (account_role, birthdate, activation_state) = resolve_account_fields(role, birthdate)?;
 
     // Refuse if another profile is already active — caller must lock first.
     if state.active_id().is_some() {
@@ -136,16 +199,25 @@ pub async fn create_profile(
         let db = db_guard.as_ref().ok_or("database not initialized")?;
         db.conn()
             .execute(
-                "INSERT OR REPLACE INTO local_identity (id, stake_address, payment_address, username, display_name, visibility) \
-                 VALUES (1, ?1, ?2, ?3, ?4, 'public')",
+                "INSERT OR REPLACE INTO local_identity (id, stake_address, payment_address, username, display_name, visibility, account_role, birthdate, activation_state) \
+                 VALUES (1, ?1, ?2, ?3, ?4, 'public', ?5, ?6, ?7)",
                 params![
                     w.stake_address.clone(),
                     w.payment_address.clone(),
                     username.clone(),
-                    display_name.clone()
+                    display_name.clone(),
+                    account_role,
+                    birthdate,
+                    activation_state
                 ],
             )
             .map_err(|e| e.to_string())?;
+
+        // The birthdate doubles as a self-asserted record in the
+        // credentials store (VC-first). Local-only — never gossiped.
+        if let Some(b) = &birthdate {
+            issue_birthdate_vc(db.conn(), &w.signing_key, b)?;
+        }
 
         #[cfg(feature = "dev-seed")]
         {
@@ -182,6 +254,7 @@ pub async fn create_profile(
 /// Create a profile from an existing BIP-39 mnemonic. Same flow as
 /// [`create_profile`] but reuses caller-supplied recovery words.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn restore_profile_with_mnemonic(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -190,6 +263,8 @@ pub async fn restore_profile_with_mnemonic(
     mnemonic: String,
     password: String,
     #[allow(non_snake_case)] avatar: Option<Avatar>,
+    role: Option<String>,
+    birthdate: Option<String>,
 ) -> Result<UnlockProfileResponse, String> {
     let username = crate::domain::identity::validate_username(&username)?;
     let display_name = display_name.trim().to_string();
@@ -197,6 +272,7 @@ pub async fn restore_profile_with_mnemonic(
         return Err("A display name is required to create a profile.".to_string());
     }
     validate_password(&password)?;
+    let (account_role, birthdate, activation_state) = resolve_account_fields(role, birthdate)?;
     if state.active_id().is_some() {
         return Err("lock the active profile before restoring a new one".to_string());
     }
@@ -239,16 +315,23 @@ pub async fn restore_profile_with_mnemonic(
         let db = db_guard.as_ref().ok_or("database not initialized")?;
         db.conn()
             .execute(
-                "INSERT OR REPLACE INTO local_identity (id, stake_address, payment_address, username, display_name, visibility) \
-                 VALUES (1, ?1, ?2, ?3, ?4, 'public')",
+                "INSERT OR REPLACE INTO local_identity (id, stake_address, payment_address, username, display_name, visibility, account_role, birthdate, activation_state) \
+                 VALUES (1, ?1, ?2, ?3, ?4, 'public', ?5, ?6, ?7)",
                 params![
                     w.stake_address.clone(),
                     w.payment_address.clone(),
                     username.clone(),
-                    display_name.clone()
+                    display_name.clone(),
+                    account_role,
+                    birthdate,
+                    activation_state
                 ],
             )
             .map_err(|e| e.to_string())?;
+
+        if let Some(b) = &birthdate {
+            issue_birthdate_vc(db.conn(), &w.signing_key, b)?;
+        }
 
         #[cfg(feature = "dev-seed")]
         {

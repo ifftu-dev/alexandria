@@ -1,6 +1,7 @@
 import { computed, readonly, ref } from 'vue'
 
 import type {
+  AccountRole,
   Avatar,
   CreateProfileResponse,
   Identity,
@@ -81,12 +82,15 @@ async function createProfile(
   display_name: string,
   password: string,
   avatar?: Avatar,
+  account?: { role?: AccountRole; birthdate?: string },
 ): Promise<CreateProfileResponse> {
   const result = await invoke<CreateProfileResponse>('create_profile', {
     username,
     displayName: display_name,
     password,
     avatar,
+    role: account?.role,
+    birthdate: account?.birthdate,
   })
   activeProfileId.value = result.summary.id
   activeWallet.value = result.wallet
@@ -102,6 +106,7 @@ async function restoreProfileWithMnemonic(
   mnemonic: string,
   password: string,
   avatar?: Avatar,
+  account?: { role?: AccountRole; birthdate?: string },
 ): Promise<UnlockProfileResponse> {
   const result = await invoke<UnlockProfileResponse>('restore_profile_with_mnemonic', {
     username,
@@ -109,6 +114,8 @@ async function restoreProfileWithMnemonic(
     mnemonic,
     password,
     avatar,
+    role: account?.role,
+    birthdate: account?.birthdate,
   })
   activeWallet.value = result.wallet
   activeIdentity.value = result.profile

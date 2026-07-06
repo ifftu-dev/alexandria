@@ -169,6 +169,55 @@ pub async fn update_chapter(
         .map_err(|e| e.to_string())
 }
 
+/// Rewrite the positions of a course's chapters to match `ordered_ids`.
+/// Must be an exact permutation of the course's chapter ids.
+pub(crate) fn reorder_chapters_impl(
+    conn: &rusqlite::Connection,
+    course_id: &str,
+    ordered_ids: &[String],
+) -> Result<(), String> {
+    let existing: Vec<String> = conn
+        .prepare("SELECT id FROM course_chapters WHERE course_id = ?1")
+        .map_err(|e| e.to_string())?
+        .query_map(params![course_id], |row| row.get(0))
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+
+    let mut expected: Vec<&str> = existing.iter().map(String::as_str).collect();
+    let mut given: Vec<&str> = ordered_ids.iter().map(String::as_str).collect();
+    expected.sort_unstable();
+    given.sort_unstable();
+    if expected != given {
+        return Err("ordered_ids must be a permutation of the course's chapter ids".into());
+    }
+
+    let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+    for (pos, id) in ordered_ids.iter().enumerate() {
+        tx.execute(
+            "UPDATE course_chapters SET position = ?1 WHERE id = ?2 AND course_id = ?3",
+            params![pos as i64, id, course_id],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    tx.commit().map_err(|e| e.to_string())
+}
+
+/// Reorder all chapters within a course (drag-and-drop persistence).
+#[tauri::command]
+pub async fn reorder_chapters(
+    state: State<'_, AppState>,
+    course_id: String,
+    ordered_ids: Vec<String>,
+) -> Result<(), String> {
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
+    reorder_chapters_impl(db.conn(), &course_id, &ordered_ids)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -195,6 +244,45 @@ mod tests {
                 [],
             )
             .unwrap();
+    }
+
+    #[test]
+    fn reorder_chapters_rewrites_positions_and_validates() {
+        let db = test_db();
+        setup_course(&db);
+        for (i, id) in ["ch_a", "ch_b", "ch_c"].iter().enumerate() {
+            db.conn()
+                .execute(
+                    "INSERT INTO course_chapters (id, course_id, title, position) VALUES (?1, 'c1', ?1, ?2)",
+                    params![id, i as i64],
+                )
+                .unwrap();
+        }
+
+        reorder_chapters_impl(
+            db.conn(),
+            "c1",
+            &["ch_b".into(), "ch_c".into(), "ch_a".into()],
+        )
+        .unwrap();
+        let order: Vec<String> = db
+            .conn()
+            .prepare("SELECT id FROM course_chapters WHERE course_id = 'c1' ORDER BY position")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(order, vec!["ch_b", "ch_c", "ch_a"]);
+
+        // Partial / foreign lists rejected.
+        assert!(reorder_chapters_impl(db.conn(), "c1", &["ch_a".into()]).is_err());
+        assert!(reorder_chapters_impl(
+            db.conn(),
+            "c1",
+            &["ch_a".into(), "ch_b".into(), "nope".into()]
+        )
+        .is_err());
     }
 
     #[test]

@@ -23,6 +23,14 @@ const router = createRouter({
       path: '/unlock',
       redirect: '/profiles',
     },
+    {
+      // Holding screen for minor learners whose profile awaits guardian
+      // activation. The global guard below funnels gated profiles here.
+      path: '/guardian-gate',
+      name: 'guardian-gate',
+      component: () => import('@/pages/GuardianGate.vue'),
+      meta: { layout: 'blank' },
+    },
 
     // ---- App routes (app layout, wallet required) ----
     {
@@ -50,25 +58,69 @@ const router = createRouter({
       meta: { layout: 'app' },
     },
 
-    // Instructor — course authoring
+    // Guardian (parent role) — children oversight
     {
-      path: '/instructor/courses/new',
-      name: 'course-create',
-      component: () => import('@/pages/instructor/CourseNew.vue'),
-      meta: { layout: 'app' },
+      path: '/guardian',
+      name: 'guardian-children',
+      component: () => import('@/pages/guardian/Children.vue'),
+      meta: { layout: 'app', requiresRole: 'parent' },
     },
     {
-      path: '/instructor/courses/:id',
-      name: 'course-edit',
-      component: () => import('@/pages/instructor/CourseEdit.vue'),
-      meta: { layout: 'app' },
+      path: '/guardian/child/:linkId',
+      name: 'guardian-child-detail',
+      component: () => import('@/pages/guardian/ChildDetail.vue'),
+      meta: { layout: 'app', requiresRole: 'parent' },
+    },
+
+    // Instructor — dashboard, learners, inbox
+    {
+      path: '/instructor',
+      name: 'instructor-dashboard',
+      component: () => import('@/pages/instructor/Dashboard.vue'),
+      meta: { layout: 'app', requiresInstructorMode: true },
     },
     {
-      path: '/instructor/tutorials/new',
-      name: 'tutorial-create',
-      component: () => import('@/pages/instructor/TutorialNew.vue'),
-      meta: { layout: 'app' },
+      path: '/instructor/courses/:id/learners',
+      name: 'instructor-course-learners',
+      component: () => import('@/pages/instructor/CourseLearners.vue'),
+      meta: { layout: 'app', requiresInstructorMode: true },
     },
+    {
+      path: '/instructor/inbox',
+      name: 'instructor-inbox',
+      component: () => import('@/pages/instructor/Inbox.vue'),
+      meta: { layout: 'app', requiresInstructorMode: true },
+    },
+    {
+      path: '/instructor/review/:id',
+      name: 'instructor-review',
+      component: () => import('@/pages/instructor/SubmissionReview.vue'),
+      meta: { layout: 'app', requiresInstructorMode: true },
+    },
+
+    // Instructor — unified composer (courses + tutorials)
+    {
+      path: '/instructor/composer/new',
+      name: 'composer-new',
+      component: () => import('@/pages/instructor/Composer.vue'),
+      meta: { layout: 'app', requiresInstructorMode: true },
+    },
+    {
+      path: '/instructor/composer/:id',
+      name: 'composer',
+      component: () => import('@/pages/instructor/Composer.vue'),
+      meta: { layout: 'app', requiresInstructorMode: true },
+    },
+    {
+      path: '/instructor/courses',
+      name: 'instructor-courses',
+      component: () => import('@/pages/instructor/MyCourses.vue'),
+      meta: { layout: 'app', requiresInstructorMode: true },
+    },
+    // Legacy authoring routes — the composer supersedes them.
+    { path: '/instructor/courses/new', redirect: '/instructor/composer/new?kind=course' },
+    { path: '/instructor/courses/:id', redirect: (to) => `/instructor/composer/${to.params.id}` },
+    { path: '/instructor/tutorials/new', redirect: '/instructor/composer/new?kind=tutorial' },
 
     // Opinions (Field Commentary — credentialed video takes)
     {
@@ -285,6 +337,44 @@ const router = createRouter({
       meta: { layout: 'app' },
     },
   ],
+})
+
+// Global access guard:
+// 1. A gated (pending_guardian) profile can only see the blank-layout
+//    auth pages and its gate screen — every app route redirects there.
+// 2. `requiresInstructorMode` routes need an instructor account with
+//    instructor mode active (mode flips are cheap, so send the user
+//    home rather than flipping silently).
+// 3. `requiresRole` routes (e.g. the guardian dashboard) are only for
+//    that account role.
+router.beforeEach(async (to) => {
+  const openNames = new Set(['onboarding', 'profiles', 'guardian-gate'])
+  if (openNames.has(String(to.name))) return true
+
+  const { useProfiles } = await import('@/composables/useProfiles')
+  const { useAccountStatus } = await import('@/composables/useAccountStatus')
+  const { isUnlocked } = useProfiles()
+  if (!isUnlocked.value) return true // App.vue handles onboarding/picker routing
+
+  const { loaded, refreshAccountStatus, isPendingGuardian, role } = useAccountStatus()
+  if (!loaded.value) await refreshAccountStatus()
+  if (isPendingGuardian.value) return { name: 'guardian-gate' }
+
+  if (to.meta.requiresInstructorMode) {
+    const { useMode } = await import('@/composables/useMode')
+    if (!useMode().isInstructorMode.value) return { name: 'home' }
+  }
+
+  if (to.meta.requiresRole && to.meta.requiresRole !== role.value) {
+    return { name: 'home' }
+  }
+
+  // Parents have no learner home; route them to their dashboard.
+  if (to.name === 'home' && role.value === 'parent') {
+    return { path: '/guardian' }
+  }
+
+  return true
 })
 
 export default router

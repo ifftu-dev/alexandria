@@ -20,6 +20,20 @@ export interface Identity {
   updated_at: string
 }
 
+/** Role chosen at onboarding. Instructors can also act as learners via modes. */
+export type AccountRole = 'learner' | 'instructor' | 'parent'
+
+/** Role + gating status for the active profile. `is_minor` is computed
+ *  from the stored birthdate at call time — age is never stored. */
+export interface AccountStatus {
+  role: AccountRole
+  /** ISO date (YYYY-MM-DD), learners only. Local-only: never published. */
+  birthdate: string | null
+  is_minor: boolean
+  /** 'active' | 'pending_guardian' (minor awaiting guardian link). */
+  activation_state: string
+}
+
 /** Public view of a user profile, served over /alexandria/profile-fetch/1.0. */
 export interface PublicProfile {
   did: string
@@ -155,6 +169,8 @@ export interface CreateCourseRequest {
   description?: string | null
   tags?: string[] | null
   skill_ids?: string[] | null
+  /** 'course' (default) or 'tutorial'. */
+  kind?: string | null
 }
 
 export interface UpdateCourseRequest {
@@ -207,6 +223,10 @@ export interface CreateElementRequest {
   element_type: string
   content_hash?: string | null
   duration_seconds?: number | null
+  content_inline?: string | null
+  plugin_cid?: string | null
+  plugin_version?: string | null
+  plugin_config_cid?: string | null
 }
 
 export interface UpdateElementRequest {
@@ -215,6 +235,10 @@ export interface UpdateElementRequest {
   content_hash?: string | null
   position?: number | null
   duration_seconds?: number | null
+  content_inline?: string | null
+  plugin_cid?: string | null
+  plugin_version?: string | null
+  plugin_config_cid?: string | null
 }
 
 export interface PublishCourseResult {
@@ -1743,6 +1767,56 @@ export interface InstalledPlugin {
   installed_at: string
   /** Disabled plugins remain installed but the player refuses to mount them. */
   enabled: boolean
+}
+
+// ---- Guardian links (parental oversight) ----
+
+export interface GuardianLinkInfo {
+  id: string
+  /** 'ward' (this profile is the child) | 'guardian' (this profile oversees). */
+  side: 'ward' | 'guardian'
+  peer_did: string
+  peer_display_name: string | null
+  status: 'pending' | 'active' | 'revoked'
+  child_birthdate: string | null
+  created_at: string
+  last_sync_at: string | null
+}
+
+// ---- Instructor dashboard ----
+
+export interface CourseOverview {
+  course_id: string
+  title: string
+  kind: string
+  status: string
+  enrollment_count: number
+  completed_count: number
+  avg_score: number | null
+  last_activity: string | null
+  pending_reviews: number
+}
+
+export interface CourseLearner {
+  learner_did: string | null
+  enrollment_id: string
+  display_name: string | null
+  enrolled_at: string
+  enrollment_status: string
+  completed_elements: number
+  total_elements: number
+  avg_score: number | null
+  time_spent_seconds: number
+  last_activity: string | null
+}
+
+export interface InboxItem {
+  kind: 'irl_submission' | 'join_request'
+  id: string
+  title: string
+  subtitle: string | null
+  created_at: string
+  target_id: string
 }
 
 /** One row in the IRL Review submission inbox. */

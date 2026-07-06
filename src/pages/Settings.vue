@@ -23,6 +23,7 @@ import { AppButton, AppInput, AppTextarea, AppModal, AppAlert } from '@/componen
 import AdvancedSettingsPanel from '@/components/settings/AdvancedSettingsPanel.vue'
 import RelayManager from '@/components/settings/RelayManager.vue'
 import PluginsPanel from '@/components/settings/PluginsPanel.vue'
+import GuardianPanel from '@/components/settings/GuardianPanel.vue'
 import type { Identity } from '@/types'
 
 const { invoke } = useLocalApi()
@@ -54,6 +55,8 @@ const SECTIONS: SectionMeta[] = [
     keywords: ['storage', 'disk', 'quota', 'cache', 'free space', 'evict', 'network', 'p2p', 'node', 'peers'] },
   { id: 'plugins', label: 'Plugins', desc: 'Install, enable, review submissions',
     keywords: ['plugin', 'install', 'uninstall', 'enable', 'disable', 'capability', 'donate', 'instructor', 'review', 'irl', 'music'] },
+  { id: 'guardian', label: 'My Guardian', desc: 'Who oversees this profile',
+    keywords: ['guardian', 'parent', 'oversight', 'minor', 'ward', 'family', 'link', 'unlink'] },
   { id: 'advanced', label: 'All settings', desc: 'Every per-profile setting',
     keywords: ['advanced', 'all settings', 'sync', 'sentinel', 'notifications', 'flags'] },
 ]
@@ -881,6 +884,11 @@ function onSectionClick(id: SettingsSectionId) {
                 <!-- ──────────── Plugins ──────────── -->
                 <template v-else-if="activeSection === 'plugins'">
                   <PluginsPanel />
+                </template>
+
+                <!-- ──────────── Guardian (oversight transparency) ──────────── -->
+                <template v-else-if="activeSection === 'guardian'">
+                  <GuardianPanel />
                 </template>
 
                 <!-- ──────────── Advanced — every registered setting ──────────── -->

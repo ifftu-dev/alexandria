@@ -16,6 +16,7 @@ use tokio::sync::{mpsc, oneshot};
 
 use super::device_sync::{SyncRequest, SyncResponse};
 use super::graph_fetch::{GraphFetchRequest, GraphFetchResponse};
+use super::guardian::{GuardianRequest, GuardianResponse};
 use super::profile_fetch::{ProfileFetchRequest, ProfileFetchResponse};
 use super::username_reg::{ReceiptRequest, ReceiptResponse};
 use super::vc_fetch::{FetchRequest, FetchResponse};
@@ -291,6 +292,11 @@ pub struct AlexandriaBehaviour {
     /// `/alexandria/username-reg/1.0`. Outbound only: clients ask, the
     /// relay countersigns.
     pub username_reg: request_response::cbor::Behaviour<ReceiptRequest, ReceiptResponse>,
+    /// Guardian link + oversight sync — `/alexandria/guardian/1.0`
+    /// request-response protocol between a minor ward and their
+    /// parent/guardian. Cross-user; payloads sealed under the per-link
+    /// key (see [`super::guardian`]).
+    pub guardian: request_response::cbor::Behaviour<GuardianRequest, GuardianResponse>,
 }
 
 /// The running P2P network node.
@@ -363,6 +369,14 @@ pub enum SwarmCommand {
     SendSyncResponse {
         channel: ResponseChannel<SyncResponse>,
         response: SyncResponse,
+    },
+    /// Send a guardian request (link / activity push / pull / revoke)
+    /// to the counterparty. The reply oneshot resolves with the peer's
+    /// [`GuardianResponse`] (or an outbound failure).
+    SendGuardianRequest {
+        peer: PeerId,
+        request: GuardianRequest,
+        reply: oneshot::Sender<Result<GuardianResponse, NetworkError>>,
     },
     /// Send a graph-fetch request to a peer. The reply oneshot resolves
     /// with the peer's [`GraphFetchResponse`] (or an outbound failure).
@@ -940,6 +954,17 @@ fn build_behaviour(
         request_response::Config::default(),
     );
 
+    // Guardian link + oversight sync (§ parental controls). CBOR
+    // codec, full bidirectional support — a ward serves pulls and
+    // link requests; a guardian serves activity pushes.
+    let guardian = request_response::cbor::Behaviour::<GuardianRequest, GuardianResponse>::new(
+        [(
+            StreamProtocol::new("/alexandria/guardian/1.0"),
+            ProtocolSupport::Full,
+        )],
+        request_response::Config::default(),
+    );
+
     // Public skill-graph fetch (§ graph-fetch). CBOR codec, full
     // bidirectional support — every node both serves its owner's graph
     // and requests other owners' graphs.
@@ -987,6 +1012,7 @@ fn build_behaviour(
         graph_fetch,
         profile_fetch,
         username_reg,
+        guardian,
         dcutr,
     })
 }
@@ -1117,6 +1143,12 @@ async fn swarm_event_loop(
     let mut outbound_sync_replies: HashMap<
         libp2p::request_response::OutboundRequestId,
         oneshot::Sender<Result<SyncResponse, NetworkError>>,
+    > = HashMap::new();
+
+    // Same bookkeeping for outbound guardian requests.
+    let mut outbound_guardian_replies: HashMap<
+        libp2p::request_response::OutboundRequestId,
+        oneshot::Sender<Result<GuardianResponse, NetworkError>>,
     > = HashMap::new();
 
     // Same bookkeeping for outbound graph-fetch requests.
@@ -1439,6 +1471,13 @@ async fn swarm_event_loop(
                             .behaviour_mut()
                             .device_sync
                             .send_response(channel, response);
+                    }
+                    Some(SwarmCommand::SendGuardianRequest { peer, request, reply }) => {
+                        let request_id = swarm
+                            .behaviour_mut()
+                            .guardian
+                            .send_request(&peer, request);
+                        outbound_guardian_replies.insert(request_id, reply);
                     }
                     Some(SwarmCommand::SendGraphFetchRequest { peer, request, reply }) => {
                         let request_id = swarm
@@ -2097,6 +2136,65 @@ async fn swarm_event_loop(
                     SwarmEvent::Behaviour(AlexandriaBehaviourEvent::DeviceSync(
                         request_response::Event::ResponseSent { .. }
                     )) => {}
+                    // ---- guardian (request-response) -----------------
+                    SwarmEvent::Behaviour(AlexandriaBehaviourEvent::Guardian(
+                        request_response::Event::Message { peer, message, .. }
+                    )) => {
+                        match message {
+                            request_response::Message::Request { request, channel, .. } => {
+                                log::debug!("guardian: inbound request from {peer}");
+                                let response = match db.as_ref() {
+                                    Some(db_arc) => match db_arc.lock() {
+                                        Ok(guard) => match guard.as_ref() {
+                                            Some(database) => super::guardian::handle_guardian_request(
+                                                database.conn(),
+                                                &peer.to_string(),
+                                                &request,
+                                            ),
+                                            None => super::guardian::GuardianResponse::Error(
+                                                "no active profile".into(),
+                                            ),
+                                        },
+                                        Err(_) => super::guardian::GuardianResponse::Error(
+                                            "db lock poisoned".into(),
+                                        ),
+                                    },
+                                    None => super::guardian::GuardianResponse::Error(
+                                        "no database".into(),
+                                    ),
+                                };
+                                let _ = swarm
+                                    .behaviour_mut()
+                                    .guardian
+                                    .send_response(channel, response);
+                            }
+                            request_response::Message::Response { request_id, response } => {
+                                if let Some(reply) = outbound_guardian_replies.remove(&request_id) {
+                                    let _ = reply.send(Ok(response));
+                                } else {
+                                    log::debug!(
+                                        "guardian: unmatched response for {request_id} from {peer}"
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    SwarmEvent::Behaviour(AlexandriaBehaviourEvent::Guardian(
+                        request_response::Event::OutboundFailure { request_id, error, peer, .. }
+                    )) => {
+                        log::warn!("guardian: outbound to {peer} failed: {error}");
+                        if let Some(reply) = outbound_guardian_replies.remove(&request_id) {
+                            let _ = reply.send(Err(NetworkError::Publish(error.to_string())));
+                        }
+                    }
+                    SwarmEvent::Behaviour(AlexandriaBehaviourEvent::Guardian(
+                        request_response::Event::InboundFailure { error, peer, .. }
+                    )) => {
+                        log::debug!("guardian: inbound from {peer} failed: {error}");
+                    }
+                    SwarmEvent::Behaviour(AlexandriaBehaviourEvent::Guardian(
+                        request_response::Event::ResponseSent { .. }
+                    )) => {}
                     // ---- graph-fetch (request-response) --------------
                     SwarmEvent::Behaviour(AlexandriaBehaviourEvent::GraphFetch(
                         request_response::Event::Message { peer, message, .. }
@@ -2447,6 +2545,28 @@ impl P2pNode {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.command_tx
             .send(SwarmCommand::SendSyncRequest {
+                peer,
+                request,
+                reply: reply_tx,
+            })
+            .await
+            .map_err(|_| NetworkError::NotRunning)?;
+        reply_rx.await.map_err(|_| NetworkError::NotRunning)?
+    }
+
+    /// Run one guardian exchange (link / push / pull / revoke) with the
+    /// counterparty over `/alexandria/guardian/1.0`.
+    pub async fn guardian_request(
+        &self,
+        peer: PeerId,
+        request: super::guardian::GuardianRequest,
+    ) -> Result<super::guardian::GuardianResponse, NetworkError> {
+        if !self.running {
+            return Err(NetworkError::NotRunning);
+        }
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.command_tx
+            .send(SwarmCommand::SendGuardianRequest {
                 peer,
                 request,
                 reply: reply_tx,
