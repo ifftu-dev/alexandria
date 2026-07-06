@@ -92,6 +92,8 @@
 | 55 | `username_claim_cache` | `username_claims` — verified DHT registry winners (`tier` 0 bare / 1 receipted / 2 anchored) |
 | 56 | `username_anchor_verified` | `anchor_verified` flag gating tier 2 in conflict ordering |
 | 53 | `plugin_enabled_and_irl_review` | Add `enabled` flag to `plugin_installed` (disabled plugins stay installed but the player refuses to mount them). New `plugin_irl_submissions` table — the local instructor-review inbox backing the `irl-review` builtin plugin. See [`plugins.md`](plugins.md). |
+| 66 | `account_role_birthdate` | Add `account_role` (`learner`/`instructor`/`parent`), `birthdate` (ISO-8601, on-device only), and `activation_state` (`active`/`pending_guardian`) to `local_identity`. Age is **recomputed** from `birthdate` each unlock — never stored — so turning 18 resolves automatically. |
+| 67 | `guardian_links` | Cross-device parental oversight: `guardian_links` (ward↔guardian pairing, vault-sealed shared key, W3C VC ids, `status`), `guardian_pending_invites` (single-use `code_hash` PK, mirrors the pairing-code pattern), `guardian_activity_rows` (sealed activity the child pushes to the guardian). See [`protocol-specification.md`](protocol-specification.md#guardian-link-protocol). **Never** added to device-sync `SYNCABLE_TABLES` or gossip. |
 
 ---
 
@@ -111,6 +113,30 @@ columns and indexes, use `src-tauri/src/db/schema.rs`.
   picker, avatar, accent color) lives separately in the unencrypted
   `profiles_index.json` sidecar — see
   [`multi-user-profiles.md`](multi-user-profiles.md).
+  Migration 66 adds `account_role`, `birthdate` (kept on-device, excluded
+  from the public `SignedProfile`), and `activation_state` — a minor
+  learner starts `pending_guardian` and flips to `active` only after a
+  guardian link is established.
+
+### Guardianship (3 tables)
+
+> Parental oversight is **cross-device and cross-user** — a minor and their
+> parent are separate identities on separate devices, linked over the sealed
+> `/alexandria/guardian/1.0` protocol. These tables and the birthdate are
+> deliberately excluded from device-sync and gossip; a unit test enforces that
+> guardian tables never appear in `SYNCABLE_TABLES`.
+
+- **`guardian_links`** — One row per link, on both sides (`side` = `ward` or
+  `guardian`). Holds the peer's DID / stake / peer id, the per-link shared key
+  (vault-sealed), the issued guardianship + ward VC ids, `status`
+  (`pending`/`active`/`revoked`), and the child's birthdate on the guardian side.
+- **`guardian_pending_invites`** — Single-use invites keyed by `code_hash`
+  (PK), with the sealed shared key and an `expires_at` (~7 days — the code
+  waits for an offline parent, not a live connection). Mirrors the single-use
+  pending-pairing pattern.
+- **`guardian_activity_rows`** — Sealed activity the child pushes to the
+  guardian (enrollments, progress, submissions), keyed by
+  `(link_id, table_name, entity_id)` and merged last-write-wins.
 
 ### Taxonomy (6 tables)
 
