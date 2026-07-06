@@ -68,8 +68,8 @@ central API, no hosted database, and no Docker infrastructure.
 |  |   (WebView)    | 194     |                      |  |
 |  |                | cmds    |  +----------------+  |  |
 |  |  29 pages      |         |  |   SQLite DB    |  |  |
-|  |  34 components |         |  |   ~75 tables    |  |  |
-|  |  14 composables|         |  |   56 migrations|  |  |
+|  |  34 components |         |  |   ~78 tables    |  |  |
+|  |  14 composables|         |  |   67 migrations|  |  |
 |  +----------------+         |  +----------------+  |  |
 |                             |                      |  |
 |                             |  +----------------+  |  |
@@ -158,13 +158,47 @@ Keys are stored in an encrypted vault. The implementation varies by platform:
 
 Both share the same lock/unlock cycle: lock clears in-memory keys, unlock re-derives from mnemonic. Locking the active profile also tears down its iroh node and libp2p swarm; unlocking a different profile rebuilds them rooted at the new profile's directory.
 
+### Roles, Modes & Guardianship
+
+Onboarding assigns each profile an `account_role` — **learner**, **instructor**,
+or **parent** (migration 66, on `local_identity`). The role shapes the home
+screen and available tools, and drives an obvious visual accent on the shell
+(amber for instructor mode, teal for the guardian role).
+
+- **Role vs. mode.** Instructors are implicitly learners too, so they get a
+  Learner↔Instructor **mode** switch (`active_mode` per-profile setting;
+  `useMode` composable; `Cmd/Ctrl+Shift+M`). Parent is a **role, not a mode** —
+  a parent's home *is* the guardian dashboard. A single `router.beforeEach`
+  guard enforces `requiresInstructorMode` on `/instructor/*` and
+  `requiresRole: 'parent'` on `/guardian/*`.
+- **Age gating.** Learners provide a `birthdate` (ISO-8601, kept on-device and
+  excluded from the public `SignedProfile`). Age is **recomputed** via
+  `domain::identity::is_minor(birthdate, today)` on every unlock — never stored —
+  so turning 18 resolves automatically. A self-asserted birthdate VC is issued
+  so "store in records" is satisfied VC-first.
+- **Activation.** A minor learner starts `activation_state = pending_guardian`
+  and is funnelled to a holding screen (`GuardianGate.vue`) by the router guard.
+  The profile flips to `active` — unblocking the app — only once a guardian link
+  is established over `/alexandria/guardian/1.0` (see
+  [`protocol-specification.md`](protocol-specification.md#guardian-link-protocol)).
+  This is deliberately **cross-device and cross-user**: the parent is a separate
+  identity on their own device, so oversight can never be forged locally.
+- **Authoring & oversight.** Instructors get a unified course/tutorial
+  **composer** (`/instructor/composer`, superseding the old
+  `CourseNew`/`CourseEdit`/`TutorialNew` pages) plus a dashboard (per-course
+  learner progress) and a submissions **inbox**. Parents get a guardian
+  dashboard listing each linked child and their synced activity.
+
+Privacy: guardianship VCs, birthdates, and `guardian_*` tables never enter
+device-sync (`SYNCABLE_TABLES`) or gossip — an invariant covered by unit tests.
+
 ---
 
 ## 4. Database
 
 **Engine**: SQLite (rusqlite 0.38, bundled)
 
-**Tables**: ~75 across 56 migrations
+**Tables**: ~78 across 67 migrations
 
 | Domain | Tables |
 |--------|--------|

@@ -387,7 +387,7 @@ All messages are JSON-encoded, wrapped in a signed envelope, and published via G
 
 ### 6.4 Network Behaviour
 
-Seven base libp2p protocols plus five request-response protocols (§6.5) compose `AlexandriaBehaviour`:
+Seven base libp2p protocols plus six request-response protocols (§6.5) compose `AlexandriaBehaviour`:
 
 | Protocol | Version | Purpose |
 |----------|---------|---------|
@@ -417,7 +417,7 @@ Seven base libp2p protocols plus five request-response protocols (§6.5) compose
 | `/alexandria/plugin-attestations/1.0` | Plugin DAO threshold-signed grader attestations |
 | `/alexandria/sentinel-priors/1.0` | Ratified Sentinel adversarial-prior metadata |
 
-All 13 topics MUST be subscribed on node startup. In addition, five
+All 13 topics MUST be subscribed on node startup. In addition, six
 request-response protocols (libp2p `request-response` + CBOR codec)
 run alongside the gossip mesh and are 1-to-1, not gossip topics:
 `/alexandria/vc-fetch/1.0` handles authority-respecting credential
@@ -451,6 +451,55 @@ anchoring under metadata label 1698.
 See §14 for the normative VC payload schemas carried by the
 `vc-did`, `vc-status`, `vc-presentation`, and `pinboard` topics, and
 by the `vc-fetch/1.0` request-response protocol.
+
+#### Guardian Link Protocol
+
+`/alexandria/guardian/1.0` is the sixth request-response protocol and the only
+**cross-user** one: it links a minor learner to a parent/guardian who is a
+*different identity on a different device*. Unlike device sync — which pairs two
+devices of the *same* user and authenticates on a matching stake address — the
+guardian link is authorised purely by possession of a single-use invite code,
+then by a per-link AEAD key for everything after.
+
+Flow:
+
+1. A gated minor (`activation_state = pending_guardian`) calls
+   `guardian_create_invite`, producing a `GuardianInvite` — the same base64url
+   shape as a `PairingCode` (child DID, stake, peer id, dial addresses, a fresh
+   32-byte shared key, display name). Its `code_hash` is stored in
+   `guardian_pending_invites`; the code is shown on the holding screen and is
+   valid ~7 days (the code waits for an offline parent, not a live connection).
+2. The parent runs `guardian_accept_invite(code)`, dials the child, and sends
+   `GuardianRequest::Link` carrying a **guardianship** W3C VC (issuer = parent
+   DID, subject = child DID, Ed25519 proof) plus AEAD-sealed metadata.
+3. The child verifies the VC, consumes the invite (single-use — replays are
+   rejected), stores the link + VC, issues a reciprocal **ward** VC, sets
+   `activation_state = active`, and replies `Linked` with an initial sealed
+   activity snapshot. A `guardian-link-changed` Tauri event live-unblocks the
+   gate.
+4. Ongoing oversight: the child pushes AES-256-GCM-sealed `SyncRow` payloads
+   (`GuardianRequest::ActivityPush`, reusing the `p2p::sync` seal/LWW helpers)
+   over an allowlist of tables (enrollments, progress, submissions, …); the
+   guardian merges them into `guardian_activity_rows` and can `ActivityPull` on
+   dashboard open.
+
+Requests: `GuardianRequest::{Link, ActivityPush, ActivityPull, Revoke}`.
+Responses: `GuardianResponse::{Linked, Ok, Sealed, Unauthorized, Error}`.
+The handler is the pure fn `handle_guardian_request(conn, peer_id, req)`
+(unit-tested in `tests/guardian_e2e.rs` with real wallets and VC signing).
+
+Turning 18 / revocation: `is_minor` is recomputed from the birthdate on every
+unlock, so a ward automatically ages out and gains `guardian_revoke_link` (VC
+status-list revocation + a `Revoke` message). While still a minor the ward
+cannot revoke; a guardian-side revoke returns the child to the
+`pending_guardian` gate.
+
+**Privacy invariants (test-enforced):** guardianship VCs and the birthdate are
+never announced on any VC gossip topic, are excluded from the public
+`profile-fetch` / `graph-fetch` responses and credential-export defaults, and
+travel exclusively over this sealed protocol. `guardian_links` and
+`guardian_activity_rows` are **not** in the device-sync `SYNCABLE_TABLES`.
+Handler + payloads: `p2p::guardian`; commands: `commands::guardian`.
 
 ### 6.6 Message Envelope
 

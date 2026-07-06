@@ -22,7 +22,13 @@ Multi-user accounts let one device host several learners, each with their own cr
 - Remote push notifications (covered in [push-notifications-rfc.md](./push-notifications-rfc.md)).
 - Deep linking (covered in a follow-up RFC; multi-profile must land first because deep links queue until a profile is unlocked).
 - Cross-profile content deduplication. Each profile keeps its own iroh blob cache for now; a shared read-only blob pool can come later.
-- Per-profile parental controls / content filtering.
+- Per-profile parental controls / content filtering. **Update:** account roles
+  and cross-device parental oversight shipped in a follow-up — a minor learner's
+  profile stays gated until a parent on a *separate device* activates it. That
+  work builds on this per-profile foundation (each role is just a
+  `local_identity.account_role`); see
+  [`architecture.md`](architecture.md#roles-modes--guardianship) and
+  [`protocol-specification.md`](protocol-specification.md#guardian-link-protocol).
 
 > **Update:** biometric unlock at the picker has since shipped (see _Security
 > properties_ below). Selecting a profile offers Touch ID / Face ID, with the

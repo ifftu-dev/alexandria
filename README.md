@@ -38,6 +38,8 @@
 - **Multi-User on One Device** — A single device can host any number of fully-isolated learner profiles. Each profile owns its own vault, SQLCipher database, iroh blob cache, and libp2p peer id; switching profiles tears all per-profile services down and brings the next one online. Designed for households, classrooms, and shared-device contexts in regions where personal hardware isn't a given. See [`docs/multi-user-profiles.md`](docs/multi-user-profiles.md).
 - **Cross-Device Synced Settings** — Every user preference (theme, sidebar layout, keyboard shortcuts, Sentinel toggles, notifications, ...) lives in one per-profile store and propagates to the user's other devices via peer-to-peer sync. Device-local settings (window geometry, disk quota) stay where they belong. See [`docs/settings.md`](docs/settings.md).
 - **Mobile Node** — iOS and Android are first-class targets. The mobile app is a fully functional node — same P2P networking, content storage, and wallet as desktop. Multi-device support via shared BIP-39 mnemonic.
+- **Roles, Modes & Parental Controls** — onboarding asks whether you are a **Learner**, **Instructor**, or **Parent/Guardian**. Learners give a birthdate (stored locally, never published; age is recomputed each unlock, never stored) — minors land in a `pending_guardian` state and must link a parent on a *separate device* before their profile activates. Instructors get a Learner↔Instructor **mode switch** (with an amber "instructor" accent so the active surface is obvious), a **unified course/tutorial composer**, and **dashboards** (per-course learner progress + a submissions inbox). Parents get a **guardian dashboard** to follow each linked child's activity. See [`docs/architecture.md`](docs/architecture.md#roles-modes--guardianship).
+- **Cross-Device Guardian Link** — the parent↔child link is a P2P handshake, not a server account: the minor generates a single-use invite code, the parent accepts it from their own device, and the two exchange W3C guardianship credentials (Ed25519) plus an AEAD-sealed activity channel over a dedicated `/alexandria/guardian/1.0` protocol. Guardianship VCs, birthdates, and oversight rows never touch public gossip or device-sync — the invariant is test-enforced. See [`docs/protocol-specification.md`](docs/protocol-specification.md#guardian-link-protocol).
 
 ## System Requirements
 
@@ -103,7 +105,7 @@ alexandria/
 │       ├── classroom/ # Encrypted group messaging, membership, gossip
 │       ├── commands/ # IPC command handlers across ~32 modules (frontend ↔ backend), including profile/* lifecycle
 │       ├── crypto/   # BIP-39 wallet, per-profile vault (Stronghold / portable), Ed25519, did:key
-│       ├── db/       # SQLite (~75 tables, 56 migrations, seed data) — one DB per profile
+│       ├── db/       # SQLite (~78 tables, 67 migrations, seed data) — one DB per profile
 │       ├── diag.rs   # File-based diagnostic logger + panic hook
 │       ├── domain/   # Business logic (courses, tutorials, opinions, vc, evidence, governance, ...)
 │       ├── evidence/ # Proficiency taxonomy + thresholds (reputation/attestation/challenge disabled post-VC-first cutover)
@@ -249,17 +251,35 @@ rm -rf src-tauri/gen/apple/build
 
 ### Building for Android
 
+Use the wrapper script — a bare `cargo tauri android build` will fail on the
+native dependency chain because Tauri does not export the NDK cross-compile
+environment those crates need:
+
+- `openssl-sys` (vendored, via SQLCipher) needs `ANDROID_NDK_ROOT` **and** the
+  NDK `llvm` bin on `PATH` (its Makefile calls `ranlib` by bare name).
+- `ffmpeg-sys-next` needs `CARGO_NDK_SYSROOT_PATH` (normally set by `cargo ndk`,
+  but Tauri drives `cargo build` directly).
+- `audiopus_sys` (Opus) builds with CMake + Ninja and aborts if a stale build
+  dir was generated with a different generator.
+
+`scripts/android-build.sh` sets all of this up (installs `cargo-ndk` if missing,
+clears the stale CMake cache), then forwards its args to `cargo tauri android
+build`:
+
 **Debug APK (for emulator or sideloading):**
 
 ```bash
-cargo tauri android build --debug --target aarch64
+./scripts/android-build.sh --debug
 ```
 
 **Release APK (unsigned — requires signing for distribution):**
 
 ```bash
-cargo tauri android build --target aarch64
+./scripts/android-build.sh --release
 ```
+
+Env overrides: `ANDROID_HOME`, `NDK_HOME`, `ANDROID_API` (default 28),
+`ANDROID_TARGET` (default `aarch64`). Requires `ninja` on `PATH`.
 
 **Deploy to emulator:**
 
@@ -402,12 +422,22 @@ alex clean all --force   # Remove everything
 ### First-Time Onboarding
 
 1. Launch the app — you see the onboarding screen
-2. Pick a profile name (shown later on the picker — renameable)
-3. Create a password — this encrypts that profile's vault
-4. A 24-word BIP-39 mnemonic is generated (CIP-1852 derivation)
-5. Payment and stake addresses are derived (preprod testnet)
-6. Back up the mnemonic — it is the identity and wallet for *this profile*
-7. The P2P node starts automatically and connects to the network
+2. Pick your **role**: Learner, Instructor, or Parent/Guardian
+3. Learners give a **birthdate** (kept on-device, never published) — if you are
+   under 18 you will be asked to invite a guardian at the end
+4. Pick a profile name / username (shown later on the picker — renameable)
+5. Create a password — this encrypts that profile's vault
+6. A 24-word BIP-39 mnemonic is generated (CIP-1852 derivation); payment and
+   stake addresses are derived (preprod testnet)
+7. Back up the mnemonic — it is the identity and wallet for *this profile*
+8. The P2P node starts automatically and connects to the network
+
+**Minors:** the profile stays in a `pending_guardian` holding screen that shows a
+single-use invite code. A parent installs Alexandria on their own device, creates
+a Parent profile, and enters the code; the moment they accept (both devices
+online) the minor's profile unlocks automatically. **Instructors** land in
+instructor mode with the composer and dashboards; toggle to learner mode any time
+(`Cmd/Ctrl + Shift + M`). **Parents** land on the guardian dashboard.
 
 Subsequent launches land on the **profile picker** (`/profiles`) — an avatar grid of every profile on the device. Pick one, enter its password, and you're in.
 
@@ -467,7 +497,7 @@ All data lives in `~/Library/Application Support/org.alexandria.node/` (macOS). 
 |----------------|---------|
 | `profiles_index.json` | Public sidecar — display names, avatars, colors, timestamps. Read by the picker before any vault is unlocked. **No keys, DIDs, or stake addresses.** |
 | `profiles/<uuid>/vault/` | Per-profile encrypted vault (Stronghold on desktop, AES-256-GCM + Argon2id on mobile) |
-| `profiles/<uuid>/alexandria.db` | Per-profile SQLCipher database (~75 tables), key derived from that profile's password |
+| `profiles/<uuid>/alexandria.db` | Per-profile SQLCipher database (~78 tables), key derived from that profile's password |
 | `profiles/<uuid>/iroh/` | Per-profile content-addressed blob store (course content, user profiles) and node secret |
 | `profiles/<uuid>/plugins/` | Per-profile installed plugin bundles |
 | `profiles/<uuid>/videocache/` | Per-profile materialized video files (served via Tauri's asset protocol) |
