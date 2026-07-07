@@ -50,5 +50,19 @@
 	<array>
 		<string>audio</string>
 	</array>
+	<!-- Deep links: custom scheme alexandria:// . HTTPS app-links on
+	     alexandria.ifftu.dev are handled via the associated-domains
+	     entitlement + the domain's apple-app-site-association (docs/deeplink/). -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>org.alexandria.node</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>alexandria</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>

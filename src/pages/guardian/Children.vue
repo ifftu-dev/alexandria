@@ -1,10 +1,11 @@
 <script setup lang="ts">
 // Parent home: linked children with add-child + sync controls.
-import { onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useGuardian, childAge } from '@/composables/useGuardian'
 import { AppButton, AppBadge, AppInput, AppModal, EmptyState } from '@/components/ui'
 
+const route = useRoute()
 const router = useRouter()
 const { children, loaded, refreshLinks, acceptInvite, syncNow } = useGuardian()
 
@@ -15,6 +16,22 @@ const addError = ref('')
 const syncing = ref(false)
 
 onMounted(() => void refreshLinks())
+
+// Arrived from a deep link (alexandria://guardian/accept?code=…): prefill the
+// add-child modal so the parent can confirm, then drop the query so a refresh
+// doesn't re-trigger it. A watcher (not just onMounted) also covers the case
+// where the parent is already on this page when the link fires.
+watch(
+  () => route.query.accept,
+  (code) => {
+    if (typeof code === 'string' && code.trim()) {
+      inviteCode.value = code.trim()
+      showAdd.value = true
+      void router.replace({ path: '/guardian', query: {} })
+    }
+  },
+  { immediate: true },
+)
 
 async function submitInvite() {
   if (!inviteCode.value.trim()) return

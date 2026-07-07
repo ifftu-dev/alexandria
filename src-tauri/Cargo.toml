@@ -52,6 +52,7 @@ tauri-plugin-log = "2"
 tauri-plugin-biometry = "0.2"
 tauri-plugin-os = "2"
 tauri-plugin-updater = "2"
+tauri-plugin-deep-link = "2"
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
@@ -178,6 +179,11 @@ x11rb = "0.13"
 [target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
 # Secure secret storage (IOTA Stronghold encrypted vault — desktop uses this instead of portable)
 iota_stronghold = "2"
+
+# Single-instance: on Windows/Linux a deep link launches a second process with
+# the URL in argv; this forwards it to the running instance (macOS delivers
+# deep links natively via on_open_url, no second process). Desktop-only.
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 
 # Device enumeration for pre-join device checks (camera listing via nokhwa)
 nokhwa = { version = "0.10", default-features = false, features = ["input-native"] }

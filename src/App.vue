@@ -12,6 +12,7 @@ import { initShortcutsFromSettings } from '@/composables/useKeyboardShortcuts'
 import { initOmniRecentsFromSettings } from '@/composables/useOmniSearch'
 import { initSentinelFlagsFromSettings } from '@/composables/useSentinel'
 import SentinelDebugPip from '@/components/integrity/SentinelDebugPip.vue'
+import { useDeepLinks } from '@/deeplink/useDeepLinks'
 
 const isDev = import.meta.env.DEV
 import { clearSettingsCache, useSettings } from '@/composables/useSettings'
@@ -122,6 +123,11 @@ onMounted(async () => {
   }
 
   ready.value = true
+
+  // Start deep-link handling after the boot route is resolved: a cold-start
+  // URL dispatches now (navigating if a profile is already unlocked, else
+  // queuing until one unlocks). Warm opens are handled for the app's lifetime.
+  void useDeepLinks().init()
 
   // Show the window now that the frontend is rendered and themed
   getCurrentWebviewWindow().show()

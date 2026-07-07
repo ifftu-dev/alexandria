@@ -10,6 +10,7 @@
     "core:window:allow-show",
     "core:window:allow-start-dragging",
     "biometry:default",
-    "updater:default"
+    "updater:default",
+    "deep-link:default"
   ]
 }

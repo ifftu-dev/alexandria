@@ -499,6 +499,17 @@ pub fn run() {
     // keeps a valid builder type.
     #[cfg(desktop)]
     let builder = builder
+        // Single-instance MUST be the first plugin registered. With the
+        // `deep-link` feature it re-emits an OnOpenUrl when a second launch
+        // carries an `alexandria://` URL (how Windows/Linux deliver deep
+        // links); here we just surface the already-running window.
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            use tauri::Manager;
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.unminimize();
+                let _ = w.set_focus();
+            }
+        }))
         .menu(|handle| {
             // Standard macOS menus. In dev builds only, append a Develop
             // submenu with "Reload Webviews" (reload all webviews without
@@ -546,6 +557,19 @@ pub fn run() {
                     .level(log::LevelFilter::Info)
                     .build(),
             )?;
+
+            // Deep links (`alexandria://…` + https app-links) are consumed on
+            // the frontend via the plugin's JS `onOpenUrl`/`getCurrent` API,
+            // which parses + routes them and queues until a profile unlocks
+            // (see `src/deeplink/`). In dev the app isn't installed, so the OS
+            // has no scheme association — register it at runtime so
+            // `open alexandria://…` reaches this instance. Release installs
+            // register the scheme via the app bundle.
+            #[cfg(all(desktop, debug_assertions))]
+            {
+                use tauri_plugin_deep_link::DeepLinkExt;
+                let _ = app.deep_link().register_all();
+            }
 
             // Initialize app-data dir + diagnostic logger.
             //
@@ -1034,6 +1058,7 @@ pub fn run() {
         .plugin(tauri_plugin_biometry::init())
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_deep_link::init())
         // Community plugin asset protocol — serves files out of
         // `app_data_dir/plugins/<cid>/` with a per-plugin CSP and the
         // alex bootstrap injected into HTML responses. See
