@@ -27,11 +27,19 @@ const loading = ref(true)
 const enrolling = ref(false)
 
 // Auto-earn completion claim
+interface UnmetElement {
+  element_id: string
+  title: string
+  element_type: string
+  best_score: number | null
+  required_score: number
+}
 interface CourseCompletionStatus {
   ready: boolean
   missing_elements: string[]
   required_count: number
   preview: { leaves: string[]; root: string } | null
+  unmet_elements: UnmetElement[]
 }
 const completionStatus = ref<CourseCompletionStatus | null>(null)
 const claiming = ref(false)
@@ -89,6 +97,7 @@ async function mintAndCelebrate() {
     txHash: claimTxHash.value,
     credentialIds: claimCredentialIds.value,
     isTutorial: isTutorial.value,
+    unmetElements: completionStatus.value?.unmet_elements ?? [],
   })
 }
 

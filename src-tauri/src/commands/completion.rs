@@ -89,6 +89,20 @@ pub struct CompletionWitnessResult {
 /// of assembling a course-completion witness.
 const COMPLETION_PASS_SCORE: f64 = 0.6;
 
+/// A gradeable element the learner still needs to pass, with the score
+/// context the UI shows when a credential can't yet be earned.
+#[derive(Debug, Clone, Serialize)]
+pub struct UnmetElement {
+    pub element_id: String,
+    pub title: String,
+    /// `quiz` | `assessment` | `interactive`.
+    pub element_type: String,
+    /// Best submission score so far (0..1), or `None` if never attempted.
+    pub best_score: Option<f64>,
+    /// Score needed to pass (0..1).
+    pub required_score: f64,
+}
+
 /// Readiness of a course's auto-earn completion claim.
 #[derive(Debug, Clone, Serialize)]
 pub struct CourseCompletionStatus {
@@ -101,6 +115,9 @@ pub struct CourseCompletionStatus {
     pub required_count: usize,
     /// Preview of the witness root, present only when `ready`.
     pub preview: Option<CompletionRootPreview>,
+    /// Score/title detail for each unmet element — drives the "why no
+    /// credential yet" explanation in the completion modal.
+    pub unmet_elements: Vec<UnmetElement>,
 }
 
 /// Assemble the ordered completion inputs for a course from the
@@ -226,12 +243,57 @@ pub async fn get_course_completion_status(
     } else {
         None
     };
+    let unmet_elements = build_unmet_elements(db.conn(), &course_id, &missing);
     Ok(CourseCompletionStatus {
         ready,
         missing_elements: missing,
         required_count,
         preview,
+        unmet_elements,
     })
+}
+
+/// Build the per-element score context for each unmet gradeable element:
+/// its title and the learner's best submission score (if any) vs the
+/// passing bar. Drives the completion modal's "why no credential" panel.
+fn build_unmet_elements(conn: &Connection, course_id: &str, missing: &[String]) -> Vec<UnmetElement> {
+    let enrollment_id: Option<String> = conn
+        .query_row(
+            "SELECT id FROM enrollments WHERE course_id = ?1 ORDER BY enrolled_at ASC LIMIT 1",
+            rusqlite::params![course_id],
+            |r| r.get(0),
+        )
+        .ok();
+
+    missing
+        .iter()
+        .map(|id| {
+            let (title, element_type) = conn
+                .query_row(
+                    "SELECT title, element_type FROM course_elements WHERE id = ?1",
+                    rusqlite::params![id],
+                    |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
+                )
+                .unwrap_or_else(|_| (id.clone(), "assessment".to_string()));
+            let best_score: Option<f64> = enrollment_id.as_ref().and_then(|eid| {
+                conn.query_row(
+                    "SELECT MAX(score) FROM element_submissions \
+                     WHERE enrollment_id = ?1 AND element_id = ?2",
+                    rusqlite::params![eid, id],
+                    |r| r.get(0),
+                )
+                .ok()
+                .flatten()
+            });
+            UnmetElement {
+                element_id: id.clone(),
+                title,
+                element_type,
+                best_score,
+                required_score: COMPLETION_PASS_SCORE,
+            }
+        })
+        .collect()
 }
 
 /// Auto-earn entry point: assemble the witness from the learner's
