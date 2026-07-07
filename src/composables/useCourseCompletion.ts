@@ -33,6 +33,18 @@ export interface MintItem {
   status: 'minting' | 'minted'
 }
 
+/** A gradeable element the learner hasn't passed yet — shown in the modal
+ *  when a credential can't be earned. */
+export interface UnmetElement {
+  element_id: string
+  title: string
+  element_type: string
+  /** Best score so far (0..1), or null if never attempted. */
+  best_score: number | null
+  /** Passing score (0..1). */
+  required_score: number
+}
+
 interface CompletionPayload {
   courseTitle: string
   courseId: string
@@ -40,6 +52,7 @@ interface CompletionPayload {
   txHash: string | null
   credentialIds: string[]
   isTutorial?: boolean
+  unmetElements?: UnmetElement[]
 }
 
 const isOpen = ref(false)
@@ -51,6 +64,8 @@ const mintStage = ref<MintStage>('minting')
 const items = ref<MintItem[]>([])
 /** First credential id — the target of "View credential" when unambiguous. */
 const primaryCredentialId = ref<string | null>(null)
+/** Gradeable elements not yet passed — populated when no credential is earned. */
+const unmetElements = ref<UnmetElement[]>([])
 /** Live elapsed time since the mint started (ms). */
 const elapsedMs = ref(0)
 /** Estimated time remaining until the batch finishes (ms). */
@@ -217,6 +232,7 @@ export function useCourseCompletion() {
     isTutorial.value = !!p.isTutorial
     txHash.value = p.txHash
     primaryCredentialId.value = p.credentialIds[0] ?? null
+    unmetElements.value = p.unmetElements ?? []
     items.value = []
     elapsedMs.value = 0
     etaMs.value = 0
@@ -273,6 +289,7 @@ export function useCourseCompletion() {
     mintStage,
     items,
     primaryCredentialId,
+    unmetElements,
     elapsedMs,
     etaMs,
     progressPct,

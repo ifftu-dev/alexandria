@@ -13,8 +13,18 @@ import { CREDENTIAL_KINDS, type CredentialClass } from '@/components/credential/
 const router = useRouter()
 const {
   isOpen, courseTitle, isTutorial, txHash, mintStage, items, primaryCredentialId,
-  elapsedMs, etaMs, progressPct, close,
+  unmetElements, elapsedMs, etaMs, progressPct, close,
 } = useCourseCompletion()
+
+const pct = (v: number) => `${Math.round(v * 100)}%`
+
+// Gradeable elements the learner still needs to pass (shown when no
+// credential could be earned), most-relevant first: attempted-but-below the
+// bar, then never-attempted.
+const unmet = computed(() =>
+  [...unmetElements.value].sort((a, b) => (b.best_score ?? -1) - (a.best_score ?? -1)),
+)
+const anyAttempted = computed(() => unmet.value.some((u) => u.best_score !== null))
 
 function fmtSecs(ms: number): string {
   const s = ms / 1000
@@ -124,8 +134,10 @@ const mint = computed(() => {
       }
     default:
       return {
-        label: 'Credential pending',
-        note: 'This course earned no credential yet.',
+        label: 'Credential not earned yet',
+        note: unmet.value.length
+          ? `Pass ${unmet.value.length} more assessment${unmet.value.length > 1 ? 's' : ''} to earn this credential.`
+          : 'This course has no assessment to credential yet.',
       }
   }
 })
@@ -236,6 +248,37 @@ function continueToDashboard() {
                 </span>
               </li>
             </ul>
+
+            <!-- Why no credential yet: per-element score vs the passing bar -->
+            <div v-if="mintStage === 'unavailable' && unmet.length" class="unmet">
+              <ul class="unmet-list">
+                <li v-for="u in unmet" :key="u.element_id" class="unmet-item">
+                  <div class="unmet-head">
+                    <span class="unmet-title">{{ u.title }}</span>
+                    <span
+                      class="unmet-badge"
+                      :class="u.best_score === null ? 'is-none' : 'is-fail'"
+                    >{{ u.best_score === null ? 'Not attempted' : 'Below passing' }}</span>
+                  </div>
+                  <div class="unmet-scores">
+                    <span>Your score: <strong>{{ u.best_score === null ? '—' : pct(u.best_score) }}</strong></span>
+                    <span>Passing: <strong>{{ pct(u.required_score) }}</strong></span>
+                  </div>
+                  <div class="unmet-bar">
+                    <div class="unmet-need" :style="{ left: `${Math.round(u.required_score * 100)}%` }" />
+                    <div class="unmet-got" :style="{ width: `${Math.round((u.best_score ?? 0) * 100)}%` }" />
+                  </div>
+                </li>
+              </ul>
+              <p class="unmet-why-title">Why you may not have passed</p>
+              <ul class="unmet-why">
+                <li v-if="anyAttempted">Your best score was below the passing mark — retake it to improve.</li>
+                <li v-if="unmet.some((u) => u.best_score === null)">A required assessment wasn't attempted.</li>
+                <li>Wrong or missing answers on scored questions, or submitting before answering all of them.</li>
+                <li>Multi-select questions need every correct option (and no incorrect ones) for full marks.</li>
+              </ul>
+              <p class="unmet-cta">Retake the assessment and score ≥ {{ pct(unmet[0]?.required_score ?? 0.6) }} to earn this credential.</p>
+            </div>
 
             <a
               v-if="shortTx"
@@ -521,6 +564,102 @@ function continueToDashboard() {
 }
 .mint-tx:hover {
   text-decoration: underline;
+}
+
+/* "Why no credential yet" panel */
+.unmet-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.unmet-item {
+  padding: 0.55rem 0.6rem;
+  border-radius: 0.55rem;
+  background: rgba(148, 163, 184, 0.08);
+  border: 1px solid var(--app-border, rgba(148, 163, 184, 0.18));
+}
+.unmet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.unmet-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--app-foreground, #e2e8f0);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.unmet-badge {
+  flex: none;
+  font-size: 0.62rem;
+  font-weight: 700;
+  padding: 0.1rem 0.4rem;
+  border-radius: 9999px;
+}
+.unmet-badge.is-fail {
+  background: rgba(239, 68, 68, 0.16);
+  color: #f87171;
+}
+.unmet-badge.is-none {
+  background: rgba(148, 163, 184, 0.18);
+  color: var(--app-muted-foreground, #94a3b8);
+}
+.unmet-scores {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 0.3rem;
+  font-size: 0.68rem;
+  color: var(--app-muted-foreground, #94a3b8);
+  font-variant-numeric: tabular-nums;
+}
+.unmet-scores strong {
+  color: var(--app-foreground, #e2e8f0);
+}
+.unmet-bar {
+  position: relative;
+  height: 6px;
+  margin-top: 0.35rem;
+  border-radius: 9999px;
+  background: rgba(148, 163, 184, 0.18);
+  overflow: hidden;
+}
+.unmet-got {
+  height: 100%;
+  border-radius: 9999px;
+  background: linear-gradient(90deg, #fbbf24, #f87171);
+}
+.unmet-need {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 2px;
+  background: #34d399;
+  z-index: 1;
+}
+.unmet-why-title {
+  margin: 0.7rem 0 0.25rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--app-foreground, #e2e8f0);
+}
+.unmet-why {
+  margin: 0;
+  padding-left: 1rem;
+  font-size: 0.7rem;
+  line-height: 1.45;
+  color: var(--app-muted-foreground, #94a3b8);
+}
+.unmet-cta {
+  margin: 0.55rem 0 0;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #6ee7b7;
 }
 
 .actions {
