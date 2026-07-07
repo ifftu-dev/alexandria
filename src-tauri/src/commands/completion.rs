@@ -256,7 +256,11 @@ pub async fn get_course_completion_status(
 /// Build the per-element score context for each unmet gradeable element:
 /// its title and the learner's best submission score (if any) vs the
 /// passing bar. Drives the completion modal's "why no credential" panel.
-fn build_unmet_elements(conn: &Connection, course_id: &str, missing: &[String]) -> Vec<UnmetElement> {
+fn build_unmet_elements(
+    conn: &Connection,
+    course_id: &str,
+    missing: &[String],
+) -> Vec<UnmetElement> {
     let enrollment_id: Option<String> = conn
         .query_row(
             "SELECT id FROM enrollments WHERE course_id = ?1 ORDER BY enrolled_at ASC LIMIT 1",
