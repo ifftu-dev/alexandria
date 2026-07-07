@@ -1,5 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
-<dict/>
+<dict>
+	<!-- HTTPS Universal Links on alexandria.ifftu.dev. Requires
+	     /.well-known/apple-app-site-association served on the domain with
+	     appID VLMNL3V44U.org.alexandria.node (see docs/deeplink/). -->
+	<key>com.apple.developer.associated-domains</key>
+	<array>
+		<string>applinks:alexandria.ifftu.dev</string>
+	</array>
+</dict>
 </plist>

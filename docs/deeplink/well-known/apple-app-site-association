@@ -1,0 +1,16 @@
+{
+  "applinks": {
+    "apps": [],
+    "details": [
+      {
+        "appID": "VLMNL3V44U.org.alexandria.node",
+        "paths": [
+          "/guardian/*",
+          "/course/*",
+          "/classroom/*",
+          "/open*"
+        ]
+      }
+    ]
+  }
+}

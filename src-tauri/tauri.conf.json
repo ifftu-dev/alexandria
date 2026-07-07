@@ -76,6 +76,17 @@
       "endpoints": [
         "https://github.com/ifftu-dev/alexandria/releases/latest/download/latest.json"
       ]
+    },
+    "deep-link": {
+      "desktop": {
+        "schemes": ["alexandria"]
+      },
+      "mobile": [
+        {
+          "host": "alexandria.ifftu.dev",
+          "pathPrefix": ["/guardian", "/course", "/classroom", "/open"]
+        }
+      ]
     }
   }
 }
