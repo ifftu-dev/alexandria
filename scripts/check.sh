@@ -42,6 +42,7 @@ if [[ $FAST -eq 0 ]]; then
 fi
 
 cd "$ROOT"
+step "tauri command guard" node scripts/check-tauri-commands.mjs
 step "vue-tsc type-check" npx vue-tsc -b --noEmit
 step "frontend tests (vitest)" npm test
 
