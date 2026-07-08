@@ -1168,8 +1168,6 @@ pub fn run() {
             commands::instructor::instructor_inbox,
             // Course publishing (iroh)
             commands::courses::publish_course,
-            commands::courses::publish_tutorial,
-            commands::courses::fetch_course_document,
             // Opinions (Field Commentary)
             commands::opinions::publish_opinion,
             commands::opinions::list_opinions,
