@@ -373,7 +373,8 @@ jobs:
             libva-dev \
             libgbm-dev \
             libdrm-dev \
-            libvdpau-dev
+            libvdpau-dev \
+            xdg-utils
 
       - name: Checkout alexandria
         uses: actions/checkout@v5
@@ -550,7 +551,8 @@ jobs:
             libva-dev \
             libgbm-dev \
             libdrm-dev \
-            libvdpau-dev
+            libvdpau-dev \
+            xdg-utils
 
       - name: Checkout alexandria
         uses: actions/checkout@v5
