@@ -28,6 +28,41 @@ pub enum CredentialType {
     SelfAssertion,
 }
 
+/// Provenance tier of a skill claim's supporting evidence. Ordered weakest
+/// → strongest; the ordering (derived from declaration order) is used to pick
+/// the dominant tier backing a skill. Feeds the aggregation quality weight.
+///
+/// - `SelfDeclared`: a bare self-asserted claim (e.g. skills typed from a
+///   resume with no attached document).
+/// - `DocumentBacked`: self-asserted but backed by an uploaded document
+///   (resume/CV file referenced in `evidence_refs`).
+/// - `AccreditedDocument`: backed by a document from an accredited
+///   institution (a university transcript / academic credential file).
+/// - `IssuerSigned`: the claim rides in a VC signed by a *distinct* issuer
+///   DID (a real institution-issued credential). This tier is informational
+///   here — such VCs already outrank the others via issuer + type weight.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProvenanceTier {
+    SelfDeclared,
+    DocumentBacked,
+    AccreditedDocument,
+    IssuerSigned,
+}
+
+impl ProvenanceTier {
+    /// snake_case token used for the denormalized `credentials.provenance`
+    /// column (matches the serde representation).
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ProvenanceTier::SelfDeclared => "self_declared",
+            ProvenanceTier::DocumentBacked => "document_backed",
+            ProvenanceTier::AccreditedDocument => "accredited_document",
+            ProvenanceTier::IssuerSigned => "issuer_signed",
+        }
+    }
+}
+
 /// Strongly-typed view over a `credentialSubject`'s skill properties.
 /// The on-disk shape is W3C VC v2 — the subject carries these fields
 /// directly, not nested under a `claim` discriminator. Use
@@ -45,6 +80,11 @@ pub struct SkillClaim {
     pub rubric_version: Option<String>,
     #[serde(default)]
     pub assessment_method: Option<String>,
+    /// Evidence provenance tier. Absent on credentials issued before this
+    /// field existed; `None` reproduces the original aggregation behavior
+    /// (quality weight 1.0), so existing VCs deserialize + score unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<ProvenanceTier>,
 }
 
 impl SkillClaim {
@@ -443,6 +483,7 @@ mod tests {
             evidence_refs: vec![],
             rubric_version: None,
             assessment_method: None,
+            provenance: None,
         });
         let v = serde_json::to_value(&claim).unwrap();
         assert_eq!(v.get("kind").and_then(|x| x.as_str()), Some("skill"));
@@ -460,6 +501,7 @@ mod tests {
             evidence_refs: vec!["urn:uuid:e1".into()],
             rubric_version: Some("v2".into()),
             assessment_method: Some("project".into()),
+            provenance: None,
         };
         let subject = CredentialSubject {
             id: Did("did:key:zSubject".into()),
@@ -481,6 +523,7 @@ mod tests {
             evidence_refs: vec![],
             rubric_version: None,
             assessment_method: None,
+            provenance: None,
         };
         let v = serde_json::to_value(&s).unwrap();
         assert!(v.get("skillId").is_some(), "got {v}");
@@ -500,6 +543,7 @@ mod tests {
                 evidence_refs: vec![],
                 rubric_version: None,
                 assessment_method: None,
+                provenance: None,
             }
             .into_properties(),
         };

@@ -5,12 +5,17 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::domain::vc::CredentialType;
+use crate::domain::vc::{CredentialType, ProvenanceTier};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AggregationConfig {
     pub version: String,
     pub type_weights: HashMap<CredentialType, f64>,
+    /// Quality-factor triples `(rubric, proctoring, traceability)` keyed by
+    /// evidence provenance tier (§14.7 inputs). A claim with no provenance
+    /// (`None`) uses `(1.0, 1.0, 1.0)` — the original behavior — so existing
+    /// credentials score unchanged.
+    pub provenance_quality: HashMap<ProvenanceTier, (f64, f64, f64)>,
     /// Per-skill decay constant λ for freshness (§14.6).
     pub skill_decay: HashMap<String, f64>,
     pub default_decay: f64,
@@ -47,9 +52,23 @@ impl Default for AggregationConfig {
         // policy that wants to consume derived states as inputs.
         type_weights.insert(CredentialType::DerivedCredential, 0.00);
 
+        // Provenance quality triples (rubric, proctoring, traceability).
+        // Ascending strength: a bare self-declared claim carries little
+        // quality signal; an uploaded resume a bit more; an accredited
+        // institution's document markedly more; a claim inside an
+        // issuer-signed VC is full quality (its issuer/type weight already
+        // dominates). All components stay in [0, 1] so the quality weight
+        // (α_r·r + α_a·a + α_x·x, α's sum to 1) stays in [0, 1].
+        let mut provenance_quality = HashMap::new();
+        provenance_quality.insert(ProvenanceTier::SelfDeclared, (0.25, 0.25, 0.25));
+        provenance_quality.insert(ProvenanceTier::DocumentBacked, (0.55, 0.40, 0.60));
+        provenance_quality.insert(ProvenanceTier::AccreditedDocument, (0.85, 0.60, 0.90));
+        provenance_quality.insert(ProvenanceTier::IssuerSigned, (1.00, 1.00, 1.00));
+
         Self {
-            version: "1.0".into(),
+            version: "1.1".into(),
             type_weights,
+            provenance_quality,
             skill_decay: HashMap::new(),
             default_decay: 0.08,
             issuer_weights: HashMap::new(),
@@ -66,6 +85,23 @@ impl Default for AggregationConfig {
             z_max: 1.5,
             eta: 0.5,
             kappa_cluster: 3.0,
+        }
+    }
+}
+
+impl AggregationConfig {
+    /// Resolve the `(rubric, proctoring, traceability)` quality triple for a
+    /// claim's provenance tier. `None` (a pre-provenance credential) yields
+    /// `(1.0, 1.0, 1.0)` — the original behavior — so existing evidence keeps
+    /// its exact score. An unmapped tier also falls back to full quality.
+    pub fn quality_triple(&self, provenance: Option<ProvenanceTier>) -> (f64, f64, f64) {
+        match provenance {
+            None => (1.0, 1.0, 1.0),
+            Some(tier) => self
+                .provenance_quality
+                .get(&tier)
+                .copied()
+                .unwrap_or((1.0, 1.0, 1.0)),
         }
     }
 }
@@ -113,6 +149,37 @@ mod tests {
             "expected 1.x, got {}",
             cfg.version
         );
+    }
+
+    #[test]
+    fn quality_triple_none_reproduces_original_full_quality() {
+        // A pre-provenance credential (None) MUST resolve to (1,1,1) so its
+        // aggregated score is byte-identical to before provenance existed.
+        let cfg = AggregationConfig::default();
+        assert_eq!(cfg.quality_triple(None), (1.0, 1.0, 1.0));
+    }
+
+    #[test]
+    fn quality_weight_is_monotonic_in_provenance_tier() {
+        // Stronger provenance ⇒ strictly higher quality weight, so an
+        // accredited transcript outranks a bare resume for the same score.
+        let cfg = AggregationConfig::default();
+        let qw = |t: ProvenanceTier| {
+            let (r, a, x) = cfg.quality_triple(Some(t));
+            cfg.quality_rubric_alpha * r
+                + cfg.quality_proctoring_alpha * a
+                + cfg.quality_traceability_alpha * x
+        };
+        let self_declared = qw(ProvenanceTier::SelfDeclared);
+        let doc = qw(ProvenanceTier::DocumentBacked);
+        let accredited = qw(ProvenanceTier::AccreditedDocument);
+        let issuer = qw(ProvenanceTier::IssuerSigned);
+        assert!(
+            self_declared < doc && doc < accredited && accredited <= issuer,
+            "expected strictly increasing quality: {self_declared} < {doc} < {accredited} <= {issuer}"
+        );
+        // IssuerSigned = full quality (its issuer/type weight already dominates).
+        assert!((issuer - 1.0).abs() < 1e-9);
     }
 
     #[test]

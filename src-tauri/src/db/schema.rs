@@ -75,6 +75,7 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (65, "element_submission_answers", MIGRATION_065),
     (66, "account_role_birthdate_activation", MIGRATION_066),
     (67, "guardian_links", MIGRATION_067),
+    (68, "skill_provenance", MIGRATION_068),
 ];
 
 const MIGRATION_001: &str = r#"
@@ -2585,4 +2586,26 @@ CREATE TABLE IF NOT EXISTS guardian_activity_rows (
     updated_at   TEXT NOT NULL,
     PRIMARY KEY (link_id, table_name, entity_id)
 );
+"#;
+
+const MIGRATION_068: &str = r#"
+-- ============================================================
+-- Migration 068: Skill-claim provenance
+--
+-- A skill claim's evidence quality now carries a provenance tier so
+-- self-declared claims (bare resume) rank below document-backed ones,
+-- which rank below accredited-institution documents, which rank below
+-- credentials actually signed by a distinct issuer DID. The tier feeds
+-- the aggregation quality weight (rubric/proctoring/traceability), which
+-- already exists but was pinned to 1.0 for every claim.
+--
+-- `provenance` is a denormalized mirror of the authoritative value
+-- inside the signed VC (credentialSubject.provenance); aggregation reads
+-- the VC, this column is for fast filtering / UI. `dominant_provenance`
+-- on the derived cache surfaces the highest tier backing a skill so the
+-- UI can badge it.
+-- ============================================================
+
+ALTER TABLE credentials ADD COLUMN provenance TEXT;
+ALTER TABLE derived_skill_states ADD COLUMN dominant_provenance TEXT;
 "#;

@@ -33,6 +33,7 @@ fn issue_one(db: &app_lib::db::Database, skill: &str) -> (app_lib::crypto::did::
             evidence_refs: vec![],
             rubric_version: Some("v1".into()),
             assessment_method: Some("exam".into()),
+            provenance: None,
         }),
         evidence_refs: vec![],
         expiration_date: None,

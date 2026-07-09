@@ -18,7 +18,7 @@ use crate::aggregation::{
     aggregate_skill_state, AggregationConfig, AggregationInput, DerivedSkillState,
 };
 use crate::crypto::did::Did;
-use crate::domain::vc::{CredentialType, SkillClaim, VerifiableCredential};
+use crate::domain::vc::{CredentialType, ProvenanceTier, SkillClaim, VerifiableCredential};
 use crate::AppState;
 
 /// Read a cached `DerivedSkillState` for `(subject, skill)` if one
@@ -38,7 +38,7 @@ pub fn get_derived_skill_state_impl(
     }
 
     // Compute live, cache, and return.
-    let evidence = load_evidence_for(conn, subject_did, skill_id)?;
+    let evidence = load_evidence_for(conn, subject_did, skill_id, &cfg)?;
     if evidence.is_empty() {
         // No credentials at all ⇒ no state worth caching.
         return Ok(None);
@@ -96,7 +96,7 @@ pub fn recompute_all_impl(conn: &Connection, now: &str) -> Result<u32, String> {
     let mut count = 0u32;
     for (subject, skill) in pairs {
         let did = Did(subject);
-        let evidence = load_evidence_for(conn, &did, &skill)?;
+        let evidence = load_evidence_for(conn, &did, &skill, &cfg)?;
         if evidence.is_empty() {
             continue;
         }
@@ -111,13 +111,15 @@ pub fn recompute_all_impl(conn: &Connection, now: &str) -> Result<u32, String> {
 
 /// Load every accepted credential matching (subject, skill) and turn
 /// each into an `AggregationInput`. Revoked / non-skill rows are
-/// excluded by the SQL — quality factors default to 1.0 since the
-/// `credentials` table doesn't track rubric/proctor/trace metadata
-/// in v1; richer evidence quality lands when those columns do.
+/// excluded by the SQL. The quality factors (rubric / proctoring /
+/// traceability) are derived from the claim's provenance tier via
+/// `config.quality_triple`; a claim with no provenance resolves to
+/// `(1.0, 1.0, 1.0)`, reproducing the original behavior exactly.
 fn load_evidence_for(
     conn: &Connection,
     subject: &Did,
     skill_id: &str,
+    config: &AggregationConfig,
 ) -> Result<Vec<AggregationInput>, String> {
     let mut stmt = conn
         .prepare(
@@ -143,10 +145,15 @@ fn load_evidence_for(
         // Read the SkillClaim out of the subject's inline properties.
         // Non-skill credentials are filtered by the SQL `skill_id`
         // predicate; this is a defensive guard for any oddly-shaped row.
-        let raw_score = match SkillClaim::extract(&vc.credential_subject) {
-            Some(s) => s.score.clamp(0.0, 1.0),
+        let claim = match SkillClaim::extract(&vc.credential_subject) {
+            Some(s) => s,
             None => continue,
         };
+        let raw_score = claim.score.clamp(0.0, 1.0);
+        // Quality factors derive from the claim's provenance tier; a claim
+        // with no provenance resolves to (1.0, 1.0, 1.0) — identical to the
+        // pre-provenance behavior.
+        let (rubric, proctoring, traceability) = config.quality_triple(claim.provenance);
         out.push(AggregationInput {
             credential_id: id,
             issuer: vc.issuer,
@@ -154,9 +161,9 @@ fn load_evidence_for(
             raw_score,
             issuance_time: vc.valid_from,
             expiration_time: vc.valid_until,
-            rubric_completeness: 1.0,
-            proctoring_reliability: 1.0,
-            evidence_traceability: 1.0,
+            rubric_completeness: rubric,
+            proctoring_reliability: proctoring,
+            evidence_traceability: traceability,
         });
     }
     Ok(out)
@@ -201,12 +208,14 @@ fn read_cached(
 
 fn upsert_cached(conn: &Connection, state: &DerivedSkillState) -> Result<(), String> {
     let json = serde_json::to_string(state).map_err(|e| e.to_string())?;
+    let dominant_provenance =
+        dominant_provenance_for(conn, state.subject.as_str(), &state.skill_id);
     conn.execute(
         "INSERT INTO derived_skill_states \
          (subject_did, skill_id, calculation_version, raw_score, confidence, \
           trust_score, level, evidence_mass, unique_issuer_clusters, \
-          active_evidence_count, state_json, computed_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12) \
+          active_evidence_count, state_json, computed_at, dominant_provenance) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13) \
          ON CONFLICT(subject_did, skill_id, calculation_version) DO UPDATE SET \
             raw_score = excluded.raw_score, \
             confidence = excluded.confidence, \
@@ -216,7 +225,8 @@ fn upsert_cached(conn: &Connection, state: &DerivedSkillState) -> Result<(), Str
             unique_issuer_clusters = excluded.unique_issuer_clusters, \
             active_evidence_count = excluded.active_evidence_count, \
             state_json = excluded.state_json, \
-            computed_at = excluded.computed_at",
+            computed_at = excluded.computed_at, \
+            dominant_provenance = excluded.dominant_provenance",
         params![
             state.subject.as_str(),
             state.skill_id,
@@ -230,10 +240,30 @@ fn upsert_cached(conn: &Connection, state: &DerivedSkillState) -> Result<(), Str
             state.active_evidence_count,
             json,
             state.computed_at,
+            dominant_provenance,
         ],
     )
     .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+/// Highest provenance tier across a skill's non-revoked credentials, as its
+/// snake_case token (for UI badges). `None` if no row carries a provenance.
+fn dominant_provenance_for(conn: &Connection, subject_did: &str, skill_id: &str) -> Option<String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT provenance FROM credentials \
+             WHERE subject_did = ?1 AND skill_id = ?2 AND revoked = 0 \
+               AND provenance IS NOT NULL",
+        )
+        .ok()?;
+    let tiers = stmt
+        .query_map(params![subject_did, skill_id], |r| r.get::<_, String>(0))
+        .ok()?
+        .filter_map(|r| r.ok())
+        .filter_map(|s| serde_json::from_value::<ProvenanceTier>(serde_json::Value::String(s)).ok())
+        .collect::<Vec<_>>();
+    tiers.into_iter().max().map(|t| t.as_str().to_string())
 }
 
 fn now_rfc3339() -> String {
@@ -320,6 +350,7 @@ mod tests {
                 evidence_refs: vec![],
                 rubric_version: Some("v1".into()),
                 assessment_method: Some("exam".into()),
+                provenance: None,
             }),
             evidence_refs: vec![],
             expiration_date: None,
@@ -404,6 +435,7 @@ mod tests {
             evidence_refs: vec![],
             rubric_version: None,
             assessment_method: None,
+            provenance: None,
         });
         let vc = VerifiableCredential {
             context: vec![],
