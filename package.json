@@ -11,6 +11,7 @@
     "test:watch": "vitest",
     "check": "bash scripts/check.sh",
     "check:fast": "bash scripts/check.sh --fast",
+    "check:tauri-commands": "node scripts/check-tauri-commands.mjs",
     "bump": "bash scripts/bump-version.sh"
   },
   "dependencies": {

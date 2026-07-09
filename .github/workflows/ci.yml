@@ -229,6 +229,13 @@ jobs:
           CARGO_BUILD_JOBS: "2"
         run: cargo test --features tutoring-video-static
 
+      - name: Tauri command guard
+        # Cross-checks lib.rs (backend) against invoke() sites (frontend), so
+        # run whenever either surface changed. Pure Node, no npm deps needed.
+        if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.frontend == 'true'
+        working-directory: alexandria
+        run: node scripts/check-tauri-commands.mjs
+
       - name: TypeScript type-check
         if: needs.changes.outputs.frontend == 'true'
         working-directory: alexandria

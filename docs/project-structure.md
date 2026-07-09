@@ -20,7 +20,7 @@ alexandria/
 ├── patches/                # Local crate patches (if-watch iOS/Android fix)
 ├── docs/                   # Documentation
 ├── bootstrap/              # Seed data (public_courses.json)
-└── scripts/                # Build/dev scripts
+└── scripts/                # Build/dev scripts (incl. check-tauri-commands.mjs: CI guard that every registered command has a frontend caller or is allowlisted)
 ```
 
 ---
@@ -41,7 +41,7 @@ src-tauri/
 │
 └── src/
     ├── main.rs             # Thin binary entry point
-    ├── lib.rs              # Tauri setup, startup tasks, ~260 command registrations
+    ├── lib.rs              # Tauri setup, startup tasks, ~300 command registrations
     ├── diag.rs             # File-based diagnostic logger + panic hook
     │
     ├── commands/           # Domain-oriented Tauri IPC handlers
