@@ -1224,6 +1224,9 @@ pub fn run() {
             commands::goal_templates::list_goal_templates,
             commands::goal_templates::get_goal_template,
             commands::goal_templates::resolve_goal,
+            // Skill-graph bootstrap from uploaded documents
+            commands::skill_bootstrap::bootstrap_extract,
+            commands::skill_bootstrap::bootstrap_confirm,
             // Snapshots
             commands::snapshot::snapshot_reputation,
             commands::snapshot::submit_snapshot_tx,

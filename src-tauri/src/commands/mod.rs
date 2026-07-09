@@ -32,6 +32,7 @@ pub mod sentinel_holdout;
 pub mod sentinel_ml;
 pub mod sentinel_priors;
 pub mod settings;
+pub mod skill_bootstrap;
 pub mod snapshot;
 pub mod taxonomy;
 pub mod username_registry;

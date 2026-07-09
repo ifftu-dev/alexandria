@@ -198,6 +198,12 @@ const router = createRouter({
       meta: { layout: 'app' },
     },
     {
+      path: '/skills/bootstrap',
+      name: 'skills-bootstrap',
+      component: () => import('@/pages/skills/BootstrapUpload.vue'),
+      meta: { layout: 'app' },
+    },
+    {
       path: '/skills/:id',
       name: 'skill-detail',
       component: () => import('@/pages/skills/Detail.vue'),
