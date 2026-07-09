@@ -407,6 +407,7 @@ mod tests {
                 evidence_refs: vec!["urn:uuid:e1".into()],
                 rubric_version: Some("v1".into()),
                 assessment_method: Some("exam".into()),
+                provenance: None,
             }),
             evidence_refs: vec!["urn:uuid:e1".into()],
             expiration_date: None,

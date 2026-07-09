@@ -208,6 +208,12 @@ pub fn issue_credential_impl(
     }
     let claim_kind = claim.kind_str();
     let skill_id = claim.skill_id().map(str::to_string);
+    // Denormalized provenance tier for fast filtering / UI badges; the
+    // authoritative value lives inside the signed VC's SkillClaim.
+    let provenance = match &claim {
+        Claim::Skill(s) => s.provenance.map(|p| p.as_str().to_string()),
+        _ => None,
+    };
 
     // Deterministic VC id per spec §3.3 — hash of issuer/subject/claim/
     // validFrom + status-list slot. Must be derived AFTER evidence_refs
@@ -311,8 +317,8 @@ pub fn issue_credential_impl(
         "INSERT INTO credentials \
          (id, issuer_did, subject_did, credential_type, claim_kind, skill_id, \
           issuance_date, expiration_date, signed_vc_json, integrity_hash, \
-          status_list_id, status_list_index, supersedes) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+          status_list_id, status_list_index, supersedes, provenance) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
         params![
             credential_id,
             issuer_did.as_str(),
@@ -327,6 +333,7 @@ pub fn issue_credential_impl(
             list_id,
             index,
             req.supersedes,
+            provenance,
         ],
     )
     .map_err(|e| format!("insert credential: {e}"))?;
@@ -976,6 +983,7 @@ mod tests {
                 evidence_refs: vec![],
                 rubric_version: Some("v1".into()),
                 assessment_method: Some("exam".into()),
+                provenance: None,
             }),
             evidence_refs: vec!["urn:uuid:e1".into()],
             expiration_date: None,

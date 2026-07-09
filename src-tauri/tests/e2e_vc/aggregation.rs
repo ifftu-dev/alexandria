@@ -87,7 +87,11 @@ async fn worked_example_26_yields_level_5() {
         &AggregationConfig::default(),
     );
     assert_eq!(state.level, 5);
-    assert_eq!(state.calculation_version, "1.0");
+    // Config version bumped to 1.1 when provenance-weighted quality landed
+    // (a config change requires a new calculation_version). The worked
+    // example itself is unaffected — its evidence carries no provenance, so
+    // quality resolves to (1,1,1) and the derived level is unchanged.
+    assert_eq!(state.calculation_version, "1.1");
 }
 
 #[tokio::test]

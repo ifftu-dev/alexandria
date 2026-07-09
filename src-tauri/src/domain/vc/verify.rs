@@ -274,6 +274,7 @@ mod tests {
             evidence_refs: vec![],
             rubric_version: None,
             assessment_method: None,
+            provenance: None,
         });
         VerifiableCredential {
             context: vec!["https://www.w3.org/ns/credentials/v2".into()],

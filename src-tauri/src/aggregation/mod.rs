@@ -151,7 +151,7 @@ pub fn aggregate_skill_state(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::vc::CredentialType;
+    use crate::domain::vc::{CredentialType, ProvenanceTier};
 
     const TEST_NOW: &str = "2026-04-13T00:00:00Z";
 
@@ -186,6 +186,68 @@ mod tests {
         assert!((state.evidence_mass).abs() < 1e-9);
         assert!((state.confidence).abs() < 1e-9);
         assert!((state.trust_score).abs() < 1e-9);
+    }
+
+    #[test]
+    fn higher_provenance_tier_yields_higher_confidence_for_same_score() {
+        // Two skills, identical raw score + credential type, differing only
+        // in provenance quality: the accredited-document tier must produce a
+        // strictly higher trust_score than the self-declared tier. This is
+        // the "accredited transcript outranks bare resume" guarantee.
+        let cfg = AggregationConfig::default();
+        let with_triple = |q: (f64, f64, f64)| AggregationInput {
+            credential_id: "c1".into(),
+            issuer: Did("did:key:zSelf".into()),
+            credential_type: CredentialType::SelfAssertion,
+            raw_score: 0.8,
+            issuance_time: TEST_NOW.into(),
+            expiration_time: None,
+            rubric_completeness: q.0,
+            proctoring_reliability: q.1,
+            evidence_traceability: q.2,
+        };
+        let low = aggregate_skill_state(
+            &Did("did:key:zA".into()),
+            "s",
+            &[with_triple(
+                cfg.quality_triple(Some(ProvenanceTier::SelfDeclared)),
+            )],
+            TEST_NOW,
+            &cfg,
+        );
+        let high = aggregate_skill_state(
+            &Did("did:key:zA".into()),
+            "s",
+            &[with_triple(
+                cfg.quality_triple(Some(ProvenanceTier::AccreditedDocument)),
+            )],
+            TEST_NOW,
+            &cfg,
+        );
+        assert!(
+            high.trust_score > low.trust_score && high.confidence > low.confidence,
+            "accredited ({}, C={}) must outrank self-declared ({}, C={})",
+            high.trust_score,
+            high.confidence,
+            low.trust_score,
+            low.confidence
+        );
+        // A None-provenance claim reproduces full-quality (1,1,1) exactly.
+        let none = aggregate_skill_state(
+            &Did("did:key:zA".into()),
+            "s",
+            &[with_triple(cfg.quality_triple(None))],
+            TEST_NOW,
+            &cfg,
+        );
+        let full = aggregate_skill_state(
+            &Did("did:key:zA".into()),
+            "s",
+            &[with_triple((1.0, 1.0, 1.0))],
+            TEST_NOW,
+            &cfg,
+        );
+        assert!((none.trust_score - full.trust_score).abs() < 1e-12);
     }
 
     #[test]

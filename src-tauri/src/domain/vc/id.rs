@@ -72,6 +72,7 @@ mod tests {
             evidence_refs: vec![],
             rubric_version: None,
             assessment_method: None,
+            provenance: None,
         })
     }
 

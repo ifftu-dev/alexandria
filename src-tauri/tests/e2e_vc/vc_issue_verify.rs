@@ -15,6 +15,7 @@ fn sample_unsigned(subject: app_lib::crypto::did::Did) -> UnsignedCredential {
         evidence_refs: vec![],
         rubric_version: Some("v1".into()),
         assessment_method: Some("exam".into()),
+        provenance: None,
     });
     UnsignedCredential {
         credential: VerifiableCredential {
@@ -102,6 +103,7 @@ async fn revoked_credential_is_rejected() {
             evidence_refs: vec![],
             rubric_version: None,
             assessment_method: None,
+            provenance: None,
         }),
         evidence_refs: vec![],
         expiration_date: None,
