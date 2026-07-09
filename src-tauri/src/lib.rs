@@ -7,6 +7,7 @@ pub mod db;
 pub mod diag;
 pub mod domain;
 pub mod evidence;
+pub mod goals;
 pub mod ipfs;
 pub mod p2p;
 pub mod plugins;
@@ -1219,6 +1220,10 @@ pub fn run() {
             commands::graph::get_my_skill_graph,
             commands::graph::fetch_public_graph,
             commands::graph::compute_learning_path,
+            // Goal templates + goal resolution
+            commands::goal_templates::list_goal_templates,
+            commands::goal_templates::get_goal_template,
+            commands::goal_templates::resolve_goal,
             // Snapshots
             commands::snapshot::snapshot_reputation,
             commands::snapshot::submit_snapshot_tx,

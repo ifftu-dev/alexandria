@@ -76,6 +76,7 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (66, "account_role_birthdate_activation", MIGRATION_066),
     (67, "guardian_links", MIGRATION_067),
     (68, "skill_provenance", MIGRATION_068),
+    (69, "goal_templates", MIGRATION_069),
 ];
 
 const MIGRATION_001: &str = r#"
@@ -2608,4 +2609,58 @@ const MIGRATION_068: &str = r#"
 
 ALTER TABLE credentials ADD COLUMN provenance TEXT;
 ALTER TABLE derived_skill_states ADD COLUMN dominant_provenance TEXT;
+"#;
+
+const MIGRATION_069: &str = r#"
+-- ============================================================
+-- Migration 069: Goal templates (goal → ideal skill graph)
+--
+-- A learner goal (a nationalized exam, a K-12 board-grade curriculum, a
+-- job role, or a parsed job description) resolves to a set of target
+-- skill IDs — the "ideal skill graph". Exams / curricula / roles use
+-- curated, DAO-ratified template maps stored here; free-text JDs are
+-- parsed on-device against skill names + synonyms (no template needed).
+--
+-- These templates are community-contributed and ratified the same way
+-- as the taxonomy: proposed via governance, published as a signed
+-- version doc, distributed over /alexandria/goal-templates/1.0, then
+-- applied locally. `taxonomy_version` stamps which skill-graph version a
+-- template's skill_ids were authored against so stale references can be
+-- flagged on taxonomy publish.
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS goal_templates (
+    id               TEXT PRIMARY KEY,
+    kind             TEXT NOT NULL CHECK (kind IN ('exam','curriculum','job_role')),
+    key              TEXT NOT NULL,          -- stable slug, e.g. 'cbse.grade10', 'jee_main', 'engineering_manager'
+    label            TEXT NOT NULL,          -- human label, e.g. 'CBSE — Grade 10'
+    board            TEXT,                   -- curriculum only: 'CBSE' | 'ICSE' | 'IB' | ...
+    grade            TEXT,                   -- curriculum only: '10'
+    skill_ids        TEXT NOT NULL,          -- JSON array of target skill ids
+    taxonomy_version TEXT,                   -- skill-graph version these ids were authored against
+    dao_id           TEXT,                   -- ratifying DAO (NULL for genesis-seeded)
+    ratified         INTEGER NOT NULL DEFAULT 0,
+    content_cid      TEXT,                   -- published version doc CID (NULL for genesis)
+    created_at       TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at       TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_goal_templates_kind ON goal_templates(kind);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_goal_templates_key ON goal_templates(kind, key);
+
+-- Signed version chain for ratified goal-template documents (mirrors
+-- taxonomy_versions): each ratification publishes a new version.
+CREATE TABLE IF NOT EXISTS goal_template_versions (
+    version          INTEGER PRIMARY KEY,
+    content_cid      TEXT NOT NULL,
+    previous_cid     TEXT,
+    ratified_by      TEXT,                   -- DAO multisig / committee id
+    signature        TEXT,
+    taxonomy_version TEXT,
+    published_at     TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Synonyms/aliases for on-device JD + resume/transcript skill matching
+-- (e.g. skill_javascript → "js, ecmascript, node.js"). Comma-separated,
+-- lowercased tokens; NULL means match on name only.
+ALTER TABLE skills ADD COLUMN synonyms TEXT;
 "#;

@@ -7,6 +7,8 @@ import { biometricSupported, storeVaultPasswordForBiometric } from '@/composable
 import { listen } from '@tauri-apps/api/event'
 import type { UnlistenFn } from '@tauri-apps/api/event'
 import Starfield from '@/components/auth/Starfield.vue'
+import GoalPicker from '@/components/goals/GoalPicker.vue'
+import { useGoals } from '@/composables/useGoals'
 import type { AccountRole } from '@/types'
 
 const router = useRouter()
@@ -60,6 +62,7 @@ type Step =
   | 'password'
   | 'generating'
   | 'backup'
+  | 'goals'
   | 'link-child'
   | 'done'
 type Mode = 'create' | 'import'
@@ -182,10 +185,16 @@ const wizardSteps = computed<{ id: Step; label: string }[]>(() => {
   } else {
     steps.push({ id: 'generating', label: 'Restore Keys' })
   }
+  // Learners set goals right after the wallet exists (goals persist to the
+  // vault-scoped `learner.targets` synced setting).
+  if (selectedRole.value === 'learner') steps.push({ id: 'goals', label: 'Your Goals' })
   if (selectedRole.value === 'parent') steps.push({ id: 'link-child', label: 'Link Your Child' })
   steps.push({ id: 'done', label: 'Complete' })
   return steps
 })
+
+// ── Learner: goals step ─────────────────────────────────────────
+const { goals: learnerGoals } = useGoals()
 
 // ── Parent: link-child step ─────────────────────────────────────
 const childInviteCode = ref('')
@@ -388,11 +397,18 @@ async function restoreWallet() {
     } catch {
       biometricHint.value = 'Biometric unlock setup skipped. You can still unlock with password.'
     }
-    step.value = selectedRole.value === 'parent' ? 'link-child' : 'done'
+    step.value = nextAfterWallet()
   } catch (e) {
     error.value = formatOnboardingError(e, 'restore')
     step.value = 'password'
   }
+}
+
+/** After the wallet exists: learners set goals, parents link a child. */
+function nextAfterWallet(): Step {
+  if (selectedRole.value === 'learner') return 'goals'
+  if (selectedRole.value === 'parent') return 'link-child'
+  return 'done'
 }
 
 async function copyMnemonic() {
@@ -402,7 +418,7 @@ async function copyMnemonic() {
 }
 
 function confirmBackup() {
-  step.value = selectedRole.value === 'parent' ? 'link-child' : 'done'
+  step.value = nextAfterWallet()
 }
 
 function enterApp() {
@@ -924,6 +940,34 @@ function enterApp() {
         >
           I've Written It Down
         </button>
+      </div>
+
+      <!-- ============================================ -->
+      <!-- GOALS (learners)                             -->
+      <!-- ============================================ -->
+      <div v-else-if="step === 'goals'">
+        <h1 class="text-2xl font-bold mb-2 text-center">What are you working toward?</h1>
+        <p class="text-sm text-muted-foreground mb-6 text-center">
+          Pick an exam, curriculum, or job — we'll map it to a skill graph and
+          chart your path. You can change or add goals any time.
+        </p>
+
+        <GoalPicker @added="() => {}" />
+
+        <div class="mt-6 flex items-center justify-between gap-3">
+          <button
+            class="text-sm text-muted-foreground hover:text-foreground transition-colors"
+            @click="step = 'done'"
+          >
+            Skip for now
+          </button>
+          <button
+            class="py-2.5 px-5 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary-hover transition-colors disabled:opacity-50"
+            @click="step = 'done'"
+          >
+            {{ learnerGoals.length ? `Continue with ${learnerGoals.length} goal${learnerGoals.length === 1 ? '' : 's'}` : 'Continue' }}
+          </button>
+        </div>
       </div>
 
       <!-- ============================================ -->

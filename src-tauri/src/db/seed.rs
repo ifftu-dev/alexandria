@@ -23,6 +23,8 @@ pub fn seed_if_empty(conn: &Connection) -> Result<bool, rusqlite::Error> {
         // id). Cheap, and it backfills content added to SEED_CONTENT after the
         // user first seeded — e.g. gradeable elements that shipped empty.
         seed_inline_content(conn)?;
+        // Genesis goal templates + synonyms (idempotent) for existing DBs.
+        seed_goal_templates(conn)?;
         return Ok(false);
     }
 
@@ -41,6 +43,9 @@ pub fn seed_if_empty(conn: &Connection) -> Result<bool, rusqlite::Error> {
 
     log::info!("Seed data inserted successfully");
 
+    // Genesis goal templates + skill synonyms (idempotent).
+    seed_goal_templates(conn)?;
+
     // If the wallet is already populated (rare on a fresh seed, but
     // possible in tests and in the backfill-after-seed flow), try to
     // rebind the demo learner to the real wallet right away.
@@ -48,6 +53,46 @@ pub fn seed_if_empty(conn: &Connection) -> Result<bool, rusqlite::Error> {
 
     Ok(true)
 }
+
+/// Genesis (DAO-ratified-by-default) goal templates and skill synonyms.
+/// Idempotent — `INSERT OR IGNORE` + keyed `UPDATE` — so it backfills into
+/// existing databases and is safe to run on every startup. These map onto the
+/// demo taxonomy; real curricula/exams/roles arrive via DAO ratification over
+/// `/alexandria/goal-templates/1.0`.
+pub fn seed_goal_templates(conn: &Connection) -> Result<(), rusqlite::Error> {
+    conn.execute_batch(GOAL_TEMPLATES_SQL)
+}
+
+const GOAL_TEMPLATES_SQL: &str = r#"
+-- Synonyms/aliases for on-device JD + document skill matching.
+UPDATE skills SET synonyms = 'js,ecmascript,node.js,node' WHERE id = 'skill_javascript';
+UPDATE skills SET synonyms = 'ts' WHERE id = 'skill_typescript';
+UPDATE skills SET synonyms = 'vue.js,vuejs' WHERE id = 'skill_vue';
+UPDATE skills SET synonyms = 'html,css,frontend' WHERE id = 'skill_html_css';
+UPDATE skills SET synonyms = 'rest,restful,api,http api' WHERE id = 'skill_rest_api';
+UPDATE skills SET synonyms = 'database design,data modeling,sql' WHERE id = 'skill_db_design';
+UPDATE skills SET synonyms = 'algorithms,complexity analysis,data structures' WHERE id = 'skill_big_o';
+UPDATE skills SET synonyms = 'linear regression,statistical modeling' WHERE id = 'skill_regression';
+UPDATE skills SET synonyms = 'neural networks,deep learning,dnn' WHERE id = 'skill_neural_nets';
+UPDATE skills SET synonyms = 'supervised learning' WHERE id = 'skill_supervised';
+UPDATE skills SET synonyms = 'model evaluation,machine learning' WHERE id = 'skill_ml_eval';
+UPDATE skills SET synonyms = 'authentication,oauth,authz' WHERE id = 'skill_auth';
+
+-- Genesis goal templates. taxonomy_version 'genesis'; ratified = 1.
+INSERT OR IGNORE INTO goal_templates (id, kind, key, label, board, grade, skill_ids, taxonomy_version, ratified) VALUES
+  ('gt_role_em', 'job_role', 'engineering_manager', 'Engineering Manager', NULL, NULL,
+   '["skill_big_o","skill_db_design","skill_rest_api","skill_graph_theory"]', 'genesis', 1),
+  ('gt_role_fe', 'job_role', 'frontend_engineer', 'Frontend Engineer', NULL, NULL,
+   '["skill_javascript","skill_typescript","skill_html_css","skill_vue"]', 'genesis', 1),
+  ('gt_role_mle', 'job_role', 'ml_engineer', 'Machine Learning Engineer', NULL, NULL,
+   '["skill_regression","skill_neural_nets","skill_supervised","skill_ml_eval","skill_probability"]', 'genesis', 1),
+  ('gt_exam_jee', 'exam', 'jee_main', 'JEE Main (Engineering entrance)', NULL, NULL,
+   '["skill_logic","skill_sets","skill_combinatorics","skill_probability"]', 'genesis', 1),
+  ('gt_cur_cbse10', 'curriculum', 'cbse.grade10', 'CBSE — Grade 10', 'CBSE', '10',
+   '["skill_logic","skill_sets","skill_probability"]', 'genesis', 1),
+  ('gt_cur_icse10', 'curriculum', 'icse.grade10', 'ICSE — Grade 10', 'ICSE', '10',
+   '["skill_logic","skill_sets","skill_probability"]', 'genesis', 1);
+"#;
 
 /// Rewrite any demo-learner sentinel rows to the real wallet address.
 ///
