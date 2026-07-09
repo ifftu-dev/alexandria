@@ -1,4 +1,5 @@
 pub mod aggregation;
+pub mod assessment;
 pub mod attestation;
 pub mod auto_issuance;
 pub mod catalog;

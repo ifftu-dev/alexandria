@@ -1,4 +1,5 @@
 pub mod aggregation;
+pub mod assessment;
 pub mod cardano;
 pub mod classroom;
 pub mod commands;
@@ -1227,6 +1228,9 @@ pub fn run() {
             // Skill-graph bootstrap from uploaded documents
             commands::skill_bootstrap::bootstrap_extract,
             commands::skill_bootstrap::bootstrap_confirm,
+            // Dynamic assessments
+            commands::assessment::assessment_start_attempt,
+            commands::assessment::assessment_grade,
             // Snapshots
             commands::snapshot::snapshot_reputation,
             commands::snapshot::submit_snapshot_tx,

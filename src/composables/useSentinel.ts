@@ -937,7 +937,7 @@ export function useSentinel() {
   // Public API
   // =========================================================================
 
-  const start = async (enrollmentId: string, optInCamera = false) => {
+  const start = async (enrollmentId: string | null, optInCamera = false) => {
     if (isActive.value) return
 
     cameraOptedIn.value = optInCamera

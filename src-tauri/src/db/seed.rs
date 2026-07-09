@@ -60,8 +60,49 @@ pub fn seed_if_empty(conn: &Connection) -> Result<bool, rusqlite::Error> {
 /// demo taxonomy; real curricula/exams/roles arrive via DAO ratification over
 /// `/alexandria/goal-templates/1.0`.
 pub fn seed_goal_templates(conn: &Connection) -> Result<(), rusqlite::Error> {
-    conn.execute_batch(GOAL_TEMPLATES_SQL)
+    conn.execute_batch(GOAL_TEMPLATES_SQL)?;
+    // The question_banks table only exists after migration 070; guard so this
+    // is safe on partially-migrated DBs.
+    let has_banks: bool = conn
+        .query_row(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='question_banks'",
+            [],
+            |_| Ok(true),
+        )
+        .unwrap_or(false);
+    if has_banks {
+        conn.execute_batch(QUESTION_BANKS_SQL)?;
+    }
+    Ok(())
 }
+
+/// Genesis question bank for a couple of demo skills so assessments work
+/// offline day one. Community-contributed banks arrive via DAO ratification
+/// over `/alexandria/question-banks/1.0`. `correct_indices` are original-option
+/// indices; the runtime shuffles per attempt and grades host-side.
+const QUESTION_BANKS_SQL: &str = r#"
+INSERT OR IGNORE INTO question_banks (id, skill_id, label, pass_threshold, draw_count, taxonomy_version, ratified) VALUES
+  ('qb_js', 'skill_javascript', 'JavaScript fundamentals', 0.7, 3, 'genesis', 1),
+  ('qb_bigo', 'skill_big_o', 'Big-O & complexity', 0.7, 3, 'genesis', 1);
+
+INSERT OR IGNORE INTO bank_questions (id, bank_id, prompt, options, correct_indices, difficulty, points) VALUES
+  ('bq_js1', 'qb_js', 'Which keyword declares a block-scoped variable?',
+    '["var","let","function","global"]', '[1]', 1, 1.0),
+  ('bq_js2', 'qb_js', 'What does `typeof null` return?',
+    '["\"null\"","\"object\"","\"undefined\"","throws"]', '[1]', 2, 1.0),
+  ('bq_js3', 'qb_js', 'Which are falsy in JavaScript? (select all)',
+    '["0","\"\"","[]","NaN"]', '[0,1,3]', 3, 1.0),
+  ('bq_js4', 'qb_js', 'Which method returns a new array?',
+    '["push","map","sort","splice"]', '[1]', 2, 1.0),
+  ('bq_bo1', 'qb_bigo', 'Time complexity of binary search?',
+    '["O(1)","O(log n)","O(n)","O(n log n)"]', '[1]', 1, 1.0),
+  ('bq_bo2', 'qb_bigo', 'Which is asymptotically fastest for large n?',
+    '["O(n^2)","O(n log n)","O(n)","O(2^n)"]', '[2]', 2, 1.0),
+  ('bq_bo3', 'qb_bigo', 'Average-case lookup in a hash table?',
+    '["O(1)","O(log n)","O(n)","O(n log n)"]', '[0]', 2, 1.0),
+  ('bq_bo4', 'qb_bigo', 'Which sorts are O(n log n) worst-case? (select all)',
+    '["quicksort","mergesort","heapsort","bubblesort"]', '[1,2]', 3, 1.0);
+"#;
 
 const GOAL_TEMPLATES_SQL: &str = r#"
 -- Synonyms/aliases for on-device JD + document skill matching.

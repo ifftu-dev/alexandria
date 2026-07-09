@@ -204,6 +204,12 @@ const router = createRouter({
       meta: { layout: 'app' },
     },
     {
+      path: '/assessment/:skillId',
+      name: 'assessment',
+      component: () => import('@/pages/learn/AssessmentRunner.vue'),
+      meta: { layout: 'app' },
+    },
+    {
       path: '/skills/:id',
       name: 'skill-detail',
       component: () => import('@/pages/skills/Detail.vue'),

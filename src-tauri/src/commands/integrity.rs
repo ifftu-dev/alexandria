@@ -143,7 +143,10 @@ fn trust_penalty(critical_count: i64, warning_count: i64) -> f64 {
 #[tauri::command]
 pub async fn integrity_start_session(
     state: State<'_, AppState>,
-    enrollment_id: String,
+    // Optional: course players pass their enrollment id; standalone flows
+    // (e.g. a skill assessment not tied to a course) pass null and the session
+    // is recorded with a NULL enrollment (the column is nullable).
+    enrollment_id: Option<String>,
 ) -> Result<StartSessionResponse, String> {
     let db_guard = state
         .db
@@ -151,7 +154,8 @@ pub async fn integrity_start_session(
         .map_err(|_| "database lock poisoned".to_string())?;
     let db = db_guard.as_ref().ok_or("database not initialized")?;
 
-    let session_id = entity_id(&[&enrollment_id, &chrono::Utc::now().to_rfc3339()]);
+    let seed = enrollment_id.as_deref().unwrap_or("standalone");
+    let session_id = entity_id(&[seed, &chrono::Utc::now().to_rfc3339()]);
 
     db.conn()
         .execute(
