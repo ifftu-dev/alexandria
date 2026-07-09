@@ -1231,6 +1231,12 @@ pub fn run() {
             // Dynamic assessments
             commands::assessment::assessment_start_attempt,
             commands::assessment::assessment_grade,
+            // Community-content DAO ratification (propose→publish→apply)
+            commands::content_governance::propose_goal_template_change,
+            commands::content_governance::publish_goal_template_ratification,
+            commands::content_governance::propose_question_bank_change,
+            commands::content_governance::publish_question_bank_ratification,
+            commands::content_governance::apply_content_version,
             // Snapshots
             commands::snapshot::snapshot_reputation,
             commands::snapshot::submit_snapshot_tx,

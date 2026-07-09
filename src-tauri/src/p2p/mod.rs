@@ -1,4 +1,5 @@
 pub mod catalog;
+pub mod content;
 pub mod device_id;
 pub mod device_sync;
 pub mod discovery;
