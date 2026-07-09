@@ -598,8 +598,7 @@ pub async fn move_element(
     move_element_impl(db.conn(), &element_id, &target_chapter_id, position)
 }
 
-/// Replace a video element's chapter markers wholesale. Until now video
-/// chapters were only writable through `publish_tutorial`; the composer
+/// Replace a video element's chapter markers wholesale — the composer
 /// edits them standalone.
 #[tauri::command]
 pub async fn set_video_chapters(
