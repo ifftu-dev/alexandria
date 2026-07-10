@@ -94,13 +94,139 @@ jobs:
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER_ID }}
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_KEY_CONTENT: ${{ secrets.APPLE_API_KEY_P8 }}
+          APPLE_IOS_CERTIFICATE: ${{ secrets.APPLE_IOS_CERTIFICATE }}
+          APPLE_IOS_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_IOS_CERTIFICATE_PASSWORD }}
         run: |
-          for secret_name in APPLE_API_ISSUER APPLE_API_KEY APPLE_API_KEY_CONTENT; do
+          for secret_name in APPLE_API_ISSUER APPLE_API_KEY APPLE_API_KEY_CONTENT \
+                             APPLE_IOS_CERTIFICATE APPLE_IOS_CERTIFICATE_PASSWORD; do
             if [ -z "$(printenv "${secret_name}")" ]; then
               echo "${secret_name} is required for signed iOS exports." >&2
               exit 1
             fi
           done
+
+      # exportArchive reports "Cloud signing permission error" for every
+      # credential fault: a malformed key, a key whose role cannot create
+      # signing assets, or an unregistered App ID. Ask App Store Connect
+      # directly so a bad credential fails here in ~1 minute rather than
+      # ~27 minutes into the archive.
+      - name: Probe App Store Connect credentials
+        if: inputs.include_ios == true && inputs.ios_export_method != 'debugging'
+        env:
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER_ID }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_KEY_CONTENT: ${{ secrets.APPLE_API_KEY_P8 }}
+          BUNDLE_ID: org.alexandria.node
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet pyjwt cryptography
+          python3 - <<'PY'
+          import os, sys, time, json, urllib.request, urllib.error, jwt
+
+          key = os.environ["APPLE_API_KEY_CONTENT"]
+          bundle_id = os.environ["BUNDLE_ID"]
+
+          if "BEGIN PRIVATE KEY" not in key:
+              sys.exit("APPLE_API_KEY_P8 is not a PEM private key. Store the .p8 "
+                       "file's literal contents, including the BEGIN/END lines.")
+
+          token = jwt.encode(
+              {"iss": os.environ["APPLE_API_ISSUER"], "aud": "appstoreconnect-v1",
+               "exp": int(time.time()) + 600},
+              key, algorithm="ES256",
+              headers={"kid": os.environ["APPLE_API_KEY"], "typ": "JWT"},
+          )
+
+          def call(path, payload=None):
+              data = json.dumps(payload).encode() if payload is not None else None
+              req = urllib.request.Request(
+                  f"https://api.appstoreconnect.apple.com/v1/{path}", data=data,
+                  headers={"Authorization": f"Bearer {token}",
+                           "Content-Type": "application/json"})
+              try:
+                  with urllib.request.urlopen(req) as r:
+                      return r.status, json.load(r)
+              except urllib.error.HTTPError as e:
+                  return e.code, json.loads(e.read() or b"{}")
+
+          def get(path):
+              return call(path)
+
+          def can_create(kind):
+              """Probe write permission without creating anything: an
+              under-privileged key is rejected with 403 before the payload is
+              ever validated, a privileged one falls through to a 400/409
+              complaining about the empty body."""
+              status, body = call(kind, {"data": {
+                  "type": kind, "attributes": {}, "relationships": {}}})
+              codes = sorted({e.get("code") for e in body.get("errors", [])})
+              print(f"{kind}-create probe: HTTP {status} {codes}")
+              return status not in (401, 403)
+
+          status, _ = get("apps?limit=1")
+          if status in (401, 403):
+              sys.exit(f"App Store Connect rejected the API key (HTTP {status}). "
+                       "Check APPLE_API_KEY_ID / APPLE_API_ISSUER_ID / APPLE_API_KEY_P8.")
+          print(f"auth ok (HTTP {status})")
+
+          _, body = get(f"bundleIds?filter[identifier]={bundle_id}&limit=1")
+          registered = bool(body.get("data"))
+          print(f"App ID '{bundle_id}' registered: {registered}")
+
+          _, body = get("certificates?limit=200")
+          for c in body.get("data", []):
+              a = c["attributes"]
+              print(f"cert: {a.get('certificateType')} {a.get('displayName')!r} "
+                    f"expires={a.get('expirationDate')}")
+
+          status, body = get("profiles?include=bundleId&limit=200")
+          if status in (401, 403):
+              sys.exit(f"cannot read provisioning profiles (HTTP {status}); the "
+                       "key's role is likely below App Manager.")
+
+          # `included` carries the bundleId each profile is bound to.
+          ids = {i["id"]: i["attributes"]["identifier"]
+                 for i in body.get("included", []) if i["type"] == "bundleIds"}
+
+          matching = []
+          print("provisioning profiles:")
+          for p in body.get("data", []):
+              a = p["attributes"]
+              rel = p.get("relationships", {}).get("bundleId", {}).get("data") or {}
+              ident = ids.get(rel.get("id"), "?")
+              print(f"  - {a.get('name')!r} type={a.get('profileType')} "
+                    f"state={a.get('profileState')} bundle={ident}")
+              if (ident == bundle_id
+                      and a.get("profileType") == "IOS_APP_STORE"
+                      and a.get("profileState") == "ACTIVE"):
+                  matching.append(a.get("name"))
+
+          if not registered:
+              sys.exit(f"App ID '{bundle_id}' is not registered on the developer "
+                       "account. Register it, or grant the API key the App Manager "
+                       "role so Xcode can register it via -allowProvisioningUpdates.")
+
+          # With an App Manager key, -allowProvisioningUpdates creates or repairs
+          # the profile during the build, so a missing ACTIVE profile is only
+          # fatal when the key cannot write. Xcode ignores INVALID profiles,
+          # which is why a stale one still reads as "no profiles found".
+          # Xcode's cloud signing creates a *cloud-managed certificate*, which is
+          # an Admin-only operation; App Manager covers profiles only. Report both
+          # so "Cloud signing permission error" maps to a specific missing role.
+          can_certs = can_create("certificates")
+          print(f"key may create certificates (Admin): {can_certs}")
+
+          if matching:
+              print(f"usable profile(s) for {bundle_id}: {matching}")
+          elif can_create("profiles"):
+              print(f"::warning::no ACTIVE IOS_APP_STORE profile is bound to "
+                    f"{bundle_id}; cloud signing will create one during the build.")
+          else:
+              sys.exit(f"No ACTIVE IOS_APP_STORE profile is bound to '{bundle_id}' "
+                       "and the API key cannot create one (HTTP 403). Grant the key "
+                       "the App Manager role, or re-select the current distribution "
+                       "certificate on the existing profile to make it ACTIVE.")
+          PY
 
       - name: Create or reuse draft release
         if: inputs.mode == 'release'
@@ -200,6 +326,150 @@ jobs:
         if: inputs.ios_export_method != 'debugging'
         run: echo "${{ secrets.APPLE_API_KEY_P8 }}" > $RUNNER_TEMP/AuthKey.p8
 
+      # The Tauri CLI signs manually only when handed a certificate and a
+      # profile. Guarantee an ACTIVE App Store profile that is bound to the
+      # bundle id, carries the capabilities the app entitles (associated
+      # domains, for universal links), and embeds the current distribution
+      # certificate. A profile goes INVALID when its certificate is replaced or
+      # a capability changes, and xcodebuild silently ignores INVALID profiles.
+      - name: Ensure an App Store provisioning profile
+        if: inputs.ios_export_method != 'debugging'
+        env:
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER_ID }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_KEY_CONTENT: ${{ secrets.APPLE_API_KEY_P8 }}
+          BUNDLE_ID: org.alexandria.node
+          PROFILE_NAME: Alexandria iOS App Store (CI)
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet --break-system-packages pyjwt cryptography \
+            || python3 -m pip install --quiet pyjwt cryptography
+          python3 - <<'PY'
+          import base64, json, os, pathlib, sys, time, urllib.error, urllib.request, jwt
+
+          bundle_id = os.environ["BUNDLE_ID"]
+          profile_name = os.environ["PROFILE_NAME"]
+          # Mirrors src-tauri/gen/apple/alexandria-node_iOS.entitlements.
+          required_caps = {"ASSOCIATED_DOMAINS"}
+
+          token = jwt.encode(
+              {"iss": os.environ["APPLE_API_ISSUER"], "aud": "appstoreconnect-v1",
+               "exp": int(time.time()) + 600},
+              os.environ["APPLE_API_KEY_CONTENT"], algorithm="ES256",
+              headers={"kid": os.environ["APPLE_API_KEY"], "typ": "JWT"},
+          )
+
+          def call(path, payload=None, method=None):
+              req = urllib.request.Request(
+                  f"https://api.appstoreconnect.apple.com/v1/{path}",
+                  data=json.dumps(payload).encode() if payload else None,
+                  method=method,
+                  headers={"Authorization": f"Bearer {token}",
+                           "Content-Type": "application/json"})
+              try:
+                  with urllib.request.urlopen(req) as r:
+                      return r.status, json.loads(r.read() or b"{}")
+              except urllib.error.HTTPError as e:
+                  return e.code, json.loads(e.read() or b"{}")
+
+          def fail(msg, body=None):
+              for err in (body or {}).get("errors", []):
+                  print(f"  {err.get('code')}: {err.get('detail')}", file=sys.stderr)
+              sys.exit(msg)
+
+          status, body = call(f"bundleIds?filter[identifier]={bundle_id}&limit=1")
+          if not body.get("data"):
+              fail(f"App ID '{bundle_id}' is not registered.", body)
+          bundle_ref = body["data"][0]["id"]
+
+          # xcodebuild fails with "requires a provisioning profile with the
+          # <feature> feature" when the App ID lacks a capability the app
+          # entitles. Enabling one invalidates existing profiles, so any profile
+          # must be minted after this.
+          _, body = call(f"bundleIds/{bundle_ref}/bundleIdCapabilities?limit=200")
+          present = {c["attributes"]["capabilityType"] for c in body.get("data", [])}
+          added = required_caps - present
+          for cap in sorted(added):
+              status, body = call("bundleIdCapabilities", {"data": {
+                  "type": "bundleIdCapabilities",
+                  "attributes": {"capabilityType": cap},
+                  "relationships": {
+                      "bundleId": {"data": {"id": bundle_ref, "type": "bundleIds"}}}}})
+              if status not in (200, 201):
+                  fail(f"could not enable {cap} on '{bundle_id}' (HTTP {status}).", body)
+              print(f"enabled capability {cap} on {bundle_id}")
+          print(f"capabilities: {sorted(present | required_caps)}")
+
+          _, body = call("profiles?include=bundleId&limit=200")
+          ids = {i["id"]: i["attributes"]["identifier"]
+                 for i in body.get("included", []) if i["type"] == "bundleIds"}
+
+          def bound_to(p):
+              rel = p.get("relationships", {}).get("bundleId", {}).get("data") or {}
+              return ids.get(rel.get("id"))
+
+          # A profile snapshots the App ID's capabilities at creation time, so an
+          # existing one may predate a capability. Always recreate the CI-owned
+          # profile from the current App ID state; only ever touch our own name,
+          # never a hand-made profile.
+          for p in body.get("data", []):
+              if p["attributes"]["name"] == profile_name:
+                  print(f"deleting prior {profile_name!r} ({p['attributes']['profileState']})")
+                  call(f"profiles/{p['id']}", method="DELETE")
+
+          status, body = call("certificates?filter[certificateType]=DISTRIBUTION")
+          certs = body.get("data", [])
+          if not certs:
+              fail("no DISTRIBUTION certificate exists on the account.", body)
+          cert_ref = certs[0]["id"]
+          print(f"using certificate {certs[0]['attributes'].get('displayName')!r} "
+                f"(expires {certs[0]['attributes'].get('expirationDate')})")
+
+          status, body = call("profiles", {"data": {
+              "type": "profiles",
+              "attributes": {"name": profile_name, "profileType": "IOS_APP_STORE"},
+              "relationships": {
+                  "bundleId": {"data": {"id": bundle_ref, "type": "bundleIds"}},
+                  "certificates": {"data": [{"id": cert_ref, "type": "certificates"}]},
+              }}})
+          if status not in (200, 201):
+              fail(f"could not create the provisioning profile (HTTP {status}).", body)
+          profile = body["data"]
+          print(f"created profile {profile_name!r}")
+
+          attrs = profile["attributes"]
+          if attrs["profileState"] != "ACTIVE":
+              fail(f"profile is {attrs['profileState']}, not ACTIVE.")
+
+          # A profile embeds its entitlements as a cleartext plist inside the CMS
+          # blob. xcodebuild demands the associated-domains key be present, so
+          # confirm the profile actually carries it rather than trusting that
+          # enabling the capability propagated before the profile was minted.
+          import plistlib
+          raw = base64.b64decode(attrs["profileContent"])
+          pl = plistlib.loads(raw[raw.index(b"<?xml"):raw.index(b"</plist>") + 8])
+          ent = pl.get("Entitlements", {})
+          print(f"profile entitlements: {sorted(ent)}")
+          if "com.apple.developer.associated-domains" not in ent:
+              fail("the minted profile does not carry associated-domains; the "
+                   "capability likely had not propagated when it was created.")
+
+          # Install it so xcodebuild resolves it from disk rather than the cloud.
+          dest = pathlib.Path.home() / "Library/MobileDevice/Provisioning Profiles"
+          dest.mkdir(parents=True, exist_ok=True)
+          path = dest / f"{attrs['uuid']}.mobileprovision"
+          path.write_bytes(base64.b64decode(attrs["profileContent"]))
+          print(f"installed {attrs['name']!r} uuid={attrs['uuid']} -> {path}")
+
+          # Drive manual signing: the build config is patched to reference this
+          # profile by name (see "Force manual code signing"), and the Tauri CLI
+          # emits a manual-signing ExportOptions.plist when IOS_MOBILE_PROVISION
+          # and IOS_CERTIFICATE are set. profileContent is base64 and carries no
+          # private key.
+          with open(os.environ["GITHUB_ENV"], "a") as env:
+              env.write(f"IOS_MOBILE_PROVISION={attrs['profileContent']}\n")
+          PY
+
       - name: Strip alpha channel from iOS app icons
         working-directory: alexandria/src-tauri/gen/apple/Assets.xcassets/AppIcon.appiconset
         run: |
@@ -244,6 +514,36 @@ jobs:
           done
           echo "All icons verified: no alpha channel"
 
+      # The generated Xcode project defaults to automatic (Xcode-managed)
+      # signing, whose only CI path is cloud signing — which produces an
+      # "Apple Distribution: Tauri (unset)" cloud certificate and cannot use a
+      # locally installed profile. Switch the app target to manual signing bound
+      # to the profile minted above so the archive and export both use the real
+      # distribution identity. Tauri does not regenerate the pbxproj at build
+      # time, so patching the checked-out copy is stable.
+      - name: Force manual code signing
+        if: inputs.ios_export_method != 'debugging'
+        working-directory: alexandria/src-tauri/gen/apple
+        env:
+          PROFILE_NAME: Alexandria iOS App Store (CI)
+        run: |
+          python3 - <<'PY'
+          import os, pathlib
+          pbx = pathlib.Path("alexandria-node.xcodeproj/project.pbxproj")
+          text = pbx.read_text()
+          needle = 'CODE_SIGN_IDENTITY = "iPhone Developer";'
+          if needle not in text:
+              raise SystemExit("signing identity anchor not found; pbxproj layout changed")
+          replacement = (
+              'CODE_SIGN_IDENTITY = "Apple Distribution";\n'
+              '\t\t\t\tCODE_SIGN_STYLE = Manual;\n'
+              f'\t\t\t\tPROVISIONING_PROFILE_SPECIFIER = "{os.environ["PROFILE_NAME"]}";'
+          )
+          count = text.count(needle)
+          pbx.write_text(text.replace(needle, replacement))
+          print(f"patched {count} build configuration(s) to manual signing")
+          PY
+
       - name: Build iOS artifacts
         if: inputs.ios_export_method == 'debugging'
         working-directory: alexandria
@@ -252,14 +552,22 @@ jobs:
         run: |
           npx tauri ios build --config src-tauri/tauri.ios.conf.json --target aarch64-sim
 
+      # Manual signing. Given IOS_CERTIFICATE and IOS_MOBILE_PROVISION the Tauri
+      # CLI imports the certificate into a keychain and emits a manual-signing
+      # ExportOptions.plist; the pbxproj patch above makes the archive use the
+      # same profile. APPLE_API_* is deliberately absent — supplying it selects
+      # cloud signing, which cannot see the installed profile. APPLE_DEVELOPMENT_
+      # TEAM must be set or signing resolves to "Apple Distribution: (unset)".
       - name: Build signed iOS artifacts
         if: inputs.ios_export_method != 'debugging'
         working-directory: alexandria
         env:
           IOS_EXPORT_METHOD: ${{ inputs.ios_export_method }}
-          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER_ID }}
-          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY_ID }}
-          APPLE_API_KEY_PATH: ${{ runner.temp }}/AuthKey.p8
+          APPLE_DEVELOPMENT_TEAM: ${{ secrets.APPLE_TEAM_ID || 'VLMNL3V44U' }}
+          IOS_CERTIFICATE: ${{ secrets.APPLE_IOS_CERTIFICATE }}
+          IOS_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_IOS_CERTIFICATE_PASSWORD }}
+          # IOS_MOBILE_PROVISION is exported by "Ensure an App Store
+          # provisioning profile".
         run: |
           npx tauri ios build --config src-tauri/tauri.ios.conf.json --export-method "${IOS_EXPORT_METHOD}"
 
