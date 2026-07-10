@@ -107,6 +107,84 @@ jobs:
             fi
           done
 
+      # exportArchive reports "Cloud signing permission error" for every
+      # credential fault: a malformed key, a key whose role cannot create
+      # signing assets, or an unregistered App ID. Ask App Store Connect
+      # directly so a bad credential fails here in ~1 minute rather than
+      # ~27 minutes into the archive.
+      - name: Probe App Store Connect credentials
+        if: inputs.include_ios == true && inputs.ios_export_method != 'debugging'
+        env:
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER_ID }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_KEY_CONTENT: ${{ secrets.APPLE_API_KEY_P8 }}
+          BUNDLE_ID: org.alexandria.node
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet pyjwt cryptography
+          python3 - <<'PY'
+          import os, sys, time, json, urllib.request, urllib.error, jwt
+
+          key = os.environ["APPLE_API_KEY_CONTENT"]
+          bundle_id = os.environ["BUNDLE_ID"]
+
+          if "BEGIN PRIVATE KEY" not in key:
+              sys.exit("APPLE_API_KEY_P8 is not a PEM private key. Store the .p8 "
+                       "file's literal contents, including the BEGIN/END lines.")
+
+          token = jwt.encode(
+              {"iss": os.environ["APPLE_API_ISSUER"], "aud": "appstoreconnect-v1",
+               "exp": int(time.time()) + 600},
+              key, algorithm="ES256",
+              headers={"kid": os.environ["APPLE_API_KEY"], "typ": "JWT"},
+          )
+
+          def get(path):
+              req = urllib.request.Request(
+                  f"https://api.appstoreconnect.apple.com/v1/{path}",
+                  headers={"Authorization": f"Bearer {token}"})
+              try:
+                  with urllib.request.urlopen(req) as r:
+                      return r.status, json.load(r)
+              except urllib.error.HTTPError as e:
+                  return e.code, json.loads(e.read() or b"{}")
+
+          status, _ = get("apps?limit=1")
+          if status in (401, 403):
+              sys.exit(f"App Store Connect rejected the API key (HTTP {status}). "
+                       "Check APPLE_API_KEY_ID / APPLE_API_ISSUER_ID / APPLE_API_KEY_P8.")
+          print(f"auth ok (HTTP {status})")
+
+          _, body = get(f"bundleIds?filter[identifier]={bundle_id}&limit=1")
+          registered = bool(body.get("data"))
+          print(f"App ID '{bundle_id}' registered: {registered}")
+
+          _, body = get("certificates?limit=200")
+          certs = [d["attributes"] for d in body.get("data", [])]
+          dist = [c for c in certs if "DISTRIBUTION" in (c.get("certificateType") or "")]
+          print(f"distribution certificates visible to this key: {len(dist)}")
+
+          status, body = get("profiles?limit=200")
+          if status in (401, 403):
+              print(f"::warning::cannot read provisioning profiles (HTTP {status}); "
+                    "the key's role is likely below App Manager")
+              profiles = []
+          else:
+              profiles = [d["attributes"].get("name") for d in body.get("data", [])]
+          print(f"provisioning profiles visible: {len(profiles)}")
+          for name in profiles[:10]:
+              print(f"  - {name}")
+
+          if not registered:
+              sys.exit(f"App ID '{bundle_id}' is not registered on the developer "
+                       "account. Register it, or grant the API key the App Manager "
+                       "role so Xcode can register it via -allowProvisioningUpdates.")
+          if not profiles:
+              sys.exit(f"No provisioning profile exists for '{bundle_id}'. Create a "
+                       "distribution profile, or grant the API key the App Manager "
+                       "role so cloud signing can create one.")
+          PY
+
       - name: Create or reuse draft release
         if: inputs.mode == 'release'
         env:
