@@ -89,7 +89,7 @@ Three keys back the skill-graph/reputation home surface (see
 | Key | Scope | Kind | Use |
 |---|---|---|---|
 | `instructor.graph_prefs` | sync | json | `{ skill_id: { public, teaching } }` — per-skill visibility + teaching highlight. Read by `p2p::graph_fetch` when serving the owner's public graph. |
-| `learner.targets` | sync | json | `Target[]` the user is working toward. |
+| `learner.targets` | sync | json | `Goal[]` the user is working toward. Each goal carries `kind`, optional `source_key` / `source_url`, `resolution_provenance`, and `taxonomy_version` — resolved from DAO-ratified `goal_templates` (exam/curriculum/job-role) or on-device job-description parsing. |
 | `identity.local_did` | device | string | Cached `did:key` of the active profile, written by `get_local_did`. Lets the swarm event loop (no keystore access) answer `graph-fetch` requests for its own owner. Internal — not user-facing. |
 
 ## Where settings used to live

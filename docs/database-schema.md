@@ -16,7 +16,7 @@
 > [`vc-migration.md`](./vc-migration.md) for the full diff.
 
 **Engine**: SQLite (rusqlite 0.38, bundled)
-**Migrations**: 56
+**Migrations**: 70
 
 ---
 
@@ -94,6 +94,18 @@
 | 53 | `plugin_enabled_and_irl_review` | Add `enabled` flag to `plugin_installed` (disabled plugins stay installed but the player refuses to mount them). New `plugin_irl_submissions` table — the local instructor-review inbox backing the `irl-review` builtin plugin. See [`plugins.md`](plugins.md). |
 | 66 | `account_role_birthdate` | Add `account_role` (`learner`/`instructor`/`parent`), `birthdate` (ISO-8601, on-device only), and `activation_state` (`active`/`pending_guardian`) to `local_identity`. Age is **recomputed** from `birthdate` each unlock — never stored — so turning 18 resolves automatically. |
 | 67 | `guardian_links` | Cross-device parental oversight: `guardian_links` (ward↔guardian pairing, vault-sealed shared key, W3C VC ids, `status`), `guardian_pending_invites` (single-use `code_hash` PK, mirrors the pairing-code pattern), `guardian_activity_rows` (sealed activity the child pushes to the guardian). See [`protocol-specification.md`](protocol-specification.md#guardian-link-protocol). **Never** added to device-sync `SYNCABLE_TABLES` or gossip. |
+| 57 | `dht_record_mirror` | `dht_records` — local mirror of signed DHT registry records |
+| 58 | `governance_vote_signatures` | Add `signature` / `public_key` to `governance_election_votes` and `governance_proposal_votes` (off-chain signed votes for the lean on-chain governance bridge) |
+| 59 | `governance_dao_onchain_links` | Add on-chain link columns to `governance_daos` (`state_token_policy`, `state_token_name`, `reputation_policy`, `membership_subjects_json`, `dao_state_utxo`) |
+| 60 | `integrity_gaze_offscreen_ratio` | Add `gaze_offscreen_ratio` to `integrity_snapshots` (Sentinel gaze / second-device signal) |
+| 61 | `integrity_attestation` | Assurance ladder: add `assurance_level` / `commitment_root` / `anchor_ref` to `integrity_sessions`, `commitment_hash` to `integrity_snapshots`, plus `integrity_attestations` (automated attestation records) |
+| 62 | `org_role_assessments` | `organizations` + `role_assessments` — enterprise sponsors and role/JD-based skill assessments |
+| 63 | `plugin_dependencies` | `plugin_dependencies` — declared inter-plugin dependencies (e.g. codejudge language plugins on a shared parent) |
+| 64 | `plugin_element_state` | `plugin_element_state` — per-element plugin state persisted across navigation and restart |
+| 65 | `element_submission_answers` | Add `answers_json` to `element_submissions` (persisted learner responses) |
+| 68 | `skill_provenance` | Add `provenance` to `credentials` (denormalized `ProvenanceTier` mirror of `credentialSubject.provenance`) and `dominant_provenance` to `derived_skill_states` (highest provenance tier backing the skill) |
+| 69 | `goal_templates` | `goal_templates` + `goal_template_versions` (DAO-ratified exam/curriculum/job-role → ideal skill graph); add `synonyms` to `skills` for on-device JD/resume matching |
+| 70 | `assessment_question_banks` | `question_banks`, `bank_questions` (answer key `correct_indices` **never** sent to the client), `question_bank_versions`, `assessment_attempts` — dynamic Sentinel-gated community assessments |
 
 ---
 
@@ -142,7 +154,9 @@ columns and indexes, use `src-tauri/src/db/schema.rs`.
 
 - **`subject_fields`** — Top-level domains, including optional `icon_emoji`.
 - **`subjects`** — Child subjects linked to a `subject_field_id`.
-- **`skills`** — Skill records tied to a subject and Bloom level.
+- **`skills`** — Skill records tied to a subject and Bloom level, plus
+  `synonyms` (comma-separated aliases for on-device JD/resume matching,
+  migration 069).
 - **`skill_prerequisites`** — Directed prerequisite edges.
 - **`skill_relations`** — Non-prerequisite skill relationships.
 - **`taxonomy_versions`** — Signed taxonomy version history with `cid`,
@@ -170,11 +184,13 @@ columns and indexes, use `src-tauri/src/db/schema.rs`.
   `grader_cid`, `content_cid`, `score`, `score_details_json`,
   `learner_did`, an optional `signed_attestation`, and the grader's
   self-declared `grader_version` (migration 051; folded into the
-  completion Merkle leaf so the on-chain witness is reproducible).
+  completion Merkle leaf so the on-chain witness is reproducible), and
+  `answers_json` (migration 065; persisted learner responses so a
+  submission resumes read-only after navigation or restart).
 - **`catalog`** — Network-discovered course metadata mirroring the
   publishable subset of `courses`.
 
-### Community Plugins (5 tables)
+### Community Plugins (7 tables)
 
 The community plugin system (see [`plugins.md`](plugins.md)). Plugins are
 content-addressed iframe bundles; built-ins ship embedded in the host
@@ -201,6 +217,11 @@ discovery (Phase 3).
   declared skills); an instructor posts back `score`, `feedback`,
   `skill_ratings_json`, and flips `status` to `reviewed`. No network —
   review stays on this node.
+- **`plugin_dependencies`** (migration 063) — Declared inter-plugin
+  dependencies (e.g. the `codejudge-multilang` umbrella depends on the
+  per-language judge plugins), so installing one auto-installs its deps.
+- **`plugin_element_state`** (migration 064) — Per-element plugin state
+  persisted across navigation and app restart.
 
 ### Reputation (2 tables)
 
@@ -219,16 +240,24 @@ discovery (Phase 3).
 - **`reputation_snapshots`** — Snapshot/anchoring records for
   reputation assertions, keyed by actor with `tx_status` and subject.
 
-### Integrity (Sentinel) (6 tables)
+### Integrity (Sentinel) (7 tables)
 
-- **`integrity_sessions`** — Sentinel sessions tied to an `enrollment_id`,
-  with `status`, `integrity_score`, `started_at`, and `ended_at`.
+- **`integrity_sessions`** — Sentinel sessions with `status`,
+  `integrity_score`, `critical_count` / `warning_count` (migration 040),
+  `started_at`, and `ended_at`. `enrollment_id` is **nullable** — standalone
+  assessment attempts run with a NULL enrollment (migration 070). The
+  assurance ladder (migration 061) adds `assurance_level` (`'local'` default
+  / `'anchored'` / `'high_assurance'`), `commitment_root`, and `anchor_ref`.
 - **`integrity_snapshots`** — Snapshot rows keyed by `session_id`, with
   per-signal scores (`typing_score`, `mouse_score`, `human_score`,
   `tab_score`, `paste_score`, `devtools_score`, `camera_score`),
-  `composite_score`, `captured_at`, and the ONNX paste/typing-bot
-  classifier output `ai_paste_anomaly` (nullable; NULL for snapshots
-  taken before the model artifact ships).
+  `composite_score`, `anomaly_flags` (migration 040), `captured_at`, the
+  ONNX paste/typing-bot classifier output `ai_paste_anomaly` (nullable),
+  `gaze_offscreen_ratio` (migration 060), and `commitment_hash` (the running
+  chained commitment, migration 061).
+- **`integrity_attestations`** (migration 061) — committee co-signatures per
+  session for the assurance ladder: `session_id`, `attestor_address`,
+  `public_key`, `signature`.
 - **`sentinel_priors`** — DAO-ratified training samples and model
   weights for the paste classifier. Weights rows carry `weights_cid`,
   `eval_cid`, `eval_tpr`, `eval_fpr`, and `version`; a client only
@@ -241,7 +270,8 @@ discovery (Phase 3).
   active-classifier selector must skip, for rolling back a faulty
   ratified model without amending governance history.
 - **`sentinel_user_models`** — Per-user keystroke autoencoder
-  (`keystroke_ae`) and mouse CNN (`mouse_cnn`) weights, keyed by
+  (`keystroke_ae`), mouse CNN (`mouse_cnn`), and gaze-calibration MLP
+  (`gaze_calib`, a per-user 5→16→2 net) weights, keyed by
   `(user_address, device_fp_prefix, model_kind)`. Moved out of browser
   localStorage into the encrypted DB.
 
@@ -344,13 +374,18 @@ These tables back the VC-first protocol described in
   supersession state. Migration 040 adds on-chain witness metadata:
   `witness_tx_hash`, `witness_validator_script_hash`,
   `witness_validator_name`, and `auto_issued` (1 when the credential was
-  auto-issued by the completion observer rather than manually).
+  auto-issued by the completion observer rather than manually). Migration
+  068 adds `provenance` — a denormalized `ProvenanceTier` mirror of
+  `credentialSubject.provenance` (`self_declared` / `document_backed` /
+  `accredited_document` / `issuer_signed`) feeding the aggregation quality
+  weight.
 - **`credential_status_lists`** — Versioned RevocationList2020-style status bitmaps.
 - **`credential_anchors`** — Per-credential integrity-anchor queue.
 - **`pinboard_observations`** — Local and remote PinBoard commitments.
 - **`presentations_seen`** — `(audience, nonce)` replay-protection log.
 - **`derived_skill_states`** — Materialized aggregation cache for
-  recruiter/consumer queries.
+  recruiter/consumer queries, plus `dominant_provenance` (the highest
+  provenance tier among the credentials backing the skill, migration 068).
 - **`credentials_pending_verification`** — Queue for VCs that arrive
   before the issuer DID document.
 - **`credential_allowlist`** — Per-credential fetch policy for
@@ -365,6 +400,39 @@ These tables back the VC-first protocol described in
 - **Migration 29 additions on `credentials`** — `suspended`,
   `suspended_at`, `suspended_until`, `suspended_reason`, plus an index
   on `supersedes`.
+
+### Goals (2 tables, migration 069)
+
+- **`goal_templates`** — DAO-ratified maps from a goal to an ideal skill
+  graph: `id`, `kind` (`CHECK(exam|curriculum|job_role)`), `key`, `label`,
+  optional `board` / `grade`, `skill_ids` (JSON), `taxonomy_version`,
+  `dao_id`, `ratified`, `content_cid`. Genesis-seeded so day-one offline
+  resolution works.
+- **`goal_template_versions`** — Signed version history mirroring
+  `taxonomy_versions` (`version`, `content_cid`, `ratified_by`,
+  `signature`, `taxonomy_version`, `published_at`).
+
+### Assessments (4 tables, migration 070)
+
+- **`question_banks`** — DAO-ratified banks: `id`, `skill_id`, `label`,
+  `difficulty_profile`, `taxonomy_version`, `dao_id`, `ratified`,
+  `content_cid`.
+- **`bank_questions`** — `id`, `bank_id`, `prompt`, `options` (JSON),
+  `correct_indices` (JSON) — the answer key, held locally and **never**
+  sent to the client or gossiped — `difficulty`, `points`, `rubric_version`.
+- **`question_bank_versions`** — Signed version history (as above).
+- **`assessment_attempts`** — Per-attempt record: `id`, `subject_did`,
+  `bank_id`, `seed`, `question_ids` (JSON), `option_orders` (JSON),
+  `integrity_session_id`, `score`, `passed`, `started_at`, `graded_at`.
+
+### Organizations and Role Assessments (2 tables, migration 062)
+
+- **`organizations`** — Enterprise sponsors: `id`, `name`, `owner_address`,
+  `did`.
+- **`role_assessments`** — Sponsor role/JD assessments: `id`, `org_id`,
+  `role_title`, `job_description`, `course_id`, `skill_ids`,
+  `issuance_policy_json`, `required_assurance_level`, `status`. See
+  [`protocol-specification.md`](protocol-specification.md) §14.9.6.
 
 ## Entity Relationship Summary
 

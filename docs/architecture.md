@@ -69,7 +69,7 @@ central API, no hosted database, and no Docker infrastructure.
 |  |                | cmds    |  +----------------+  |  |
 |  |  29 pages      |         |  |   SQLite DB    |  |  |
 |  |  34 components |         |  |   ~78 tables    |  |  |
-|  |  14 composables|         |  |   67 migrations|  |  |
+|  |  14 composables|         |  |   70 migrations|  |  |
 |  +----------------+         |  +----------------+  |  |
 |                             |                      |  |
 |                             |  +----------------+  |  |
@@ -198,7 +198,7 @@ device-sync (`SYNCABLE_TABLES`) or gossip — an invariant covered by unit tests
 
 **Engine**: SQLite (rusqlite 0.38, bundled)
 
-**Tables**: ~78 across 67 migrations
+**Tables**: ~90 across 70 migrations
 
 | Domain | Tables |
 |--------|--------|
@@ -308,13 +308,18 @@ path within the same process hangs indefinitely.
 | Plugins | `/alexandria/plugins/1.0` | Community plugin announcements |
 | Plugin Attestations | `/alexandria/plugin-attestations/1.0` | Plugin DAO grader attestations |
 | Sentinel Priors | `/alexandria/sentinel-priors/1.0` | Ratified Sentinel adversarial-prior metadata |
+| Goal Templates | `/alexandria/goal-templates/1.0` | DAO-ratified goal → skill-graph templates |
+| Question Banks | `/alexandria/question-banks/1.0` | DAO-ratified assessment question banks |
 
-Five request-response protocols (libp2p `request-response` + CBOR
+Six request-response protocols (libp2p `request-response` + CBOR
 codec) run alongside the gossip mesh and are not part of the
 gossip-topic set: `/alexandria/vc-fetch/1.0` handles
-authority-respecting credential pull, and `/alexandria/sync/1.0`
+authority-respecting credential pull, `/alexandria/sync/1.0`
 carries AES-256-GCM-sealed cross-device sync payloads between paired
-devices.
+devices, and `/alexandria/guardian/1.0`, `/alexandria/graph-fetch/1.0`,
+`/alexandria/profile-fetch/1.0`, and `/alexandria/username-reg/1.0` carry
+the guardian link, public skill-graph, public profile, and username-receipt
+exchanges.
 
 ### Message Flow
 
@@ -326,11 +331,11 @@ devices.
 ### Validation Pipeline (6 steps)
 
 1. **Signature** — Ed25519 verify (covers all envelope fields: topic, timestamp, stake_address, payload)
-2. **Identity Binding** — for privileged topics (taxonomy, governance, Sentinel priors, plugin DAO attestations) the `(stake_address, public_key)` pair MUST appear in the local `stake_pubkey_registry` within the current validity window; non-privileged topics skip this step. See [`docs/stake-pubkey-registry.md`](./stake-pubkey-registry.md).
+2. **Identity Binding** — for privileged topics (taxonomy, governance, Sentinel priors, plugin DAO attestations, goal templates, question banks) the `(stake_address, public_key)` pair MUST appear in the local `stake_pubkey_registry` within the current validity window; non-privileged topics skip this step. See [`docs/stake-pubkey-registry.md`](./stake-pubkey-registry.md).
 3. **Freshness** — within ±5 minutes
 4. **Dedup** — Blake2b-256 hash in LRU cache (100K entries, least-recently-used eviction)
 5. **Schema** — valid JSON
-6. **Authority** — taxonomy/governance/Sentinel handlers re-check committee membership via on-chain governance tables
+6. **Authority** — taxonomy/governance/Sentinel and content-governance (goal-template, question-bank) handlers re-check committee membership via on-chain governance tables
 
 Validation outcomes feed directly into gossipsub peer scoring: `Reject` on signature, envelope-parse, or identity-binding failure penalises the source through the per-topic `invalid_message_deliveries` weight (see `p2p/scoring.rs`); `Accept` rewards first-delivery scoring for valid messages.
 
@@ -340,7 +345,7 @@ Per-peer token-bucket rate limiter (20 messages per 60 seconds, 1 refill per 3 s
 
 ### Dynamic Topics
 
-In addition to the 13 global topics, classrooms use per-classroom dynamic topics:
+In addition to the 15 global topics, classrooms use per-classroom dynamic topics:
 - Message topic: `/alexandria/classroom/{id}/1.0`
 - Meta topic: `/alexandria/classroom/{id}/meta/1.0`
 
@@ -418,16 +423,19 @@ Assessment completion (plugin grader → element_submissions row:
     v
 claim_course_completion: assemble passing element submissions in
     course-template order → completion Merkle root
+    → self-issue the W3C Verifiable Credential LOCALLY at claim time
+    (content-only courses with no gradeable elements issue at a
+     baseline proficiency, no witness)
     |
     v
-Completion-witness tx (completion.ak validator) submitted to Cardano
+Best-effort Completion-witness tx (completion.ak validator) as an
+    on-chain ANCHOR — treasury-funded when ALEXANDRIA_TREASURY_* is
+    configured (learner still signs for validator identity), else
+    learner-funded; failure does not block the local credential
     |
     v
-Observer (cardano::completion::tick) ingests the on-chain witness
-    |
-    v
-auto_issuance::tick self-signs a W3C Verifiable Credential
-    (gated on completion-attestation requirements)
+Observer (cardano::completion::tick) ingests the witness as a
+    secondary confirmation (no longer the sole issuance trigger)
     |
     v
 on_credential_accepted → distribution-based reputation
@@ -465,7 +473,7 @@ modules were removed.
 
 - One DAO per subject field or subject
 - DAOs have committees (chair + members)
-- Committees gate taxonomy updates
+- Committees gate taxonomy updates and DAO-ratified content (goal templates, question banks)
 
 ### Features
 

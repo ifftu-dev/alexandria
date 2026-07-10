@@ -65,6 +65,11 @@ src-tauri/
     │   ├── challenge.rs    # Evidence challenges and voting
     │   ├── opinions.rs     # Field Commentary opinions
     │   ├── integrity.rs    # Sentinel sessions and snapshots
+    │   ├── assessment.rs   # Dynamic Sentinel-gated assessments: start attempt, host-side grade
+    │   ├── goal_templates.rs # Resolve learner goals → skill graph; list/get DAO goal templates
+    │   ├── skill_bootstrap.rs # Bootstrap skill graph from uploaded resume/transcript
+    │   ├── content_governance.rs # DAO propose/publish for goal templates + question banks
+    │   ├── role_assessment.rs # Enterprise sponsor role/JD assessments
     │   ├── content.rs      # iroh blob operations
     │   ├── pinning.rs      # PinBoard commitments
     │   ├── storage.rs      # Quota and cache management
@@ -84,8 +89,15 @@ src-tauri/
     ├── crypto/             # BIP-39 wallet, keystore, Ed25519, did:key
     ├── db/                 # SQLite, migrations, seed data
     ├── domain/             # Core types and VC domain models
-    ├── aggregation/        # Trust aggregation / anti-gaming pipeline
+    ├── aggregation/        # Trust aggregation / anti-gaming pipeline (provenance-weighted)
     ├── evidence/           # Reputation, attestation, challenge logic
+    ├── goals/              # Goal → skill-graph resolver + on-device JD/resume parser
+    │   ├── mod.rs
+    │   └── jd_parser.rs    # Pure n-gram matcher over skill names + synonyms
+    ├── assessment/         # Dynamic assessment engine (pure)
+    │   ├── mod.rs          # SplitMix64 PRNG + option shuffle
+    │   ├── randomizer.rs   # Difficulty-stratified question draw (per-attempt seed)
+    │   └── grader.rs       # Host-side grading against the withheld answer key
     ├── ipfs/               # iroh node + resolver + gateway fallback
     │
     ├── profile/            # Multi-user profile manager
@@ -209,7 +221,8 @@ src/
 │   ├── layout/             # Sidebar, top bar (avatar dropdown), bottom bar, PiP, ticker, modal shell
 │   ├── omni/               # Omni search surface
 │   ├── settings/           # Settings-page panels (AdvancedSettingsPanel, PluginsPanel)
-│   └── skills/             # Skill graph
+│   ├── goals/              # GoalPicker (exam/curriculum/job-role/JD tabs + confirm suggestions)
+│   └── skills/             # Skill graph + SkillBootstrapPanel (resume/transcript upload)
 │
 ├── layouts/
 │   ├── AppLayout.vue       # Sidebar + content area
@@ -225,7 +238,8 @@ src/
 │   │   ├── JoinRequests.vue
 │   │   └── Settings.vue
 │   ├── ProfileMe.vue        # Own profile page (/profile)
-│   ├── targets/             # Learning targets (/targets)
+│   ├── goals/               # Learning goals + path view (/goals)
+│   │   └── Index.vue
 │   ├── u/                   # Public user profiles (/u/:id)
 │   ├── courses/
 │   │   ├── Detail.vue
@@ -246,14 +260,16 @@ src/
 │   │   ├── CourseNew.vue
 │   │   └── TutorialNew.vue
 │   ├── learn/
-│   │   └── Player.vue
+│   │   ├── Player.vue
+│   │   └── AssessmentRunner.vue # Sentinel-gated dynamic assessment (/assessment/:skillId)
 │   ├── opinions/
 │   │   ├── Detail.vue
 │   │   ├── Index.vue
 │   │   └── New.vue
 │   ├── skills/
 │   │   ├── Detail.vue
-│   │   └── Index.vue
+│   │   ├── Index.vue
+│   │   └── BootstrapUpload.vue # Resume/transcript skill bootstrap (/skills/bootstrap)
 │   └── tutoring/
 │       ├── Index.vue
 │       └── Session.vue

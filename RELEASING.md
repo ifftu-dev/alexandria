@@ -5,7 +5,7 @@ This document explains how to set up the CI/CD pipeline and create releases.
 ## Prerequisites
 
 To manage releases for Alexandria, you need:
-- An Apple Developer Program membership for macOS and iOS signing.
+- An Apple Developer Program membership for macOS and iOS signing. The App Store Connect API key used for iOS must hold the **App Manager** role so CI can mint provisioning profiles.
 - A GitHub account with administrator access to the repository.
 - Rust and Cargo installed locally for generating signing keys.
 - Access to the `iroh-live-patched` private repository.
@@ -17,18 +17,23 @@ Configure these secrets in your GitHub repository settings under **Settings > Se
 | Secret Name | Description | How to Obtain |
 | :--- | :--- | :--- |
 | `CROSS_REPO_PAT` | GitHub Personal Access Token with `repo` scope. | Create in GitHub Developer Settings. Required to clone the private `iroh-live-patched` repository. |
-| `APPLE_CERTIFICATE` | macOS/iOS signing certificate (.p12 file). | Export from Keychain Access on macOS. Base64 encode the file: `base64 -i cert.p12 \| pbcopy`. |
-| `APPLE_CERTIFICATE_PASSWORD` | Password for the `.p12` certificate file. | Set this when exporting the certificate from Keychain Access. |
-| `KEYCHAIN_PASSWORD` | Temporary keychain password for CI. | Any string. The CI uses this to create a temporary keychain on the runner. |
-| `APPLE_SIGNING_IDENTITY` | Certificate name string. | Find in Keychain Access (e.g., "Developer ID Application: Name (TEAMID)"). |
-| `APPLE_API_ISSUER` | App Store Connect API issuer ID. | Found in App Store Connect > Users and Access > Integrations > App Store Connect API. |
-| `APPLE_API_KEY` | App Store Connect API key ID. | Found in the same App Store Connect API section (e.g., "ABC123DEF4"). |
-| `APPLE_API_KEY_CONTENT` | Raw contents of the `.p8` API key file. | Download the `.p8` file from App Store Connect and copy its text content. |
+| `APPLE_MAC_CERTIFICATE` | macOS **Developer ID Application** signing certificate (.p12 file). | Export from Keychain Access on macOS. Base64 encode the file: `base64 -i cert.p12 \| pbcopy`. |
+| `APPLE_MAC_CERTIFICATE_PASSWORD` | Password for the macOS `.p12` certificate file. | Set this when exporting the certificate from Keychain Access. |
+| `APPLE_MAC_SIGNING_IDENTITY` | macOS certificate name string. | Find in Keychain Access (e.g., "Developer ID Application: Name (TEAMID)"). |
+| `APPLE_IOS_CERTIFICATE` | iOS **Apple Distribution** signing certificate (.p12 file). | Export from Keychain Access on macOS. Base64 encode: `base64 -i ios_cert.p12 \| pbcopy`. Required for signed iOS exports. |
+| `APPLE_IOS_CERTIFICATE_PASSWORD` | Password for the iOS `.p12` certificate file. | Set this when exporting the certificate from Keychain Access. |
+| `APPLE_KEYCHAIN_PASSWORD` | Temporary keychain password for CI. | Any string. The CI uses this to create a temporary keychain on the runner. |
+| `APPLE_TEAM_ID` | Apple Developer Team ID (e.g., "VLMNL3V44U"). | Found in the Apple Developer account Membership page. Optional — the mobile workflow falls back to a baked-in default when unset. |
+| `APPLE_API_ISSUER_ID` | App Store Connect API issuer ID. | Found in App Store Connect > Users and Access > Integrations > App Store Connect API. The API key needs the **App Manager** role to mint iOS provisioning profiles. |
+| `APPLE_API_KEY_ID` | App Store Connect API key ID. | Found in the same App Store Connect API section (e.g., "ABC123DEF4"). |
+| `APPLE_API_KEY_P8` | Raw contents of the `.p8` API key file. | Download the `.p8` file from App Store Connect and copy its text content (including the BEGIN/END lines). |
 | `TAURI_SIGNING_PRIVATE_KEY` | Tauri updater private key. | Generate using `cargo tauri signer generate`. |
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Password for the Tauri signer key. | Set this when generating the key. |
 | `ANDROID_KEYSTORE` | Android signing keystore (.jks file). | Generate using `keytool`. Base64 encode the file: `base64 -i release.jks \| pbcopy`. |
 | `ANDROID_KEYSTORE_PASSWORD` | Password for the Android keystore. | Set this when generating the keystore. |
 | `ANDROID_KEY_ALIAS` | Key alias for the Android keystore. | Set this when generating the keystore (e.g., "release-key"). |
+| `WINDOWS_CERTIFICATE` | Windows code-signing certificate (.pfx/.p12 file). | Base64 encode the certificate file. Used by the desktop workflow to sign the Windows installer. |
+| `WINDOWS_CERTIFICATE_PASSWORD` | Password for the Windows certificate. | Set this when exporting the certificate. |
 | `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` | Google Play service account JSON key (optional). | Create in Google Cloud Console > IAM > Service Accounts. Grant "Release Manager" role in Google Play Console > API access. |
 
 ## Creating a Release
@@ -64,11 +69,21 @@ Release artifacts follow the naming convention `Alexandria-<version>-<platform>.
 
 Signed artifacts also produce `.sig` files. The desktop finalize job generates `latest.json` for the auto-updater.
 
+### iOS Code Signing (manual)
+
+iOS uses **manual** code signing rather than Xcode-managed (automatic) signing, because automatic signing on CI falls back to Apple's cloud signing service, which mints a placeholder `Apple Distribution: Tauri (unset)` certificate and cannot use a locally installed profile. The `mobile-shared.yml` build performs three preparatory steps before `tauri ios build`:
+
+1. **Probe App Store Connect credentials** — queries the App Store Connect API so a bad key, an unregistered App ID, or a missing profile fails in ~1 minute rather than ~27 minutes into the archive.
+2. **Ensure an App Store provisioning profile** — enables the app's `associated-domains` capability (required by universal links) on the App ID, then mints and installs an ACTIVE distribution profile named `Alexandria iOS App Store (CI)`. It reuses an existing ACTIVE profile and only ever deletes the CI-owned name, so hand-made profiles are untouched.
+3. **Force manual code signing** — patches the generated Xcode project to `CODE_SIGN_STYLE = Manual` bound to that profile.
+
+The build step is given `APPLE_IOS_CERTIFICATE`, `APPLE_IOS_CERTIFICATE_PASSWORD`, `IOS_MOBILE_PROVISION` (the minted profile), and `APPLE_DEVELOPMENT_TEAM`. The `APPLE_API_*` secrets are deliberately withheld from the build step — supplying them would re-select cloud signing.
+
 ### Store Uploads
 
 After building, the mobile workflow automatically uploads to app stores:
 
-- **TestFlight (iOS)**: Uploads via `xcrun altool` when `ios_export_method` is `app-store-connect`. The build appears in TestFlight after Apple processing (5-15 minutes). Requires `APPLE_API_KEY`, `APPLE_API_ISSUER`, and `APPLE_API_KEY_CONTENT` secrets.
+- **TestFlight (iOS)**: Uploads via `xcrun altool` when `ios_export_method` is `app-store-connect`. The build appears in TestFlight after Apple processing (5-15 minutes). Requires `APPLE_API_KEY_ID`, `APPLE_API_ISSUER_ID`, and `APPLE_API_KEY_P8` secrets.
 - **Google Play (Android)**: Uploads the AAB to the **internal testing** track via `r0adkll/upload-google-play`. Only runs when `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` secret is configured and the Android build uses the production keystore (`secret` signing mode). To promote to other tracks, use the Google Play Console.
 
 ## Auto-Updater Setup

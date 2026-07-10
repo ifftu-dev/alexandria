@@ -25,11 +25,13 @@
 
 ## What Alexandria Does
 
-- **Courses & Assessments** — Rich HTML, video, and interactive quiz content with per-element progress tracking, notes, and skill tagging.
+- **Courses & Assessments** — Rich HTML, video, and interactive quiz content with per-element progress tracking, notes, and skill tagging. Separately, **dynamic assessments** verify claimed skills through community-contributed, DAO-ratified question banks: each attempt draws a randomized, difficulty-stratified subset, is graded host-side (the answer key never reaches the client), and auto-activates Sentinel — a pass issues an `AssessmentCredential`.
+- **Goals & Learning Paths** — learners set a goal (a nationalized exam, a K-12 board-grade curriculum, a job role, or a pasted/linked job description); it resolves to an ideal skill graph via DAO-ratified goal templates or on-device job-description parsing, and computed prerequisite paths chart the route.
+- **Skill-Graph Bootstrap** — a new learner uploads a resume, transcript, or credential; on-device parsing suggests skills to confirm, each becoming a self-asserted credential whose **provenance tier** (self-declared → document-backed → accredited-document → issuer-signed) weights how much aggregation confidence it carries.
 - **Public Content Availability** — Published course media can resolve from public URLs (with local BLAKE3 caching), and fresh installs bootstrap a bundled public catalog before network discovery catches up.
-- **Verifiable Credentials** — Learners earn W3C Verifiable Credentials scoped to individual skills at Bloom's taxonomy levels (remember through create). Credentials are auto-earned: a Cardano completion validator witnesses the learner's element-completion tx, and a local observer auto-issues a self-signed VC referencing that on-chain witness. See [`docs/vc-migration.md`](docs/vc-migration.md) for the current architectural state.
+- **Verifiable Credentials** — Learners earn W3C Verifiable Credentials scoped to individual skills at Bloom's taxonomy levels (remember through create). Completion credentials are **self-issued locally at claim time** — a Cardano completion validator witnesses the element-completion tx as an optional on-chain anchor (treasury-funded when configured), not a hard requirement. Courses with no gradeable elements issue a content-only credential at a baseline proficiency. See [`docs/vc-migration.md`](docs/vc-migration.md) for the current architectural state.
 - **Reputation** — Instructor impact derived from learner outcomes, scoped to `(subject, role, skill, proficiency_level)`. Distribution-based with confidence bounds — no global scores.
-- **Usernames & Public Profiles** — decentralized @handles backed by a DHT registry (relay-receipted, optionally Cardano-anchored under metadata label 1698), public/private profiles and skill graphs fetched over P2P, and learning targets with computed paths. See [docs/username-registry.md](docs/username-registry.md).
+- **Usernames & Public Profiles** — decentralized @handles backed by a DHT registry (relay-receipted, optionally Cardano-anchored under metadata label 1698), public/private profiles and skill graphs fetched over P2P, and learner goals with computed paths. See [docs/username-registry.md](docs/username-registry.md).
 - **Cardano's role** — (1) VC integrity anchoring (BLAKE3-of-VC metadata txs), (2) DAO governance (elections, proposals, reputation snapshots, CIP-68 soulbound reputation tokens), (3) the `completion.ak` validator that witnesses learner completion events to authorize VC issuance, and (4) the `challenge_escrow.ak` validator that holds a challenger's stake pending the DAO's revoke/refund decision. All validators are deployed as reference scripts on **preprod testnet** (block 4736927). Legacy skill-proof / course-registration NFT minting has been retired.
 - **Governance** — DAOs mirror the knowledge taxonomy. Elections, proposals, committee-gated taxonomy updates, and P2P propagation are implemented locally. The Aiken/Plutus governance validators are deployed as reference scripts on **preprod testnet** (block 4736927); the on-chain enforcement flows that reference them are still maturing.
 - **Assessment Integrity** — Sentinel anti-cheat uses a keystroke autoencoder, mouse trajectory CNN, and face embedder. All processing stays client-side; snapshots are stored locally and feed downstream trust decisions without exposing raw biometrics.
@@ -103,9 +105,9 @@ alexandria/
 │       ├── aggregation/ # Deterministic aggregation engine with anti-gaming penalties, weights, independence
 │       ├── cardano/  # Blockfrost client, Conway tx building, NFT policies, metadata anchoring
 │       ├── classroom/ # Encrypted group messaging, membership, gossip
-│       ├── commands/ # IPC command handlers across ~32 modules (frontend ↔ backend), including profile/* lifecycle
+│       ├── commands/ # IPC command handlers across ~50 modules (frontend ↔ backend), including profile/* lifecycle
 │       ├── crypto/   # BIP-39 wallet, per-profile vault (Stronghold / portable), Ed25519, did:key
-│       ├── db/       # SQLite (~78 tables, 67 migrations, seed data) — one DB per profile
+│       ├── db/       # SQLite (~90 tables, 70 migrations, seed data) — one DB per profile
 │       ├── diag.rs   # File-based diagnostic logger + panic hook
 │       ├── domain/   # Business logic (courses, tutorials, opinions, vc, evidence, governance, ...)
 │       ├── evidence/ # Proficiency taxonomy + thresholds (reputation/attestation/challenge disabled post-VC-first cutover)
@@ -430,7 +432,10 @@ alex clean all --force   # Remove everything
 6. A 24-word BIP-39 mnemonic is generated (CIP-1852 derivation); payment and
    stake addresses are derived (preprod testnet)
 7. Back up the mnemonic — it is the identity and wallet for *this profile*
-8. The P2P node starts automatically and connects to the network
+8. Learners then set a **goal** (exam, curriculum, job role, or job description) that
+   resolves to a target skill graph, and can upload a **resume/transcript** to bootstrap
+   the skills they already have
+9. The P2P node starts automatically and connects to the network
 
 **Minors:** the profile stays in a `pending_guardian` holding screen that shows a
 single-use invite code. A parent installs Alexandria on their own device, creates
