@@ -53,6 +53,10 @@ tauri-plugin-biometry = "0.2"
 tauri-plugin-os = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-deep-link = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+# On-device PDF text extraction for the resume/transcript skill bootstrap.
+pdf-extract = "0.7"
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }

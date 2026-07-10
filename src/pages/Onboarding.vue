@@ -8,6 +8,7 @@ import { listen } from '@tauri-apps/api/event'
 import type { UnlistenFn } from '@tauri-apps/api/event'
 import Starfield from '@/components/auth/Starfield.vue'
 import GoalPicker from '@/components/goals/GoalPicker.vue'
+import SkillBootstrapPanel from '@/components/skills/SkillBootstrapPanel.vue'
 import { useGoals } from '@/composables/useGoals'
 import type { AccountRole } from '@/types'
 
@@ -63,6 +64,7 @@ type Step =
   | 'generating'
   | 'backup'
   | 'goals'
+  | 'bootstrap'
   | 'link-child'
   | 'done'
 type Mode = 'create' | 'import'
@@ -187,14 +189,18 @@ const wizardSteps = computed<{ id: Step; label: string }[]>(() => {
   }
   // Learners set goals right after the wallet exists (goals persist to the
   // vault-scoped `learner.targets` synced setting).
-  if (selectedRole.value === 'learner') steps.push({ id: 'goals', label: 'Your Goals' })
+  if (selectedRole.value === 'learner') {
+    steps.push({ id: 'goals', label: 'Your Goals' })
+    steps.push({ id: 'bootstrap', label: 'Your Skills' })
+  }
   if (selectedRole.value === 'parent') steps.push({ id: 'link-child', label: 'Link Your Child' })
   steps.push({ id: 'done', label: 'Complete' })
   return steps
 })
 
-// ── Learner: goals step ─────────────────────────────────────────
+// ── Learner: goals + skill-bootstrap steps ──────────────────────
 const { goals: learnerGoals } = useGoals()
+const bootstrapClaimed = ref(0)
 
 // ── Parent: link-child step ─────────────────────────────────────
 const childInviteCode = ref('')
@@ -957,15 +963,44 @@ function enterApp() {
         <div class="mt-6 flex items-center justify-between gap-3">
           <button
             class="text-sm text-muted-foreground hover:text-foreground transition-colors"
-            @click="step = 'done'"
+            @click="step = 'bootstrap'"
           >
             Skip for now
           </button>
           <button
             class="py-2.5 px-5 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary-hover transition-colors disabled:opacity-50"
-            @click="step = 'done'"
+            @click="step = 'bootstrap'"
           >
             {{ learnerGoals.length ? `Continue with ${learnerGoals.length} goal${learnerGoals.length === 1 ? '' : 's'}` : 'Continue' }}
+          </button>
+        </div>
+      </div>
+
+      <!-- ============================================ -->
+      <!-- BOOTSTRAP SKILLS (learners)                  -->
+      <!-- ============================================ -->
+      <div v-else-if="step === 'bootstrap'">
+        <h1 class="text-2xl font-bold mb-2 text-center">What do you already know?</h1>
+        <p class="text-sm text-muted-foreground mb-6 text-center">
+          Upload a resume or transcript and we'll map it to skills you can claim.
+          Credentials from accredited schools count for more than a self-made
+          resume. You can verify any skill with an assessment later.
+        </p>
+
+        <SkillBootstrapPanel @claimed="(n) => { bootstrapClaimed += n }" />
+
+        <div class="mt-6 flex items-center justify-between gap-3">
+          <button
+            class="text-sm text-muted-foreground hover:text-foreground transition-colors"
+            @click="step = 'done'"
+          >
+            Skip for now
+          </button>
+          <button
+            class="py-2.5 px-5 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary-hover transition-colors"
+            @click="step = 'done'"
+          >
+            {{ bootstrapClaimed ? `Continue with ${bootstrapClaimed} skill${bootstrapClaimed === 1 ? '' : 's'}` : 'Continue' }}
           </button>
         </div>
       </div>

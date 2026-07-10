@@ -271,11 +271,19 @@ onBeforeUnmount(() => {
 <template>
   <div>
     <!-- Header -->
-    <div class="mb-8">
-      <h1 class="text-3xl font-bold text-foreground">My Skill Graph</h1>
-      <p class="mt-2 text-muted-foreground">
-        Your personal skill progression graph derived from your proofs, unlocked skills, and prerequisite chains.
-      </p>
+    <div class="mb-8 flex items-start justify-between gap-4">
+      <div>
+        <h1 class="text-3xl font-bold text-foreground">My Skill Graph</h1>
+        <p class="mt-2 text-muted-foreground">
+          Your personal skill progression graph derived from your proofs, unlocked skills, and prerequisite chains.
+        </p>
+      </div>
+      <button
+        class="shrink-0 rounded-md border border-border px-3 py-2 text-sm font-medium text-foreground transition-colors hover:border-primary/50"
+        @click="router.push('/skills/bootstrap')"
+      >
+        + From resume
+      </button>
     </div>
 
     <!-- Skeleton -->

@@ -1061,6 +1061,8 @@ pub fn run() {
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_deep_link::init())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
         // Community plugin asset protocol — serves files out of
         // `app_data_dir/plugins/<cid>/` with a per-plugin CSP and the
         // alex bootstrap injected into HTML responses. See
@@ -1228,6 +1230,7 @@ pub fn run() {
             // Skill-graph bootstrap from uploaded documents
             commands::skill_bootstrap::bootstrap_extract,
             commands::skill_bootstrap::bootstrap_confirm,
+            commands::skill_bootstrap::bootstrap_extract_text,
             // Dynamic assessments
             commands::assessment::assessment_start_attempt,
             commands::assessment::assessment_grade,
