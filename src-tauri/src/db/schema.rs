@@ -77,6 +77,7 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (67, "guardian_links", MIGRATION_067),
     (68, "skill_provenance", MIGRATION_068),
     (69, "goal_templates", MIGRATION_069),
+    (70, "assessment_question_banks", MIGRATION_070),
 ];
 
 const MIGRATION_001: &str = r#"
@@ -2663,4 +2664,78 @@ CREATE TABLE IF NOT EXISTS goal_template_versions (
 -- (e.g. skill_javascript → "js, ecmascript, node.js"). Comma-separated,
 -- lowercased tokens; NULL means match on name only.
 ALTER TABLE skills ADD COLUMN synonyms TEXT;
+"#;
+
+const MIGRATION_070: &str = r#"
+-- ============================================================
+-- Migration 070: Dynamic assessment question banks
+--
+-- A learner verifies a claimed skill by taking an assessment. Question
+-- banks are community-contributed and DAO-ratified (like the taxonomy);
+-- each attempt draws a randomized, difficulty-stratified subset with
+-- shuffled options (anti-gaming) and is graded HOST-SIDE — the correct
+-- answers (`bank_questions.correct_indices`) are never sent to the client
+-- and never leave the node over any command or gossip payload.
+--
+-- On pass, an `AssessmentCredential` VC is issued bound to the Sentinel
+-- integrity session, which raises the skill's aggregated confidence
+-- (assessment type weight 0.90 >> self-assertion 0.25).
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS question_banks (
+    id                 TEXT PRIMARY KEY,
+    skill_id           TEXT NOT NULL,
+    label              TEXT NOT NULL,
+    pass_threshold     REAL NOT NULL DEFAULT 0.7,   -- fraction correct to pass
+    draw_count         INTEGER NOT NULL DEFAULT 5,  -- questions per attempt
+    taxonomy_version   TEXT,
+    dao_id             TEXT,
+    ratified           INTEGER NOT NULL DEFAULT 0,
+    content_cid        TEXT,
+    created_at         TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_question_banks_skill ON question_banks(skill_id);
+
+CREATE TABLE IF NOT EXISTS bank_questions (
+    id               TEXT PRIMARY KEY,
+    bank_id          TEXT NOT NULL REFERENCES question_banks(id) ON DELETE CASCADE,
+    prompt           TEXT NOT NULL,
+    options          TEXT NOT NULL,   -- JSON array of option strings
+    correct_indices  TEXT NOT NULL,   -- JSON array of correct option indices — NEVER sent to client
+    difficulty       INTEGER NOT NULL DEFAULT 2,   -- 1 (easy) .. 5 (hard)
+    points           REAL NOT NULL DEFAULT 1.0
+);
+CREATE INDEX IF NOT EXISTS idx_bank_questions_bank ON bank_questions(bank_id);
+
+-- Signed version chain for ratified question-bank documents (mirrors
+-- taxonomy_versions / goal_template_versions).
+CREATE TABLE IF NOT EXISTS question_bank_versions (
+    version          INTEGER PRIMARY KEY,
+    content_cid      TEXT NOT NULL,
+    previous_cid     TEXT,
+    ratified_by      TEXT,
+    signature        TEXT,
+    taxonomy_version TEXT,
+    published_at     TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- One attempt: the drawn question subset + seed + bound integrity session,
+-- graded host-side. `question_ids` records exactly which questions were
+-- served so grading is reproducible; the answer key is looked up server-side.
+CREATE TABLE IF NOT EXISTS assessment_attempts (
+    id                    TEXT PRIMARY KEY,
+    subject_did           TEXT NOT NULL,
+    bank_id               TEXT NOT NULL REFERENCES question_banks(id),
+    skill_id              TEXT NOT NULL,
+    seed                  INTEGER NOT NULL,
+    question_ids          TEXT NOT NULL,   -- JSON array of served question ids (in served order)
+    option_orders         TEXT NOT NULL,   -- JSON: per-question shuffled option index order
+    integrity_session_id  TEXT,
+    score                 REAL,
+    passed                INTEGER,
+    credential_id         TEXT,            -- issued AssessmentCredential, if passed
+    started_at            TEXT NOT NULL DEFAULT (datetime('now')),
+    graded_at             TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_assessment_attempts_subject ON assessment_attempts(subject_did, skill_id);
 "#;

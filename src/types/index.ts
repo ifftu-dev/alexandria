@@ -2013,6 +2013,32 @@ export interface GoalResolution {
   resolution_provenance: 'template' | 'jd_parsed'
 }
 
+/** A question as served during an assessment — options shuffled, no answer key. */
+export interface ServedQuestion {
+  id: string
+  prompt: string
+  options: string[]
+}
+
+export interface StartedAttempt {
+  attempt_id: string
+  skill_id: string
+  pass_threshold: number
+  questions: ServedQuestion[]
+}
+
+/** One submitted answer: the served option positions the learner selected. */
+export interface SubmittedAnswer {
+  question_id: string
+  selected: number[]
+}
+
+export interface GradeResult {
+  score: number
+  passed: boolean
+  credential_id: string | null
+}
+
 /** The goal the learner is setting (matches the Rust `GoalInput` enum). */
 export type GoalInput =
   | { kind: 'exam'; key: string }
