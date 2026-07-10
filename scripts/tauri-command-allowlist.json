@@ -1,6 +1,5 @@
 {
   "_comment": "Registered Tauri commands that intentionally have NO frontend invoke() caller yet. Each is forward-built backend surface (pending UI, operator/admin tooling, on-chain flow, or test-covered inner fn). check-tauri-commands.mjs fails CI if a NEWLY registered command is missing here AND has no caller, or if an entry here has since gained a caller (remove it then) or no longer exists (remove it then). Shrink this list as UI lands. Value = the gap is tracked, not silent.",
-
   "check_health": "diagnostic; documented, no UI",
   "is_biometric_available": "capability probe; pending UI",
   "resolve_profile": "inner fn unit-tested (ipfs/profile.rs)",
@@ -71,5 +70,10 @@
   "allow_credential_fetch": "credential fetch ACL; UI pending",
   "disallow_credential_fetch": "credential fetch ACL; UI pending",
   "plugin_list_dependencies": "plugin dep inspection; UI pending",
-  "plugin_ingest_attestation": "plugin attestation flow; owner kept as pending, pairs with plugin_attestation_status"
+  "plugin_ingest_attestation": "plugin attestation flow; owner kept as pending, pairs with plugin_attestation_status",
+  "propose_goal_template_change": "DAO governance; proposal UI pending",
+  "publish_goal_template_ratification": "DAO governance; ratification UI pending",
+  "propose_question_bank_change": "DAO governance; proposal UI pending",
+  "publish_question_bank_ratification": "DAO governance; ratification UI pending",
+  "apply_content_version": "gossip-inbound / import path; no direct UI caller"
 }
