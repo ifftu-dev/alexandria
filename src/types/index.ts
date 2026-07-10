@@ -1972,4 +1972,51 @@ export interface Goal {
   source_did?: string | null
   goal_skill_ids: string[]
   created_at: string
+  /** How this goal was set: an exam/curriculum/job-role template, or a parsed JD. */
+  kind?: 'exam' | 'curriculum' | 'job_role' | 'jd'
+  /** Template slug (e.g. 'cbse.grade10', 'engineering_manager') when kind is a template. */
+  source_key?: string
+  /** The JD link, when the goal came from a pasted/linked job description. */
+  source_url?: string
+  resolution_provenance?: 'template' | 'jd_parsed'
+  /** Skill-graph version the target ids were authored against. */
+  taxonomy_version?: string
 }
+
+/** A curated goal → skill map (exam / curriculum / job role). */
+export interface GoalTemplate {
+  id: string
+  kind: 'exam' | 'curriculum' | 'job_role'
+  key: string
+  label: string
+  board?: string
+  grade?: string
+  skill_ids: string[]
+  taxonomy_version?: string
+  ratified: boolean
+}
+
+/** One extracted candidate skill from a parsed job description. */
+export interface SkillSuggestion {
+  skill_id: string
+  name: string
+  score: number
+  matched: string
+}
+
+/** Result of resolving a goal input to target skills. */
+export interface GoalResolution {
+  label: string
+  goal_skill_ids: string[]
+  suggestions: SkillSuggestion[]
+  taxonomy_version?: string
+  resolution_provenance: 'template' | 'jd_parsed'
+}
+
+/** The goal the learner is setting (matches the Rust `GoalInput` enum). */
+export type GoalInput =
+  | { kind: 'exam'; key: string }
+  | { kind: 'curriculum'; board: string; grade: string }
+  | { kind: 'job_role'; key: string }
+  | { kind: 'jd_text'; text: string }
+  | { kind: 'jd_link'; url: string }

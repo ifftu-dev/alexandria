@@ -9,7 +9,7 @@ import { computed } from 'vue'
 
 import { useSetting } from './useSettings'
 import { useLocalApi } from './useLocalApi'
-import type { LearningPath, Goal } from '@/types'
+import type { LearningPath, Goal, GoalTemplate, GoalResolution, GoalInput } from '@/types'
 
 function genId(): string {
   const c = globalThis.crypto
@@ -27,6 +27,11 @@ export function useGoals() {
     label: string
     goalSkillIds: string[]
     sourceDid?: string | null
+    kind?: Goal['kind']
+    sourceKey?: string
+    sourceUrl?: string
+    resolutionProvenance?: Goal['resolution_provenance']
+    taxonomyVersion?: string
   }): Promise<Goal> {
     const goal: Goal = {
       id: genId(),
@@ -34,9 +39,24 @@ export function useGoals() {
       source_did: input.sourceDid ?? null,
       goal_skill_ids: input.goalSkillIds,
       created_at: new Date().toISOString(),
+      kind: input.kind,
+      source_key: input.sourceKey,
+      source_url: input.sourceUrl,
+      resolution_provenance: input.resolutionProvenance,
+      taxonomy_version: input.taxonomyVersion,
     }
     await setting.set([...(setting.ref.value ?? []), goal])
     return goal
+  }
+
+  /** Curated goal templates, optionally filtered by kind. */
+  function listGoalTemplates(kind?: GoalTemplate['kind']): Promise<GoalTemplate[]> {
+    return invoke<GoalTemplate[]>('list_goal_templates', { kind: kind ?? null })
+  }
+
+  /** Resolve a goal input to target skills (curated map) or suggestions (JD). */
+  function resolveGoal(input: GoalInput): Promise<GoalResolution> {
+    return invoke<GoalResolution>('resolve_goal', { input })
   }
 
   async function removeGoal(id: string): Promise<void> {
@@ -68,5 +88,7 @@ export function useGoals() {
     hasGoalForDid,
     pathFor,
     combinedPath,
+    listGoalTemplates,
+    resolveGoal,
   }
 }

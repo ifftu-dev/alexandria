@@ -11,6 +11,7 @@ pub mod credentials;
 pub mod elements;
 pub mod enrollment;
 pub mod evidence;
+pub mod goal_templates;
 pub mod governance;
 pub mod graph;
 pub mod guardian;
