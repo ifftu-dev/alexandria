@@ -154,14 +154,15 @@ jobs:
           def get(path):
               return call(path)
 
-          def can_create_profiles():
+          def can_create(kind):
               """Probe write permission without creating anything: an
               under-privileged key is rejected with 403 before the payload is
-              ever validated, a privileged one falls through to a 400/409."""
-              status, body = call("profiles", {"data": {
-                  "type": "profiles", "attributes": {}, "relationships": {}}})
-              codes = [e.get("code") for e in body.get("errors", [])]
-              print(f"profile-create probe: HTTP {status} {codes}")
+              ever validated, a privileged one falls through to a 400/409
+              complaining about the empty body."""
+              status, body = call(kind, {"data": {
+                  "type": kind, "attributes": {}, "relationships": {}}})
+              codes = sorted({e.get("code") for e in body.get("errors", [])})
+              print(f"{kind}-create probe: HTTP {status} {codes}")
               return status not in (401, 403)
 
           status, _ = get("apps?limit=1")
@@ -211,9 +212,15 @@ jobs:
           # the profile during the build, so a missing ACTIVE profile is only
           # fatal when the key cannot write. Xcode ignores INVALID profiles,
           # which is why a stale one still reads as "no profiles found".
+          # Xcode's cloud signing creates a *cloud-managed certificate*, which is
+          # an Admin-only operation; App Manager covers profiles only. Report both
+          # so "Cloud signing permission error" maps to a specific missing role.
+          can_certs = can_create("certificates")
+          print(f"key may create certificates (Admin): {can_certs}")
+
           if matching:
               print(f"usable profile(s) for {bundle_id}: {matching}")
-          elif can_create_profiles():
+          elif can_create("profiles"):
               print(f"::warning::no ACTIVE IOS_APP_STORE profile is bound to "
                     f"{bundle_id}; cloud signing will create one during the build.")
           else:
