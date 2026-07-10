@@ -61,7 +61,8 @@ All processing happens client-side. There is no server-side component — Alexan
 | `typing_consistency` | Rule | 0-1 | 0.20 | EMA-based deviation from stored typing profile |
 | `mouse_consistency` | Rule | 0-1 | 0.15 | Velocity deviation from stored mouse profile |
 | `is_human_likely` | Rule | bool | 0.15 | Velocity variance check (bots have constant speed) |
-| `tab_switches` | Rule | count | 0.15 | Tab focus changes during assessment |
+| `tab_switches` | Rule | count | 0.15 | Tab focus changes during assessment (webview) |
+| `app_switch` | Native | event | advisory | OS frontmost-app change (NSWorkspace / GetForegroundWindow / X11); emitted on `sentinel://focus` |
 | `paste_events` / `pasted_chars` | Rule | count | 0.10 | Clipboard paste activity |
 | `devtools_detected` | Rule | bool | 0.10 | DevTools heuristic |
 | `face_present` / `face_count` | Rule | bool/int | 0.15* | Face verification every 3s while camera opted in (* opt-in only; loop driven by the course player) |
@@ -78,7 +79,7 @@ All processing happens client-side. There is no server-side component — Alexan
 
 ### Client-Side (`useSentinel.ts`)
 
-- **Activation**: Starts when an enrolled learner opens the course player; the active element context is updated as they navigate
+- **Activation**: Starts when a learner opens the course player (enrolled) or begins any assessment attempt (standalone, with no enrollment); the active element context is updated as they navigate
 - **Snapshot interval**: Random 15-45 seconds
 - **Profile storage**: localStorage keyed by `sentinel_profile_{userId}_{deviceFp[0:16]}`
 - **Profile update**: Exponential Moving Average with alpha=0.2 (alpha=0.5 during training wizard)
@@ -104,6 +105,7 @@ Per-snapshot checks:
 14. Gaze off-screen ratio > 0.30 (camera opted in) → `gaze_wander` warning
 15. ≥ 3 downward off-screen glances in the window → `device_glance` critical
 16. Gaze-occluded ratio > 0.40 (eyes hidden while camera opted in) → `gaze_occluded` warning
+17. Native OS focus moved to another application → `app_switch` warning (distinct from the webview-only `tab_switching`; detected natively via NSWorkspace / GetForegroundWindow / X11, emitted on `sentinel://focus`)
 
 Flag severity is authoritative on the backend (`commands/integrity.rs::flag_severity`). Unknown flags default to info so client/server version skew never auto-suspends a session.
 
@@ -367,7 +369,7 @@ Stored in local SQLite. See [Database Schema](database-schema.md) for full DDL.
 
 | Command | Description |
 |---------|-------------|
-| `integrity_start_session` | Start integrity monitoring for an enrolled learning session |
+| `integrity_start_session` | Start integrity monitoring for a learning session; `enrollment_id` is optional (NULL for standalone assessment attempts) |
 | `integrity_get_session` | Get session with scores |
 | `integrity_end_session` | End session and compute final score |
 | `integrity_submit_snapshot` | Submit a behavioral snapshot (includes `ai_paste_anomaly`) |
@@ -418,7 +420,7 @@ Stored in local SQLite. See [Database Schema](database-schema.md) for full DDL.
 ### Learning Page Integration
 
 `useSentinel` lifecycle hooks in the course player:
-- `start()` on mount (if enrolled)
+- `start(enrollmentId)` on mount — `enrollmentId` for an enrolled course, or `null` for a standalone assessment attempt (the assessment runner always starts Sentinel)
 - `setElement()` on element navigation
 - `stop()` on unmount
 - `setCameraOptedIn(bool)` when the learner accepts/declines camera verification on an assessment element

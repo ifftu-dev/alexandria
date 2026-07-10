@@ -83,14 +83,39 @@ Course elements (`course_elements`) are tagged with skills via `element_skill_ta
 
 ## 6. Evidence Model
 
-The verifiable outcome of an assessment is now a **W3C Verifiable Credential** (see [`vc-migration.md`](./vc-migration.md) and `domain::vc`), not an `evidence_records` row. Credentials are auto-earned: `claim_course_completion` assembles completion leaves from the learner's graded `element_submissions`, verifies them against the course template (gradeable elements in order, ≥0.6 pass), computes a Merkle root, and submits the completion witness; the observer then auto-issues the VC.
+The verifiable outcome of an assessment is now a **W3C Verifiable Credential** (see [`vc-migration.md`](./vc-migration.md) and `domain::vc`), not an `evidence_records` row. There are three issuance paths:
+
+1. **Course completion** — `claim_course_completion` assembles completion leaves from the learner's graded `element_submissions`, verifies them against the course template (gradeable elements in order, ≥0.6 pass), computes a Merkle root, and **self-issues the credential locally at claim time**. A Cardano completion-witness mint is a best-effort on-chain *anchor* (treasury-funded when configured, learner still signs), not a hard requirement — the local observer path remains as a secondary confirmation. Courses with no gradeable elements issue a **content-only** credential at a baseline proficiency (`CONTENT_COMPLETION_SCORE = 0.3`) with a deterministic completion root and no on-chain witness. `get_course_completion_status` reports the still-unmet gradeable elements, driving the "why no credential yet" surface.
+2. **Document bootstrap** — skills confirmed from an uploaded resume / transcript are self-issued as `SelfAssertion` credentials carrying a provenance tier (see §6.1).
+3. **Assessment** — passing a dynamic, Sentinel-gated question-bank attempt issues an `AssessmentCredential` bound to the integrity session (see §6.2).
 
 Each credential binds:
 - subject DID, skill / proficiency scope
-- the course and the graded submissions it derives from
+- the course, submissions, or assessment attempt it derives from
 - the issuer DID and an Ed25519 detached-JWS signature
 
 There is no `/alexandria/evidence/1.0` topic (it was removed in migration 040). Credentials cross the network via the `vc-did`, `vc-status`, and `vc-fetch/1.0` protocols.
+
+### 6.1 Provenance tiers
+
+A `SkillClaim` may carry an optional `ProvenanceTier` (migration 068) that grades how the evidence was obtained, feeding the aggregation quality weight (§ below and `aggregation/config.rs`):
+
+| Tier | Meaning | Example |
+|------|---------|---------|
+| `self_declared` | Unbacked self-claim | manual skill selection |
+| `document_backed` | Backed by a self-authored document | a resume |
+| `accredited_document` | Backed by an accredited institution's document | a university transcript |
+| `issuer_signed` | Issued by a third party (issuer ≠ subject) | a formal credential |
+
+Higher tiers carry more aggregation confidence. A `None` provenance reproduces the pre-068 behavior exactly (quality triple `(1,1,1)`), so the `calculation_version` bump `1.0 → 1.1` is the only observable change for legacy claims.
+
+### 6.2 Dynamic assessments
+
+Community-contributed, DAO-ratified **question banks** (migration 070; see [`protocol-specification.md`](./protocol-specification.md) §8.4) verify claimed skills:
+
+- `assessment_start_attempt` draws a randomized, difficulty-stratified subset (per-attempt seed) and shuffles options; the answer key (`bank_questions.correct_indices`) is **never** included in the returned questions.
+- Sentinel auto-activates for every attempt (the learner is told), binding the attempt to an integrity session.
+- `assessment_grade` grades **host-side** against the locally-held key and, on pass, issues an `AssessmentCredential` bound to that integrity session, then recomputes derived skill states.
 
 ---
 
@@ -263,9 +288,19 @@ list and a **Target this graph** action.
 ### 14.3 Targets & learning paths
 
 A user may target any skill graph — an instructor's whole public graph,
-or a single skill (rooted subtree). Targets are stored in the **synced**
+or a single skill (rooted subtree). Goals are stored in the **synced**
 `learner.targets` setting (array of `{ id, label, source_did?,
-goal_skill_ids, created_at }`); a user may hold many.
+goal_skill_ids, kind?, source_key?, source_url?, resolution_provenance?,
+taxonomy_version?, created_at }`); a user may hold many.
+
+Beyond hand-picking skills, a goal can be **resolved** (`resolve_goal`,
+`commands::goal_templates`) from a DAO-ratified **goal template** — a
+nationalized exam, a K-12 board-grade curriculum, or a job role
+(migration 069, seeded genesis set) — or from a job description: a public
+JD link is fetched and stripped to text, or pasted text is parsed
+on-device (`goals::jd_parser`) against skill names + `skills.synonyms`,
+producing skill suggestions the user confirms. The resolved
+`goal_skill_ids` then feed the same path pipeline below.
 
 `compute_learning_path(goal_skill_ids)` (`commands::graph::compute_path`)
 computes, against the user's earned set:
@@ -277,9 +312,9 @@ computes, against the user's earned set:
 4. up to 3 published-course recommendations per unproven skill, matched
    against the JSON `courses.skill_ids` column.
 
-Multiple targets merge into one deduped path (`combinedPath`). The home
-screen shows progress rings + the next unlocked step per target;
-`/targets` lists them with the full path (`LearningPathView.vue`).
+Multiple goals merge into one deduped path (`combinedPath`). The home
+screen shows progress rings + the next unlocked step per goal;
+`/goals` lists them with the full path (`LearningPathView.vue`).
 
 ### 14.4 Commands & settings
 
@@ -292,7 +327,7 @@ screen shows progress rings + the next unlocked step per target;
 | Setting key | Scope | Shape |
 |---|---|---|
 | `instructor.graph_prefs` | sync | `{ skill_id: { public, teaching } }` |
-| `learner.targets` | sync | `Target[]` |
+| `learner.targets` | sync | `Goal[]` |
 | `identity.local_did` | device | cached `did:key` (lets the swarm loop answer graph-fetch) |
 
 ---
@@ -354,10 +389,12 @@ implementation-status preamble.
 | Component | Module | PR |
 |-----------|--------|----|
 | Skill proofs (legacy NFT pipeline) | retired in migration 040 (`evidence::aggregator` and `mint_skill_proof_nft` removed) | — |
-| Auto-earned completion credentials | `commands::completion::claim_course_completion` + observer auto-issuance | VC-first |
+| Local-first completion credentials (+ optional on-chain anchor, content-only fallback) | `commands::completion::claim_course_completion` | VC-first |
+| Document-bootstrap self-assertions (resume/transcript) | `commands::skill_bootstrap` | mig 068 |
+| Dynamic Sentinel-gated assessments (randomized draw, host-side grade) | `assessment::*`, `commands::assessment` | mig 070 |
 | W3C-style Verifiable Credentials | `domain::vc`, `commands::credentials` | PR 4–5 |
 | Deterministic aggregation engine (Q, M, U, C, T, L) | `aggregation::aggregate_skill_state` | PR 6 |
-| Type weights, freshness, quality, independence (§14) | `aggregation::weights` | PR 6 |
+| Type weights, freshness, **provenance-weighted quality**, independence (§14) | `aggregation::weights`, `aggregation::config` (`quality_triple`, calc version 1.1) | PR 6 / mig 068 |
 | Anti-gaming (cluster cap, inflation z-score, §15) | `aggregation::antigaming` | PR 7 |
 | Issuer clustering / pairwise dependence | `aggregation::independence` | PR 7 (per-DID v1; richer signals deferred) |
 | Persisted derived-state cache (§16) | `commands::aggregation` (`derived_skill_states` table) | PR 13 |

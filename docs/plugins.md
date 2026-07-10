@@ -203,14 +203,15 @@ are interactive (replay, retry, review results), so the learner clicks
 | `music-reviews` | interactive | Scrolling-timeline pitch trainer; see its `README.md`. Pitch detection unit-tested via `ui/pitch.test.js` |
 | `irl-review` | interactive | Upload work for human instructor review |
 | `codejudge-javascript` | interactive | Solve coding challenges in JS; runs the solution locally in a QuickJS WebAssembly sandbox against stdin/stdout test cases |
-| `codejudge-lua` | interactive | Same, in Lua via the fengari VM |
+| `codejudge-lua` | interactive | Same, in Lua via wasmoon (Lua 5.4 → WebAssembly) |
 | `codejudge-multilang` | interactive | Umbrella that `depends on` the codejudge language plugins; installing it auto-installs them |
 
-The codejudge plugins' in-browser runtimes (QuickJS, fengari) and
-CodeMirror are not committed — they are fetched/built into each bundle's
-`ui/vendor/` (and the problem bank baked into `ui/problems.js`) by
-`plugins/builtin/codejudge-shared/fetch-runtimes.sh`, then embedded via
-`include_bytes!`. Run that script before building.
+The codejudge plugins' in-browser runtimes (QuickJS, wasmoon) and
+CodeMirror live in each bundle's `ui/vendor/` (with the problem bank baked
+into `ui/problems.js`) and **are committed**, so the app and CI build with no
+extra step. Regenerate them with
+`plugins/builtin/codejudge-shared/fetch-runtimes.sh` only after bumping a
+runtime version or the problem bank; they are embedded via `include_bytes!`.
 
 ## IRL Review flow
 

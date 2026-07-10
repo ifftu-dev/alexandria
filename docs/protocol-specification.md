@@ -361,7 +361,7 @@ Alexandria uses libp2p 0.56 to build a fully decentralized P2P network where eve
 | 6 | Sync | Cross-device sync (encrypted, LWW/append-only) |
 | 5 | Domain | Catalog, Evidence, Taxonomy, Governance, Profiles, Classrooms |
 | 4 | Validation | Signature, Identity, Freshness, Dedup, Schema, Authority |
-| 3 | GossipSub | 13 global topics + per-classroom dynamic topics, peer scoring, rate limiting |
+| 3 | GossipSub | 15 global topics + per-classroom dynamic topics, peer scoring, rate limiting |
 | 2 | Transport | QUIC, TCP, Kademlia, AutoNAT, Relay, DCUtR |
 | 1 | Crypto | Ed25519, Blake2b-256, SHA-256 |
 
@@ -416,8 +416,10 @@ Seven base libp2p protocols plus six request-response protocols (§6.5) compose 
 | `/alexandria/plugins/1.0` | Community plugin announcements (manifest CID + metadata) |
 | `/alexandria/plugin-attestations/1.0` | Plugin DAO threshold-signed grader attestations |
 | `/alexandria/sentinel-priors/1.0` | Ratified Sentinel adversarial-prior metadata |
+| `/alexandria/goal-templates/1.0` | DAO-ratified goal → skill-graph templates (exam/curriculum/job-role) |
+| `/alexandria/question-banks/1.0` | DAO-ratified assessment question banks |
 
-All 13 topics MUST be subscribed on node startup. In addition, six
+All 15 topics MUST be subscribed on node startup. In addition, six
 request-response protocols (libp2p `request-response` + CBOR codec)
 run alongside the gossip mesh and are 1-to-1, not gossip topics:
 `/alexandria/vc-fetch/1.0` handles authority-respecting credential
@@ -534,7 +536,7 @@ Every incoming gossip message MUST pass through a 6-step validation pipeline. A 
 | Step | Check | Rejection Error |
 |------|-------|-----------------|
 | 1. Signature | Ed25519 verify over canonical bytes | `InvalidSignature` |
-| 2. Identity | For privileged topics (taxonomy, governance, Sentinel priors, plugin DAO attestations), `(stake_address, public_key)` MUST appear in `stake_pubkey_registry` within the current validity window. Non-privileged topics skip. See [`docs/stake-pubkey-registry.md`](./stake-pubkey-registry.md). | `IdentityMismatch` |
+| 2. Identity | For privileged topics (taxonomy, governance, Sentinel priors, plugin DAO attestations, goal templates, question banks), `(stake_address, public_key)` MUST appear in `stake_pubkey_registry` within the current validity window. Non-privileged topics skip. See [`docs/stake-pubkey-registry.md`](./stake-pubkey-registry.md). | `IdentityMismatch` |
 | 3. Freshness | Timestamp within ±5 minutes of local clock | `ExpiredMessage` |
 | 4. Dedup | Blake2b-256 hash not in LRU cache (100,000 entries) | `DuplicateMessage` |
 | 5. Schema | Payload deserialises to expected topic-specific type | `InvalidSchema` |
@@ -567,11 +569,12 @@ The first failing step rejects the message. Validation outcomes MUST feed gossip
 
 #### 6.8.3 Per-Topic Parameters
 
-Twelve of the thirteen signed topics carry per-topic scoring parameters; peer-exchange traffic intentionally bypasses scoring because its payload is unsigned. The privileged-tier topics (taxonomy, governance, Sentinel priors, plugin DAO attestations) share the strongest `invalid_message_deliveries_weight = -50.0` because forging an entry on any of them produces a global, persistent harm.
+Fourteen of the fifteen signed topics carry per-topic scoring parameters; peer-exchange traffic intentionally bypasses scoring because its payload is unsigned. The privileged-tier topics (taxonomy, governance, Sentinel priors, plugin DAO attestations, goal templates, question banks) share the strongest `invalid_message_deliveries_weight = -50.0` because forging an entry on any of them produces a global, persistent harm.
 
 | Topic | Weight | First Delivery | Invalid Penalty | Invalid Decay |
 |-------|--------|----------------|-----------------|---------------|
 | **Taxonomy** | **1.0** | **5.0** | **-50.0** | **0.3** |
+| **Goal Templates / Question Banks** | **1.0** | **5.0** | **-50.0** | **0.3** |
 | **Sentinel Priors** | **1.0** | **4.0** | **-50.0** | **0.3** |
 | **Plugin Attestations** | **1.0** | **3.0** | **-50.0** | **0.3** |
 | Governance | 0.8 | 3.0 | -30.0 | 0.3 |
@@ -641,6 +644,15 @@ Skills carry references to external taxonomies (ESCO, O*NET) to support interope
 ### 8.3 Taxonomy Governance
 
 Taxonomy updates are committee-gated via the governance system and propagated over the `/alexandria/taxonomy/1.0` GossipSub topic. All taxonomy changes are versioned (`taxonomy_versions`), and old proofs remain valid across taxonomy versions. Backward-compatible parsing is required.
+
+### 8.4 Content Ratification (Goal Templates & Question Banks)
+
+Two further content types are DAO-ratified through the same committee-gated, versioned, gossip-propagated flow as taxonomy:
+
+- **Goal templates** — exam / curriculum / job-role → ideal-skill-graph maps (`goal_templates`, versioned in `goal_template_versions`), propagated on `/alexandria/goal-templates/1.0` under the `goal_template_change` governance category.
+- **Question banks** — assessment question banks (`question_banks`, versioned in `question_bank_versions`), propagated on `/alexandria/question-banks/1.0` under the `question_bank_change` category. Answer keys (`bank_questions.correct_indices`) are held locally and **never** published in the ratified document or over any command.
+
+Both follow propose → signed-vote → resolve → publish (content CID) → peers fetch + apply, mirroring taxonomy ratification. Genesis-ratified templates and banks are seeded so day-one offline use works before any gossip arrives.
 
 ---
 
