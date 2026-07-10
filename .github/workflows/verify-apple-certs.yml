@@ -1,0 +1,50 @@
+name: Verify Apple Certs (temp)
+
+# Throwaway diagnostic: decodes the Apple cert secrets and prints ONLY the
+# certificate subject/issuer (public info — no private key is emitted) so we
+# can confirm which cert type is stored in each secret and that each password
+# matches its cert. Delete this workflow + branch after use.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Inspect certs
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_IOS_CERTIFICATE: ${{ secrets.APPLE_IOS_CERTIFICATE }}
+          APPLE_IOS_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_IOS_CERTIFICATE_PASSWORD }}
+        run: |
+          inspect() {
+            local name="$1" b64="$2" pw="$3"
+            echo "==================================================="
+            echo "### $name"
+            if [ -z "$b64" ]; then echo "  MISSING (secret empty)"; return; fi
+            if ! echo "$b64" | base64 -d > cert.p12 2>/dev/null; then
+              echo "  FAIL: not valid base64"; return
+            fi
+            echo "  p12 size: $(wc -c < cert.p12) bytes"
+            # -legacy needed for OpenSSL 3.x to read Apple's RC2-encrypted p12
+            if subject=$(openssl pkcs12 -in cert.p12 -nokeys -passin pass:"$pw" -legacy 2>/dev/null | openssl x509 -noout -subject 2>/dev/null) && [ -n "$subject" ]; then
+              echo "  PASSWORD: OK (matches cert)"
+              echo "  $subject"
+              openssl pkcs12 -in cert.p12 -nokeys -passin pass:"$pw" -legacy 2>/dev/null | openssl x509 -noout -issuer -enddate 2>/dev/null | sed 's/^/  /'
+              # count private keys present (should be >=1 for signing)
+              keys=$(openssl pkcs12 -in cert.p12 -nocerts -passin pass:"$pw" -legacy 2>/dev/null | grep -c "PRIVATE KEY" || true)
+              echo "  private keys in bundle: $keys"
+            else
+              echo "  PASSWORD: FAIL (wrong password for this cert, or unreadable p12)"
+            fi
+            rm -f cert.p12
+          }
+          inspect "APPLE_CERTIFICATE (expected: Developer ID Application — macOS)" "$APPLE_CERTIFICATE" "$APPLE_CERTIFICATE_PASSWORD"
+          inspect "APPLE_IOS_CERTIFICATE (expected: Apple Distribution — iOS)" "$APPLE_IOS_CERTIFICATE" "$APPLE_IOS_CERTIFICATE_PASSWORD"
+          echo "==================================================="
+          echo "Interpretation:"
+          echo " - APPLE_CERTIFICATE subject should read 'Developer ID Application: ...'"
+          echo " - APPLE_IOS_CERTIFICATE subject should read 'Apple Distribution: ...' (or 'iPhone Distribution: ...')"
+          echo " - If APPLE_CERTIFICATE shows Apple Distribution, the macOS cert was overwritten with the iOS one."
