@@ -158,8 +158,10 @@ jobs:
               """Probe write permission without creating anything: an
               under-privileged key is rejected with 403 before the payload is
               ever validated, a privileged one falls through to a 400/409."""
-              status, _ = call("profiles", {"data": {
+              status, body = call("profiles", {"data": {
                   "type": "profiles", "attributes": {}, "relationships": {}}})
+              codes = [e.get("code") for e in body.get("errors", [])]
+              print(f"profile-create probe: HTTP {status} {codes}")
               return status not in (401, 403)
 
           status, _ = get("apps?limit=1")
