@@ -96,11 +96,9 @@ jobs:
           APPLE_API_KEY_CONTENT: ${{ secrets.APPLE_API_KEY_P8 }}
           APPLE_IOS_CERTIFICATE: ${{ secrets.APPLE_IOS_CERTIFICATE }}
           APPLE_IOS_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_IOS_CERTIFICATE_PASSWORD }}
-          APPLE_KEYCHAIN_PASSWORD: ${{ secrets.APPLE_KEYCHAIN_PASSWORD }}
         run: |
           for secret_name in APPLE_API_ISSUER APPLE_API_KEY APPLE_API_KEY_CONTENT \
-                             APPLE_IOS_CERTIFICATE APPLE_IOS_CERTIFICATE_PASSWORD \
-                             APPLE_KEYCHAIN_PASSWORD; do
+                             APPLE_IOS_CERTIFICATE APPLE_IOS_CERTIFICATE_PASSWORD; do
             if [ -z "$(printenv "${secret_name}")" ]; then
               echo "${secret_name} is required for signed iOS exports." >&2
               exit 1
@@ -328,38 +326,6 @@ jobs:
         if: inputs.ios_export_method != 'debugging'
         run: echo "${{ secrets.APPLE_API_KEY_P8 }}" > $RUNNER_TEMP/AuthKey.p8
 
-      # Without a distribution identity in the keychain, xcodebuild falls back to
-      # cloud signing ("codesigning identity override: \"\"" → "Apple Distribution:
-      # Tauri (unset)") and exportArchive fails before it can match a profile.
-      - name: Import Apple iOS Certificate
-        if: inputs.ios_export_method != 'debugging'
-        env:
-          APPLE_IOS_CERTIFICATE: ${{ secrets.APPLE_IOS_CERTIFICATE }}
-          APPLE_IOS_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_IOS_CERTIFICATE_PASSWORD }}
-          KEYCHAIN_PASSWORD: ${{ secrets.APPLE_KEYCHAIN_PASSWORD }}
-        run: |
-          set -euo pipefail
-          cert="${RUNNER_TEMP}/ios_certificate.p12"
-          keychain="${RUNNER_TEMP}/ios-build.keychain-db"
-          echo "$APPLE_IOS_CERTIFICATE" | base64 --decode > "$cert"
-          security create-keychain -p "$KEYCHAIN_PASSWORD" "$keychain"
-          security set-keychain-settings -lut 21600 "$keychain"
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$keychain"
-          security import "$cert" \
-            -k "$keychain" \
-            -P "$APPLE_IOS_CERTIFICATE_PASSWORD" \
-            -T /usr/bin/codesign \
-            -T /usr/bin/security
-          security set-key-partition-list \
-            -S apple-tool:,apple:,codesign: \
-            -s -k "$KEYCHAIN_PASSWORD" "$keychain" >/dev/null
-          # xcodebuild resolves identities from the search list, not just the default.
-          security list-keychains -d user -s "$keychain" login.keychain-db
-          security default-keychain -s "$keychain"
-          rm -f "$cert"
-          echo "Imported signing identities:"
-          security find-identity -v -p codesigning "$keychain"
-
       # exportArchive ignores INVALID profiles (a profile goes INVALID when the
       # certificate it embeds is replaced), then fails trying to repair them
       # through cloud signing. Guarantee an ACTIVE App Store profile bound to the
@@ -469,6 +435,13 @@ jobs:
           path = dest / f"{attrs['uuid']}.mobileprovision"
           path.write_bytes(base64.b64decode(attrs["profileContent"]))
           print(f"installed {attrs['name']!r} uuid={attrs['uuid']} -> {path}")
+
+          # Hand the profile to the Tauri CLI, which performs its own signing
+          # setup: it only takes the manual-signing path when IOS_MOBILE_PROVISION
+          # and IOS_CERTIFICATE are present, otherwise it attempts cloud signing.
+          # profileContent is already base64 and carries no private key.
+          with open(os.environ["GITHUB_ENV"], "a") as env:
+              env.write(f"IOS_MOBILE_PROVISION={attrs['profileContent']}\n")
           PY
 
       - name: Strip alpha channel from iOS app icons
@@ -523,14 +496,20 @@ jobs:
         run: |
           npx tauri ios build --config src-tauri/tauri.ios.conf.json --target aarch64-sim
 
+      # Manual signing: the CLI imports the certificate and the profile itself.
+      # Supplying APPLE_API_* here instead would select cloud signing, which
+      # cannot see a locally installed profile and fails with
+      # "No profiles for '<bundle id>' were found".
       - name: Build signed iOS artifacts
         if: inputs.ios_export_method != 'debugging'
         working-directory: alexandria
         env:
           IOS_EXPORT_METHOD: ${{ inputs.ios_export_method }}
-          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER_ID }}
-          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY_ID }}
-          APPLE_API_KEY_PATH: ${{ runner.temp }}/AuthKey.p8
+          APPLE_DEVELOPMENT_TEAM: ${{ secrets.APPLE_TEAM_ID || 'VLMNL3V44U' }}
+          IOS_CERTIFICATE: ${{ secrets.APPLE_IOS_CERTIFICATE }}
+          IOS_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_IOS_CERTIFICATE_PASSWORD }}
+          # IOS_MOBILE_PROVISION is exported by "Ensure an App Store
+          # provisioning profile" above.
         run: |
           npx tauri ios build --config src-tauri/tauri.ios.conf.json --export-method "${IOS_EXPORT_METHOD}"
 
