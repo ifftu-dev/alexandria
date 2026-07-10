@@ -160,29 +160,43 @@ jobs:
           print(f"App ID '{bundle_id}' registered: {registered}")
 
           _, body = get("certificates?limit=200")
-          certs = [d["attributes"] for d in body.get("data", [])]
-          dist = [c for c in certs if "DISTRIBUTION" in (c.get("certificateType") or "")]
-          print(f"distribution certificates visible to this key: {len(dist)}")
+          for c in body.get("data", []):
+              a = c["attributes"]
+              print(f"cert: {a.get('certificateType')} {a.get('displayName')!r} "
+                    f"expires={a.get('expirationDate')}")
 
-          status, body = get("profiles?limit=200")
+          status, body = get("profiles?include=bundleId&limit=200")
           if status in (401, 403):
-              print(f"::warning::cannot read provisioning profiles (HTTP {status}); "
-                    "the key's role is likely below App Manager")
-              profiles = []
-          else:
-              profiles = [d["attributes"].get("name") for d in body.get("data", [])]
-          print(f"provisioning profiles visible: {len(profiles)}")
-          for name in profiles[:10]:
-              print(f"  - {name}")
+              sys.exit(f"cannot read provisioning profiles (HTTP {status}); the "
+                       "key's role is likely below App Manager.")
+
+          # `included` carries the bundleId each profile is bound to.
+          ids = {i["id"]: i["attributes"]["identifier"]
+                 for i in body.get("included", []) if i["type"] == "bundleIds"}
+
+          matching = []
+          print("provisioning profiles:")
+          for p in body.get("data", []):
+              a = p["attributes"]
+              rel = p.get("relationships", {}).get("bundleId", {}).get("data") or {}
+              ident = ids.get(rel.get("id"), "?")
+              print(f"  - {a.get('name')!r} type={a.get('profileType')} "
+                    f"state={a.get('profileState')} bundle={ident}")
+              if (ident == bundle_id
+                      and a.get("profileType") == "IOS_APP_STORE"
+                      and a.get("profileState") == "ACTIVE"):
+                  matching.append(a.get("name"))
 
           if not registered:
               sys.exit(f"App ID '{bundle_id}' is not registered on the developer "
                        "account. Register it, or grant the API key the App Manager "
                        "role so Xcode can register it via -allowProvisioningUpdates.")
-          if not profiles:
-              sys.exit(f"No provisioning profile exists for '{bundle_id}'. Create a "
-                       "distribution profile, or grant the API key the App Manager "
-                       "role so cloud signing can create one.")
+          if not matching:
+              sys.exit(f"No ACTIVE IOS_APP_STORE provisioning profile is bound to "
+                       f"'{bundle_id}'. exportArchive will fail with 'No profiles "
+                       f"were found'. Create one, or grant the API key the App "
+                       f"Manager role so cloud signing can create it.")
+          print(f"usable profile(s) for {bundle_id}: {matching}")
           PY
 
       - name: Create or reuse draft release
