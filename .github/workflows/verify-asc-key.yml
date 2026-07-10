@@ -1,0 +1,59 @@
+name: Verify ASC State (temp)
+
+# Throwaway diagnostic: inspects current App Store Connect signing state —
+# which profiles exist for org.alexandria.node, their type/state, and which
+# certificate each is bound to. Prints only names/ids, no secret material.
+# Delete after use.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Query App Store Connect signing state
+        env:
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          python3 -m pip install --quiet pyjwt cryptography requests
+          python3 - <<'PY'
+          import os, time, jwt, requests
+          kid=os.environ["APPLE_API_KEY_ID"]; iss=os.environ["APPLE_API_ISSUER_ID"]; p8=os.environ["APPLE_API_KEY_P8"]
+          tok=jwt.encode({"iss":iss,"iat":int(time.time()),"exp":int(time.time())+600,"aud":"appstoreconnect-v1"},
+                         p8, algorithm="ES256", headers={"kid":kid,"typ":"JWT"})
+          H={"Authorization":f"Bearer {tok}"}; B="https://api.appstoreconnect.apple.com/v1"
+          g=lambda p: requests.get(B+p, headers=H, timeout=30)
+
+          print("="*60); print("CERTIFICATES (valid, non-revoked):")
+          r=g("/certificates?limit=200")
+          for c in r.json().get("data",[]):
+              a=c["attributes"]
+              print(f"  [{c['id']}] {a.get('certificateType'):<28} {a.get('displayName')}  exp={a.get('expirationDate','')[:10]}")
+
+          print("="*60); print("PROFILES (with bundleId + bound certs):")
+          r=g("/profiles?limit=200&include=bundleId,certificates")
+          data=r.json().get("data",[]); inc={i["id"]:i for i in r.json().get("included",[])}
+          if not data: print("  (none)")
+          for p in data:
+              a=p["attributes"]
+              bid=p.get("relationships",{}).get("bundleId",{}).get("data") or {}
+              b=inc.get(bid.get("id"),{}).get("attributes",{})
+              certs=p.get("relationships",{}).get("certificates",{}).get("data",[]) or []
+              cnames=[inc.get(c["id"],{}).get("attributes",{}).get("certificateType","?") for c in certs]
+              flag=""
+              if b.get("identifier")=="org.alexandria.node" and a.get("profileType")=="IOS_APP_STORE":
+                  flag = "   <-- THE ONE cloud signing needs" + ("  ✅" if a.get("profileState")=="ACTIVE" else "  ❌ NOT ACTIVE")
+              print(f"  {a.get('name')!r}")
+              print(f"     type={a.get('profileType')}  state={a.get('profileState')}  bundle={b.get('identifier')}  certs={cnames}{flag}")
+
+          print("="*60); print("VERDICT:")
+          ok=[p for p in data
+              if p["attributes"].get("profileType")=="IOS_APP_STORE"
+              and p["attributes"].get("profileState")=="ACTIVE"
+              and inc.get((p.get("relationships",{}).get("bundleId",{}).get("data") or {}).get("id"),{}).get("attributes",{}).get("identifier")=="org.alexandria.node"]
+          if ok: print("  ACTIVE IOS_APP_STORE profile for org.alexandria.node EXISTS ✅")
+          else:  print("  NO active IOS_APP_STORE profile for org.alexandria.node ❌  <-- this is the blocker")
+          PY
