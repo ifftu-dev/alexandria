@@ -360,6 +360,117 @@ jobs:
           echo "Imported signing identities:"
           security find-identity -v -p codesigning "$keychain"
 
+      # exportArchive ignores INVALID profiles (a profile goes INVALID when the
+      # certificate it embeds is replaced), then fails trying to repair them
+      # through cloud signing. Guarantee an ACTIVE App Store profile bound to the
+      # bundle id, built around the distribution certificate imported above, and
+      # install it locally so the export never needs cloud signing.
+      - name: Ensure an App Store provisioning profile
+        if: inputs.ios_export_method != 'debugging'
+        env:
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER_ID }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_KEY_CONTENT: ${{ secrets.APPLE_API_KEY_P8 }}
+          BUNDLE_ID: org.alexandria.node
+          PROFILE_NAME: Alexandria iOS App Store (CI)
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet --break-system-packages pyjwt cryptography \
+            || python3 -m pip install --quiet pyjwt cryptography
+          python3 - <<'PY'
+          import base64, json, os, pathlib, sys, time, urllib.error, urllib.request, jwt
+
+          bundle_id = os.environ["BUNDLE_ID"]
+          profile_name = os.environ["PROFILE_NAME"]
+
+          token = jwt.encode(
+              {"iss": os.environ["APPLE_API_ISSUER"], "aud": "appstoreconnect-v1",
+               "exp": int(time.time()) + 600},
+              os.environ["APPLE_API_KEY_CONTENT"], algorithm="ES256",
+              headers={"kid": os.environ["APPLE_API_KEY"], "typ": "JWT"},
+          )
+
+          def call(path, payload=None, method=None):
+              req = urllib.request.Request(
+                  f"https://api.appstoreconnect.apple.com/v1/{path}",
+                  data=json.dumps(payload).encode() if payload else None,
+                  method=method,
+                  headers={"Authorization": f"Bearer {token}",
+                           "Content-Type": "application/json"})
+              try:
+                  with urllib.request.urlopen(req) as r:
+                      return r.status, json.loads(r.read() or b"{}")
+              except urllib.error.HTTPError as e:
+                  return e.code, json.loads(e.read() or b"{}")
+
+          def fail(msg, body=None):
+              if body:
+                  for err in body.get("errors", []):
+                      print(f"  {err.get('code')}: {err.get('detail')}", file=sys.stderr)
+              sys.exit(msg)
+
+          _, body = call("profiles?include=bundleId&limit=200")
+          ids = {i["id"]: i["attributes"]["identifier"]
+                 for i in body.get("included", []) if i["type"] == "bundleIds"}
+
+          def bound_to(p):
+              rel = p.get("relationships", {}).get("bundleId", {}).get("data") or {}
+              return ids.get(rel.get("id"))
+
+          active = [p for p in body.get("data", [])
+                    if bound_to(p) == bundle_id
+                    and p["attributes"]["profileType"] == "IOS_APP_STORE"
+                    and p["attributes"]["profileState"] == "ACTIVE"]
+
+          if active:
+              profile = active[0]
+              print(f"reusing ACTIVE profile {profile['attributes']['name']!r}")
+          else:
+              # A same-named leftover (INVALID, from an earlier run) would collide
+              # on create. Only ever remove the profile this job owns.
+              for p in body.get("data", []):
+                  if p["attributes"]["name"] == profile_name:
+                      print(f"deleting stale {profile_name!r} "
+                            f"({p['attributes']['profileState']})")
+                      call(f"profiles/{p['id']}", method="DELETE")
+
+              status, body = call(f"bundleIds?filter[identifier]={bundle_id}&limit=1")
+              if not body.get("data"):
+                  fail(f"App ID '{bundle_id}' is not registered.", body)
+              bundle_ref = body["data"][0]["id"]
+
+              status, body = call("certificates?filter[certificateType]=DISTRIBUTION")
+              certs = body.get("data", [])
+              if not certs:
+                  fail("no DISTRIBUTION certificate exists on the account.", body)
+              cert_ref = certs[0]["id"]
+              print(f"using certificate {certs[0]['attributes'].get('displayName')!r} "
+                    f"(expires {certs[0]['attributes'].get('expirationDate')})")
+
+              status, body = call("profiles", {"data": {
+                  "type": "profiles",
+                  "attributes": {"name": profile_name, "profileType": "IOS_APP_STORE"},
+                  "relationships": {
+                      "bundleId": {"data": {"id": bundle_ref, "type": "bundleIds"}},
+                      "certificates": {"data": [{"id": cert_ref, "type": "certificates"}]},
+                  }}})
+              if status not in (200, 201):
+                  fail(f"could not create the provisioning profile (HTTP {status}).", body)
+              profile = body["data"]
+              print(f"created profile {profile_name!r}")
+
+          attrs = profile["attributes"]
+          if attrs["profileState"] != "ACTIVE":
+              fail(f"profile is {attrs['profileState']}, not ACTIVE.")
+
+          # Install it so xcodebuild resolves it from disk rather than the cloud.
+          dest = pathlib.Path.home() / "Library/MobileDevice/Provisioning Profiles"
+          dest.mkdir(parents=True, exist_ok=True)
+          path = dest / f"{attrs['uuid']}.mobileprovision"
+          path.write_bytes(base64.b64decode(attrs["profileContent"]))
+          print(f"installed {attrs['name']!r} uuid={attrs['uuid']} -> {path}")
+          PY
+
       - name: Strip alpha channel from iOS app icons
         working-directory: alexandria/src-tauri/gen/apple/Assets.xcassets/AppIcon.appiconset
         run: |
