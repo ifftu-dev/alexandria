@@ -56,6 +56,16 @@ pub const TOPIC_PLUGIN_ATTESTATIONS: &str = "/alexandria/plugin-attestations/1.0
 /// See docs/sentinel-adversarial-priors.md.
 pub const TOPIC_SENTINEL_PRIORS: &str = "/alexandria/sentinel-priors/1.0";
 
+/// Ratified goal-template versions — a DAO publishes a signed version
+/// document (goal → target-skill maps) here after a `goal_template_change`
+/// proposal is approved. Receivers apply it into `goal_templates`. Privileged.
+pub const TOPIC_GOAL_TEMPLATES: &str = "/alexandria/goal-templates/1.0";
+/// Ratified assessment question-bank versions — published after a
+/// `question_bank_change` proposal is approved. Receivers apply it into
+/// `question_banks` / `bank_questions`. The answer key travels inside the
+/// signed doc but is never re-exposed to the client. Privileged.
+pub const TOPIC_QUESTION_BANKS: &str = "/alexandria/question-banks/1.0";
+
 /// All gossip topics the node subscribes to.
 pub const ALL_TOPICS: &[&str] = &[
     TOPIC_CATALOG,
@@ -71,6 +81,8 @@ pub const ALL_TOPICS: &[&str] = &[
     TOPIC_PLUGINS,
     TOPIC_PLUGIN_ATTESTATIONS,
     TOPIC_SENTINEL_PRIORS,
+    TOPIC_GOAL_TEMPLATES,
+    TOPIC_QUESTION_BANKS,
 ];
 
 /// Peer exchange message — broadcast on TOPIC_PEER_EXCHANGE.

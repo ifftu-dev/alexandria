@@ -30,8 +30,8 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 use super::types::{
-    SignedGossipMessage, TOPIC_GOVERNANCE, TOPIC_PLUGIN_ATTESTATIONS, TOPIC_SENTINEL_PRIORS,
-    TOPIC_TAXONOMY,
+    SignedGossipMessage, TOPIC_GOAL_TEMPLATES, TOPIC_GOVERNANCE, TOPIC_PLUGIN_ATTESTATIONS,
+    TOPIC_QUESTION_BANKS, TOPIC_SENTINEL_PRIORS, TOPIC_TAXONOMY,
 };
 
 /// Snapshot format version. Bump if the canonical-bytes layout changes
@@ -476,7 +476,12 @@ pub fn load_bootstrap_if_present(
 pub fn is_privileged_topic(topic: &str) -> bool {
     matches!(
         topic,
-        TOPIC_TAXONOMY | TOPIC_GOVERNANCE | TOPIC_SENTINEL_PRIORS | TOPIC_PLUGIN_ATTESTATIONS
+        TOPIC_TAXONOMY
+            | TOPIC_GOVERNANCE
+            | TOPIC_SENTINEL_PRIORS
+            | TOPIC_PLUGIN_ATTESTATIONS
+            | TOPIC_GOAL_TEMPLATES
+            | TOPIC_QUESTION_BANKS
     )
 }
 

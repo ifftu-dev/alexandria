@@ -7,6 +7,7 @@ pub mod challenge;
 pub mod chapters;
 pub mod classroom;
 pub mod completion;
+pub mod content_governance;
 pub mod courses;
 pub mod credentials;
 pub mod elements;

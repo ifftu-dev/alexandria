@@ -15,9 +15,10 @@ use std::time::Duration;
 use libp2p::gossipsub::{IdentTopic, PeerScoreParams, PeerScoreThresholds, TopicScoreParams};
 
 use super::types::{
-    ALL_TOPICS, TOPIC_CATALOG, TOPIC_GOVERNANCE, TOPIC_OPINIONS, TOPIC_PEER_EXCHANGE,
-    TOPIC_PINBOARD, TOPIC_PLUGINS, TOPIC_PLUGIN_ATTESTATIONS, TOPIC_PROFILES,
-    TOPIC_SENTINEL_PRIORS, TOPIC_TAXONOMY, TOPIC_VC_DID, TOPIC_VC_PRESENTATION, TOPIC_VC_STATUS,
+    ALL_TOPICS, TOPIC_CATALOG, TOPIC_GOAL_TEMPLATES, TOPIC_GOVERNANCE, TOPIC_OPINIONS,
+    TOPIC_PEER_EXCHANGE, TOPIC_PINBOARD, TOPIC_PLUGINS, TOPIC_PLUGIN_ATTESTATIONS, TOPIC_PROFILES,
+    TOPIC_QUESTION_BANKS, TOPIC_SENTINEL_PRIORS, TOPIC_TAXONOMY, TOPIC_VC_DID,
+    TOPIC_VC_PRESENTATION, TOPIC_VC_STATUS,
 };
 
 /// Classification used to pick a topic's scoring profile.
@@ -33,6 +34,8 @@ fn classify_topic(topic: &str) -> Option<TopicScoreParams> {
         TOPIC_GOVERNANCE => Some(topic_params_governance()),
         TOPIC_SENTINEL_PRIORS => Some(topic_params_sentinel_priors()),
         TOPIC_PLUGIN_ATTESTATIONS => Some(topic_params_plugin_attestations()),
+        // Ratified community content — same trust class as taxonomy.
+        TOPIC_GOAL_TEMPLATES | TOPIC_QUESTION_BANKS => Some(topic_params_taxonomy()),
         // ---- VC layer (medium-value signed credentials / status) -------
         TOPIC_VC_DID | TOPIC_VC_STATUS | TOPIC_VC_PRESENTATION => Some(topic_params_vc_layer()),
         TOPIC_PINBOARD => Some(topic_params_vc_layer()),
@@ -440,6 +443,8 @@ mod tests {
             TOPIC_GOVERNANCE,
             TOPIC_SENTINEL_PRIORS,
             TOPIC_PLUGIN_ATTESTATIONS,
+            TOPIC_GOAL_TEMPLATES,
+            TOPIC_QUESTION_BANKS,
         ];
         // Non-privileged topics should have a weaker (less negative)
         // P4 penalty than each privileged topic.
