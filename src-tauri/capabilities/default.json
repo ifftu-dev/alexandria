@@ -11,6 +11,32 @@
     "core:window:allow-start-dragging",
     "biometry:default",
     "updater:default",
-    "deep-link:default"
+    "deep-link:default",
+    "dialog:default",
+    {
+      "identifier": "fs:allow-read-file",
+      "allow": [
+        {
+          "path": "$HOME/**"
+        }
+      ],
+      "deny": [
+        {
+          "path": "$HOME/.ssh/**"
+        },
+        {
+          "path": "$HOME/.gnupg/**"
+        },
+        {
+          "path": "$HOME/.aws/**"
+        },
+        {
+          "path": "$HOME/.config/**"
+        },
+        {
+          "path": "$HOME/Library/**"
+        }
+      ]
+    }
   ]
 }

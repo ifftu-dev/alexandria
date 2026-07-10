@@ -104,6 +104,21 @@ fn suggest_from_text(conn: &Connection, text: &str) -> Result<Vec<SkillSuggestio
 
 // ---- Tauri commands -----------------------------------------------------
 
+/// Extract plain text from an uploaded document's bytes for skill matching.
+/// PDFs are parsed on-device; other bytes are treated as UTF-8 text. Operates
+/// only on bytes the caller already holds — it is not a file-read primitive.
+#[tauri::command]
+pub async fn bootstrap_extract_text(data: Vec<u8>) -> Result<String, String> {
+    if data.starts_with(b"%PDF") {
+        // Text-based PDFs extract cleanly; scanned/image PDFs yield little —
+        // the user can still paste in that case.
+        pdf_extract::extract_text_from_mem(&data)
+            .map_err(|e| format!("couldn't read text from this PDF: {e}"))
+    } else {
+        Ok(String::from_utf8_lossy(&data).into_owned())
+    }
+}
+
 /// Extract candidate skills from document text (the frontend supplies the text
 /// — pasted, or read from a `.txt`/`.md` file). Suggestions only; nothing is
 /// claimed until `bootstrap_confirm`.
