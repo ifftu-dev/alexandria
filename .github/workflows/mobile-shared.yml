@@ -408,47 +408,51 @@ jobs:
               rel = p.get("relationships", {}).get("bundleId", {}).get("data") or {}
               return ids.get(rel.get("id"))
 
-          # A profile minted before the capability existed does not carry it, so
-          # discard ours whenever we just changed the App ID.
-          stale = [p for p in body.get("data", []) if p["attributes"]["name"] == profile_name
-                   and (added or p["attributes"]["profileState"] != "ACTIVE")]
-          for p in stale:
-              print(f"deleting stale {profile_name!r} ({p['attributes']['profileState']})")
-              call(f"profiles/{p['id']}", method="DELETE")
+          # A profile snapshots the App ID's capabilities at creation time, so an
+          # existing one may predate a capability. Always recreate the CI-owned
+          # profile from the current App ID state; only ever touch our own name,
+          # never a hand-made profile.
+          for p in body.get("data", []):
+              if p["attributes"]["name"] == profile_name:
+                  print(f"deleting prior {profile_name!r} ({p['attributes']['profileState']})")
+                  call(f"profiles/{p['id']}", method="DELETE")
 
-          reusable = [p for p in body.get("data", [])
-                      if p not in stale
-                      and bound_to(p) == bundle_id
-                      and p["attributes"]["profileType"] == "IOS_APP_STORE"
-                      and p["attributes"]["profileState"] == "ACTIVE"]
+          status, body = call("certificates?filter[certificateType]=DISTRIBUTION")
+          certs = body.get("data", [])
+          if not certs:
+              fail("no DISTRIBUTION certificate exists on the account.", body)
+          cert_ref = certs[0]["id"]
+          print(f"using certificate {certs[0]['attributes'].get('displayName')!r} "
+                f"(expires {certs[0]['attributes'].get('expirationDate')})")
 
-          if reusable:
-              profile = reusable[0]
-              print(f"reusing ACTIVE profile {profile['attributes']['name']!r}")
-          else:
-              status, body = call("certificates?filter[certificateType]=DISTRIBUTION")
-              certs = body.get("data", [])
-              if not certs:
-                  fail("no DISTRIBUTION certificate exists on the account.", body)
-              cert_ref = certs[0]["id"]
-              print(f"using certificate {certs[0]['attributes'].get('displayName')!r} "
-                    f"(expires {certs[0]['attributes'].get('expirationDate')})")
-
-              status, body = call("profiles", {"data": {
-                  "type": "profiles",
-                  "attributes": {"name": profile_name, "profileType": "IOS_APP_STORE"},
-                  "relationships": {
-                      "bundleId": {"data": {"id": bundle_ref, "type": "bundleIds"}},
-                      "certificates": {"data": [{"id": cert_ref, "type": "certificates"}]},
-                  }}})
-              if status not in (200, 201):
-                  fail(f"could not create the provisioning profile (HTTP {status}).", body)
-              profile = body["data"]
-              print(f"created profile {profile_name!r}")
+          status, body = call("profiles", {"data": {
+              "type": "profiles",
+              "attributes": {"name": profile_name, "profileType": "IOS_APP_STORE"},
+              "relationships": {
+                  "bundleId": {"data": {"id": bundle_ref, "type": "bundleIds"}},
+                  "certificates": {"data": [{"id": cert_ref, "type": "certificates"}]},
+              }}})
+          if status not in (200, 201):
+              fail(f"could not create the provisioning profile (HTTP {status}).", body)
+          profile = body["data"]
+          print(f"created profile {profile_name!r}")
 
           attrs = profile["attributes"]
           if attrs["profileState"] != "ACTIVE":
               fail(f"profile is {attrs['profileState']}, not ACTIVE.")
+
+          # A profile embeds its entitlements as a cleartext plist inside the CMS
+          # blob. xcodebuild demands the associated-domains key be present, so
+          # confirm the profile actually carries it rather than trusting that
+          # enabling the capability propagated before the profile was minted.
+          import plistlib
+          raw = base64.b64decode(attrs["profileContent"])
+          pl = plistlib.loads(raw[raw.index(b"<?xml"):raw.index(b"</plist>") + 8])
+          ent = pl.get("Entitlements", {})
+          print(f"profile entitlements: {sorted(ent)}")
+          if "com.apple.developer.associated-domains" not in ent:
+              fail("the minted profile does not carry associated-domains; the "
+                   "capability likely had not propagated when it was created.")
 
           # Install it so xcodebuild resolves it from disk rather than the cloud.
           dest = pathlib.Path.home() / "Library/MobileDevice/Provisioning Profiles"
