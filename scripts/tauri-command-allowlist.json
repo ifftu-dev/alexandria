@@ -71,6 +71,7 @@
   "disallow_credential_fetch": "credential fetch ACL; UI pending",
   "plugin_list_dependencies": "plugin dep inspection; UI pending",
   "plugin_ingest_attestation": "plugin attestation flow; owner kept as pending, pairs with plugin_attestation_status",
+  "get_goal_template": "goal-template detail lookup; detail UI pending (list + resolve are wired)",
   "propose_goal_template_change": "DAO governance; proposal UI pending",
   "publish_goal_template_ratification": "DAO governance; ratification UI pending",
   "propose_question_bank_change": "DAO governance; proposal UI pending",
