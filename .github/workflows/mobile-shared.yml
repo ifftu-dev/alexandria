@@ -460,13 +460,12 @@ jobs:
           path = dest / f"{attrs['uuid']}.mobileprovision"
           path.write_bytes(base64.b64decode(attrs["profileContent"]))
           print(f"installed {attrs['name']!r} uuid={attrs['uuid']} -> {path}")
-
-          # Hand the profile to the Tauri CLI, which performs its own signing
-          # setup: it only takes the manual-signing path when IOS_MOBILE_PROVISION
-          # and IOS_CERTIFICATE are present, otherwise it attempts cloud signing.
-          # profileContent is already base64 and carries no private key.
-          with open(os.environ["GITHUB_ENV"], "a") as env:
-              env.write(f"IOS_MOBILE_PROVISION={attrs['profileContent']}\n")
+          # The Tauri project uses Xcode-managed (automatic) signing; the build
+          # step passes the App Store Connect API key so xcodebuild provisions
+          # against the portal. This step's job is to make that provisioning
+          # succeed deterministically: the capability is enabled and an ACTIVE
+          # profile already exists, so -allowProvisioningUpdates has nothing left
+          # to create.
           PY
 
       - name: Strip alpha channel from iOS app icons
@@ -521,20 +520,21 @@ jobs:
         run: |
           npx tauri ios build --config src-tauri/tauri.ios.conf.json --target aarch64-sim
 
-      # Manual signing: the CLI imports the certificate and the profile itself.
-      # Supplying APPLE_API_* here instead would select cloud signing, which
-      # cannot see a locally installed profile and fails with
-      # "No profiles for '<bundle id>' were found".
+      # Xcode-managed (automatic) signing. The earlier "Ensure an App Store
+      # provisioning profile" step guarantees the two things automatic signing
+      # cannot fix on its own — the associated-domains capability on the App ID
+      # and an ACTIVE distribution profile — so provisioning here is resolved
+      # against the portal without needing to create anything. APPLE_DEVELOPMENT_
+      # TEAM must be set or signing resolves to "Apple Distribution: (unset)".
       - name: Build signed iOS artifacts
         if: inputs.ios_export_method != 'debugging'
         working-directory: alexandria
         env:
           IOS_EXPORT_METHOD: ${{ inputs.ios_export_method }}
           APPLE_DEVELOPMENT_TEAM: ${{ secrets.APPLE_TEAM_ID || 'VLMNL3V44U' }}
-          IOS_CERTIFICATE: ${{ secrets.APPLE_IOS_CERTIFICATE }}
-          IOS_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_IOS_CERTIFICATE_PASSWORD }}
-          # IOS_MOBILE_PROVISION is exported by "Ensure an App Store
-          # provisioning profile" above.
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER_ID }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_KEY_PATH: ${{ runner.temp }}/AuthKey.p8
         run: |
           npx tauri ios build --config src-tauri/tauri.ios.conf.json --export-method "${IOS_EXPORT_METHOD}"
 
