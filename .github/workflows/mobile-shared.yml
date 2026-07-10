@@ -191,12 +191,17 @@ jobs:
               sys.exit(f"App ID '{bundle_id}' is not registered on the developer "
                        "account. Register it, or grant the API key the App Manager "
                        "role so Xcode can register it via -allowProvisioningUpdates.")
+
+          # Not fatal: with an App Manager key, -allowProvisioningUpdates creates
+          # or repairs the profile during the build. Xcode ignores INVALID
+          # profiles, which is why a stale one still reads as "no profiles found".
           if not matching:
-              sys.exit(f"No ACTIVE IOS_APP_STORE provisioning profile is bound to "
-                       f"'{bundle_id}'. exportArchive will fail with 'No profiles "
-                       f"were found'. Create one, or grant the API key the App "
-                       f"Manager role so cloud signing can create it.")
-          print(f"usable profile(s) for {bundle_id}: {matching}")
+              print(f"::warning::no ACTIVE IOS_APP_STORE profile is bound to "
+                    f"{bundle_id}; relying on cloud signing to create one. If "
+                    f"exportArchive reports 'No profiles were found', the API key "
+                    f"lacks the App Manager role.")
+          else:
+              print(f"usable profile(s) for {bundle_id}: {matching}")
           PY
 
       - name: Create or reuse draft release
