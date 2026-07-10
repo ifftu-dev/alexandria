@@ -326,11 +326,12 @@ jobs:
         if: inputs.ios_export_method != 'debugging'
         run: echo "${{ secrets.APPLE_API_KEY_P8 }}" > $RUNNER_TEMP/AuthKey.p8
 
-      # exportArchive ignores INVALID profiles (a profile goes INVALID when the
-      # certificate it embeds is replaced), then fails trying to repair them
-      # through cloud signing. Guarantee an ACTIVE App Store profile bound to the
-      # bundle id, built around the distribution certificate imported above, and
-      # install it locally so the export never needs cloud signing.
+      # The Tauri CLI signs manually only when handed a certificate and a
+      # profile. Guarantee an ACTIVE App Store profile that is bound to the
+      # bundle id, carries the capabilities the app entitles (associated
+      # domains, for universal links), and embeds the current distribution
+      # certificate. A profile goes INVALID when its certificate is replaced or
+      # a capability changes, and xcodebuild silently ignores INVALID profiles.
       - name: Ensure an App Store provisioning profile
         if: inputs.ios_export_method != 'debugging'
         env:
@@ -348,6 +349,8 @@ jobs:
 
           bundle_id = os.environ["BUNDLE_ID"]
           profile_name = os.environ["PROFILE_NAME"]
+          # Mirrors src-tauri/gen/apple/alexandria-node_iOS.entitlements.
+          required_caps = {"ASSOCIATED_DOMAINS"}
 
           token = jwt.encode(
               {"iss": os.environ["APPLE_API_ISSUER"], "aud": "appstoreconnect-v1",
@@ -370,10 +373,32 @@ jobs:
                   return e.code, json.loads(e.read() or b"{}")
 
           def fail(msg, body=None):
-              if body:
-                  for err in body.get("errors", []):
-                      print(f"  {err.get('code')}: {err.get('detail')}", file=sys.stderr)
+              for err in (body or {}).get("errors", []):
+                  print(f"  {err.get('code')}: {err.get('detail')}", file=sys.stderr)
               sys.exit(msg)
+
+          status, body = call(f"bundleIds?filter[identifier]={bundle_id}&limit=1")
+          if not body.get("data"):
+              fail(f"App ID '{bundle_id}' is not registered.", body)
+          bundle_ref = body["data"][0]["id"]
+
+          # xcodebuild fails with "requires a provisioning profile with the
+          # <feature> feature" when the App ID lacks a capability the app
+          # entitles. Enabling one invalidates existing profiles, so any profile
+          # must be minted after this.
+          _, body = call(f"bundleIds/{bundle_ref}/bundleIdCapabilities?limit=200")
+          present = {c["attributes"]["capabilityType"] for c in body.get("data", [])}
+          added = required_caps - present
+          for cap in sorted(added):
+              status, body = call("bundleIdCapabilities", {"data": {
+                  "type": "bundleIdCapabilities",
+                  "attributes": {"capabilityType": cap},
+                  "relationships": {
+                      "bundleId": {"data": {"id": bundle_ref, "type": "bundleIds"}}}}})
+              if status not in (200, 201):
+                  fail(f"could not enable {cap} on '{bundle_id}' (HTTP {status}).", body)
+              print(f"enabled capability {cap} on {bundle_id}")
+          print(f"capabilities: {sorted(present | required_caps)}")
 
           _, body = call("profiles?include=bundleId&limit=200")
           ids = {i["id"]: i["attributes"]["identifier"]
@@ -383,28 +408,24 @@ jobs:
               rel = p.get("relationships", {}).get("bundleId", {}).get("data") or {}
               return ids.get(rel.get("id"))
 
-          active = [p for p in body.get("data", [])
-                    if bound_to(p) == bundle_id
-                    and p["attributes"]["profileType"] == "IOS_APP_STORE"
-                    and p["attributes"]["profileState"] == "ACTIVE"]
+          # A profile minted before the capability existed does not carry it, so
+          # discard ours whenever we just changed the App ID.
+          stale = [p for p in body.get("data", []) if p["attributes"]["name"] == profile_name
+                   and (added or p["attributes"]["profileState"] != "ACTIVE")]
+          for p in stale:
+              print(f"deleting stale {profile_name!r} ({p['attributes']['profileState']})")
+              call(f"profiles/{p['id']}", method="DELETE")
 
-          if active:
-              profile = active[0]
+          reusable = [p for p in body.get("data", [])
+                      if p not in stale
+                      and bound_to(p) == bundle_id
+                      and p["attributes"]["profileType"] == "IOS_APP_STORE"
+                      and p["attributes"]["profileState"] == "ACTIVE"]
+
+          if reusable:
+              profile = reusable[0]
               print(f"reusing ACTIVE profile {profile['attributes']['name']!r}")
           else:
-              # A same-named leftover (INVALID, from an earlier run) would collide
-              # on create. Only ever remove the profile this job owns.
-              for p in body.get("data", []):
-                  if p["attributes"]["name"] == profile_name:
-                      print(f"deleting stale {profile_name!r} "
-                            f"({p['attributes']['profileState']})")
-                      call(f"profiles/{p['id']}", method="DELETE")
-
-              status, body = call(f"bundleIds?filter[identifier]={bundle_id}&limit=1")
-              if not body.get("data"):
-                  fail(f"App ID '{bundle_id}' is not registered.", body)
-              bundle_ref = body["data"][0]["id"]
-
               status, body = call("certificates?filter[certificateType]=DISTRIBUTION")
               certs = body.get("data", [])
               if not certs:
