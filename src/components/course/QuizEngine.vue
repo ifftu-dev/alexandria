@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { AppButton, AppSpinner, AppAlert } from '@/components/ui'
 import type { QuizDefinition, QuizResult, ElementSubmissionRecord } from '@/types'
@@ -22,6 +23,7 @@ const emit = defineEmits<{
   (e: 'complete', result: QuizResult): void
 }>()
 
+const { t } = useI18n()
 const { invoke } = useLocalApi()
 const quiz = ref<QuizDefinition | null>(null)
 const loading = ref(false)
@@ -58,7 +60,7 @@ async function loadQuiz() {
     try {
       parseAndResetQuiz(props.contentInline)
     } catch (e: unknown) {
-      error.value = `Failed to parse quiz: ${e}`
+      error.value = t('courses.quiz.parseError', { error: String(e) })
       quiz.value = null
     }
     return
@@ -72,7 +74,7 @@ async function loadQuiz() {
     const json = decoder.decode(new Uint8Array(bytes))
     parseAndResetQuiz(json)
   } catch (e: unknown) {
-    error.value = `Failed to load quiz: ${e}`
+    error.value = t('courses.quiz.loadError', { error: String(e) })
     quiz.value = null
   } finally {
     loading.value = false
@@ -231,14 +233,14 @@ watch(() => props.contentCid, init)
 
 <template>
   <div class="quiz-engine">
-    <AppSpinner v-if="loading" label="Loading quiz..." />
+    <AppSpinner v-if="loading" :label="t('courses.quiz.loading')" />
 
     <div v-else-if="error" class="text-sm text-destructive">
       {{ error }}
     </div>
 
     <div v-else-if="!quiz" class="text-sm text-muted-foreground italic">
-      No quiz content available.
+      {{ $t('courses.quiz.noContent') }}
     </div>
 
     <div v-else class="space-y-6">
@@ -246,7 +248,7 @@ watch(() => props.contentCid, init)
       <div class="flex items-center justify-between">
         <h3 class="text-base font-semibold">{{ quiz.title }}</h3>
         <span class="text-xs text-muted-foreground">
-          Question {{ currentIndex + 1 }} / {{ totalQuestions }}
+          {{ $t('courses.quiz.questionProgress', { current: currentIndex + 1, total: totalQuestions }) }}
         </span>
       </div>
 
@@ -260,9 +262,9 @@ watch(() => props.contentCid, init)
 
       <!-- Results banner -->
       <AppAlert v-if="submitted && result" :variant="result.passed ? 'success' : 'warning'">
-        <template #title>{{ result.passed ? 'Passed!' : 'Not yet' }}</template>
-        Score: {{ Math.round(result.score * 100) }}% ({{ result.earned_points }}/{{ result.total_points }} points)
-        <span v-if="quiz.pass_threshold"> — {{ Math.round(quiz.pass_threshold * 100) }}% required</span>
+        <template #title>{{ result.passed ? $t('courses.quiz.passed') : $t('courses.quiz.notYet') }}</template>
+        {{ $t('courses.quiz.scoreLine', { pct: Math.round(result.score * 100), earned: result.earned_points, total: result.total_points }) }}
+        <span v-if="quiz.pass_threshold">{{ $t('courses.quiz.thresholdRequired', { pct: Math.round(quiz.pass_threshold * 100) }) }}</span>
       </AppAlert>
 
       <!-- Question -->
@@ -272,10 +274,10 @@ watch(() => props.contentCid, init)
             class="text-xs font-bold px-2 py-0.5 rounded"
             :class="submitted ? (questionResult(currentQuestion.id) ? 'bg-success/15 text-success' : 'bg-destructive/15 text-destructive') : 'bg-muted/30 text-muted-foreground'"
           >
-            {{ currentQuestion.type === 'multiple_choice' ? 'Multi' : currentQuestion.type === 'short_answer' ? 'Text' : 'MC' }}
+            {{ currentQuestion.type === 'multiple_choice' ? $t('courses.quiz.typeMulti') : currentQuestion.type === 'short_answer' ? $t('courses.quiz.typeText') : $t('courses.quiz.typeMc') }}
           </span>
           <span class="text-xs text-muted-foreground">
-            {{ currentQuestion.points }} pt{{ currentQuestion.points !== 1 ? 's' : '' }}
+            {{ $t('courses.quiz.pointsCount', { count: currentQuestion.points }, currentQuestion.points) }}
           </span>
         </div>
 
@@ -317,7 +319,7 @@ watch(() => props.contentCid, init)
           <input
             type="text"
             class="input w-full"
-            placeholder="Type your answer..."
+            :placeholder="t('courses.quiz.shortAnswerPlaceholder')"
             :value="(currentAnswer as string) ?? ''"
             :disabled="submitted"
             @input="setTextAnswer(currentQuestion.id, ($event.target as HTMLInputElement).value)"
@@ -338,7 +340,7 @@ watch(() => props.contentCid, init)
           size="sm"
           @click="prevQuestion"
         >
-          Previous
+          {{ $t('courses.quiz.previous') }}
         </AppButton>
         <div v-else />
 
@@ -348,14 +350,14 @@ watch(() => props.contentCid, init)
             size="sm"
             @click="nextQuestion"
           >
-            Next
+            {{ $t('common.actions.next') }}
           </AppButton>
           <AppButton
             v-if="isLastQuestion && !submitted"
             size="sm"
             @click="gradeQuiz"
           >
-            Submit Quiz
+            {{ $t('courses.quiz.submitQuiz') }}
           </AppButton>
         </div>
       </div>

@@ -3,21 +3,23 @@
 // evidence) or paste its text, confirm the extracted skills, and claim them as
 // provenance-tagged self-asserted credentials. Emits `claimed` with the count.
 // Used both in onboarding and on the standalone /skills/bootstrap page.
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useSkillBootstrap, type DocType } from '@/composables/useSkillBootstrap'
 import { AppButton, AppBadge } from '@/components/ui'
 import type { SkillSuggestion } from '@/types'
 
 const emit = defineEmits<{ (e: 'claimed', count: number): void }>()
 
+const { t } = useI18n()
 const { pickFile, readFile, extract, confirm } = useSkillBootstrap()
 
 const docType = ref<DocType>('resume')
-const docTypes: { id: DocType; label: string; hint: string }[] = [
-  { id: 'resume', label: 'Resume / CV', hint: 'Self-made — lower confidence' },
-  { id: 'transcript', label: 'Academic transcript', hint: 'Accredited — higher confidence' },
-  { id: 'accredited_credential', label: 'Institution credential', hint: 'Accredited — higher confidence' },
-]
+const docTypes = computed<{ id: DocType; label: string; hint: string }[]>(() => [
+  { id: 'resume', label: t('skills.bootstrap.docResumeLabel'), hint: t('skills.bootstrap.docResumeHint') },
+  { id: 'transcript', label: t('skills.bootstrap.docTranscriptLabel'), hint: t('skills.bootstrap.docTranscriptHint') },
+  { id: 'accredited_credential', label: t('skills.bootstrap.docCredentialLabel'), hint: t('skills.bootstrap.docCredentialHint') },
+])
 
 const text = ref('')
 const fileName = ref('')
@@ -51,7 +53,7 @@ async function findSkills() {
   try {
     suggestions.value = await extract(text.value)
     chosen.value = new Set(suggestions.value.filter((s) => s.score >= 0.6).map((s) => s.skill_id))
-    if (!suggestions.value.length) error.value = 'No matching skills found — try adding more detail.'
+    if (!suggestions.value.length) error.value = t('skills.bootstrap.noSkillsFound')
   } catch (err) {
     error.value = String(err)
   } finally {
@@ -99,21 +101,21 @@ async function claim() {
     </div>
 
     <div class="flex items-center gap-3 rounded-lg border border-dashed border-border p-4 text-sm">
-      <AppButton variant="outline" :loading="busy" @click="chooseFile">Choose file</AppButton>
-      <span class="text-muted-foreground">{{ fileName || 'PDF, image, or text — stored as evidence' }}</span>
+      <AppButton variant="outline" :loading="busy" @click="chooseFile">{{ $t('skills.bootstrap.chooseFile') }}</AppButton>
+      <span class="text-muted-foreground">{{ fileName || $t('skills.bootstrap.filePlaceholder') }}</span>
     </div>
     <textarea
       v-model="text"
       rows="6"
       class="w-full rounded-lg border border-border bg-input px-3 py-2 text-sm text-foreground"
-      placeholder="Paste the document text here (required for PDFs / images)…"
+      :placeholder="$t('skills.bootstrap.textPlaceholder')"
     />
     <AppButton variant="outline" :loading="busy" :disabled="!text.trim()" @click="findSkills">
-      Find skills
+      {{ $t('skills.bootstrap.findSkills') }}
     </AppButton>
 
     <div v-if="suggestions.length" class="space-y-2">
-      <p class="text-sm text-muted-foreground">Confirm which skills to claim:</p>
+      <p class="text-sm text-muted-foreground">{{ $t('skills.bootstrap.confirmPrompt') }}</p>
       <label
         v-for="s in suggestions"
         :key="s.skill_id"
@@ -121,11 +123,11 @@ async function claim() {
       >
         <input type="checkbox" :checked="chosen.has(s.skill_id)" @change="toggle(s.skill_id)" />
         <span class="flex-1 text-foreground">{{ s.name }}</span>
-        <AppBadge v-if="s.score >= 0.6" variant="success">strong</AppBadge>
+        <AppBadge v-if="s.score >= 0.6" variant="success">{{ $t('skills.bootstrap.strong') }}</AppBadge>
         <span class="text-xs text-muted-foreground">“{{ s.matched }}”</span>
       </label>
       <AppButton :loading="busy" :disabled="!chosen.size" @click="claim">
-        Claim {{ chosen.size }} skill{{ chosen.size === 1 ? '' : 's' }}
+        {{ $t('skills.bootstrap.claim', { count: chosen.size }, chosen.size) }}
       </AppButton>
     </div>
 

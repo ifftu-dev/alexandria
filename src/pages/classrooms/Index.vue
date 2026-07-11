@@ -3,17 +3,17 @@
     <!-- Header -->
     <div class="border-b border-border px-6 py-4 flex items-center justify-between">
       <div>
-        <h1 class="text-xl font-bold text-foreground">Classrooms</h1>
-        <p class="text-sm text-muted-foreground mt-0.5">Group spaces for learning together</p>
+        <h1 class="text-xl font-bold text-foreground">{{ $t('classrooms.index.title') }}</h1>
+        <p class="text-sm text-muted-foreground mt-0.5">{{ $t('classrooms.index.subtitle') }}</p>
       </div>
       <AppButton variant="primary" size="sm" @click="showCreate = true">
-        + Create Classroom
+        + {{ $t('classrooms.actions.createClassroom') }}
       </AppButton>
     </div>
 
     <!-- Loading -->
     <div v-if="loading" class="flex items-center justify-center py-20">
-      <div class="text-muted-foreground">Loading classrooms...</div>
+      <div class="text-muted-foreground">{{ $t('classrooms.index.loading') }}</div>
     </div>
 
     <!-- Empty state -->
@@ -24,12 +24,12 @@
       <div class="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center text-3xl mb-4">
         🏫
       </div>
-      <h2 class="text-lg font-semibold text-foreground mb-2">No classrooms yet</h2>
+      <h2 class="text-lg font-semibold text-foreground mb-2">{{ $t('classrooms.index.emptyTitle') }}</h2>
       <p class="text-muted-foreground text-sm max-w-sm mb-6">
-        Create a classroom to start a group learning space, or join one by requesting access.
+        {{ $t('classrooms.index.emptyBody') }}
       </p>
       <AppButton variant="primary" @click="showCreate = true">
-        Create your first classroom
+        {{ $t('classrooms.index.createFirst') }}
       </AppButton>
     </div>
 
@@ -51,7 +51,7 @@
           <div class="min-w-0">
             <h3 class="font-semibold text-foreground truncate">{{ classroom.name }}</h3>
             <div class="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
-              <span>{{ classroom.member_count ?? 0 }} member{{ classroom.member_count !== 1 ? 's' : '' }}</span>
+              <span>{{ $t('classrooms.members.count', { count: classroom.member_count ?? 0 }, classroom.member_count ?? 0) }}</span>
               <span class="opacity-40">·</span>
               <span class="capitalize">{{ classroom.my_role }}</span>
             </div>
@@ -71,30 +71,30 @@
     </div>
 
     <!-- Create classroom modal -->
-    <AppModal :open="showCreate" @close="showCreate = false" title="Create Classroom">
+    <AppModal :open="showCreate" @close="showCreate = false" :title="$t('classrooms.create.title')">
       <div class="space-y-4">
         <div>
-          <label class="block text-sm text-muted-foreground mb-1">Classroom name *</label>
+          <label class="block text-sm text-muted-foreground mb-1">{{ $t('classrooms.create.nameLabel') }} *</label>
           <input
             v-model="form.name"
             type="text"
-            placeholder="e.g. Advanced Mathematics"
+            :placeholder="$t('classrooms.create.namePlaceholder')"
             class="w-full px-3 py-2 bg-muted border border-border rounded-lg text-foreground placeholder-muted-foreground text-sm focus:outline-none focus:border-primary"
           />
         </div>
 
         <div>
-          <label class="block text-sm text-muted-foreground mb-1">Description</label>
+          <label class="block text-sm text-muted-foreground mb-1">{{ $t('classrooms.create.descriptionLabel') }}</label>
           <textarea
             v-model="form.description"
-            placeholder="What is this classroom about?"
+            :placeholder="$t('classrooms.create.descriptionPlaceholder')"
             rows="3"
             class="w-full px-3 py-2 bg-muted border border-border rounded-lg text-foreground placeholder-muted-foreground text-sm focus:outline-none focus:border-primary resize-none"
           />
         </div>
 
         <div>
-          <label class="block text-sm text-muted-foreground mb-1">Icon emoji</label>
+          <label class="block text-sm text-muted-foreground mb-1">{{ $t('classrooms.create.iconLabel') }}</label>
           <input
             v-model="form.iconEmoji"
             type="text"
@@ -108,7 +108,7 @@
       <template #footer>
         <div class="flex gap-3">
           <AppButton variant="secondary" class="flex-1" @click="showCreate = false">
-            Cancel
+            {{ $t('common.actions.cancel') }}
           </AppButton>
           <AppButton
             variant="primary"
@@ -117,7 +117,7 @@
             :loading="creating"
             @click="handleCreate"
           >
-            Create
+            {{ $t('classrooms.actions.create') }}
           </AppButton>
         </div>
       </template>

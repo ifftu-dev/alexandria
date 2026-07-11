@@ -1,0 +1,23 @@
+{
+  "peers": "sin conexiones | {count} conexión | {count} conexiones",
+  "title": "Conexiones",
+  "subtitle": "Cómo tu aplicación se conecta con otros estudiantes: de forma directa y privada, sin servidores.",
+  "status": "Estado",
+  "online": "En línea",
+  "offline": "Sin conexión",
+  "starting": "Iniciando…",
+  "connections": "Conexiones",
+  "refresh": "Actualizar",
+  "empty": "Buscando a otros estudiantes…",
+  "diagnostic": "Diagnóstico",
+  "mountError": "No se pudieron cargar los detalles de conexión: {error}",
+  "appOnline": "Estás conectado y listo para aprender.",
+  "appOffline": "Estás sin conexión: puedes seguir aprendiendo con todo lo guardado en este dispositivo.",
+  "appStarting": "Preparando todo…",
+  "advanced": {
+    "deviceId": "ID del dispositivo",
+    "topics": "Canales",
+    "addresses": "Direcciones",
+    "natStatus": "Accesibilidad de red"
+  }
+}

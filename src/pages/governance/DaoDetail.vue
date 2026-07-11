@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { useRoute } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { useAuth } from '@/composables/useAuth'
 import {
@@ -16,6 +17,7 @@ import type {
 } from '@/types'
 
 const { invoke } = useLocalApi()
+const { t } = useI18n()
 const route = useRoute()
 const { stakeAddress } = useAuth()
 
@@ -54,11 +56,11 @@ const proposalForm = ref<SubmitProposalParams>({
 })
 const creatingProposal = ref(false)
 
-const tabs = [
-  { key: 'overview', label: 'Overview' },
-  { key: 'elections', label: 'Elections' },
-  { key: 'proposals', label: 'Proposals' },
-]
+const tabs = computed(() => [
+  { key: 'overview', label: t('governance.detail.tabs.overview') },
+  { key: 'elections', label: t('governance.detail.tabs.elections') },
+  { key: 'proposals', label: t('governance.detail.tabs.proposals') },
+])
 
 const committeMembers = computed(() => members.value.filter(m => m.role === 'committee'))
 const regularMembers = computed(() => members.value.filter(m => m.role === 'member'))
@@ -130,7 +132,7 @@ function closeElectionDetail() {
 
 async function createElection() {
   if (!electionForm.value.title.trim()) {
-    error.value = 'Election title is required.'
+    error.value = t('governance.detail.elections.titleRequired')
     return
   }
   creatingElection.value = true
@@ -229,7 +231,7 @@ async function installCommittee() {
 
 async function createProposal() {
   if (!proposalForm.value.title.trim()) {
-    error.value = 'Proposal title is required.'
+    error.value = t('governance.detail.proposals.titleRequired')
     return
   }
   creatingProposal.value = true
@@ -343,13 +345,13 @@ const proposalCategories = ['policy', 'taxonomy', 'curriculum', 'technical', 'go
       </div>
     </div>
 
-    <EmptyState v-else-if="!dao" title="DAO not found" />
+    <EmptyState v-else-if="!dao" :title="$t('governance.detail.notFound')" />
 
     <div v-else class="max-w-4xl">
       <!-- ==================== BREADCRUMB ==================== -->
       <div class="flex items-center gap-2 mb-6 text-xs">
-        <router-link to="/governance" class="text-muted-foreground hover:text-foreground transition-colors">
-          Governance
+        <router-link to="/community" class="text-muted-foreground hover:text-foreground transition-colors">
+          {{ $t('governance.detail.breadcrumb') }}
         </router-link>
         <svg class="w-3 h-3 text-muted-foreground/50" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
           <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
@@ -381,25 +383,25 @@ const proposalCategories = ['policy', 'taxonomy', 'curriculum', 'technical', 'go
               <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" />
               </svg>
-              {{ totalMembers }} member{{ totalMembers !== 1 ? 's' : '' }}
+              {{ $t('governance.detail.stats.members', { count: totalMembers }, totalMembers) }}
             </span>
             <span class="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
               <svg class="w-3.5 h-3.5 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
               </svg>
-              {{ committeMembers.length }}/{{ dao.committee_size }} committee
+              {{ $t('governance.detail.stats.council', { filled: committeMembers.length, total: dao.committee_size }) }}
             </span>
             <span class="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
               <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
-              {{ electionCount }} election{{ electionCount !== 1 ? 's' : '' }}
+              {{ $t('governance.detail.stats.elections', { count: electionCount }, electionCount) }}
             </span>
             <span class="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
               <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
               </svg>
-              {{ proposalCount }} proposal{{ proposalCount !== 1 ? 's' : '' }}
+              {{ $t('governance.detail.stats.proposals', { count: proposalCount }, proposalCount) }}
             </span>
           </div>
         </div>
@@ -414,44 +416,47 @@ const proposalCategories = ['policy', 'taxonomy', 'curriculum', 'technical', 'go
       <div v-if="activeTab === 'overview'" class="space-y-6">
         <!-- Details -->
         <div class="card p-5">
-          <h2 class="text-base font-semibold mb-4">Details</h2>
+          <h2 class="text-base font-semibold mb-4">{{ $t('governance.detail.details.heading') }}</h2>
           <div>
             <div class="flex items-center justify-between py-3 border-b border-border/50">
-              <span class="text-sm text-muted-foreground">Scope</span>
+              <span class="text-sm text-muted-foreground">{{ $t('governance.detail.details.scope') }}</span>
               <span class="text-sm font-medium">{{ dao.scope_type }}</span>
             </div>
             <div class="flex items-center justify-between py-3 border-b border-border/50">
-              <span class="text-sm text-muted-foreground">Scope ID</span>
-              <span class="text-sm font-medium font-mono">{{ dao.scope_id }}</span>
-            </div>
-            <div class="flex items-center justify-between py-3 border-b border-border/50">
-              <span class="text-sm text-muted-foreground">Committee Size</span>
+              <span class="text-sm text-muted-foreground">{{ $t('governance.detail.details.councilSize') }}</span>
               <span class="text-sm font-medium">{{ dao.committee_size }}</span>
             </div>
             <div class="flex items-center justify-between py-3 border-b border-border/50">
-              <span class="text-sm text-muted-foreground">Election Interval</span>
-              <span class="text-sm font-medium">{{ dao.election_interval_days }} days</span>
-            </div>
-            <div v-if="dao.on_chain_tx" class="flex items-center justify-between py-3 border-b border-border/50">
-              <span class="text-sm text-muted-foreground">On-chain TX</span>
-              <span class="text-sm font-medium font-mono">{{ dao.on_chain_tx }}</span>
+              <span class="text-sm text-muted-foreground">{{ $t('governance.detail.details.electionInterval') }}</span>
+              <span class="text-sm font-medium">{{ $t('governance.detail.details.intervalDays', { count: dao.election_interval_days }) }}</span>
             </div>
             <div class="flex items-center justify-between py-3">
-              <span class="text-sm text-muted-foreground">Created</span>
+              <span class="text-sm text-muted-foreground">{{ $t('governance.detail.details.created') }}</span>
               <span class="text-sm font-medium">{{ dao.created_at }}</span>
             </div>
+            <details class="mt-2">
+              <summary class="cursor-pointer text-xs text-muted-foreground">{{ $t('common.advanced.toggle') }}</summary>
+              <div class="flex items-center justify-between py-3 border-b border-border/50">
+                <span class="text-sm text-muted-foreground">{{ $t('governance.detail.details.topicId') }}</span>
+                <span class="text-sm font-medium font-mono">{{ dao.scope_id }}</span>
+              </div>
+              <div v-if="dao.on_chain_tx" class="flex items-center justify-between py-3">
+                <span class="text-sm text-muted-foreground">{{ $t('governance.detail.details.publicRecord') }}</span>
+                <span class="text-sm font-medium font-mono">{{ dao.on_chain_tx }}</span>
+              </div>
+            </details>
           </div>
         </div>
 
         <!-- Committee -->
         <div class="card p-5">
           <div class="flex items-center justify-between mb-4">
-            <h2 class="text-base font-semibold">Committee</h2>
+            <h2 class="text-base font-semibold">{{ $t('governance.detail.council.heading') }}</h2>
             <span class="text-xs text-muted-foreground px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-500">
-              {{ committeMembers.length }} / {{ dao.committee_size }} seats
+              {{ $t('governance.detail.council.seats', { filled: committeMembers.length, total: dao.committee_size }) }}
             </span>
           </div>
-          <EmptyState v-if="committeMembers.length === 0" title="No committee members" description="Run an election to install a committee." />
+          <EmptyState v-if="committeMembers.length === 0" :title="$t('governance.detail.council.emptyTitle')" :description="$t('governance.detail.council.emptyDescription')" />
           <div v-else class="space-y-2">
             <div
               v-for="m in committeMembers"
@@ -466,7 +471,7 @@ const proposalCategories = ['policy', 'taxonomy', 'curriculum', 'technical', 'go
                 </div>
                 <div>
                   <span class="text-sm font-mono block">{{ shortAddr(m.stake_address) }}</span>
-                  <AppBadge variant="governance" class="text-[0.6rem] mt-0.5">committee</AppBadge>
+                  <AppBadge variant="governance" class="text-[0.6rem] mt-0.5">{{ $t('governance.detail.council.badge') }}</AppBadge>
                 </div>
               </div>
               <span class="text-xs text-muted-foreground">{{ m.joined_at }}</span>
@@ -476,7 +481,7 @@ const proposalCategories = ['policy', 'taxonomy', 'curriculum', 'technical', 'go
 
         <!-- Regular members -->
         <div v-if="regularMembers.length" class="card p-5">
-          <h2 class="text-base font-semibold mb-4">Members ({{ regularMembers.length }})</h2>
+          <h2 class="text-base font-semibold mb-4">{{ $t('governance.detail.members.heading', { count: regularMembers.length }) }}</h2>
           <div class="space-y-2">
             <div
               v-for="m in regularMembers"
@@ -503,23 +508,23 @@ const proposalCategories = ['policy', 'taxonomy', 'curriculum', 'technical', 'go
       <!-- ==================== ELECTIONS TAB ==================== -->
       <div v-else-if="activeTab === 'elections'">
         <div class="flex items-center justify-between mb-4">
-          <h2 class="text-base font-semibold">Elections</h2>
+          <h2 class="text-base font-semibold">{{ $t('governance.detail.elections.heading') }}</h2>
           <AppButton v-if="stakeAddress && dao.status === 'active'" size="sm" @click="showCreateElection = true; electionForm = { dao_id: daoId, title: '', description: '', seats: dao.committee_size }">
-            + Open Election
+            {{ $t('governance.detail.elections.open') }}
           </AppButton>
         </div>
 
         <EmptyState
           v-if="elections.length === 0 && !selectedElection"
-          title="No elections"
-          description="Open an election to select committee members."
+          :title="$t('governance.detail.elections.emptyTitle')"
+          :description="$t('governance.detail.elections.emptyDescription')"
         />
 
         <!-- Election Detail View -->
         <div v-if="selectedElection" class="space-y-4">
           <div class="flex items-center gap-2 mb-2">
             <button class="text-xs text-primary hover:underline" @click="closeElectionDetail">
-              Elections
+              {{ $t('governance.detail.elections.heading') }}
             </button>
             <svg class="w-3 h-3 text-muted-foreground/50" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
@@ -544,7 +549,7 @@ const proposalCategories = ['policy', 'taxonomy', 'curriculum', 'technical', 'go
                 <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z" />
                 </svg>
-                {{ selectedElection.seats }} seat{{ selectedElection.seats !== 1 ? 's' : '' }}
+                {{ $t('governance.detail.elections.seats', { count: selectedElection.seats }, selectedElection.seats) }}
               </span>
               <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-muted/30 text-xs text-muted-foreground">
                 <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -563,21 +568,21 @@ const proposalCategories = ['policy', 'taxonomy', 'curriculum', 'technical', 'go
             <!-- Phase actions -->
             <div class="flex gap-2 mb-6">
               <AppButton v-if="selectedElection.phase === 'nomination' && stakeAddress" size="sm" variant="outline" @click="nominateSelf">
-                Nominate Self
+                {{ $t('governance.detail.elections.actions.nominateSelf') }}
               </AppButton>
               <AppButton v-if="selectedElection.phase === 'nomination'" size="sm" @click="startVoting">
-                Start Voting
+                {{ $t('governance.detail.elections.actions.startVoting') }}
               </AppButton>
               <AppButton v-if="selectedElection.phase === 'voting'" size="sm" @click="finalizeElection">
-                Finalize
+                {{ $t('governance.detail.elections.actions.close') }}
               </AppButton>
               <AppButton v-if="selectedElection.phase === 'finalized'" size="sm" @click="installCommittee">
-                Install Committee
+                {{ $t('governance.detail.elections.actions.seatCouncil') }}
               </AppButton>
             </div>
 
             <!-- Nominees -->
-            <h4 class="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">Nominees</h4>
+            <h4 class="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">{{ $t('governance.detail.elections.nominees') }}</h4>
 
             <!-- Loading skeleton for nominees -->
             <div v-if="loadingElection" class="animate-pulse space-y-3">
@@ -592,7 +597,7 @@ const proposalCategories = ['policy', 'taxonomy', 'curriculum', 'technical', 'go
               </div>
             </div>
 
-            <EmptyState v-else-if="electionNominees.length === 0" title="No nominees yet" />
+            <EmptyState v-else-if="electionNominees.length === 0" :title="$t('governance.detail.elections.noNominees')" />
 
             <div v-else class="space-y-3">
               <div
@@ -605,9 +610,9 @@ const proposalCategories = ['policy', 'taxonomy', 'curriculum', 'technical', 'go
               >
                 <div class="flex items-center justify-between mb-2">
                   <div class="flex items-center gap-2.5">
-                    <AppBadge v-if="nom.is_winner" variant="success">Winner</AppBadge>
-                    <AppBadge v-else-if="nom.accepted" variant="primary">Accepted</AppBadge>
-                    <AppBadge v-else variant="warning">Pending</AppBadge>
+                    <AppBadge v-if="nom.is_winner" variant="success">{{ $t('governance.detail.elections.badges.winner') }}</AppBadge>
+                    <AppBadge v-else-if="nom.accepted" variant="primary">{{ $t('governance.detail.elections.badges.accepted') }}</AppBadge>
+                    <AppBadge v-else variant="warning">{{ $t('governance.detail.elections.badges.pending') }}</AppBadge>
                     <span class="text-sm font-mono">{{ shortAddr(nom.stake_address) }}</span>
                   </div>
                   <div class="flex items-center gap-3">
@@ -617,14 +622,14 @@ const proposalCategories = ['policy', 'taxonomy', 'curriculum', 'technical', 'go
                       variant="outline"
                       @click="acceptNomination(nom.id)"
                     >
-                      Accept
+                      {{ $t('governance.detail.elections.actions.accept') }}
                     </AppButton>
                     <AppButton
                       v-if="selectedElection.phase === 'voting' && nom.accepted && stakeAddress"
                       size="xs"
                       @click="castElectionVote(nom.id)"
                     >
-                      Vote
+                      {{ $t('governance.detail.elections.actions.vote') }}
                     </AppButton>
                   </div>
                 </div>
@@ -638,7 +643,7 @@ const proposalCategories = ['policy', 'taxonomy', 'curriculum', 'technical', 'go
                         : '0%' }"
                     />
                   </div>
-                  <span class="text-xs text-muted-foreground tabular-nums shrink-0">{{ nom.votes_received }} vote{{ nom.votes_received !== 1 ? 's' : '' }}</span>
+                  <span class="text-xs text-muted-foreground tabular-nums shrink-0">{{ $t('governance.detail.elections.votes', { count: nom.votes_received }, nom.votes_received) }}</span>
                 </div>
               </div>
             </div>
@@ -665,12 +670,12 @@ const proposalCategories = ['policy', 'taxonomy', 'curriculum', 'technical', 'go
               <DeadlineCountdown
                 v-if="election.phase === 'nomination'"
                 :deadline="election.nomination_end"
-                label="Nomination"
+                :label="$t('governance.detail.elections.nominationLabel')"
               />
               <DeadlineCountdown
                 v-if="election.phase === 'voting'"
                 :deadline="election.voting_end"
-                label="Voting"
+                :label="$t('governance.detail.elections.votingLabel')"
               />
             </div>
             <div class="flex items-center flex-wrap gap-3">
@@ -678,19 +683,19 @@ const proposalCategories = ['policy', 'taxonomy', 'curriculum', 'technical', 'go
                 <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z" />
                 </svg>
-                {{ election.seats }} seat{{ election.seats !== 1 ? 's' : '' }}
+                {{ $t('governance.detail.elections.seats', { count: election.seats }, election.seats) }}
               </span>
               <span v-if="election.voting_end" class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-muted/30 text-xs text-muted-foreground">
                 <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
-                Ends {{ election.voting_end }}
+                {{ $t('governance.detail.elections.ends', { date: election.voting_end }) }}
               </span>
               <span v-if="election.finalized_at" class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-emerald-500/10 text-xs text-emerald-400">
                 <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
-                Finalized {{ election.finalized_at }}
+                {{ $t('governance.detail.elections.closed', { date: election.finalized_at }) }}
               </span>
             </div>
           </div>
@@ -700,16 +705,16 @@ const proposalCategories = ['policy', 'taxonomy', 'curriculum', 'technical', 'go
       <!-- ==================== PROPOSALS TAB ==================== -->
       <div v-else-if="activeTab === 'proposals'">
         <div class="flex items-center justify-between mb-4">
-          <h2 class="text-base font-semibold">Proposals</h2>
+          <h2 class="text-base font-semibold">{{ $t('governance.detail.proposals.heading') }}</h2>
           <AppButton v-if="stakeAddress && dao.status === 'active'" size="sm" @click="showCreateProposal = true; proposalForm = { dao_id: daoId, title: '', description: '', category: 'policy' }">
-            + Submit Proposal
+            {{ $t('governance.detail.proposals.submit') }}
           </AppButton>
         </div>
 
         <EmptyState
           v-if="proposals.length === 0"
-          title="No proposals"
-          description="Submit a proposal to suggest changes within this DAO's scope."
+          :title="$t('governance.detail.proposals.emptyTitle')"
+          :description="$t('governance.detail.proposals.emptyDescription')"
         />
 
         <div v-else class="space-y-4">
@@ -749,8 +754,8 @@ const proposalCategories = ['policy', 'taxonomy', 'curriculum', 'technical', 'go
                 />
               </div>
               <div class="flex justify-between text-xs mt-1.5">
-                <span class="text-emerald-400">{{ proposal.votes_for }} for</span>
-                <span class="text-red-400">{{ proposal.votes_against }} against</span>
+                <span class="text-emerald-400">{{ $t('governance.detail.proposals.for', { count: proposal.votes_for }) }}</span>
+                <span class="text-red-400">{{ $t('governance.detail.proposals.against', { count: proposal.votes_against }) }}</span>
               </div>
             </div>
 
@@ -760,13 +765,13 @@ const proposalCategories = ['policy', 'taxonomy', 'curriculum', 'technical', 'go
               <DeadlineCountdown
                 v-if="proposal.status === 'published'"
                 :deadline="proposal.voting_deadline"
-                label="Voting"
+                :label="$t('governance.detail.proposals.votingLabel')"
               />
               <span v-if="proposal.voting_deadline" class="inline-flex items-center gap-1.5">
                 <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
-                Deadline: {{ proposal.voting_deadline }}
+                {{ $t('governance.detail.proposals.deadline', { date: proposal.voting_deadline }) }}
               </span>
               <span class="inline-flex items-center gap-1.5">
                 <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -779,8 +784,8 @@ const proposalCategories = ['policy', 'taxonomy', 'curriculum', 'technical', 'go
             <!-- Actions -->
             <div v-if="stakeAddress" class="flex flex-wrap gap-2">
               <template v-if="proposal.status === 'draft'">
-                <AppButton size="xs" @click="approveProposal(proposal.id)">Approve (Open Voting)</AppButton>
-                <AppButton size="xs" variant="danger" @click="cancelProposal(proposal.id)">Cancel</AppButton>
+                <AppButton size="xs" @click="approveProposal(proposal.id)">{{ $t('governance.detail.proposals.actions.approve') }}</AppButton>
+                <AppButton size="xs" variant="danger" @click="cancelProposal(proposal.id)">{{ $t('common.actions.cancel') }}</AppButton>
               </template>
               <template v-else-if="proposal.status === 'published'">
                 <ProficiencyGate :required-level="proposal.min_vote_proficiency || 'remember'" :met="true" />
@@ -788,16 +793,16 @@ const proposalCategories = ['policy', 'taxonomy', 'curriculum', 'technical', 'go
                   <svg class="w-3 h-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
                   </svg>
-                  Vote For
+                  {{ $t('governance.detail.proposals.actions.voteFor') }}
                 </AppButton>
                 <AppButton size="xs" variant="danger" @click="voteOnProposal(proposal.id, false)">
                   <svg class="w-3 h-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
                   </svg>
-                  Vote Against
+                  {{ $t('governance.detail.proposals.actions.voteAgainst') }}
                 </AppButton>
-                <AppButton size="xs" variant="ghost" @click="resolveProposal(proposal.id)">Resolve</AppButton>
-                <AppButton size="xs" variant="ghost" @click="cancelProposal(proposal.id)">Cancel</AppButton>
+                <AppButton size="xs" variant="ghost" @click="resolveProposal(proposal.id)">{{ $t('governance.detail.proposals.actions.resolve') }}</AppButton>
+                <AppButton size="xs" variant="ghost" @click="cancelProposal(proposal.id)">{{ $t('common.actions.cancel') }}</AppButton>
               </template>
             </div>
           </div>
@@ -805,49 +810,49 @@ const proposalCategories = ['policy', 'taxonomy', 'curriculum', 'technical', 'go
       </div>
 
       <!-- ==================== CREATE ELECTION MODAL ==================== -->
-      <AppModal :open="showCreateElection" title="Open Election" @close="showCreateElection = false">
+      <AppModal :open="showCreateElection" :title="$t('governance.detail.createElection.title')" @close="showCreateElection = false">
         <div class="space-y-4">
           <p v-if="error" class="text-sm text-error">{{ error }}</p>
           <div>
-            <label class="block text-xs font-medium text-muted-foreground mb-1.5">Title</label>
-            <AppInput v-model="electionForm.title" placeholder="e.g. Q1 2026 Committee Election" />
+            <label class="block text-xs font-medium text-muted-foreground mb-1.5">{{ $t('governance.detail.createElection.titleLabel') }}</label>
+            <AppInput v-model="electionForm.title" :placeholder="$t('governance.detail.createElection.titlePlaceholder')" />
           </div>
           <div>
-            <label class="block text-xs font-medium text-muted-foreground mb-1.5">Description</label>
-            <input v-model="electionForm.description" class="input w-full" placeholder="Purpose of this election..." />
+            <label class="block text-xs font-medium text-muted-foreground mb-1.5">{{ $t('governance.detail.createElection.descriptionLabel') }}</label>
+            <input v-model="electionForm.description" class="input w-full" :placeholder="$t('governance.detail.createElection.descriptionPlaceholder')" />
           </div>
           <div>
-            <label class="block text-xs font-medium text-muted-foreground mb-1.5">Seats</label>
+            <label class="block text-xs font-medium text-muted-foreground mb-1.5">{{ $t('governance.detail.createElection.seatsLabel') }}</label>
             <input v-model.number="electionForm.seats" type="number" min="1" max="21" class="input w-full" />
           </div>
           <div class="flex justify-end gap-2 pt-2">
-            <AppButton variant="ghost" @click="showCreateElection = false">Cancel</AppButton>
-            <AppButton :loading="creatingElection" @click="createElection">Open Election</AppButton>
+            <AppButton variant="ghost" @click="showCreateElection = false">{{ $t('common.actions.cancel') }}</AppButton>
+            <AppButton :loading="creatingElection" @click="createElection">{{ $t('governance.detail.createElection.submit') }}</AppButton>
           </div>
         </div>
       </AppModal>
 
       <!-- ==================== CREATE PROPOSAL MODAL ==================== -->
-      <AppModal :open="showCreateProposal" title="Submit Proposal" @close="showCreateProposal = false">
+      <AppModal :open="showCreateProposal" :title="$t('governance.detail.createProposal.title')" @close="showCreateProposal = false">
         <div class="space-y-4">
           <p v-if="error" class="text-sm text-error">{{ error }}</p>
           <div>
-            <label class="block text-xs font-medium text-muted-foreground mb-1.5">Title</label>
-            <AppInput v-model="proposalForm.title" placeholder="e.g. Add NLP skills to taxonomy" />
+            <label class="block text-xs font-medium text-muted-foreground mb-1.5">{{ $t('governance.detail.createProposal.titleLabel') }}</label>
+            <AppInput v-model="proposalForm.title" :placeholder="$t('governance.detail.createProposal.titlePlaceholder')" />
           </div>
           <div>
-            <label class="block text-xs font-medium text-muted-foreground mb-1.5">Description</label>
-            <input v-model="proposalForm.description" class="input w-full" placeholder="Describe the proposed change..." />
+            <label class="block text-xs font-medium text-muted-foreground mb-1.5">{{ $t('governance.detail.createProposal.descriptionLabel') }}</label>
+            <input v-model="proposalForm.description" class="input w-full" :placeholder="$t('governance.detail.createProposal.descriptionPlaceholder')" />
           </div>
           <div>
-            <label class="block text-xs font-medium text-muted-foreground mb-1.5">Category</label>
+            <label class="block text-xs font-medium text-muted-foreground mb-1.5">{{ $t('governance.detail.createProposal.categoryLabel') }}</label>
             <select v-model="proposalForm.category" class="input w-full">
               <option v-for="cat in proposalCategories" :key="cat" :value="cat">{{ cat }}</option>
             </select>
           </div>
           <div class="flex justify-end gap-2 pt-2">
-            <AppButton variant="ghost" @click="showCreateProposal = false">Cancel</AppButton>
-            <AppButton :loading="creatingProposal" @click="createProposal">Submit Proposal</AppButton>
+            <AppButton variant="ghost" @click="showCreateProposal = false">{{ $t('common.actions.cancel') }}</AppButton>
+            <AppButton :loading="creatingProposal" @click="createProposal">{{ $t('governance.detail.createProposal.submit') }}</AppButton>
           </div>
         </div>
       </AppModal>

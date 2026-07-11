@@ -1,0 +1,206 @@
+{
+  "dashboard": {
+    "title": "讲师工作台",
+    "subtitle": "了解学习者在你各门课程中的表现，以及等待你审阅的内容。",
+    "inbox": "收件箱",
+    "compose": "+ 编写",
+    "statCourses": "课程与教程",
+    "statPublished": "已发布",
+    "statEnrollments": "报名人数",
+    "statPendingReviews": "等待审阅",
+    "colCourse": "课程",
+    "colStatus": "状态",
+    "colEnrolled": "已报名",
+    "colCompletion": "完成度",
+    "colAvgScore": "平均分",
+    "colReviews": "审阅",
+    "colLastActivity": "最近活动",
+    "emptyTitle": "还没有课程",
+    "emptyDesc": "构建你的第一门课程或教程，即可在此查看学习者活动。"
+  },
+  "myCourses": {
+    "title": "我的课程",
+    "subtitle": "你在此设备上构建的一切——草稿与已发布。",
+    "addCourse": "+ 课程",
+    "addTutorial": "+ 教程",
+    "emptyTitle": "还什么都没构建",
+    "emptyDesc": "使用编排器创建你的第一门课程或教程。",
+    "updated": "更新于 {date}"
+  },
+  "courseLearners": {
+    "eyebrow": "学习者进度",
+    "fallbackTitle": "课程",
+    "emptyTitle": "此设备上还没有报名",
+    "emptyDesc": "每位学习者的进度都存放在他们自己的设备上——此视图显示应用在这里发现的内容（报名和课堂提交）。",
+    "colLearner": "学习者",
+    "colStatus": "状态",
+    "colProgress": "进度",
+    "colAvgScore": "平均分",
+    "colTimeSpent": "花费时间",
+    "colLastActivity": "最近活动",
+    "localLearner": "本地学习者"
+  },
+  "inbox": {
+    "title": "收件箱",
+    "subtitle": "等待你审阅的学习者提交，以及待处理的教室加入申请。",
+    "tabAll": "全部",
+    "tabSubmissions": "提交作业",
+    "tabJoinRequests": "加入申请",
+    "emptyTitle": "全部处理完毕",
+    "emptyDesc": "没有内容等待你审阅。"
+  },
+  "submissionReview": {
+    "eyebrow": "作业审阅",
+    "title": "审阅提交",
+    "notFoundTitle": "未找到提交",
+    "notFoundDesc": "它可能已被审阅或已被移除。",
+    "from": "来自",
+    "submittedWork": "提交的作业",
+    "yourReview": "你的评阅",
+    "scoreLabel": "得分 — {percent}%",
+    "perSkillRatings": "各项技能评分",
+    "feedback": "反馈",
+    "feedbackPlaceholder": "哪里做得好，哪里需要改进…",
+    "postReview": "发布评阅",
+    "reviewed": "已审阅",
+    "finalScore": "得分："
+  },
+  "compose": {
+    "newCourse": "新建课程",
+    "newTutorial": "新建教程",
+    "courseIntro": "课程按章节组织，每一章包含视频、课时、小测验、测评和动手练习。",
+    "tutorialIntro": "教程是一条简短的单线课时——通常是一个带标记点的视频，外加一个可选的小测验。",
+    "titleLabel": "标题",
+    "titlePlaceholder": "例如：实用密码学",
+    "descriptionLabel": "简介",
+    "descriptionPlaceholder": "一段话的推介。",
+    "tagsLabel": "标签（用逗号分隔）",
+    "tagsPlaceholder": "例如：安全, 入门",
+    "createDraft": "创建草稿",
+    "needTitle": "请先给它起个标题。",
+    "editMeta": "编辑标题和简介",
+    "publish": "发布",
+    "beforePublish": "发布前",
+    "blockerNeedElement": "至少添加一个元素。",
+    "blockerUnboundPlugins": "无 | 还有 {count} 个插件元素需要选择插件 | 还有 {count} 个插件元素需要选择插件",
+    "publishedTitle": "你的课程已上线",
+    "publishedNote": "学习者现在就能找到并报名了。",
+    "fingerprintLabel": "内容指纹",
+    "sizeBytes": "无 | {count} 字节 | {count} 字节",
+    "nothingSelectedTitle": "未选择任何内容",
+    "nothingSelectedDesc": "从大纲中选择一个元素，或添加一个以开始构建。",
+    "confirmPublishTitle": "发布",
+    "confirmPublishMessage": "此操作将发布“{title}”，学习者可立即找到并报名。它由你签署，并直接分享给你的连接。",
+    "confirmDeleteTitle": "删除",
+    "confirmDeleteMessage": "此操作将永久删除该草稿及其所有章节和元素。无法撤销。",
+    "editDetails": "编辑详情",
+    "notFoundTitle": "未找到",
+    "notFoundDesc": "此课程或教程在你的设备上不存在。"
+  },
+  "outline": {
+    "elementTitlePlaceholder": "元素标题",
+    "chapterTitlePlaceholder": "章节标题",
+    "add": "添加",
+    "addChapter": "添加章节",
+    "addElement": "+ 添加元素",
+    "addChapterCta": "+ 添加章节"
+  },
+  "elementTypes": {
+    "video": "视频",
+    "text": "文本",
+    "pdf": "PDF",
+    "downloadable": "下载",
+    "quiz": "小测验",
+    "objectiveSingleMcq": "单选题",
+    "objectiveMultiMcq": "多选题",
+    "subjectiveMcq": "主观选择题",
+    "essay": "论述题",
+    "interactive": "互动",
+    "assessment": "测评",
+    "plugin": "插件"
+  },
+  "elementEditor": {
+    "deleteElement": "删除元素",
+    "titlePlaceholder": "元素标题",
+    "confirmDeleteTitle": "删除元素",
+    "confirmDeleteMessage": "此操作将从课程中移除该元素及其内容。无法撤销。"
+  },
+  "skillPicker": {
+    "searchPlaceholder": "搜索技能…",
+    "removeSkill": "移除 {name}",
+    "addSkill": "技能"
+  },
+  "editors": {
+    "shared": {
+      "uploaded": "已上传"
+    },
+    "video": {
+      "fileHeading": "视频文件",
+      "minutes": "{count} 分钟",
+      "reading": "正在读取 {size} MB…",
+      "saving": "正在保存到此设备…",
+      "uploadFailed": "上传失败：{error}",
+      "markersHeading": "章节标记点",
+      "addMarker": "+ 标记点",
+      "saveMarkers": "保存标记点",
+      "markersHint": "时间戳会成为视频下方可点击的导航。",
+      "markerTitlePlaceholder": "标记点标题",
+      "startSeconds": "起始（秒）"
+    },
+    "file": {
+      "pdfHeading": "PDF 文档",
+      "downloadHeading": "可下载文件",
+      "uploading": "正在上传…",
+      "uploadFailed": "上传失败：{error}"
+    },
+    "quiz": {
+      "questionsHeading": "题目",
+      "multiHint": "多个正确答案",
+      "singleHint": "一个正确答案",
+      "addQuestion": "+ 题目",
+      "saveQuiz": "保存小测验",
+      "empty": "还没有题目——添加第一道吧。",
+      "questionPlaceholder": "题目提示",
+      "removeQuestion": "移除题目",
+      "optionPlaceholder": "选项 {number}",
+      "correctAnswer": "正确答案",
+      "markCorrect": "标记为正确",
+      "removeOption": "移除选项",
+      "addOption": "+ 添加选项",
+      "errNeedQuestion": "至少添加一道题目。",
+      "errNoPrompt": "第 {number} 题没有题目提示。",
+      "errTooFewOptions": "第 {number} 题至少需要两个选项。",
+      "errNoCorrect": "第 {number} 题没有标记任何正确答案。"
+    },
+    "text": {
+      "heading": "课时正文（Markdown）",
+      "placeholder": "# 课时标题\n\n用 Markdown 撰写课时…"
+    },
+    "essay": {
+      "heading": "论述作业",
+      "promptLabel": "题目",
+      "promptPlaceholder": "学习者应就什么进行写作？",
+      "rubricLabel": "评分标准（审阅时向你展示，并事先向学习者展示）",
+      "rubricPlaceholder": "例如：论点清晰度（30%）、论据（40%）、结构（30%）",
+      "minWordsLabel": "最少字数（可选）",
+      "hint": "论述提交会进入你的讲师收件箱，供人工审阅和评分。",
+      "errNeedPrompt": "论述题需要一个题目。"
+    },
+    "json": {
+      "assessmentHeading": "测评定义（JSON）",
+      "interactiveHeading": "互动内容（JSON）",
+      "invalidJson": "无效的 JSON。",
+      "errFixJson": "保存前请修正 JSON。"
+    },
+    "plugin": {
+      "heading": "插件绑定",
+      "installedLabel": "已安装的插件",
+      "pickOption": "选择一个插件…",
+      "noneInstalled": "未安装已启用的插件——请到 设置 → 插件 中添加。",
+      "configLabel": "元素配置（初始化时传给插件的 JSON——例如 codejudge 题目定义）",
+      "invalidJson": "无效的 JSON。",
+      "errPickFirst": "请先选择一个插件。",
+      "errFixConfig": "保存前请修正配置 JSON。"
+    }
+  }
+}

@@ -10,7 +10,7 @@ const props = withDefaults(defineProps<{
   placement?: 'top' | 'bottom'
 }>(), {
   text: '',
-  label: 'More information',
+  label: '',
   placement: 'top',
 })
 
@@ -72,7 +72,7 @@ onUnmounted(() => {
       type="button"
       class="infotip-trigger"
       :class="{ 'infotip-trigger--active': open }"
-      :aria-label="label"
+      :aria-label="label || $t('common.infoTip.label')"
       :aria-expanded="open"
       :aria-describedby="popId"
       @mouseenter="show"

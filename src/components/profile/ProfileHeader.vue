@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import type { PublicProfile } from '@/types'
+
+const { t } = useI18n()
 
 const props = defineProps<{
   profile: PublicProfile
@@ -16,7 +19,7 @@ const props = defineProps<{
 defineEmits<{ edit: [] }>()
 
 const name = computed(
-  () => props.profile.display_name || props.profile.username || 'Unnamed',
+  () => props.profile.display_name || props.profile.username || t('profile.unnamed'),
 )
 const initial = computed(() => (name.value[0] ?? '?').toUpperCase())
 
@@ -64,10 +67,10 @@ async function copyDid() {
         </div>
         <div class="flex items-center gap-2">
           <span v-if="isOwn && visibility === 'private'" class="ph-vis ph-vis--private">
-            🔒 Private
+            🔒 {{ $t('profile.header.private') }}
           </span>
           <span v-else-if="isOwn" class="ph-vis ph-vis--public">
-            🌐 Public
+            🌐 {{ $t('profile.header.public') }}
           </span>
           <slot name="actions" />
         </div>
@@ -79,27 +82,35 @@ async function copyDid() {
         <span
           v-if="registry === 'anchored'"
           class="ph-reg ph-reg--anchored"
-          title="Username anchored on Cardano — the binding is verified on-chain"
-        >⛓ Verified</span>
+          :title="$t('profile.header.verifiedHint')"
+        >⛓ {{ $t('profile.header.verified') }}</span>
         <span
           v-else-if="registry === 'receipted'"
           class="ph-reg ph-reg--receipted"
-          title="Username registered with relay-countersigned first-seen receipts"
-        >✓ Registered</span>
+          :title="$t('profile.header.registeredHint')"
+        >✓ {{ $t('profile.header.registered') }}</span>
       </p>
 
       <p v-if="profile.bio" class="mt-3 max-w-prose text-sm text-foreground/85">
         {{ profile.bio }}
       </p>
 
-      <button
-        class="mt-3 inline-flex items-center gap-1 text-[0.65rem] text-muted-foreground hover:text-foreground"
-        :title="profile.did"
-        @click="copyDid"
-      >
-        <span class="max-w-[16rem] truncate font-mono">{{ profile.did }}</span>
-        <span>{{ copied ? '✓ copied' : '⧉' }}</span>
-      </button>
+      <details class="mt-3">
+        <summary class="cursor-pointer text-[0.65rem] text-muted-foreground hover:text-foreground">
+          {{ $t('common.advanced.toggle') }}
+        </summary>
+        <div class="mt-1.5 text-[0.65rem] text-muted-foreground">
+          <span class="mr-1">{{ $t('profile.header.publicId') }}</span>
+          <button
+            class="inline-flex items-center gap-1 hover:text-foreground"
+            :title="profile.did"
+            @click="copyDid"
+          >
+            <span class="max-w-[16rem] truncate font-mono">{{ profile.did }}</span>
+            <span>{{ copied ? $t('common.actions.copied') : '⧉' }}</span>
+          </button>
+        </div>
+      </details>
     </div>
   </div>
 </template>

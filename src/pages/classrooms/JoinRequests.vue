@@ -6,10 +6,10 @@
         :to="{ name: 'classroom', params: { id: classroomId } }"
         class="text-muted-foreground hover:text-foreground transition-colors"
       >
-        ← Back
+        ← {{ $t('common.actions.back') }}
       </RouterLink>
       <div>
-        <h1 class="text-xl font-bold text-foreground">Join Requests</h1>
+        <h1 class="text-xl font-bold text-foreground">{{ $t('classrooms.requests.title') }}</h1>
         <p class="text-sm text-muted-foreground">{{ currentClassroom?.name }}</p>
       </div>
     </div>
@@ -20,7 +20,7 @@
         <div class="w-16 h-16 rounded-2xl bg-success/10 flex items-center justify-center text-3xl mb-4">
           ✅
         </div>
-        <p class="text-muted-foreground text-sm">No pending join requests</p>
+        <p class="text-muted-foreground text-sm">{{ $t('classrooms.requests.empty') }}</p>
       </div>
 
       <!-- Requests list -->
@@ -55,7 +55,7 @@
               :disabled="processing === req.id"
               @click="handleDeny(req)"
             >
-              Deny
+              {{ $t('classrooms.requests.deny') }}
             </AppButton>
             <AppButton
               variant="primary"
@@ -64,7 +64,7 @@
               :loading="processing === req.id"
               @click="handleApprove(req)"
             >
-              Approve
+              {{ $t('classrooms.requests.approve') }}
             </AppButton>
           </div>
         </div>

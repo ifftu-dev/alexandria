@@ -6,6 +6,7 @@ import MobileTabBar from '@/components/layout/MobileTabBar.vue'
 import TutoringPiP from '@/components/layout/TutoringPiP.vue'
 import OmniSearch from '@/components/omni/OmniSearch.vue'
 import CourseCompletionModal from '@/components/course/CourseCompletionModal.vue'
+import UnreviewedLocaleBanner from '@/components/i18n/UnreviewedLocaleBanner.vue'
 import { usePlatform } from '@/composables/usePlatform'
 import { useMode } from '@/composables/useMode'
 import { useAccountStatus } from '@/composables/useAccountStatus'
@@ -99,6 +100,9 @@ function toggleSidebar() {
   >
     <!-- Topbar — spans full width above everything -->
     <AppTopBar :sidebar-collapsed="sidebarCollapsed" @toggle-sidebar="toggleSidebar" />
+
+    <!-- Machine-translation review notice for unreviewed locales -->
+    <UnreviewedLocaleBanner />
 
     <!-- Below topbar: sidebar + content side by side -->
     <div class="flex flex-1 overflow-hidden">

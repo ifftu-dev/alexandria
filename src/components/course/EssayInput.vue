@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { AppButton } from '@/components/ui'
 import type { ElementSubmissionRecord } from '@/types'
@@ -28,6 +29,7 @@ const emit = defineEmits<{
   (e: 'complete', score: number): void
 }>()
 
+const { t } = useI18n()
 const { invoke } = useLocalApi()
 const essay = ref<EssayContent | null>(null)
 const loading = ref(false)
@@ -76,11 +78,11 @@ const validationMessage = computed(() => {
   if (!essay.value) return null
   if (wordCountStatus.value === 'short') {
     const needed = minWords.value - wordCount.value
-    return `Your response needs at least ${needed} more word${needed !== 1 ? 's' : ''}`
+    return t('courses.essay.validationShort', { count: needed }, needed)
   }
   if (wordCountStatus.value === 'long') {
     const over = wordCount.value - maxWords.value
-    return `Your response is ${over} word${over !== 1 ? 's' : ''} over the limit`
+    return t('courses.essay.validationLong', { count: over }, over)
   }
   return null
 })
@@ -93,7 +95,7 @@ async function loadContent() {
       text.value = ''
       submitted.value = false
     } catch (e: unknown) {
-      error.value = `Failed to parse essay prompt: ${e}`
+      error.value = t('courses.essay.parseError', { error: String(e) })
       essay.value = null
     }
     return
@@ -109,7 +111,7 @@ async function loadContent() {
     text.value = ''
     submitted.value = false
   } catch (e: unknown) {
-    error.value = `Failed to load essay prompt: ${e}`
+    error.value = t('courses.essay.loadError', { error: String(e) })
     essay.value = null
   } finally {
     loading.value = false
@@ -216,14 +218,14 @@ watch(() => props.elementId, async () => {
 
     <!-- No content -->
     <div v-else-if="!essay" class="py-8 text-center text-sm text-muted-foreground">
-      No essay prompt available.
+      {{ $t('courses.essay.noPrompt') }}
     </div>
 
     <!-- Essay Content -->
     <div v-else class="space-y-5">
       <!-- Type badge -->
       <span class="inline-flex rounded-full bg-purple-100 px-2.5 py-0.5 text-xs font-medium text-purple-700 dark:bg-purple-900/30 dark:text-purple-400">
-        Written Response
+        {{ $t('courses.essay.writtenResponse') }}
       </span>
 
       <!-- Question -->
@@ -237,14 +239,14 @@ watch(() => props.elementId, async () => {
           <path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
         </svg>
         <div>
-          <p class="text-xs font-medium text-muted-foreground">Guidelines</p>
+          <p class="text-xs font-medium text-muted-foreground">{{ $t('courses.essay.guidelines') }}</p>
           <p class="mt-1 text-sm text-foreground">{{ essay.guidelines }}</p>
         </div>
       </div>
 
       <!-- Rubric criteria -->
       <div v-if="essay.rubric_criteria?.length" class="space-y-1.5">
-        <p class="text-xs font-medium text-muted-foreground">Assessment criteria</p>
+        <p class="text-xs font-medium text-muted-foreground">{{ $t('courses.essay.criteria') }}</p>
         <ul class="space-y-1">
           <li v-for="(criterion, idx) in essay.rubric_criteria" :key="idx" class="flex items-start gap-2 text-sm text-foreground">
             <svg class="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -260,7 +262,7 @@ watch(() => props.elementId, async () => {
         <textarea
           v-model="text"
           rows="12"
-          :placeholder="submitted ? '' : 'Write your response here...'"
+          :placeholder="submitted ? '' : t('courses.essay.placeholder')"
           :disabled="submitted"
           class="w-full resize-y rounded-lg border border-border bg-background px-4 py-3 text-sm text-foreground placeholder-muted-foreground/50 transition-colors focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-60"
           @input="onInput"
@@ -270,17 +272,17 @@ watch(() => props.elementId, async () => {
         <div class="flex items-center justify-between text-xs">
           <div class="flex items-center gap-4">
             <span :class="wordCountColor">
-              {{ wordCount }} word{{ wordCount !== 1 ? 's' : '' }}
+              {{ $t('courses.essay.wordsCount', { count: wordCount }, wordCount) }}
               <template v-if="minWords || (maxWords && maxWords !== Infinity)">
                 <span class="text-muted-foreground">
-                  ({{ minWords ? `min ${minWords}` : '' }}{{ minWords && maxWords && maxWords !== Infinity ? ', ' : '' }}{{ maxWords && maxWords !== Infinity ? `max ${maxWords}` : '' }})
+                  ({{ minWords ? $t('courses.essay.minHint', { count: minWords }) : '' }}{{ minWords && maxWords && maxWords !== Infinity ? ', ' : '' }}{{ maxWords && maxWords !== Infinity ? $t('courses.essay.maxHint', { count: maxWords }) : '' }})
                 </span>
               </template>
             </span>
-            <span class="text-muted-foreground">{{ charCount }} characters</span>
+            <span class="text-muted-foreground">{{ $t('courses.essay.charactersCount', { count: charCount }, charCount) }}</span>
           </div>
-          <span v-if="saving" class="text-muted-foreground">Saving...</span>
-          <span v-else-if="lastSaved" class="text-muted-foreground">Saved at {{ lastSaved }}</span>
+          <span v-if="saving" class="text-muted-foreground">{{ $t('courses.essay.saving') }}</span>
+          <span v-else-if="lastSaved" class="text-muted-foreground">{{ $t('courses.essay.savedAt', { time: lastSaved }) }}</span>
         </div>
 
         <!-- Validation message -->
@@ -295,7 +297,7 @@ watch(() => props.elementId, async () => {
           <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
         </svg>
         <p class="text-sm text-emerald-800 dark:text-emerald-300">
-          Your response has been submitted and will be reviewed.
+          {{ $t('courses.essay.submittedBanner') }}
         </p>
       </div>
 
@@ -305,7 +307,7 @@ watch(() => props.elementId, async () => {
           :disabled="!canSubmit"
           @click="submitEssay"
         >
-          Submit Response
+          {{ $t('courses.essay.submitResponse') }}
         </AppButton>
       </div>
     </div>

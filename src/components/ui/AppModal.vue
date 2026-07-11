@@ -70,7 +70,7 @@ watch(() => props.open, (val) => {
               <button
                 class="p-1 rounded-md text-muted-foreground hover:bg-muted/50 transition-colors"
                 @click="emit('close')"
-                aria-label="Close"
+                :aria-label="$t('common.actions.close')"
               >
                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />

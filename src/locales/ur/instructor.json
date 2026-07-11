@@ -1,0 +1,206 @@
+{
+  "dashboard": {
+    "title": "استاد ڈیش بورڈ",
+    "subtitle": "آپ کے کورسز میں سیکھنے والے کیسا کر رہے ہیں، اور آپ کے جائزے کا کیا انتظار کر رہا ہے۔",
+    "inbox": "ان باکس",
+    "compose": "+ تشکیل دیں",
+    "statCourses": "کورسز اور ٹیوٹوریلز",
+    "statPublished": "شائع شدہ",
+    "statEnrollments": "داخلے",
+    "statPendingReviews": "جائزے کا انتظار",
+    "colCourse": "کورس",
+    "colStatus": "حالت",
+    "colEnrolled": "داخل شدہ",
+    "colCompletion": "تکمیل",
+    "colAvgScore": "اوسط اسکور",
+    "colReviews": "جائزے",
+    "colLastActivity": "آخری سرگرمی",
+    "emptyTitle": "ابھی کوئی کورس نہیں",
+    "emptyDesc": "سیکھنے والوں کی سرگرمی یہاں دیکھنے کے لیے اپنا پہلا کورس یا ٹیوٹوریل بنائیں۔"
+  },
+  "myCourses": {
+    "title": "میرے کورسز",
+    "subtitle": "جو کچھ آپ نے اس آلے پر بنایا — مسودے اور شائع شدہ۔",
+    "addCourse": "+ کورس",
+    "addTutorial": "+ ٹیوٹوریل",
+    "emptyTitle": "ابھی کچھ نہیں بنایا",
+    "emptyDesc": "کمپوزر سے اپنا پہلا کورس یا ٹیوٹوریل بنائیں۔",
+    "updated": "{date} کو تازہ کیا گیا"
+  },
+  "courseLearners": {
+    "eyebrow": "سیکھنے والوں کی پیشرفت",
+    "fallbackTitle": "کورس",
+    "emptyTitle": "اس آلے پر ابھی کوئی رجسٹریشن نہیں",
+    "emptyDesc": "ہر سیکھنے والے کی پیشرفت اس کے اپنے آلے پر رہتی ہے — یہ منظر وہ دکھاتا ہے جو ایپ کو یہاں ملا (رجسٹریشنز اور کلاس میں جمع کرائے گئے کام)۔",
+    "colLearner": "سیکھنے والا",
+    "colStatus": "حالت",
+    "colProgress": "پیشرفت",
+    "colAvgScore": "اوسط اسکور",
+    "colTimeSpent": "صرف کردہ وقت",
+    "colLastActivity": "آخری سرگرمی",
+    "localLearner": "مقامی سیکھنے والا"
+  },
+  "inbox": {
+    "title": "ان باکس",
+    "subtitle": "سیکھنے والوں کے جمع کرائے گئے کام جو آپ کے جائزے کے منتظر ہیں، اور زیرِ التوا کلاس روم شمولیت درخواستیں۔",
+    "tabAll": "سب",
+    "tabSubmissions": "جمع کرائے گئے",
+    "tabJoinRequests": "شمولیت درخواستیں",
+    "emptyTitle": "سب مکمل",
+    "emptyDesc": "آپ کے جائزے کا کوئی انتظار نہیں کر رہا۔"
+  },
+  "submissionReview": {
+    "eyebrow": "جمع کردہ کام کا جائزہ",
+    "title": "جمع کردہ کام کا جائزہ لیں",
+    "notFoundTitle": "جمع کردہ کام نہیں ملا",
+    "notFoundDesc": "اس کا جائزہ پہلے ہی لیا جا چکا ہو گا یا اسے ہٹا دیا گیا ہو گا۔",
+    "from": "طرف سے",
+    "submittedWork": "جمع کردہ کام",
+    "yourReview": "آپ کا جائزہ",
+    "scoreLabel": "اسکور — {percent}%",
+    "perSkillRatings": "فی مہارت درجہ بندی",
+    "feedback": "رائے",
+    "feedbackPlaceholder": "کیا مضبوط تھا، کیا بہتر کرنا ہے…",
+    "postReview": "جائزہ شائع کریں",
+    "reviewed": "جائزہ لیا گیا",
+    "finalScore": "اسکور:"
+  },
+  "compose": {
+    "newCourse": "نیا کورس",
+    "newTutorial": "نیا ٹیوٹوریل",
+    "courseIntro": "کورس ابواب میں منظم ہوتا ہے، ہر ایک میں ویڈیوز، اسباق، کوئزز، تشخیصات اور عملی مشقیں ہوتی ہیں۔",
+    "tutorialIntro": "ٹیوٹوریل ایک مختصر واحد ٹریک سبق ہوتا ہے — عام طور پر مارکرز والی ایک ویڈیو اور ایک اختیاری کوئز۔",
+    "titleLabel": "عنوان",
+    "titlePlaceholder": "مثلاً، عملی خفیہ نگاری",
+    "descriptionLabel": "تفصیل",
+    "descriptionPlaceholder": "ایک پیراگراف کا تعارف۔",
+    "tagsLabel": "ٹیگز (کاما سے جدا)",
+    "tagsPlaceholder": "مثلاً، سیکیورٹی، مبتدی",
+    "createDraft": "مسودہ بنائیں",
+    "needTitle": "پہلے اسے ایک عنوان دیں۔",
+    "editMeta": "عنوان اور تفصیل میں ترمیم کریں",
+    "publish": "شائع کریں",
+    "beforePublish": "شائع کرنے سے پہلے",
+    "blockerNeedElement": "کم از کم ایک عنصر شامل کریں۔",
+    "blockerUnboundPlugins": "کوئی نہیں | {count} پلگ ان عنصر کو ابھی ایک پلگ ان کے انتخاب کی ضرورت ہے | {count} پلگ ان عناصر کو ابھی ایک پلگ ان کے انتخاب کی ضرورت ہے",
+    "publishedTitle": "آپ کا کورس لائیو ہے",
+    "publishedNote": "سیکھنے والے اب اسے تلاش کر کے داخلہ لے سکتے ہیں۔",
+    "fingerprintLabel": "مواد کا فنگر پرنٹ",
+    "sizeBytes": "کوئی نہیں | {count} بائٹ | {count} بائٹس",
+    "nothingSelectedTitle": "کچھ منتخب نہیں",
+    "nothingSelectedDesc": "خاکے سے ایک عنصر منتخب کریں، یا بنانا شروع کرنے کے لیے ایک شامل کریں۔",
+    "confirmPublishTitle": "شائع کریں",
+    "confirmPublishMessage": "یہ '{title}' شائع کرتا ہے تاکہ سیکھنے والے فوراً اسے تلاش کر کے داخلہ لے سکیں۔ یہ آپ کے دستخط شدہ ہے اور براہِ راست آپ کے رابطوں کے ساتھ شیئر کیا جاتا ہے۔",
+    "confirmDeleteTitle": "حذف کریں",
+    "confirmDeleteMessage": "یہ مسودے اور اس کے تمام ابواب اور عناصر کو مستقل طور پر حذف کر دیتا ہے۔ یہ واپس نہیں ہو سکتا۔",
+    "editDetails": "تفصیلات میں ترمیم کریں",
+    "notFoundTitle": "نہیں ملا",
+    "notFoundDesc": "یہ کورس یا ٹیوٹوریل اس آلے پر موجود نہیں ہے۔"
+  },
+  "outline": {
+    "elementTitlePlaceholder": "عنصر کا عنوان",
+    "chapterTitlePlaceholder": "باب کا عنوان",
+    "add": "شامل کریں",
+    "addChapter": "باب شامل کریں",
+    "addElement": "+ عنصر شامل کریں",
+    "addChapterCta": "+ باب شامل کریں"
+  },
+  "elementTypes": {
+    "video": "ویڈیو",
+    "text": "متن",
+    "pdf": "PDF",
+    "downloadable": "ڈاؤن لوڈ",
+    "quiz": "کوئز",
+    "objectiveSingleMcq": "واحد MCQ",
+    "objectiveMultiMcq": "متعدد MCQ",
+    "subjectiveMcq": "موضوعی MCQ",
+    "essay": "مضمون",
+    "interactive": "متعامل",
+    "assessment": "تشخیص",
+    "plugin": "پلگ ان"
+  },
+  "elementEditor": {
+    "deleteElement": "عنصر حذف کریں",
+    "titlePlaceholder": "عنصر کا عنوان",
+    "confirmDeleteTitle": "عنصر حذف کریں",
+    "confirmDeleteMessage": "یہ عنصر اور اس کے مواد کو کورس سے ہٹا دیتا ہے۔ یہ واپس نہیں ہو سکتا۔"
+  },
+  "skillPicker": {
+    "searchPlaceholder": "مہارتیں تلاش کریں…",
+    "removeSkill": "{name} ہٹا دیں",
+    "addSkill": "مہارت"
+  },
+  "editors": {
+    "shared": {
+      "uploaded": "اپ لوڈ ہو گیا"
+    },
+    "video": {
+      "fileHeading": "ویڈیو فائل",
+      "minutes": "{count} منٹ",
+      "reading": "{size} MB پڑھا جا رہا ہے…",
+      "saving": "اس آلے پر محفوظ کیا جا رہا ہے…",
+      "uploadFailed": "اپ لوڈ ناکام: {error}",
+      "markersHeading": "باب کے مارکرز",
+      "addMarker": "+ مارکر",
+      "saveMarkers": "مارکرز محفوظ کریں",
+      "markersHint": "ٹائم اسٹیمپس ویڈیو کے نیچے قابلِ کلک نیویگیشن بن جاتے ہیں۔",
+      "markerTitlePlaceholder": "مارکر کا عنوان",
+      "startSeconds": "آغاز (سیکنڈ)"
+    },
+    "file": {
+      "pdfHeading": "PDF دستاویز",
+      "downloadHeading": "قابلِ ڈاؤن لوڈ فائل",
+      "uploading": "اپ لوڈ ہو رہا ہے…",
+      "uploadFailed": "اپ لوڈ ناکام: {error}"
+    },
+    "quiz": {
+      "questionsHeading": "سوالات",
+      "multiHint": "متعدد درست جوابات",
+      "singleHint": "ایک درست جواب",
+      "addQuestion": "+ سوال",
+      "saveQuiz": "کوئز محفوظ کریں",
+      "empty": "ابھی کوئی سوال نہیں — پہلا شامل کریں۔",
+      "questionPlaceholder": "سوال کی ہدایت",
+      "removeQuestion": "سوال ہٹا دیں",
+      "optionPlaceholder": "آپشن {number}",
+      "correctAnswer": "درست جواب",
+      "markCorrect": "درست کے طور پر نشان زد کریں",
+      "removeOption": "آپشن ہٹا دیں",
+      "addOption": "+ آپشن شامل کریں",
+      "errNeedQuestion": "کم از کم ایک سوال شامل کریں۔",
+      "errNoPrompt": "سوال {number} میں کوئی ہدایت نہیں ہے۔",
+      "errTooFewOptions": "سوال {number} کو کم از کم دو آپشنز درکار ہیں۔",
+      "errNoCorrect": "سوال {number} میں کوئی درست جواب نشان زد نہیں ہے۔"
+    },
+    "text": {
+      "heading": "سبق کا متن (مارک ڈاؤن)",
+      "placeholder": "# سبق کا عنوان\n\nسبق کو مارک ڈاؤن میں لکھیں…"
+    },
+    "essay": {
+      "heading": "مضمون کی تفویض",
+      "promptLabel": "ہدایت",
+      "promptPlaceholder": "سیکھنے والے کو کس بارے میں لکھنا چاہیے؟",
+      "rubricLabel": "درجہ بندی کا معیار (جائزہ لیتے وقت آپ کو، اور سیکھنے والے کو پہلے ہی دکھایا جاتا ہے)",
+      "rubricPlaceholder": "مثلاً، مقالے کی وضاحت (30%)، شواہد (40%)، ساخت (30%)",
+      "minWordsLabel": "کم از کم الفاظ (اختیاری)",
+      "hint": "مضمون کے جمع کرائے گئے کام دستی جائزے اور اسکورنگ کے لیے آپ کے استاد ان باکس میں آتے ہیں۔",
+      "errNeedPrompt": "مضمون کو ایک ہدایت درکار ہے۔"
+    },
+    "json": {
+      "assessmentHeading": "تشخیص کی تعریف (JSON)",
+      "interactiveHeading": "متعامل مواد (JSON)",
+      "invalidJson": "غلط JSON۔",
+      "errFixJson": "محفوظ کرنے سے پہلے JSON ٹھیک کریں۔"
+    },
+    "plugin": {
+      "heading": "پلگ ان بائنڈنگ",
+      "installedLabel": "نصب شدہ پلگ ان",
+      "pickOption": "ایک پلگ ان منتخب کریں…",
+      "noneInstalled": "کوئی فعال پلگ ان نصب نہیں — ترتیبات → پلگ انز کے تحت ایک شامل کریں۔",
+      "configLabel": "عنصر کنفیگ (آغاز پر پلگ ان کو دیا گیا JSON — مثلاً codejudge مسئلے کی تعریف)",
+      "invalidJson": "غلط JSON۔",
+      "errPickFirst": "پہلے ایک پلگ ان منتخب کریں۔",
+      "errFixConfig": "محفوظ کرنے سے پہلے کنفیگ JSON ٹھیک کریں۔"
+    }
+  }
+}

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 
 import Starfield from '@/components/auth/Starfield.vue'
 import AddProfileTile from '@/components/profile/AddProfileTile.vue'
@@ -15,6 +16,7 @@ import {
 } from '@/composables/useBiometricVault'
 
 const router = useRouter()
+const { t } = useI18n()
 const { profiles, refreshProfiles, unlockProfile } = useProfiles()
 
 const selectedId = ref<string | null>(null)
@@ -36,11 +38,11 @@ const biometricEnabled = computed(() => biometricAvailable.value && selectedHasC
 // emit progress events yet, so we cycle through expected stages on a
 // timer — gives the user a sense of motion instead of a frozen spinner.
 const UNLOCK_STAGES: { at: number; msg: string }[] = [
-  { at: 0, msg: 'Decrypting your vault…' },
-  { at: 1200, msg: 'Loading your profile…' },
-  { at: 2500, msg: 'Opening the local database…' },
-  { at: 4500, msg: 'Spinning up the local node…' },
-  { at: 7000, msg: 'Almost there — taking a bit longer than usual…' },
+  { at: 0, msg: t('onboarding.profileSelect.stageDecrypting') },
+  { at: 1200, msg: t('onboarding.profileSelect.stageLoadingProfile') },
+  { at: 2500, msg: t('onboarding.profileSelect.stageOpeningData') },
+  { at: 4500, msg: t('onboarding.profileSelect.stageStartingApp') },
+  { at: 7000, msg: t('onboarding.profileSelect.stageAlmostThere') },
 ]
 let unlockStageTimers: number[] = []
 function startUnlockStages() {
@@ -133,7 +135,7 @@ async function onUnlock() {
   startUnlockStages()
   try {
     await unlockProfile(selectedId.value, password.value)
-    unlockStatus.value = 'Welcome back — taking you home…'
+    unlockStatus.value = t('onboarding.profileSelect.welcomeBack')
     // Blur the password field *before* navigating away. On macOS a focused
     // password input holds Secure Event Input on; WKWebView can leak that
     // state if the field unmounts while focused, which suppresses global
@@ -168,11 +170,11 @@ async function unlockWithBiometric(auto = false) {
     if (!auto) {
       const msg = e instanceof Error ? e.message : String(e)
       if (/itemnotfound|not found/i.test(msg)) {
-        error.value = 'Biometric unlock isn’t set up yet. Unlock once with your password to enable it.'
+        error.value = t('onboarding.profileSelect.biometricNotSetup')
       } else if (/-34018/.test(msg)) {
-        error.value = 'Biometric keychain is unavailable in this build (entitlement -34018). Use a signed build.'
+        error.value = t('onboarding.profileSelect.biometricUnavailable')
       } else if (!/cancel/i.test(msg)) {
-        error.value = `Biometric unlock failed: ${msg}`
+        error.value = t('onboarding.profileSelect.biometricFailed', { error: msg })
       }
     }
     biometricLoading.value = false
@@ -186,7 +188,7 @@ async function unlockWithBiometric(auto = false) {
   startUnlockStages()
   try {
     await unlockProfile(profileId, vaultPassword)
-    unlockStatus.value = 'Welcome back — taking you home…'
+    unlockStatus.value = t('onboarding.profileSelect.welcomeBack')
     // See onUnlock: release Secure Event Input before unmounting.
     passwordInput.value?.blur()
     router.replace('/home')
@@ -194,7 +196,7 @@ async function unlockWithBiometric(auto = false) {
     // Stored credential was rejected by the vault. Drop to the password
     // form; only nag on a deliberate tap.
     if (!auto) {
-      error.value = 'Biometric password didn’t match this profile. Enter your password.'
+      error.value = t('onboarding.profileSelect.biometricMismatch')
     }
     password.value = ''
     await nextTick()
@@ -222,9 +224,9 @@ function onKeydown(event: KeyboardEvent) {
 
     <div class="w-full max-w-3xl relative z-10">
       <header class="text-center mb-12">
-        <h1 class="text-3xl font-semibold text-foreground">Who's learning today?</h1>
+        <h1 class="text-3xl font-semibold text-foreground">{{ $t('onboarding.profileSelect.heading') }}</h1>
         <p class="text-muted-foreground mt-2">
-          Pick a profile to continue, or add a new one.
+          {{ $t('onboarding.profileSelect.subtitle') }}
         </p>
       </header>
 
@@ -261,7 +263,7 @@ function onKeydown(event: KeyboardEvent) {
               {{ selectedProfile.display_name }}
             </div>
             <div class="text-xs text-muted-foreground mt-1">
-              Enter password to continue
+              {{ $t('onboarding.profileSelect.enterPassword') }}
             </div>
           </div>
 
@@ -270,7 +272,7 @@ function onKeydown(event: KeyboardEvent) {
               ref="passwordInput"
               v-model="password"
               type="password"
-              placeholder="Vault password"
+              :placeholder="$t('onboarding.profileSelect.passwordPlaceholder')"
               :error="error ?? ''"
               :disabled="unlocking"
             />
@@ -297,7 +299,7 @@ function onKeydown(event: KeyboardEvent) {
                 :disabled="unlocking"
                 @click="onBack"
               >
-                Back
+                {{ $t('common.actions.back') }}
               </AppButton>
               <AppButton
                 type="submit"
@@ -305,7 +307,7 @@ function onKeydown(event: KeyboardEvent) {
                 :disabled="unlocking || password.length === 0"
                 class="flex-1"
               >
-                Unlock
+                {{ $t('onboarding.profileSelect.unlock') }}
               </AppButton>
             </div>
 
@@ -321,7 +323,7 @@ function onKeydown(event: KeyboardEvent) {
               <svg class="mr-1.5 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M12 11c-1.1 0-2 .9-2 2v1m4-3c1.1 0 2 .9 2 2v2m-9-5a7 7 0 0110 0M5 8a10 10 0 0114 0M9 19c-.5-1-1-2.2-1-4m8 3a14 14 0 00.5-5" />
               </svg>
-              Unlock with biometrics
+              {{ $t('onboarding.profileSelect.unlockBiometric') }}
             </AppButton>
           </form>
         </div>

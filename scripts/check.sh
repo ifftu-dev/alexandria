@@ -43,6 +43,7 @@ fi
 
 cd "$ROOT"
 step "tauri command guard" node scripts/check-tauri-commands.mjs
+step "i18n catalog parity" node scripts/i18n/check-parity.mjs
 step "vue-tsc type-check" npx vue-tsc -b --noEmit
 step "frontend tests (vitest)" npm test
 

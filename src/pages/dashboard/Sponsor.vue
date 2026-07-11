@@ -7,20 +7,22 @@
  * candidates from a completed integrity session.
  */
 import { ref, computed, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { AppButton, AppBadge, AppModal, AppInput, AppTextarea, AppTabs, EmptyState, AppAlert } from '@/components/ui'
 import { useSponsor } from '@/composables/useSponsor'
 import { useAuth } from '@/composables/useAuth'
 import type { IssuancePolicy, VerifiableCredential } from '@/types'
 
+const { t } = useI18n()
 const sponsor = useSponsor()
 const { stakeAddress } = useAuth()
 
 const tab = ref<'orgs' | 'roles' | 'issue'>('orgs')
-const tabs = [
-  { key: 'orgs', label: 'Organizations' },
-  { key: 'roles', label: 'Role Assessments' },
-  { key: 'issue', label: 'Issue Credential' },
-]
+const tabs = computed(() => [
+  { key: 'orgs', label: t('dashboard.sponsor.tabs.orgs') },
+  { key: 'roles', label: t('dashboard.sponsor.tabs.roles') },
+  { key: 'issue', label: t('dashboard.sponsor.tabs.issue') },
+])
 
 const ASSURANCE_LEVELS = ['local', 'anchored', 'high_assurance']
 
@@ -134,9 +136,9 @@ onMounted(async () => {
 <template>
   <div class="mx-auto max-w-4xl p-4">
     <div class="mb-4">
-      <h1 class="text-lg font-semibold text-foreground">Sponsor</h1>
+      <h1 class="text-lg font-semibold text-foreground">{{ $t('dashboard.sponsor.title') }}</h1>
       <p class="text-sm text-muted-foreground">
-        Define role-specific, job-description-based assessments and issue trusted credentials gated on assessment integrity.
+        {{ $t('dashboard.sponsor.subtitle') }}
       </p>
     </div>
 
@@ -147,16 +149,16 @@ onMounted(async () => {
     <!-- Organizations ------------------------------------------------- -->
     <section v-if="tab === 'orgs'">
       <div class="mb-3 flex justify-end">
-        <AppButton variant="primary" size="sm" @click="orgModalOpen = true">New Organization</AppButton>
+        <AppButton variant="primary" size="sm" @click="orgModalOpen = true">{{ $t('dashboard.sponsor.orgs.new') }}</AppButton>
       </div>
-      <EmptyState v-if="!sponsor.organizations.value.length" title="No organizations yet" description="Create one to start authoring role assessments." />
+      <EmptyState v-if="!sponsor.organizations.value.length" :title="$t('dashboard.sponsor.orgs.emptyTitle')" :description="$t('dashboard.sponsor.orgs.emptyBody')" />
       <div v-else class="grid gap-3">
         <div v-for="org in sponsor.organizations.value" :key="org.id" class="rounded-lg border border-border bg-card p-3">
           <div class="flex items-center justify-between">
             <span class="font-medium text-foreground">{{ org.name }}</span>
             <span class="font-mono text-xs text-muted-foreground">{{ org.id.slice(0, 12) }}</span>
           </div>
-          <p class="mt-1 truncate text-xs text-muted-foreground">owner: {{ org.owner_address }}</p>
+          <p class="mt-1 truncate text-xs text-muted-foreground">{{ $t('dashboard.sponsor.orgs.owner') }}: {{ org.owner_address }}</p>
         </div>
       </div>
     </section>
@@ -165,10 +167,10 @@ onMounted(async () => {
     <section v-else-if="tab === 'roles'">
       <div class="mb-3 flex justify-end">
         <AppButton variant="primary" size="sm" :disabled="!sponsor.organizations.value.length" @click="openRoleModal">
-          New Role Assessment
+          {{ $t('dashboard.sponsor.roles.new') }}
         </AppButton>
       </div>
-      <EmptyState v-if="!sponsor.roleAssessments.value.length" title="No role assessments" description="Author one against an organization." />
+      <EmptyState v-if="!sponsor.roleAssessments.value.length" :title="$t('dashboard.sponsor.roles.emptyTitle')" :description="$t('dashboard.sponsor.roles.emptyBody')" />
       <div v-else class="grid gap-3">
         <div v-for="ra in sponsor.roleAssessments.value" :key="ra.id" class="rounded-lg border border-border bg-card p-3">
           <div class="flex items-center justify-between">
@@ -181,15 +183,15 @@ onMounted(async () => {
             <AppBadge v-if="ra.required_assurance_level" :variant="assuranceTone(ra.required_assurance_level)">
               {{ ra.required_assurance_level }}
             </AppBadge>
-            <span v-if="ra.issuance_policy?.require_clean" class="text-muted-foreground">requires clean</span>
+            <span v-if="ra.issuance_policy?.require_clean" class="text-muted-foreground">{{ $t('dashboard.sponsor.roles.requiresClean') }}</span>
             <span v-if="ra.issuance_policy?.min_integrity != null" class="text-muted-foreground">
-              min integrity {{ ra.issuance_policy.min_integrity }}
+              {{ $t('dashboard.sponsor.roles.minIntegrity', { value: ra.issuance_policy.min_integrity }) }}
             </span>
             <span v-for="s in ra.skill_ids" :key="s" class="rounded bg-muted px-1.5 py-0.5 text-muted-foreground">{{ s }}</span>
           </div>
           <div class="mt-2 flex gap-2">
-            <AppButton v-if="ra.status === 'draft'" variant="ghost" size="sm" @click="sponsor.setRoleAssessmentStatus(ra.id, 'published')">Publish</AppButton>
-            <AppButton v-if="ra.status !== 'archived'" variant="ghost" size="sm" @click="sponsor.setRoleAssessmentStatus(ra.id, 'archived')">Archive</AppButton>
+            <AppButton v-if="ra.status === 'draft'" variant="ghost" size="sm" @click="sponsor.setRoleAssessmentStatus(ra.id, 'published')">{{ $t('dashboard.sponsor.roles.publish') }}</AppButton>
+            <AppButton v-if="ra.status !== 'archived'" variant="ghost" size="sm" @click="sponsor.setRoleAssessmentStatus(ra.id, 'archived')">{{ $t('dashboard.sponsor.roles.archive') }}</AppButton>
           </div>
         </div>
       </div>
@@ -198,72 +200,72 @@ onMounted(async () => {
     <!-- Issue --------------------------------------------------------- -->
     <section v-else>
       <div class="grid gap-3 rounded-lg border border-border bg-card p-4">
-        <label class="text-xs text-muted-foreground">Role assessment
+        <label class="text-xs text-muted-foreground">{{ $t('dashboard.sponsor.issue.roleLabel') }}
           <select v-model="issueForm.role_assessment_id" class="mt-1 w-full rounded-md border border-border bg-background p-2 text-sm">
-            <option value="">Select…</option>
+            <option value="">{{ $t('dashboard.sponsor.issue.selectPlaceholder') }}</option>
             <option v-for="ra in publishedRoles" :key="ra.id" :value="ra.id">{{ ra.role_title }} — {{ orgName_(ra.org_id) }}</option>
           </select>
         </label>
-        <AppInput v-model="issueForm.subject" label="Candidate DID" placeholder="did:key:z6Mk…" />
-        <AppInput v-model="issueForm.integrity_session_id" label="Integrity session id" placeholder="isess_…" />
+        <AppInput v-model="issueForm.subject" :label="$t('dashboard.sponsor.issue.candidateLabel')" placeholder="did:key:z6Mk…" />
+        <AppInput v-model="issueForm.integrity_session_id" :label="$t('dashboard.sponsor.issue.sessionLabel')" placeholder="isess_…" />
         <div>
           <AppButton variant="primary" size="sm" :disabled="issueBusy" @click="issue">
-            {{ issueBusy ? 'Issuing…' : 'Issue Role Credential' }}
+            {{ issueBusy ? $t('dashboard.sponsor.issue.submitting') : $t('dashboard.sponsor.issue.submit') }}
           </AppButton>
         </div>
         <AppAlert v-if="issueError" variant="error">{{ issueError }}</AppAlert>
         <div v-if="issueResult" class="rounded-md border border-emerald-300 bg-emerald-50 p-3 text-sm dark:border-emerald-800/40 dark:bg-emerald-900/20">
-          <p class="font-medium text-emerald-700 dark:text-emerald-400">Credential issued</p>
+          <p class="font-medium text-emerald-700 dark:text-emerald-400">{{ $t('dashboard.sponsor.issue.issued') }}</p>
           <p class="mt-1 font-mono text-xs break-all text-muted-foreground">{{ issueResult.id }}</p>
           <p v-if="issueResult.integrity" class="mt-1 text-xs text-muted-foreground">
-            assurance:
+            {{ $t('dashboard.sponsor.issue.assurance') }}
             <AppBadge :variant="assuranceTone(issueResult.integrity.assuranceLevel)">{{ issueResult.integrity.assuranceLevel }}</AppBadge>
-            · integrity {{ issueResult.integrity.integrityScore ?? 'n/a' }}
+            · {{ $t('dashboard.sponsor.issue.integrity', { value: issueResult.integrity.integrityScore ?? 'n/a' }) }}
           </p>
         </div>
       </div>
     </section>
 
     <!-- New org modal -->
-    <AppModal :open="orgModalOpen" title="New Organization" @close="orgModalOpen = false">
+    <AppModal :open="orgModalOpen" :title="$t('dashboard.sponsor.orgModal.title')" @close="orgModalOpen = false">
       <div class="grid gap-3">
-        <AppInput v-model="orgName" label="Name" placeholder="Acme Corp" />
+        <AppInput v-model="orgName" :label="$t('dashboard.sponsor.orgModal.nameLabel')" :placeholder="$t('dashboard.sponsor.orgModal.namePlaceholder')" />
         <div class="flex justify-end gap-2">
-          <AppButton variant="ghost" size="sm" @click="orgModalOpen = false">Cancel</AppButton>
-          <AppButton variant="primary" size="sm" :disabled="orgBusy || !orgName.trim()" @click="createOrg">Create</AppButton>
+          <AppButton variant="ghost" size="sm" @click="orgModalOpen = false">{{ $t('common.actions.cancel') }}</AppButton>
+          <AppButton variant="primary" size="sm" :disabled="orgBusy || !orgName.trim()" @click="createOrg">{{ $t('dashboard.sponsor.actions.create') }}</AppButton>
         </div>
       </div>
     </AppModal>
 
     <!-- New role assessment modal -->
-    <AppModal :open="roleModalOpen" title="New Role Assessment" @close="roleModalOpen = false">
+    <AppModal :open="roleModalOpen" :title="$t('dashboard.sponsor.roleModal.title')" @close="roleModalOpen = false">
       <div class="grid max-h-[70vh] gap-3 overflow-y-auto">
-        <label class="text-xs text-muted-foreground">Organization
+        <label class="text-xs text-muted-foreground">{{ $t('dashboard.sponsor.roleModal.orgLabel') }}
           <select v-model="roleForm.org_id" class="mt-1 w-full rounded-md border border-border bg-background p-2 text-sm">
             <option v-for="o in sponsor.organizations.value" :key="o.id" :value="o.id">{{ o.name }}</option>
           </select>
         </label>
-        <AppInput v-model="roleForm.role_title" label="Role title" placeholder="SRE L4" />
-        <AppTextarea v-model="roleForm.job_description" label="Job description" placeholder="Operate production at scale…" />
-        <AppInput v-model="roleForm.skill_ids" label="Skill ids (comma-separated)" placeholder="skill:sre, skill:linux" />
-        <p class="text-xs font-medium text-foreground">Issuance policy</p>
+        <AppInput v-model="roleForm.role_title" :label="$t('dashboard.sponsor.roleModal.roleTitleLabel')" :placeholder="$t('dashboard.sponsor.roleModal.roleTitlePlaceholder')" />
+        <AppTextarea v-model="roleForm.job_description" :label="$t('dashboard.sponsor.roleModal.jobLabel')" :placeholder="$t('dashboard.sponsor.roleModal.jobPlaceholder')" />
+        <AppInput v-model="roleForm.skill_ids" :label="$t('dashboard.sponsor.roleModal.skillsLabel')" placeholder="skill:sre, skill:linux" />
+        <p class="text-xs font-medium text-foreground">{{ $t('dashboard.sponsor.roleModal.policy') }}</p>
         <div class="grid grid-cols-3 gap-2">
-          <AppInput v-model="roleForm.min_integrity" label="Min integrity" placeholder="0.70" type="number" />
-          <AppInput v-model="roleForm.max_critical" label="Max critical" placeholder="0" type="number" />
-          <AppInput v-model="roleForm.max_warning" label="Max warning" placeholder="2" type="number" />
+          <AppInput v-model="roleForm.min_integrity" :label="$t('dashboard.sponsor.roleModal.minIntegrity')" placeholder="0.70" type="number" />
+          <AppInput v-model="roleForm.max_critical" :label="$t('dashboard.sponsor.roleModal.maxCritical')" placeholder="0" type="number" />
+          <AppInput v-model="roleForm.max_warning" :label="$t('dashboard.sponsor.roleModal.maxWarning')" placeholder="2" type="number" />
         </div>
         <label class="flex items-center gap-2 text-sm text-foreground">
-          <input v-model="roleForm.require_clean" type="checkbox" /> Require clean session
+          <input v-model="roleForm.require_clean" type="checkbox" /> {{ $t('dashboard.sponsor.roleModal.requireClean') }}
         </label>
-        <label class="text-xs text-muted-foreground">Required assurance level
+        <label class="text-xs text-muted-foreground">{{ $t('dashboard.sponsor.roleModal.assuranceLabel') }}
           <select v-model="roleForm.required_assurance_level" class="mt-1 w-full rounded-md border border-border bg-background p-2 text-sm">
-            <option value="">(none)</option>
+            <option value="">{{ $t('dashboard.sponsor.roleModal.assuranceNone') }}</option>
             <option v-for="l in ASSURANCE_LEVELS" :key="l" :value="l">{{ l }}</option>
           </select>
         </label>
         <div class="flex justify-end gap-2">
-          <AppButton variant="ghost" size="sm" @click="roleModalOpen = false">Cancel</AppButton>
-          <AppButton variant="primary" size="sm" :disabled="roleBusy || !roleForm.role_title.trim() || !roleForm.org_id" @click="createRole">Create</AppButton>
+          <AppButton variant="ghost" size="sm" @click="roleModalOpen = false">{{ $t('common.actions.cancel') }}</AppButton>
+          <AppButton variant="primary" size="sm" :disabled="roleBusy || !roleForm.role_title.trim() || !roleForm.org_id" @click="createRole">{{ $t('dashboard.sponsor.actions.create') }}</AppButton>
         </div>
       </div>
     </AppModal>

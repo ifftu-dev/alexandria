@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { AppBadge, AppButton, AppAlert } from '@/components/ui'
 import { useCredentials } from '@/composables/useCredentials'
 import type { VerifiableCredential, VerificationResult } from '@/types'
 
+const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const api = useCredentials()
@@ -28,7 +30,7 @@ onMounted(async () => {
     // Auto-verify on load — gives the user immediate signal.
     verification.value = (await api.verify(c)) ?? null
   } else {
-    error.value = api.error.value ?? `Credential ${credentialId.value} not found`
+    error.value = api.error.value ?? t('credentials.detail.notFound')
   }
   loading.value = false
 })
@@ -43,7 +45,7 @@ async function reverify() {
 async function revoke() {
   if (!credential.value?.id) return
   revoking.value = true
-  await api.revoke(credential.value.id, revokeReason.value || 'no reason given')
+  await api.revoke(credential.value.id, revokeReason.value || t('credentials.detail.revokeDefaultReason'))
   revoking.value = false
   showRevoke.value = false
   // Re-verify to surface the revoked flag.
@@ -55,7 +57,7 @@ function classOf(c: VerifiableCredential): string {
 }
 
 function back() {
-  router.push({ name: 'dashboard-credentials' })
+  router.push({ name: 'credentials' })
 }
 
 const decisionVariant = computed(() => {
@@ -67,7 +69,7 @@ const decisionVariant = computed(() => {
 <template>
   <div>
     <button class="mb-4 text-sm text-muted-foreground hover:text-foreground" @click="back">
-      ← Back to credentials
+      ← {{ $t('credentials.detail.back') }}
     </button>
 
     <div v-if="loading" class="animate-pulse rounded-xl bg-card shadow-sm p-6 h-64" />
@@ -79,124 +81,131 @@ const decisionVariant = computed(() => {
         <div class="min-w-0">
           <h1
             class="text-2xl font-bold text-foreground truncate"
-            :title="credential.id ?? '(no envelope id)'"
+            :title="credential.id ?? $t('credentials.detail.noId')"
           >
-            {{ credential.id ?? '(no envelope id)' }}
+            {{ credential.id ?? $t('credentials.detail.noId') }}
           </h1>
           <div class="mt-2 flex items-center gap-2">
             <AppBadge variant="primary">{{ classOf(credential) }}</AppBadge>
             <AppBadge :variant="decisionVariant">
-              {{ verification?.acceptance_decision ?? 'not yet verified' }}
+              {{ verification?.acceptance_decision ?? $t('credentials.detail.notVerified') }}
             </AppBadge>
           </div>
         </div>
         <div class="flex gap-2 flex-shrink-0">
           <AppButton variant="outline" :loading="verifying" @click="reverify">
-            Re-verify
+            {{ $t('credentials.detail.recheck') }}
           </AppButton>
-          <AppButton variant="danger" @click="showRevoke = true">Revoke</AppButton>
+          <AppButton variant="danger" @click="showRevoke = true">{{ $t('credentials.detail.revoke') }}</AppButton>
         </div>
       </div>
 
       <!-- Verification result panel -->
       <section v-if="verification" class="mb-6 rounded-xl bg-card shadow-sm p-6">
-        <h2 class="text-base font-semibold mb-3">Verification</h2>
+        <h2 class="text-base font-semibold mb-3">{{ $t('credentials.detail.proofTitle') }}</h2>
         <dl class="grid grid-cols-2 gap-3 sm:grid-cols-3 text-sm">
           <div>
-            <dt class="text-xs text-muted-foreground">Signature</dt>
+            <dt class="text-xs text-muted-foreground">{{ $t('credentials.detail.signature') }}</dt>
             <dd>
               <AppBadge :variant="verification.valid_signature ? 'success' : 'error'">
-                {{ verification.valid_signature ? 'valid' : 'invalid' }}
+                {{ verification.valid_signature ? $t('credentials.value.signed') : $t('credentials.value.notSigned') }}
               </AppBadge>
             </dd>
           </div>
           <div>
-            <dt class="text-xs text-muted-foreground">Issuer resolved</dt>
+            <dt class="text-xs text-muted-foreground">{{ $t('credentials.detail.issuerResolved') }}</dt>
             <dd>
               <AppBadge :variant="verification.issuer_resolved ? 'success' : 'error'">
-                {{ verification.issuer_resolved ? 'yes' : 'no' }}
+                {{ verification.issuer_resolved ? $t('credentials.value.yes') : $t('credentials.value.no') }}
               </AppBadge>
             </dd>
           </div>
           <div>
-            <dt class="text-xs text-muted-foreground">Subject bound</dt>
+            <dt class="text-xs text-muted-foreground">{{ $t('credentials.detail.subjectBound') }}</dt>
             <dd>
               <AppBadge :variant="verification.subject_bound ? 'success' : 'error'">
-                {{ verification.subject_bound ? 'yes' : 'no' }}
+                {{ verification.subject_bound ? $t('credentials.value.yes') : $t('credentials.value.no') }}
               </AppBadge>
             </dd>
           </div>
           <div>
-            <dt class="text-xs text-muted-foreground">Revoked</dt>
+            <dt class="text-xs text-muted-foreground">{{ $t('credentials.detail.revoked') }}</dt>
             <dd>
               <AppBadge :variant="verification.revoked ? 'error' : 'success'">
-                {{ verification.revoked ? 'yes' : 'no' }}
+                {{ verification.revoked ? $t('credentials.value.yes') : $t('credentials.value.no') }}
               </AppBadge>
             </dd>
           </div>
           <div>
-            <dt class="text-xs text-muted-foreground">Expired</dt>
+            <dt class="text-xs text-muted-foreground">{{ $t('credentials.detail.expired') }}</dt>
             <dd>
               <AppBadge :variant="verification.expired ? 'warning' : 'success'">
-                {{ verification.expired ? 'yes' : 'no' }}
+                {{ verification.expired ? $t('credentials.value.yes') : $t('credentials.value.no') }}
               </AppBadge>
             </dd>
           </div>
           <div>
-            <dt class="text-xs text-muted-foreground">Integrity anchored</dt>
+            <dt class="text-xs text-muted-foreground">{{ $t('credentials.detail.tamperProof') }}</dt>
             <dd>
               <AppBadge :variant="verification.integrity_anchored ? 'success' : 'secondary'">
-                {{ verification.integrity_anchored ? 'yes' : 'pending' }}
+                {{ verification.integrity_anchored ? $t('credentials.value.yes') : $t('credentials.value.pending') }}
               </AppBadge>
             </dd>
           </div>
         </dl>
         <p class="mt-3 text-xs text-muted-foreground">
-          Verified at {{ verification.verification_time }}
+          {{ $t('credentials.detail.verifiedAt', { time: verification.verification_time }) }}
         </p>
       </section>
 
       <!-- Integrity attestation (§ Integrity→VC bridge) -->
       <section v-if="credential.integrity" class="mb-6 rounded-xl bg-card shadow-sm p-6">
-        <h2 class="text-base font-semibold mb-3">Assessment integrity</h2>
+        <h2 class="text-base font-semibold mb-3">{{ $t('credentials.detail.integrityTitle') }}</h2>
         <div class="grid gap-2 text-sm">
           <div class="flex items-center justify-between">
-            <span class="text-muted-foreground">Assurance</span>
+            <span class="text-muted-foreground">{{ $t('credentials.detail.assurance') }}</span>
             <AppBadge :variant="credential.integrity.assuranceLevel === 'high_assurance' ? 'success' : credential.integrity.assuranceLevel === 'anchored' ? 'accent' : 'secondary'">
               {{ credential.integrity.assuranceLevel }}
             </AppBadge>
           </div>
           <div class="flex items-center justify-between">
-            <span class="text-muted-foreground">Session status</span>
+            <span class="text-muted-foreground">{{ $t('credentials.detail.status') }}</span>
             <span class="text-foreground">{{ credential.integrity.status }}</span>
           </div>
           <div class="flex items-center justify-between">
-            <span class="text-muted-foreground">Integrity score</span>
-            <span class="text-foreground">{{ credential.integrity.integrityScore ?? 'n/a' }}</span>
+            <span class="text-muted-foreground">{{ $t('credentials.detail.integrityScore') }}</span>
+            <span class="text-foreground">{{ credential.integrity.integrityScore ?? $t('credentials.detail.na') }}</span>
           </div>
           <div class="flex items-center justify-between">
-            <span class="text-muted-foreground">Flags</span>
-            <span class="text-foreground">{{ credential.integrity.criticalCount }} critical · {{ credential.integrity.warningCount }} warning</span>
+            <span class="text-muted-foreground">{{ $t('credentials.detail.flags') }}</span>
+            <span class="text-foreground">{{ $t('credentials.detail.flagsValue', { critical: credential.integrity.criticalCount, warning: credential.integrity.warningCount }) }}</span>
           </div>
-          <div v-if="credential.integrity.commitmentRoot" class="flex items-center justify-between gap-3">
-            <span class="text-muted-foreground">Commitment root</span>
-            <span class="truncate font-mono text-xs text-muted-foreground">{{ credential.integrity.commitmentRoot }}</span>
-          </div>
-          <div v-if="credential.integrity.anchorRef" class="flex items-center justify-between gap-3">
-            <span class="text-muted-foreground">Anchor</span>
-            <span class="truncate font-mono text-xs text-muted-foreground">{{ credential.integrity.anchorRef }}</span>
-          </div>
+          <details v-if="credential.integrity.commitmentRoot || credential.integrity.anchorRef">
+            <summary class="cursor-pointer text-muted-foreground">{{ $t('common.advanced.toggle') }}</summary>
+            <div class="mt-2 grid gap-2">
+              <div v-if="credential.integrity.commitmentRoot" class="flex items-center justify-between gap-3">
+                <span class="text-muted-foreground">{{ $t('credentials.detail.commitmentRoot') }}</span>
+                <span class="truncate font-mono text-xs text-muted-foreground">{{ credential.integrity.commitmentRoot }}</span>
+              </div>
+              <div v-if="credential.integrity.anchorRef" class="flex items-center justify-between gap-3">
+                <span class="text-muted-foreground">{{ $t('credentials.detail.publicRecord') }}</span>
+                <span class="truncate font-mono text-xs text-muted-foreground">{{ credential.integrity.anchorRef }}</span>
+              </div>
+            </div>
+          </details>
         </div>
         <p class="mt-3 text-xs text-muted-foreground">
-          Signed into the credential envelope — the issuer attests to these figures.
-          <span v-if="credential.integrity.assuranceLevel === 'local'">Local: device-reported.</span>
+          {{ $t('credentials.detail.integrityNote') }}
+          <span v-if="credential.integrity.assuranceLevel === 'local'">{{ $t('credentials.detail.integrityLocal') }}</span>
         </p>
       </section>
 
       <!-- Raw payload -->
       <section class="rounded-xl bg-card shadow-sm p-6">
-        <h2 class="text-base font-semibold mb-3">Raw credential</h2>
-        <pre class="max-h-96 overflow-auto rounded-md bg-muted/30 p-3 text-xs font-mono">{{ JSON.stringify(credential, null, 2) }}</pre>
+        <details>
+          <summary class="cursor-pointer text-base font-semibold">{{ $t('credentials.detail.fullDetails') }}</summary>
+          <pre class="mt-3 max-h-96 overflow-auto rounded-md bg-muted/30 p-3 text-xs font-mono">{{ JSON.stringify(credential, null, 2) }}</pre>
+        </details>
       </section>
 
       <!-- Revoke confirm -->
@@ -206,21 +215,19 @@ const decisionVariant = computed(() => {
         @click.self="showRevoke = false"
       >
         <div class="card p-6 w-full max-w-md">
-          <h2 class="text-base font-semibold mb-2">Revoke credential</h2>
+          <h2 class="text-base font-semibold mb-2">{{ $t('credentials.detail.revokeTitle') }}</h2>
           <p class="text-sm text-muted-foreground mb-4">
-            This flips the revocation bit in this issuer's status list.
-            Verifiers across the network will reject the credential once
-            the status list propagates.
+            {{ $t('credentials.detail.revokeBody') }}
           </p>
           <input
             v-model="revokeReason"
             class="input mb-4"
-            placeholder="Reason (optional)"
+            :placeholder="$t('credentials.detail.revokeReason')"
           />
           <div class="flex justify-end gap-2">
-            <AppButton variant="ghost" @click="showRevoke = false">Cancel</AppButton>
+            <AppButton variant="ghost" @click="showRevoke = false">{{ $t('common.actions.cancel') }}</AppButton>
             <AppButton variant="danger" :loading="revoking" @click="revoke">
-              Revoke
+              {{ $t('credentials.detail.revoke') }}
             </AppButton>
           </div>
         </div>

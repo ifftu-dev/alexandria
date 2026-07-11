@@ -18,6 +18,7 @@
  */
 
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useLocalApi } from '@/composables/useLocalApi'
 import PluginIframe from './PluginIframe.vue'
 import PermissionPrompt from './PermissionPrompt.vue'
@@ -51,6 +52,7 @@ const emit = defineEmits<{
   (e: 'scored-complete', score: number): void
 }>()
 
+const { t } = useI18n()
 const { invoke } = useLocalApi()
 
 const manifest = ref<PluginManifest | null>(null)
@@ -108,7 +110,7 @@ const grantedCapabilities = computed<PluginCapability[]>(() => {
 onMounted(async () => {
   void invoke('frontend_log', { message: `[PluginHost] onMounted pluginCid=${pluginCid.value || '<empty>'} elementId=${props.element.id}` })
   if (!pluginCid.value) {
-    loadError.value = 'This element references a plugin, but no plugin CID is set.'
+    loadError.value = t('plugins.host.noCid')
     loading.value = false
     return
   }
@@ -130,8 +132,7 @@ onMounted(async () => {
     }
     const installed = list.find((p) => p.plugin_cid === pluginCid.value)
     if (installed && !installed.enabled) {
-      refusalReason.value =
-        'This plugin is disabled. Re-enable it from Settings → Plugins to use it.'
+      refusalReason.value = t('plugins.host.disabled')
       manifest.value = m
       permissions.value = perms
       return
@@ -143,13 +144,12 @@ onMounted(async () => {
     // if the plugin declares no kinds at all (manifest validation should
     // have already caught that, but defense in depth).
     if (m.kinds.length === 0) {
-      refusalReason.value = 'This plugin declares no element kinds and cannot be mounted.'
+      refusalReason.value = t('plugins.host.noKinds')
     } else if (m.kinds.includes('graded') && !m.kinds.includes('interactive') && !m.grader) {
-      refusalReason.value =
-        'This plugin declares "graded" but no grader is attached. The author needs to publish a corrected manifest.'
+      refusalReason.value = t('plugins.host.noGrader')
     }
   } catch (e) {
-    loadError.value = `Failed to load plugin: ${e}`
+    loadError.value = t('plugins.host.loadFailed', { error: String(e) })
   } finally {
     loading.value = false
   }

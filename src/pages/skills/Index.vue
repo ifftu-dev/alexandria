@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { useSkillGraphHover } from '@/composables/useSkillGraphHover'
@@ -18,6 +19,7 @@ import { useGoals } from '@/composables/useGoals'
 import { BLOOM_ORDER, bloomBadge } from '@/utils/bloom'
 
 const { invoke } = useLocalApi()
+const { t } = useI18n()
 const router = useRouter()
 const { addGoal } = useGoals()
 
@@ -34,11 +36,11 @@ const selectedField = ref<string | null>(null)
 const selectedSubject = ref<string | null>(null)
 
 const activeTab = ref('graph')
-const tabs = [
-  { key: 'graph', label: 'My Graph' },
-  { key: 'browse', label: 'Browse Taxonomy' },
-  { key: 'credentials', label: 'My Credentials' },
-]
+const tabs = computed(() => [
+  { key: 'graph', label: t('skills.tabs.graph') },
+  { key: 'browse', label: t('skills.tabs.browse') },
+  { key: 'credentials', label: t('skills.tabs.credentials') },
+])
 
 onMounted(async () => {
   try {
@@ -273,16 +275,16 @@ onBeforeUnmount(() => {
     <!-- Header -->
     <div class="mb-8 flex items-start justify-between gap-4">
       <div>
-        <h1 class="text-3xl font-bold text-foreground">My Skill Graph</h1>
+        <h1 class="text-3xl font-bold text-foreground">{{ $t('skills.index.title') }}</h1>
         <p class="mt-2 text-muted-foreground">
-          Your personal skill progression graph derived from your proofs, unlocked skills, and prerequisite chains.
+          {{ $t('skills.index.subtitle') }}
         </p>
       </div>
       <button
         class="shrink-0 rounded-md border border-border px-3 py-2 text-sm font-medium text-foreground transition-colors hover:border-primary/50"
-        @click="router.push('/skills/bootstrap')"
+        @click="router.push('/skills/import')"
       >
-        + From resume
+        {{ $t('skills.index.fromResume') }}
       </button>
     </div>
 
@@ -324,7 +326,7 @@ onBeforeUnmount(() => {
             <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" />
             </svg>
-            Earned
+            {{ $t('skills.stats.earned') }}
           </p>
         </div>
         <div class="rounded-xl bg-card shadow-sm p-5 text-center">
@@ -333,7 +335,7 @@ onBeforeUnmount(() => {
             <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
             </svg>
-            Available
+            {{ $t('skills.stats.available') }}
           </p>
         </div>
         <div class="rounded-xl bg-card shadow-sm p-5 text-center">
@@ -342,7 +344,7 @@ onBeforeUnmount(() => {
             <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456z" />
             </svg>
-            Locked
+            {{ $t('skills.stats.locked') }}
           </p>
         </div>
         <div class="rounded-xl bg-card shadow-sm p-5 text-center">
@@ -351,7 +353,7 @@ onBeforeUnmount(() => {
             <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" />
             </svg>
-            Taxonomy Skills
+            {{ $t('skills.stats.total') }}
           </p>
         </div>
       </div>
@@ -365,7 +367,7 @@ onBeforeUnmount(() => {
         <input
           v-model="search"
           class="w-full rounded-lg border border-border bg-background px-4 py-2.5 text-sm text-foreground placeholder-muted-foreground/50 transition-colors focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
-          placeholder="Search skills by name, description, or level..."
+          :placeholder="$t('skills.browse.searchPlaceholder')"
         >
 
         <div v-if="totalSkills === 0" class="py-16 text-center">
@@ -374,9 +376,9 @@ onBeforeUnmount(() => {
               <path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
             </svg>
           </div>
-          <h3 class="text-lg font-semibold text-foreground">No skills in the taxonomy</h3>
+          <h3 class="text-lg font-semibold text-foreground">{{ $t('skills.browse.emptyTitle') }}</h3>
           <p class="mt-1 text-sm text-muted-foreground max-w-md mx-auto">
-            Skills are added through the governance taxonomy proposal workflow. Create a DAO, propose a taxonomy change, and ratify it to populate the skill graph.
+            {{ $t('skills.browse.emptyBody') }}
           </p>
         </div>
 
@@ -385,13 +387,13 @@ onBeforeUnmount(() => {
           <div class="w-full md:w-64 md:flex-shrink-0 space-y-3">
             <!-- Subject Fields -->
             <div class="rounded-xl bg-card shadow-sm p-4">
-              <p class="text-[10px] font-semibold text-muted-foreground mb-3 tracking-wider uppercase">Subject Fields</p>
+              <p class="text-[10px] font-semibold text-muted-foreground mb-3 tracking-wider uppercase">{{ $t('skills.browse.areas') }}</p>
               <button
                 v-if="selectedField"
                 class="w-full text-left text-xs px-2 py-1 mb-1 rounded-lg text-primary hover:bg-primary/10"
                 @click="selectField(null)"
               >
-                Show all
+                {{ $t('skills.browse.showAll') }}
               </button>
               <div
                 v-for="field in fields"
@@ -410,19 +412,19 @@ onBeforeUnmount(() => {
                 </div>
               </div>
               <p v-if="fields.length === 0" class="text-xs text-muted-foreground italic px-2">
-                No subject fields
+                {{ $t('skills.browse.noAreas') }}
               </p>
             </div>
 
             <!-- Subjects -->
             <div class="rounded-xl bg-card shadow-sm p-4">
-              <p class="text-[10px] font-semibold text-muted-foreground mb-3 tracking-wider uppercase">Subjects</p>
+              <p class="text-[10px] font-semibold text-muted-foreground mb-3 tracking-wider uppercase">{{ $t('skills.browse.topics') }}</p>
               <button
                 v-if="selectedSubject"
                 class="w-full text-left text-xs px-2 py-1 mb-1 rounded-lg text-primary hover:bg-primary/10"
                 @click="selectSubject(null)"
               >
-                Show all
+                {{ $t('skills.browse.showAll') }}
               </button>
               <div
                 v-for="subj in filteredSubjects"
@@ -439,13 +441,13 @@ onBeforeUnmount(() => {
                 </div>
               </div>
               <p v-if="filteredSubjects.length === 0" class="text-xs text-muted-foreground italic px-2">
-                No subjects{{ selectedField ? ' in this field' : '' }}
+                {{ selectedField ? $t('skills.browse.noTopicsInArea') : $t('skills.browse.noTopics') }}
               </p>
             </div>
 
             <!-- Bloom level legend -->
             <div class="rounded-xl bg-card shadow-sm p-4">
-              <p class="text-[10px] font-semibold text-muted-foreground mb-3 tracking-wider uppercase">Bloom's Levels</p>
+              <p class="text-[10px] font-semibold text-muted-foreground mb-3 tracking-wider uppercase">{{ $t('skills.browse.levels') }}</p>
               <div class="space-y-1.5">
                 <div v-for="level in BLOOM_ORDER" :key="level" class="flex items-center gap-2 text-xs">
                   <AppBadge :variant="bloomBadge(level)" class="text-[0.6rem] min-w-[5rem] justify-center">
@@ -460,13 +462,13 @@ onBeforeUnmount(() => {
           <div class="flex-1 min-w-0">
             <div v-if="filteredSkills.length === 0" class="rounded-xl bg-card shadow-sm p-8 text-center">
               <p class="text-sm text-muted-foreground">
-                No skills match the current filters.
+                {{ $t('skills.browse.noMatches') }}
               </p>
             </div>
 
             <div v-else class="space-y-2">
               <p class="text-xs text-muted-foreground mb-3">
-                {{ filteredSkills.length }} skill{{ filteredSkills.length !== 1 ? 's' : '' }}
+                {{ $t('skills.browse.skillCount', { count: filteredSkills.length }, filteredSkills.length) }}
               </p>
 
               <div
@@ -490,17 +492,17 @@ onBeforeUnmount(() => {
                     </p>
                     <div class="flex items-center gap-3 mt-2 text-xs text-muted-foreground">
                       <span v-if="skill.subject_name">{{ skill.subject_field_name }} / {{ skill.subject_name }}</span>
-                      <span v-if="skill.prerequisite_count > 0">{{ skill.prerequisite_count }} prerequisite{{ skill.prerequisite_count !== 1 ? 's' : '' }}</span>
-                      <span v-if="skill.dependent_count > 0">{{ skill.dependent_count }} dependent{{ skill.dependent_count !== 1 ? 's' : '' }}</span>
+                      <span v-if="skill.prerequisite_count > 0">{{ $t('skills.browse.prerequisitesCount', { count: skill.prerequisite_count }, skill.prerequisite_count) }}</span>
+                      <span v-if="skill.dependent_count > 0">{{ $t('skills.browse.unlocksCount', { count: skill.dependent_count }, skill.dependent_count) }}</span>
                     </div>
                   </div>
 
                   <button
                     class="goal-btn shrink-0"
-                    :title="`Set ${skill.name} as a goal`"
+                    :title="$t('skills.browse.goalTitle', { name: skill.name })"
                     @click.stop="goalSkill(skill)"
                   >
-                    🎯 Goal
+                    {{ $t('skills.browse.goal') }}
                   </button>
                 </div>
               </div>
@@ -520,9 +522,9 @@ onBeforeUnmount(() => {
               <path stroke-linecap="round" stroke-linejoin="round" d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" />
             </svg>
           </div>
-          <h3 class="text-sm font-medium text-foreground">No personal skills to graph yet</h3>
+          <h3 class="text-sm font-medium text-foreground">{{ $t('skills.graph.emptyTitle') }}</h3>
           <p class="mt-1 text-xs text-muted-foreground">
-            Complete course assessments to earn proofs; unlocked and prerequisite skills will appear here.
+            {{ $t('skills.graph.emptyBody') }}
           </p>
         </div>
         <div v-else class="rounded-2xl border border-border overflow-hidden bg-slate-950">
@@ -532,18 +534,18 @@ onBeforeUnmount(() => {
           <div class="flex items-center justify-center gap-6 border-t border-border bg-card px-4 py-3 text-xs">
             <span class="flex items-center gap-1.5">
               <span class="inline-block h-2.5 w-2.5 rounded-full bg-success" />
-              <span class="text-muted-foreground">Earned ({{ earnedSkillsCount }})</span>
+              <span class="text-muted-foreground">{{ $t('skills.graph.legendEarned', { count: earnedSkillsCount }) }}</span>
             </span>
             <span v-if="availableSkillsCount > 0" class="flex items-center gap-1.5">
               <span class="inline-block h-2.5 w-2.5 rounded-full bg-warning" />
-              <span class="text-muted-foreground">Available ({{ availableSkillsCount }})</span>
+              <span class="text-muted-foreground">{{ $t('skills.graph.legendAvailable', { count: availableSkillsCount }) }}</span>
             </span>
             <span class="flex items-center gap-1.5">
               <span class="inline-block h-2 w-2 rounded-full" style="background: rgba(148, 163, 184, 0.4)" />
-              <span class="text-muted-foreground">Locked ({{ lockedSkillsCount }})</span>
+              <span class="text-muted-foreground">{{ $t('skills.graph.legendLocked', { count: lockedSkillsCount }) }}</span>
             </span>
             <span class="text-muted-foreground/50">·</span>
-            <span class="text-muted-foreground">node size = Bloom level (Remember→Create)</span>
+            <span class="text-muted-foreground">{{ $t('skills.graph.legendNodeSize') }}</span>
           </div>
         </div>
       </div>
@@ -556,10 +558,9 @@ onBeforeUnmount(() => {
               <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12c0 1.268-.63 2.39-1.593 3.068a3.745 3.745 0 01-1.043 3.296 3.745 3.745 0 01-3.296 1.043A3.745 3.745 0 0112 21c-1.268 0-2.39-.63-3.068-1.593a3.746 3.746 0 01-3.296-1.043 3.745 3.745 0 01-1.043-3.296A3.745 3.745 0 013 12c0-1.268.63-2.39 1.593-3.068a3.745 3.745 0 011.043-3.296 3.746 3.746 0 013.296-1.043A3.746 3.746 0 0112 3c1.268 0 2.39.63 3.068 1.593a3.746 3.746 0 013.296 1.043 3.746 3.746 0 011.043 3.296A3.745 3.745 0 0121 12z" />
             </svg>
           </div>
-          <h3 class="text-lg font-semibold text-foreground">No credentials yet</h3>
+          <h3 class="text-lg font-semibold text-foreground">{{ $t('skills.credentials.emptyTitle') }}</h3>
           <p class="mt-1 text-sm text-muted-foreground max-w-md mx-auto">
-            Verifiable credentials you earn will appear here. Complete a course whose elements
-            can submit a Cardano completion witness to auto-earn your first VC.
+            {{ $t('skills.credentials.emptyBody') }}
           </p>
         </div>
 
@@ -586,12 +587,12 @@ onBeforeUnmount(() => {
                 <div class="font-mono text-lg font-bold text-primary">
                   {{ ((extractSkillClaim(vc.credentialSubject)?.score ?? 0) * 100).toFixed(0) }}%
                 </div>
-                <div class="text-[10px] text-muted-foreground">score</div>
+                <div class="text-[10px] text-muted-foreground">{{ $t('skills.credentials.score') }}</div>
               </div>
             </div>
             <div class="flex flex-wrap gap-1.5 mt-2.5">
               <AppBadge v-if="vc.witness" variant="success" class="text-[0.6rem]">
-                on-chain witness
+                {{ $t('common.status.verified') }}
               </AppBadge>
               <AppBadge v-else variant="secondary" class="text-[0.6rem]">
                 {{ vc.type[vc.type.length - 1] }}

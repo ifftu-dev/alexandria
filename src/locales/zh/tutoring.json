@@ -1,0 +1,166 @@
+{
+  "header": {
+    "title": "实时辅导",
+    "subtitle": "实时视频——直接、私密，无需服务器。"
+  },
+  "actions": {
+    "startTitle": "发起一场会话",
+    "startDesc": "开启一场带摄像头和麦克风的实时视频会话。分享邀请，让他人加入。",
+    "joinTitle": "加入一场会话",
+    "joinDesc": "输入邀请以加入别人发起的会话。加入时你的摄像头和麦克风会开启。"
+  },
+  "lobby": {
+    "rejoinHint": "会话进行中——点击以重新加入",
+    "pastSessions": "过往会话",
+    "emptyTitle": "还没有会话",
+    "emptyDesc": "发起或加入一场实时视频会话。一切都在你们之间直接传输——无需服务器。",
+    "status": {
+      "ended": "已结束",
+      "left": "已离开",
+      "active": "直播中"
+    }
+  },
+  "form": {
+    "nameLabel": "你的名字（可选）"
+  },
+  "create": {
+    "title": "发起一场辅导会话",
+    "subtitle": "给你的会话起个名字。他人使用你分享的邀请加入。",
+    "titleLabel": "会话标题",
+    "titlePlaceholder": "例如：图算法复习",
+    "namePlaceholder": "例如：Alice",
+    "start": "发起会话"
+  },
+  "join": {
+    "title": "加入一场辅导会话",
+    "subtitle": "粘贴分享给你的邀请。",
+    "ticketLabel": "邀请码",
+    "ticketPlaceholder": "在此粘贴你的邀请…",
+    "scanQr": "扫描二维码",
+    "labelLabel": "会话标签（可选）",
+    "labelPlaceholder": "例如：我的自习会话",
+    "namePlaceholder": "例如：Bob",
+    "join": "加入会话"
+  },
+  "device": {
+    "title": "设备检查",
+    "subtitleStart": "在开始前检查你的设备。",
+    "subtitleJoin": "在加入前检查你的设备。",
+    "camera": "摄像头",
+    "microphone": "麦克风",
+    "speaker": "扬声器",
+    "noCameras": "未找到摄像头——本次会话将仅有音频",
+    "noMics": "未找到麦克风",
+    "noSpeakers": "未找到扬声器",
+    "defaultSuffix": "（默认）",
+    "textOnly": "你仍可加入——本次会话将仅使用文字聊天。",
+    "checking": "检查中…",
+    "starting": "启动中…",
+    "joining": "加入中…"
+  },
+  "qr": {
+    "scanTitle": "扫描二维码邀请",
+    "scanSubtitle": "将你的摄像头对准另一台设备上显示的二维码。"
+  },
+  "scanner": {
+    "requesting": "正在请求摄像头访问权限…",
+    "denied": "摄像头访问被拒绝。请在系统设置中开启摄像头访问权限，然后重试。",
+    "unsupported": "此设备上摄像头不可用。",
+    "error": "摄像头错误",
+    "errorNoCameraApi": "此设备上摄像头不可用。",
+    "errorPermissionDenied": "摄像头访问被拒绝。"
+  },
+  "session": {
+    "ended": "会话已结束",
+    "you": "你",
+    "peersCount": "{connected}/{total} 已连接",
+    "connectionTooltip": "连接：{quality}",
+    "quality": {
+      "good": "良好",
+      "fair": "一般",
+      "poor": "较差",
+      "none": "未连接"
+    },
+    "diagnosticsTitle": "连接详情",
+    "audioDevicesTitle": "声音设备",
+    "audioLabel": "音频",
+    "copyInviteTitle": "复制邀请",
+    "copyInvite": "复制邀请",
+    "qrTitle": "显示二维码以邀请",
+    "qr": "二维码",
+    "chat": "聊天",
+    "startingCamera": "正在启动摄像头…",
+    "cameraOff": "摄像头已关闭",
+    "muted": "已静音",
+    "waitingPeers": "正在等待他人加入…",
+    "shareHint": "使用上方按钮分享邀请。",
+    "screenSharingActive": "屏幕共享进行中",
+    "screenShareDesc": "你的屏幕正在与他人共享",
+    "waitingFrame": "正在等待第一帧",
+    "enableCameraHint": "点击摄像头按钮以开启它",
+    "notFoundTitle": "未找到会话",
+    "notFoundDesc": "此会话可能已结束，或你尚未加入它。",
+    "backToLobby": "返回大厅",
+    "dismiss": "关闭",
+    "selfPreviewAlt": "你的预览",
+    "peerVideoAlt": "来自 {name} 的视频"
+  },
+  "controls": {
+    "mute": "静音",
+    "unmute": "取消静音",
+    "muteMic": "关闭麦克风",
+    "unmuteMic": "开启麦克风",
+    "cameraOn": "开启摄像头",
+    "cameraOff": "关闭摄像头",
+    "share": "共享屏幕",
+    "stopShare": "停止共享屏幕",
+    "speakerLevel": "扬声器输出音量",
+    "leave": "离开",
+    "open": "打开"
+  },
+  "chat": {
+    "title": "会话聊天",
+    "empty": "还没有消息",
+    "p2pHint": "消息以直接、私密的方式发送",
+    "placeholder": "输入消息…"
+  },
+  "audio": {
+    "title": "声音设备",
+    "subtitle": "实时辅导默认通过扬声器播放，或在你于此选择时切换到已连接的耳机或蓝牙设备。",
+    "loading": "正在加载可用选项…",
+    "output": "声音输出",
+    "currentSuffix": "（当前）",
+    "iosHint": "在 iPhone 上，一旦 iOS 将已连接的耳机和蓝牙选项提供给通话，它们就会显示在这里。",
+    "apply": "应用",
+    "applying": "正在应用…"
+  },
+  "leave": {
+    "title": "离开会话？",
+    "desc": "你的摄像头和麦克风将停止。其他人会看到你离开。",
+    "stay": "留下",
+    "confirm": "离开会话"
+  },
+  "ticketFallback": {
+    "title": "邀请",
+    "desc": "选中并复制下方的邀请，分享给他人。"
+  },
+  "qrInvite": {
+    "title": "扫码加入",
+    "desc": "在另一台设备上打开 Alexandria，并从加入界面扫描此二维码。",
+    "copy": "复制邀请"
+  },
+  "diagnostics": {
+    "title": "连接详情",
+    "selectManual": "选中上方所有文本并手动复制",
+    "noSession": "没有活动会话",
+    "refresh": "刷新",
+    "copyJson": "复制 JSON"
+  },
+  "pip": {
+    "previewAlt": "辅导预览",
+    "live": "直播中",
+    "connected": "{connected}/{total} 已连接",
+    "micOn": "麦克风开",
+    "micOff": "麦克风关"
+  }
+}

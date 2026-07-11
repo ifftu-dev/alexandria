@@ -9,7 +9,7 @@
       </button>
       <div class="flex-1 min-w-0">
         <div class="text-sm font-semibold text-foreground truncate">
-          {{ currentClassroom?.name ?? 'Loading...' }}
+          {{ currentClassroom?.name ?? $t('classrooms.common.loading') }}
         </div>
         <div v-if="activeChannel" class="text-xs text-muted-foreground truncate">
           # {{ activeChannel.name }}
@@ -29,14 +29,14 @@
         <div class="flex items-center gap-2 min-w-0">
           <span class="text-lg">{{ currentClassroom?.icon_emoji ?? '🏫' }}</span>
           <span class="font-semibold text-foreground text-sm truncate">
-            {{ currentClassroom?.name ?? 'Loading...' }}
+            {{ currentClassroom?.name ?? $t('classrooms.common.loading') }}
           </span>
         </div>
         <RouterLink
           v-if="currentClassroom?.my_role === 'owner' || currentClassroom?.my_role === 'moderator'"
           :to="{ name: 'classroom-settings', params: { id: classroomId } }"
           class="text-muted-foreground hover:text-foreground transition-colors text-sm"
-          title="Settings"
+          :title="$t('classrooms.nav.settings')"
         >
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
             <path stroke-linecap="round" stroke-linejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 010 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 010-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28z" />
@@ -50,9 +50,9 @@
         v-if="activeCall"
         class="mx-3 mt-3 p-2 bg-success/10 border border-success/30 rounded-lg"
       >
-        <div class="text-xs text-success font-medium mb-1">🎙 Voice call active</div>
+        <div class="text-xs text-success font-medium mb-1">🎙 {{ $t('classrooms.call.active') }}</div>
         <AppButton variant="primary" size="xs" class="w-full" @click="handleJoinCall">
-          Join call
+          {{ $t('classrooms.call.join') }}
         </AppButton>
       </div>
 
@@ -66,13 +66,13 @@
 
       <!-- Members count -->
       <div class="px-4 py-3 border-t border-border text-xs text-muted-foreground">
-        {{ members.length }} member{{ members.length !== 1 ? 's' : '' }}
+        {{ $t('classrooms.members.count', { count: members.length }, members.length) }}
         <RouterLink
           v-if="currentClassroom?.my_role === 'owner' || currentClassroom?.my_role === 'moderator'"
           :to="{ name: 'classroom-requests', params: { id: classroomId } }"
           class="ml-2 text-primary hover:text-primary/80"
         >
-          Requests{{ joinRequests.length > 0 ? ` (${joinRequests.length})` : '' }}
+          {{ $t('classrooms.requests.link') }}{{ joinRequests.length > 0 ? ` (${joinRequests.length})` : '' }}
         </RouterLink>
       </div>
     </div>
@@ -83,7 +83,7 @@
       <div class="hidden md:flex px-4 py-3 border-b border-border items-center justify-between flex-shrink-0">
         <div class="flex items-center gap-2">
           <span class="text-muted-foreground">#</span>
-          <span class="font-semibold text-foreground">{{ activeChannel?.name ?? 'Select a channel' }}</span>
+          <span class="font-semibold text-foreground">{{ activeChannel?.name ?? $t('classrooms.channels.selectShort') }}</span>
           <span v-if="activeChannel?.description" class="text-sm text-muted-foreground">
             · {{ activeChannel.description }}
           </span>
@@ -95,7 +95,7 @@
             size="xs"
             @click="handleStartCall"
           >
-            🎙 Start call
+            🎙 {{ $t('classrooms.call.start') }}
           </AppButton>
         </div>
       </div>
@@ -103,13 +103,13 @@
       <!-- Messages -->
       <div ref="messageContainer" class="flex-1 overflow-y-auto px-4 py-4 space-y-1">
         <div v-if="!activeChannelId" class="flex items-center justify-center h-full text-muted-foreground text-sm">
-          Select a channel to start chatting
+          {{ $t('classrooms.channels.selectToChat') }}
         </div>
 
         <div v-else-if="channelMessages.length === 0" class="flex items-center justify-center h-full">
           <div class="text-center">
             <div class="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center text-xl mx-auto mb-3">#</div>
-            <p class="text-sm text-muted-foreground">No messages yet. Start the conversation!</p>
+            <p class="text-sm text-muted-foreground">{{ $t('classrooms.messages.empty') }}</p>
           </div>
         </div>
 
@@ -120,7 +120,7 @@
             @click="loadMore"
             class="w-full text-xs text-primary hover:text-primary/80 py-2 transition-colors"
           >
-            Load earlier messages
+            {{ $t('classrooms.messages.loadMore') }}
           </button>
 
           <div
@@ -141,7 +141,7 @@
                 <span class="text-xs text-muted-foreground">{{ formatTime(msg.sent_at) }}</span>
               </div>
               <p v-if="!msg.deleted" class="text-sm text-foreground/90 break-words">{{ msg.content }}</p>
-              <p v-else class="text-sm text-muted-foreground italic">[deleted]</p>
+              <p v-else class="text-sm text-muted-foreground italic">{{ $t('classrooms.messages.deleted') }}</p>
             </div>
 
             <!-- Delete button -->
@@ -164,7 +164,7 @@
           <textarea
             v-model="messageInput"
             @keydown.enter.exact.prevent="handleSend"
-            :placeholder="`Message #${activeChannel?.name ?? 'channel'}`"
+            :placeholder="$t('classrooms.messages.inputPlaceholder', { channel: activeChannel?.name ?? $t('classrooms.channels.fallbackName') })"
             rows="1"
             class="flex-1 px-3 py-2 bg-muted border border-border rounded-lg text-foreground placeholder-muted-foreground text-sm focus:outline-none focus:border-primary resize-none"
             :style="{ height: inputHeight + 'px' }"
@@ -176,10 +176,10 @@
             :disabled="!messageInput.trim() || sending"
             @click="handleSend"
           >
-            Send
+            {{ $t('classrooms.messages.send') }}
           </AppButton>
         </div>
-        <div class="hidden md:block text-xs text-muted-foreground/60 mt-1">Enter to send · Shift+Enter for newline</div>
+        <div class="hidden md:block text-xs text-muted-foreground/60 mt-1">{{ $t('classrooms.messages.inputHint') }}</div>
       </div>
     </div>
 
@@ -215,7 +215,7 @@
                 <div class="flex items-center gap-2 min-w-0">
                   <span class="text-lg">{{ currentClassroom?.icon_emoji ?? '🏫' }}</span>
                   <span class="font-semibold text-foreground text-sm truncate">
-                    {{ currentClassroom?.name ?? 'Loading...' }}
+                    {{ currentClassroom?.name ?? $t('classrooms.common.loading') }}
                   </span>
                 </div>
                 <button @click="showChannelDrawer = false" class="p-1 text-muted-foreground hover:text-foreground">
@@ -230,9 +230,9 @@
                 v-if="activeCall"
                 class="mx-3 mt-3 p-2 bg-success/10 border border-success/30 rounded-lg"
               >
-                <div class="text-xs text-success font-medium mb-1">🎙 Voice call active</div>
+                <div class="text-xs text-success font-medium mb-1">🎙 {{ $t('classrooms.call.active') }}</div>
                 <AppButton variant="primary" size="xs" class="w-full" @click="handleJoinCall; showChannelDrawer = false">
-                  Join call
+                  {{ $t('classrooms.call.join') }}
                 </AppButton>
               </div>
 
@@ -246,14 +246,14 @@
 
               <!-- Footer -->
               <div class="px-4 py-3 border-t border-border text-xs text-muted-foreground">
-                {{ members.length }} member{{ members.length !== 1 ? 's' : '' }}
+                {{ $t('classrooms.members.count', { count: members.length }, members.length) }}
                 <RouterLink
                   v-if="currentClassroom?.my_role === 'owner' || currentClassroom?.my_role === 'moderator'"
                   :to="{ name: 'classroom-settings', params: { id: classroomId } }"
                   class="ml-2 text-primary hover:text-primary/80"
                   @click="showChannelDrawer = false"
                 >
-                  Settings
+                  {{ $t('classrooms.nav.settings') }}
                 </RouterLink>
               </div>
             </div>
@@ -285,7 +285,7 @@
           >
             <div class="absolute inset-y-0 right-0 w-72 bg-card border-l border-border safe-area-top safe-area-bottom safe-area-lr overflow-y-auto">
               <div class="px-4 py-3 border-b border-border flex items-center justify-between">
-                <span class="font-semibold text-foreground text-sm">Members</span>
+                <span class="font-semibold text-foreground text-sm">{{ $t('classrooms.members.heading') }}</span>
                 <button @click="showMembersDrawer = false" class="p-1 text-muted-foreground hover:text-foreground">
                   <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -300,26 +300,26 @@
     </Teleport>
 
     <!-- ── New channel modal ─────────────────────────────────── -->
-    <AppModal :open="showNewChannel" @close="showNewChannel = false" title="Create channel">
+    <AppModal :open="showNewChannel" @close="showNewChannel = false" :title="$t('classrooms.channels.createTitle')">
       <div class="space-y-3">
         <input
           v-model="newChannelName"
           type="text"
-          placeholder="channel-name"
+          :placeholder="$t('classrooms.channels.namePlaceholder')"
           class="w-full px-3 py-2 bg-muted border border-border rounded-lg text-foreground placeholder-muted-foreground text-sm focus:outline-none focus:border-primary"
         />
         <select
           v-model="newChannelType"
           class="w-full px-3 py-2 bg-muted border border-border rounded-lg text-foreground text-sm focus:outline-none focus:border-primary"
         >
-          <option value="text">Text channel</option>
-          <option value="announcement">Announcement channel</option>
+          <option value="text">{{ $t('classrooms.channels.typeText') }}</option>
+          <option value="announcement">{{ $t('classrooms.channels.typeAnnouncement') }}</option>
         </select>
       </div>
       <template #footer>
         <div class="flex gap-3">
           <AppButton variant="secondary" class="flex-1" @click="showNewChannel = false">
-            Cancel
+            {{ $t('common.actions.cancel') }}
           </AppButton>
           <AppButton
             variant="primary"
@@ -327,7 +327,7 @@
             :disabled="!newChannelName.trim()"
             @click="handleCreateChannel"
           >
-            Create
+            {{ $t('classrooms.actions.create') }}
           </AppButton>
         </div>
       </template>
@@ -337,6 +337,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch, defineComponent, h, type PropType } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import { useClassroom } from '@/composables/useClassroom'
 import { useAuth } from '@/composables/useAuth'
@@ -354,17 +355,18 @@ const ChannelList = defineComponent({
   },
   emits: ['select', 'add'],
   setup(props, { emit }) {
+    const { t } = useI18n()
     return () =>
       h('div', { class: 'flex-1 overflow-y-auto py-3' }, [
         h('div', { class: 'px-3 mb-1 flex items-center justify-between' }, [
-          h('span', { class: 'text-xs font-semibold text-muted-foreground uppercase tracking-wider' }, 'Channels'),
+          h('span', { class: 'text-xs font-semibold text-muted-foreground uppercase tracking-wider' }, t('classrooms.channels.heading')),
           props.canManage
             ? h(
                 'button',
                 {
                   onClick: () => emit('add'),
                   class: 'text-muted-foreground hover:text-foreground transition-colors text-sm leading-none',
-                  title: 'Add channel',
+                  title: t('classrooms.channels.add'),
                 },
                 '+',
               )
@@ -387,7 +389,7 @@ const ChannelList = defineComponent({
               h('span', { class: 'text-muted-foreground/60 text-xs' }, '#'),
               h('span', { class: 'truncate' }, ch.name),
               ch.channel_type === 'announcement'
-                ? h('span', { class: 'ml-auto text-xs text-warning', title: 'Announcement channel' }, '📢')
+                ? h('span', { class: 'ml-auto text-xs text-warning', title: t('classrooms.channels.announcementBadge') }, '📢')
                 : null,
             ],
           ),
@@ -402,6 +404,7 @@ const MemberList = defineComponent({
     members: { type: Array as PropType<readonly any[]>, required: true },
   },
   setup(props) {
+    const { t } = useI18n()
     function formatAddr(addr: string): string {
       return addr.length > 12 ? `${addr.slice(0, 8)}...${addr.slice(-4)}` : addr
     }
@@ -428,11 +431,11 @@ const MemberList = defineComponent({
     return () => {
       const all = props.members as any[]
       return h('div', { class: 'px-3 py-3' }, [
-        h('div', { class: 'text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2' }, 'Members'),
-        roleSection('Owner', all.filter((m) => m.role === 'owner'), 'bg-warning/20 text-warning'),
-        roleSection('Moderators', all.filter((m) => m.role === 'moderator'), 'bg-primary/20 text-primary'),
+        h('div', { class: 'text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2' }, t('classrooms.members.heading')),
+        roleSection(t('classrooms.roles.ownerSection'), all.filter((m) => m.role === 'owner'), 'bg-warning/20 text-warning'),
+        roleSection(t('classrooms.roles.moderatorSection'), all.filter((m) => m.role === 'moderator'), 'bg-primary/20 text-primary'),
         roleSection(
-          `Members — ${all.filter((m) => m.role === 'member').length}`,
+          `${t('classrooms.roles.memberSection')} — ${all.filter((m) => m.role === 'member').length}`,
           all.filter((m) => m.role === 'member'),
           'bg-muted text-muted-foreground',
         ),

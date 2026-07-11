@@ -55,9 +55,9 @@ onMounted(async () => {
   <div>
     <div class="flex items-center justify-between mb-4">
       <div>
-        <h1 class="text-xl font-bold">Courses</h1>
+        <h1 class="text-xl font-bold">{{ $t('courses.index.title') }}</h1>
         <p class="text-sm text-muted-foreground">
-          Courses and tutorials on your node, and those discovered from peers.
+          {{ $t('courses.index.subtitle') }}
         </p>
       </div>
       <div class="flex gap-2">
@@ -65,13 +65,13 @@ onMounted(async () => {
           <svg class="w-4 h-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M8 5v14l11-7z" />
           </svg>
-          New Tutorial
+          {{ $t('courses.index.newTutorial') }}
         </AppButton>
         <AppButton variant="primary" size="sm" @click="$router.push('/instructor/courses/new')">
           <svg class="w-4 h-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
           </svg>
-          New Course
+          {{ $t('courses.index.newCourse') }}
         </AppButton>
       </div>
     </div>
@@ -90,7 +90,7 @@ onMounted(async () => {
         ]"
         @click="setKindFilter(opt)"
       >
-        {{ opt === 'all' ? 'All' : opt === 'course' ? 'Courses' : 'Tutorials' }}
+        {{ opt === 'all' ? $t('courses.index.filterAll') : opt === 'course' ? $t('courses.index.filterCourses') : $t('courses.index.filterTutorials') }}
         <span class="ml-1 opacity-70">{{ counts[opt] }}</span>
       </button>
     </div>
@@ -125,16 +125,14 @@ onMounted(async () => {
         </svg>
       </div>
       <p class="text-sm font-medium text-foreground">
-        {{ kindFilter === 'tutorial' ? 'No tutorials yet' :
-           kindFilter === 'course' ? 'No courses yet' : 'No courses yet' }}
+        {{ kindFilter === 'tutorial' ? $t('courses.index.emptyTutorialsTitle') : $t('courses.index.emptyCoursesTitle') }}
       </p>
       <p class="mt-1 text-xs text-muted-foreground max-w-sm mx-auto">
         <template v-if="kindFilter === 'tutorial'">
-          Tutorials are single-video learning artefacts. Create one to share a
-          focused explainer with skill tags.
+          {{ $t('courses.index.emptyTutorialsBody') }}
         </template>
         <template v-else>
-          Courses will appear here when you create them locally or discover them from peers.
+          {{ $t('courses.index.emptyCoursesBody') }}
         </template>
       </p>
       <AppButton
@@ -147,7 +145,7 @@ onMounted(async () => {
             : '/instructor/courses/new'
         )"
       >
-        {{ kindFilter === 'tutorial' ? 'Create Your First Tutorial' : 'Create Your First Course' }}
+        {{ kindFilter === 'tutorial' ? $t('courses.index.createFirstTutorial') : $t('courses.index.createFirstCourse') }}
       </AppButton>
     </div>
 

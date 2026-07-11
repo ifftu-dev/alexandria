@@ -1,0 +1,40 @@
+{
+  "index": {
+    "title": "Tus metas",
+    "subtitle": "Las habilidades hacia las que trabajas. Alexandria traza tu camino a partir de lo que ya has demostrado.",
+    "perGoal": "Por meta",
+    "combinedPath": "Camino combinado",
+    "findSomeone": "Buscar a alguien",
+    "usernamePlaceholder": "{'@'}usuario",
+    "viewProfile": "Ver perfil",
+    "yourHandle": "Eres {'@'}{name}: comparte tu nombre de usuario para que otros te encuentren.",
+    "chartingPaths": "Trazando tus caminos…",
+    "emptyTitle": "Aún no hay metas",
+    "emptyDescription": "Elige un conjunto de habilidades como objetivo: explora la biblioteca de habilidades o el mapa público de un docente y pulsa «Fijar como meta».",
+    "browseSkills": "Explorar habilidades",
+    "skillsAcrossGoals": "{earned} / {total} habilidades en {goals} metas",
+    "skillsCount": "{earned} / {total} habilidades",
+    "nextStep": "Siguiente: {name}",
+    "allCleared": "Estás listo para cada paso 🎉",
+    "viewPath": "Ver camino",
+    "hidePath": "Ocultar camino"
+  },
+  "picker": {
+    "jobRole": "Puesto de trabajo",
+    "exam": "Examen",
+    "curriculum": "Plan de estudios",
+    "jobDescription": "Descripción del puesto",
+    "selectPrompt": "Selecciona un {type}…",
+    "setAsGoal": "Fijar como meta",
+    "pasteText": "Pegar texto",
+    "fromLink": "Desde enlace",
+    "jobPostingUrl": "URL de la oferta de empleo",
+    "jdPlaceholder": "Pega aquí la descripción del puesto…",
+    "findSkills": "Buscar habilidades",
+    "foundSkills": "Se encontraron estas habilidades: confirma cuáles añadir a tu meta:",
+    "strongMatch": "fuerte",
+    "matched": "coincide con «{term}»",
+    "noMatchingSkills": "No se encontraron habilidades coincidentes: prueba con otra descripción.",
+    "addAsGoal": "Añadir {count} habilidad como meta | Añadir {count} habilidades como meta"
+  }
+}

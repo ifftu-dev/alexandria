@@ -1,0 +1,118 @@
+{
+  "index": {
+    "title": "我的技能图谱",
+    "subtitle": "你个人的技能地图——由你已获得的、你可以接下来开始的，以及每项技能所依托的基础构建而成。",
+    "fromResume": "+ 来自简历"
+  },
+  "tabs": {
+    "graph": "我的图谱",
+    "browse": "浏览技能",
+    "credentials": "我的凭证"
+  },
+  "stats": {
+    "earned": "已获得",
+    "available": "可开始",
+    "locked": "已锁定",
+    "total": "全部技能"
+  },
+  "browse": {
+    "searchPlaceholder": "按名称、描述或等级搜索技能…",
+    "emptyTitle": "还没有技能",
+    "emptyBody": "技能由社区添加。发起一个社区群组，提议一项变更，并获得批准，来填充技能地图。",
+    "areas": "领域",
+    "topics": "主题",
+    "levels": "技能等级",
+    "showAll": "显示全部",
+    "noAreas": "还没有领域",
+    "noTopics": "没有主题",
+    "noTopicsInArea": "此领域内没有主题",
+    "noMatches": "没有技能匹配当前筛选。",
+    "skillCount": "无技能 | {count} 项技能 | {count} 项技能",
+    "prerequisitesCount": "无先修 | {count} 项先修 | {count} 项先修",
+    "unlocksCount": "不解锁任何内容 | 解锁 {count} 项技能 | 解锁 {count} 项技能",
+    "goal": "🎯 目标",
+    "goalTitle": "将 {name} 设为目标"
+  },
+  "graph": {
+    "emptyTitle": "还没有可展示的技能",
+    "emptyBody": "完成课程测评以获得凭证；你解锁的技能会显示在这里。",
+    "legendEarned": "已获得（{count}）",
+    "legendAvailable": "可开始（{count}）",
+    "legendLocked": "已锁定（{count}）",
+    "legendNodeSize": "圆点大小表示技能等级（记忆 → 创造）",
+    "summary": "{skills} 项技能，{edges} 条先修连接"
+  },
+  "credentials": {
+    "emptyTitle": "还没有凭证",
+    "emptyBody": "你获得的凭证会显示在这里。完成一门能记录已验证结业证明的课程，即可获得你的第一份凭证。",
+    "score": "得分"
+  },
+  "detail": {
+    "back": "返回所有技能",
+    "loadError": "加载技能失败",
+    "backToSkills": "返回技能",
+    "prerequisites": "先修",
+    "noPrerequisites": "没有先修——这是一项起步技能。",
+    "dependents": "通向",
+    "noDependents": "还没有内容以此为基础。",
+    "related": "相关技能",
+    "yourCredentials": "你的凭证",
+    "credEmptyTitle": "还没有凭证",
+    "credEmptyBody": "你为此技能获得的凭证会显示在这里。完成一门标记了此技能的课程即可获得一份。",
+    "scorePct": "{percent}% 得分",
+    "receipt": "公开记录",
+    "highest": "你的最佳凭证：等级 {level}。",
+    "relation": {
+      "related": "相关",
+      "complementary": "互补",
+      "alternative": "替代"
+    }
+  },
+  "bootstrap": {
+    "title": "添加你的技能",
+    "intro": "上传一份简历、成绩单或凭证，我们会建议可认领的技能。经认证的文件比自制简历更有分量。这些是起点——参加测评来验证并提升它们。",
+    "addedTitle": "技能已添加",
+    "addedBody": "已添加 {count} 项技能。参加测评以验证它并提升你的置信度。 | 已添加 {count} 项技能。参加测评以验证它们并提升你的置信度。",
+    "viewMySkills": "查看我的技能",
+    "addMore": "添加更多",
+    "docResumeLabel": "简历 / CV",
+    "docResumeHint": "自制——置信度较低",
+    "docTranscriptLabel": "学术成绩单",
+    "docTranscriptHint": "经认证——置信度较高",
+    "docCredentialLabel": "院校凭证",
+    "docCredentialHint": "经认证——置信度较高",
+    "chooseFile": "选择文件",
+    "filePlaceholder": "PDF、图片或文本——作为证据存储",
+    "textPlaceholder": "在此粘贴文档文本（PDF / 图片必填）…",
+    "findSkills": "查找技能",
+    "noSkillsFound": "未找到匹配的技能——试着添加更多细节。",
+    "confirmPrompt": "确认要认领哪些技能：",
+    "strong": "高度匹配",
+    "claim": "认领 {count} 项技能 | 认领 {count} 项技能"
+  },
+  "visibility": {
+    "title": "可见性与教学",
+    "subtitle": "选择哪些已获得的技能公开，并标记你教授的技能。",
+    "publicCount": "{public} / {total} 公开",
+    "showAll": "显示全部",
+    "hideAll": "隐藏全部",
+    "loading": "正在加载你的技能…",
+    "empty": "还没有已获得的技能——你获得的凭证会显示在这里供你发布。",
+    "publicOn": "👁 公开",
+    "publicOff": "🔒 私密",
+    "publicOnTitle": "公开——点击隐藏",
+    "publicOffTitle": "私密——点击发布",
+    "teachOn": "★ 教授中",
+    "teachOff": "☆ 教授",
+    "teachOnTitle": "你教授这项",
+    "teachOffTitle": "标记为教授"
+  },
+  "path": {
+    "statusEarned": "已证明",
+    "statusAvailable": "下一步",
+    "statusLocked": "已锁定",
+    "goalBadge": "★ 目标",
+    "empty": "没有可学的了——此目标中的一切你都已经证明。",
+    "noCourse": "还没有课程涵盖这项。"
+  }
+}

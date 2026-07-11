@@ -1,7 +1,8 @@
 <script setup lang="ts">
 // Course outline: chapter → element tree with add + drag reorder.
 // For tutorials (one implicit chapter) the chapter level is hidden.
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { AppButton } from '@/components/ui'
 import { useDragReorder } from './useDragReorder'
@@ -22,6 +23,7 @@ const emit = defineEmits<{
 }>()
 
 const { invoke } = useLocalApi()
+const { t } = useI18n()
 
 const error = ref('')
 
@@ -47,20 +49,20 @@ async function addChapter() {
 }
 
 // ── Add element ─────────────────────────────────────────────────
-const ELEMENT_TYPES = [
-  { value: 'video', label: 'Video' },
-  { value: 'text', label: 'Text' },
-  { value: 'pdf', label: 'PDF' },
-  { value: 'downloadable', label: 'Download' },
-  { value: 'quiz', label: 'Quiz' },
-  { value: 'objective_single_mcq', label: 'Single MCQ' },
-  { value: 'objective_multi_mcq', label: 'Multi MCQ' },
-  { value: 'subjective_mcq', label: 'Subjective MCQ' },
-  { value: 'essay', label: 'Essay' },
-  { value: 'interactive', label: 'Interactive' },
-  { value: 'assessment', label: 'Assessment' },
-  { value: 'plugin', label: 'Plugin' },
-]
+const ELEMENT_TYPES = computed(() => [
+  { value: 'video', label: t('instructor.elementTypes.video') },
+  { value: 'text', label: t('instructor.elementTypes.text') },
+  { value: 'pdf', label: t('instructor.elementTypes.pdf') },
+  { value: 'downloadable', label: t('instructor.elementTypes.downloadable') },
+  { value: 'quiz', label: t('instructor.elementTypes.quiz') },
+  { value: 'objective_single_mcq', label: t('instructor.elementTypes.objectiveSingleMcq') },
+  { value: 'objective_multi_mcq', label: t('instructor.elementTypes.objectiveMultiMcq') },
+  { value: 'subjective_mcq', label: t('instructor.elementTypes.subjectiveMcq') },
+  { value: 'essay', label: t('instructor.elementTypes.essay') },
+  { value: 'interactive', label: t('instructor.elementTypes.interactive') },
+  { value: 'assessment', label: t('instructor.elementTypes.assessment') },
+  { value: 'plugin', label: t('instructor.elementTypes.plugin') },
+])
 
 const addingToChapter = ref<string | null>(null)
 const newElementTitle = ref('')
@@ -126,8 +128,8 @@ function elementIds(chapterId: string): string[] {
   return (props.elements[chapterId] ?? []).map(e => e.id)
 }
 
-function typeLabel(t: string): string {
-  return ELEMENT_TYPES.find(e => e.value === t)?.label ?? t
+function typeLabel(type: string): string {
+  return ELEMENT_TYPES.value.find(e => e.value === type)?.label ?? type
 }
 </script>
 
@@ -189,7 +191,7 @@ function typeLabel(t: string): string {
           <input
             v-model="newElementTitle"
             class="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
-            placeholder="Element title"
+            :placeholder="$t('instructor.outline.elementTitlePlaceholder')"
             @keydown.enter="addElement(chapter.id)"
           >
           <select
@@ -199,8 +201,8 @@ function typeLabel(t: string): string {
             <option v-for="t in ELEMENT_TYPES" :key="t.value" :value="t.value">{{ t.label }}</option>
           </select>
           <div class="flex gap-1.5">
-            <AppButton size="xs" :loading="creatingElement" @click="addElement(chapter.id)">Add</AppButton>
-            <AppButton variant="ghost" size="xs" @click="addingToChapter = null">Cancel</AppButton>
+            <AppButton size="xs" :loading="creatingElement" @click="addElement(chapter.id)">{{ $t('instructor.outline.add') }}</AppButton>
+            <AppButton variant="ghost" size="xs" @click="addingToChapter = null">{{ $t('common.actions.cancel') }}</AppButton>
           </div>
         </div>
         <button
@@ -208,7 +210,7 @@ function typeLabel(t: string): string {
           class="w-full rounded-md px-2.5 py-1.5 text-left text-xs text-muted-foreground hover:text-primary hover:bg-muted/30 transition-colors"
           @click="addingToChapter = chapter.id; newElementTitle = ''"
         >
-          + Add element
+          {{ $t('instructor.outline.addElement') }}
         </button>
       </div>
     </div>
@@ -219,16 +221,16 @@ function typeLabel(t: string): string {
         <input
           v-model="newChapterTitle"
           class="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
-          placeholder="Chapter title"
+          :placeholder="$t('instructor.outline.chapterTitlePlaceholder')"
           @keydown.enter="addChapter"
         >
         <div class="flex gap-1.5">
-          <AppButton size="xs" :loading="creatingChapter" @click="addChapter">Add chapter</AppButton>
-          <AppButton variant="ghost" size="xs" @click="showNewChapter = false">Cancel</AppButton>
+          <AppButton size="xs" :loading="creatingChapter" @click="addChapter">{{ $t('instructor.outline.addChapter') }}</AppButton>
+          <AppButton variant="ghost" size="xs" @click="showNewChapter = false">{{ $t('common.actions.cancel') }}</AppButton>
         </div>
       </div>
       <AppButton v-else variant="outline" size="sm" class="w-full" @click="showNewChapter = true">
-        + Add chapter
+        {{ $t('instructor.outline.addChapterCta') }}
       </AppButton>
     </template>
 

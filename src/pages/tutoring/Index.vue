@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { useTutoringRoom } from '@/composables/useTutoringRoom'
 import QrCodeScanner from '@/components/tutoring/QrCodeScanner.vue'
 import type { DeviceCheckResult, DeviceList } from '@/types'
 
+const { t } = useI18n()
 const router = useRouter()
 const {
   sessions,
@@ -186,6 +188,15 @@ function goToActiveSession() {
   }
 }
 
+function statusLabel(status: string) {
+  const map: Record<string, string> = {
+    ended: t('tutoring.lobby.status.ended'),
+    left: t('tutoring.lobby.status.left'),
+    active: t('tutoring.lobby.status.active'),
+  }
+  return map[status] ?? status
+}
+
 function formatDate(iso: string) {
   try {
     return new Date(iso).toLocaleDateString(undefined, {
@@ -211,8 +222,8 @@ function formatDate(iso: string) {
           </svg>
         </div>
         <div>
-          <h1 class="text-2xl font-bold text-foreground">Live Tutoring</h1>
-          <p class="text-sm text-muted-foreground">P2P video sessions powered by iroh — no servers, no limits.</p>
+          <h1 class="text-2xl font-bold text-foreground">{{ $t('tutoring.header.title') }}</h1>
+          <p class="text-sm text-muted-foreground">{{ $t('tutoring.header.subtitle') }}</p>
         </div>
       </div>
     </div>
@@ -235,7 +246,7 @@ function formatDate(iso: string) {
         </span>
         <div class="flex-1 min-w-0">
           <p class="font-semibold text-foreground">{{ activeSession.title }}</p>
-          <p class="text-xs text-muted-foreground">Session in progress — click to rejoin</p>
+          <p class="text-xs text-muted-foreground">{{ $t('tutoring.lobby.rejoinHint') }}</p>
         </div>
         <svg class="h-5 w-5 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
           <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
@@ -255,9 +266,9 @@ function formatDate(iso: string) {
             <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
           </svg>
         </div>
-        <h3 class="mt-4 text-lg font-semibold text-foreground">Start a Session</h3>
+        <h3 class="mt-4 text-lg font-semibold text-foreground">{{ $t('tutoring.actions.startTitle') }}</h3>
         <p class="mt-1 text-sm text-muted-foreground">
-          Create a new tutoring room with camera and microphone. Share the invite ticket with participants.
+          {{ $t('tutoring.actions.startDesc') }}
         </p>
       </button>
 
@@ -271,16 +282,16 @@ function formatDate(iso: string) {
             <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9" />
           </svg>
         </div>
-        <h3 class="mt-4 text-lg font-semibold text-foreground">Join a Session</h3>
+        <h3 class="mt-4 text-lg font-semibold text-foreground">{{ $t('tutoring.actions.joinTitle') }}</h3>
         <p class="mt-1 text-sm text-muted-foreground">
-          Enter a room ticket to join an existing tutoring session. Your camera and mic will activate on join.
+          {{ $t('tutoring.actions.joinDesc') }}
         </p>
       </button>
     </div>
 
     <!-- Past sessions -->
     <div v-if="pastSessions.length > 0">
-      <h2 class="text-lg font-semibold text-foreground mb-3">Past Sessions</h2>
+      <h2 class="text-lg font-semibold text-foreground mb-3">{{ $t('tutoring.lobby.pastSessions') }}</h2>
       <div class="divide-y divide-border rounded-xl border border-border bg-card overflow-hidden">
         <div
           v-for="session in pastSessions"
@@ -300,7 +311,7 @@ function formatDate(iso: string) {
             class="inline-flex items-center rounded-full px-2 py-0.5 text-[0.65rem] font-medium"
             :class="session.status === 'ended' ? 'bg-muted text-muted-foreground' : 'bg-destructive/10 text-destructive'"
           >
-            {{ session.status }}
+            {{ statusLabel(session.status) }}
           </span>
         </div>
       </div>
@@ -313,8 +324,8 @@ function formatDate(iso: string) {
           <path stroke-linecap="round" stroke-linejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
         </svg>
       </div>
-      <h3 class="text-sm font-medium text-foreground">No sessions yet</h3>
-      <p class="mt-1 text-xs text-muted-foreground max-w-xs">Start or join a live tutoring session. All video and audio streams peer-to-peer via iroh.</p>
+      <h3 class="text-sm font-medium text-foreground">{{ $t('tutoring.lobby.emptyTitle') }}</h3>
+      <p class="mt-1 text-xs text-muted-foreground max-w-xs">{{ $t('tutoring.lobby.emptyDesc') }}</p>
     </div>
 
     <!-- Create Room Modal -->
@@ -331,27 +342,27 @@ function formatDate(iso: string) {
           <div class="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-xl mx-4">
             <!-- Step 1: Form -->
             <template v-if="createStep === 'form'">
-              <h2 class="text-lg font-semibold text-foreground">Start a Tutoring Session</h2>
-              <p class="mt-1 text-sm text-muted-foreground">Give your session a name. Participants will join using the ticket you share.</p>
+              <h2 class="text-lg font-semibold text-foreground">{{ $t('tutoring.create.title') }}</h2>
+              <p class="mt-1 text-sm text-muted-foreground">{{ $t('tutoring.create.subtitle') }}</p>
               <div class="mt-4 space-y-3">
                 <div>
-                  <label class="text-sm font-medium text-foreground" for="room-title">Session Title</label>
+                  <label class="text-sm font-medium text-foreground" for="room-title">{{ $t('tutoring.create.titleLabel') }}</label>
                   <input
                     id="room-title"
                     v-model="newRoomTitle"
                     type="text"
-                    placeholder="e.g. Graph Algorithms Review"
+                    :placeholder="$t('tutoring.create.titlePlaceholder')"
                     class="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                     @keydown.enter="handleCreatePreview"
                   />
                 </div>
                 <div>
-                  <label class="text-sm font-medium text-foreground" for="create-display-name">Your Name (optional)</label>
+                  <label class="text-sm font-medium text-foreground" for="create-display-name">{{ $t('tutoring.form.nameLabel') }}</label>
                   <input
                     id="create-display-name"
                     v-model="createDisplayName"
                     type="text"
-                    placeholder="e.g. Alice"
+                    :placeholder="$t('tutoring.create.namePlaceholder')"
                     class="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                   />
                 </div>
@@ -361,22 +372,22 @@ function formatDate(iso: string) {
                   class="rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
                   @click="resetCreateModal"
                 >
-                  Cancel
+                  {{ $t('common.actions.cancel') }}
                 </button>
                 <button
                   class="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
                   :disabled="!newRoomTitle.trim() || checkingDevices"
                   @click="handleCreatePreview"
                 >
-                  {{ checkingDevices ? 'Checking...' : 'Next' }}
+                  {{ checkingDevices ? $t('tutoring.device.checking') : $t('common.actions.next') }}
                 </button>
               </div>
             </template>
 
             <!-- Step 2: Device preview -->
             <template v-else>
-              <h2 class="text-lg font-semibold text-foreground">Device Check</h2>
-              <p class="mt-1 text-sm text-muted-foreground">Verify your devices before starting.</p>
+              <h2 class="text-lg font-semibold text-foreground">{{ $t('tutoring.device.title') }}</h2>
+              <p class="mt-1 text-sm text-muted-foreground">{{ $t('tutoring.device.subtitleStart') }}</p>
 
               <div class="mt-4 space-y-3">
                 <!-- Camera selector -->
@@ -391,7 +402,7 @@ function formatDate(iso: string) {
                       </svg>
                     </div>
                     <div class="flex-1 min-w-0">
-                      <p class="text-sm font-medium text-foreground">Camera</p>
+                      <p class="text-sm font-medium text-foreground">{{ $t('tutoring.device.camera') }}</p>
                     </div>
                     <svg v-if="deviceCheck?.has_camera" class="h-4 w-4 text-success shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                       <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
@@ -409,7 +420,7 @@ function formatDate(iso: string) {
                       {{ cam.name }}
                     </option>
                   </select>
-                  <p v-else class="text-xs text-muted-foreground">No cameras detected — session will be audio-only</p>
+                  <p v-else class="text-xs text-muted-foreground">{{ $t('tutoring.device.noCameras') }}</p>
                 </div>
 
                 <!-- Microphone selector -->
@@ -424,7 +435,7 @@ function formatDate(iso: string) {
                       </svg>
                     </div>
                     <div class="flex-1 min-w-0">
-                      <p class="text-sm font-medium text-foreground">Microphone</p>
+                      <p class="text-sm font-medium text-foreground">{{ $t('tutoring.device.microphone') }}</p>
                     </div>
                     <svg v-if="deviceCheck?.has_audio" class="h-4 w-4 text-success shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                       <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
@@ -439,10 +450,10 @@ function formatDate(iso: string) {
                     class="w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                   >
                     <option v-for="mic in devices.audio_inputs" :key="mic.id" :value="mic.id">
-                      {{ mic.name || mic.id }}{{ mic.is_default ? ' (Default)' : '' }}
+                      {{ mic.name || mic.id }}{{ mic.is_default ? $t('tutoring.device.defaultSuffix') : '' }}
                     </option>
                   </select>
-                  <p v-else class="text-xs text-muted-foreground">No microphones detected</p>
+                  <p v-else class="text-xs text-muted-foreground">{{ $t('tutoring.device.noMics') }}</p>
                 </div>
 
                 <!-- Speaker output selector -->
@@ -454,7 +465,7 @@ function formatDate(iso: string) {
                       </svg>
                     </div>
                     <div class="flex-1 min-w-0">
-                      <p class="text-sm font-medium text-foreground">Speaker</p>
+                      <p class="text-sm font-medium text-foreground">{{ $t('tutoring.device.speaker') }}</p>
                     </div>
                     <svg v-if="devices && devices.audio_outputs.length > 0" class="h-4 w-4 text-success shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                       <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
@@ -466,15 +477,15 @@ function formatDate(iso: string) {
                     class="w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                   >
                     <option v-for="spk in devices.audio_outputs" :key="spk.id" :value="spk.id">
-                      {{ spk.name || spk.id }}{{ spk.is_default ? ' (Default)' : '' }}
+                      {{ spk.name || spk.id }}{{ spk.is_default ? $t('tutoring.device.defaultSuffix') : '' }}
                     </option>
                   </select>
-                  <p v-else class="text-xs text-muted-foreground">No speakers detected</p>
+                  <p v-else class="text-xs text-muted-foreground">{{ $t('tutoring.device.noSpeakers') }}</p>
                 </div>
 
                 <!-- Info text -->
                 <p v-if="!deviceCheck?.has_camera && !deviceCheck?.has_audio" class="text-xs text-muted-foreground text-center mt-1">
-                  You can still join — the session will use text chat only.
+                  {{ $t('tutoring.device.textOnly') }}
                 </p>
               </div>
 
@@ -488,14 +499,14 @@ function formatDate(iso: string) {
                   class="rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
                   @click="createStep = 'form'"
                 >
-                  Back
+                  {{ $t('common.actions.back') }}
                 </button>
                 <button
                   class="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
                   :disabled="loading"
                   @click="handleCreateConfirm"
                 >
-                  {{ loading ? 'Starting...' : 'Start Session' }}
+                  {{ loading ? $t('tutoring.device.starting') : $t('tutoring.create.start') }}
                 </button>
               </div>
             </template>
@@ -518,12 +529,12 @@ function formatDate(iso: string) {
           <div class="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-xl mx-4">
             <!-- Step 1: Form -->
             <template v-if="joinStep === 'form'">
-              <h2 class="text-lg font-semibold text-foreground">Join a Tutoring Session</h2>
-              <p class="mt-1 text-sm text-muted-foreground">Paste the room ticket shared by the host.</p>
+              <h2 class="text-lg font-semibold text-foreground">{{ $t('tutoring.join.title') }}</h2>
+              <p class="mt-1 text-sm text-muted-foreground">{{ $t('tutoring.join.subtitle') }}</p>
               <div class="mt-4 space-y-3">
                 <div>
                   <div class="flex items-center justify-between">
-                    <label class="text-sm font-medium text-foreground" for="join-ticket">Room Ticket</label>
+                    <label class="text-sm font-medium text-foreground" for="join-ticket">{{ $t('tutoring.join.ticketLabel') }}</label>
                     <button
                       type="button"
                       class="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs font-medium text-foreground transition-colors hover:bg-muted"
@@ -532,34 +543,34 @@ function formatDate(iso: string) {
                       <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                         <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 013.75 9.375v-4.5zM3.75 14.625c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5a1.125 1.125 0 01-1.125-1.125v-4.5zM13.5 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0113.5 9.375v-4.5z" />
                       </svg>
-                      Scan QR
+                      {{ $t('tutoring.join.scanQr') }}
                     </button>
                   </div>
                   <textarea
                     id="join-ticket"
                     v-model="joinTicket"
                     rows="3"
-                    placeholder="Paste room ticket here..."
+                    :placeholder="$t('tutoring.join.ticketPlaceholder')"
                     class="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground font-mono placeholder-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary resize-none"
                   />
                 </div>
                 <div>
-                  <label class="text-sm font-medium text-foreground" for="join-title">Session Label (optional)</label>
+                  <label class="text-sm font-medium text-foreground" for="join-title">{{ $t('tutoring.join.labelLabel') }}</label>
                   <input
                     id="join-title"
                     v-model="joinTitle"
                     type="text"
-                    placeholder="e.g. My Study Session"
+                    :placeholder="$t('tutoring.join.labelPlaceholder')"
                     class="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                   />
                 </div>
                 <div>
-                  <label class="text-sm font-medium text-foreground" for="join-display-name">Your Name (optional)</label>
+                  <label class="text-sm font-medium text-foreground" for="join-display-name">{{ $t('tutoring.form.nameLabel') }}</label>
                   <input
                     id="join-display-name"
                     v-model="joinDisplayName"
                     type="text"
-                    placeholder="e.g. Bob"
+                    :placeholder="$t('tutoring.join.namePlaceholder')"
                     class="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                   />
                 </div>
@@ -569,22 +580,22 @@ function formatDate(iso: string) {
                   class="rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
                   @click="resetJoinModal"
                 >
-                  Cancel
+                  {{ $t('common.actions.cancel') }}
                 </button>
                 <button
                   class="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
                   :disabled="!joinTicket.trim() || checkingDevices"
                   @click="handleJoinPreview"
                 >
-                  {{ checkingDevices ? 'Checking...' : 'Next' }}
+                  {{ checkingDevices ? $t('tutoring.device.checking') : $t('common.actions.next') }}
                 </button>
               </div>
             </template>
 
             <!-- Step 2: Device preview -->
             <template v-else>
-              <h2 class="text-lg font-semibold text-foreground">Device Check</h2>
-              <p class="mt-1 text-sm text-muted-foreground">Verify your devices before joining.</p>
+              <h2 class="text-lg font-semibold text-foreground">{{ $t('tutoring.device.title') }}</h2>
+              <p class="mt-1 text-sm text-muted-foreground">{{ $t('tutoring.device.subtitleJoin') }}</p>
 
               <div class="mt-4 space-y-3">
                 <!-- Camera selector -->
@@ -599,7 +610,7 @@ function formatDate(iso: string) {
                       </svg>
                     </div>
                     <div class="flex-1 min-w-0">
-                      <p class="text-sm font-medium text-foreground">Camera</p>
+                      <p class="text-sm font-medium text-foreground">{{ $t('tutoring.device.camera') }}</p>
                     </div>
                     <svg v-if="deviceCheck?.has_camera" class="h-4 w-4 text-success shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                       <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
@@ -617,7 +628,7 @@ function formatDate(iso: string) {
                       {{ cam.name }}
                     </option>
                   </select>
-                  <p v-else class="text-xs text-muted-foreground">No cameras detected — session will be audio-only</p>
+                  <p v-else class="text-xs text-muted-foreground">{{ $t('tutoring.device.noCameras') }}</p>
                 </div>
 
                 <!-- Microphone selector -->
@@ -632,7 +643,7 @@ function formatDate(iso: string) {
                       </svg>
                     </div>
                     <div class="flex-1 min-w-0">
-                      <p class="text-sm font-medium text-foreground">Microphone</p>
+                      <p class="text-sm font-medium text-foreground">{{ $t('tutoring.device.microphone') }}</p>
                     </div>
                     <svg v-if="deviceCheck?.has_audio" class="h-4 w-4 text-success shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                       <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
@@ -647,10 +658,10 @@ function formatDate(iso: string) {
                     class="w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                   >
                     <option v-for="mic in devices.audio_inputs" :key="mic.id" :value="mic.id">
-                      {{ mic.name || mic.id }}{{ mic.is_default ? ' (Default)' : '' }}
+                      {{ mic.name || mic.id }}{{ mic.is_default ? $t('tutoring.device.defaultSuffix') : '' }}
                     </option>
                   </select>
-                  <p v-else class="text-xs text-muted-foreground">No microphones detected</p>
+                  <p v-else class="text-xs text-muted-foreground">{{ $t('tutoring.device.noMics') }}</p>
                 </div>
 
                 <!-- Speaker output selector -->
@@ -662,7 +673,7 @@ function formatDate(iso: string) {
                       </svg>
                     </div>
                     <div class="flex-1 min-w-0">
-                      <p class="text-sm font-medium text-foreground">Speaker</p>
+                      <p class="text-sm font-medium text-foreground">{{ $t('tutoring.device.speaker') }}</p>
                     </div>
                     <svg v-if="devices && devices.audio_outputs.length > 0" class="h-4 w-4 text-success shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                       <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
@@ -674,15 +685,15 @@ function formatDate(iso: string) {
                     class="w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                   >
                     <option v-for="spk in devices.audio_outputs" :key="spk.id" :value="spk.id">
-                      {{ spk.name || spk.id }}{{ spk.is_default ? ' (Default)' : '' }}
+                      {{ spk.name || spk.id }}{{ spk.is_default ? $t('tutoring.device.defaultSuffix') : '' }}
                     </option>
                   </select>
-                  <p v-else class="text-xs text-muted-foreground">No speakers detected</p>
+                  <p v-else class="text-xs text-muted-foreground">{{ $t('tutoring.device.noSpeakers') }}</p>
                 </div>
 
                 <!-- Info text -->
                 <p v-if="!deviceCheck?.has_camera && !deviceCheck?.has_audio" class="text-xs text-muted-foreground text-center mt-1">
-                  You can still join — the session will use text chat only.
+                  {{ $t('tutoring.device.textOnly') }}
                 </p>
               </div>
 
@@ -696,14 +707,14 @@ function formatDate(iso: string) {
                   class="rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
                   @click="joinStep = 'form'"
                 >
-                  Back
+                  {{ $t('common.actions.back') }}
                 </button>
                 <button
                   class="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
                   :disabled="loading"
                   @click="handleJoinConfirm"
                 >
-                  {{ loading ? 'Joining...' : 'Join Session' }}
+                  {{ loading ? $t('tutoring.device.joining') : $t('tutoring.join.join') }}
                 </button>
               </div>
             </template>
@@ -724,8 +735,8 @@ function formatDate(iso: string) {
       >
         <div v-if="showQrScanner" class="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm" @click.self="showQrScanner = false">
           <div class="w-full max-w-sm rounded-xl border border-border bg-card p-6 shadow-xl mx-4">
-            <h2 class="text-lg font-semibold text-foreground">Scan QR invite</h2>
-            <p class="mt-1 text-sm text-muted-foreground">Point your camera at the QR code shown by the host.</p>
+            <h2 class="text-lg font-semibold text-foreground">{{ $t('tutoring.qr.scanTitle') }}</h2>
+            <p class="mt-1 text-sm text-muted-foreground">{{ $t('tutoring.qr.scanSubtitle') }}</p>
             <div class="mt-4">
               <QrCodeScanner
                 v-if="showQrScanner"
@@ -739,7 +750,7 @@ function formatDate(iso: string) {
                 class="rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
                 @click="showQrScanner = false"
               >
-                Cancel
+                {{ $t('common.actions.cancel') }}
               </button>
             </div>
           </div>

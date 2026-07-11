@@ -1,0 +1,450 @@
+{
+  "title": "Sentinel",
+  "subtitle": "Mantiene la honestidad de tus evaluaciones",
+  "actions": {
+    "resetProfile": "Restablecer configuración",
+    "proposeCheat": "Proponer patrón de trampa",
+    "recalibrate": "Rehacer configuración",
+    "train": "Configurar Sentinel",
+    "open": "Abrir",
+    "runTest": "Ejecutar prueba",
+    "openCommunity": "Abrir Comunidad"
+  },
+  "tabs": {
+    "overview": "Resumen",
+    "sessions": "Sesiones",
+    "signals": "Señales y pesos",
+    "profile": "Configuración y alertas"
+  },
+  "privacy": {
+    "title": "Privado por diseño",
+    "body": "Tus datos brutos de cámara, escritura y ratón nunca salen de este dispositivo. Aquí solo se guardan puntuaciones simples (de 0 a 1) que se usan en tus registros. Lo que Sentinel aprende vive en este navegador y puedes eliminarlo en cualquier momento."
+  },
+  "overview": {
+    "totalSessions": "Sesiones totales",
+    "avgIntegrity": "Integridad media",
+    "avgConsistency": "Consistencia media",
+    "cleanRate": "Tasa de sesiones limpias"
+  },
+  "breakdown": {
+    "title": "Cómo resultaron tus sesiones",
+    "empty": "Aún no hay sesiones. Los resultados aparecen aquí después de que termines evaluaciones.",
+    "clean": "Limpia",
+    "flagged": "Marcada",
+    "suspended": "Suspendida"
+  },
+  "community": {
+    "title": "Comunidad de Sentinel",
+    "active": "Activa",
+    "pending": "Empezando",
+    "description": "Revisa la biblioteca compartida de patrones de trampa de la que aprende cada copia de Sentinel.",
+    "noCouncil": "Aún no se ha elegido ningún consejo. Propón el primer consejo de Sentinel en la Comunidad principal de Alexandria para desbloquear las aprobaciones y las pruebas de precisión.",
+    "members": "Miembros del consejo"
+  },
+  "holdout": {
+    "title": "Conjunto de pruebas de precisión",
+    "sets": "sin conjuntos | {count} conjunto | {count} conjuntos",
+    "description": "Muestras privadas que la comunidad guarda para comprobar la precisión de Sentinel y con qué frecuencia genera falsas alarmas. Repartidas entre los miembros del consejo: ejecutar una prueba necesita {threshold} de sus claves.",
+    "empty": "Aún no se ha añadido ningún conjunto de pruebas. Un miembro del consejo añade uno usando {command}.",
+    "run": "Ejecutar prueba"
+  },
+  "cheatCard": {
+    "title": "Prueba de trampa de Sentinel",
+    "description": "Ejecuta patrones de trampa inventados a través del detector activo. Informa una puntuación y un resultado para cada uno sin que escribas nada. Solo para comprobación: no reemplaza una prueba de precisión real.",
+    "open": "Abrir"
+  },
+  "engine": {
+    "title": "Estado de Sentinel",
+    "calibrated": "Configurado",
+    "notCalibrated": "No configurado",
+    "emptyTitle": "Aún no configurado",
+    "emptyBody": "Ejecuta la configuración rápida para que Sentinel aprenda cómo escribes y te mueves.",
+    "typing": "Escritura",
+    "mouse": "Ratón",
+    "aiModels": "Modelos inteligentes",
+    "wpm": "PPM",
+    "ready": "{count}/3 listos"
+  },
+  "sessions": {
+    "emptyTitle": "Aún no hay sesiones",
+    "emptyBody": "Las sesiones se crean automáticamente cuando haces evaluaciones. Termina una para verla aquí.",
+    "emptyHint": "Sentinel vigila señales de trampa en tiempo real durante las evaluaciones.",
+    "copyTitle": "Copiar ID de sesión",
+    "inProgress": "En progreso",
+    "scoreHigh": "Alta",
+    "scoreMedium": "Media",
+    "scoreLow": "Baja"
+  },
+  "signals": {
+    "title": "Cómo se construye la puntuación de integridad",
+    "description": "Tu puntuación de integridad general combina estas señales. Todo se mide aquí mismo, en tu dispositivo.",
+    "distribution": "Distribución de pesos",
+    "items": {
+      "typingConsistency": {
+        "name": "Ritmo de escritura",
+        "description": "Comprueba en qué medida tu escritura coincide con el ritmo que Sentinel aprendió de ti: cuánto mantienes las teclas y las pausas entre ellas."
+      },
+      "mouseConsistency": {
+        "name": "Movimiento del ratón",
+        "description": "Comprueba en qué medida la velocidad y el movimiento de tu ratón coinciden con el patrón que Sentinel aprendió de ti."
+      },
+      "isHuman": {
+        "name": "Movimiento similar al humano",
+        "description": "Las personas reales se mueven con variación natural. Un movimiento perfectamente constante, similar al de una máquina, se marca."
+      },
+      "tabSwitches": {
+        "name": "Permanecer en la página",
+        "description": "Observa con qué frecuencia te alejas de la evaluación. Muchos cambios se marcan."
+      },
+      "pasteEvents": {
+        "name": "Pegar",
+        "description": "Cuenta cuánto texto pegas. Pegar bloques grandes de texto se marca."
+      },
+      "devtools": {
+        "name": "Herramientas de desarrollador",
+        "description": "Detecta cuando se abren las herramientas de desarrollador del navegador."
+      },
+      "facePresent": {
+        "name": "Comprobación de cámara",
+        "description": "Si activas tu cámara, Sentinel comprueba cada pocos segundos que sigues ahí."
+      },
+      "aiPasteAnomaly": {
+        "name": "Detector de pegado de Sentinel",
+        "description": "Una comprobación adicional para respuestas pegadas y bots de escritura. Solo consultiva, y solo cuando la puntuación inteligente está activada."
+      }
+    }
+  },
+  "flags": {
+    "title": "Qué genera una alerta",
+    "description": "Las alertas se generan automáticamente cuando una señal supera un límite. Cómo resulta una sesión depende de cuántas alertas surjan y de lo graves que sean.",
+    "triggerLabel": "Se genera cuando: {trigger}",
+    "items": {
+      "tabSwitching": {
+        "description": "Alejarse con demasiada frecuencia",
+        "trigger": "Más de 10 cambios en una comprobación"
+      },
+      "pasteDetected": {
+        "description": "Se pegó un bloque grande de texto",
+        "trigger": "Más de 500 caracteres pegados"
+      },
+      "devtoolsDetected": {
+        "description": "Se abrieron las herramientas de desarrollador del navegador",
+        "trigger": "La comprobación de herramientas de desarrollador dio positivo"
+      },
+      "botSuspected": {
+        "description": "El movimiento parece automatizado",
+        "trigger": "El movimiento del ratón casi no tiene variación natural"
+      },
+      "noFace": {
+        "description": "No se ve ningún rostro en la cámara",
+        "trigger": "Falta el rostro en una sesión con cámara activada"
+      },
+      "multipleFaces": {
+        "description": "Más de un rostro en la cámara",
+        "trigger": "Más de un rostro durante una comprobación"
+      },
+      "multiAccount": {
+        "description": "Este dispositivo está vinculado a más de una cuenta",
+        "trigger": "El mismo dispositivo se vio en más de una cuenta"
+      },
+      "lowIntegrity": {
+        "description": "La puntuación de integridad cayó por debajo del límite seguro",
+        "trigger": "Puntuación general por debajo de 0,40"
+      },
+      "behaviorShift": {
+        "description": "El comportamiento se desvió mucho de tu patrón habitual",
+        "trigger": "Puntuación de coincidencia por debajo de 0,35"
+      }
+    }
+  },
+  "profile": {
+    "trainingTitle": "Estado de los modelos inteligentes",
+    "keystrokeModel": "Modelo de escritura",
+    "mouseModel": "Modelo de ratón",
+    "trained": "entrenado",
+    "untrained": "sin entrenar",
+    "epochs": "Rondas",
+    "samples": "Muestras",
+    "loss": "Error",
+    "note": "Lo que Sentinel aprende se guarda en almacenamiento cifrado en este dispositivo. Vuelve a ejecutar la configuración para reentrenar, o restablece para borrarlo por completo.",
+    "behavioralTitle": "Tu patrón",
+    "typing": "Escritura",
+    "mouse": "Ratón",
+    "aiModels": "Modelos inteligentes",
+    "avgDwell": "Retención media",
+    "avgFlight": "Pausa media",
+    "speed": "Velocidad",
+    "velocity": "Velocidad",
+    "acceleration": "Aceleración",
+    "clickPrecision": "Precisión de clic",
+    "keystrokeModelShort": "Modelo de escritura",
+    "mouseModelShort": "Modelo de ratón",
+    "faceCheck": "Comprobación de rostro",
+    "ready": "Listo",
+    "pending": "Pendiente",
+    "enrolled": "Configurado",
+    "notSet": "Sin configurar",
+    "errorSamples": "Error / muestras",
+    "setupProgress": "Progreso de configuración",
+    "noAiData": "No hay datos de modelos inteligentes",
+    "noProfileTitle": "Aún no configurado",
+    "noProfileBody": "Ejecuta la configuración rápida para que Sentinel aprenda cómo escribes y te mueves."
+  },
+  "outcomes": {
+    "title": "Cómo se deciden los resultados",
+    "clean": "Limpia",
+    "cleanRule": "El resultado habitual: sin alertas graves, menos de 3 advertencias, integridad de 0,40 o superior.",
+    "flagged": "Marcada",
+    "flaggedRule": "1 alerta grave, o 3 o más advertencias, o integridad por debajo de 0,40: se envía para que un revisor la examine.",
+    "suspended": "Suspendida",
+    "suspendedRule": "2 o más alertas graves, o 1 alerta grave más 2 advertencias: los resultados pueden descartarse."
+  },
+  "aiScoring": {
+    "title": "Puntuación inteligente (consultiva)",
+    "description": "Permite que los modelos de escritura, ratón, rostro y pegado añadan un pequeño empujón a la puntuación de integridad. Desactivada por defecto: las señales inteligentes son consultivas hasta que se contrastan con datos reales.",
+    "enabled": "Activada",
+    "disabled": "Desactivada"
+  },
+  "pasteClassifier": {
+    "title": "Detector de pegado de Sentinel",
+    "description": "Añade la señal del detector de pegado mientras la puntuación inteligente está activada. Desactívalo si marca demasiadas respuestas honestas; las demás señales inteligentes siguen funcionando.",
+    "loadedModel": "Detector cargado",
+    "activeModel": "Detector de la comunidad",
+    "bundledFallback": "predeterminado integrado"
+  },
+  "reset": {
+    "title": "Borrar tu configuración",
+    "description": "Elimina de este dispositivo lo que Sentinel aprendió sobre ti. Tendrás que volver a configurarlo antes de que pueda vigilar futuras evaluaciones.",
+    "button": "Restablecer configuración"
+  },
+  "howItWorks": {
+    "title": "Cómo funciona Sentinel",
+    "body": "Sentinel usa dos tipos de comprobaciones: unas fiables basadas en reglas (las comprobaciones decisivas) y otras inteligentes por usuario (consultivas). Durante una evaluación toma instantáneas discretas en momentos aleatorios, cada 15 a 45 segundos. Tus puntuaciones de integridad y consistencia provienen de las señales ponderadas de arriba, y el resultado depende de cuántas alertas surjan y de lo graves que sean. Cada trampa confirmada reduce la fiabilidad de las habilidades afectadas."
+  },
+  "cheatTest": {
+    "title": "Prueba de trampa de Sentinel",
+    "subtitle": "Ejecuta patrones de trampa inventados a través del detector activo y observa las puntuaciones. Solo para comprobación: no es una prueba de precisión real.",
+    "loadedModel": "Detector cargado",
+    "streamLength": "Longitud de muestra",
+    "seed": "Semilla",
+    "run": "Ejecutar todos los patrones",
+    "summary": "Resumen",
+    "caught": "Trampas detectadas",
+    "falseAlarms": "Falsas alarmas",
+    "catchRate": "Tasa de detección",
+    "falseAlarmRate": "Tasa de falsas alarmas",
+    "colPattern": "Patrón",
+    "colExpected": "Debería ser",
+    "colScore": "Puntuación",
+    "colFlag": "Resultado",
+    "colVerdict": "Veredicto",
+    "featureDetails": "Valores detallados de las características",
+    "featureLabel": "Patrón",
+    "emptyHint": "Elige {action} para enviar cada patrón a través del detector activo.",
+    "emptyHintAction": "Ejecutar todos los patrones"
+  },
+  "holdoutEval": {
+    "back": "Volver a Sentinel",
+    "title": "Prueba de precisión",
+    "subtitle": "Comprueba la precisión de Sentinel frente a un conjunto de pruebas privado de la comunidad. Necesita las claves de suficientes miembros del consejo para desbloquearse; cada miembro ejecuta {command} en su propio dispositivo y pega el resultado abajo.",
+    "step1": "1. Elige un conjunto de pruebas",
+    "empty": "Aún no se han añadido conjuntos de pruebas. Un miembro del consejo añade uno usando {command}.",
+    "selectPlaceholder": "— Seleccionar —",
+    "step2": "2. Reúne {count} claves",
+    "step2Body": "Cada miembro del consejo listado abajo desbloquea su propia clave en su dispositivo (con {command}) y comparte el resultado por un canal seguro. Pega cualquiera de {count} de ellas aquí: Sentinel las combina y desbloquea el conjunto de pruebas.",
+    "sharePlaceholder": "pega la clave de este miembro (o déjalo en blanco)",
+    "run": "Ejecutar prueba",
+    "resultTitle": "Resultado de la prueba",
+    "resultUnlocked": "Conjunto de pruebas desbloqueado",
+    "modelKind": "Modelo",
+    "label": "Etiqueta",
+    "samples": "Muestras",
+    "schema": "Formato",
+    "untrained": "Sentinel no está configurado aquí, así que no hay ningún resultado que mostrar. Configura Sentinel primero.",
+    "verdictHuman": "Conjunto de pruebas de usuario honesto: el nivel medio de alarma de Sentinel fue del {score}% (más bajo es mejor). El {adv}% de las muestras activó la alarma: esa es tu tasa de falsas alarmas.",
+    "verdictAttack": "Conjunto de pruebas de trampa: el nivel medio de alarma de Sentinel fue del {score}% (más alto es mejor). El {adv}% de {count} muestras {kind} se detectaron como trampa: esa es tu tasa de detección para la familia «{label}».",
+    "note": "El conjunto de pruebas desbloqueado permanece en este dispositivo. No compartas las muestras etiquetadas: filtrarlas entrega a los tramposos la clave de respuestas."
+  },
+  "propose": {
+    "back": "Volver a Sentinel",
+    "title": "Proponer un patrón de trampa",
+    "subtitle": "Envía un patrón de trampa etiquetado para que la comunidad de Sentinel lo revise. Los patrones aprobados enseñan a cada copia de Sentinel a reconocer ese tipo de trampa. Los patrones de rostro no se aceptan.",
+    "submittedTitle": "Propuesta enviada",
+    "submittedBody": "ID de la propuesta: {id}. Los miembros de la comunidad de Sentinel votarán sobre ella: consulta el panel de la Comunidad para ver el progreso.",
+    "another": "Proponer otro",
+    "step1": "1. Qué modelo",
+    "step1Body": "¿Qué modelo debería aprender a detectar este patrón? Los datos de rostro nunca se comparten.",
+    "step2": "2. Etiqueta",
+    "step2Body": "¿Qué tipo de trampa es esta? Elige una etiqueta conocida o escribe la tuya.",
+    "labelPlaceholder": "O escribe una etiqueta personalizada (anula la elección de arriba)",
+    "step3": "3. Archivo de muestra",
+    "step3Body": "Un archivo JSON con formato 1, un modelo que coincida con tu elección de arriba, una etiqueta y al menos 20 muestras. Consulta {doc} para el formato.",
+    "selected": "Seleccionado: {name}",
+    "parsedOk": "Se ve bien: {count} muestras, etiqueta {label}.",
+    "kindMismatch": "Atención: el modelo del archivo es «{fileKind}» pero elegiste «{selectedKind}». Cambia uno antes de enviar.",
+    "selfCheckTitle": "Autocomprobación de Sentinel",
+    "step4": "4. Sesión de origen (opcional)",
+    "step4Body": "Si tomaste estas muestras de una de tus propias sesiones de evaluación, elígela aquí. Las sesiones marcadas o suspendidas no se pueden usar: los datos de trampa no deben moldear el detector. Sentinel comprueba de nuevo de todos modos.",
+    "sessionNone": "Ninguna",
+    "step5": "5. Resumen de la propuesta",
+    "titlePlaceholder": "Título corto que se muestra a los votantes",
+    "descriptionPlaceholder": "¿Por qué debería aprobarse? ¿Cómo recopilaste los datos?",
+    "submit": "Enviar propuesta",
+    "verdict": {
+      "untrained": "Sentinel aún no está configurado aquí, así que no puede autocomprobarse. Configura Sentinel primero para ver si esto realmente parece una trampa.",
+      "strong": "Sentinel marca esto con fuerza (media del {pct}%, {adv}% de las muestras por encima del límite). Un patrón de trampa sólido.",
+      "weak": "Sentinel lee esto como cercano a lo normal (media del {pct}%). Aprobarlo podría enseñar al modelo a marcar a personas honestas: reconsidéralo antes de enviar.",
+      "borderline": "En el límite: media del {pct}%, {adv}% marcado. El patrón puede ser débil o mixto: revisa de nuevo las muestras."
+    },
+    "errors": {
+      "samplesArray": "«samples» debe ser una lista.",
+      "tooFew": "Se necesitan al menos 20 muestras (hay {count}).",
+      "faceForbidden": "Los patrones de rostro no se aceptan.",
+      "unsupportedKind": "Modelo no compatible: {kind}.",
+      "unsupportedSchema": "Formato no compatible: {schema}.",
+      "emptyLabel": "La etiqueta no puede estar vacía.",
+      "readFailed": "No se pudo leer el archivo: {error}"
+    }
+  },
+  "wizard": {
+    "welcomeTitle": "Configurar Sentinel",
+    "welcomeBody": "Esta configuración rápida enseña a Sentinel cómo escribes y mueves el ratón personalmente. Tarda unos 2 minutos y ayuda a detectar a alguien que finja ser tú.",
+    "buildsTitle": "Lo que construye esta configuración (solo para ti, opcional):",
+    "buildsTyping": "Modelo de escritura: aprende tu ritmo de escritura",
+    "buildsMouse": "Modelo de ratón: aprende cómo mueves el ratón",
+    "buildsFace": "Comprobación de rostro: configurada con tu cámara (opcional)",
+    "alreadyTrained": "(ya hecho: puedes omitirlo)",
+    "alreadyEnrolled": "(ya configurado: puedes omitirlo)",
+    "activeTitle": "Ya te protege, sin necesidad de configuración:",
+    "activePaste": "Detector de pegado de Sentinel: detecta respuestas pegadas y bots de escritura, integrado en cada copia",
+    "activeRules": "Comprobaciones básicas: permanecer en la página, herramientas de desarrollador, tamaño de pegado y movimiento no natural",
+    "privacyNote": "Todo permanece en este dispositivo. Tus pulsaciones de teclas, movimientos del ratón y video brutos nunca se guardan. Lo que Sentinel aprende se guarda en almacenamiento cifrado en tu dispositivo.",
+    "begin": "Empezar",
+    "typingTitle": "Configuración de escritura",
+    "typingBody": "Escribe el texto de abajo con naturalidad. Sentinel aprende tu ritmo de escritura: cuánto mantienes cada tecla y las pausas entre ellas.",
+    "typingHasModel": "Ya tienes un modelo de escritura de una configuración anterior. Volver a escribir lo reemplaza; Omitir conserva el existente.",
+    "typingPlaceholder": "Empieza a escribir aquí…",
+    "labelSpeed": "Velocidad",
+    "labelHold": "Retención",
+    "labelGap": "Pausa",
+    "labelKeys": "Teclas",
+    "unitMs": "ms",
+    "unitTotal": "total",
+    "skipKeep": "Omitir: conservar el existente",
+    "mouseTitle": "Configuración del ratón",
+    "mouseBody": "Haz clic en cada objetivo a medida que aparece. Muévete con naturalidad: Sentinel está aprendiendo la velocidad y el movimiento de tu ratón.",
+    "mouseHasModel": "Ya tienes un modelo de ratón. Rehacer esto lo reemplaza; Omitir conserva el existente.",
+    "allTargetsHit": "Todos los objetivos alcanzados",
+    "labelMoves": "Movimientos",
+    "labelClicks": "Clics",
+    "labelTargets": "Objetivos",
+    "awarenessTitle": "Qué más vigila Sentinel",
+    "awarenessBody": "Más allá de la escritura y el ratón, Sentinel vigila estos aspectos durante las evaluaciones. No hay que hacer nada aquí: es solo para que lo sepas.",
+    "awarenessTabTitle": "Permanecer en la página",
+    "awarenessTabBody": "Registra cuándo te alejas de la evaluación y cuánto tiempo estás fuera. Un cambio ocasional está bien: muchos cambios marcan la sesión.",
+    "awarenessClipboardTitle": "Pegar",
+    "awarenessClipboardBody": "Detecta los eventos de pegado y cuenta los caracteres pegados. Los pegados pequeños están bien: pegar bloques grandes de texto en las respuestas genera una alerta.",
+    "awarenessDevtoolsTitle": "Herramientas de desarrollador",
+    "awarenessDevtoolsBody": "Una comprobación rápida detecta si las herramientas de desarrollador del navegador están abiertas. Es una señal leve: no te suspende, pero cuenta para la puntuación general.",
+    "awarenessFingerprintTitle": "Comprobación del dispositivo",
+    "awarenessFingerprintBody": "Una huella privada de este dispositivo (sin datos personales) ayuda a detectar el mismo dispositivo usado por diferentes cuentas.",
+    "cameraTitle": "Comprobación de rostro (opcional)",
+    "cameraBody": "Puedes activar tu cámara para confirmar que estás presente durante las evaluaciones. El video se maneja por completo en tu dispositivo: nunca se envían imágenes ni video a ningún sitio.",
+    "cameraHasEnrollment": "Ya tienes una comprobación de rostro configurada. Volver a activar la cámara la reemplaza; Omitir conserva la existente.",
+    "enableCamera": "Activar cámara",
+    "skip": "Omitir",
+    "faceDetected": "Rostro detectado",
+    "noFace": "No se detecta rostro: colócate dentro del encuadre",
+    "cameraSkipped": "Cámara omitida. Puedes activarla más tarde durante cualquier evaluación.",
+    "cameraDenied": "Se denegó el permiso de la cámara.",
+    "cameraNotFound": "No se encontró ninguna cámara en este dispositivo.",
+    "cameraFailed": "No se pudo abrir la cámara.",
+    "gazeTitle": "Configuración de seguimiento ocular (opcional)",
+    "gazeBody": "Sigue los puntos con los ojos. Esto enseña a Sentinel dónde miras en esta pantalla, para que pueda detectar cuándo tu mirada se desvía a un segundo dispositivo durante una evaluación. El video se maneja solo en tu dispositivo: no se almacena ni se envía nada.",
+    "gazeCoarseNote": "Sin esto, el seguimiento ocular sigue funcionando en un modo de desvío de mirada más aproximado.",
+    "startCalibration": "Iniciar configuración",
+    "gazeCameraFailed": "No se pudo abrir la cámara para la configuración de seguimiento ocular.",
+    "gazeTrainFailed": "La configuración de seguimiento ocular falló.",
+    "gazeNotEnough": "No hay suficientes fotogramas utilizables ({count}). Asegúrate de que tu rostro esté bien iluminado y centrado, luego inténtalo de nuevo.",
+    "gazeLookDot": "Mira el punto. Punto {current} de {total}.",
+    "gazeDone": "Seguimiento ocular configurado a partir de {count} muestras.",
+    "gazeLoss": "Error de ajuste: {loss}",
+    "recalibrate": "Rehacer configuración",
+    "reviewTitle": "Configuración completada",
+    "reviewBody": "Sentinel ha construido tu patrón. Esto es lo que aprendió:",
+    "typingPattern": "Patrón de escritura",
+    "msHold": "ms de retención",
+    "msGap": "ms de pausa",
+    "mousePattern": "Patrón de ratón",
+    "pxVelocity": "velocidad (px/ms)",
+    "reviewSamples": "muestras",
+    "facePresence": "Comprobación de rostro",
+    "faceSkipped": "Omitida: puedes activarla durante las evaluaciones",
+    "faceConfigured": "Configurada y probada",
+    "smartModels": "Modelos inteligentes",
+    "modelTyping": "Modelo de escritura",
+    "modelMouse": "Modelo de ratón",
+    "modelFace": "Comprobación de rostro",
+    "keptExisting": "Se conservó el existente",
+    "retrained": "Rehecho",
+    "insufficient": "No hay suficientes datos",
+    "enrolled": "Configurado",
+    "statusSkipped": "Omitido",
+    "statusPending": "Pendiente",
+    "reviewNote": "Estos modelos son solo para ti. El detector de pegado integrado (siempre activo) funciona por separado. Todo ello permanece en tu dispositivo.",
+    "finish": "Finalizar",
+    "saving": "Guardando…"
+  },
+  "debug": {
+    "title": "Sentinel — vista en vivo",
+    "close": "Cerrar (⌘⇧S)",
+    "cameraUnavailable": "Cámara no disponible",
+    "startPreview": "Iniciar vista previa de la cámara",
+    "stopCamera": "detener cámara",
+    "pillNoFace": "sin rostro",
+    "pillOnScreen": "en pantalla",
+    "pillOffScreen": "FUERA DE PANTALLA",
+    "sectionOutcome": "Resultado",
+    "sectionTyping": "Escritura",
+    "sectionMouse": "Ratón",
+    "sectionClipboard": "Portapapeles",
+    "sectionEnvironment": "Entorno",
+    "sectionCamera": "Cámara",
+    "sectionGaze": "Mirada",
+    "sectionAiScores": "Puntuaciones inteligentes",
+    "rowSession": "sesión",
+    "rowIntegrity": "integridad",
+    "rowConsistency": "consistencia",
+    "rowSpeed": "velocidad",
+    "rowKeystrokeBuffer": "búfer de escritura (en vivo)",
+    "rowHumanLike": "similar al humano",
+    "rowPointsBuffer": "búfer del ratón (en vivo)",
+    "rowPasteEvents": "eventos de pegado",
+    "rowPastedChars": "caracteres pegados",
+    "rowTabSwitches": "cambios de pestaña",
+    "rowUnfocused": "sin foco",
+    "rowDevtools": "herramientas de desarrollador",
+    "rowEnvChanged": "entorno cambiado",
+    "rowAppFocusLost": "foco de la aplicación perdido",
+    "rowSwitchedTo": "cambió a",
+    "rowFaces": "rostros (en vivo)",
+    "rowFacePresent": "rostro presente",
+    "rowFaceConsistency": "coincidencia de rostro",
+    "rowFaceSimMatch": "similitud / coincidencia de rostro",
+    "rowSessionChecks": "comprobaciones de sesión",
+    "rowSessionRead": "lectura de sesión",
+    "rowPreviewYawPitch": "guiñada / cabeceo de vista previa",
+    "rowOffscreenRatio": "proporción fuera de pantalla",
+    "rowDownGlances": "miradas hacia abajo",
+    "rowOccludedChecks": "comprobaciones bloqueadas",
+    "rowPasteAnomaly": "alarma de pegado",
+    "rowKeystrokeAnomaly": "alarma de escritura",
+    "rowMouseHumanProb": "probabilidad humana del ratón",
+    "rowInferLatency": "tiempo de respuesta",
+    "valActive": "activo",
+    "valIdle": "inactivo",
+    "valYes": "sí",
+    "valNo": "no",
+    "valNa": "n/d"
+  }
+}

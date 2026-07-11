@@ -16,8 +16,8 @@ defineEmits<{
       +
     </div>
     <div class="text-center">
-      <div class="font-medium text-foreground">Add user</div>
-      <div class="text-xs text-muted-foreground mt-0.5">Create a new profile</div>
+      <div class="font-medium text-foreground">{{ $t('profile.add.title') }}</div>
+      <div class="text-xs text-muted-foreground mt-0.5">{{ $t('profile.add.subtitle') }}</div>
     </div>
   </button>
 </template>

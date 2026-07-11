@@ -1,0 +1,99 @@
+{
+  "browse": {
+    "title": "Explorar plugins",
+    "intro": "Tipos de actividad integrados más complementos de la comunidad que la aplicación ha encontrado. Los plugins aprobados por la comunidad pueden emitir credenciales que cuentan de forma predeterminada. Los que aún no se han revisado también funcionan, pero sus calificaciones solo cuentan como tu progreso hasta que la comunidad los revise.",
+    "builtin": "Integrados",
+    "community": "Comunidad",
+    "emptyTitle": "Aún no hay plugins de la comunidad",
+    "emptyDescription": "Los complementos de la comunidad llegan de otros estudiantes. Cuando alguien publique uno, aparecerá aquí.",
+    "loadFailed": "No se pudo cargar la lista de plugins: {error}"
+  },
+  "badge": {
+    "builtin": "Integrado",
+    "unknown": "Sin revisar",
+    "knownFlawed": "Problemas conocidos",
+    "attested": "Aprobado por la comunidad",
+    "unattested": "Aún sin revisar",
+    "statusPending": "Comprobando…"
+  },
+  "meta": {
+    "kinds": "Tipos",
+    "graded": "Calificado",
+    "contentId": "ID de contenido",
+    "author": "Por",
+    "caps": "Permisos",
+    "installed": "Añadido"
+  },
+  "installed": {
+    "title": "Plugins",
+    "intro": "Actividades de aprendizaje y evaluación creadas por la comunidad. Cada plugin se ejecuta en un entorno aislado y protegido, sin acceso a internet. Concedes permisos (micrófono, cámara, etc.) plugin por plugin, la primera vez que los necesita.",
+    "installHeading": "Añadir desde una carpeta de este dispositivo",
+    "installHintPrefix": "Apunta a una carpeta de este dispositivo que contenga su",
+    "installHintAnd": ", y un",
+    "installHintSuffix": "paquete. Pronto podrás añadir plugins directamente de otros estudiantes.",
+    "installPlaceholder": "/ruta/a/la/carpeta-del-plugin",
+    "installedHeading": "Tus plugins",
+    "emptyTitle": "Aún no hay plugins",
+    "emptyDescription": "Añade un plugin arriba para desbloquear nuevas actividades de aprendizaje y evaluación.",
+    "actions": {
+      "add": "Añadir",
+      "details": "Detalles",
+      "hide": "Ocultar"
+    },
+    "errors": {
+      "enterPath": "Introduce la ruta a una carpeta de plugin.",
+      "installSuccess": "Se añadió «{name}» v{version}.",
+      "installFailed": "No se pudo añadir el plugin: {error}",
+      "listFailed": "No se pudieron cargar tus plugins: {error}",
+      "detailsFailed": "No se pudieron cargar los detalles del plugin: {error}",
+      "uninstallFailed": "No se pudo quitar el plugin: {error}",
+      "revokeFailed": "No se pudo desactivar ese permiso: {error}"
+    },
+    "uninstallConfirm": "¿Quitar «{name}»? Esto elimina el plugin de este dispositivo. Los cursos que lo usan dejarán de funcionar hasta que lo vuelvas a añadir.",
+    "detail": {
+      "kinds": "Tipos",
+      "declaredCapabilities": "Permisos que puede solicitar",
+      "platforms": "Plataformas",
+      "apiVersion": "Versión del formato de plugin",
+      "none": "ninguno",
+      "unspecified": "sin especificar",
+      "grantedHeading": "Permisos que has concedido",
+      "noGrants": "No hay permisos permanentes. El plugin te preguntará la primera vez que necesite uno.",
+      "revoke": "Desactivar"
+    }
+  },
+  "docs": {
+    "back": "Volver a plugins",
+    "fallbackName": "Plugin",
+    "by": "de {name}",
+    "donate": "Apoyar al creador",
+    "noReadme": "Este plugin no incluye una guía.",
+    "loadError": "No se pudo cargar la guía: {error}"
+  },
+  "permission": {
+    "heading": "{name} quiere {action}",
+    "capabilities": {
+      "microphone": "usar tu micrófono",
+      "camera": "usar tu cámara",
+      "midi": "conectarse a tus dispositivos de música (MIDI)",
+      "fullscreen": "ocupar toda la pantalla",
+      "clipboard": "leer y cambiar tu portapapeles",
+      "storage": "guardar tu progreso en este dispositivo",
+      "mlInference": "ejecutar modelos de IA directamente en tu dispositivo"
+    },
+    "sandbox": "Los plugins los crea la comunidad y se ejecutan en un entorno aislado seguro.",
+    "madeBy": "Creado por",
+    "noAccess": "No puede acceder a internet ni a ningún otro dato de este dispositivo.",
+    "always": "Permitir siempre",
+    "session": "Permitir en esta sesión",
+    "once": "Permitir una vez",
+    "deny": "No permitir"
+  },
+  "host": {
+    "noCid": "Esta actividad usa un plugin, pero falta su ID de contenido.",
+    "disabled": "Este plugin está desactivado. Vuelve a activarlo en Ajustes → Plugins para usarlo.",
+    "noKinds": "Este plugin no define ninguna actividad, así que no puede ejecutarse.",
+    "noGrader": "Este plugin está configurado para calificar pero no tiene ningún calificador adjunto. El autor necesita publicar una corrección.",
+    "loadFailed": "No se pudo cargar el plugin: {error}"
+  }
+}

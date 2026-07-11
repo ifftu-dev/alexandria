@@ -288,8 +288,21 @@ pub mod keys {
         scope: Scope::Sync,
         category: "Locale",
         label: "Display language",
-        description: "BCP-47 language tag (e.g. `en`, `pt-BR`).",
-        default: || "en".to_string(),
+        description: "Interface language. `system` follows the operating system; \
+                      otherwise a supported locale code (e.g. `en`, `es`, `hi`, `ur`).",
+        default: || "system".to_string(),
+    };
+
+    /// Locale codes whose machine-translation "unreviewed" banner the user has
+    /// already dismissed. Device-scoped — dismissal is a per-device UI decision.
+    /// Shape: `["es", "hi", …]`.
+    pub const UI_DISMISSED_LOCALE_NOTICES: SettingKey<JsonSetting> = SettingKey {
+        key: "ui.dismissed_locale_notices",
+        scope: Scope::Device,
+        category: "Locale",
+        label: "Dismissed translation notices",
+        description: "Languages whose machine-translation review banner has been dismissed.",
+        default: || JsonSetting(serde_json::json!([])),
     };
 
     // ── Video playback defaults ────────────────────────────────
@@ -494,6 +507,7 @@ pub fn all_entries(
         entry!(NOTIFICATIONS_ENABLED),
         entry!(SYNC_AUTO),
         entry!(USER_LANGUAGE),
+        entry!(UI_DISMISSED_LOCALE_NOTICES),
         entry!(VIDEO_DEFAULT_VOLUME),
         entry!(VIDEO_DEFAULT_MUTED),
         entry!(CARDANO_BLOCKFROST_KEY),
@@ -536,6 +550,7 @@ pub fn lookup_meta(key: &str) -> Option<(Scope, &'static str)> {
     check!(NOTIFICATIONS_ENABLED);
     check!(SYNC_AUTO);
     check!(USER_LANGUAGE);
+    check!(UI_DISMISSED_LOCALE_NOTICES);
     check!(VIDEO_DEFAULT_VOLUME);
     check!(VIDEO_DEFAULT_MUTED);
     check!(CARDANO_BLOCKFROST_KEY);
@@ -596,6 +611,22 @@ mod tests {
         let theme = entries.iter().find(|e| e.key == "ui.theme").unwrap();
         assert_eq!(theme.current_value, "system");
         assert!(theme.is_default);
+    }
+
+    #[test]
+    fn locale_settings_registered() {
+        let overrides = std::collections::HashMap::new();
+        let entries = all_entries(&overrides);
+        let lang = entries.iter().find(|e| e.key == "user.language").unwrap();
+        assert_eq!(lang.current_value, "system");
+        assert_eq!(lang.scope, Scope::Sync);
+        let notices = entries
+            .iter()
+            .find(|e| e.key == "ui.dismissed_locale_notices")
+            .unwrap();
+        assert_eq!(notices.kind, "json");
+        assert_eq!(notices.scope, Scope::Device);
+        assert!(lookup_meta("ui.dismissed_locale_notices").is_some());
     }
 
     #[test]

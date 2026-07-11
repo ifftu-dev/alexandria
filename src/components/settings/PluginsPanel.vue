@@ -9,6 +9,7 @@
  */
 
 import { ref, computed, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { useDisplayNames } from '@/composables/useDisplayNames'
@@ -32,6 +33,7 @@ import type {
   PluginPermissionRecord,
 } from '@/types'
 
+const { t } = useI18n()
 const { invoke } = useLocalApi()
 const router = useRouter()
 const { displayName, ensureNames } = useDisplayNames()
@@ -43,9 +45,9 @@ function openDocs(p: InstalledPlugin) {
 // ---- Tab state ------------------------------------------------------------
 const activeTab = ref<'installed' | 'inbox' | 'my-submissions'>('installed')
 const tabs = computed(() => [
-  { key: 'installed', label: 'Installed', count: plugins.value.length },
-  { key: 'inbox', label: 'Instructor Inbox', count: pendingInbox.value.length },
-  { key: 'my-submissions', label: 'My Submissions', count: mySubmissions.value.length },
+  { key: 'installed', label: t('settings.plugins.tabs.installed'), count: plugins.value.length },
+  { key: 'inbox', label: t('settings.plugins.tabs.inbox'), count: pendingInbox.value.length },
+  { key: 'my-submissions', label: t('settings.plugins.tabs.mySubmissions'), count: mySubmissions.value.length },
 ])
 
 // ---- Installed plugins ----------------------------------------------------
@@ -161,7 +163,7 @@ async function refresh() {
     attestation.value = aMap
     void loadThumbnails()
   } catch (e) {
-    installError.value = `Failed to load plugins: ${e}`
+    installError.value = t('settings.plugins.loadFailed', { msg: String(e) })
   } finally {
     loading.value = false
   }
@@ -190,7 +192,7 @@ async function loadThumbnails() {
 async function install() {
   const path = installPath.value.trim()
   if (!path) {
-    installError.value = 'Enter the path to a plugin bundle directory.'
+    installError.value = t('settings.plugins.enterPath')
     return
   }
   installing.value = true
@@ -200,11 +202,11 @@ async function install() {
     const result = await invoke<InstalledPlugin>('plugin_install_from_file', {
       directory: path,
     })
-    installSuccess.value = `Installed "${result.name}" v${result.version}.`
+    installSuccess.value = t('settings.plugins.installed', { name: result.name, version: result.version })
     installPath.value = ''
     await refresh()
   } catch (e) {
-    installError.value = `Install failed: ${e}`
+    installError.value = t('settings.plugins.installFailed', { msg: String(e) })
   } finally {
     installing.value = false
   }
@@ -216,7 +218,7 @@ async function toggleEnabled(p: InstalledPlugin) {
     await invoke('plugin_set_enabled', { pluginCid: p.plugin_cid, enabled: next })
     p.enabled = next
   } catch (e) {
-    installError.value = `Could not ${next ? 'enable' : 'disable'} plugin: ${e}`
+    installError.value = t('settings.plugins.toggleFailed', { msg: String(e) })
   }
 }
 
@@ -232,7 +234,7 @@ async function doUninstall() {
     await invoke('plugin_uninstall', { pluginCid: p.plugin_cid })
     await refresh()
   } catch (e) {
-    installError.value = `Uninstall failed: ${e}`
+    installError.value = t('settings.plugins.uninstallFailed', { msg: String(e) })
   }
 }
 
@@ -252,18 +254,18 @@ async function revoke(cid: string, capability: PluginCapability) {
       }),
     }
   } catch (e) {
-    installError.value = `Revoke failed: ${e}`
+    installError.value = t('settings.plugins.revokeFailed', { msg: String(e) })
   }
 }
 
 function attestationBadge(cid: string): { label: string; variant: 'success' | 'warning' | 'secondary' } {
   const s = attestation.value[cid]
-  if (!s) return { label: 'Status pending', variant: 'secondary' }
+  if (!s) return { label: t('settings.plugins.statusPending'), variant: 'secondary' }
   if (s.advisories.some((a) => a.kind === 'known_flawed')) {
-    return { label: 'Known flawed', variant: 'warning' }
+    return { label: t('settings.plugins.knownFlawed'), variant: 'warning' }
   }
-  if (s.attested) return { label: 'DAO attested', variant: 'success' }
-  return { label: 'Unattested', variant: 'secondary' }
+  if (s.attested) return { label: t('settings.plugins.attested'), variant: 'success' }
+  return { label: t('settings.plugins.unattested'), variant: 'secondary' }
 }
 
 
@@ -310,7 +312,7 @@ async function submitReview() {
     reviewing.value = null
     await Promise.all([loadInbox(), loadMySubmissions()])
   } catch (e) {
-    reviewError.value = `Failed to post review: ${e}`
+    reviewError.value = t('settings.plugins.reviewFailed', { msg: String(e) })
   } finally {
     reviewSubmitting.value = false
   }
@@ -362,9 +364,7 @@ async function loadMySubmissions() {
 <template>
   <div>
     <p class="mb-6 text-sm text-muted-foreground">
-      Install, enable, and manage community-authored learning elements.
-      Plugins run in a sandboxed iframe with no network access; capabilities
-      (microphone, camera, etc.) are granted per-plugin on first use.
+      {{ $t('settings.plugins.intro') }}
     </p>
 
     <AppTabs
@@ -379,19 +379,18 @@ async function loadMySubmissions() {
     <!-- ============================================================ -->
     <section v-if="activeTab === 'installed'">
       <div class="mb-6 rounded-2xl border border-border bg-card/50 p-4">
-        <h2 class="text-sm font-semibold text-foreground">Install from local directory</h2>
+        <h2 class="text-sm font-semibold text-foreground">{{ $t('settings.plugins.installTitle') }}</h2>
         <p class="mt-1 text-xs text-muted-foreground">
-          Point to a directory containing <code class="font-mono">manifest.json</code>,
-          <code class="font-mono">manifest.sig</code>, and the entry HTML the manifest references.
+          {{ $t('settings.plugins.installHint') }}
         </p>
         <div class="mt-3 flex gap-2">
           <AppInput
             v-model="installPath"
-            placeholder="/absolute/path/to/plugin-bundle"
+            :placeholder="$t('settings.plugins.installPathPlaceholder')"
             class="flex-1"
             :disabled="installing"
           />
-          <AppButton :loading="installing" @click="install">Install</AppButton>
+          <AppButton :loading="installing" @click="install">{{ $t('settings.plugins.install') }}</AppButton>
         </div>
         <AppAlert v-if="installError" variant="error" class="mt-3">{{ installError }}</AppAlert>
         <AppAlert v-if="installSuccess" variant="success" class="mt-3">{{ installSuccess }}</AppAlert>
@@ -403,8 +402,8 @@ async function loadMySubmissions() {
 
       <EmptyState
         v-else-if="plugins.length === 0"
-        title="No plugins installed"
-        description="Install a plugin above to add new learning and assessment element types."
+        :title="$t('settings.plugins.noneTitle')"
+        :description="$t('settings.plugins.noneDesc')"
       />
 
       <template v-else>
@@ -416,13 +415,13 @@ async function loadMySubmissions() {
           <input
             v-model="pluginQuery"
             type="text"
-            placeholder="Search plugins by name, capability, tag…"
+            :placeholder="$t('settings.plugins.searchPlaceholder')"
             class="w-full rounded-lg border border-border bg-background py-2 pl-9 pr-8 text-sm text-foreground outline-none focus:border-primary"
           >
           <button
             v-if="pluginQuery"
             class="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-            aria-label="Clear search"
+            :aria-label="$t('settings.plugins.clearSearch')"
             @click="pluginQuery = ''"
           >
             <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -432,7 +431,7 @@ async function loadMySubmissions() {
         </div>
 
         <p v-if="filteredPlugins.length === 0" class="py-8 text-center text-sm text-muted-foreground">
-          No plugins match "{{ pluginQuery }}".
+          {{ $t('settings.plugins.noMatch', { query: pluginQuery }) }}
         </p>
 
         <div class="plugin-grid">
@@ -466,7 +465,7 @@ async function loadMySubmissions() {
               <div class="mt-1 flex flex-wrap items-center gap-1.5">
                 <AppBadge variant="secondary">v{{ p.version }}</AppBadge>
                 <AppBadge variant="secondary">{{ p.source }}</AppBadge>
-                <AppBadge v-if="!p.enabled" variant="warning">Disabled</AppBadge>
+                <AppBadge v-if="!p.enabled" variant="warning">{{ $t('settings.plugins.disabled') }}</AppBadge>
               </div>
             </div>
           </div>
@@ -490,7 +489,7 @@ async function loadMySubmissions() {
               :key="perm.capability"
               type="button"
               class="group/cap inline-flex items-center gap-1 rounded-md bg-muted/30 px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:bg-destructive/15 hover:text-destructive"
-              :title="`${perm.capability} (${perm.scope}) — click to revoke`"
+              :title="$t('settings.plugins.revokeHint', { capability: perm.capability, scope: perm.scope })"
               @click.stop="revoke(p.plugin_cid, perm.capability)"
             >
               {{ perm.capability }}
@@ -506,7 +505,7 @@ async function loadMySubmissions() {
             class="mt-2 flex flex-col gap-1 text-[10px] text-muted-foreground"
           >
             <div v-if="dependencyNames(p.plugin_cid).length" class="flex flex-wrap items-center gap-1">
-              <span class="opacity-70">Requires</span>
+              <span class="opacity-70">{{ $t('settings.plugins.requires') }}</span>
               <span
                 v-for="dep in dependencyNames(p.plugin_cid)"
                 :key="`req-${p.plugin_cid}-${dep}`"
@@ -514,7 +513,7 @@ async function loadMySubmissions() {
               >{{ dep }}</span>
             </div>
             <div v-if="requiredByNames(p.plugin_cid).length" class="flex flex-wrap items-center gap-1">
-              <span class="opacity-70">Required by</span>
+              <span class="opacity-70">{{ $t('settings.plugins.requiredBy') }}</span>
               <span
                 v-for="dep in requiredByNames(p.plugin_cid)"
                 :key="`reqby-${p.plugin_cid}-${dep}`"
@@ -532,7 +531,7 @@ async function loadMySubmissions() {
                 class="h-4 w-4 rounded border-border accent-primary"
                 @change="toggleEnabled(p)"
               />
-              Enabled
+              {{ $t('settings.plugins.enabled') }}
             </label>
             <div class="flex items-center gap-1">
               <AppButton
@@ -541,7 +540,7 @@ async function loadMySubmissions() {
                 variant="ghost"
                 @click.stop="donate(p)"
               >
-                Donate
+                {{ $t('settings.plugins.donate') }}
               </AppButton>
               <AppButton
                 v-if="p.source !== 'builtin'"
@@ -549,7 +548,7 @@ async function loadMySubmissions() {
                 variant="danger"
                 @click.stop="confirmUninstall(p)"
               >
-                Uninstall
+                {{ $t('settings.plugins.uninstall') }}
               </AppButton>
             </div>
           </div>
@@ -570,13 +569,13 @@ async function loadMySubmissions() {
     <!-- ============================================================ -->
     <section v-if="activeTab === 'inbox'">
       <p class="mb-4 text-sm text-muted-foreground">
-        Pending submissions from learners using the IRL Review plugin on this device.
+        {{ $t('settings.plugins.inboxIntro') }}
       </p>
 
       <EmptyState
         v-if="pendingInbox.length === 0"
-        title="No pending reviews"
-        description="When a learner submits work to the IRL Review plugin, it will appear here."
+        :title="$t('settings.plugins.inboxEmptyTitle')"
+        :description="$t('settings.plugins.inboxEmptyDesc')"
       />
 
       <ul v-else class="space-y-3">
@@ -588,13 +587,13 @@ async function loadMySubmissions() {
           <div class="flex flex-wrap items-start justify-between gap-3">
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-2 text-sm">
-                <AppBadge variant="warning">pending</AppBadge>
+                <AppBadge variant="warning">{{ $t('settings.plugins.pending') }}</AppBadge>
                 <span class="text-muted-foreground">
-                  from <span class="font-medium text-foreground">{{ displayName(s.learner_did) }}</span>
+                  {{ $t('settings.plugins.from') }} <span class="font-medium text-foreground">{{ displayName(s.learner_did) }}</span>
                 </span>
               </div>
               <p class="mt-1 text-[11px] text-muted-foreground">
-                Submitted {{ new Date(s.created_at).toLocaleString() }}
+                {{ $t('settings.plugins.submitted', { date: new Date(s.created_at).toLocaleString() }) }}
               </p>
               <p
                 v-if="parseSubmission(s.submission_json).comment"
@@ -616,10 +615,10 @@ async function loadMySubmissions() {
                 v-if="(parseSubmission(s.submission_json).files?.length ?? 0) > 0"
                 class="mt-2 text-[11px] text-muted-foreground"
               >
-                {{ parseSubmission(s.submission_json).files?.length }} file(s) attached
+                {{ $t('settings.plugins.filesAttached', { count: parseSubmission(s.submission_json).files?.length ?? 0 }, parseSubmission(s.submission_json).files?.length ?? 0) }}
               </p>
             </div>
-            <AppButton size="sm" @click="openReview(s)">Open</AppButton>
+            <AppButton size="sm" @click="openReview(s)">{{ $t('settings.plugins.open') }}</AppButton>
           </div>
         </li>
       </ul>
@@ -630,13 +629,13 @@ async function loadMySubmissions() {
     <!-- ============================================================ -->
     <section v-if="activeTab === 'my-submissions'">
       <p class="mb-4 text-sm text-muted-foreground">
-        Submissions you have sent to instructors through the IRL Review plugin.
+        {{ $t('settings.plugins.mySubmissionsIntro') }}
       </p>
 
       <EmptyState
         v-if="mySubmissions.length === 0"
-        title="No submissions yet"
-        description="Use the IRL Review plugin inside a course to submit work for review."
+        :title="$t('settings.plugins.mySubmissionsEmptyTitle')"
+        :description="$t('settings.plugins.mySubmissionsEmptyDesc')"
       />
 
       <ul v-else class="space-y-3">
@@ -682,30 +681,28 @@ async function loadMySubmissions() {
     <AppModal
       v-if="uninstallTarget"
       :open="!!uninstallTarget"
-      title="Uninstall plugin?"
+      :title="$t('settings.plugins.uninstallTitle')"
       @close="uninstallTarget = null"
     >
       <p class="text-sm">
-        Remove <strong>{{ uninstallTarget.name }}</strong> v{{ uninstallTarget.version }}?
-        Courses that use it will stop working until you re-install.
+        {{ $t('settings.plugins.uninstallBody', { name: uninstallTarget.name, version: uninstallTarget.version }) }}
       </p>
       <template #footer>
-        <AppButton variant="ghost" @click="uninstallTarget = null">Cancel</AppButton>
-        <AppButton variant="danger" @click="doUninstall">Uninstall</AppButton>
+        <AppButton variant="ghost" @click="uninstallTarget = null">{{ $t('common.actions.cancel') }}</AppButton>
+        <AppButton variant="danger" @click="doUninstall">{{ $t('settings.plugins.uninstall') }}</AppButton>
       </template>
     </AppModal>
 
     <AppModal
       v-if="reviewing"
       :open="!!reviewing"
-      title="Review submission"
+      :title="$t('settings.plugins.reviewTitle')"
       @close="reviewing = null"
     >
       <div class="space-y-4">
         <div>
           <p class="text-xs text-muted-foreground">
-            From <span class="font-medium text-foreground">{{ displayName(reviewing.learner_did) }}</span>
-            on {{ new Date(reviewing.created_at).toLocaleString() }}
+            {{ $t('settings.plugins.reviewFrom', { name: displayName(reviewing.learner_did), date: new Date(reviewing.created_at).toLocaleString() }) }}
           </p>
           <p
             v-if="parseSubmission(reviewing.submission_json).comment"
@@ -717,7 +714,7 @@ async function loadMySubmissions() {
 
         <div v-if="(parseSubmission(reviewing.submission_json).files?.length ?? 0) > 0">
           <h4 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Attached files
+            {{ $t('settings.plugins.attachedFiles') }}
           </h4>
           <ul class="mt-2 space-y-2">
             <li
@@ -759,7 +756,7 @@ async function loadMySubmissions() {
                 :download="file.name"
                 class="mt-2 inline-block text-xs text-primary hover:underline"
               >
-                Download
+                {{ $t('settings.plugins.download') }}
               </a>
             </li>
           </ul>
@@ -767,7 +764,7 @@ async function loadMySubmissions() {
 
         <div>
           <label class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Overall score
+            {{ $t('settings.plugins.overallScore') }}
           </label>
           <div class="mt-1 flex items-center gap-3">
             <input
@@ -784,10 +781,10 @@ async function loadMySubmissions() {
 
         <div>
           <label class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Per-skill ratings
+            {{ $t('settings.plugins.perSkillRatings') }}
           </label>
           <div v-if="parseSkills(reviewing.skills_json).length === 0" class="mt-2 text-xs text-muted-foreground">
-            The learner did not declare any skills.
+            {{ $t('settings.plugins.noSkills') }}
           </div>
           <div v-else class="mt-2 space-y-2">
             <div
@@ -813,13 +810,13 @@ async function loadMySubmissions() {
 
         <div>
           <label class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Feedback
+            {{ $t('settings.plugins.feedback') }}
           </label>
           <AppTextarea
             v-model="reviewFeedback"
             class="mt-1"
             :rows="4"
-            placeholder="Tell the learner what worked and what to improve…"
+            :placeholder="$t('settings.plugins.feedbackPlaceholder')"
           />
         </div>
 
@@ -827,8 +824,8 @@ async function loadMySubmissions() {
       </div>
 
       <template #footer>
-        <AppButton variant="ghost" @click="reviewing = null">Cancel</AppButton>
-        <AppButton :loading="reviewSubmitting" @click="submitReview">Post review</AppButton>
+        <AppButton variant="ghost" @click="reviewing = null">{{ $t('common.actions.cancel') }}</AppButton>
+        <AppButton :loading="reviewSubmitting" @click="submitReview">{{ $t('settings.plugins.postReview') }}</AppButton>
       </template>
     </AppModal>
   </div>

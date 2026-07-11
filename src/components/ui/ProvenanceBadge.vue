@@ -18,13 +18,13 @@ const isAiGenerated = () => props.provenance === 'ai_generated'
 </script>
 
 <template>
-  <span v-if="isAiGenerated()" class="provenance-badge" title="This is AI-generated example content seeded for the demo. It is not a real course / tutorial / opinion.">
+  <span v-if="isAiGenerated()" class="provenance-badge" :title="$t('common.provenance.exampleTooltip')">
     <svg class="provenance-badge__icon" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
       <path d="M8 1.5 L9.4 5.6 L13.5 7 L9.4 8.4 L8 12.5 L6.6 8.4 L2.5 7 L6.6 5.6 Z" />
       <circle cx="13" cy="2.5" r="0.8" />
       <circle cx="2.5" cy="12.5" r="0.6" />
     </svg>
-    <span>AI-generated example</span>
+    <span>{{ $t('common.provenance.exampleLabel') }}</span>
   </span>
 </template>
 

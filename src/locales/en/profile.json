@@ -1,0 +1,68 @@
+{
+  "loadingProfile": "Loading your profile…",
+  "fetching": "Loading profile…",
+  "unnamed": "Unnamed",
+  "thisUser": "this person",
+  "unavailable": {
+    "title": "Profile unavailable",
+    "description": "Open your account to view your profile."
+  },
+  "actions": {
+    "editProfile": "Edit profile"
+  },
+  "visibility": {
+    "private": "Your profile is private — other people can't see it, and your username won't show up in search.",
+    "public": "Your profile is public — anyone can find it by your username or public ID.",
+    "manageIn": "Manage this in",
+    "settingsAccount": "Settings → Account"
+  },
+  "stats": {
+    "teachingImpact": "Teaching impact",
+    "learningImpact": "Learning impact",
+    "skillsProven": "Skills proven",
+    "publicSkills": "Public skills"
+  },
+  "skillGraph": {
+    "title": "Your skill graph",
+    "manageVisibility": "Manage visibility ▸"
+  },
+  "header": {
+    "private": "Private",
+    "public": "Public",
+    "verified": "Verified",
+    "verifiedHint": "This name is publicly confirmed and tamper-proof.",
+    "registered": "Registered",
+    "registeredHint": "This name is registered.",
+    "publicId": "Public ID"
+  },
+  "add": {
+    "title": "Add account",
+    "subtitle": "Set up a new account"
+  },
+  "tile": {
+    "neverOpened": "Never opened",
+    "justNow": "Just now",
+    "minAgo": "{count} min ago | {count} min ago",
+    "hrAgo": "{count} hr ago | {count} hr ago",
+    "daysAgo": "{count} day ago | {count} days ago"
+  },
+  "goal": {
+    "set": "Set as goal",
+    "isSet": "Goal set",
+    "label": "{name} · skill graph"
+  },
+  "teaches": {
+    "title": "Teaches",
+    "hint": "— chose to teach these"
+  },
+  "publicSkillGraph": "Public skill graph",
+  "graphStats": "{skills} skills · {taught} taught",
+  "noPublicSkills": {
+    "title": "No public skills",
+    "description": "{name} hasn't shared any skills publicly yet."
+  },
+  "error": {
+    "couldntLoad": "Couldn't load this profile: {error}",
+    "offlineHint": "This profile is shared directly by its owner. They need to be online, and their profile set to public."
+  }
+}

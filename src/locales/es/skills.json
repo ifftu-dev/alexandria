@@ -1,0 +1,118 @@
+{
+  "index": {
+    "title": "Mi mapa de habilidades",
+    "subtitle": "Tu mapa personal de habilidades, construido a partir de lo que has conseguido, lo que puedes empezar a continuación y aquello sobre lo que se basa cada habilidad.",
+    "fromResume": "+ Desde currículum"
+  },
+  "tabs": {
+    "graph": "Mi mapa",
+    "browse": "Explorar habilidades",
+    "credentials": "Mis credenciales"
+  },
+  "stats": {
+    "earned": "Conseguidas",
+    "available": "Disponibles",
+    "locked": "Bloqueadas",
+    "total": "Todas las habilidades"
+  },
+  "browse": {
+    "searchPlaceholder": "Busca habilidades por nombre, descripción o nivel…",
+    "emptyTitle": "Aún no hay habilidades",
+    "emptyBody": "Las habilidades las añade la comunidad. Inicia un grupo comunitario, propón un cambio y consigue que se apruebe para completar el mapa de habilidades.",
+    "areas": "Áreas",
+    "topics": "Temas",
+    "levels": "Niveles de habilidad",
+    "showAll": "Mostrar todo",
+    "noAreas": "Aún no hay áreas",
+    "noTopics": "No hay temas",
+    "noTopicsInArea": "No hay temas en esta área",
+    "noMatches": "Ninguna habilidad coincide con los filtros actuales.",
+    "skillCount": "sin habilidades | {count} habilidad | {count} habilidades",
+    "prerequisitesCount": "sin prerrequisitos | {count} prerrequisito | {count} prerrequisitos",
+    "unlocksCount": "no desbloquea nada | desbloquea {count} habilidad | desbloquea {count} habilidades",
+    "goal": "🎯 Meta",
+    "goalTitle": "Fijar {name} como meta"
+  },
+  "graph": {
+    "emptyTitle": "Aún no hay habilidades que mostrar",
+    "emptyBody": "Completa las evaluaciones de los cursos para obtener credenciales; las habilidades que desbloquees aparecerán aquí.",
+    "legendEarned": "Conseguidas ({count})",
+    "legendAvailable": "Disponibles ({count})",
+    "legendLocked": "Bloqueadas ({count})",
+    "legendNodeSize": "El tamaño del punto indica el nivel de habilidad (Recordar → Crear)",
+    "summary": "{skills} habilidades, {edges} enlaces de prerrequisitos"
+  },
+  "credentials": {
+    "emptyTitle": "Aún no hay credenciales",
+    "emptyBody": "Las credenciales que obtengas aparecerán aquí. Termina un curso que pueda registrar una prueba de finalización verificada para obtener tu primera credencial.",
+    "score": "puntuación"
+  },
+  "detail": {
+    "back": "Volver a todas las habilidades",
+    "loadError": "No se pudo cargar la habilidad",
+    "backToSkills": "Volver a habilidades",
+    "prerequisites": "Prerrequisitos",
+    "noPrerequisites": "Sin prerrequisitos: esta es una habilidad inicial.",
+    "dependents": "Conduce a",
+    "noDependents": "Aún no hay nada que se base en esta.",
+    "related": "Habilidades relacionadas",
+    "yourCredentials": "Tus credenciales",
+    "credEmptyTitle": "Aún no hay credenciales",
+    "credEmptyBody": "Las credenciales que obtengas para esta habilidad aparecerán aquí. Termina un curso etiquetado con esta habilidad para obtener una.",
+    "scorePct": "{percent}% de puntuación",
+    "receipt": "Registro público",
+    "highest": "Tu mejor credencial: nivel {level}.",
+    "relation": {
+      "related": "Relacionada",
+      "complementary": "Complementaria",
+      "alternative": "Alternativa"
+    }
+  },
+  "bootstrap": {
+    "title": "Añade tus habilidades",
+    "intro": "Sube un currículum, un expediente o una credencial y te sugeriremos habilidades para reclamar. Los documentos acreditados cuentan más que un currículum hecho por ti mismo. Estos son puntos de partida: haz una evaluación para verificarlas y elevarlas.",
+    "addedTitle": "Habilidades añadidas",
+    "addedBody": "Se añadió {count} habilidad. Haz una evaluación para verificarla y aumentar tu confianza. | Se añadieron {count} habilidades. Haz una evaluación para verificarlas y aumentar tu confianza.",
+    "viewMySkills": "Ver mis habilidades",
+    "addMore": "Añadir más",
+    "docResumeLabel": "Currículum / CV",
+    "docResumeHint": "Hecho por ti mismo: menor confianza",
+    "docTranscriptLabel": "Expediente académico",
+    "docTranscriptHint": "Acreditado: mayor confianza",
+    "docCredentialLabel": "Credencial de institución",
+    "docCredentialHint": "Acreditada: mayor confianza",
+    "chooseFile": "Elegir archivo",
+    "filePlaceholder": "PDF, imagen o texto: se guarda como evidencia",
+    "textPlaceholder": "Pega aquí el texto del documento (obligatorio para PDF / imágenes)…",
+    "findSkills": "Buscar habilidades",
+    "noSkillsFound": "No se encontraron habilidades coincidentes: prueba a añadir más detalles.",
+    "confirmPrompt": "Confirma qué habilidades reclamar:",
+    "strong": "fuerte",
+    "claim": "Reclamar {count} habilidad | Reclamar {count} habilidades"
+  },
+  "visibility": {
+    "title": "Visibilidad y enseñanza",
+    "subtitle": "Elige qué habilidades conseguidas son públicas y marca las que enseñas.",
+    "publicCount": "{public} / {total} públicas",
+    "showAll": "Mostrar todo",
+    "hideAll": "Ocultar todo",
+    "loading": "Cargando tus habilidades…",
+    "empty": "Aún no hay habilidades conseguidas: las credenciales que obtengas aparecerán aquí para que las publiques.",
+    "publicOn": "👁 Pública",
+    "publicOff": "🔒 Privada",
+    "publicOnTitle": "Pública: haz clic para ocultar",
+    "publicOffTitle": "Privada: haz clic para publicar",
+    "teachOn": "★ Enseñando",
+    "teachOff": "☆ Enseñar",
+    "teachOnTitle": "Enseñas esto",
+    "teachOffTitle": "Marcar como enseñada"
+  },
+  "path": {
+    "statusEarned": "Demostrada",
+    "statusAvailable": "Siguiente",
+    "statusLocked": "Bloqueada",
+    "goalBadge": "★ meta",
+    "empty": "Nada que aprender: ya has demostrado todo en esta meta.",
+    "noCourse": "Aún no hay ningún curso que cubra esto."
+  }
+}

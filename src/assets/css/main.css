@@ -63,8 +63,12 @@
   --mode-instructor-accent: rgb(180, 83, 9);
   --mode-guardian-accent: rgb(13, 148, 136);
 
-  /* Typography */
-  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  /* Typography.
+     The Noto families carry non-Latin scripts (CJK, Devanagari, Bengali,
+     Telugu, Nastaliq/Urdu). Each is bundled via @fontsource (imported in
+     main.ts) with per-script `unicode-range`, so the browser only pulls a
+     given font for codepoints it covers — Latin text still renders in Inter. */
+  --font-sans: 'Inter', 'Noto Sans SC', 'Noto Sans Devanagari', 'Noto Sans Bengali', 'Noto Sans Telugu', 'Noto Nastaliq Urdu', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
 
   /* Spacing & Sizing */

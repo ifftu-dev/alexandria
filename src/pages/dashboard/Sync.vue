@@ -144,10 +144,10 @@ async function toggleAutoSync() {
         <div class="flex items-start justify-between gap-4">
           <div>
             <h1 class="text-3xl font-bold tracking-tight text-foreground">
-              Cross-Device Sync
+              {{ $t('dashboard.sync.title') }}
             </h1>
             <p class="mt-1.5 text-sm text-muted-foreground">
-              Keep your data synchronized across every device you've paired with this one.
+              {{ $t('dashboard.sync.subtitle') }}
             </p>
           </div>
           <button
@@ -174,7 +174,7 @@ async function toggleAutoSync() {
             >
               <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182M21.015 4.356v4.992" />
             </svg>
-            {{ syncing ? 'Syncing...' : 'Sync Now' }}
+            {{ syncing ? $t('dashboard.sync.syncing') : $t('dashboard.sync.syncNow') }}
           </button>
         </div>
       </div>
@@ -183,22 +183,22 @@ async function toggleAutoSync() {
       <div class="px-4 sm:px-6 lg:px-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <!-- Devices -->
         <div class="rounded-lg border border-border bg-card p-5">
-          <p class="text-xs font-medium uppercase tracking-wider text-muted-foreground">Devices</p>
+          <p class="text-xs font-medium uppercase tracking-wider text-muted-foreground">{{ $t('dashboard.sync.stats.devices') }}</p>
           <p class="mt-2 text-3xl font-bold tabular-nums text-foreground">{{ deviceCount }}</p>
         </div>
 
         <!-- Queue -->
         <div class="rounded-lg border border-border bg-card p-5">
-          <p class="text-xs font-medium uppercase tracking-wider text-muted-foreground">Queue</p>
+          <p class="text-xs font-medium uppercase tracking-wider text-muted-foreground">{{ $t('dashboard.sync.stats.queue') }}</p>
           <p class="mt-2 text-3xl font-bold tabular-nums text-foreground">
             {{ queueLength }}
-            <span class="text-sm font-normal text-muted-foreground">pending</span>
+            <span class="text-sm font-normal text-muted-foreground">{{ $t('dashboard.sync.stats.pending') }}</span>
           </p>
         </div>
 
         <!-- Auto-sync toggle -->
         <div class="rounded-lg border border-border bg-card p-5">
-          <p class="text-xs font-medium uppercase tracking-wider text-muted-foreground">Auto-Sync</p>
+          <p class="text-xs font-medium uppercase tracking-wider text-muted-foreground">{{ $t('dashboard.sync.stats.autoSync') }}</p>
           <div class="mt-2 flex items-center gap-3">
             <button
               role="switch"
@@ -213,16 +213,16 @@ async function toggleAutoSync() {
               />
             </button>
             <span class="text-lg font-semibold text-foreground">
-              {{ isAutoSync ? 'On' : 'Off' }}
+              {{ isAutoSync ? $t('dashboard.sync.stats.on') : $t('dashboard.sync.stats.off') }}
             </span>
           </div>
         </div>
 
         <!-- Last Sync -->
         <div class="rounded-lg border border-border bg-card p-5">
-          <p class="text-xs font-medium uppercase tracking-wider text-muted-foreground">Last Sync</p>
+          <p class="text-xs font-medium uppercase tracking-wider text-muted-foreground">{{ $t('dashboard.sync.stats.lastSync') }}</p>
           <p class="mt-2 text-lg font-semibold text-foreground">
-            {{ status?.last_sync ?? 'Never' }}
+            {{ status?.last_sync ?? $t('dashboard.sync.stats.never') }}
           </p>
         </div>
       </div>
@@ -244,11 +244,10 @@ async function toggleAutoSync() {
           </svg>
           <div>
             <p class="text-sm font-medium text-emerald-700 dark:text-emerald-300">
-              Sync completed successfully
+              {{ $t('dashboard.sync.result.title') }}
             </p>
             <p class="mt-0.5 text-xs text-emerald-600 dark:text-emerald-400">
-              Merged {{ syncResult.rows_merged }} rows in {{ syncResult.duration_ms }}ms
-              &mdash; sent {{ syncResult.rows_sent }}, received {{ syncResult.rows_received }}
+              {{ $t('dashboard.sync.result.detail', { merged: syncResult.rows_merged, ms: syncResult.duration_ms, sent: syncResult.rows_sent, received: syncResult.rows_received }) }}
             </p>
           </div>
         </div>
@@ -258,21 +257,13 @@ async function toggleAutoSync() {
       <div class="mt-8 px-4 sm:px-6 lg:px-8">
         <div class="rounded-lg border border-border bg-card p-5">
           <h2 class="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-4">
-            This Device
+            {{ $t('dashboard.sync.device.heading') }}
           </h2>
 
           <div class="divide-y divide-border/50">
-            <!-- Device ID -->
-            <div class="flex items-center justify-between py-2.5">
-              <span class="text-sm text-muted-foreground">Device ID</span>
-              <span class="font-mono text-sm text-foreground select-all">
-                {{ device?.id ?? '...' }}
-              </span>
-            </div>
-
             <!-- Name -->
             <div v-if="device?.device_name" class="flex items-center justify-between py-2.5">
-              <span class="text-sm text-muted-foreground">Name</span>
+              <span class="text-sm text-muted-foreground">{{ $t('dashboard.sync.device.name') }}</span>
               <span class="text-sm font-medium text-foreground">
                 {{ device.device_name }}
               </span>
@@ -280,11 +271,22 @@ async function toggleAutoSync() {
 
             <!-- Platform -->
             <div class="flex items-center justify-between py-2.5">
-              <span class="text-sm text-muted-foreground">Platform</span>
+              <span class="text-sm text-muted-foreground">{{ $t('dashboard.sync.device.platform') }}</span>
               <span class="text-sm text-foreground">
-                {{ device?.platform ?? 'Unknown' }}
+                {{ device?.platform ?? $t('dashboard.sync.device.unknown') }}
               </span>
             </div>
+
+            <!-- Device ID (raw) under Advanced -->
+            <details class="py-2.5">
+              <summary class="cursor-pointer text-sm text-muted-foreground">{{ $t('common.advanced.toggle') }}</summary>
+              <div class="mt-2 flex items-center justify-between">
+                <span class="text-sm text-muted-foreground">{{ $t('dashboard.sync.device.id') }}</span>
+                <span class="font-mono text-sm text-foreground select-all">
+                  {{ device?.id ?? '...' }}
+                </span>
+              </div>
+            </details>
           </div>
         </div>
       </div>
@@ -292,21 +294,21 @@ async function toggleAutoSync() {
       <!-- Pair a device -->
       <div class="mt-8 px-4 sm:px-6 lg:px-8">
         <h2 class="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-4">
-          Pair a Device
+          {{ $t('dashboard.sync.pair.heading') }}
         </h2>
         <div class="grid gap-4 lg:grid-cols-2">
           <!-- Generate -->
           <div class="rounded-lg border border-border bg-card p-5">
-            <p class="text-sm font-medium text-foreground">Generate a code</p>
+            <p class="text-sm font-medium text-foreground">{{ $t('dashboard.sync.pair.generateTitle') }}</p>
             <p class="mt-1 text-xs text-muted-foreground">
-              Create a one-time code on this device, then enter it on the other one. The code is a secret and expires in 10 minutes.
+              {{ $t('dashboard.sync.pair.generateBody') }}
             </p>
             <button
               :disabled="generatingCode"
               class="mt-3 inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-primary/90 disabled:opacity-60"
               @click="generateCode"
             >
-              {{ generatingCode ? 'Generating…' : 'Generate Pairing Code' }}
+              {{ generatingCode ? $t('dashboard.sync.pair.generating') : $t('dashboard.sync.pair.generate') }}
             </button>
             <div v-if="generatedCode" class="mt-3">
               <div class="flex items-center gap-2">
@@ -317,7 +319,7 @@ async function toggleAutoSync() {
                   class="shrink-0 rounded-md border border-border px-3 py-2 text-xs font-medium text-foreground transition-colors hover:bg-muted/40"
                   @click="copyCode"
                 >
-                  {{ copied ? 'Copied' : 'Copy' }}
+                  {{ copied ? $t('common.actions.copied') : $t('common.actions.copy') }}
                 </button>
               </div>
             </div>
@@ -325,15 +327,15 @@ async function toggleAutoSync() {
 
           <!-- Accept -->
           <div class="rounded-lg border border-border bg-card p-5">
-            <p class="text-sm font-medium text-foreground">Enter a code</p>
+            <p class="text-sm font-medium text-foreground">{{ $t('dashboard.sync.pair.enterTitle') }}</p>
             <p class="mt-1 text-xs text-muted-foreground">
-              Paste a code generated on another of your devices to pair it and sync immediately.
+              {{ $t('dashboard.sync.pair.enterBody') }}
             </p>
             <div class="mt-3 flex items-center gap-2">
               <input
                 v-model="codeInput"
                 type="text"
-                placeholder="Paste pairing code"
+                :placeholder="$t('dashboard.sync.pair.codePlaceholder')"
                 class="flex-1 min-w-0 rounded-md border border-border bg-background px-3 py-2 font-mono text-xs text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                 @keyup.enter="acceptCode"
               />
@@ -342,7 +344,7 @@ async function toggleAutoSync() {
                 class="shrink-0 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-primary/90 disabled:opacity-60"
                 @click="acceptCode"
               >
-                {{ accepting ? 'Pairing…' : 'Pair' }}
+                {{ accepting ? $t('dashboard.sync.pair.pairing') : $t('dashboard.sync.pair.pair') }}
               </button>
             </div>
           </div>
@@ -355,7 +357,7 @@ async function toggleAutoSync() {
       <!-- Paired Devices -->
       <div class="mt-6 px-4 sm:px-6 lg:px-8">
         <h2 class="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-4">
-          Paired Devices
+          {{ $t('dashboard.sync.paired.heading') }}
         </h2>
 
         <!-- Rich empty state -->
@@ -374,9 +376,9 @@ async function toggleAutoSync() {
               <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 1.5H8.25A2.25 2.25 0 006 3.75v16.5a2.25 2.25 0 002.25 2.25h7.5A2.25 2.25 0 0018 20.25V3.75a2.25 2.25 0 00-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-3 18.75h3" />
             </svg>
           </div>
-          <p class="text-sm font-medium text-foreground">No other devices paired</p>
+          <p class="text-sm font-medium text-foreground">{{ $t('dashboard.sync.paired.emptyTitle') }}</p>
           <p class="mt-1 text-xs text-muted-foreground max-w-sm mx-auto">
-            Use the pairing panel above — generate a code here and accept it on your other device (or vice versa) to start syncing.
+            {{ $t('dashboard.sync.paired.emptyBody') }}
           </p>
         </div>
 
@@ -393,9 +395,9 @@ async function toggleAutoSync() {
                   {{ d.device_name ?? d.device_id }}
                 </p>
                 <p class="mt-0.5 text-xs text-muted-foreground">
-                  {{ d.tables_synced }} tables synced
+                  {{ $t('dashboard.sync.paired.tables', { count: d.tables_synced }, d.tables_synced) }}
                   <template v-if="d.last_synced">
-                    &middot; last {{ d.last_synced }}
+                    {{ $t('dashboard.sync.paired.last', { time: d.last_synced }) }}
                   </template>
                 </p>
               </div>
@@ -405,7 +407,7 @@ async function toggleAutoSync() {
                   :class="d.is_online ? 'bg-emerald-500' : 'bg-muted-foreground/30'"
                 />
                 <span class="text-xs text-muted-foreground">
-                  {{ d.is_online ? 'Online' : 'Offline' }}
+                  {{ d.is_online ? $t('dashboard.sync.device.online') : $t('common.status.offline') }}
                 </span>
               </span>
             </div>
@@ -416,7 +418,7 @@ async function toggleAutoSync() {
       <!-- Sync History -->
       <div class="mt-8 mb-8 px-4 sm:px-6 lg:px-8">
         <h2 class="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-4">
-          Sync History
+          {{ $t('dashboard.sync.history.heading') }}
         </h2>
 
         <!-- Empty history -->
@@ -435,9 +437,9 @@ async function toggleAutoSync() {
               <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
           </div>
-          <p class="text-sm font-medium text-foreground">No sync history</p>
+          <p class="text-sm font-medium text-foreground">{{ $t('dashboard.sync.history.emptyTitle') }}</p>
           <p class="mt-1 text-xs text-muted-foreground">
-            Sync history will appear here after your first sync.
+            {{ $t('dashboard.sync.history.emptyBody') }}
           </p>
         </div>
 

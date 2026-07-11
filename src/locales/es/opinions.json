@@ -1,0 +1,52 @@
+{
+  "index": {
+    "title": "Comentarios por tema",
+    "subtitle": "Opiniones de educadores con credenciales en cada tema. Las más recientes primero, nunca clasificadas.",
+    "post": "Publicar opinión",
+    "filterAll": "Todas",
+    "emptyTitle": "Aún no hay opiniones",
+    "emptyFieldDescription": "Aún no hay opiniones en este tema.",
+    "emptyAllDescription": "Los educadores con credenciales en un tema pueden publicar aquí videos de opinión. Sé el primero.",
+    "opinionCount": "ninguna | {count} opinión | {count} opiniones",
+    "minutes": "{count} min"
+  },
+  "detail": {
+    "notFound": "Opinión no encontrada.",
+    "withdraw": "Retirar",
+    "withdrawConfirm": "¿Retirar esta opinión? El video se eliminará de este dispositivo y la publicación quedará oculta.",
+    "withdrawFailed": "No se pudo retirar: {error}",
+    "byLabel": "por",
+    "credentialsHeading": "Credenciales que respaldan esta opinión",
+    "noCredentials": "No hay credenciales referenciadas.",
+    "verifiedProof": "Prueba verificada",
+    "unsyncedLabel": "Aún sincronizando de otros estudiantes:"
+  },
+  "new": {
+    "title": "Publicar una opinión",
+    "intro": "Las opiniones pertenecen a un tema. Para publicar en un tema necesitas al menos una credencial de nivel de aplicación o superior en una habilidad de ese tema.",
+    "noEligibleWarning": "Aún no tienes una credencial que califique. Obtén una credencial de nivel de aplicación o superior en cualquier habilidad y podrás publicar opiniones en el tema de esa habilidad.",
+    "topicHeading": "Tema",
+    "contentHeading": "Contenido",
+    "titleLabel": "Título",
+    "titlePlaceholder": "p. ej., Por qué el enfoque funcional primero es el valor por defecto equivocado para CS1",
+    "summaryLabel": "Resumen (opcional)",
+    "summaryPlaceholder": "Un encuadre de una línea para la vista de lista.",
+    "videoLabel": "Video",
+    "readingMb": "Leyendo {mb} MB…",
+    "uploading": "Subiendo…",
+    "videoUploadFailed": "La subida del video falló: {error}",
+    "uploaded": "Subido",
+    "minutes": "{count} min",
+    "thumbnailLabel": "Miniatura (opcional)",
+    "thumbnailUploadFailed": "La subida de la miniatura falló: {error}",
+    "uploadedPrefix": "Subido:",
+    "credentialsHeading": "Credenciales",
+    "credentialsHelp": "Elige cuáles de tus credenciales respaldan esta opinión. Al menos una debe habilitarte para publicar en este tema; hemos preseleccionado esas. Puedes añadir o quitar credenciales abajo.",
+    "noQualifying": "No tienes una credencial que califique para este tema. Elige otro tema.",
+    "verified": "Verificada",
+    "credentialMeta": "puntuación {score}% · emitida {date}",
+    "loadFailed": "No se pudieron cargar los temas: {error}",
+    "publishFailed": "La publicación falló: {error}",
+    "publish": "Publicar opinión"
+  }
+}

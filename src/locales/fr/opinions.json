@@ -1,0 +1,52 @@
+{
+  "index": {
+    "title": "Commentaires par sujet",
+    "subtitle": "Avis d'éducateurs disposant de justificatifs dans chaque sujet. Les plus récents en premier, jamais classés.",
+    "post": "Publier un avis",
+    "filterAll": "Tous",
+    "emptyTitle": "Aucun avis pour l'instant",
+    "emptyFieldDescription": "Aucun avis dans ce sujet pour l'instant.",
+    "emptyAllDescription": "Les éducateurs disposant de justificatifs dans un sujet peuvent publier des vidéos d'avis ici. Soyez le premier.",
+    "opinionCount": "aucun | {count} avis | {count} avis",
+    "minutes": "{count} min"
+  },
+  "detail": {
+    "notFound": "Avis introuvable.",
+    "withdraw": "Retirer",
+    "withdrawConfirm": "Retirer cet avis ? La vidéo sera supprimée de cet appareil et la publication masquée.",
+    "withdrawFailed": "Impossible de retirer : {error}",
+    "byLabel": "par",
+    "credentialsHeading": "Justificatifs derrière cet avis",
+    "noCredentials": "Aucun justificatif référencé.",
+    "verifiedProof": "Preuve vérifiée",
+    "unsyncedLabel": "Encore en cours de synchronisation depuis d'autres apprenants :"
+  },
+  "new": {
+    "title": "Publier un avis",
+    "intro": "Les avis appartiennent à un sujet. Pour publier dans un sujet, vous devez posséder au moins un justificatif au niveau application ou supérieur pour une compétence de ce sujet.",
+    "noEligibleWarning": "Vous n'avez pas encore de justificatif qualifiant. Obtenez un justificatif au niveau application ou supérieur pour n'importe quelle compétence, et vous pourrez publier des avis dans le sujet de cette compétence.",
+    "topicHeading": "Sujet",
+    "contentHeading": "Contenu",
+    "titleLabel": "Titre",
+    "titlePlaceholder": "ex. Pourquoi l'approche fonctionnelle d'abord est un mauvais choix par défaut pour l'informatique de première année",
+    "summaryLabel": "Résumé (facultatif)",
+    "summaryPlaceholder": "Une phrase de cadrage pour la vue en liste.",
+    "videoLabel": "Vidéo",
+    "readingMb": "Lecture de {mb} Mo…",
+    "uploading": "Téléversement…",
+    "videoUploadFailed": "Échec du téléversement de la vidéo : {error}",
+    "uploaded": "Téléversé",
+    "minutes": "{count} min",
+    "thumbnailLabel": "Miniature (facultatif)",
+    "thumbnailUploadFailed": "Échec du téléversement de la miniature : {error}",
+    "uploadedPrefix": "Téléversé :",
+    "credentialsHeading": "Justificatifs",
+    "credentialsHelp": "Choisissez ceux de vos justificatifs qui appuient cet avis. Au moins un doit vous qualifier pour publier dans ce sujet — nous les avons présélectionnés. Vous pouvez ajouter ou retirer des justificatifs ci-dessous.",
+    "noQualifying": "Vous n'avez pas de justificatif qualifiant pour ce sujet. Choisissez un autre sujet.",
+    "verified": "Vérifié",
+    "credentialMeta": "score {score}% · délivré le {date}",
+    "loadFailed": "Impossible de charger les sujets : {error}",
+    "publishFailed": "Échec de la publication : {error}",
+    "publish": "Publier l'avis"
+  }
+}

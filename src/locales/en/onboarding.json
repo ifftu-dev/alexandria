@@ -1,0 +1,188 @@
+{
+  "motif": {
+    "ubuntu": "I am, because we all are"
+  },
+  "wizard": {
+    "welcome": "Welcome",
+    "role": "Your Role",
+    "birthdate": "Birthdate",
+    "password": "Set Password",
+    "createAccount": "Create Account",
+    "recoveryPhrase": "Recovery Phrase",
+    "restoreAccount": "Restore Account",
+    "goals": "Your Goals",
+    "skills": "Your Skills",
+    "linkChild": "Link Your Child",
+    "complete": "Complete"
+  },
+  "aside": {
+    "title": "Welcome to Alexandria",
+    "subtitle": "Set up your learning account in a few guided steps."
+  },
+  "roles": {
+    "learnerTitle": "Learner",
+    "learnerDesc": "Take courses, earn credentials, and grow your skills.",
+    "instructorTitle": "Instructor",
+    "instructorDesc": "Author courses and tutorials, review submissions, and mentor learners. You can switch into learner mode any time.",
+    "parentTitle": "Parent / Guardian",
+    "parentDesc": "Oversee your child's learning: link their account and follow their progress from your own device."
+  },
+  "welcome": {
+    "tagline": "Free, decentralized learning. Your credentials. Your identity. Your control.",
+    "whatHappens": "What happens next",
+    "step1": "You set a password to protect your account on this device.",
+    "step2": "We create your account — your identity, owned only by you.",
+    "step3": "You get a Recovery Phrase — your secret backup. Write it down and keep it safe.",
+    "step4": "Start learning, earn credentials, own your education.",
+    "createAccount": "Create Account",
+    "restoreAccount": "Restore My Account",
+    "signIn": "Sign in to an existing account"
+  },
+  "role": {
+    "heading": "How will you use Alexandria?",
+    "subtitle": "This shapes your home screen and tools. Instructors can switch into learner mode any time."
+  },
+  "birthdate": {
+    "heading": "When were you born?",
+    "subtitle": "Your birthdate stays on this device — it's never shared.",
+    "label": "Birthdate",
+    "ageStatement": "You are {age} years old.",
+    "minorNotice": "Because you're under 18, a parent or guardian must activate your account before you can start learning. You'll get an invite code for them at the end of setup."
+  },
+  "password": {
+    "titleCreate": "Set Your Password",
+    "titleImport": "Restore Your Account",
+    "subtitleCreate": "This password protects your account on this device.",
+    "subtitleImport": "Enter your Recovery Phrase and set a password for this device.",
+    "recoveryLabel": "Recovery Phrase",
+    "recoveryHint": "Your secret backup to restore your account.",
+    "recoveryPlaceholder": "Enter your 24-word Recovery Phrase, separated by spaces",
+    "wordsEntered": "no words entered yet | {count} word entered | {count} words entered",
+    "wordsRule": "Recovery Phrases must contain 12, 15, or 24 words.",
+    "usernameLabel": "Username",
+    "usernamePlaceholder": "your_handle",
+    "usernameHint": "3–32 characters · lowercase letters, numbers, underscores. How others find you.",
+    "checking": "Checking availability…",
+    "usernameAvailable": "✓ {'@'}{handle} is available",
+    "usernameTaken": "✕ {'@'}{handle} is already taken",
+    "usernameUnknown": "⚠ Can't check availability right now — you can continue, but the name may be taken by the time you connect.",
+    "displayNameLabel": "Display name",
+    "displayNamePlaceholder": "Your name as others see it",
+    "displayNameHint": "Defaults to your username — change it any time.",
+    "passwordLabel": "Password",
+    "passwordPlaceholder": "At least 12 characters",
+    "passwordCounter": "{count}/12 characters minimum",
+    "confirmLabel": "Confirm Password",
+    "confirmPlaceholder": "Enter password again",
+    "passwordsMismatch": "Passwords do not match.",
+    "passwordsMatch": "Passwords match.",
+    "noRecoveryWarning": "There is no password recovery. If you forget this password, you'll need your Recovery Phrase to restore access.",
+    "biometricLabel": "Enable biometric unlock on this device",
+    "biometricHint": "Use Touch ID / Face ID after setup. You can change this later in Settings.",
+    "errorHeading": "Check These Details",
+    "submitCreate": "Create Account",
+    "submitImport": "Restore My Account"
+  },
+  "generating": {
+    "titleCreate": "Creating Your Account",
+    "titleImport": "Restoring Your Account",
+    "subtitle": "This takes a moment while we set things up securely.",
+    "initializing": "Initializing..."
+  },
+  "backup": {
+    "heading": "Your Recovery Phrase",
+    "subtitle": "This is your secret backup. Write these 24 words down on paper and store them somewhere safe. It is the ONLY way to restore your account if you forget your password.",
+    "copy": "Copy Recovery Phrase",
+    "copied": "Copied to clipboard",
+    "warning": "Never share your Recovery Phrase. Anyone with these words can access your credentials.",
+    "confirm": "I've Written It Down"
+  },
+  "goals": {
+    "heading": "What are you working toward?",
+    "subtitle": "Pick an exam, curriculum, or job — we'll map it to a skill graph and chart your path. You can change or add goals any time.",
+    "skip": "Skip for now",
+    "continue": "Continue | Continue with {count} goal | Continue with {count} goals"
+  },
+  "bootstrap": {
+    "heading": "What do you already know?",
+    "subtitle": "Upload a resume or transcript and we'll map it to skills you can claim. Credentials from accredited schools count for more than a self-made resume. You can verify any skill with an assessment later.",
+    "skip": "Skip for now",
+    "continue": "Continue | Continue with {count} skill | Continue with {count} skills"
+  },
+  "linkChild": {
+    "heading": "Link your child",
+    "subtitle": "Your child's activation screen shows an invite code. Paste it here to activate their account and follow their learning from this account.",
+    "label": "Invite code",
+    "placeholder": "Paste the invite code from your child's device",
+    "hint": "Both devices need to be online to complete the link.",
+    "linking": "Linking…",
+    "submit": "Link Child",
+    "skip": "Skip for now — I'll add them from my dashboard",
+    "childFallback": "your child"
+  },
+  "done": {
+    "heading": "You're Ready",
+    "bodyCreate": "Your account has been created and encrypted.",
+    "bodyImport": "Your account has been restored and encrypted.",
+    "dataNote": "All your data stays on this device, protected by your password.",
+    "minorNotice": "One more step: your account needs a parent or guardian. Next you'll get an invite code to share with them — your account activates as soon as they accept it from their own device.",
+    "linkedWith": "Linked with {name} — their account is now active.",
+    "enterGuardian": "Invite My Guardian",
+    "enterParent": "Open My Dashboard",
+    "enterLearner": "Start Learning"
+  },
+  "errors": {
+    "passwordTooShortDetail": "Your password must be at least 12 characters long. Add a few more characters, then try again.",
+    "phraseLengthUnsupported": "That Recovery Phrase length is not supported. Use a 12-, 15-, or 24-word phrase, then try again.",
+    "phraseInvalid": "That Recovery Phrase does not look valid. Check the word order and spelling, then try again.",
+    "createFailed": "We couldn't create your account yet. {error}",
+    "restoreFailed": "We couldn't restore your account yet. {error}",
+    "birthdateInvalid": "Enter a valid birthdate — it cannot be in the future or more than 120 years ago.",
+    "usernameInvalid": "Choose a username: 3–32 characters, lowercase letters, numbers, and underscores only.",
+    "usernameTaken": "That username is already taken — pick another.",
+    "displayNameRequired": "Choose a display name to continue.",
+    "passwordTooShort": "Your password is too short. Use at least 12 characters, then try again.",
+    "passwordsDoNotMatch": "The confirmation password does not match yet. Enter the same password in both fields to continue.",
+    "phraseRequired": "Enter your Recovery Phrase to continue. Alexandria accepts 12-, 15-, or 24-word phrases."
+  },
+  "biometric": {
+    "enabledSecure": "Biometric unlock enabled on this device.",
+    "enabledSession": "Biometric unlock enabled for this app session (dev runtime keychain limitation).",
+    "skipped": "Biometric unlock setup skipped. You can still unlock with password."
+  },
+  "profileSelect": {
+    "heading": "Who's learning today?",
+    "subtitle": "Pick a profile to continue, or add a new one.",
+    "enterPassword": "Enter password to continue",
+    "passwordPlaceholder": "Your password",
+    "unlock": "Unlock",
+    "unlockBiometric": "Unlock with biometrics",
+    "stageDecrypting": "Unlocking your account…",
+    "stageLoadingProfile": "Loading your profile…",
+    "stageOpeningData": "Getting your data ready…",
+    "stageStartingApp": "Starting the app…",
+    "stageAlmostThere": "Almost there — taking a bit longer than usual…",
+    "welcomeBack": "Welcome back — taking you home…",
+    "biometricNotSetup": "Biometric unlock isn't set up yet. Unlock once with your password to enable it.",
+    "biometricUnavailable": "Biometric unlock is unavailable in this build (entitlement -34018). Use a signed build.",
+    "biometricFailed": "Biometric unlock failed: {error}",
+    "biometricMismatch": "Biometric password didn't match this profile. Enter your password."
+  },
+  "guardianGate": {
+    "heading": "A guardian needs to activate your account",
+    "subtitle": "Because you're under 18, a parent or guardian must approve your account from their own device before you can start learning. Everything you do on Alexandria will be visible to them.",
+    "howHeading": "How it works",
+    "how1": "Share the invite code below with your parent or guardian.",
+    "how2": "They install Alexandria, create a Parent profile, and enter your code.",
+    "how3": "The moment they accept (both devices online), your account unlocks automatically.",
+    "codeHeading": "Your guardian invite code",
+    "generating": "Generating…",
+    "newCode": "New code",
+    "codeHint": "Valid for 7 days, single use. Treat it like a password — anyone holding it can become your guardian.",
+    "copyCode": "Copy invite code",
+    "copied": "Copied to clipboard",
+    "checking": "Checking…",
+    "checkActivation": "Check Activation",
+    "backToProfiles": "Back to profiles"
+  }
+}

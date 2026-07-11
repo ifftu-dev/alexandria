@@ -3,11 +3,13 @@
 // they can see. Adults can unlink; minors cannot (the backend refuses
 // too — this mirrors that honestly).
 import { onMounted, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useGuardian } from '@/composables/useGuardian'
 import { useAccountStatus } from '@/composables/useAccountStatus'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { AppBadge, AppButton, EmptyState } from '@/components/ui'
 
+const { t } = useI18n()
 const { guardians, loaded, refreshLinks, revokeLink } = useGuardian()
 const { isMinor, role } = useAccountStatus()
 const { invoke } = useLocalApi()
@@ -47,21 +49,20 @@ async function generateInvite() {
 }
 
 const SHARED_DATA = [
-  'Course enrollments and completion status',
-  'Per-lesson progress, scores, and time spent',
-  'Graded and instructor-reviewed submissions',
-  'Classroom memberships',
-  'Your display name and birthdate',
+  t('settings.guardian.shared.enrollments'),
+  t('settings.guardian.shared.progress'),
+  t('settings.guardian.shared.submissions'),
+  t('settings.guardian.shared.classrooms'),
+  t('settings.guardian.shared.identity'),
 ]
 </script>
 
 <template>
   <div class="space-y-6">
     <div>
-      <h3 class="text-base font-semibold text-foreground">My Guardian</h3>
+      <h3 class="text-base font-semibold text-foreground">{{ $t('settings.guardian.title') }}</h3>
       <p class="mt-1 text-sm text-muted-foreground">
-        Guardians see your learning activity on their own device. This page
-        shows exactly who is linked and what is shared.
+        {{ $t('settings.guardian.intro') }}
       </p>
     </div>
 
@@ -69,10 +70,10 @@ const SHARED_DATA = [
 
     <EmptyState
       v-else-if="!guardians.length"
-      title="No guardian linked"
+      :title="$t('settings.guardian.noneTitle')"
       :description="role === 'learner'
-        ? 'No one is overseeing this profile.'
-        : 'Guardian links only apply to learner profiles.'"
+        ? $t('settings.guardian.noneLearner')
+        : $t('settings.guardian.noneOther')"
     />
 
     <div v-else class="space-y-3">
@@ -87,7 +88,7 @@ const SHARED_DATA = [
           </span>
           <div class="min-w-0 flex-1">
             <p class="truncate text-sm font-medium text-foreground">
-              {{ g.peer_display_name ?? 'Guardian' }}
+              {{ g.peer_display_name ?? $t('settings.guardian.fallbackName') }}
             </p>
             <p class="truncate text-xs text-muted-foreground">{{ g.peer_did.slice(0, 32) }}…</p>
           </div>
@@ -101,23 +102,22 @@ const SHARED_DATA = [
             :loading="revokingId === g.id"
             @click="unlink(g.id)"
           >
-            Unlink
+            {{ $t('settings.guardian.unlink') }}
           </AppButton>
         </div>
         <p class="mt-2 text-xs text-muted-foreground">
-          Linked {{ g.created_at.slice(0, 10) }}
-          <template v-if="g.last_sync_at"> · last synced {{ g.last_sync_at.slice(0, 16) }}</template>
+          {{ $t('settings.guardian.linked', { date: g.created_at.slice(0, 10) }) }}
+          <template v-if="g.last_sync_at"> {{ $t('settings.guardian.lastSynced', { date: g.last_sync_at.slice(0, 16) }) }}</template>
         </p>
       </div>
 
       <p v-if="isMinor" class="text-xs text-muted-foreground">
-        You'll be able to remove your guardian when you turn 18. Until then,
-        only your guardian can unlink from their device.
+        {{ $t('settings.guardian.minorNote') }}
       </p>
     </div>
 
     <div class="rounded-xl border border-border bg-card p-4">
-      <h4 class="text-sm font-semibold text-foreground mb-2">What your guardian can see</h4>
+      <h4 class="text-sm font-semibold text-foreground mb-2">{{ $t('settings.guardian.canSeeTitle') }}</h4>
       <ul class="space-y-1.5 text-sm text-muted-foreground">
         <li v-for="item in SHARED_DATA" :key="item" class="flex items-start gap-2">
           <svg class="mt-0.5 h-3.5 w-3.5 shrink-0 text-[color:var(--mode-guardian-accent)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
@@ -127,20 +127,19 @@ const SHARED_DATA = [
         </li>
       </ul>
       <p class="mt-2 text-xs text-muted-foreground">
-        Everything travels encrypted directly between your devices — never
-        through a server, never published to the network.
+        {{ $t('settings.guardian.encryptedNote') }}
       </p>
     </div>
 
     <div v-if="role === 'learner'" class="rounded-xl border border-border bg-card p-4">
       <div class="flex items-center justify-between mb-1">
-        <h4 class="text-sm font-semibold text-foreground">Add a guardian</h4>
+        <h4 class="text-sm font-semibold text-foreground">{{ $t('settings.guardian.addTitle') }}</h4>
         <AppButton variant="outline" size="xs" :loading="generating" @click="generateInvite">
-          Generate invite
+          {{ $t('settings.guardian.generateInvite') }}
         </AppButton>
       </div>
       <p class="text-xs text-muted-foreground mb-2">
-        Share a one-time code with a parent/guardian to link them.
+        {{ $t('settings.guardian.addHint') }}
       </p>
       <code v-if="inviteCode" class="block max-h-20 overflow-y-auto break-all rounded-lg bg-muted/30 p-2 font-mono text-xs">{{ inviteCode }}</code>
     </div>

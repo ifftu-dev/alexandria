@@ -1,0 +1,134 @@
+{
+  "index": {
+    "title": "Communauté",
+    "subtitle": "Groupes communautaires qui déterminent quelles compétences sont reconnues",
+    "stats": {
+      "totalGroups": "Groupes communautaires",
+      "active": "Actifs",
+      "councilSeats": "Sièges au conseil"
+    },
+    "searchPlaceholder": "Rechercher des communautés…",
+    "empty": {
+      "noMatchTitle": "Aucune communauté ne correspond à votre recherche",
+      "noMatchHint": "Essayez un autre terme de recherche.",
+      "noneTitle": "Aucune communauté pour l'instant",
+      "noneHint": "Les groupes communautaires apparaissent automatiquement à mesure que de nouveaux sujets sont ajoutés."
+    },
+    "scope": {
+      "topicAreaShort": "DT",
+      "topicShort": "SU",
+      "topicArea": "Domaine thématique",
+      "topic": "Sujet"
+    },
+    "seats": "aucun | {count} siège | {count} sièges"
+  },
+  "detail": {
+    "breadcrumb": "Communauté",
+    "notFound": "Groupe communautaire introuvable",
+    "tabs": {
+      "overview": "Aperçu",
+      "elections": "Élections",
+      "proposals": "Propositions"
+    },
+    "stats": {
+      "members": "aucun | {count} membre | {count} membres",
+      "council": "{filled}/{total} au conseil",
+      "elections": "aucune | {count} élection | {count} élections",
+      "proposals": "aucune | {count} proposition | {count} propositions"
+    },
+    "details": {
+      "heading": "Détails",
+      "scope": "Type de sujet",
+      "councilSize": "Taille du conseil",
+      "electionInterval": "Intervalle électoral",
+      "intervalDays": "{count} jours",
+      "created": "Créé",
+      "topicId": "Identifiant du sujet",
+      "publicRecord": "Enregistrement public"
+    },
+    "council": {
+      "heading": "Conseil",
+      "seats": "{filled} / {total} sièges",
+      "emptyTitle": "Aucun membre du conseil",
+      "emptyDescription": "Organisez une élection pour pourvoir le conseil.",
+      "badge": "conseil"
+    },
+    "members": {
+      "heading": "Membres ({count})"
+    },
+    "elections": {
+      "heading": "Élections",
+      "open": "+ Lancer une élection",
+      "emptyTitle": "Aucune élection",
+      "emptyDescription": "Lancez une élection pour choisir les membres du conseil.",
+      "seats": "aucun | {count} siège | {count} sièges",
+      "actions": {
+        "nominateSelf": "Me porter candidat",
+        "startVoting": "Lancer le vote",
+        "close": "Clôturer l'élection",
+        "seatCouncil": "Installer le conseil",
+        "accept": "Accepter",
+        "vote": "Voter"
+      },
+      "nominees": "Candidats",
+      "noNominees": "Aucun candidat pour l'instant",
+      "badges": {
+        "winner": "Gagnant",
+        "accepted": "Accepté",
+        "pending": "En attente"
+      },
+      "votes": "aucune | {count} voix | {count} voix",
+      "nominationLabel": "Candidature",
+      "votingLabel": "Vote",
+      "ends": "Se termine le {date}",
+      "closed": "Clôturée le {date}",
+      "titleRequired": "Veuillez ajouter un titre d'élection."
+    },
+    "proposals": {
+      "heading": "Propositions",
+      "submit": "+ Soumettre une proposition",
+      "emptyTitle": "Aucune proposition",
+      "emptyDescription": "Soumettez une proposition pour suggérer des changements sur ce sujet.",
+      "votingLabel": "Vote",
+      "for": "{count} pour",
+      "against": "{count} contre",
+      "deadline": "Échéance : {date}",
+      "actions": {
+        "approve": "Approuver (ouvrir le vote)",
+        "voteFor": "Voter pour",
+        "voteAgainst": "Voter contre",
+        "resolve": "Résoudre"
+      },
+      "titleRequired": "Veuillez ajouter un titre de proposition."
+    },
+    "createElection": {
+      "title": "Lancer une élection",
+      "titleLabel": "Titre",
+      "titlePlaceholder": "ex. Élection du conseil T1 2026",
+      "descriptionLabel": "Description",
+      "descriptionPlaceholder": "Objet de cette élection…",
+      "seatsLabel": "Sièges",
+      "submit": "Lancer l'élection"
+    },
+    "createProposal": {
+      "title": "Soumettre une proposition",
+      "titleLabel": "Titre",
+      "titlePlaceholder": "ex. Reconnaître les compétences en TAL",
+      "descriptionLabel": "Description",
+      "descriptionPlaceholder": "Décrivez le changement proposé…",
+      "categoryLabel": "Catégorie",
+      "submit": "Soumettre la proposition"
+    }
+  },
+  "onChainBadge": {
+    "confirming": "Confirmation…"
+  },
+  "deadline": {
+    "default": "Échéance",
+    "passed": "{label} dépassée"
+  },
+  "proficiency": {
+    "requires": "Nécessite",
+    "level": "de maîtrise"
+  }
+}

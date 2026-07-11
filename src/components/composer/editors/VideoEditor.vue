@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // Video element editor: blob upload + duration probe + chapter markers.
 import { onMounted, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { AppBadge, AppButton } from '@/components/ui'
 import type { Element, VideoChapterInput } from '@/types'
@@ -9,6 +10,7 @@ const props = defineProps<{ element: Element }>()
 const emit = defineEmits<{ updated: [Element] }>()
 
 const { invoke } = useLocalApi()
+const { t } = useI18n()
 
 const uploading = ref(false)
 const progress = ref('')
@@ -29,10 +31,10 @@ async function onFileChange(e: Event) {
   if (!file) return
   uploading.value = true
   error.value = ''
-  progress.value = `Reading ${Math.round(file.size / 1024 / 1024)} MB…`
+  progress.value = t('instructor.editors.video.reading', { size: Math.round(file.size / 1024 / 1024) })
   try {
     const buf = await file.arrayBuffer()
-    progress.value = 'Adding to blob store…'
+    progress.value = t('instructor.editors.video.saving')
     const result = await invoke<{ hash: string; size: number }>('content_add', {
       data: Array.from(new Uint8Array(buf)),
     })
@@ -58,7 +60,7 @@ async function onFileChange(e: Event) {
     emit('updated', updated)
     progress.value = ''
   } catch (err) {
-    error.value = `Upload failed: ${err}`
+    error.value = t('instructor.editors.video.uploadFailed', { error: String(err) })
   } finally {
     uploading.value = false
   }
@@ -95,12 +97,12 @@ async function saveMarkers() {
 <template>
   <div class="space-y-5">
     <div>
-      <h3 class="text-sm font-semibold text-foreground mb-2">Video file</h3>
+      <h3 class="text-sm font-semibold text-foreground mb-2">{{ $t('instructor.editors.video.fileHeading') }}</h3>
       <div v-if="element.content_cid" class="flex items-center gap-2 text-sm mb-2">
-        <AppBadge variant="success">Uploaded</AppBadge>
+        <AppBadge variant="success">{{ $t('instructor.editors.shared.uploaded') }}</AppBadge>
         <code class="text-xs text-muted-foreground truncate">{{ element.content_cid.slice(0, 24) }}…</code>
         <span v-if="element.duration_seconds" class="text-xs text-muted-foreground">
-          · {{ Math.round(element.duration_seconds / 60) }} min
+          · {{ $t('instructor.editors.video.minutes', { count: Math.round(element.duration_seconds / 60) }) }}
         </span>
       </div>
       <input
@@ -115,22 +117,22 @@ async function saveMarkers() {
 
     <div>
       <div class="flex items-center justify-between mb-2">
-        <h3 class="text-sm font-semibold text-foreground">Chapter markers</h3>
+        <h3 class="text-sm font-semibold text-foreground">{{ $t('instructor.editors.video.markersHeading') }}</h3>
         <div class="flex gap-2">
-          <AppButton variant="ghost" size="xs" @click="addMarker">+ Marker</AppButton>
+          <AppButton variant="ghost" size="xs" @click="addMarker">{{ $t('instructor.editors.video.addMarker') }}</AppButton>
           <AppButton v-if="markersDirty" size="xs" :loading="savingMarkers" @click="saveMarkers">
-            Save markers
+            {{ $t('instructor.editors.video.saveMarkers') }}
           </AppButton>
         </div>
       </div>
       <p v-if="!markers.length" class="text-xs text-muted-foreground">
-        Timestamps become clickable navigation below the video.
+        {{ $t('instructor.editors.video.markersHint') }}
       </p>
       <div v-for="(m, i) in markers" :key="i" class="flex items-center gap-2 mb-2">
         <input
           v-model="m.title"
           type="text"
-          placeholder="Marker title"
+          :placeholder="$t('instructor.editors.video.markerTitlePlaceholder')"
           class="flex-1 rounded-md border border-border bg-background px-3 py-2 text-sm"
           @input="markersDirty = true"
         >
@@ -139,7 +141,7 @@ async function saveMarkers() {
           type="number"
           min="0"
           class="w-28 rounded-md border border-border bg-background px-2 py-2 text-sm text-center"
-          title="Start (seconds)"
+          :title="$t('instructor.editors.video.startSeconds')"
           @input="markersDirty = true"
         >
         <button

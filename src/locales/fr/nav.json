@@ -1,0 +1,78 @@
+{
+  "primary": {
+    "home": "Accueil",
+    "opinions": "Avis",
+    "community": "Communauté",
+    "skills": "Compétences",
+    "goals": "Objectifs",
+    "dashboard": "Tableau de bord",
+    "myCourses": "Mes cours",
+    "inbox": "Boîte de réception",
+    "myChildren": "Mes enfants"
+  },
+  "sections": {
+    "liveTutoring": "Tutorat en direct",
+    "classrooms": "Salles de classe",
+    "skillGraph": "Graphe de compétences",
+    "viewAllSessions": "Voir toutes les sessions",
+    "viewAllClassrooms": "Voir toutes les salles de classe",
+    "noSessions": "Aucune session pour l'instant",
+    "noClassrooms": "Aucune salle de classe pour l'instant",
+    "memberCount": "aucun membre | {count} membre | {count} membres"
+  },
+  "status": {
+    "active": "Active",
+    "ended": "Terminée",
+    "cancelled": "Annulée"
+  },
+  "mode": {
+    "ariaLabel": "Mode actif",
+    "learner": "Apprenant",
+    "instructor": "Instructeur",
+    "learnerHint": "Mode apprenant — suivez des cours et obtenez des justificatifs",
+    "instructorHint": "Mode instructeur — créez des cours et relisez les travaux"
+  },
+  "topbar": {
+    "expandSidebar": "Développer la barre latérale",
+    "collapseSidebar": "Réduire la barre latérale",
+    "goBack": "Revenir en arrière",
+    "goForward": "Avancer",
+    "forward": "Suivant",
+    "openSearch": "Ouvrir la recherche",
+    "searchPlaceholder": "Rechercher des compétences, cours, groupes communautaires…",
+    "alpha": "Alpha",
+    "instructorMode": "Mode instructeur",
+    "instructorModeHint": "Vous êtes en mode instructeur — vous créez et relisez, vous n'apprenez pas",
+    "guardian": "Tuteur",
+    "guardianHint": "Compte tuteur — supervise l'apprentissage de vos enfants"
+  },
+  "prerelease": {
+    "title": "Version préliminaire — pas pour un usage en production",
+    "titleVersion": "Version préliminaire v{version} — pas pour un usage en production"
+  },
+  "theme": {
+    "ariaLabel": "Thème actuel : {theme}. Touchez pour changer.",
+    "light": "Clair",
+    "dark": "Sombre",
+    "system": "Système"
+  },
+  "userMenu": {
+    "ariaLabel": "Menu du compte de {name}",
+    "defaultName": "vous",
+    "anonymous": "Anonyme",
+    "onThisDevice": "Sur cet appareil",
+    "roleInstructor": "instructeur",
+    "roleInstructorLearner": "instructeur · mode apprenant",
+    "myProfile": "Mon profil",
+    "myLearning": "Mon apprentissage",
+    "myCredentials": "Mes justificatifs",
+    "sponsor": "Sponsor",
+    "mySkills": "Mes compétences",
+    "myReputation": "Ma réputation",
+    "sentinel": "Sentinel",
+    "community": "Communauté",
+    "settings": "Paramètres",
+    "switchUser": "Changer d'utilisateur",
+    "lockAccount": "Verrouiller le compte"
+  }
+}

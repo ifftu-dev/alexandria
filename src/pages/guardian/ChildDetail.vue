@@ -4,11 +4,13 @@
 // guardian link.
 import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { useGuardian, childAge } from '@/composables/useGuardian'
 import { AppBadge, AppButton, AppTabs, EmptyState } from '@/components/ui'
 import type { GuardianLinkInfo } from '@/types'
 
 const route = useRoute()
+const { t } = useI18n()
 const linkId = route.params.linkId as string
 
 const { links, refreshLinks, syncNow, childActivity, revokeLink } = useGuardian()
@@ -64,12 +66,12 @@ const syncing = ref(false)
 const revoking = ref(false)
 
 const activeTab = ref('overview')
-const tabs = [
-  { key: 'overview', label: 'Overview' },
-  { key: 'courses', label: 'Courses' },
-  { key: 'submissions', label: 'Submissions' },
-  { key: 'classrooms', label: 'Classrooms' },
-]
+const tabs = computed(() => [
+  { key: 'overview', label: t('guardian.detail.tabOverview') },
+  { key: 'courses', label: t('guardian.detail.tabCourses') },
+  { key: 'submissions', label: t('guardian.detail.tabSubmissions') },
+  { key: 'classrooms', label: t('guardian.detail.tabClassrooms') },
+])
 
 const courseTitle = (courseId: string) =>
   courses.value.find(c => c.id === courseId)?.title ?? `${courseId.slice(0, 12)}…`
@@ -134,7 +136,7 @@ async function runSync() {
 }
 
 async function unlink() {
-  if (!window.confirm('Unlink this child? Their profile will be gated again until another guardian accepts a new invite.')) {
+  if (!window.confirm(t('guardian.detail.unlinkConfirm'))) {
     return
   }
   revoking.value = true
@@ -159,19 +161,19 @@ function pct(v: number | null): string {
         </span>
         <div>
           <h1 class="text-2xl font-bold text-foreground">
-            {{ link?.peer_display_name ?? 'Child' }}
+            {{ link?.peer_display_name ?? $t('guardian.detail.unnamedChild') }}
             <span v-if="link && childAge(link) !== null" class="text-base font-normal text-muted-foreground">
-              · {{ childAge(link) }} years old
+              · {{ $t('guardian.detail.yearsOld', { age: childAge(link) }) }}
             </span>
           </h1>
           <p class="text-xs text-muted-foreground">
-            {{ link?.last_sync_at ? `Last synced ${link.last_sync_at.slice(0, 16)}` : 'Not synced yet' }}
+            {{ link?.last_sync_at ? $t('guardian.children.lastSynced', { time: link.last_sync_at.slice(0, 16) }) : $t('guardian.children.notSynced') }}
           </p>
         </div>
       </div>
       <div class="flex shrink-0 gap-2">
-        <AppButton variant="outline" size="sm" :loading="syncing" @click="runSync">Sync now</AppButton>
-        <AppButton variant="danger" size="sm" :loading="revoking" @click="unlink">Unlink</AppButton>
+        <AppButton variant="outline" size="sm" :loading="syncing" @click="runSync">{{ $t('guardian.actions.syncNow') }}</AppButton>
+        <AppButton variant="danger" size="sm" :loading="revoking" @click="unlink">{{ $t('guardian.actions.unlink') }}</AppButton>
       </div>
     </div>
 
@@ -185,38 +187,38 @@ function pct(v: number | null): string {
     <template v-else-if="activeTab === 'overview'">
       <div class="grid grid-cols-2 gap-4 lg:grid-cols-3">
         <div class="rounded-xl border border-border bg-card p-5">
-          <p class="text-xs text-muted-foreground">Enrolled courses</p>
+          <p class="text-xs text-muted-foreground">{{ $t('guardian.detail.statEnrolledCourses') }}</p>
           <p class="mt-1 text-2xl font-bold text-foreground">{{ totals.enrollments }}</p>
         </div>
         <div class="rounded-xl border border-border bg-card p-5">
-          <p class="text-xs text-muted-foreground">Elements completed</p>
+          <p class="text-xs text-muted-foreground">{{ $t('guardian.detail.statElementsCompleted') }}</p>
           <p class="mt-1 text-2xl font-bold text-foreground">{{ totals.completedElements }}</p>
         </div>
         <div class="rounded-xl border border-border bg-card p-5">
-          <p class="text-xs text-muted-foreground">Time spent</p>
+          <p class="text-xs text-muted-foreground">{{ $t('guardian.detail.statTimeSpent') }}</p>
           <p class="mt-1 text-2xl font-bold text-foreground">{{ totals.timeSpentHours }}h</p>
         </div>
         <div class="rounded-xl border border-border bg-card p-5">
-          <p class="text-xs text-muted-foreground">Average score</p>
+          <p class="text-xs text-muted-foreground">{{ $t('guardian.detail.statAvgScore') }}</p>
           <p class="mt-1 text-2xl font-bold text-foreground">{{ pct(totals.avgScore) }}</p>
         </div>
         <div class="rounded-xl border border-border bg-card p-5">
-          <p class="text-xs text-muted-foreground">Submissions</p>
+          <p class="text-xs text-muted-foreground">{{ $t('guardian.detail.statSubmissions') }}</p>
           <p class="mt-1 text-2xl font-bold text-foreground">{{ totals.submissions }}</p>
         </div>
         <div class="rounded-xl border border-border bg-card p-5">
-          <p class="text-xs text-muted-foreground">Classrooms</p>
+          <p class="text-xs text-muted-foreground">{{ $t('guardian.detail.statClassrooms') }}</p>
           <p class="mt-1 text-2xl font-bold text-foreground">{{ totals.classrooms }}</p>
         </div>
       </div>
 
       <!-- Recent activity -->
       <div class="rounded-xl border border-border bg-card p-5">
-        <h2 class="mb-3 text-sm font-semibold text-foreground">Recent activity</h2>
+        <h2 class="mb-3 text-sm font-semibold text-foreground">{{ $t('guardian.detail.recentActivity') }}</h2>
         <EmptyState
           v-if="!progress.length"
-          title="No activity yet"
-          description="Progress appears here once their device syncs."
+          :title="$t('guardian.detail.noActivityTitle')"
+          :description="$t('guardian.detail.noActivityDescription')"
         />
         <ul v-else class="space-y-2">
           <li
@@ -229,8 +231,8 @@ function pct(v: number | null): string {
               :class="p.status === 'completed' ? 'bg-success' : 'bg-warning'"
             />
             <span class="text-foreground capitalize">{{ p.status.replace('_', ' ') }}</span>
-            <span class="text-muted-foreground">an element</span>
-            <span v-if="p.score !== null" class="text-muted-foreground">— scored {{ pct(p.score) }}</span>
+            <span class="text-muted-foreground">{{ $t('guardian.detail.anElement') }}</span>
+            <span v-if="p.score !== null" class="text-muted-foreground">{{ $t('guardian.detail.scored', { score: pct(p.score) }) }}</span>
             <span class="ml-auto shrink-0 text-xs text-muted-foreground">{{ p.updated_at.slice(0, 16) }}</span>
           </li>
         </ul>
@@ -241,8 +243,8 @@ function pct(v: number | null): string {
     <template v-else-if="activeTab === 'courses'">
       <EmptyState
         v-if="!enrollments.length"
-        title="No enrollments"
-        description="Courses your child enrolls in will appear here."
+        :title="$t('guardian.detail.noEnrollmentsTitle')"
+        :description="$t('guardian.detail.noEnrollmentsDescription')"
       />
       <div v-else class="space-y-3">
         <div
@@ -255,12 +257,13 @@ function pct(v: number | null): string {
             <AppBadge :variant="en.status === 'completed' ? 'success' : 'primary'" class="capitalize">
               {{ en.status }}
             </AppBadge>
-            <span class="ml-auto text-xs text-muted-foreground">Enrolled {{ en.enrolled_at.slice(0, 10) }}</span>
+            <span class="ml-auto text-xs text-muted-foreground">{{ $t('guardian.detail.enrolledOn', { date: en.enrolled_at.slice(0, 10) }) }}</span>
           </div>
           <p class="mt-2 text-sm text-muted-foreground">
-            {{ (progressByEnrollment.get(en.id) ?? []).filter(p => p.status === 'completed').length }}
-            elements completed ·
-            {{ (((progressByEnrollment.get(en.id) ?? []).reduce((n, p) => n + (p.time_spent ?? 0), 0)) / 60).toFixed(0) }} min
+            {{ $t('guardian.detail.elementsCompletedMinutes', {
+              completed: (progressByEnrollment.get(en.id) ?? []).filter(p => p.status === 'completed').length,
+              minutes: (((progressByEnrollment.get(en.id) ?? []).reduce((n, p) => n + (p.time_spent ?? 0), 0)) / 60).toFixed(0),
+            }) }}
           </p>
         </div>
       </div>
@@ -270,8 +273,8 @@ function pct(v: number | null): string {
     <template v-else-if="activeTab === 'submissions'">
       <EmptyState
         v-if="!submissions.length && !irlSubmissions.length"
-        title="No submissions"
-        description="Graded work and instructor-reviewed submissions appear here."
+        :title="$t('guardian.detail.noSubmissionsTitle')"
+        :description="$t('guardian.detail.noSubmissionsDescription')"
       />
       <div v-else class="space-y-3">
         <div
@@ -280,9 +283,9 @@ function pct(v: number | null): string {
           class="rounded-xl border border-border bg-card p-4"
         >
           <div class="flex items-center gap-2 text-sm">
-            <span class="font-medium text-foreground">Submission</span>
+            <span class="font-medium text-foreground">{{ $t('guardian.detail.submission') }}</span>
             <AppBadge v-if="s.status" class="capitalize">{{ s.status }}</AppBadge>
-            <span class="text-muted-foreground">score {{ pct(s.score) }}</span>
+            <span class="text-muted-foreground">{{ $t('guardian.detail.score', { score: pct(s.score) }) }}</span>
             <span class="ml-auto text-xs text-muted-foreground">{{ s.created_at.slice(0, 16) }}</span>
           </div>
           <p v-if="s.feedback" class="mt-1 text-sm text-muted-foreground">“{{ s.feedback }}”</p>
@@ -294,8 +297,8 @@ function pct(v: number | null): string {
     <template v-else>
       <EmptyState
         v-if="!classrooms.length"
-        title="No classrooms"
-        description="Classrooms your child joins appear here."
+        :title="$t('guardian.detail.noClassroomsTitle')"
+        :description="$t('guardian.detail.noClassroomsDescription')"
       />
       <div v-else class="space-y-3">
         <div
@@ -308,7 +311,7 @@ function pct(v: number | null): string {
           </span>
           <div class="min-w-0">
             <p class="truncate text-sm font-medium text-foreground">{{ c.classroom_id.slice(0, 20) }}…</p>
-            <p class="text-xs text-muted-foreground capitalize">{{ c.role }} · joined {{ c.joined_at.slice(0, 10) }}</p>
+            <p class="text-xs text-muted-foreground capitalize">{{ $t('guardian.detail.roleJoined', { role: c.role, date: c.joined_at.slice(0, 10) }) }}</p>
           </div>
         </div>
       </div>

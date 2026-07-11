@@ -1,22 +1,24 @@
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import type { LearningPath, LearningStepStatus } from '@/types'
 
 defineProps<{ path: LearningPath }>()
 
+const { t } = useI18n()
 const router = useRouter()
 
 const statusMeta: Record<LearningStepStatus, { dot: string; label: string; cls: string }> = {
-  earned: { dot: '✓', label: 'Proven', cls: 'step--earned' },
-  available: { dot: '▶', label: 'Next', cls: 'step--available' },
-  locked: { dot: '○', label: 'Locked', cls: 'step--locked' },
+  earned: { dot: '✓', label: t('skills.path.statusEarned'), cls: 'step--earned' },
+  available: { dot: '▶', label: t('skills.path.statusAvailable'), cls: 'step--available' },
+  locked: { dot: '○', label: t('skills.path.statusLocked'), cls: 'step--locked' },
 }
 </script>
 
 <template>
   <div>
     <div v-if="path.steps.length === 0" class="text-sm text-muted-foreground">
-      Nothing to learn — you've already proven everything in this goal.
+      {{ $t('skills.path.empty') }}
     </div>
 
     <ol v-else class="space-y-1.5">
@@ -35,7 +37,7 @@ const statusMeta: Record<LearningStepStatus, { dot: string; label: string; cls: 
             >
               {{ step.name }}
             </button>
-            <span v-if="step.is_goal" class="goal-badge">★ goal</span>
+            <span v-if="step.is_goal" class="goal-badge">{{ $t('skills.path.goalBadge') }}</span>
             <span class="ml-auto shrink-0 text-[0.65rem] uppercase tracking-wide text-muted-foreground">
               {{ statusMeta[step.status].label }}
             </span>
@@ -59,7 +61,7 @@ const statusMeta: Record<LearningStepStatus, { dot: string; label: string; cls: 
             v-else-if="step.status === 'available' && step.course_recs.length === 0"
             class="mt-0.5 text-[0.7rem] text-muted-foreground"
           >
-            No course covers this yet.
+            {{ $t('skills.path.noCourse') }}
           </p>
         </div>
       </li>

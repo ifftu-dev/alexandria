@@ -75,7 +75,7 @@ async function untag(skillId: string) {
         :key="t.skill_id"
         class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium transition-colors hover:opacity-80"
         :style="{ backgroundColor: `rgb(${bloomColors[t.bloom_level] || bloomColors.apply} / 0.15)`, color: `rgb(${bloomColors[t.bloom_level] || bloomColors.apply})` }"
-        :title="`Remove ${t.skill_name}`"
+        :title="$t('instructor.skillPicker.removeSkill', { name: t.skill_name })"
         @click="untag(t.skill_id)"
       >
         {{ t.skill_name }}
@@ -86,7 +86,7 @@ async function untag(skillId: string) {
         <input
           v-model="search"
           class="rounded-lg border border-border bg-background px-2 py-1 text-xs w-48"
-          placeholder="Search skills..."
+          :placeholder="$t('instructor.skillPicker.searchPlaceholder')"
           @keydown.escape="picking = false; search = ''"
         >
         <div
@@ -111,7 +111,7 @@ async function untag(skillId: string) {
         @click="picking = true; search = ''"
       >
         <svg class="w-3 h-3" viewBox="0 0 20 20" fill="currentColor"><path d="M10.75 4.75a.75.75 0 00-1.5 0v4.5h-4.5a.75.75 0 000 1.5h4.5v4.5a.75.75 0 001.5 0v-4.5h4.5a.75.75 0 000-1.5h-4.5v-4.5z"/></svg>
-        Skill
+        {{ $t('instructor.skillPicker.addSkill') }}
       </button>
     </div>
     <p v-if="error" class="mt-1 text-xs text-error">{{ error }}</p>

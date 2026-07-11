@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { AppSpinner } from '@/components/ui'
 import { sanitizeHtml } from '@/utils/sanitize'
@@ -13,6 +14,7 @@ const emit = defineEmits<{
   (e: 'complete'): void
 }>()
 
+const { t } = useI18n()
 const { invoke } = useLocalApi()
 const content = ref('')
 const loading = ref(false)
@@ -32,7 +34,7 @@ async function loadContent() {
     const decoder = new TextDecoder()
     content.value = sanitizeHtml(decoder.decode(new Uint8Array(bytes)))
   } catch (e: unknown) {
-    error.value = `Failed to load content: ${e}`
+    error.value = t('courses.text.loadError', { error: String(e) })
     content.value = ''
   } finally {
     loading.value = false
@@ -45,7 +47,7 @@ watch(() => [props.contentCid, props.contentInline], loadContent)
 
 <template>
   <div class="text-content">
-    <AppSpinner v-if="loading" label="Loading content..." />
+    <AppSpinner v-if="loading" :label="t('courses.text.loading')" />
 
     <div v-else-if="error" class="text-sm text-destructive">
       {{ error }}
@@ -54,7 +56,7 @@ watch(() => [props.contentCid, props.contentInline], loadContent)
     <div v-else-if="content" class="prose max-w-none" v-html="content" />
 
     <div v-else class="text-sm text-muted-foreground italic">
-      No content available.
+      {{ $t('courses.text.noContent') }}
     </div>
   </div>
 </template>

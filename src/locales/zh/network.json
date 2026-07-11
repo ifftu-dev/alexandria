@@ -1,0 +1,23 @@
+{
+  "peers": "无连接 | {count} 个连接 | {count} 个连接",
+  "title": "连接",
+  "subtitle": "你的应用如何与其他学习者连接——直接、私密，无需服务器。",
+  "status": "状态",
+  "online": "在线",
+  "offline": "离线",
+  "starting": "启动中…",
+  "connections": "连接",
+  "refresh": "刷新",
+  "empty": "正在寻找其他学习者…",
+  "diagnostic": "诊断",
+  "mountError": "无法加载连接详情：{error}",
+  "appOnline": "你已连接，随时可以开始学习。",
+  "appOffline": "你已离线——仍可使用此设备上保存的内容继续学习。",
+  "appStarting": "正在准备…",
+  "advanced": {
+    "deviceId": "设备 ID",
+    "topics": "频道",
+    "addresses": "地址",
+    "natStatus": "网络可达性"
+  }
+}

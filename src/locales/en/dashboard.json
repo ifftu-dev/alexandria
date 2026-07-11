@@ -1,0 +1,219 @@
+{
+  "home": {
+    "greeting": {
+      "morning": "Good morning",
+      "afternoon": "Good afternoon",
+      "evening": "Good evening"
+    },
+    "conflict": {
+      "held": "{'@'}{name} is already taken by someone else.",
+      "explain": "They claimed it before you, so searches point to them.",
+      "pick": "Pick a new username →"
+    },
+    "hero": {
+      "resumeEyebrow": "Pick up where you left off",
+      "resumeTitleFallback": "Your course",
+      "resumeCta": "Resume course",
+      "startEyebrow": "Get started",
+      "startTitle": "Set your first learning goal",
+      "startCta": "Browse skills",
+      "recommendedEyebrow": "Recommended for you",
+      "recommendedCta": "Open course",
+      "exploreEyebrow": "Explore",
+      "exploreTitle": "Discover courses from other learners",
+      "exploreCta": "Browse courses"
+    },
+    "stats": {
+      "teaching": "Teaching impact",
+      "learning": "Learning impact",
+      "skills": "Skills proven",
+      "confidence": "Confidence",
+      "teachingTipLabel": "What is teaching impact?",
+      "teachingTipText": "The credit you've earned by teaching — the weighted value of credentials learners claimed from your courses and tutorials.",
+      "learningTipLabel": "What is learning impact?",
+      "learningTipText": "The credit you've earned as a learner — the weighted value of credentials you've claimed by finishing courses.",
+      "skillsTipLabel": "What does skills proven mean?",
+      "skillsTipText": "Distinct skills backed by at least one credential in your profile.",
+      "confidenceTipLabel": "What is confidence?",
+      "confidenceTipText": "The average strength of the checks behind your credentials — how strongly other learners trust them."
+    },
+    "goals": {
+      "title": "Your goals",
+      "viewAll": "View all",
+      "next": "Next: {name}",
+      "ready": "You're ready 🎉",
+      "add": "Add a goal"
+    },
+    "graph": {
+      "title": "Your skill graph",
+      "proven": "{count} skill proven | {count} skills proven",
+      "hide": "Hide ▴",
+      "expand": "Expand ▾",
+      "empty": "No proven skills yet. Earn credentials by finishing courses, and they'll show up here.",
+      "levelTitle": "Skill level: {level}",
+      "manage": "Manage visibility & teaching"
+    },
+    "pill": {
+      "tutorial": "Tutorial",
+      "course": "Course"
+    },
+    "continue": "Continue learning",
+    "enrolledOn": "Enrolled {date}",
+    "tutorials": {
+      "title": "Quick tutorials",
+      "count": "{count} tutorial | {count} tutorials"
+    },
+    "courses": {
+      "recommendedTitle": "Recommended for you",
+      "title": "Courses",
+      "count": "{count} course | {count} courses",
+      "emptyTitle": "No courses yet",
+      "emptyBody": "Create your first course, or find ones shared by other learners.",
+      "create": "Create course"
+    },
+    "diag": {
+      "read": "Read diagnostics"
+    }
+  },
+  "reputation": {
+    "title": "My reputation",
+    "subtitle": "Your standing, built from your teaching impact and what you've learned.",
+    "tabs": {
+      "instructor": "Teaching impact",
+      "learner": "Learning profile"
+    },
+    "stats": {
+      "totalImpact": "Total impact",
+      "skillsTaught": "Skills taught",
+      "skillsDemonstrated": "Skills shown",
+      "avgConfidence": "Average confidence"
+    },
+    "empty": {
+      "instructorTitle": "No teaching reputation yet",
+      "instructorBody": "Publish courses and help learners earn credentials to build your impact.",
+      "learnerTitle": "No learning reputation yet",
+      "learnerBody": "Finish courses and earn credentials to build your profile."
+    },
+    "assertion": {
+      "global": "Overall",
+      "credentials": "{count} credential | {count} credentials",
+      "confidenceSuffix": "{value} confidence",
+      "confidence": "Confidence",
+      "median": "Median",
+      "learners": "Learners",
+      "variance": "Variance",
+      "evidence": "Evidence"
+    }
+  },
+  "sponsor": {
+    "title": "Sponsor",
+    "subtitle": "Create role-based assessments from a job description, and issue trusted credentials to candidates who pass.",
+    "tabs": {
+      "orgs": "Organizations",
+      "roles": "Role assessments",
+      "issue": "Issue credential"
+    },
+    "orgs": {
+      "new": "New organization",
+      "emptyTitle": "No organizations yet",
+      "emptyBody": "Create one to start building role assessments.",
+      "owner": "Owner"
+    },
+    "roles": {
+      "new": "New role assessment",
+      "emptyTitle": "No role assessments",
+      "emptyBody": "Create one for an organization.",
+      "requiresClean": "requires a clean session",
+      "minIntegrity": "min integrity {value}",
+      "publish": "Publish",
+      "archive": "Archive"
+    },
+    "issue": {
+      "roleLabel": "Role assessment",
+      "selectPlaceholder": "Select…",
+      "candidateLabel": "Candidate public ID",
+      "sessionLabel": "Integrity session ID",
+      "submit": "Issue role credential",
+      "submitting": "Issuing…",
+      "issued": "Credential issued",
+      "assurance": "assurance:",
+      "integrity": "integrity {value}"
+    },
+    "orgModal": {
+      "title": "New organization",
+      "nameLabel": "Name",
+      "namePlaceholder": "Acme Corp"
+    },
+    "roleModal": {
+      "title": "New role assessment",
+      "orgLabel": "Organization",
+      "roleTitleLabel": "Role title",
+      "roleTitlePlaceholder": "SRE L4",
+      "jobLabel": "Job description",
+      "jobPlaceholder": "Operate production at scale…",
+      "skillsLabel": "Skill IDs (comma-separated)",
+      "policy": "Issuance policy",
+      "minIntegrity": "Min integrity",
+      "maxCritical": "Max critical",
+      "maxWarning": "Max warning",
+      "requireClean": "Require a clean session",
+      "assuranceLabel": "Required assurance level",
+      "assuranceNone": "(none)"
+    },
+    "actions": {
+      "create": "Create"
+    }
+  },
+  "sync": {
+    "title": "Cross-device sync",
+    "subtitle": "Keep your data in step across every device you've paired with this one.",
+    "syncNow": "Sync now",
+    "syncing": "Syncing…",
+    "stats": {
+      "devices": "Devices",
+      "queue": "Queue",
+      "pending": "pending",
+      "autoSync": "Auto-sync",
+      "on": "On",
+      "off": "Off",
+      "lastSync": "Last sync",
+      "never": "Never"
+    },
+    "result": {
+      "title": "Sync finished",
+      "detail": "Merged {merged} rows in {ms}ms — sent {sent}, received {received}"
+    },
+    "device": {
+      "heading": "This device",
+      "id": "Device ID",
+      "name": "Name",
+      "platform": "Platform",
+      "unknown": "Unknown",
+      "online": "Online"
+    },
+    "pair": {
+      "heading": "Pair a device",
+      "generateTitle": "Generate a code",
+      "generateBody": "Create a one-time code on this device, then enter it on the other one. The code is secret and expires in 10 minutes.",
+      "generate": "Generate pairing code",
+      "generating": "Generating…",
+      "enterTitle": "Enter a code",
+      "enterBody": "Paste a code made on another of your devices to pair it and sync right away.",
+      "codePlaceholder": "Paste pairing code",
+      "pair": "Pair",
+      "pairing": "Pairing…"
+    },
+    "paired": {
+      "heading": "Paired devices",
+      "emptyTitle": "No other devices paired",
+      "emptyBody": "Use the panel above — generate a code here and enter it on your other device (or the other way around) to start syncing.",
+      "tables": "{count} table synced | {count} tables synced",
+      "last": "· last {time}"
+    },
+    "history": {
+      "heading": "Sync history",
+      "emptyTitle": "No sync history",
+      "emptyBody": "Your sync history will show up here after your first sync."
+    }
+  }
+}

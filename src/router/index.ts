@@ -198,11 +198,12 @@ const router = createRouter({
       meta: { layout: 'app' },
     },
     {
-      path: '/skills/bootstrap',
-      name: 'skills-bootstrap',
+      path: '/skills/import',
+      name: 'skills-import',
       component: () => import('@/pages/skills/BootstrapUpload.vue'),
       meta: { layout: 'app' },
     },
+    { path: '/skills/bootstrap', redirect: '/skills/import' },
     {
       path: '/assessment/:skillId',
       name: 'assessment',
@@ -236,63 +237,74 @@ const router = createRouter({
       meta: { layout: 'app' },
     },
 
-    // Governance
+    // Community (formerly "Governance")
     {
-      path: '/governance',
-      name: 'governance',
+      path: '/community',
+      name: 'community',
       component: () => import('@/pages/governance/Index.vue'),
       meta: { layout: 'app' },
     },
     {
-      path: '/governance/:id',
-      name: 'dao-detail',
+      path: '/community/:id',
+      name: 'community-detail',
       component: () => import('@/pages/governance/DaoDetail.vue'),
       meta: { layout: 'app' },
     },
+    // Legacy /governance* paths — redirect so old deeplinks/bookmarks resolve.
+    { path: '/governance', redirect: '/community' },
+    { path: '/governance/:id', redirect: (to) => `/community/${to.params.id}` },
 
-    // Dashboard
+    // Dashboard surfaces — flattened to plain top-level paths.
     {
-      path: '/dashboard/courses',
-      name: 'dashboard-courses',
+      path: '/learning',
+      name: 'learning',
       component: () => import('@/pages/dashboard/Courses.vue'),
       meta: { layout: 'app' },
     },
     {
-      path: '/dashboard/credentials',
-      name: 'dashboard-credentials',
+      path: '/credentials',
+      name: 'credentials',
       component: () => import('@/pages/dashboard/Credentials.vue'),
       meta: { layout: 'app' },
     },
     {
-      path: '/dashboard/sponsor',
-      name: 'dashboard-sponsor',
+      path: '/sponsor',
+      name: 'sponsor',
       component: () => import('@/pages/dashboard/Sponsor.vue'),
       meta: { layout: 'app' },
     },
     {
-      path: '/dashboard/credentials/:id',
-      name: 'dashboard-credential-detail',
+      path: '/credentials/:id',
+      name: 'credential-detail',
       component: () => import('@/pages/dashboard/CredentialDetail.vue'),
       meta: { layout: 'app' },
     },
     {
-      path: '/dashboard/reputation',
-      name: 'dashboard-reputation',
+      path: '/reputation',
+      name: 'reputation',
       component: () => import('@/pages/dashboard/Reputation.vue'),
       meta: { layout: 'app' },
     },
     {
-      path: '/dashboard/network',
-      name: 'dashboard-network',
+      path: '/network',
+      name: 'network-status',
       component: () => import('@/pages/dashboard/Network.vue'),
       meta: { layout: 'app' },
     },
     {
-      path: '/dashboard/sync',
-      name: 'dashboard-sync',
+      path: '/sync',
+      name: 'sync-status',
       component: () => import('@/pages/dashboard/Sync.vue'),
       meta: { layout: 'app' },
     },
+    // Legacy /dashboard/* paths — redirect so old deeplinks/bookmarks resolve.
+    { path: '/dashboard/courses', redirect: '/learning' },
+    { path: '/dashboard/credentials', redirect: '/credentials' },
+    { path: '/dashboard/credentials/:id', redirect: (to) => `/credentials/${to.params.id}` },
+    { path: '/dashboard/sponsor', redirect: '/sponsor' },
+    { path: '/dashboard/reputation', redirect: '/reputation' },
+    { path: '/dashboard/network', redirect: '/network' },
+    { path: '/dashboard/sync', redirect: '/sync' },
     {
       path: '/dashboard/sentinel',
       name: 'dashboard-sentinel',

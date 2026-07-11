@@ -1,0 +1,89 @@
+{
+  "index": {
+    "title": "Aulas",
+    "subtitle": "Espacios de grupo para aprender juntos",
+    "loading": "Cargando aulas…",
+    "emptyTitle": "Aún no hay aulas",
+    "emptyBody": "Crea un aula para iniciar un espacio de aprendizaje en grupo, o únete a una solicitando acceso.",
+    "createFirst": "Crea tu primera aula"
+  },
+  "actions": {
+    "create": "Crear",
+    "createClassroom": "Crear aula"
+  },
+  "create": {
+    "title": "Crear aula",
+    "nameLabel": "Nombre del aula",
+    "namePlaceholder": "p. ej. Matemáticas avanzadas",
+    "descriptionLabel": "Descripción",
+    "descriptionPlaceholder": "¿De qué trata esta aula?",
+    "iconLabel": "Emoji de icono"
+  },
+  "members": {
+    "count": "ninguno | {count} miembro | {count} miembros",
+    "heading": "Miembros"
+  },
+  "roles": {
+    "member": "Miembro",
+    "moderator": "Moderador",
+    "ownerSection": "Propietario",
+    "moderatorSection": "Moderadores",
+    "memberSection": "Miembros"
+  },
+  "requests": {
+    "title": "Solicitudes de acceso",
+    "empty": "No hay solicitudes de acceso pendientes",
+    "approve": "Aprobar",
+    "deny": "Denegar",
+    "link": "Solicitudes"
+  },
+  "settings": {
+    "title": "Ajustes del aula",
+    "general": "General",
+    "inviteCode": "Código de invitación",
+    "inviteHint": "Comparte este código con otras personas para que puedan encontrar tu aula y solicitar unirse.",
+    "membersHeading": "Miembros",
+    "kick": "Quitar",
+    "dangerZone": "Zona de peligro",
+    "archiveTitle": "Archivar esta aula",
+    "archiveBody": "El aula quedará oculta y ya no podrá recibir mensajes.",
+    "archive": "Archivar",
+    "leaveTitle": "Abandonar esta aula",
+    "leaveBody": "Tendrás que solicitar acceso de nuevo para volver a unirte.",
+    "leave": "Abandonar",
+    "confirmKick": "¿Seguro que quieres quitar a este miembro?",
+    "confirmArchive": "¿Archivar esta aula? Esto no se puede deshacer.",
+    "confirmLeave": "¿Abandonar esta aula?"
+  },
+  "nav": {
+    "settings": "Ajustes"
+  },
+  "call": {
+    "active": "Llamada de voz activa",
+    "join": "Unirse a la llamada",
+    "start": "Iniciar llamada"
+  },
+  "channels": {
+    "heading": "Canales",
+    "add": "Añadir canal",
+    "announcementBadge": "Canal de anuncios",
+    "selectShort": "Selecciona un canal",
+    "selectToChat": "Selecciona un canal para empezar a chatear",
+    "createTitle": "Crear canal",
+    "namePlaceholder": "nombre-del-canal",
+    "typeText": "Canal de texto",
+    "typeAnnouncement": "Canal de anuncios",
+    "fallbackName": "canal"
+  },
+  "messages": {
+    "empty": "Aún no hay mensajes. ¡Inicia la conversación!",
+    "loadMore": "Cargar mensajes anteriores",
+    "deleted": "[eliminado]",
+    "inputPlaceholder": "Mensaje a #{channel}",
+    "inputHint": "Intro para enviar · Mayús+Intro para nueva línea",
+    "send": "Enviar"
+  },
+  "common": {
+    "loading": "Cargando…"
+  }
+}

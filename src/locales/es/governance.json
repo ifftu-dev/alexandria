@@ -1,0 +1,134 @@
+{
+  "index": {
+    "title": "Comunidad",
+    "subtitle": "Grupos comunitarios que definen qué habilidades se reconocen",
+    "stats": {
+      "totalGroups": "Grupos comunitarios",
+      "active": "Activos",
+      "councilSeats": "Escaños del consejo"
+    },
+    "searchPlaceholder": "Buscar comunidades…",
+    "empty": {
+      "noMatchTitle": "Ninguna comunidad coincide con tu búsqueda",
+      "noMatchHint": "Prueba con otro término de búsqueda.",
+      "noneTitle": "Aún no hay comunidades",
+      "noneHint": "Los grupos comunitarios aparecen automáticamente a medida que se añaden nuevos temas."
+    },
+    "scope": {
+      "topicAreaShort": "AT",
+      "topicShort": "TE",
+      "topicArea": "Área temática",
+      "topic": "Tema"
+    },
+    "seats": "ninguno | {count} escaño | {count} escaños"
+  },
+  "detail": {
+    "breadcrumb": "Comunidad",
+    "notFound": "Grupo comunitario no encontrado",
+    "tabs": {
+      "overview": "Resumen",
+      "elections": "Elecciones",
+      "proposals": "Propuestas"
+    },
+    "stats": {
+      "members": "ninguno | {count} miembro | {count} miembros",
+      "council": "{filled}/{total} del consejo",
+      "elections": "ninguna | {count} elección | {count} elecciones",
+      "proposals": "ninguna | {count} propuesta | {count} propuestas"
+    },
+    "details": {
+      "heading": "Detalles",
+      "scope": "Tipo de tema",
+      "councilSize": "Tamaño del consejo",
+      "electionInterval": "Intervalo de elecciones",
+      "intervalDays": "{count} días",
+      "created": "Creado",
+      "topicId": "ID del tema",
+      "publicRecord": "Registro público"
+    },
+    "council": {
+      "heading": "Consejo",
+      "seats": "{filled} / {total} escaños",
+      "emptyTitle": "No hay miembros del consejo",
+      "emptyDescription": "Celebra una elección para ocupar el consejo.",
+      "badge": "consejo"
+    },
+    "members": {
+      "heading": "Miembros ({count})"
+    },
+    "elections": {
+      "heading": "Elecciones",
+      "open": "+ Iniciar elección",
+      "emptyTitle": "No hay elecciones",
+      "emptyDescription": "Abre una elección para elegir a los miembros del consejo.",
+      "seats": "ninguno | {count} escaño | {count} escaños",
+      "actions": {
+        "nominateSelf": "Postularme",
+        "startVoting": "Iniciar votación",
+        "close": "Cerrar elección",
+        "seatCouncil": "Constituir el consejo",
+        "accept": "Aceptar",
+        "vote": "Votar"
+      },
+      "nominees": "Candidatos",
+      "noNominees": "Aún no hay candidatos",
+      "badges": {
+        "winner": "Ganador",
+        "accepted": "Aceptado",
+        "pending": "Pendiente"
+      },
+      "votes": "ninguno | {count} voto | {count} votos",
+      "nominationLabel": "Nominación",
+      "votingLabel": "Votación",
+      "ends": "Termina {date}",
+      "closed": "Cerrada {date}",
+      "titleRequired": "Añade un título para la elección."
+    },
+    "proposals": {
+      "heading": "Propuestas",
+      "submit": "+ Enviar propuesta",
+      "emptyTitle": "No hay propuestas",
+      "emptyDescription": "Envía una propuesta para sugerir cambios en este tema.",
+      "votingLabel": "Votación",
+      "for": "{count} a favor",
+      "against": "{count} en contra",
+      "deadline": "Fecha límite: {date}",
+      "actions": {
+        "approve": "Aprobar (abrir votación)",
+        "voteFor": "Votar a favor",
+        "voteAgainst": "Votar en contra",
+        "resolve": "Resolver"
+      },
+      "titleRequired": "Añade un título para la propuesta."
+    },
+    "createElection": {
+      "title": "Iniciar elección",
+      "titleLabel": "Título",
+      "titlePlaceholder": "p. ej. Elección del consejo T1 2026",
+      "descriptionLabel": "Descripción",
+      "descriptionPlaceholder": "Propósito de esta elección…",
+      "seatsLabel": "Escaños",
+      "submit": "Iniciar elección"
+    },
+    "createProposal": {
+      "title": "Enviar propuesta",
+      "titleLabel": "Título",
+      "titlePlaceholder": "p. ej. Reconocer habilidades de PLN",
+      "descriptionLabel": "Descripción",
+      "descriptionPlaceholder": "Describe el cambio propuesto…",
+      "categoryLabel": "Categoría",
+      "submit": "Enviar propuesta"
+    }
+  },
+  "onChainBadge": {
+    "confirming": "Confirmando…"
+  },
+  "deadline": {
+    "default": "Fecha límite",
+    "passed": "{label} vencida"
+  },
+  "proficiency": {
+    "requires": "Requiere",
+    "level": "de competencia"
+  }
+}

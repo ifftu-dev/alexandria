@@ -10,6 +10,7 @@
  */
 
 import { onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import type { PluginCapability } from '@/types'
 import { AppButton } from '@/components/ui'
 import { useDisplayNames } from '@/composables/useDisplayNames'
@@ -21,6 +22,7 @@ const props = defineProps<{
   reason: string
 }>()
 
+const { t } = useI18n()
 const { displayName, ensureNames } = useDisplayNames()
 onMounted(() => void ensureNames([props.authorDid]))
 
@@ -31,19 +33,19 @@ const emit = defineEmits<{
 function capabilityLabel(c: PluginCapability): string {
   switch (c) {
     case 'microphone':
-      return 'use your microphone'
+      return t('plugins.permission.capabilities.microphone')
     case 'camera':
-      return 'use your camera'
+      return t('plugins.permission.capabilities.camera')
     case 'midi':
-      return 'access connected MIDI devices'
+      return t('plugins.permission.capabilities.midi')
     case 'fullscreen':
-      return 'enter fullscreen mode'
+      return t('plugins.permission.capabilities.fullscreen')
     case 'clipboard':
-      return 'read from and write to your clipboard'
+      return t('plugins.permission.capabilities.clipboard')
     case 'storage':
-      return 'save progress locally'
+      return t('plugins.permission.capabilities.storage')
     case 'ml_inference':
-      return 'run on-device machine-learning models'
+      return t('plugins.permission.capabilities.mlInference')
   }
 }
 
@@ -59,7 +61,7 @@ function capabilityLabel(c: PluginCapability): string {
       class="w-full max-w-md rounded-2xl border border-border bg-background p-6 shadow-2xl"
     >
       <h2 class="text-base font-semibold text-foreground">
-        {{ pluginName }} wants to {{ capabilityLabel(capability) }}
+        {{ $t('plugins.permission.heading', { name: pluginName, action: capabilityLabel(capability) }) }}
       </h2>
 
       <p v-if="reason" class="mt-2 text-sm text-muted-foreground">
@@ -72,28 +74,28 @@ function capabilityLabel(c: PluginCapability): string {
             <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
           <div class="space-y-1">
-            <p>Plugins are community-authored and run in a sandbox.</p>
+            <p>{{ $t('plugins.permission.sandbox') }}</p>
             <p>
-              Author:
+              {{ $t('plugins.permission.madeBy') }}
               <span class="font-medium">{{ displayName(authorDid) }}</span>
             </p>
-            <p>The plugin cannot access the network or any other data on this device.</p>
+            <p>{{ $t('plugins.permission.noAccess') }}</p>
           </div>
         </div>
       </div>
 
       <div class="mt-5 space-y-2">
         <AppButton variant="primary" class="w-full justify-center" @click="emit('decide', 'always')">
-          Always allow
+          {{ $t('plugins.permission.always') }}
         </AppButton>
         <AppButton variant="secondary" class="w-full justify-center" @click="emit('decide', 'session')">
-          Allow for this session
+          {{ $t('plugins.permission.session') }}
         </AppButton>
         <AppButton variant="secondary" class="w-full justify-center" @click="emit('decide', 'once')">
-          Allow once
+          {{ $t('plugins.permission.once') }}
         </AppButton>
         <AppButton variant="ghost" class="w-full justify-center" @click="emit('decide', 'deny')">
-          Deny
+          {{ $t('plugins.permission.deny') }}
         </AppButton>
       </div>
     </div>

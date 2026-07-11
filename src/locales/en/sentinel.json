@@ -1,0 +1,450 @@
+{
+  "title": "Sentinel",
+  "subtitle": "Keeps your assessments honest",
+  "actions": {
+    "resetProfile": "Reset setup",
+    "proposeCheat": "Propose cheat pattern",
+    "recalibrate": "Redo setup",
+    "train": "Set up Sentinel",
+    "open": "Open",
+    "runTest": "Run test",
+    "openCommunity": "Open Community"
+  },
+  "tabs": {
+    "overview": "Overview",
+    "sessions": "Sessions",
+    "signals": "Signals & weights",
+    "profile": "Setup & flags"
+  },
+  "privacy": {
+    "title": "Private by design",
+    "body": "Your raw camera, typing, and mouse data never leave this device. Only plain scores (0 to 1) are kept here and used in your records. What Sentinel learns lives in this browser and you can delete it any time."
+  },
+  "overview": {
+    "totalSessions": "Total sessions",
+    "avgIntegrity": "Avg integrity",
+    "avgConsistency": "Avg consistency",
+    "cleanRate": "Clean rate"
+  },
+  "breakdown": {
+    "title": "How your sessions turned out",
+    "empty": "No sessions yet. Results show up here after you finish assessments.",
+    "clean": "Clean",
+    "flagged": "Flagged",
+    "suspended": "Suspended"
+  },
+  "community": {
+    "title": "Sentinel Community",
+    "active": "Active",
+    "pending": "Getting started",
+    "description": "Reviews the shared cheat-pattern library that every copy of Sentinel learns from.",
+    "noCouncil": "No council chosen yet. Propose the first Sentinel council in the main Alexandria Community to unlock approvals and accuracy tests.",
+    "members": "Council members"
+  },
+  "holdout": {
+    "title": "Accuracy test set",
+    "sets": "no sets | {count} set | {count} sets",
+    "description": "Private samples the community keeps for checking how accurate Sentinel is and how often it raises false alarms. Split across council members — running a test needs {threshold} of their keys.",
+    "empty": "No test set added yet. A council member adds one using {command}.",
+    "run": "Run test"
+  },
+  "cheatCard": {
+    "title": "Sentinel cheat test",
+    "description": "Run made-up cheating patterns through the active detector. It reports a score and result for each one without you typing anything. For checking only — it doesn't replace a real accuracy test.",
+    "open": "Open"
+  },
+  "engine": {
+    "title": "Sentinel status",
+    "calibrated": "Set up",
+    "notCalibrated": "Not set up",
+    "emptyTitle": "Not set up yet",
+    "emptyBody": "Run the quick setup so Sentinel can learn how you type and move.",
+    "typing": "Typing",
+    "mouse": "Mouse",
+    "aiModels": "Smart models",
+    "wpm": "WPM",
+    "ready": "{count}/3 ready"
+  },
+  "sessions": {
+    "emptyTitle": "No sessions yet",
+    "emptyBody": "Sessions are created automatically when you take assessments. Finish one to see it here.",
+    "emptyHint": "Sentinel watches for signs of cheating in real time during assessments.",
+    "copyTitle": "Copy session ID",
+    "inProgress": "In progress",
+    "scoreHigh": "High",
+    "scoreMedium": "Medium",
+    "scoreLow": "Low"
+  },
+  "signals": {
+    "title": "How the integrity score is built",
+    "description": "Your overall integrity score blends these signals. Everything is measured right here on your device.",
+    "distribution": "Weight distribution",
+    "items": {
+      "typingConsistency": {
+        "name": "Typing rhythm",
+        "description": "Checks how closely your typing matches the rhythm Sentinel learned from you — how long you hold keys and the gaps between them."
+      },
+      "mouseConsistency": {
+        "name": "Mouse movement",
+        "description": "Checks how closely your mouse speed and motion match the pattern Sentinel learned from you."
+      },
+      "isHuman": {
+        "name": "Human-like movement",
+        "description": "Real people move with natural variation. Perfectly steady, machine-like motion gets flagged."
+      },
+      "tabSwitches": {
+        "name": "Staying on the page",
+        "description": "Watches how often you switch away from the assessment. A lot of switching gets flagged."
+      },
+      "pasteEvents": {
+        "name": "Pasting",
+        "description": "Counts how much text you paste in. Pasting large blocks of text gets flagged."
+      },
+      "devtools": {
+        "name": "Developer tools",
+        "description": "Notices when the browser's developer tools are opened."
+      },
+      "facePresent": {
+        "name": "Camera check",
+        "description": "If you opt in to your camera, Sentinel checks every few seconds that you're still there."
+      },
+      "aiPasteAnomaly": {
+        "name": "Sentinel paste detector",
+        "description": "An extra check for pasted answers and typing bots. Advisory only, and only when smart scoring is on."
+      }
+    }
+  },
+  "flags": {
+    "title": "What raises a flag",
+    "description": "Flags are raised automatically when a signal crosses a limit. How a session turns out depends on how many flags come up and how serious they are.",
+    "triggerLabel": "Raised when: {trigger}",
+    "items": {
+      "tabSwitching": {
+        "description": "Switching away too often",
+        "trigger": "More than 10 switches in one check"
+      },
+      "pasteDetected": {
+        "description": "Pasted a large block of text",
+        "trigger": "More than 500 characters pasted"
+      },
+      "devtoolsDetected": {
+        "description": "Browser developer tools opened",
+        "trigger": "The developer-tools check came back positive"
+      },
+      "botSuspected": {
+        "description": "Movement looks automated",
+        "trigger": "Mouse motion has almost no natural variation"
+      },
+      "noFace": {
+        "description": "No face seen on camera",
+        "trigger": "Face missing on a camera-enabled session"
+      },
+      "multipleFaces": {
+        "description": "More than one face on camera",
+        "trigger": "More than one face during a check"
+      },
+      "multiAccount": {
+        "description": "This device is linked to more than one account",
+        "trigger": "The same device was seen on more than one account"
+      },
+      "lowIntegrity": {
+        "description": "Integrity score dropped below the safe line",
+        "trigger": "Overall score under 0.40"
+      },
+      "behaviorShift": {
+        "description": "Behavior drifted a long way from your usual pattern",
+        "trigger": "Match score under 0.35"
+      }
+    }
+  },
+  "profile": {
+    "trainingTitle": "Smart model status",
+    "keystrokeModel": "Typing model",
+    "mouseModel": "Mouse model",
+    "trained": "trained",
+    "untrained": "not trained",
+    "epochs": "Rounds",
+    "samples": "Samples",
+    "loss": "Error",
+    "note": "What Sentinel learns is kept in encrypted storage on this device. Re-run the setup to retrain, or reset to erase it completely.",
+    "behavioralTitle": "Your pattern",
+    "typing": "Typing",
+    "mouse": "Mouse",
+    "aiModels": "Smart models",
+    "avgDwell": "Avg hold",
+    "avgFlight": "Avg gap",
+    "speed": "Speed",
+    "velocity": "Speed",
+    "acceleration": "Acceleration",
+    "clickPrecision": "Click accuracy",
+    "keystrokeModelShort": "Typing model",
+    "mouseModelShort": "Mouse model",
+    "faceCheck": "Face check",
+    "ready": "Ready",
+    "pending": "Pending",
+    "enrolled": "Set up",
+    "notSet": "Not set",
+    "errorSamples": "Error / samples",
+    "setupProgress": "Setup progress",
+    "noAiData": "No smart model data",
+    "noProfileTitle": "No setup yet",
+    "noProfileBody": "Run the quick setup so Sentinel can learn how you type and move."
+  },
+  "outcomes": {
+    "title": "How outcomes are decided",
+    "clean": "Clean",
+    "cleanRule": "The usual result — no serious flags, fewer than 3 warnings, integrity 0.40 or higher.",
+    "flagged": "Flagged",
+    "flaggedRule": "1 serious flag, or 3+ warnings, or integrity under 0.40 — sent for a reviewer to look at.",
+    "suspended": "Suspended",
+    "suspendedRule": "2+ serious flags, or 1 serious flag plus 2 warnings — the results may be thrown out."
+  },
+  "aiScoring": {
+    "title": "Smart scoring (advisory)",
+    "description": "Let the typing, mouse, face, and paste models add a small nudge to the integrity score. Off by default — smart signals are advisory until they're checked against real data.",
+    "enabled": "On",
+    "disabled": "Off"
+  },
+  "pasteClassifier": {
+    "title": "Sentinel paste detector",
+    "description": "Adds the paste-detector signal while smart scoring is on. Turn it off if it flags too many honest answers; the other smart signals keep working.",
+    "loadedModel": "Loaded detector",
+    "activeModel": "Community detector",
+    "bundledFallback": "built-in default"
+  },
+  "reset": {
+    "title": "Erase your setup",
+    "description": "Delete what Sentinel learned about you from this device. You'll need to set it up again before it can watch future assessments.",
+    "button": "Reset setup"
+  },
+  "howItWorks": {
+    "title": "How Sentinel works",
+    "body": "Sentinel uses two kinds of checks: dependable rule-based ones (the deciding checks) and smart per-user ones (advisory). During an assessment it takes quiet snapshots at random moments, every 15 to 45 seconds. Your integrity and consistency scores come from the weighted signals above, and the outcome depends on how many flags come up and how serious they are. Each confirmed cheat lowers the trust on affected skills."
+  },
+  "cheatTest": {
+    "title": "Sentinel cheat test",
+    "subtitle": "Run made-up cheating patterns through the active detector and see the scores. For checking only — not a real accuracy test.",
+    "loadedModel": "Loaded detector",
+    "streamLength": "Sample length",
+    "seed": "Seed",
+    "run": "Run all patterns",
+    "summary": "Summary",
+    "caught": "Cheats caught",
+    "falseAlarms": "False alarms",
+    "catchRate": "Catch rate",
+    "falseAlarmRate": "False-alarm rate",
+    "colPattern": "Pattern",
+    "colExpected": "Should be",
+    "colScore": "Score",
+    "colFlag": "Result",
+    "colVerdict": "Verdict",
+    "featureDetails": "Detailed feature values",
+    "featureLabel": "Pattern",
+    "emptyHint": "Choose {action} to send each pattern through the active detector.",
+    "emptyHintAction": "Run all patterns"
+  },
+  "holdoutEval": {
+    "back": "Back to Sentinel",
+    "title": "Accuracy test",
+    "subtitle": "Checks how accurate Sentinel is against a private community test set. It needs enough council members' keys to unlock; each member runs {command} on their own device and pastes the result below.",
+    "step1": "1. Pick a test set",
+    "empty": "No test sets added yet. A council member adds one using {command}.",
+    "selectPlaceholder": "— Select —",
+    "step2": "2. Collect {count} keys",
+    "step2Body": "Each council member listed below unlocks their own key on their device (with {command}) and shares the result over a secure channel. Paste any {count} of them here — Sentinel combines them and unlocks the test set.",
+    "sharePlaceholder": "paste this member's key (or leave blank)",
+    "run": "Run test",
+    "resultTitle": "Test result",
+    "resultUnlocked": "Test set unlocked",
+    "modelKind": "Model",
+    "label": "Label",
+    "samples": "Samples",
+    "schema": "Format",
+    "untrained": "Sentinel isn't set up here, so there's no result to show. Set up Sentinel first.",
+    "verdictHuman": "Honest-user test set: Sentinel's average alarm level was {score}% (lower is better). {adv}% of samples tripped the alarm — that's your false-alarm rate.",
+    "verdictAttack": "Cheat test set: Sentinel's average alarm level was {score}% (higher is better). {adv}% of {count} {kind} samples were caught as cheating — that's your catch rate for the '{label}' family.",
+    "note": "The unlocked test set stays on this device. Don't share the labeled samples — leaking them hands cheaters the answer key."
+  },
+  "propose": {
+    "back": "Back to Sentinel",
+    "title": "Propose a cheat pattern",
+    "subtitle": "Submit a labeled cheat pattern for the Sentinel community to review. Approved patterns teach every copy of Sentinel to recognize that kind of cheating. Face patterns aren't accepted.",
+    "submittedTitle": "Proposal sent",
+    "submittedBody": "Proposal ID: {id}. Sentinel community members will vote on it — check the Community dashboard for progress.",
+    "another": "Propose another",
+    "step1": "1. Which model",
+    "step1Body": "Which model should learn to catch this pattern? Face data is never shared.",
+    "step2": "2. Label",
+    "step2Body": "What kind of cheating is this? Pick a known label or type your own.",
+    "labelPlaceholder": "Or type a custom label (overrides the choice above)",
+    "step3": "3. Sample file",
+    "step3Body": "A JSON file with format 1, a model matching your choice above, a label, and at least 20 samples. See {doc} for the format.",
+    "selected": "Selected: {name}",
+    "parsedOk": "Looks good — {count} samples, label {label}.",
+    "kindMismatch": "Heads up: the file's model is \"{fileKind}\" but you picked \"{selectedKind}\". Change one before submitting.",
+    "selfCheckTitle": "Sentinel self-check",
+    "step4": "4. Source session (optional)",
+    "step4Body": "If you took these samples from one of your own assessment sessions, pick it here. Flagged or suspended sessions can't be used — cheat data must not shape the detector. Sentinel checks again either way.",
+    "sessionNone": "None",
+    "step5": "5. Proposal summary",
+    "titlePlaceholder": "Short title shown to voters",
+    "descriptionPlaceholder": "Why should this be approved? How did you collect the data?",
+    "submit": "Submit proposal",
+    "verdict": {
+      "untrained": "Sentinel isn't set up here yet, so it can't self-check. Set up Sentinel first to see whether this really looks like cheating.",
+      "strong": "Sentinel flags this strongly (average {pct}%, {adv}% of samples over the line). A solid cheat pattern.",
+      "weak": "Sentinel reads this as close to normal (average {pct}%). Approving it could teach the model to flag honest people — reconsider before submitting.",
+      "borderline": "Borderline: average {pct}%, {adv}% flagged. The pattern may be weak or mixed — take another look at the samples."
+    },
+    "errors": {
+      "samplesArray": "\"samples\" must be a list.",
+      "tooFew": "Need at least 20 samples (got {count}).",
+      "faceForbidden": "Face patterns aren't accepted.",
+      "unsupportedKind": "Unsupported model: {kind}.",
+      "unsupportedSchema": "Unsupported format: {schema}.",
+      "emptyLabel": "The label can't be empty.",
+      "readFailed": "Couldn't read the file: {error}"
+    }
+  },
+  "wizard": {
+    "welcomeTitle": "Set up Sentinel",
+    "welcomeBody": "This quick setup teaches Sentinel how you personally type and move your mouse. It takes about 2 minutes and helps catch someone pretending to be you.",
+    "buildsTitle": "What this setup builds (just for you, optional):",
+    "buildsTyping": "Typing model — learns your typing rhythm",
+    "buildsMouse": "Mouse model — learns how you move the mouse",
+    "buildsFace": "Face check — set up with your camera (optional)",
+    "alreadyTrained": "(already done — you can skip)",
+    "alreadyEnrolled": "(already set up — you can skip)",
+    "activeTitle": "Already protecting you, no setup needed:",
+    "activePaste": "Sentinel paste detector — spots pasted answers and typing bots, built into every copy",
+    "activeRules": "Basic checks — staying on the page, developer tools, paste size, and unnatural movement",
+    "privacyNote": "Everything stays on this device. Your raw keystrokes, mouse movements, and video are never saved. What Sentinel learns is kept in encrypted storage on your device.",
+    "begin": "Get started",
+    "typingTitle": "Typing setup",
+    "typingBody": "Type the text below naturally. Sentinel learns your typing rhythm — how long you hold each key and the gaps between them.",
+    "typingHasModel": "You already have a typing model from an earlier setup. Retyping replaces it; Skip keeps the existing one.",
+    "typingPlaceholder": "Start typing here…",
+    "labelSpeed": "Speed",
+    "labelHold": "Hold",
+    "labelGap": "Gap",
+    "labelKeys": "Keys",
+    "unitMs": "ms",
+    "unitTotal": "total",
+    "skipKeep": "Skip — keep existing",
+    "mouseTitle": "Mouse setup",
+    "mouseBody": "Click each target as it appears. Move naturally — Sentinel is learning your mouse speed and movement.",
+    "mouseHasModel": "You already have a mouse model. Redoing this replaces it; Skip keeps the existing one.",
+    "allTargetsHit": "All targets hit",
+    "labelMoves": "Moves",
+    "labelClicks": "Clicks",
+    "labelTargets": "Targets",
+    "awarenessTitle": "What else Sentinel watches",
+    "awarenessBody": "Beyond typing and mouse, Sentinel watches these during assessments. Nothing to do here — just so you know.",
+    "awarenessTabTitle": "Staying on the page",
+    "awarenessTabBody": "Tracks when you switch away from the assessment and how long you're gone. The odd switch is fine — a lot of switching flags the session.",
+    "awarenessClipboardTitle": "Pasting",
+    "awarenessClipboardBody": "Notices paste events and counts the characters pasted. Small pastes are fine — pasting big blocks of text into answers raises a flag.",
+    "awarenessDevtoolsTitle": "Developer tools",
+    "awarenessDevtoolsBody": "A quick check notices if the browser's developer tools are open. It's a soft signal — it won't fail you, but it counts toward the overall score.",
+    "awarenessFingerprintTitle": "Device check",
+    "awarenessFingerprintBody": "A private fingerprint of this device (no personal data) helps spot the same device being used by different accounts.",
+    "cameraTitle": "Face check (optional)",
+    "cameraBody": "You can turn on your camera to confirm you're present during assessments. The video is handled entirely on your device — no images or video are ever sent anywhere.",
+    "cameraHasEnrollment": "You already have a face check set up. Turning the camera on again replaces it; Skip keeps the existing one.",
+    "enableCamera": "Turn on camera",
+    "skip": "Skip",
+    "faceDetected": "Face detected",
+    "noFace": "No face detected — position yourself in the frame",
+    "cameraSkipped": "Camera skipped. You can turn it on later during any assessment.",
+    "cameraDenied": "Camera permission was denied.",
+    "cameraNotFound": "No camera found on this device.",
+    "cameraFailed": "Couldn't open the camera.",
+    "gazeTitle": "Eye-tracking setup (optional)",
+    "gazeBody": "Follow the dots with your eyes. This teaches Sentinel where you look on this screen, so it can tell when your gaze drifts to a second device during an assessment. Video is handled on your device only — nothing is stored or sent.",
+    "gazeCoarseNote": "Without this, eye-tracking still works in a rougher look-away mode.",
+    "startCalibration": "Start setup",
+    "gazeCameraFailed": "Couldn't open the camera for eye-tracking setup.",
+    "gazeTrainFailed": "Eye-tracking setup failed.",
+    "gazeNotEnough": "Not enough usable frames ({count}). Make sure your face is well-lit and centered, then try again.",
+    "gazeLookDot": "Look at the dot. Point {current} of {total}.",
+    "gazeDone": "Eye-tracking set up from {count} samples.",
+    "gazeLoss": "Fit error: {loss}",
+    "recalibrate": "Redo setup",
+    "reviewTitle": "Setup complete",
+    "reviewBody": "Sentinel has built your pattern. Here's what it learned:",
+    "typingPattern": "Typing pattern",
+    "msHold": "ms hold",
+    "msGap": "ms gap",
+    "mousePattern": "Mouse pattern",
+    "pxVelocity": "speed (px/ms)",
+    "reviewSamples": "samples",
+    "facePresence": "Face check",
+    "faceSkipped": "Skipped — you can turn it on during assessments",
+    "faceConfigured": "Set up and tested",
+    "smartModels": "Smart models",
+    "modelTyping": "Typing model",
+    "modelMouse": "Mouse model",
+    "modelFace": "Face check",
+    "keptExisting": "Kept existing",
+    "retrained": "Redone",
+    "insufficient": "Not enough data",
+    "enrolled": "Set up",
+    "statusSkipped": "Skipped",
+    "statusPending": "Pending",
+    "reviewNote": "These models are just for you. The built-in paste detector (always on) works separately. All of it stays on your device.",
+    "finish": "Finish",
+    "saving": "Saving…"
+  },
+  "debug": {
+    "title": "Sentinel — live view",
+    "close": "Close (⌘⇧S)",
+    "cameraUnavailable": "Camera unavailable",
+    "startPreview": "Start camera preview",
+    "stopCamera": "stop camera",
+    "pillNoFace": "no face",
+    "pillOnScreen": "on-screen",
+    "pillOffScreen": "OFF-SCREEN",
+    "sectionOutcome": "Outcome",
+    "sectionTyping": "Typing",
+    "sectionMouse": "Mouse",
+    "sectionClipboard": "Clipboard",
+    "sectionEnvironment": "Environment",
+    "sectionCamera": "Camera",
+    "sectionGaze": "Gaze",
+    "sectionAiScores": "Smart scores",
+    "rowSession": "session",
+    "rowIntegrity": "integrity",
+    "rowConsistency": "consistency",
+    "rowSpeed": "speed",
+    "rowKeystrokeBuffer": "typing buffer (live)",
+    "rowHumanLike": "human-like",
+    "rowPointsBuffer": "mouse buffer (live)",
+    "rowPasteEvents": "paste events",
+    "rowPastedChars": "pasted characters",
+    "rowTabSwitches": "tab switches",
+    "rowUnfocused": "unfocused",
+    "rowDevtools": "developer tools",
+    "rowEnvChanged": "environment changed",
+    "rowAppFocusLost": "app focus lost",
+    "rowSwitchedTo": "switched to",
+    "rowFaces": "faces (live)",
+    "rowFacePresent": "face present",
+    "rowFaceConsistency": "face match",
+    "rowFaceSimMatch": "face similarity / match",
+    "rowSessionChecks": "session checks",
+    "rowSessionRead": "session reading",
+    "rowPreviewYawPitch": "preview yaw / pitch",
+    "rowOffscreenRatio": "off-screen ratio",
+    "rowDownGlances": "downward glances",
+    "rowOccludedChecks": "blocked checks",
+    "rowPasteAnomaly": "paste alarm",
+    "rowKeystrokeAnomaly": "typing alarm",
+    "rowMouseHumanProb": "mouse human likelihood",
+    "rowInferLatency": "response time",
+    "valActive": "active",
+    "valIdle": "idle",
+    "valYes": "yes",
+    "valNo": "no",
+    "valNa": "n/a"
+  }
+}

@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useRouter, useRoute } from 'vue-router'
 import { getCurrentWindow } from '@tauri-apps/api/window'
+
+const { t } = useI18n()
 import { getVersion } from '@tauri-apps/api/app'
 import { AppBadge } from '@/components/ui'
 import ModeSwitcher from '@/components/layout/ModeSwitcher.vue'
@@ -146,8 +149,8 @@ registerAction('toggle-mode', () => {
 const appVersion = ref('')
 const alphaTitle = computed(() =>
   appVersion.value
-    ? `Pre-release v${appVersion.value} — not for production use`
-    : 'Pre-release build — not for production use',
+    ? t('nav.prerelease.titleVersion', { version: appVersion.value })
+    : t('nav.prerelease.title'),
 )
 onMounted(async () => {
   try { appVersion.value = await getVersion() } catch { /* non-tauri context */ }
@@ -169,8 +172,8 @@ const avatarEmoji = computed(() => {
       <button
         v-if="!isMobilePlatform"
         class="topbar-icon-btn"
-        :aria-label="sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'"
-        :title="sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'"
+        :aria-label="sidebarCollapsed ? $t('nav.topbar.expandSidebar') : $t('nav.topbar.collapseSidebar')"
+        :title="sidebarCollapsed ? $t('nav.topbar.expandSidebar') : $t('nav.topbar.collapseSidebar')"
         @click="emit('toggleSidebar')"
       >
         <svg class="h-[1.125rem] w-[1.125rem]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
@@ -184,11 +187,11 @@ const avatarEmoji = computed(() => {
         :class="{ 'topbar-icon-btn--disabled': !canGoBack }"
         :disabled="!canGoBack"
         :aria-disabled="!canGoBack"
-        aria-label="Go back"
-        title="Back"
+        :aria-label="$t('nav.topbar.goBack')"
+        :title="$t('common.actions.back')"
         @click="router.back()"
       >
-        <svg class="h-[1.05rem] w-[1.05rem]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9">
+        <svg class="h-[1.05rem] w-[1.05rem] rtl:-scale-x-100" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9">
           <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
         </svg>
       </button>
@@ -198,32 +201,32 @@ const avatarEmoji = computed(() => {
         :class="{ 'topbar-icon-btn--disabled': !canGoForward }"
         :disabled="!canGoForward"
         :aria-disabled="!canGoForward"
-        aria-label="Go forward"
-        title="Forward"
+        :aria-label="$t('nav.topbar.goForward')"
+        :title="$t('nav.topbar.forward')"
         @click="router.forward()"
       >
-        <svg class="h-[1.05rem] w-[1.05rem]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9">
+        <svg class="h-[1.05rem] w-[1.05rem] rtl:-scale-x-100" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9">
           <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
         </svg>
       </button>
 
-      <AppBadge variant="warning" class="topbar-alpha-badge" :title="alphaTitle">Alpha</AppBadge>
+      <AppBadge variant="warning" class="topbar-alpha-badge" :title="alphaTitle">{{ $t('nav.topbar.alpha') }}</AppBadge>
 
       <!-- Unmissable surface indicator: which hat is the user wearing? -->
       <AppBadge
         v-if="isInstructorMode"
         variant="governance"
         class="topbar-mode-badge"
-        title="You are in instructor mode — composing and reviewing, not learning"
+        :title="$t('nav.topbar.instructorModeHint')"
       >
-        Instructor Mode
+        {{ $t('nav.topbar.instructorMode') }}
       </AppBadge>
       <AppBadge
         v-else-if="role === 'parent'"
         class="topbar-mode-badge topbar-mode-badge--guardian"
-        title="Guardian account — overseeing your children's learning"
+        :title="$t('nav.topbar.guardianHint')"
       >
-        Guardian
+        {{ $t('nav.topbar.guardian') }}
       </AppBadge>
     </div>
 
@@ -233,14 +236,14 @@ const avatarEmoji = computed(() => {
         type="button"
         class="topbar-search topbar-search--button"
         data-no-drag
-        aria-label="Open search"
+        :aria-label="$t('nav.topbar.openSearch')"
         @mousedown.stop
         @click="openOmniSearch"
       >
         <svg class="topbar-search-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
           <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
         </svg>
-        <span class="topbar-search-placeholder">Search skills, courses, DAOs…</span>
+        <span class="topbar-search-placeholder">{{ $t('nav.topbar.searchPlaceholder') }}</span>
         <kbd class="topbar-search-kbd">{{ shortcuts.search ? formatCombo(shortcuts.search.keys) : '' }}</kbd>
       </button>
     </div>
@@ -250,7 +253,7 @@ const avatarEmoji = computed(() => {
       <!-- Learner ⇄ Instructor switch (instructor accounts only) -->
       <ModeSwitcher class="hidden sm:flex" />
 
-      <!-- P2P status — hidden on mobile -->
+      <!-- Connection status — hidden on mobile -->
       <div class="hidden md:flex items-center gap-1.5 text-xs text-muted-foreground">
         <span
           class="w-2 h-2 rounded-full"
@@ -258,7 +261,7 @@ const avatarEmoji = computed(() => {
             ? 'bg-success'
             : p2pStatus != null ? 'bg-muted-foreground/40' : 'bg-warning animate-pulse'"
         />
-        {{ p2pStatus?.is_running ? 'Connected' : p2pStatus != null ? 'Offline' : 'Starting...' }}
+        {{ p2pStatus?.is_running ? t('common.status.connected') : p2pStatus != null ? t('network.offline') : t('network.starting') }}
       </div>
 
       <!-- Theme toggle dropdown -->
@@ -267,7 +270,7 @@ const avatarEmoji = computed(() => {
           class="topbar-icon-btn"
           aria-haspopup="listbox"
           :aria-expanded="themeMenuOpen"
-          :aria-label="`Current theme: ${theme}. Click to change.`"
+          :aria-label="$t('nav.theme.ariaLabel', { theme })"
           @click.stop="themeMenuOpen = !themeMenuOpen"
         >
           <svg class="w-[1.125rem] h-[1.125rem]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -289,9 +292,9 @@ const avatarEmoji = computed(() => {
             <div class="p-1">
               <button
                 v-for="opt in [
-                  { value: 'light' as const, label: 'Light', icon: 'M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z' },
-                  { value: 'dark' as const, label: 'Dark', icon: 'M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z' },
-                  { value: 'system' as const, label: 'System', icon: 'M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z' },
+                  { value: 'light' as const, label: $t('nav.theme.light'), icon: 'M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z' },
+                  { value: 'dark' as const, label: $t('nav.theme.dark'), icon: 'M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z' },
+                  { value: 'system' as const, label: $t('nav.theme.system'), icon: 'M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z' },
                 ]"
                 :key="opt.value"
                 class="flex items-center gap-2 w-full px-3 py-2 text-sm rounded-md transition-colors text-left"
@@ -318,7 +321,7 @@ const avatarEmoji = computed(() => {
           class="flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold text-white transition-shadow hover:shadow-md"
           :class="avatarBg ? '' : 'bg-gradient-to-br from-primary to-accent'"
           :style="avatarBg ? { backgroundColor: avatarBg } : {}"
-          :aria-label="`User menu for ${displayName || 'User'}`"
+          :aria-label="$t('nav.userMenu.ariaLabel', { name: displayName || $t('nav.userMenu.defaultName') })"
           aria-haspopup="true"
           :aria-expanded="userMenuOpen"
           @click.stop="userMenuOpen = !userMenuOpen"
@@ -340,14 +343,14 @@ const avatarEmoji = computed(() => {
             <div class="border-b border-border px-4 py-3">
               <div class="flex items-center gap-2">
                 <p class="truncate text-sm font-medium text-foreground">
-                  {{ displayName || 'Anonymous' }}
+                  {{ displayName || $t('nav.userMenu.anonymous') }}
                 </p>
                 <span class="inline-block rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium capitalize leading-none text-muted-foreground">
-                  {{ role === 'instructor' ? (isInstructorMode ? 'instructor' : 'instructor · learner mode') : role }}
+                  {{ role === 'instructor' ? (isInstructorMode ? $t('nav.userMenu.roleInstructor') : $t('nav.userMenu.roleInstructorLearner')) : role }}
                 </span>
               </div>
               <p class="truncate text-xs text-muted-foreground mt-0.5">
-                Local vault user
+                {{ $t('nav.userMenu.onThisDevice') }}
               </p>
             </div>
 
@@ -358,30 +361,30 @@ const avatarEmoji = computed(() => {
                 <svg class="h-4 w-4 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
                 </svg>
-                My Profile
+                {{ $t('nav.userMenu.myProfile') }}
               </button>
               <!-- My Learning -->
-              <button class="flex items-center gap-2 rounded-lg px-3 py-2 w-full text-sm text-foreground transition-colors hover:bg-muted" @click="navigateFromMenu('/dashboard/courses')">
+              <button class="flex items-center gap-2 rounded-lg px-3 py-2 w-full text-sm text-foreground transition-colors hover:bg-muted" @click="navigateFromMenu('/learning')">
                 <svg class="h-4 w-4 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
                 </svg>
-                My Learning
+                {{ $t('nav.userMenu.myLearning') }}
               </button>
 
               <!-- My Credentials -->
-              <button class="flex items-center gap-2 rounded-lg px-3 py-2 w-full text-sm text-foreground transition-colors hover:bg-muted" @click="navigateFromMenu('/dashboard/credentials')">
+              <button class="flex items-center gap-2 rounded-lg px-3 py-2 w-full text-sm text-foreground transition-colors hover:bg-muted" @click="navigateFromMenu('/credentials')">
                 <svg class="h-4 w-4 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
                 </svg>
-                My Credentials
+                {{ $t('nav.userMenu.myCredentials') }}
               </button>
 
               <!-- Sponsor -->
-              <button class="flex items-center gap-2 rounded-lg px-3 py-2 w-full text-sm text-foreground transition-colors hover:bg-muted" @click="navigateFromMenu('/dashboard/sponsor')">
+              <button class="flex items-center gap-2 rounded-lg px-3 py-2 w-full text-sm text-foreground transition-colors hover:bg-muted" @click="navigateFromMenu('/sponsor')">
                 <svg class="h-4 w-4 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M3 21v-2a4 4 0 014-4h10a4 4 0 014 4v2M7 7a4 4 0 108 0 4 4 0 00-8 0z" />
                 </svg>
-                Sponsor
+                {{ $t('nav.userMenu.sponsor') }}
               </button>
 
               <!-- My Skills -->
@@ -389,15 +392,15 @@ const avatarEmoji = computed(() => {
                 <svg class="h-4 w-4 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
                 </svg>
-                My Skills
+                {{ $t('nav.userMenu.mySkills') }}
               </button>
 
               <!-- My Reputation -->
-              <button class="flex items-center gap-2 rounded-lg px-3 py-2 w-full text-sm text-foreground transition-colors hover:bg-muted" @click="navigateFromMenu('/dashboard/reputation')">
+              <button class="flex items-center gap-2 rounded-lg px-3 py-2 w-full text-sm text-foreground transition-colors hover:bg-muted" @click="navigateFromMenu('/reputation')">
                 <svg class="h-4 w-4 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
                 </svg>
-                My Reputation
+                {{ $t('nav.userMenu.myReputation') }}
               </button>
 
               <!-- Sentinel -->
@@ -405,15 +408,15 @@ const avatarEmoji = computed(() => {
                 <svg class="h-4 w-4 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
                 </svg>
-                Sentinel
+                {{ $t('nav.userMenu.sentinel') }}
               </button>
 
               <!-- Governance -->
-              <button class="flex items-center gap-2 rounded-lg px-3 py-2 w-full text-sm text-foreground transition-colors hover:bg-muted" @click="navigateFromMenu('/governance')">
+              <button class="flex items-center gap-2 rounded-lg px-3 py-2 w-full text-sm text-foreground transition-colors hover:bg-muted" @click="navigateFromMenu('/community')">
                 <svg class="h-4 w-4 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M3 21h18M3 10h18M5 6l7-3 7 3M4 10v11m16-11v11M8 14v3m4-3v3m4-3v3" />
                 </svg>
-                Governance
+                {{ $t('nav.userMenu.community') }}
               </button>
 
               <!-- Settings -->
@@ -422,7 +425,7 @@ const avatarEmoji = computed(() => {
                   <path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
                   <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                 </svg>
-                Settings
+                {{ $t('nav.userMenu.settings') }}
               </button>
             </div>
 
@@ -434,7 +437,7 @@ const avatarEmoji = computed(() => {
                 <svg class="h-4 w-4 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M17 20h5v-2a4 4 0 00-3-3.87M9 20H4v-2a4 4 0 013-3.87m6-5a4 4 0 11-8 0 4 4 0 018 0zm6 0a4 4 0 11-8 0 4 4 0 018 0z" />
                 </svg>
-                Switch user
+                {{ $t('nav.userMenu.switchUser') }}
                 <span class="ml-auto text-xs text-muted-foreground">{{ shortcuts['switch-profile'] ? formatCombo(shortcuts['switch-profile'].keys) : '' }}</span>
               </button>
               <button
@@ -444,7 +447,7 @@ const avatarEmoji = computed(() => {
                 <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
                 </svg>
-                Lock profile
+                {{ $t('nav.userMenu.lockAccount') }}
               </button>
             </div>
 
@@ -476,6 +479,8 @@ const avatarEmoji = computed(() => {
 }
 
 .topbar--macos {
+  /* Physical, NOT logical: reserves space for the macOS traffic-light window
+     controls, which stay top-left even in RTL. Do not switch to padding-inline-start. */
   padding-left: 5rem;
 }
 
@@ -487,7 +492,7 @@ const avatarEmoji = computed(() => {
 }
 
 .topbar-alpha-badge {
-  margin-left: 0.5rem;
+  margin-inline-start: 0.5rem;
   padding: 0.0625rem 0.4375rem;
   font-size: 0.6875rem;
   letter-spacing: 0.02em;
@@ -496,7 +501,7 @@ const avatarEmoji = computed(() => {
 }
 
 .topbar-mode-badge {
-  margin-left: 0.375rem;
+  margin-inline-start: 0.375rem;
   padding: 0.0625rem 0.4375rem;
   font-size: 0.6875rem;
   letter-spacing: 0.02em;
@@ -596,7 +601,7 @@ const avatarEmoji = computed(() => {
 
 .topbar-search-icon {
   position: absolute;
-  left: 0.625rem;
+  inset-inline-start: 0.625rem;
   width: 0.875rem;
   height: 0.875rem;
   color: color-mix(in srgb, var(--app-muted-foreground) 50%, transparent);
@@ -627,7 +632,7 @@ const avatarEmoji = computed(() => {
 
 .topbar-search-clear {
   position: absolute;
-  right: 0.375rem;
+  inset-inline-end: 0.375rem;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -648,7 +653,7 @@ const avatarEmoji = computed(() => {
 
 .topbar-search-kbd {
   position: absolute;
-  right: 0.5rem;
+  inset-inline-end: 0.5rem;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -668,7 +673,7 @@ const avatarEmoji = computed(() => {
 /* Button-style trigger (opens omni search palette) */
 .topbar-search--button {
   cursor: pointer;
-  text-align: left;
+  text-align: start;
   font: inherit;
   color: inherit;
   padding: 0;

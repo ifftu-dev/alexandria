@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { invoke } from '@tauri-apps/api/core'
 import {
@@ -17,6 +18,7 @@ import {
   type VerifiableCredential,
 } from '@/types'
 
+const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 
@@ -49,7 +51,7 @@ async function loadOpinion() {
     const id = route.params.id as string
     const row = await invoke<OpinionRow | null>('get_opinion', { opinionId: id })
     if (!row) {
-      error.value = 'Opinion not found.'
+      error.value = t('opinions.detail.notFound')
       return
     }
     opinion.value = row
@@ -80,14 +82,14 @@ async function loadOpinion() {
 
 async function withdraw() {
   if (!opinion.value) return
-  if (!confirm('Withdraw this opinion? The video will be unpinned locally and the post hidden.')) {
+  if (!confirm(t('opinions.detail.withdrawConfirm'))) {
     return
   }
   try {
     await invoke('withdraw_own_opinion', { opinionId: opinion.value.id })
     router.push('/opinions')
   } catch (e) {
-    error.value = `Withdraw failed: ${e}`
+    error.value = t('opinions.detail.withdrawFailed', { error: String(e) })
   }
 }
 
@@ -125,7 +127,7 @@ onMounted(async () => {
       <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
         <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
       </svg>
-      Back
+      {{ $t('common.actions.back') }}
     </button>
 
     <AppSpinner v-if="loading" />
@@ -145,10 +147,10 @@ onMounted(async () => {
             {{ opinion.summary }}
           </p>
           <p class="mt-2 text-xs text-muted-foreground font-mono">
-            by {{ opinion.author_address }} · {{ formatDate(opinion.published_at) }}
+            {{ $t('opinions.detail.byLabel') }} {{ opinion.author_address }} · {{ formatDate(opinion.published_at) }}
           </p>
         </div>
-        <AppButton v-if="isOwner" variant="ghost" @click="withdraw">Withdraw</AppButton>
+        <AppButton v-if="isOwner" variant="ghost" @click="withdraw">{{ $t('opinions.detail.withdraw') }}</AppButton>
       </header>
 
       <div v-if="opinion.video_cid" class="rounded-xl overflow-hidden bg-black">
@@ -157,11 +159,11 @@ onMounted(async () => {
 
       <div class="rounded-xl border border-border bg-card p-5 space-y-3">
         <h3 class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          Staked credentials
+          {{ $t('opinions.detail.credentialsHeading') }}
         </h3>
 
         <div v-if="opinion.credential_proof_ids.length === 0" class="text-xs text-muted-foreground">
-          No credentials referenced.
+          {{ $t('opinions.detail.noCredentials') }}
         </div>
 
         <div v-else class="space-y-3">
@@ -183,13 +185,18 @@ onMounted(async () => {
                     {{ vc.type[vc.type.length - 1] }}
                   </template>
                 </div>
-                <div class="text-[11px] text-muted-foreground font-mono mt-1">
-                  {{ vc.id }}
-                </div>
+                <details class="mt-1">
+                  <summary class="cursor-pointer text-[11px] text-muted-foreground">
+                    {{ $t('common.advanced.toggle') }}
+                  </summary>
+                  <div class="text-[11px] text-muted-foreground font-mono mt-1">
+                    {{ vc.id }}
+                  </div>
+                </details>
               </div>
               <div class="text-right flex-shrink-0 space-y-1">
                 <AppBadge v-if="vc.witness" variant="success" class="text-[0.6rem]">
-                  on-chain witness
+                  {{ $t('opinions.detail.verifiedProof') }}
                 </AppBadge>
                 <div class="text-[10px] text-muted-foreground">
                   {{ vc.validFrom.slice(0, 10) }}
@@ -202,7 +209,7 @@ onMounted(async () => {
             v-if="unresolvedIds().length > 0"
             class="text-xs text-muted-foreground"
           >
-            Unsynced credentials:
+            {{ $t('opinions.detail.unsyncedLabel') }}
             <span
               v-for="pid in unresolvedIds()"
               :key="pid"

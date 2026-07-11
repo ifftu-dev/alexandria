@@ -3,23 +3,25 @@
 // DAO-ratified templates that resolve directly to target skills; a job
 // description (link or pasted text) is parsed on-device into skill
 // *suggestions* the learner confirms before they become a goal.
-import { onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useGoals } from '@/composables/useGoals'
 import { AppButton, AppInput, AppBadge } from '@/components/ui'
 import type { GoalTemplate, SkillSuggestion } from '@/types'
 
 const emit = defineEmits<{ (e: 'added'): void }>()
 
+const { t } = useI18n()
 const { listGoalTemplates, resolveGoal, addGoal } = useGoals()
 
 type Tab = 'exam' | 'curriculum' | 'job_role' | 'jd'
 const tab = ref<Tab>('job_role')
-const tabs: { id: Tab; label: string }[] = [
-  { id: 'job_role', label: 'Job role' },
-  { id: 'exam', label: 'Exam' },
-  { id: 'curriculum', label: 'Curriculum' },
-  { id: 'jd', label: 'Job description' },
-]
+const tabs = computed<{ id: Tab; label: string }[]>(() => [
+  { id: 'job_role', label: t('goals.picker.jobRole') },
+  { id: 'exam', label: t('goals.picker.exam') },
+  { id: 'curriculum', label: t('goals.picker.curriculum') },
+  { id: 'jd', label: t('goals.picker.jobDescription') },
+])
 
 const templates = ref<GoalTemplate[]>([])
 const selectedKey = ref('')
@@ -89,7 +91,7 @@ async function parseJd() {
     jdLabel.value = res.label
     // Pre-check strong matches (score >= 0.6).
     chosen.value = new Set(res.suggestions.filter((s) => s.score >= 0.6).map((s) => s.skill_id))
-    if (!res.suggestions.length) error.value = 'No matching skills found — try a different description.'
+    if (!res.suggestions.length) error.value = t('goals.picker.noMatchingSkills')
   } catch (e) {
     error.value = String(e)
   } finally {
@@ -148,11 +150,11 @@ async function addJdGoal() {
         v-model="selectedKey"
         class="w-full rounded-lg border border-border bg-input px-3 py-2 text-sm text-foreground"
       >
-        <option value="" disabled>Select a {{ tab.replace('_', ' ') }}…</option>
+        <option value="" disabled>{{ $t('goals.picker.selectPrompt', { type: tab.replace('_', ' ') }) }}</option>
         <option v-for="tpl in templates" :key="tpl.key" :value="tpl.key">{{ tpl.label }}</option>
       </select>
       <AppButton :disabled="!selectedKey" :loading="busy" @click="addTemplateGoal">
-        Set as goal
+        {{ $t('goals.picker.setAsGoal') }}
       </AppButton>
     </div>
 
@@ -163,17 +165,17 @@ async function addJdGoal() {
           class="rounded px-2 py-1"
           :class="jdMode === 'paste' ? 'text-primary' : 'text-muted-foreground'"
           @click="jdMode = 'paste'"
-        >Paste text</button>
+        >{{ $t('goals.picker.pasteText') }}</button>
         <button
           class="rounded px-2 py-1"
           :class="jdMode === 'link' ? 'text-primary' : 'text-muted-foreground'"
           @click="jdMode = 'link'"
-        >From link</button>
+        >{{ $t('goals.picker.fromLink') }}</button>
       </div>
       <AppInput
         v-if="jdMode === 'link'"
         v-model="jdUrl"
-        label="Job posting URL"
+        :label="$t('goals.picker.jobPostingUrl')"
         placeholder="https://…"
       />
       <textarea
@@ -181,7 +183,7 @@ async function addJdGoal() {
         v-model="jdText"
         rows="6"
         class="w-full rounded-lg border border-border bg-input px-3 py-2 text-sm text-foreground"
-        placeholder="Paste the job description here…"
+        :placeholder="$t('goals.picker.jdPlaceholder')"
       />
       <AppButton
         variant="outline"
@@ -189,12 +191,12 @@ async function addJdGoal() {
         :disabled="jdMode === 'link' ? !jdUrl.trim() : !jdText.trim()"
         @click="parseJd"
       >
-        Find skills
+        {{ $t('goals.picker.findSkills') }}
       </AppButton>
 
       <div v-if="suggestions.length" class="space-y-2">
         <p class="text-sm text-muted-foreground">
-          Found these skills — confirm which to add to your goal:
+          {{ $t('goals.picker.foundSkills') }}
         </p>
         <label
           v-for="s in suggestions"
@@ -203,11 +205,11 @@ async function addJdGoal() {
         >
           <input type="checkbox" :checked="chosen.has(s.skill_id)" @change="toggle(s.skill_id)" />
           <span class="flex-1 text-foreground">{{ s.name }}</span>
-          <AppBadge variant="success" v-if="s.score >= 0.6">strong</AppBadge>
-          <span class="text-xs text-muted-foreground">matched “{{ s.matched }}”</span>
+          <AppBadge variant="success" v-if="s.score >= 0.6">{{ $t('goals.picker.strongMatch') }}</AppBadge>
+          <span class="text-xs text-muted-foreground">{{ $t('goals.picker.matched', { term: s.matched }) }}</span>
         </label>
         <AppButton :loading="busy" :disabled="!chosen.size" @click="addJdGoal">
-          Add {{ chosen.size }} skill{{ chosen.size === 1 ? '' : 's' }} as goal
+          {{ $t('goals.picker.addAsGoal', { count: chosen.size }, chosen.size) }}
         </AppButton>
       </div>
     </div>

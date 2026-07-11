@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { AppModal, AppInput } from '@/components/ui'
 import { useDisplayNames } from '@/composables/useDisplayNames'
 import { extractSkillClaim, extractRoleClaim, type VerifiableCredential } from '@/types'
@@ -26,6 +27,7 @@ const emit = defineEmits<{
   (e: 'open-credential', id: string): void
 }>()
 
+const { t } = useI18n()
 const { displayName, ensureNames } = useDisplayNames()
 
 watch(
@@ -73,7 +75,7 @@ function summaryOf(c: VerifiableCredential): string {
   if (skill) return `${skill.skillId} · L${skill.level} · ${(skill.score * 100).toFixed(0)}%`
   const role = extractRoleClaim(c.credentialSubject)
   if (role) return role.role + (role.scope ? ` · ${role.scope}` : '')
-  return 'custom claim'
+  return t('credentials.sources.customClaim')
 }
 
 // Which classes actually appear — only show those filter chips.
@@ -125,30 +127,28 @@ function pickCredential(c: VerifiableCredential) {
 <template>
   <AppModal
     :open="open"
-    :title="`Evidence behind ${skillName}`"
+    :title="$t('credentials.sources.title', { name: skillName })"
     max-width="44rem"
     @close="emit('close')"
   >
     <div class="space-y-4">
       <p class="text-xs text-muted-foreground">
-        This derived credential was computed from
-        <span class="font-medium text-foreground">{{ sourceCount }}</span>
-        input credential{{ sourceCount === 1 ? '' : 's' }}.
+        {{ $t('credentials.sources.builtFrom', { count: sourceCount }, sourceCount) }}
         <span v-if="sources.length < sourceCount">
-          {{ sourceCount - sources.length }} could not be resolved locally.
+          {{ $t('credentials.sources.unresolved', { count: sourceCount - sources.length }, sourceCount - sources.length) }}
         </span>
       </p>
 
       <!-- Controls -->
       <div class="flex flex-wrap items-center gap-2">
         <div class="min-w-[12rem] flex-1">
-          <AppInput v-model="search" placeholder="Search issuer, skill, id…" />
+          <AppInput v-model="search" :placeholder="$t('credentials.sources.searchPlaceholder')" />
         </div>
         <select v-model="sortKey" class="input w-auto text-sm">
-          <option value="score">Sort: score</option>
-          <option value="date">Sort: newest</option>
-          <option value="type">Sort: type</option>
-          <option value="issuer">Sort: issuer</option>
+          <option value="score">{{ $t('credentials.sources.sortScore') }}</option>
+          <option value="date">{{ $t('credentials.sources.sortNewest') }}</option>
+          <option value="type">{{ $t('credentials.sources.sortType') }}</option>
+          <option value="issuer">{{ $t('credentials.sources.sortSource') }}</option>
         </select>
       </div>
 
@@ -161,7 +161,7 @@ function pickCredential(c: VerifiableCredential) {
             : 'bg-muted text-muted-foreground hover:text-foreground'"
           @click="typeFilter = 'all'"
         >
-          All
+          {{ $t('credentials.sources.all') }}
         </button>
         <button
           v-for="k in presentClasses"
@@ -171,7 +171,7 @@ function pickCredential(c: VerifiableCredential) {
           @click="typeFilter = k"
         >
           <span class="h-1.5 w-1.5 rounded-full" :class="CREDENTIAL_KINDS[k].dot" />
-          {{ CREDENTIAL_KINDS[k].label }}
+          {{ $t(CREDENTIAL_KINDS[k].label) }}
         </button>
       </div>
 
@@ -200,19 +200,19 @@ function pickCredential(c: VerifiableCredential) {
             </p>
           </div>
           <span class="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold" :class="kindOfType(c.type).badge">
-            {{ kindOfType(c.type).short }}
+            {{ $t(kindOfType(c.type).short) }}
           </span>
         </li>
       </ul>
 
       <p v-else class="rounded-lg border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
-        No matching input credentials.
+        {{ $t('credentials.sources.empty') }}
       </p>
     </div>
 
     <template #footer>
       <div class="flex justify-end">
-        <button class="btn" @click="emit('close')">Close</button>
+        <button class="btn" @click="emit('close')">{{ $t('common.actions.close') }}</button>
       </div>
     </template>
   </AppModal>

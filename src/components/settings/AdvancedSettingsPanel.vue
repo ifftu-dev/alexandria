@@ -37,7 +37,7 @@ async function setString(entry: SettingEntry, value: string) {
 </script>
 
 <template>
-  <div v-if="!ready" class="p-6 text-sm text-muted-foreground">Loading settings…</div>
+  <div v-if="!ready" class="p-6 text-sm text-muted-foreground">{{ $t('settings.advanced.loading') }}</div>
   <div v-else class="space-y-6">
     <div
       v-for="(group, category) in grouped"
@@ -60,8 +60,8 @@ async function setString(entry: SettingEntry, value: string) {
                   ? 'bg-primary/10 text-primary'
                   : 'bg-muted text-muted-foreground'"
                 :title="entry.scope === 'sync'
-                  ? 'Synced across your devices'
-                  : 'Stays on this device'"
+                  ? $t('settings.advanced.syncedTooltip')
+                  : $t('settings.advanced.deviceTooltip')"
               >
                 {{ entry.scope }}
               </span>
@@ -112,7 +112,7 @@ async function setString(entry: SettingEntry, value: string) {
               size="xs"
               @click="resetSetting(entry.key)"
             >
-              Reset
+              {{ $t('settings.advanced.reset') }}
             </AppButton>
           </div>
         </div>
@@ -120,8 +120,7 @@ async function setString(entry: SettingEntry, value: string) {
     </div>
 
     <p class="text-xs text-muted-foreground px-1">
-      Settings tagged <strong>sync</strong> propagate to your other devices via cross-device sync.
-      Settings tagged <strong>device</strong> stay on this device only.
+      {{ $t('settings.advanced.syncNote') }}
     </p>
   </div>
 </template>

@@ -5,6 +5,7 @@
  * clicking a plugin card in Settings → Plugins.
  */
 import { ref, onMounted, nextTick, computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { useDisplayNames } from '@/composables/useDisplayNames'
@@ -12,6 +13,7 @@ import { renderMarkdown } from '@/utils/markdown'
 import { AppSpinner, AppButton, AppBadge } from '@/components/ui'
 import type { InstalledPlugin, PluginManifest } from '@/types'
 
+const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const { invoke } = useLocalApi()
@@ -43,11 +45,11 @@ onMounted(async () => {
     const text = await invoke<string>('plugin_get_docs', { pluginCid: cid.value })
     html.value = text
       ? renderMarkdown(text)
-      : '<p class="text-muted-foreground">This plugin does not ship a README.</p>'
+      : `<p class="text-muted-foreground">${t('plugins.docs.noReadme')}</p>`
     await nextTick()
     await resolveImages()
   } catch (e) {
-    html.value = `<p class="text-destructive">Could not load docs: ${e}</p>`
+    html.value = `<p class="text-destructive">${t('plugins.docs.loadError', { error: String(e) })}</p>`
   } finally {
     loading.value = false
   }
@@ -100,7 +102,7 @@ function thumbGradient(c: string): string {
       <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
         <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
       </svg>
-      Back to Plugins
+      {{ $t('plugins.docs.back') }}
     </button>
 
     <header class="mb-6 flex items-start gap-4">
@@ -113,13 +115,13 @@ function thumbGradient(c: string): string {
       </div>
       <div class="min-w-0">
         <h1 class="text-2xl font-bold text-foreground">
-          {{ plugin?.name ?? manifest?.name ?? 'Plugin' }}
+          {{ plugin?.name ?? manifest?.name ?? $t('plugins.docs.fallbackName') }}
         </h1>
         <div class="mt-1.5 flex flex-wrap items-center gap-2">
           <AppBadge v-if="plugin" variant="secondary">v{{ plugin.version }}</AppBadge>
           <AppBadge v-if="plugin" variant="secondary">{{ plugin.source }}</AppBadge>
           <span v-if="manifest?.author_did" class="text-xs text-muted-foreground">
-            by {{ displayName(manifest.author_did) }}
+            {{ $t('plugins.docs.by', { name: displayName(manifest.author_did) }) }}
           </span>
         </div>
         <p v-if="manifest?.description" class="mt-2 text-sm text-muted-foreground">
@@ -127,7 +129,7 @@ function thumbGradient(c: string): string {
         </p>
         <div v-if="manifest?.donate_url" class="mt-3">
           <AppButton size="sm" variant="outline" @click="openDonate">
-            Donate to creator
+            {{ $t('plugins.docs.donate') }}
           </AppButton>
         </div>
       </div>

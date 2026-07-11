@@ -37,8 +37,8 @@ function hours(seconds: number): string {
 <template>
   <div class="space-y-6">
     <div>
-      <p class="text-xs uppercase tracking-wide text-muted-foreground">Learner performance</p>
-      <h1 class="text-2xl font-bold text-foreground">{{ course?.title ?? 'Course' }}</h1>
+      <p class="text-xs uppercase tracking-wide text-muted-foreground">{{ $t('instructor.courseLearners.eyebrow') }}</p>
+      <h1 class="text-2xl font-bold text-foreground">{{ course?.title ?? $t('instructor.courseLearners.fallbackTitle') }}</h1>
     </div>
 
     <p v-if="error" class="text-sm text-error">{{ error }}</p>
@@ -49,27 +49,27 @@ function hours(seconds: number): string {
 
     <EmptyState
       v-else-if="!learners.length"
-      title="No enrollments recorded on this node"
-      description="Enrollment data lives on each learner's device — this view covers activity this node has seen (local enrollments, in-class submissions)."
+      :title="$t('instructor.courseLearners.emptyTitle')"
+      :description="$t('instructor.courseLearners.emptyDesc')"
     />
 
     <div v-else class="overflow-x-auto rounded-xl border border-border bg-card">
       <table class="w-full text-sm">
         <thead>
           <tr class="border-b border-border text-left text-xs text-muted-foreground">
-            <th class="px-4 py-3 font-medium">Learner</th>
-            <th class="px-4 py-3 font-medium">Status</th>
-            <th class="px-4 py-3 font-medium text-right">Progress</th>
-            <th class="px-4 py-3 font-medium text-right">Avg score</th>
-            <th class="px-4 py-3 font-medium text-right">Time spent</th>
-            <th class="px-4 py-3 font-medium">Last activity</th>
+            <th class="px-4 py-3 font-medium">{{ $t('instructor.courseLearners.colLearner') }}</th>
+            <th class="px-4 py-3 font-medium">{{ $t('instructor.courseLearners.colStatus') }}</th>
+            <th class="px-4 py-3 font-medium text-right">{{ $t('instructor.courseLearners.colProgress') }}</th>
+            <th class="px-4 py-3 font-medium text-right">{{ $t('instructor.courseLearners.colAvgScore') }}</th>
+            <th class="px-4 py-3 font-medium text-right">{{ $t('instructor.courseLearners.colTimeSpent') }}</th>
+            <th class="px-4 py-3 font-medium">{{ $t('instructor.courseLearners.colLastActivity') }}</th>
           </tr>
         </thead>
         <tbody>
           <tr v-for="l in learners" :key="l.enrollment_id" class="border-b border-border/50 last:border-0">
             <td class="px-4 py-3">
               <span class="font-medium text-foreground">
-                {{ l.display_name ?? (l.learner_did ? `${l.learner_did.slice(0, 20)}…` : 'Local learner') }}
+                {{ l.display_name ?? (l.learner_did ? `${l.learner_did.slice(0, 20)}…` : $t('instructor.courseLearners.localLearner')) }}
               </span>
             </td>
             <td class="px-4 py-3"><StatusBadge :status="l.enrollment_status" /></td>

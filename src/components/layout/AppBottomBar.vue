@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useP2P } from '@/composables/useP2P'
 import { useContentSync } from '@/composables/useContentSync'
 
+const { t } = useI18n()
 const { status: p2pStatus, startPolling } = useP2P()
 const { visible: contentSyncVisible, statusMessage: contentSyncMessage } = useContentSync()
 
@@ -11,7 +13,9 @@ onMounted(() => {
 })
 
 const networkStatusLabel = computed(() => {
-  return p2pStatus.value?.is_running ? 'Connected' : 'Connecting...'
+  return p2pStatus.value?.is_running
+    ? t('common.status.connected')
+    : t('common.status.connecting')
 })
 
 const peerCount = computed(() => {
@@ -33,7 +37,7 @@ const networkIconClass = computed(() => {
         <path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
       </svg>
       <span class="font-medium">
-        {{ networkStatusLabel }} | {{ peerCount }} peer{{ peerCount !== 1 ? 's' : '' }}
+        {{ networkStatusLabel }} · {{ t('network.peers', { count: peerCount }, peerCount) }}
       </span>
     </div>
 
@@ -79,7 +83,7 @@ const networkIconClass = computed(() => {
 }
 
 .bottom-bar__right {
-  margin-left: auto;
+  margin-inline-start: auto;
   flex-shrink: 0;
   white-space: nowrap;
   color: var(--app-muted-foreground);

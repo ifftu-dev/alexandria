@@ -11,6 +11,7 @@
  */
 
 import { ref, onMounted, computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { useDisplayNames } from '@/composables/useDisplayNames'
 import { AppSpinner, AppAlert, AppBadge, EmptyState } from '@/components/ui'
@@ -19,6 +20,7 @@ import type {
   PluginAttestationStatus,
 } from '@/types'
 
+const { t } = useI18n()
 const { invoke } = useLocalApi()
 const { displayName, ensureNames } = useDisplayNames()
 
@@ -48,7 +50,7 @@ onMounted(async () => {
     })
     status.value = next
   } catch (e) {
-    loadError.value = `Failed to load plugin catalog: ${e}`
+    loadError.value = t('plugins.browse.loadFailed', { error: String(e) })
   } finally {
     loading.value = false
   }
@@ -66,12 +68,12 @@ const grouped = computed(() => {
 
 function attestationBadge(cid: string): { label: string; variant: 'success' | 'warning' | 'secondary' } {
   const s = status.value[cid]
-  if (!s) return { label: 'Unknown', variant: 'secondary' }
+  if (!s) return { label: t('plugins.badge.unknown'), variant: 'secondary' }
   if (s.advisories.some((a) => a.kind === 'known_flawed')) {
-    return { label: 'Known flawed', variant: 'warning' }
+    return { label: t('plugins.badge.knownFlawed'), variant: 'warning' }
   }
-  if (s.attested) return { label: 'DAO attested', variant: 'success' }
-  return { label: 'Unattested', variant: 'secondary' }
+  if (s.attested) return { label: t('plugins.badge.attested'), variant: 'success' }
+  return { label: t('plugins.badge.unattested'), variant: 'secondary' }
 }
 
 function shortCid(cid: string): string {
@@ -82,12 +84,9 @@ function shortCid(cid: string): string {
 <template>
   <div class="mx-auto max-w-4xl px-4 py-6 md:px-6 md:py-8">
     <header class="mb-6">
-      <h1 class="text-2xl font-bold text-foreground">Browse plugins</h1>
+      <h1 class="text-2xl font-bold text-foreground">{{ $t('plugins.browse.title') }}</h1>
       <p class="mt-1 text-sm text-muted-foreground">
-        Built-in element types and any community plugins this node has heard of.
-        DAO-attested plugins can issue credentials recognized under the default
-        verifier policy; unattested plugins still run, but their grades are
-        progress-only until the DAO recognizes them.
+        {{ $t('plugins.browse.intro') }}
       </p>
     </header>
 
@@ -100,7 +99,7 @@ function shortCid(cid: string): string {
     <template v-else>
       <section v-if="grouped.builtins.length > 0" class="mb-8">
         <h2 class="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-          Built-in
+          {{ $t('plugins.browse.builtin') }}
         </h2>
         <ul class="space-y-2">
           <li
@@ -112,7 +111,7 @@ function shortCid(cid: string): string {
               <div class="flex items-center gap-2">
                 <h3 class="text-sm font-semibold text-foreground">{{ e.name }}</h3>
                 <AppBadge variant="secondary">v{{ e.version }}</AppBadge>
-                <AppBadge variant="secondary">built-in</AppBadge>
+                <AppBadge variant="secondary">{{ $t('plugins.badge.builtin') }}</AppBadge>
                 <AppBadge :variant="attestationBadge(e.plugin_cid).variant">
                   {{ attestationBadge(e.plugin_cid).label }}
                 </AppBadge>
@@ -121,9 +120,12 @@ function shortCid(cid: string): string {
                 {{ e.description }}
               </p>
               <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
-                <span>Kinds: {{ e.kinds.join(', ') }}</span>
-                <span v-if="e.has_grader">Graded</span>
-                <span>CID: <code class="font-mono">{{ shortCid(e.plugin_cid) }}</code></span>
+                <span>{{ $t('plugins.meta.kinds') }}: {{ e.kinds.join(', ') }}</span>
+                <span v-if="e.has_grader">{{ $t('plugins.meta.graded') }}</span>
+                <details>
+                  <summary class="cursor-pointer">{{ $t('common.advanced.toggle') }}</summary>
+                  <span>{{ $t('plugins.meta.contentId') }}: <code class="font-mono">{{ shortCid(e.plugin_cid) }}</code></span>
+                </details>
               </div>
             </div>
           </li>
@@ -132,12 +134,12 @@ function shortCid(cid: string): string {
 
       <section>
         <h2 class="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-          Community
+          {{ $t('plugins.browse.community') }}
         </h2>
         <EmptyState
           v-if="grouped.community.length === 0"
-          title="No community plugins yet"
-          description="Plugin announcements arrive over the P2P network. Once peers publish, they'll show up here."
+          :title="$t('plugins.browse.emptyTitle')"
+          :description="$t('plugins.browse.emptyDescription')"
         />
         <ul v-else class="space-y-2">
           <li
@@ -158,12 +160,15 @@ function shortCid(cid: string): string {
                 {{ e.description }}
               </p>
               <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
-                <span>Author: {{ displayName(e.author_did) }}</span>
-                <span>Kinds: {{ e.kinds.join(', ') }}</span>
+                <span>{{ $t('plugins.meta.author') }}: {{ displayName(e.author_did) }}</span>
+                <span>{{ $t('plugins.meta.kinds') }}: {{ e.kinds.join(', ') }}</span>
                 <span v-if="e.capabilities.length > 0">
-                  Caps: {{ e.capabilities.join(', ') }}
+                  {{ $t('plugins.meta.caps') }}: {{ e.capabilities.join(', ') }}
                 </span>
-                <span>CID: <code class="font-mono">{{ shortCid(e.plugin_cid) }}</code></span>
+                <details>
+                  <summary class="cursor-pointer">{{ $t('common.advanced.toggle') }}</summary>
+                  <span>{{ $t('plugins.meta.contentId') }}: <code class="font-mono">{{ shortCid(e.plugin_cid) }}</code></span>
+                </details>
               </div>
             </div>
           </li>

@@ -1,0 +1,40 @@
+{
+  "index": {
+    "title": "आपके लक्ष्य",
+    "subtitle": "वे कौशल जिनकी ओर आप बढ़ रहे हैं। Alexandria आपने जो पहले साबित किया है, उससे आपका रास्ता तय करता है।",
+    "perGoal": "प्रति लक्ष्य",
+    "combinedPath": "संयुक्त रास्ता",
+    "findSomeone": "किसी को खोजें",
+    "usernamePlaceholder": "{'@'}username",
+    "viewProfile": "प्रोफ़ाइल देखें",
+    "yourHandle": "आप {'@'}{name} हैं — अपना हैंडल साझा करें ताकि दूसरे आपको खोज सकें।",
+    "chartingPaths": "आपके रास्ते तय हो रहे हैं…",
+    "emptyTitle": "अभी तक कोई लक्ष्य नहीं",
+    "emptyDescription": "लक्ष्य बनाने के लिए कौशलों का एक समूह चुनें — कौशल लाइब्रेरी या किसी शिक्षक का सार्वजनिक मानचित्र ब्राउज़ करें और “लक्ष्य के रूप में सेट करें” दबाएँ।",
+    "browseSkills": "कौशल ब्राउज़ करें",
+    "skillsAcrossGoals": "{goals} लक्ष्यों में {earned} / {total} कौशल",
+    "skillsCount": "{earned} / {total} कौशल",
+    "nextStep": "अगला: {name}",
+    "allCleared": "आप हर कदम के लिए तैयार हैं 🎉",
+    "viewPath": "रास्ता देखें",
+    "hidePath": "रास्ता छिपाएँ"
+  },
+  "picker": {
+    "jobRole": "नौकरी की भूमिका",
+    "exam": "परीक्षा",
+    "curriculum": "पाठ्यक्रम",
+    "jobDescription": "नौकरी का विवरण",
+    "selectPrompt": "एक {type} चुनें…",
+    "setAsGoal": "लक्ष्य के रूप में सेट करें",
+    "pasteText": "टेक्स्ट पेस्ट करें",
+    "fromLink": "लिंक से",
+    "jobPostingUrl": "नौकरी पोस्टिंग URL",
+    "jdPlaceholder": "नौकरी का विवरण यहाँ पेस्ट करें…",
+    "findSkills": "कौशल खोजें",
+    "foundSkills": "ये कौशल मिले — पुष्टि करें कि अपने लक्ष्य में कौन से जोड़ने हैं:",
+    "strongMatch": "मज़बूत",
+    "matched": "“{term}” से मेल खाया",
+    "noMatchingSkills": "कोई मेल खाता कौशल नहीं मिला — कोई अलग विवरण आज़माएँ।",
+    "addAsGoal": "{count} कौशल को लक्ष्य के रूप में जोड़ें | {count} कौशलों को लक्ष्य के रूप में जोड़ें"
+  }
+}

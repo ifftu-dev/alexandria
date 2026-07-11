@@ -5,8 +5,11 @@
 // registry), so adding a relay here is safe: a malicious one can carry
 // traffic but cannot forge handle ownership.
 import { ref, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { invoke } from '@tauri-apps/api/core'
 import { AppButton, AppInput } from '@/components/ui'
+
+const { t } = useI18n()
 
 interface ExtraRelay {
   peer_id: string
@@ -31,7 +34,7 @@ onMounted(async () => {
     rows.value = relays.map(r => ({ peer_id: r.peer_id, host: r.host, port: String(r.port) }))
   } catch (e) {
     error.value = true
-    status.value = `Failed to load relays: ${e}`
+    status.value = t('settings.relays.loadFailed', { msg: String(e) })
   } finally {
     loading.value = false
   }
@@ -58,7 +61,7 @@ async function save() {
   }))
   try {
     await invoke('save_extra_relays', { relays })
-    status.value = 'Saved. New relays take effect on the next node start.'
+    status.value = t('settings.relays.saved')
   } catch (e) {
     error.value = true
     status.value = `${e}`
@@ -71,19 +74,17 @@ async function save() {
 <template>
   <div class="rounded-lg border border-border p-4">
     <div class="flex items-center justify-between gap-4 mb-1">
-      <p class="text-sm font-medium text-foreground">Community relays</p>
-      <AppButton variant="outline" size="sm" @click="addRow">+ Add relay</AppButton>
+      <p class="text-sm font-medium text-foreground">{{ $t('settings.relays.title') }}</p>
+      <AppButton variant="outline" size="sm" @click="addRow">{{ $t('settings.relays.add') }}</AppButton>
     </div>
     <p class="text-xs text-muted-foreground mb-3">
-      Extra relays to bootstrap and route through. They help connectivity (NAT
-      traversal + directory) only — they cannot vouch for usernames, so adding
-      one is safe.
+      {{ $t('settings.relays.hint') }}
     </p>
 
-    <p v-if="loading" class="text-xs text-muted-foreground">Loading…</p>
+    <p v-if="loading" class="text-xs text-muted-foreground">{{ $t('settings.relays.loading') }}</p>
 
     <p v-else-if="rows.length === 0" class="text-xs text-muted-foreground italic">
-      No community relays added. The built-in operator relays are always used.
+      {{ $t('settings.relays.empty') }}
     </p>
 
     <div v-else class="space-y-2">
@@ -94,18 +95,18 @@ async function save() {
       >
         <AppInput
           v-model="row.peer_id"
-          placeholder="Peer ID (12D3KooW…)"
+          :placeholder="$t('settings.relays.deviceIdPlaceholder')"
           class="flex-1 min-w-[16rem] font-mono text-xs"
         />
-        <AppInput v-model="row.host" placeholder="host (dns or ip)" class="w-40" />
-        <AppInput v-model="row.port" type="number" placeholder="port" class="w-20" />
-        <AppButton variant="ghost" size="sm" @click="removeRow(i)">Remove</AppButton>
+        <AppInput v-model="row.host" :placeholder="$t('settings.relays.hostPlaceholder')" class="w-40" />
+        <AppInput v-model="row.port" type="number" :placeholder="$t('settings.relays.portPlaceholder')" class="w-20" />
+        <AppButton variant="ghost" size="sm" @click="removeRow(i)">{{ $t('settings.relays.remove') }}</AppButton>
       </div>
     </div>
 
     <div class="flex items-center gap-3 mt-3">
       <AppButton size="sm" :disabled="saving || loading" @click="save">
-        {{ saving ? 'Saving…' : 'Save relays' }}
+        {{ saving ? $t('settings.relays.saving') : $t('settings.relays.save') }}
       </AppButton>
       <span
         v-if="status"

@@ -18,11 +18,14 @@ defineProps<{
       {{ label }}
     </p>
     <div v-if="element.content_cid" class="mt-2 text-xs text-muted-foreground">
-      <p class="mb-1">Content CID:</p>
-      <code class="break-all font-mono text-[10px]">{{ element.content_cid }}</code>
+      <details>
+        <summary class="cursor-pointer">{{ $t('common.advanced.toggle') }}</summary>
+        <p class="mb-1 mt-1">{{ $t('courses.unknown.contentId') }}</p>
+        <code class="break-all font-mono text-[10px]">{{ element.content_cid }}</code>
+      </details>
     </div>
     <div v-else class="mt-2 text-xs text-muted-foreground">
-      No content attached to this element yet.
+      {{ $t('courses.unknown.noContent') }}
     </div>
   </div>
 </template>

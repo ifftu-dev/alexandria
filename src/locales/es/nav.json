@@ -1,0 +1,78 @@
+{
+  "primary": {
+    "home": "Inicio",
+    "opinions": "Opiniones",
+    "community": "Comunidad",
+    "skills": "Habilidades",
+    "goals": "Metas",
+    "dashboard": "Panel",
+    "myCourses": "Mis cursos",
+    "inbox": "Bandeja de entrada",
+    "myChildren": "Mis hijos"
+  },
+  "sections": {
+    "liveTutoring": "Tutoría en vivo",
+    "classrooms": "Aulas",
+    "skillGraph": "Mapa de habilidades",
+    "viewAllSessions": "Ver todas las sesiones",
+    "viewAllClassrooms": "Ver todas las aulas",
+    "noSessions": "Aún no hay sesiones",
+    "noClassrooms": "Aún no hay aulas",
+    "memberCount": "sin miembros | {count} miembro | {count} miembros"
+  },
+  "status": {
+    "active": "Activa",
+    "ended": "Finalizada",
+    "cancelled": "Cancelada"
+  },
+  "mode": {
+    "ariaLabel": "Modo activo",
+    "learner": "Estudiante",
+    "instructor": "Instructor",
+    "learnerHint": "Modo estudiante: haz cursos y obtén credenciales",
+    "instructorHint": "Modo instructor: crea cursos y revisa trabajos"
+  },
+  "topbar": {
+    "expandSidebar": "Expandir barra lateral",
+    "collapseSidebar": "Contraer barra lateral",
+    "goBack": "Volver atrás",
+    "goForward": "Ir adelante",
+    "forward": "Adelante",
+    "openSearch": "Abrir búsqueda",
+    "searchPlaceholder": "Buscar habilidades, cursos, grupos comunitarios…",
+    "alpha": "Alfa",
+    "instructorMode": "Modo instructor",
+    "instructorModeHint": "Estás en modo instructor: creando y revisando, no aprendiendo",
+    "guardian": "Tutor",
+    "guardianHint": "Cuenta de tutor: supervisando el aprendizaje de tus hijos"
+  },
+  "prerelease": {
+    "title": "Compilación previa: no apta para uso en producción",
+    "titleVersion": "Versión previa v{version}: no apta para uso en producción"
+  },
+  "theme": {
+    "ariaLabel": "Tema actual: {theme}. Toca para cambiar.",
+    "light": "Claro",
+    "dark": "Oscuro",
+    "system": "Sistema"
+  },
+  "userMenu": {
+    "ariaLabel": "Menú de cuenta de {name}",
+    "defaultName": "tú",
+    "anonymous": "Anónimo",
+    "onThisDevice": "En este dispositivo",
+    "roleInstructor": "instructor",
+    "roleInstructorLearner": "instructor · modo estudiante",
+    "myProfile": "Mi perfil",
+    "myLearning": "Mi aprendizaje",
+    "myCredentials": "Mis credenciales",
+    "sponsor": "Patrocinador",
+    "mySkills": "Mis habilidades",
+    "myReputation": "Mi reputación",
+    "sentinel": "Sentinel",
+    "community": "Comunidad",
+    "settings": "Ajustes",
+    "switchUser": "Cambiar de usuario",
+    "lockAccount": "Bloquear cuenta"
+  }
+}

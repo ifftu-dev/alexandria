@@ -2,11 +2,13 @@
 // Parent home: linked children with add-child + sync controls.
 import { onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { useGuardian, childAge } from '@/composables/useGuardian'
 import { AppButton, AppBadge, AppInput, AppModal, EmptyState } from '@/components/ui'
 
 const route = useRoute()
 const router = useRouter()
+const { t } = useI18n()
 const { children, loaded, refreshLinks, acceptInvite, syncNow } = useGuardian()
 
 const showAdd = ref(false)
@@ -65,22 +67,28 @@ function statusVariant(status: string): 'success' | 'warning' | 'error' {
   if (status === 'pending') return 'warning'
   return 'error'
 }
+
+function statusLabel(status: string): string {
+  if (status === 'active') return t('guardian.children.statusActive')
+  if (status === 'pending') return t('guardian.children.statusWaiting')
+  return t('guardian.children.statusInactive')
+}
 </script>
 
 <template>
   <div class="space-y-6">
     <div class="flex items-start justify-between gap-4">
       <div>
-        <h1 class="text-2xl font-bold text-foreground">My Children</h1>
+        <h1 class="text-2xl font-bold text-foreground">{{ $t('guardian.children.title') }}</h1>
         <p class="mt-1 text-sm text-muted-foreground">
-          Everything your children do on Alexandria, synced from their devices.
+          {{ $t('guardian.children.subtitle') }}
         </p>
       </div>
       <div class="flex shrink-0 gap-2">
         <AppButton variant="outline" size="sm" :loading="syncing" @click="runSync">
-          Sync now
+          {{ $t('guardian.actions.syncNow') }}
         </AppButton>
-        <AppButton size="sm" @click="showAdd = true">+ Add child</AppButton>
+        <AppButton size="sm" @click="showAdd = true">{{ $t('guardian.actions.addChild') }}</AppButton>
       </div>
     </div>
 
@@ -90,8 +98,8 @@ function statusVariant(status: string): 'success' | 'warning' | 'error' {
 
     <EmptyState
       v-else-if="!children.length"
-      title="No children linked yet"
-      description="Ask your child for the invite code shown on their activation screen, then add them here."
+      :title="$t('guardian.children.emptyTitle')"
+      :description="$t('guardian.children.emptyDescription')"
     />
 
     <div v-else class="grid gap-4 sm:grid-cols-2">
@@ -107,40 +115,38 @@ function statusVariant(status: string): 'success' | 'warning' | 'error' {
           </span>
           <div class="min-w-0">
             <p class="truncate font-semibold text-foreground">
-              {{ child.peer_display_name ?? 'Unnamed child' }}
+              {{ child.peer_display_name ?? $t('guardian.children.unnamedChild') }}
               <span v-if="childAge(child) !== null" class="ml-1 text-sm font-normal text-muted-foreground">
-                · {{ childAge(child) }} y/o
+                · {{ $t('guardian.children.ageShort', { age: childAge(child) }) }}
               </span>
             </p>
             <p class="truncate text-xs text-muted-foreground">{{ child.peer_did.slice(0, 28) }}…</p>
           </div>
           <AppBadge :variant="statusVariant(child.status)" class="ml-auto shrink-0 capitalize">
-            {{ child.status === 'pending' ? 'waiting for device' : child.status }}
+            {{ statusLabel(child.status) }}
           </AppBadge>
         </div>
         <p class="mt-3 text-xs text-muted-foreground">
-          {{ child.last_sync_at ? `Last synced ${child.last_sync_at.slice(0, 16)}` : 'Not synced yet' }}
+          {{ child.last_sync_at ? $t('guardian.children.lastSynced', { time: child.last_sync_at.slice(0, 16) }) : $t('guardian.children.notSynced') }}
         </p>
       </button>
     </div>
 
     <!-- Add child modal -->
-    <AppModal :open="showAdd" title="Add a child" @close="showAdd = false">
+    <AppModal :open="showAdd" :title="$t('guardian.children.addModalTitle')" @close="showAdd = false">
       <div class="space-y-4">
         <p class="text-sm text-muted-foreground">
-          Paste the invite code from your child's activation screen. Accepting
-          it activates their profile and links their activity to this account.
-          Both devices need to be online to complete the link.
+          {{ $t('guardian.children.addModalBody') }}
         </p>
         <AppInput
           v-model="inviteCode"
-          label="Invite code"
-          placeholder="Paste the code here"
+          :label="$t('guardian.children.inviteCodeLabel')"
+          :placeholder="$t('guardian.children.inviteCodePlaceholder')"
         />
         <p v-if="addError" class="text-sm text-error">{{ addError }}</p>
         <div class="flex justify-end gap-2">
-          <AppButton variant="ghost" @click="showAdd = false">Cancel</AppButton>
-          <AppButton :loading="accepting" @click="submitInvite">Link child</AppButton>
+          <AppButton variant="ghost" @click="showAdd = false">{{ $t('common.actions.cancel') }}</AppButton>
+          <AppButton :loading="accepting" @click="submitInvite">{{ $t('guardian.children.linkChild') }}</AppButton>
         </div>
       </div>
     </AppModal>

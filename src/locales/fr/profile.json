@@ -1,0 +1,68 @@
+{
+  "loadingProfile": "Chargement de votre profil…",
+  "fetching": "Chargement du profil…",
+  "unnamed": "Sans nom",
+  "thisUser": "cette personne",
+  "unavailable": {
+    "title": "Profil indisponible",
+    "description": "Ouvrez votre compte pour voir votre profil."
+  },
+  "actions": {
+    "editProfile": "Modifier le profil"
+  },
+  "visibility": {
+    "private": "Votre profil est privé — les autres personnes ne peuvent pas le voir, et votre nom d'utilisateur n'apparaîtra pas dans les recherches.",
+    "public": "Votre profil est public — n'importe qui peut le trouver par votre nom d'utilisateur ou identifiant public.",
+    "manageIn": "Gérez cela dans",
+    "settingsAccount": "Paramètres → Compte"
+  },
+  "stats": {
+    "teachingImpact": "Impact pédagogique",
+    "learningImpact": "Impact d'apprentissage",
+    "skillsProven": "Compétences prouvées",
+    "publicSkills": "Compétences publiques"
+  },
+  "skillGraph": {
+    "title": "Votre graphe de compétences",
+    "manageVisibility": "Gérer la visibilité ▸"
+  },
+  "header": {
+    "private": "Privé",
+    "public": "Public",
+    "verified": "Vérifié",
+    "verifiedHint": "Ce nom est confirmé publiquement et infalsifiable.",
+    "registered": "Enregistré",
+    "registeredHint": "Ce nom est enregistré.",
+    "publicId": "Identifiant public"
+  },
+  "add": {
+    "title": "Ajouter un compte",
+    "subtitle": "Configurer un nouveau compte"
+  },
+  "tile": {
+    "neverOpened": "Jamais ouvert",
+    "justNow": "À l'instant",
+    "minAgo": "il y a {count} min | il y a {count} min",
+    "hrAgo": "il y a {count} h | il y a {count} h",
+    "daysAgo": "il y a {count} jour | il y a {count} jours"
+  },
+  "goal": {
+    "set": "Définir comme objectif",
+    "isSet": "Objectif défini",
+    "label": "{name} · graphe de compétences"
+  },
+  "teaches": {
+    "title": "Enseigne",
+    "hint": "— a choisi d'enseigner ceci"
+  },
+  "publicSkillGraph": "Graphe de compétences public",
+  "graphStats": "{skills} compétences · {taught} enseignées",
+  "noPublicSkills": {
+    "title": "Aucune compétence publique",
+    "description": "{name} n'a encore partagé aucune compétence publiquement."
+  },
+  "error": {
+    "couldntLoad": "Impossible de charger ce profil : {error}",
+    "offlineHint": "Ce profil est partagé directement par son propriétaire. Il doit être en ligne, et son profil doit être défini comme public."
+  }
+}

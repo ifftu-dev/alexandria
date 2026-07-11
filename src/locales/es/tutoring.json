@@ -1,0 +1,166 @@
+{
+  "header": {
+    "title": "Tutoría en vivo",
+    "subtitle": "Video en vivo: directo y privado, sin servidores."
+  },
+  "actions": {
+    "startTitle": "Iniciar una sesión",
+    "startDesc": "Inicia una sesión de video en vivo con cámara y micrófono. Comparte la invitación para que otros puedan unirse.",
+    "joinTitle": "Unirse a una sesión",
+    "joinDesc": "Introduce una invitación para unirte a una sesión iniciada por otra persona. Tu cámara y micrófono se encienden al unirte."
+  },
+  "lobby": {
+    "rejoinHint": "Sesión en curso: toca para volver a unirte",
+    "pastSessions": "Sesiones pasadas",
+    "emptyTitle": "Aún no hay sesiones",
+    "emptyDesc": "Inicia o únete a una sesión de video en vivo. Todo se transmite directamente entre ustedes, sin servidores.",
+    "status": {
+      "ended": "Finalizada",
+      "left": "Abandonada",
+      "active": "En vivo"
+    }
+  },
+  "form": {
+    "nameLabel": "Tu nombre (opcional)"
+  },
+  "create": {
+    "title": "Iniciar una sesión de tutoría",
+    "subtitle": "Dale un nombre a tu sesión. Otros se unen usando la invitación que compartas.",
+    "titleLabel": "Título de la sesión",
+    "titlePlaceholder": "p. ej. Repaso de algoritmos de grafos",
+    "namePlaceholder": "p. ej. Alicia",
+    "start": "Iniciar sesión"
+  },
+  "join": {
+    "title": "Unirse a una sesión de tutoría",
+    "subtitle": "Pega la invitación que te compartieron.",
+    "ticketLabel": "Código de invitación",
+    "ticketPlaceholder": "Pega tu invitación aquí…",
+    "scanQr": "Escanear QR",
+    "labelLabel": "Etiqueta de la sesión (opcional)",
+    "labelPlaceholder": "p. ej. Mi sesión de estudio",
+    "namePlaceholder": "p. ej. Bob",
+    "join": "Unirse a la sesión"
+  },
+  "device": {
+    "title": "Comprobación de dispositivos",
+    "subtitleStart": "Comprueba tus dispositivos antes de empezar.",
+    "subtitleJoin": "Comprueba tus dispositivos antes de unirte.",
+    "camera": "Cámara",
+    "microphone": "Micrófono",
+    "speaker": "Altavoz",
+    "noCameras": "No se encontraron cámaras: esta sesión será solo de audio",
+    "noMics": "No se encontraron micrófonos",
+    "noSpeakers": "No se encontraron altavoces",
+    "defaultSuffix": " (predeterminado)",
+    "textOnly": "Aún puedes unirte: esta sesión usará solo chat de texto.",
+    "checking": "Comprobando…",
+    "starting": "Iniciando…",
+    "joining": "Uniéndote…"
+  },
+  "qr": {
+    "scanTitle": "Escanear invitación QR",
+    "scanSubtitle": "Apunta tu cámara al código QR que aparece en el otro dispositivo."
+  },
+  "scanner": {
+    "requesting": "Solicitando acceso a la cámara…",
+    "denied": "Se denegó el acceso a la cámara. Activa el acceso a la cámara en los ajustes de tu sistema e inténtalo de nuevo.",
+    "unsupported": "La cámara no está disponible en este dispositivo.",
+    "error": "Error de cámara",
+    "errorNoCameraApi": "La cámara no está disponible en este dispositivo.",
+    "errorPermissionDenied": "Se denegó el acceso a la cámara."
+  },
+  "session": {
+    "ended": "Sesión finalizada",
+    "you": "Tú",
+    "peersCount": "{connected}/{total} conectados",
+    "connectionTooltip": "Conexión: {quality}",
+    "quality": {
+      "good": "Buena",
+      "fair": "Aceptable",
+      "poor": "Mala",
+      "none": "Sin conexión"
+    },
+    "diagnosticsTitle": "Detalles de conexión",
+    "audioDevicesTitle": "Dispositivos de sonido",
+    "audioLabel": "Audio",
+    "copyInviteTitle": "Copiar invitación",
+    "copyInvite": "Copiar invitación",
+    "qrTitle": "Mostrar código QR para invitar",
+    "qr": "QR",
+    "chat": "Chat",
+    "startingCamera": "Iniciando la cámara…",
+    "cameraOff": "Cámara apagada",
+    "muted": "Silenciado",
+    "waitingPeers": "Esperando a que otros se unan…",
+    "shareHint": "Comparte la invitación con el botón de arriba.",
+    "screenSharingActive": "Compartir pantalla activo",
+    "screenShareDesc": "Tu pantalla se está compartiendo con otros",
+    "waitingFrame": "Esperando el primer fotograma",
+    "enableCameraHint": "Toca el botón de la cámara para encenderla",
+    "notFoundTitle": "Sesión no encontrada",
+    "notFoundDesc": "Puede que esta sesión haya finalizado o que no te hayas unido a ella.",
+    "backToLobby": "Volver a la sala",
+    "dismiss": "Descartar",
+    "selfPreviewAlt": "Tu vista previa",
+    "peerVideoAlt": "Video de {name}"
+  },
+  "controls": {
+    "mute": "Silenciar",
+    "unmute": "Reactivar sonido",
+    "muteMic": "Silenciar micrófono",
+    "unmuteMic": "Reactivar micrófono",
+    "cameraOn": "Encender cámara",
+    "cameraOff": "Apagar cámara",
+    "share": "Compartir pantalla",
+    "stopShare": "Dejar de compartir pantalla",
+    "speakerLevel": "Nivel de salida del altavoz",
+    "leave": "Abandonar",
+    "open": "Abrir"
+  },
+  "chat": {
+    "title": "Chat de la sesión",
+    "empty": "Aún no hay mensajes",
+    "p2pHint": "Los mensajes se envían de forma directa y privada",
+    "placeholder": "Escribe un mensaje…"
+  },
+  "audio": {
+    "title": "Dispositivos de sonido",
+    "subtitle": "La tutoría en vivo suena por el altavoz de forma predeterminada, o cambia a unos auriculares conectados o a un dispositivo Bluetooth cuando eliges uno aquí.",
+    "loading": "Cargando las opciones disponibles…",
+    "output": "Salida de sonido",
+    "currentSuffix": " (actual)",
+    "iosHint": "En iPhone, las opciones de auriculares conectados y Bluetooth aparecen aquí una vez que iOS las pone a disposición de la llamada.",
+    "apply": "Aplicar",
+    "applying": "Aplicando…"
+  },
+  "leave": {
+    "title": "¿Abandonar la sesión?",
+    "desc": "Tu cámara y micrófono se detendrán. Otras personas verán que te vas.",
+    "stay": "Quedarme",
+    "confirm": "Abandonar la sesión"
+  },
+  "ticketFallback": {
+    "title": "Invitación",
+    "desc": "Selecciona y copia la invitación de abajo para compartirla con otros."
+  },
+  "qrInvite": {
+    "title": "Escanea para unirte",
+    "desc": "Abre Alexandria en otro dispositivo y escanea este código desde la pantalla de Unirse.",
+    "copy": "Copiar invitación"
+  },
+  "diagnostics": {
+    "title": "Detalles de conexión",
+    "selectManual": "Selecciona todo el texto de arriba y cópialo manualmente",
+    "noSession": "No hay ninguna sesión activa",
+    "refresh": "Actualizar",
+    "copyJson": "Copiar JSON"
+  },
+  "pip": {
+    "previewAlt": "Vista previa de tutoría",
+    "live": "En vivo",
+    "connected": "{connected}/{total} conectados",
+    "micOn": "Micrófono activado",
+    "micOff": "Micrófono apagado"
+  }
+}

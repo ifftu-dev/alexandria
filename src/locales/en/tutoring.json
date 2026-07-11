@@ -1,0 +1,166 @@
+{
+  "header": {
+    "title": "Live Tutoring",
+    "subtitle": "Live video — direct and private, no servers."
+  },
+  "actions": {
+    "startTitle": "Start a Session",
+    "startDesc": "Start a live video session with camera and mic. Share the invite so others can join.",
+    "joinTitle": "Join a Session",
+    "joinDesc": "Enter an invite to join a session someone else started. Your camera and mic turn on when you join."
+  },
+  "lobby": {
+    "rejoinHint": "Session in progress — tap to rejoin",
+    "pastSessions": "Past Sessions",
+    "emptyTitle": "No sessions yet",
+    "emptyDesc": "Start or join a live video session. Everything streams directly between you — no servers.",
+    "status": {
+      "ended": "Ended",
+      "left": "Left",
+      "active": "Live"
+    }
+  },
+  "form": {
+    "nameLabel": "Your Name (optional)"
+  },
+  "create": {
+    "title": "Start a Tutoring Session",
+    "subtitle": "Give your session a name. Others join using the invite you share.",
+    "titleLabel": "Session Title",
+    "titlePlaceholder": "e.g. Graph Algorithms Review",
+    "namePlaceholder": "e.g. Alice",
+    "start": "Start Session"
+  },
+  "join": {
+    "title": "Join a Tutoring Session",
+    "subtitle": "Paste the invite shared with you.",
+    "ticketLabel": "Invite code",
+    "ticketPlaceholder": "Paste your invite here…",
+    "scanQr": "Scan QR",
+    "labelLabel": "Session Label (optional)",
+    "labelPlaceholder": "e.g. My Study Session",
+    "namePlaceholder": "e.g. Bob",
+    "join": "Join Session"
+  },
+  "device": {
+    "title": "Device Check",
+    "subtitleStart": "Check your devices before starting.",
+    "subtitleJoin": "Check your devices before joining.",
+    "camera": "Camera",
+    "microphone": "Microphone",
+    "speaker": "Speaker",
+    "noCameras": "No cameras found — this session will be audio-only",
+    "noMics": "No microphones found",
+    "noSpeakers": "No speakers found",
+    "defaultSuffix": " (Default)",
+    "textOnly": "You can still join — this session will use text chat only.",
+    "checking": "Checking…",
+    "starting": "Starting…",
+    "joining": "Joining…"
+  },
+  "qr": {
+    "scanTitle": "Scan QR invite",
+    "scanSubtitle": "Point your camera at the QR code shown on the other device."
+  },
+  "scanner": {
+    "requesting": "Requesting camera access…",
+    "denied": "Camera access was denied. Turn on camera access in your system settings and try again.",
+    "unsupported": "The camera isn't available on this device.",
+    "error": "Camera error",
+    "errorNoCameraApi": "The camera isn't available on this device.",
+    "errorPermissionDenied": "Camera access was denied."
+  },
+  "session": {
+    "ended": "Session Ended",
+    "you": "You",
+    "peersCount": "{connected}/{total} connected",
+    "connectionTooltip": "Connection: {quality}",
+    "quality": {
+      "good": "Good",
+      "fair": "Fair",
+      "poor": "Poor",
+      "none": "Not connected"
+    },
+    "diagnosticsTitle": "Connection details",
+    "audioDevicesTitle": "Sound devices",
+    "audioLabel": "Audio",
+    "copyInviteTitle": "Copy invite",
+    "copyInvite": "Copy Invite",
+    "qrTitle": "Show QR code to invite",
+    "qr": "QR",
+    "chat": "Chat",
+    "startingCamera": "Starting camera…",
+    "cameraOff": "Camera off",
+    "muted": "Muted",
+    "waitingPeers": "Waiting for others to join…",
+    "shareHint": "Share the invite using the button above.",
+    "screenSharingActive": "Screen Sharing Active",
+    "screenShareDesc": "Your screen is being shared with others",
+    "waitingFrame": "Waiting for first frame",
+    "enableCameraHint": "Tap the camera button to turn it on",
+    "notFoundTitle": "Session not found",
+    "notFoundDesc": "This session may have ended, or you haven't joined it.",
+    "backToLobby": "Back to Lobby",
+    "dismiss": "Dismiss",
+    "selfPreviewAlt": "Your preview",
+    "peerVideoAlt": "Video from {name}"
+  },
+  "controls": {
+    "mute": "Mute",
+    "unmute": "Unmute",
+    "muteMic": "Mute microphone",
+    "unmuteMic": "Unmute microphone",
+    "cameraOn": "Turn on camera",
+    "cameraOff": "Turn off camera",
+    "share": "Share screen",
+    "stopShare": "Stop screen sharing",
+    "speakerLevel": "Speaker output level",
+    "leave": "Leave",
+    "open": "Open"
+  },
+  "chat": {
+    "title": "Session Chat",
+    "empty": "No messages yet",
+    "p2pHint": "Messages are sent directly and privately",
+    "placeholder": "Type a message…"
+  },
+  "audio": {
+    "title": "Sound Devices",
+    "subtitle": "Live tutoring plays through the speaker by default, or switches to a connected headset or Bluetooth device when you pick one here.",
+    "loading": "Loading available options…",
+    "output": "Sound Output",
+    "currentSuffix": " (Current)",
+    "iosHint": "On iPhone, connected headset and Bluetooth options appear here once iOS makes them available to the call.",
+    "apply": "Apply",
+    "applying": "Applying…"
+  },
+  "leave": {
+    "title": "Leave Session?",
+    "desc": "Your camera and microphone will stop. Other people will see you leave.",
+    "stay": "Stay",
+    "confirm": "Leave Session"
+  },
+  "ticketFallback": {
+    "title": "Invite",
+    "desc": "Select and copy the invite below to share with others."
+  },
+  "qrInvite": {
+    "title": "Scan to join",
+    "desc": "Open Alexandria on another device and scan this code from the Join screen.",
+    "copy": "Copy invite"
+  },
+  "diagnostics": {
+    "title": "Connection details",
+    "selectManual": "Select all the text above and copy it manually",
+    "noSession": "No active session",
+    "refresh": "Refresh",
+    "copyJson": "Copy JSON"
+  },
+  "pip": {
+    "previewAlt": "Tutoring preview",
+    "live": "Live",
+    "connected": "{connected}/{total} connected",
+    "micOn": "Mic On",
+    "micOff": "Mic Off"
+  }
+}

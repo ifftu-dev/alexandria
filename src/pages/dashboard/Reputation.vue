@@ -45,9 +45,9 @@ function formatConfidence(n: number): string {
   <div>
     <!-- Header -->
     <div class="mb-8">
-      <h1 class="text-3xl font-bold text-foreground">My Reputation</h1>
+      <h1 class="text-3xl font-bold text-foreground">{{ $t('dashboard.reputation.title') }}</h1>
       <p class="mt-2 text-muted-foreground">
-        Skill-scoped reputation derived from your teaching impact and learning achievements.
+        {{ $t('dashboard.reputation.subtitle') }}
       </p>
     </div>
 
@@ -80,7 +80,7 @@ function formatConfidence(n: number): string {
             : 'text-muted-foreground hover:text-foreground'"
           @click="activeTab = 'instructor'"
         >
-          Instructor Impact
+          {{ $t('dashboard.reputation.tabs.instructor') }}
         </button>
         <button
           class="flex-1 rounded-md px-4 py-2 text-sm font-medium transition-colors"
@@ -89,22 +89,22 @@ function formatConfidence(n: number): string {
             : 'text-muted-foreground hover:text-foreground'"
           @click="activeTab = 'learner'"
         >
-          Learner Profile
+          {{ $t('dashboard.reputation.tabs.learner') }}
         </button>
       </div>
 
       <!-- Stats -->
       <div class="mb-8 grid gap-4" :class="activeTab === 'instructor' ? 'sm:grid-cols-3' : 'sm:grid-cols-2'">
         <div v-if="activeTab === 'instructor'" class="rounded-xl bg-card shadow-sm p-6">
-          <p class="text-sm text-muted-foreground">Total Impact</p>
+          <p class="text-sm text-muted-foreground">{{ $t('dashboard.reputation.stats.totalImpact') }}</p>
           <p class="mt-2 text-3xl font-bold text-primary">{{ totalImpact.toFixed(2) }}</p>
         </div>
         <div class="rounded-xl bg-card shadow-sm p-6">
-          <p class="text-sm text-muted-foreground">{{ activeTab === 'instructor' ? 'Skills Taught' : 'Skills Demonstrated' }}</p>
+          <p class="text-sm text-muted-foreground">{{ activeTab === 'instructor' ? $t('dashboard.reputation.stats.skillsTaught') : $t('dashboard.reputation.stats.skillsDemonstrated') }}</p>
           <p class="mt-2 text-3xl font-bold text-foreground">{{ currentAssertions.length }}</p>
         </div>
         <div class="rounded-xl bg-card shadow-sm p-6">
-          <p class="text-sm text-muted-foreground">Average Confidence</p>
+          <p class="text-sm text-muted-foreground">{{ $t('dashboard.reputation.stats.avgConfidence') }}</p>
           <p class="mt-2 text-3xl font-bold text-primary">{{ formatConfidence(avgConfidence) }}</p>
         </div>
       </div>
@@ -117,12 +117,12 @@ function formatConfidence(n: number): string {
           </svg>
         </div>
         <h3 class="text-sm font-medium text-foreground">
-          No {{ activeTab }} reputation yet
+          {{ activeTab === 'instructor' ? $t('dashboard.reputation.empty.instructorTitle') : $t('dashboard.reputation.empty.learnerTitle') }}
         </h3>
         <p class="mt-1 text-sm text-muted-foreground max-w-sm mx-auto">
           {{ activeTab === 'instructor'
-            ? 'Publish courses and help learners earn credentials to build your impact.'
-            : 'Complete courses and earn credentials to build your profile.' }}
+            ? $t('dashboard.reputation.empty.instructorBody')
+            : $t('dashboard.reputation.empty.learnerBody') }}
         </p>
       </div>
 
@@ -135,27 +135,27 @@ function formatConfidence(n: number): string {
         >
           <div class="flex items-center justify-between">
             <div>
-              <p class="font-medium text-foreground">{{ assertion.skill_id ?? 'Global' }}</p>
+              <p class="font-medium text-foreground">{{ assertion.skill_id ?? $t('dashboard.reputation.assertion.global') }}</p>
               <div class="mt-1 flex items-center gap-2">
                 <AppBadge variant="primary">{{ assertion.role }}</AppBadge>
                 <AppBadge v-if="assertion.proficiency_level" variant="secondary">
                   {{ assertion.proficiency_level }}
                 </AppBadge>
                 <span v-if="assertion.evidence_count" class="text-xs text-muted-foreground">
-                  {{ assertion.evidence_count }} credentials
+                  {{ $t('dashboard.reputation.assertion.credentials', { count: assertion.evidence_count }, assertion.evidence_count) }}
                 </span>
               </div>
             </div>
             <div class="text-right">
               <p class="text-lg font-bold text-primary">{{ assertion.score.toFixed(3) }}</p>
-              <p class="text-xs text-muted-foreground">{{ formatConfidence(assertion.confidence) }} confidence</p>
+              <p class="text-xs text-muted-foreground">{{ $t('dashboard.reputation.assertion.confidenceSuffix', { value: formatConfidence(assertion.confidence) }) }}</p>
             </div>
           </div>
 
           <!-- Confidence bar -->
           <div class="mt-3">
             <div class="flex items-center justify-between text-xs text-muted-foreground">
-              <span>Confidence</span>
+              <span>{{ $t('dashboard.reputation.assertion.confidence') }}</span>
               <span>{{ formatConfidence(assertion.confidence) }}</span>
             </div>
             <div class="mt-1 h-1.5 overflow-hidden rounded-full bg-muted/30">
@@ -169,19 +169,19 @@ function formatConfidence(n: number): string {
           <!-- Distribution metrics -->
           <div v-if="assertion.distribution" class="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-3 border-t border-border/50 pt-3">
             <div>
-              <p class="text-[10px] uppercase tracking-wider text-muted-foreground">Median</p>
+              <p class="text-[10px] uppercase tracking-wider text-muted-foreground">{{ $t('dashboard.reputation.assertion.median') }}</p>
               <p class="text-sm font-medium font-mono text-foreground">{{ assertion.distribution.median_impact.toFixed(3) }}</p>
             </div>
             <div>
-              <p class="text-[10px] uppercase tracking-wider text-muted-foreground">Learners</p>
+              <p class="text-[10px] uppercase tracking-wider text-muted-foreground">{{ $t('dashboard.reputation.assertion.learners') }}</p>
               <p class="text-sm font-medium font-mono text-foreground">{{ assertion.distribution.learner_count }}</p>
             </div>
             <div>
-              <p class="text-[10px] uppercase tracking-wider text-muted-foreground">Variance</p>
+              <p class="text-[10px] uppercase tracking-wider text-muted-foreground">{{ $t('dashboard.reputation.assertion.variance') }}</p>
               <p class="text-sm font-medium font-mono text-foreground">{{ assertion.distribution.impact_variance.toFixed(3) }}</p>
             </div>
             <div>
-              <p class="text-[10px] uppercase tracking-wider text-muted-foreground">Evidence</p>
+              <p class="text-[10px] uppercase tracking-wider text-muted-foreground">{{ $t('dashboard.reputation.assertion.evidence') }}</p>
               <p class="text-sm font-medium font-mono text-foreground">{{ assertion.evidence_count }}</p>
             </div>
           </div>

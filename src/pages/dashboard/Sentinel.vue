@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { AppButton, AppBadge, EmptyState } from '@/components/ui'
 import { useSentinel } from '@/composables/useSentinel'
@@ -14,6 +15,7 @@ import type {
 } from '@/types'
 
 const router = useRouter()
+const { t } = useI18n()
 
 const { invoke } = useLocalApi()
 const {
@@ -46,31 +48,31 @@ const activeTab = ref<'overview' | 'sessions' | 'signals' | 'profile'>('overview
 // ---------------------------------------------------------------------------
 // Signal weights (matches sentinel spec)
 // ---------------------------------------------------------------------------
-const signalWeights = [
-  { name: 'Typing Consistency', key: 'typing_consistency', weight: 20, description: 'EMA-based deviation from stored typing profile (dwell time, flight time, WPM)' },
-  { name: 'Mouse Consistency', key: 'mouse_consistency', weight: 15, description: 'Velocity and acceleration deviation from stored mouse movement profile' },
-  { name: 'Human Likelihood', key: 'is_human_likely', weight: 15, description: 'Velocity variance check — bots exhibit constant speed with zero variance' },
-  { name: 'Tab Focus', key: 'tab_switches', weight: 15, description: 'Tab/window focus changes during assessment — excessive switching is flagged' },
-  { name: 'Paste Activity', key: 'paste_events', weight: 10, description: 'Clipboard paste event count and total pasted character volume' },
-  { name: 'DevTools Detection', key: 'devtools_detected', weight: 10, description: 'Browser developer tools heuristic — checks for debugger, firebug, and DOM probing' },
-  { name: 'Camera Verification', key: 'face_present', weight: 15, description: 'Continuous face verification every 3s via LBP embeddings (camera opt-in only)' },
-  { name: 'Paste Classifier (ONNX)', key: 'ai_paste_anomaly', weight: 5, description: 'ONNX-based paste / typing-bot / LLM-paste-edit detector. Advisory weight when AI scoring enabled. Flags at ≥0.95 (warning) and ≥0.99 (critical).' },
-]
+const signalWeights = computed(() => [
+  { name: t('sentinel.signals.items.typingConsistency.name'), key: 'typing_consistency', weight: 20, description: t('sentinel.signals.items.typingConsistency.description') },
+  { name: t('sentinel.signals.items.mouseConsistency.name'), key: 'mouse_consistency', weight: 15, description: t('sentinel.signals.items.mouseConsistency.description') },
+  { name: t('sentinel.signals.items.isHuman.name'), key: 'is_human_likely', weight: 15, description: t('sentinel.signals.items.isHuman.description') },
+  { name: t('sentinel.signals.items.tabSwitches.name'), key: 'tab_switches', weight: 15, description: t('sentinel.signals.items.tabSwitches.description') },
+  { name: t('sentinel.signals.items.pasteEvents.name'), key: 'paste_events', weight: 10, description: t('sentinel.signals.items.pasteEvents.description') },
+  { name: t('sentinel.signals.items.devtools.name'), key: 'devtools_detected', weight: 10, description: t('sentinel.signals.items.devtools.description') },
+  { name: t('sentinel.signals.items.facePresent.name'), key: 'face_present', weight: 15, description: t('sentinel.signals.items.facePresent.description') },
+  { name: t('sentinel.signals.items.aiPasteAnomaly.name'), key: 'ai_paste_anomaly', weight: 5, description: t('sentinel.signals.items.aiPasteAnomaly.description') },
+])
 
 // ---------------------------------------------------------------------------
 // Anomaly flag types
 // ---------------------------------------------------------------------------
-const anomalyFlagTypes = [
-  { type: 'tab_switching', severity: 'warning' as const, description: 'Excessive tab/window switching', trigger: '> 10 switches per snapshot window' },
-  { type: 'paste_detected', severity: 'warning' as const, description: 'Clipboard paste activity detected', trigger: '> 500 characters pasted' },
-  { type: 'devtools_detected', severity: 'critical' as const, description: 'Browser developer tools opened', trigger: 'DevTools heuristic returns true' },
-  { type: 'bot_suspected', severity: 'critical' as const, description: 'Automated input pattern detected', trigger: 'Mouse velocity variance near zero' },
-  { type: 'no_face', severity: 'info' as const, description: 'No face detected in camera frame', trigger: 'Face absent on camera-opted session' },
-  { type: 'multiple_faces', severity: 'warning' as const, description: 'Multiple faces in camera frame', trigger: 'Face count > 1 during verification' },
-  { type: 'multi_account', severity: 'critical' as const, description: 'Device fingerprint linked to multiple accounts', trigger: 'Same device FP across > 1 user' },
-  { type: 'low_integrity', severity: 'warning' as const, description: 'Integrity score below safe threshold', trigger: 'Composite score < 0.40' },
-  { type: 'behavior_shift', severity: 'warning' as const, description: 'Significant behavioral profile deviation', trigger: 'Consistency score < 0.35' },
-]
+const anomalyFlagTypes = computed(() => [
+  { type: 'tab_switching', severity: 'warning' as const, description: t('sentinel.flags.items.tabSwitching.description'), trigger: t('sentinel.flags.items.tabSwitching.trigger') },
+  { type: 'paste_detected', severity: 'warning' as const, description: t('sentinel.flags.items.pasteDetected.description'), trigger: t('sentinel.flags.items.pasteDetected.trigger') },
+  { type: 'devtools_detected', severity: 'critical' as const, description: t('sentinel.flags.items.devtoolsDetected.description'), trigger: t('sentinel.flags.items.devtoolsDetected.trigger') },
+  { type: 'bot_suspected', severity: 'critical' as const, description: t('sentinel.flags.items.botSuspected.description'), trigger: t('sentinel.flags.items.botSuspected.trigger') },
+  { type: 'no_face', severity: 'info' as const, description: t('sentinel.flags.items.noFace.description'), trigger: t('sentinel.flags.items.noFace.trigger') },
+  { type: 'multiple_faces', severity: 'warning' as const, description: t('sentinel.flags.items.multipleFaces.description'), trigger: t('sentinel.flags.items.multipleFaces.trigger') },
+  { type: 'multi_account', severity: 'critical' as const, description: t('sentinel.flags.items.multiAccount.description'), trigger: t('sentinel.flags.items.multiAccount.trigger') },
+  { type: 'low_integrity', severity: 'warning' as const, description: t('sentinel.flags.items.lowIntegrity.description'), trigger: t('sentinel.flags.items.lowIntegrity.trigger') },
+  { type: 'behavior_shift', severity: 'warning' as const, description: t('sentinel.flags.items.behaviorShift.description'), trigger: t('sentinel.flags.items.behaviorShift.trigger') },
+])
 
 // ---------------------------------------------------------------------------
 // Computed
@@ -233,9 +235,9 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
           </svg>
         </div>
         <div>
-          <h1 class="text-xl font-bold text-foreground">Sentinel</h1>
+          <h1 class="text-xl font-bold text-foreground">{{ $t('sentinel.title') }}</h1>
           <p class="mt-0.5 text-sm text-muted-foreground">
-            Assessment integrity monitoring
+            {{ $t('sentinel.subtitle') }}
           </p>
         </div>
       </div>
@@ -246,21 +248,21 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
           size="sm"
           @click="handleResetProfile"
         >
-          Reset Profile
+          {{ $t('sentinel.actions.resetProfile') }}
         </AppButton>
         <AppButton
           variant="secondary"
           size="sm"
           @click="router.push('/dashboard/sentinel/propose-prior')"
         >
-          Propose cheat pattern
+          {{ $t('sentinel.actions.proposeCheat') }}
         </AppButton>
         <AppButton
           variant="primary"
           size="sm"
           @click="showWizard = true"
         >
-          {{ profile ? 'Recalibrate' : 'Train Sentinel' }}
+          {{ profile ? $t('sentinel.actions.recalibrate') : $t('sentinel.actions.train') }}
         </AppButton>
       </div>
     </div>
@@ -287,11 +289,9 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
             <path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
           </svg>
           <div>
-            <p class="text-sm font-medium text-emerald-800 dark:text-emerald-300">Privacy by Design</p>
+            <p class="text-sm font-medium text-emerald-800 dark:text-emerald-300">{{ $t('sentinel.privacy.title') }}</p>
             <p class="mt-1 text-xs text-emerald-700 dark:text-emerald-400">
-              Raw biometric data (keystrokes, mouse coordinates, video frames) never leaves your device.
-              Only derived scores (0.0–1.0) are stored locally and used in evidence records.
-              Your behavioral profile is stored in browser localStorage and can be deleted at any time.
+              {{ $t('sentinel.privacy.body') }}
             </p>
           </div>
         </div>
@@ -311,7 +311,7 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
               : 'text-muted-foreground hover:text-foreground'"
             @click="activeTab = tab"
           >
-            {{ tab === 'overview' ? 'Overview' : tab === 'sessions' ? 'Sessions' : tab === 'signals' ? 'Signals & Weights' : 'Profile & Flags' }}
+            {{ tab === 'overview' ? $t('sentinel.tabs.overview') : tab === 'sessions' ? $t('sentinel.tabs.sessions') : tab === 'signals' ? $t('sentinel.tabs.signals') : $t('sentinel.tabs.profile') }}
           </button>
         </div>
       </div>
@@ -345,32 +345,32 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
         <div class="grid grid-cols-2 gap-4 sm:grid-cols-4">
           <!-- Total Sessions -->
           <div class="rounded-lg shadow-sm p-4">
-            <p class="text-xs font-medium text-muted-foreground">Total Sessions</p>
+            <p class="text-xs font-medium text-muted-foreground">{{ $t('sentinel.overview.totalSessions') }}</p>
             <p class="mt-1 text-2xl font-bold text-foreground">{{ sessions.length }}</p>
           </div>
           <!-- Avg Integrity -->
           <div class="rounded-lg shadow-sm p-4">
-            <p class="text-xs font-medium text-muted-foreground">Avg Integrity</p>
+            <p class="text-xs font-medium text-muted-foreground">{{ $t('sentinel.overview.avgIntegrity') }}</p>
             <p class="mt-1 text-2xl font-bold text-foreground">{{ integrityPercent }}%</p>
           </div>
           <!-- Avg Consistency -->
           <div class="rounded-lg shadow-sm p-4">
-            <p class="text-xs font-medium text-muted-foreground">Avg Consistency</p>
+            <p class="text-xs font-medium text-muted-foreground">{{ $t('sentinel.overview.avgConsistency') }}</p>
             <p class="mt-1 text-2xl font-bold text-foreground">{{ consistencyPercent }}%</p>
           </div>
           <!-- Clean Rate -->
           <div class="rounded-lg shadow-sm p-4">
-            <p class="text-xs font-medium text-muted-foreground">Clean Rate</p>
+            <p class="text-xs font-medium text-muted-foreground">{{ $t('sentinel.overview.cleanRate') }}</p>
             <p class="mt-1 text-2xl font-bold text-foreground">{{ sessionBreakdown.cleanPct }}%</p>
           </div>
         </div>
 
         <!-- Session Outcome Breakdown -->
         <div class="card p-5">
-          <h2 class="mb-4 text-sm font-semibold text-foreground">Session Outcome Breakdown</h2>
+          <h2 class="mb-4 text-sm font-semibold text-foreground">{{ $t('sentinel.breakdown.title') }}</h2>
 
           <div v-if="sessions.length === 0" class="py-6 text-center text-sm text-muted-foreground">
-            No sessions recorded yet. Outcomes will appear after you complete assessments.
+            {{ $t('sentinel.breakdown.empty') }}
           </div>
 
           <template v-else>
@@ -397,17 +397,17 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
             <div class="mt-3 flex items-center gap-6 text-xs">
               <div class="flex items-center gap-1.5">
                 <span class="inline-block h-2.5 w-2.5 rounded-full bg-emerald-500" />
-                <span class="text-muted-foreground">Clean</span>
+                <span class="text-muted-foreground">{{ $t('sentinel.breakdown.clean') }}</span>
                 <span class="font-medium text-foreground">{{ sessionBreakdown.clean }}</span>
               </div>
               <div class="flex items-center gap-1.5">
                 <span class="inline-block h-2.5 w-2.5 rounded-full bg-amber-500" />
-                <span class="text-muted-foreground">Flagged</span>
+                <span class="text-muted-foreground">{{ $t('sentinel.breakdown.flagged') }}</span>
                 <span class="font-medium text-foreground">{{ sessionBreakdown.flagged }}</span>
               </div>
               <div class="flex items-center gap-1.5">
                 <span class="inline-block h-2.5 w-2.5 rounded-full bg-red-500" />
-                <span class="text-muted-foreground">Suspended</span>
+                <span class="text-muted-foreground">{{ $t('sentinel.breakdown.suspended') }}</span>
                 <span class="font-medium text-foreground">{{ sessionBreakdown.suspended }}</span>
               </div>
             </div>
@@ -419,57 +419,59 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
           <!-- DAO committee card -->
           <div class="card p-5">
             <div class="mb-2 flex items-center justify-between">
-              <h2 class="text-sm font-semibold text-foreground">Sentinel DAO</h2>
+              <h2 class="text-sm font-semibold text-foreground">{{ $t('sentinel.community.title') }}</h2>
               <AppBadge :variant="sentinelDao.committee.length > 0 ? 'success' : 'warning'">
-                {{ sentinelDao.committee.length > 0 ? 'Active' : 'Bootstrap pending' }}
+                {{ sentinelDao.committee.length > 0 ? $t('sentinel.community.active') : $t('sentinel.community.pending') }}
               </AppBadge>
             </div>
             <p class="text-xs text-muted-foreground">
-              Curates the adversarial-prior library every Sentinel client trains against.
+              {{ $t('sentinel.community.description') }}
             </p>
             <div v-if="sentinelDao.committee.length === 0" class="mt-3 rounded-md bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
-              No committee elected yet. Propose the initial Sentinel DAO committee on the main
-              Alexandria DAO to unlock ratification and holdout evaluation.
+              {{ $t('sentinel.community.noCouncil') }}
               <div class="mt-2">
-                <AppButton size="sm" variant="secondary" @click="router.push('/governance')">
-                  Open governance
+                <AppButton size="sm" variant="secondary" @click="router.push('/community')">
+                  {{ $t('sentinel.actions.openCommunity') }}
                 </AppButton>
               </div>
             </div>
-            <div v-else class="mt-3 space-y-1">
-              <div
-                v-for="m in sentinelDao.committee"
-                :key="m.stake_address"
-                class="flex items-center justify-between text-xs"
-              >
-                <code class="truncate font-mono text-muted-foreground">{{ m.stake_address }}</code>
-                <AppBadge :variant="m.role === 'chair' ? 'primary' : 'secondary'">
-                  {{ m.role }}
-                </AppBadge>
+            <details v-else class="mt-3">
+              <summary class="cursor-pointer text-xs text-muted-foreground">{{ $t('common.advanced.toggle') }}</summary>
+              <p class="mt-2 text-[0.65rem] text-muted-foreground">{{ $t('sentinel.community.members') }}</p>
+              <div class="mt-1 space-y-1">
+                <div
+                  v-for="m in sentinelDao.committee"
+                  :key="m.stake_address"
+                  class="flex items-center justify-between text-xs"
+                >
+                  <code class="truncate font-mono text-muted-foreground">{{ m.stake_address }}</code>
+                  <AppBadge :variant="m.role === 'chair' ? 'primary' : 'secondary'">
+                    {{ m.role }}
+                  </AppBadge>
+                </div>
               </div>
-            </div>
+            </details>
           </div>
 
           <!-- Holdout summary card -->
           <div class="card p-5">
             <div class="mb-2 flex items-center justify-between">
-              <h2 class="text-sm font-semibold text-foreground">Classifier Holdout</h2>
+              <h2 class="text-sm font-semibold text-foreground">{{ $t('sentinel.holdout.title') }}</h2>
               <AppBadge :variant="holdouts.length > 0 ? 'success' : 'secondary'">
-                {{ holdouts.length }} {{ holdouts.length === 1 ? 'set' : 'sets' }}
+                {{ $t('sentinel.holdout.sets', { count: holdouts.length }, holdouts.length) }}
               </AppBadge>
             </div>
             <p class="text-xs text-muted-foreground">
-              DAO-private evaluation data used to measure classifier accuracy and false-positive
-              rate. Shamir-split across committee members; evaluate requires
-              {{ holdouts[0]?.threshold ?? 'N' }} reconstructed shares.
+              {{ $t('sentinel.holdout.description', { threshold: holdouts[0]?.threshold ?? 'N' }) }}
             </p>
             <div v-if="holdouts.length === 0" class="mt-3 rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-              No holdout uploaded yet. A committee member uploads it via
-              <code class="font-mono">sentinel_holdout_upload</code>.
+              <i18n-t keypath="sentinel.holdout.empty" tag="span">
+                <template #command><code class="font-mono">sentinel_holdout_upload</code></template>
+              </i18n-t>
             </div>
             <div v-else class="mt-3">
               <AppButton size="sm" variant="secondary" @click="router.push('/dashboard/sentinel/holdout-evaluate')">
-                Run evaluation
+                {{ $t('sentinel.holdout.run') }}
               </AppButton>
             </div>
           </div>
@@ -479,15 +481,13 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
         <div class="card p-5">
           <div class="flex items-center justify-between">
             <div>
-              <h2 class="text-sm font-semibold text-foreground">Paste-Classifier Cheat Test</h2>
+              <h2 class="text-sm font-semibold text-foreground">{{ $t('sentinel.cheatCard.title') }}</h2>
               <p class="mt-1 text-xs text-muted-foreground">
-                Drive the active classifier with synthetic attack streams. Reports per-archetype
-                score + flag without typing a single keystroke. Diagnostic only — does not
-                replace real-world FPR measurement.
+                {{ $t('sentinel.cheatCard.description') }}
               </p>
             </div>
             <AppButton size="sm" variant="secondary" @click="router.push('/dashboard/sentinel/cheat-test')">
-              Open
+              {{ $t('sentinel.cheatCard.open') }}
             </AppButton>
           </div>
         </div>
@@ -495,9 +495,9 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
         <!-- Engine Status -->
         <div class="card p-5">
           <div class="mb-4 flex items-center justify-between">
-            <h2 class="text-sm font-semibold text-foreground">Engine Status</h2>
+            <h2 class="text-sm font-semibold text-foreground">{{ $t('sentinel.engine.title') }}</h2>
             <AppBadge :variant="profile ? 'success' : 'warning'">
-              {{ profile ? 'Calibrated' : 'Not Calibrated' }}
+              {{ profile ? $t('sentinel.engine.calibrated') : $t('sentinel.engine.notCalibrated') }}
             </AppBadge>
           </div>
 
@@ -505,12 +505,12 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
             <svg class="mx-auto h-8 w-8 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
               <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
             </svg>
-            <p class="mt-2 text-sm font-medium text-foreground">No profile calibrated</p>
+            <p class="mt-2 text-sm font-medium text-foreground">{{ $t('sentinel.engine.emptyTitle') }}</p>
             <p class="mt-1 text-xs text-muted-foreground">
-              Run the training wizard to calibrate Sentinel to your behavioral patterns.
+              {{ $t('sentinel.engine.emptyBody') }}
             </p>
             <AppButton variant="primary" size="sm" class="mt-4" @click="showWizard = true">
-              Train Sentinel
+              {{ $t('sentinel.actions.train') }}
             </AppButton>
           </div>
 
@@ -519,16 +519,16 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
               <svg class="mx-auto h-5 w-5 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5M12 17.25h8.25" />
               </svg>
-              <p class="mt-1 text-xs font-medium text-muted-foreground">Typing</p>
+              <p class="mt-1 text-xs font-medium text-muted-foreground">{{ $t('sentinel.engine.typing') }}</p>
               <p class="text-sm font-semibold text-foreground">
-                {{ ((profile as any)?.typingPattern?.speedWpm ?? 0).toFixed(0) }} WPM
+                {{ ((profile as any)?.typingPattern?.speedWpm ?? 0).toFixed(0) }} {{ $t('sentinel.engine.wpm') }}
               </p>
             </div>
             <div class="rounded-lg shadow-sm p-3 text-center">
               <svg class="mx-auto h-5 w-5 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M15.042 21.672L13.684 16.6m0 0l-2.51 2.225.569-9.47 5.227 7.917-3.286-.672zM12 2.25V4.5m5.834.166l-1.591 1.591M20.25 10.5H18M7.757 14.743l-1.59 1.59M6 10.5H3.75m4.007-4.243l-1.59-1.59" />
               </svg>
-              <p class="mt-1 text-xs font-medium text-muted-foreground">Mouse</p>
+              <p class="mt-1 text-xs font-medium text-muted-foreground">{{ $t('sentinel.engine.mouse') }}</p>
               <p class="text-sm font-semibold text-foreground">
                 {{ ((profile as any)?.mousePattern?.avgVelocity ?? 0).toFixed(1) }} px/ms
               </p>
@@ -537,9 +537,9 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
               <svg class="mx-auto h-5 w-5 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456z" />
               </svg>
-              <p class="mt-1 text-xs font-medium text-muted-foreground">AI Models</p>
+              <p class="mt-1 text-xs font-medium text-muted-foreground">{{ $t('sentinel.engine.aiModels') }}</p>
               <p class="text-sm font-semibold text-foreground">
-                {{ [aiStatus?.keystrokeAE?.trained, aiStatus?.mouseCNN?.trained, aiStatus?.faceEmbedder?.enrolled].filter(Boolean).length }}/3 Ready
+                {{ $t('sentinel.engine.ready', { count: [aiStatus?.keystrokeAE?.trained, aiStatus?.mouseCNN?.trained, aiStatus?.faceEmbedder?.enrolled].filter(Boolean).length }) }}
               </p>
             </div>
           </div>
@@ -552,8 +552,8 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
       <template v-else-if="activeTab === 'sessions'">
         <div v-if="sessions.length === 0">
           <EmptyState
-            title="No sessions recorded"
-            description="Integrity sessions are created automatically when you take assessments. Complete an assessment to see session data here."
+            :title="$t('sentinel.sessions.emptyTitle')"
+            :description="$t('sentinel.sessions.emptyBody')"
           >
             <template #action>
               <div class="flex flex-col items-center gap-2">
@@ -561,7 +561,7 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
                   <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
                 </svg>
                 <p class="text-xs text-muted-foreground">
-                  Sentinel monitors integrity signals in real-time during assessments.
+                  {{ $t('sentinel.sessions.emptyHint') }}
                 </p>
               </div>
             </template>
@@ -607,13 +607,13 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
                 <!-- Session id — copy to feed the Sponsor issuance flow. -->
                 <button
                   class="mt-1.5 flex max-w-full items-center gap-1 font-mono text-xs text-muted-foreground transition-colors hover:text-foreground"
-                  title="Copy session id"
+                  :title="$t('sentinel.sessions.copyTitle')"
                   @click="copySessionId(session.id)"
                 >
                   <svg class="h-3 w-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
                   </svg>
-                  <span class="truncate">{{ copiedSessionId === session.id ? 'copied!' : session.id }}</span>
+                  <span class="truncate">{{ copiedSessionId === session.id ? $t('common.actions.copied') : session.id }}</span>
                 </button>
               </div>
 
@@ -623,12 +623,12 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
                   {{ (session.integrity_score * 100).toFixed(0) }}<span class="text-sm font-normal text-muted-foreground">%</span>
                 </p>
                 <AppBadge :variant="scoreColor(session.integrity_score)" class="mt-1">
-                  {{ session.integrity_score >= 0.8 ? 'High' : session.integrity_score >= 0.5 ? 'Medium' : 'Low' }}
+                  {{ session.integrity_score >= 0.8 ? $t('sentinel.sessions.scoreHigh') : session.integrity_score >= 0.5 ? $t('sentinel.sessions.scoreMedium') : $t('sentinel.sessions.scoreLow') }}
                 </AppBadge>
               </div>
               <div v-else class="flex-shrink-0 text-right">
                 <p class="font-mono text-lg text-muted-foreground">--</p>
-                <p class="text-[0.65rem] text-muted-foreground">In progress</p>
+                <p class="text-[0.65rem] text-muted-foreground">{{ $t('sentinel.sessions.inProgress') }}</p>
               </div>
             </div>
           </div>
@@ -640,10 +640,9 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
       <!-- ================================================================ -->
       <template v-else-if="activeTab === 'signals'">
         <div class="card p-5">
-          <h2 class="mb-1 text-sm font-semibold text-foreground">Integrity Signal Weights</h2>
+          <h2 class="mb-1 text-sm font-semibold text-foreground">{{ $t('sentinel.signals.title') }}</h2>
           <p class="mb-5 text-xs text-muted-foreground">
-            The composite integrity score is a weighted average of these 7 behavioral signals.
-            All signals are computed entirely on-device.
+            {{ $t('sentinel.signals.description') }}
           </p>
 
           <div class="space-y-3">
@@ -677,7 +676,7 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
 
         <!-- Weight distribution visual -->
         <div class="card p-5">
-          <h2 class="mb-3 text-sm font-semibold text-foreground">Weight Distribution</h2>
+          <h2 class="mb-3 text-sm font-semibold text-foreground">{{ $t('sentinel.signals.distribution') }}</h2>
           <div class="flex h-4 overflow-hidden rounded-full">
             <div
               v-for="(signal, idx) in signalWeights"
@@ -723,28 +722,28 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
       <template v-else-if="activeTab === 'profile'">
         <!-- Per-model training status (backend candle) -->
         <div class="card p-5">
-          <h2 class="mb-4 text-sm font-semibold text-foreground">AI Model Training Status</h2>
+          <h2 class="mb-4 text-sm font-semibold text-foreground">{{ $t('sentinel.profile.trainingTitle') }}</h2>
           <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
             <div class="rounded bg-muted/40 p-4">
               <div class="flex items-center justify-between">
                 <div class="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                  Keystroke Autoencoder
+                  {{ $t('sentinel.profile.keystrokeModel') }}
                 </div>
                 <AppBadge :variant="aiStatus?.keystrokeAE?.trained ? 'success' : 'secondary'">
-                  {{ aiStatus?.keystrokeAE?.trained ? 'trained' : 'untrained' }}
+                  {{ aiStatus?.keystrokeAE?.trained ? $t('sentinel.profile.trained') : $t('sentinel.profile.untrained') }}
                 </AppBadge>
               </div>
               <div class="mt-3 grid grid-cols-3 gap-2 text-xs">
                 <div>
-                  <div class="text-muted-foreground">Epochs</div>
+                  <div class="text-muted-foreground">{{ $t('sentinel.profile.epochs') }}</div>
                   <div class="font-mono text-foreground">{{ aiStatus?.keystrokeAE?.epochs ?? '—' }}</div>
                 </div>
                 <div>
-                  <div class="text-muted-foreground">Samples</div>
+                  <div class="text-muted-foreground">{{ $t('sentinel.profile.samples') }}</div>
                   <div class="font-mono text-foreground">{{ aiStatus?.keystrokeAE?.samples ?? '—' }}</div>
                 </div>
                 <div>
-                  <div class="text-muted-foreground">Loss</div>
+                  <div class="text-muted-foreground">{{ $t('sentinel.profile.loss') }}</div>
                   <div class="font-mono text-foreground">
                     {{ aiStatus?.keystrokeAE?.loss !== undefined ? aiStatus.keystrokeAE.loss.toFixed(3) : '—' }}
                   </div>
@@ -754,23 +753,23 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
             <div class="rounded bg-muted/40 p-4">
               <div class="flex items-center justify-between">
                 <div class="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                  Mouse Trajectory CNN
+                  {{ $t('sentinel.profile.mouseModel') }}
                 </div>
                 <AppBadge :variant="aiStatus?.mouseCNN?.trained ? 'success' : 'secondary'">
-                  {{ aiStatus?.mouseCNN?.trained ? 'trained' : 'untrained' }}
+                  {{ aiStatus?.mouseCNN?.trained ? $t('sentinel.profile.trained') : $t('sentinel.profile.untrained') }}
                 </AppBadge>
               </div>
               <div class="mt-3 grid grid-cols-3 gap-2 text-xs">
                 <div>
-                  <div class="text-muted-foreground">Epochs</div>
+                  <div class="text-muted-foreground">{{ $t('sentinel.profile.epochs') }}</div>
                   <div class="font-mono text-foreground">{{ aiStatus?.mouseCNN?.epochs ?? '—' }}</div>
                 </div>
                 <div>
-                  <div class="text-muted-foreground">Samples</div>
+                  <div class="text-muted-foreground">{{ $t('sentinel.profile.samples') }}</div>
                   <div class="font-mono text-foreground">{{ aiStatus?.mouseCNN?.samples ?? '—' }}</div>
                 </div>
                 <div>
-                  <div class="text-muted-foreground">Loss</div>
+                  <div class="text-muted-foreground">{{ $t('sentinel.profile.loss') }}</div>
                   <div class="font-mono text-foreground">
                     {{ aiStatus?.mouseCNN?.loss !== undefined ? aiStatus.mouseCNN.loss.toFixed(3) : '—' }}
                   </div>
@@ -779,45 +778,44 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
             </div>
           </div>
           <p class="mt-3 text-xs text-muted-foreground">
-            Weights persist in the encrypted SQLite DB under <code>sentinel_user_models</code>.
-            Retrain via the calibration wizard. Reset wipes the rows entirely.
+            {{ $t('sentinel.profile.note') }}
           </p>
         </div>
 
         <!-- Behavioral Profile -->
         <div class="card p-5">
           <div class="mb-4 flex items-center justify-between">
-            <h2 class="text-sm font-semibold text-foreground">Behavioral Profile</h2>
+            <h2 class="text-sm font-semibold text-foreground">{{ $t('sentinel.profile.behavioralTitle') }}</h2>
             <AppBadge :variant="profile ? 'success' : 'warning'">
-              {{ profile ? 'Calibrated' : 'Not Calibrated' }}
+              {{ profile ? $t('sentinel.engine.calibrated') : $t('sentinel.engine.notCalibrated') }}
             </AppBadge>
           </div>
 
           <div v-if="profile" class="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <!-- Typing -->
             <div class="rounded-lg shadow-sm p-4">
-              <p class="mb-3 text-xs font-medium uppercase tracking-wider text-muted-foreground">Typing</p>
+              <p class="mb-3 text-xs font-medium uppercase tracking-wider text-muted-foreground">{{ $t('sentinel.profile.typing') }}</p>
               <div class="space-y-2">
                 <div class="flex items-center justify-between">
-                  <span class="text-xs text-muted-foreground">Avg Dwell</span>
+                  <span class="text-xs text-muted-foreground">{{ $t('sentinel.profile.avgDwell') }}</span>
                   <span class="font-mono text-xs font-medium text-foreground">
                     {{ ((profile as any)?.typingPattern?.avgDwellTime ?? 0).toFixed(0) }}ms
                   </span>
                 </div>
                 <div class="flex items-center justify-between">
-                  <span class="text-xs text-muted-foreground">Avg Flight</span>
+                  <span class="text-xs text-muted-foreground">{{ $t('sentinel.profile.avgFlight') }}</span>
                   <span class="font-mono text-xs font-medium text-foreground">
                     {{ ((profile as any)?.typingPattern?.avgFlightTime ?? (profile as any)?.typingPattern?.avgFlightMs ?? 0).toFixed(0) }}ms
                   </span>
                 </div>
                 <div class="flex items-center justify-between">
-                  <span class="text-xs text-muted-foreground">Speed</span>
+                  <span class="text-xs text-muted-foreground">{{ $t('sentinel.profile.speed') }}</span>
                   <span class="font-mono text-xs font-medium text-foreground">
-                    {{ ((profile as any)?.typingPattern?.speedWpm ?? 0).toFixed(0) }} WPM
+                    {{ ((profile as any)?.typingPattern?.speedWpm ?? 0).toFixed(0) }} {{ $t('sentinel.engine.wpm') }}
                   </span>
                 </div>
                 <div class="flex items-center justify-between">
-                  <span class="text-xs text-muted-foreground">Samples</span>
+                  <span class="text-xs text-muted-foreground">{{ $t('sentinel.profile.samples') }}</span>
                   <span class="font-mono text-xs font-medium text-foreground">
                     {{ (profile as any)?.typingPattern?.sampleCount ?? 0 }}
                   </span>
@@ -827,28 +825,28 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
 
             <!-- Mouse -->
             <div class="rounded-lg shadow-sm p-4">
-              <p class="mb-3 text-xs font-medium uppercase tracking-wider text-muted-foreground">Mouse</p>
+              <p class="mb-3 text-xs font-medium uppercase tracking-wider text-muted-foreground">{{ $t('sentinel.profile.mouse') }}</p>
               <div class="space-y-2">
                 <div class="flex items-center justify-between">
-                  <span class="text-xs text-muted-foreground">Velocity</span>
+                  <span class="text-xs text-muted-foreground">{{ $t('sentinel.profile.velocity') }}</span>
                   <span class="font-mono text-xs font-medium text-foreground">
                     {{ ((profile as any)?.mousePattern?.avgVelocity ?? 0).toFixed(2) }} px/ms
                   </span>
                 </div>
                 <div class="flex items-center justify-between">
-                  <span class="text-xs text-muted-foreground">Acceleration</span>
+                  <span class="text-xs text-muted-foreground">{{ $t('sentinel.profile.acceleration') }}</span>
                   <span class="font-mono text-xs font-medium text-foreground">
                     {{ ((profile as any)?.mousePattern?.avgAcceleration ?? 0).toFixed(2) }} px/ms²
                   </span>
                 </div>
                 <div class="flex items-center justify-between">
-                  <span class="text-xs text-muted-foreground">Click Precision</span>
+                  <span class="text-xs text-muted-foreground">{{ $t('sentinel.profile.clickPrecision') }}</span>
                   <span class="font-mono text-xs font-medium text-foreground">
                     {{ ((profile as any)?.mousePattern?.clickPrecision ?? 0).toFixed(2) }}
                   </span>
                 </div>
                 <div class="flex items-center justify-between">
-                  <span class="text-xs text-muted-foreground">Samples</span>
+                  <span class="text-xs text-muted-foreground">{{ $t('sentinel.profile.samples') }}</span>
                   <span class="font-mono text-xs font-medium text-foreground">
                     {{ (profile as any)?.mousePattern?.sampleCount ?? 0 }}
                   </span>
@@ -858,70 +856,69 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
 
             <!-- AI Models -->
             <div class="rounded-lg shadow-sm p-4">
-              <p class="mb-3 text-xs font-medium uppercase tracking-wider text-muted-foreground">AI Models</p>
+              <p class="mb-3 text-xs font-medium uppercase tracking-wider text-muted-foreground">{{ $t('sentinel.profile.aiModels') }}</p>
               <div v-if="aiStatus" class="space-y-2.5">
                 <div class="flex items-center justify-between">
-                  <span class="text-xs text-muted-foreground">Keystroke AE</span>
+                  <span class="text-xs text-muted-foreground">{{ $t('sentinel.profile.keystrokeModelShort') }}</span>
                   <AppBadge :variant="aiStatus.keystrokeAE?.trained ? 'success' : 'warning'" class="text-[0.6rem]">
-                    {{ aiStatus.keystrokeAE?.trained ? 'Ready' : 'Pending' }}
+                    {{ aiStatus.keystrokeAE?.trained ? $t('sentinel.profile.ready') : $t('sentinel.profile.pending') }}
                   </AppBadge>
                 </div>
                 <div v-if="aiStatus.keystrokeAE?.trained" class="flex items-center justify-between">
-                  <span class="pl-2 text-[0.65rem] text-muted-foreground">Loss / Samples</span>
+                  <span class="pl-2 text-[0.65rem] text-muted-foreground">{{ $t('sentinel.profile.errorSamples') }}</span>
                   <span class="font-mono text-[0.65rem] text-muted-foreground">
                     {{ aiStatus.keystrokeAE.loss.toFixed(4) }} / {{ aiStatus.keystrokeAE.samples }}
                   </span>
                 </div>
 
                 <div class="flex items-center justify-between">
-                  <span class="text-xs text-muted-foreground">Mouse CNN</span>
+                  <span class="text-xs text-muted-foreground">{{ $t('sentinel.profile.mouseModelShort') }}</span>
                   <AppBadge :variant="aiStatus.mouseCNN?.trained ? 'success' : 'warning'" class="text-[0.6rem]">
-                    {{ aiStatus.mouseCNN?.trained ? 'Ready' : 'Pending' }}
+                    {{ aiStatus.mouseCNN?.trained ? $t('sentinel.profile.ready') : $t('sentinel.profile.pending') }}
                   </AppBadge>
                 </div>
                 <div v-if="aiStatus.mouseCNN?.trained" class="flex items-center justify-between">
-                  <span class="pl-2 text-[0.65rem] text-muted-foreground">Loss / Samples</span>
+                  <span class="pl-2 text-[0.65rem] text-muted-foreground">{{ $t('sentinel.profile.errorSamples') }}</span>
                   <span class="font-mono text-[0.65rem] text-muted-foreground">
                     {{ aiStatus.mouseCNN.loss.toFixed(4) }} / {{ aiStatus.mouseCNN.samples }}
                   </span>
                 </div>
 
                 <div class="flex items-center justify-between">
-                  <span class="text-xs text-muted-foreground">Face LBP</span>
+                  <span class="text-xs text-muted-foreground">{{ $t('sentinel.profile.faceCheck') }}</span>
                   <AppBadge :variant="aiStatus.faceEmbedder?.enrolled ? 'success' : 'secondary'" class="text-[0.6rem]">
-                    {{ aiStatus.faceEmbedder?.enrolled ? 'Enrolled' : 'Not set' }}
+                    {{ aiStatus.faceEmbedder?.enrolled ? $t('sentinel.profile.enrolled') : $t('sentinel.profile.notSet') }}
                   </AppBadge>
                 </div>
                 <div v-if="aiStatus.faceEmbedder?.enrolled" class="flex items-center justify-between">
-                  <span class="pl-2 text-[0.65rem] text-muted-foreground">Enrollment Progress</span>
+                  <span class="pl-2 text-[0.65rem] text-muted-foreground">{{ $t('sentinel.profile.setupProgress') }}</span>
                   <span class="font-mono text-[0.65rem] text-muted-foreground">
                     {{ Math.round(aiStatus.faceEmbedder.progress * 100) }}%
                   </span>
                 </div>
               </div>
               <div v-else class="py-2 text-center text-xs text-muted-foreground">
-                No AI model data
+                {{ $t('sentinel.profile.noAiData') }}
               </div>
             </div>
           </div>
 
           <div v-else class="rounded-lg border border-dashed border-border p-6 text-center">
-            <p class="text-sm font-medium text-foreground">No profile yet</p>
+            <p class="text-sm font-medium text-foreground">{{ $t('sentinel.profile.noProfileTitle') }}</p>
             <p class="mt-1 text-xs text-muted-foreground">
-              Run the training wizard to calibrate Sentinel to your behavioral patterns.
+              {{ $t('sentinel.profile.noProfileBody') }}
             </p>
             <AppButton variant="primary" size="sm" class="mt-3" @click="showWizard = true">
-              Train Sentinel
+              {{ $t('sentinel.actions.train') }}
             </AppButton>
           </div>
         </div>
 
         <!-- Anomaly Flag Types -->
         <div class="card p-5">
-          <h2 class="mb-1 text-sm font-semibold text-foreground">Anomaly Flag Types</h2>
+          <h2 class="mb-1 text-sm font-semibold text-foreground">{{ $t('sentinel.flags.title') }}</h2>
           <p class="mb-5 text-xs text-muted-foreground">
-            Flags are raised automatically when behavioral signals exceed thresholds.
-            Session outcomes are determined by flag count and severity.
+            {{ $t('sentinel.flags.description') }}
           </p>
 
           <div class="space-y-2">
@@ -941,7 +938,7 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
                 </div>
                 <p class="mt-1.5 text-xs text-foreground">{{ flag.description }}</p>
                 <p class="mt-0.5 text-[0.65rem] text-muted-foreground">
-                  Trigger: {{ flag.trigger }}
+                  {{ $t('sentinel.flags.triggerLabel', { trigger: flag.trigger }) }}
                 </p>
               </div>
             </div>
@@ -950,27 +947,27 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
 
         <!-- Outcome Rules -->
         <div class="card p-5">
-          <h2 class="mb-3 text-sm font-semibold text-foreground">Outcome Determination</h2>
+          <h2 class="mb-3 text-sm font-semibold text-foreground">{{ $t('sentinel.outcomes.title') }}</h2>
           <div class="space-y-2">
             <div class="flex items-start gap-3 rounded-lg shadow-sm p-3">
               <span class="mt-0.5 inline-block h-2.5 w-2.5 flex-shrink-0 rounded-full bg-emerald-500" />
               <div>
-                <p class="text-xs font-medium text-foreground">Clean</p>
-                <p class="text-[0.65rem] text-muted-foreground">Default outcome — no critical flags, fewer than 3 warnings, integrity &ge; 0.40</p>
+                <p class="text-xs font-medium text-foreground">{{ $t('sentinel.outcomes.clean') }}</p>
+                <p class="text-[0.65rem] text-muted-foreground">{{ $t('sentinel.outcomes.cleanRule') }}</p>
               </div>
             </div>
             <div class="flex items-start gap-3 rounded-lg shadow-sm p-3">
               <span class="mt-0.5 inline-block h-2.5 w-2.5 flex-shrink-0 rounded-full bg-amber-500" />
               <div>
-                <p class="text-xs font-medium text-foreground">Flagged</p>
-                <p class="text-[0.65rem] text-muted-foreground">1 critical flag, OR 3+ warnings, OR integrity &lt; 0.40 — surfaces for admin review</p>
+                <p class="text-xs font-medium text-foreground">{{ $t('sentinel.outcomes.flagged') }}</p>
+                <p class="text-[0.65rem] text-muted-foreground">{{ $t('sentinel.outcomes.flaggedRule') }}</p>
               </div>
             </div>
             <div class="flex items-start gap-3 rounded-lg shadow-sm p-3">
               <span class="mt-0.5 inline-block h-2.5 w-2.5 flex-shrink-0 rounded-full bg-red-500" />
               <div>
-                <p class="text-xs font-medium text-foreground">Suspended</p>
-                <p class="text-[0.65rem] text-muted-foreground">2+ critical flags, OR 1 critical + 2 warnings — assessment results may be invalidated</p>
+                <p class="text-xs font-medium text-foreground">{{ $t('sentinel.outcomes.suspended') }}</p>
+                <p class="text-[0.65rem] text-muted-foreground">{{ $t('sentinel.outcomes.suspendedRule') }}</p>
               </div>
             </div>
           </div>
@@ -980,11 +977,9 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
         <div class="card p-5">
           <div class="flex items-center justify-between gap-4">
             <div>
-              <h2 class="text-sm font-semibold text-foreground">Advisory AI Scoring</h2>
+              <h2 class="text-sm font-semibold text-foreground">{{ $t('sentinel.aiScoring.title') }}</h2>
               <p class="mt-1 text-xs text-muted-foreground">
-                Fold keystroke autoencoder, mouse CNN, face LBP, and paste-classifier
-                scores into the integrity calculation at a small advisory weight. Off
-                by default — AI signals are advisory until validated with labeled data.
+                {{ $t('sentinel.aiScoring.description') }}
               </p>
             </div>
             <AppButton
@@ -992,7 +987,7 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
               size="sm"
               @click="setAIScoringEnabled(!aiScoringEnabled)"
             >
-              {{ aiScoringEnabled ? 'Enabled' : 'Disabled' }}
+              {{ aiScoringEnabled ? $t('sentinel.aiScoring.enabled') : $t('sentinel.aiScoring.disabled') }}
             </AppButton>
           </div>
         </div>
@@ -1001,11 +996,9 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
         <div class="card p-5">
           <div class="flex items-center justify-between gap-4">
             <div>
-              <h2 class="text-sm font-semibold text-foreground">Paste Classifier (ONNX)</h2>
+              <h2 class="text-sm font-semibold text-foreground">{{ $t('sentinel.pasteClassifier.title') }}</h2>
               <p class="mt-1 text-xs text-muted-foreground">
-                Contributes the <code>ai_paste_anomaly</code> signal when AI scoring is on.
-                Disable if false-positive rate proves disruptive; other AI signals stay
-                active.
+                {{ $t('sentinel.pasteClassifier.description') }}
               </p>
             </div>
             <AppButton
@@ -1013,12 +1006,12 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
               size="sm"
               @click="setPasteClassifierEnabled(!pasteClassifierEnabled)"
             >
-              {{ pasteClassifierEnabled ? 'Enabled' : 'Disabled' }}
+              {{ pasteClassifierEnabled ? $t('sentinel.aiScoring.enabled') : $t('sentinel.aiScoring.disabled') }}
             </AppButton>
           </div>
           <div class="mt-4 grid grid-cols-2 gap-3 text-xs">
             <div class="rounded bg-muted/40 p-2">
-              <div class="text-muted-foreground">Loaded model</div>
+              <div class="text-muted-foreground">{{ $t('sentinel.pasteClassifier.loadedModel') }}</div>
               <div class="font-mono text-foreground">
                 {{ loadedClassifier.version ?? '—' }}
                 <span v-if="loadedClassifier.source" class="ml-1 text-muted-foreground">
@@ -1027,7 +1020,7 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
               </div>
             </div>
             <div class="rounded bg-muted/40 p-2">
-              <div class="text-muted-foreground">Active DAO model</div>
+              <div class="text-muted-foreground">{{ $t('sentinel.pasteClassifier.activeModel') }}</div>
               <div v-if="activeDaoClassifier" class="font-mono text-foreground">
                 {{ activeDaoClassifier.version }}
                 <span class="ml-1 text-muted-foreground">
@@ -1035,7 +1028,7 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
                   FPR={{ activeDaoClassifier.eval_fpr.toFixed(2) }}
                 </span>
               </div>
-              <div v-else class="font-mono text-muted-foreground">bundled fallback</div>
+              <div v-else class="font-mono text-muted-foreground">{{ $t('sentinel.pasteClassifier.bundledFallback') }}</div>
             </div>
           </div>
         </div>
@@ -1044,10 +1037,9 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
         <div v-if="profile" class="card p-5">
           <div class="flex items-center justify-between">
             <div>
-              <h2 class="text-sm font-semibold text-foreground">Reset Behavioral Profile</h2>
+              <h2 class="text-sm font-semibold text-foreground">{{ $t('sentinel.reset.title') }}</h2>
               <p class="mt-1 text-xs text-muted-foreground">
-                Delete your stored behavioral profile and AI model weights from this device.
-                You will need to recalibrate before Sentinel can monitor future assessments.
+                {{ $t('sentinel.reset.description') }}
               </p>
             </div>
             <AppButton
@@ -1055,7 +1047,7 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
               size="sm"
               @click="handleResetProfile"
             >
-              Reset Profile
+              {{ $t('sentinel.reset.button') }}
             </AppButton>
           </div>
         </div>
@@ -1070,13 +1062,9 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
             <path stroke-linecap="round" stroke-linejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
           </svg>
           <div>
-            <p class="text-sm font-medium text-foreground">How Sentinel Works</p>
+            <p class="text-sm font-medium text-foreground">{{ $t('sentinel.howItWorks.title') }}</p>
             <p class="mt-1 text-xs text-muted-foreground">
-              Sentinel uses dual scoring: rule-based deterministic checks (authoritative) and AI-based per-user models (advisory).
-              During assessments, behavioral snapshots are captured at random 15–45 second intervals.
-              Integrity and consistency scores are computed from 7 weighted signals.
-              Session outcomes are determined by flag severity and count.
-              Confirmed violations lower the trust factor on skill assessments by 0.20 per violation (floor: 0.10).
+              {{ $t('sentinel.howItWorks.body') }}
             </p>
           </div>
         </div>

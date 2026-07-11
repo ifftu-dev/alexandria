@@ -1,0 +1,78 @@
+{
+  "primary": {
+    "home": "होम",
+    "opinions": "राय",
+    "community": "समुदाय",
+    "skills": "कौशल",
+    "goals": "लक्ष्य",
+    "dashboard": "डैशबोर्ड",
+    "myCourses": "मेरे कोर्स",
+    "inbox": "इनबॉक्स",
+    "myChildren": "मेरे बच्चे"
+  },
+  "sections": {
+    "liveTutoring": "लाइव ट्यूशन",
+    "classrooms": "कक्षाएँ",
+    "skillGraph": "कौशल ग्राफ़",
+    "viewAllSessions": "सभी सत्र देखें",
+    "viewAllClassrooms": "सभी कक्षाएँ देखें",
+    "noSessions": "अभी तक कोई सत्र नहीं",
+    "noClassrooms": "अभी तक कोई कक्षा नहीं",
+    "memberCount": "कोई सदस्य नहीं | {count} सदस्य | {count} सदस्य"
+  },
+  "status": {
+    "active": "सक्रिय",
+    "ended": "समाप्त",
+    "cancelled": "रद्द"
+  },
+  "mode": {
+    "ariaLabel": "सक्रिय मोड",
+    "learner": "शिक्षार्थी",
+    "instructor": "प्रशिक्षक",
+    "learnerHint": "शिक्षार्थी मोड — कोर्स लें और प्रमाण-पत्र अर्जित करें",
+    "instructorHint": "प्रशिक्षक मोड — कोर्स बनाएँ और काम की समीक्षा करें"
+  },
+  "topbar": {
+    "expandSidebar": "साइडबार विस्तृत करें",
+    "collapseSidebar": "साइडबार समेटें",
+    "goBack": "वापस जाएँ",
+    "goForward": "आगे जाएँ",
+    "forward": "आगे",
+    "openSearch": "खोज खोलें",
+    "searchPlaceholder": "कौशल, कोर्स, समुदाय समूह खोजें…",
+    "alpha": "अल्फा",
+    "instructorMode": "प्रशिक्षक मोड",
+    "instructorModeHint": "आप प्रशिक्षक मोड में हैं — बना और समीक्षा कर रहे हैं, सीख नहीं रहे",
+    "guardian": "अभिभावक",
+    "guardianHint": "अभिभावक खाता — अपने बच्चों की पढ़ाई की देखरेख कर रहे हैं"
+  },
+  "prerelease": {
+    "title": "प्री-रिलीज़ बिल्ड — उत्पादन उपयोग के लिए नहीं",
+    "titleVersion": "प्री-रिलीज़ v{version} — उत्पादन उपयोग के लिए नहीं"
+  },
+  "theme": {
+    "ariaLabel": "वर्तमान थीम: {theme}। बदलने के लिए टैप करें।",
+    "light": "लाइट",
+    "dark": "डार्क",
+    "system": "सिस्टम"
+  },
+  "userMenu": {
+    "ariaLabel": "{name} के लिए खाता मेनू",
+    "defaultName": "आप",
+    "anonymous": "गुमनाम",
+    "onThisDevice": "इस डिवाइस पर",
+    "roleInstructor": "प्रशिक्षक",
+    "roleInstructorLearner": "प्रशिक्षक · शिक्षार्थी मोड",
+    "myProfile": "मेरी प्रोफ़ाइल",
+    "myLearning": "मेरी पढ़ाई",
+    "myCredentials": "मेरे प्रमाण-पत्र",
+    "sponsor": "प्रायोजक",
+    "mySkills": "मेरे कौशल",
+    "myReputation": "मेरी प्रतिष्ठा",
+    "sentinel": "Sentinel",
+    "community": "समुदाय",
+    "settings": "सेटिंग्स",
+    "switchUser": "उपयोगकर्ता बदलें",
+    "lockAccount": "खाता लॉक करें"
+  }
+}

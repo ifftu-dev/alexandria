@@ -1,0 +1,23 @@
+{
+  "peers": "no connections | {count} connection | {count} connections",
+  "title": "Connections",
+  "subtitle": "How your app connects to other learners — directly and privately, with no servers.",
+  "status": "Status",
+  "online": "Online",
+  "offline": "Offline",
+  "starting": "Starting…",
+  "connections": "Connections",
+  "refresh": "Refresh",
+  "empty": "Looking for other learners…",
+  "diagnostic": "Diagnostic",
+  "mountError": "Couldn't load connection details: {error}",
+  "appOnline": "You're connected and ready to learn.",
+  "appOffline": "You're offline — you can still learn with everything saved on this device.",
+  "appStarting": "Getting things ready…",
+  "advanced": {
+    "deviceId": "Device ID",
+    "topics": "Channels",
+    "addresses": "Addresses",
+    "natStatus": "Network reachability"
+  }
+}

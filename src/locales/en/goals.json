@@ -1,0 +1,40 @@
+{
+  "index": {
+    "title": "Your Goals",
+    "subtitle": "The skills you're working toward. Alexandria maps your path from what you've already proven.",
+    "perGoal": "Per goal",
+    "combinedPath": "Combined path",
+    "findSomeone": "Find someone",
+    "usernamePlaceholder": "{'@'}username",
+    "viewProfile": "View profile",
+    "yourHandle": "You are {'@'}{name} — share your handle so others can find you.",
+    "chartingPaths": "Mapping your paths…",
+    "emptyTitle": "No goals yet",
+    "emptyDescription": "Pick a set of skills to aim for — browse the skill library or a teacher's public map and hit “Set as goal”.",
+    "browseSkills": "Browse skills",
+    "skillsAcrossGoals": "{earned} / {total} skills across {goals} goals",
+    "skillsCount": "{earned} / {total} skills",
+    "nextStep": "Next: {name}",
+    "allCleared": "You're ready for every step 🎉",
+    "viewPath": "View path",
+    "hidePath": "Hide path"
+  },
+  "picker": {
+    "jobRole": "Job role",
+    "exam": "Exam",
+    "curriculum": "Curriculum",
+    "jobDescription": "Job description",
+    "selectPrompt": "Select a {type}…",
+    "setAsGoal": "Set as goal",
+    "pasteText": "Paste text",
+    "fromLink": "From link",
+    "jobPostingUrl": "Job posting URL",
+    "jdPlaceholder": "Paste the job description here…",
+    "findSkills": "Find skills",
+    "foundSkills": "Found these skills — confirm which to add to your goal:",
+    "strongMatch": "strong",
+    "matched": "matched “{term}”",
+    "noMatchingSkills": "No matching skills found — try a different description.",
+    "addAsGoal": "Add {count} skill as goal | Add {count} skills as goal"
+  }
+}

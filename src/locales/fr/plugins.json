@@ -1,0 +1,99 @@
+{
+  "browse": {
+    "title": "Parcourir les extensions",
+    "intro": "Types d'activités intégrés ainsi que des modules communautaires que l'application a trouvés. Les extensions approuvées par la communauté peuvent délivrer des justificatifs qui comptent par défaut. Celles qui n'ont pas encore été relues fonctionnent toujours, mais leurs notes comptent uniquement comme votre progression jusqu'à ce que la communauté les relise.",
+    "builtin": "Intégré",
+    "community": "Communauté",
+    "emptyTitle": "Aucune extension communautaire pour l'instant",
+    "emptyDescription": "Les modules communautaires proviennent d'autres apprenants. Dès que quelqu'un en publie un, il apparaîtra ici.",
+    "loadFailed": "Impossible de charger la liste des extensions : {error}"
+  },
+  "badge": {
+    "builtin": "Intégré",
+    "unknown": "Non relu",
+    "knownFlawed": "Problèmes connus",
+    "attested": "Approuvé par la communauté",
+    "unattested": "Pas encore relu",
+    "statusPending": "Vérification…"
+  },
+  "meta": {
+    "kinds": "Types",
+    "graded": "Noté",
+    "contentId": "Identifiant du contenu",
+    "author": "Par",
+    "caps": "Autorisations",
+    "installed": "Ajouté"
+  },
+  "installed": {
+    "title": "Extensions",
+    "intro": "Activités d'apprentissage et d'évaluation créées par la communauté. Chaque extension s'exécute dans un bac à sable verrouillé sans accès à Internet. Vous accordez les autorisations (microphone, caméra, etc.) une extension à la fois, la première fois qu'elle en a besoin.",
+    "installHeading": "Ajouter depuis un dossier sur cet appareil",
+    "installHintPrefix": "Pointez vers un dossier sur cet appareil qui contient son",
+    "installHintAnd": ", et un",
+    "installHintSuffix": "paquet. Bientôt, vous pourrez ajouter des extensions directement depuis d'autres apprenants.",
+    "installPlaceholder": "/chemin/vers/dossier-extension",
+    "installedHeading": "Vos extensions",
+    "emptyTitle": "Aucune extension pour l'instant",
+    "emptyDescription": "Ajoutez une extension ci-dessus pour débloquer de nouvelles activités d'apprentissage et d'évaluation.",
+    "actions": {
+      "add": "Ajouter",
+      "details": "Détails",
+      "hide": "Masquer"
+    },
+    "errors": {
+      "enterPath": "Saisissez le chemin vers un dossier d'extension.",
+      "installSuccess": "« {name} » v{version} ajouté.",
+      "installFailed": "Impossible d'ajouter l'extension : {error}",
+      "listFailed": "Impossible de charger vos extensions : {error}",
+      "detailsFailed": "Impossible de charger les détails de l'extension : {error}",
+      "uninstallFailed": "Impossible de retirer l'extension : {error}",
+      "revokeFailed": "Impossible de désactiver cette autorisation : {error}"
+    },
+    "uninstallConfirm": "Retirer « {name} » ? Cela supprime l'extension de cet appareil. Les cours qui l'utilisent cesseront de fonctionner jusqu'à ce que vous l'ajoutiez à nouveau.",
+    "detail": {
+      "kinds": "Types",
+      "declaredCapabilities": "Autorisations qu'elle peut demander",
+      "platforms": "Plateformes",
+      "apiVersion": "Version du format d'extension",
+      "none": "aucune",
+      "unspecified": "non spécifié",
+      "grantedHeading": "Autorisations que vous avez accordées",
+      "noGrants": "Aucune autorisation durable. L'extension demandera la première fois qu'elle en aura besoin.",
+      "revoke": "Désactiver"
+    }
+  },
+  "docs": {
+    "back": "Retour aux extensions",
+    "fallbackName": "Extension",
+    "by": "par {name}",
+    "donate": "Soutenir le créateur",
+    "noReadme": "Cette extension ne comprend pas de guide.",
+    "loadError": "Impossible de charger le guide : {error}"
+  },
+  "permission": {
+    "heading": "{name} souhaite {action}",
+    "capabilities": {
+      "microphone": "utiliser votre microphone",
+      "camera": "utiliser votre caméra",
+      "midi": "se connecter à vos appareils de musique (MIDI)",
+      "fullscreen": "occuper tout l'écran",
+      "clipboard": "lire et modifier votre presse-papiers",
+      "storage": "enregistrer votre progression sur cet appareil",
+      "mlInference": "exécuter des modèles d'IA directement sur votre appareil"
+    },
+    "sandbox": "Les extensions sont créées par la communauté et s'exécutent dans un bac à sable sécurisé.",
+    "madeBy": "Créé par",
+    "noAccess": "Elle ne peut pas atteindre Internet ni aucune autre donnée sur cet appareil.",
+    "always": "Toujours autoriser",
+    "session": "Autoriser cette session",
+    "once": "Autoriser une fois",
+    "deny": "Ne pas autoriser"
+  },
+  "host": {
+    "noCid": "Cette activité utilise une extension, mais son identifiant de contenu est manquant.",
+    "disabled": "Cette extension est désactivée. Réactivez-la dans Paramètres → Extensions pour l'utiliser.",
+    "noKinds": "Cette extension ne définit aucune activité, elle ne peut donc pas s'exécuter.",
+    "noGrader": "Cette extension est configurée pour la notation mais n'a aucun correcteur associé. L'auteur doit publier un correctif.",
+    "loadFailed": "Impossible de charger l'extension : {error}"
+  }
+}

@@ -1,0 +1,219 @@
+{
+  "home": {
+    "greeting": {
+      "morning": "Bonjour",
+      "afternoon": "Bon après-midi",
+      "evening": "Bonsoir"
+    },
+    "conflict": {
+      "held": "{'@'}{name} est déjà pris par quelqu'un d'autre.",
+      "explain": "Cette personne l'a réclamé avant vous, donc les recherches pointent vers elle.",
+      "pick": "Choisir un nouveau nom d'utilisateur →"
+    },
+    "hero": {
+      "resumeEyebrow": "Reprenez là où vous vous êtes arrêté",
+      "resumeTitleFallback": "Votre cours",
+      "resumeCta": "Reprendre le cours",
+      "startEyebrow": "Commencer",
+      "startTitle": "Définissez votre premier objectif d'apprentissage",
+      "startCta": "Parcourir les compétences",
+      "recommendedEyebrow": "Recommandé pour vous",
+      "recommendedCta": "Ouvrir le cours",
+      "exploreEyebrow": "Explorer",
+      "exploreTitle": "Découvrez des cours d'autres apprenants",
+      "exploreCta": "Parcourir les cours"
+    },
+    "stats": {
+      "teaching": "Impact pédagogique",
+      "learning": "Impact d'apprentissage",
+      "skills": "Compétences prouvées",
+      "confidence": "Confiance",
+      "teachingTipLabel": "Qu'est-ce que l'impact pédagogique ?",
+      "teachingTipText": "Le crédit que vous avez gagné en enseignant — la valeur pondérée des justificatifs que les apprenants ont obtenus grâce à vos cours et tutoriels.",
+      "learningTipLabel": "Qu'est-ce que l'impact d'apprentissage ?",
+      "learningTipText": "Le crédit que vous avez gagné en tant qu'apprenant — la valeur pondérée des justificatifs que vous avez obtenus en terminant des cours.",
+      "skillsTipLabel": "Que signifie compétences prouvées ?",
+      "skillsTipText": "Compétences distinctes appuyées par au moins un justificatif dans votre profil.",
+      "confidenceTipLabel": "Qu'est-ce que la confiance ?",
+      "confidenceTipText": "La solidité moyenne des vérifications derrière vos justificatifs — à quel point les autres apprenants leur font confiance."
+    },
+    "goals": {
+      "title": "Vos objectifs",
+      "viewAll": "Tout voir",
+      "next": "Suivant : {name}",
+      "ready": "Vous êtes prêt 🎉",
+      "add": "Ajouter un objectif"
+    },
+    "graph": {
+      "title": "Votre graphe de compétences",
+      "proven": "{count} compétence prouvée | {count} compétences prouvées",
+      "hide": "Masquer ▴",
+      "expand": "Développer ▾",
+      "empty": "Aucune compétence prouvée pour l'instant. Obtenez des justificatifs en terminant des cours, et ils apparaîtront ici.",
+      "levelTitle": "Niveau de compétence : {level}",
+      "manage": "Gérer la visibilité et l'enseignement"
+    },
+    "pill": {
+      "tutorial": "Tutoriel",
+      "course": "Cours"
+    },
+    "continue": "Continuer l'apprentissage",
+    "enrolledOn": "Inscrit le {date}",
+    "tutorials": {
+      "title": "Tutoriels rapides",
+      "count": "{count} tutoriel | {count} tutoriels"
+    },
+    "courses": {
+      "recommendedTitle": "Recommandé pour vous",
+      "title": "Cours",
+      "count": "{count} cours | {count} cours",
+      "emptyTitle": "Aucun cours pour l'instant",
+      "emptyBody": "Créez votre premier cours, ou trouvez-en partagés par d'autres apprenants.",
+      "create": "Créer un cours"
+    },
+    "diag": {
+      "read": "Lire les diagnostics"
+    }
+  },
+  "reputation": {
+    "title": "Ma réputation",
+    "subtitle": "Votre standing, construit à partir de votre impact pédagogique et de ce que vous avez appris.",
+    "tabs": {
+      "instructor": "Impact pédagogique",
+      "learner": "Profil d'apprentissage"
+    },
+    "stats": {
+      "totalImpact": "Impact total",
+      "skillsTaught": "Compétences enseignées",
+      "skillsDemonstrated": "Compétences montrées",
+      "avgConfidence": "Confiance moyenne"
+    },
+    "empty": {
+      "instructorTitle": "Aucune réputation d'enseignement pour l'instant",
+      "instructorBody": "Publiez des cours et aidez les apprenants à obtenir des justificatifs pour bâtir votre impact.",
+      "learnerTitle": "Aucune réputation d'apprentissage pour l'instant",
+      "learnerBody": "Terminez des cours et obtenez des justificatifs pour construire votre profil."
+    },
+    "assertion": {
+      "global": "Global",
+      "credentials": "{count} justificatif | {count} justificatifs",
+      "confidenceSuffix": "{value} de confiance",
+      "confidence": "Confiance",
+      "median": "Médiane",
+      "learners": "Apprenants",
+      "variance": "Variance",
+      "evidence": "Preuves"
+    }
+  },
+  "sponsor": {
+    "title": "Sponsor",
+    "subtitle": "Créez des évaluations basées sur des rôles à partir d'une description de poste, et délivrez des justificatifs fiables aux candidats qui réussissent.",
+    "tabs": {
+      "orgs": "Organisations",
+      "roles": "Évaluations de rôle",
+      "issue": "Délivrer un justificatif"
+    },
+    "orgs": {
+      "new": "Nouvelle organisation",
+      "emptyTitle": "Aucune organisation pour l'instant",
+      "emptyBody": "Créez-en une pour commencer à construire des évaluations de rôle.",
+      "owner": "Propriétaire"
+    },
+    "roles": {
+      "new": "Nouvelle évaluation de rôle",
+      "emptyTitle": "Aucune évaluation de rôle",
+      "emptyBody": "Créez-en une pour une organisation.",
+      "requiresClean": "nécessite une session sans anomalie",
+      "minIntegrity": "intégrité min. {value}",
+      "publish": "Publier",
+      "archive": "Archiver"
+    },
+    "issue": {
+      "roleLabel": "Évaluation de rôle",
+      "selectPlaceholder": "Sélectionner…",
+      "candidateLabel": "Identifiant public du candidat",
+      "sessionLabel": "Identifiant de session d'intégrité",
+      "submit": "Délivrer le justificatif de rôle",
+      "submitting": "Délivrance…",
+      "issued": "Justificatif délivré",
+      "assurance": "assurance :",
+      "integrity": "intégrité {value}"
+    },
+    "orgModal": {
+      "title": "Nouvelle organisation",
+      "nameLabel": "Nom",
+      "namePlaceholder": "Acme Corp"
+    },
+    "roleModal": {
+      "title": "Nouvelle évaluation de rôle",
+      "orgLabel": "Organisation",
+      "roleTitleLabel": "Intitulé du rôle",
+      "roleTitlePlaceholder": "SRE N4",
+      "jobLabel": "Description de poste",
+      "jobPlaceholder": "Exploiter la production à grande échelle…",
+      "skillsLabel": "Identifiants de compétences (séparés par des virgules)",
+      "policy": "Politique de délivrance",
+      "minIntegrity": "Intégrité min.",
+      "maxCritical": "Critiques max.",
+      "maxWarning": "Avertissements max.",
+      "requireClean": "Exiger une session sans anomalie",
+      "assuranceLabel": "Niveau d'assurance requis",
+      "assuranceNone": "(aucun)"
+    },
+    "actions": {
+      "create": "Créer"
+    }
+  },
+  "sync": {
+    "title": "Synchronisation multi-appareils",
+    "subtitle": "Gardez vos données à jour sur tous les appareils que vous avez appairés avec celui-ci.",
+    "syncNow": "Synchroniser maintenant",
+    "syncing": "Synchronisation…",
+    "stats": {
+      "devices": "Appareils",
+      "queue": "File d'attente",
+      "pending": "en attente",
+      "autoSync": "Synchronisation auto",
+      "on": "Activée",
+      "off": "Désactivée",
+      "lastSync": "Dernière synchronisation",
+      "never": "Jamais"
+    },
+    "result": {
+      "title": "Synchronisation terminée",
+      "detail": "{merged} lignes fusionnées en {ms} ms — {sent} envoyées, {received} reçues"
+    },
+    "device": {
+      "heading": "Cet appareil",
+      "id": "Identifiant de l'appareil",
+      "name": "Nom",
+      "platform": "Plateforme",
+      "unknown": "Inconnu",
+      "online": "En ligne"
+    },
+    "pair": {
+      "heading": "Appairer un appareil",
+      "generateTitle": "Générer un code",
+      "generateBody": "Créez un code à usage unique sur cet appareil, puis saisissez-le sur l'autre. Le code est secret et expire dans 10 minutes.",
+      "generate": "Générer un code d'appairage",
+      "generating": "Génération…",
+      "enterTitle": "Saisir un code",
+      "enterBody": "Collez un code créé sur un autre de vos appareils pour l'appairer et synchroniser immédiatement.",
+      "codePlaceholder": "Coller le code d'appairage",
+      "pair": "Appairer",
+      "pairing": "Appairage…"
+    },
+    "paired": {
+      "heading": "Appareils appairés",
+      "emptyTitle": "Aucun autre appareil appairé",
+      "emptyBody": "Utilisez le panneau ci-dessus — générez un code ici et saisissez-le sur votre autre appareil (ou l'inverse) pour commencer à synchroniser.",
+      "tables": "{count} table synchronisée | {count} tables synchronisées",
+      "last": "· dernière {time}"
+    },
+    "history": {
+      "heading": "Historique de synchronisation",
+      "emptyTitle": "Aucun historique de synchronisation",
+      "emptyBody": "Votre historique de synchronisation apparaîtra ici après votre première synchronisation."
+    }
+  }
+}

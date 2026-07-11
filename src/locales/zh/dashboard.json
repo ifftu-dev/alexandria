@@ -1,0 +1,219 @@
+{
+  "home": {
+    "greeting": {
+      "morning": "早上好",
+      "afternoon": "下午好",
+      "evening": "晚上好"
+    },
+    "conflict": {
+      "held": "{'@'}{name} 已被他人占用。",
+      "explain": "他们比你更早认领了这个用户名，所以搜索会指向他们。",
+      "pick": "换一个新的用户名 →"
+    },
+    "hero": {
+      "resumeEyebrow": "从上次停下的地方继续",
+      "resumeTitleFallback": "你的课程",
+      "resumeCta": "继续课程",
+      "startEyebrow": "开始上手",
+      "startTitle": "设定你的第一个学习目标",
+      "startCta": "浏览技能",
+      "recommendedEyebrow": "为你推荐",
+      "recommendedCta": "打开课程",
+      "exploreEyebrow": "探索",
+      "exploreTitle": "发现其他学习者的课程",
+      "exploreCta": "浏览课程"
+    },
+    "stats": {
+      "teaching": "教学影响力",
+      "learning": "学习影响力",
+      "skills": "已证明技能",
+      "confidence": "置信度",
+      "teachingTipLabel": "什么是教学影响力？",
+      "teachingTipText": "你通过教学赢得的信誉——学习者从你的课程和教程中获得的凭证的加权价值。",
+      "learningTipLabel": "什么是学习影响力？",
+      "learningTipText": "你作为学习者赢得的信誉——你通过完成课程获得的凭证的加权价值。",
+      "skillsTipLabel": "已证明技能是什么意思？",
+      "skillsTipText": "在你的档案中至少有一份凭证支撑的不同技能。",
+      "confidenceTipLabel": "什么是置信度？",
+      "confidenceTipText": "支撑你凭证的核验的平均强度——其他学习者对它们的信任程度。"
+    },
+    "goals": {
+      "title": "你的目标",
+      "viewAll": "查看全部",
+      "next": "下一步：{name}",
+      "ready": "你已准备就绪 🎉",
+      "add": "添加目标"
+    },
+    "graph": {
+      "title": "你的技能图谱",
+      "proven": "{count} 项技能已证明 | {count} 项技能已证明",
+      "hide": "隐藏 ▴",
+      "expand": "展开 ▾",
+      "empty": "还没有已证明的技能。完成课程获得凭证，它们就会显示在这里。",
+      "levelTitle": "技能等级：{level}",
+      "manage": "管理可见性与教学"
+    },
+    "pill": {
+      "tutorial": "教程",
+      "course": "课程"
+    },
+    "continue": "继续学习",
+    "enrolledOn": "报名于 {date}",
+    "tutorials": {
+      "title": "快速教程",
+      "count": "{count} 个教程 | {count} 个教程"
+    },
+    "courses": {
+      "recommendedTitle": "为你推荐",
+      "title": "课程",
+      "count": "{count} 门课程 | {count} 门课程",
+      "emptyTitle": "还没有课程",
+      "emptyBody": "创建你的第一门课程，或发现其他学习者分享的课程。",
+      "create": "创建课程"
+    },
+    "diag": {
+      "read": "查看诊断信息"
+    }
+  },
+  "reputation": {
+    "title": "我的声誉",
+    "subtitle": "你的地位，源自你的教学影响力和所学所得。",
+    "tabs": {
+      "instructor": "教学影响力",
+      "learner": "学习档案"
+    },
+    "stats": {
+      "totalImpact": "总影响力",
+      "skillsTaught": "教授的技能",
+      "skillsDemonstrated": "展示的技能",
+      "avgConfidence": "平均置信度"
+    },
+    "empty": {
+      "instructorTitle": "还没有教学声誉",
+      "instructorBody": "发布课程并帮助学习者获得凭证，以建立你的影响力。",
+      "learnerTitle": "还没有学习声誉",
+      "learnerBody": "完成课程并获得凭证，以建立你的档案。"
+    },
+    "assertion": {
+      "global": "整体",
+      "credentials": "{count} 份凭证 | {count} 份凭证",
+      "confidenceSuffix": "置信度 {value}",
+      "confidence": "置信度",
+      "median": "中位数",
+      "learners": "学习者",
+      "variance": "方差",
+      "evidence": "证据"
+    }
+  },
+  "sponsor": {
+    "title": "赞助方",
+    "subtitle": "根据职位描述创建基于角色的测评，并向通过者签发可信凭证。",
+    "tabs": {
+      "orgs": "组织",
+      "roles": "角色测评",
+      "issue": "签发凭证"
+    },
+    "orgs": {
+      "new": "新建组织",
+      "emptyTitle": "还没有组织",
+      "emptyBody": "创建一个以开始构建角色测评。",
+      "owner": "所有者"
+    },
+    "roles": {
+      "new": "新建角色测评",
+      "emptyTitle": "没有角色测评",
+      "emptyBody": "为某个组织创建一个。",
+      "requiresClean": "需要一次无异常的会话",
+      "minIntegrity": "最低诚信度 {value}",
+      "publish": "发布",
+      "archive": "归档"
+    },
+    "issue": {
+      "roleLabel": "角色测评",
+      "selectPlaceholder": "选择…",
+      "candidateLabel": "候选人公开 ID",
+      "sessionLabel": "诚信会话 ID",
+      "submit": "签发角色凭证",
+      "submitting": "正在签发…",
+      "issued": "凭证已签发",
+      "assurance": "保障级别：",
+      "integrity": "诚信度 {value}"
+    },
+    "orgModal": {
+      "title": "新建组织",
+      "nameLabel": "名称",
+      "namePlaceholder": "示例公司"
+    },
+    "roleModal": {
+      "title": "新建角色测评",
+      "orgLabel": "组织",
+      "roleTitleLabel": "角色名称",
+      "roleTitlePlaceholder": "SRE L4",
+      "jobLabel": "职位描述",
+      "jobPlaceholder": "大规模运维生产环境…",
+      "skillsLabel": "技能 ID（用逗号分隔）",
+      "policy": "签发策略",
+      "minIntegrity": "最低诚信度",
+      "maxCritical": "最多严重项",
+      "maxWarning": "最多警告项",
+      "requireClean": "要求一次无异常的会话",
+      "assuranceLabel": "所需保障级别",
+      "assuranceNone": "（无）"
+    },
+    "actions": {
+      "create": "创建"
+    }
+  },
+  "sync": {
+    "title": "跨设备同步",
+    "subtitle": "让你的数据在与本设备配对的每台设备上保持一致。",
+    "syncNow": "立即同步",
+    "syncing": "正在同步…",
+    "stats": {
+      "devices": "设备",
+      "queue": "队列",
+      "pending": "待处理",
+      "autoSync": "自动同步",
+      "on": "开",
+      "off": "关",
+      "lastSync": "上次同步",
+      "never": "从未"
+    },
+    "result": {
+      "title": "同步完成",
+      "detail": "在 {ms} 毫秒内合并了 {merged} 行——发送 {sent}，接收 {received}"
+    },
+    "device": {
+      "heading": "本设备",
+      "id": "设备 ID",
+      "name": "名称",
+      "platform": "平台",
+      "unknown": "未知",
+      "online": "在线"
+    },
+    "pair": {
+      "heading": "配对设备",
+      "generateTitle": "生成一个验证码",
+      "generateBody": "在此设备上生成一个一次性验证码，然后在另一台设备上输入。该验证码是保密的，10 分钟后失效。",
+      "generate": "生成配对码",
+      "generating": "正在生成…",
+      "enterTitle": "输入验证码",
+      "enterBody": "粘贴在你另一台设备上生成的验证码，即可配对并立即同步。",
+      "codePlaceholder": "粘贴配对码",
+      "pair": "配对",
+      "pairing": "正在配对…"
+    },
+    "paired": {
+      "heading": "已配对的设备",
+      "emptyTitle": "尚无其他已配对设备",
+      "emptyBody": "使用上方面板——在此生成一个验证码并在你的另一台设备上输入（或反过来）即可开始同步。",
+      "tables": "已同步 {count} 张表 | 已同步 {count} 张表",
+      "last": "· 上次 {time}"
+    },
+    "history": {
+      "heading": "同步历史",
+      "emptyTitle": "没有同步历史",
+      "emptyBody": "首次同步后，你的同步历史将显示在这里。"
+    }
+  }
+}

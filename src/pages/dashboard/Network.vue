@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useP2P } from '@/composables/useP2P'
 import type { PeerInfo } from '@/types'
+
+const { t } = useI18n()
 
 const { status: p2pStatus, lastError: p2pError, refreshStatus, peers: fetchPeers, startPolling, stopPolling } = useP2P()
 
@@ -40,7 +43,7 @@ async function refreshPeers() {
   <div class="space-y-4">
     <!-- Mount error -->
     <div v-if="mountError" style="background: #dc2626; color: white; padding: 16px; border-radius: 8px;">
-      Mount error: {{ mountError }}
+      {{ t('network.mountError', { error: mountError }) }}
     </div>
 
     <!-- Header -->
@@ -51,8 +54,8 @@ async function refreshPeers() {
         </svg>
       </div>
       <div>
-        <h1 class="text-2xl font-bold text-foreground">P2P Network</h1>
-        <p class="text-sm text-muted-foreground">Your node's peer-to-peer network status.</p>
+        <h1 class="text-2xl font-bold text-foreground">{{ t('network.title') }}</h1>
+        <p class="text-sm text-muted-foreground">{{ t('network.subtitle') }}</p>
       </div>
     </div>
 
@@ -68,58 +71,59 @@ async function refreshPeers() {
     <div v-else class="grid grid-cols-1 gap-4 sm:grid-cols-3">
       <!-- Status -->
       <div class="rounded-xl border border-border bg-card p-5">
-        <div class="text-xs font-medium uppercase tracking-wider text-muted-foreground">Status</div>
+        <div class="text-xs font-medium uppercase tracking-wider text-muted-foreground">{{ t('network.status') }}</div>
         <div class="mt-2 flex items-center gap-2">
           <span
             class="inline-block h-2.5 w-2.5 rounded-full"
             :class="isRunning ? 'bg-success' : 'bg-warning animate-pulse'"
           />
           <span class="text-xl font-bold text-foreground">
-            {{ isRunning ? 'Online' : p2pStatus != null ? 'Offline' : 'Starting...' }}
+            {{ isRunning ? t('network.online') : p2pStatus != null ? t('network.offline') : t('network.starting') }}
           </span>
         </div>
       </div>
 
-      <!-- Peers -->
+      <!-- Connections -->
       <div class="rounded-xl border border-border bg-card p-5">
-        <div class="text-xs font-medium uppercase tracking-wider text-muted-foreground">Connected Peers</div>
+        <div class="text-xs font-medium uppercase tracking-wider text-muted-foreground">{{ t('network.connections') }}</div>
         <div class="mt-2">
           <span class="text-xl font-bold text-foreground">{{ peerCount }}</span>
         </div>
       </div>
 
-      <!-- Topics -->
+      <!-- Channels -->
       <div class="rounded-xl border border-border bg-card p-5">
-        <div class="text-xs font-medium uppercase tracking-wider text-muted-foreground">Topics</div>
+        <div class="text-xs font-medium uppercase tracking-wider text-muted-foreground">{{ t('network.advanced.topics') }}</div>
         <div class="mt-2">
           <span class="text-xl font-bold text-foreground">{{ topicCount || '\u2014' }}</span>
         </div>
       </div>
     </div>
 
-    <!-- Node details -->
-    <div class="rounded-xl border border-border bg-card p-5">
-      <h2 class="text-base font-semibold text-foreground mb-3">Node Details</h2>
+    <!-- Advanced connection details -->
+    <details class="rounded-xl border border-border bg-card p-5">
+      <summary class="cursor-pointer text-base font-semibold text-foreground">{{ t('common.advanced.toggle') }}</summary>
+      <p class="mt-1 mb-3 text-xs text-muted-foreground">{{ t('common.advanced.hint') }}</p>
 
       <div class="divide-y divide-border/50">
         <div class="flex items-center justify-between py-2.5">
-          <span class="text-sm text-muted-foreground">Peer ID</span>
+          <span class="text-sm text-muted-foreground">{{ t('network.advanced.deviceId') }}</span>
           <span class="text-xs font-mono text-foreground max-w-[60%] truncate">
             {{ p2pStatus?.peer_id ?? '\u2014' }}
           </span>
         </div>
         <div class="flex items-center justify-between py-2.5">
-          <span class="text-sm text-muted-foreground">Peers</span>
+          <span class="text-sm text-muted-foreground">{{ t('network.connections') }}</span>
           <span class="text-sm font-medium text-foreground">{{ peerCount }}</span>
         </div>
         <div class="flex items-center justify-between py-2.5">
-          <span class="text-sm text-muted-foreground">Topics</span>
+          <span class="text-sm text-muted-foreground">{{ t('network.advanced.topics') }}</span>
           <span class="text-xs font-mono text-foreground">
             {{ p2pStatus?.subscribed_topics?.length ? p2pStatus.subscribed_topics.join(', ') : '\u2014' }}
           </span>
         </div>
         <div class="flex items-start justify-between py-2.5">
-          <span class="text-sm text-muted-foreground shrink-0">Addresses</span>
+          <span class="text-sm text-muted-foreground shrink-0">{{ t('network.advanced.addresses') }}</span>
           <div v-if="p2pStatus?.listening_addresses?.length" class="text-right ml-4">
             <div
               v-for="addr in p2pStatus.listening_addresses"
@@ -132,15 +136,15 @@ async function refreshPeers() {
           <span v-else class="text-sm text-foreground">&mdash;</span>
         </div>
         <div v-if="p2pStatus?.nat_status" class="flex items-center justify-between py-2.5">
-          <span class="text-sm text-muted-foreground">NAT Status</span>
+          <span class="text-sm text-muted-foreground">{{ t('network.advanced.natStatus') }}</span>
           <span class="text-sm font-medium text-foreground">{{ p2pStatus.nat_status }}</span>
         </div>
       </div>
-    </div>
+    </details>
 
     <!-- Diagnostic (show when offline or error) -->
     <div v-if="p2pError || !isRunning" class="rounded-xl border border-amber-500/30 bg-amber-50 dark:bg-amber-500/5 p-4">
-      <h3 class="text-sm font-semibold text-amber-700 dark:text-amber-400 mb-2">Diagnostic</h3>
+      <h3 class="text-sm font-semibold text-amber-700 dark:text-amber-400 mb-2">{{ t('network.diagnostic') }}</h3>
       <div v-if="p2pError" class="text-xs font-mono text-red-600 dark:text-red-400 mb-2">{{ p2pError }}</div>
       <pre class="text-xs font-mono text-muted-foreground whitespace-pre-wrap break-all">{{ JSON.stringify(p2pStatus, null, 2) ?? 'null' }}</pre>
     </div>
@@ -148,12 +152,12 @@ async function refreshPeers() {
     <!-- Connected Peers list -->
     <div class="rounded-xl border border-border bg-card p-5">
       <div class="flex items-center justify-between mb-3">
-        <h2 class="text-base font-semibold text-foreground">Connected Peers</h2>
+        <h2 class="text-base font-semibold text-foreground">{{ t('network.connections') }}</h2>
         <button
           class="text-sm text-primary hover:text-primary-hover font-medium"
           @click="refreshPeers"
         >
-          Refresh
+          {{ t('network.refresh') }}
         </button>
       </div>
 
@@ -173,7 +177,7 @@ async function refreshPeers() {
       </div>
 
       <div v-else class="text-center py-8">
-        <p class="text-sm text-muted-foreground">No peers connected yet. Waiting for DHT discovery...</p>
+        <p class="text-sm text-muted-foreground">{{ t('network.empty') }}</p>
       </div>
     </div>
   </div>

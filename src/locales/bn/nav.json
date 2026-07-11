@@ -1,0 +1,78 @@
+{
+  "primary": {
+    "home": "হোম",
+    "opinions": "মতামত",
+    "community": "কমিউনিটি",
+    "skills": "দক্ষতা",
+    "goals": "লক্ষ্য",
+    "dashboard": "ড্যাশবোর্ড",
+    "myCourses": "আমার কোর্স",
+    "inbox": "ইনবক্স",
+    "myChildren": "আমার সন্তানরা"
+  },
+  "sections": {
+    "liveTutoring": "লাইভ টিউটরিং",
+    "classrooms": "শ্রেণিকক্ষ",
+    "skillGraph": "দক্ষতা গ্রাফ",
+    "viewAllSessions": "সব সেশন দেখুন",
+    "viewAllClassrooms": "সব শ্রেণিকক্ষ দেখুন",
+    "noSessions": "এখনও কোনো সেশন নেই",
+    "noClassrooms": "এখনও কোনো শ্রেণিকক্ষ নেই",
+    "memberCount": "কোনো সদস্য নেই | {count} জন সদস্য | {count} জন সদস্য"
+  },
+  "status": {
+    "active": "সক্রিয়",
+    "ended": "সমাপ্ত",
+    "cancelled": "বাতিল"
+  },
+  "mode": {
+    "ariaLabel": "সক্রিয় মোড",
+    "learner": "শিক্ষার্থী",
+    "instructor": "প্রশিক্ষক",
+    "learnerHint": "শিক্ষার্থী মোড — কোর্স করুন ও ক্রেডেনশিয়াল অর্জন করুন",
+    "instructorHint": "প্রশিক্ষক মোড — কোর্স তৈরি করুন ও কাজ পর্যালোচনা করুন"
+  },
+  "topbar": {
+    "expandSidebar": "সাইডবার প্রসারিত করুন",
+    "collapseSidebar": "সাইডবার সংকুচিত করুন",
+    "goBack": "পেছনে যান",
+    "goForward": "সামনে যান",
+    "forward": "সামনে",
+    "openSearch": "অনুসন্ধান খুলুন",
+    "searchPlaceholder": "দক্ষতা, কোর্স, কমিউনিটি গোষ্ঠী খুঁজুন…",
+    "alpha": "আলফা",
+    "instructorMode": "প্রশিক্ষক মোড",
+    "instructorModeHint": "আপনি প্রশিক্ষক মোডে আছেন — তৈরি ও পর্যালোচনা করছেন, শিখছেন না",
+    "guardian": "অভিভাবক",
+    "guardianHint": "অভিভাবক অ্যাকাউন্ট — আপনার সন্তানদের শেখা তত্ত্বাবধান করছেন"
+  },
+  "prerelease": {
+    "title": "প্রি-রিলিজ বিল্ড — প্রোডাকশন ব্যবহারের জন্য নয়",
+    "titleVersion": "প্রি-রিলিজ v{version} — প্রোডাকশন ব্যবহারের জন্য নয়"
+  },
+  "theme": {
+    "ariaLabel": "বর্তমান থিম: {theme}। পরিবর্তন করতে ট্যাপ করুন।",
+    "light": "হালকা",
+    "dark": "গাঢ়",
+    "system": "সিস্টেম"
+  },
+  "userMenu": {
+    "ariaLabel": "{name}-এর অ্যাকাউন্ট মেনু",
+    "defaultName": "আপনি",
+    "anonymous": "অজ্ঞাতনামা",
+    "onThisDevice": "এই ডিভাইসে",
+    "roleInstructor": "প্রশিক্ষক",
+    "roleInstructorLearner": "প্রশিক্ষক · শিক্ষার্থী মোড",
+    "myProfile": "আমার প্রোফাইল",
+    "myLearning": "আমার শিক্ষা",
+    "myCredentials": "আমার ক্রেডেনশিয়াল",
+    "sponsor": "পৃষ্ঠপোষক",
+    "mySkills": "আমার দক্ষতা",
+    "myReputation": "আমার সুনাম",
+    "sentinel": "Sentinel",
+    "community": "কমিউনিটি",
+    "settings": "সেটিংস",
+    "switchUser": "ব্যবহারকারী পরিবর্তন করুন",
+    "lockAccount": "অ্যাকাউন্ট লক করুন"
+  }
+}

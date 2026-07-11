@@ -1,0 +1,166 @@
+{
+  "header": {
+    "title": "Tutorat en direct",
+    "subtitle": "Vidéo en direct — directe et privée, sans serveurs."
+  },
+  "actions": {
+    "startTitle": "Démarrer une session",
+    "startDesc": "Démarrez une session vidéo en direct avec caméra et micro. Partagez l'invitation pour que d'autres puissent rejoindre.",
+    "joinTitle": "Rejoindre une session",
+    "joinDesc": "Saisissez une invitation pour rejoindre une session lancée par quelqu'un d'autre. Votre caméra et votre micro s'activent lorsque vous rejoignez."
+  },
+  "lobby": {
+    "rejoinHint": "Session en cours — touchez pour rejoindre à nouveau",
+    "pastSessions": "Sessions passées",
+    "emptyTitle": "Aucune session pour l'instant",
+    "emptyDesc": "Démarrez ou rejoignez une session vidéo en direct. Tout est diffusé directement entre vous — sans serveurs.",
+    "status": {
+      "ended": "Terminée",
+      "left": "Quittée",
+      "active": "En direct"
+    }
+  },
+  "form": {
+    "nameLabel": "Votre nom (facultatif)"
+  },
+  "create": {
+    "title": "Démarrer une session de tutorat",
+    "subtitle": "Donnez un nom à votre session. Les autres rejoignent avec l'invitation que vous partagez.",
+    "titleLabel": "Titre de la session",
+    "titlePlaceholder": "ex. Révision des algorithmes de graphes",
+    "namePlaceholder": "ex. Alice",
+    "start": "Démarrer la session"
+  },
+  "join": {
+    "title": "Rejoindre une session de tutorat",
+    "subtitle": "Collez l'invitation qui vous a été partagée.",
+    "ticketLabel": "Code d'invitation",
+    "ticketPlaceholder": "Collez votre invitation ici…",
+    "scanQr": "Scanner le QR",
+    "labelLabel": "Libellé de la session (facultatif)",
+    "labelPlaceholder": "ex. Ma session d'étude",
+    "namePlaceholder": "ex. Bob",
+    "join": "Rejoindre la session"
+  },
+  "device": {
+    "title": "Vérification des appareils",
+    "subtitleStart": "Vérifiez vos appareils avant de démarrer.",
+    "subtitleJoin": "Vérifiez vos appareils avant de rejoindre.",
+    "camera": "Caméra",
+    "microphone": "Microphone",
+    "speaker": "Haut-parleur",
+    "noCameras": "Aucune caméra trouvée — cette session sera uniquement audio",
+    "noMics": "Aucun microphone trouvé",
+    "noSpeakers": "Aucun haut-parleur trouvé",
+    "defaultSuffix": " (Par défaut)",
+    "textOnly": "Vous pouvez tout de même rejoindre — cette session utilisera uniquement le chat texte.",
+    "checking": "Vérification…",
+    "starting": "Démarrage…",
+    "joining": "Connexion…"
+  },
+  "qr": {
+    "scanTitle": "Scanner l'invitation QR",
+    "scanSubtitle": "Pointez votre caméra vers le code QR affiché sur l'autre appareil."
+  },
+  "scanner": {
+    "requesting": "Demande d'accès à la caméra…",
+    "denied": "L'accès à la caméra a été refusé. Activez l'accès à la caméra dans les paramètres de votre système et réessayez.",
+    "unsupported": "La caméra n'est pas disponible sur cet appareil.",
+    "error": "Erreur de caméra",
+    "errorNoCameraApi": "La caméra n'est pas disponible sur cet appareil.",
+    "errorPermissionDenied": "L'accès à la caméra a été refusé."
+  },
+  "session": {
+    "ended": "Session terminée",
+    "you": "Vous",
+    "peersCount": "{connected}/{total} connectés",
+    "connectionTooltip": "Connexion : {quality}",
+    "quality": {
+      "good": "Bonne",
+      "fair": "Correcte",
+      "poor": "Faible",
+      "none": "Non connecté"
+    },
+    "diagnosticsTitle": "Détails de connexion",
+    "audioDevicesTitle": "Périphériques audio",
+    "audioLabel": "Audio",
+    "copyInviteTitle": "Copier l'invitation",
+    "copyInvite": "Copier l'invitation",
+    "qrTitle": "Afficher le code QR pour inviter",
+    "qr": "QR",
+    "chat": "Chat",
+    "startingCamera": "Démarrage de la caméra…",
+    "cameraOff": "Caméra désactivée",
+    "muted": "Micro coupé",
+    "waitingPeers": "En attente que d'autres rejoignent…",
+    "shareHint": "Partagez l'invitation à l'aide du bouton ci-dessus.",
+    "screenSharingActive": "Partage d'écran actif",
+    "screenShareDesc": "Votre écran est partagé avec les autres",
+    "waitingFrame": "En attente de la première image",
+    "enableCameraHint": "Touchez le bouton de la caméra pour l'activer",
+    "notFoundTitle": "Session introuvable",
+    "notFoundDesc": "Cette session s'est peut-être terminée, ou vous ne l'avez pas rejointe.",
+    "backToLobby": "Retour au salon",
+    "dismiss": "Ignorer",
+    "selfPreviewAlt": "Votre aperçu",
+    "peerVideoAlt": "Vidéo de {name}"
+  },
+  "controls": {
+    "mute": "Couper le micro",
+    "unmute": "Réactiver le micro",
+    "muteMic": "Couper le microphone",
+    "unmuteMic": "Réactiver le microphone",
+    "cameraOn": "Activer la caméra",
+    "cameraOff": "Désactiver la caméra",
+    "share": "Partager l'écran",
+    "stopShare": "Arrêter le partage d'écran",
+    "speakerLevel": "Niveau de sortie du haut-parleur",
+    "leave": "Quitter",
+    "open": "Ouvrir"
+  },
+  "chat": {
+    "title": "Chat de la session",
+    "empty": "Aucun message pour l'instant",
+    "p2pHint": "Les messages sont envoyés directement et en privé",
+    "placeholder": "Saisissez un message…"
+  },
+  "audio": {
+    "title": "Périphériques audio",
+    "subtitle": "Le tutorat en direct est diffusé par le haut-parleur par défaut, ou bascule vers un casque connecté ou un appareil Bluetooth lorsque vous en choisissez un ici.",
+    "loading": "Chargement des options disponibles…",
+    "output": "Sortie audio",
+    "currentSuffix": " (Actuel)",
+    "iosHint": "Sur iPhone, les options de casque connecté et Bluetooth apparaissent ici une fois qu'iOS les rend disponibles à l'appel.",
+    "apply": "Appliquer",
+    "applying": "Application…"
+  },
+  "leave": {
+    "title": "Quitter la session ?",
+    "desc": "Votre caméra et votre microphone s'arrêteront. Les autres personnes vous verront partir.",
+    "stay": "Rester",
+    "confirm": "Quitter la session"
+  },
+  "ticketFallback": {
+    "title": "Invitation",
+    "desc": "Sélectionnez et copiez l'invitation ci-dessous pour la partager avec d'autres."
+  },
+  "qrInvite": {
+    "title": "Scanner pour rejoindre",
+    "desc": "Ouvrez Alexandria sur un autre appareil et scannez ce code depuis l'écran Rejoindre.",
+    "copy": "Copier l'invitation"
+  },
+  "diagnostics": {
+    "title": "Détails de connexion",
+    "selectManual": "Sélectionnez tout le texte ci-dessus et copiez-le manuellement",
+    "noSession": "Aucune session active",
+    "refresh": "Actualiser",
+    "copyJson": "Copier le JSON"
+  },
+  "pip": {
+    "previewAlt": "Aperçu du tutorat",
+    "live": "En direct",
+    "connected": "{connected}/{total} connectés",
+    "micOn": "Micro activé",
+    "micOff": "Micro coupé"
+  }
+}

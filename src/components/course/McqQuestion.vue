@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { AppButton } from '@/components/ui'
 import type { ElementSubmissionRecord } from '@/types'
@@ -37,6 +38,7 @@ const emit = defineEmits<{
   (e: 'complete', score: number): void
 }>()
 
+const { t } = useI18n()
 const { invoke } = useLocalApi()
 const mcq = ref<McqContent | null>(null)
 const loading = ref(false)
@@ -51,9 +53,9 @@ const isMulti = computed(() => props.type === 'objective_multi_mcq')
 
 const typeBadge = computed(() => {
   switch (props.type) {
-    case 'objective_single_mcq': return { label: 'Single Choice', color: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' }
-    case 'objective_multi_mcq': return { label: 'Multiple Choice', color: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' }
-    case 'subjective_mcq': return { label: 'Subjective', color: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400' }
+    case 'objective_single_mcq': return { label: t('courses.mcq.typeSingleChoice'), color: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' }
+    case 'objective_multi_mcq': return { label: t('courses.mcq.typeMultipleChoice'), color: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' }
+    case 'subjective_mcq': return { label: t('courses.mcq.typeSubjective'), color: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400' }
   }
 })
 
@@ -70,7 +72,7 @@ async function loadContent() {
     try {
       parseAndReset(props.contentInline)
     } catch (e: unknown) {
-      error.value = `Failed to parse question: ${e}`
+      error.value = t('courses.mcq.parseError', { error: String(e) })
       mcq.value = null
     }
     return
@@ -84,7 +86,7 @@ async function loadContent() {
     const json = decoder.decode(new Uint8Array(bytes))
     parseAndReset(json)
   } catch (e: unknown) {
-    error.value = `Failed to load question: ${e}`
+    error.value = t('courses.mcq.loadError', { error: String(e) })
     mcq.value = null
   } finally {
     loading.value = false
@@ -215,7 +217,7 @@ watch(() => props.elementId, () => {
 
     <!-- No content -->
     <div v-else-if="!mcq" class="py-8 text-center text-sm text-muted-foreground">
-      No question content available.
+      {{ $t('courses.mcq.noContent') }}
     </div>
 
     <!-- MCQ Content -->
@@ -226,7 +228,7 @@ watch(() => props.elementId, () => {
           {{ typeBadge.label }}
         </span>
         <span v-if="isMulti" class="text-xs text-muted-foreground">
-          (Select all that apply)
+          {{ $t('courses.mcq.selectAllThatApply') }}
         </span>
       </div>
 
@@ -296,10 +298,10 @@ watch(() => props.elementId, () => {
         </svg>
         <div>
           <p class="text-sm font-medium" :class="score >= 0.7 ? 'text-emerald-800 dark:text-emerald-300' : 'text-red-800 dark:text-red-300'">
-            {{ score >= 0.7 ? 'Correct!' : 'Incorrect' }}
+            {{ score >= 0.7 ? $t('courses.mcq.correct') : $t('courses.mcq.incorrect') }}
           </p>
           <p v-if="isMulti" class="text-xs" :class="score >= 0.7 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'">
-            Score: {{ Math.round(score * 100) }}%
+            {{ $t('courses.mcq.scorePct', { pct: Math.round(score * 100) }) }}
           </p>
         </div>
       </div>
@@ -310,7 +312,7 @@ watch(() => props.elementId, () => {
           <path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
         </svg>
         <p class="text-sm text-blue-800 dark:text-blue-300">
-          Answer submitted. This response will be reviewed.
+          {{ $t('courses.mcq.answerReview') }}
         </p>
       </div>
 
@@ -320,7 +322,7 @@ watch(() => props.elementId, () => {
           <path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
         </svg>
         <div>
-          <p class="text-xs font-medium text-muted-foreground">Explanation</p>
+          <p class="text-xs font-medium text-muted-foreground">{{ $t('courses.mcq.explanation') }}</p>
           <p class="mt-1 text-sm text-foreground">{{ mcq.explanation }}</p>
         </div>
       </div>
@@ -332,7 +334,7 @@ watch(() => props.elementId, () => {
           :disabled="selectedIndices.length === 0"
           @click="submitAnswer"
         >
-          Submit Answer
+          {{ $t('courses.mcq.submitAnswer') }}
         </AppButton>
         <AppButton
           v-if="submitted && !isSubjective && score < 0.7 && !readOnly"
@@ -340,7 +342,7 @@ watch(() => props.elementId, () => {
           size="sm"
           @click="tryAgain"
         >
-          Try Again
+          {{ $t('common.actions.retry') }}
         </AppButton>
       </div>
     </div>

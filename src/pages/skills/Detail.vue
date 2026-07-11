@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { AppBadge, EmptyState } from '@/components/ui'
@@ -7,6 +8,7 @@ import { extractSkillClaim, type SkillDetail, type VerifiableCredential } from '
 import { BLOOM_ORDER, bloomBadge } from '@/utils/bloom'
 
 const { invoke } = useLocalApi()
+const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 
@@ -52,7 +54,7 @@ onMounted(async () => {
       return claim !== null && claim.skillId === skillId
     })
   } catch (e: any) {
-    error.value = typeof e === 'string' ? e : e?.message ?? 'Failed to load skill'
+    error.value = typeof e === 'string' ? e : e?.message ?? t('skills.detail.loadError')
     console.error('Failed to load skill:', e)
   } finally {
     loading.value = false
@@ -65,9 +67,9 @@ function goToSkill(id: string) {
 
 
 const relationLabels: Record<string, string> = {
-  related: 'Related',
-  complementary: 'Complementary',
-  alternative: 'Alternative',
+  related: t('skills.detail.relation.related'),
+  complementary: t('skills.detail.relation.complementary'),
+  alternative: t('skills.detail.relation.alternative'),
 }
 </script>
 
@@ -81,7 +83,7 @@ const relationLabels: Record<string, string> = {
       <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
         <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
       </svg>
-      Back to Taxonomy
+      {{ $t('skills.detail.back') }}
     </button>
 
     <!-- Loading skeleton -->
@@ -156,7 +158,7 @@ const relationLabels: Record<string, string> = {
           </svg>
         </div>
         <div>
-          <p class="text-sm font-medium text-foreground">Failed to load skill</p>
+          <p class="text-sm font-medium text-foreground">{{ $t('skills.detail.loadError') }}</p>
           <p class="text-xs text-muted-foreground mt-1">{{ error }}</p>
         </div>
         <button
@@ -166,7 +168,7 @@ const relationLabels: Record<string, string> = {
           <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
           </svg>
-          Back to Skills
+          {{ $t('skills.detail.backToSkills') }}
         </button>
       </div>
     </div>
@@ -227,13 +229,13 @@ const relationLabels: Record<string, string> = {
         <!-- Prerequisites -->
         <div class="card p-5">
           <h2 class="text-sm font-semibold text-foreground mb-3">
-            Prerequisites
+            {{ $t('skills.detail.prerequisites') }}
             <span class="text-muted-foreground font-normal ml-1">
               ({{ detail.prerequisites.length }})
             </span>
           </h2>
           <p v-if="detail.prerequisites.length === 0" class="text-xs text-muted-foreground italic">
-            No prerequisites -- this is a foundational skill.
+            {{ $t('skills.detail.noPrerequisites') }}
           </p>
           <div v-else class="space-y-1">
             <div
@@ -258,13 +260,13 @@ const relationLabels: Record<string, string> = {
         <!-- Dependents -->
         <div class="card p-5">
           <h2 class="text-sm font-semibold text-foreground mb-3">
-            Dependents
+            {{ $t('skills.detail.dependents') }}
             <span class="text-muted-foreground font-normal ml-1">
               ({{ detail.dependents.length }})
             </span>
           </h2>
           <p v-if="detail.dependents.length === 0" class="text-xs text-muted-foreground italic">
-            No skills depend on this one yet.
+            {{ $t('skills.detail.noDependents') }}
           </p>
           <div v-else class="space-y-1">
             <div
@@ -290,7 +292,7 @@ const relationLabels: Record<string, string> = {
       <!-- Related Skills -->
       <div v-if="detail.related.length > 0" class="card p-5 mt-6">
         <h2 class="text-sm font-semibold text-foreground mb-3">
-          Related Skills
+          {{ $t('skills.detail.related') }}
           <span class="text-muted-foreground font-normal ml-1">
             ({{ detail.related.length }})
           </span>
@@ -317,11 +319,11 @@ const relationLabels: Record<string, string> = {
 
       <!-- Your credentials for this skill -->
       <div class="card p-5 mt-6">
-        <h2 class="text-sm font-semibold text-foreground mb-3">Your Credentials</h2>
+        <h2 class="text-sm font-semibold text-foreground mb-3">{{ $t('skills.detail.yourCredentials') }}</h2>
         <EmptyState
           v-if="myCredentials.length === 0"
-          title="No credentials yet"
-          description="Auto-earned Verifiable Credentials for this skill will appear here. Complete a course tagged with this skill to earn one."
+          :title="$t('skills.detail.credEmptyTitle')"
+          :description="$t('skills.detail.credEmptyBody')"
         />
         <div v-else class="space-y-3">
           <div
@@ -337,25 +339,27 @@ const relationLabels: Record<string, string> = {
                   {{ BLOOM_ORDER[extractSkillClaim(vc.credentialSubject)?.level ?? 2] ?? 'apply' }}
                 </AppBadge>
                 <span class="ml-2 text-sm font-medium text-foreground">
-                  {{ ((extractSkillClaim(vc.credentialSubject)?.score ?? 0) * 100).toFixed(0) }}% score
+                  {{ $t('skills.detail.scorePct', { percent: ((extractSkillClaim(vc.credentialSubject)?.score ?? 0) * 100).toFixed(0) }) }}
                 </span>
               </div>
               <span class="text-xs text-muted-foreground font-mono">
                 {{ vc.validFrom.slice(0, 10) }}
               </span>
             </div>
-            <div class="flex flex-wrap gap-1.5 text-[10px]">
-              <AppBadge v-if="vc.witness" variant="success">on-chain witness</AppBadge>
+            <div class="flex flex-wrap items-center gap-1.5 text-[10px]">
+              <AppBadge v-if="vc.witness" variant="success">{{ $t('common.status.verified') }}</AppBadge>
               <AppBadge variant="secondary">{{ vc.type[vc.type.length - 1] }}</AppBadge>
-              <span v-if="vc.witness" class="text-muted-foreground font-mono">
-                tx {{ vc.witness.tx_hash.slice(0, 12) }}…
-              </span>
+              <details v-if="vc.witness" class="text-[10px]">
+                <summary class="cursor-pointer text-muted-foreground">{{ $t('common.advanced.toggle') }}</summary>
+                <span class="text-muted-foreground font-mono">
+                  {{ $t('skills.detail.receipt') }} {{ vc.witness.tx_hash.slice(0, 12) }}…
+                </span>
+              </details>
             </div>
           </div>
         </div>
         <p v-if="bestCredential" class="mt-3 text-xs text-muted-foreground">
-          Highest credential: level
-          {{ BLOOM_ORDER[extractSkillClaim(bestCredential.credentialSubject)?.level ?? 2] ?? 'apply' }}.
+          {{ $t('skills.detail.highest', { level: BLOOM_ORDER[extractSkillClaim(bestCredential.credentialSubject)?.level ?? 2] ?? 'apply' }) }}
         </p>
       </div>
     </template>

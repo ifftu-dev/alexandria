@@ -1,0 +1,99 @@
+{
+  "browse": {
+    "title": "浏览插件",
+    "intro": "内置的活动类型，加上应用发现的社区扩展。经社区批准的插件可以签发默认计入的凭证。尚未经审核的插件也能使用，但在社区审核之前，它们的评分只计作你的进度。",
+    "builtin": "内置",
+    "community": "社区",
+    "emptyTitle": "还没有社区插件",
+    "emptyDescription": "社区扩展来自其他学习者。一旦有人发布，它就会显示在这里。",
+    "loadFailed": "无法加载插件列表：{error}"
+  },
+  "badge": {
+    "builtin": "内置",
+    "unknown": "未审核",
+    "knownFlawed": "已知问题",
+    "attested": "社区批准",
+    "unattested": "尚未审核",
+    "statusPending": "检查中…"
+  },
+  "meta": {
+    "kinds": "类型",
+    "graded": "计分",
+    "contentId": "内容 ID",
+    "author": "作者",
+    "caps": "权限",
+    "installed": "已添加"
+  },
+  "installed": {
+    "title": "插件",
+    "intro": "社区制作的学习和测评活动。每个插件都在一个隔离的沙箱中运行，无法访问互联网。你在每个插件首次需要时逐一授予权限（麦克风、摄像头等）。",
+    "installHeading": "从此设备上的文件夹添加",
+    "installHintPrefix": "指向此设备上的一个文件夹，其中包含它的",
+    "installHintAnd": "，以及一个",
+    "installHintSuffix": "包。很快你就能直接从其他学习者处添加插件了。",
+    "installPlaceholder": "/path/to/plugin-folder",
+    "installedHeading": "你的插件",
+    "emptyTitle": "还没有插件",
+    "emptyDescription": "在上方添加一个插件，以解锁新的学习和测评活动。",
+    "actions": {
+      "add": "添加",
+      "details": "详情",
+      "hide": "隐藏"
+    },
+    "errors": {
+      "enterPath": "请输入插件文件夹的路径。",
+      "installSuccess": "已添加“{name}”v{version}。",
+      "installFailed": "无法添加该插件：{error}",
+      "listFailed": "无法加载你的插件：{error}",
+      "detailsFailed": "无法加载插件详情：{error}",
+      "uninstallFailed": "无法移除该插件：{error}",
+      "revokeFailed": "无法关闭该权限：{error}"
+    },
+    "uninstallConfirm": "移除“{name}”？此操作会从此设备删除该插件。使用它的课程将无法工作，直到你再次添加它。",
+    "detail": {
+      "kinds": "类型",
+      "declaredCapabilities": "它可能请求的权限",
+      "platforms": "平台",
+      "apiVersion": "插件格式版本",
+      "none": "无",
+      "unspecified": "未指定",
+      "grantedHeading": "你已授予的权限",
+      "noGrants": "没有持久权限。该插件将在首次需要时请求。",
+      "revoke": "关闭"
+    }
+  },
+  "docs": {
+    "back": "返回插件",
+    "fallbackName": "插件",
+    "by": "作者：{name}",
+    "donate": "支持创作者",
+    "noReadme": "此插件未附带指南。",
+    "loadError": "无法加载指南：{error}"
+  },
+  "permission": {
+    "heading": "{name} 想要{action}",
+    "capabilities": {
+      "microphone": "使用你的麦克风",
+      "camera": "使用你的摄像头",
+      "midi": "连接到你的音乐（MIDI）设备",
+      "fullscreen": "填满整个屏幕",
+      "clipboard": "读取并更改你的剪贴板",
+      "storage": "在此设备上保存你的进度",
+      "mlInference": "直接在你的设备上运行 AI 模型"
+    },
+    "sandbox": "插件由社区制作，运行在一个安全的沙箱中。",
+    "madeBy": "制作者",
+    "noAccess": "它无法访问互联网或此设备上的任何其他数据。",
+    "always": "始终允许",
+    "session": "本次会话允许",
+    "once": "仅允许一次",
+    "deny": "不允许"
+  },
+  "host": {
+    "noCid": "此活动使用了一个插件，但其内容 ID 缺失。",
+    "disabled": "此插件已关闭。请在 设置 → 插件 中重新开启以使用它。",
+    "noKinds": "此插件未定义任何活动，因此无法运行。",
+    "noGrader": "此插件配置为计分，但未附带评分器。作者需要发布一个修复。",
+    "loadFailed": "无法加载该插件：{error}"
+  }
+}

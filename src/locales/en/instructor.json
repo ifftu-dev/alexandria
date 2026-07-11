@@ -1,0 +1,206 @@
+{
+  "dashboard": {
+    "title": "Instructor Dashboard",
+    "subtitle": "How learners are doing across your courses, plus what's waiting for your review.",
+    "inbox": "Inbox",
+    "compose": "+ Compose",
+    "statCourses": "Courses & tutorials",
+    "statPublished": "Published",
+    "statEnrollments": "Enrollments",
+    "statPendingReviews": "Waiting for review",
+    "colCourse": "Course",
+    "colStatus": "Status",
+    "colEnrolled": "Enrolled",
+    "colCompletion": "Completion",
+    "colAvgScore": "Avg score",
+    "colReviews": "Reviews",
+    "colLastActivity": "Last activity",
+    "emptyTitle": "No courses yet",
+    "emptyDesc": "Build your first course or tutorial to see learner activity here."
+  },
+  "myCourses": {
+    "title": "My Courses",
+    "subtitle": "Everything you've built on this device — drafts and published.",
+    "addCourse": "+ Course",
+    "addTutorial": "+ Tutorial",
+    "emptyTitle": "Nothing built yet",
+    "emptyDesc": "Create your first course or tutorial with the composer.",
+    "updated": "Updated {date}"
+  },
+  "courseLearners": {
+    "eyebrow": "Learner progress",
+    "fallbackTitle": "Course",
+    "emptyTitle": "No sign-ups yet on this device",
+    "emptyDesc": "Each learner's progress lives on their own device — this view shows what the app has found here (sign-ups and in-class submissions).",
+    "colLearner": "Learner",
+    "colStatus": "Status",
+    "colProgress": "Progress",
+    "colAvgScore": "Avg score",
+    "colTimeSpent": "Time spent",
+    "colLastActivity": "Last activity",
+    "localLearner": "Local learner"
+  },
+  "inbox": {
+    "title": "Inbox",
+    "subtitle": "Learner submissions waiting for your review, plus pending classroom join requests.",
+    "tabAll": "All",
+    "tabSubmissions": "Submissions",
+    "tabJoinRequests": "Join requests",
+    "emptyTitle": "All caught up",
+    "emptyDesc": "Nothing is waiting for your review."
+  },
+  "submissionReview": {
+    "eyebrow": "Submission review",
+    "title": "Review submission",
+    "notFoundTitle": "Submission not found",
+    "notFoundDesc": "It may have been reviewed already or removed.",
+    "from": "from",
+    "submittedWork": "Submitted work",
+    "yourReview": "Your review",
+    "scoreLabel": "Score — {percent}%",
+    "perSkillRatings": "Per-skill ratings",
+    "feedback": "Feedback",
+    "feedbackPlaceholder": "What was strong, what to improve…",
+    "postReview": "Post review",
+    "reviewed": "Reviewed",
+    "finalScore": "Score:"
+  },
+  "compose": {
+    "newCourse": "New Course",
+    "newTutorial": "New Tutorial",
+    "courseIntro": "A course is organized into chapters, each holding videos, lessons, quizzes, assessments, and hands-on exercises.",
+    "tutorialIntro": "A tutorial is a short single-track lesson — usually one video with markers and an optional quiz.",
+    "titleLabel": "Title",
+    "titlePlaceholder": "e.g., Practical Cryptography",
+    "descriptionLabel": "Description",
+    "descriptionPlaceholder": "One-paragraph pitch.",
+    "tagsLabel": "Tags (comma-separated)",
+    "tagsPlaceholder": "e.g., security, beginner",
+    "createDraft": "Create draft",
+    "needTitle": "Give it a title first.",
+    "editMeta": "Edit title and description",
+    "publish": "Publish",
+    "beforePublish": "Before you publish",
+    "blockerNeedElement": "Add at least one element.",
+    "blockerUnboundPlugins": "none | {count} plugin element still needs a plugin chosen | {count} plugin elements still need a plugin chosen",
+    "publishedTitle": "Your course is live",
+    "publishedNote": "Learners can find and enroll in it now.",
+    "fingerprintLabel": "Content fingerprint",
+    "sizeBytes": "none | {count} byte | {count} bytes",
+    "nothingSelectedTitle": "Nothing selected",
+    "nothingSelectedDesc": "Pick an element from the outline, or add one to start building.",
+    "confirmPublishTitle": "Publish",
+    "confirmPublishMessage": "This publishes '{title}' so learners can find and enroll right away. It's signed by you and shared directly with your connections.",
+    "confirmDeleteTitle": "Delete",
+    "confirmDeleteMessage": "This permanently deletes the draft and all its chapters and elements. This can't be undone.",
+    "editDetails": "Edit details",
+    "notFoundTitle": "Not found",
+    "notFoundDesc": "This course or tutorial doesn't exist on this device."
+  },
+  "outline": {
+    "elementTitlePlaceholder": "Element title",
+    "chapterTitlePlaceholder": "Chapter title",
+    "add": "Add",
+    "addChapter": "Add chapter",
+    "addElement": "+ Add element",
+    "addChapterCta": "+ Add chapter"
+  },
+  "elementTypes": {
+    "video": "Video",
+    "text": "Text",
+    "pdf": "PDF",
+    "downloadable": "Download",
+    "quiz": "Quiz",
+    "objectiveSingleMcq": "Single MCQ",
+    "objectiveMultiMcq": "Multi MCQ",
+    "subjectiveMcq": "Subjective MCQ",
+    "essay": "Essay",
+    "interactive": "Interactive",
+    "assessment": "Assessment",
+    "plugin": "Plugin"
+  },
+  "elementEditor": {
+    "deleteElement": "Delete element",
+    "titlePlaceholder": "Element title",
+    "confirmDeleteTitle": "Delete element",
+    "confirmDeleteMessage": "This removes the element and its content from the course. This can't be undone."
+  },
+  "skillPicker": {
+    "searchPlaceholder": "Search skills…",
+    "removeSkill": "Remove {name}",
+    "addSkill": "Skill"
+  },
+  "editors": {
+    "shared": {
+      "uploaded": "Uploaded"
+    },
+    "video": {
+      "fileHeading": "Video file",
+      "minutes": "{count} min",
+      "reading": "Reading {size} MB…",
+      "saving": "Saving to this device…",
+      "uploadFailed": "Upload failed: {error}",
+      "markersHeading": "Chapter markers",
+      "addMarker": "+ Marker",
+      "saveMarkers": "Save markers",
+      "markersHint": "Timestamps become clickable navigation below the video.",
+      "markerTitlePlaceholder": "Marker title",
+      "startSeconds": "Start (seconds)"
+    },
+    "file": {
+      "pdfHeading": "PDF document",
+      "downloadHeading": "Downloadable file",
+      "uploading": "Uploading…",
+      "uploadFailed": "Upload failed: {error}"
+    },
+    "quiz": {
+      "questionsHeading": "Questions",
+      "multiHint": "multiple correct answers",
+      "singleHint": "one correct answer",
+      "addQuestion": "+ Question",
+      "saveQuiz": "Save quiz",
+      "empty": "No questions yet — add the first one.",
+      "questionPlaceholder": "Question prompt",
+      "removeQuestion": "Remove question",
+      "optionPlaceholder": "Option {number}",
+      "correctAnswer": "Correct answer",
+      "markCorrect": "Mark as correct",
+      "removeOption": "Remove option",
+      "addOption": "+ Add option",
+      "errNeedQuestion": "Add at least one question.",
+      "errNoPrompt": "Question {number} has no prompt.",
+      "errTooFewOptions": "Question {number} needs at least two options.",
+      "errNoCorrect": "Question {number} has no correct answers marked."
+    },
+    "text": {
+      "heading": "Lesson body (Markdown)",
+      "placeholder": "# Lesson title\n\nWrite the lesson in Markdown…"
+    },
+    "essay": {
+      "heading": "Essay assignment",
+      "promptLabel": "Prompt",
+      "promptPlaceholder": "What should the learner write about?",
+      "rubricLabel": "Grading rubric (shown to you when reviewing, and to the learner up front)",
+      "rubricPlaceholder": "e.g., Thesis clarity (30%), Evidence (40%), Structure (30%)",
+      "minWordsLabel": "Minimum words (optional)",
+      "hint": "Essay submissions land in your instructor inbox for manual review and scoring.",
+      "errNeedPrompt": "The essay needs a prompt."
+    },
+    "json": {
+      "assessmentHeading": "Assessment definition (JSON)",
+      "interactiveHeading": "Interactive content (JSON)",
+      "invalidJson": "Invalid JSON.",
+      "errFixJson": "Fix the JSON before saving."
+    },
+    "plugin": {
+      "heading": "Plugin binding",
+      "installedLabel": "Installed plugin",
+      "pickOption": "Pick a plugin…",
+      "noneInstalled": "No enabled plugins installed — add one under Settings → Plugins.",
+      "configLabel": "Element config (JSON passed to the plugin at init — e.g. a codejudge problem definition)",
+      "invalidJson": "Invalid JSON.",
+      "errPickFirst": "Pick a plugin first.",
+      "errFixConfig": "Fix the config JSON before saving."
+    }
+  }
+}

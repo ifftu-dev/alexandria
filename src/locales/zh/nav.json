@@ -1,0 +1,78 @@
+{
+  "primary": {
+    "home": "首页",
+    "opinions": "观点",
+    "community": "社区",
+    "skills": "技能",
+    "goals": "目标",
+    "dashboard": "工作台",
+    "myCourses": "我的课程",
+    "inbox": "收件箱",
+    "myChildren": "我的孩子"
+  },
+  "sections": {
+    "liveTutoring": "实时辅导",
+    "classrooms": "教室",
+    "skillGraph": "技能图谱",
+    "viewAllSessions": "查看所有会话",
+    "viewAllClassrooms": "查看所有教室",
+    "noSessions": "还没有会话",
+    "noClassrooms": "还没有教室",
+    "memberCount": "无成员 | {count} 名成员 | {count} 名成员"
+  },
+  "status": {
+    "active": "活跃",
+    "ended": "已结束",
+    "cancelled": "已取消"
+  },
+  "mode": {
+    "ariaLabel": "当前模式",
+    "learner": "学习者",
+    "instructor": "讲师",
+    "learnerHint": "学习者模式——学习课程并获得凭证",
+    "instructorHint": "讲师模式——构建课程并审阅作业"
+  },
+  "topbar": {
+    "expandSidebar": "展开侧边栏",
+    "collapseSidebar": "收起侧边栏",
+    "goBack": "后退",
+    "goForward": "前进",
+    "forward": "前进",
+    "openSearch": "打开搜索",
+    "searchPlaceholder": "搜索技能、课程、社区群组…",
+    "alpha": "内测版",
+    "instructorMode": "讲师模式",
+    "instructorModeHint": "你正处于讲师模式——构建和审阅，而非学习",
+    "guardian": "监护人",
+    "guardianHint": "监护人账户——监督你孩子的学习"
+  },
+  "prerelease": {
+    "title": "预发布版本——请勿用于生产环境",
+    "titleVersion": "预发布版本 v{version}——请勿用于生产环境"
+  },
+  "theme": {
+    "ariaLabel": "当前主题：{theme}。点击切换。",
+    "light": "浅色",
+    "dark": "深色",
+    "system": "跟随系统"
+  },
+  "userMenu": {
+    "ariaLabel": "{name} 的账户菜单",
+    "defaultName": "你",
+    "anonymous": "匿名",
+    "onThisDevice": "在此设备上",
+    "roleInstructor": "讲师",
+    "roleInstructorLearner": "讲师 · 学习者模式",
+    "myProfile": "我的档案",
+    "myLearning": "我的学习",
+    "myCredentials": "我的凭证",
+    "sponsor": "赞助方",
+    "mySkills": "我的技能",
+    "myReputation": "我的声誉",
+    "sentinel": "Sentinel",
+    "community": "社区",
+    "settings": "设置",
+    "switchUser": "切换用户",
+    "lockAccount": "锁定账户"
+  }
+}

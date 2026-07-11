@@ -10,9 +10,9 @@ import type { CredentialType } from '@/types'
 export type CredentialClass = CredentialType | 'DerivedCredential'
 
 export interface CredentialKindMeta {
-  /** Full human label. */
+  /** i18n key for the full human label. */
   label: string
-  /** Compact label for chips/badges. */
+  /** i18n key for the compact label used in chips/badges. */
   short: string
   /** Badge classes: background + text + ring. */
   badge: string
@@ -25,8 +25,8 @@ export interface CredentialKindMeta {
 }
 
 const UNKNOWN: CredentialKindMeta = {
-  label: 'Credential',
-  short: 'Other',
+  label: 'credentials.kind.unknown.label',
+  short: 'credentials.kind.unknown.short',
   badge: 'bg-muted text-muted-foreground ring-1 ring-border',
   dot: 'bg-muted-foreground/60',
   text: 'text-muted-foreground',
@@ -36,8 +36,8 @@ const UNKNOWN: CredentialKindMeta = {
 export const CREDENTIAL_KINDS: Record<CredentialClass, CredentialKindMeta> = {
   // Official completion cert from an authority.
   FormalCredential: {
-    label: 'Formal',
-    short: 'Formal',
+    label: 'credentials.kind.formal.label',
+    short: 'credentials.kind.formal.short',
     badge: 'bg-indigo-100 text-indigo-700 ring-1 ring-indigo-200 dark:bg-indigo-900/30 dark:text-indigo-300 dark:ring-indigo-800',
     dot: 'bg-indigo-500',
     text: 'text-indigo-600 dark:text-indigo-400',
@@ -45,8 +45,8 @@ export const CREDENTIAL_KINDS: Record<CredentialClass, CredentialKindMeta> = {
   },
   // Result of a graded evaluation (quiz/exam/codejudge).
   AssessmentCredential: {
-    label: 'Assessment',
-    short: 'Assess',
+    label: 'credentials.kind.assessment.label',
+    short: 'credentials.kind.assessment.short',
     badge: 'bg-amber-100 text-amber-700 ring-1 ring-amber-200 dark:bg-amber-900/30 dark:text-amber-300 dark:ring-amber-800',
     dot: 'bg-amber-500',
     text: 'text-amber-600 dark:text-amber-400',
@@ -54,8 +54,8 @@ export const CREDENTIAL_KINDS: Record<CredentialClass, CredentialKindMeta> = {
   },
   // A third party vouches for you (endorsement/attendance/integrity).
   AttestationCredential: {
-    label: 'Attestation',
-    short: 'Attest',
+    label: 'credentials.kind.attestation.label',
+    short: 'credentials.kind.attestation.short',
     badge: 'bg-emerald-100 text-emerald-700 ring-1 ring-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-300 dark:ring-emerald-800',
     dot: 'bg-emerald-500',
     text: 'text-emerald-600 dark:text-emerald-400',
@@ -63,8 +63,8 @@ export const CREDENTIAL_KINDS: Record<CredentialClass, CredentialKindMeta> = {
   },
   // A role/permission in a context (instructor, DAO member).
   RoleCredential: {
-    label: 'Role',
-    short: 'Role',
+    label: 'credentials.kind.role.label',
+    short: 'credentials.kind.role.short',
     badge: 'bg-sky-100 text-sky-700 ring-1 ring-sky-200 dark:bg-sky-900/30 dark:text-sky-300 dark:ring-sky-800',
     dot: 'bg-sky-500',
     text: 'text-sky-600 dark:text-sky-400',
@@ -72,8 +72,8 @@ export const CREDENTIAL_KINDS: Record<CredentialClass, CredentialKindMeta> = {
   },
   // Computed roll-up over evidence (not directly issued).
   DerivedCredential: {
-    label: 'Derived',
-    short: 'Derived',
+    label: 'credentials.kind.derived.label',
+    short: 'credentials.kind.derived.short',
     badge: 'bg-violet-100 text-violet-700 ring-1 ring-violet-200 dark:bg-violet-900/30 dark:text-violet-300 dark:ring-violet-800',
     dot: 'bg-violet-500',
     text: 'text-violet-600 dark:text-violet-400',
@@ -81,8 +81,8 @@ export const CREDENTIAL_KINDS: Record<CredentialClass, CredentialKindMeta> = {
   },
   // You claim it about yourself (lowest trust).
   SelfAssertion: {
-    label: 'Self',
-    short: 'Self',
+    label: 'credentials.kind.self.label',
+    short: 'credentials.kind.self.short',
     badge: 'bg-slate-100 text-slate-700 ring-1 ring-slate-200 dark:bg-slate-800/60 dark:text-slate-300 dark:ring-slate-700',
     dot: 'bg-slate-500',
     text: 'text-slate-600 dark:text-slate-400',

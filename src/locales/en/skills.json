@@ -1,0 +1,118 @@
+{
+  "index": {
+    "title": "My Skill Graph",
+    "subtitle": "Your personal map of skills — built from what you've earned, what you can start next, and what each skill builds on.",
+    "fromResume": "+ From resume"
+  },
+  "tabs": {
+    "graph": "My Graph",
+    "browse": "Browse Skills",
+    "credentials": "My Credentials"
+  },
+  "stats": {
+    "earned": "Earned",
+    "available": "Available",
+    "locked": "Locked",
+    "total": "All Skills"
+  },
+  "browse": {
+    "searchPlaceholder": "Search skills by name, description, or level…",
+    "emptyTitle": "No skills yet",
+    "emptyBody": "Skills are added by the community. Start a community group, propose a change, and get it approved to fill in the skill map.",
+    "areas": "Areas",
+    "topics": "Topics",
+    "levels": "Skill Levels",
+    "showAll": "Show all",
+    "noAreas": "No areas yet",
+    "noTopics": "No topics",
+    "noTopicsInArea": "No topics in this area",
+    "noMatches": "No skills match the current filters.",
+    "skillCount": "no skills | {count} skill | {count} skills",
+    "prerequisitesCount": "no prerequisites | {count} prerequisite | {count} prerequisites",
+    "unlocksCount": "unlocks nothing | unlocks {count} skill | unlocks {count} skills",
+    "goal": "🎯 Goal",
+    "goalTitle": "Set {name} as a goal"
+  },
+  "graph": {
+    "emptyTitle": "No skills to show yet",
+    "emptyBody": "Finish course assessments to earn credentials; the skills you unlock will appear here.",
+    "legendEarned": "Earned ({count})",
+    "legendAvailable": "Available ({count})",
+    "legendLocked": "Locked ({count})",
+    "legendNodeSize": "Dot size shows skill level (Remember → Create)",
+    "summary": "{skills} skills, {edges} prerequisite links"
+  },
+  "credentials": {
+    "emptyTitle": "No credentials yet",
+    "emptyBody": "Credentials you earn will appear here. Finish a course that can record a verified proof of completion to earn your first credential.",
+    "score": "score"
+  },
+  "detail": {
+    "back": "Back to all skills",
+    "loadError": "Failed to load skill",
+    "backToSkills": "Back to skills",
+    "prerequisites": "Prerequisites",
+    "noPrerequisites": "No prerequisites — this is a starting skill.",
+    "dependents": "Leads to",
+    "noDependents": "Nothing builds on this one yet.",
+    "related": "Related Skills",
+    "yourCredentials": "Your Credentials",
+    "credEmptyTitle": "No credentials yet",
+    "credEmptyBody": "Credentials you earn for this skill will appear here. Finish a course tagged with this skill to earn one.",
+    "scorePct": "{percent}% score",
+    "receipt": "Public record",
+    "highest": "Your best credential: level {level}.",
+    "relation": {
+      "related": "Related",
+      "complementary": "Complementary",
+      "alternative": "Alternative"
+    }
+  },
+  "bootstrap": {
+    "title": "Add your skills",
+    "intro": "Upload a resume, transcript, or credential and we'll suggest skills to claim. Accredited documents count for more than a self-made resume. These are starting points — take an assessment to verify and raise them.",
+    "addedTitle": "Skills added",
+    "addedBody": "Added {count} skill. Take an assessment to verify it and raise your confidence. | Added {count} skills. Take an assessment to verify them and raise your confidence.",
+    "viewMySkills": "View my skills",
+    "addMore": "Add more",
+    "docResumeLabel": "Resume / CV",
+    "docResumeHint": "Self-made — lower confidence",
+    "docTranscriptLabel": "Academic transcript",
+    "docTranscriptHint": "Accredited — higher confidence",
+    "docCredentialLabel": "Institution credential",
+    "docCredentialHint": "Accredited — higher confidence",
+    "chooseFile": "Choose file",
+    "filePlaceholder": "PDF, image, or text — stored as evidence",
+    "textPlaceholder": "Paste the document text here (required for PDFs / images)…",
+    "findSkills": "Find skills",
+    "noSkillsFound": "No matching skills found — try adding more detail.",
+    "confirmPrompt": "Confirm which skills to claim:",
+    "strong": "strong",
+    "claim": "Claim {count} skill | Claim {count} skills"
+  },
+  "visibility": {
+    "title": "Visibility & teaching",
+    "subtitle": "Choose which earned skills are public, and mark the ones you teach.",
+    "publicCount": "{public} / {total} public",
+    "showAll": "Show all",
+    "hideAll": "Hide all",
+    "loading": "Loading your skills…",
+    "empty": "No earned skills yet — credentials you earn will appear here for you to publish.",
+    "publicOn": "👁 Public",
+    "publicOff": "🔒 Private",
+    "publicOnTitle": "Public — click to hide",
+    "publicOffTitle": "Private — click to publish",
+    "teachOn": "★ Teaching",
+    "teachOff": "☆ Teach",
+    "teachOnTitle": "You teach this",
+    "teachOffTitle": "Mark as taught"
+  },
+  "path": {
+    "statusEarned": "Proven",
+    "statusAvailable": "Next",
+    "statusLocked": "Locked",
+    "goalBadge": "★ goal",
+    "empty": "Nothing to learn — you've already proven everything in this goal.",
+    "noCourse": "No course covers this yet."
+  }
+}

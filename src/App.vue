@@ -8,6 +8,7 @@ import BlankLayout from '@/layouts/BlankLayout.vue'
 import { useProfiles, onProfileLocked, onProfileReady } from '@/composables/useProfiles'
 import { useAccountStatus } from '@/composables/useAccountStatus'
 import { initTheme, initThemeFromSettings } from '@/composables/useTheme'
+import { initLocaleFromSettings } from '@/composables/useLocale'
 import { initShortcutsFromSettings } from '@/composables/useKeyboardShortcuts'
 import { initOmniRecentsFromSettings } from '@/composables/useOmniSearch'
 import { initSentinelFlagsFromSettings } from '@/composables/useSentinel'
@@ -74,6 +75,7 @@ async function hydrateProfileScopedState() {
     await useSettings().initialize()
     await Promise.all([
       initThemeFromSettings(),
+      initLocaleFromSettings(),
       initShortcutsFromSettings(),
       initOmniRecentsFromSettings(),
       initSentinelFlagsFromSettings(),
@@ -143,7 +145,7 @@ onUnmounted(() => {
   <div v-if="!ready" class="flex items-center justify-center h-full bg-background safe-area-top">
     <div class="text-center">
       <div class="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-      <p class="text-sm text-muted-foreground">Initializing...</p>
+      <p class="text-sm text-muted-foreground">{{ $t('common.app.initializing') }}</p>
     </div>
   </div>
   <component v-else :is="layout">

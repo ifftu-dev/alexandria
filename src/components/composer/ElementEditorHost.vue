@@ -87,7 +87,7 @@ async function deleteElement() {
         <StatusBadge :status="element.element_type" />
         <span class="text-xs text-muted-foreground font-mono truncate">{{ element.id.slice(0, 12) }}…</span>
         <AppButton variant="danger" size="xs" class="ml-auto" @click="showDelete = true">
-          Delete element
+          {{ $t('instructor.elementEditor.deleteElement') }}
         </AppButton>
       </div>
       <div class="flex items-center gap-2">
@@ -95,11 +95,11 @@ async function deleteElement() {
           v-model="title"
           type="text"
           class="flex-1 rounded-md border border-border bg-background px-3 py-2 text-base font-semibold"
-          placeholder="Element title"
+          :placeholder="$t('instructor.elementEditor.titlePlaceholder')"
           @input="titleDirty = true"
           @keydown.enter="saveTitle"
         >
-        <AppButton v-if="titleDirty" size="sm" :loading="savingTitle" @click="saveTitle">Save</AppButton>
+        <AppButton v-if="titleDirty" size="sm" :loading="savingTitle" @click="saveTitle">{{ $t('common.actions.save') }}</AppButton>
       </div>
       <SkillTagPicker :key="element.id" :element-id="element.id" />
     </div>
@@ -117,9 +117,9 @@ async function deleteElement() {
 
     <ConfirmDialog
       :open="showDelete"
-      title="Delete Element"
-      message="This removes the element and its content from the course. This cannot be undone."
-      confirm-label="Delete"
+      :title="$t('instructor.elementEditor.confirmDeleteTitle')"
+      :message="$t('instructor.elementEditor.confirmDeleteMessage')"
+      :confirm-label="$t('common.actions.delete')"
       confirm-variant="danger"
       :loading="deleting"
       @confirm="deleteElement"

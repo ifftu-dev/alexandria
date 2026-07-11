@@ -2,6 +2,7 @@
 // Essay editor — prompt + grading rubric, stored as content_inline JSON.
 // Essay submissions are manually reviewed, feeding the instructor inbox.
 import { ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { AppButton } from '@/components/ui'
 import type { Element } from '@/types'
@@ -10,6 +11,7 @@ const props = defineProps<{ element: Element }>()
 const emit = defineEmits<{ updated: [Element] }>()
 
 const { invoke } = useLocalApi()
+const { t } = useI18n()
 
 function parse(): { prompt: string; rubric: string; min_words: number | null } {
   try {
@@ -42,7 +44,7 @@ watch(() => props.element.id, () => {
 
 async function save() {
   if (!prompt.value.trim()) {
-    error.value = 'The essay needs a prompt.'
+    error.value = t('instructor.editors.essay.errNeedPrompt')
     return
   }
   saving.value = true
@@ -71,36 +73,36 @@ async function save() {
 <template>
   <div class="space-y-4">
     <div class="flex items-center justify-between">
-      <h3 class="text-sm font-semibold text-foreground">Essay assignment</h3>
-      <AppButton v-if="dirty" size="xs" :loading="saving" @click="save">Save</AppButton>
+      <h3 class="text-sm font-semibold text-foreground">{{ $t('instructor.editors.essay.heading') }}</h3>
+      <AppButton v-if="dirty" size="xs" :loading="saving" @click="save">{{ $t('common.actions.save') }}</AppButton>
     </div>
 
     <div>
-      <label class="mb-1 block text-xs font-medium text-muted-foreground">Prompt</label>
+      <label class="mb-1 block text-xs font-medium text-muted-foreground">{{ $t('instructor.editors.essay.promptLabel') }}</label>
       <textarea
         v-model="prompt"
         rows="5"
         class="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
-        placeholder="What should the learner write about?"
+        :placeholder="$t('instructor.editors.essay.promptPlaceholder')"
         @input="dirty = true"
       />
     </div>
 
     <div>
       <label class="mb-1 block text-xs font-medium text-muted-foreground">
-        Grading rubric (shown to you when reviewing, and to the learner up front)
+        {{ $t('instructor.editors.essay.rubricLabel') }}
       </label>
       <textarea
         v-model="rubric"
         rows="5"
         class="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
-        placeholder="e.g., Thesis clarity (30%), Evidence (40%), Structure (30%)"
+        :placeholder="$t('instructor.editors.essay.rubricPlaceholder')"
         @input="dirty = true"
       />
     </div>
 
     <div>
-      <label class="mb-1 block text-xs font-medium text-muted-foreground">Minimum words (optional)</label>
+      <label class="mb-1 block text-xs font-medium text-muted-foreground">{{ $t('instructor.editors.essay.minWordsLabel') }}</label>
       <input
         v-model.number="minWords"
         type="number"
@@ -111,7 +113,7 @@ async function save() {
     </div>
 
     <p class="text-xs text-muted-foreground">
-      Essay submissions land in your instructor inbox for manual review and scoring.
+      {{ $t('instructor.editors.essay.hint') }}
     </p>
     <p v-if="error" class="text-sm text-error">{{ error }}</p>
   </div>

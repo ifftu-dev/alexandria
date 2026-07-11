@@ -1,0 +1,188 @@
+{
+  "motif": {
+    "ubuntu": "我在，因为我们同在"
+  },
+  "wizard": {
+    "welcome": "欢迎",
+    "role": "你的角色",
+    "birthdate": "出生日期",
+    "password": "设置密码",
+    "createAccount": "创建账户",
+    "recoveryPhrase": "恢复短语",
+    "restoreAccount": "恢复账户",
+    "goals": "你的目标",
+    "skills": "你的技能",
+    "linkChild": "关联你的孩子",
+    "complete": "完成"
+  },
+  "aside": {
+    "title": "欢迎来到 Alexandria",
+    "subtitle": "通过几个引导步骤，设置你的学习账户。"
+  },
+  "roles": {
+    "learnerTitle": "学习者",
+    "learnerDesc": "学习课程、获得凭证、提升技能。",
+    "instructorTitle": "讲师",
+    "instructorDesc": "创作课程和教程、审阅提交、指导学习者。你可以随时切换到学习者模式。",
+    "parentTitle": "父母 / 监护人",
+    "parentDesc": "监督孩子的学习：关联他们的账户，并在你自己的设备上跟进他们的进度。"
+  },
+  "welcome": {
+    "tagline": "免费、去中心化的学习。你的凭证。你的身份。由你掌控。",
+    "whatHappens": "接下来会发生什么",
+    "step1": "你设置一个密码，以在此设备上保护你的账户。",
+    "step2": "我们为你创建账户——你的身份，只归你所有。",
+    "step3": "你会获得一段恢复短语——你的秘密备份。请写下来并妥善保管。",
+    "step4": "开始学习、获得凭证、掌控你的教育。",
+    "createAccount": "创建账户",
+    "restoreAccount": "恢复我的账户",
+    "signIn": "登录已有账户"
+  },
+  "role": {
+    "heading": "你将如何使用 Alexandria？",
+    "subtitle": "这会决定你的主界面和工具。讲师可以随时切换到学习者模式。"
+  },
+  "birthdate": {
+    "heading": "你是哪一天出生的？",
+    "subtitle": "你的出生日期只保留在此设备上——绝不会被分享。",
+    "label": "出生日期",
+    "ageStatement": "你今年 {age} 岁。",
+    "minorNotice": "由于你未满 18 岁，需要父母或监护人先激活你的账户，你才能开始学习。设置结束时，你会得到一个供他们使用的邀请码。"
+  },
+  "password": {
+    "titleCreate": "设置你的密码",
+    "titleImport": "恢复你的账户",
+    "subtitleCreate": "此密码用于在此设备上保护你的账户。",
+    "subtitleImport": "输入你的恢复短语，并为此设备设置一个密码。",
+    "recoveryLabel": "恢复短语",
+    "recoveryHint": "用于恢复账户的秘密备份。",
+    "recoveryPlaceholder": "输入你的 24 个单词的恢复短语，用空格分隔",
+    "wordsEntered": "尚未输入单词 | 已输入 {count} 个单词 | 已输入 {count} 个单词",
+    "wordsRule": "恢复短语必须包含 12、15 或 24 个单词。",
+    "usernameLabel": "用户名",
+    "usernamePlaceholder": "your_handle",
+    "usernameHint": "3–32 个字符 · 小写字母、数字、下划线。别人通过它找到你。",
+    "checking": "正在检查可用性…",
+    "usernameAvailable": "✓ {'@'}{handle} 可用",
+    "usernameTaken": "✕ {'@'}{handle} 已被占用",
+    "usernameUnknown": "⚠ 暂时无法检查可用性——你可以继续，但等你连接时该名称可能已被占用。",
+    "displayNameLabel": "显示名称",
+    "displayNamePlaceholder": "别人看到的你的名字",
+    "displayNameHint": "默认与用户名相同——你可以随时更改。",
+    "passwordLabel": "密码",
+    "passwordPlaceholder": "至少 12 个字符",
+    "passwordCounter": "{count}/12 个字符（最少）",
+    "confirmLabel": "确认密码",
+    "confirmPlaceholder": "再次输入密码",
+    "passwordsMismatch": "两次密码不一致。",
+    "passwordsMatch": "两次密码一致。",
+    "noRecoveryWarning": "没有密码找回功能。如果你忘记此密码，需要用恢复短语才能重新获得访问权限。",
+    "biometricLabel": "在此设备上启用生物识别解锁",
+    "biometricHint": "设置后使用 Touch ID / Face ID。你之后可在设置中更改。",
+    "errorHeading": "请检查这些信息",
+    "submitCreate": "创建账户",
+    "submitImport": "恢复我的账户"
+  },
+  "generating": {
+    "titleCreate": "正在创建你的账户",
+    "titleImport": "正在恢复你的账户",
+    "subtitle": "我们正在安全地为你设置，请稍候。",
+    "initializing": "正在初始化..."
+  },
+  "backup": {
+    "heading": "你的恢复短语",
+    "subtitle": "这是你的秘密备份。请把这 24 个单词写在纸上，妥善存放在安全的地方。如果你忘记密码，这是恢复账户的唯一方式。",
+    "copy": "复制恢复短语",
+    "copied": "已复制到剪贴板",
+    "warning": "切勿分享你的恢复短语。任何持有这些单词的人都能访问你的凭证。",
+    "confirm": "我已写下"
+  },
+  "goals": {
+    "heading": "你正在为什么而努力？",
+    "subtitle": "挑选一项考试、课程大纲或职位——我们会将其映射为技能图谱并规划你的路径。你可以随时更改或添加目标。",
+    "skip": "暂时跳过",
+    "continue": "继续 | 带着 {count} 个目标继续 | 带着 {count} 个目标继续"
+  },
+  "bootstrap": {
+    "heading": "你已经掌握了什么？",
+    "subtitle": "上传一份简历或成绩单，我们会将其映射为你可以认领的技能。来自认证院校的凭证比自制简历更有分量。你之后可以通过测评来验证任何技能。",
+    "skip": "暂时跳过",
+    "continue": "继续 | 带着 {count} 项技能继续 | 带着 {count} 项技能继续"
+  },
+  "linkChild": {
+    "heading": "关联你的孩子",
+    "subtitle": "你孩子的激活界面会显示一个邀请码。在此粘贴以激活其账户，并从此账户跟进他们的学习。",
+    "label": "邀请码",
+    "placeholder": "粘贴来自孩子设备的邀请码",
+    "hint": "两台设备都需在线才能完成关联。",
+    "linking": "正在关联…",
+    "submit": "关联孩子",
+    "skip": "暂时跳过——我稍后从工作台添加他们",
+    "childFallback": "你的孩子"
+  },
+  "done": {
+    "heading": "你已准备就绪",
+    "bodyCreate": "你的账户已创建并加密。",
+    "bodyImport": "你的账户已恢复并加密。",
+    "dataNote": "你的所有数据都留在此设备上，由你的密码保护。",
+    "minorNotice": "还差一步：你的账户需要一位父母或监护人。接下来你会得到一个邀请码分享给他们——他们在自己的设备上接受后，你的账户便会立即激活。",
+    "linkedWith": "已与 {name} 关联——他们的账户现已激活。",
+    "enterGuardian": "邀请我的监护人",
+    "enterParent": "打开我的工作台",
+    "enterLearner": "开始学习"
+  },
+  "errors": {
+    "passwordTooShortDetail": "你的密码必须至少 12 个字符。再多加几个字符，然后重试。",
+    "phraseLengthUnsupported": "不支持该长度的恢复短语。请使用 12、15 或 24 个单词的短语，然后重试。",
+    "phraseInvalid": "该恢复短语看起来无效。请检查单词顺序和拼写，然后重试。",
+    "createFailed": "我们暂时无法创建你的账户。{error}",
+    "restoreFailed": "我们暂时无法恢复你的账户。{error}",
+    "birthdateInvalid": "请输入一个有效的出生日期——它不能是将来的日期，也不能早于 120 年前。",
+    "usernameInvalid": "请选择一个用户名：3–32 个字符，仅限小写字母、数字和下划线。",
+    "usernameTaken": "该用户名已被占用——请另选一个。",
+    "displayNameRequired": "请选择一个显示名称以继续。",
+    "passwordTooShort": "你的密码太短。请使用至少 12 个字符，然后重试。",
+    "passwordsDoNotMatch": "确认密码尚不一致。请在两个字段中输入相同的密码以继续。",
+    "phraseRequired": "请输入你的恢复短语以继续。Alexandria 接受 12、15 或 24 个单词的短语。"
+  },
+  "biometric": {
+    "enabledSecure": "已在此设备上启用生物识别解锁。",
+    "enabledSession": "已为本次应用会话启用生物识别解锁（开发运行环境的钥匙串限制）。",
+    "skipped": "已跳过生物识别解锁设置。你仍可用密码解锁。"
+  },
+  "profileSelect": {
+    "heading": "今天由谁来学习？",
+    "subtitle": "选择一个档案以继续，或添加一个新的。",
+    "enterPassword": "输入密码以继续",
+    "passwordPlaceholder": "你的密码",
+    "unlock": "解锁",
+    "unlockBiometric": "用生物识别解锁",
+    "stageDecrypting": "正在解锁你的账户…",
+    "stageLoadingProfile": "正在加载你的档案…",
+    "stageOpeningData": "正在准备你的数据…",
+    "stageStartingApp": "正在启动应用…",
+    "stageAlmostThere": "就快好了——比平常稍慢一些…",
+    "welcomeBack": "欢迎回来——正带你回到首页…",
+    "biometricNotSetup": "尚未设置生物识别解锁。请先用密码解锁一次以启用它。",
+    "biometricUnavailable": "此版本中生物识别解锁不可用（权限 -34018）。请使用已签名的版本。",
+    "biometricFailed": "生物识别解锁失败：{error}",
+    "biometricMismatch": "生物识别密码与此档案不匹配。请输入你的密码。"
+  },
+  "guardianGate": {
+    "heading": "需要一位监护人来激活你的账户",
+    "subtitle": "由于你未满 18 岁，需要父母或监护人在他们自己的设备上批准你的账户，你才能开始学习。你在 Alexandria 上的一切活动他们都能看到。",
+    "howHeading": "运作方式",
+    "how1": "将下方的邀请码分享给你的父母或监护人。",
+    "how2": "他们安装 Alexandria，创建一个父母档案，并输入你的邀请码。",
+    "how3": "他们一旦接受（两台设备都在线），你的账户便会自动解锁。",
+    "codeHeading": "你的监护人邀请码",
+    "generating": "正在生成…",
+    "newCode": "新邀请码",
+    "codeHint": "有效期 7 天，仅限使用一次。请像对待密码一样对待它——任何持有它的人都能成为你的监护人。",
+    "copyCode": "复制邀请码",
+    "copied": "已复制到剪贴板",
+    "checking": "正在检查…",
+    "checkActivation": "检查激活状态",
+    "backToProfiles": "返回档案列表"
+  }
+}

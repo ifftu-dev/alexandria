@@ -7,9 +7,11 @@
  */
 import { computed, watch, ref, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { useCourseCompletion } from '@/composables/useCourseCompletion'
 import { CREDENTIAL_KINDS, type CredentialClass } from '@/components/credential/credentialKind'
 
+const { t } = useI18n()
 const router = useRouter()
 const {
   isOpen, courseTitle, isTutorial, txHash, mintStage, items, primaryCredentialId,
@@ -34,12 +36,12 @@ function fmtSecs(ms: number): string {
 // Right-hand readout on the progress bar: a live ETA while minting/anchoring,
 // then the final elapsed time once the batch is done.
 const etaLabel = computed(() => {
-  if (mintStage.value === 'issued') return `Done in ${fmtSecs(elapsedMs.value)}s`
+  if (mintStage.value === 'issued') return t('courses.completion.etaDone', { seconds: fmtSecs(elapsedMs.value) })
   if (mintStage.value === 'unavailable') return ''
   if (mintStage.value === 'anchoring') {
-    return etaMs.value > 0 ? `~${fmtSecs(etaMs.value)}s on-chain` : 'confirming…'
+    return etaMs.value > 0 ? t('courses.completion.etaSecuring', { seconds: fmtSecs(etaMs.value) }) : t('courses.completion.etaSecuringConfirming')
   }
-  return etaMs.value > 0 ? `~${fmtSecs(etaMs.value)}s left` : 'finishing…'
+  return etaMs.value > 0 ? t('courses.completion.etaLeft', { seconds: fmtSecs(etaMs.value) }) : t('courses.completion.etaFinishing')
 })
 
 function kindMeta(kind: string) {
@@ -119,25 +121,25 @@ const mint = computed(() => {
   switch (mintStage.value) {
     case 'issued':
       return {
-        label: total > 1 ? `${total} credentials minted` : 'Credential minted',
-        note: 'Your Verifiable Credentials are ready.',
+        label: t('courses.completion.credentialsReady', { count: total }, total),
+        note: t('courses.completion.credentialsReadyNote'),
       }
     case 'minting':
       return {
-        label: 'Minting credentials',
-        note: `${mintedCount.value}/${total} minted…`,
+        label: t('courses.completion.creatingLabel'),
+        note: t('courses.completion.creatingNote', { done: mintedCount.value, total }),
       }
     case 'anchoring':
       return {
-        label: 'Anchoring on Cardano',
-        note: 'Witness submitted — confirming on-chain…',
+        label: t('courses.completion.securingLabel'),
+        note: t('courses.completion.securingNote'),
       }
     default:
       return {
-        label: 'Credential not earned yet',
+        label: t('courses.completion.notEarnedLabel'),
         note: unmet.value.length
-          ? `Pass ${unmet.value.length} more assessment${unmet.value.length > 1 ? 's' : ''} to earn this credential.`
-          : 'This course has no assessment to credential yet.',
+          ? t('courses.completion.notEarnedNote', { count: unmet.value.length }, unmet.value.length)
+          : t('courses.completion.noAssessmentNote'),
       }
   }
 })
@@ -150,9 +152,9 @@ function viewCredential() {
   // A single issued credential → its detail; otherwise the credentials list
   // (derived view) where the whole batch + its evidence live.
   if (id && items.value.length === 1) {
-    router.push({ name: 'dashboard-credential-detail', params: { id } })
+    router.push({ name: 'credential-detail', params: { id } })
   } else {
-    router.push({ name: 'dashboard-credentials' })
+    router.push({ name: 'credentials' })
   }
 }
 
@@ -201,8 +203,8 @@ function continueToDashboard() {
             <div class="emblem-shine" />
           </div>
 
-          <p class="eyebrow">Achievement unlocked</p>
-          <h2 class="title">{{ isTutorial ? 'Tutorial complete' : 'Course complete' }}</h2>
+          <p class="eyebrow">{{ $t('courses.completion.achievementUnlocked') }}</p>
+          <h2 class="title">{{ isTutorial ? $t('courses.completion.tutorialComplete') : $t('courses.completion.courseComplete') }}</h2>
           <p class="course-name">{{ courseTitle }}</p>
 
           <!-- Credential mint progress -->
@@ -258,11 +260,11 @@ function continueToDashboard() {
                     <span
                       class="unmet-badge"
                       :class="u.best_score === null ? 'is-none' : 'is-fail'"
-                    >{{ u.best_score === null ? 'Not attempted' : 'Below passing' }}</span>
+                    >{{ u.best_score === null ? $t('courses.completion.notAttempted') : $t('courses.completion.belowPassing') }}</span>
                   </div>
                   <div class="unmet-scores">
-                    <span>Your score: <strong>{{ u.best_score === null ? '—' : pct(u.best_score) }}</strong></span>
-                    <span>Passing: <strong>{{ pct(u.required_score) }}</strong></span>
+                    <span>{{ $t('courses.completion.yourScore') }} <strong>{{ u.best_score === null ? '—' : pct(u.best_score) }}</strong></span>
+                    <span>{{ $t('courses.completion.passing') }} <strong>{{ pct(u.required_score) }}</strong></span>
                   </div>
                   <div class="unmet-bar">
                     <div class="unmet-need" :style="{ left: `${Math.round(u.required_score * 100)}%` }" />
@@ -270,14 +272,14 @@ function continueToDashboard() {
                   </div>
                 </li>
               </ul>
-              <p class="unmet-why-title">Why you may not have passed</p>
+              <p class="unmet-why-title">{{ $t('courses.completion.whyTitle') }}</p>
               <ul class="unmet-why">
-                <li v-if="anyAttempted">Your best score was below the passing mark — retake it to improve.</li>
-                <li v-if="unmet.some((u) => u.best_score === null)">A required assessment wasn't attempted.</li>
-                <li>Wrong or missing answers on scored questions, or submitting before answering all of them.</li>
-                <li>Multi-select questions need every correct option (and no incorrect ones) for full marks.</li>
+                <li v-if="anyAttempted">{{ $t('courses.completion.whyBelow') }}</li>
+                <li v-if="unmet.some((u) => u.best_score === null)">{{ $t('courses.completion.whyNotAttempted') }}</li>
+                <li>{{ $t('courses.completion.whyWrong') }}</li>
+                <li>{{ $t('courses.completion.whyMultiSelect') }}</li>
               </ul>
-              <p class="unmet-cta">Retake the assessment and score ≥ {{ pct(unmet[0]?.required_score ?? 0.6) }} to earn this credential.</p>
+              <p class="unmet-cta">{{ $t('courses.completion.cta', { pct: pct(unmet[0]?.required_score ?? 0.6) }) }}</p>
             </div>
 
             <a
@@ -286,14 +288,14 @@ function continueToDashboard() {
               :href="`https://preprod.cardanoscan.io/transaction/${txHash}`"
               target="_blank"
               rel="noopener"
-            >witness {{ shortTx }} ↗</a>
+            >{{ $t('courses.completion.viewPublicRecord') }}</a>
           </div>
 
           <div class="actions">
             <button v-if="hasCredential" class="btn btn-primary" @click="viewCredential">
-              View credential{{ items.length > 1 ? 's' : '' }}
+              {{ $t('courses.completion.viewCredentials', { count: items.length }, items.length) }}
             </button>
-            <button class="btn" @click="continueToDashboard">Continue</button>
+            <button class="btn" @click="continueToDashboard">{{ $t('common.actions.continue') }}</button>
           </div>
         </div>
       </div>

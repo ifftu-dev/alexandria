@@ -1,0 +1,40 @@
+{
+  "index": {
+    "title": "Vos objectifs",
+    "subtitle": "Les compétences vers lesquelles vous travaillez. Alexandria trace votre parcours à partir de ce que vous avez déjà prouvé.",
+    "perGoal": "Par objectif",
+    "combinedPath": "Parcours combiné",
+    "findSomeone": "Trouver quelqu'un",
+    "usernamePlaceholder": "{'@'}nomdutilisateur",
+    "viewProfile": "Voir le profil",
+    "yourHandle": "Vous êtes {'@'}{name} — partagez votre identifiant pour que les autres puissent vous trouver.",
+    "chartingPaths": "Traçage de vos parcours…",
+    "emptyTitle": "Aucun objectif pour l'instant",
+    "emptyDescription": "Choisissez un ensemble de compétences à viser — parcourez la bibliothèque de compétences ou la carte publique d'un enseignant et cliquez sur « Définir comme objectif ».",
+    "browseSkills": "Parcourir les compétences",
+    "skillsAcrossGoals": "{earned} / {total} compétences sur {goals} objectifs",
+    "skillsCount": "{earned} / {total} compétences",
+    "nextStep": "Suivant : {name}",
+    "allCleared": "Vous êtes prêt pour chaque étape 🎉",
+    "viewPath": "Voir le parcours",
+    "hidePath": "Masquer le parcours"
+  },
+  "picker": {
+    "jobRole": "Poste",
+    "exam": "Examen",
+    "curriculum": "Programme",
+    "jobDescription": "Description de poste",
+    "selectPrompt": "Sélectionnez un(e) {type}…",
+    "setAsGoal": "Définir comme objectif",
+    "pasteText": "Coller le texte",
+    "fromLink": "Depuis un lien",
+    "jobPostingUrl": "URL de l'offre d'emploi",
+    "jdPlaceholder": "Collez la description de poste ici…",
+    "findSkills": "Trouver des compétences",
+    "foundSkills": "Voici les compétences trouvées — confirmez celles à ajouter à votre objectif :",
+    "strongMatch": "forte",
+    "matched": "correspond à « {term} »",
+    "noMatchingSkills": "Aucune compétence correspondante trouvée — essayez une autre description.",
+    "addAsGoal": "Ajouter {count} compétence comme objectif | Ajouter {count} compétences comme objectif"
+  }
+}

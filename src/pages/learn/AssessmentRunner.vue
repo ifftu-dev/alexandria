@@ -77,10 +77,9 @@ async function submit() {
         :class="sentinel.isActive.value ? 'bg-success' : 'bg-muted-foreground'"
       />
       <div class="flex-1">
-        <span class="font-medium text-foreground">Integrity monitoring is on.</span>
+        <span class="font-medium text-foreground">{{ $t('learn.assessment.integrityOn') }}</span>
         <span class="text-muted-foreground">
-          This is a graded assessment, so Sentinel confirms it's you. Everything
-          runs on your device — only an integrity score is recorded.
+          {{ $t('learn.assessment.integrityNote') }}
         </span>
       </div>
       <span class="font-mono text-xs text-muted-foreground">
@@ -88,7 +87,7 @@ async function submit() {
       </span>
     </div>
 
-    <div v-if="loading" class="py-10 text-center text-sm text-muted-foreground">Preparing your assessment…</div>
+    <div v-if="loading" class="py-10 text-center text-sm text-muted-foreground">{{ $t('learn.assessment.preparing') }}</div>
 
     <div v-else-if="error && !attempt" class="rounded-lg border border-error/40 bg-error/5 p-4 text-sm text-error">
       {{ error }}
@@ -103,24 +102,24 @@ async function submit() {
         {{ result.passed ? '✓' : '—' }}
       </div>
       <h1 class="text-xl font-bold text-foreground">
-        {{ result.passed ? 'Passed' : 'Not passed yet' }} — {{ Math.round(result.score * 100) }}%
+        {{ result.passed ? $t('learn.assessment.passed') : $t('learn.assessment.notPassedYet') }} — {{ Math.round(result.score * 100) }}%
       </h1>
       <p class="text-sm text-muted-foreground">
         {{ result.passed
-          ? 'A verified assessment credential was issued — your confidence in this skill has gone up.'
-          : 'Review the material and try again — a fresh set of questions is drawn each attempt.' }}
+          ? $t('learn.assessment.passedNote')
+          : $t('learn.assessment.retryNote') }}
       </p>
       <div class="flex justify-center gap-2">
-        <AppButton @click="router.push('/skills')">View my skills</AppButton>
-        <AppButton v-if="!result.passed" variant="outline" @click="router.go(0)">Retake</AppButton>
+        <AppButton @click="router.push('/skills')">{{ $t('learn.assessment.viewSkills') }}</AppButton>
+        <AppButton v-if="!result.passed" variant="outline" @click="router.go(0)">{{ $t('learn.assessment.retake') }}</AppButton>
       </div>
     </div>
 
     <!-- Questions -->
     <template v-else-if="attempt">
-      <h1 class="text-xl font-bold text-foreground">Verify: {{ skillId.replace('skill_', '').replace(/_/g, ' ') }}</h1>
+      <h1 class="text-xl font-bold text-foreground">{{ $t('learn.assessment.verifyTitle', { name: skillId.replace('skill_', '').replace(/_/g, ' ') }) }}</h1>
       <p class="text-sm text-muted-foreground">
-        Select all correct answers. Pass mark {{ Math.round(attempt.pass_threshold * 100) }}%.
+        {{ $t('learn.assessment.selectAll', { percent: Math.round(attempt.pass_threshold * 100) }) }}
       </p>
 
       <div v-for="(q, qi) in attempt.questions" :key="q.id" class="rounded-xl border border-border p-4">
@@ -140,7 +139,7 @@ async function submit() {
       </div>
 
       <p v-if="error" class="text-sm text-error">{{ error }}</p>
-      <AppButton :loading="grading" @click="submit">Submit assessment</AppButton>
+      <AppButton :loading="grading" @click="submit">{{ $t('learn.assessment.submit') }}</AppButton>
     </template>
   </div>
 </template>
