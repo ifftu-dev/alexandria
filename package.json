@@ -12,6 +12,7 @@
     "check": "bash scripts/check.sh",
     "check:fast": "bash scripts/check.sh --fast",
     "check:tauri-commands": "node scripts/check-tauri-commands.mjs",
+    "tauri": "tauri",
     "i18n:keys": "node scripts/i18n/gen-keys.mjs",
     "i18n:parity": "node scripts/i18n/check-parity.mjs",
     "i18n:translate": "node scripts/i18n/translate.mjs",
