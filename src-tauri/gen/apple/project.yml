@@ -53,6 +53,9 @@ targets:
           - UIInterfaceOrientationLandscapeRight
         CFBundleShortVersionString: 0.1.0
         CFBundleVersion: "0.1.0"
+        # App uses only standard, exempt encryption — suppresses the
+        # per-upload TestFlight export-compliance prompt.
+        ITSAppUsesNonExemptEncryption: false
     entitlements:
       path: alexandria-node_iOS/alexandria-node_iOS.entitlements
     scheme:

@@ -10,6 +10,16 @@
 	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
+	<!-- Export compliance: the app uses only standard, published encryption
+	     (AES-256/SQLCipher, Ed25519/X25519, Argon2id, TLS/Noise). Because the
+	     full source is publicly available (open source), the encryption is
+	     exempt under US EAR §742.15(b)/§740.13(e) and the equivalent EU
+	     "publicly available" decontrol — which covers France, so no separate
+	     ANSSI declaration code is required. Declaring this suppresses the
+	     per-upload TestFlight export-compliance prompt. France availability
+	     itself is a territory setting in App Store Connect, not a bundle key. -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>CFBundleName</key>
 	<string>$(PRODUCT_NAME)</string>
 	<key>CFBundlePackageType</key>
