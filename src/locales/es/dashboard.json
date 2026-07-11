@@ -1,0 +1,219 @@
+{
+  "home": {
+    "greeting": {
+      "morning": "Buenos días",
+      "afternoon": "Buenas tardes",
+      "evening": "Buenas noches"
+    },
+    "conflict": {
+      "held": "{'@'}{name} ya está en uso por otra persona.",
+      "explain": "Lo reclamaron antes que tú, así que las búsquedas apuntan a ellos.",
+      "pick": "Elige un nuevo nombre de usuario →"
+    },
+    "hero": {
+      "resumeEyebrow": "Retoma donde lo dejaste",
+      "resumeTitleFallback": "Tu curso",
+      "resumeCta": "Reanudar curso",
+      "startEyebrow": "Empezar",
+      "startTitle": "Fija tu primera meta de aprendizaje",
+      "startCta": "Explorar habilidades",
+      "recommendedEyebrow": "Recomendado para ti",
+      "recommendedCta": "Abrir curso",
+      "exploreEyebrow": "Explorar",
+      "exploreTitle": "Descubre cursos de otros estudiantes",
+      "exploreCta": "Explorar cursos"
+    },
+    "stats": {
+      "teaching": "Impacto docente",
+      "learning": "Impacto de aprendizaje",
+      "skills": "Habilidades demostradas",
+      "confidence": "Confianza",
+      "teachingTipLabel": "¿Qué es el impacto docente?",
+      "teachingTipText": "El crédito que has ganado enseñando: el valor ponderado de las credenciales que los estudiantes obtuvieron de tus cursos y tutoriales.",
+      "learningTipLabel": "¿Qué es el impacto de aprendizaje?",
+      "learningTipText": "El crédito que has ganado como estudiante: el valor ponderado de las credenciales que has obtenido al terminar cursos.",
+      "skillsTipLabel": "¿Qué significa habilidades demostradas?",
+      "skillsTipText": "Habilidades distintas respaldadas por al menos una credencial en tu perfil.",
+      "confidenceTipLabel": "¿Qué es la confianza?",
+      "confidenceTipText": "La solidez media de las comprobaciones que respaldan tus credenciales: cuánto confían en ellas otros estudiantes."
+    },
+    "goals": {
+      "title": "Tus metas",
+      "viewAll": "Ver todas",
+      "next": "Siguiente: {name}",
+      "ready": "Estás listo 🎉",
+      "add": "Añadir una meta"
+    },
+    "graph": {
+      "title": "Tu mapa de habilidades",
+      "proven": "{count} habilidad demostrada | {count} habilidades demostradas",
+      "hide": "Ocultar ▴",
+      "expand": "Expandir ▾",
+      "empty": "Aún no hay habilidades demostradas. Consigue credenciales terminando cursos y aparecerán aquí.",
+      "levelTitle": "Nivel de habilidad: {level}",
+      "manage": "Gestionar visibilidad y enseñanza"
+    },
+    "pill": {
+      "tutorial": "Tutorial",
+      "course": "Curso"
+    },
+    "continue": "Seguir aprendiendo",
+    "enrolledOn": "Inscrito {date}",
+    "tutorials": {
+      "title": "Tutoriales rápidos",
+      "count": "{count} tutorial | {count} tutoriales"
+    },
+    "courses": {
+      "recommendedTitle": "Recomendado para ti",
+      "title": "Cursos",
+      "count": "{count} curso | {count} cursos",
+      "emptyTitle": "Aún no hay cursos",
+      "emptyBody": "Crea tu primer curso o encuentra otros compartidos por otros estudiantes.",
+      "create": "Crear curso"
+    },
+    "diag": {
+      "read": "Leer diagnósticos"
+    }
+  },
+  "reputation": {
+    "title": "Mi reputación",
+    "subtitle": "Tu posición, construida a partir de tu impacto docente y de lo que has aprendido.",
+    "tabs": {
+      "instructor": "Impacto docente",
+      "learner": "Perfil de aprendizaje"
+    },
+    "stats": {
+      "totalImpact": "Impacto total",
+      "skillsTaught": "Habilidades enseñadas",
+      "skillsDemonstrated": "Habilidades mostradas",
+      "avgConfidence": "Confianza promedio"
+    },
+    "empty": {
+      "instructorTitle": "Aún no hay reputación docente",
+      "instructorBody": "Publica cursos y ayuda a los estudiantes a obtener credenciales para construir tu impacto.",
+      "learnerTitle": "Aún no hay reputación de aprendizaje",
+      "learnerBody": "Termina cursos y obtén credenciales para construir tu perfil."
+    },
+    "assertion": {
+      "global": "General",
+      "credentials": "{count} credencial | {count} credenciales",
+      "confidenceSuffix": "{value} de confianza",
+      "confidence": "Confianza",
+      "median": "Mediana",
+      "learners": "Estudiantes",
+      "variance": "Varianza",
+      "evidence": "Evidencia"
+    }
+  },
+  "sponsor": {
+    "title": "Patrocinador",
+    "subtitle": "Crea evaluaciones basadas en roles a partir de una descripción de puesto y emite credenciales fiables a los candidatos que aprueben.",
+    "tabs": {
+      "orgs": "Organizaciones",
+      "roles": "Evaluaciones de rol",
+      "issue": "Emitir credencial"
+    },
+    "orgs": {
+      "new": "Nueva organización",
+      "emptyTitle": "Aún no hay organizaciones",
+      "emptyBody": "Crea una para empezar a construir evaluaciones de rol.",
+      "owner": "Propietario"
+    },
+    "roles": {
+      "new": "Nueva evaluación de rol",
+      "emptyTitle": "No hay evaluaciones de rol",
+      "emptyBody": "Crea una para una organización.",
+      "requiresClean": "requiere una sesión limpia",
+      "minIntegrity": "integridad mín. {value}",
+      "publish": "Publicar",
+      "archive": "Archivar"
+    },
+    "issue": {
+      "roleLabel": "Evaluación de rol",
+      "selectPlaceholder": "Selecciona…",
+      "candidateLabel": "ID público del candidato",
+      "sessionLabel": "ID de sesión de integridad",
+      "submit": "Emitir credencial de rol",
+      "submitting": "Emitiendo…",
+      "issued": "Credencial emitida",
+      "assurance": "garantía:",
+      "integrity": "integridad {value}"
+    },
+    "orgModal": {
+      "title": "Nueva organización",
+      "nameLabel": "Nombre",
+      "namePlaceholder": "Acme Corp"
+    },
+    "roleModal": {
+      "title": "Nueva evaluación de rol",
+      "orgLabel": "Organización",
+      "roleTitleLabel": "Título del rol",
+      "roleTitlePlaceholder": "SRE L4",
+      "jobLabel": "Descripción del puesto",
+      "jobPlaceholder": "Operar producción a escala…",
+      "skillsLabel": "ID de habilidades (separados por comas)",
+      "policy": "Política de emisión",
+      "minIntegrity": "Integridad mínima",
+      "maxCritical": "Máx. críticas",
+      "maxWarning": "Máx. advertencias",
+      "requireClean": "Requerir una sesión limpia",
+      "assuranceLabel": "Nivel de garantía requerido",
+      "assuranceNone": "(ninguno)"
+    },
+    "actions": {
+      "create": "Crear"
+    }
+  },
+  "sync": {
+    "title": "Sincronización entre dispositivos",
+    "subtitle": "Mantén tus datos al día en todos los dispositivos que hayas emparejado con este.",
+    "syncNow": "Sincronizar ahora",
+    "syncing": "Sincronizando…",
+    "stats": {
+      "devices": "Dispositivos",
+      "queue": "Cola",
+      "pending": "pendiente",
+      "autoSync": "Sincronización automática",
+      "on": "Activada",
+      "off": "Desactivada",
+      "lastSync": "Última sincronización",
+      "never": "Nunca"
+    },
+    "result": {
+      "title": "Sincronización finalizada",
+      "detail": "Se fusionaron {merged} filas en {ms} ms: enviadas {sent}, recibidas {received}"
+    },
+    "device": {
+      "heading": "Este dispositivo",
+      "id": "ID del dispositivo",
+      "name": "Nombre",
+      "platform": "Plataforma",
+      "unknown": "Desconocido",
+      "online": "En línea"
+    },
+    "pair": {
+      "heading": "Emparejar un dispositivo",
+      "generateTitle": "Generar un código",
+      "generateBody": "Crea un código de un solo uso en este dispositivo y luego introdúcelo en el otro. El código es secreto y caduca en 10 minutos.",
+      "generate": "Generar código de emparejamiento",
+      "generating": "Generando…",
+      "enterTitle": "Introducir un código",
+      "enterBody": "Pega un código creado en otro de tus dispositivos para emparejarlo y sincronizar de inmediato.",
+      "codePlaceholder": "Pega el código de emparejamiento",
+      "pair": "Emparejar",
+      "pairing": "Emparejando…"
+    },
+    "paired": {
+      "heading": "Dispositivos emparejados",
+      "emptyTitle": "No hay otros dispositivos emparejados",
+      "emptyBody": "Usa el panel de arriba: genera un código aquí e introdúcelo en tu otro dispositivo (o al revés) para empezar a sincronizar.",
+      "tables": "{count} tabla sincronizada | {count} tablas sincronizadas",
+      "last": "· última {time}"
+    },
+    "history": {
+      "heading": "Historial de sincronización",
+      "emptyTitle": "No hay historial de sincronización",
+      "emptyBody": "Tu historial de sincronización aparecerá aquí después de tu primera sincronización."
+    }
+  }
+}

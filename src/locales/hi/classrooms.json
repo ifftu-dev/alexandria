@@ -1,0 +1,89 @@
+{
+  "index": {
+    "title": "कक्षाएँ",
+    "subtitle": "साथ मिलकर सीखने के लिए समूह स्थान",
+    "loading": "कक्षाएँ लोड हो रही हैं…",
+    "emptyTitle": "अभी तक कोई कक्षा नहीं",
+    "emptyBody": "समूह शिक्षण स्थान शुरू करने के लिए एक कक्षा बनाएँ, या पहुँच का अनुरोध करके किसी में शामिल हों।",
+    "createFirst": "अपनी पहली कक्षा बनाएँ"
+  },
+  "actions": {
+    "create": "बनाएँ",
+    "createClassroom": "कक्षा बनाएँ"
+  },
+  "create": {
+    "title": "कक्षा बनाएँ",
+    "nameLabel": "कक्षा का नाम",
+    "namePlaceholder": "उदा. उन्नत गणित",
+    "descriptionLabel": "विवरण",
+    "descriptionPlaceholder": "यह कक्षा किस बारे में है?",
+    "iconLabel": "आइकन इमोजी"
+  },
+  "members": {
+    "count": "कोई नहीं | {count} सदस्य | {count} सदस्य",
+    "heading": "सदस्य"
+  },
+  "roles": {
+    "member": "सदस्य",
+    "moderator": "मॉडरेटर",
+    "ownerSection": "स्वामी",
+    "moderatorSection": "मॉडरेटर",
+    "memberSection": "सदस्य"
+  },
+  "requests": {
+    "title": "शामिल होने के अनुरोध",
+    "empty": "कोई लंबित अनुरोध नहीं",
+    "approve": "स्वीकृत करें",
+    "deny": "अस्वीकार करें",
+    "link": "अनुरोध"
+  },
+  "settings": {
+    "title": "कक्षा सेटिंग्स",
+    "general": "सामान्य",
+    "inviteCode": "आमंत्रण कोड",
+    "inviteHint": "यह कोड दूसरों के साथ साझा करें ताकि वे आपकी कक्षा खोज सकें और शामिल होने का अनुरोध कर सकें।",
+    "membersHeading": "सदस्य",
+    "kick": "निकालें",
+    "dangerZone": "जोखिम क्षेत्र",
+    "archiveTitle": "इस कक्षा को संग्रहित करें",
+    "archiveBody": "कक्षा छिपा दी जाएगी और अब संदेश प्राप्त नहीं कर सकेगी।",
+    "archive": "संग्रहित करें",
+    "leaveTitle": "इस कक्षा को छोड़ें",
+    "leaveBody": "फिर से शामिल होने के लिए आपको दोबारा पहुँच का अनुरोध करना होगा।",
+    "leave": "छोड़ें",
+    "confirmKick": "क्या आप वाकई इस सदस्य को निकालना चाहते हैं?",
+    "confirmArchive": "इस कक्षा को संग्रहित करें? इसे पूर्ववत नहीं किया जा सकता।",
+    "confirmLeave": "इस कक्षा को छोड़ें?"
+  },
+  "nav": {
+    "settings": "सेटिंग्स"
+  },
+  "call": {
+    "active": "वॉइस कॉल सक्रिय",
+    "join": "कॉल में शामिल हों",
+    "start": "कॉल शुरू करें"
+  },
+  "channels": {
+    "heading": "चैनल",
+    "add": "चैनल जोड़ें",
+    "announcementBadge": "घोषणा चैनल",
+    "selectShort": "एक चैनल चुनें",
+    "selectToChat": "चैट शुरू करने के लिए एक चैनल चुनें",
+    "createTitle": "चैनल बनाएँ",
+    "namePlaceholder": "channel-name",
+    "typeText": "टेक्स्ट चैनल",
+    "typeAnnouncement": "घोषणा चैनल",
+    "fallbackName": "चैनल"
+  },
+  "messages": {
+    "empty": "अभी तक कोई संदेश नहीं। बातचीत शुरू करें!",
+    "loadMore": "पुराने संदेश लोड करें",
+    "deleted": "[हटाया गया]",
+    "inputPlaceholder": "संदेश #{channel}",
+    "inputHint": "भेजने के लिए Enter · नई पंक्ति के लिए Shift+Enter",
+    "send": "भेजें"
+  },
+  "common": {
+    "loading": "लोड हो रहा है…"
+  }
+}

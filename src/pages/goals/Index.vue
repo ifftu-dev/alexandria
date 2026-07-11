@@ -78,9 +78,9 @@ const dash = computed(() => 2 * Math.PI * 20)
   <div>
     <div class="mb-6 flex items-end justify-between">
       <div>
-        <h1 class="page-title">Your Goals</h1>
+        <h1 class="page-title">{{ $t('goals.index.title') }}</h1>
         <p class="mt-1 text-sm text-muted-foreground">
-          Skill graphs you're working toward. Alexandria charts the path from what you've proven.
+          {{ $t('goals.index.subtitle') }}
         </p>
       </div>
       <AppButton
@@ -89,52 +89,52 @@ const dash = computed(() => 2 * Math.PI * 20)
         size="sm"
         @click="showCombined = !showCombined"
       >
-        {{ showCombined ? 'Per goal' : 'Combined path' }}
+        {{ showCombined ? $t('goals.index.perGoal') : $t('goals.index.combinedPath') }}
       </AppButton>
     </div>
 
     <!-- User lookup -->
     <div class="card mb-6 p-4">
-      <p class="mb-2 text-sm font-semibold text-foreground">Find someone</p>
+      <p class="mb-2 text-sm font-semibold text-foreground">{{ $t('goals.index.findSomeone') }}</p>
       <div class="flex items-end gap-2">
         <div class="min-w-0 flex-1">
           <AppInput
             v-model="lookupQuery"
-            placeholder="@username"
+            :placeholder="$t('goals.index.usernamePlaceholder')"
             data-testid="user-lookup-input"
             @keyup.enter="openUserProfile"
           />
         </div>
         <AppButton :disabled="!lookupQuery.trim()" data-testid="user-lookup-go" @click="openUserProfile">
-          View profile
+          {{ $t('goals.index.viewProfile') }}
         </AppButton>
       </div>
       <p v-if="myUsername" class="mt-2 text-[0.65rem] text-muted-foreground" data-testid="my-username">
-        You are <span class="font-medium text-primary">@{{ myUsername }}</span> — share your handle so others can find you.
+        {{ $t('goals.index.yourHandle', { name: myUsername }) }}
       </p>
     </div>
 
     <div v-if="loading" class="flex justify-center py-16">
-      <AppSpinner size="lg" label="Charting your paths…" />
+      <AppSpinner size="lg" :label="$t('goals.index.chartingPaths')" />
     </div>
 
     <EmptyState
       v-else-if="goals.length === 0"
       icon="🎯"
-      title="No goals yet"
-      description="Pick a skill graph to aim for — browse the taxonomy or an instructor's public graph and hit “Set as goal”."
+      :title="$t('goals.index.emptyTitle')"
+      :description="$t('goals.index.emptyDescription')"
     >
       <template #action>
-        <AppButton class="mt-4" @click="router.push('/skills')">Browse skills</AppButton>
+        <AppButton class="mt-4" @click="router.push('/skills')">{{ $t('goals.index.browseSkills') }}</AppButton>
       </template>
     </EmptyState>
 
     <!-- Combined path -->
     <div v-else-if="showCombined && combined" class="card p-5">
       <div class="mb-4 flex items-center justify-between">
-        <h2 class="text-base font-semibold text-foreground">Combined path</h2>
+        <h2 class="text-base font-semibold text-foreground">{{ $t('goals.index.combinedPath') }}</h2>
         <span class="text-xs text-muted-foreground">
-          {{ combined.earned_count }} / {{ combined.total }} skills across {{ goals.length }} goals
+          {{ $t('goals.index.skillsAcrossGoals', { earned: combined.earned_count, total: combined.total, goals: goals.length }) }}
         </span>
       </div>
       <LearningPathView :path="combined" />
@@ -163,24 +163,24 @@ const dash = computed(() => 2 * Math.PI * 20)
           <div class="min-w-0 flex-1">
             <h3 class="truncate text-sm font-semibold text-foreground">{{ t.label }}</h3>
             <p class="mt-0.5 text-xs text-muted-foreground">
-              {{ paths[t.id]?.earned_count ?? 0 }} / {{ paths[t.id]?.total ?? t.goal_skill_ids.length }} skills
+              {{ $t('goals.index.skillsCount', { earned: paths[t.id]?.earned_count ?? 0, total: paths[t.id]?.total ?? t.goal_skill_ids.length }) }}
             </p>
             <p v-if="nextStep(paths[t.id])" class="mt-1 truncate text-xs text-primary">
-              Next: {{ nextStep(paths[t.id]) }}
+              {{ $t('goals.index.nextStep', { name: nextStep(paths[t.id]) }) }}
             </p>
-            <p v-else class="mt-1 text-xs text-success">All prerequisites cleared 🎉</p>
+            <p v-else class="mt-1 text-xs text-success">{{ $t('goals.index.allCleared') }}</p>
           </div>
         </div>
 
         <div class="mt-4 flex items-center gap-2">
           <AppButton size="sm" @click="expanded = expanded === t.id ? null : t.id">
-            {{ expanded === t.id ? 'Hide path' : 'View path' }}
+            {{ expanded === t.id ? $t('goals.index.hidePath') : $t('goals.index.viewPath') }}
           </AppButton>
           <button
             class="text-xs text-muted-foreground hover:text-destructive"
             @click="onRemove(t)"
           >
-            Remove
+            {{ $t('common.actions.remove') }}
           </button>
         </div>
 

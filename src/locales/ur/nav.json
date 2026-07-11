@@ -1,0 +1,78 @@
+{
+  "primary": {
+    "home": "ہوم",
+    "opinions": "آراء",
+    "community": "برادری",
+    "skills": "مہارتیں",
+    "goals": "اہداف",
+    "dashboard": "ڈیش بورڈ",
+    "myCourses": "میرے کورسز",
+    "inbox": "ان باکس",
+    "myChildren": "میرے بچے"
+  },
+  "sections": {
+    "liveTutoring": "براہِ راست ٹیوشن",
+    "classrooms": "کلاس رومز",
+    "skillGraph": "مہارت گراف",
+    "viewAllSessions": "تمام سیشنز دیکھیں",
+    "viewAllClassrooms": "تمام کلاس رومز دیکھیں",
+    "noSessions": "ابھی کوئی سیشن نہیں",
+    "noClassrooms": "ابھی کوئی کلاس روم نہیں",
+    "memberCount": "کوئی رکن نہیں | {count} رکن | {count} ارکان"
+  },
+  "status": {
+    "active": "فعال",
+    "ended": "ختم",
+    "cancelled": "منسوخ"
+  },
+  "mode": {
+    "ariaLabel": "فعال موڈ",
+    "learner": "سیکھنے والا",
+    "instructor": "استاد",
+    "learnerHint": "سیکھنے والا موڈ — کورسز لیں اور اسناد کمائیں",
+    "instructorHint": "استاد موڈ — کورسز بنائیں اور کام کا جائزہ لیں"
+  },
+  "topbar": {
+    "expandSidebar": "سائیڈ بار پھیلائیں",
+    "collapseSidebar": "سائیڈ بار سکیڑیں",
+    "goBack": "واپس جائیں",
+    "goForward": "آگے جائیں",
+    "forward": "آگے",
+    "openSearch": "تلاش کھولیں",
+    "searchPlaceholder": "مہارتیں، کورسز، برادری کے گروپ تلاش کریں…",
+    "alpha": "الفا",
+    "instructorMode": "استاد موڈ",
+    "instructorModeHint": "آپ استاد موڈ میں ہیں — بنا رہے اور جائزہ لے رہے ہیں، سیکھ نہیں رہے",
+    "guardian": "سرپرست",
+    "guardianHint": "سرپرست اکاؤنٹ — اپنے بچوں کے سیکھنے کی نگرانی"
+  },
+  "prerelease": {
+    "title": "پری ریلیز بلڈ — پیداواری استعمال کے لیے نہیں",
+    "titleVersion": "پری ریلیز v{version} — پیداواری استعمال کے لیے نہیں"
+  },
+  "theme": {
+    "ariaLabel": "موجودہ تھیم: {theme}۔ تبدیل کرنے کے لیے ٹیپ کریں۔",
+    "light": "روشن",
+    "dark": "گہرا",
+    "system": "سسٹم"
+  },
+  "userMenu": {
+    "ariaLabel": "{name} کے لیے اکاؤنٹ مینو",
+    "defaultName": "آپ",
+    "anonymous": "گمنام",
+    "onThisDevice": "اس آلے پر",
+    "roleInstructor": "استاد",
+    "roleInstructorLearner": "استاد · سیکھنے والا موڈ",
+    "myProfile": "میرا پروفائل",
+    "myLearning": "میرا سیکھنا",
+    "myCredentials": "میری اسناد",
+    "sponsor": "سرپرست",
+    "mySkills": "میری مہارتیں",
+    "myReputation": "میری ساکھ",
+    "sentinel": "Sentinel",
+    "community": "برادری",
+    "settings": "ترتیبات",
+    "switchUser": "صارف تبدیل کریں",
+    "lockAccount": "اکاؤنٹ لاک کریں"
+  }
+}

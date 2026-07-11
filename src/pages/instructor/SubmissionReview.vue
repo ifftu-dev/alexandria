@@ -73,23 +73,23 @@ async function postReview() {
 <template>
   <div class="max-w-3xl space-y-6">
     <div>
-      <p class="text-xs uppercase tracking-wide text-muted-foreground">Submission review</p>
-      <h1 class="text-2xl font-bold text-foreground">Review submission</h1>
+      <p class="text-xs uppercase tracking-wide text-muted-foreground">{{ $t('instructor.submissionReview.eyebrow') }}</p>
+      <h1 class="text-2xl font-bold text-foreground">{{ $t('instructor.submissionReview.title') }}</h1>
     </div>
 
     <div v-if="loading" class="h-64 animate-pulse rounded-xl bg-muted-foreground/8" />
 
     <EmptyState
       v-else-if="!submission"
-      title="Submission not found"
-      description="It may have been reviewed already or removed."
+      :title="$t('instructor.submissionReview.notFoundTitle')"
+      :description="$t('instructor.submissionReview.notFoundDesc')"
     />
 
     <template v-else>
       <div class="rounded-xl border border-border bg-card p-5 space-y-3">
         <div class="flex flex-wrap items-center gap-2 text-sm">
           <StatusBadge :status="submission.status" />
-          <span class="text-muted-foreground">from</span>
+          <span class="text-muted-foreground">{{ $t('instructor.submissionReview.from') }}</span>
           <code class="text-xs text-muted-foreground">{{ submission.learner_did.slice(0, 32) }}…</code>
           <span class="ml-auto text-xs text-muted-foreground">{{ submission.created_at.slice(0, 16) }}</span>
         </div>
@@ -97,23 +97,23 @@ async function postReview() {
           <AppBadge v-for="s in declaredSkills" :key="s" size="xs">{{ s }}</AppBadge>
         </div>
         <div>
-          <p class="mb-1 text-xs font-medium text-muted-foreground">Submitted payload</p>
+          <p class="mb-1 text-xs font-medium text-muted-foreground">{{ $t('instructor.submissionReview.submittedWork') }}</p>
           <pre class="max-h-80 overflow-auto rounded-lg bg-muted/20 p-3 font-mono text-xs">{{ prettyPayload }}</pre>
         </div>
       </div>
 
       <div v-if="submission.status === 'pending'" class="rounded-xl border border-border bg-card p-5 space-y-4">
-        <h2 class="text-sm font-semibold text-foreground">Your review</h2>
+        <h2 class="text-sm font-semibold text-foreground">{{ $t('instructor.submissionReview.yourReview') }}</h2>
 
         <div>
           <label class="mb-1 block text-xs font-medium text-muted-foreground">
-            Score — {{ scorePct }}%
+            {{ $t('instructor.submissionReview.scoreLabel', { percent: scorePct }) }}
           </label>
           <input v-model.number="scorePct" type="range" min="0" max="100" step="5" class="w-full">
         </div>
 
         <div v-if="declaredSkills.length" class="space-y-2">
-          <p class="text-xs font-medium text-muted-foreground">Per-skill ratings</p>
+          <p class="text-xs font-medium text-muted-foreground">{{ $t('instructor.submissionReview.perSkillRatings') }}</p>
           <div v-for="s in declaredSkills" :key="s" class="flex items-center gap-3">
             <span class="w-48 truncate text-sm text-foreground">{{ s }}</span>
             <input
@@ -131,27 +131,27 @@ async function postReview() {
         </div>
 
         <div>
-          <label class="mb-1 block text-xs font-medium text-muted-foreground">Feedback</label>
+          <label class="mb-1 block text-xs font-medium text-muted-foreground">{{ $t('instructor.submissionReview.feedback') }}</label>
           <textarea
             v-model="feedback"
             rows="4"
             class="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
-            placeholder="What was strong, what to improve…"
+            :placeholder="$t('instructor.submissionReview.feedbackPlaceholder')"
           />
         </div>
 
         <p v-if="error" class="text-sm text-error">{{ error }}</p>
 
         <div class="flex gap-2">
-          <AppButton :loading="submitting" @click="postReview">Post review</AppButton>
-          <AppButton variant="ghost" @click="router.back()">Cancel</AppButton>
+          <AppButton :loading="submitting" @click="postReview">{{ $t('instructor.submissionReview.postReview') }}</AppButton>
+          <AppButton variant="ghost" @click="router.back()">{{ $t('common.actions.cancel') }}</AppButton>
         </div>
       </div>
 
       <div v-else class="rounded-xl border border-border bg-card p-5 space-y-2">
-        <h2 class="text-sm font-semibold text-foreground">Reviewed</h2>
+        <h2 class="text-sm font-semibold text-foreground">{{ $t('instructor.submissionReview.reviewed') }}</h2>
         <p class="text-sm text-foreground">
-          Score: {{ submission.score === null ? '—' : `${Math.round(submission.score * 100)}%` }}
+          {{ $t('instructor.submissionReview.finalScore') }} {{ submission.score === null ? '—' : `${Math.round(submission.score * 100)}%` }}
         </p>
         <p v-if="submission.feedback" class="text-sm text-muted-foreground">{{ submission.feedback }}</p>
       </div>

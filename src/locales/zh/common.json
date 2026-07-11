@@ -1,0 +1,57 @@
+{
+  "app": {
+    "name": "Alexandria",
+    "initializing": "正在初始化…",
+    "tagline": "我在，因为我们同在"
+  },
+  "actions": {
+    "save": "保存",
+    "cancel": "取消",
+    "close": "关闭",
+    "confirm": "确认",
+    "continue": "继续",
+    "back": "返回",
+    "next": "下一步",
+    "retry": "重试",
+    "copy": "复制",
+    "copied": "已复制",
+    "delete": "删除",
+    "remove": "移除",
+    "edit": "编辑",
+    "add": "添加",
+    "done": "完成",
+    "search": "搜索",
+    "loading": "加载中…"
+  },
+  "status": {
+    "connected": "已连接",
+    "offline": "离线",
+    "connecting": "连接中…",
+    "verified": "已验证",
+    "pending": "确认中…",
+    "savedOnDevice": "已保存到此设备"
+  },
+  "advanced": {
+    "toggle": "高级详情",
+    "hint": "面向支持人员和高级用户的技术详情。"
+  },
+  "language": {
+    "label": "语言",
+    "system": "跟随设备",
+    "systemHint": "跟随设备的语言设置。"
+  },
+  "unreviewedBanner": {
+    "message": "此翻译由机器生成，尚未经过校对。发现问题？可在设置中切换回英文。",
+    "dismiss": "知道了"
+  },
+  "empty": {
+    "title": "这里还什么都没有"
+  },
+  "infoTip": {
+    "label": "更多信息"
+  },
+  "provenance": {
+    "exampleLabel": "AI 生成的示例",
+    "exampleTooltip": "这是为演示添加的 AI 生成示例内容，并非真实的课程、教程或观点。"
+  }
+}

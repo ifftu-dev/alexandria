@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { invoke } from '@tauri-apps/api/core'
 import { AppButton, AppInput, AppTextarea, AppAlert, AppBadge } from '@/components/ui'
@@ -12,6 +13,7 @@ import {
   type VerifiableCredential,
 } from '@/types'
 
+const { t } = useI18n()
 const router = useRouter()
 
 const SUMMARY_MAX = 280
@@ -113,7 +115,7 @@ onMounted(async () => {
       autoSelectCredentials()
     }
   } catch (e) {
-    error.value = `Failed to load taxonomy: ${e}`
+    error.value = t('opinions.new.loadFailed', { error: String(e) })
   }
 })
 
@@ -172,10 +174,12 @@ async function onVideoChange(e: Event) {
   if (!file) return
   videoFile.value = file
   videoUploading.value = true
-  videoProgress.value = `Reading ${Math.round(file.size / 1024 / 1024)} MB…`
+  videoProgress.value = t('opinions.new.readingMb', {
+    mb: Math.round(file.size / 1024 / 1024),
+  })
   try {
     const bytes = await readFileAsBytes(file)
-    videoProgress.value = 'Adding to iroh…'
+    videoProgress.value = t('opinions.new.uploading')
     const result = await invoke<{ hash: string; size: number }>('content_add', {
       data: bytes,
     })
@@ -193,7 +197,7 @@ async function onVideoChange(e: Event) {
     URL.revokeObjectURL(probe.src)
     videoProgress.value = ''
   } catch (e) {
-    error.value = `Video upload failed: ${e}`
+    error.value = t('opinions.new.videoUploadFailed', { error: String(e) })
     videoHash.value = null
   } finally {
     videoUploading.value = false
@@ -210,7 +214,7 @@ async function onThumbChange(e: Event) {
     const result = await invoke<{ hash: string }>('content_add', { data: bytes })
     thumbHash.value = result.hash
   } catch (e) {
-    error.value = `Thumbnail upload failed: ${e}`
+    error.value = t('opinions.new.thumbnailUploadFailed', { error: String(e) })
   } finally {
     thumbUploading.value = false
   }
@@ -240,7 +244,7 @@ async function submit() {
     const row = await invoke<OpinionRow>('publish_opinion', { req })
     router.push(`/opinions/${row.id}`)
   } catch (e) {
-    error.value = `Publish failed: ${e}`
+    error.value = t('opinions.new.publishFailed', { error: String(e) })
   } finally {
     submitting.value = false
   }
@@ -250,11 +254,9 @@ async function submit() {
 <template>
   <div class="max-w-3xl">
     <div class="mb-8">
-      <h1 class="text-3xl font-bold text-foreground">Post an Opinion</h1>
+      <h1 class="text-3xl font-bold text-foreground">{{ $t('opinions.new.title') }}</h1>
       <p class="mt-2 text-muted-foreground">
-        Opinions are scoped to a subject field. To post in a field you must
-        hold at least one skill-kind Verifiable Credential at level <em>apply</em>+
-        under a skill in that field.
+        {{ $t('opinions.new.intro') }}
       </p>
     </div>
 
@@ -263,15 +265,13 @@ async function submit() {
       type="warning"
       class="mb-6"
     >
-      You don't hold any qualifying credentials yet. Earn a credential at level
-      <em>apply</em> or above in any skill and you'll be eligible to post
-      opinions in that skill's subject field.
+      {{ $t('opinions.new.noEligibleWarning') }}
     </AppAlert>
 
     <div v-else class="space-y-6">
       <section class="rounded-xl border border-border bg-card p-6 space-y-4">
         <h2 class="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-          Subject field
+          {{ $t('opinions.new.topicHeading') }}
         </h2>
         <select
           v-model="subjectFieldId"
@@ -286,20 +286,20 @@ async function submit() {
 
       <section class="rounded-xl border border-border bg-card p-6 space-y-4">
         <h2 class="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-          Content
+          {{ $t('opinions.new.contentHeading') }}
         </h2>
 
         <AppInput
           v-model="title"
-          label="Title"
-          placeholder="e.g., Why functional-first is the wrong default for CS1"
+          :label="t('opinions.new.titleLabel')"
+          :placeholder="t('opinions.new.titlePlaceholder')"
         />
 
         <div>
           <AppTextarea
             v-model="summary"
-            label="Summary (optional)"
-            placeholder="A one-line framing for the list view."
+            :label="t('opinions.new.summaryLabel')"
+            :placeholder="t('opinions.new.summaryPlaceholder')"
             :rows="2"
           />
           <p
@@ -311,7 +311,7 @@ async function submit() {
         </div>
 
         <label class="block">
-          <span class="mb-1 block text-sm font-medium text-foreground">Video</span>
+          <span class="mb-1 block text-sm font-medium text-foreground">{{ $t('opinions.new.videoLabel') }}</span>
           <input
             type="file"
             accept="video/*"
@@ -324,16 +324,16 @@ async function submit() {
           {{ videoProgress }}
         </div>
         <div v-else-if="videoHash" class="flex items-center gap-2 text-sm">
-          <AppBadge variant="success">Uploaded</AppBadge>
+          <AppBadge variant="success">{{ $t('opinions.new.uploaded') }}</AppBadge>
           <code class="text-xs text-muted-foreground">{{ videoHash.slice(0, 24) }}…</code>
           <span v-if="videoDuration" class="text-xs text-muted-foreground">
-            · {{ Math.round(videoDuration / 60) }} min
+            · {{ $t('opinions.new.minutes', { count: Math.round(videoDuration / 60) }) }}
           </span>
         </div>
 
         <label class="block pt-2">
           <span class="mb-1 block text-sm font-medium text-foreground">
-            Thumbnail (optional)
+            {{ $t('opinions.new.thumbnailLabel') }}
           </span>
           <input
             type="file"
@@ -343,23 +343,21 @@ async function submit() {
             @change="onThumbChange"
           />
           <span v-if="thumbHash" class="mt-1 block text-xs text-muted-foreground">
-            Uploaded: {{ thumbHash.slice(0, 16) }}…
+            {{ $t('opinions.new.uploadedPrefix') }} {{ thumbHash.slice(0, 16) }}…
           </span>
         </label>
       </section>
 
       <section class="rounded-xl border border-border bg-card p-6 space-y-4">
         <h2 class="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-          Credentials
+          {{ $t('opinions.new.credentialsHeading') }}
         </h2>
         <p class="text-xs text-muted-foreground">
-          Which of your credentials you're staking on this opinion. At least
-          one must qualify you to post in this subject field — we've
-          pre-selected all of those. You can add or remove credentials below.
+          {{ $t('opinions.new.credentialsHelp') }}
         </p>
 
         <div v-if="qualifyingCredentialsForField.length === 0" class="text-sm text-red-500">
-          You don't have a qualifying credential for this field. Pick a different field.
+          {{ $t('opinions.new.noQualifying') }}
         </div>
         <div v-else class="space-y-2">
           <label
@@ -377,10 +375,10 @@ async function submit() {
               <div class="text-sm font-medium text-foreground">
                 {{ describeSkill(vc) }}
                 <AppBadge variant="secondary" class="ml-2">{{ claimLevel(vc) }}</AppBadge>
-                <AppBadge v-if="vc.witness" variant="success" class="ml-1">on-chain</AppBadge>
+                <AppBadge v-if="vc.witness" variant="success" class="ml-1">{{ $t('opinions.new.verified') }}</AppBadge>
               </div>
               <div class="text-xs text-muted-foreground">
-                score {{ Math.round(claimScore(vc) * 100) }}% · issued {{ vc.validFrom.slice(0, 10) }}
+                {{ $t('opinions.new.credentialMeta', { score: Math.round(claimScore(vc) * 100), date: vc.validFrom.slice(0, 10) }) }}
               </div>
             </div>
           </label>
@@ -391,10 +389,10 @@ async function submit() {
 
       <div class="flex gap-3">
         <AppButton :loading="submitting" :disabled="!canSubmit" @click="submit">
-          Publish Opinion
+          {{ $t('opinions.new.publish') }}
         </AppButton>
         <AppButton variant="ghost" @click="router.back()">
-          Cancel
+          {{ $t('common.actions.cancel') }}
         </AppButton>
       </div>
     </div>

@@ -1,0 +1,52 @@
+{
+  "index": {
+    "title": "Topic Commentary",
+    "subtitle": "Opinions from educators with credentials in each topic. Newest first, never ranked.",
+    "post": "Post Opinion",
+    "filterAll": "All",
+    "emptyTitle": "No opinions yet",
+    "emptyFieldDescription": "No opinions in this topic yet.",
+    "emptyAllDescription": "Educators with credentials in a topic can post opinion videos here. Be the first.",
+    "opinionCount": "none | {count} opinion | {count} opinions",
+    "minutes": "{count} min"
+  },
+  "detail": {
+    "notFound": "Opinion not found.",
+    "withdraw": "Withdraw",
+    "withdrawConfirm": "Withdraw this opinion? The video will be removed from this device and the post hidden.",
+    "withdrawFailed": "Couldn't withdraw: {error}",
+    "byLabel": "by",
+    "credentialsHeading": "Credentials behind this opinion",
+    "noCredentials": "No credentials referenced.",
+    "verifiedProof": "Verified proof",
+    "unsyncedLabel": "Still syncing from other learners:"
+  },
+  "new": {
+    "title": "Post an Opinion",
+    "intro": "Opinions belong to a topic. To post in a topic you need at least one credential at the apply level or higher for a skill in that topic.",
+    "noEligibleWarning": "You don't have a qualifying credential yet. Earn a credential at the apply level or higher in any skill, and you'll be able to post opinions in that skill's topic.",
+    "topicHeading": "Topic",
+    "contentHeading": "Content",
+    "titleLabel": "Title",
+    "titlePlaceholder": "e.g., Why functional-first is the wrong default for CS1",
+    "summaryLabel": "Summary (optional)",
+    "summaryPlaceholder": "A one-line framing for the list view.",
+    "videoLabel": "Video",
+    "readingMb": "Reading {mb} MB…",
+    "uploading": "Uploading…",
+    "videoUploadFailed": "Video upload failed: {error}",
+    "uploaded": "Uploaded",
+    "minutes": "{count} min",
+    "thumbnailLabel": "Thumbnail (optional)",
+    "thumbnailUploadFailed": "Thumbnail upload failed: {error}",
+    "uploadedPrefix": "Uploaded:",
+    "credentialsHeading": "Credentials",
+    "credentialsHelp": "Choose which of your credentials back this opinion. At least one must qualify you to post in this topic — we've pre-selected those. You can add or remove credentials below.",
+    "noQualifying": "You don't have a qualifying credential for this topic. Pick a different topic.",
+    "verified": "Verified",
+    "credentialMeta": "score {score}% · issued {date}",
+    "loadFailed": "Couldn't load topics: {error}",
+    "publishFailed": "Publish failed: {error}",
+    "publish": "Publish Opinion"
+  }
+}

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { AppButton, AppBadge } from '@/components/ui'
 import { useLocalApi } from '@/composables/useLocalApi'
@@ -19,6 +20,7 @@ import type {
 // labeled samples and show accuracy + FP fraction.
 
 const router = useRouter()
+const { t } = useI18n()
 const { invoke } = useLocalApi()
 const { testBlobAgainstClassifier } = useSentinel()
 
@@ -140,12 +142,15 @@ const verdictSummary = computed<string | null>(() => {
   // For "human"-labeled blobs we want LOW anomaly score (low false-positive rate).
   // The holdout curator picks what each set is measuring.
   if (label.toLowerCase().includes('human')) {
-    return `Clean-human holdout: classifier mean anomaly ${scorePct}% (lower is better), `
-      + `${advPct}% of samples cross the threshold — that's your false-positive rate.`
+    return t('sentinel.holdoutEval.verdictHuman', { score: scorePct, adv: advPct })
   }
-  return `Adversarial holdout: classifier mean anomaly ${scorePct}% (higher is better), `
-    + `${advPct}% of ${v.sampleCount} ${kind} samples were detected as attacks — that's `
-    + `your true-positive rate for the '${label}' family.`
+  return t('sentinel.holdoutEval.verdictAttack', {
+    score: scorePct,
+    adv: advPct,
+    count: v.sampleCount,
+    kind,
+    label,
+  })
 })
 </script>
 
@@ -160,23 +165,23 @@ const verdictSummary = computed<string | null>(() => {
         <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
           <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
         </svg>
-        Back to Sentinel
+        {{ $t('sentinel.holdoutEval.back') }}
       </button>
-      <h1 class="text-xl font-bold text-foreground">Holdout classifier evaluation</h1>
+      <h1 class="text-xl font-bold text-foreground">{{ $t('sentinel.holdoutEval.title') }}</h1>
       <p class="mt-1 text-sm text-muted-foreground">
-        Measures local classifier accuracy against a DAO-private holdout set. Requires the
-        threshold number of committee-member shares to decrypt; each member runs
-        <code class="font-mono">sentinel_holdout_unseal_share</code> on their own device and pastes
-        the result below.
+        <i18n-t keypath="sentinel.holdoutEval.subtitle" tag="span">
+          <template #command><code class="font-mono">sentinel_holdout_unseal_share</code></template>
+        </i18n-t>
       </p>
     </div>
 
     <!-- Holdout picker -->
     <div class="card p-5 space-y-3">
-      <h2 class="text-sm font-semibold text-foreground">1. Pick a holdout set</h2>
+      <h2 class="text-sm font-semibold text-foreground">{{ $t('sentinel.holdoutEval.step1') }}</h2>
       <div v-if="holdouts.length === 0" class="rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-        No holdout sets uploaded yet. A committee member uploads one via
-        <code class="font-mono">sentinel_holdout_upload</code>.
+        <i18n-t keypath="sentinel.holdoutEval.empty" tag="span">
+          <template #command><code class="font-mono">sentinel_holdout_upload</code></template>
+        </i18n-t>
       </div>
       <select
         v-else
@@ -184,7 +189,7 @@ const verdictSummary = computed<string | null>(() => {
         class="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
         @change="onSelect(selectedId)"
       >
-        <option value="">— Select —</option>
+        <option value="">{{ $t('sentinel.holdoutEval.selectPlaceholder') }}</option>
         <option v-for="h in holdouts" :key="h.id" :value="h.id">
           {{ h.model_kind }} · threshold {{ h.threshold }} · {{ h.created_at }}
         </option>
@@ -198,18 +203,17 @@ const verdictSummary = computed<string | null>(() => {
     <div v-if="policy && selectedHoldout" class="card p-5 space-y-3">
       <div class="flex items-center justify-between">
         <h2 class="text-sm font-semibold text-foreground">
-          2. Collect {{ policy.threshold }} shares
+          {{ $t('sentinel.holdoutEval.step2', { count: policy.threshold }) }}
         </h2>
         <AppBadge :variant="providedShareCount >= policy.threshold ? 'success' : 'secondary'">
           {{ providedShareCount }} / {{ policy.threshold }}
         </AppBadge>
       </div>
       <p class="text-xs text-muted-foreground">
-        Each committee member whose pubkey is listed below decrypts their share locally
-        (via <code class="font-mono">sentinel_holdout_unseal_share</code>) and shares the
-        resulting <code class="font-mono">y_hex</code> value over a secure channel. Paste any
-        {{ policy.threshold }} of them here — the backend combines them via Shamir interpolation
-        and decrypts the holdout blob.
+        <i18n-t keypath="sentinel.holdoutEval.step2Body" tag="span">
+          <template #count>{{ policy.threshold }}</template>
+          <template #command><code class="font-mono">sentinel_holdout_unseal_share</code></template>
+        </i18n-t>
       </p>
       <div class="space-y-3">
         <div
@@ -225,7 +229,7 @@ const verdictSummary = computed<string | null>(() => {
           <input
             v-model="shareInputs[share.share_index]"
             type="text"
-            placeholder="paste y_hex from this member (or leave blank)"
+            :placeholder="$t('sentinel.holdoutEval.sharePlaceholder')"
             class="w-full rounded-md border border-border bg-background px-3 py-1.5 font-mono text-xs"
           />
         </div>
@@ -235,7 +239,7 @@ const verdictSummary = computed<string | null>(() => {
     <!-- Evaluate -->
     <div v-if="policy" class="flex justify-end">
       <AppButton size="sm" :disabled="!canEvaluate" :loading="evaluating" @click="runEvaluation">
-        Run evaluation
+        {{ $t('sentinel.holdoutEval.run') }}
       </AppButton>
     </div>
 
@@ -245,30 +249,30 @@ const verdictSummary = computed<string | null>(() => {
     </div>
     <div v-if="evalBlob" class="card p-5 space-y-3">
       <div class="flex items-center justify-between">
-        <h2 class="text-sm font-semibold text-foreground">Evaluation result</h2>
-        <AppBadge variant="success">Holdout decrypted</AppBadge>
+        <h2 class="text-sm font-semibold text-foreground">{{ $t('sentinel.holdoutEval.resultTitle') }}</h2>
+        <AppBadge variant="success">{{ $t('sentinel.holdoutEval.resultUnlocked') }}</AppBadge>
       </div>
       <div class="grid grid-cols-2 gap-3 text-xs">
         <div>
-          <div class="text-muted-foreground">Model kind</div>
+          <div class="text-muted-foreground">{{ $t('sentinel.holdoutEval.modelKind') }}</div>
           <div class="font-mono text-foreground">{{ evalBlob.model_kind }}</div>
         </div>
         <div>
-          <div class="text-muted-foreground">Label</div>
+          <div class="text-muted-foreground">{{ $t('sentinel.holdoutEval.label') }}</div>
           <div class="font-mono text-foreground">{{ evalBlob.label }}</div>
         </div>
         <div>
-          <div class="text-muted-foreground">Samples</div>
+          <div class="text-muted-foreground">{{ $t('sentinel.holdoutEval.samples') }}</div>
           <div class="font-mono text-foreground">{{ evalBlob.samples.length }}</div>
         </div>
         <div>
-          <div class="text-muted-foreground">Schema</div>
+          <div class="text-muted-foreground">{{ $t('sentinel.holdoutEval.schema') }}</div>
           <div class="font-mono text-foreground">v{{ evalBlob.schema_version }}</div>
         </div>
       </div>
 
       <div v-if="evalVerdictUntrained" class="rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-        Local classifier not trained — can't compute a verdict. Train Sentinel first.
+        {{ $t('sentinel.holdoutEval.untrained') }}
       </div>
       <div
         v-else-if="verdictSummary"
@@ -284,8 +288,7 @@ const verdictSummary = computed<string | null>(() => {
       </div>
 
       <p class="text-[11px] text-muted-foreground">
-        The decrypted holdout stays on this device. Do not redistribute the labeled samples —
-        leaking them gives attackers the evaluation criteria.
+        {{ $t('sentinel.holdoutEval.note') }}
       </p>
     </div>
   </div>

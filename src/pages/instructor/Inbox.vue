@@ -3,21 +3,23 @@
 // join requests, oldest first.
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { AppTabs, EmptyState } from '@/components/ui'
 import type { InboxItem } from '@/types'
 
 const { invoke } = useLocalApi()
 const router = useRouter()
+const { t } = useI18n()
 
 const items = ref<InboxItem[]>([])
 const loading = ref(true)
 const activeTab = ref('all')
 
 const tabs = computed(() => [
-  { key: 'all', label: 'All', count: items.value.length },
-  { key: 'irl_submission', label: 'Submissions', count: items.value.filter(i => i.kind === 'irl_submission').length },
-  { key: 'join_request', label: 'Join requests', count: items.value.filter(i => i.kind === 'join_request').length },
+  { key: 'all', label: t('instructor.inbox.tabAll'), count: items.value.length },
+  { key: 'irl_submission', label: t('instructor.inbox.tabSubmissions'), count: items.value.filter(i => i.kind === 'irl_submission').length },
+  { key: 'join_request', label: t('instructor.inbox.tabJoinRequests'), count: items.value.filter(i => i.kind === 'join_request').length },
 ])
 
 const visible = computed(() =>
@@ -53,9 +55,9 @@ function iconFor(kind: InboxItem['kind']): string {
 <template>
   <div class="space-y-6">
     <div>
-      <h1 class="text-2xl font-bold text-foreground">Inbox</h1>
+      <h1 class="text-2xl font-bold text-foreground">{{ $t('instructor.inbox.title') }}</h1>
       <p class="mt-1 text-sm text-muted-foreground">
-        Learner submissions awaiting your review, and pending classroom join requests.
+        {{ $t('instructor.inbox.subtitle') }}
       </p>
     </div>
 
@@ -67,8 +69,8 @@ function iconFor(kind: InboxItem['kind']): string {
 
     <EmptyState
       v-else-if="!visible.length"
-      title="All caught up"
-      description="Nothing is waiting for your review."
+      :title="$t('instructor.inbox.emptyTitle')"
+      :description="$t('instructor.inbox.emptyDesc')"
     />
 
     <div v-else class="space-y-2">

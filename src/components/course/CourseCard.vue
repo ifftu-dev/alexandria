@@ -61,13 +61,13 @@ onMounted(async () => {
       <div class="cc-stats">
         <span v-if="course.kind === 'tutorial'" class="cc-stats__pill cc-stats__pill--tutorial">
           <svg class="h-3 w-3" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
-          Tutorial
+          {{ $t('courses.card.tutorial') }}
         </span>
         <span v-else class="cc-stats__pill cc-stats__pill--course">
           <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
             <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
           </svg>
-          Course
+          {{ $t('courses.card.course') }}
         </span>
       </div>
     </div>
@@ -101,7 +101,7 @@ onMounted(async () => {
           <span>{{ (course.author_name || 'A').charAt(0).toUpperCase() }}</span>
         </div>
         <span class="cc-author__name">
-          {{ course.author_name || (course.author_address ? course.author_address.slice(0, 16) + '...' : 'Unknown') }}
+          {{ course.author_name || (course.author_address ? course.author_address.slice(0, 16) + '...' : $t('courses.card.unknownAuthor')) }}
         </span>
         <ProvenanceBadge :provenance="course.provenance" class="cc-author__badge" />
       </div>

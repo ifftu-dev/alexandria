@@ -1,0 +1,89 @@
+{
+  "index": {
+    "title": "Salles de classe",
+    "subtitle": "Espaces de groupe pour apprendre ensemble",
+    "loading": "Chargement des salles de classe…",
+    "emptyTitle": "Aucune salle de classe pour l'instant",
+    "emptyBody": "Créez une salle de classe pour démarrer un espace d'apprentissage collectif, ou rejoignez-en une en demandant l'accès.",
+    "createFirst": "Créez votre première salle de classe"
+  },
+  "actions": {
+    "create": "Créer",
+    "createClassroom": "Créer une salle de classe"
+  },
+  "create": {
+    "title": "Créer une salle de classe",
+    "nameLabel": "Nom de la salle de classe",
+    "namePlaceholder": "ex. Mathématiques avancées",
+    "descriptionLabel": "Description",
+    "descriptionPlaceholder": "De quoi parle cette salle de classe ?",
+    "iconLabel": "Émoji d'icône"
+  },
+  "members": {
+    "count": "aucun | {count} membre | {count} membres",
+    "heading": "Membres"
+  },
+  "roles": {
+    "member": "Membre",
+    "moderator": "Modérateur",
+    "ownerSection": "Propriétaire",
+    "moderatorSection": "Modérateurs",
+    "memberSection": "Membres"
+  },
+  "requests": {
+    "title": "Demandes d'adhésion",
+    "empty": "Aucune demande d'adhésion en attente",
+    "approve": "Approuver",
+    "deny": "Refuser",
+    "link": "Demandes"
+  },
+  "settings": {
+    "title": "Paramètres de la salle de classe",
+    "general": "Général",
+    "inviteCode": "Code d'invitation",
+    "inviteHint": "Partagez ce code avec d'autres personnes pour qu'elles puissent trouver votre salle de classe et demander à la rejoindre.",
+    "membersHeading": "Membres",
+    "kick": "Retirer",
+    "dangerZone": "Zone sensible",
+    "archiveTitle": "Archiver cette salle de classe",
+    "archiveBody": "La salle de classe sera masquée et ne pourra plus recevoir de messages.",
+    "archive": "Archiver",
+    "leaveTitle": "Quitter cette salle de classe",
+    "leaveBody": "Vous devrez à nouveau demander l'accès pour la rejoindre.",
+    "leave": "Quitter",
+    "confirmKick": "Voulez-vous vraiment retirer ce membre ?",
+    "confirmArchive": "Archiver cette salle de classe ? Cette action est irréversible.",
+    "confirmLeave": "Quitter cette salle de classe ?"
+  },
+  "nav": {
+    "settings": "Paramètres"
+  },
+  "call": {
+    "active": "Appel vocal en cours",
+    "join": "Rejoindre l'appel",
+    "start": "Démarrer un appel"
+  },
+  "channels": {
+    "heading": "Canaux",
+    "add": "Ajouter un canal",
+    "announcementBadge": "Canal d'annonces",
+    "selectShort": "Sélectionnez un canal",
+    "selectToChat": "Sélectionnez un canal pour commencer à discuter",
+    "createTitle": "Créer un canal",
+    "namePlaceholder": "nom-du-canal",
+    "typeText": "Canal de texte",
+    "typeAnnouncement": "Canal d'annonces",
+    "fallbackName": "canal"
+  },
+  "messages": {
+    "empty": "Aucun message pour l'instant. Lancez la conversation !",
+    "loadMore": "Charger les messages précédents",
+    "deleted": "[supprimé]",
+    "inputPlaceholder": "Message dans #{channel}",
+    "inputHint": "Entrée pour envoyer · Maj+Entrée pour un saut de ligne",
+    "send": "Envoyer"
+  },
+  "common": {
+    "loading": "Chargement…"
+  }
+}

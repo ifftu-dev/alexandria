@@ -1,0 +1,78 @@
+{
+  "primary": {
+    "home": "హోమ్",
+    "opinions": "అభిప్రాయాలు",
+    "community": "సముదాయం",
+    "skills": "నైపుణ్యాలు",
+    "goals": "లక్ష్యాలు",
+    "dashboard": "డాష్‌బోర్డ్",
+    "myCourses": "నా కోర్సులు",
+    "inbox": "ఇన్‌బాక్స్",
+    "myChildren": "నా పిల్లలు"
+  },
+  "sections": {
+    "liveTutoring": "లైవ్ ట్యూటరింగ్",
+    "classrooms": "తరగతి గదులు",
+    "skillGraph": "నైపుణ్య గ్రాఫ్",
+    "viewAllSessions": "అన్ని సెషన్‌లను చూడు",
+    "viewAllClassrooms": "అన్ని తరగతి గదులను చూడు",
+    "noSessions": "ఇంకా సెషన్‌లు లేవు",
+    "noClassrooms": "ఇంకా తరగతి గదులు లేవు",
+    "memberCount": "సభ్యులు లేరు | {count} సభ్యుడు | {count} సభ్యులు"
+  },
+  "status": {
+    "active": "క్రియాశీలం",
+    "ended": "ముగిసింది",
+    "cancelled": "రద్దు చేయబడింది"
+  },
+  "mode": {
+    "ariaLabel": "క్రియాశీల మోడ్",
+    "learner": "అభ్యాసకుడు",
+    "instructor": "బోధకుడు",
+    "learnerHint": "అభ్యాసకుడు మోడ్ — కోర్సులు తీసుకోండి మరియు క్రెడెన్షియల్‌లు పొందండి",
+    "instructorHint": "బోధకుడు మోడ్ — కోర్సులు రూపొందించండి మరియు పనిని సమీక్షించండి"
+  },
+  "topbar": {
+    "expandSidebar": "సైడ్‌బార్‌ను విస్తరించు",
+    "collapseSidebar": "సైడ్‌బార్‌ను కుదించు",
+    "goBack": "వెనుకకు వెళ్ళు",
+    "goForward": "ముందుకు వెళ్ళు",
+    "forward": "ముందుకు",
+    "openSearch": "శోధనను తెరువు",
+    "searchPlaceholder": "నైపుణ్యాలు, కోర్సులు, సముదాయ బృందాలను వెతకండి…",
+    "alpha": "ఆల్ఫా",
+    "instructorMode": "బోధకుడు మోడ్",
+    "instructorModeHint": "మీరు బోధకుడు మోడ్‌లో ఉన్నారు — రూపొందించడం మరియు సమీక్షించడం, నేర్చుకోవడం కాదు",
+    "guardian": "సంరక్షకుడు",
+    "guardianHint": "సంరక్షకుడు ఖాతా — మీ పిల్లల అభ్యాసాన్ని పర్యవేక్షిస్తోంది"
+  },
+  "prerelease": {
+    "title": "ప్రీ-రిలీజ్ బిల్డ్ — ఉత్పత్తి వినియోగం కోసం కాదు",
+    "titleVersion": "ప్రీ-రిలీజ్ v{version} — ఉత్పత్తి వినియోగం కోసం కాదు"
+  },
+  "theme": {
+    "ariaLabel": "ప్రస్తుత థీమ్: {theme}. మార్చడానికి నొక్కండి.",
+    "light": "లైట్",
+    "dark": "డార్క్",
+    "system": "సిస్టమ్"
+  },
+  "userMenu": {
+    "ariaLabel": "{name} కోసం ఖాతా మెను",
+    "defaultName": "మీరు",
+    "anonymous": "అనామకుడు",
+    "onThisDevice": "ఈ పరికరంలో",
+    "roleInstructor": "బోధకుడు",
+    "roleInstructorLearner": "బోధకుడు · అభ్యాసకుడు మోడ్",
+    "myProfile": "నా ప్రొఫైల్",
+    "myLearning": "నా అభ్యాసం",
+    "myCredentials": "నా క్రెడెన్షియల్‌లు",
+    "sponsor": "స్పాన్సర్",
+    "mySkills": "నా నైపుణ్యాలు",
+    "myReputation": "నా ప్రతిష్ఠ",
+    "sentinel": "సెంటినెల్",
+    "community": "సముదాయం",
+    "settings": "సెట్టింగ్‌లు",
+    "switchUser": "వినియోగదారుని మార్చు",
+    "lockAccount": "ఖాతాను లాక్ చేయి"
+  }
+}

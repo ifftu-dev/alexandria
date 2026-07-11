@@ -1,0 +1,57 @@
+{
+  "app": {
+    "name": "Alexandria",
+    "initializing": "Initializing…",
+    "tagline": "I am, because we all are"
+  },
+  "actions": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "close": "Close",
+    "confirm": "Confirm",
+    "continue": "Continue",
+    "back": "Back",
+    "next": "Next",
+    "retry": "Retry",
+    "copy": "Copy",
+    "copied": "Copied",
+    "delete": "Delete",
+    "remove": "Remove",
+    "edit": "Edit",
+    "add": "Add",
+    "done": "Done",
+    "search": "Search",
+    "loading": "Loading…"
+  },
+  "status": {
+    "connected": "Connected",
+    "offline": "Offline",
+    "connecting": "Connecting…",
+    "verified": "Verified",
+    "pending": "Confirming…",
+    "savedOnDevice": "Saved on this device"
+  },
+  "advanced": {
+    "toggle": "Advanced details",
+    "hint": "Technical details for support and power users."
+  },
+  "language": {
+    "label": "Language",
+    "system": "Match device",
+    "systemHint": "Follow your device's language."
+  },
+  "unreviewedBanner": {
+    "message": "This translation is machine-generated and hasn't been reviewed yet. Something look wrong? You can switch back to English in Settings.",
+    "dismiss": "Got it"
+  },
+  "empty": {
+    "title": "Nothing here yet"
+  },
+  "infoTip": {
+    "label": "More information"
+  },
+  "provenance": {
+    "exampleLabel": "AI-generated example",
+    "exampleTooltip": "This is AI-generated example content added for the demo. It's not a real course, tutorial, or opinion."
+  }
+}

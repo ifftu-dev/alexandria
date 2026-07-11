@@ -29,14 +29,14 @@ const explorerUrl = (hash: string) =>
         class="hover:underline"
         @click.stop
       >
-        On-Chain
+        {{ $t('common.status.verified') }}
       </a>
     </template>
     <template v-else-if="status === 'pending'">
-      Pending
+      {{ $t('governance.onChainBadge.confirming') }}
     </template>
     <template v-else>
-      Local Only
+      {{ $t('common.status.savedOnDevice') }}
     </template>
   </span>
 </template>

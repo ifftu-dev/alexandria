@@ -1,0 +1,40 @@
+{
+  "index": {
+    "title": "你的目标",
+    "subtitle": "你正在为之努力的技能。Alexandria 会从你已证明的能力出发，为你规划路径。",
+    "perGoal": "按目标",
+    "combinedPath": "综合路径",
+    "findSomeone": "查找他人",
+    "usernamePlaceholder": "{'@'}用户名",
+    "viewProfile": "查看档案",
+    "yourHandle": "你是 {'@'}{name}——分享你的用户名，让别人找到你。",
+    "chartingPaths": "正在规划你的路径…",
+    "emptyTitle": "还没有目标",
+    "emptyDescription": "挑选一组要努力的技能——浏览技能库或某位老师的公开图谱，然后点击“设为目标”。",
+    "browseSkills": "浏览技能",
+    "skillsAcrossGoals": "{goals} 个目标中共 {earned} / {total} 项技能",
+    "skillsCount": "{earned} / {total} 项技能",
+    "nextStep": "下一步：{name}",
+    "allCleared": "你已为每一步做好准备 🎉",
+    "viewPath": "查看路径",
+    "hidePath": "隐藏路径"
+  },
+  "picker": {
+    "jobRole": "职位角色",
+    "exam": "考试",
+    "curriculum": "课程大纲",
+    "jobDescription": "职位描述",
+    "selectPrompt": "选择一个{type}…",
+    "setAsGoal": "设为目标",
+    "pasteText": "粘贴文本",
+    "fromLink": "来自链接",
+    "jobPostingUrl": "招聘信息链接",
+    "jdPlaceholder": "在此粘贴职位描述…",
+    "findSkills": "查找技能",
+    "foundSkills": "找到了这些技能——确认要添加到目标中的项：",
+    "strongMatch": "高度匹配",
+    "matched": "匹配“{term}”",
+    "noMatchingSkills": "未找到匹配的技能——换一段描述试试。",
+    "addAsGoal": "将 {count} 项技能设为目标 | 将 {count} 项技能设为目标"
+  }
+}

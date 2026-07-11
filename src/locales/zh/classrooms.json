@@ -1,0 +1,89 @@
+{
+  "index": {
+    "title": "教室",
+    "subtitle": "共同学习的群组空间",
+    "loading": "正在加载教室…",
+    "emptyTitle": "还没有教室",
+    "emptyBody": "创建一个教室来开启群组学习空间，或者申请加入已有的教室。",
+    "createFirst": "创建你的第一个教室"
+  },
+  "actions": {
+    "create": "创建",
+    "createClassroom": "创建教室"
+  },
+  "create": {
+    "title": "创建教室",
+    "nameLabel": "教室名称",
+    "namePlaceholder": "例如：高等数学",
+    "descriptionLabel": "简介",
+    "descriptionPlaceholder": "这个教室是关于什么的？",
+    "iconLabel": "图标表情"
+  },
+  "members": {
+    "count": "无 | {count} 名成员 | {count} 名成员",
+    "heading": "成员"
+  },
+  "roles": {
+    "member": "成员",
+    "moderator": "管理员",
+    "ownerSection": "所有者",
+    "moderatorSection": "管理员",
+    "memberSection": "成员"
+  },
+  "requests": {
+    "title": "加入申请",
+    "empty": "没有待处理的加入申请",
+    "approve": "批准",
+    "deny": "拒绝",
+    "link": "申请"
+  },
+  "settings": {
+    "title": "教室设置",
+    "general": "常规",
+    "inviteCode": "邀请码",
+    "inviteHint": "把这个邀请码分享给他人，他们就能找到并申请加入你的教室。",
+    "membersHeading": "成员",
+    "kick": "移除",
+    "dangerZone": "危险操作",
+    "archiveTitle": "归档此教室",
+    "archiveBody": "该教室将被隐藏，且无法再接收消息。",
+    "archive": "归档",
+    "leaveTitle": "退出此教室",
+    "leaveBody": "你需要重新申请才能再次加入。",
+    "leave": "退出",
+    "confirmKick": "确定要移除这名成员吗？",
+    "confirmArchive": "归档此教室？此操作无法撤销。",
+    "confirmLeave": "退出此教室？"
+  },
+  "nav": {
+    "settings": "设置"
+  },
+  "call": {
+    "active": "语音通话进行中",
+    "join": "加入通话",
+    "start": "发起通话"
+  },
+  "channels": {
+    "heading": "频道",
+    "add": "添加频道",
+    "announcementBadge": "公告频道",
+    "selectShort": "选择一个频道",
+    "selectToChat": "选择一个频道开始聊天",
+    "createTitle": "创建频道",
+    "namePlaceholder": "频道名称",
+    "typeText": "文字频道",
+    "typeAnnouncement": "公告频道",
+    "fallbackName": "频道"
+  },
+  "messages": {
+    "empty": "还没有消息，来开启对话吧！",
+    "loadMore": "加载更早的消息",
+    "deleted": "[已删除]",
+    "inputPlaceholder": "在 #{channel} 中发消息",
+    "inputHint": "回车发送 · Shift+回车换行",
+    "send": "发送"
+  },
+  "common": {
+    "loading": "正在加载…"
+  }
+}

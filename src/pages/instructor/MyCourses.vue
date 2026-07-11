@@ -34,17 +34,17 @@ onMounted(async () => {
   <div class="space-y-6">
     <div class="flex items-start justify-between gap-4">
       <div>
-        <h1 class="text-2xl font-bold text-foreground">My Courses</h1>
+        <h1 class="text-2xl font-bold text-foreground">{{ $t('instructor.myCourses.title') }}</h1>
         <p class="mt-1 text-sm text-muted-foreground">
-          Everything you've authored on this device — drafts and published.
+          {{ $t('instructor.myCourses.subtitle') }}
         </p>
       </div>
       <div class="flex shrink-0 gap-2">
         <AppButton size="sm" @click="router.push('/instructor/composer/new?kind=course')">
-          + Course
+          {{ $t('instructor.myCourses.addCourse') }}
         </AppButton>
         <AppButton variant="outline" size="sm" @click="router.push('/instructor/composer/new?kind=tutorial')">
-          + Tutorial
+          {{ $t('instructor.myCourses.addTutorial') }}
         </AppButton>
       </div>
     </div>
@@ -55,8 +55,8 @@ onMounted(async () => {
 
     <EmptyState
       v-else-if="!mine.length"
-      title="Nothing authored yet"
-      description="Create your first course or tutorial with the composer."
+      :title="$t('instructor.myCourses.emptyTitle')"
+      :description="$t('instructor.myCourses.emptyDesc')"
     />
 
     <div v-else class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -76,7 +76,7 @@ onMounted(async () => {
         <p v-if="course.description" class="mt-1 text-sm text-muted-foreground line-clamp-2">
           {{ course.description }}
         </p>
-        <p class="mt-2 text-xs text-muted-foreground">Updated {{ course.updated_at.slice(0, 10) }}</p>
+        <p class="mt-2 text-xs text-muted-foreground">{{ $t('instructor.myCourses.updated', { date: course.updated_at.slice(0, 10) }) }}</p>
       </button>
     </div>
   </div>

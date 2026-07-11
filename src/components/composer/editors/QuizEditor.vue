@@ -4,6 +4,7 @@
 //   { questions: [{ id, question, options[], correct_index }] }
 // Multi-MCQ uses `correct_indices` instead of `correct_index`.
 import { ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { AppButton } from '@/components/ui'
 import type { Element } from '@/types'
@@ -12,6 +13,7 @@ const props = defineProps<{ element: Element }>()
 const emit = defineEmits<{ updated: [Element] }>()
 
 const { invoke } = useLocalApi()
+const { t } = useI18n()
 
 interface Question {
   id: string
@@ -87,11 +89,11 @@ function isCorrect(q: Question, i: number): boolean {
 }
 
 function validate(): string | null {
-  if (!questions.value.length) return 'Add at least one question.'
+  if (!questions.value.length) return t('instructor.editors.quiz.errNeedQuestion')
   for (const [i, q] of questions.value.entries()) {
-    if (!q.question.trim()) return `Question ${i + 1} has no prompt.`
-    if (q.options.filter(o => o.trim()).length < 2) return `Question ${i + 1} needs at least two options.`
-    if (multi() && !(q.correct_indices ?? []).length) return `Question ${i + 1} has no correct answers marked.`
+    if (!q.question.trim()) return t('instructor.editors.quiz.errNoPrompt', { number: i + 1 })
+    if (q.options.filter(o => o.trim()).length < 2) return t('instructor.editors.quiz.errTooFewOptions', { number: i + 1 })
+    if (multi() && !(q.correct_indices ?? []).length) return t('instructor.editors.quiz.errNoCorrect', { number: i + 1 })
   }
   return null
 }
@@ -123,19 +125,19 @@ async function save() {
   <div class="space-y-4">
     <div class="flex items-center justify-between">
       <h3 class="text-sm font-semibold text-foreground">
-        Questions
+        {{ $t('instructor.editors.quiz.questionsHeading') }}
         <span class="ml-1 text-xs font-normal text-muted-foreground">
-          ({{ element.element_type === 'objective_multi_mcq' ? 'multiple correct answers' : 'one correct answer' }})
+          ({{ element.element_type === 'objective_multi_mcq' ? $t('instructor.editors.quiz.multiHint') : $t('instructor.editors.quiz.singleHint') }})
         </span>
       </h3>
       <div class="flex gap-2">
-        <AppButton variant="ghost" size="xs" @click="addQuestion">+ Question</AppButton>
-        <AppButton v-if="dirty" size="xs" :loading="saving" @click="save">Save quiz</AppButton>
+        <AppButton variant="ghost" size="xs" @click="addQuestion">{{ $t('instructor.editors.quiz.addQuestion') }}</AppButton>
+        <AppButton v-if="dirty" size="xs" :loading="saving" @click="save">{{ $t('instructor.editors.quiz.saveQuiz') }}</AppButton>
       </div>
     </div>
 
     <p v-if="!questions.length" class="text-xs text-muted-foreground">
-      No questions yet — add the first one.
+      {{ $t('instructor.editors.quiz.empty') }}
     </p>
 
     <div
@@ -149,13 +151,13 @@ async function save() {
           v-model="q.question"
           rows="2"
           class="flex-1 rounded-md border border-border bg-background px-3 py-2 text-sm"
-          placeholder="Question prompt"
+          :placeholder="$t('instructor.editors.quiz.questionPlaceholder')"
           @input="dirty = true"
         />
         <button
           type="button"
           class="rounded-md p-2 text-muted-foreground hover:bg-muted hover:text-foreground"
-          title="Remove question"
+          :title="$t('instructor.editors.quiz.removeQuestion')"
           @click="removeQuestion(qi)"
         >
           <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -170,7 +172,7 @@ async function save() {
             type="button"
             class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-colors"
             :class="isCorrect(q, oi) ? 'border-success bg-success text-white' : 'border-border text-transparent hover:border-success/60'"
-            :title="isCorrect(q, oi) ? 'Correct answer' : 'Mark as correct'"
+            :title="isCorrect(q, oi) ? $t('instructor.editors.quiz.correctAnswer') : $t('instructor.editors.quiz.markCorrect')"
             @click="toggleCorrect(q, oi)"
           >
             <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
@@ -181,14 +183,14 @@ async function save() {
             v-model="q.options[oi]"
             type="text"
             class="flex-1 rounded-md border border-border bg-background px-3 py-1.5 text-sm"
-            :placeholder="`Option ${oi + 1}`"
+            :placeholder="$t('instructor.editors.quiz.optionPlaceholder', { number: oi + 1 })"
             @input="dirty = true"
           >
           <button
             type="button"
             class="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30"
             :disabled="q.options.length <= 2"
-            title="Remove option"
+            :title="$t('instructor.editors.quiz.removeOption')"
             @click="removeOption(q, oi)"
           >
             <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -201,7 +203,7 @@ async function save() {
           class="text-xs text-primary hover:underline"
           @click="addOption(q)"
         >
-          + Add option
+          {{ $t('instructor.editors.quiz.addOption') }}
         </button>
       </div>
     </div>

@@ -1,0 +1,99 @@
+{
+  "browse": {
+    "title": "Browse plugins",
+    "intro": "Built-in activity types plus community add-ons the app has found. Community-approved plugins can issue credentials that count by default. Ones that haven't been reviewed yet still work, but their grades only count as your progress until the community reviews them.",
+    "builtin": "Built-in",
+    "community": "Community",
+    "emptyTitle": "No community plugins yet",
+    "emptyDescription": "Community add-ons arrive from other learners. Once someone publishes one, it will show up here.",
+    "loadFailed": "Couldn't load the plugin list: {error}"
+  },
+  "badge": {
+    "builtin": "Built-in",
+    "unknown": "Not reviewed",
+    "knownFlawed": "Known issues",
+    "attested": "Community-approved",
+    "unattested": "Not yet reviewed",
+    "statusPending": "Checking…"
+  },
+  "meta": {
+    "kinds": "Types",
+    "graded": "Graded",
+    "contentId": "Content ID",
+    "author": "By",
+    "caps": "Permissions",
+    "installed": "Added"
+  },
+  "installed": {
+    "title": "Plugins",
+    "intro": "Community-made learning and assessment activities. Each plugin runs in a locked-down sandbox with no internet access. You grant permissions (microphone, camera, and so on) one plugin at a time, the first time it needs them.",
+    "installHeading": "Add from a folder on this device",
+    "installHintPrefix": "Point to a folder on this device that holds its",
+    "installHintAnd": ", and a",
+    "installHintSuffix": "bundle. Soon you'll be able to add plugins straight from other learners.",
+    "installPlaceholder": "/path/to/plugin-folder",
+    "installedHeading": "Your plugins",
+    "emptyTitle": "No plugins yet",
+    "emptyDescription": "Add a plugin above to unlock new learning and assessment activities.",
+    "actions": {
+      "add": "Add",
+      "details": "Details",
+      "hide": "Hide"
+    },
+    "errors": {
+      "enterPath": "Enter the path to a plugin folder.",
+      "installSuccess": "Added \"{name}\" v{version}.",
+      "installFailed": "Couldn't add the plugin: {error}",
+      "listFailed": "Couldn't load your plugins: {error}",
+      "detailsFailed": "Couldn't load plugin details: {error}",
+      "uninstallFailed": "Couldn't remove the plugin: {error}",
+      "revokeFailed": "Couldn't turn off that permission: {error}"
+    },
+    "uninstallConfirm": "Remove \"{name}\"? This deletes the plugin from this device. Courses that use it will stop working until you add it again.",
+    "detail": {
+      "kinds": "Types",
+      "declaredCapabilities": "Permissions it may ask for",
+      "platforms": "Platforms",
+      "apiVersion": "Plugin format version",
+      "none": "none",
+      "unspecified": "unspecified",
+      "grantedHeading": "Permissions you've granted",
+      "noGrants": "No lasting permissions. The plugin will ask the first time it needs one.",
+      "revoke": "Turn off"
+    }
+  },
+  "docs": {
+    "back": "Back to plugins",
+    "fallbackName": "Plugin",
+    "by": "by {name}",
+    "donate": "Support the creator",
+    "noReadme": "This plugin doesn't include a guide.",
+    "loadError": "Couldn't load the guide: {error}"
+  },
+  "permission": {
+    "heading": "{name} wants to {action}",
+    "capabilities": {
+      "microphone": "use your microphone",
+      "camera": "use your camera",
+      "midi": "connect to your music (MIDI) devices",
+      "fullscreen": "fill the whole screen",
+      "clipboard": "read and change your clipboard",
+      "storage": "save your progress on this device",
+      "mlInference": "run AI models right on your device"
+    },
+    "sandbox": "Plugins are made by the community and run in a safe sandbox.",
+    "madeBy": "Made by",
+    "noAccess": "It can't reach the internet or any other data on this device.",
+    "always": "Always allow",
+    "session": "Allow this session",
+    "once": "Allow once",
+    "deny": "Don't allow"
+  },
+  "host": {
+    "noCid": "This activity uses a plugin, but its content ID is missing.",
+    "disabled": "This plugin is turned off. Turn it back on in Settings → Plugins to use it.",
+    "noKinds": "This plugin doesn't define any activities, so it can't run.",
+    "noGrader": "This plugin is set up for grading but has no grader attached. The author needs to publish a fix.",
+    "loadFailed": "Couldn't load the plugin: {error}"
+  }
+}

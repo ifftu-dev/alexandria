@@ -1,0 +1,40 @@
+{
+  "index": {
+    "title": "آپ کے اہداف",
+    "subtitle": "وہ مہارتیں جن کی طرف آپ کام کر رہے ہیں۔ Alexandria آپ نے جو پہلے ہی ثابت کیا ہے اس سے آپ کا راستہ ترتیب دیتا ہے۔",
+    "perGoal": "فی ہدف",
+    "combinedPath": "مشترکہ راستہ",
+    "findSomeone": "کسی کو تلاش کریں",
+    "usernamePlaceholder": "{'@'}username",
+    "viewProfile": "پروفائل دیکھیں",
+    "yourHandle": "آپ {'@'}{name} ہیں — اپنا ہینڈل شیئر کریں تاکہ دوسرے آپ کو تلاش کر سکیں۔",
+    "chartingPaths": "آپ کے راستے ترتیب دیے جا رہے ہیں…",
+    "emptyTitle": "ابھی کوئی ہدف نہیں",
+    "emptyDescription": "جن مہارتوں کا ہدف رکھنا ہے ان کا مجموعہ منتخب کریں — مہارت کی لائبریری یا کسی استاد کا عوامی نقشہ دیکھیں اور “بطور ہدف مقرر کریں” پر کلک کریں۔",
+    "browseSkills": "مہارتیں دیکھیں",
+    "skillsAcrossGoals": "{goals} اہداف میں {earned} / {total} مہارتیں",
+    "skillsCount": "{earned} / {total} مہارتیں",
+    "nextStep": "اگلا: {name}",
+    "allCleared": "آپ ہر مرحلے کے لیے تیار ہیں 🎉",
+    "viewPath": "راستہ دیکھیں",
+    "hidePath": "راستہ چھپائیں"
+  },
+  "picker": {
+    "jobRole": "ملازمت کا کردار",
+    "exam": "امتحان",
+    "curriculum": "نصاب",
+    "jobDescription": "ملازمت کی تفصیل",
+    "selectPrompt": "ایک {type} منتخب کریں…",
+    "setAsGoal": "بطور ہدف مقرر کریں",
+    "pasteText": "متن چسپاں کریں",
+    "fromLink": "لنک سے",
+    "jobPostingUrl": "ملازمت اشتہار کا URL",
+    "jdPlaceholder": "ملازمت کی تفصیل یہاں چسپاں کریں…",
+    "findSkills": "مہارتیں تلاش کریں",
+    "foundSkills": "یہ مہارتیں ملیں — تصدیق کریں کہ آپ کے ہدف میں کون سی شامل کرنی ہیں:",
+    "strongMatch": "مضبوط",
+    "matched": "“{term}” سے مماثل",
+    "noMatchingSkills": "کوئی مماثل مہارت نہیں ملی — مختلف تفصیل آزمائیں۔",
+    "addAsGoal": "{count} مہارت بطور ہدف شامل کریں | {count} مہارتیں بطور ہدف شامل کریں"
+  }
+}

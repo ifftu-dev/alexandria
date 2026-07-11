@@ -1,0 +1,206 @@
+{
+  "dashboard": {
+    "title": "शिक्षक डॅशबोर्ड",
+    "subtitle": "तुमच्या अभ्यासक्रमांमध्ये विद्यार्थी कसे करत आहेत, तसेच तुमच्या पुनरावलोकनाची काय प्रतीक्षा आहे.",
+    "inbox": "इनबॉक्स",
+    "compose": "+ रचना करा",
+    "statCourses": "अभ्यासक्रम व ट्युटोरियल",
+    "statPublished": "प्रकाशित",
+    "statEnrollments": "नोंदणी",
+    "statPendingReviews": "पुनरावलोकनाची प्रतीक्षा",
+    "colCourse": "अभ्यासक्रम",
+    "colStatus": "स्थिती",
+    "colEnrolled": "नोंदणी",
+    "colCompletion": "पूर्णता",
+    "colAvgScore": "सरासरी गुण",
+    "colReviews": "पुनरावलोकने",
+    "colLastActivity": "शेवटची क्रिया",
+    "emptyTitle": "अजून एकही अभ्यासक्रम नाही",
+    "emptyDesc": "इथे विद्यार्थी क्रिया पाहण्यासाठी तुमचा पहिला अभ्यासक्रम किंवा ट्युटोरियल तयार करा."
+  },
+  "myCourses": {
+    "title": "माझे अभ्यासक्रम",
+    "subtitle": "तुम्ही या डिव्हाइसवर तयार केलेले सर्व काही — मसुदे आणि प्रकाशित.",
+    "addCourse": "+ अभ्यासक्रम",
+    "addTutorial": "+ ट्युटोरियल",
+    "emptyTitle": "अजून काहीही तयार केले नाही",
+    "emptyDesc": "रचनाकाराने तुमचा पहिला अभ्यासक्रम किंवा ट्युटोरियल तयार करा.",
+    "updated": "अद्ययावत {date}"
+  },
+  "courseLearners": {
+    "eyebrow": "विद्यार्थी प्रगती",
+    "fallbackTitle": "अभ्यासक्रम",
+    "emptyTitle": "या डिव्हाइसवर अजून एकही नोंदणी नाही",
+    "emptyDesc": "प्रत्येक विद्यार्थ्याची प्रगती त्यांच्या स्वतःच्या डिव्हाइसवर राहते — हे दृश्य अ‍ॅपला इथे जे सापडले ते दाखवते (नोंदणी आणि वर्गातील सादरीकरणे).",
+    "colLearner": "विद्यार्थी",
+    "colStatus": "स्थिती",
+    "colProgress": "प्रगती",
+    "colAvgScore": "सरासरी गुण",
+    "colTimeSpent": "घालवलेला वेळ",
+    "colLastActivity": "शेवटची क्रिया",
+    "localLearner": "स्थानिक विद्यार्थी"
+  },
+  "inbox": {
+    "title": "इनबॉक्स",
+    "subtitle": "तुमच्या पुनरावलोकनाची प्रतीक्षा करणारी विद्यार्थी सादरीकरणे, तसेच प्रलंबित वर्गखोली सामील होण्याच्या विनंत्या.",
+    "tabAll": "सर्व",
+    "tabSubmissions": "सादरीकरणे",
+    "tabJoinRequests": "सामील होण्याच्या विनंत्या",
+    "emptyTitle": "सर्व काही पूर्ण झाले",
+    "emptyDesc": "तुमच्या पुनरावलोकनाची काहीही प्रतीक्षा नाही."
+  },
+  "submissionReview": {
+    "eyebrow": "सादरीकरण पुनरावलोकन",
+    "title": "सादरीकरण पुनरावलोकन करा",
+    "notFoundTitle": "सादरीकरण सापडले नाही",
+    "notFoundDesc": "त्याचे कदाचित आधीच पुनरावलोकन झाले असेल किंवा ते काढून टाकले असेल.",
+    "from": "कडून",
+    "submittedWork": "सादर केलेले काम",
+    "yourReview": "तुमचे पुनरावलोकन",
+    "scoreLabel": "गुण — {percent}%",
+    "perSkillRatings": "प्रति-कौशल्य मूल्यांकन",
+    "feedback": "अभिप्राय",
+    "feedbackPlaceholder": "काय चांगले होते, काय सुधारायचे…",
+    "postReview": "पुनरावलोकन पोस्ट करा",
+    "reviewed": "पुनरावलोकन केले",
+    "finalScore": "गुण:"
+  },
+  "compose": {
+    "newCourse": "नवीन अभ्यासक्रम",
+    "newTutorial": "नवीन ट्युटोरियल",
+    "courseIntro": "अभ्यासक्रम प्रकरणांमध्ये संघटित असतो, प्रत्येकात व्हिडिओ, धडे, प्रश्नमंजुषा, मूल्यमापने आणि प्रत्यक्ष सराव असतात.",
+    "tutorialIntro": "ट्युटोरियल हा एक छोटा एकल-मार्ग धडा असतो — सहसा मार्करसह एक व्हिडिओ आणि पर्यायी प्रश्नमंजुषा.",
+    "titleLabel": "शीर्षक",
+    "titlePlaceholder": "उदा. व्यावहारिक क्रिप्टोग्राफी",
+    "descriptionLabel": "वर्णन",
+    "descriptionPlaceholder": "एक-परिच्छेदाचे सादरीकरण.",
+    "tagsLabel": "टॅग (स्वल्पविरामाने वेगळे)",
+    "tagsPlaceholder": "उदा. सुरक्षा, प्रारंभिक",
+    "createDraft": "मसुदा तयार करा",
+    "needTitle": "आधी त्याला एक शीर्षक द्या.",
+    "editMeta": "शीर्षक आणि वर्णन संपादित करा",
+    "publish": "प्रकाशित करा",
+    "beforePublish": "प्रकाशित करण्याआधी",
+    "blockerNeedElement": "किमान एक घटक जोडा.",
+    "blockerUnboundPlugins": "एकही नाही | {count} प्लगइन घटकाला अजून प्लगइन निवडणे आवश्यक आहे | {count} प्लगइन घटकांना अजून प्लगइन निवडणे आवश्यक आहे",
+    "publishedTitle": "तुमचा अभ्यासक्रम प्रकाशित झाला",
+    "publishedNote": "विद्यार्थी आता तो शोधून त्यात नोंदणी करू शकतात.",
+    "fingerprintLabel": "मजकूर ठसा",
+    "sizeBytes": "एकही नाही | {count} बाइट | {count} बाइट्स",
+    "nothingSelectedTitle": "काहीही निवडलेले नाही",
+    "nothingSelectedDesc": "रूपरेषेतून एक घटक निवडा, किंवा तयार करणे सुरू करण्यासाठी एक जोडा.",
+    "confirmPublishTitle": "प्रकाशित करा",
+    "confirmPublishMessage": "हे '{title}' प्रकाशित करते जेणेकरून विद्यार्थी लगेच शोधून नोंदणी करू शकतील. ते तुमच्याकडून स्वाक्षरी केलेले आहे आणि तुमच्या कनेक्शनसह थेट सामायिक केले जाते.",
+    "confirmDeleteTitle": "हटवा",
+    "confirmDeleteMessage": "हे मसुदा आणि त्याची सर्व प्रकरणे व घटक कायमचे हटवते. हे पूर्ववत करता येणार नाही.",
+    "editDetails": "तपशील संपादित करा",
+    "notFoundTitle": "सापडले नाही",
+    "notFoundDesc": "हा अभ्यासक्रम किंवा ट्युटोरियल या डिव्हाइसवर अस्तित्वात नाही."
+  },
+  "outline": {
+    "elementTitlePlaceholder": "घटक शीर्षक",
+    "chapterTitlePlaceholder": "प्रकरण शीर्षक",
+    "add": "जोडा",
+    "addChapter": "प्रकरण जोडा",
+    "addElement": "+ घटक जोडा",
+    "addChapterCta": "+ प्रकरण जोडा"
+  },
+  "elementTypes": {
+    "video": "व्हिडिओ",
+    "text": "मजकूर",
+    "pdf": "PDF",
+    "downloadable": "डाउनलोड",
+    "quiz": "प्रश्नमंजुषा",
+    "objectiveSingleMcq": "एकल MCQ",
+    "objectiveMultiMcq": "बहुविध MCQ",
+    "subjectiveMcq": "व्यक्तिनिष्ठ MCQ",
+    "essay": "निबंध",
+    "interactive": "परस्परसंवादी",
+    "assessment": "मूल्यमापन",
+    "plugin": "प्लगइन"
+  },
+  "elementEditor": {
+    "deleteElement": "घटक हटवा",
+    "titlePlaceholder": "घटक शीर्षक",
+    "confirmDeleteTitle": "घटक हटवा",
+    "confirmDeleteMessage": "हे घटक आणि त्याचा मजकूर अभ्यासक्रमातून काढून टाकते. हे पूर्ववत करता येणार नाही."
+  },
+  "skillPicker": {
+    "searchPlaceholder": "कौशल्ये शोधा…",
+    "removeSkill": "{name} काढून टाका",
+    "addSkill": "कौशल्य"
+  },
+  "editors": {
+    "shared": {
+      "uploaded": "अपलोड केले"
+    },
+    "video": {
+      "fileHeading": "व्हिडिओ फाइल",
+      "minutes": "{count} मिनिटे",
+      "reading": "{size} MB वाचत आहे…",
+      "saving": "या डिव्हाइसवर जतन करत आहे…",
+      "uploadFailed": "अपलोड अयशस्वी: {error}",
+      "markersHeading": "प्रकरण मार्कर",
+      "addMarker": "+ मार्कर",
+      "saveMarkers": "मार्कर जतन करा",
+      "markersHint": "टाइमस्टॅम्प व्हिडिओखाली क्लिक करण्यायोग्य नेव्हिगेशन बनतात.",
+      "markerTitlePlaceholder": "मार्कर शीर्षक",
+      "startSeconds": "सुरुवात (सेकंद)"
+    },
+    "file": {
+      "pdfHeading": "PDF दस्तऐवज",
+      "downloadHeading": "डाउनलोड करण्यायोग्य फाइल",
+      "uploading": "अपलोड करत आहे…",
+      "uploadFailed": "अपलोड अयशस्वी: {error}"
+    },
+    "quiz": {
+      "questionsHeading": "प्रश्न",
+      "multiHint": "अनेक बरोबर उत्तरे",
+      "singleHint": "एक बरोबर उत्तर",
+      "addQuestion": "+ प्रश्न",
+      "saveQuiz": "प्रश्नमंजुषा जतन करा",
+      "empty": "अजून एकही प्रश्न नाही — पहिला जोडा.",
+      "questionPlaceholder": "प्रश्न सूचना",
+      "removeQuestion": "प्रश्न काढून टाका",
+      "optionPlaceholder": "पर्याय {number}",
+      "correctAnswer": "बरोबर उत्तर",
+      "markCorrect": "बरोबर म्हणून चिन्हांकित करा",
+      "removeOption": "पर्याय काढून टाका",
+      "addOption": "+ पर्याय जोडा",
+      "errNeedQuestion": "किमान एक प्रश्न जोडा.",
+      "errNoPrompt": "प्रश्न {number} ला सूचना नाही.",
+      "errTooFewOptions": "प्रश्न {number} ला किमान दोन पर्याय हवेत.",
+      "errNoCorrect": "प्रश्न {number} ला कोणतेही बरोबर उत्तर चिन्हांकित केलेले नाही."
+    },
+    "text": {
+      "heading": "धड्याचा मजकूर (Markdown)",
+      "placeholder": "# धड्याचे शीर्षक\n\nधडा Markdown मध्ये लिहा…"
+    },
+    "essay": {
+      "heading": "निबंध असाइनमेंट",
+      "promptLabel": "सूचना",
+      "promptPlaceholder": "विद्यार्थ्याने कशाबद्दल लिहावे?",
+      "rubricLabel": "गुणवत्ता निकष (पुनरावलोकन करताना तुम्हाला दाखवले जाते, आणि विद्यार्थ्याला आधीच)",
+      "rubricPlaceholder": "उदा. प्रबंधाची स्पष्टता (30%), पुरावा (40%), रचना (30%)",
+      "minWordsLabel": "किमान शब्द (पर्यायी)",
+      "hint": "निबंध सादरीकरणे मॅन्युअल पुनरावलोकन व गुणांकनासाठी तुमच्या शिक्षक इनबॉक्समध्ये येतात.",
+      "errNeedPrompt": "निबंधाला सूचना आवश्यक आहे."
+    },
+    "json": {
+      "assessmentHeading": "मूल्यमापन व्याख्या (JSON)",
+      "interactiveHeading": "परस्परसंवादी मजकूर (JSON)",
+      "invalidJson": "अवैध JSON.",
+      "errFixJson": "जतन करण्याआधी JSON दुरुस्त करा."
+    },
+    "plugin": {
+      "heading": "प्लगइन जोडणी",
+      "installedLabel": "इंस्टॉल केलेले प्लगइन",
+      "pickOption": "एक प्लगइन निवडा…",
+      "noneInstalled": "कोणतेही सक्षम प्लगइन इंस्टॉल केलेले नाही — सेटिंग्ज → प्लगइन अंतर्गत एक जोडा.",
+      "configLabel": "घटक कॉन्फिग (सुरुवातीला प्लगइनला दिलेला JSON — उदा. codejudge समस्या व्याख्या)",
+      "invalidJson": "अवैध JSON.",
+      "errPickFirst": "आधी एक प्लगइन निवडा.",
+      "errFixConfig": "जतन करण्याआधी कॉन्फिग JSON दुरुस्त करा."
+    }
+  }
+}

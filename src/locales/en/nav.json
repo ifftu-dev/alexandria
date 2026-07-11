@@ -1,0 +1,78 @@
+{
+  "primary": {
+    "home": "Home",
+    "opinions": "Opinions",
+    "community": "Community",
+    "skills": "Skills",
+    "goals": "Goals",
+    "dashboard": "Dashboard",
+    "myCourses": "My Courses",
+    "inbox": "Inbox",
+    "myChildren": "My Children"
+  },
+  "sections": {
+    "liveTutoring": "Live Tutoring",
+    "classrooms": "Classrooms",
+    "skillGraph": "Skill Graph",
+    "viewAllSessions": "View all sessions",
+    "viewAllClassrooms": "View all classrooms",
+    "noSessions": "No sessions yet",
+    "noClassrooms": "No classrooms yet",
+    "memberCount": "no members | {count} member | {count} members"
+  },
+  "status": {
+    "active": "Active",
+    "ended": "Ended",
+    "cancelled": "Cancelled"
+  },
+  "mode": {
+    "ariaLabel": "Active mode",
+    "learner": "Learner",
+    "instructor": "Instructor",
+    "learnerHint": "Learner mode — take courses and earn credentials",
+    "instructorHint": "Instructor mode — build courses and review work"
+  },
+  "topbar": {
+    "expandSidebar": "Expand sidebar",
+    "collapseSidebar": "Collapse sidebar",
+    "goBack": "Go back",
+    "goForward": "Go forward",
+    "forward": "Forward",
+    "openSearch": "Open search",
+    "searchPlaceholder": "Search skills, courses, community groups…",
+    "alpha": "Alpha",
+    "instructorMode": "Instructor Mode",
+    "instructorModeHint": "You are in instructor mode — building and reviewing, not learning",
+    "guardian": "Guardian",
+    "guardianHint": "Guardian account — overseeing your children's learning"
+  },
+  "prerelease": {
+    "title": "Pre-release build — not for production use",
+    "titleVersion": "Pre-release v{version} — not for production use"
+  },
+  "theme": {
+    "ariaLabel": "Current theme: {theme}. Tap to change.",
+    "light": "Light",
+    "dark": "Dark",
+    "system": "System"
+  },
+  "userMenu": {
+    "ariaLabel": "Account menu for {name}",
+    "defaultName": "you",
+    "anonymous": "Anonymous",
+    "onThisDevice": "On this device",
+    "roleInstructor": "instructor",
+    "roleInstructorLearner": "instructor · learner mode",
+    "myProfile": "My Profile",
+    "myLearning": "My Learning",
+    "myCredentials": "My Credentials",
+    "sponsor": "Sponsor",
+    "mySkills": "My Skills",
+    "myReputation": "My Reputation",
+    "sentinel": "Sentinel",
+    "community": "Community",
+    "settings": "Settings",
+    "switchUser": "Switch user",
+    "lockAccount": "Lock account"
+  }
+}

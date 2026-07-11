@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { convertFileSrc } from '@tauri-apps/api/core'
+import { useI18n } from 'vue-i18n'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { useSetting } from '@/composables/useSettings'
 import { AppSpinner } from '@/components/ui'
+
+const { t } = useI18n()
 
 type QualityOption = {
   id: string
@@ -69,23 +72,23 @@ const isTouchDevice = computed(() => {
   return /iPad|iPhone|iPod|Android/.test(navigator.userAgent)
 })
 
-const speedOptions = [
+const speedOptions = computed(() => [
   { id: '0.25', label: '0.25x' },
   { id: '0.5', label: '0.5x' },
   { id: '0.75', label: '0.75x' },
-  { id: '1', label: 'Normal' },
+  { id: '1', label: t('courses.video.speedNormal') },
   { id: '1.25', label: '1.25x' },
   { id: '1.5', label: '1.5x' },
   { id: '1.75', label: '1.75x' },
   { id: '2', label: '2x' },
-]
+])
 
-const qualityOptions: QualityOption[] = [
-  { id: 'auto', label: 'Auto', needsTranscoding: false },
+const qualityOptions = computed<QualityOption[]>(() => [
+  { id: 'auto', label: t('courses.video.qualityAuto'), needsTranscoding: false },
   { id: '1080p', label: '1080p', needsTranscoding: true },
   { id: '720p', label: '720p', needsTranscoding: true },
   { id: '480p', label: '480p', needsTranscoding: true },
-]
+])
 
 const effectiveTime = computed(() => (isScrubbing.value ? scrubTime.value : currentTime.value))
 const fullscreenActive = computed(() => isFullscreen.value || pseudoFullscreen.value)
@@ -194,7 +197,7 @@ async function togglePlay() {
       isPlaying.value = false
     }
   } catch {
-    setInfo('Unable to start playback')
+    setInfo(t('courses.video.unablePlay'))
   }
   scheduleControlsHide()
 }
@@ -240,7 +243,7 @@ function setPlaybackRate(rate: string) {
   if (!video || Number.isNaN(numeric)) return
   video.playbackRate = numeric
   activeSpeed.value = rate
-  setInfo(`Speed: ${speedOptions.find((s) => s.id === rate)?.label ?? `${rate}x`}`)
+  setInfo(t('courses.video.speedInfo', { label: speedOptions.value.find((s) => s.id === rate)?.label ?? `${rate}x` }))
 }
 
 function toggleMute() {
@@ -338,7 +341,7 @@ async function togglePiP() {
   }
 
   if (!doc.pictureInPictureEnabled) {
-    setInfo('Picture-in-picture unavailable')
+    setInfo(t('courses.video.pipUnavailable'))
     return
   }
 
@@ -349,27 +352,27 @@ async function togglePiP() {
       await (video as HTMLVideoElement & { requestPictureInPicture?: () => Promise<void> }).requestPictureInPicture?.()
     }
   } catch {
-    setInfo('Picture-in-picture unavailable')
+    setInfo(t('courses.video.pipUnavailable'))
   }
 }
 
 function toggleCaptions() {
   captionEnabled.value = !captionEnabled.value
   if (captionEnabled.value) {
-    setInfo('Captions stub: transcript track support will be wired next')
+    setInfo(t('courses.video.captionsSoon'))
   } else {
-    setInfo('Captions off')
+    setInfo(t('courses.video.captionsOff'))
   }
 }
 
 function selectQuality(option: QualityOption) {
   if (option.needsTranscoding) {
-    setInfo(`Quality ${option.label} stub: requires transcoded renditions`)
+    setInfo(t('courses.video.qualitySoon', { label: option.label }))
     activeQuality.value = option.id
     return
   }
   activeQuality.value = option.id
-  setInfo(`Quality: ${option.label}`)
+  setInfo(t('courses.video.qualityInfo', { label: option.label }))
 }
 
 async function loadVideo() {
@@ -410,8 +413,8 @@ async function loadVideo() {
     currentTime.value = 0
     duration.value = 0
     bufferedEnd.value = 0
-  } catch (e: unknown) {
-    error.value = `Failed to load video: ${String(e)}`
+  } catch {
+    error.value = t('courses.video.loadFailed')
     videoUrl.value = null
   } finally {
     loading.value = false
@@ -421,8 +424,8 @@ async function loadVideo() {
 function onVideoError() {
   const me = videoRef.value?.error
   error.value = me
-    ? `Failed to load video (code ${me.code})`
-    : 'Failed to load video — content unavailable on this node.'
+    ? t('courses.video.errorCode', { code: me.code })
+    : t('courses.video.errorUnavailable')
 }
 
 function onContainerClick() {
@@ -488,14 +491,14 @@ function onKeydown(event: KeyboardEvent) {
     toggleCaptions()
   } else if (event.key === '>') {
     event.preventDefault()
-    const idx = speedOptions.findIndex((s) => s.id === activeSpeed.value)
-    const next = Math.min(speedOptions.length - 1, idx + 1)
-    setPlaybackRate(speedOptions[next]!.id)
+    const idx = speedOptions.value.findIndex((s) => s.id === activeSpeed.value)
+    const next = Math.min(speedOptions.value.length - 1, idx + 1)
+    setPlaybackRate(speedOptions.value[next]!.id)
   } else if (event.key === '<') {
     event.preventDefault()
-    const idx = speedOptions.findIndex((s) => s.id === activeSpeed.value)
+    const idx = speedOptions.value.findIndex((s) => s.id === activeSpeed.value)
     const next = Math.max(0, idx - 1)
-    setPlaybackRate(speedOptions[next]!.id)
+    setPlaybackRate(speedOptions.value[next]!.id)
   }
 }
 
@@ -575,7 +578,7 @@ onUnmounted(() => {
 
 <template>
   <div class="video-player">
-    <AppSpinner v-if="loading" label="Loading video..." />
+    <AppSpinner v-if="loading" :label="t('courses.video.loading')" />
 
     <div v-else-if="error" class="text-sm text-destructive">
       {{ error }}
@@ -715,7 +718,7 @@ onUnmounted(() => {
               </button>
 
               <div v-if="showSettings" class="absolute bottom-10 right-0 w-64 rounded-lg border border-white/10 bg-black/90 p-2 shadow-xl">
-                <div class="px-2 py-1 text-[11px] uppercase tracking-wide text-white/60">Playback Speed</div>
+                <div class="px-2 py-1 text-[11px] uppercase tracking-wide text-white/60">{{ $t('courses.video.playbackSpeed') }}</div>
                 <button
                   v-for="speed in speedOptions"
                   :key="speed.id"
@@ -724,10 +727,10 @@ onUnmounted(() => {
                   @click="setPlaybackRate(speed.id)"
                 >
                   <span>{{ speed.label }}</span>
-                  <span v-if="activeSpeed === speed.id" class="text-xs text-primary-300">Active</span>
+                  <span v-if="activeSpeed === speed.id" class="text-xs text-primary-300">{{ $t('courses.video.active') }}</span>
                 </button>
 
-                <div class="mt-2 px-2 py-1 text-[11px] uppercase tracking-wide text-white/60">Quality</div>
+                <div class="mt-2 px-2 py-1 text-[11px] uppercase tracking-wide text-white/60">{{ $t('courses.video.quality') }}</div>
                 <button
                   v-for="quality in qualityOptions"
                   :key="quality.id"
@@ -736,8 +739,8 @@ onUnmounted(() => {
                   @click="selectQuality(quality)"
                 >
                   <span>{{ quality.label }}</span>
-                  <span v-if="quality.needsTranscoding" class="text-[10px] text-white/50">stub</span>
-                  <span v-else-if="activeQuality === quality.id" class="text-xs text-primary-300">Active</span>
+                  <span v-if="quality.needsTranscoding" class="text-[10px] text-white/50">{{ $t('courses.video.soon') }}</span>
+                  <span v-else-if="activeQuality === quality.id" class="text-xs text-primary-300">{{ $t('courses.video.active') }}</span>
                 </button>
               </div>
             </div>
@@ -769,8 +772,8 @@ onUnmounted(() => {
       <svg class="mb-3 h-12 w-12 text-muted-foreground/50" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
         <path stroke-linecap="round" stroke-linejoin="round" d="m15.75 10.5 4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25h-9A2.25 2.25 0 0 0 2.25 7.5v9a2.25 2.25 0 0 0 2.25 2.25Z" />
       </svg>
-      <p class="text-sm font-medium text-muted-foreground">{{ title ?? 'Video' }}</p>
-      <p class="mt-1 text-xs text-muted-foreground/60">Video content not yet available on this node</p>
+      <p class="text-sm font-medium text-muted-foreground">{{ title ?? $t('courses.video.defaultTitle') }}</p>
+      <p class="mt-1 text-xs text-muted-foreground/60">{{ $t('courses.video.notAvailable') }}</p>
     </div>
   </div>
 </template>

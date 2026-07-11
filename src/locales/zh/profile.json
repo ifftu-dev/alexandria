@@ -1,0 +1,68 @@
+{
+  "loadingProfile": "正在加载你的档案…",
+  "fetching": "正在加载档案…",
+  "unnamed": "未命名",
+  "thisUser": "此人",
+  "unavailable": {
+    "title": "档案不可用",
+    "description": "打开你的账户以查看你的档案。"
+  },
+  "actions": {
+    "editProfile": "编辑档案"
+  },
+  "visibility": {
+    "private": "你的档案是私密的——其他人看不到它，你的用户名也不会出现在搜索中。",
+    "public": "你的档案是公开的——任何人都能通过你的用户名或公开 ID 找到它。",
+    "manageIn": "在此处管理",
+    "settingsAccount": "设置 → 账户"
+  },
+  "stats": {
+    "teachingImpact": "教学影响力",
+    "learningImpact": "学习影响力",
+    "skillsProven": "已证明技能",
+    "publicSkills": "公开技能"
+  },
+  "skillGraph": {
+    "title": "你的技能图谱",
+    "manageVisibility": "管理可见性 ▸"
+  },
+  "header": {
+    "private": "私密",
+    "public": "公开",
+    "verified": "已验证",
+    "verifiedHint": "此名称已公开确认，且防篡改。",
+    "registered": "已注册",
+    "registeredHint": "此名称已注册。",
+    "publicId": "公开 ID"
+  },
+  "add": {
+    "title": "添加账户",
+    "subtitle": "设置一个新账户"
+  },
+  "tile": {
+    "neverOpened": "从未打开",
+    "justNow": "刚刚",
+    "minAgo": "{count} 分钟前 | {count} 分钟前",
+    "hrAgo": "{count} 小时前 | {count} 小时前",
+    "daysAgo": "{count} 天前 | {count} 天前"
+  },
+  "goal": {
+    "set": "设为目标",
+    "isSet": "目标已设定",
+    "label": "{name} · 技能图谱"
+  },
+  "teaches": {
+    "title": "教授",
+    "hint": "— 选择教授这些"
+  },
+  "publicSkillGraph": "公开技能图谱",
+  "graphStats": "{skills} 项技能 · {taught} 项教授",
+  "noPublicSkills": {
+    "title": "没有公开技能",
+    "description": "{name} 尚未公开分享任何技能。"
+  },
+  "error": {
+    "couldntLoad": "无法加载此档案：{error}",
+    "offlineHint": "此档案由其所有者直接分享。他们需要在线，且档案设为公开。"
+  }
+}

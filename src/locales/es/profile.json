@@ -1,0 +1,68 @@
+{
+  "loadingProfile": "Cargando tu perfil…",
+  "fetching": "Cargando perfil…",
+  "unnamed": "Sin nombre",
+  "thisUser": "esta persona",
+  "unavailable": {
+    "title": "Perfil no disponible",
+    "description": "Abre tu cuenta para ver tu perfil."
+  },
+  "actions": {
+    "editProfile": "Editar perfil"
+  },
+  "visibility": {
+    "private": "Tu perfil es privado: otras personas no pueden verlo y tu nombre de usuario no aparecerá en las búsquedas.",
+    "public": "Tu perfil es público: cualquiera puede encontrarlo por tu nombre de usuario o ID público.",
+    "manageIn": "Gestiona esto en",
+    "settingsAccount": "Ajustes → Cuenta"
+  },
+  "stats": {
+    "teachingImpact": "Impacto docente",
+    "learningImpact": "Impacto de aprendizaje",
+    "skillsProven": "Habilidades demostradas",
+    "publicSkills": "Habilidades públicas"
+  },
+  "skillGraph": {
+    "title": "Tu mapa de habilidades",
+    "manageVisibility": "Gestionar visibilidad ▸"
+  },
+  "header": {
+    "private": "Privado",
+    "public": "Público",
+    "verified": "Verificado",
+    "verifiedHint": "Este nombre está confirmado públicamente y es a prueba de manipulaciones.",
+    "registered": "Registrado",
+    "registeredHint": "Este nombre está registrado.",
+    "publicId": "ID público"
+  },
+  "add": {
+    "title": "Añadir cuenta",
+    "subtitle": "Configura una nueva cuenta"
+  },
+  "tile": {
+    "neverOpened": "Nunca abierto",
+    "justNow": "Justo ahora",
+    "minAgo": "hace {count} min | hace {count} min",
+    "hrAgo": "hace {count} h | hace {count} h",
+    "daysAgo": "hace {count} día | hace {count} días"
+  },
+  "goal": {
+    "set": "Fijar como meta",
+    "isSet": "Meta fijada",
+    "label": "{name} · mapa de habilidades"
+  },
+  "teaches": {
+    "title": "Enseña",
+    "hint": "— eligió enseñar estas"
+  },
+  "publicSkillGraph": "Mapa de habilidades público",
+  "graphStats": "{skills} habilidades · {taught} enseñadas",
+  "noPublicSkills": {
+    "title": "No hay habilidades públicas",
+    "description": "{name} aún no ha compartido ninguna habilidad públicamente."
+  },
+  "error": {
+    "couldntLoad": "No se pudo cargar este perfil: {error}",
+    "offlineHint": "Este perfil lo comparte directamente su propietario. Necesita estar en línea y tener su perfil configurado como público."
+  }
+}

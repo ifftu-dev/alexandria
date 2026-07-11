@@ -1,0 +1,134 @@
+{
+  "index": {
+    "title": "సముదాయం",
+    "subtitle": "ఏ నైపుణ్యాలు గుర్తింపు పొందుతాయో రూపొందించే సముదాయ బృందాలు",
+    "stats": {
+      "totalGroups": "సముదాయ బృందాలు",
+      "active": "క్రియాశీలం",
+      "councilSeats": "కౌన్సిల్ సీట్లు"
+    },
+    "searchPlaceholder": "సముదాయాలను వెతకండి…",
+    "empty": {
+      "noMatchTitle": "మీ శోధనకు సముదాయాలు ఏవీ సరిపోలలేదు",
+      "noMatchHint": "వేరే శోధన పదంతో ప్రయత్నించండి.",
+      "noneTitle": "ఇంకా సముదాయాలు లేవు",
+      "noneHint": "కొత్త అంశాలు జోడించబడిన కొద్దీ సముదాయ బృందాలు స్వయంచాలకంగా కనిపిస్తాయి."
+    },
+    "scope": {
+      "topicAreaShort": "TA",
+      "topicShort": "TO",
+      "topicArea": "అంశ ప్రాంతం",
+      "topic": "అంశం"
+    },
+    "seats": "ఏదీ లేదు | {count} సీటు | {count} సీట్లు"
+  },
+  "detail": {
+    "breadcrumb": "సముదాయం",
+    "notFound": "సముదాయ బృందం కనుగొనబడలేదు",
+    "tabs": {
+      "overview": "అవలోకనం",
+      "elections": "ఎన్నికలు",
+      "proposals": "ప్రతిపాదనలు"
+    },
+    "stats": {
+      "members": "ఎవరూ లేరు | {count} సభ్యుడు | {count} సభ్యులు",
+      "council": "{filled}/{total} కౌన్సిల్",
+      "elections": "ఏదీ లేదు | {count} ఎన్నిక | {count} ఎన్నికలు",
+      "proposals": "ఏదీ లేదు | {count} ప్రతిపాదన | {count} ప్రతిపాదనలు"
+    },
+    "details": {
+      "heading": "వివరాలు",
+      "scope": "అంశ రకం",
+      "councilSize": "కౌన్సిల్ పరిమాణం",
+      "electionInterval": "ఎన్నిక వ్యవధి",
+      "intervalDays": "{count} రోజులు",
+      "created": "సృష్టించబడింది",
+      "topicId": "అంశ ID",
+      "publicRecord": "పబ్లిక్ రికార్డ్"
+    },
+    "council": {
+      "heading": "కౌన్సిల్",
+      "seats": "{filled} / {total} సీట్లు",
+      "emptyTitle": "కౌన్సిల్ సభ్యులు లేరు",
+      "emptyDescription": "కౌన్సిల్‌ను నింపడానికి ఒక ఎన్నికను నిర్వహించండి.",
+      "badge": "కౌన్సిల్"
+    },
+    "members": {
+      "heading": "సభ్యులు ({count})"
+    },
+    "elections": {
+      "heading": "ఎన్నికలు",
+      "open": "+ ఎన్నికను ప్రారంభించు",
+      "emptyTitle": "ఎన్నికలు లేవు",
+      "emptyDescription": "కౌన్సిల్ సభ్యులను ఎంచుకోవడానికి ఒక ఎన్నికను తెరవండి.",
+      "seats": "ఏదీ లేదు | {count} సీటు | {count} సీట్లు",
+      "actions": {
+        "nominateSelf": "నన్ను నామినేట్ చేయి",
+        "startVoting": "ఓటింగ్ ప్రారంభించు",
+        "close": "ఎన్నికను మూసివేయి",
+        "seatCouncil": "కౌన్సిల్‌ను నియమించు",
+        "accept": "అంగీకరించు",
+        "vote": "ఓటు వేయి"
+      },
+      "nominees": "నామినీలు",
+      "noNominees": "ఇంకా నామినీలు లేరు",
+      "badges": {
+        "winner": "విజేత",
+        "accepted": "అంగీకరించబడింది",
+        "pending": "పెండింగ్"
+      },
+      "votes": "ఏదీ లేదు | {count} ఓటు | {count} ఓట్లు",
+      "nominationLabel": "నామినేషన్",
+      "votingLabel": "ఓటింగ్",
+      "ends": "{date}న ముగుస్తుంది",
+      "closed": "{date}న మూసివేయబడింది",
+      "titleRequired": "దయచేసి ఎన్నిక శీర్షికను జోడించండి."
+    },
+    "proposals": {
+      "heading": "ప్రతిపాదనలు",
+      "submit": "+ ప్రతిపాదనను సమర్పించు",
+      "emptyTitle": "ప్రతిపాదనలు లేవు",
+      "emptyDescription": "ఈ అంశానికి మార్పులను సూచించడానికి ఒక ప్రతిపాదనను సమర్పించండి.",
+      "votingLabel": "ఓటింగ్",
+      "for": "{count} అనుకూలం",
+      "against": "{count} వ్యతిరేకం",
+      "deadline": "గడువు: {date}",
+      "actions": {
+        "approve": "ఆమోదించు (ఓటింగ్ తెరువు)",
+        "voteFor": "అనుకూలంగా ఓటు వేయి",
+        "voteAgainst": "వ్యతిరేకంగా ఓటు వేయి",
+        "resolve": "పరిష్కరించు"
+      },
+      "titleRequired": "దయచేసి ప్రతిపాదన శీర్షికను జోడించండి."
+    },
+    "createElection": {
+      "title": "ఎన్నికను ప్రారంభించు",
+      "titleLabel": "శీర్షిక",
+      "titlePlaceholder": "ఉదా. Q1 2026 కౌన్సిల్ ఎన్నిక",
+      "descriptionLabel": "వివరణ",
+      "descriptionPlaceholder": "ఈ ఎన్నిక ప్రయోజనం…",
+      "seatsLabel": "సీట్లు",
+      "submit": "ఎన్నికను ప్రారంభించు"
+    },
+    "createProposal": {
+      "title": "ప్రతిపాదనను సమర్పించు",
+      "titleLabel": "శీర్షిక",
+      "titlePlaceholder": "ఉదా. NLP నైపుణ్యాలను గుర్తించు",
+      "descriptionLabel": "వివరణ",
+      "descriptionPlaceholder": "ప్రతిపాదిత మార్పును వివరించండి…",
+      "categoryLabel": "వర్గం",
+      "submit": "ప్రతిపాదనను సమర్పించు"
+    }
+  },
+  "onChainBadge": {
+    "confirming": "నిర్ధారిస్తోంది…"
+  },
+  "deadline": {
+    "default": "గడువు",
+    "passed": "{label} గడిచింది"
+  },
+  "proficiency": {
+    "requires": "అవసరం",
+    "level": "ప్రావీణ్యత"
+  }
+}

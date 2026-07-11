@@ -13,7 +13,7 @@ interface Props {
 
 withDefaults(defineProps<Props>(), {
   message: '',
-  confirmLabel: 'Confirm',
+  confirmLabel: '',
   confirmVariant: 'primary',
   loading: false,
 })
@@ -30,10 +30,10 @@ defineEmits<{ confirm: []; cancel: [] }>()
     <template #footer>
       <div class="flex justify-end gap-2">
         <AppButton variant="ghost" :disabled="loading" @click="$emit('cancel')">
-          Cancel
+          {{ $t('common.actions.cancel') }}
         </AppButton>
         <AppButton :variant="confirmVariant" :loading="loading" @click="$emit('confirm')">
-          {{ confirmLabel }}
+          {{ confirmLabel || $t('common.actions.confirm') }}
         </AppButton>
       </div>
     </template>

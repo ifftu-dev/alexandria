@@ -12,6 +12,7 @@
  */
 
 import { ref, onMounted, computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { useDisplayNames } from '@/composables/useDisplayNames'
 import { AppButton, AppInput, AppSpinner, AppAlert, EmptyState, AppBadge } from '@/components/ui'
@@ -23,6 +24,7 @@ import type {
   PluginAttestationStatus,
 } from '@/types'
 
+const { t } = useI18n()
 const { invoke } = useLocalApi()
 const { displayName, ensureNames } = useDisplayNames()
 
@@ -64,7 +66,7 @@ async function refresh() {
     })
     attestation.value = next
   } catch (e) {
-    installError.value = `Failed to list plugins: ${e}`
+    installError.value = t('plugins.installed.errors.listFailed', { error: String(e) })
   } finally {
     loading.value = false
   }
@@ -72,18 +74,18 @@ async function refresh() {
 
 function attestationBadge(cid: string): { label: string; variant: 'success' | 'warning' | 'secondary' } {
   const s = attestation.value[cid]
-  if (!s) return { label: 'Status pending', variant: 'secondary' }
+  if (!s) return { label: t('plugins.badge.statusPending'), variant: 'secondary' }
   if (s.advisories.some((a) => a.kind === 'known_flawed')) {
-    return { label: 'Known flawed', variant: 'warning' }
+    return { label: t('plugins.badge.knownFlawed'), variant: 'warning' }
   }
-  if (s.attested) return { label: 'DAO attested', variant: 'success' }
-  return { label: 'Unattested', variant: 'secondary' }
+  if (s.attested) return { label: t('plugins.badge.attested'), variant: 'success' }
+  return { label: t('plugins.badge.unattested'), variant: 'secondary' }
 }
 
 async function install() {
   const path = installPath.value.trim()
   if (!path) {
-    installError.value = 'Enter the path to a plugin bundle directory.'
+    installError.value = t('plugins.installed.errors.enterPath')
     return
   }
   installing.value = true
@@ -93,11 +95,14 @@ async function install() {
     const installed = await invoke<InstalledPlugin>('plugin_install_from_file', {
       directory: path,
     })
-    installSuccess.value = `Installed "${installed.name}" v${installed.version}.`
+    installSuccess.value = t('plugins.installed.errors.installSuccess', {
+      name: installed.name,
+      version: installed.version,
+    })
     installPath.value = ''
     await refresh()
   } catch (e) {
-    installError.value = `Install failed: ${e}`
+    installError.value = t('plugins.installed.errors.installFailed', { error: String(e) })
   } finally {
     installing.value = false
   }
@@ -122,7 +127,7 @@ async function toggleExpand(cid: string) {
     expandedManifest.value = m
     expandedPermissions.value = perms
   } catch (e) {
-    installError.value = `Failed to load plugin details: ${e}`
+    installError.value = t('plugins.installed.errors.detailsFailed', { error: String(e) })
   } finally {
     expandedLoading.value = false
   }
@@ -130,7 +135,7 @@ async function toggleExpand(cid: string) {
 
 async function uninstall(cid: string, name: string) {
   // eslint-disable-next-line no-alert
-  if (!confirm(`Uninstall "${name}"? This removes the plugin from disk. Courses that use it will stop working until you re-install.`)) {
+  if (!confirm(t('plugins.installed.uninstallConfirm', { name }))) {
     return
   }
   try {
@@ -142,7 +147,7 @@ async function uninstall(cid: string, name: string) {
     }
     await refresh()
   } catch (e) {
-    installError.value = `Uninstall failed: ${e}`
+    installError.value = t('plugins.installed.errors.uninstallFailed', { error: String(e) })
   }
 }
 
@@ -153,7 +158,7 @@ async function revoke(cid: string, capability: PluginCapability) {
       pluginCid: cid,
     })
   } catch (e) {
-    installError.value = `Revoke failed: ${e}`
+    installError.value = t('plugins.installed.errors.revokeFailed', { error: String(e) })
   }
 }
 
@@ -168,30 +173,28 @@ function shortCid(cid: string): string {
 <template>
   <div class="mx-auto max-w-3xl px-4 py-6 md:px-6 md:py-8">
     <header class="mb-6">
-      <h1 class="text-2xl font-bold text-foreground">Plugins</h1>
+      <h1 class="text-2xl font-bold text-foreground">{{ $t('plugins.installed.title') }}</h1>
       <p class="mt-1 text-sm text-muted-foreground">
-        Community-authored learning and assessment elements. Plugins run in a
-        sandboxed iframe with no network access; you grant capabilities (microphone,
-        camera, etc.) per-plugin on first use.
+        {{ $t('plugins.installed.intro') }}
       </p>
     </header>
 
     <!-- Install from local file -->
     <section class="mb-8 rounded-2xl border border-border bg-card/50 p-4">
-      <h2 class="text-sm font-semibold text-foreground">Install from local directory</h2>
+      <h2 class="text-sm font-semibold text-foreground">{{ $t('plugins.installed.installHeading') }}</h2>
       <p class="mt-1 text-xs text-muted-foreground">
-        Point to a directory containing <code class="font-mono">manifest.json</code>,
-        <code class="font-mono">manifest.sig</code>, and a <code class="font-mono">ui/</code>
-        bundle. Phase 3 will add discovery from the P2P plugin catalog.
+        {{ $t('plugins.installed.installHintPrefix') }} <code class="font-mono">manifest.json</code>,
+        <code class="font-mono">manifest.sig</code>{{ $t('plugins.installed.installHintAnd') }} <code class="font-mono">ui/</code>
+        {{ $t('plugins.installed.installHintSuffix') }}
       </p>
       <div class="mt-3 flex gap-2">
         <AppInput
           v-model="installPath"
-          placeholder="/absolute/path/to/plugin-bundle"
+          :placeholder="$t('plugins.installed.installPlaceholder')"
           class="flex-1"
           :disabled="installing"
         />
-        <AppButton :loading="installing" @click="install">Install</AppButton>
+        <AppButton :loading="installing" @click="install">{{ $t('plugins.installed.actions.add') }}</AppButton>
       </div>
       <AppAlert v-if="installError" variant="error" class="mt-3">{{ installError }}</AppAlert>
       <AppAlert v-if="installSuccess" variant="success" class="mt-3">{{ installSuccess }}</AppAlert>
@@ -199,7 +202,7 @@ function shortCid(cid: string): string {
 
     <!-- Installed list -->
     <section>
-      <h2 class="mb-3 text-sm font-semibold text-foreground">Installed plugins</h2>
+      <h2 class="mb-3 text-sm font-semibold text-foreground">{{ $t('plugins.installed.installedHeading') }}</h2>
 
       <div v-if="loading" class="flex justify-center p-10">
         <AppSpinner />
@@ -207,8 +210,8 @@ function shortCid(cid: string): string {
 
       <EmptyState
         v-else-if="empty"
-        title="No plugins installed"
-        description="Install a plugin above to add new learning and assessment element types."
+        :title="$t('plugins.installed.emptyTitle')"
+        :description="$t('plugins.installed.emptyDescription')"
       />
 
       <ul v-else class="space-y-2">
@@ -228,17 +231,20 @@ function shortCid(cid: string): string {
                 </AppBadge>
               </div>
               <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
-                <span>Author: {{ displayName(p.author_did) }}</span>
-                <span>CID: <code class="font-mono">{{ shortCid(p.plugin_cid) }}</code></span>
-                <span>Installed: {{ new Date(p.installed_at).toLocaleString() }}</span>
+                <span>{{ $t('plugins.meta.author') }}: {{ displayName(p.author_did) }}</span>
+                <span>{{ $t('plugins.meta.installed') }}: {{ new Date(p.installed_at).toLocaleString() }}</span>
+                <details>
+                  <summary class="cursor-pointer">{{ $t('common.advanced.toggle') }}</summary>
+                  <span>{{ $t('plugins.meta.contentId') }}: <code class="font-mono">{{ shortCid(p.plugin_cid) }}</code></span>
+                </details>
               </div>
             </div>
             <div class="flex gap-2">
               <AppButton size="sm" variant="ghost" @click="toggleExpand(p.plugin_cid)">
-                {{ expandedCid === p.plugin_cid ? 'Hide' : 'Details' }}
+                {{ expandedCid === p.plugin_cid ? $t('plugins.installed.actions.hide') : $t('plugins.installed.actions.details') }}
               </AppButton>
               <AppButton size="sm" variant="danger" @click="uninstall(p.plugin_cid, p.name)">
-                Uninstall
+                {{ $t('common.actions.remove') }}
               </AppButton>
             </div>
           </div>
@@ -255,36 +261,36 @@ function shortCid(cid: string): string {
               </p>
 
               <dl class="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
-                <dt class="text-muted-foreground">Kinds</dt>
+                <dt class="text-muted-foreground">{{ $t('plugins.installed.detail.kinds') }}</dt>
                 <dd class="text-foreground">{{ expandedManifest.kinds.join(', ') }}</dd>
-                <dt class="text-muted-foreground">Declared capabilities</dt>
+                <dt class="text-muted-foreground">{{ $t('plugins.installed.detail.declaredCapabilities') }}</dt>
                 <dd class="text-foreground">
                   {{
                     expandedManifest.capabilities.length
                       ? expandedManifest.capabilities.join(', ')
-                      : 'none'
+                      : $t('plugins.installed.detail.none')
                   }}
                 </dd>
-                <dt class="text-muted-foreground">Platforms</dt>
+                <dt class="text-muted-foreground">{{ $t('plugins.installed.detail.platforms') }}</dt>
                 <dd class="text-foreground">
                   {{
                     expandedManifest.platforms.length
                       ? expandedManifest.platforms.join(', ')
-                      : 'unspecified'
+                      : $t('plugins.installed.detail.unspecified')
                   }}
                 </dd>
-                <dt class="text-muted-foreground">API version</dt>
+                <dt class="text-muted-foreground">{{ $t('plugins.installed.detail.apiVersion') }}</dt>
                 <dd class="text-foreground">{{ expandedManifest.api_version }}</dd>
               </dl>
 
               <h4 class="mt-4 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Granted permissions
+                {{ $t('plugins.installed.detail.grantedHeading') }}
               </h4>
               <p
                 v-if="expandedPermissions.length === 0"
                 class="mt-1 text-xs text-muted-foreground"
               >
-                No persistent grants. Capabilities will be requested on first use.
+                {{ $t('plugins.installed.detail.noGrants') }}
               </p>
               <ul v-else class="mt-2 space-y-1">
                 <li
@@ -300,7 +306,7 @@ function shortCid(cid: string): string {
                     class="text-destructive transition-colors hover:text-destructive/80"
                     @click="revoke(p.plugin_cid, perm.capability)"
                   >
-                    Revoke
+                    {{ $t('plugins.installed.detail.revoke') }}
                   </button>
                 </li>
               </ul>

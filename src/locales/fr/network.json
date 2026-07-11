@@ -1,0 +1,23 @@
+{
+  "peers": "aucune connexion | {count} connexion | {count} connexions",
+  "title": "Connexions",
+  "subtitle": "Comment votre application se connecte à d'autres apprenants — directement et en privé, sans serveurs.",
+  "status": "État",
+  "online": "En ligne",
+  "offline": "Hors ligne",
+  "starting": "Démarrage…",
+  "connections": "Connexions",
+  "refresh": "Actualiser",
+  "empty": "Recherche d'autres apprenants…",
+  "diagnostic": "Diagnostic",
+  "mountError": "Impossible de charger les détails de connexion : {error}",
+  "appOnline": "Vous êtes connecté et prêt à apprendre.",
+  "appOffline": "Vous êtes hors ligne — vous pouvez continuer à apprendre avec tout ce qui est enregistré sur cet appareil.",
+  "appStarting": "Préparation en cours…",
+  "advanced": {
+    "deviceId": "Identifiant de l'appareil",
+    "topics": "Canaux",
+    "addresses": "Adresses",
+    "natStatus": "Accessibilité réseau"
+  }
+}

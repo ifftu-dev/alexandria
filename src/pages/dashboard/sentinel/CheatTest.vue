@@ -211,28 +211,27 @@ const FEATURE_DIM = FEATURE_NAMES.length
   <div class="mx-auto max-w-5xl p-6">
     <div class="mb-6 flex items-center justify-between">
       <div>
-        <h1 class="text-xl font-semibold text-foreground">Sentinel — Cheat Test</h1>
+        <h1 class="text-xl font-semibold text-foreground">{{ $t('sentinel.cheatTest.title') }}</h1>
         <p class="mt-1 text-sm text-muted-foreground">
-          Drive the backend tract classifier with synthetic attack streams and report scores.
-          Diagnostic — not a substitute for real holdout evaluation.
+          {{ $t('sentinel.cheatTest.subtitle') }}
         </p>
       </div>
       <AppButton variant="secondary" size="sm" @click="router.push('/dashboard/sentinel')">
-        Back
+        {{ $t('common.actions.back') }}
       </AppButton>
     </div>
 
     <div class="card mb-4 p-5">
       <div class="flex flex-wrap items-end gap-4">
         <div>
-          <label class="text-xs text-muted-foreground">Loaded model</label>
+          <label class="text-xs text-muted-foreground">{{ $t('sentinel.cheatTest.loadedModel') }}</label>
           <div class="mt-1 font-mono text-sm text-foreground">
             {{ loadedInfo.version }}
             <span class="text-muted-foreground">({{ loadedInfo.source }})</span>
           </div>
         </div>
         <div>
-          <label class="text-xs text-muted-foreground">Stream length</label>
+          <label class="text-xs text-muted-foreground">{{ $t('sentinel.cheatTest.streamLength') }}</label>
           <input
             v-model.number="sampleSize"
             type="number"
@@ -242,7 +241,7 @@ const FEATURE_DIM = FEATURE_NAMES.length
           />
         </div>
         <div>
-          <label class="text-xs text-muted-foreground">Seed</label>
+          <label class="text-xs text-muted-foreground">{{ $t('sentinel.cheatTest.seed') }}</label>
           <input
             v-model.number="seed"
             type="number"
@@ -250,28 +249,28 @@ const FEATURE_DIM = FEATURE_NAMES.length
           />
         </div>
         <AppButton size="sm" :loading="running" :disabled="running" @click="runAll">
-          Run all attack streams
+          {{ $t('sentinel.cheatTest.run') }}
         </AppButton>
       </div>
     </div>
 
     <div v-if="stats" class="card mb-4 p-5">
-      <h2 class="text-sm font-semibold text-foreground">Summary</h2>
+      <h2 class="text-sm font-semibold text-foreground">{{ $t('sentinel.cheatTest.summary') }}</h2>
       <div class="mt-3 grid grid-cols-2 gap-3 text-sm md:grid-cols-4">
         <div class="rounded bg-muted/40 p-3">
-          <div class="text-xs text-muted-foreground">True positives</div>
+          <div class="text-xs text-muted-foreground">{{ $t('sentinel.cheatTest.caught') }}</div>
           <div class="text-foreground">{{ stats.tp }} / {{ stats.totalAttacks }}</div>
         </div>
         <div class="rounded bg-muted/40 p-3">
-          <div class="text-xs text-muted-foreground">False positives</div>
+          <div class="text-xs text-muted-foreground">{{ $t('sentinel.cheatTest.falseAlarms') }}</div>
           <div class="text-foreground">{{ stats.fp }} / {{ stats.totalHumans }}</div>
         </div>
         <div class="rounded bg-muted/40 p-3">
-          <div class="text-xs text-muted-foreground">TPR</div>
+          <div class="text-xs text-muted-foreground">{{ $t('sentinel.cheatTest.catchRate') }}</div>
           <div class="text-foreground">{{ stats.tpr.toFixed(2) }}</div>
         </div>
         <div class="rounded bg-muted/40 p-3">
-          <div class="text-xs text-muted-foreground">FPR</div>
+          <div class="text-xs text-muted-foreground">{{ $t('sentinel.cheatTest.falseAlarmRate') }}</div>
           <div class="text-foreground">{{ stats.fpr.toFixed(2) }}</div>
         </div>
       </div>
@@ -282,11 +281,11 @@ const FEATURE_DIM = FEATURE_NAMES.length
         <table class="w-full text-left text-sm">
           <thead>
             <tr class="border-b border-border text-xs text-muted-foreground">
-              <th class="py-2 pr-3">Attack class</th>
-              <th class="py-2 pr-3">Expected</th>
-              <th class="py-2 pr-3">Score</th>
-              <th class="py-2 pr-3">Flag</th>
-              <th class="py-2 pr-3">Verdict</th>
+              <th class="py-2 pr-3">{{ $t('sentinel.cheatTest.colPattern') }}</th>
+              <th class="py-2 pr-3">{{ $t('sentinel.cheatTest.colExpected') }}</th>
+              <th class="py-2 pr-3">{{ $t('sentinel.cheatTest.colScore') }}</th>
+              <th class="py-2 pr-3">{{ $t('sentinel.cheatTest.colFlag') }}</th>
+              <th class="py-2 pr-3">{{ $t('sentinel.cheatTest.colVerdict') }}</th>
             </tr>
           </thead>
           <tbody>
@@ -326,13 +325,13 @@ const FEATURE_DIM = FEATURE_NAMES.length
 
       <details class="mt-6">
         <summary class="cursor-pointer text-xs text-muted-foreground">
-          Per-attack feature vector
+          {{ $t('sentinel.cheatTest.featureDetails') }}
         </summary>
         <div class="mt-3 overflow-x-auto">
           <table class="w-full text-left text-xs">
             <thead>
               <tr class="border-b border-border text-muted-foreground">
-                <th class="py-1 pr-2">Label</th>
+                <th class="py-1 pr-2">{{ $t('sentinel.cheatTest.featureLabel') }}</th>
                 <th v-for="(name, i) in FEATURE_NAMES" :key="i" class="py-1 pr-2">{{ name }}</th>
               </tr>
             </thead>
@@ -350,7 +349,9 @@ const FEATURE_DIM = FEATURE_NAMES.length
     </div>
 
     <div v-if="rows.length === 0 && !running" class="card p-8 text-center text-sm text-muted-foreground">
-      Click <strong>Run all attack streams</strong> to drive each archetype through the active classifier.
+      <i18n-t keypath="sentinel.cheatTest.emptyHint" tag="span">
+        <template #action><strong>{{ $t('sentinel.cheatTest.emptyHintAction') }}</strong></template>
+      </i18n-t>
     </div>
   </div>
 </template>

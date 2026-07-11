@@ -100,27 +100,25 @@ async function backToProfiles() {
           </svg>
         </div>
 
-        <h1 class="text-2xl font-bold mb-2 text-foreground">A guardian needs to activate your profile</h1>
+        <h1 class="text-2xl font-bold mb-2 text-foreground">{{ $t('onboarding.guardianGate.heading') }}</h1>
         <p class="text-sm text-muted-foreground mb-6">
-          Because you're under 18, a parent or guardian must approve your profile
-          from their own device before you can start learning. Everything you do
-          on Alexandria will be visible to them.
+          {{ $t('onboarding.guardianGate.subtitle') }}
         </p>
 
         <div class="card p-5 mb-5 text-left">
-          <h2 class="text-sm font-semibold text-foreground mb-2">How it works</h2>
+          <h2 class="text-sm font-semibold text-foreground mb-2">{{ $t('onboarding.guardianGate.howHeading') }}</h2>
           <ul class="space-y-2 text-sm text-muted-foreground">
             <li class="flex items-start gap-2">
               <span class="text-primary mt-0.5 font-mono text-xs w-4 text-right shrink-0">01</span>
-              Share the invite code below with your parent or guardian.
+              {{ $t('onboarding.guardianGate.how1') }}
             </li>
             <li class="flex items-start gap-2">
               <span class="text-primary mt-0.5 font-mono text-xs w-4 text-right shrink-0">02</span>
-              They install Alexandria, create a Parent profile, and enter your code.
+              {{ $t('onboarding.guardianGate.how2') }}
             </li>
             <li class="flex items-start gap-2">
               <span class="text-primary mt-0.5 font-mono text-xs w-4 text-right shrink-0">03</span>
-              The moment they accept (both devices online), your profile unlocks automatically.
+              {{ $t('onboarding.guardianGate.how3') }}
             </li>
           </ul>
         </div>
@@ -128,18 +126,17 @@ async function backToProfiles() {
         <!-- Invite code -->
         <div class="card p-5 mb-5 text-left">
           <div class="flex items-center justify-between mb-2">
-            <h2 class="text-sm font-semibold text-foreground">Your guardian invite code</h2>
+            <h2 class="text-sm font-semibold text-foreground">{{ $t('onboarding.guardianGate.codeHeading') }}</h2>
             <button
               class="text-xs text-primary hover:underline disabled:opacity-50"
               :disabled="generating"
               @click="() => generateInvite()"
             >
-              {{ generating ? 'Generating…' : 'New code' }}
+              {{ generating ? $t('onboarding.guardianGate.generating') : $t('onboarding.guardianGate.newCode') }}
             </button>
           </div>
           <p class="mb-2 text-xs text-muted-foreground">
-            Valid for 7 days, single use. Treat it like a password — anyone
-            holding it can become your guardian.
+            {{ $t('onboarding.guardianGate.codeHint') }}
           </p>
           <div v-if="inviteCode" class="space-y-2">
             <code class="block max-h-24 overflow-y-auto break-all rounded-lg bg-muted/30 p-3 font-mono text-xs text-foreground">{{ inviteCode }}</code>
@@ -148,7 +145,7 @@ async function backToProfiles() {
               :class="copied ? 'bg-success/10 text-success border-success/30' : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'"
               @click="copyInvite"
             >
-              {{ copied ? 'Copied to clipboard' : 'Copy invite code' }}
+              {{ copied ? $t('onboarding.guardianGate.copied') : $t('onboarding.guardianGate.copyCode') }}
             </button>
           </div>
           <p v-else-if="inviteError" class="text-sm text-error">{{ inviteError }}</p>
@@ -160,14 +157,14 @@ async function backToProfiles() {
           :disabled="checking"
           @click="ensureStillGated()"
         >
-          {{ checking ? 'Checking…' : 'Check Activation' }}
+          {{ checking ? $t('onboarding.guardianGate.checking') : $t('onboarding.guardianGate.checkActivation') }}
         </button>
 
         <button
           class="w-full mt-3 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
           @click="backToProfiles"
         >
-          Back to profiles
+          {{ $t('onboarding.guardianGate.backToProfiles') }}
         </button>
       </div>
     </div>

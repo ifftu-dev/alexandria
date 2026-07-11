@@ -41,14 +41,14 @@ async function save() {
 <template>
   <div class="space-y-3">
     <div class="flex items-center justify-between">
-      <h3 class="text-sm font-semibold text-foreground">Lesson body (Markdown)</h3>
-      <AppButton v-if="dirty" size="xs" :loading="saving" @click="save">Save</AppButton>
+      <h3 class="text-sm font-semibold text-foreground">{{ $t('instructor.editors.text.heading') }}</h3>
+      <AppButton v-if="dirty" size="xs" :loading="saving" @click="save">{{ $t('common.actions.save') }}</AppButton>
     </div>
     <textarea
       v-model="body"
       rows="18"
       class="w-full rounded-md border border-border bg-background p-3 font-mono text-sm"
-      placeholder="# Lesson title&#10;&#10;Write the lesson in Markdown…"
+      :placeholder="$t('instructor.editors.text.placeholder')"
       @input="dirty = true"
     />
     <p v-if="error" class="text-sm text-error">{{ error }}</p>

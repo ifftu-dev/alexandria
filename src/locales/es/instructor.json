@@ -1,0 +1,206 @@
+{
+  "dashboard": {
+    "title": "Panel del instructor",
+    "subtitle": "Cómo les va a los estudiantes en tus cursos, además de lo que espera tu revisión.",
+    "inbox": "Bandeja de entrada",
+    "compose": "+ Redactar",
+    "statCourses": "Cursos y tutoriales",
+    "statPublished": "Publicados",
+    "statEnrollments": "Inscripciones",
+    "statPendingReviews": "Esperando revisión",
+    "colCourse": "Curso",
+    "colStatus": "Estado",
+    "colEnrolled": "Inscritos",
+    "colCompletion": "Finalización",
+    "colAvgScore": "Punt. media",
+    "colReviews": "Revisiones",
+    "colLastActivity": "Última actividad",
+    "emptyTitle": "Aún no hay cursos",
+    "emptyDesc": "Crea tu primer curso o tutorial para ver aquí la actividad de los estudiantes."
+  },
+  "myCourses": {
+    "title": "Mis cursos",
+    "subtitle": "Todo lo que has creado en este dispositivo: borradores y publicados.",
+    "addCourse": "+ Curso",
+    "addTutorial": "+ Tutorial",
+    "emptyTitle": "Aún no has creado nada",
+    "emptyDesc": "Crea tu primer curso o tutorial con el editor.",
+    "updated": "Actualizado {date}"
+  },
+  "courseLearners": {
+    "eyebrow": "Progreso de los estudiantes",
+    "fallbackTitle": "Curso",
+    "emptyTitle": "Aún no hay inscripciones en este dispositivo",
+    "emptyDesc": "El progreso de cada estudiante vive en su propio dispositivo: esta vista muestra lo que la aplicación ha encontrado aquí (inscripciones y entregas en el aula).",
+    "colLearner": "Estudiante",
+    "colStatus": "Estado",
+    "colProgress": "Progreso",
+    "colAvgScore": "Punt. media",
+    "colTimeSpent": "Tiempo dedicado",
+    "colLastActivity": "Última actividad",
+    "localLearner": "Estudiante local"
+  },
+  "inbox": {
+    "title": "Bandeja de entrada",
+    "subtitle": "Entregas de estudiantes que esperan tu revisión, además de solicitudes de acceso al aula pendientes.",
+    "tabAll": "Todo",
+    "tabSubmissions": "Entregas",
+    "tabJoinRequests": "Solicitudes de acceso",
+    "emptyTitle": "Todo al día",
+    "emptyDesc": "No hay nada esperando tu revisión."
+  },
+  "submissionReview": {
+    "eyebrow": "Revisión de entrega",
+    "title": "Revisar entrega",
+    "notFoundTitle": "Entrega no encontrada",
+    "notFoundDesc": "Puede que ya se haya revisado o que se haya eliminado.",
+    "from": "de",
+    "submittedWork": "Trabajo entregado",
+    "yourReview": "Tu revisión",
+    "scoreLabel": "Puntuación — {percent}%",
+    "perSkillRatings": "Valoraciones por habilidad",
+    "feedback": "Comentarios",
+    "feedbackPlaceholder": "Qué estuvo bien, qué mejorar…",
+    "postReview": "Publicar revisión",
+    "reviewed": "Revisado",
+    "finalScore": "Puntuación:"
+  },
+  "compose": {
+    "newCourse": "Nuevo curso",
+    "newTutorial": "Nuevo tutorial",
+    "courseIntro": "Un curso se organiza en capítulos, cada uno con videos, lecciones, cuestionarios, evaluaciones y ejercicios prácticos.",
+    "tutorialIntro": "Un tutorial es una lección corta de una sola vía: normalmente un video con marcadores y un cuestionario opcional.",
+    "titleLabel": "Título",
+    "titlePlaceholder": "p. ej., Criptografía práctica",
+    "descriptionLabel": "Descripción",
+    "descriptionPlaceholder": "Presentación de un párrafo.",
+    "tagsLabel": "Etiquetas (separadas por comas)",
+    "tagsPlaceholder": "p. ej., seguridad, principiante",
+    "createDraft": "Crear borrador",
+    "needTitle": "Ponle un título primero.",
+    "editMeta": "Editar título y descripción",
+    "publish": "Publicar",
+    "beforePublish": "Antes de publicar",
+    "blockerNeedElement": "Añade al menos un elemento.",
+    "blockerUnboundPlugins": "ninguno | {count} elemento de plugin aún necesita que se elija un plugin | {count} elementos de plugin aún necesitan que se elija un plugin",
+    "publishedTitle": "Tu curso está activo",
+    "publishedNote": "Los estudiantes ya pueden encontrarlo e inscribirse.",
+    "fingerprintLabel": "Huella del contenido",
+    "sizeBytes": "ninguno | {count} byte | {count} bytes",
+    "nothingSelectedTitle": "Nada seleccionado",
+    "nothingSelectedDesc": "Elige un elemento del esquema o añade uno para empezar a construir.",
+    "confirmPublishTitle": "Publicar",
+    "confirmPublishMessage": "Esto publica «{title}» para que los estudiantes puedan encontrarlo e inscribirse de inmediato. Está firmado por ti y se comparte directamente con tus contactos.",
+    "confirmDeleteTitle": "Eliminar",
+    "confirmDeleteMessage": "Esto elimina permanentemente el borrador y todos sus capítulos y elementos. Esto no se puede deshacer.",
+    "editDetails": "Editar detalles",
+    "notFoundTitle": "No encontrado",
+    "notFoundDesc": "Este curso o tutorial no existe en este dispositivo."
+  },
+  "outline": {
+    "elementTitlePlaceholder": "Título del elemento",
+    "chapterTitlePlaceholder": "Título del capítulo",
+    "add": "Añadir",
+    "addChapter": "Añadir capítulo",
+    "addElement": "+ Añadir elemento",
+    "addChapterCta": "+ Añadir capítulo"
+  },
+  "elementTypes": {
+    "video": "Video",
+    "text": "Texto",
+    "pdf": "PDF",
+    "downloadable": "Descarga",
+    "quiz": "Cuestionario",
+    "objectiveSingleMcq": "OM única",
+    "objectiveMultiMcq": "OM múltiple",
+    "subjectiveMcq": "OM subjetiva",
+    "essay": "Ensayo",
+    "interactive": "Interactivo",
+    "assessment": "Evaluación",
+    "plugin": "Plugin"
+  },
+  "elementEditor": {
+    "deleteElement": "Eliminar elemento",
+    "titlePlaceholder": "Título del elemento",
+    "confirmDeleteTitle": "Eliminar elemento",
+    "confirmDeleteMessage": "Esto elimina el elemento y su contenido del curso. Esto no se puede deshacer."
+  },
+  "skillPicker": {
+    "searchPlaceholder": "Buscar habilidades…",
+    "removeSkill": "Quitar {name}",
+    "addSkill": "Habilidad"
+  },
+  "editors": {
+    "shared": {
+      "uploaded": "Subido"
+    },
+    "video": {
+      "fileHeading": "Archivo de video",
+      "minutes": "{count} min",
+      "reading": "Leyendo {size} MB…",
+      "saving": "Guardando en este dispositivo…",
+      "uploadFailed": "La subida falló: {error}",
+      "markersHeading": "Marcadores de capítulo",
+      "addMarker": "+ Marcador",
+      "saveMarkers": "Guardar marcadores",
+      "markersHint": "Las marcas de tiempo se convierten en navegación clicable debajo del video.",
+      "markerTitlePlaceholder": "Título del marcador",
+      "startSeconds": "Inicio (segundos)"
+    },
+    "file": {
+      "pdfHeading": "Documento PDF",
+      "downloadHeading": "Archivo descargable",
+      "uploading": "Subiendo…",
+      "uploadFailed": "La subida falló: {error}"
+    },
+    "quiz": {
+      "questionsHeading": "Preguntas",
+      "multiHint": "varias respuestas correctas",
+      "singleHint": "una respuesta correcta",
+      "addQuestion": "+ Pregunta",
+      "saveQuiz": "Guardar cuestionario",
+      "empty": "Aún no hay preguntas: añade la primera.",
+      "questionPlaceholder": "Enunciado de la pregunta",
+      "removeQuestion": "Quitar pregunta",
+      "optionPlaceholder": "Opción {number}",
+      "correctAnswer": "Respuesta correcta",
+      "markCorrect": "Marcar como correcta",
+      "removeOption": "Quitar opción",
+      "addOption": "+ Añadir opción",
+      "errNeedQuestion": "Añade al menos una pregunta.",
+      "errNoPrompt": "La pregunta {number} no tiene enunciado.",
+      "errTooFewOptions": "La pregunta {number} necesita al menos dos opciones.",
+      "errNoCorrect": "La pregunta {number} no tiene ninguna respuesta correcta marcada."
+    },
+    "text": {
+      "heading": "Cuerpo de la lección (Markdown)",
+      "placeholder": "# Título de la lección\n\nEscribe la lección en Markdown…"
+    },
+    "essay": {
+      "heading": "Tarea de ensayo",
+      "promptLabel": "Enunciado",
+      "promptPlaceholder": "¿Sobre qué debe escribir el estudiante?",
+      "rubricLabel": "Rúbrica de calificación (se te muestra al revisar, y al estudiante desde el principio)",
+      "rubricPlaceholder": "p. ej., Claridad de la tesis (30%), Evidencia (40%), Estructura (30%)",
+      "minWordsLabel": "Palabras mínimas (opcional)",
+      "hint": "Las entregas de ensayo llegan a tu bandeja de instructor para revisión y calificación manuales.",
+      "errNeedPrompt": "El ensayo necesita un enunciado."
+    },
+    "json": {
+      "assessmentHeading": "Definición de la evaluación (JSON)",
+      "interactiveHeading": "Contenido interactivo (JSON)",
+      "invalidJson": "JSON no válido.",
+      "errFixJson": "Corrige el JSON antes de guardar."
+    },
+    "plugin": {
+      "heading": "Enlace de plugin",
+      "installedLabel": "Plugin instalado",
+      "pickOption": "Elige un plugin…",
+      "noneInstalled": "No hay plugins habilitados instalados: añade uno en Ajustes → Plugins.",
+      "configLabel": "Configuración del elemento (JSON pasado al plugin al iniciar, p. ej. la definición de un problema de codejudge)",
+      "invalidJson": "JSON no válido.",
+      "errPickFirst": "Elige un plugin primero.",
+      "errFixConfig": "Corrige el JSON de configuración antes de guardar."
+    }
+  }
+}

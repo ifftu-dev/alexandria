@@ -1,0 +1,134 @@
+{
+  "index": {
+    "title": "社区",
+    "subtitle": "决定哪些技能获得认可的社区群组",
+    "stats": {
+      "totalGroups": "社区群组",
+      "active": "活跃",
+      "councilSeats": "理事会席位"
+    },
+    "searchPlaceholder": "搜索社区…",
+    "empty": {
+      "noMatchTitle": "没有社区匹配你的搜索",
+      "noMatchHint": "换一个搜索词试试。",
+      "noneTitle": "还没有社区",
+      "noneHint": "随着新主题的加入，社区群组会自动出现。"
+    },
+    "scope": {
+      "topicAreaShort": "领域",
+      "topicShort": "主题",
+      "topicArea": "主题领域",
+      "topic": "主题"
+    },
+    "seats": "无 | {count} 个席位 | {count} 个席位"
+  },
+  "detail": {
+    "breadcrumb": "社区",
+    "notFound": "未找到社区群组",
+    "tabs": {
+      "overview": "概览",
+      "elections": "选举",
+      "proposals": "提案"
+    },
+    "stats": {
+      "members": "无 | {count} 名成员 | {count} 名成员",
+      "council": "{filled}/{total} 理事会",
+      "elections": "无 | {count} 场选举 | {count} 场选举",
+      "proposals": "无 | {count} 项提案 | {count} 项提案"
+    },
+    "details": {
+      "heading": "详情",
+      "scope": "主题类型",
+      "councilSize": "理事会规模",
+      "electionInterval": "选举周期",
+      "intervalDays": "{count} 天",
+      "created": "创建于",
+      "topicId": "主题 ID",
+      "publicRecord": "公开记录"
+    },
+    "council": {
+      "heading": "理事会",
+      "seats": "{filled} / {total} 席位",
+      "emptyTitle": "没有理事会成员",
+      "emptyDescription": "举行一场选举来填补理事会。",
+      "badge": "理事会"
+    },
+    "members": {
+      "heading": "成员（{count}）"
+    },
+    "elections": {
+      "heading": "选举",
+      "open": "+ 发起选举",
+      "emptyTitle": "没有选举",
+      "emptyDescription": "发起选举以选出理事会成员。",
+      "seats": "无 | {count} 个席位 | {count} 个席位",
+      "actions": {
+        "nominateSelf": "提名我自己",
+        "startVoting": "开始投票",
+        "close": "结束选举",
+        "seatCouncil": "组建理事会",
+        "accept": "接受",
+        "vote": "投票"
+      },
+      "nominees": "被提名人",
+      "noNominees": "还没有被提名人",
+      "badges": {
+        "winner": "当选",
+        "accepted": "已接受",
+        "pending": "待处理"
+      },
+      "votes": "无 | {count} 票 | {count} 票",
+      "nominationLabel": "提名",
+      "votingLabel": "投票",
+      "ends": "结束于 {date}",
+      "closed": "已结束 {date}",
+      "titleRequired": "请填写选举标题。"
+    },
+    "proposals": {
+      "heading": "提案",
+      "submit": "+ 提交提案",
+      "emptyTitle": "没有提案",
+      "emptyDescription": "提交提案，为此主题建议变更。",
+      "votingLabel": "投票",
+      "for": "{count} 赞成",
+      "against": "{count} 反对",
+      "deadline": "截止：{date}",
+      "actions": {
+        "approve": "批准（开启投票）",
+        "voteFor": "投赞成",
+        "voteAgainst": "投反对",
+        "resolve": "裁定"
+      },
+      "titleRequired": "请填写提案标题。"
+    },
+    "createElection": {
+      "title": "发起选举",
+      "titleLabel": "标题",
+      "titlePlaceholder": "例如：2026 年第一季度理事会选举",
+      "descriptionLabel": "说明",
+      "descriptionPlaceholder": "本次选举的目的…",
+      "seatsLabel": "席位",
+      "submit": "发起选举"
+    },
+    "createProposal": {
+      "title": "提交提案",
+      "titleLabel": "标题",
+      "titlePlaceholder": "例如：认可 NLP 技能",
+      "descriptionLabel": "说明",
+      "descriptionPlaceholder": "描述所提议的变更…",
+      "categoryLabel": "分类",
+      "submit": "提交提案"
+    }
+  },
+  "onChainBadge": {
+    "confirming": "确认中…"
+  },
+  "deadline": {
+    "default": "截止时间",
+    "passed": "{label}已过"
+  },
+  "proficiency": {
+    "requires": "需要",
+    "level": "熟练度"
+  }
+}

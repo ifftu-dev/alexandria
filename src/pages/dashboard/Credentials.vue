@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { AppButton, AppModal, AppInput, EmptyState } from '@/components/ui'
 import { useCredentials } from '@/composables/useCredentials'
@@ -20,6 +21,7 @@ import {
   type VerifiableCredential,
 } from '@/types'
 
+const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const api = useCredentials()
@@ -90,9 +92,10 @@ function skillLabel(id: string): string {
   return skillNames.value.get(id) ?? id
 }
 
-const LEVEL_LABELS = ['—', 'Novice', 'Beginner', 'Competent', 'Proficient', 'Expert']
+const LEVEL_KEYS = ['none', 'novice', 'beginner', 'competent', 'proficient', 'expert']
 function levelLabel(n: number): string {
-  return LEVEL_LABELS[n] ?? `L${n}`
+  const key = LEVEL_KEYS[n]
+  return key ? t(`credentials.levels.${key}`) : t('credentials.card.levelShort', { level: n })
 }
 
 /** Resolve a derived state's source ids to loaded input credentials. */
@@ -147,7 +150,7 @@ const stats = computed(() => {
 
 function clearSkillFilter() {
   skillFilter.value = null
-  void router.replace({ name: 'dashboard-credentials' })
+  void router.replace({ name: 'credentials' })
 }
 
 function openSources(s: DerivedSkillState) {
@@ -157,7 +160,7 @@ function openSources(s: DerivedSkillState) {
 
 function openCredential(id: string) {
   sourceOpen.value = false
-  router.push({ name: 'dashboard-credential-detail', params: { id } })
+  router.push({ name: 'credential-detail', params: { id } })
 }
 
 // Issue modal -------------------------------------------------------------
@@ -297,23 +300,20 @@ async function exportBundle() {
     <!-- Header -->
     <div class="mb-8 flex items-start justify-between gap-4 flex-wrap">
       <div>
-        <h1 class="text-3xl font-bold text-foreground">Credentials</h1>
+        <h1 class="text-3xl font-bold text-foreground">{{ $t('credentials.page.title') }}</h1>
         <p class="mt-2 max-w-2xl text-muted-foreground">
-          Your derived skill credentials — each is computed from the
-          underlying evidence (assessments, attestations, formal certs)
-          and updates as new credentials arrive. Open one to see the
-          input credentials behind it.
+          {{ $t('credentials.page.intro') }}
         </p>
       </div>
       <div class="flex gap-2 flex-wrap">
         <AppButton variant="outline" :loading="recomputing" @click="recompute">
-          Recompute
+          {{ $t('credentials.page.refresh') }}
         </AppButton>
         <AppButton variant="outline" :loading="exporting" @click="exportBundle">
-          Export bundle
+          {{ $t('credentials.page.exportAll') }}
         </AppButton>
-        <AppButton variant="ghost" @click="openPresent">Present</AppButton>
-        <AppButton @click="openIssue">Issue credential</AppButton>
+        <AppButton variant="ghost" @click="openPresent">{{ $t('credentials.page.share') }}</AppButton>
+        <AppButton @click="openIssue">{{ $t('credentials.page.add') }}</AppButton>
       </div>
     </div>
 
@@ -331,15 +331,15 @@ async function exportBundle() {
       <!-- Stats -->
       <div class="mb-6 grid gap-4 sm:grid-cols-3">
         <div class="rounded-xl bg-card shadow-sm p-6">
-          <p class="text-sm text-muted-foreground">Derived skills</p>
+          <p class="text-sm text-muted-foreground">{{ $t('credentials.stats.skills') }}</p>
           <p class="mt-2 text-3xl font-bold text-foreground">{{ stats.count }}</p>
         </div>
         <div class="rounded-xl bg-card shadow-sm p-6">
-          <p class="text-sm text-muted-foreground">Avg. level</p>
+          <p class="text-sm text-muted-foreground">{{ $t('credentials.stats.avgLevel') }}</p>
           <p class="mt-2 text-3xl font-bold text-primary">{{ stats.avgLevel.toFixed(1) }}<span class="text-base text-muted-foreground">/5</span></p>
         </div>
         <div class="rounded-xl bg-card shadow-sm p-6">
-          <p class="text-sm text-muted-foreground">Avg. confidence</p>
+          <p class="text-sm text-muted-foreground">{{ $t('credentials.stats.avgConfidence') }}</p>
           <p class="mt-2 text-3xl font-bold text-foreground">{{ (stats.avgConf * 100).toFixed(0) }}<span class="text-base text-muted-foreground">%</span></p>
         </div>
       </div>
@@ -347,26 +347,26 @@ async function exportBundle() {
       <!-- Search + sort -->
       <div class="mb-4 flex flex-wrap items-center gap-2">
         <div class="min-w-[14rem] flex-1">
-          <AppInput v-model="search" placeholder="Search skills…" />
+          <AppInput v-model="search" :placeholder="$t('credentials.search.placeholder')" />
         </div>
         <select v-model="sortKey" class="input w-auto text-sm">
-          <option value="level">Sort: level</option>
-          <option value="confidence">Sort: confidence</option>
-          <option value="trust">Sort: trust score</option>
-          <option value="evidence">Sort: evidence count</option>
-          <option value="recent">Sort: recently updated</option>
-          <option value="name">Sort: name (A–Z)</option>
+          <option value="level">{{ $t('credentials.sort.level') }}</option>
+          <option value="confidence">{{ $t('credentials.sort.confidence') }}</option>
+          <option value="trust">{{ $t('credentials.sort.trust') }}</option>
+          <option value="evidence">{{ $t('credentials.sort.evidence') }}</option>
+          <option value="recent">{{ $t('credentials.sort.recent') }}</option>
+          <option value="name">{{ $t('credentials.sort.name') }}</option>
         </select>
       </div>
 
       <!-- Active skill filter chip -->
       <div v-if="skillFilter" class="mb-4 flex items-center gap-2">
         <span class="inline-flex items-center gap-2 rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
-          Skill: {{ skillLabel(skillFilter) }}
+          {{ $t('credentials.filter.skill', { name: skillLabel(skillFilter) }) }}
           <button
             type="button"
             class="text-primary/70 transition-colors hover:text-primary"
-            aria-label="Clear skill filter"
+            :aria-label="$t('credentials.filter.clear')"
             @click="clearSkillFilter"
           >
             <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
@@ -379,13 +379,13 @@ async function exportBundle() {
       <!-- Empty state -->
       <EmptyState
         v-if="filtered.length === 0"
-        title="No derived credentials yet"
+        :title="$t('credentials.empty.title')"
         :description="derived.length === 0
-          ? 'Complete a course or earn a credential — your skill credentials are computed from that evidence.'
-          : 'No skill matches your search.'"
+          ? $t('credentials.empty.noneYet')
+          : $t('credentials.empty.noMatch')"
       >
         <template #action>
-          <AppButton @click="openIssue">Issue credential</AppButton>
+          <AppButton @click="openIssue">{{ $t('credentials.page.add') }}</AppButton>
         </template>
       </EmptyState>
 
@@ -400,9 +400,9 @@ async function exportBundle() {
           <div class="mb-3 flex items-start justify-between gap-2">
             <span class="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-semibold" :class="CREDENTIAL_KINDS.DerivedCredential.badge">
               <span class="h-1.5 w-1.5 rounded-full" :class="CREDENTIAL_KINDS.DerivedCredential.dot" />
-              Derived
+              {{ $t('credentials.kind.derived.short') }}
             </span>
-            <span class="text-xs font-semibold text-foreground">L{{ s.level }}<span class="text-muted-foreground">/5</span></span>
+            <span class="text-xs font-semibold text-foreground">{{ $t('credentials.card.levelShort', { level: s.level }) }}<span class="text-muted-foreground">/5</span></span>
           </div>
 
           <p class="truncate text-sm font-semibold text-foreground" :title="skillLabel(s.skill_id)">
@@ -413,7 +413,7 @@ async function exportBundle() {
           <!-- Confidence bar -->
           <div class="mt-3">
             <div class="mb-1 flex justify-between text-[11px] text-muted-foreground">
-              <span>Confidence</span>
+              <span>{{ $t('credentials.card.confidence') }}</span>
               <span>{{ (s.confidence * 100).toFixed(0) }}%</span>
             </div>
             <div class="h-1.5 w-full overflow-hidden rounded-full bg-muted">
@@ -423,11 +423,11 @@ async function exportBundle() {
 
           <dl class="mt-3 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px]">
             <div class="flex justify-between">
-              <dt class="text-muted-foreground">Trust</dt>
+              <dt class="text-muted-foreground">{{ $t('credentials.card.trust') }}</dt>
               <dd class="font-medium">{{ (s.trust_score * 100).toFixed(0) }}%</dd>
             </div>
             <div class="flex justify-between">
-              <dt class="text-muted-foreground">Issuers</dt>
+              <dt class="text-muted-foreground">{{ $t('credentials.card.sources') }}</dt>
               <dd class="font-medium">{{ s.unique_issuer_clusters }}</dd>
             </div>
           </dl>
@@ -440,7 +440,7 @@ async function exportBundle() {
                 :key="k"
                 class="flex h-5 w-5 items-center justify-center rounded text-white"
                 :class="CREDENTIAL_KINDS[k].dot"
-                :title="CREDENTIAL_KINDS[k].label"
+                :title="$t(CREDENTIAL_KINDS[k].label)"
               >
                 <svg viewBox="0 0 24 24" class="h-3 w-3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <path :d="CREDENTIAL_KINDS[k].icon" />
@@ -448,7 +448,7 @@ async function exportBundle() {
               </span>
             </div>
             <span class="text-[11px] text-primary opacity-0 transition-opacity group-hover:opacity-100">
-              {{ s.active_evidence_count }} evidence →
+              {{ $t('credentials.card.evidence', { count: s.active_evidence_count }, s.active_evidence_count) }}
             </span>
           </div>
         </article>
@@ -466,40 +466,40 @@ async function exportBundle() {
     />
 
     <!-- Issue modal -->
-    <AppModal :open="issueOpen" title="Issue credential" max-width="32rem" @close="issueOpen = false">
+    <AppModal :open="issueOpen" :title="$t('credentials.issue.title')" max-width="32rem" @close="issueOpen = false">
       <form class="space-y-4" @submit.prevent="submitIssue">
         <div>
-          <label class="label text-xs text-muted-foreground">Credential type</label>
+          <label class="label text-xs text-muted-foreground">{{ $t('credentials.issue.type') }}</label>
           <select v-model="issueForm.credential_type" class="input">
-            <option value="FormalCredential">Formal</option>
-            <option value="AssessmentCredential">Assessment</option>
-            <option value="AttestationCredential">Attestation</option>
-            <option value="RoleCredential">Role</option>
-            <option value="SelfAssertion">Self assertion</option>
+            <option value="FormalCredential">{{ $t('credentials.issue.typeFormal') }}</option>
+            <option value="AssessmentCredential">{{ $t('credentials.issue.typeAssessment') }}</option>
+            <option value="AttestationCredential">{{ $t('credentials.issue.typeAttestation') }}</option>
+            <option value="RoleCredential">{{ $t('credentials.issue.typeRole') }}</option>
+            <option value="SelfAssertion">{{ $t('credentials.issue.typeSelf') }}</option>
           </select>
         </div>
-        <AppInput v-model="issueForm.subject" label="Subject DID" placeholder="did:key:z…" />
-        <AppInput v-model="issueForm.skill_id" label="Skill ID" placeholder="skill_x" />
+        <AppInput v-model="issueForm.subject" :label="$t('credentials.issue.subject')" placeholder="did:key:z…" />
+        <AppInput v-model="issueForm.skill_id" :label="$t('credentials.issue.skill')" placeholder="skill_x" />
         <div class="grid grid-cols-2 gap-3">
-          <AppInput v-model="issueForm.level" label="Level (1–5)" type="number" />
-          <AppInput v-model="issueForm.score" label="Score (0–1)" type="number" />
+          <AppInput v-model="issueForm.level" :label="$t('credentials.issue.level')" type="number" />
+          <AppInput v-model="issueForm.score" :label="$t('credentials.issue.score')" type="number" />
         </div>
         <AppInput
           v-model="issueForm.evidence_refs"
-          label="Evidence refs (comma-separated)"
+          :label="$t('credentials.issue.evidence')"
           placeholder="urn:uuid:e1, urn:uuid:e2"
         />
         <AppInput
           v-model="issueForm.expiration_date"
-          label="Expiration (ISO 8601, optional)"
+          :label="$t('credentials.issue.expiration')"
           placeholder="2028-04-13T00:00:00Z"
         />
         <p v-if="issueError" class="text-xs text-error">{{ issueError }}</p>
       </form>
       <template #footer>
         <div class="flex justify-end gap-2">
-          <AppButton variant="ghost" @click="issueOpen = false">Cancel</AppButton>
-          <AppButton :loading="issueBusy" @click="submitIssue">Issue</AppButton>
+          <AppButton variant="ghost" @click="issueOpen = false">{{ $t('common.actions.cancel') }}</AppButton>
+          <AppButton :loading="issueBusy" @click="submitIssue">{{ $t('credentials.issue.submit') }}</AppButton>
         </div>
       </template>
     </AppModal>
@@ -507,30 +507,30 @@ async function exportBundle() {
     <!-- Presentation modal -->
     <AppModal
       :open="presentOpen"
-      title="Create selective-disclosure presentation"
+      :title="$t('credentials.present.title')"
       max-width="36rem"
       @close="presentOpen = false"
     >
       <div v-if="!presentResult" class="space-y-4">
-        <AppInput v-model="presentForm.credential_id" label="Credential ID" placeholder="urn:uuid:…" />
+        <AppInput v-model="presentForm.credential_id" :label="$t('credentials.present.credentialId')" placeholder="urn:uuid:…" />
         <AppInput
           v-model="presentForm.reveal"
-          label="Reveal paths (comma-separated)"
+          :label="$t('credentials.present.reveal')"
           placeholder="credentialSubject.level"
         />
-        <AppInput v-model="presentForm.audience" label="Audience" placeholder="did:web:hirer.example" />
-        <AppInput v-model="presentForm.nonce" label="Nonce" />
+        <AppInput v-model="presentForm.audience" :label="$t('credentials.present.audience')" placeholder="did:web:hirer.example" />
+        <AppInput v-model="presentForm.nonce" :label="$t('credentials.present.nonce')" />
         <p v-if="presentError" class="text-xs text-error">{{ presentError }}</p>
       </div>
       <div v-else class="space-y-3">
-        <p class="text-sm text-foreground">Presentation envelope created.</p>
+        <p class="text-sm text-foreground">{{ $t('credentials.present.ready') }}</p>
         <pre class="max-h-64 overflow-auto rounded-md bg-muted/30 p-3 text-xs font-mono">{{ JSON.stringify(presentResult, null, 2) }}</pre>
       </div>
       <template #footer>
         <div class="flex justify-end gap-2">
-          <AppButton variant="ghost" @click="presentOpen = false">Close</AppButton>
-          <AppButton v-if="!presentResult" :loading="presentBusy" @click="submitPresent">Create</AppButton>
-          <AppButton v-else variant="outline" @click="copyEnvelope">Copy JSON</AppButton>
+          <AppButton variant="ghost" @click="presentOpen = false">{{ $t('common.actions.close') }}</AppButton>
+          <AppButton v-if="!presentResult" :loading="presentBusy" @click="submitPresent">{{ $t('credentials.present.create') }}</AppButton>
+          <AppButton v-else variant="outline" @click="copyEnvelope">{{ $t('credentials.present.copy') }}</AppButton>
         </div>
       </template>
     </AppModal>

@@ -48,9 +48,9 @@ onMounted(async () => {
           </svg>
         </div>
         <div>
-          <h1 class="text-2xl font-bold text-foreground sm:text-3xl">Governance</h1>
+          <h1 class="text-2xl font-bold text-foreground sm:text-3xl">{{ $t('governance.index.title') }}</h1>
           <p class="text-sm text-muted-foreground">
-            DAOs governing the knowledge taxonomy
+            {{ $t('governance.index.subtitle') }}
           </p>
         </div>
       </div>
@@ -82,15 +82,15 @@ onMounted(async () => {
       <!-- Stats -->
       <div class="mb-8 grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div class="rounded-xl bg-card shadow-sm p-6">
-          <p class="text-sm text-muted-foreground">Total DAOs</p>
+          <p class="text-sm text-muted-foreground">{{ $t('governance.index.stats.totalGroups') }}</p>
           <p class="mt-2 text-3xl font-bold text-foreground">{{ totalDaos }}</p>
         </div>
         <div class="rounded-xl bg-card shadow-sm p-6">
-          <p class="text-sm text-muted-foreground">Active</p>
+          <p class="text-sm text-muted-foreground">{{ $t('governance.index.stats.active') }}</p>
           <p class="mt-2 text-3xl font-bold text-emerald-500">{{ activeDaos }}</p>
         </div>
         <div class="rounded-xl bg-card shadow-sm p-6">
-          <p class="text-sm text-muted-foreground">Total Committee Seats</p>
+          <p class="text-sm text-muted-foreground">{{ $t('governance.index.stats.councilSeats') }}</p>
           <p class="mt-2 text-3xl font-bold text-amber-500">{{ totalSeats }}</p>
         </div>
       </div>
@@ -100,7 +100,7 @@ onMounted(async () => {
         <input
           v-model="search"
           class="w-full max-w-sm rounded-lg border border-border bg-background px-4 py-2.5 text-sm text-foreground placeholder-muted-foreground/50 transition-colors focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
-          placeholder="Search DAOs..."
+          :placeholder="$t('governance.index.searchPlaceholder')"
         >
       </div>
 
@@ -112,10 +112,10 @@ onMounted(async () => {
           </svg>
         </div>
         <h3 class="text-lg font-semibold text-foreground">
-          {{ search ? 'No DAOs match your search' : 'No DAOs yet' }}
+          {{ search ? $t('governance.index.empty.noMatchTitle') : $t('governance.index.empty.noneTitle') }}
         </h3>
         <p class="mt-1 text-sm text-muted-foreground max-w-sm mx-auto">
-          {{ search ? 'Try a different search term.' : 'DAOs are created automatically when subject fields or subjects are added to the taxonomy.' }}
+          {{ search ? $t('governance.index.empty.noMatchHint') : $t('governance.index.empty.noneHint') }}
         </p>
       </div>
 
@@ -124,13 +124,13 @@ onMounted(async () => {
         <router-link
           v-for="dao in filtered"
           :key="dao.id"
-          :to="`/governance/${dao.id}`"
+          :to="`/community/${dao.id}`"
           class="group rounded-xl bg-card shadow-sm p-5 transition-shadow hover:shadow-md"
         >
           <div class="flex items-start gap-3">
             <div class="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-amber-500/10 text-lg">
               <span v-if="dao.icon_emoji">{{ dao.icon_emoji }}</span>
-              <span v-else class="text-sm font-bold text-amber-600 dark:text-amber-400">{{ dao.scope_type === 'subject_field' ? 'SF' : 'SU' }}</span>
+              <span v-else class="text-sm font-bold text-amber-600 dark:text-amber-400">{{ dao.scope_type === 'subject_field' ? $t('governance.index.scope.topicAreaShort') : $t('governance.index.scope.topicShort') }}</span>
             </div>
             <div class="flex-1 min-w-0">
               <div class="flex items-center gap-2 mb-1">
@@ -148,9 +148,9 @@ onMounted(async () => {
                   <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" />
                   </svg>
-                  {{ dao.committee_size }} seats
+                  {{ $t('governance.index.seats', { count: dao.committee_size }, dao.committee_size) }}
                 </span>
-                <span>{{ dao.scope_type === 'subject_field' ? 'Subject Field' : 'Subject' }}</span>
+                <span>{{ dao.scope_type === 'subject_field' ? $t('governance.index.scope.topicArea') : $t('governance.index.scope.topic') }}</span>
               </div>
             </div>
           </div>

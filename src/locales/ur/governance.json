@@ -1,0 +1,134 @@
+{
+  "index": {
+    "title": "برادری",
+    "subtitle": "برادری کے گروپ جو طے کرتے ہیں کہ کن مہارتوں کو تسلیم کیا جائے",
+    "stats": {
+      "totalGroups": "برادری کے گروپ",
+      "active": "فعال",
+      "councilSeats": "کونسل کی نشستیں"
+    },
+    "searchPlaceholder": "برادریاں تلاش کریں…",
+    "empty": {
+      "noMatchTitle": "آپ کی تلاش سے کوئی برادری مطابقت نہیں رکھتی",
+      "noMatchHint": "کوئی مختلف تلاش کی اصطلاح آزمائیں۔",
+      "noneTitle": "ابھی کوئی برادری نہیں",
+      "noneHint": "نئے موضوعات شامل ہونے پر برادری کے گروپ خودکار طور پر نمودار ہوتے ہیں۔"
+    },
+    "scope": {
+      "topicAreaShort": "TA",
+      "topicShort": "TO",
+      "topicArea": "موضوعی علاقہ",
+      "topic": "موضوع"
+    },
+    "seats": "کوئی نہیں | {count} نشست | {count} نشستیں"
+  },
+  "detail": {
+    "breadcrumb": "برادری",
+    "notFound": "برادری کا گروپ نہیں ملا",
+    "tabs": {
+      "overview": "جائزہ",
+      "elections": "انتخابات",
+      "proposals": "تجاویز"
+    },
+    "stats": {
+      "members": "کوئی نہیں | {count} رکن | {count} ارکان",
+      "council": "{filled}/{total} کونسل",
+      "elections": "کوئی نہیں | {count} انتخاب | {count} انتخابات",
+      "proposals": "کوئی نہیں | {count} تجویز | {count} تجاویز"
+    },
+    "details": {
+      "heading": "تفصیلات",
+      "scope": "موضوع کی قسم",
+      "councilSize": "کونسل کا حجم",
+      "electionInterval": "انتخابی وقفہ",
+      "intervalDays": "{count} دن",
+      "created": "بنایا گیا",
+      "topicId": "موضوع کا شناختی نمبر",
+      "publicRecord": "عوامی ریکارڈ"
+    },
+    "council": {
+      "heading": "کونسل",
+      "seats": "{filled} / {total} نشستیں",
+      "emptyTitle": "کوئی کونسل رکن نہیں",
+      "emptyDescription": "کونسل بھرنے کے لیے انتخاب چلائیں۔",
+      "badge": "کونسل"
+    },
+    "members": {
+      "heading": "ارکان ({count})"
+    },
+    "elections": {
+      "heading": "انتخابات",
+      "open": "+ انتخاب شروع کریں",
+      "emptyTitle": "کوئی انتخاب نہیں",
+      "emptyDescription": "کونسل کے ارکان چننے کے لیے انتخاب کھولیں۔",
+      "seats": "کوئی نہیں | {count} نشست | {count} نشستیں",
+      "actions": {
+        "nominateSelf": "خود کو نامزد کریں",
+        "startVoting": "ووٹنگ شروع کریں",
+        "close": "انتخاب بند کریں",
+        "seatCouncil": "کونسل بٹھائیں",
+        "accept": "قبول کریں",
+        "vote": "ووٹ دیں"
+      },
+      "nominees": "نامزد امیدوار",
+      "noNominees": "ابھی کوئی نامزد امیدوار نہیں",
+      "badges": {
+        "winner": "کامیاب",
+        "accepted": "قبول شدہ",
+        "pending": "زیرِ التوا"
+      },
+      "votes": "کوئی نہیں | {count} ووٹ | {count} ووٹ",
+      "nominationLabel": "نامزدگی",
+      "votingLabel": "ووٹنگ",
+      "ends": "{date} کو ختم",
+      "closed": "{date} کو بند ہوا",
+      "titleRequired": "براہ کرم انتخاب کا عنوان شامل کریں۔"
+    },
+    "proposals": {
+      "heading": "تجاویز",
+      "submit": "+ تجویز جمع کریں",
+      "emptyTitle": "کوئی تجویز نہیں",
+      "emptyDescription": "اس موضوع کے لیے تبدیلیوں کی تجویز دینے کے لیے ایک تجویز جمع کریں۔",
+      "votingLabel": "ووٹنگ",
+      "for": "{count} حق میں",
+      "against": "{count} خلاف",
+      "deadline": "آخری تاریخ: {date}",
+      "actions": {
+        "approve": "منظور کریں (ووٹنگ کھولیں)",
+        "voteFor": "حق میں ووٹ",
+        "voteAgainst": "خلاف ووٹ",
+        "resolve": "فیصلہ کریں"
+      },
+      "titleRequired": "براہ کرم تجویز کا عنوان شامل کریں۔"
+    },
+    "createElection": {
+      "title": "انتخاب شروع کریں",
+      "titleLabel": "عنوان",
+      "titlePlaceholder": "مثلاً پہلی سہ ماہی 2026 کونسل انتخاب",
+      "descriptionLabel": "تفصیل",
+      "descriptionPlaceholder": "اس انتخاب کا مقصد…",
+      "seatsLabel": "نشستیں",
+      "submit": "انتخاب شروع کریں"
+    },
+    "createProposal": {
+      "title": "تجویز جمع کریں",
+      "titleLabel": "عنوان",
+      "titlePlaceholder": "مثلاً NLP مہارتوں کو تسلیم کریں",
+      "descriptionLabel": "تفصیل",
+      "descriptionPlaceholder": "تجویز کردہ تبدیلی بیان کریں…",
+      "categoryLabel": "زمرہ",
+      "submit": "تجویز جمع کریں"
+    }
+  },
+  "onChainBadge": {
+    "confirming": "تصدیق کی جا رہی ہے…"
+  },
+  "deadline": {
+    "default": "آخری تاریخ",
+    "passed": "{label} گزر گئی"
+  },
+  "proficiency": {
+    "requires": "درکار",
+    "level": "مہارت"
+  }
+}

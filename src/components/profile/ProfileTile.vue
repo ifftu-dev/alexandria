@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import type { ProfileSummary } from '@/types'
 
 import ProfileAvatar from './ProfileAvatar.vue'
+
+const { t } = useI18n()
 
 interface Props {
   profile: ProfileSummary
@@ -20,14 +23,23 @@ defineEmits<{
 
 const lastSeen = computed(() => {
   const stamp = props.profile.last_unlocked_at
-  if (!stamp) return 'Never opened'
+  if (!stamp) return t('profile.tile.neverOpened')
   const then = new Date(stamp).getTime()
   if (Number.isNaN(then)) return ''
   const seconds = (Date.now() - then) / 1000
-  if (seconds < 60) return 'Just now'
-  if (seconds < 3600) return `${Math.floor(seconds / 60)} min ago`
-  if (seconds < 86400) return `${Math.floor(seconds / 3600)} hr ago`
-  if (seconds < 86400 * 7) return `${Math.floor(seconds / 86400)} days ago`
+  if (seconds < 60) return t('profile.tile.justNow')
+  if (seconds < 3600) {
+    const m = Math.floor(seconds / 60)
+    return t('profile.tile.minAgo', { count: m }, m)
+  }
+  if (seconds < 86400) {
+    const h = Math.floor(seconds / 3600)
+    return t('profile.tile.hrAgo', { count: h }, h)
+  }
+  if (seconds < 86400 * 7) {
+    const d = Math.floor(seconds / 86400)
+    return t('profile.tile.daysAgo', { count: d }, d)
+  }
   return new Date(stamp).toLocaleDateString()
 })
 </script>

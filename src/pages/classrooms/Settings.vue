@@ -6,10 +6,10 @@
         :to="{ name: 'classroom', params: { id: classroomId } }"
         class="text-muted-foreground hover:text-foreground transition-colors"
       >
-        ← Back
+        ← {{ $t('common.actions.back') }}
       </RouterLink>
       <div>
-        <h1 class="text-xl font-bold text-foreground">Classroom Settings</h1>
+        <h1 class="text-xl font-bold text-foreground">{{ $t('classrooms.settings.title') }}</h1>
         <p class="text-sm text-muted-foreground">{{ currentClassroom?.name }}</p>
       </div>
     </div>
@@ -17,19 +17,19 @@
     <div class="max-w-2xl mx-auto px-4 sm:px-6 py-8 space-y-6">
       <!-- General info -->
       <section class="card p-6">
-        <h2 class="text-base font-semibold text-foreground mb-4">General</h2>
+        <h2 class="text-base font-semibold text-foreground mb-4">{{ $t('classrooms.settings.general') }}</h2>
         <div class="space-y-4">
           <div>
-            <label class="block text-sm text-muted-foreground mb-1">Invite code</label>
+            <label class="block text-sm text-muted-foreground mb-1">{{ $t('classrooms.settings.inviteCode') }}</label>
             <div class="flex gap-2">
               <code class="flex-1 px-3 py-2 bg-muted border border-border rounded-lg text-foreground text-sm font-mono truncate">
                 {{ currentClassroom?.invite_code ?? '—' }}
               </code>
               <AppButton variant="secondary" size="sm" @click="copyInviteCode">
-                Copy
+                {{ $t('common.actions.copy') }}
               </AppButton>
             </div>
-            <p class="text-xs text-muted-foreground mt-1">Share this code with others so they can find and request to join your classroom.</p>
+            <p class="text-xs text-muted-foreground mt-1">{{ $t('classrooms.settings.inviteHint') }}</p>
           </div>
         </div>
       </section>
@@ -37,7 +37,7 @@
       <!-- Members -->
       <section class="card p-6">
         <h2 class="text-base font-semibold text-foreground mb-4">
-          Members ({{ members.length }})
+          {{ $t('classrooms.settings.membersHeading') }} ({{ members.length }})
         </h2>
         <div class="space-y-2">
           <div
@@ -67,11 +67,11 @@
                 @change="handleSetRole(m.stake_address, ($event.target as HTMLSelectElement).value)"
                 class="text-xs bg-muted border border-border rounded px-2 py-1 text-foreground"
               >
-                <option value="member">Member</option>
-                <option value="moderator">Moderator</option>
+                <option value="member">{{ $t('classrooms.roles.member') }}</option>
+                <option value="moderator">{{ $t('classrooms.roles.moderator') }}</option>
               </select>
               <AppButton variant="ghost" size="xs" @click="handleKick(m.stake_address)" class="text-destructive hover:text-destructive">
-                Kick
+                {{ $t('classrooms.settings.kick') }}
               </AppButton>
             </div>
           </div>
@@ -80,14 +80,14 @@
 
       <!-- Danger zone -->
       <section class="card p-6 border-destructive/30">
-        <h2 class="text-base font-semibold text-destructive mb-4">Danger Zone</h2>
+        <h2 class="text-base font-semibold text-destructive mb-4">{{ $t('classrooms.settings.dangerZone') }}</h2>
         <div class="flex items-center justify-between gap-4">
           <div class="min-w-0">
-            <p class="text-sm text-foreground">Archive this classroom</p>
-            <p class="text-xs text-muted-foreground">The classroom will be hidden and can no longer receive messages.</p>
+            <p class="text-sm text-foreground">{{ $t('classrooms.settings.archiveTitle') }}</p>
+            <p class="text-xs text-muted-foreground">{{ $t('classrooms.settings.archiveBody') }}</p>
           </div>
           <AppButton variant="danger" size="sm" @click="handleArchive">
-            Archive
+            {{ $t('classrooms.settings.archive') }}
           </AppButton>
         </div>
       </section>
@@ -99,11 +99,11 @@
       >
         <div class="flex items-center justify-between gap-4">
           <div class="min-w-0">
-            <p class="text-sm text-foreground">Leave this classroom</p>
-            <p class="text-xs text-muted-foreground">You will need to request access again to rejoin.</p>
+            <p class="text-sm text-foreground">{{ $t('classrooms.settings.leaveTitle') }}</p>
+            <p class="text-xs text-muted-foreground">{{ $t('classrooms.settings.leaveBody') }}</p>
           </div>
           <AppButton variant="secondary" size="sm" @click="handleLeave">
-            Leave
+            {{ $t('classrooms.settings.leave') }}
           </AppButton>
         </div>
       </section>
@@ -113,11 +113,13 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { useClassroom } from '@/composables/useClassroom'
 import AppButton from '@/components/ui/AppButton.vue'
 
+const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const classroomId = computed(() => route.params.id as string)
@@ -147,7 +149,7 @@ async function handleSetRole(stakeAddress: string, role: string) {
 }
 
 async function handleKick(stakeAddress: string) {
-  if (!confirm('Are you sure you want to kick this member?')) return
+  if (!confirm(t('classrooms.settings.confirmKick'))) return
   try {
     await invoke('classroom_kick_member', {
       classroomId: classroomId.value,
@@ -159,7 +161,7 @@ async function handleKick(stakeAddress: string) {
 }
 
 async function handleArchive() {
-  if (!confirm('Archive this classroom? This cannot be undone.')) return
+  if (!confirm(t('classrooms.settings.confirmArchive'))) return
   try {
     await invoke('classroom_archive', { classroomId: classroomId.value })
     router.push({ name: 'classrooms' })
@@ -169,7 +171,7 @@ async function handleArchive() {
 }
 
 async function handleLeave() {
-  if (!confirm('Leave this classroom?')) return
+  if (!confirm(t('classrooms.settings.confirmLeave'))) return
   try {
     await leaveClassroom(classroomId.value)
     router.push({ name: 'classrooms' })

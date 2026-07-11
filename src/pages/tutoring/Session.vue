@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { useTutoringRoom } from '@/composables/useTutoringRoom'
 import { usePlatform } from '@/composables/usePlatform'
 import QrCodeDisplay from '@/components/tutoring/QrCodeDisplay.vue'
 import type { DeviceList } from '@/types'
 
+const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const {
@@ -185,6 +187,15 @@ const connectionQuality = computed(() => {
   return 'poor'
 })
 
+const connectionQualityLabel = computed(() => {
+  switch (connectionQuality.value) {
+    case 'good': return t('tutoring.session.quality.good')
+    case 'fair': return t('tutoring.session.quality.fair')
+    case 'poor': return t('tutoring.session.quality.poor')
+    default: return t('tutoring.session.quality.none')
+  }
+})
+
 const connectionQualityColor = computed(() => {
   switch (connectionQuality.value) {
     case 'good': return 'text-success'
@@ -324,7 +335,7 @@ function formatChatTime(ts: number) {
 
 /** Resolve peer display name: gossip name > status name > short node ID. */
 function peerDisplayName(nodeId: string): string {
-  if (nodeId === 'self') return 'You'
+  if (nodeId === 'self') return t('tutoring.session.you')
   // Prefer real-time gossip name, then status-reported name
   const gossipName = peerNames.value[nodeId]
   if (gossipName) return gossipName
@@ -360,7 +371,7 @@ function peerInitials(nodeId: string): string {
           <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
           </svg>
-          <span class="hidden sm:inline">Back</span>
+          <span class="hidden sm:inline">{{ $t('common.actions.back') }}</span>
         </button>
 
         <div class="h-4 w-px bg-border hidden sm:block" />
@@ -372,14 +383,14 @@ function peerInitials(nodeId: string): string {
           </span>
           <span v-else class="h-2.5 w-2.5 rounded-full bg-muted-foreground/30 shrink-0" />
           <span class="text-xs sm:text-sm font-medium text-foreground truncate max-w-[120px] sm:max-w-[200px]" :title="sessionTitle">
-            {{ isActive ? sessionTitle : 'Session Ended' }}
+            {{ isActive ? sessionTitle : $t('tutoring.session.ended') }}
           </span>
           <!-- Duration timer -->
           <span v-if="isActive" class="rounded bg-muted px-1 sm:px-1.5 py-0.5 text-[0.65rem] sm:text-xs font-mono text-muted-foreground tabular-nums">
             {{ formattedDuration }}
           </span>
           <!-- Connection quality indicator -->
-          <div v-if="isActive" class="flex items-center gap-0.5" :title="`Connection: ${connectionQuality}`">
+          <div v-if="isActive" class="flex items-center gap-0.5" :title="$t('tutoring.session.connectionTooltip', { quality: connectionQualityLabel })">
             <svg class="h-3.5 w-3.5" :class="connectionQualityColor" viewBox="0 0 20 20" fill="currentColor">
               <rect x="2" y="14" width="3" height="4" rx="0.5" :opacity="connectionQuality !== 'none' ? 1 : 0.3" />
               <rect x="7" y="10" width="3" height="8" rx="0.5" :opacity="connectionQuality === 'good' || connectionQuality === 'fair' ? 1 : 0.3" />
@@ -396,7 +407,7 @@ function peerInitials(nodeId: string): string {
           <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128H9m6 0a5.97 5.97 0 00-.786-3.07M9 19.128v-.003c0-1.113.285-2.16.786-3.07M9 19.128H3.375a4.125 4.125 0 01-.003-8.25 4.125 4.125 0 017.533-2.493M9 19.128a5.97 5.97 0 01.786-3.07" />
           </svg>
-          <span class="hidden sm:inline">{{ connectedPeerCount }}/{{ peerCount }} peers</span>
+          <span class="hidden sm:inline">{{ $t('tutoring.session.peersCount', { connected: connectedPeerCount, total: peerCount }) }}</span>
           <span class="sm:hidden">{{ connectedPeerCount }}</span>
         </div>
 
@@ -405,7 +416,7 @@ function peerInitials(nodeId: string): string {
           v-if="isActive"
           class="flex items-center gap-1 rounded-lg border border-border px-1.5 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           @click="handleShowDiagnostics"
-          title="Show diagnostics"
+          :title="$t('tutoring.session.diagnosticsTitle')"
         >
           <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15.3M14.25 3.104c.251.023.501.05.75.082M19.8 15.3l-1.57.393A9.065 9.065 0 0112 15a9.065 9.065 0 00-6.23.693L5 14.5m14.8.8l1.402 1.402c1.232 1.232.65 3.318-1.067 3.611l-.772.13c-1.687.282-3.404.418-5.129.418s-3.442-.136-5.129-.418l-.772-.131c-1.716-.293-2.299-2.379-1.067-3.61L5 14.5" />
@@ -416,12 +427,12 @@ function peerInitials(nodeId: string): string {
           v-if="isActive && isIOS"
           class="flex items-center gap-1 rounded-lg border border-border px-2 py-1.5 text-xs text-foreground transition-colors hover:bg-muted"
           @click="openAudioDevices"
-          title="Audio devices"
+          :title="$t('tutoring.session.audioDevicesTitle')"
         >
           <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M3 10.5h2.25m13.5 0H21m-15.75 4.5H6a2.25 2.25 0 012.25-2.25h7.5A2.25 2.25 0 0118 15h.75M7.5 10.5V8.25A2.25 2.25 0 019.75 6h4.5A2.25 2.25 0 0116.5 8.25v2.25m-9 0h9" />
           </svg>
-          <span class="hidden sm:inline">Audio</span>
+          <span class="hidden sm:inline">{{ $t('tutoring.session.audioLabel') }}</span>
         </button>
 
         <!-- Copy ticket -->
@@ -429,7 +440,7 @@ function peerInitials(nodeId: string): string {
           v-if="isActive && sessionStatus?.ticket"
           class="flex items-center gap-1.5 rounded-lg border border-border px-2 sm:px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
           @click="copyTicket"
-          :title="ticketCopied ? 'Copied!' : 'Copy invite ticket'"
+          :title="ticketCopied ? $t('common.actions.copied') : $t('tutoring.session.copyInviteTitle')"
         >
           <svg v-if="!ticketCopied" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9.75a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184" />
@@ -437,7 +448,7 @@ function peerInitials(nodeId: string): string {
           <svg v-else class="h-3.5 w-3.5 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
           </svg>
-          <span class="hidden sm:inline">{{ ticketCopied ? 'Copied!' : 'Copy Invite' }}</span>
+          <span class="hidden sm:inline">{{ ticketCopied ? $t('common.actions.copied') : $t('tutoring.session.copyInvite') }}</span>
         </button>
 
         <!-- Show QR invite -->
@@ -445,13 +456,13 @@ function peerInitials(nodeId: string): string {
           v-if="isActive && sessionStatus?.ticket"
           class="flex items-center gap-1.5 rounded-lg border border-border px-2 sm:px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
           @click="showQrInvite = true"
-          title="Show QR code for invite"
+          :title="$t('tutoring.session.qrTitle')"
         >
           <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 013.75 9.375v-4.5zM3.75 14.625c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5a1.125 1.125 0 01-1.125-1.125v-4.5zM13.5 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0113.5 9.375v-4.5z" />
             <path stroke-linecap="round" stroke-linejoin="round" d="M6.75 6.75h.75v.75h-.75v-.75zM6.75 16.5h.75v.75h-.75v-.75zM16.5 6.75h.75v.75h-.75v-.75zM13.5 13.5h.75v.75h-.75v-.75zM13.5 19.5h.75v.75h-.75v-.75zM19.5 13.5h.75v.75h-.75v-.75zM19.5 19.5h.75v.75h-.75v-.75zM16.5 16.5h.75v.75h-.75v-.75z" />
           </svg>
-          <span class="hidden sm:inline">QR</span>
+          <span class="hidden sm:inline">{{ $t('tutoring.session.qr') }}</span>
         </button>
 
         <!-- Chat toggle -->
@@ -464,7 +475,7 @@ function peerInitials(nodeId: string): string {
           <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M8.625 9.75a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375m-13.5 3.01c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.184-4.183a1.14 1.14 0 01.778-.332 48.294 48.294 0 005.83-.498c1.585-.233 2.708-1.626 2.708-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z" />
           </svg>
-          <span class="hidden sm:inline">Chat</span>
+          <span class="hidden sm:inline">{{ $t('tutoring.session.chat') }}</span>
           <!-- Unread badge -->
           <span
             v-if="unreadChatCount > 0 && !showChat"
@@ -483,7 +494,7 @@ function peerInitials(nodeId: string): string {
           <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75" />
           </svg>
-          <span class="hidden sm:inline">Leave</span>
+          <span class="hidden sm:inline">{{ $t('tutoring.controls.leave') }}</span>
         </button>
       </div>
     </div>
@@ -513,7 +524,7 @@ function peerInitials(nodeId: string): string {
                   v-else-if="selfVideoSrc"
                   :src="selfVideoSrc"
                   class="absolute inset-0 h-full w-full object-cover"
-                  alt="Self preview"
+                  :alt="$t('tutoring.session.selfPreviewAlt')"
                 />
                 <!-- Fallback: audio-only circular indicator -->
                 <div v-else class="absolute inset-0 flex flex-col items-center justify-center gap-4">
@@ -550,9 +561,9 @@ function peerInitials(nodeId: string): string {
                     </svg>
                   </div>
                   <div class="text-center">
-                    <p class="text-sm font-medium text-foreground">You</p>
+                    <p class="text-sm font-medium text-foreground">{{ $t('tutoring.session.you') }}</p>
                     <p class="text-xs text-muted-foreground">
-                      {{ videoEnabled ? 'Starting camera...' : 'Camera off' }}
+                      {{ videoEnabled ? $t('tutoring.session.startingCamera') : $t('tutoring.session.cameraOff') }}
                     </p>
                   </div>
                 </div>
@@ -564,7 +575,7 @@ function peerInitials(nodeId: string): string {
                     <span class="relative inline-flex h-2 w-2 rounded-full bg-success" />
                   </span>
                   <span v-else class="h-2 w-2 rounded-full bg-muted-foreground/50" />
-                  <span class="text-xs font-medium text-white">You</span>
+                  <span class="text-xs font-medium text-white">{{ $t('tutoring.session.you') }}</span>
                 </div>
 
                 <!-- Audio indicator overlay -->
@@ -589,7 +600,7 @@ function peerInitials(nodeId: string): string {
                       ]"
                     />
                   </div>
-                  <span v-else class="text-[0.6rem] font-medium text-white">Muted</span>
+                  <span v-else class="text-[0.6rem] font-medium text-white">{{ $t('tutoring.session.muted') }}</span>
                 </div>
               </div>
 
@@ -606,7 +617,7 @@ function peerInitials(nodeId: string): string {
                     v-if="videoFrames[peer.node_id]"
                     :src="videoFrames[peer.node_id]"
                     class="absolute inset-0 h-full w-full object-cover"
-                    :alt="`Video from ${peerDisplayName(peer.node_id)}`"
+                    :alt="$t('tutoring.session.peerVideoAlt', { name: peerDisplayName(peer.node_id) })"
                   />
                   <!-- Audio-only peer card (no video frames) -->
                   <div v-else class="flex items-center gap-3 p-4">
@@ -615,7 +626,7 @@ function peerInitials(nodeId: string): string {
                     </div>
                     <div class="flex-1 min-w-0">
                       <p class="text-sm font-medium text-foreground truncate">
-                        {{ peer.connected ? peerDisplayName(peer.node_id) : 'Connecting...' }}
+                        {{ peer.connected ? peerDisplayName(peer.node_id) : $t('common.status.connecting') }}
                       </p>
                       <div class="flex items-center gap-1.5 mt-0.5">
                         <span
@@ -623,7 +634,7 @@ function peerInitials(nodeId: string): string {
                           :class="peer.connected ? 'bg-success' : 'bg-warning'"
                         />
                         <span class="text-xs text-muted-foreground">
-                          {{ peer.connected ? 'Connected' : 'Connecting' }}
+                          {{ peer.connected ? $t('common.status.connected') : $t('common.status.connecting') }}
                         </span>
                       </div>
                     </div>
@@ -635,7 +646,7 @@ function peerInitials(nodeId: string): string {
                       :class="peer.connected ? 'bg-success' : 'bg-warning'"
                     />
                     <span class="text-[0.6rem] font-medium text-white">
-                      {{ peer.connected ? peerDisplayName(peer.node_id) : 'Connecting...' }}
+                      {{ peer.connected ? peerDisplayName(peer.node_id) : $t('common.status.connecting') }}
                     </span>
                   </div>
                   <!-- Speaker VU indicator -->
@@ -665,8 +676,8 @@ function peerInitials(nodeId: string): string {
                 <svg class="mx-auto h-8 w-8 text-muted-foreground/30" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z" />
                 </svg>
-                <p class="mt-3 text-sm text-muted-foreground">Waiting for peers to join...</p>
-                <p class="mt-1 text-xs text-muted-foreground/70">Share the invite ticket using the button above.</p>
+                <p class="mt-3 text-sm text-muted-foreground">{{ $t('tutoring.session.waitingPeers') }}</p>
+                <p class="mt-1 text-xs text-muted-foreground/70">{{ $t('tutoring.session.shareHint') }}</p>
               </div>
             </template>
 
@@ -688,7 +699,7 @@ function peerInitials(nodeId: string): string {
                   v-else-if="selfVideoSrc"
                   :src="selfVideoSrc"
                   class="absolute inset-0 h-full w-full object-cover"
-                  alt="Self preview"
+                  :alt="$t('tutoring.session.selfPreviewAlt')"
                 />
                 <!-- Fallback placeholder when no video frames -->
                 <div v-else class="absolute inset-0 flex flex-col items-center justify-center gap-3 text-muted-foreground">
@@ -698,10 +709,10 @@ function peerInitials(nodeId: string): string {
                   </svg>
                   <div class="text-center">
                     <p class="text-sm font-medium">
-                      {{ screenSharing ? 'Screen Sharing Active' : videoEnabled ? 'Starting camera...' : 'Camera Off' }}
+                      {{ screenSharing ? $t('tutoring.session.screenSharingActive') : videoEnabled ? $t('tutoring.session.startingCamera') : $t('tutoring.session.cameraOff') }}
                     </p>
                     <p class="text-xs opacity-70">
-                      {{ screenSharing ? 'Your screen is being shared with peers' : videoEnabled ? 'Waiting for first frame' : 'Click the camera button to enable' }}
+                      {{ screenSharing ? $t('tutoring.session.screenShareDesc') : videoEnabled ? $t('tutoring.session.waitingFrame') : $t('tutoring.session.enableCameraHint') }}
                     </p>
                   </div>
                 </div>
@@ -713,7 +724,7 @@ function peerInitials(nodeId: string): string {
                     <span class="relative inline-flex h-2 w-2 rounded-full bg-success" />
                   </span>
                   <span v-else class="h-2 w-2 rounded-full bg-muted-foreground/50" />
-                  <span class="text-xs font-medium text-white">You</span>
+                  <span class="text-xs font-medium text-white">{{ $t('tutoring.session.you') }}</span>
                 </div>
 
                 <!-- Audio indicator with VU meter -->
@@ -739,7 +750,7 @@ function peerInitials(nodeId: string): string {
                       ]"
                     />
                   </div>
-                  <span v-else class="text-[0.6rem] font-medium text-white">Muted</span>
+                  <span v-else class="text-[0.6rem] font-medium text-white">{{ $t('tutoring.session.muted') }}</span>
                 </div>
               </div>
 
@@ -755,7 +766,7 @@ function peerInitials(nodeId: string): string {
                     v-if="videoFrames[peer.node_id]"
                     :src="videoFrames[peer.node_id]"
                     class="absolute inset-0 h-full w-full object-cover"
-                    :alt="`Video from ${peerDisplayName(peer.node_id)}`"
+                    :alt="$t('tutoring.session.peerVideoAlt', { name: peerDisplayName(peer.node_id) })"
                   />
                   <!-- Placeholder when no video -->
                   <div v-else class="absolute inset-0 flex flex-col items-center justify-center gap-2 text-muted-foreground">
@@ -771,7 +782,7 @@ function peerInitials(nodeId: string): string {
                       :class="peer.connected ? 'bg-success' : 'bg-warning'"
                     />
                     <span class="text-[0.6rem] font-medium text-white">
-                      {{ peer.connected ? peerDisplayName(peer.node_id) : 'Connecting...' }}
+                      {{ peer.connected ? peerDisplayName(peer.node_id) : $t('common.status.connecting') }}
                     </span>
                   </div>
                   <!-- Speaker VU indicator on peer card -->
@@ -801,8 +812,8 @@ function peerInitials(nodeId: string): string {
                 <svg class="mx-auto h-8 w-8 text-muted-foreground/30" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z" />
                 </svg>
-                <p class="mt-3 text-sm text-muted-foreground">Waiting for peers to join...</p>
-                <p class="mt-1 text-xs text-muted-foreground/70">Share the invite ticket using the button above.</p>
+                <p class="mt-3 text-sm text-muted-foreground">{{ $t('tutoring.session.waitingPeers') }}</p>
+                <p class="mt-1 text-xs text-muted-foreground/70">{{ $t('tutoring.session.shareHint') }}</p>
               </div>
             </template>
           </div>
@@ -816,13 +827,13 @@ function peerInitials(nodeId: string): string {
                 <path stroke-linecap="round" stroke-linejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
               </svg>
             </div>
-            <h3 class="text-sm font-medium text-foreground">Session not found</h3>
-            <p class="mt-1 text-xs text-muted-foreground">This session may have ended or you haven't joined it.</p>
+            <h3 class="text-sm font-medium text-foreground">{{ $t('tutoring.session.notFoundTitle') }}</h3>
+            <p class="mt-1 text-xs text-muted-foreground">{{ $t('tutoring.session.notFoundDesc') }}</p>
             <button
               class="mt-4 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
               @click="router.push('/tutoring')"
             >
-              Back to Lobby
+              {{ $t('tutoring.session.backToLobby') }}
             </button>
           </div>
         </div>
@@ -836,7 +847,7 @@ function peerInitials(nodeId: string): string {
               :class="audioEnabled
                 ? 'border-border bg-muted text-foreground hover:bg-muted/80'
                 : 'border-destructive/50 bg-destructive/10 text-destructive hover:bg-destructive/20'"
-              :title="audioEnabled ? 'Mute microphone' : 'Unmute microphone'"
+              :title="audioEnabled ? $t('tutoring.controls.muteMic') : $t('tutoring.controls.unmuteMic')"
               @click="handleToggleAudio"
             >
               <svg v-if="audioEnabled" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -871,7 +882,7 @@ function peerInitials(nodeId: string): string {
             :class="videoEnabled && !screenSharing
               ? 'border-border bg-muted text-foreground hover:bg-muted/80'
               : 'border-destructive/50 bg-destructive/10 text-destructive hover:bg-destructive/20'"
-            :title="videoEnabled ? 'Turn off camera' : 'Turn on camera'"
+            :title="videoEnabled ? $t('tutoring.controls.cameraOff') : $t('tutoring.controls.cameraOn')"
             @click="handleToggleVideo"
           >
             <svg v-if="videoEnabled && !screenSharing" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -889,7 +900,7 @@ function peerInitials(nodeId: string): string {
             :class="screenSharing
               ? 'border-primary/50 bg-primary/10 text-primary hover:bg-primary/20'
               : 'border-border bg-muted text-foreground hover:bg-muted/80'"
-            :title="screenSharing ? 'Stop screen sharing' : 'Share screen'"
+            :title="screenSharing ? $t('tutoring.controls.stopShare') : $t('tutoring.controls.share')"
             @click="handleToggleScreenShare"
           >
             <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -901,7 +912,7 @@ function peerInitials(nodeId: string): string {
           <div class="relative" v-if="outputLevel > 0.02">
             <div
               class="flex h-11 w-11 items-center justify-center rounded-full border border-border bg-muted text-foreground"
-              title="Speaker output level"
+              :title="$t('tutoring.controls.speakerLevel')"
             >
               <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" />
@@ -935,7 +946,7 @@ function peerInitials(nodeId: string): string {
             <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75" />
             </svg>
-            Leave
+            {{ $t('tutoring.controls.leave') }}
           </button>
         </div>
       </div>
@@ -968,7 +979,7 @@ function peerInitials(nodeId: string): string {
         <div v-if="showChat && isActive" class="absolute right-0 top-0 bottom-0 z-30 sm:relative sm:inset-auto sm:z-auto flex w-[min(20rem,85vw)] sm:w-72 flex-col border-l border-border bg-card shrink-0 overflow-hidden shadow-xl sm:shadow-none">
           <!-- Chat header -->
           <div class="flex items-center justify-between border-b border-border px-4 py-3 shrink-0">
-            <h3 class="text-sm font-semibold text-foreground">Session Chat</h3>
+            <h3 class="text-sm font-semibold text-foreground">{{ $t('tutoring.chat.title') }}</h3>
             <button
               class="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
               @click="showChat = false"
@@ -985,8 +996,8 @@ function peerInitials(nodeId: string): string {
               <svg class="h-8 w-8 text-muted-foreground/20 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M8.625 9.75a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375m-13.5 3.01c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.184-4.183a1.14 1.14 0 01.778-.332 48.294 48.294 0 005.83-.498c1.585-.233 2.708-1.626 2.708-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z" />
               </svg>
-              <p class="text-xs text-muted-foreground">No messages yet</p>
-              <p class="text-[0.65rem] text-muted-foreground/60 mt-0.5">Messages are sent P2P via gossip</p>
+              <p class="text-xs text-muted-foreground">{{ $t('tutoring.chat.empty') }}</p>
+              <p class="text-[0.65rem] text-muted-foreground/60 mt-0.5">{{ $t('tutoring.chat.p2pHint') }}</p>
             </div>
 
             <div
@@ -1002,7 +1013,7 @@ function peerInitials(nodeId: string): string {
               >
                 <div class="flex items-center gap-2 mb-0.5">
                   <span class="text-[0.65rem] font-semibold" :class="msg.sender === 'self' ? 'text-primary' : 'text-foreground'">
-                    {{ msg.sender === 'self' ? 'You' : (msg.sender_name || peerDisplayName(msg.sender)) }}
+                    {{ msg.sender === 'self' ? $t('tutoring.session.you') : (msg.sender_name || peerDisplayName(msg.sender)) }}
                   </span>
                   <span class="text-[0.6rem] text-muted-foreground/60">
                     {{ formatChatTime(msg.timestamp) }}
@@ -1019,7 +1030,7 @@ function peerInitials(nodeId: string): string {
               <input
                 v-model="chatInput"
                 type="text"
-                placeholder="Type a message..."
+                :placeholder="$t('tutoring.chat.placeholder')"
                 maxlength="2000"
                 class="flex-1 rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                 @keydown.enter="handleSendChat"
@@ -1048,7 +1059,7 @@ function peerInitials(nodeId: string): string {
       <button
         class="rounded p-0.5 text-destructive/60 hover:text-destructive hover:bg-destructive/10 transition-colors"
         @click="dismissedError = true"
-        title="Dismiss"
+        :title="$t('tutoring.session.dismiss')"
       >
         <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
           <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -1071,18 +1082,18 @@ function peerInitials(nodeId: string): string {
           @click.self="showAudioDevices = false"
         >
           <div class="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-xl mx-4">
-            <h2 class="text-lg font-semibold text-foreground">Audio Devices</h2>
+            <h2 class="text-lg font-semibold text-foreground">{{ $t('tutoring.audio.title') }}</h2>
             <p class="mt-1 text-sm text-muted-foreground">
-              Live tutoring should play through the speaker by default, or move to a connected headset/Bluetooth device when you choose it here.
+              {{ $t('tutoring.audio.subtitle') }}
             </p>
 
             <div v-if="loadingAudioDevices" class="mt-4 rounded-lg border border-border bg-muted/30 px-3 py-4 text-sm text-muted-foreground">
-              Loading available routes...
+              {{ $t('tutoring.audio.loading') }}
             </div>
 
             <div v-else class="mt-4 space-y-4">
               <div>
-                <label class="text-sm font-medium text-foreground" for="session-audio-output">Audio Output</label>
+                <label class="text-sm font-medium text-foreground" for="session-audio-output">{{ $t('tutoring.audio.output') }}</label>
                 <select
                   id="session-audio-output"
                   v-model="selectedAudioOutput"
@@ -1093,13 +1104,13 @@ function peerInitials(nodeId: string): string {
                     :key="device.id"
                     :value="device.id"
                   >
-                    {{ device.name || device.id }}{{ device.is_default ? ' (Current)' : '' }}
+                    {{ device.name || device.id }}{{ device.is_default ? $t('tutoring.audio.currentSuffix') : '' }}
                   </option>
                 </select>
               </div>
 
               <div>
-                <label class="text-sm font-medium text-foreground" for="session-audio-input">Microphone</label>
+                <label class="text-sm font-medium text-foreground" for="session-audio-input">{{ $t('tutoring.device.microphone') }}</label>
                 <select
                   id="session-audio-input"
                   v-model="selectedMicInput"
@@ -1110,13 +1121,13 @@ function peerInitials(nodeId: string): string {
                     :key="device.id"
                     :value="device.id"
                   >
-                    {{ device.name || device.id }}{{ device.is_default ? ' (Current)' : '' }}
+                    {{ device.name || device.id }}{{ device.is_default ? $t('tutoring.audio.currentSuffix') : '' }}
                   </option>
                 </select>
               </div>
 
               <p class="text-xs text-muted-foreground">
-                On iPhone, connected headset and Bluetooth routes appear here when iOS exposes them to the call audio session.
+                {{ $t('tutoring.audio.iosHint') }}
               </p>
             </div>
 
@@ -1125,14 +1136,14 @@ function peerInitials(nodeId: string): string {
                 class="rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
                 @click="showAudioDevices = false"
               >
-                Cancel
+                {{ $t('common.actions.cancel') }}
               </button>
               <button
                 class="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
                 :disabled="loadingAudioDevices || applyingAudioDevices"
                 @click="applyAudioDevices"
               >
-                {{ applyingAudioDevices ? 'Applying...' : 'Apply' }}
+                {{ applyingAudioDevices ? $t('tutoring.audio.applying') : $t('tutoring.audio.apply') }}
               </button>
             </div>
           </div>
@@ -1152,20 +1163,20 @@ function peerInitials(nodeId: string): string {
       >
         <div v-if="showLeaveConfirm" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" @click.self="showLeaveConfirm = false">
           <div class="w-full max-w-sm rounded-xl border border-border bg-card p-6 shadow-xl mx-4">
-            <h2 class="text-lg font-semibold text-foreground">Leave Session?</h2>
-            <p class="mt-2 text-sm text-muted-foreground">Your camera and microphone will stop broadcasting. Other participants will see you leave.</p>
+            <h2 class="text-lg font-semibold text-foreground">{{ $t('tutoring.leave.title') }}</h2>
+            <p class="mt-2 text-sm text-muted-foreground">{{ $t('tutoring.leave.desc') }}</p>
             <div class="mt-6 flex justify-end gap-2">
               <button
                 class="rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
                 @click="showLeaveConfirm = false"
               >
-                Stay
+                {{ $t('tutoring.leave.stay') }}
               </button>
               <button
                 class="rounded-lg bg-destructive px-4 py-2 text-sm font-medium text-destructive-foreground transition-colors hover:bg-destructive/90"
                 @click="handleLeave"
               >
-                Leave Session
+                {{ $t('tutoring.leave.confirm') }}
               </button>
             </div>
           </div>
@@ -1185,8 +1196,8 @@ function peerInitials(nodeId: string): string {
       >
         <div v-if="showTicketFallback" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" @click.self="showTicketFallback = false">
           <div class="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-xl mx-4">
-            <h2 class="text-lg font-semibold text-foreground">Room Ticket</h2>
-            <p class="mt-1 text-sm text-muted-foreground">Select and copy the ticket below to share with participants.</p>
+            <h2 class="text-lg font-semibold text-foreground">{{ $t('tutoring.ticketFallback.title') }}</h2>
+            <p class="mt-1 text-sm text-muted-foreground">{{ $t('tutoring.ticketFallback.desc') }}</p>
             <textarea
               readonly
               :value="sessionStatus?.ticket ?? ''"
@@ -1199,7 +1210,7 @@ function peerInitials(nodeId: string): string {
                 class="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
                 @click="showTicketFallback = false"
               >
-                Done
+                {{ $t('common.actions.done') }}
               </button>
             </div>
           </div>
@@ -1219,8 +1230,8 @@ function peerInitials(nodeId: string): string {
       >
         <div v-if="showQrInvite && sessionStatus?.ticket" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" @click.self="showQrInvite = false">
           <div class="w-full max-w-sm rounded-xl border border-border bg-card p-6 shadow-xl mx-4">
-            <h2 class="text-lg font-semibold text-foreground">Scan to join</h2>
-            <p class="mt-1 text-sm text-muted-foreground">Open Alexandria on another device and scan this code from the Join dialog.</p>
+            <h2 class="text-lg font-semibold text-foreground">{{ $t('tutoring.qrInvite.title') }}</h2>
+            <p class="mt-1 text-sm text-muted-foreground">{{ $t('tutoring.qrInvite.desc') }}</p>
             <div class="mt-4 flex justify-center">
               <QrCodeDisplay :value="sessionStatus.ticket" :size="260" />
             </div>
@@ -1229,13 +1240,13 @@ function peerInitials(nodeId: string): string {
                 class="rounded-lg border border-border px-3 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-muted"
                 @click="copyTicket"
               >
-                {{ ticketCopied ? 'Copied!' : 'Copy ticket' }}
+                {{ ticketCopied ? $t('common.actions.copied') : $t('tutoring.qrInvite.copy') }}
               </button>
               <button
                 class="rounded-lg bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
                 @click="showQrInvite = false"
               >
-                Done
+                {{ $t('common.actions.done') }}
               </button>
             </div>
           </div>
@@ -1255,7 +1266,7 @@ function peerInitials(nodeId: string): string {
       >
         <div v-if="showDiagnostics" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" @click.self="showDiagnostics = false">
           <div class="w-full max-w-lg rounded-xl border border-border bg-card p-6 shadow-xl mx-4 max-h-[80vh] overflow-auto">
-            <h2 class="text-lg font-semibold text-foreground">A/V Pipeline Diagnostics</h2>
+            <h2 class="text-lg font-semibold text-foreground">{{ $t('tutoring.diagnostics.title') }}</h2>
             <pre v-if="diagnosticsData && !showDiagFallback" class="mt-3 rounded-lg bg-muted p-3 text-xs font-mono text-foreground overflow-auto max-h-[50vh] whitespace-pre-wrap break-all select-all">{{ JSON.stringify(diagnosticsData, null, 2) }}</pre>
             <!-- Fallback textarea for iOS where clipboard API is blocked -->
             <textarea
@@ -1266,14 +1277,14 @@ function peerInitials(nodeId: string): string {
               :value="JSON.stringify(diagnosticsData, null, 2)"
               @focus="($event.target as HTMLTextAreaElement).select()"
             />
-            <p v-if="showDiagFallback" class="mt-1 text-xs text-muted-foreground">Select all text above and copy manually</p>
-            <p v-if="!diagnosticsData" class="mt-3 text-sm text-muted-foreground">No active session</p>
+            <p v-if="showDiagFallback" class="mt-1 text-xs text-muted-foreground">{{ $t('tutoring.diagnostics.selectManual') }}</p>
+            <p v-if="!diagnosticsData" class="mt-3 text-sm text-muted-foreground">{{ $t('tutoring.diagnostics.noSession') }}</p>
             <div class="mt-4 flex gap-2">
               <button
                 class="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
                 @click="handleShowDiagnostics"
               >
-                Refresh
+                {{ $t('tutoring.diagnostics.refresh') }}
               </button>
               <button
                 v-if="diagnosticsData"
@@ -1281,14 +1292,14 @@ function peerInitials(nodeId: string): string {
                 :class="diagnosticsCopied ? 'text-success border-success' : 'text-foreground'"
                 @click="copyDiagnostics"
               >
-                {{ diagnosticsCopied ? 'Copied!' : 'Copy JSON' }}
+                {{ diagnosticsCopied ? $t('common.actions.copied') : $t('tutoring.diagnostics.copyJson') }}
               </button>
               <div class="flex-1" />
               <button
                 class="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
                 @click="showDiagnostics = false"
               >
-                Close
+                {{ $t('common.actions.close') }}
               </button>
             </div>
           </div>

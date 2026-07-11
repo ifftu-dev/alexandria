@@ -31,30 +31,30 @@ const { role } = useAccountStatus()
 
 interface NavItem {
   path: string
-  label: string
+  labelKey: string
   icon: string
 }
 
 const LEARNER_NAV: NavItem[] = [
-  { path: '/home', label: 'Home', icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6' },
-  { path: '/opinions', label: 'Opinions', icon: 'M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z' },
-  { path: '/governance', label: 'Governance', icon: 'M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3' },
-  { path: '/skills', label: 'Skills', icon: 'M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z' },
-  { path: '/goals', label: 'Goals', icon: '' }, // circles drawn separately below
+  { path: '/home', labelKey: 'nav.primary.home', icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6' },
+  { path: '/opinions', labelKey: 'nav.primary.opinions', icon: 'M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z' },
+  { path: '/community', labelKey: 'nav.primary.community', icon: 'M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3' },
+  { path: '/skills', labelKey: 'nav.primary.skills', icon: 'M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z' },
+  { path: '/goals', labelKey: 'nav.primary.goals', icon: '' }, // circles drawn separately below
 ]
 
 const INSTRUCTOR_NAV: NavItem[] = [
-  { path: '/instructor', label: 'Dashboard', icon: 'M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z' },
-  { path: '/instructor/courses', label: 'My Courses', icon: 'M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253' },
-  { path: '/instructor/inbox', label: 'Inbox', icon: 'M2.25 13.5h3.86a2.25 2.25 0 012.012 1.244l.256.512a2.25 2.25 0 002.013 1.244h3.218a2.25 2.25 0 002.013-1.244l.256-.512a2.25 2.25 0 012.013-1.244h3.859m-19.5.338V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18v-4.162c0-.224-.034-.447-.1-.661L19.24 5.338a2.25 2.25 0 00-2.15-1.588H6.911a2.25 2.25 0 00-2.15 1.588L2.35 13.177a2.25 2.25 0 00-.1.661z' },
-  { path: '/skills', label: 'Skills', icon: 'M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z' },
-  { path: '/governance', label: 'Governance', icon: 'M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3' },
+  { path: '/instructor', labelKey: 'nav.primary.dashboard', icon: 'M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z' },
+  { path: '/instructor/courses', labelKey: 'nav.primary.myCourses', icon: 'M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253' },
+  { path: '/instructor/inbox', labelKey: 'nav.primary.inbox', icon: 'M2.25 13.5h3.86a2.25 2.25 0 012.012 1.244l.256.512a2.25 2.25 0 002.013 1.244h3.218a2.25 2.25 0 002.013-1.244l.256-.512a2.25 2.25 0 012.013-1.244h3.859m-19.5.338V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18v-4.162c0-.224-.034-.447-.1-.661L19.24 5.338a2.25 2.25 0 00-2.15-1.588H6.911a2.25 2.25 0 00-2.15 1.588L2.35 13.177a2.25 2.25 0 00-.1.661z' },
+  { path: '/skills', labelKey: 'nav.primary.skills', icon: 'M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z' },
+  { path: '/community', labelKey: 'nav.primary.community', icon: 'M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3' },
 ]
 
 const PARENT_NAV: NavItem[] = [
-  { path: '/guardian', label: 'My Children', icon: 'M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z' },
-  { path: '/opinions', label: 'Opinions', icon: 'M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z' },
-  { path: '/governance', label: 'Governance', icon: 'M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3' },
+  { path: '/guardian', labelKey: 'nav.primary.myChildren', icon: 'M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z' },
+  { path: '/opinions', labelKey: 'nav.primary.opinions', icon: 'M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z' },
+  { path: '/community', labelKey: 'nav.primary.community', icon: 'M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3' },
 ]
 
 const primaryNav = computed<NavItem[]>(() => {
@@ -165,7 +165,7 @@ const classroomPreviews = computed(() =>
           v-for="item in primaryNav"
           :key="item.path"
           :class="['sb-item', { 'sb-item--active': isActive(item.path) }]"
-          :title="collapsed ? item.label : undefined"
+          :title="collapsed ? $t(item.labelKey) : undefined"
           @click="navigate(item.path)"
         >
           <svg v-if="item.icon" class="sb-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
@@ -176,7 +176,7 @@ const classroomPreviews = computed(() =>
             <circle cx="12" cy="12" r="4.5" />
             <circle cx="12" cy="12" r="0.75" fill="currentColor" />
           </svg>
-          <span class="sb-label">{{ item.label }}</span>
+          <span class="sb-label">{{ $t(item.labelKey) }}</span>
           <span
             v-if="item.path === '/instructor/inbox' && inboxCount > 0 && !collapsed"
             class="ml-auto rounded-full bg-error px-1.5 text-[10px] font-bold leading-4 text-white"
@@ -196,18 +196,18 @@ const classroomPreviews = computed(() =>
         <button
           v-if="collapsed"
           :class="['sb-item', { 'sb-item--active': isActive('/tutoring') }]"
-          title="Live Tutoring"
+          :title="$t('nav.sections.liveTutoring')"
           @click="navigate('/tutoring')"
         >
           <svg class="sb-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
             <path stroke-linecap="round" stroke-linejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
           </svg>
-          <div class="sb-tooltip">Live Tutoring</div>
+          <div class="sb-tooltip">{{ $t('nav.sections.liveTutoring') }}</div>
         </button>
 
         <!-- Expanded: section header + chevron -->
         <div v-if="!collapsed" class="sb-section-header">
-          <button class="sb-section-title" @click="navigate('/tutoring')">Live Tutoring</button>
+          <button class="sb-section-title" @click="navigate('/tutoring')">{{ $t('nav.sections.liveTutoring') }}</button>
           <button class="sb-section-chevron" @click.stop="toggleSection('tutoring')">
             <svg :class="['h-3.5 w-3.5 transition-transform duration-200', isSectionOpen('tutoring') ? '' : '-rotate-90']" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
               <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
@@ -236,20 +236,20 @@ const classroomPreviews = computed(() =>
                 <div class="min-w-0 flex-1 sb-preview-title-slot">
                   <TickerText class="sb-preview-title" :text="session.title" />
                 </div>
-                <span v-if="session.status === 'active'" class="sb-status-icon" title="Active"><span class="sb-live-dot" style="background: #22c55e" /></span>
-                <span v-else-if="session.status === 'ended'" class="sb-status-icon sb-status-ended" title="Ended">
+                <span v-if="session.status === 'active'" class="sb-status-icon" :title="$t('nav.status.active')"><span class="sb-live-dot" style="background: #22c55e" /></span>
+                <span v-else-if="session.status === 'ended'" class="sb-status-icon sb-status-ended" :title="$t('nav.status.ended')">
                   <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
                 </span>
-                <span v-else class="sb-status-icon sb-status-ended" title="Cancelled">
+                <span v-else class="sb-status-icon sb-status-ended" :title="$t('nav.status.cancelled')">
                   <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
                 </span>
               </button>
               <button class="sb-view-all" @click="navigate('/tutoring')">
-                View all sessions
+                {{ $t('nav.sections.viewAllSessions') }}
                 <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" /></svg>
               </button>
             </template>
-            <p v-else class="sb-empty-hint">No sessions yet</p>
+            <p v-else class="sb-empty-hint">{{ $t('nav.sections.noSessions') }}</p>
           </div>
         </Transition>
       </div>
@@ -264,18 +264,18 @@ const classroomPreviews = computed(() =>
         <button
           v-if="collapsed"
           :class="['sb-item', { 'sb-item--active': isActive('/classrooms') }]"
-          title="Classrooms"
+          :title="$t('nav.sections.classrooms')"
           @click="navigate('/classrooms')"
         >
           <svg class="sb-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
             <path stroke-linecap="round" stroke-linejoin="round" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z" />
           </svg>
-          <div class="sb-tooltip">Classrooms</div>
+          <div class="sb-tooltip">{{ $t('nav.sections.classrooms') }}</div>
         </button>
 
         <!-- Expanded: section header + chevron -->
         <div v-if="!collapsed" class="sb-section-header">
-          <button class="sb-section-title" @click="navigate('/classrooms')">Classrooms</button>
+          <button class="sb-section-title" @click="navigate('/classrooms')">{{ $t('nav.sections.classrooms') }}</button>
           <button class="sb-section-chevron" @click.stop="toggleSection('classrooms')">
             <svg :class="['h-3.5 w-3.5 transition-transform duration-200', isSectionOpen('classrooms') ? '' : '-rotate-90']" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
               <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
@@ -303,15 +303,15 @@ const classroomPreviews = computed(() =>
                 <div class="sb-avatar sb-avatar--classroom">{{ classroom.initial }}</div>
                 <div class="min-w-0 flex-1 sb-preview-title-slot">
                   <TickerText class="sb-preview-title" :text="classroom.name" />
-                  <span class="sb-preview-meta">{{ classroom.member_count }} members</span>
+                  <span class="sb-preview-meta">{{ $t('nav.sections.memberCount', { count: classroom.member_count ?? 0 }, classroom.member_count ?? 0) }}</span>
                 </div>
               </button>
               <button class="sb-view-all" @click="navigate('/classrooms')">
-                View all classrooms
+                {{ $t('nav.sections.viewAllClassrooms') }}
                 <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" /></svg>
               </button>
             </template>
-            <p v-else class="sb-empty-hint">No classrooms yet</p>
+            <p v-else class="sb-empty-hint">{{ $t('nav.sections.noClassrooms') }}</p>
           </div>
         </Transition>
       </div>
@@ -321,7 +321,7 @@ const classroomPreviews = computed(() =>
     <!-- Skill Graph widget -->
     <!-- Collapsed: icon-only with tooltip -->
     <div v-if="collapsed" class="sb-skill-graph-collapsed">
-      <button class="sb-item" title="Skill Graph" @click="navigate('/skills')">
+      <button class="sb-item" :title="$t('nav.sections.skillGraph')" @click="navigate('/skills')">
         <svg class="sb-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
           <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
         </svg>
@@ -403,7 +403,7 @@ const classroomPreviews = computed(() =>
   line-height: 1;
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
-  text-align: left;
+  text-align: start;
 }
 
 .sb-item:hover {
@@ -457,7 +457,7 @@ const classroomPreviews = computed(() =>
   background: none;
   border: none;
   cursor: pointer;
-  text-align: left;
+  text-align: start;
   padding: 0;
   transition: opacity 0.15s;
 }
@@ -504,7 +504,7 @@ const classroomPreviews = computed(() =>
   transition: background 0.15s;
   text-decoration: none;
   cursor: pointer;
-  text-align: left;
+  text-align: start;
   width: 100%;
   background: transparent;
   border: none;
@@ -629,10 +629,10 @@ const classroomPreviews = computed(() =>
 
 .sb-tooltip {
   position: absolute;
-  left: 100%;
+  inset-inline-start: 100%;
   top: 50%;
   transform: translateY(-50%);
-  margin-left: 0.625rem;
+  margin-inline-start: 0.625rem;
   padding: 0.3rem 0.625rem;
   font-size: 0.75rem;
   font-weight: 500;

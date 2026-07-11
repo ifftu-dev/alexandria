@@ -1,0 +1,52 @@
+{
+  "index": {
+    "title": "主题评论",
+    "subtitle": "来自在各主题拥有凭证的教育者的观点。最新在前，从不排名。",
+    "post": "发布观点",
+    "filterAll": "全部",
+    "emptyTitle": "还没有观点",
+    "emptyFieldDescription": "此主题下还没有观点。",
+    "emptyAllDescription": "在某主题拥有凭证的教育者可以在这里发布观点视频。来做第一个吧。",
+    "opinionCount": "无 | {count} 条观点 | {count} 条观点",
+    "minutes": "{count} 分钟"
+  },
+  "detail": {
+    "notFound": "未找到观点。",
+    "withdraw": "撤回",
+    "withdrawConfirm": "撤回此观点？该视频将从此设备移除，帖子也将被隐藏。",
+    "withdrawFailed": "无法撤回：{error}",
+    "byLabel": "作者",
+    "credentialsHeading": "支撑此观点的凭证",
+    "noCredentials": "未引用任何凭证。",
+    "verifiedProof": "已验证的证明",
+    "unsyncedLabel": "仍在从其他学习者处同步："
+  },
+  "new": {
+    "title": "发布一条观点",
+    "intro": "观点归属于某个主题。要在某主题下发布，你需要在该主题内的某项技能上至少拥有一份达到“应用”级别或更高的凭证。",
+    "noEligibleWarning": "你还没有符合条件的凭证。在任一技能上获得一份达到“应用”级别或更高的凭证，你就能在该技能的主题下发布观点了。",
+    "topicHeading": "主题",
+    "contentHeading": "内容",
+    "titleLabel": "标题",
+    "titlePlaceholder": "例如：为什么函数式优先是 CS1 的错误默认选择",
+    "summaryLabel": "摘要（可选）",
+    "summaryPlaceholder": "为列表视图提供一句话的概述。",
+    "videoLabel": "视频",
+    "readingMb": "正在读取 {mb} MB…",
+    "uploading": "正在上传…",
+    "videoUploadFailed": "视频上传失败：{error}",
+    "uploaded": "已上传",
+    "minutes": "{count} 分钟",
+    "thumbnailLabel": "缩略图（可选）",
+    "thumbnailUploadFailed": "缩略图上传失败：{error}",
+    "uploadedPrefix": "已上传：",
+    "credentialsHeading": "凭证",
+    "credentialsHelp": "选择哪些凭证来支撑这条观点。至少要有一份能让你有资格在此主题下发布——我们已为你预选。你可以在下方添加或移除凭证。",
+    "noQualifying": "你没有适用于此主题的符合条件凭证。请换一个主题。",
+    "verified": "已验证",
+    "credentialMeta": "得分 {score}% · 签发于 {date}",
+    "loadFailed": "无法加载主题：{error}",
+    "publishFailed": "发布失败：{error}",
+    "publish": "发布观点"
+  }
+}

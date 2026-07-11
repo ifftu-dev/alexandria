@@ -1,0 +1,206 @@
+{
+  "dashboard": {
+    "title": "प्रशिक्षक डैशबोर्ड",
+    "subtitle": "आपके कोर्सों में शिक्षार्थी कैसा कर रहे हैं, साथ ही आपकी समीक्षा के लिए क्या प्रतीक्षा में है।",
+    "inbox": "इनबॉक्स",
+    "compose": "+ रचें",
+    "statCourses": "कोर्स और ट्यूटोरियल",
+    "statPublished": "प्रकाशित",
+    "statEnrollments": "नामांकन",
+    "statPendingReviews": "समीक्षा की प्रतीक्षा में",
+    "colCourse": "कोर्स",
+    "colStatus": "स्थिति",
+    "colEnrolled": "नामांकित",
+    "colCompletion": "समापन",
+    "colAvgScore": "औसत स्कोर",
+    "colReviews": "समीक्षाएँ",
+    "colLastActivity": "अंतिम गतिविधि",
+    "emptyTitle": "अभी तक कोई कोर्स नहीं",
+    "emptyDesc": "यहाँ शिक्षार्थी गतिविधि देखने के लिए अपना पहला कोर्स या ट्यूटोरियल बनाएँ।"
+  },
+  "myCourses": {
+    "title": "मेरे कोर्स",
+    "subtitle": "जो कुछ भी आपने इस डिवाइस पर बनाया है — ड्राफ़्ट और प्रकाशित।",
+    "addCourse": "+ कोर्स",
+    "addTutorial": "+ ट्यूटोरियल",
+    "emptyTitle": "अभी तक कुछ नहीं बनाया",
+    "emptyDesc": "कंपोज़र से अपना पहला कोर्स या ट्यूटोरियल बनाएँ।",
+    "updated": "{date} को अपडेट किया गया"
+  },
+  "courseLearners": {
+    "eyebrow": "शिक्षार्थी प्रगति",
+    "fallbackTitle": "कोर्स",
+    "emptyTitle": "इस डिवाइस पर अभी तक कोई साइन-अप नहीं",
+    "emptyDesc": "हर शिक्षार्थी की प्रगति उनके अपने डिवाइस पर रहती है — यह दृश्य वह दिखाता है जो ऐप को यहाँ मिला है (साइन-अप और कक्षा में जमा किए गए कार्य)।",
+    "colLearner": "शिक्षार्थी",
+    "colStatus": "स्थिति",
+    "colProgress": "प्रगति",
+    "colAvgScore": "औसत स्कोर",
+    "colTimeSpent": "बिताया गया समय",
+    "colLastActivity": "अंतिम गतिविधि",
+    "localLearner": "स्थानीय शिक्षार्थी"
+  },
+  "inbox": {
+    "title": "इनबॉक्स",
+    "subtitle": "आपकी समीक्षा की प्रतीक्षा में शिक्षार्थियों के जमा किए गए कार्य, साथ ही लंबित कक्षा शामिल होने के अनुरोध।",
+    "tabAll": "सभी",
+    "tabSubmissions": "जमा किए गए कार्य",
+    "tabJoinRequests": "शामिल होने के अनुरोध",
+    "emptyTitle": "सब कुछ निपट गया",
+    "emptyDesc": "आपकी समीक्षा के लिए कुछ भी प्रतीक्षा में नहीं है।"
+  },
+  "submissionReview": {
+    "eyebrow": "जमा कार्य समीक्षा",
+    "title": "जमा कार्य की समीक्षा करें",
+    "notFoundTitle": "जमा कार्य नहीं मिला",
+    "notFoundDesc": "इसकी समीक्षा पहले ही हो चुकी होगी या इसे हटा दिया गया होगा।",
+    "from": "से",
+    "submittedWork": "जमा किया गया कार्य",
+    "yourReview": "आपकी समीक्षा",
+    "scoreLabel": "स्कोर — {percent}%",
+    "perSkillRatings": "प्रति-कौशल रेटिंग",
+    "feedback": "प्रतिक्रिया",
+    "feedbackPlaceholder": "क्या मज़बूत था, क्या सुधारना है…",
+    "postReview": "समीक्षा पोस्ट करें",
+    "reviewed": "समीक्षित",
+    "finalScore": "स्कोर:"
+  },
+  "compose": {
+    "newCourse": "नया कोर्स",
+    "newTutorial": "नया ट्यूटोरियल",
+    "courseIntro": "एक कोर्स अध्यायों में व्यवस्थित होता है, जिनमें से प्रत्येक में वीडियो, पाठ, क्विज़, मूल्यांकन और अभ्यास होते हैं।",
+    "tutorialIntro": "एक ट्यूटोरियल एक छोटा एकल-ट्रैक पाठ होता है — आमतौर पर मार्कर वाला एक वीडियो और एक वैकल्पिक क्विज़।",
+    "titleLabel": "शीर्षक",
+    "titlePlaceholder": "उदा., व्यावहारिक क्रिप्टोग्राफी",
+    "descriptionLabel": "विवरण",
+    "descriptionPlaceholder": "एक-पैराग्राफ प्रस्तुति।",
+    "tagsLabel": "टैग (अल्पविराम से अलग)",
+    "tagsPlaceholder": "उदा., सुरक्षा, शुरुआती",
+    "createDraft": "ड्राफ़्ट बनाएँ",
+    "needTitle": "पहले इसे एक शीर्षक दें।",
+    "editMeta": "शीर्षक और विवरण संपादित करें",
+    "publish": "प्रकाशित करें",
+    "beforePublish": "प्रकाशित करने से पहले",
+    "blockerNeedElement": "कम से कम एक तत्व जोड़ें।",
+    "blockerUnboundPlugins": "कोई नहीं | {count} प्लगइन तत्व को अभी भी एक प्लगइन चुनना है | {count} प्लगइन तत्वों को अभी भी एक प्लगइन चुनना है",
+    "publishedTitle": "आपका कोर्स लाइव है",
+    "publishedNote": "शिक्षार्थी अब इसे खोज और नामांकन कर सकते हैं।",
+    "fingerprintLabel": "सामग्री फ़िंगरप्रिंट",
+    "sizeBytes": "कोई नहीं | {count} बाइट | {count} बाइट",
+    "nothingSelectedTitle": "कुछ चयनित नहीं",
+    "nothingSelectedDesc": "रूपरेखा से एक तत्व चुनें, या बनाना शुरू करने के लिए एक जोड़ें।",
+    "confirmPublishTitle": "प्रकाशित करें",
+    "confirmPublishMessage": "यह '{title}' को प्रकाशित करता है ताकि शिक्षार्थी तुरंत इसे खोज और नामांकन कर सकें। यह आपके द्वारा हस्ताक्षरित है और सीधे आपके कनेक्शनों के साथ साझा किया जाता है।",
+    "confirmDeleteTitle": "हटाएँ",
+    "confirmDeleteMessage": "यह ड्राफ़्ट और इसके सभी अध्यायों और तत्वों को स्थायी रूप से हटा देता है। इसे पूर्ववत नहीं किया जा सकता।",
+    "editDetails": "विवरण संपादित करें",
+    "notFoundTitle": "नहीं मिला",
+    "notFoundDesc": "यह कोर्स या ट्यूटोरियल इस डिवाइस पर मौजूद नहीं है।"
+  },
+  "outline": {
+    "elementTitlePlaceholder": "तत्व शीर्षक",
+    "chapterTitlePlaceholder": "अध्याय शीर्षक",
+    "add": "जोड़ें",
+    "addChapter": "अध्याय जोड़ें",
+    "addElement": "+ तत्व जोड़ें",
+    "addChapterCta": "+ अध्याय जोड़ें"
+  },
+  "elementTypes": {
+    "video": "वीडियो",
+    "text": "टेक्स्ट",
+    "pdf": "PDF",
+    "downloadable": "डाउनलोड",
+    "quiz": "क्विज़",
+    "objectiveSingleMcq": "एकल MCQ",
+    "objectiveMultiMcq": "बहु MCQ",
+    "subjectiveMcq": "व्यक्तिपरक MCQ",
+    "essay": "निबंध",
+    "interactive": "इंटरैक्टिव",
+    "assessment": "मूल्यांकन",
+    "plugin": "प्लगइन"
+  },
+  "elementEditor": {
+    "deleteElement": "तत्व हटाएँ",
+    "titlePlaceholder": "तत्व शीर्षक",
+    "confirmDeleteTitle": "तत्व हटाएँ",
+    "confirmDeleteMessage": "यह तत्व और इसकी सामग्री को कोर्स से हटा देता है। इसे पूर्ववत नहीं किया जा सकता।"
+  },
+  "skillPicker": {
+    "searchPlaceholder": "कौशल खोजें…",
+    "removeSkill": "{name} निकालें",
+    "addSkill": "कौशल"
+  },
+  "editors": {
+    "shared": {
+      "uploaded": "अपलोड हो गया"
+    },
+    "video": {
+      "fileHeading": "वीडियो फ़ाइल",
+      "minutes": "{count} मिनट",
+      "reading": "{size} MB पढ़ रहा है…",
+      "saving": "इस डिवाइस पर सहेजा जा रहा है…",
+      "uploadFailed": "अपलोड विफल: {error}",
+      "markersHeading": "अध्याय मार्कर",
+      "addMarker": "+ मार्कर",
+      "saveMarkers": "मार्कर सहेजें",
+      "markersHint": "टाइमस्टैम्प वीडियो के नीचे क्लिक करने योग्य नेविगेशन बन जाते हैं।",
+      "markerTitlePlaceholder": "मार्कर शीर्षक",
+      "startSeconds": "आरंभ (सेकंड)"
+    },
+    "file": {
+      "pdfHeading": "PDF दस्तावेज़",
+      "downloadHeading": "डाउनलोड करने योग्य फ़ाइल",
+      "uploading": "अपलोड हो रहा है…",
+      "uploadFailed": "अपलोड विफल: {error}"
+    },
+    "quiz": {
+      "questionsHeading": "प्रश्न",
+      "multiHint": "कई सही उत्तर",
+      "singleHint": "एक सही उत्तर",
+      "addQuestion": "+ प्रश्न",
+      "saveQuiz": "क्विज़ सहेजें",
+      "empty": "अभी तक कोई प्रश्न नहीं — पहला जोड़ें।",
+      "questionPlaceholder": "प्रश्न संकेत",
+      "removeQuestion": "प्रश्न निकालें",
+      "optionPlaceholder": "विकल्प {number}",
+      "correctAnswer": "सही उत्तर",
+      "markCorrect": "सही के रूप में चिह्नित करें",
+      "removeOption": "विकल्प निकालें",
+      "addOption": "+ विकल्प जोड़ें",
+      "errNeedQuestion": "कम से कम एक प्रश्न जोड़ें।",
+      "errNoPrompt": "प्रश्न {number} में कोई संकेत नहीं है।",
+      "errTooFewOptions": "प्रश्न {number} में कम से कम दो विकल्प चाहिए।",
+      "errNoCorrect": "प्रश्न {number} में कोई सही उत्तर चिह्नित नहीं है।"
+    },
+    "text": {
+      "heading": "पाठ का मुख्य भाग (Markdown)",
+      "placeholder": "# पाठ शीर्षक\n\nपाठ को Markdown में लिखें…"
+    },
+    "essay": {
+      "heading": "निबंध असाइनमेंट",
+      "promptLabel": "संकेत",
+      "promptPlaceholder": "शिक्षार्थी को किस बारे में लिखना चाहिए?",
+      "rubricLabel": "ग्रेडिंग मानदंड (समीक्षा करते समय आपको और शुरू में शिक्षार्थी को दिखाया जाता है)",
+      "rubricPlaceholder": "उदा., थीसिस स्पष्टता (30%), साक्ष्य (40%), संरचना (30%)",
+      "minWordsLabel": "न्यूनतम शब्द (वैकल्पिक)",
+      "hint": "निबंध जमा किए गए कार्य मैन्युअल समीक्षा और स्कोरिंग के लिए आपके प्रशिक्षक इनबॉक्स में आते हैं।",
+      "errNeedPrompt": "निबंध के लिए एक संकेत चाहिए।"
+    },
+    "json": {
+      "assessmentHeading": "मूल्यांकन परिभाषा (JSON)",
+      "interactiveHeading": "इंटरैक्टिव सामग्री (JSON)",
+      "invalidJson": "अमान्य JSON।",
+      "errFixJson": "सहेजने से पहले JSON ठीक करें।"
+    },
+    "plugin": {
+      "heading": "प्लगइन बाइंडिंग",
+      "installedLabel": "इंस्टॉल किया गया प्लगइन",
+      "pickOption": "एक प्लगइन चुनें…",
+      "noneInstalled": "कोई सक्षम प्लगइन इंस्टॉल नहीं — सेटिंग्स → प्लगइन के अंतर्गत एक जोड़ें।",
+      "configLabel": "तत्व कॉन्फ़िग (init पर प्लगइन को पास किया गया JSON — उदा. एक codejudge समस्या परिभाषा)",
+      "invalidJson": "अमान्य JSON।",
+      "errPickFirst": "पहले एक प्लगइन चुनें।",
+      "errFixConfig": "सहेजने से पहले कॉन्फ़िग JSON ठीक करें।"
+    }
+  }
+}

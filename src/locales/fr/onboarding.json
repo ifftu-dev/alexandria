@@ -1,0 +1,188 @@
+{
+  "motif": {
+    "ubuntu": "Je suis, parce que nous sommes tous"
+  },
+  "wizard": {
+    "welcome": "Bienvenue",
+    "role": "Votre rôle",
+    "birthdate": "Date de naissance",
+    "password": "Définir le mot de passe",
+    "createAccount": "Créer un compte",
+    "recoveryPhrase": "Phrase de récupération",
+    "restoreAccount": "Restaurer le compte",
+    "goals": "Vos objectifs",
+    "skills": "Vos compétences",
+    "linkChild": "Lier votre enfant",
+    "complete": "Terminé"
+  },
+  "aside": {
+    "title": "Bienvenue sur Alexandria",
+    "subtitle": "Configurez votre compte d'apprentissage en quelques étapes guidées."
+  },
+  "roles": {
+    "learnerTitle": "Apprenant",
+    "learnerDesc": "Suivez des cours, obtenez des justificatifs et développez vos compétences.",
+    "instructorTitle": "Instructeur",
+    "instructorDesc": "Créez des cours et des tutoriels, relisez les soumissions et accompagnez les apprenants. Vous pouvez basculer en mode apprenant à tout moment.",
+    "parentTitle": "Parent / Tuteur",
+    "parentDesc": "Supervisez l'apprentissage de votre enfant : liez son compte et suivez sa progression depuis votre propre appareil."
+  },
+  "welcome": {
+    "tagline": "Apprentissage gratuit et décentralisé. Vos justificatifs. Votre identité. Votre contrôle.",
+    "whatHappens": "Ce qui se passe ensuite",
+    "step1": "Vous définissez un mot de passe pour protéger votre compte sur cet appareil.",
+    "step2": "Nous créons votre compte — votre identité, qui n'appartient qu'à vous.",
+    "step3": "Vous recevez une phrase de récupération — votre sauvegarde secrète. Notez-la et conservez-la en lieu sûr.",
+    "step4": "Commencez à apprendre, obtenez des justificatifs, soyez maître de votre éducation.",
+    "createAccount": "Créer un compte",
+    "restoreAccount": "Restaurer mon compte",
+    "signIn": "Se connecter à un compte existant"
+  },
+  "role": {
+    "heading": "Comment utiliserez-vous Alexandria ?",
+    "subtitle": "Cela façonne votre écran d'accueil et vos outils. Les instructeurs peuvent basculer en mode apprenant à tout moment."
+  },
+  "birthdate": {
+    "heading": "Quand êtes-vous né ?",
+    "subtitle": "Votre date de naissance reste sur cet appareil — elle n'est jamais partagée.",
+    "label": "Date de naissance",
+    "ageStatement": "Vous avez {age} ans.",
+    "minorNotice": "Comme vous avez moins de 18 ans, un parent ou tuteur doit activer votre compte avant que vous puissiez commencer à apprendre. Vous recevrez un code d'invitation pour lui à la fin de la configuration."
+  },
+  "password": {
+    "titleCreate": "Définissez votre mot de passe",
+    "titleImport": "Restaurez votre compte",
+    "subtitleCreate": "Ce mot de passe protège votre compte sur cet appareil.",
+    "subtitleImport": "Saisissez votre phrase de récupération et définissez un mot de passe pour cet appareil.",
+    "recoveryLabel": "Phrase de récupération",
+    "recoveryHint": "Votre sauvegarde secrète pour restaurer votre compte.",
+    "recoveryPlaceholder": "Saisissez votre phrase de récupération de 24 mots, séparés par des espaces",
+    "wordsEntered": "aucun mot saisi pour l'instant | {count} mot saisi | {count} mots saisis",
+    "wordsRule": "Les phrases de récupération doivent contenir 12, 15 ou 24 mots.",
+    "usernameLabel": "Nom d'utilisateur",
+    "usernamePlaceholder": "votre_identifiant",
+    "usernameHint": "3–32 caractères · lettres minuscules, chiffres, tirets bas. Comment les autres vous trouvent.",
+    "checking": "Vérification de la disponibilité…",
+    "usernameAvailable": "✓ {'@'}{handle} est disponible",
+    "usernameTaken": "✕ {'@'}{handle} est déjà pris",
+    "usernameUnknown": "⚠ Impossible de vérifier la disponibilité pour l'instant — vous pouvez continuer, mais le nom pourrait être pris au moment où vous vous connecterez.",
+    "displayNameLabel": "Nom d'affichage",
+    "displayNamePlaceholder": "Votre nom tel que les autres le voient",
+    "displayNameHint": "Par défaut, il correspond à votre nom d'utilisateur — modifiable à tout moment.",
+    "passwordLabel": "Mot de passe",
+    "passwordPlaceholder": "Au moins 12 caractères",
+    "passwordCounter": "{count}/12 caractères minimum",
+    "confirmLabel": "Confirmer le mot de passe",
+    "confirmPlaceholder": "Saisissez à nouveau le mot de passe",
+    "passwordsMismatch": "Les mots de passe ne correspondent pas.",
+    "passwordsMatch": "Les mots de passe correspondent.",
+    "noRecoveryWarning": "Il n'existe aucune récupération de mot de passe. Si vous oubliez ce mot de passe, il vous faudra votre phrase de récupération pour restaurer l'accès.",
+    "biometricLabel": "Activer le déverrouillage biométrique sur cet appareil",
+    "biometricHint": "Utilisez Touch ID / Face ID après la configuration. Vous pourrez modifier cela plus tard dans les Paramètres.",
+    "errorHeading": "Vérifiez ces détails",
+    "submitCreate": "Créer un compte",
+    "submitImport": "Restaurer mon compte"
+  },
+  "generating": {
+    "titleCreate": "Création de votre compte",
+    "titleImport": "Restauration de votre compte",
+    "subtitle": "Cela prend un instant pendant que nous configurons tout en toute sécurité.",
+    "initializing": "Initialisation..."
+  },
+  "backup": {
+    "heading": "Votre phrase de récupération",
+    "subtitle": "Ceci est votre sauvegarde secrète. Notez ces 24 mots sur papier et conservez-les en lieu sûr. C'est le SEUL moyen de restaurer votre compte si vous oubliez votre mot de passe.",
+    "copy": "Copier la phrase de récupération",
+    "copied": "Copié dans le presse-papiers",
+    "warning": "Ne partagez jamais votre phrase de récupération. Toute personne disposant de ces mots peut accéder à vos justificatifs.",
+    "confirm": "Je l'ai notée"
+  },
+  "goals": {
+    "heading": "Vers quoi travaillez-vous ?",
+    "subtitle": "Choisissez un examen, un programme ou un poste — nous le relierons à un graphe de compétences et tracerons votre parcours. Vous pouvez modifier ou ajouter des objectifs à tout moment.",
+    "skip": "Passer pour l'instant",
+    "continue": "Continuer | Continuer avec {count} objectif | Continuer avec {count} objectifs"
+  },
+  "bootstrap": {
+    "heading": "Que savez-vous déjà ?",
+    "subtitle": "Téléversez un CV ou un relevé de notes et nous le relierons à des compétences que vous pouvez revendiquer. Les justificatifs d'établissements accrédités comptent plus qu'un CV réalisé soi-même. Vous pourrez vérifier n'importe quelle compétence avec une évaluation plus tard.",
+    "skip": "Passer pour l'instant",
+    "continue": "Continuer | Continuer avec {count} compétence | Continuer avec {count} compétences"
+  },
+  "linkChild": {
+    "heading": "Liez votre enfant",
+    "subtitle": "L'écran d'activation de votre enfant affiche un code d'invitation. Collez-le ici pour activer son compte et suivre son apprentissage depuis ce compte.",
+    "label": "Code d'invitation",
+    "placeholder": "Collez le code d'invitation depuis l'appareil de votre enfant",
+    "hint": "Les deux appareils doivent être en ligne pour finaliser le lien.",
+    "linking": "Liaison…",
+    "submit": "Lier l'enfant",
+    "skip": "Passer pour l'instant — je l'ajouterai depuis mon tableau de bord",
+    "childFallback": "votre enfant"
+  },
+  "done": {
+    "heading": "Vous êtes prêt",
+    "bodyCreate": "Votre compte a été créé et chiffré.",
+    "bodyImport": "Votre compte a été restauré et chiffré.",
+    "dataNote": "Toutes vos données restent sur cet appareil, protégées par votre mot de passe.",
+    "minorNotice": "Encore une étape : votre compte a besoin d'un parent ou tuteur. Ensuite, vous recevrez un code d'invitation à partager avec lui — votre compte s'active dès qu'il l'accepte depuis son propre appareil.",
+    "linkedWith": "Lié avec {name} — son compte est maintenant actif.",
+    "enterGuardian": "Inviter mon tuteur",
+    "enterParent": "Ouvrir mon tableau de bord",
+    "enterLearner": "Commencer à apprendre"
+  },
+  "errors": {
+    "passwordTooShortDetail": "Votre mot de passe doit comporter au moins 12 caractères. Ajoutez-en quelques-uns, puis réessayez.",
+    "phraseLengthUnsupported": "Cette longueur de phrase de récupération n'est pas prise en charge. Utilisez une phrase de 12, 15 ou 24 mots, puis réessayez.",
+    "phraseInvalid": "Cette phrase de récupération ne semble pas valide. Vérifiez l'ordre des mots et l'orthographe, puis réessayez.",
+    "createFailed": "Nous n'avons pas encore pu créer votre compte. {error}",
+    "restoreFailed": "Nous n'avons pas encore pu restaurer votre compte. {error}",
+    "birthdateInvalid": "Saisissez une date de naissance valide — elle ne peut pas être dans le futur ni remonter à plus de 120 ans.",
+    "usernameInvalid": "Choisissez un nom d'utilisateur : 3–32 caractères, lettres minuscules, chiffres et tirets bas uniquement.",
+    "usernameTaken": "Ce nom d'utilisateur est déjà pris — choisissez-en un autre.",
+    "displayNameRequired": "Choisissez un nom d'affichage pour continuer.",
+    "passwordTooShort": "Votre mot de passe est trop court. Utilisez au moins 12 caractères, puis réessayez.",
+    "passwordsDoNotMatch": "Le mot de passe de confirmation ne correspond pas encore. Saisissez le même mot de passe dans les deux champs pour continuer.",
+    "phraseRequired": "Saisissez votre phrase de récupération pour continuer. Alexandria accepte les phrases de 12, 15 ou 24 mots."
+  },
+  "biometric": {
+    "enabledSecure": "Déverrouillage biométrique activé sur cet appareil.",
+    "enabledSession": "Déverrouillage biométrique activé pour cette session de l'application (limitation du trousseau de l'environnement de développement).",
+    "skipped": "Configuration du déverrouillage biométrique ignorée. Vous pouvez toujours déverrouiller avec un mot de passe."
+  },
+  "profileSelect": {
+    "heading": "Qui apprend aujourd'hui ?",
+    "subtitle": "Choisissez un profil pour continuer, ou ajoutez-en un nouveau.",
+    "enterPassword": "Saisissez le mot de passe pour continuer",
+    "passwordPlaceholder": "Votre mot de passe",
+    "unlock": "Déverrouiller",
+    "unlockBiometric": "Déverrouiller avec la biométrie",
+    "stageDecrypting": "Déverrouillage de votre compte…",
+    "stageLoadingProfile": "Chargement de votre profil…",
+    "stageOpeningData": "Préparation de vos données…",
+    "stageStartingApp": "Démarrage de l'application…",
+    "stageAlmostThere": "Presque terminé — cela prend un peu plus de temps que d'habitude…",
+    "welcomeBack": "Bon retour — direction l'accueil…",
+    "biometricNotSetup": "Le déverrouillage biométrique n'est pas encore configuré. Déverrouillez une fois avec votre mot de passe pour l'activer.",
+    "biometricUnavailable": "Le déverrouillage biométrique est indisponible dans cette version (droit -34018). Utilisez une version signée.",
+    "biometricFailed": "Échec du déverrouillage biométrique : {error}",
+    "biometricMismatch": "Le mot de passe biométrique ne correspondait pas à ce profil. Saisissez votre mot de passe."
+  },
+  "guardianGate": {
+    "heading": "Un tuteur doit activer votre compte",
+    "subtitle": "Comme vous avez moins de 18 ans, un parent ou tuteur doit approuver votre compte depuis son propre appareil avant que vous puissiez commencer à apprendre. Tout ce que vous faites sur Alexandria lui sera visible.",
+    "howHeading": "Comment ça marche",
+    "how1": "Partagez le code d'invitation ci-dessous avec votre parent ou tuteur.",
+    "how2": "Il installe Alexandria, crée un profil Parent et saisit votre code.",
+    "how3": "Dès qu'il l'accepte (les deux appareils en ligne), votre compte se déverrouille automatiquement.",
+    "codeHeading": "Votre code d'invitation de tuteur",
+    "generating": "Génération…",
+    "newCode": "Nouveau code",
+    "codeHint": "Valable 7 jours, à usage unique. Traitez-le comme un mot de passe — quiconque le détient peut devenir votre tuteur.",
+    "copyCode": "Copier le code d'invitation",
+    "copied": "Copié dans le presse-papiers",
+    "checking": "Vérification…",
+    "checkActivation": "Vérifier l'activation",
+    "backToProfiles": "Retour aux profils"
+  }
+}

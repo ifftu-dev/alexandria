@@ -7,6 +7,7 @@
 // `publish_course` pipeline.
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { AppButton, AppInput, AppTextarea, ConfirmDialog, EmptyState, StatusBadge } from '@/components/ui'
 import OutlinePanel from '@/components/composer/OutlinePanel.vue'
@@ -23,6 +24,7 @@ import type {
 const { invoke } = useLocalApi()
 const route = useRoute()
 const router = useRouter()
+const { t } = useI18n()
 
 const isNew = computed(() => route.params.id === undefined)
 const kind = computed<'course' | 'tutorial'>(() => {
@@ -45,7 +47,7 @@ const creating = ref(false)
 
 async function createDraft() {
   if (!newTitle.value.trim()) {
-    error.value = 'Give it a title first.'
+    error.value = t('instructor.compose.needTitle')
     return
   }
   creating.value = true
@@ -171,12 +173,12 @@ const totalElements = computed(() =>
 
 const publishBlockers = computed<string[]>(() => {
   const blockers: string[] = []
-  if (!totalElements.value) blockers.push('Add at least one element.')
+  if (!totalElements.value) blockers.push(t('instructor.compose.blockerNeedElement'))
   const unbound = Object.values(elements.value)
     .flat()
     .filter(e => e.element_type === 'plugin' && !e.plugin_cid)
   if (unbound.length) {
-    blockers.push(`${unbound.length} plugin element(s) have no plugin bound.`)
+    blockers.push(t('instructor.compose.blockerUnboundPlugins', { count: unbound.length }, unbound.length))
   }
   return blockers
 })
@@ -218,23 +220,23 @@ async function deleteCourse() {
   <div v-if="isNew && !course" class="max-w-2xl">
     <div class="mb-8">
       <h1 class="text-3xl font-bold text-foreground">
-        New {{ kind === 'tutorial' ? 'Tutorial' : 'Course' }}
+        {{ kind === 'tutorial' ? $t('instructor.compose.newTutorial') : $t('instructor.compose.newCourse') }}
       </h1>
       <p class="mt-2 text-muted-foreground">
         {{ kind === 'tutorial'
-          ? 'A tutorial is a lightweight single-track lesson — typically one video with markers and an optional quiz.'
-          : 'A course is structured into chapters, each holding videos, lessons, quizzes, assessments, and plugin exercises.' }}
+          ? $t('instructor.compose.tutorialIntro')
+          : $t('instructor.compose.courseIntro') }}
       </p>
     </div>
 
     <div class="rounded-xl border border-border bg-card p-6 space-y-5">
-      <AppInput v-model="newTitle" label="Title" placeholder="e.g., Practical Cryptography" />
-      <AppTextarea v-model="newDescription" label="Description" :rows="3" placeholder="One-paragraph pitch." />
-      <AppInput v-model="newTagsCsv" label="Tags (comma-separated)" placeholder="e.g., security, beginner" />
+      <AppInput v-model="newTitle" :label="$t('instructor.compose.titleLabel')" :placeholder="$t('instructor.compose.titlePlaceholder')" />
+      <AppTextarea v-model="newDescription" :label="$t('instructor.compose.descriptionLabel')" :rows="3" :placeholder="$t('instructor.compose.descriptionPlaceholder')" />
+      <AppInput v-model="newTagsCsv" :label="$t('instructor.compose.tagsLabel')" :placeholder="$t('instructor.compose.tagsPlaceholder')" />
       <p v-if="error" class="text-sm text-error">{{ error }}</p>
       <div class="flex gap-3">
-        <AppButton :loading="creating" @click="createDraft">Create draft</AppButton>
-        <AppButton variant="ghost" @click="router.back()">Cancel</AppButton>
+        <AppButton :loading="creating" @click="createDraft">{{ $t('instructor.compose.createDraft') }}</AppButton>
+        <AppButton variant="ghost" @click="router.back()">{{ $t('common.actions.cancel') }}</AppButton>
       </div>
     </div>
   </div>
@@ -262,7 +264,7 @@ async function deleteCourse() {
         </div>
         <button
           class="group flex items-center gap-2 text-left"
-          title="Edit title & description"
+          :title="$t('instructor.compose.editMeta')"
           @click="openMetaEditor"
         >
           <h1 class="text-2xl font-bold text-foreground truncate">{{ course.title }}</h1>
@@ -282,24 +284,30 @@ async function deleteCourse() {
           :title="publishBlockers.join(' ')"
           @click="showPublishConfirm = true"
         >
-          Publish
+          {{ $t('instructor.compose.publish') }}
         </AppButton>
-        <AppButton variant="danger" size="sm" @click="showDeleteConfirm = true">Delete</AppButton>
+        <AppButton variant="danger" size="sm" @click="showDeleteConfirm = true">{{ $t('common.actions.delete') }}</AppButton>
       </div>
     </div>
 
     <!-- Publish blockers / result -->
     <div v-if="course.status === 'draft' && publishBlockers.length" class="rounded-lg border border-warning/30 bg-warning/5 px-4 py-3">
-      <p class="text-xs font-semibold uppercase tracking-wide text-warning mb-1">Before you publish</p>
+      <p class="text-xs font-semibold uppercase tracking-wide text-warning mb-1">{{ $t('instructor.compose.beforePublish') }}</p>
       <ul class="text-sm text-warning list-disc pl-4">
         <li v-for="b in publishBlockers" :key="b">{{ b }}</li>
       </ul>
     </div>
     <div v-if="publishResult" class="rounded-lg border border-success/20 bg-success/10 px-4 py-3">
-      <p class="text-sm font-medium text-success">Published!</p>
-      <p class="text-xs text-muted-foreground">
-        Hash: <code class="font-mono">{{ publishResult.content_hash }}</code> ({{ publishResult.size }} bytes)
-      </p>
+      <p class="text-sm font-medium text-success">{{ $t('instructor.compose.publishedTitle') }}</p>
+      <p class="text-xs text-muted-foreground">{{ $t('instructor.compose.publishedNote') }}</p>
+      <details class="mt-1">
+        <summary class="cursor-pointer text-xs text-muted-foreground">{{ $t('common.advanced.toggle') }}</summary>
+        <p class="mt-1 text-xs text-muted-foreground">
+          {{ $t('instructor.compose.fingerprintLabel') }}:
+          <code class="font-mono">{{ publishResult.content_hash }}</code>
+          ({{ $t('instructor.compose.sizeBytes', { count: publishResult.size }, publishResult.size) }})
+        </p>
+      </details>
     </div>
     <p v-if="error" class="text-sm text-error">{{ error }}</p>
 
@@ -324,8 +332,8 @@ async function deleteCourse() {
         />
         <EmptyState
           v-else
-          title="Nothing selected"
-          description="Pick an element from the outline, or add one to start composing."
+          :title="$t('instructor.compose.nothingSelectedTitle')"
+          :description="$t('instructor.compose.nothingSelectedDesc')"
         />
       </div>
     </div>
@@ -333,18 +341,18 @@ async function deleteCourse() {
     <!-- Dialogs -->
     <ConfirmDialog
       :open="showPublishConfirm"
-      title="Publish"
-      :message="`This signs and publishes '${course.title}' to the network. Learners will be able to enroll immediately.`"
-      confirm-label="Publish"
+      :title="$t('instructor.compose.confirmPublishTitle')"
+      :message="$t('instructor.compose.confirmPublishMessage', { title: course.title })"
+      :confirm-label="$t('instructor.compose.publish')"
       :loading="publishing"
       @confirm="publish"
       @cancel="showPublishConfirm = false"
     />
     <ConfirmDialog
       :open="showDeleteConfirm"
-      title="Delete"
-      message="This permanently deletes the draft and all its chapters and elements. This cannot be undone."
-      confirm-label="Delete"
+      :title="$t('instructor.compose.confirmDeleteTitle')"
+      :message="$t('instructor.compose.confirmDeleteMessage')"
+      :confirm-label="$t('common.actions.delete')"
       confirm-variant="danger"
       :loading="deleting"
       @confirm="deleteCourse"
@@ -355,12 +363,12 @@ async function deleteCourse() {
     <Teleport to="body">
       <div v-if="editingMeta" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" @click.self="editingMeta = false">
         <div class="w-full max-w-lg rounded-xl border border-border bg-card p-6 space-y-4">
-          <h2 class="text-lg font-semibold text-foreground">Edit details</h2>
-          <AppInput v-model="metaTitle" label="Title" />
-          <AppTextarea v-model="metaDescription" label="Description" :rows="4" />
+          <h2 class="text-lg font-semibold text-foreground">{{ $t('instructor.compose.editDetails') }}</h2>
+          <AppInput v-model="metaTitle" :label="$t('instructor.compose.titleLabel')" />
+          <AppTextarea v-model="metaDescription" :label="$t('instructor.compose.descriptionLabel')" :rows="4" />
           <div class="flex justify-end gap-2">
-            <AppButton variant="ghost" @click="editingMeta = false">Cancel</AppButton>
-            <AppButton :loading="savingMeta" @click="saveMeta">Save</AppButton>
+            <AppButton variant="ghost" @click="editingMeta = false">{{ $t('common.actions.cancel') }}</AppButton>
+            <AppButton :loading="savingMeta" @click="saveMeta">{{ $t('common.actions.save') }}</AppButton>
           </div>
         </div>
       </div>
@@ -370,7 +378,7 @@ async function deleteCourse() {
   <!-- ── Not found ─────────────────────────────────────────────── -->
   <EmptyState
     v-else
-    title="Not found"
-    description="This course or tutorial does not exist on this device."
+    :title="$t('instructor.compose.notFoundTitle')"
+    :description="$t('instructor.compose.notFoundDesc')"
   />
 </template>

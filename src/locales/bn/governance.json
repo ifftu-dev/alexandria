@@ -1,0 +1,134 @@
+{
+  "index": {
+    "title": "কমিউনিটি",
+    "subtitle": "কোন দক্ষতাগুলো স্বীকৃতি পাবে তা নির্ধারণকারী কমিউনিটি গোষ্ঠী",
+    "stats": {
+      "totalGroups": "কমিউনিটি গোষ্ঠী",
+      "active": "সক্রিয়",
+      "councilSeats": "কাউন্সিল আসন"
+    },
+    "searchPlaceholder": "কমিউনিটি খুঁজুন…",
+    "empty": {
+      "noMatchTitle": "আপনার অনুসন্ধানের সাথে কোনো কমিউনিটি মেলেনি",
+      "noMatchHint": "অন্য একটি অনুসন্ধান শব্দ চেষ্টা করুন।",
+      "noneTitle": "এখনও কোনো কমিউনিটি নেই",
+      "noneHint": "নতুন বিষয় যোগ হওয়ার সাথে সাথে কমিউনিটি গোষ্ঠী স্বয়ংক্রিয়ভাবে দেখা যায়।"
+    },
+    "scope": {
+      "topicAreaShort": "TA",
+      "topicShort": "TO",
+      "topicArea": "বিষয় ক্ষেত্র",
+      "topic": "বিষয়"
+    },
+    "seats": "কেউ নেই | {count}টি আসন | {count}টি আসন"
+  },
+  "detail": {
+    "breadcrumb": "কমিউনিটি",
+    "notFound": "কমিউনিটি গোষ্ঠী পাওয়া যায়নি",
+    "tabs": {
+      "overview": "সারসংক্ষেপ",
+      "elections": "নির্বাচন",
+      "proposals": "প্রস্তাব"
+    },
+    "stats": {
+      "members": "কেউ নেই | {count} জন সদস্য | {count} জন সদস্য",
+      "council": "{filled}/{total} কাউন্সিল",
+      "elections": "কোনোটি নেই | {count}টি নির্বাচন | {count}টি নির্বাচন",
+      "proposals": "কোনোটি নেই | {count}টি প্রস্তাব | {count}টি প্রস্তাব"
+    },
+    "details": {
+      "heading": "বিস্তারিত",
+      "scope": "বিষয়ের ধরন",
+      "councilSize": "কাউন্সিলের আকার",
+      "electionInterval": "নির্বাচনের ব্যবধান",
+      "intervalDays": "{count} দিন",
+      "created": "তৈরি হয়েছে",
+      "topicId": "বিষয় আইডি",
+      "publicRecord": "সর্বজনীন রেকর্ড"
+    },
+    "council": {
+      "heading": "কাউন্সিল",
+      "seats": "{filled} / {total} আসন",
+      "emptyTitle": "কোনো কাউন্সিল সদস্য নেই",
+      "emptyDescription": "কাউন্সিল পূরণ করতে একটি নির্বাচন পরিচালনা করুন।",
+      "badge": "কাউন্সিল"
+    },
+    "members": {
+      "heading": "সদস্যবৃন্দ ({count})"
+    },
+    "elections": {
+      "heading": "নির্বাচন",
+      "open": "+ নির্বাচন শুরু করুন",
+      "emptyTitle": "কোনো নির্বাচন নেই",
+      "emptyDescription": "কাউন্সিল সদস্য নির্বাচন করতে একটি নির্বাচন শুরু করুন।",
+      "seats": "কেউ নেই | {count}টি আসন | {count}টি আসন",
+      "actions": {
+        "nominateSelf": "নিজেকে মনোনীত করুন",
+        "startVoting": "ভোট শুরু করুন",
+        "close": "নির্বাচন বন্ধ করুন",
+        "seatCouncil": "কাউন্সিল বসান",
+        "accept": "গ্রহণ করুন",
+        "vote": "ভোট দিন"
+      },
+      "nominees": "মনোনীত প্রার্থী",
+      "noNominees": "এখনও কোনো মনোনীত প্রার্থী নেই",
+      "badges": {
+        "winner": "বিজয়ী",
+        "accepted": "গৃহীত",
+        "pending": "অপেক্ষমাণ"
+      },
+      "votes": "কেউ নেই | {count}টি ভোট | {count}টি ভোট",
+      "nominationLabel": "মনোনয়ন",
+      "votingLabel": "ভোটদান",
+      "ends": "শেষ হয় {date}",
+      "closed": "বন্ধ হয়েছে {date}",
+      "titleRequired": "অনুগ্রহ করে একটি নির্বাচনের শিরোনাম যোগ করুন।"
+    },
+    "proposals": {
+      "heading": "প্রস্তাব",
+      "submit": "+ প্রস্তাব জমা দিন",
+      "emptyTitle": "কোনো প্রস্তাব নেই",
+      "emptyDescription": "এই বিষয়ে পরিবর্তনের পরামর্শ দিতে একটি প্রস্তাব জমা দিন।",
+      "votingLabel": "ভোটদান",
+      "for": "{count}টি পক্ষে",
+      "against": "{count}টি বিপক্ষে",
+      "deadline": "সময়সীমা: {date}",
+      "actions": {
+        "approve": "অনুমোদন করুন (ভোট শুরু করুন)",
+        "voteFor": "পক্ষে ভোট দিন",
+        "voteAgainst": "বিপক্ষে ভোট দিন",
+        "resolve": "নিষ্পত্তি করুন"
+      },
+      "titleRequired": "অনুগ্রহ করে একটি প্রস্তাবের শিরোনাম যোগ করুন।"
+    },
+    "createElection": {
+      "title": "নির্বাচন শুরু করুন",
+      "titleLabel": "শিরোনাম",
+      "titlePlaceholder": "যেমন ২০২৬ ১ম প্রান্তিক কাউন্সিল নির্বাচন",
+      "descriptionLabel": "বিবরণ",
+      "descriptionPlaceholder": "এই নির্বাচনের উদ্দেশ্য…",
+      "seatsLabel": "আসন",
+      "submit": "নির্বাচন শুরু করুন"
+    },
+    "createProposal": {
+      "title": "প্রস্তাব জমা দিন",
+      "titleLabel": "শিরোনাম",
+      "titlePlaceholder": "যেমন NLP দক্ষতা স্বীকৃতি দিন",
+      "descriptionLabel": "বিবরণ",
+      "descriptionPlaceholder": "প্রস্তাবিত পরিবর্তন বর্ণনা করুন…",
+      "categoryLabel": "বিভাগ",
+      "submit": "প্রস্তাব জমা দিন"
+    }
+  },
+  "onChainBadge": {
+    "confirming": "নিশ্চিত করা হচ্ছে…"
+  },
+  "deadline": {
+    "default": "সময়সীমা",
+    "passed": "{label} পার হয়ে গেছে"
+  },
+  "proficiency": {
+    "requires": "প্রয়োজন",
+    "level": "দক্ষতা"
+  }
+}

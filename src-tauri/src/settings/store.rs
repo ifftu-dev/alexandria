@@ -274,7 +274,7 @@ mod tests {
         assert!(!theme.is_default);
 
         let lang = entries.iter().find(|e| e.key == "user.language").unwrap();
-        assert_eq!(lang.current_value, "en");
+        assert_eq!(lang.current_value, "system");
         assert!(lang.is_default);
     }
 

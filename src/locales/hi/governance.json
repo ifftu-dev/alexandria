@@ -1,0 +1,134 @@
+{
+  "index": {
+    "title": "समुदाय",
+    "subtitle": "समुदाय समूह जो तय करते हैं कि कौन से कौशल मान्यता पाते हैं",
+    "stats": {
+      "totalGroups": "समुदाय समूह",
+      "active": "सक्रिय",
+      "councilSeats": "परिषद सीटें"
+    },
+    "searchPlaceholder": "समुदाय खोजें…",
+    "empty": {
+      "noMatchTitle": "कोई समुदाय आपकी खोज से मेल नहीं खाता",
+      "noMatchHint": "कोई अलग खोज शब्द आज़माएँ।",
+      "noneTitle": "अभी तक कोई समुदाय नहीं",
+      "noneHint": "नए विषय जुड़ने पर समुदाय समूह स्वतः दिखाई देते हैं।"
+    },
+    "scope": {
+      "topicAreaShort": "TA",
+      "topicShort": "TO",
+      "topicArea": "विषय क्षेत्र",
+      "topic": "विषय"
+    },
+    "seats": "कोई नहीं | {count} सीट | {count} सीटें"
+  },
+  "detail": {
+    "breadcrumb": "समुदाय",
+    "notFound": "समुदाय समूह नहीं मिला",
+    "tabs": {
+      "overview": "अवलोकन",
+      "elections": "चुनाव",
+      "proposals": "प्रस्ताव"
+    },
+    "stats": {
+      "members": "कोई नहीं | {count} सदस्य | {count} सदस्य",
+      "council": "{filled}/{total} परिषद",
+      "elections": "कोई नहीं | {count} चुनाव | {count} चुनाव",
+      "proposals": "कोई नहीं | {count} प्रस्ताव | {count} प्रस्ताव"
+    },
+    "details": {
+      "heading": "विवरण",
+      "scope": "विषय प्रकार",
+      "councilSize": "परिषद आकार",
+      "electionInterval": "चुनाव अंतराल",
+      "intervalDays": "{count} दिन",
+      "created": "बनाया गया",
+      "topicId": "विषय ID",
+      "publicRecord": "सार्वजनिक रिकॉर्ड"
+    },
+    "council": {
+      "heading": "परिषद",
+      "seats": "{filled} / {total} सीटें",
+      "emptyTitle": "कोई परिषद सदस्य नहीं",
+      "emptyDescription": "परिषद भरने के लिए चुनाव कराएँ।",
+      "badge": "परिषद"
+    },
+    "members": {
+      "heading": "सदस्य ({count})"
+    },
+    "elections": {
+      "heading": "चुनाव",
+      "open": "+ चुनाव शुरू करें",
+      "emptyTitle": "कोई चुनाव नहीं",
+      "emptyDescription": "परिषद सदस्य चुनने के लिए चुनाव खोलें।",
+      "seats": "कोई नहीं | {count} सीट | {count} सीटें",
+      "actions": {
+        "nominateSelf": "स्वयं को नामांकित करें",
+        "startVoting": "मतदान शुरू करें",
+        "close": "चुनाव बंद करें",
+        "seatCouncil": "परिषद बैठाएँ",
+        "accept": "स्वीकार करें",
+        "vote": "मत दें"
+      },
+      "nominees": "नामांकित",
+      "noNominees": "अभी तक कोई नामांकित नहीं",
+      "badges": {
+        "winner": "विजेता",
+        "accepted": "स्वीकृत",
+        "pending": "लंबित"
+      },
+      "votes": "कोई नहीं | {count} मत | {count} मत",
+      "nominationLabel": "नामांकन",
+      "votingLabel": "मतदान",
+      "ends": "{date} को समाप्त",
+      "closed": "{date} को बंद",
+      "titleRequired": "कृपया एक चुनाव शीर्षक जोड़ें।"
+    },
+    "proposals": {
+      "heading": "प्रस्ताव",
+      "submit": "+ प्रस्ताव जमा करें",
+      "emptyTitle": "कोई प्रस्ताव नहीं",
+      "emptyDescription": "इस विषय के लिए बदलाव सुझाने हेतु एक प्रस्ताव जमा करें।",
+      "votingLabel": "मतदान",
+      "for": "{count} पक्ष में",
+      "against": "{count} विरोध में",
+      "deadline": "समय-सीमा: {date}",
+      "actions": {
+        "approve": "स्वीकृत करें (मतदान खोलें)",
+        "voteFor": "पक्ष में मत दें",
+        "voteAgainst": "विरोध में मत दें",
+        "resolve": "निपटाएँ"
+      },
+      "titleRequired": "कृपया एक प्रस्ताव शीर्षक जोड़ें।"
+    },
+    "createElection": {
+      "title": "चुनाव शुरू करें",
+      "titleLabel": "शीर्षक",
+      "titlePlaceholder": "उदा. Q1 2026 परिषद चुनाव",
+      "descriptionLabel": "विवरण",
+      "descriptionPlaceholder": "इस चुनाव का उद्देश्य…",
+      "seatsLabel": "सीटें",
+      "submit": "चुनाव शुरू करें"
+    },
+    "createProposal": {
+      "title": "प्रस्ताव जमा करें",
+      "titleLabel": "शीर्षक",
+      "titlePlaceholder": "उदा. NLP कौशल को मान्यता दें",
+      "descriptionLabel": "विवरण",
+      "descriptionPlaceholder": "प्रस्तावित बदलाव का वर्णन करें…",
+      "categoryLabel": "श्रेणी",
+      "submit": "प्रस्ताव जमा करें"
+    }
+  },
+  "onChainBadge": {
+    "confirming": "पुष्टि हो रही है…"
+  },
+  "deadline": {
+    "default": "समय-सीमा",
+    "passed": "{label} बीत गई"
+  },
+  "proficiency": {
+    "requires": "आवश्यक",
+    "level": "प्रवीणता"
+  }
+}

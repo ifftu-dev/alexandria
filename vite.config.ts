@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import tailwindcss from '@tailwindcss/vite'
+import vueI18n from '@intlify/unplugin-vue-i18n/vite'
 import { resolve } from 'path'
 
 // https://vite.dev/config/
@@ -8,6 +9,20 @@ export default defineConfig({
   plugins: [
     vue(),
     tailwindcss(),
+    // Precompile locale catalogs to render functions at build time.
+    // The Tauri webview CSP is `script-src 'self'` (no unsafe-eval), so the
+    // vue-i18n *runtime* message compiler (which uses `new Function`) would
+    // throw. `runtimeOnly` drops that compiler; `compositionOnly` tree-shakes
+    // the legacy API.
+    vueI18n({
+      // Only the JSON namespace files are message catalogs. The `.ts` barrels
+      // and `meta.ts` are normal modules — including them makes the plugin try
+      // to precompile them as locale resources.
+      include: [resolve(__dirname, 'src/locales/**/*.json')],
+      runtimeOnly: true,
+      compositionOnly: true,
+      strictMessage: false,
+    }),
   ],
   resolve: {
     alias: {

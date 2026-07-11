@@ -1,0 +1,89 @@
+{
+  "index": {
+    "title": "Classrooms",
+    "subtitle": "Group spaces for learning together",
+    "loading": "Loading classrooms…",
+    "emptyTitle": "No classrooms yet",
+    "emptyBody": "Create a classroom to start a group learning space, or join one by requesting access.",
+    "createFirst": "Create your first classroom"
+  },
+  "actions": {
+    "create": "Create",
+    "createClassroom": "Create Classroom"
+  },
+  "create": {
+    "title": "Create Classroom",
+    "nameLabel": "Classroom name",
+    "namePlaceholder": "e.g. Advanced Mathematics",
+    "descriptionLabel": "Description",
+    "descriptionPlaceholder": "What is this classroom about?",
+    "iconLabel": "Icon emoji"
+  },
+  "members": {
+    "count": "none | {count} member | {count} members",
+    "heading": "Members"
+  },
+  "roles": {
+    "member": "Member",
+    "moderator": "Moderator",
+    "ownerSection": "Owner",
+    "moderatorSection": "Moderators",
+    "memberSection": "Members"
+  },
+  "requests": {
+    "title": "Join Requests",
+    "empty": "No pending join requests",
+    "approve": "Approve",
+    "deny": "Deny",
+    "link": "Requests"
+  },
+  "settings": {
+    "title": "Classroom Settings",
+    "general": "General",
+    "inviteCode": "Invite code",
+    "inviteHint": "Share this code with others so they can find and request to join your classroom.",
+    "membersHeading": "Members",
+    "kick": "Remove",
+    "dangerZone": "Danger Zone",
+    "archiveTitle": "Archive this classroom",
+    "archiveBody": "The classroom will be hidden and can no longer receive messages.",
+    "archive": "Archive",
+    "leaveTitle": "Leave this classroom",
+    "leaveBody": "You will need to request access again to rejoin.",
+    "leave": "Leave",
+    "confirmKick": "Are you sure you want to remove this member?",
+    "confirmArchive": "Archive this classroom? This cannot be undone.",
+    "confirmLeave": "Leave this classroom?"
+  },
+  "nav": {
+    "settings": "Settings"
+  },
+  "call": {
+    "active": "Voice call active",
+    "join": "Join call",
+    "start": "Start call"
+  },
+  "channels": {
+    "heading": "Channels",
+    "add": "Add channel",
+    "announcementBadge": "Announcement channel",
+    "selectShort": "Select a channel",
+    "selectToChat": "Select a channel to start chatting",
+    "createTitle": "Create channel",
+    "namePlaceholder": "channel-name",
+    "typeText": "Text channel",
+    "typeAnnouncement": "Announcement channel",
+    "fallbackName": "channel"
+  },
+  "messages": {
+    "empty": "No messages yet. Start the conversation!",
+    "loadMore": "Load earlier messages",
+    "deleted": "[deleted]",
+    "inputPlaceholder": "Message #{channel}",
+    "inputHint": "Enter to send · Shift+Enter for newline",
+    "send": "Send"
+  },
+  "common": {
+    "loading": "Loading…"
+  }
+}

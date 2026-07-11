@@ -43,28 +43,28 @@ onMounted(async () => {
   <div class="card p-5">
     <div class="mb-4 flex flex-wrap items-center justify-between gap-2">
       <div>
-        <h3 class="text-base font-semibold text-foreground">Visibility &amp; teaching</h3>
+        <h3 class="text-base font-semibold text-foreground">{{ $t('skills.visibility.title') }}</h3>
         <p class="mt-0.5 text-xs text-muted-foreground">
-          Choose which earned skills are public, and mark the ones you teach.
+          {{ $t('skills.visibility.subtitle') }}
         </p>
       </div>
       <div v-if="nodes.length" class="flex items-center gap-2">
-        <span class="text-xs text-muted-foreground">{{ publicCount }} / {{ nodes.length }} public</span>
+        <span class="text-xs text-muted-foreground">{{ $t('skills.visibility.publicCount', { public: publicCount, total: nodes.length }) }}</span>
         <AppButton variant="ghost" size="xs" @click="updateMany(allIds, { public: true })">
-          Show all
+          {{ $t('skills.visibility.showAll') }}
         </AppButton>
         <AppButton variant="ghost" size="xs" @click="updateMany(allIds, { public: false })">
-          Hide all
+          {{ $t('skills.visibility.hideAll') }}
         </AppButton>
       </div>
     </div>
 
     <div v-if="loading" class="flex justify-center py-8">
-      <AppSpinner label="Loading your skills…" />
+      <AppSpinner :label="$t('skills.visibility.loading')" />
     </div>
 
     <p v-else-if="nodes.length === 0" class="py-6 text-sm text-muted-foreground">
-      No earned skills yet — credentials you earn will appear here for you to publish.
+      {{ $t('skills.visibility.empty') }}
     </p>
 
     <div v-else class="space-y-5">
@@ -88,10 +88,10 @@ onMounted(async () => {
             <button
               class="vis-toggle"
               :class="{ 'vis-toggle--on': prefFor(n.id).public }"
-              :title="prefFor(n.id).public ? 'Public — click to hide' : 'Private — click to publish'"
+              :title="prefFor(n.id).public ? $t('skills.visibility.publicOnTitle') : $t('skills.visibility.publicOffTitle')"
               @click="setPublic(n.id, !prefFor(n.id).public)"
             >
-              {{ prefFor(n.id).public ? '👁 Public' : '🔒 Private' }}
+              {{ prefFor(n.id).public ? $t('skills.visibility.publicOn') : $t('skills.visibility.publicOff') }}
             </button>
 
             <!-- teaching toggle -->
@@ -99,10 +99,10 @@ onMounted(async () => {
               class="vis-toggle"
               :class="{ 'vis-toggle--teach': prefFor(n.id).teaching }"
               :disabled="!prefFor(n.id).public"
-              :title="prefFor(n.id).teaching ? 'You teach this' : 'Mark as taught'"
+              :title="prefFor(n.id).teaching ? $t('skills.visibility.teachOnTitle') : $t('skills.visibility.teachOffTitle')"
               @click="setTeaching(n.id, !prefFor(n.id).teaching)"
             >
-              {{ prefFor(n.id).teaching ? '★ Teaching' : '☆ Teach' }}
+              {{ prefFor(n.id).teaching ? $t('skills.visibility.teachOn') : $t('skills.visibility.teachOff') }}
             </button>
           </li>
         </ul>

@@ -10,12 +10,25 @@ import Starfield from '@/components/auth/Starfield.vue'
 import GoalPicker from '@/components/goals/GoalPicker.vue'
 import SkillBootstrapPanel from '@/components/skills/SkillBootstrapPanel.vue'
 import { useGoals } from '@/composables/useGoals'
+import { useLocale } from '@/composables/useLocale'
+import { useI18n } from 'vue-i18n'
+import type { AppLocale } from '@/locales/meta'
 import type { AccountRole } from '@/types'
 
+const { t } = useI18n()
 const router = useRouter()
 const route = useRoute()
 const { profiles, refreshProfiles, createProfile, restoreProfileWithMnemonic, activeProfileId } = useProfiles()
 const { invoke } = useLocalApi()
+
+// Language can be chosen before any profile exists — the pick lives in the
+// pre-unlock cache and is seeded into the new profile on completion.
+const { available: localeChoices, preference: localePreference, setLocale, persistLocaleToProfile } =
+  useLocale()
+function onLocaleChange(e: Event) {
+  const value = (e.target as HTMLSelectElement).value
+  void setLocale(value === 'system' ? 'system' : (value as AppLocale))
+}
 
 const vaultExists = computed(() => profiles.value.length > 0)
 const username = ref('')
@@ -76,26 +89,26 @@ const step = ref<Step>('welcome')
 const selectedRole = ref<AccountRole | null>(null)
 const birthdate = ref('')
 
-const roleCards: { id: AccountRole; title: string; desc: string; icon: string }[] = [
+const roleCards = computed<{ id: AccountRole; title: string; desc: string; icon: string }[]>(() => [
   {
     id: 'learner',
-    title: 'Learner',
-    desc: 'Take courses, earn verifiable credentials, and grow your skills.',
+    title: t('onboarding.roles.learnerTitle'),
+    desc: t('onboarding.roles.learnerDesc'),
     icon: 'M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253',
   },
   {
     id: 'instructor',
-    title: 'Instructor',
-    desc: 'Author courses and tutorials, review submissions, and mentor learners. You can switch into learner mode any time.',
+    title: t('onboarding.roles.instructorTitle'),
+    desc: t('onboarding.roles.instructorDesc'),
     icon: 'M8.25 6.75h12M8.25 12h12m-12 5.25h12M3.75 6.75h.007v.008H3.75V6.75zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zM3.75 12h.007v.008H3.75V12zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm-.375 5.25h.007v.008H3.75v-.008zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z',
   },
   {
     id: 'parent',
-    title: 'Parent / Guardian',
-    desc: "Oversee your child's learning: link their profile and follow their progress from your own device.",
+    title: t('onboarding.roles.parentTitle'),
+    desc: t('onboarding.roles.parentDesc'),
     icon: 'M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z',
   },
-]
+])
 
 const BIRTHDATE_RE = /^\d{4}-\d{2}-\d{2}$/
 const ageYears = computed<number | null>(() => {
@@ -177,24 +190,24 @@ const importWordCountValid = computed(() => {
 
 const wizardSteps = computed<{ id: Step; label: string }[]>(() => {
   const steps: { id: Step; label: string }[] = [
-    { id: 'welcome', label: 'Welcome' },
-    { id: 'role', label: 'Your Role' },
+    { id: 'welcome', label: t('onboarding.wizard.welcome') },
+    { id: 'role', label: t('onboarding.wizard.role') },
   ]
-  if (selectedRole.value === 'learner') steps.push({ id: 'birthdate', label: 'Birthdate' })
-  steps.push({ id: 'password', label: 'Secure Vault' })
+  if (selectedRole.value === 'learner') steps.push({ id: 'birthdate', label: t('onboarding.wizard.birthdate') })
+  steps.push({ id: 'password', label: t('onboarding.wizard.password') })
   if (mode.value === 'create') {
-    steps.push({ id: 'generating', label: 'Generate Keys' }, { id: 'backup', label: 'Backup Phrase' })
+    steps.push({ id: 'generating', label: t('onboarding.wizard.createAccount') }, { id: 'backup', label: t('onboarding.wizard.recoveryPhrase') })
   } else {
-    steps.push({ id: 'generating', label: 'Restore Keys' })
+    steps.push({ id: 'generating', label: t('onboarding.wizard.restoreAccount') })
   }
-  // Learners set goals right after the wallet exists (goals persist to the
+  // Learners set goals right after the account exists (goals persist to the
   // vault-scoped `learner.targets` synced setting).
   if (selectedRole.value === 'learner') {
-    steps.push({ id: 'goals', label: 'Your Goals' })
-    steps.push({ id: 'bootstrap', label: 'Your Skills' })
+    steps.push({ id: 'goals', label: t('onboarding.wizard.goals') })
+    steps.push({ id: 'bootstrap', label: t('onboarding.wizard.skills') })
   }
-  if (selectedRole.value === 'parent') steps.push({ id: 'link-child', label: 'Link Your Child' })
-  steps.push({ id: 'done', label: 'Complete' })
+  if (selectedRole.value === 'parent') steps.push({ id: 'link-child', label: t('onboarding.wizard.linkChild') })
+  steps.push({ id: 'done', label: t('onboarding.wizard.complete') })
   return steps
 })
 
@@ -217,7 +230,7 @@ async function linkChild() {
       'guardian_accept_invite',
       { code: childInviteCode.value.trim() },
     )
-    linkedChildName.value = link.peer_display_name ?? 'your child'
+    linkedChildName.value = link.peer_display_name ?? t('onboarding.linkChild.childFallback')
     step.value = 'done'
   } catch (e) {
     linkChildError.value = String(e)
@@ -239,20 +252,20 @@ function formatOnboardingError(cause: unknown, action: 'create' | 'restore'): st
   const raw = cause instanceof Error ? cause.message : String(cause)
 
   if (raw.includes('Password must be at least')) {
-    return 'Your vault password must be at least 12 characters long. Add a few more characters, then try again.'
+    return t('onboarding.errors.passwordTooShortDetail')
   }
 
   if (raw.includes('Recovery phrase must be')) {
-    return 'That recovery phrase length is not supported. Use a 12-, 15-, or 24-word phrase, then try again.'
+    return t('onboarding.errors.phraseLengthUnsupported')
   }
 
   if (raw.toLowerCase().includes('mnemonic') || raw.toLowerCase().includes('checksum')) {
-    return 'That recovery phrase does not look valid. Check the word order and spelling, then try again.'
+    return t('onboarding.errors.phraseInvalid')
   }
 
   return action === 'create'
-    ? `We couldn't create your wallet yet. ${raw}`
-    : `We couldn't restore your wallet yet. ${raw}`
+    ? t('onboarding.errors.createFailed', { error: raw })
+    : t('onboarding.errors.restoreFailed', { error: raw })
 }
 
 function startCreate() {
@@ -277,7 +290,7 @@ function chooseRole(role: AccountRole) {
 function proceedFromBirthdate() {
   error.value = ''
   if (!birthdateValid.value) {
-    error.value = 'Enter a valid birthdate — it cannot be in the future or more than 120 years ago.'
+    error.value = t('onboarding.errors.birthdateInvalid')
     return
   }
   step.value = 'password'
@@ -302,24 +315,24 @@ async function proceedFromPassword() {
 
   // Username and display name are both mandatory.
   if (!usernameValid.value) {
-    error.value = 'Choose a username: 3–32 characters, lowercase letters, numbers, and underscores only.'
+    error.value = t('onboarding.errors.usernameInvalid')
     return
   }
   if (availability.value === 'taken') {
-    error.value = 'That username is already taken — pick another.'
+    error.value = t('onboarding.errors.usernameTaken')
     return
   }
   if (!displayName.value.trim()) {
-    error.value = 'Choose a display name to continue.'
+    error.value = t('onboarding.errors.displayNameRequired')
     return
   }
 
   if (!passwordValid.value) {
-    error.value = 'Your vault password is too short. Use at least 12 characters, then try again.'
+    error.value = t('onboarding.errors.passwordTooShort')
     return
   }
   if (!passwordsMatch.value) {
-    error.value = 'The confirmation password does not match yet. Enter the same password in both fields to continue.'
+    error.value = t('onboarding.errors.passwordsDoNotMatch')
     return
   }
 
@@ -351,11 +364,11 @@ async function createWallet() {
       if (enableBiometricOnSetup.value && biometricAvailable.value) {
         const mode = await storeVaultPasswordForBiometric(result.summary.id, password.value)
         biometricHint.value = mode === 'secure'
-          ? 'Biometric unlock enabled on this device.'
-          : 'Biometric unlock enabled for this app session (dev runtime keychain limitation).'
+          ? t('onboarding.biometric.enabledSecure')
+          : t('onboarding.biometric.enabledSession')
       }
     } catch {
-      biometricHint.value = 'Biometric unlock setup skipped. You can still unlock with password.'
+      biometricHint.value = t('onboarding.biometric.skipped')
     }
     step.value = 'backup'
   } catch (e) {
@@ -367,13 +380,13 @@ async function createWallet() {
 async function restoreWallet() {
   const phrase = importMnemonic.value.trim()
   if (!phrase) {
-    error.value = 'Enter your recovery phrase to continue. Alexandria accepts 12-, 15-, or 24-word phrases.'
+    error.value = t('onboarding.errors.phraseRequired')
     return
   }
 
   const words = phrase.split(/\s+/)
   if (words.length !== 12 && words.length !== 15 && words.length !== 24) {
-    error.value = 'That recovery phrase length is not supported. Use a 12-, 15-, or 24-word phrase, then try again.'
+    error.value = t('onboarding.errors.phraseLengthUnsupported')
     return
   }
 
@@ -397,11 +410,11 @@ async function restoreWallet() {
       if (enableBiometricOnSetup.value && biometricAvailable.value && activeProfileId.value) {
         const mode = await storeVaultPasswordForBiometric(activeProfileId.value, password.value)
         biometricHint.value = mode === 'secure'
-          ? 'Biometric unlock enabled on this device.'
-          : 'Biometric unlock enabled for this app session (dev runtime keychain limitation).'
+          ? t('onboarding.biometric.enabledSecure')
+          : t('onboarding.biometric.enabledSession')
       }
     } catch {
-      biometricHint.value = 'Biometric unlock setup skipped. You can still unlock with password.'
+      biometricHint.value = t('onboarding.biometric.skipped')
     }
     step.value = nextAfterWallet()
   } catch (e) {
@@ -428,6 +441,8 @@ function confirmBackup() {
 }
 
 function enterApp() {
+  // Carry a pre-unlock language choice into the freshly-created profile.
+  void persistLocaleToProfile()
   // Minors are gated until a parent/guardian accepts their invite;
   // the backend created the profile in `pending_guardian` state.
   // Parents land on their oversight dashboard.
@@ -458,8 +473,8 @@ function enterApp() {
                 </svg>
               </div>
             </div>
-            <h2 class="text-xl font-semibold text-foreground">Welcome to Alexandria</h2>
-            <p class="mt-1 text-sm text-muted-foreground">Set up your sovereign learning identity in a few guided steps.</p>
+            <h2 class="text-xl font-semibold text-foreground">{{ $t('onboarding.aside.title') }}</h2>
+            <p class="mt-1 text-sm text-muted-foreground">{{ $t('onboarding.aside.subtitle') }}</p>
           </div>
 
           <div class="space-y-2.5">
@@ -480,7 +495,7 @@ function enterApp() {
           </div>
 
           <div class="mt-auto pt-6 text-xs text-muted-foreground italic tracking-wide">
-            I am, because we all are
+            {{ $t('onboarding.motif.ubuntu') }}
           </div>
         </aside>
 
@@ -499,6 +514,26 @@ function enterApp() {
       <!-- WELCOME                                      -->
       <!-- ============================================ -->
       <div v-if="step === 'welcome'" class="text-center">
+        <!-- Language picker — chosen before any profile exists; the choice is
+             saved to the new profile and synced across devices on completion. -->
+        <div class="flex items-center justify-center gap-2 mb-6">
+          <svg class="w-4 h-4 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true">
+            <circle cx="12" cy="12" r="9" />
+            <path stroke-linecap="round" stroke-linejoin="round" d="M3 12h18M12 3a15 15 0 010 18M12 3a15 15 0 000 18" />
+          </svg>
+          <select
+            class="text-sm rounded-md border border-border bg-background text-foreground px-2.5 py-1.5"
+            :value="localePreference"
+            :aria-label="$t('common.language.label')"
+            @change="onLocaleChange"
+          >
+            <option value="system">{{ $t('common.language.system') }}</option>
+            <option v-for="loc in localeChoices" :key="loc.code" :value="loc.code">
+              {{ loc.endonym }}
+            </option>
+          </select>
+        </div>
+
         <!-- Alexandria logo -->
         <div class="relative w-16 h-16 mx-auto mb-6">
           <div class="absolute inset-0 rounded-full bg-primary/8 animate-ping" style="animation-duration: 3s;" />
@@ -512,30 +547,30 @@ function enterApp() {
 
         <h1 class="text-3xl font-bold mb-1 text-foreground">Alexandria</h1>
         <p class="text-sm text-muted-foreground mb-1 italic tracking-wide">
-          I am, because we all are
+          {{ $t('onboarding.motif.ubuntu') }}
         </p>
         <p class="text-muted-foreground mb-8 text-sm">
-          Free, decentralized learning. Your credentials. Your identity. Your control.
+          {{ $t('onboarding.welcome.tagline') }}
         </p>
 
         <div class="card p-6 mb-6 text-left">
-          <h2 class="text-base font-semibold mb-3">What happens next</h2>
+          <h2 class="text-base font-semibold mb-3">{{ $t('onboarding.welcome.whatHappens') }}</h2>
           <ul class="space-y-2 text-sm text-muted-foreground">
             <li class="flex items-start gap-2">
               <span class="text-primary mt-0.5 font-mono text-xs w-4 text-right shrink-0">01</span>
-              You set a password to protect your vault on this device.
+              {{ $t('onboarding.welcome.step1') }}
             </li>
             <li class="flex items-start gap-2">
               <span class="text-primary mt-0.5 font-mono text-xs w-4 text-right shrink-0">02</span>
-              We generate a unique wallet &mdash; your identity on the network.
+              {{ $t('onboarding.welcome.step2') }}
             </li>
             <li class="flex items-start gap-2">
               <span class="text-primary mt-0.5 font-mono text-xs w-4 text-right shrink-0">03</span>
-              You receive a 24-word recovery phrase. Write it down and keep it safe.
+              {{ $t('onboarding.welcome.step3') }}
             </li>
             <li class="flex items-start gap-2">
               <span class="text-primary mt-0.5 font-mono text-xs w-4 text-right shrink-0">04</span>
-              Start learning, earn credentials, own your education.
+              {{ $t('onboarding.welcome.step4') }}
             </li>
           </ul>
         </div>
@@ -544,14 +579,14 @@ function enterApp() {
           class="w-full py-2.5 px-4 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary-hover transition-colors"
           @click="startCreate"
         >
-          Create My Identity
+          {{ $t('onboarding.welcome.createAccount') }}
         </button>
 
         <button
           class="w-full mt-3 py-2.5 px-4 rounded-md text-sm font-medium border border-border text-foreground hover:bg-muted/50 transition-colors"
           @click="startImport"
         >
-          Import Existing Wallet
+          {{ $t('onboarding.welcome.restoreAccount') }}
         </button>
 
         <button
@@ -559,7 +594,7 @@ function enterApp() {
           class="w-full mt-3 py-2 text-sm text-primary hover:underline transition-colors"
           @click="router.replace('/unlock')"
         >
-          Sign in to existing vault
+          {{ $t('onboarding.welcome.signIn') }}
         </button>
       </div>
 
@@ -574,12 +609,12 @@ function enterApp() {
           <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
           </svg>
-          Back
+          {{ $t('common.actions.back') }}
         </button>
 
-        <h1 class="text-2xl font-bold mb-2 text-center">How will you use Alexandria?</h1>
+        <h1 class="text-2xl font-bold mb-2 text-center">{{ $t('onboarding.role.heading') }}</h1>
         <p class="text-sm text-muted-foreground mb-6 text-center">
-          This shapes your home screen and tools. Instructors can switch into learner mode any time.
+          {{ $t('onboarding.role.subtitle') }}
         </p>
 
         <div class="space-y-3">
@@ -614,17 +649,17 @@ function enterApp() {
           <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
           </svg>
-          Back
+          {{ $t('common.actions.back') }}
         </button>
 
-        <h1 class="text-2xl font-bold mb-2 text-center">When were you born?</h1>
+        <h1 class="text-2xl font-bold mb-2 text-center">{{ $t('onboarding.birthdate.heading') }}</h1>
         <p class="text-sm text-muted-foreground mb-6 text-center">
-          Your birthdate stays on this device — it is never published to the network.
+          {{ $t('onboarding.birthdate.subtitle') }}
         </p>
 
         <div class="card p-5 mb-4">
           <label class="block text-xs font-medium text-muted-foreground mb-1.5">
-            Birthdate
+            {{ $t('onboarding.birthdate.label') }}
           </label>
           <input
             v-model="birthdate"
@@ -633,14 +668,13 @@ function enterApp() {
             @keyup.enter.exact.prevent="proceedFromBirthdate"
           >
           <p v-if="ageYears !== null && birthdateValid" class="mt-2 text-sm text-foreground">
-            You are <span class="font-semibold">{{ ageYears }}</span> years old.
+            {{ $t('onboarding.birthdate.ageStatement', { age: ageYears }) }}
           </p>
         </div>
 
         <div v-if="isMinorLearner" class="card p-4 mb-4 border-warning bg-warning/5">
           <p class="text-sm text-warning font-medium">
-            Because you're under 18, a parent or guardian must activate your profile before you can start learning.
-            You'll get an invite code for them at the end of setup.
+            {{ $t('onboarding.birthdate.minorNotice') }}
           </p>
         </div>
 
@@ -656,7 +690,7 @@ function enterApp() {
           :disabled="!birthdateValid"
           @click="proceedFromBirthdate"
         >
-          Continue
+          {{ $t('common.actions.continue') }}
         </button>
       </div>
 
@@ -671,27 +705,27 @@ function enterApp() {
           <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
           </svg>
-          Back
+          {{ $t('common.actions.back') }}
         </button>
 
         <h1 class="text-2xl font-bold mb-2 text-center">
-          {{ mode === 'create' ? 'Set Your Password' : 'Import Wallet' }}
+          {{ mode === 'create' ? $t('onboarding.password.titleCreate') : $t('onboarding.password.titleImport') }}
         </h1>
         <p class="text-sm text-muted-foreground mb-6 text-center">
           {{ mode === 'create'
-            ? 'This password protects your encrypted vault on this device.'
-            : 'Enter your recovery phrase and set a password for this device.'
+            ? $t('onboarding.password.subtitleCreate')
+            : $t('onboarding.password.subtitleImport')
           }}
         </p>
 
-        <!-- Import: Mnemonic input -->
+        <!-- Import: Recovery Phrase input -->
         <div v-if="mode === 'import'" class="card p-5 mb-4">
           <label class="block text-xs font-medium text-muted-foreground mb-1.5">
-            Recovery Phrase
+            {{ $t('onboarding.password.recoveryLabel') }}
           </label>
           <textarea
             v-model="importMnemonic"
-            placeholder="Enter your 24-word recovery phrase, separated by spaces"
+            :placeholder="$t('onboarding.password.recoveryPlaceholder')"
             rows="3"
             class="w-full px-3 py-2 text-sm font-mono rounded-md border border-border bg-background focus:outline-none focus:ring-2 focus:ring-ring resize-none"
             @keyup.enter.exact.prevent="proceedFromPassword"
@@ -700,7 +734,7 @@ function enterApp() {
             class="mt-1 text-xs"
             :class="importWordCountValid ? 'text-muted-foreground' : 'text-error'"
           >
-            {{ importWordCount }} words entered. Recovery phrases must contain 12, 15, or 24 words.
+            {{ $t('onboarding.password.wordsEntered', { count: importWordCount }, importWordCount) }} {{ $t('onboarding.password.wordsRule') }}
           </p>
         </div>
 
@@ -709,7 +743,7 @@ function enterApp() {
           <div class="space-y-4">
             <div>
               <label class="block text-xs font-medium text-muted-foreground mb-1.5">
-                Username
+                {{ $t('onboarding.password.usernameLabel') }}
               </label>
               <div class="relative">
                 <span class="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">@</span>
@@ -720,50 +754,50 @@ function enterApp() {
                   autocapitalize="none"
                   autocorrect="off"
                   spellcheck="false"
-                  placeholder="your_handle"
+                  :placeholder="$t('onboarding.password.usernamePlaceholder')"
                   class="w-full pl-8 pr-3 py-2 text-sm rounded-md border border-border bg-background focus:outline-none focus:ring-2 focus:ring-ring"
                 >
               </div>
               <p class="mt-1 text-xs" :class="username && !usernameValid ? 'text-warning' : 'text-muted-foreground'">
-                3–32 characters · lowercase letters, numbers, underscores. How others find you.
+                {{ $t('onboarding.password.usernameHint') }}
               </p>
               <p v-if="availability === 'checking'" class="mt-0.5 text-xs text-muted-foreground">
-                Checking availability…
+                {{ $t('onboarding.password.checking') }}
               </p>
               <p v-else-if="availability === 'available'" class="mt-0.5 text-xs text-success">
-                ✓ @{{ username.trim().toLowerCase() }} is available
+                {{ $t('onboarding.password.usernameAvailable', { handle: username.trim().toLowerCase() }) }}
               </p>
               <p v-else-if="availability === 'taken'" class="mt-0.5 text-xs text-error">
-                ✕ @{{ username.trim().toLowerCase() }} is already taken
+                {{ $t('onboarding.password.usernameTaken', { handle: username.trim().toLowerCase() }) }}
               </p>
               <p v-else-if="availability === 'unknown'" class="mt-0.5 text-xs text-warning">
-                ⚠ Can't verify availability right now — you can continue, but the name may conflict once online.
+                {{ $t('onboarding.password.usernameUnknown') }}
               </p>
             </div>
             <div>
               <label class="block text-xs font-medium text-muted-foreground mb-1.5">
-                Display name
+                {{ $t('onboarding.password.displayNameLabel') }}
               </label>
               <input
                 v-model="displayName"
                 type="text"
                 maxlength="64"
-                placeholder="Your name as others see it"
+                :placeholder="$t('onboarding.password.displayNamePlaceholder')"
                 class="w-full px-3 py-2 text-sm rounded-md border border-border bg-background focus:outline-none focus:ring-2 focus:ring-ring"
                 @input="displayNameDirty = true"
               >
               <p class="mt-1 text-xs text-muted-foreground">
-                Defaults to your username — change it any time.
+                {{ $t('onboarding.password.displayNameHint') }}
               </p>
             </div>
             <div>
               <label class="block text-xs font-medium text-muted-foreground mb-1.5">
-                Password
+                {{ $t('onboarding.password.passwordLabel') }}
               </label>
               <input
                 v-model="password"
                 type="password"
-                placeholder="At least 12 characters"
+                :placeholder="$t('onboarding.password.passwordPlaceholder')"
                 class="w-full px-3 py-2 text-sm rounded-md border border-border bg-background focus:outline-none focus:ring-2 focus:ring-ring"
                 @keyup.enter.exact.prevent="proceedFromPassword"
               >
@@ -771,17 +805,17 @@ function enterApp() {
                 class="mt-1 text-xs"
                 :class="passwordValid ? 'text-success' : 'text-muted-foreground'"
               >
-                {{ passwordLength }}/12 characters minimum
+                {{ $t('onboarding.password.passwordCounter', { count: passwordLength }) }}
               </p>
             </div>
             <div>
               <label class="block text-xs font-medium text-muted-foreground mb-1.5">
-                Confirm Password
+                {{ $t('onboarding.password.confirmLabel') }}
               </label>
               <input
                 v-model="confirmPassword"
                 type="password"
-                placeholder="Enter password again"
+                :placeholder="$t('onboarding.password.confirmPlaceholder')"
                 class="w-full px-3 py-2 text-sm rounded-md border border-border bg-background focus:outline-none focus:ring-2 focus:ring-ring"
                 @keyup.enter.exact.prevent="proceedFromPassword"
               >
@@ -789,13 +823,13 @@ function enterApp() {
                 v-if="confirmPassword && !passwordsMatch"
                 class="text-xs text-error mt-1"
               >
-                Passwords do not match.
+                {{ $t('onboarding.password.passwordsMismatch') }}
               </p>
               <p
                 v-else-if="confirmPassword && passwordsMatch"
                 class="text-xs text-success mt-1"
               >
-                Passwords match.
+                {{ $t('onboarding.password.passwordsMatch') }}
               </p>
             </div>
           </div>
@@ -803,7 +837,7 @@ function enterApp() {
 
         <div class="card p-4 mb-4 border-warning bg-warning/5">
           <p class="text-sm text-warning font-medium">
-            There is no password recovery. If you forget this password, you'll need your recovery phrase to restore access.
+            {{ $t('onboarding.password.noRecoveryWarning') }}
           </p>
         </div>
 
@@ -815,9 +849,9 @@ function enterApp() {
               class="mt-0.5 h-4 w-4 rounded border-border"
             >
             <span>
-              <span class="block text-sm font-medium text-foreground">Enable biometric unlock on this device</span>
+              <span class="block text-sm font-medium text-foreground">{{ $t('onboarding.password.biometricLabel') }}</span>
               <span class="block text-xs text-muted-foreground mt-0.5">
-                Use Touch ID / Face ID after setup. You can change this later in Settings.
+                {{ $t('onboarding.password.biometricHint') }}
               </span>
             </span>
           </label>
@@ -827,7 +861,7 @@ function enterApp() {
           v-if="error"
           class="mb-3 rounded-md border border-error/30 bg-error/5 px-3 py-2"
         >
-          <p class="text-xs font-semibold uppercase tracking-wide text-error">Check These Details</p>
+          <p class="text-xs font-semibold uppercase tracking-wide text-error">{{ $t('onboarding.password.errorHeading') }}</p>
           <p class="mt-1 text-sm text-error">{{ error }}</p>
         </div>
 
@@ -835,7 +869,7 @@ function enterApp() {
           class="w-full py-2.5 px-4 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary-hover transition-colors"
           @click="proceedFromPassword"
         >
-          {{ mode === 'create' ? 'Create Wallet' : 'Restore Wallet' }}
+          {{ mode === 'create' ? $t('onboarding.password.submitCreate') : $t('onboarding.password.submitImport') }}
         </button>
       </div>
 
@@ -864,10 +898,10 @@ function enterApp() {
         </div>
 
         <h2 class="text-xl font-bold mb-1 text-foreground">
-          {{ mode === 'create' ? 'Creating Your Identity' : 'Restoring Your Wallet' }}
+          {{ mode === 'create' ? $t('onboarding.generating.titleCreate') : $t('onboarding.generating.titleImport') }}
         </h2>
         <p class="text-sm text-muted-foreground mb-6">
-          This involves cryptographic key derivation and may take a moment.
+          {{ $t('onboarding.generating.subtitle') }}
         </p>
 
         <!-- Live log output -->
@@ -887,7 +921,7 @@ function enterApp() {
             </div>
             <div v-if="progressLines.length === 0" class="flex items-start gap-2 text-primary">
               <div class="w-3 h-3 mt-0.5 shrink-0 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-              <span>Initializing...</span>
+              <span>{{ $t('onboarding.generating.initializing') }}</span>
             </div>
           </div>
         </div>
@@ -898,10 +932,9 @@ function enterApp() {
       <!-- BACKUP                                       -->
       <!-- ============================================ -->
       <div v-else-if="step === 'backup'" class="text-center">
-        <h1 class="text-2xl font-bold mb-2">Your Recovery Phrase</h1>
+        <h1 class="text-2xl font-bold mb-2">{{ $t('onboarding.backup.heading') }}</h1>
         <p class="text-sm text-muted-foreground mb-6">
-          Write these 24 words down on paper and store them somewhere safe.
-          This is the ONLY way to recover your identity if you forget your password.
+          {{ $t('onboarding.backup.subtitle') }}
         </p>
 
         <div class="card p-5 mb-6">
@@ -930,13 +963,13 @@ function enterApp() {
             <svg v-else class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
               <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
             </svg>
-            {{ copied ? 'Copied to clipboard' : 'Copy recovery phrase' }}
+            {{ copied ? $t('onboarding.backup.copied') : $t('onboarding.backup.copy') }}
           </button>
         </div>
 
         <div class="card p-4 mb-6 border-warning bg-warning/5">
           <p class="text-sm text-warning font-medium">
-            Never share your recovery phrase. Anyone with these words can access your credentials.
+            {{ $t('onboarding.backup.warning') }}
           </p>
         </div>
 
@@ -944,7 +977,7 @@ function enterApp() {
           class="w-full py-2.5 px-4 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary-hover transition-colors"
           @click="confirmBackup"
         >
-          I've Written It Down
+          {{ $t('onboarding.backup.confirm') }}
         </button>
       </div>
 
@@ -952,10 +985,9 @@ function enterApp() {
       <!-- GOALS (learners)                             -->
       <!-- ============================================ -->
       <div v-else-if="step === 'goals'">
-        <h1 class="text-2xl font-bold mb-2 text-center">What are you working toward?</h1>
+        <h1 class="text-2xl font-bold mb-2 text-center">{{ $t('onboarding.goals.heading') }}</h1>
         <p class="text-sm text-muted-foreground mb-6 text-center">
-          Pick an exam, curriculum, or job — we'll map it to a skill graph and
-          chart your path. You can change or add goals any time.
+          {{ $t('onboarding.goals.subtitle') }}
         </p>
 
         <GoalPicker @added="() => {}" />
@@ -965,13 +997,13 @@ function enterApp() {
             class="text-sm text-muted-foreground hover:text-foreground transition-colors"
             @click="step = 'bootstrap'"
           >
-            Skip for now
+            {{ $t('onboarding.goals.skip') }}
           </button>
           <button
             class="py-2.5 px-5 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary-hover transition-colors disabled:opacity-50"
             @click="step = 'bootstrap'"
           >
-            {{ learnerGoals.length ? `Continue with ${learnerGoals.length} goal${learnerGoals.length === 1 ? '' : 's'}` : 'Continue' }}
+            {{ $t('onboarding.goals.continue', { count: learnerGoals.length }, learnerGoals.length) }}
           </button>
         </div>
       </div>
@@ -980,11 +1012,9 @@ function enterApp() {
       <!-- BOOTSTRAP SKILLS (learners)                  -->
       <!-- ============================================ -->
       <div v-else-if="step === 'bootstrap'">
-        <h1 class="text-2xl font-bold mb-2 text-center">What do you already know?</h1>
+        <h1 class="text-2xl font-bold mb-2 text-center">{{ $t('onboarding.bootstrap.heading') }}</h1>
         <p class="text-sm text-muted-foreground mb-6 text-center">
-          Upload a resume or transcript and we'll map it to skills you can claim.
-          Credentials from accredited schools count for more than a self-made
-          resume. You can verify any skill with an assessment later.
+          {{ $t('onboarding.bootstrap.subtitle') }}
         </p>
 
         <SkillBootstrapPanel @claimed="(n) => { bootstrapClaimed += n }" />
@@ -994,13 +1024,13 @@ function enterApp() {
             class="text-sm text-muted-foreground hover:text-foreground transition-colors"
             @click="step = 'done'"
           >
-            Skip for now
+            {{ $t('onboarding.bootstrap.skip') }}
           </button>
           <button
             class="py-2.5 px-5 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary-hover transition-colors"
             @click="step = 'done'"
           >
-            {{ bootstrapClaimed ? `Continue with ${bootstrapClaimed} skill${bootstrapClaimed === 1 ? '' : 's'}` : 'Continue' }}
+            {{ $t('onboarding.bootstrap.continue', { count: bootstrapClaimed }, bootstrapClaimed) }}
           </button>
         </div>
       </div>
@@ -1009,24 +1039,23 @@ function enterApp() {
       <!-- LINK CHILD (parents)                         -->
       <!-- ============================================ -->
       <div v-else-if="step === 'link-child'">
-        <h1 class="text-2xl font-bold mb-2 text-center">Link your child</h1>
+        <h1 class="text-2xl font-bold mb-2 text-center">{{ $t('onboarding.linkChild.heading') }}</h1>
         <p class="text-sm text-muted-foreground mb-6 text-center">
-          Your child's activation screen shows an invite code. Paste it here to
-          activate their profile and follow their learning from this account.
+          {{ $t('onboarding.linkChild.subtitle') }}
         </p>
 
         <div class="card p-5 mb-4">
           <label class="block text-xs font-medium text-muted-foreground mb-1.5">
-            Invite code
+            {{ $t('onboarding.linkChild.label') }}
           </label>
           <textarea
             v-model="childInviteCode"
             rows="3"
-            placeholder="Paste the invite code from your child's device"
+            :placeholder="$t('onboarding.linkChild.placeholder')"
             class="w-full px-3 py-2 text-sm font-mono rounded-md border border-border bg-background focus:outline-none focus:ring-2 focus:ring-ring resize-none"
           />
           <p class="mt-1 text-xs text-muted-foreground">
-            Both devices need to be online to complete the link.
+            {{ $t('onboarding.linkChild.hint') }}
           </p>
         </div>
 
@@ -1042,14 +1071,14 @@ function enterApp() {
           :disabled="!childInviteCode.trim() || linkingChild"
           @click="linkChild"
         >
-          {{ linkingChild ? 'Linking…' : 'Link Child' }}
+          {{ linkingChild ? $t('onboarding.linkChild.linking') : $t('onboarding.linkChild.submit') }}
         </button>
 
         <button
           class="w-full mt-3 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
           @click="step = 'done'"
         >
-          Skip for now — I'll add them from my dashboard
+          {{ $t('onboarding.linkChild.skip') }}
         </button>
       </div>
 
@@ -1062,15 +1091,15 @@ function enterApp() {
             <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
           </svg>
         </div>
-        <h1 class="text-2xl font-bold mb-2">You're Ready</h1>
+        <h1 class="text-2xl font-bold mb-2">{{ $t('onboarding.done.heading') }}</h1>
         <p class="text-muted-foreground mb-2">
           {{ mode === 'create'
-            ? 'Your identity has been created and encrypted.'
-            : 'Your wallet has been restored and encrypted.'
+            ? $t('onboarding.done.bodyCreate')
+            : $t('onboarding.done.bodyImport')
           }}
         </p>
         <p class="text-sm text-muted-foreground mb-6">
-          All your data stays on this device, protected by your password.
+          {{ $t('onboarding.done.dataNote') }}
         </p>
         <p v-if="biometricHint" class="text-xs text-muted-foreground mb-4">
           {{ biometricHint }}
@@ -1078,25 +1107,23 @@ function enterApp() {
 
         <div v-if="isMinorLearner" class="card p-4 mb-4 border-warning bg-warning/5 text-left">
           <p class="text-sm text-warning font-medium">
-            One more step: your profile needs a parent or guardian.
-            Next you'll get an invite code to share with them — your profile
-            activates as soon as they accept it from their own device.
+            {{ $t('onboarding.done.minorNotice') }}
           </p>
         </div>
 
         <p v-if="linkedChildName" class="text-sm text-success mb-4">
-          Linked with {{ linkedChildName }} — their profile is now active.
+          {{ $t('onboarding.done.linkedWith', { name: linkedChildName }) }}
         </p>
 
         <button
           class="w-full py-2.5 px-4 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary-hover transition-colors"
           @click="enterApp"
         >
-          {{ isMinorLearner ? 'Invite My Guardian' : selectedRole === 'parent' ? 'Open My Dashboard' : 'Start Learning' }}
+          {{ isMinorLearner ? $t('onboarding.done.enterGuardian') : selectedRole === 'parent' ? $t('onboarding.done.enterParent') : $t('onboarding.done.enterLearner') }}
         </button>
 
         <p class="text-xs text-muted-foreground mt-4 italic tracking-wide">
-          I am, because we all are
+          {{ $t('onboarding.motif.ubuntu') }}
         </p>
       </div>
 

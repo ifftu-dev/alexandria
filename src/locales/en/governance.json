@@ -1,0 +1,134 @@
+{
+  "index": {
+    "title": "Community",
+    "subtitle": "Community groups that shape which skills get recognized",
+    "stats": {
+      "totalGroups": "Community Groups",
+      "active": "Active",
+      "councilSeats": "Council Seats"
+    },
+    "searchPlaceholder": "Search communities…",
+    "empty": {
+      "noMatchTitle": "No communities match your search",
+      "noMatchHint": "Try a different search term.",
+      "noneTitle": "No communities yet",
+      "noneHint": "Community groups appear automatically as new topics are added."
+    },
+    "scope": {
+      "topicAreaShort": "TA",
+      "topicShort": "TO",
+      "topicArea": "Topic area",
+      "topic": "Topic"
+    },
+    "seats": "none | {count} seat | {count} seats"
+  },
+  "detail": {
+    "breadcrumb": "Community",
+    "notFound": "Community group not found",
+    "tabs": {
+      "overview": "Overview",
+      "elections": "Elections",
+      "proposals": "Proposals"
+    },
+    "stats": {
+      "members": "none | {count} member | {count} members",
+      "council": "{filled}/{total} council",
+      "elections": "none | {count} election | {count} elections",
+      "proposals": "none | {count} proposal | {count} proposals"
+    },
+    "details": {
+      "heading": "Details",
+      "scope": "Topic type",
+      "councilSize": "Council Size",
+      "electionInterval": "Election Interval",
+      "intervalDays": "{count} days",
+      "created": "Created",
+      "topicId": "Topic ID",
+      "publicRecord": "Public record"
+    },
+    "council": {
+      "heading": "Council",
+      "seats": "{filled} / {total} seats",
+      "emptyTitle": "No council members",
+      "emptyDescription": "Run an election to fill the council.",
+      "badge": "council"
+    },
+    "members": {
+      "heading": "Members ({count})"
+    },
+    "elections": {
+      "heading": "Elections",
+      "open": "+ Start Election",
+      "emptyTitle": "No elections",
+      "emptyDescription": "Open an election to choose council members.",
+      "seats": "none | {count} seat | {count} seats",
+      "actions": {
+        "nominateSelf": "Nominate Myself",
+        "startVoting": "Start Voting",
+        "close": "Close Election",
+        "seatCouncil": "Seat the Council",
+        "accept": "Accept",
+        "vote": "Vote"
+      },
+      "nominees": "Nominees",
+      "noNominees": "No nominees yet",
+      "badges": {
+        "winner": "Winner",
+        "accepted": "Accepted",
+        "pending": "Pending"
+      },
+      "votes": "none | {count} vote | {count} votes",
+      "nominationLabel": "Nomination",
+      "votingLabel": "Voting",
+      "ends": "Ends {date}",
+      "closed": "Closed {date}",
+      "titleRequired": "Please add an election title."
+    },
+    "proposals": {
+      "heading": "Proposals",
+      "submit": "+ Submit Proposal",
+      "emptyTitle": "No proposals",
+      "emptyDescription": "Submit a proposal to suggest changes for this topic.",
+      "votingLabel": "Voting",
+      "for": "{count} for",
+      "against": "{count} against",
+      "deadline": "Deadline: {date}",
+      "actions": {
+        "approve": "Approve (Open Voting)",
+        "voteFor": "Vote For",
+        "voteAgainst": "Vote Against",
+        "resolve": "Resolve"
+      },
+      "titleRequired": "Please add a proposal title."
+    },
+    "createElection": {
+      "title": "Start Election",
+      "titleLabel": "Title",
+      "titlePlaceholder": "e.g. Q1 2026 Council Election",
+      "descriptionLabel": "Description",
+      "descriptionPlaceholder": "Purpose of this election…",
+      "seatsLabel": "Seats",
+      "submit": "Start Election"
+    },
+    "createProposal": {
+      "title": "Submit Proposal",
+      "titleLabel": "Title",
+      "titlePlaceholder": "e.g. Recognize NLP skills",
+      "descriptionLabel": "Description",
+      "descriptionPlaceholder": "Describe the proposed change…",
+      "categoryLabel": "Category",
+      "submit": "Submit Proposal"
+    }
+  },
+  "onChainBadge": {
+    "confirming": "Confirming…"
+  },
+  "deadline": {
+    "default": "Deadline",
+    "passed": "{label} passed"
+  },
+  "proficiency": {
+    "requires": "Requires",
+    "level": "proficiency"
+  }
+}

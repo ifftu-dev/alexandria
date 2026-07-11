@@ -1,0 +1,78 @@
+{
+  "primary": {
+    "home": "मुख्यपृष्ठ",
+    "opinions": "मते",
+    "community": "समुदाय",
+    "skills": "कौशल्ये",
+    "goals": "ध्येये",
+    "dashboard": "डॅशबोर्ड",
+    "myCourses": "माझे अभ्यासक्रम",
+    "inbox": "इनबॉक्स",
+    "myChildren": "माझी मुले"
+  },
+  "sections": {
+    "liveTutoring": "थेट शिकवणी",
+    "classrooms": "वर्गखोल्या",
+    "skillGraph": "कौशल्य आलेख",
+    "viewAllSessions": "सर्व सत्रे पाहा",
+    "viewAllClassrooms": "सर्व वर्गखोल्या पाहा",
+    "noSessions": "अजून एकही सत्र नाही",
+    "noClassrooms": "अजून एकही वर्गखोली नाही",
+    "memberCount": "सदस्य नाहीत | {count} सदस्य | {count} सदस्य"
+  },
+  "status": {
+    "active": "सक्रिय",
+    "ended": "संपले",
+    "cancelled": "रद्द केले"
+  },
+  "mode": {
+    "ariaLabel": "सक्रिय मोड",
+    "learner": "विद्यार्थी",
+    "instructor": "शिक्षक",
+    "learnerHint": "विद्यार्थी मोड — अभ्यासक्रम घ्या आणि प्रमाणपत्रे मिळवा",
+    "instructorHint": "शिक्षक मोड — अभ्यासक्रम तयार करा आणि कामाचे पुनरावलोकन करा"
+  },
+  "topbar": {
+    "expandSidebar": "साइडबार विस्तृत करा",
+    "collapseSidebar": "साइडबार संकुचित करा",
+    "goBack": "मागे जा",
+    "goForward": "पुढे जा",
+    "forward": "पुढे",
+    "openSearch": "शोध उघडा",
+    "searchPlaceholder": "कौशल्ये, अभ्यासक्रम, समुदाय गट शोधा…",
+    "alpha": "अल्फा",
+    "instructorMode": "शिक्षक मोड",
+    "instructorModeHint": "तुम्ही शिक्षक मोडमध्ये आहात — तयार करत आणि पुनरावलोकन करत, शिकत नाही",
+    "guardian": "पालक",
+    "guardianHint": "पालक खाते — तुमच्या मुलांच्या शिक्षणावर देखरेख"
+  },
+  "prerelease": {
+    "title": "पूर्व-प्रकाशन बिल्ड — उत्पादन वापरासाठी नाही",
+    "titleVersion": "पूर्व-प्रकाशन v{version} — उत्पादन वापरासाठी नाही"
+  },
+  "theme": {
+    "ariaLabel": "सध्याची थीम: {theme}. बदलण्यासाठी टॅप करा.",
+    "light": "उजळ",
+    "dark": "गडद",
+    "system": "सिस्टम"
+  },
+  "userMenu": {
+    "ariaLabel": "{name} साठी खाते मेनू",
+    "defaultName": "तुम्ही",
+    "anonymous": "निनावी",
+    "onThisDevice": "या डिव्हाइसवर",
+    "roleInstructor": "शिक्षक",
+    "roleInstructorLearner": "शिक्षक · विद्यार्थी मोड",
+    "myProfile": "माझे प्रोफाइल",
+    "myLearning": "माझे शिक्षण",
+    "myCredentials": "माझी प्रमाणपत्रे",
+    "sponsor": "प्रायोजक",
+    "mySkills": "माझी कौशल्ये",
+    "myReputation": "माझी प्रतिष्ठा",
+    "sentinel": "Sentinel",
+    "community": "समुदाय",
+    "settings": "सेटिंग्ज",
+    "switchUser": "वापरकर्ता बदला",
+    "lockAccount": "खाते लॉक करा"
+  }
+}

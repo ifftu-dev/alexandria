@@ -1,0 +1,118 @@
+{
+  "index": {
+    "title": "Mon graphe de compétences",
+    "subtitle": "Votre carte personnelle des compétences — construite à partir de ce que vous avez obtenu, ce que vous pouvez commencer ensuite, et ce sur quoi chaque compétence repose.",
+    "fromResume": "+ Depuis un CV"
+  },
+  "tabs": {
+    "graph": "Mon graphe",
+    "browse": "Parcourir les compétences",
+    "credentials": "Mes justificatifs"
+  },
+  "stats": {
+    "earned": "Obtenues",
+    "available": "Disponibles",
+    "locked": "Verrouillées",
+    "total": "Toutes les compétences"
+  },
+  "browse": {
+    "searchPlaceholder": "Rechercher des compétences par nom, description ou niveau…",
+    "emptyTitle": "Aucune compétence pour l'instant",
+    "emptyBody": "Les compétences sont ajoutées par la communauté. Lancez un groupe communautaire, proposez un changement et faites-le approuver pour compléter la carte des compétences.",
+    "areas": "Domaines",
+    "topics": "Sujets",
+    "levels": "Niveaux de compétence",
+    "showAll": "Tout afficher",
+    "noAreas": "Aucun domaine pour l'instant",
+    "noTopics": "Aucun sujet",
+    "noTopicsInArea": "Aucun sujet dans ce domaine",
+    "noMatches": "Aucune compétence ne correspond aux filtres actuels.",
+    "skillCount": "aucune compétence | {count} compétence | {count} compétences",
+    "prerequisitesCount": "aucun prérequis | {count} prérequis | {count} prérequis",
+    "unlocksCount": "ne débloque rien | débloque {count} compétence | débloque {count} compétences",
+    "goal": "🎯 Objectif",
+    "goalTitle": "Définir {name} comme objectif"
+  },
+  "graph": {
+    "emptyTitle": "Aucune compétence à afficher pour l'instant",
+    "emptyBody": "Terminez les évaluations des cours pour obtenir des justificatifs ; les compétences que vous débloquez apparaîtront ici.",
+    "legendEarned": "Obtenues ({count})",
+    "legendAvailable": "Disponibles ({count})",
+    "legendLocked": "Verrouillées ({count})",
+    "legendNodeSize": "La taille du point indique le niveau de compétence (Se souvenir → Créer)",
+    "summary": "{skills} compétences, {edges} liens de prérequis"
+  },
+  "credentials": {
+    "emptyTitle": "Aucun justificatif pour l'instant",
+    "emptyBody": "Les justificatifs que vous obtenez apparaîtront ici. Terminez un cours qui peut enregistrer une preuve d'achèvement vérifiée pour obtenir votre premier justificatif.",
+    "score": "score"
+  },
+  "detail": {
+    "back": "Retour à toutes les compétences",
+    "loadError": "Échec du chargement de la compétence",
+    "backToSkills": "Retour aux compétences",
+    "prerequisites": "Prérequis",
+    "noPrerequisites": "Aucun prérequis — c'est une compétence de départ.",
+    "dependents": "Mène à",
+    "noDependents": "Rien ne repose encore sur celle-ci.",
+    "related": "Compétences associées",
+    "yourCredentials": "Vos justificatifs",
+    "credEmptyTitle": "Aucun justificatif pour l'instant",
+    "credEmptyBody": "Les justificatifs que vous obtenez pour cette compétence apparaîtront ici. Terminez un cours étiqueté avec cette compétence pour en obtenir un.",
+    "scorePct": "{percent}% de score",
+    "receipt": "Enregistrement public",
+    "highest": "Votre meilleur justificatif : niveau {level}.",
+    "relation": {
+      "related": "Associée",
+      "complementary": "Complémentaire",
+      "alternative": "Alternative"
+    }
+  },
+  "bootstrap": {
+    "title": "Ajoutez vos compétences",
+    "intro": "Téléversez un CV, un relevé de notes ou un justificatif et nous vous suggérerons des compétences à revendiquer. Les documents accrédités comptent plus qu'un CV réalisé soi-même. Ce sont des points de départ — passez une évaluation pour les vérifier et les rehausser.",
+    "addedTitle": "Compétences ajoutées",
+    "addedBody": "{count} compétence ajoutée. Passez une évaluation pour la vérifier et augmenter votre confiance. | {count} compétences ajoutées. Passez une évaluation pour les vérifier et augmenter votre confiance.",
+    "viewMySkills": "Voir mes compétences",
+    "addMore": "Ajouter d'autres",
+    "docResumeLabel": "CV",
+    "docResumeHint": "Réalisé soi-même — confiance plus faible",
+    "docTranscriptLabel": "Relevé de notes académique",
+    "docTranscriptHint": "Accrédité — confiance plus élevée",
+    "docCredentialLabel": "Justificatif d'établissement",
+    "docCredentialHint": "Accrédité — confiance plus élevée",
+    "chooseFile": "Choisir un fichier",
+    "filePlaceholder": "PDF, image ou texte — conservé comme preuve",
+    "textPlaceholder": "Collez le texte du document ici (requis pour les PDF / images)…",
+    "findSkills": "Trouver des compétences",
+    "noSkillsFound": "Aucune compétence correspondante trouvée — essayez d'ajouter plus de détails.",
+    "confirmPrompt": "Confirmez les compétences à revendiquer :",
+    "strong": "forte",
+    "claim": "Revendiquer {count} compétence | Revendiquer {count} compétences"
+  },
+  "visibility": {
+    "title": "Visibilité et enseignement",
+    "subtitle": "Choisissez quelles compétences obtenues sont publiques, et marquez celles que vous enseignez.",
+    "publicCount": "{public} / {total} publiques",
+    "showAll": "Tout afficher",
+    "hideAll": "Tout masquer",
+    "loading": "Chargement de vos compétences…",
+    "empty": "Aucune compétence obtenue pour l'instant — les justificatifs que vous obtenez apparaîtront ici pour que vous les publiiez.",
+    "publicOn": "👁 Public",
+    "publicOff": "🔒 Privé",
+    "publicOnTitle": "Public — cliquez pour masquer",
+    "publicOffTitle": "Privé — cliquez pour publier",
+    "teachOn": "★ Enseigne",
+    "teachOff": "☆ Enseigner",
+    "teachOnTitle": "Vous enseignez ceci",
+    "teachOffTitle": "Marquer comme enseignée"
+  },
+  "path": {
+    "statusEarned": "Prouvée",
+    "statusAvailable": "Suivante",
+    "statusLocked": "Verrouillée",
+    "goalBadge": "★ objectif",
+    "empty": "Rien à apprendre — vous avez déjà tout prouvé dans cet objectif.",
+    "noCourse": "Aucun cours ne couvre encore ceci."
+  }
+}

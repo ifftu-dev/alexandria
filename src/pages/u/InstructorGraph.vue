@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 
 import { useLocalApi } from '@/composables/useLocalApi'
 import { useGoals } from '@/composables/useGoals'
@@ -11,6 +12,7 @@ import type { PublicProfile, PublicSkillGraph, SkillInfo, SkillGraphEdge, Userna
 
 const route = useRoute()
 const router = useRouter()
+const { t } = useI18n()
 const { invoke } = useLocalApi()
 const { goals, addGoal, removeGoal } = useGoals()
 
@@ -34,7 +36,7 @@ const registry = ref<'anchored' | 'receipted' | null>(null)
 const adding = ref(false)
 
 const name = computed(
-  () => profile.value?.display_name || profile.value?.username || 'this user',
+  () => profile.value?.display_name || profile.value?.username || t('profile.thisUser'),
 )
 
 const existingGoal = computed(() =>
@@ -124,7 +126,7 @@ async function onAddGoal() {
   adding.value = true
   try {
     await addGoal({
-      label: `${name.value} · skill graph`,
+      label: t('profile.goal.label', { name: name.value }),
       goalSkillIds: graph.value.nodes.map((n) => n.id),
       sourceDid: profile.value.did,
     })
@@ -142,18 +144,17 @@ async function onRemoveGoal() {
 <template>
   <div>
     <button class="mb-4 text-xs text-muted-foreground hover:text-foreground" @click="router.back()">
-      ‹ back
+      ‹ {{ $t('common.actions.back') }}
     </button>
 
     <div v-if="loading" class="flex justify-center py-16">
-      <AppSpinner size="lg" label="Fetching profile…" />
+      <AppSpinner size="lg" :label="$t('profile.fetching')" />
     </div>
 
     <AppAlert v-else-if="error" variant="error">
-      Couldn't load this profile: {{ error }}
+      {{ $t('profile.error.couldntLoad', { error }) }}
       <div class="mt-1 text-xs opacity-80">
-        Profiles are fetched over P2P. The owner's node must be online and reachable, and their
-        profile public.
+        {{ $t('profile.error.offlineHint') }}
       </div>
     </AppAlert>
 
@@ -167,11 +168,11 @@ async function onRemoveGoal() {
             :disabled="!graph || graph.nodes.length === 0"
             @click="onAddGoal"
           >
-            🎯 Set as goal
+            🎯 {{ $t('profile.goal.set') }}
           </AppButton>
           <template v-else>
-            <AppBadge variant="success">Goal set</AppBadge>
-            <AppButton variant="outline" size="sm" @click="onRemoveGoal">Remove</AppButton>
+            <AppBadge variant="success">{{ $t('profile.goal.isSet') }}</AppBadge>
+            <AppButton variant="outline" size="sm" @click="onRemoveGoal">{{ $t('common.actions.remove') }}</AppButton>
           </template>
         </template>
       </ProfileHeader>
@@ -179,8 +180,8 @@ async function onRemoveGoal() {
       <!-- Teaching highlight -->
       <div v-if="teachingNodes.length > 0" class="card p-4">
         <div class="mb-2 flex items-center gap-2">
-          <span class="text-sm font-semibold text-foreground">Teaches</span>
-          <span class="text-xs text-muted-foreground">— opted to instruct these</span>
+          <span class="text-sm font-semibold text-foreground">{{ $t('profile.teaches.title') }}</span>
+          <span class="text-xs text-muted-foreground">{{ $t('profile.teaches.hint') }}</span>
         </div>
         <div class="flex flex-wrap gap-2">
           <button
@@ -197,9 +198,9 @@ async function onRemoveGoal() {
       <!-- Full public DAG -->
       <div v-if="graph && graph.nodes.length > 0">
         <div class="mb-2 flex items-center justify-between">
-          <h2 class="text-base font-semibold text-foreground">Public skill graph</h2>
+          <h2 class="text-base font-semibold text-foreground">{{ $t('profile.publicSkillGraph') }}</h2>
           <span class="text-xs text-muted-foreground">
-            {{ graph.nodes.length }} skills · {{ teachingNodes.length }} taught
+            {{ $t('profile.graphStats', { skills: graph.nodes.length, taught: teachingNodes.length }) }}
           </span>
         </div>
         <SkillGraph :skills="skills" :edges="edges" @select="(id) => router.push(`/skills/${id}`)" />
@@ -207,8 +208,8 @@ async function onRemoveGoal() {
       <EmptyState
         v-else
         icon="📭"
-        title="No public skills"
-        :description="`${name} hasn't made any earned skills public yet.`"
+        :title="$t('profile.noPublicSkills.title')"
+        :description="$t('profile.noPublicSkills.description', { name })"
       />
     </div>
   </div>

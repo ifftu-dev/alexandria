@@ -1,0 +1,134 @@
+{
+  "index": {
+    "title": "समुदाय",
+    "subtitle": "कोणती कौशल्ये मान्यता पावतात हे ठरवणारे समुदाय गट",
+    "stats": {
+      "totalGroups": "समुदाय गट",
+      "active": "सक्रिय",
+      "councilSeats": "परिषद जागा"
+    },
+    "searchPlaceholder": "समुदाय शोधा…",
+    "empty": {
+      "noMatchTitle": "तुमच्या शोधाशी कोणताही समुदाय जुळत नाही",
+      "noMatchHint": "वेगळा शोध शब्द वापरून पाहा.",
+      "noneTitle": "अजून एकही समुदाय नाही",
+      "noneHint": "नवीन विषय जोडले जातात तसतसे समुदाय गट आपोआप दिसतात."
+    },
+    "scope": {
+      "topicAreaShort": "विक्षे",
+      "topicShort": "विष",
+      "topicArea": "विषय क्षेत्र",
+      "topic": "विषय"
+    },
+    "seats": "एकही नाही | {count} जागा | {count} जागा"
+  },
+  "detail": {
+    "breadcrumb": "समुदाय",
+    "notFound": "समुदाय गट सापडला नाही",
+    "tabs": {
+      "overview": "आढावा",
+      "elections": "निवडणुका",
+      "proposals": "प्रस्ताव"
+    },
+    "stats": {
+      "members": "एकही नाही | {count} सदस्य | {count} सदस्य",
+      "council": "{filled}/{total} परिषद",
+      "elections": "एकही नाही | {count} निवडणूक | {count} निवडणुका",
+      "proposals": "एकही नाही | {count} प्रस्ताव | {count} प्रस्ताव"
+    },
+    "details": {
+      "heading": "तपशील",
+      "scope": "विषय प्रकार",
+      "councilSize": "परिषद आकार",
+      "electionInterval": "निवडणूक कालावधी",
+      "intervalDays": "{count} दिवस",
+      "created": "तयार केले",
+      "topicId": "विषय आयडी",
+      "publicRecord": "सार्वजनिक नोंद"
+    },
+    "council": {
+      "heading": "परिषद",
+      "seats": "{filled} / {total} जागा",
+      "emptyTitle": "कोणतेही परिषद सदस्य नाहीत",
+      "emptyDescription": "परिषद भरण्यासाठी निवडणूक घ्या.",
+      "badge": "परिषद"
+    },
+    "members": {
+      "heading": "सदस्य ({count})"
+    },
+    "elections": {
+      "heading": "निवडणुका",
+      "open": "+ निवडणूक सुरू करा",
+      "emptyTitle": "कोणत्याही निवडणुका नाहीत",
+      "emptyDescription": "परिषद सदस्य निवडण्यासाठी निवडणूक सुरू करा.",
+      "seats": "एकही नाही | {count} जागा | {count} जागा",
+      "actions": {
+        "nominateSelf": "स्वतःला नामांकित करा",
+        "startVoting": "मतदान सुरू करा",
+        "close": "निवडणूक बंद करा",
+        "seatCouncil": "परिषद स्थापन करा",
+        "accept": "स्वीकारा",
+        "vote": "मतदान करा"
+      },
+      "nominees": "नामांकित",
+      "noNominees": "अजून कोणीही नामांकित नाही",
+      "badges": {
+        "winner": "विजेता",
+        "accepted": "स्वीकारले",
+        "pending": "प्रलंबित"
+      },
+      "votes": "एकही नाही | {count} मत | {count} मते",
+      "nominationLabel": "नामांकन",
+      "votingLabel": "मतदान",
+      "ends": "समाप्ती {date}",
+      "closed": "बंद झाले {date}",
+      "titleRequired": "कृपया निवडणुकीचे शीर्षक जोडा."
+    },
+    "proposals": {
+      "heading": "प्रस्ताव",
+      "submit": "+ प्रस्ताव सादर करा",
+      "emptyTitle": "कोणतेही प्रस्ताव नाहीत",
+      "emptyDescription": "या विषयासाठी बदल सुचवण्यासाठी प्रस्ताव सादर करा.",
+      "votingLabel": "मतदान",
+      "for": "{count} बाजूने",
+      "against": "{count} विरुद्ध",
+      "deadline": "अंतिम मुदत: {date}",
+      "actions": {
+        "approve": "मंजूर करा (मतदान सुरू)",
+        "voteFor": "बाजूने मतदान करा",
+        "voteAgainst": "विरुद्ध मतदान करा",
+        "resolve": "निकाली काढा"
+      },
+      "titleRequired": "कृपया प्रस्तावाचे शीर्षक जोडा."
+    },
+    "createElection": {
+      "title": "निवडणूक सुरू करा",
+      "titleLabel": "शीर्षक",
+      "titlePlaceholder": "उदा. Q1 2026 परिषद निवडणूक",
+      "descriptionLabel": "वर्णन",
+      "descriptionPlaceholder": "या निवडणुकीचा उद्देश…",
+      "seatsLabel": "जागा",
+      "submit": "निवडणूक सुरू करा"
+    },
+    "createProposal": {
+      "title": "प्रस्ताव सादर करा",
+      "titleLabel": "शीर्षक",
+      "titlePlaceholder": "उदा. NLP कौशल्यांना मान्यता द्या",
+      "descriptionLabel": "वर्णन",
+      "descriptionPlaceholder": "प्रस्तावित बदलाचे वर्णन करा…",
+      "categoryLabel": "श्रेणी",
+      "submit": "प्रस्ताव सादर करा"
+    }
+  },
+  "onChainBadge": {
+    "confirming": "पुष्टी करत आहे…"
+  },
+  "deadline": {
+    "default": "अंतिम मुदत",
+    "passed": "{label} उलटली"
+  },
+  "proficiency": {
+    "requires": "आवश्यक",
+    "level": "प्रवीणता"
+  }
+}

@@ -1,0 +1,206 @@
+{
+  "dashboard": {
+    "title": "Tableau de bord de l'instructeur",
+    "subtitle": "Comment progressent les apprenants dans vos cours, ainsi que ce qui attend votre relecture.",
+    "inbox": "Boîte de réception",
+    "compose": "+ Composer",
+    "statCourses": "Cours et tutoriels",
+    "statPublished": "Publiés",
+    "statEnrollments": "Inscriptions",
+    "statPendingReviews": "En attente de relecture",
+    "colCourse": "Cours",
+    "colStatus": "État",
+    "colEnrolled": "Inscrits",
+    "colCompletion": "Achèvement",
+    "colAvgScore": "Score moyen",
+    "colReviews": "Relectures",
+    "colLastActivity": "Dernière activité",
+    "emptyTitle": "Aucun cours pour l'instant",
+    "emptyDesc": "Créez votre premier cours ou tutoriel pour voir l'activité des apprenants ici."
+  },
+  "myCourses": {
+    "title": "Mes cours",
+    "subtitle": "Tout ce que vous avez créé sur cet appareil — brouillons et publiés.",
+    "addCourse": "+ Cours",
+    "addTutorial": "+ Tutoriel",
+    "emptyTitle": "Rien de créé pour l'instant",
+    "emptyDesc": "Créez votre premier cours ou tutoriel avec le compositeur.",
+    "updated": "Mis à jour le {date}"
+  },
+  "courseLearners": {
+    "eyebrow": "Progression des apprenants",
+    "fallbackTitle": "Cours",
+    "emptyTitle": "Aucune inscription pour l'instant sur cet appareil",
+    "emptyDesc": "La progression de chaque apprenant reste sur son propre appareil — cette vue montre ce que l'application a trouvé ici (inscriptions et soumissions en classe).",
+    "colLearner": "Apprenant",
+    "colStatus": "État",
+    "colProgress": "Progression",
+    "colAvgScore": "Score moyen",
+    "colTimeSpent": "Temps passé",
+    "colLastActivity": "Dernière activité",
+    "localLearner": "Apprenant local"
+  },
+  "inbox": {
+    "title": "Boîte de réception",
+    "subtitle": "Soumissions d'apprenants en attente de votre relecture, ainsi que les demandes d'adhésion aux salles de classe en attente.",
+    "tabAll": "Tout",
+    "tabSubmissions": "Soumissions",
+    "tabJoinRequests": "Demandes d'adhésion",
+    "emptyTitle": "Tout est à jour",
+    "emptyDesc": "Rien n'attend votre relecture."
+  },
+  "submissionReview": {
+    "eyebrow": "Relecture de soumission",
+    "title": "Relire la soumission",
+    "notFoundTitle": "Soumission introuvable",
+    "notFoundDesc": "Elle a peut-être déjà été relue ou supprimée.",
+    "from": "de",
+    "submittedWork": "Travail soumis",
+    "yourReview": "Votre relecture",
+    "scoreLabel": "Score — {percent}%",
+    "perSkillRatings": "Évaluations par compétence",
+    "feedback": "Retour",
+    "feedbackPlaceholder": "Ce qui était solide, ce qu'il faut améliorer…",
+    "postReview": "Publier la relecture",
+    "reviewed": "Relu",
+    "finalScore": "Score :"
+  },
+  "compose": {
+    "newCourse": "Nouveau cours",
+    "newTutorial": "Nouveau tutoriel",
+    "courseIntro": "Un cours est organisé en chapitres, chacun contenant des vidéos, des leçons, des quiz, des évaluations et des exercices pratiques.",
+    "tutorialIntro": "Un tutoriel est une courte leçon à piste unique — généralement une vidéo avec des marqueurs et un quiz facultatif.",
+    "titleLabel": "Titre",
+    "titlePlaceholder": "ex. Cryptographie pratique",
+    "descriptionLabel": "Description",
+    "descriptionPlaceholder": "Présentation en un paragraphe.",
+    "tagsLabel": "Étiquettes (séparées par des virgules)",
+    "tagsPlaceholder": "ex. sécurité, débutant",
+    "createDraft": "Créer un brouillon",
+    "needTitle": "Donnez-lui d'abord un titre.",
+    "editMeta": "Modifier le titre et la description",
+    "publish": "Publier",
+    "beforePublish": "Avant de publier",
+    "blockerNeedElement": "Ajoutez au moins un élément.",
+    "blockerUnboundPlugins": "aucun | {count} élément d'extension a encore besoin d'une extension choisie | {count} éléments d'extension ont encore besoin d'une extension choisie",
+    "publishedTitle": "Votre cours est en ligne",
+    "publishedNote": "Les apprenants peuvent le trouver et s'y inscrire dès maintenant.",
+    "fingerprintLabel": "Empreinte du contenu",
+    "sizeBytes": "aucun | {count} octet | {count} octets",
+    "nothingSelectedTitle": "Rien de sélectionné",
+    "nothingSelectedDesc": "Choisissez un élément dans le plan, ou ajoutez-en un pour commencer à construire.",
+    "confirmPublishTitle": "Publier",
+    "confirmPublishMessage": "Cela publie « {title} » pour que les apprenants puissent le trouver et s'y inscrire immédiatement. Il est signé par vous et partagé directement avec vos contacts.",
+    "confirmDeleteTitle": "Supprimer",
+    "confirmDeleteMessage": "Cela supprime définitivement le brouillon ainsi que tous ses chapitres et éléments. Cette action est irréversible.",
+    "editDetails": "Modifier les détails",
+    "notFoundTitle": "Introuvable",
+    "notFoundDesc": "Ce cours ou tutoriel n'existe pas sur cet appareil."
+  },
+  "outline": {
+    "elementTitlePlaceholder": "Titre de l'élément",
+    "chapterTitlePlaceholder": "Titre du chapitre",
+    "add": "Ajouter",
+    "addChapter": "Ajouter un chapitre",
+    "addElement": "+ Ajouter un élément",
+    "addChapterCta": "+ Ajouter un chapitre"
+  },
+  "elementTypes": {
+    "video": "Vidéo",
+    "text": "Texte",
+    "pdf": "PDF",
+    "downloadable": "Téléchargement",
+    "quiz": "Quiz",
+    "objectiveSingleMcq": "QCM à choix unique",
+    "objectiveMultiMcq": "QCM à choix multiple",
+    "subjectiveMcq": "QCM subjectif",
+    "essay": "Dissertation",
+    "interactive": "Interactif",
+    "assessment": "Évaluation",
+    "plugin": "Extension"
+  },
+  "elementEditor": {
+    "deleteElement": "Supprimer l'élément",
+    "titlePlaceholder": "Titre de l'élément",
+    "confirmDeleteTitle": "Supprimer l'élément",
+    "confirmDeleteMessage": "Cela retire l'élément et son contenu du cours. Cette action est irréversible."
+  },
+  "skillPicker": {
+    "searchPlaceholder": "Rechercher des compétences…",
+    "removeSkill": "Retirer {name}",
+    "addSkill": "Compétence"
+  },
+  "editors": {
+    "shared": {
+      "uploaded": "Téléversé"
+    },
+    "video": {
+      "fileHeading": "Fichier vidéo",
+      "minutes": "{count} min",
+      "reading": "Lecture de {size} Mo…",
+      "saving": "Enregistrement sur cet appareil…",
+      "uploadFailed": "Échec du téléversement : {error}",
+      "markersHeading": "Marqueurs de chapitre",
+      "addMarker": "+ Marqueur",
+      "saveMarkers": "Enregistrer les marqueurs",
+      "markersHint": "Les horodatages deviennent une navigation cliquable sous la vidéo.",
+      "markerTitlePlaceholder": "Titre du marqueur",
+      "startSeconds": "Début (secondes)"
+    },
+    "file": {
+      "pdfHeading": "Document PDF",
+      "downloadHeading": "Fichier téléchargeable",
+      "uploading": "Téléversement…",
+      "uploadFailed": "Échec du téléversement : {error}"
+    },
+    "quiz": {
+      "questionsHeading": "Questions",
+      "multiHint": "plusieurs bonnes réponses",
+      "singleHint": "une seule bonne réponse",
+      "addQuestion": "+ Question",
+      "saveQuiz": "Enregistrer le quiz",
+      "empty": "Aucune question pour l'instant — ajoutez la première.",
+      "questionPlaceholder": "Énoncé de la question",
+      "removeQuestion": "Retirer la question",
+      "optionPlaceholder": "Option {number}",
+      "correctAnswer": "Bonne réponse",
+      "markCorrect": "Marquer comme correcte",
+      "removeOption": "Retirer l'option",
+      "addOption": "+ Ajouter une option",
+      "errNeedQuestion": "Ajoutez au moins une question.",
+      "errNoPrompt": "La question {number} n'a pas d'énoncé.",
+      "errTooFewOptions": "La question {number} a besoin d'au moins deux options.",
+      "errNoCorrect": "La question {number} n'a aucune bonne réponse marquée."
+    },
+    "text": {
+      "heading": "Corps de la leçon (Markdown)",
+      "placeholder": "# Titre de la leçon\n\nRédigez la leçon en Markdown…"
+    },
+    "essay": {
+      "heading": "Devoir de dissertation",
+      "promptLabel": "Sujet",
+      "promptPlaceholder": "Sur quoi l'apprenant doit-il écrire ?",
+      "rubricLabel": "Grille de notation (affichée à vous lors de la relecture, et à l'apprenant dès le départ)",
+      "rubricPlaceholder": "ex. Clarté de la thèse (30 %), Preuves (40 %), Structure (30 %)",
+      "minWordsLabel": "Nombre de mots minimum (facultatif)",
+      "hint": "Les soumissions de dissertation arrivent dans votre boîte de réception d'instructeur pour une relecture et une notation manuelles.",
+      "errNeedPrompt": "La dissertation a besoin d'un sujet."
+    },
+    "json": {
+      "assessmentHeading": "Définition de l'évaluation (JSON)",
+      "interactiveHeading": "Contenu interactif (JSON)",
+      "invalidJson": "JSON invalide.",
+      "errFixJson": "Corrigez le JSON avant d'enregistrer."
+    },
+    "plugin": {
+      "heading": "Liaison d'extension",
+      "installedLabel": "Extension installée",
+      "pickOption": "Choisir une extension…",
+      "noneInstalled": "Aucune extension activée installée — ajoutez-en une dans Paramètres → Extensions.",
+      "configLabel": "Configuration de l'élément (JSON transmis à l'extension à l'initialisation — ex. une définition de problème codejudge)",
+      "invalidJson": "JSON invalide.",
+      "errPickFirst": "Choisissez d'abord une extension.",
+      "errFixConfig": "Corrigez le JSON de configuration avant d'enregistrer."
+    }
+  }
+}

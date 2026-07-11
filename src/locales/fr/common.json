@@ -1,0 +1,57 @@
+{
+  "app": {
+    "name": "Alexandria",
+    "initializing": "Initialisation…",
+    "tagline": "Je suis, parce que nous sommes tous"
+  },
+  "actions": {
+    "save": "Enregistrer",
+    "cancel": "Annuler",
+    "close": "Fermer",
+    "confirm": "Confirmer",
+    "continue": "Continuer",
+    "back": "Retour",
+    "next": "Suivant",
+    "retry": "Réessayer",
+    "copy": "Copier",
+    "copied": "Copié",
+    "delete": "Supprimer",
+    "remove": "Retirer",
+    "edit": "Modifier",
+    "add": "Ajouter",
+    "done": "Terminé",
+    "search": "Rechercher",
+    "loading": "Chargement…"
+  },
+  "status": {
+    "connected": "Connecté",
+    "offline": "Hors ligne",
+    "connecting": "Connexion…",
+    "verified": "Vérifié",
+    "pending": "Confirmation…",
+    "savedOnDevice": "Enregistré sur cet appareil"
+  },
+  "advanced": {
+    "toggle": "Détails avancés",
+    "hint": "Détails techniques pour le support et les utilisateurs avancés."
+  },
+  "language": {
+    "label": "Langue",
+    "system": "Selon l'appareil",
+    "systemHint": "Suivre la langue de votre appareil."
+  },
+  "unreviewedBanner": {
+    "message": "Cette traduction est générée automatiquement et n'a pas encore été relue. Quelque chose semble incorrect ? Vous pouvez revenir à l'anglais dans les Paramètres.",
+    "dismiss": "J'ai compris"
+  },
+  "empty": {
+    "title": "Rien ici pour l'instant"
+  },
+  "infoTip": {
+    "label": "Plus d'informations"
+  },
+  "provenance": {
+    "exampleLabel": "Exemple généré par IA",
+    "exampleTooltip": "Ceci est un contenu d'exemple généré par IA, ajouté pour la démonstration. Ce n'est pas un vrai cours, tutoriel ou avis."
+  }
+}

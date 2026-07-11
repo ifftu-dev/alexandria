@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { AppButton } from '@/components/ui'
 import { useLocalApi } from '@/composables/useLocalApi'
@@ -13,6 +14,7 @@ import type { IntegritySession } from '@/types'
 // is filed under the Sentinel DAO with content_cid = blob hash.
 
 const router = useRouter()
+const { t } = useI18n()
 const { invoke } = useLocalApi()
 const { testBlobAgainstClassifier } = useSentinel()
 
@@ -98,12 +100,12 @@ function onFileChosen(event: Event) {
       const mk = String(obj.model_kind ?? '')
       const lb = String(obj.label ?? '')
       const samples = Array.isArray(obj.samples) ? obj.samples : null
-      if (!samples) throw new Error('samples must be a JSON array')
-      if (samples.length < 20) throw new Error(`need at least 20 samples (got ${samples.length})`)
-      if (mk === 'face') throw new Error('face kind is forbidden for adversarial priors')
-      if (mk !== 'keystroke' && mk !== 'mouse') throw new Error(`unsupported model_kind: ${mk}`)
-      if (sv !== 1) throw new Error(`unsupported schema_version: ${sv}`)
-      if (!lb || lb.trim().length === 0) throw new Error('label must be non-empty')
+      if (!samples) throw new Error(t('sentinel.propose.errors.samplesArray'))
+      if (samples.length < 20) throw new Error(t('sentinel.propose.errors.tooFew', { count: samples.length }))
+      if (mk === 'face') throw new Error(t('sentinel.propose.errors.faceForbidden'))
+      if (mk !== 'keystroke' && mk !== 'mouse') throw new Error(t('sentinel.propose.errors.unsupportedKind', { kind: mk }))
+      if (sv !== 1) throw new Error(t('sentinel.propose.errors.unsupportedSchema', { schema: sv }))
+      if (!lb || lb.trim().length === 0) throw new Error(t('sentinel.propose.errors.emptyLabel'))
       parsedBlob.value = { schema_version: sv, model_kind: mk, label: lb, sampleCount: samples.length }
 
       // Run the local classifier against the blob to verify it's
@@ -122,7 +124,7 @@ function onFileChosen(event: Event) {
       parseError.value = e instanceof Error ? e.message : String(e)
     }
   }).catch(e => {
-    parseError.value = `file read failed: ${String(e)}`
+    parseError.value = t('sentinel.propose.errors.readFailed', { error: String(e) })
   })
 }
 
@@ -131,7 +133,7 @@ const classifierVerdict = computed<{ tone: 'success' | 'warning' | 'info'; messa
   if (classifierCheckStatus.value === 'untrained') {
     return {
       tone: 'info',
-      message: 'Local classifier not trained yet — cannot self-check. Train Sentinel first for the adversarial-ness verdict.',
+      message: t('sentinel.propose.verdict.untrained'),
     }
   }
   const c = classifierCheck.value!
@@ -140,18 +142,18 @@ const classifierVerdict = computed<{ tone: 'success' | 'warning' | 'info'; messa
   if (c.meanScore >= 0.65 && c.adversarialFraction >= 0.5) {
     return {
       tone: 'success',
-      message: `Your classifier flags this strongly (mean ${pct}%, ${adv}% of samples above threshold). Good adversarial prior.`,
+      message: t('sentinel.propose.verdict.strong', { pct, adv }),
     }
   }
   if (c.meanScore < 0.35) {
     return {
       tone: 'warning',
-      message: `Your classifier reads this as near-normal (mean ${pct}%). Ratifying could teach the model to flag honest users — reconsider before submitting.`,
+      message: t('sentinel.propose.verdict.weak', { pct }),
     }
   }
   return {
     tone: 'warning',
-    message: `Borderline: mean ${pct}%, ${adv}% adversarial. Prior may be weak or mixed — inspect the samples.`,
+    message: t('sentinel.propose.verdict.borderline', { pct, adv }),
   }
 })
 
@@ -206,25 +208,25 @@ function reset() {
         <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
           <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
         </svg>
-        Back to Sentinel
+        {{ $t('sentinel.propose.back') }}
       </button>
-      <h1 class="text-xl font-bold text-foreground">Propose an adversarial prior</h1>
+      <h1 class="text-xl font-bold text-foreground">{{ $t('sentinel.propose.title') }}</h1>
       <p class="mt-1 text-sm text-muted-foreground">
-        Submit a labeled cheat pattern for Sentinel DAO ratification. Ratified priors train every client's local
-        anti-cheat model as negative examples. Face-kind patterns are not accepted.
+        {{ $t('sentinel.propose.subtitle') }}
       </p>
     </div>
 
     <!-- Success state -->
     <div v-if="submittedProposalId" class="rounded-xl border border-emerald-500/40 bg-emerald-500/10 p-5">
-      <h2 class="text-sm font-semibold text-emerald-700 dark:text-emerald-400">Proposal submitted</h2>
+      <h2 class="text-sm font-semibold text-emerald-700 dark:text-emerald-400">{{ $t('sentinel.propose.submittedTitle') }}</h2>
       <p class="mt-1 text-xs text-muted-foreground">
-        Proposal ID: <code class="font-mono">{{ submittedProposalId }}</code>. Sentinel DAO members will vote on
-        ratification; check the governance dashboard for progress.
+        <i18n-t keypath="sentinel.propose.submittedBody" tag="span">
+          <template #id><code class="font-mono">{{ submittedProposalId }}</code></template>
+        </i18n-t>
       </p>
       <div class="mt-4 flex gap-2">
-        <AppButton size="sm" variant="secondary" @click="reset">Propose another</AppButton>
-        <AppButton size="sm" @click="router.push('/dashboard/sentinel')">Done</AppButton>
+        <AppButton size="sm" variant="secondary" @click="reset">{{ $t('sentinel.propose.another') }}</AppButton>
+        <AppButton size="sm" @click="router.push('/dashboard/sentinel')">{{ $t('common.actions.done') }}</AppButton>
       </div>
     </div>
 
@@ -232,9 +234,9 @@ function reset() {
     <template v-else>
       <!-- Kind -->
       <div class="card p-5 space-y-3">
-        <h2 class="text-sm font-semibold text-foreground">1. Model kind</h2>
+        <h2 class="text-sm font-semibold text-foreground">{{ $t('sentinel.propose.step1') }}</h2>
         <p class="text-xs text-muted-foreground">
-          Which local model should learn to flag this pattern? Face is never federated.
+          {{ $t('sentinel.propose.step1Body') }}
         </p>
         <div class="flex gap-2">
           <label
@@ -253,9 +255,9 @@ function reset() {
 
       <!-- Label -->
       <div class="card p-5 space-y-3">
-        <h2 class="text-sm font-semibold text-foreground">2. Label</h2>
+        <h2 class="text-sm font-semibold text-foreground">{{ $t('sentinel.propose.step2') }}</h2>
         <p class="text-xs text-muted-foreground">
-          What kind of attack is this? Pick a known label or type a custom one.
+          {{ $t('sentinel.propose.step2Body') }}
         </p>
         <select
           v-model="labelChoice"
@@ -266,17 +268,18 @@ function reset() {
         <input
           v-model="labelCustom"
           type="text"
-          placeholder="Or enter a custom label (overrides selection above)"
+          :placeholder="$t('sentinel.propose.labelPlaceholder')"
           class="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
         />
       </div>
 
       <!-- Blob upload -->
       <div class="card p-5 space-y-3">
-        <h2 class="text-sm font-semibold text-foreground">3. Labeled-samples blob</h2>
+        <h2 class="text-sm font-semibold text-foreground">{{ $t('sentinel.propose.step3') }}</h2>
         <p class="text-xs text-muted-foreground">
-          JSON file with schema_version=1, model_kind matching the choice above, a non-empty label, and at least
-          20 samples. See <code class="font-mono">docs/sentinel-adversarial-priors.md</code> for the schema.
+          <i18n-t keypath="sentinel.propose.step3Body" tag="span">
+            <template #doc><code class="font-mono">docs/sentinel-adversarial-priors.md</code></template>
+          </i18n-t>
         </p>
         <input
           type="file"
@@ -285,7 +288,9 @@ function reset() {
           @change="onFileChosen"
         />
         <div v-if="fileName" class="text-xs text-muted-foreground">
-          Selected: <code class="font-mono">{{ fileName }}</code>
+          <i18n-t keypath="sentinel.propose.selected" tag="span">
+            <template #name><code class="font-mono">{{ fileName }}</code></template>
+          </i18n-t>
         </div>
         <div v-if="parseError" class="rounded-md bg-red-500/10 px-3 py-2 text-xs text-red-600 dark:text-red-400">
           {{ parseError }}
@@ -294,9 +299,14 @@ function reset() {
           v-else-if="parsedBlob"
           class="rounded-md bg-emerald-500/10 px-3 py-2 text-xs text-emerald-700 dark:text-emerald-400 space-y-0.5"
         >
-          <div>Parsed OK — {{ parsedBlob.sampleCount }} samples, label <code class="font-mono">{{ parsedBlob.label }}</code>.</div>
+          <div>
+            <i18n-t keypath="sentinel.propose.parsedOk" tag="span">
+              <template #count>{{ parsedBlob.sampleCount }}</template>
+              <template #label><code class="font-mono">{{ parsedBlob.label }}</code></template>
+            </i18n-t>
+          </div>
           <div v-if="parsedBlob.model_kind !== modelKind" class="text-amber-600 dark:text-amber-400">
-            Warning: blob model_kind is "{{ parsedBlob.model_kind }}" but you selected "{{ modelKind }}". Change one before submitting.
+            {{ $t('sentinel.propose.kindMismatch', { fileKind: parsedBlob.model_kind, selectedKind: modelKind }) }}
           </div>
         </div>
         <!-- Classifier self-check verdict (follow-up #6) -->
@@ -309,23 +319,22 @@ function reset() {
             'bg-muted/60 text-muted-foreground': classifierVerdict.tone === 'info',
           }"
         >
-          <div class="font-medium">Classifier self-check</div>
+          <div class="font-medium">{{ $t('sentinel.propose.selfCheckTitle') }}</div>
           <div class="mt-0.5">{{ classifierVerdict.message }}</div>
         </div>
       </div>
 
       <!-- Source session (optional) -->
       <div class="card p-5 space-y-3">
-        <h2 class="text-sm font-semibold text-foreground">4. Source session (optional)</h2>
+        <h2 class="text-sm font-semibold text-foreground">{{ $t('sentinel.propose.step4') }}</h2>
         <p class="text-xs text-muted-foreground">
-          If you extracted these samples from one of your assessment sessions, pick it here. Flagged or suspended
-          sessions aren't eligible — attacker data must not shape the classifier. The backend re-checks regardless.
+          {{ $t('sentinel.propose.step4Body') }}
         </p>
         <select
           v-model="sourceSessionId"
           class="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
         >
-          <option value="">None</option>
+          <option value="">{{ $t('sentinel.propose.sessionNone') }}</option>
           <option
             v-for="s in eligibleSessions"
             :key="s.id"
@@ -338,17 +347,17 @@ function reset() {
 
       <!-- Proposal metadata -->
       <div class="card p-5 space-y-3">
-        <h2 class="text-sm font-semibold text-foreground">5. Proposal summary</h2>
+        <h2 class="text-sm font-semibold text-foreground">{{ $t('sentinel.propose.step5') }}</h2>
         <input
           v-model="title"
           type="text"
-          placeholder="Short title shown to voters"
+          :placeholder="$t('sentinel.propose.titlePlaceholder')"
           class="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
         />
         <textarea
           v-model="description"
           rows="3"
-          placeholder="Why should this be ratified? How was the data collected?"
+          :placeholder="$t('sentinel.propose.descriptionPlaceholder')"
           class="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
         />
       </div>
@@ -358,9 +367,9 @@ function reset() {
         {{ submitError }}
       </div>
       <div class="flex justify-end gap-2">
-        <AppButton variant="secondary" size="sm" @click="router.push('/dashboard/sentinel')">Cancel</AppButton>
+        <AppButton variant="secondary" size="sm" @click="router.push('/dashboard/sentinel')">{{ $t('common.actions.cancel') }}</AppButton>
         <AppButton size="sm" :disabled="!canSubmit" :loading="submitting" @click="submit">
-          Submit proposal
+          {{ $t('sentinel.propose.submit') }}
         </AppButton>
       </div>
     </template>

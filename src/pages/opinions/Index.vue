@@ -91,16 +91,16 @@ onMounted(async () => {
   <div>
     <div class="mb-6 flex items-center justify-between">
       <div>
-        <h1 class="text-xl font-bold">Field Commentary</h1>
+        <h1 class="text-xl font-bold">{{ $t('opinions.index.title') }}</h1>
         <p class="text-sm text-muted-foreground">
-          Opinions from educators credentialed in each field. Chronological, not ranked.
+          {{ $t('opinions.index.subtitle') }}
         </p>
       </div>
       <AppButton variant="primary" size="sm" @click="$router.push('/opinions/new')">
         <svg class="w-4 h-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
           <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
         </svg>
-        Post Opinion
+        {{ $t('opinions.index.post') }}
       </AppButton>
     </div>
 
@@ -116,7 +116,7 @@ onMounted(async () => {
         ]"
         @click="setField('')"
       >
-        All <span class="ml-1 opacity-70">{{ opinions.length }}</span>
+        {{ $t('opinions.index.filterAll') }} <span class="ml-1 opacity-70">{{ opinions.length }}</span>
       </button>
       <button
         v-for="f in fields"
@@ -147,11 +147,11 @@ onMounted(async () => {
     <!-- Empty state -->
     <EmptyState
       v-else-if="grouped.length === 0"
-      title="No opinions yet"
+      :title="$t('opinions.index.emptyTitle')"
       :description="
         selectedField
-          ? 'No opinions in this subject field yet.'
-          : 'Educators credentialed in a subject can post opinion videos here. Be the first.'
+          ? $t('opinions.index.emptyFieldDescription')
+          : $t('opinions.index.emptyAllDescription')
       "
     />
 
@@ -161,7 +161,7 @@ onMounted(async () => {
         <h2 class="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-3">
           {{ group.name }}
           <span class="ml-1 text-xs font-normal opacity-60">
-            · {{ group.opinions.length }} {{ group.opinions.length === 1 ? 'opinion' : 'opinions' }}
+            · {{ $t('opinions.index.opinionCount', { count: group.opinions.length }, group.opinions.length) }}
           </span>
         </h2>
 
@@ -183,7 +183,7 @@ onMounted(async () => {
                   {{ op.title }}
                 </span>
                 <AppBadge v-if="op.duration_seconds" variant="secondary">
-                  {{ Math.round(op.duration_seconds / 60) }} min
+                  {{ $t('opinions.index.minutes', { count: Math.round(op.duration_seconds / 60) }) }}
                 </AppBadge>
                 <ProvenanceBadge :provenance="op.provenance" />
               </div>

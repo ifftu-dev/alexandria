@@ -85,21 +85,21 @@ onMounted(async () => {
 <template>
   <div>
     <div v-if="loading" class="flex justify-center py-16">
-      <AppSpinner size="lg" label="Loading your profile…" />
+      <AppSpinner size="lg" :label="$t('profile.loadingProfile')" />
     </div>
 
     <EmptyState
       v-else-if="!profile"
       icon="🔐"
-      title="Profile unavailable"
-      description="Unlock your profile to view it."
+      :title="$t('profile.unavailable.title')"
+      :description="$t('profile.unavailable.description')"
     />
 
     <div v-else class="space-y-6">
       <ProfileHeader :profile="profile" :is-own="true" :visibility="identity?.visibility ?? 'public'" :registry="registry">
         <template #actions>
           <AppButton size="sm" variant="outline" @click="router.push('/settings/account')">
-            ✏️ Edit profile
+            ✏️ {{ $t('profile.actions.editProfile') }}
           </AppButton>
         </template>
       </ProfileHeader>
@@ -108,31 +108,31 @@ onMounted(async () => {
       <p class="text-xs text-muted-foreground">
         {{
           identity?.visibility === 'private'
-            ? 'Your profile is private — other users cannot fetch it, and your username is not discoverable.'
-            : 'Your profile is public — anyone can view it by your username or DID.'
+            ? $t('profile.visibility.private')
+            : $t('profile.visibility.public')
         }}
-        Manage this in
+        {{ $t('profile.visibility.manageIn') }}
         <button class="text-primary hover:underline" @click="router.push('/settings/account')">
-          Settings → Account
+          {{ $t('profile.visibility.settingsAccount') }}
         </button>.
       </p>
 
       <!-- Impact band -->
       <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <button class="stat-card" @click="router.push('/dashboard/reputation')">
-          <span class="stat-label">Teaching impact</span>
+        <button class="stat-card" @click="router.push('/reputation')">
+          <span class="stat-label">{{ $t('profile.stats.teachingImpact') }}</span>
           <span class="stat-value">{{ teachingImpact }}</span>
         </button>
-        <button class="stat-card" @click="router.push('/dashboard/reputation')">
-          <span class="stat-label">Learning impact</span>
+        <button class="stat-card" @click="router.push('/reputation')">
+          <span class="stat-label">{{ $t('profile.stats.learningImpact') }}</span>
           <span class="stat-value">{{ learningImpact }}</span>
         </button>
         <button class="stat-card" @click="router.push('/skills')">
-          <span class="stat-label">Skills proven</span>
+          <span class="stat-label">{{ $t('profile.stats.skillsProven') }}</span>
           <span class="stat-value">{{ graph?.nodes.length ?? 0 }}</span>
         </button>
         <button class="stat-card" @click="router.push('/skills')">
-          <span class="stat-label">Public skills</span>
+          <span class="stat-label">{{ $t('profile.stats.publicSkills') }}</span>
           <span class="stat-value">{{ graph?.nodes.filter((n) => n.public).length ?? 0 }}</span>
         </button>
       </div>
@@ -140,9 +140,9 @@ onMounted(async () => {
       <!-- Skill chips -->
       <div v-if="graph && graph.nodes.length > 0" class="card p-4">
         <div class="mb-2 flex items-center justify-between">
-          <span class="text-sm font-semibold text-foreground">Your skill graph</span>
+          <span class="text-sm font-semibold text-foreground">{{ $t('profile.skillGraph.title') }}</span>
           <AppButton variant="ghost" size="xs" @click="router.push('/skills')">
-            Manage visibility ▸
+            {{ $t('profile.skillGraph.manageVisibility') }}
           </AppButton>
         </div>
         <div class="flex flex-wrap gap-2">

@@ -1,0 +1,89 @@
+{
+  "index": {
+    "title": "کلاس رومز",
+    "subtitle": "مل کر سیکھنے کے لیے گروپ جگہیں",
+    "loading": "کلاس رومز لوڈ ہو رہے ہیں…",
+    "emptyTitle": "ابھی کوئی کلاس روم نہیں",
+    "emptyBody": "گروپ سیکھنے کی جگہ شروع کرنے کے لیے کلاس روم بنائیں، یا رسائی کی درخواست دے کر کسی میں شامل ہوں۔",
+    "createFirst": "اپنا پہلا کلاس روم بنائیں"
+  },
+  "actions": {
+    "create": "بنائیں",
+    "createClassroom": "کلاس روم بنائیں"
+  },
+  "create": {
+    "title": "کلاس روم بنائیں",
+    "nameLabel": "کلاس روم کا نام",
+    "namePlaceholder": "مثلاً اعلیٰ ریاضی",
+    "descriptionLabel": "تفصیل",
+    "descriptionPlaceholder": "یہ کلاس روم کس بارے میں ہے؟",
+    "iconLabel": "آئیکن ایموجی"
+  },
+  "members": {
+    "count": "کوئی نہیں | {count} رکن | {count} ارکان",
+    "heading": "ارکان"
+  },
+  "roles": {
+    "member": "رکن",
+    "moderator": "نگران",
+    "ownerSection": "مالک",
+    "moderatorSection": "نگران",
+    "memberSection": "ارکان"
+  },
+  "requests": {
+    "title": "شمولیت کی درخواستیں",
+    "empty": "کوئی زیرِ التوا شمولیت درخواست نہیں",
+    "approve": "منظور کریں",
+    "deny": "مسترد کریں",
+    "link": "درخواستیں"
+  },
+  "settings": {
+    "title": "کلاس روم کی ترتیبات",
+    "general": "عمومی",
+    "inviteCode": "دعوتی کوڈ",
+    "inviteHint": "یہ کوڈ دوسروں کے ساتھ شیئر کریں تاکہ وہ آپ کا کلاس روم تلاش کر کے شمولیت کی درخواست دے سکیں۔",
+    "membersHeading": "ارکان",
+    "kick": "ہٹا دیں",
+    "dangerZone": "خطرناک علاقہ",
+    "archiveTitle": "اس کلاس روم کو محفوظ خانے میں رکھیں",
+    "archiveBody": "کلاس روم چھپا دیا جائے گا اور اسے مزید پیغامات موصول نہیں ہوں گے۔",
+    "archive": "محفوظ خانہ",
+    "leaveTitle": "یہ کلاس روم چھوڑ دیں",
+    "leaveBody": "دوبارہ شامل ہونے کے لیے آپ کو دوبارہ رسائی کی درخواست دینی ہوگی۔",
+    "leave": "چھوڑ دیں",
+    "confirmKick": "کیا آپ واقعی اس رکن کو ہٹانا چاہتے ہیں؟",
+    "confirmArchive": "اس کلاس روم کو محفوظ خانے میں رکھیں؟ یہ واپس نہیں ہو سکتا۔",
+    "confirmLeave": "یہ کلاس روم چھوڑ دیں؟"
+  },
+  "nav": {
+    "settings": "ترتیبات"
+  },
+  "call": {
+    "active": "صوتی کال جاری ہے",
+    "join": "کال میں شامل ہوں",
+    "start": "کال شروع کریں"
+  },
+  "channels": {
+    "heading": "چینلز",
+    "add": "چینل شامل کریں",
+    "announcementBadge": "اعلانی چینل",
+    "selectShort": "ایک چینل منتخب کریں",
+    "selectToChat": "بات چیت شروع کرنے کے لیے ایک چینل منتخب کریں",
+    "createTitle": "چینل بنائیں",
+    "namePlaceholder": "چینل-نام",
+    "typeText": "متنی چینل",
+    "typeAnnouncement": "اعلانی چینل",
+    "fallbackName": "چینل"
+  },
+  "messages": {
+    "empty": "ابھی کوئی پیغام نہیں۔ گفتگو شروع کریں!",
+    "loadMore": "پرانے پیغامات لوڈ کریں",
+    "deleted": "[حذف شدہ]",
+    "inputPlaceholder": "پیغام #{channel}",
+    "inputHint": "بھیجنے کے لیے Enter · نئی سطر کے لیے Shift+Enter",
+    "send": "بھیجیں"
+  },
+  "common": {
+    "loading": "لوڈ ہو رہا ہے…"
+  }
+}

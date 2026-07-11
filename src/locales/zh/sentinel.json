@@ -1,0 +1,450 @@
+{
+  "title": "Sentinel",
+  "subtitle": "让你的测评保持诚信",
+  "actions": {
+    "resetProfile": "重置设置",
+    "proposeCheat": "提议作弊模式",
+    "recalibrate": "重新设置",
+    "train": "设置 Sentinel",
+    "open": "打开",
+    "runTest": "运行测试",
+    "openCommunity": "打开社区"
+  },
+  "tabs": {
+    "overview": "概览",
+    "sessions": "会话",
+    "signals": "信号与权重",
+    "profile": "设置与标记"
+  },
+  "privacy": {
+    "title": "隐私优先的设计",
+    "body": "你的原始摄像头、按键和鼠标数据绝不会离开此设备。这里只保留普通分数（0 到 1），并用于你的记录。Sentinel 所学到的内容都留在此浏览器中，你可以随时删除。"
+  },
+  "overview": {
+    "totalSessions": "会话总数",
+    "avgIntegrity": "平均诚信度",
+    "avgConsistency": "平均一致性",
+    "cleanRate": "无异常率"
+  },
+  "breakdown": {
+    "title": "你的会话结果如何",
+    "empty": "还没有会话。完成测评后，结果会显示在这里。",
+    "clean": "无异常",
+    "flagged": "已标记",
+    "suspended": "已暂停"
+  },
+  "community": {
+    "title": "Sentinel 社区",
+    "active": "活跃",
+    "pending": "正在起步",
+    "description": "审核每份 Sentinel 副本都从中学习的共享作弊模式库。",
+    "noCouncil": "尚未选出理事会。在 Alexandria 主社区中提议第一个 Sentinel 理事会，以解锁批准和准确性测试。",
+    "members": "理事会成员"
+  },
+  "holdout": {
+    "title": "准确性测试集",
+    "sets": "无测试集 | {count} 个测试集 | {count} 个测试集",
+    "description": "社区保留的私密样本，用于检查 Sentinel 的准确度以及误报的频率。样本分散在各理事会成员处——运行一次测试需要其中 {threshold} 位的密钥。",
+    "empty": "尚未添加测试集。理事会成员使用 {command} 添加一个。",
+    "run": "运行测试"
+  },
+  "cheatCard": {
+    "title": "Sentinel 作弊测试",
+    "description": "让虚构的作弊模式通过当前检测器运行。它会为每一个报告分数和结果，无需你输入任何内容。仅供检查——不能替代真正的准确性测试。",
+    "open": "打开"
+  },
+  "engine": {
+    "title": "Sentinel 状态",
+    "calibrated": "已设置",
+    "notCalibrated": "未设置",
+    "emptyTitle": "尚未设置",
+    "emptyBody": "运行快速设置，让 Sentinel 学习你如何打字和移动。",
+    "typing": "打字",
+    "mouse": "鼠标",
+    "aiModels": "智能模型",
+    "wpm": "每分钟词数",
+    "ready": "{count}/3 就绪"
+  },
+  "sessions": {
+    "emptyTitle": "还没有会话",
+    "emptyBody": "会话会在你参加测评时自动创建。完成一次即可在此看到。",
+    "emptyHint": "Sentinel 在测评期间实时监测作弊迹象。",
+    "copyTitle": "复制会话 ID",
+    "inProgress": "进行中",
+    "scoreHigh": "高",
+    "scoreMedium": "中",
+    "scoreLow": "低"
+  },
+  "signals": {
+    "title": "诚信度分数是如何构成的",
+    "description": "你的整体诚信度分数融合了这些信号。所有测量都在你的设备上完成。",
+    "distribution": "权重分布",
+    "items": {
+      "typingConsistency": {
+        "name": "打字节奏",
+        "description": "检查你的打字与 Sentinel 从你身上学到的节奏有多接近——你按键的时长以及按键之间的间隔。"
+      },
+      "mouseConsistency": {
+        "name": "鼠标移动",
+        "description": "检查你的鼠标速度和运动轨迹与 Sentinel 从你身上学到的模式有多接近。"
+      },
+      "isHuman": {
+        "name": "类人的移动",
+        "description": "真人移动时会有自然的变化。完美平稳、机器般的运动会被标记。"
+      },
+      "tabSwitches": {
+        "name": "停留在页面上",
+        "description": "监测你切换离开测评的频率。频繁切换会被标记。"
+      },
+      "pasteEvents": {
+        "name": "粘贴",
+        "description": "统计你粘贴了多少文本。粘贴大段文本会被标记。"
+      },
+      "devtools": {
+        "name": "开发者工具",
+        "description": "察觉浏览器的开发者工具何时被打开。"
+      },
+      "facePresent": {
+        "name": "摄像头检查",
+        "description": "如果你选择开启摄像头，Sentinel 每隔几秒检查一次你是否仍在。"
+      },
+      "aiPasteAnomaly": {
+        "name": "Sentinel 粘贴检测器",
+        "description": "针对粘贴答案和打字机器人的额外检查。仅供参考，且只在智能评分开启时生效。"
+      }
+    }
+  },
+  "flags": {
+    "title": "什么会引发标记",
+    "description": "当某个信号超过限值时会自动引发标记。会话的结果取决于出现了多少标记以及它们有多严重。",
+    "triggerLabel": "引发条件：{trigger}",
+    "items": {
+      "tabSwitching": {
+        "description": "切换离开过于频繁",
+        "trigger": "一次检查中切换超过 10 次"
+      },
+      "pasteDetected": {
+        "description": "粘贴了大段文本",
+        "trigger": "粘贴超过 500 个字符"
+      },
+      "devtoolsDetected": {
+        "description": "打开了浏览器开发者工具",
+        "trigger": "开发者工具检查结果为阳性"
+      },
+      "botSuspected": {
+        "description": "移动看起来是自动化的",
+        "trigger": "鼠标运动几乎没有自然变化"
+      },
+      "noFace": {
+        "description": "摄像头中未见人脸",
+        "trigger": "在启用摄像头的会话中人脸缺失"
+      },
+      "multipleFaces": {
+        "description": "摄像头中出现不止一张人脸",
+        "trigger": "一次检查中出现不止一张人脸"
+      },
+      "multiAccount": {
+        "description": "此设备关联了不止一个账户",
+        "trigger": "同一设备在不止一个账户上被发现"
+      },
+      "lowIntegrity": {
+        "description": "诚信度分数跌破安全线",
+        "trigger": "整体分数低于 0.40"
+      },
+      "behaviorShift": {
+        "description": "行为大幅偏离你的常态模式",
+        "trigger": "匹配分数低于 0.35"
+      }
+    }
+  },
+  "profile": {
+    "trainingTitle": "智能模型状态",
+    "keystrokeModel": "打字模型",
+    "mouseModel": "鼠标模型",
+    "trained": "已训练",
+    "untrained": "未训练",
+    "epochs": "轮数",
+    "samples": "样本",
+    "loss": "误差",
+    "note": "Sentinel 所学到的内容以加密方式存储在此设备上。重新运行设置即可再次训练，或重置以将其彻底清除。",
+    "behavioralTitle": "你的模式",
+    "typing": "打字",
+    "mouse": "鼠标",
+    "aiModels": "智能模型",
+    "avgDwell": "平均按键时长",
+    "avgFlight": "平均间隔",
+    "speed": "速度",
+    "velocity": "速度",
+    "acceleration": "加速度",
+    "clickPrecision": "点击精度",
+    "keystrokeModelShort": "打字模型",
+    "mouseModelShort": "鼠标模型",
+    "faceCheck": "人脸检查",
+    "ready": "就绪",
+    "pending": "待处理",
+    "enrolled": "已设置",
+    "notSet": "未设置",
+    "errorSamples": "误差 / 样本",
+    "setupProgress": "设置进度",
+    "noAiData": "无智能模型数据",
+    "noProfileTitle": "尚未设置",
+    "noProfileBody": "运行快速设置，让 Sentinel 学习你如何打字和移动。"
+  },
+  "outcomes": {
+    "title": "结果是如何判定的",
+    "clean": "无异常",
+    "cleanRule": "常见结果——没有严重标记，警告少于 3 项，诚信度 0.40 或更高。",
+    "flagged": "已标记",
+    "flaggedRule": "1 项严重标记，或 3 项及以上警告，或诚信度低于 0.40——将交由审阅者查看。",
+    "suspended": "已暂停",
+    "suspendedRule": "2 项及以上严重标记，或 1 项严重标记加 2 项警告——结果可能被作废。"
+  },
+  "aiScoring": {
+    "title": "智能评分（仅供参考）",
+    "description": "让打字、鼠标、人脸和粘贴模型对诚信度分数施加一点小幅调整。默认关闭——在与真实数据核对之前，智能信号仅供参考。",
+    "enabled": "开",
+    "disabled": "关"
+  },
+  "pasteClassifier": {
+    "title": "Sentinel 粘贴检测器",
+    "description": "在智能评分开启时加入粘贴检测器信号。如果它标记了太多诚实的答案，可将其关闭；其他智能信号会继续工作。",
+    "loadedModel": "已加载的检测器",
+    "activeModel": "社区检测器",
+    "bundledFallback": "内置默认"
+  },
+  "reset": {
+    "title": "清除你的设置",
+    "description": "从此设备删除 Sentinel 对你的了解。之后需要重新设置，它才能监测未来的测评。",
+    "button": "重置设置"
+  },
+  "howItWorks": {
+    "title": "Sentinel 如何工作",
+    "body": "Sentinel 使用两类检查：可靠的基于规则的检查（决定性检查）和智能的按用户定制的检查（仅供参考）。在测评期间，它会在 15 到 45 秒之间的随机时刻悄悄拍摄快照。你的诚信度和一致性分数来自上述加权信号，结果取决于出现了多少标记以及它们有多严重。每一次被确认的作弊都会降低相关技能的信任度。"
+  },
+  "cheatTest": {
+    "title": "Sentinel 作弊测试",
+    "subtitle": "让虚构的作弊模式通过当前检测器运行，查看分数。仅供检查——并非真正的准确性测试。",
+    "loadedModel": "已加载的检测器",
+    "streamLength": "样本长度",
+    "seed": "种子",
+    "run": "运行所有模式",
+    "summary": "汇总",
+    "caught": "捕获的作弊",
+    "falseAlarms": "误报",
+    "catchRate": "捕获率",
+    "falseAlarmRate": "误报率",
+    "colPattern": "模式",
+    "colExpected": "应为",
+    "colScore": "分数",
+    "colFlag": "结果",
+    "colVerdict": "判定",
+    "featureDetails": "详细特征值",
+    "featureLabel": "模式",
+    "emptyHint": "选择{action}，让每个模式通过当前检测器运行。",
+    "emptyHintAction": "运行所有模式"
+  },
+  "holdoutEval": {
+    "back": "返回 Sentinel",
+    "title": "准确性测试",
+    "subtitle": "对照一个私密的社区测试集检查 Sentinel 的准确度。它需要足够的理事会成员密钥才能解锁；每位成员在自己的设备上运行 {command}，并把结果粘贴到下方。",
+    "step1": "1. 选择一个测试集",
+    "empty": "尚未添加测试集。理事会成员使用 {command} 添加一个。",
+    "selectPlaceholder": "— 选择 —",
+    "step2": "2. 收集 {count} 个密钥",
+    "step2Body": "下方列出的每位理事会成员在自己的设备上解锁各自的密钥（用 {command}），并通过安全渠道分享结果。在此粘贴其中任意 {count} 个——Sentinel 会将它们组合并解锁测试集。",
+    "sharePlaceholder": "粘贴此成员的密钥（或留空）",
+    "run": "运行测试",
+    "resultTitle": "测试结果",
+    "resultUnlocked": "测试集已解锁",
+    "modelKind": "模型",
+    "label": "标签",
+    "samples": "样本",
+    "schema": "格式",
+    "untrained": "Sentinel 在此尚未设置，因此没有结果可显示。请先设置 Sentinel。",
+    "verdictHuman": "诚实用户测试集：Sentinel 的平均告警水平为 {score}%（越低越好）。{adv}% 的样本触发了告警——这就是你的误报率。",
+    "verdictAttack": "作弊测试集：Sentinel 的平均告警水平为 {score}%（越高越好）。{count} 个{kind}样本中有 {adv}% 被识别为作弊——这就是你对“{label}”类别的捕获率。",
+    "note": "已解锁的测试集留在此设备上。请勿分享带标签的样本——泄露它们等于把答案交给作弊者。"
+  },
+  "propose": {
+    "back": "返回 Sentinel",
+    "title": "提议一个作弊模式",
+    "subtitle": "提交一个带标签的作弊模式，供 Sentinel 社区审核。获批的模式会教会每份 Sentinel 副本识别那类作弊。不接受人脸模式。",
+    "submittedTitle": "提案已发送",
+    "submittedBody": "提案 ID：{id}。Sentinel 社区成员将对它投票——到社区工作台查看进展。",
+    "another": "再提议一个",
+    "step1": "1. 哪个模型",
+    "step1Body": "哪个模型应学会捕捉这个模式？人脸数据绝不共享。",
+    "step2": "2. 标签",
+    "step2Body": "这是哪类作弊？选择一个已知标签或输入你自己的。",
+    "labelPlaceholder": "或输入自定义标签（会覆盖上面的选择）",
+    "step3": "3. 样本文件",
+    "step3Body": "一个格式为 1 的 JSON 文件，其模型与你上面的选择一致，带一个标签，且至少有 20 个样本。格式详见 {doc}。",
+    "selected": "已选择：{name}",
+    "parsedOk": "看起来不错——{count} 个样本，标签 {label}。",
+    "kindMismatch": "请注意：文件的模型是“{fileKind}”，但你选择的是“{selectedKind}”。提交前请更改其一。",
+    "selfCheckTitle": "Sentinel 自检",
+    "step4": "4. 来源会话（可选）",
+    "step4Body": "如果这些样本取自你自己的某次测评会话，请在此选择。被标记或暂停的会话不能使用——作弊数据不得塑造检测器。无论如何 Sentinel 都会再次检查。",
+    "sessionNone": "无",
+    "step5": "5. 提案摘要",
+    "titlePlaceholder": "向投票者展示的简短标题",
+    "descriptionPlaceholder": "为什么应该批准它？你是如何收集数据的？",
+    "submit": "提交提案",
+    "verdict": {
+      "untrained": "Sentinel 在此尚未设置，因此无法自检。请先设置 Sentinel，看看这是否真的像作弊。",
+      "strong": "Sentinel 对此强烈标记（平均 {pct}%，{adv}% 的样本越线）。是个可靠的作弊模式。",
+      "weak": "Sentinel 认为这接近正常（平均 {pct}%）。批准它可能会教模型去标记诚实的人——提交前请再考虑。",
+      "borderline": "临界：平均 {pct}%，{adv}% 被标记。该模式可能较弱或混杂——再看看这些样本。"
+    },
+    "errors": {
+      "samplesArray": "“samples”必须是一个列表。",
+      "tooFew": "至少需要 20 个样本（实际 {count} 个）。",
+      "faceForbidden": "不接受人脸模式。",
+      "unsupportedKind": "不支持的模型：{kind}。",
+      "unsupportedSchema": "不支持的格式：{schema}。",
+      "emptyLabel": "标签不能为空。",
+      "readFailed": "无法读取该文件：{error}"
+    }
+  },
+  "wizard": {
+    "welcomeTitle": "设置 Sentinel",
+    "welcomeBody": "这个快速设置会教 Sentinel 了解你个人如何打字和移动鼠标。大约需要 2 分钟，有助于识别冒充你的人。",
+    "buildsTitle": "此设置会构建的内容（专属于你，可选）：",
+    "buildsTyping": "打字模型——学习你的打字节奏",
+    "buildsMouse": "鼠标模型——学习你如何移动鼠标",
+    "buildsFace": "人脸检查——用你的摄像头设置（可选）",
+    "alreadyTrained": "（已完成——可跳过）",
+    "alreadyEnrolled": "（已设置——可跳过）",
+    "activeTitle": "已在保护你，无需设置：",
+    "activePaste": "Sentinel 粘贴检测器——识别粘贴的答案和打字机器人，内置于每份副本",
+    "activeRules": "基础检查——停留在页面上、开发者工具、粘贴量以及不自然的移动",
+    "privacyNote": "一切都留在此设备上。你的原始按键、鼠标移动和视频绝不会被保存。Sentinel 所学到的内容以加密方式存储在你的设备上。",
+    "begin": "开始",
+    "typingTitle": "打字设置",
+    "typingBody": "自然地输入下方文本。Sentinel 会学习你的打字节奏——你按每个键的时长以及按键之间的间隔。",
+    "typingHasModel": "你已有一个来自早先设置的打字模型。重新输入会替换它；跳过则保留现有的。",
+    "typingPlaceholder": "在此开始打字…",
+    "labelSpeed": "速度",
+    "labelHold": "按键时长",
+    "labelGap": "间隔",
+    "labelKeys": "按键数",
+    "unitMs": "毫秒",
+    "unitTotal": "总计",
+    "skipKeep": "跳过——保留现有",
+    "mouseTitle": "鼠标设置",
+    "mouseBody": "在每个目标出现时点击它。自然地移动——Sentinel 正在学习你的鼠标速度和移动方式。",
+    "mouseHasModel": "你已有一个鼠标模型。重做会替换它；跳过则保留现有的。",
+    "allTargetsHit": "已命中所有目标",
+    "labelMoves": "移动次数",
+    "labelClicks": "点击次数",
+    "labelTargets": "目标",
+    "awarenessTitle": "Sentinel 还会监测什么",
+    "awarenessBody": "除了打字和鼠标，Sentinel 在测评期间还会监测这些。这里无需你做任何事——只是让你了解。",
+    "awarenessTabTitle": "停留在页面上",
+    "awarenessTabBody": "追踪你何时切换离开测评以及离开了多久。偶尔切换没关系——频繁切换会标记该会话。",
+    "awarenessClipboardTitle": "粘贴",
+    "awarenessClipboardBody": "察觉粘贴事件并统计粘贴的字符数。少量粘贴没关系——把大段文本粘贴进答案会引发标记。",
+    "awarenessDevtoolsTitle": "开发者工具",
+    "awarenessDevtoolsBody": "一项快速检查会察觉浏览器的开发者工具是否打开。这是一个弱信号——它不会判你失败，但会计入整体分数。",
+    "awarenessFingerprintTitle": "设备检查",
+    "awarenessFingerprintBody": "此设备的一个私密指纹（不含个人数据）有助于发现同一设备被不同账户使用。",
+    "cameraTitle": "人脸检查（可选）",
+    "cameraBody": "你可以开启摄像头，以在测评期间确认你在场。视频完全在你的设备上处理——绝不会发送任何图像或视频。",
+    "cameraHasEnrollment": "你已设置好人脸检查。再次开启摄像头会替换它；跳过则保留现有的。",
+    "enableCamera": "开启摄像头",
+    "skip": "跳过",
+    "faceDetected": "已检测到人脸",
+    "noFace": "未检测到人脸——请把自己放到画面中",
+    "cameraSkipped": "已跳过摄像头。你可以在任何测评期间稍后开启它。",
+    "cameraDenied": "摄像头权限被拒绝。",
+    "cameraNotFound": "此设备上未找到摄像头。",
+    "cameraFailed": "无法打开摄像头。",
+    "gazeTitle": "眼动追踪设置（可选）",
+    "gazeBody": "用眼睛跟随这些点。这会教 Sentinel 了解你在此屏幕上看向哪里，从而在测评期间判断你的视线是否飘向了另一台设备。视频仅在你的设备上处理——不存储、不发送。",
+    "gazeCoarseNote": "没有它，眼动追踪仍能以较粗略的“看向别处”模式工作。",
+    "startCalibration": "开始设置",
+    "gazeCameraFailed": "无法为眼动追踪设置打开摄像头。",
+    "gazeTrainFailed": "眼动追踪设置失败。",
+    "gazeNotEnough": "可用帧不足（{count}）。请确保你的脸光线充足且居中，然后重试。",
+    "gazeLookDot": "看向这个点。第 {current} / {total} 个。",
+    "gazeDone": "已根据 {count} 个样本完成眼动追踪设置。",
+    "gazeLoss": "拟合误差：{loss}",
+    "recalibrate": "重新设置",
+    "reviewTitle": "设置完成",
+    "reviewBody": "Sentinel 已构建你的模式。以下是它学到的内容：",
+    "typingPattern": "打字模式",
+    "msHold": "毫秒按键时长",
+    "msGap": "毫秒间隔",
+    "mousePattern": "鼠标模式",
+    "pxVelocity": "速度（像素/毫秒）",
+    "reviewSamples": "样本",
+    "facePresence": "人脸检查",
+    "faceSkipped": "已跳过——你可以在测评期间开启它",
+    "faceConfigured": "已设置并测试",
+    "smartModels": "智能模型",
+    "modelTyping": "打字模型",
+    "modelMouse": "鼠标模型",
+    "modelFace": "人脸检查",
+    "keptExisting": "保留现有",
+    "retrained": "已重做",
+    "insufficient": "数据不足",
+    "enrolled": "已设置",
+    "statusSkipped": "已跳过",
+    "statusPending": "待处理",
+    "reviewNote": "这些模型仅属于你。内置的粘贴检测器（始终开启）独立工作。所有这些都留在你的设备上。",
+    "finish": "完成",
+    "saving": "正在保存…"
+  },
+  "debug": {
+    "title": "Sentinel — 实时视图",
+    "close": "关闭（⌘⇧S）",
+    "cameraUnavailable": "摄像头不可用",
+    "startPreview": "开始摄像头预览",
+    "stopCamera": "停止摄像头",
+    "pillNoFace": "无人脸",
+    "pillOnScreen": "屏幕内",
+    "pillOffScreen": "屏幕外",
+    "sectionOutcome": "结果",
+    "sectionTyping": "打字",
+    "sectionMouse": "鼠标",
+    "sectionClipboard": "剪贴板",
+    "sectionEnvironment": "环境",
+    "sectionCamera": "摄像头",
+    "sectionGaze": "视线",
+    "sectionAiScores": "智能分数",
+    "rowSession": "会话",
+    "rowIntegrity": "诚信度",
+    "rowConsistency": "一致性",
+    "rowSpeed": "速度",
+    "rowKeystrokeBuffer": "打字缓冲（实时）",
+    "rowHumanLike": "类人度",
+    "rowPointsBuffer": "鼠标缓冲（实时）",
+    "rowPasteEvents": "粘贴事件",
+    "rowPastedChars": "粘贴的字符",
+    "rowTabSwitches": "标签切换",
+    "rowUnfocused": "失焦",
+    "rowDevtools": "开发者工具",
+    "rowEnvChanged": "环境已改变",
+    "rowAppFocusLost": "应用失去焦点",
+    "rowSwitchedTo": "切换到",
+    "rowFaces": "人脸（实时）",
+    "rowFacePresent": "人脸在场",
+    "rowFaceConsistency": "人脸匹配",
+    "rowFaceSimMatch": "人脸相似度 / 匹配",
+    "rowSessionChecks": "会话检查",
+    "rowSessionRead": "会话读数",
+    "rowPreviewYawPitch": "预览偏航 / 俯仰",
+    "rowOffscreenRatio": "屏幕外比例",
+    "rowDownGlances": "向下瞥视",
+    "rowOccludedChecks": "被遮挡的检查",
+    "rowPasteAnomaly": "粘贴告警",
+    "rowKeystrokeAnomaly": "打字告警",
+    "rowMouseHumanProb": "鼠标类人概率",
+    "rowInferLatency": "响应时间",
+    "valActive": "活跃",
+    "valIdle": "空闲",
+    "valYes": "是",
+    "valNo": "否",
+    "valNa": "不适用"
+  }
+}

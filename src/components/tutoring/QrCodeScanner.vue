@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import jsQR from 'jsqr'
+
+const { t } = useI18n()
 
 const emit = defineEmits<{
   scan: [value: string]
@@ -19,7 +22,7 @@ let stopped = false
 async function start() {
   if (!navigator.mediaDevices?.getUserMedia) {
     status.value = 'unsupported'
-    emit('error', 'Camera API not available on this platform')
+    emit('error', t('tutoring.scanner.errorNoCameraApi'))
     return
   }
 
@@ -32,7 +35,7 @@ async function start() {
     const err = e as DOMException
     if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
       status.value = 'denied'
-      emit('error', 'Camera permission denied')
+      emit('error', t('tutoring.scanner.errorPermissionDenied'))
     } else {
       status.value = 'error'
       errorMessage.value = err.message || String(e)
@@ -128,16 +131,16 @@ defineExpose({ stop })
       class="absolute inset-0 flex items-center justify-center bg-black/70 p-4 text-center text-sm text-white"
     >
       <template v-if="status === 'requesting'">
-        <p>Requesting camera access…</p>
+        <p>{{ $t('tutoring.scanner.requesting') }}</p>
       </template>
       <template v-else-if="status === 'denied'">
-        <p>Camera permission denied. Enable camera access in system settings and try again.</p>
+        <p>{{ $t('tutoring.scanner.denied') }}</p>
       </template>
       <template v-else-if="status === 'unsupported'">
-        <p>Camera is not available on this device.</p>
+        <p>{{ $t('tutoring.scanner.unsupported') }}</p>
       </template>
       <template v-else>
-        <p>{{ errorMessage || 'Camera error' }}</p>
+        <p>{{ errorMessage || $t('tutoring.scanner.error') }}</p>
       </template>
     </div>
   </div>

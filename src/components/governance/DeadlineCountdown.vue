@@ -44,7 +44,7 @@ const isPast = computed(() => {
     <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
       <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
     </svg>
-    <span v-if="isPast" class="text-muted-foreground">{{ label || 'Deadline' }} passed</span>
+    <span v-if="isPast" class="text-muted-foreground">{{ $t('governance.deadline.passed', { label: label || $t('governance.deadline.default') }) }}</span>
     <span v-else-if="remaining" class="text-foreground font-medium">{{ remaining }}</span>
   </span>
 </template>

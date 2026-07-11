@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { AppButton, StatusBadge, EmptyState, ProvenanceBadge } from '@/components/ui'
 import type { Course, Chapter, Element, Enrollment } from '@/types'
 
+const { t } = useI18n()
 const { invoke } = useLocalApi()
 const route = useRoute()
 const router = useRouter()
@@ -85,17 +87,17 @@ function elementTypeIcon(elementType: string): string {
 
 function elementTypeLabel(elementType: string): string {
   switch (elementType) {
-    case 'video': return 'Video'
-    case 'text': return 'Reading'
-    case 'pdf': return 'PDF'
-    case 'downloadable': return 'Download'
-    case 'quiz': return 'Quiz'
-    case 'assessment': return 'Assessment'
-    case 'objective_single_mcq': return 'Single Choice'
-    case 'objective_multi_mcq': return 'Multiple Choice'
-    case 'subjective_mcq': return 'Subjective'
-    case 'essay': return 'Essay'
-    case 'interactive': return 'Interactive'
+    case 'video': return t('courses.detail.elementTypes.video')
+    case 'text': return t('courses.detail.elementTypes.text')
+    case 'pdf': return t('courses.detail.elementTypes.pdf')
+    case 'downloadable': return t('courses.detail.elementTypes.downloadable')
+    case 'quiz': return t('courses.detail.elementTypes.quiz')
+    case 'assessment': return t('courses.detail.elementTypes.assessment')
+    case 'objective_single_mcq': return t('courses.detail.elementTypes.singleChoice')
+    case 'objective_multi_mcq': return t('courses.detail.elementTypes.multipleChoice')
+    case 'subjective_mcq': return t('courses.detail.elementTypes.subjective')
+    case 'essay': return t('courses.detail.elementTypes.essay')
+    case 'interactive': return t('courses.detail.elementTypes.interactive')
     default: return elementType
   }
 }
@@ -124,8 +126,8 @@ function elementTypeLabel(elementType: string): string {
 
     <EmptyState
       v-else-if="!course"
-      title="Course not found"
-      description="This course may have been removed or is not available on your node."
+      :title="t('courses.detail.notFoundTitle')"
+      :description="t('courses.detail.notFoundBody')"
     />
 
     <div v-else class="max-w-4xl">
@@ -148,19 +150,19 @@ function elementTypeLabel(elementType: string): string {
               <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
               </svg>
-              {{ chapters.length }} chapter{{ chapters.length !== 1 ? 's' : '' }}
+              {{ $t('courses.detail.chaptersCount', { count: chapters.length }, chapters.length) }}
             </span>
             <span class="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
               <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
               </svg>
-              {{ totalElements }} element{{ totalElements !== 1 ? 's' : '' }}
+              {{ $t('courses.detail.lessonsCount', { count: totalElements }, totalElements) }}
             </span>
             <span v-if="course.tags?.length" class="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
               <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
               </svg>
-              {{ course.tags.length }} tag{{ course.tags.length !== 1 ? 's' : '' }}
+              {{ $t('courses.detail.tagsCount', { count: course.tags.length }, course.tags.length) }}
             </span>
           </div>
         </div>
@@ -175,7 +177,7 @@ function elementTypeLabel(elementType: string): string {
             <svg class="w-4 h-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
             </svg>
-            Enroll
+            {{ $t('courses.detail.enroll') }}
           </AppButton>
           <AppButton
             v-else-if="enrollment.status === 'active'"
@@ -185,7 +187,7 @@ function elementTypeLabel(elementType: string): string {
             <svg class="w-4 h-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
             </svg>
-            Continue Learning
+            {{ $t('courses.detail.continueLearning') }}
           </AppButton>
           <div v-else class="flex justify-end">
             <StatusBadge :status="enrollment.status" />
@@ -195,7 +197,7 @@ function elementTypeLabel(elementType: string): string {
             size="sm"
             @click="router.push(`/instructor/courses/${course.id}`)"
           >
-            Edit Course
+            {{ $t('courses.detail.editCourse') }}
           </AppButton>
         </div>
       </div>
@@ -227,7 +229,7 @@ function elementTypeLabel(elementType: string): string {
 
       <!-- Chapters with elements -->
       <div v-if="chapters.length > 0" class="space-y-4 mb-8">
-        <h2 class="text-base font-semibold">Course Content</h2>
+        <h2 class="text-base font-semibold">{{ $t('courses.detail.courseContent') }}</h2>
         <div
           v-for="(chapter, index) in chapters"
           :key="chapter.id"
@@ -245,7 +247,7 @@ function elementTypeLabel(elementType: string): string {
               </p>
             </div>
             <span v-if="elements[chapter.id]?.length" class="ml-auto text-xs text-muted-foreground shrink-0">
-              {{ elements[chapter.id]?.length ?? 0 }} element{{ (elements[chapter.id]?.length ?? 0) !== 1 ? 's' : '' }}
+              {{ $t('courses.detail.lessonsCount', { count: elements[chapter.id]?.length ?? 0 }, elements[chapter.id]?.length ?? 0) }}
             </span>
           </div>
 
@@ -268,42 +270,45 @@ function elementTypeLabel(elementType: string): string {
             </div>
           </div>
           <div v-else class="px-5 py-3 text-xs text-muted-foreground italic">
-            No elements yet
+            {{ $t('courses.detail.noLessons') }}
           </div>
         </div>
       </div>
 
       <!-- Details card -->
       <div class="card p-5">
-        <h2 class="text-base font-semibold mb-4">Details</h2>
+        <h2 class="text-base font-semibold mb-4">{{ $t('courses.detail.details') }}</h2>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
-            <div class="text-xs text-muted-foreground mb-0.5">Author</div>
+            <div class="text-xs text-muted-foreground mb-0.5">{{ $t('courses.detail.author') }}</div>
             <div class="text-sm text-foreground">
               <span v-if="course.author_name" class="font-medium">{{ course.author_name }}</span>
-              <span v-else class="font-mono break-all">{{ course.author_address || 'Unknown' }}</span>
+              <span v-else class="font-mono break-all">{{ course.author_address || $t('courses.detail.unknown') }}</span>
             </div>
             <div v-if="course.author_name && course.author_address" class="text-xs font-mono text-muted-foreground mt-0.5 break-all">
               {{ course.author_address }}
             </div>
           </div>
-          <div v-if="course.content_cid">
-            <div class="text-xs text-muted-foreground mb-0.5">Content CID</div>
-            <div class="text-sm font-mono text-foreground break-all">
-              {{ course.content_cid }}
-            </div>
-          </div>
           <div v-if="course.skill_ids?.length">
-            <div class="text-xs text-muted-foreground mb-0.5">Linked Skills</div>
+            <div class="text-xs text-muted-foreground mb-0.5">{{ $t('courses.detail.linkedSkills') }}</div>
             <div class="text-sm text-foreground">
-              {{ course.skill_ids.length }} skill{{ course.skill_ids.length !== 1 ? 's' : '' }}
+              {{ $t('courses.detail.skillsCount', { count: course.skill_ids.length }, course.skill_ids.length) }}
             </div>
           </div>
           <div>
-            <div class="text-xs text-muted-foreground mb-0.5">Created</div>
+            <div class="text-xs text-muted-foreground mb-0.5">{{ $t('courses.detail.created') }}</div>
             <div class="text-sm text-foreground">
               {{ new Date(course.created_at).toLocaleDateString() }}
             </div>
+          </div>
+          <div v-if="course.content_cid" class="sm:col-span-2">
+            <details>
+              <summary class="cursor-pointer text-xs text-muted-foreground">{{ $t('common.advanced.toggle') }}</summary>
+              <div class="mt-2 text-xs text-muted-foreground mb-0.5">{{ $t('courses.detail.contentId') }}</div>
+              <div class="text-sm font-mono text-foreground break-all">
+                {{ course.content_cid }}
+              </div>
+            </details>
           </div>
         </div>
       </div>

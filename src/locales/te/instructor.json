@@ -1,0 +1,206 @@
+{
+  "dashboard": {
+    "title": "బోధకుడు డాష్‌బోర్డ్",
+    "subtitle": "మీ కోర్సులలో అభ్యాసకులు ఎలా చేస్తున్నారు, అలాగే మీ సమీక్ష కోసం వేచి ఉన్నవి.",
+    "inbox": "ఇన్‌బాక్స్",
+    "compose": "+ రచించు",
+    "statCourses": "కోర్సులు & ట్యుటోరియల్‌లు",
+    "statPublished": "ప్రచురించబడ్డాయి",
+    "statEnrollments": "నమోదులు",
+    "statPendingReviews": "సమీక్ష కోసం వేచి ఉన్నవి",
+    "colCourse": "కోర్సు",
+    "colStatus": "స్థితి",
+    "colEnrolled": "నమోదైంది",
+    "colCompletion": "పూర్తి",
+    "colAvgScore": "సగటు స్కోర్",
+    "colReviews": "సమీక్షలు",
+    "colLastActivity": "చివరి కార్యకలాపం",
+    "emptyTitle": "ఇంకా కోర్సులు లేవు",
+    "emptyDesc": "ఇక్కడ అభ్యాసకుల కార్యకలాపాన్ని చూడటానికి మీ మొదటి కోర్సు లేదా ట్యుటోరియల్‌ను నిర్మించండి."
+  },
+  "myCourses": {
+    "title": "నా కోర్సులు",
+    "subtitle": "మీరు ఈ పరికరంలో నిర్మించిన ప్రతిదీ — డ్రాఫ్ట్‌లు మరియు ప్రచురించబడినవి.",
+    "addCourse": "+ కోర్సు",
+    "addTutorial": "+ ట్యుటోరియల్",
+    "emptyTitle": "ఇంకా ఏమీ నిర్మించలేదు",
+    "emptyDesc": "కంపోజర్‌తో మీ మొదటి కోర్సు లేదా ట్యుటోరియల్‌ను సృష్టించండి.",
+    "updated": "నవీకరించబడింది {date}"
+  },
+  "courseLearners": {
+    "eyebrow": "అభ్యాసకుని పురోగతి",
+    "fallbackTitle": "కోర్సు",
+    "emptyTitle": "ఈ పరికరంలో ఇంకా సైన్-అప్‌లు లేవు",
+    "emptyDesc": "ప్రతి అభ్యాసకుని పురోగతి వారి స్వంత పరికరంలో ఉంటుంది — ఈ వీక్షణ యాప్ ఇక్కడ కనుగొన్నదాన్ని చూపుతుంది (సైన్-అప్‌లు మరియు తరగతిలో సమర్పణలు).",
+    "colLearner": "అభ్యాసకుడు",
+    "colStatus": "స్థితి",
+    "colProgress": "పురోగతి",
+    "colAvgScore": "సగటు స్కోర్",
+    "colTimeSpent": "గడిపిన సమయం",
+    "colLastActivity": "చివరి కార్యకలాపం",
+    "localLearner": "స్థానిక అభ్యాసకుడు"
+  },
+  "inbox": {
+    "title": "ఇన్‌బాక్స్",
+    "subtitle": "మీ సమీక్ష కోసం వేచి ఉన్న అభ్యాసకుల సమర్పణలు, అలాగే పెండింగ్ తరగతి గది చేరిక అభ్యర్థనలు.",
+    "tabAll": "అన్నీ",
+    "tabSubmissions": "సమర్పణలు",
+    "tabJoinRequests": "చేరిక అభ్యర్థనలు",
+    "emptyTitle": "అంతా పూర్తయింది",
+    "emptyDesc": "మీ సమీక్ష కోసం ఏదీ వేచి లేదు."
+  },
+  "submissionReview": {
+    "eyebrow": "సమర్పణ సమీక్ష",
+    "title": "సమర్పణను సమీక్షించు",
+    "notFoundTitle": "సమర్పణ కనుగొనబడలేదు",
+    "notFoundDesc": "ఇది ఇప్పటికే సమీక్షించబడి ఉండవచ్చు లేదా తీసివేయబడి ఉండవచ్చు.",
+    "from": "నుండి",
+    "submittedWork": "సమర్పించిన పని",
+    "yourReview": "మీ సమీక్ష",
+    "scoreLabel": "స్కోర్ — {percent}%",
+    "perSkillRatings": "ప్రతి-నైపుణ్య రేటింగ్‌లు",
+    "feedback": "అభిప్రాయం",
+    "feedbackPlaceholder": "ఏది బాగుంది, ఏది మెరుగుపరచాలి…",
+    "postReview": "సమీక్షను పోస్ట్ చేయి",
+    "reviewed": "సమీక్షించబడింది",
+    "finalScore": "స్కోర్:"
+  },
+  "compose": {
+    "newCourse": "కొత్త కోర్సు",
+    "newTutorial": "కొత్త ట్యుటోరియల్",
+    "courseIntro": "ఒక కోర్సు అధ్యాయాలుగా వ్యవస్థీకరించబడింది, ప్రతిదీ వీడియోలు, పాఠాలు, క్విజ్‌లు, మూల్యాంకనాలు మరియు ప్రయోగాత్మక వ్యాయామాలను కలిగి ఉంటుంది.",
+    "tutorialIntro": "ఒక ట్యుటోరియల్ చిన్న ఒకే-ట్రాక్ పాఠం — సాధారణంగా మార్కర్‌లతో ఒక వీడియో మరియు ఐచ్ఛిక క్విజ్.",
+    "titleLabel": "శీర్షిక",
+    "titlePlaceholder": "ఉదా., ప్రాక్టికల్ క్రిప్టోగ్రఫీ",
+    "descriptionLabel": "వివరణ",
+    "descriptionPlaceholder": "ఒక-పేరా పరిచయం.",
+    "tagsLabel": "ట్యాగ్‌లు (కామాలతో వేరు చేయబడ్డాయి)",
+    "tagsPlaceholder": "ఉదా., సెక్యూరిటీ, ప్రారంభకుడు",
+    "createDraft": "డ్రాఫ్ట్‌ను సృష్టించు",
+    "needTitle": "ముందుగా దానికి ఒక శీర్షికను ఇవ్వండి.",
+    "editMeta": "శీర్షిక మరియు వివరణను సవరించు",
+    "publish": "ప్రచురించు",
+    "beforePublish": "మీరు ప్రచురించే ముందు",
+    "blockerNeedElement": "కనీసం ఒక ఎలిమెంట్‌ను జోడించండి.",
+    "blockerUnboundPlugins": "ఏదీ లేదు | {count} ప్లగిన్ ఎలిమెంట్‌కు ఇంకా ప్లగిన్ ఎంచుకోవాల్సి ఉంది | {count} ప్లగిన్ ఎలిమెంట్‌లకు ఇంకా ప్లగిన్ ఎంచుకోవాల్సి ఉంది",
+    "publishedTitle": "మీ కోర్సు లైవ్‌లో ఉంది",
+    "publishedNote": "అభ్యాసకులు ఇప్పుడు దాన్ని కనుగొని నమోదు చేసుకోవచ్చు.",
+    "fingerprintLabel": "కంటెంట్ ఫింగర్‌ప్రింట్",
+    "sizeBytes": "ఏదీ లేదు | {count} బైట్ | {count} బైట్‌లు",
+    "nothingSelectedTitle": "ఏదీ ఎంచుకోబడలేదు",
+    "nothingSelectedDesc": "అవుట్‌లైన్ నుండి ఒక ఎలిమెంట్‌ను ఎంచుకోండి, లేదా నిర్మించడం ప్రారంభించడానికి ఒకదాన్ని జోడించండి.",
+    "confirmPublishTitle": "ప్రచురించు",
+    "confirmPublishMessage": "ఇది '{title}'ని ప్రచురిస్తుంది కాబట్టి అభ్యాసకులు వెంటనే కనుగొని నమోదు చేసుకోవచ్చు. ఇది మీచే సంతకం చేయబడింది మరియు మీ కనెక్షన్‌లతో నేరుగా పంచుకోబడింది.",
+    "confirmDeleteTitle": "తొలగించు",
+    "confirmDeleteMessage": "ఇది డ్రాఫ్ట్ మరియు దాని అన్ని అధ్యాయాలు మరియు ఎలిమెంట్‌లను శాశ్వతంగా తొలగిస్తుంది. దీన్ని రద్దు చేయలేరు.",
+    "editDetails": "వివరాలను సవరించు",
+    "notFoundTitle": "కనుగొనబడలేదు",
+    "notFoundDesc": "ఈ కోర్సు లేదా ట్యుటోరియల్ ఈ పరికరంలో లేదు."
+  },
+  "outline": {
+    "elementTitlePlaceholder": "ఎలిమెంట్ శీర్షిక",
+    "chapterTitlePlaceholder": "అధ్యాయ శీర్షిక",
+    "add": "జోడించు",
+    "addChapter": "అధ్యాయాన్ని జోడించు",
+    "addElement": "+ ఎలిమెంట్‌ను జోడించు",
+    "addChapterCta": "+ అధ్యాయాన్ని జోడించు"
+  },
+  "elementTypes": {
+    "video": "వీడియో",
+    "text": "టెక్స్ట్",
+    "pdf": "PDF",
+    "downloadable": "డౌన్‌లోడ్",
+    "quiz": "క్విజ్",
+    "objectiveSingleMcq": "ఒకే MCQ",
+    "objectiveMultiMcq": "బహుళ MCQ",
+    "subjectiveMcq": "సబ్జెక్టివ్ MCQ",
+    "essay": "వ్యాసం",
+    "interactive": "ఇంటరాక్టివ్",
+    "assessment": "మూల్యాంకనం",
+    "plugin": "ప్లగిన్"
+  },
+  "elementEditor": {
+    "deleteElement": "ఎలిమెంట్‌ను తొలగించు",
+    "titlePlaceholder": "ఎలిమెంట్ శీర్షిక",
+    "confirmDeleteTitle": "ఎలిమెంట్‌ను తొలగించు",
+    "confirmDeleteMessage": "ఇది ఎలిమెంట్ మరియు దాని కంటెంట్‌ను కోర్సు నుండి తీసివేస్తుంది. దీన్ని రద్దు చేయలేరు."
+  },
+  "skillPicker": {
+    "searchPlaceholder": "నైపుణ్యాలను వెతకండి…",
+    "removeSkill": "{name}ను తీసివేయి",
+    "addSkill": "నైపుణ్యం"
+  },
+  "editors": {
+    "shared": {
+      "uploaded": "అప్‌లోడ్ చేయబడింది"
+    },
+    "video": {
+      "fileHeading": "వీడియో ఫైల్",
+      "minutes": "{count} నిమి",
+      "reading": "{size} MB చదువుతోంది…",
+      "saving": "ఈ పరికరంలో సేవ్ చేస్తోంది…",
+      "uploadFailed": "అప్‌లోడ్ విఫలమైంది: {error}",
+      "markersHeading": "అధ్యాయ మార్కర్‌లు",
+      "addMarker": "+ మార్కర్",
+      "saveMarkers": "మార్కర్‌లను సేవ్ చేయి",
+      "markersHint": "టైమ్‌స్టాంప్‌లు వీడియో దిగువన క్లిక్ చేయగల నావిగేషన్‌గా మారతాయి.",
+      "markerTitlePlaceholder": "మార్కర్ శీర్షిక",
+      "startSeconds": "ప్రారంభం (సెకన్లు)"
+    },
+    "file": {
+      "pdfHeading": "PDF పత్రం",
+      "downloadHeading": "డౌన్‌లోడ్ చేయగల ఫైల్",
+      "uploading": "అప్‌లోడ్ అవుతోంది…",
+      "uploadFailed": "అప్‌లోడ్ విఫలమైంది: {error}"
+    },
+    "quiz": {
+      "questionsHeading": "ప్రశ్నలు",
+      "multiHint": "బహుళ సరైన సమాధానాలు",
+      "singleHint": "ఒక సరైన సమాధానం",
+      "addQuestion": "+ ప్రశ్న",
+      "saveQuiz": "క్విజ్‌ను సేవ్ చేయి",
+      "empty": "ఇంకా ప్రశ్నలు లేవు — మొదటిదాన్ని జోడించండి.",
+      "questionPlaceholder": "ప్రశ్న ప్రాంప్ట్",
+      "removeQuestion": "ప్రశ్నను తీసివేయి",
+      "optionPlaceholder": "ఎంపిక {number}",
+      "correctAnswer": "సరైన సమాధానం",
+      "markCorrect": "సరైనదిగా గుర్తించు",
+      "removeOption": "ఎంపికను తీసివేయి",
+      "addOption": "+ ఎంపికను జోడించు",
+      "errNeedQuestion": "కనీసం ఒక ప్రశ్నను జోడించండి.",
+      "errNoPrompt": "ప్రశ్న {number}కి ప్రాంప్ట్ లేదు.",
+      "errTooFewOptions": "ప్రశ్న {number}కి కనీసం రెండు ఎంపికలు అవసరం.",
+      "errNoCorrect": "ప్రశ్న {number}కి సరైన సమాధానాలు ఏవీ గుర్తించబడలేదు."
+    },
+    "text": {
+      "heading": "పాఠ శరీరం (Markdown)",
+      "placeholder": "# పాఠ శీర్షిక\n\nపాఠాన్ని Markdownలో వ్రాయండి…"
+    },
+    "essay": {
+      "heading": "వ్యాస అసైన్‌మెంట్",
+      "promptLabel": "ప్రాంప్ట్",
+      "promptPlaceholder": "అభ్యాసకుడు దేని గురించి వ్రాయాలి?",
+      "rubricLabel": "గ్రేడింగ్ రుబ్రిక్ (సమీక్షించేటప్పుడు మీకు చూపబడుతుంది, మరియు అభ్యాసకుడికి ముందుగానే)",
+      "rubricPlaceholder": "ఉదా., థీసిస్ స్పష్టత (30%), సాక్ష్యం (40%), నిర్మాణం (30%)",
+      "minWordsLabel": "కనీస పదాలు (ఐచ్ఛికం)",
+      "hint": "వ్యాస సమర్పణలు మాన్యువల్ సమీక్ష మరియు స్కోరింగ్ కోసం మీ బోధకుడు ఇన్‌బాక్స్‌లో వస్తాయి.",
+      "errNeedPrompt": "వ్యాసానికి ఒక ప్రాంప్ట్ అవసరం."
+    },
+    "json": {
+      "assessmentHeading": "మూల్యాంకన నిర్వచనం (JSON)",
+      "interactiveHeading": "ఇంటరాక్టివ్ కంటెంట్ (JSON)",
+      "invalidJson": "చెల్లని JSON.",
+      "errFixJson": "సేవ్ చేసే ముందు JSONను సరిచేయండి."
+    },
+    "plugin": {
+      "heading": "ప్లగిన్ బైండింగ్",
+      "installedLabel": "ఇన్‌స్టాల్ చేయబడిన ప్లగిన్",
+      "pickOption": "ఒక ప్లగిన్‌ను ఎంచుకో…",
+      "noneInstalled": "ఎనేబుల్ చేయబడిన ప్లగిన్‌లు ఇన్‌స్టాల్ చేయబడలేదు — సెట్టింగ్‌లు → ప్లగిన్‌ల కింద ఒకదాన్ని జోడించండి.",
+      "configLabel": "ఎలిమెంట్ కాన్ఫిగ్ (init వద్ద ప్లగిన్‌కు పంపబడిన JSON — ఉదా. ఒక codejudge సమస్య నిర్వచనం)",
+      "invalidJson": "చెల్లని JSON.",
+      "errPickFirst": "ముందుగా ఒక ప్లగిన్‌ను ఎంచుకోండి.",
+      "errFixConfig": "సేవ్ చేసే ముందు కాన్ఫిగ్ JSONను సరిచేయండి."
+    }
+  }
+}

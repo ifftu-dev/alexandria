@@ -5,6 +5,7 @@
  * baseline patterns. All data stays on-device.
  */
 import { ref, computed, nextTick, onBeforeUnmount, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { AppButton } from '@/components/ui'
 import { useSentinel } from '@/composables/useSentinel'
 
@@ -12,6 +13,8 @@ const emit = defineEmits<{
   complete: []
   cancel: []
 }>()
+
+const { t } = useI18n()
 
 const {
   startTrainingKeystrokes,
@@ -268,13 +271,13 @@ const enableCamera = async () => {
   catch (err) {
     const error = err as Error
     if (error.name === 'NotAllowedError') {
-      cameraError.value = 'Camera permission was denied.'
+      cameraError.value = t('sentinel.wizard.cameraDenied')
     }
     else if (error.name === 'NotFoundError') {
-      cameraError.value = 'No camera found on this device.'
+      cameraError.value = t('sentinel.wizard.cameraNotFound')
     }
     else {
-      cameraError.value = 'Could not access camera.'
+      cameraError.value = t('sentinel.wizard.cameraFailed')
     }
   }
 }
@@ -348,7 +351,7 @@ const startGazeCalibration = async () => {
     }
   }
   catch {
-    gazeError.value = 'Could not access the camera for gaze calibration.'
+    gazeError.value = t('sentinel.wizard.gazeCameraFailed')
     return
   }
 
@@ -381,10 +384,10 @@ const startGazeCalibration = async () => {
     if (resp) {
       gazeResult.value = { samples: resp.training_samples, loss: resp.train_loss }
     } else {
-      gazeError.value = 'Calibration training failed.'
+      gazeError.value = t('sentinel.wizard.gazeTrainFailed')
     }
   } else {
-    gazeError.value = `Not enough usable frames (${gazeSamples.length}). Ensure your face is well-lit and centered, then retry.`
+    gazeError.value = t('sentinel.wizard.gazeNotEnough', { count: gazeSamples.length })
   }
   stopGazeCamera()
   gazeRunning.value = false
@@ -489,55 +492,52 @@ onBeforeUnmount(() => {
           </svg>
         </div>
         <h2 class="mb-2 text-lg font-bold text-foreground">
-          Train Sentinel
+          {{ $t('sentinel.wizard.welcomeTitle') }}
         </h2>
         <p class="mb-4 text-sm text-muted-foreground">
-          This calibration teaches Sentinel how <strong>you specifically</strong> type and move your mouse.
-          Takes ~2 minutes. Catches impersonation attacks the global paste-classifier alone can't.
+          {{ $t('sentinel.wizard.welcomeBody') }}
         </p>
 
         <!-- What the wizard trains vs what's already protecting you -->
         <div class="mb-4 rounded-lg border border-border bg-muted/30 p-3 text-left text-xs">
-          <p class="mb-2 font-medium text-foreground">What this wizard trains (per-user, optional):</p>
+          <p class="mb-2 font-medium text-foreground">{{ $t('sentinel.wizard.buildsTitle') }}</p>
           <ul class="space-y-1 text-muted-foreground">
-            <li>• <strong>Keystroke autoencoder</strong> — learns your typing rhythm
-              <span v-if="hasKeystrokeModel" class="text-emerald-600 dark:text-emerald-400">(already trained — you can skip)</span>
+            <li>• {{ $t('sentinel.wizard.buildsTyping') }}
+              <span v-if="hasKeystrokeModel" class="text-emerald-600 dark:text-emerald-400">{{ $t('sentinel.wizard.alreadyTrained') }}</span>
             </li>
-            <li>• <strong>Mouse-trajectory CNN</strong> — learns your mouse movement
-              <span v-if="hasMouseModel" class="text-emerald-600 dark:text-emerald-400">(already trained — you can skip)</span>
+            <li>• {{ $t('sentinel.wizard.buildsMouse') }}
+              <span v-if="hasMouseModel" class="text-emerald-600 dark:text-emerald-400">{{ $t('sentinel.wizard.alreadyTrained') }}</span>
             </li>
-            <li>• <strong>Face enrollment</strong> — LBP embedding (camera opt-in)
-              <span v-if="hasFaceEnrollment" class="text-emerald-600 dark:text-emerald-400">(already enrolled — you can skip)</span>
+            <li>• {{ $t('sentinel.wizard.buildsFace') }}
+              <span v-if="hasFaceEnrollment" class="text-emerald-600 dark:text-emerald-400">{{ $t('sentinel.wizard.alreadyEnrolled') }}</span>
             </li>
           </ul>
-          <p class="mt-3 font-medium text-foreground">Already active without calibration:</p>
+          <p class="mt-3 font-medium text-foreground">{{ $t('sentinel.wizard.activeTitle') }}</p>
           <ul class="space-y-1 text-muted-foreground">
-            <li>• <strong>Paste / typing-bot classifier (ONNX)</strong> — global cheat detector, ships with every install</li>
-            <li>• Rule-based checks (tab focus, devtools, paste size, velocity variance)</li>
+            <li>• {{ $t('sentinel.wizard.activePaste') }}</li>
+            <li>• {{ $t('sentinel.wizard.activeRules') }}</li>
           </ul>
         </div>
 
         <div class="mb-6 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-left dark:border-emerald-800/40 dark:bg-emerald-900/20">
           <p class="text-xs text-emerald-700 dark:text-emerald-400">
-            Everything stays on your device. Raw keystrokes / mouse coordinates / video never persist.
-            Per-user model weights live in your encrypted local database (sqlcipher).
+            {{ $t('sentinel.wizard.privacyNote') }}
           </p>
         </div>
         <AppButton variant="primary" @click="nextStep">
-          Begin Calibration
+          {{ $t('sentinel.wizard.begin') }}
         </AppButton>
       </div>
 
       <!-- ================ TYPING CALIBRATION ================ -->
       <div v-else-if="currentStep === 'typing'">
         <div class="mb-4">
-          <h2 class="text-base font-semibold text-foreground">Typing Calibration</h2>
+          <h2 class="text-base font-semibold text-foreground">{{ $t('sentinel.wizard.typingTitle') }}</h2>
           <p class="mt-1 text-sm text-muted-foreground">
-            Type the text below naturally. Sentinel will learn your keystroke rhythm -- how long you hold each key and the gaps between them.
+            {{ $t('sentinel.wizard.typingBody') }}
           </p>
           <p v-if="hasKeystrokeModel" class="mt-2 rounded-md bg-emerald-50 p-2 text-xs text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400">
-            You already have a trained keystroke model from a previous calibration.
-            Retyping replaces it; <strong>Skip</strong> keeps the existing one.
+            {{ $t('sentinel.wizard.typingHasModel') }}
           </p>
         </div>
 
@@ -559,7 +559,7 @@ onBeforeUnmount(() => {
         <!-- Input area -->
         <textarea
           class="input mb-4 min-h-[5rem] w-full resize-none font-mono text-sm"
-          placeholder="Start typing here..."
+          :placeholder="$t('sentinel.wizard.typingPlaceholder')"
           :value="typedText"
           autocomplete="off"
           autocorrect="off"
@@ -571,38 +571,38 @@ onBeforeUnmount(() => {
         <!-- Live metrics -->
         <div class="mb-4 grid grid-cols-4 gap-3">
           <div class="rounded-lg bg-muted/30 p-3 text-center">
-            <p class="text-xs text-muted-foreground">Speed</p>
+            <p class="text-xs text-muted-foreground">{{ $t('sentinel.wizard.labelSpeed') }}</p>
             <p class="mt-0.5 font-mono text-lg font-bold text-foreground">
               {{ typingMetrics?.speedWpm ?? 0 }}
             </p>
-            <p class="text-xs text-muted-foreground">WPM</p>
+            <p class="text-xs text-muted-foreground">{{ $t('sentinel.engine.wpm') }}</p>
           </div>
           <div class="rounded-lg bg-muted/30 p-3 text-center">
-            <p class="text-xs text-muted-foreground">Dwell</p>
+            <p class="text-xs text-muted-foreground">{{ $t('sentinel.wizard.labelHold') }}</p>
             <p class="mt-0.5 font-mono text-lg font-bold text-foreground">
               {{ (typingMetrics?.avgDwellMs ?? 0).toFixed(0) }}
             </p>
-            <p class="text-xs text-muted-foreground">ms</p>
+            <p class="text-xs text-muted-foreground">{{ $t('sentinel.wizard.unitMs') }}</p>
           </div>
           <div class="rounded-lg bg-muted/30 p-3 text-center">
-            <p class="text-xs text-muted-foreground">Flight</p>
+            <p class="text-xs text-muted-foreground">{{ $t('sentinel.wizard.labelGap') }}</p>
             <p class="mt-0.5 font-mono text-lg font-bold text-foreground">
               {{ (typingMetrics?.avgFlightMs ?? 0).toFixed(0) }}
             </p>
-            <p class="text-xs text-muted-foreground">ms</p>
+            <p class="text-xs text-muted-foreground">{{ $t('sentinel.wizard.unitMs') }}</p>
           </div>
           <div class="rounded-lg bg-muted/30 p-3 text-center">
-            <p class="text-xs text-muted-foreground">Keys</p>
+            <p class="text-xs text-muted-foreground">{{ $t('sentinel.wizard.labelKeys') }}</p>
             <p class="mt-0.5 font-mono text-lg font-bold text-foreground">
               {{ typingMetrics?.keystrokeCount ?? 0 }}
             </p>
-            <p class="text-xs text-muted-foreground">total</p>
+            <p class="text-xs text-muted-foreground">{{ $t('sentinel.wizard.unitTotal') }}</p>
           </div>
         </div>
 
         <!-- Completion -->
         <div class="flex items-center justify-between">
-          <AppButton variant="ghost" size="sm" @click="prevStep">Back</AppButton>
+          <AppButton variant="ghost" size="sm" @click="prevStep">{{ $t('common.actions.back') }}</AppButton>
           <div class="flex items-center gap-3">
             <div class="h-1.5 w-32 overflow-hidden rounded-full bg-muted">
               <div
@@ -616,7 +616,7 @@ onBeforeUnmount(() => {
               size="sm"
               @click="skipStep('typing')"
             >
-              Skip — keep existing
+              {{ $t('sentinel.wizard.skipKeep') }}
             </AppButton>
             <AppButton
               variant="primary"
@@ -624,7 +624,7 @@ onBeforeUnmount(() => {
               :disabled="!typingComplete"
               @click="finishTyping"
             >
-              Continue
+              {{ $t('common.actions.continue') }}
             </AppButton>
           </div>
         </div>
@@ -633,13 +633,12 @@ onBeforeUnmount(() => {
       <!-- ================ MOUSE CALIBRATION ================ -->
       <div v-else-if="currentStep === 'mouse'">
         <div class="mb-4">
-          <h2 class="text-base font-semibold text-foreground">Mouse Calibration</h2>
+          <h2 class="text-base font-semibold text-foreground">{{ $t('sentinel.wizard.mouseTitle') }}</h2>
           <p class="mt-1 text-sm text-muted-foreground">
-            Click each target as it appears. Move naturally -- Sentinel is learning your mouse velocity and movement patterns.
+            {{ $t('sentinel.wizard.mouseBody') }}
           </p>
           <p v-if="hasMouseModel" class="mt-2 rounded-md bg-emerald-50 p-2 text-xs text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400">
-            You already have a trained mouse model. Recalibrating replaces it;
-            <strong>Skip</strong> keeps the existing one.
+            {{ $t('sentinel.wizard.mouseHasModel') }}
           </p>
         </div>
 
@@ -680,7 +679,7 @@ onBeforeUnmount(() => {
                   <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
                 </svg>
               </div>
-              <p class="text-sm font-medium text-foreground">All targets hit</p>
+              <p class="text-sm font-medium text-foreground">{{ $t('sentinel.wizard.allTargetsHit') }}</p>
             </div>
           </div>
         </div>
@@ -688,19 +687,19 @@ onBeforeUnmount(() => {
         <!-- Live metrics -->
         <div class="mb-4 grid grid-cols-3 gap-3">
           <div class="rounded-lg bg-muted/30 p-3 text-center">
-            <p class="text-xs text-muted-foreground">Moves</p>
+            <p class="text-xs text-muted-foreground">{{ $t('sentinel.wizard.labelMoves') }}</p>
             <p class="mt-0.5 font-mono text-lg font-bold text-foreground">
               {{ mouseMetrics?.moveCount ?? 0 }}
             </p>
           </div>
           <div class="rounded-lg bg-muted/30 p-3 text-center">
-            <p class="text-xs text-muted-foreground">Clicks</p>
+            <p class="text-xs text-muted-foreground">{{ $t('sentinel.wizard.labelClicks') }}</p>
             <p class="mt-0.5 font-mono text-lg font-bold text-foreground">
               {{ mouseMetrics?.clickCount ?? 0 }}
             </p>
           </div>
           <div class="rounded-lg bg-muted/30 p-3 text-center">
-            <p class="text-xs text-muted-foreground">Targets</p>
+            <p class="text-xs text-muted-foreground">{{ $t('sentinel.wizard.labelTargets') }}</p>
             <p class="mt-0.5 font-mono text-lg font-bold text-foreground">
               {{ mouseTargets.filter(t => t.hit).length }}/{{ mouseTargets.length }}
             </p>
@@ -708,7 +707,7 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="flex items-center justify-between">
-          <AppButton variant="ghost" size="sm" @click="prevStep">Back</AppButton>
+          <AppButton variant="ghost" size="sm" @click="prevStep">{{ $t('common.actions.back') }}</AppButton>
           <div class="flex items-center gap-3">
             <AppButton
               v-if="hasMouseModel"
@@ -716,7 +715,7 @@ onBeforeUnmount(() => {
               size="sm"
               @click="skipStep('mouse')"
             >
-              Skip — keep existing
+              {{ $t('sentinel.wizard.skipKeep') }}
             </AppButton>
             <AppButton
               variant="primary"
@@ -724,7 +723,7 @@ onBeforeUnmount(() => {
               :disabled="!mouseComplete"
               @click="finishMouse"
             >
-              Continue
+              {{ $t('common.actions.continue') }}
             </AppButton>
           </div>
         </div>
@@ -733,9 +732,9 @@ onBeforeUnmount(() => {
       <!-- ================ AWARENESS ================ -->
       <div v-else-if="currentStep === 'awareness'">
         <div class="mb-4">
-          <h2 class="text-base font-semibold text-foreground">What Else Sentinel Watches</h2>
+          <h2 class="text-base font-semibold text-foreground">{{ $t('sentinel.wizard.awarenessTitle') }}</h2>
           <p class="mt-1 text-sm text-muted-foreground">
-            Beyond typing and mouse patterns, Sentinel monitors these signals during assessments. No action needed here -- just be aware.
+            {{ $t('sentinel.wizard.awarenessBody') }}
           </p>
         </div>
 
@@ -747,10 +746,9 @@ onBeforeUnmount(() => {
               </svg>
             </div>
             <div>
-              <p class="text-sm font-medium text-foreground">Tab Focus</p>
+              <p class="text-sm font-medium text-foreground">{{ $t('sentinel.wizard.awarenessTabTitle') }}</p>
               <p class="mt-0.5 text-xs text-muted-foreground">
-                Tracks when you switch away from the assessment tab and how long you're gone.
-                Occasional switches are normal -- excessive switching flags the session.
+                {{ $t('sentinel.wizard.awarenessTabBody') }}
               </p>
             </div>
           </div>
@@ -762,10 +760,9 @@ onBeforeUnmount(() => {
               </svg>
             </div>
             <div>
-              <p class="text-sm font-medium text-foreground">Clipboard</p>
+              <p class="text-sm font-medium text-foreground">{{ $t('sentinel.wizard.awarenessClipboardTitle') }}</p>
               <p class="mt-0.5 text-xs text-muted-foreground">
-                Detects paste events and counts characters pasted. Small pastes are fine --
-                pasting large blocks of text into essay answers raises a flag.
+                {{ $t('sentinel.wizard.awarenessClipboardBody') }}
               </p>
             </div>
           </div>
@@ -777,10 +774,9 @@ onBeforeUnmount(() => {
               </svg>
             </div>
             <div>
-              <p class="text-sm font-medium text-foreground">Developer Tools</p>
+              <p class="text-sm font-medium text-foreground">{{ $t('sentinel.wizard.awarenessDevtoolsTitle') }}</p>
               <p class="mt-0.5 text-xs text-muted-foreground">
-                A heuristic detects if browser DevTools are open by checking window dimension changes.
-                This is a soft signal -- it won't fail you, but it contributes to the overall integrity score.
+                {{ $t('sentinel.wizard.awarenessDevtoolsBody') }}
               </p>
             </div>
           </div>
@@ -792,32 +788,29 @@ onBeforeUnmount(() => {
               </svg>
             </div>
             <div>
-              <p class="text-sm font-medium text-foreground">Device Fingerprint</p>
+              <p class="text-sm font-medium text-foreground">{{ $t('sentinel.wizard.awarenessFingerprintTitle') }}</p>
               <p class="mt-0.5 text-xs text-muted-foreground">
-                A SHA-256 hash of your browser's rendering characteristics creates a probabilistic device identifier.
-                This detects multi-account usage -- the same device used by different accounts.
+                {{ $t('sentinel.wizard.awarenessFingerprintBody') }}
               </p>
             </div>
           </div>
         </div>
 
         <div class="mt-5 flex items-center justify-between">
-          <AppButton variant="ghost" size="sm" @click="prevStep">Back</AppButton>
-          <AppButton variant="primary" size="sm" @click="nextStep">Continue</AppButton>
+          <AppButton variant="ghost" size="sm" @click="prevStep">{{ $t('common.actions.back') }}</AppButton>
+          <AppButton variant="primary" size="sm" @click="nextStep">{{ $t('common.actions.continue') }}</AppButton>
         </div>
       </div>
 
       <!-- ================ CAMERA ================ -->
       <div v-else-if="currentStep === 'camera'">
         <div class="mb-4">
-          <h2 class="text-base font-semibold text-foreground">Face Presence (Optional)</h2>
+          <h2 class="text-base font-semibold text-foreground">{{ $t('sentinel.wizard.cameraTitle') }}</h2>
           <p class="mt-1 text-sm text-muted-foreground">
-            Optionally enable your camera to confirm you're present during assessments. The video feed is processed entirely
-            on your device -- no images or video are ever transmitted.
+            {{ $t('sentinel.wizard.cameraBody') }}
           </p>
           <p v-if="hasFaceEnrollment" class="mt-2 rounded-md bg-emerald-50 p-2 text-xs text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400">
-            You already have a face enrollment. Re-enabling the camera replaces it;
-            <strong>Skip</strong> keeps the existing one.
+            {{ $t('sentinel.wizard.cameraHasEnrollment') }}
           </p>
         </div>
 
@@ -830,10 +823,10 @@ onBeforeUnmount(() => {
             </div>
             <div class="flex justify-center gap-3">
               <AppButton variant="primary" size="sm" @click="enableCamera">
-                Enable Camera
+                {{ $t('sentinel.wizard.enableCamera') }}
               </AppButton>
               <AppButton variant="ghost" size="sm" @click="skipCamera">
-                Skip
+                {{ $t('sentinel.wizard.skip') }}
               </AppButton>
             </div>
             <div v-if="cameraError" class="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-2 dark:border-amber-800/40 dark:bg-amber-900/20">
@@ -853,38 +846,36 @@ onBeforeUnmount(() => {
             <div class="mb-4 flex items-center justify-center gap-2">
               <div class="h-2.5 w-2.5 rounded-full" :class="faceDetected ? 'bg-emerald-500' : 'bg-amber-500'" />
               <span class="text-sm" :class="faceDetected ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'">
-                {{ faceDetected ? 'Face detected' : 'No face detected -- position yourself in frame' }}
+                {{ faceDetected ? $t('sentinel.wizard.faceDetected') : $t('sentinel.wizard.noFace') }}
               </span>
             </div>
             <AppButton variant="primary" size="sm" :disabled="!faceDetected" @click="nextStep">
-              Continue
+              {{ $t('common.actions.continue') }}
             </AppButton>
           </div>
 
           <div v-else class="text-center">
             <p class="mb-4 text-sm text-muted-foreground">
-              Camera skipped. You can enable it later during any assessment.
+              {{ $t('sentinel.wizard.cameraSkipped') }}
             </p>
           </div>
         </div>
 
         <div class="mt-5 flex items-center justify-between">
-          <AppButton variant="ghost" size="sm" @click="prevStep">Back</AppButton>
-          <AppButton v-if="cameraSkipped" variant="primary" size="sm" @click="nextStep">Continue</AppButton>
+          <AppButton variant="ghost" size="sm" @click="prevStep">{{ $t('common.actions.back') }}</AppButton>
+          <AppButton v-if="cameraSkipped" variant="primary" size="sm" @click="nextStep">{{ $t('common.actions.continue') }}</AppButton>
         </div>
       </div>
 
       <!-- ================ GAZE CALIBRATION ================ -->
       <div v-else-if="currentStep === 'gaze'">
         <div class="mb-4">
-          <h2 class="text-base font-semibold text-foreground">Gaze Calibration (Optional)</h2>
+          <h2 class="text-base font-semibold text-foreground">{{ $t('sentinel.wizard.gazeTitle') }}</h2>
           <p class="mt-1 text-sm text-muted-foreground">
-            Follow the dots with your eyes. This teaches Sentinel where you look on this screen so it can tell
-            when your gaze drifts to a second device during an assessment. Video is processed on-device only --
-            no images are stored or transmitted.
+            {{ $t('sentinel.wizard.gazeBody') }}
           </p>
           <p v-if="gazeSkipped || !cameraEnabled && cameraSkipped" class="mt-2 text-xs text-muted-foreground">
-            Without calibration, gaze still works in a coarser look-away mode.
+            {{ $t('sentinel.wizard.gazeCoarseNote') }}
           </p>
         </div>
 
@@ -893,10 +884,10 @@ onBeforeUnmount(() => {
           <div v-if="gazeDotIndex === -1 && !gazeResult" class="text-center">
             <div class="flex justify-center gap-3">
               <AppButton variant="primary" size="sm" @click="startGazeCalibration">
-                Start Calibration
+                {{ $t('sentinel.wizard.startCalibration') }}
               </AppButton>
               <AppButton variant="ghost" size="sm" @click="skipGaze">
-                Skip
+                {{ $t('sentinel.wizard.skip') }}
               </AppButton>
             </div>
             <div v-if="gazeError" class="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-2 dark:border-amber-800/40 dark:bg-amber-900/20">
@@ -914,7 +905,7 @@ onBeforeUnmount(() => {
               />
             </div>
             <p class="mt-3 text-sm text-muted-foreground">
-              Look at the dot. Point {{ Math.min(gazeDotIndex + 1, GAZE_DOTS.length) }} of {{ GAZE_DOTS.length }}.
+              {{ $t('sentinel.wizard.gazeLookDot', { current: Math.min(gazeDotIndex + 1, GAZE_DOTS.length), total: GAZE_DOTS.length }) }}
             </p>
             <video ref="gazeVideoRef" class="sr-only" muted playsinline />
           </div>
@@ -927,16 +918,16 @@ onBeforeUnmount(() => {
               </svg>
             </div>
             <p class="text-sm text-foreground">
-              Gaze calibrated from {{ gazeResult.samples }} samples.
+              {{ $t('sentinel.wizard.gazeDone', { count: gazeResult.samples }) }}
             </p>
-            <p class="mt-1 text-xs text-muted-foreground">Calibration loss: {{ gazeResult.loss.toFixed(4) }}</p>
-            <AppButton variant="ghost" size="sm" class="mt-3" @click="startGazeCalibration">Recalibrate</AppButton>
+            <p class="mt-1 text-xs text-muted-foreground">{{ $t('sentinel.wizard.gazeLoss', { loss: gazeResult.loss.toFixed(4) }) }}</p>
+            <AppButton variant="ghost" size="sm" class="mt-3" @click="startGazeCalibration">{{ $t('sentinel.wizard.recalibrate') }}</AppButton>
           </div>
         </div>
 
         <div class="mt-5 flex items-center justify-between">
-          <AppButton variant="ghost" size="sm" :disabled="gazeRunning" @click="prevStep">Back</AppButton>
-          <AppButton variant="primary" size="sm" :disabled="gazeRunning" @click="nextStep">Continue</AppButton>
+          <AppButton variant="ghost" size="sm" :disabled="gazeRunning" @click="prevStep">{{ $t('common.actions.back') }}</AppButton>
+          <AppButton variant="primary" size="sm" :disabled="gazeRunning" @click="nextStep">{{ $t('common.actions.continue') }}</AppButton>
         </div>
       </div>
 
@@ -948,71 +939,71 @@ onBeforeUnmount(() => {
               <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
           </div>
-          <h2 class="text-base font-semibold text-foreground">Calibration Complete</h2>
+          <h2 class="text-base font-semibold text-foreground">{{ $t('sentinel.wizard.reviewTitle') }}</h2>
           <p class="mt-1 text-sm text-muted-foreground">
-            Your behavioral profile has been built. Here's what Sentinel learned:
+            {{ $t('sentinel.wizard.reviewBody') }}
           </p>
         </div>
 
         <div v-if="savedProfile" class="mx-auto max-w-md space-y-3">
           <!-- Typing summary -->
           <div class="rounded-lg border border-border bg-muted/20 p-4">
-            <p class="mb-2 text-xs font-medium text-muted-foreground">TYPING PATTERN</p>
+            <p class="mb-2 text-xs font-medium text-muted-foreground">{{ $t('sentinel.wizard.typingPattern') }}</p>
             <div class="grid grid-cols-3 gap-3 text-center">
               <div>
                 <p class="font-mono text-lg font-bold text-foreground">
                   {{ ((savedProfile as any)?.typingPattern?.avgDwellTime ?? 0).toFixed(0) }}
                 </p>
-                <p class="text-xs text-muted-foreground">ms dwell</p>
+                <p class="text-xs text-muted-foreground">{{ $t('sentinel.wizard.msHold') }}</p>
               </div>
               <div>
                 <p class="font-mono text-lg font-bold text-foreground">
                   {{ ((savedProfile as any)?.typingPattern?.avgFlightMs ?? (savedProfile as any)?.typingPattern?.avgFlightTime ?? 0).toFixed(0) }}
                 </p>
-                <p class="text-xs text-muted-foreground">ms flight</p>
+                <p class="text-xs text-muted-foreground">{{ $t('sentinel.wizard.msGap') }}</p>
               </div>
               <div>
                 <p class="font-mono text-lg font-bold text-foreground">
                   {{ ((savedProfile as any)?.typingPattern?.speedWpm ?? 0).toFixed(0) }}
                 </p>
-                <p class="text-xs text-muted-foreground">WPM</p>
+                <p class="text-xs text-muted-foreground">{{ $t('sentinel.engine.wpm') }}</p>
               </div>
             </div>
           </div>
 
           <!-- Mouse summary -->
           <div class="rounded-lg border border-border bg-muted/20 p-4">
-            <p class="mb-2 text-xs font-medium text-muted-foreground">MOUSE PATTERN</p>
+            <p class="mb-2 text-xs font-medium text-muted-foreground">{{ $t('sentinel.wizard.mousePattern') }}</p>
             <div class="grid grid-cols-2 gap-3 text-center">
               <div>
                 <p class="font-mono text-lg font-bold text-foreground">
                   {{ ((savedProfile as any)?.mousePattern?.avgVelocity ?? 0).toFixed(2) }}
                 </p>
-                <p class="text-xs text-muted-foreground">px/ms velocity</p>
+                <p class="text-xs text-muted-foreground">{{ $t('sentinel.wizard.pxVelocity') }}</p>
               </div>
               <div>
                 <p class="font-mono text-lg font-bold text-foreground">
                   {{ (savedProfile as any)?.mousePattern?.sampleCount ?? 0 }}
                 </p>
-                <p class="text-xs text-muted-foreground">samples</p>
+                <p class="text-xs text-muted-foreground">{{ $t('sentinel.wizard.reviewSamples') }}</p>
               </div>
             </div>
           </div>
 
           <!-- Camera status -->
           <div class="rounded-lg border border-border bg-muted/20 p-4">
-            <p class="mb-2 text-xs font-medium text-muted-foreground">FACE PRESENCE</p>
+            <p class="mb-2 text-xs font-medium text-muted-foreground">{{ $t('sentinel.wizard.facePresence') }}</p>
             <p class="text-sm text-foreground">
-              {{ cameraSkipped ? 'Skipped -- can be enabled during assessments' : 'Configured and tested' }}
+              {{ cameraSkipped ? $t('sentinel.wizard.faceSkipped') : $t('sentinel.wizard.faceConfigured') }}
             </p>
           </div>
 
           <!-- AI Models training results -->
           <div v-if="aiTrainingResults" class="rounded-lg border border-primary/30 bg-primary/5 p-4">
-            <p class="mb-3 text-xs font-medium text-primary">AI MODELS</p>
+            <p class="mb-3 text-xs font-medium text-primary">{{ $t('sentinel.wizard.smartModels') }}</p>
             <div class="space-y-2">
               <div class="flex items-center justify-between text-sm">
-                <span class="text-muted-foreground">Keystroke Autoencoder</span>
+                <span class="text-muted-foreground">{{ $t('sentinel.wizard.modelTyping') }}</span>
                 <span
                   class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium"
                   :class="skipped.typing
@@ -1022,12 +1013,12 @@ onBeforeUnmount(() => {
                       : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'"
                 >
                   {{ skipped.typing
-                    ? 'Kept existing'
-                    : aiTrainingResults.keystrokeAE.trained ? 'Retrained' : 'Insufficient data' }}
+                    ? $t('sentinel.wizard.keptExisting')
+                    : aiTrainingResults.keystrokeAE.trained ? $t('sentinel.wizard.retrained') : $t('sentinel.wizard.insufficient') }}
                 </span>
               </div>
               <div class="flex items-center justify-between text-sm">
-                <span class="text-muted-foreground">Mouse Trajectory CNN</span>
+                <span class="text-muted-foreground">{{ $t('sentinel.wizard.modelMouse') }}</span>
                 <span
                   class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium"
                   :class="skipped.mouse
@@ -1037,12 +1028,12 @@ onBeforeUnmount(() => {
                       : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'"
                 >
                   {{ skipped.mouse
-                    ? 'Kept existing'
-                    : aiTrainingResults.mouseCNN.trained ? 'Retrained' : 'Insufficient data' }}
+                    ? $t('sentinel.wizard.keptExisting')
+                    : aiTrainingResults.mouseCNN.trained ? $t('sentinel.wizard.retrained') : $t('sentinel.wizard.insufficient') }}
                 </span>
               </div>
               <div class="flex items-center justify-between text-sm">
-                <span class="text-muted-foreground">Face Verification</span>
+                <span class="text-muted-foreground">{{ $t('sentinel.wizard.modelFace') }}</span>
                 <span
                   class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium"
                   :class="skipped.camera
@@ -1054,23 +1045,22 @@ onBeforeUnmount(() => {
                         : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'"
                 >
                   {{ skipped.camera
-                    ? 'Kept existing'
+                    ? $t('sentinel.wizard.keptExisting')
                     : aiTrainingResults.faceEmbedder.enrolled
-                      ? 'Enrolled'
-                      : cameraSkipped ? 'Skipped' : 'Pending' }}
+                      ? $t('sentinel.wizard.enrolled')
+                      : cameraSkipped ? $t('sentinel.wizard.statusSkipped') : $t('sentinel.wizard.statusPending') }}
                 </span>
               </div>
             </div>
             <p class="mt-3 text-xs text-muted-foreground">
-              Per-user models. The global paste classifier (always on) is independent of these.
-              All processing stays on your device.
+              {{ $t('sentinel.wizard.reviewNote') }}
             </p>
           </div>
         </div>
 
         <div class="mt-6 flex items-center justify-between">
           <AppButton variant="ghost" size="sm" @click="restartWizard">
-            Recalibrate
+            {{ $t('sentinel.wizard.recalibrate') }}
           </AppButton>
           <AppButton
             variant="primary"
@@ -1079,7 +1069,7 @@ onBeforeUnmount(() => {
             :loading="saving"
             @click="finishWizard"
           >
-            {{ saving ? 'Saving...' : 'Finish' }}
+            {{ saving ? $t('sentinel.wizard.saving') : $t('sentinel.wizard.finish') }}
           </AppButton>
         </div>
       </div>

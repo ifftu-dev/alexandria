@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { useSentinel } from '@/composables/useSentinel'
 import { AppButton, ProvenanceBadge } from '@/components/ui'
@@ -10,6 +11,7 @@ import { useCourseCompletion } from '@/composables/useCourseCompletion'
 import type { Course, Chapter, Element, Enrollment, ElementProgress, UpdateProgressRequest, QuizResult } from '@/types'
 
 const { invoke } = useLocalApi()
+const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const courseCompletion = useCourseCompletion()
@@ -91,7 +93,7 @@ async function mintAndCelebrate() {
   await claimCredential().catch(() => {})
 
   courseCompletion.open({
-    courseTitle: course.value?.title ?? 'Course',
+    courseTitle: course.value?.title ?? t('learn.player.courseFallback'),
     courseId,
     skillIds: course.value?.skill_ids ?? [],
     txHash: claimTxHash.value,
@@ -365,7 +367,7 @@ async function enableCamera() {
     sentinel.setCameraOptedIn(true)
     startFaceLoop()
   } catch (e) {
-    cameraError.value = e instanceof Error ? e.message : 'Camera unavailable'
+    cameraError.value = e instanceof Error ? e.message : t('learn.player.cameraUnavailable')
     releaseCameraStream()
   } finally {
     cameraStarting.value = false
@@ -577,7 +579,7 @@ async function onDownloadClick() {
   downloadError.value = null
 
   if (!element.content_cid) {
-    downloadError.value = 'No file attached to this element yet.'
+    downloadError.value = t('learn.player.noFileAttached')
     return
   }
 
@@ -604,7 +606,7 @@ async function onDownloadClick() {
     await markComplete()
   } catch (e) {
     console.error('Failed to download content:', e)
-    downloadError.value = `Download failed: ${String(e)}`
+    downloadError.value = t('learn.player.downloadFailed', { error: String(e) })
   } finally {
     downloadingElementId.value = null
   }
@@ -704,18 +706,18 @@ function elementTypeIcon(elementType: string): string {
 
 function elementTypeLabel(elementType: string): string {
   switch (elementType) {
-    case 'video': return 'Video'
-    case 'text': return 'Reading'
-    case 'pdf': return 'PDF Document'
-    case 'downloadable': return 'Download'
-    case 'quiz': return 'Quiz'
-    case 'assessment': return 'Assessment'
-    case 'objective_single_mcq': return 'Single Choice'
-    case 'objective_multi_mcq': return 'Multiple Choice'
-    case 'subjective_mcq': return 'Subjective'
-    case 'essay': return 'Written Response'
-    case 'interactive': return 'Interactive'
-    default: return 'Content'
+    case 'video': return t('learn.player.elementType.video')
+    case 'text': return t('learn.player.elementType.text')
+    case 'pdf': return t('learn.player.elementType.pdf')
+    case 'downloadable': return t('learn.player.elementType.downloadable')
+    case 'quiz': return t('learn.player.elementType.quiz')
+    case 'assessment': return t('learn.player.elementType.assessment')
+    case 'objective_single_mcq': return t('learn.player.elementType.singleChoice')
+    case 'objective_multi_mcq': return t('learn.player.elementType.multipleChoice')
+    case 'subjective_mcq': return t('learn.player.elementType.subjective')
+    case 'essay': return t('learn.player.elementType.essay')
+    case 'interactive': return t('learn.player.elementType.interactive')
+    default: return t('learn.player.elementType.content')
   }
 }
 
@@ -786,10 +788,10 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
             <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
           </svg>
         </div>
-        <h2 class="text-lg font-semibold text-foreground">Course not found</h2>
-        <p class="mt-1 text-sm text-muted-foreground">The course may have been removed or is unavailable.</p>
+        <h2 class="text-lg font-semibold text-foreground">{{ $t('learn.player.notFoundTitle') }}</h2>
+        <p class="mt-1 text-sm text-muted-foreground">{{ $t('learn.player.notFoundBody') }}</p>
         <AppButton variant="secondary" size="sm" class="mt-4" @click="router.push('/courses')">
-          Browse Courses
+          {{ $t('learn.player.browseCourses') }}
         </AppButton>
       </div>
     </div>
@@ -803,7 +805,7 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
         <div class="flex items-center gap-2 px-3 py-2">
           <button
             class="p-1 rounded-md text-muted-foreground active:bg-muted"
-            aria-label="Back to course"
+            :aria-label="$t('learn.player.backToCourse')"
             @click="router.push(`/courses/${courseId}`)"
           >
             <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -814,7 +816,7 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
           <!-- Opens the chapter navigator sheet -->
           <button
             class="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-1 text-left active:bg-muted"
-            aria-label="Open chapter navigator"
+            :aria-label="$t('learn.player.openChapterNav')"
             @click="openMobileNav"
           >
             <svg class="h-4 w-4 shrink-0 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -855,7 +857,7 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
             <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
             </svg>
-            Back to course
+            {{ $t('learn.player.backToCourse') }}
           </button>
 
           <!-- Course title + progress -->
@@ -866,7 +868,7 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
             </div>
             <div class="space-y-1">
               <div class="flex items-center justify-between text-xs text-muted-foreground">
-                <span>{{ completedElements }} of {{ totalElements }} complete</span>
+                <span>{{ $t('learn.player.completeOfTotal', { done: completedElements, total: totalElements }) }}</span>
                 <span class="font-medium">{{ progressPercent }}%</span>
               </div>
               <div class="h-1.5 overflow-hidden rounded-full bg-muted/30">
@@ -881,25 +883,29 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
             <!-- Claim credential — visible once the assessed elements pass -->
             <div v-if="completionStatus?.ready" class="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3">
               <p class="text-xs font-medium text-emerald-700 dark:text-emerald-300">
-                Course complete — claim your Verifiable Credential.
+                {{ $t('learn.player.claimReadyTitle') }}
               </p>
               <button
                 :disabled="claiming"
                 class="mt-2 w-full rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-emerald-700 disabled:opacity-60"
                 @click="claimCredential"
               >
-                {{ claiming ? 'Claiming…' : 'Claim Credential' }}
+                {{ claiming ? $t('learn.player.claiming') : $t('learn.player.claimCredential') }}
               </button>
               <p v-if="claimError" class="mt-2 text-xs text-red-600 dark:text-red-400">{{ claimError }}</p>
-              <p v-if="claimTxHash" class="mt-2 break-all text-xs text-emerald-700 dark:text-emerald-300">
-                Witness submitted: {{ claimTxHash.slice(0, 16) }}…
-              </p>
+              <div v-if="claimTxHash" class="mt-2 text-xs text-emerald-700 dark:text-emerald-300">
+                <p>{{ $t('learn.player.publicRecordSaved') }}</p>
+                <details class="mt-1">
+                  <summary class="cursor-pointer">{{ $t('common.advanced.toggle') }}</summary>
+                  <span class="mt-1 block break-all font-mono">{{ claimTxHash.slice(0, 16) }}…</span>
+                </details>
+              </div>
             </div>
             <div
               v-else-if="completionStatus && completionStatus.required_count > 0"
               class="text-xs text-muted-foreground"
             >
-              {{ completionStatus.required_count - completionStatus.missing_elements.length }}/{{ completionStatus.required_count }} assessments passed
+              {{ $t('learn.player.assessmentsPassed', { passed: completionStatus.required_count - completionStatus.missing_elements.length, total: completionStatus.required_count }) }}
             </div>
             <!-- Content-only / already-finished course: no gradeable gate, so
                  offer the completion credential once everything is consumed.
@@ -910,14 +916,14 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
               class="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3"
             >
               <p class="text-xs font-medium text-emerald-700 dark:text-emerald-300">
-                Course complete — get your completion credential.
+                {{ $t('learn.player.getCredentialTitle') }}
               </p>
               <button
                 :disabled="claiming"
                 class="mt-2 w-full rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-emerald-700 disabled:opacity-60"
                 @click="finishCourse"
               >
-                {{ claiming ? 'Minting…' : 'Get completion credential' }}
+                {{ claiming ? $t('learn.player.creatingCredential') : $t('learn.player.getCompletionCredential') }}
               </button>
               <p v-if="claimError" class="mt-2 text-xs text-red-600 dark:text-red-400">{{ claimError }}</p>
             </div>
@@ -939,20 +945,17 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
                   :class="sentinel.integrityScore.value > 0.7 ? 'bg-emerald-500' : sentinel.integrityScore.value > 0.4 ? 'bg-amber-400' : 'bg-red-500'"
                 />
               </span>
-              <span class="text-xs font-medium text-foreground">Integrity monitoring</span>
-              <InfoTip label="Why integrity monitoring is on" placement="bottom" class="ml-auto">
-                <span class="mb-1 block font-semibold text-foreground">Why this is on</span>
-                This is a graded assessment, so Sentinel confirms it's you doing the
-                work — that's what makes the credential you earn trustworthy to others.
-                <span class="mt-2 mb-1 block font-semibold text-foreground">Your privacy</span>
-                Everything runs on your device. No video, audio, or images are ever
-                recorded, stored, or sent anywhere — only an integrity score. The camera
-                is optional and you can turn it off at any time.
+              <span class="text-xs font-medium text-foreground">{{ $t('learn.player.integrityMonitoring') }}</span>
+              <InfoTip :label="$t('learn.player.whyMonitoringLabel')" placement="bottom" class="ml-auto">
+                <span class="mb-1 block font-semibold text-foreground">{{ $t('learn.player.whyMonitoringTitle') }}</span>
+                {{ $t('learn.player.whyMonitoringBody') }}
+                <span class="mt-2 mb-1 block font-semibold text-foreground">{{ $t('learn.player.privacyTitle') }}</span>
+                {{ $t('learn.player.privacyBody') }}
               </InfoTip>
             </div>
 
             <div class="flex items-center justify-between text-xs">
-              <span class="text-muted-foreground">Integrity score</span>
+              <span class="text-muted-foreground">{{ $t('learn.player.integrityScore') }}</span>
               <span
                 class="font-semibold"
                 :class="sentinel.integrityScore.value > 0.7 ? 'text-emerald-600 dark:text-emerald-400' : sentinel.integrityScore.value > 0.4 ? 'text-amber-600 dark:text-amber-400' : 'text-red-600 dark:text-red-400'"
@@ -969,9 +972,9 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
                     class="h-1.5 w-1.5 rounded-full"
                     :class="lastFacePresent ? 'bg-emerald-500' : 'bg-muted-foreground/50'"
                   />
-                  {{ lastFacePresent === null ? 'Camera connecting…' : lastFacePresent ? 'Face verified' : 'No face detected' }}
+                  {{ lastFacePresent === null ? $t('learn.player.cameraConnecting') : lastFacePresent ? $t('learn.player.faceVerified') : $t('learn.player.noFaceDetected') }}
                 </template>
-                <template v-else>Camera off</template>
+                <template v-else>{{ $t('learn.player.cameraOff') }}</template>
               </span>
               <button
                 class="rounded-md px-2 py-1 text-[11px] font-medium transition-colors disabled:opacity-60"
@@ -981,7 +984,7 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
                 :disabled="cameraStarting"
                 @click="cameraStream ? disableCamera() : enableCamera()"
               >
-                {{ cameraStarting ? 'Starting…' : cameraStream ? 'Turn off' : 'Enable camera' }}
+                {{ cameraStarting ? $t('learn.player.cameraStarting') : cameraStream ? $t('learn.player.cameraTurnOff') : $t('learn.player.cameraEnable') }}
               </button>
             </div>
             <p v-if="cameraError" class="text-[11px] text-red-600 dark:text-red-400">{{ cameraError }}</p>
@@ -1064,7 +1067,7 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
                   {{ el.title }}
                 </span>
                 <span class="mt-0.5 block truncate text-[11px] leading-tight text-muted-foreground">
-                  {{ elementTypeLabel(el.element_type) }}<template v-if="el.duration_seconds"> · {{ Math.round(el.duration_seconds / 60) }} min</template>
+                  {{ elementTypeLabel(el.element_type) }}<template v-if="el.duration_seconds"> · {{ $t('learn.player.minutes', { count: Math.round(el.duration_seconds / 60) }) }}</template>
                 </span>
               </span>
             </button>
@@ -1111,14 +1114,14 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
                     </span>
                     <!-- Duration -->
                     <span v-if="currentElement.duration_seconds" class="text-xs text-muted-foreground">
-                      {{ Math.round(currentElement.duration_seconds / 60) }} min
+                      {{ $t('learn.player.minutes', { count: Math.round(currentElement.duration_seconds / 60) }) }}
                     </span>
                     <!-- Monitored badge -->
                     <span v-if="isAssessment" class="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
                       <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                         <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
                       </svg>
-                      Monitored
+                      {{ $t('learn.player.monitored') }}
                     </span>
                   </div>
                 </div>
@@ -1129,7 +1132,7 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
                     <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                       <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
                     </svg>
-                    Completed
+                    {{ $t('learn.player.completed') }}
                     <span v-if="progress[currentElement.id]?.score != null" class="ml-0.5">
                       {{ Math.round((progress[currentElement.id]!.score!) * 100) }}%
                     </span>
@@ -1137,14 +1140,14 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
                 </div>
                 <div v-else-if="elementStatus(currentElement.id) === 'in_progress'" class="flex-shrink-0">
                   <span class="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
-                    In Progress
+                    {{ $t('learn.player.inProgress') }}
                   </span>
                 </div>
               </div>
 
               <div class="mt-3">
                 <div class="flex items-center justify-between text-[11px] text-muted-foreground mb-1">
-                  <span>Course progress</span>
+                  <span>{{ $t('learn.player.courseProgress') }}</span>
                   <span>{{ completedElements }} / {{ totalElements }}</span>
                 </div>
                 <div class="h-1.5 overflow-hidden rounded-full bg-muted/40">
@@ -1198,8 +1201,8 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
                 <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h7" />
               </svg>
             </div>
-            <h3 class="text-sm font-medium text-foreground">No element selected</h3>
-            <p class="mt-1 text-xs text-muted-foreground">Select an element from the sidebar to start learning.</p>
+            <h3 class="text-sm font-medium text-foreground">{{ $t('learn.player.noElementTitle') }}</h3>
+            <p class="mt-1 text-xs text-muted-foreground">{{ $t('learn.player.noElementBody') }}</p>
           </div>
         </div>
 
@@ -1208,7 +1211,7 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
         <!-- ============================== -->
         <div v-if="currentElement" class="flex-shrink-0 border-t border-border bg-card/60 px-3 pt-2 pb-[calc(0.5rem+var(--sab,env(safe-area-inset-bottom)))] md:px-6 md:py-3">
           <p v-if="claimError" class="mx-auto mb-2 max-w-4xl text-xs text-destructive">
-            Couldn't finish the course: {{ claimError }}
+            {{ $t('learn.player.finishError', { error: claimError }) }}
           </p>
           <div :class="['mx-auto flex items-center justify-between gap-2', isVideoElement ? 'max-w-7xl' : 'max-w-4xl']">
             <!-- Previous -->
@@ -1216,7 +1219,7 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
               <svg class="mr-1.5 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
               </svg>
-              Previous
+              {{ $t('learn.player.previous') }}
             </AppButton>
 
             <!-- Center action -->
@@ -1226,7 +1229,7 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
               :loading="enrolling"
               @click="enrollFromPlayer"
             >
-              Enroll to Track Progress
+              {{ $t('learn.player.enrollToTrack') }}
             </AppButton>
             <AppButton
               v-else-if="isContentElement && elementStatus(currentElement.id) !== 'completed'"
@@ -1237,7 +1240,7 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
               <svg class="mr-1.5 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
               </svg>
-              Mark Complete
+              {{ $t('learn.player.markComplete') }}
             </AppButton>
             <span v-else class="text-xs text-muted-foreground">
               {{ activeFlatIndex + 1 }} / {{ flatElements.length }}
@@ -1249,16 +1252,16 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
               size="sm"
               :loading="claiming"
               :disabled="!canFinish"
-              :title="canFinish ? undefined : 'Complete every element first'"
+              :title="canFinish ? undefined : $t('learn.player.finishDisabledHint')"
               @click="finishCourse"
             >
-              Finish Course
+              {{ $t('learn.player.finishCourse') }}
               <svg class="ml-1.5 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
               </svg>
             </AppButton>
             <AppButton v-else size="sm" :disabled="!hasNextElement" @click="goToNext">
-              Next
+              {{ $t('common.actions.next') }}
               <svg class="ml-1.5 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
               </svg>
@@ -1298,10 +1301,10 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
               <div class="sticky top-0 z-10 bg-card px-4 pt-2.5 pb-3">
                 <div class="mx-auto mb-3 h-1 w-9 rounded-full bg-muted" />
                 <div class="flex items-center justify-between">
-                  <h2 class="text-sm font-semibold text-foreground">Chapters</h2>
+                  <h2 class="text-sm font-semibold text-foreground">{{ $t('learn.player.chapters') }}</h2>
                   <button
                     class="rounded-md p-1 text-muted-foreground active:bg-muted"
-                    aria-label="Close chapter navigator"
+                    :aria-label="$t('learn.player.closeChapterNav')"
                     @click="mobileNavOpen = false"
                   >
                     <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">

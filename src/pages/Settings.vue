@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useRouter, useRoute } from 'vue-router'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { useAuth } from '@/composables/useAuth'
@@ -24,8 +25,10 @@ import AdvancedSettingsPanel from '@/components/settings/AdvancedSettingsPanel.v
 import RelayManager from '@/components/settings/RelayManager.vue'
 import PluginsPanel from '@/components/settings/PluginsPanel.vue'
 import GuardianPanel from '@/components/settings/GuardianPanel.vue'
+import LanguageSelector from '@/components/settings/LanguageSelector.vue'
 import type { Identity } from '@/types'
 
+const { t } = useI18n()
 const { invoke } = useLocalApi()
 const { identity, lockVault: authLock, exportMnemonic: authExport, refreshProfile } = useAuth()
 const { activeProfileId } = useProfiles()
@@ -44,30 +47,41 @@ interface SectionMeta {
   /** Free-text terms the search box matches against, beyond label/desc. */
   keywords: string[]
 }
-const SECTIONS: SectionMeta[] = [
-  { id: 'account', label: 'Account & Identity', desc: 'Profile, addresses, peer',
-    keywords: ['display name', 'bio', 'stake address', 'payment address', 'peer id', 'profile hash', 'publish', 'did'] },
-  { id: 'security', label: 'Security & Privacy', desc: 'Recovery, lock, biometric',
-    keywords: ['recovery phrase', 'mnemonic', 'export', 'seed', 'lock wallet', 'vault', 'biometric', 'touch id', 'face id', 'password'] },
-  { id: 'personalization', label: 'Personalization', desc: 'Theme, shortcuts',
-    keywords: ['theme', 'light', 'dark', 'system', 'appearance', 'keyboard shortcuts', 'keybindings', 'hotkeys'] },
-  { id: 'system', label: 'System', desc: 'Storage, network',
-    keywords: ['storage', 'disk', 'quota', 'cache', 'free space', 'evict', 'network', 'p2p', 'node', 'peers'] },
-  { id: 'plugins', label: 'Plugins', desc: 'Install, enable, review submissions',
-    keywords: ['plugin', 'install', 'uninstall', 'enable', 'disable', 'capability', 'donate', 'instructor', 'review', 'irl', 'music'] },
-  { id: 'guardian', label: 'My Guardian', desc: 'Who oversees this profile',
-    keywords: ['guardian', 'parent', 'oversight', 'minor', 'ward', 'family', 'link', 'unlink'] },
-  { id: 'advanced', label: 'All settings', desc: 'Every per-profile setting',
-    keywords: ['advanced', 'all settings', 'sync', 'sentinel', 'notifications', 'flags'] },
+const SECTION_IDS: SettingsSectionId[] = [
+  'account', 'security', 'personalization', 'system', 'plugins', 'guardian', 'advanced',
 ]
-const SECTION_IDS = SECTIONS.map((s) => s.id)
+const SECTIONS = computed<SectionMeta[]>(() => [
+  { id: 'account', label: t('settings.nav.sections.account.label'), desc: t('settings.nav.sections.account.desc'),
+    keywords: ['display name', 'bio', 'stake address', 'payment address', 'peer id', 'profile hash', 'publish', 'did'] },
+  { id: 'security', label: t('settings.nav.sections.security.label'), desc: t('settings.nav.sections.security.desc'),
+    keywords: ['recovery phrase', 'mnemonic', 'export', 'seed', 'lock wallet', 'vault', 'biometric', 'touch id', 'face id', 'password'] },
+  { id: 'personalization', label: t('settings.nav.sections.personalization.label'), desc: t('settings.nav.sections.personalization.desc'),
+    keywords: ['language', 'locale', 'translation', 'idioma', 'langue', 'भाषा', 'theme', 'light', 'dark', 'system', 'appearance', 'keyboard shortcuts', 'keybindings', 'hotkeys'] },
+  { id: 'system', label: t('settings.nav.sections.system.label'), desc: t('settings.nav.sections.system.desc'),
+    keywords: ['storage', 'disk', 'quota', 'cache', 'free space', 'evict', 'network', 'p2p', 'node', 'peers'] },
+  { id: 'plugins', label: t('settings.nav.sections.plugins.label'), desc: t('settings.nav.sections.plugins.desc'),
+    keywords: ['plugin', 'install', 'uninstall', 'enable', 'disable', 'capability', 'donate', 'instructor', 'review', 'irl', 'music'] },
+  { id: 'guardian', label: t('settings.nav.sections.guardian.label'), desc: t('settings.nav.sections.guardian.desc'),
+    keywords: ['guardian', 'parent', 'oversight', 'minor', 'ward', 'family', 'link', 'unlink'] },
+  { id: 'advanced', label: t('settings.nav.sections.advanced.label'), desc: t('settings.nav.sections.advanced.desc'),
+    keywords: ['advanced', 'all settings', 'sync', 'sentinel', 'notifications', 'flags'] },
+])
+
+const THEME_LABELS: Record<'light' | 'dark' | 'system', string> = {
+  light: 'settings.personalization.themeLight',
+  dark: 'settings.personalization.themeDark',
+  system: 'settings.personalization.themeSystem',
+}
+function themeLabel(opt: 'light' | 'dark' | 'system'): string {
+  return t(THEME_LABELS[opt])
+}
 
 // ---- Search ----
 const searchQuery = ref('')
 const filteredSections = computed<SectionMeta[]>(() => {
   const q = searchQuery.value.trim().toLowerCase()
-  if (!q) return SECTIONS
-  return SECTIONS.filter((s) => {
+  if (!q) return SECTIONS.value
+  return SECTIONS.value.filter((s) => {
     const hay = [s.label, s.desc, ...s.keywords].join(' ').toLowerCase()
     return q.split(/\s+/).every((term) => hay.includes(term))
   })
@@ -119,7 +133,7 @@ async function saveUsername() {
     await invoke('set_username', { username: newUsername.value.trim() })
     await refreshProfile()
     editingUsername.value = false
-    usernameMessage.value = 'Username updated.'
+    usernameMessage.value = t('settings.profile.usernameUpdated')
   } catch (e) {
     usernameMessage.value = `${e}`
   } finally {
@@ -200,7 +214,7 @@ async function setQuota(bytes: number) {
     storageMessage.value = ''
     await loadStorageStats()
   } catch (e) {
-    storageMessage.value = `Error: ${e}`
+    storageMessage.value = t('settings.storage.error', { msg: String(e) })
   }
 }
 
@@ -210,13 +224,16 @@ async function freeSpace() {
   try {
     const result = await invoke<{ blobs_evicted: number; bytes_freed: number }>('storage_evict_now')
     if (result.blobs_evicted > 0) {
-      storageMessage.value = `Freed ${formatBytes(result.bytes_freed)} from ${result.blobs_evicted} item${result.blobs_evicted === 1 ? '' : 's'}.`
+      storageMessage.value = t('settings.storage.freed', {
+        size: formatBytes(result.bytes_freed),
+        items: t('settings.storage.freedItems', { count: result.blobs_evicted }, result.blobs_evicted),
+      })
     } else {
-      storageMessage.value = 'Nothing to free.'
+      storageMessage.value = t('settings.storage.nothingToFree')
     }
     await loadStorageStats()
   } catch (e) {
-    storageMessage.value = `Error: ${e}`
+    storageMessage.value = t('settings.storage.error', { msg: String(e) })
   } finally {
     evicting.value = false
   }
@@ -268,7 +285,9 @@ async function refreshBiometricState() {
     biometricAvailable.value = status.isAvailable
     biometricEnabled.value = enabled
     biometricDiagnostics.value = status.error
-      ? `Status error${status.errorCode ? ` (${status.errorCode})` : ''}: ${status.error}`
+      ? (status.errorCode
+          ? t('settings.security.statusErrorCode', { code: status.errorCode, msg: status.error })
+          : t('settings.security.statusError', { msg: status.error }))
       : ''
   } catch {
     biometricAvailable.value = false
@@ -279,7 +298,7 @@ async function refreshBiometricState() {
 
 async function saveProfile() {
   if (!displayName.value.trim()) {
-    message.value = 'A display name is required.'
+    message.value = t('settings.profile.displayNameRequired')
     return
   }
   saving.value = true
@@ -293,9 +312,9 @@ async function saveProfile() {
       },
     })
     await refreshProfile()
-    message.value = 'Profile updated.'
+    message.value = t('settings.profile.updated')
   } catch (e) {
-    message.value = `Error: ${e}`
+    message.value = t('settings.profile.error', { msg: String(e) })
   } finally {
     saving.value = false
   }
@@ -306,10 +325,10 @@ async function publishProfile() {
   publishMessage.value = ''
   try {
     await invoke('publish_profile')
-    publishMessage.value = 'Published!'
+    publishMessage.value = t('settings.profile.published')
     await refreshProfile()
   } catch (e) {
-    publishMessage.value = `Error: ${e}`
+    publishMessage.value = t('settings.profile.error', { msg: String(e) })
   } finally {
     publishing.value = false
   }
@@ -362,7 +381,7 @@ async function lockWallet() {
 
 async function enableBiometric() {
   if (!biometricPassword.value) {
-    biometricMessage.value = 'Enter your vault password to enable biometric unlock.'
+    biometricMessage.value = t('settings.security.enterPasswordToEnable')
     return
   }
   biometricBusy.value = true
@@ -370,25 +389,25 @@ async function enableBiometric() {
   try {
     const supported = await biometricSupported()
     if (!supported) {
-      biometricMessage.value = 'Biometric support is unavailable right now on this runtime.'
+      biometricMessage.value = t('settings.security.biometricUnavailableRuntime')
       return
     }
     if (!activeProfileId.value) {
-      biometricMessage.value = 'No active profile — unlock a profile before enabling biometrics.'
+      biometricMessage.value = t('settings.security.noActiveProfile')
       return
     }
     const mode = await storeVaultPasswordForBiometric(activeProfileId.value, biometricPassword.value)
     biometricEnabled.value = true
     biometricPassword.value = ''
     biometricMessage.value = mode === 'secure'
-      ? 'Biometric unlock enabled.'
-      : 'Biometric unlock enabled for this app session only (dev runtime keychain entitlement limitation).'
+      ? t('settings.security.biometricEnabledMsg')
+      : t('settings.security.biometricSessionOnly')
   } catch (e) {
     const msg = String(e)
     if (msg.includes('-34018')) {
-      biometricMessage.value = 'macOS keychain entitlement is missing for this runtime (-34018). Use a bundled/signed app build, then enable biometrics again.'
+      biometricMessage.value = t('settings.security.keychainEntitlement')
     } else {
-      biometricMessage.value = `Failed to enable biometric unlock: ${msg}`
+      biometricMessage.value = t('settings.security.biometricEnableFailed', { msg })
     }
   } finally {
     biometricBusy.value = false
@@ -404,9 +423,9 @@ async function disableBiometric() {
       await clearBiometricVaultPassword(activeProfileId.value)
     }
     biometricEnabled.value = false
-    biometricMessage.value = 'Biometric credential cleared for this profile.'
+    biometricMessage.value = t('settings.security.biometricCleared')
   } catch (e) {
-    biometricMessage.value = `Failed to clear biometric credential: ${String(e)}`
+    biometricMessage.value = t('settings.security.biometricClearFailed', { msg: String(e) })
   } finally {
     biometricBusy.value = false
     await refreshBiometricState()
@@ -414,7 +433,7 @@ async function disableBiometric() {
 }
 
 function gotoNetwork() {
-  router.push('/dashboard/network')
+  router.push('/network')
 }
 
 async function copyText(value: string | undefined | null) {
@@ -437,7 +456,7 @@ function onSectionClick(id: SettingsSectionId) {
             <aside class="settings-sidebar shrink-0 sm:w-64 border-b sm:border-b-0 sm:border-r border-border bg-muted/20 flex flex-col">
               <div class="px-4 pt-5 pb-3">
                 <h2 class="text-sm font-semibold tracking-wide uppercase text-muted-foreground mb-3">
-                  Settings
+                  {{ $t('settings.nav.heading') }}
                 </h2>
                 <!-- Search -->
                 <div class="relative">
@@ -447,14 +466,14 @@ function onSectionClick(id: SettingsSectionId) {
                   <input
                     v-model="searchQuery"
                     type="text"
-                    placeholder="Search settings…"
+                    :placeholder="$t('settings.nav.searchPlaceholder')"
                     class="w-full rounded-lg border border-border bg-background py-1.5 pl-8 pr-7 text-sm text-foreground outline-none focus:border-primary"
                     @keyup.enter="onSearchEnter"
                   >
                   <button
                     v-if="searchQuery"
                     class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                    aria-label="Clear search"
+                    :aria-label="$t('settings.nav.clearSearch')"
                     @click="searchQuery = ''"
                   >
                     <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -466,7 +485,7 @@ function onSectionClick(id: SettingsSectionId) {
 
               <nav class="flex-1 overflow-y-auto px-2 pb-4 flex sm:block overflow-x-auto sm:overflow-visible gap-1 sm:gap-0">
                 <p v-if="filteredSections.length === 0" class="px-3 py-4 text-xs text-muted-foreground">
-                  No settings match "{{ searchQuery }}".
+                  {{ $t('settings.nav.noMatch', { query: searchQuery }) }}
                 </p>
                 <button
                   v-for="s in filteredSections"
@@ -524,66 +543,66 @@ function onSectionClick(id: SettingsSectionId) {
                 <!-- ──────────── Account & Identity ──────────── -->
                 <template v-if="activeSection === 'account'">
                   <div>
-                    <h4 class="settings-group-title">Profile</h4>
+                    <h4 class="settings-group-title">{{ $t('settings.profile.title') }}</h4>
                     <div class="space-y-4">
                       <div>
-                        <label class="label text-xs text-muted-foreground">Username</label>
+                        <label class="label text-xs text-muted-foreground">{{ $t('settings.profile.usernameLabel') }}</label>
                         <div v-if="!editingUsername" class="flex items-center gap-2">
                           <span class="rounded-md border border-border bg-muted/40 px-3 py-2 text-sm text-foreground">
                             @{{ identity?.username ?? '—' }}
                           </span>
                           <AppButton variant="ghost" size="xs" @click="editingUsername = true; newUsername = identity?.username ?? ''">
-                            Change
+                            {{ $t('settings.profile.change') }}
                           </AppButton>
-                          <span class="text-xs text-muted-foreground">How others find you</span>
+                          <span class="text-xs text-muted-foreground">{{ $t('settings.profile.findYou') }}</span>
                         </div>
                         <div v-else class="flex items-center gap-2">
-                          <AppInput v-model="newUsername" placeholder="new_handle" />
-                          <AppButton size="sm" :loading="usernameSaving" @click="saveUsername">Save</AppButton>
-                          <AppButton variant="ghost" size="sm" @click="editingUsername = false">Cancel</AppButton>
+                          <AppInput v-model="newUsername" :placeholder="$t('settings.profile.newHandlePlaceholder')" />
+                          <AppButton size="sm" :loading="usernameSaving" @click="saveUsername">{{ $t('common.actions.save') }}</AppButton>
+                          <AppButton variant="ghost" size="sm" @click="editingUsername = false">{{ $t('common.actions.cancel') }}</AppButton>
                         </div>
                         <p v-if="usernameMessage" class="mt-1 text-xs text-muted-foreground">{{ usernameMessage }}</p>
                         <p v-if="editingUsername" class="mt-1 text-xs text-warning">
-                          Changing your handle releases the old one once its registry record expires — links using it will stop resolving.
+                          {{ $t('settings.profile.usernameWarning') }}
                         </p>
                       </div>
                       <AppInput
                         v-model="displayName"
-                        label="Display Name"
-                        placeholder="How others see you"
+                        :label="$t('settings.profile.displayNameLabel')"
+                        :placeholder="$t('settings.profile.displayNamePlaceholder')"
                       />
                       <AppTextarea
                         v-model="bio"
-                        label="Bio"
-                        placeholder="A short description about yourself"
+                        :label="$t('settings.profile.bioLabel')"
+                        :placeholder="$t('settings.profile.bioPlaceholder')"
                       />
                       <div>
-                        <label class="label text-xs text-muted-foreground">Profile visibility</label>
+                        <label class="label text-xs text-muted-foreground">{{ $t('settings.profile.visibilityLabel') }}</label>
                         <div class="flex gap-2">
                           <button
                             class="vis-option"
                             :class="{ 'vis-option--active': profileVisibility === 'public' }"
                             @click="profileVisibility = 'public'"
                           >
-                            🌐 Public
-                            <span class="vis-desc">Anyone can view your profile and find you by @username.</span>
+                            🌐 {{ $t('settings.profile.public') }}
+                            <span class="vis-desc">{{ $t('settings.profile.publicDesc') }}</span>
                           </button>
                           <button
                             class="vis-option"
                             :class="{ 'vis-option--active': profileVisibility === 'private' }"
                             @click="profileVisibility = 'private'"
                           >
-                            🔒 Private
-                            <span class="vis-desc">Profile hidden from other users; username not discoverable.</span>
+                            🔒 {{ $t('settings.profile.private') }}
+                            <span class="vis-desc">{{ $t('settings.profile.privateDesc') }}</span>
                           </button>
                         </div>
                       </div>
                       <div class="flex flex-wrap items-center gap-3">
                         <AppButton :loading="saving" @click="saveProfile">
-                          Save Profile
+                          {{ $t('settings.profile.save') }}
                         </AppButton>
                         <AppButton variant="outline" :loading="publishing" @click="publishProfile">
-                          Publish to Network
+                          {{ $t('settings.profile.publish') }}
                         </AppButton>
                         <span v-if="message" class="text-xs text-emerald-600 dark:text-emerald-400">{{ message }}</span>
                         <span v-if="publishMessage" class="text-xs text-emerald-600 dark:text-emerald-400">{{ publishMessage }}</span>
@@ -592,83 +611,86 @@ function onSectionClick(id: SettingsSectionId) {
                   </div>
 
                   <div v-if="identity">
-                    <h4 class="settings-group-title">Identity</h4>
-                    <div class="space-y-3">
-                      <div class="settings-row-stack">
-                        <div class="flex items-center justify-between">
-                          <p class="text-xs text-muted-foreground">Stake Address</p>
-                          <button class="settings-copy-btn" @click="copyText(identity.stake_address)">Copy</button>
+                    <h4 class="settings-group-title">{{ $t('settings.account.title') }}</h4>
+                    <details>
+                      <summary class="cursor-pointer text-xs text-muted-foreground">{{ $t('common.advanced.toggle') }}</summary>
+                      <div class="space-y-3 mt-3">
+                        <div class="settings-row-stack">
+                          <div class="flex items-center justify-between">
+                            <p class="text-xs text-muted-foreground">{{ $t('settings.account.stakeAddress') }}</p>
+                            <button class="settings-copy-btn" @click="copyText(identity.stake_address)">{{ $t('common.actions.copy') }}</button>
+                          </div>
+                          <code class="settings-code">{{ identity.stake_address }}</code>
                         </div>
-                        <code class="settings-code">{{ identity.stake_address }}</code>
-                      </div>
 
-                      <div class="settings-row-stack">
-                        <div class="flex items-center justify-between">
-                          <p class="text-xs text-muted-foreground">Payment Address</p>
-                          <button class="settings-copy-btn" @click="copyText(identity.payment_address)">Copy</button>
+                        <div class="settings-row-stack">
+                          <div class="flex items-center justify-between">
+                            <p class="text-xs text-muted-foreground">{{ $t('settings.account.paymentAddress') }}</p>
+                            <button class="settings-copy-btn" @click="copyText(identity.payment_address)">{{ $t('common.actions.copy') }}</button>
+                          </div>
+                          <code class="settings-code">{{ identity.payment_address }}</code>
                         </div>
-                        <code class="settings-code">{{ identity.payment_address }}</code>
-                      </div>
 
-                      <div class="settings-row-stack">
-                        <div class="flex items-center justify-between">
-                          <p class="text-xs text-muted-foreground">Peer ID</p>
-                          <button
-                            v-if="p2pStatus?.peer_id"
-                            class="settings-copy-btn"
-                            @click="copyText(p2pStatus.peer_id)"
-                          >
-                            Copy
-                          </button>
+                        <div class="settings-row-stack">
+                          <div class="flex items-center justify-between">
+                            <p class="text-xs text-muted-foreground">{{ $t('settings.account.deviceId') }}</p>
+                            <button
+                              v-if="p2pStatus?.peer_id"
+                              class="settings-copy-btn"
+                              @click="copyText(p2pStatus.peer_id)"
+                            >
+                              {{ $t('common.actions.copy') }}
+                            </button>
+                          </div>
+                          <code v-if="p2pStatus?.peer_id" class="settings-code">{{ p2pStatus.peer_id }}</code>
+                          <p v-else class="text-xs text-muted-foreground italic">{{ $t('settings.account.offline') }}</p>
                         </div>
-                        <code v-if="p2pStatus?.peer_id" class="settings-code">{{ p2pStatus.peer_id }}</code>
-                        <p v-else class="text-xs text-muted-foreground italic">Network offline</p>
-                      </div>
 
-                      <div v-if="identity.profile_hash" class="settings-row-stack">
-                        <div class="flex items-center justify-between">
-                          <p class="text-xs text-muted-foreground">Published Profile Hash</p>
-                          <button class="settings-copy-btn" @click="copyText(identity.profile_hash)">Copy</button>
+                        <div v-if="identity.profile_hash" class="settings-row-stack">
+                          <div class="flex items-center justify-between">
+                            <p class="text-xs text-muted-foreground">{{ $t('settings.account.profileFingerprint') }}</p>
+                            <button class="settings-copy-btn" @click="copyText(identity.profile_hash)">{{ $t('common.actions.copy') }}</button>
+                          </div>
+                          <code class="settings-code">{{ identity.profile_hash }}</code>
                         </div>
-                        <code class="settings-code">{{ identity.profile_hash }}</code>
                       </div>
-                    </div>
+                    </details>
                   </div>
                 </template>
 
                 <!-- ──────────── Security & Privacy ──────────── -->
                 <template v-else-if="activeSection === 'security'">
                   <div>
-                    <h4 class="settings-group-title">Wallet</h4>
+                    <h4 class="settings-group-title">{{ $t('settings.security.accountTitle') }}</h4>
                     <div class="divide-y divide-border/50 rounded-lg border border-border">
                       <div class="flex items-center justify-between gap-4 p-4">
                         <div>
-                          <p class="text-sm font-medium text-foreground">Recovery Phrase</p>
-                          <p class="text-xs text-muted-foreground">Export your 24-word backup phrase</p>
+                          <p class="text-sm font-medium text-foreground">{{ $t('settings.security.recoveryPhrase') }}</p>
+                          <p class="text-xs text-muted-foreground">{{ $t('settings.security.recoveryPhraseDesc') }}</p>
                         </div>
                         <AppButton variant="outline" size="sm" @click="openExportModal">
-                          Export
+                          {{ $t('settings.security.export') }}
                         </AppButton>
                       </div>
                       <div class="flex items-center justify-between gap-4 p-4">
                         <div>
-                          <p class="text-sm font-medium text-foreground">Lock Wallet</p>
-                          <p class="text-xs text-muted-foreground">Clear secrets from memory and require password</p>
+                          <p class="text-sm font-medium text-foreground">{{ $t('settings.security.lockTitle') }}</p>
+                          <p class="text-xs text-muted-foreground">{{ $t('settings.security.lockDesc') }}</p>
                         </div>
                         <AppButton variant="outline" size="sm" :loading="locking" @click="lockWallet">
-                          Lock
+                          {{ $t('settings.security.lock') }}
                         </AppButton>
                       </div>
                     </div>
                   </div>
 
                   <div>
-                    <h4 class="settings-group-title">Device</h4>
+                    <h4 class="settings-group-title">{{ $t('settings.security.deviceTitle') }}</h4>
                     <div class="rounded-lg border border-border p-4">
                       <div class="flex items-center justify-between gap-4">
                         <div>
-                          <p class="text-sm font-medium text-foreground">Biometric Unlock</p>
-                          <p class="text-xs text-muted-foreground">Use Touch ID/Face ID to unlock this device vault</p>
+                          <p class="text-sm font-medium text-foreground">{{ $t('settings.security.biometricTitle') }}</p>
+                          <p class="text-xs text-muted-foreground">{{ $t('settings.security.biometricDesc') }}</p>
                         </div>
                         <AppButton
                           v-if="biometricEnabled"
@@ -677,30 +699,30 @@ function onSectionClick(id: SettingsSectionId) {
                           :loading="biometricBusy"
                           @click="disableBiometric"
                         >
-                          Disable
+                          {{ $t('settings.security.disable') }}
                         </AppButton>
                       </div>
 
                       <div v-if="!biometricAvailable" class="mt-3 text-xs text-muted-foreground">
-                        Biometrics are not available on this device/runtime.
+                        {{ $t('settings.security.biometricUnavailable') }}
                       </div>
 
                       <div v-else-if="!biometricEnabled" class="mt-3 flex flex-col sm:flex-row sm:items-end gap-2">
                         <div class="flex-1">
                           <AppInput
                             v-model="biometricPassword"
-                            label="Vault Password"
+                            :label="$t('settings.security.passwordLabel')"
                             type="password"
-                            placeholder="Enter current vault password"
+                            :placeholder="$t('settings.security.passwordPlaceholder')"
                           />
                         </div>
                         <AppButton size="sm" :loading="biometricBusy" @click="enableBiometric">
-                          Enable
+                          {{ $t('settings.security.enable') }}
                         </AppButton>
                       </div>
 
                       <div v-else class="mt-3 text-xs text-emerald-600 dark:text-emerald-400">
-                        Biometric unlock is enabled.
+                        {{ $t('settings.security.biometricEnabled') }}
                       </div>
 
                       <p v-if="biometricMessage" class="mt-2 text-xs text-muted-foreground">
@@ -716,7 +738,12 @@ function onSectionClick(id: SettingsSectionId) {
                 <!-- ──────────── Personalization ──────────── -->
                 <template v-else-if="activeSection === 'personalization'">
                   <div>
-                    <h4 class="settings-group-title">Theme</h4>
+                    <h4 class="settings-group-title">{{ t('common.language.label') }}</h4>
+                    <LanguageSelector />
+                  </div>
+
+                  <div>
+                    <h4 class="settings-group-title">{{ $t('settings.personalization.themeTitle') }}</h4>
                     <div class="grid grid-cols-3 gap-2">
                       <button
                         v-for="opt in (['light', 'dark', 'system'] as const)"
@@ -726,20 +753,20 @@ function onSectionClick(id: SettingsSectionId) {
                         @click="setTheme(opt)"
                       >
                         <span class="theme-card-swatch" :class="`theme-card-swatch--${opt}`" aria-hidden="true" />
-                        <span class="capitalize text-sm">{{ opt }}</span>
+                        <span class="text-sm">{{ themeLabel(opt) }}</span>
                       </button>
                     </div>
                   </div>
 
                   <div>
                     <div class="flex items-center justify-between mb-3">
-                      <h4 class="settings-group-title mb-0">Keyboard Shortcuts</h4>
+                      <h4 class="settings-group-title mb-0">{{ $t('settings.personalization.shortcutsTitle') }}</h4>
                       <AppButton variant="ghost" size="sm" @click="resetAllShortcuts">
-                        Reset all
+                        {{ $t('settings.personalization.resetAll') }}
                       </AppButton>
                     </div>
                     <p class="text-xs text-muted-foreground mb-3">
-                      Click a shortcut's key binding to record a new one. Press Escape to cancel.
+                      {{ $t('settings.personalization.shortcutsHint') }}
                     </p>
                     <div class="divide-y divide-border/50 rounded-lg border border-border">
                       <div
@@ -757,7 +784,7 @@ function onSectionClick(id: SettingsSectionId) {
                               @keydown="onShortcutKeydown"
                               @blur="cancelRecording"
                             >
-                              Press keys…
+                              {{ $t('settings.personalization.pressKeys') }}
                             </kbd>
                           </template>
                           <template v-else>
@@ -771,10 +798,10 @@ function onSectionClick(id: SettingsSectionId) {
                           <button
                             v-if="def.keys.key !== def.defaultKeys.key || def.keys.mod !== def.defaultKeys.mod || def.keys.shift !== def.defaultKeys.shift || def.keys.alt !== def.defaultKeys.alt"
                             class="text-xs text-muted-foreground hover:text-foreground transition-colors"
-                            title="Reset to default"
+                            :title="$t('settings.personalization.resetToDefault')"
                             @click="resetShortcut(def.id)"
                           >
-                            reset
+                            {{ $t('settings.personalization.reset') }}
                           </button>
                         </div>
                       </div>
@@ -785,18 +812,18 @@ function onSectionClick(id: SettingsSectionId) {
                 <!-- ──────────── System ──────────── -->
                 <template v-else-if="activeSection === 'system'">
                   <div>
-                    <h4 class="settings-group-title">Storage</h4>
+                    <h4 class="settings-group-title">{{ $t('settings.storage.title') }}</h4>
                     <div v-if="storageStats" class="space-y-5 rounded-lg border border-border p-4">
                       <div>
                         <div class="flex items-center justify-between mb-1.5">
-                          <p class="text-sm font-medium text-foreground">Content Cache</p>
+                          <p class="text-sm font-medium text-foreground">{{ $t('settings.storage.cacheLabel') }}</p>
                           <p class="text-xs text-muted-foreground">
                             {{ formatBytes(storageStats.total_pinned_bytes) }}
                             <template v-if="storageStats.quota_bytes > 0">
-                              of {{ formatBytes(storageStats.quota_bytes) }}
+                              {{ $t('settings.storage.cacheOf', { size: formatBytes(storageStats.quota_bytes) }) }}
                             </template>
                             <template v-else>
-                              (unlimited)
+                              {{ $t('settings.storage.unlimited') }}
                             </template>
                           </p>
                         </div>
@@ -808,15 +835,15 @@ function onSectionClick(id: SettingsSectionId) {
                           />
                         </div>
                         <p class="mt-1 text-xs text-muted-foreground">
-                          {{ storageStats.pin_count }} item{{ storageStats.pin_count === 1 ? '' : 's' }} cached
+                          {{ $t('settings.storage.cached', { count: storageStats.pin_count }, storageStats.pin_count) }}
                           <template v-if="storageStats.evictable_bytes > 0">
-                            &middot; {{ formatBytes(storageStats.evictable_bytes) }} can be freed
+                            &middot; {{ $t('settings.storage.canBeFreed', { size: formatBytes(storageStats.evictable_bytes) }) }}
                           </template>
                         </p>
                       </div>
 
                       <div>
-                        <p class="text-sm font-medium text-foreground mb-2">Disk Quota</p>
+                        <p class="text-sm font-medium text-foreground mb-2">{{ $t('settings.storage.quotaLabel') }}</p>
                         <div class="flex flex-wrap gap-2">
                           <button
                             v-for="option in QUOTA_OPTIONS"
@@ -827,7 +854,7 @@ function onSectionClick(id: SettingsSectionId) {
                               : 'bg-background text-foreground border-border hover:bg-muted/50'"
                             @click="setQuota(option.bytes)"
                           >
-                            {{ option.label }}
+                            {{ option.bytes === 0 ? $t('settings.storage.unlimitedOption') : option.label }}
                           </button>
                         </div>
                       </div>
@@ -840,37 +867,37 @@ function onSectionClick(id: SettingsSectionId) {
                           :disabled="storageStats.evictable_bytes === 0"
                           @click="freeSpace"
                         >
-                          Free Space
+                          {{ $t('settings.storage.freeSpace') }}
                         </AppButton>
                         <span v-if="storageMessage" class="text-xs text-muted-foreground">{{ storageMessage }}</span>
                       </div>
                     </div>
                     <div v-else class="rounded-lg border border-border p-4 text-sm text-muted-foreground">
-                      Loading storage information…
+                      {{ $t('settings.storage.loading') }}
                     </div>
                   </div>
 
                   <div>
-                    <h4 class="settings-group-title">Network</h4>
+                    <h4 class="settings-group-title">{{ $t('settings.network.title') }}</h4>
                     <div class="rounded-lg border border-border p-4">
                       <div class="flex items-center justify-between gap-4">
                         <div>
-                          <p class="text-sm font-medium text-foreground">P2P Node</p>
+                          <p class="text-sm font-medium text-foreground">{{ $t('settings.network.nodeLabel') }}</p>
                           <p class="text-xs text-muted-foreground">
                             <template v-if="p2pStatus?.is_running">
-                              Connected · peer ID
+                              {{ $t('common.status.connected') }} · {{ $t('settings.network.deviceIdLabel') }}
                               <code class="font-mono text-[11px]">{{ p2pStatus.peer_id?.slice(0, 12) }}…</code>
                             </template>
                             <template v-else-if="p2pStatus">
-                              Offline
+                              {{ $t('common.status.offline') }}
                             </template>
                             <template v-else>
-                              Starting…
+                              {{ $t('settings.network.starting') }}
                             </template>
                           </p>
                         </div>
                         <AppButton variant="outline" size="sm" @click="gotoNetwork">
-                          Open network →
+                          {{ $t('settings.network.openNetwork') }}
                         </AppButton>
                       </div>
                     </div>
@@ -901,55 +928,54 @@ function onSectionClick(id: SettingsSectionId) {
         <!-- Export Recovery Phrase modal -->
         <AppModal
           :open="showExportModal"
-          title="Export Recovery Phrase"
+          :title="$t('settings.export.title')"
           max-width="28rem"
           @close="closeExportModal"
         >
           <div v-if="!exportedMnemonic && !exportConfirmed">
             <AppAlert variant="error" class="mb-4">
-              Your recovery phrase gives full access to your identity and credentials.
-              Only export it in a private, secure environment.
+              {{ $t('settings.export.warning') }}
             </AppAlert>
             <div class="flex gap-2">
-              <AppButton variant="ghost" class="flex-1" @click="closeExportModal">Cancel</AppButton>
+              <AppButton variant="ghost" class="flex-1" @click="closeExportModal">{{ $t('common.actions.cancel') }}</AppButton>
               <AppButton variant="danger" class="flex-1" @click="confirmExport">
-                I Understand, Continue
+                {{ $t('settings.export.understand') }}
               </AppButton>
             </div>
           </div>
 
           <div v-else-if="exportConfirmed && !exportedMnemonic && !exporting && !exportError">
-            <p class="text-sm text-muted-foreground mb-3">Enter your vault password to confirm.</p>
+            <p class="text-sm text-muted-foreground mb-3">{{ $t('settings.export.enterPassword') }}</p>
             <AppInput
               v-model="exportPassword"
               type="password"
-              placeholder="Vault password"
+              :placeholder="$t('settings.export.passwordPlaceholder')"
               class="mb-3"
               @keyup.enter="doExport"
             />
             <div class="flex gap-2">
-              <AppButton variant="ghost" class="flex-1" @click="closeExportModal">Cancel</AppButton>
+              <AppButton variant="ghost" class="flex-1" @click="closeExportModal">{{ $t('common.actions.cancel') }}</AppButton>
               <AppButton
                 variant="danger"
                 class="flex-1"
                 :disabled="!exportPassword"
                 @click="doExport"
               >
-                Show Phrase
+                {{ $t('settings.export.showPhrase') }}
               </AppButton>
             </div>
           </div>
 
           <div v-else-if="exporting" class="text-center py-4">
             <div class="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-2" />
-            <p class="text-sm text-muted-foreground">Decrypting…</p>
+            <p class="text-sm text-muted-foreground">{{ $t('settings.export.decrypting') }}</p>
           </div>
 
           <div v-else-if="exportError">
             <AppAlert variant="error" class="mb-3">{{ exportError }}</AppAlert>
             <div class="flex gap-2">
-              <AppButton variant="outline" class="flex-1" @click="closeExportModal">Close</AppButton>
-              <AppButton variant="ghost" class="flex-1" @click="exportError = ''">Try Again</AppButton>
+              <AppButton variant="outline" class="flex-1" @click="closeExportModal">{{ $t('common.actions.close') }}</AppButton>
+              <AppButton variant="ghost" class="flex-1" @click="exportError = ''">{{ $t('settings.export.tryAgain') }}</AppButton>
             </div>
           </div>
 
@@ -964,7 +990,7 @@ function onSectionClick(id: SettingsSectionId) {
                 <span class="font-mono font-medium">{{ word }}</span>
               </div>
             </div>
-            <AppButton class="w-full" @click="closeExportModal">Done</AppButton>
+            <AppButton class="w-full" @click="closeExportModal">{{ $t('common.actions.done') }}</AppButton>
           </div>
         </AppModal>
   </div>

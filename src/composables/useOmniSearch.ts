@@ -225,7 +225,7 @@ function daoToResult(d: DaoInfo): OmniSearchResult {
     title: d.name,
     subtitle: scopeLabel,
     icon: d.icon_emoji || undefined,
-    route: `/governance/${d.id}`,
+    route: `/community/${d.id}`,
   }
 }
 

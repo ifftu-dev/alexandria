@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { useLocalApi } from '@/composables/useLocalApi'
+
+const { t } = useI18n()
 import { useAuth } from '@/composables/useAuth'
 import { useP2P } from '@/composables/useP2P'
 import { useContentSync } from '@/composables/useContentSync'
@@ -100,9 +103,9 @@ async function readDiagLog() {
 const greeting = ref('')
 onMounted(() => {
   const hour = new Date().getHours()
-  if (hour < 12) greeting.value = 'Good morning'
-  else if (hour < 18) greeting.value = 'Good afternoon'
-  else greeting.value = 'Good evening'
+  if (hour < 12) greeting.value = t('dashboard.home.greeting.morning')
+  else if (hour < 18) greeting.value = t('dashboard.home.greeting.afternoon')
+  else greeting.value = t('dashboard.home.greeting.evening')
 })
 
 // Start P2P after a short delay so the Home page renders first.
@@ -145,33 +148,33 @@ const heroAction = computed<HeroAction>(() => {
   const enrolled = enrollments.value[0]
   if (enrolled) {
     return {
-      eyebrow: 'Pick up where you left off',
-      title: enrolledCourseMap.value[enrolled.course_id]?.title ?? 'Your course',
-      cta: 'Resume course',
+      eyebrow: t('dashboard.home.hero.resumeEyebrow'),
+      title: enrolledCourseMap.value[enrolled.course_id]?.title ?? t('dashboard.home.hero.resumeTitleFallback'),
+      cta: t('dashboard.home.hero.resumeCta'),
       to: `/learn/${enrolled.course_id}`,
     }
   }
   if (goals.value.length === 0) {
     return {
-      eyebrow: 'Get started',
-      title: 'Set your first learning goal',
-      cta: 'Browse skills',
+      eyebrow: t('dashboard.home.hero.startEyebrow'),
+      title: t('dashboard.home.hero.startTitle'),
+      cta: t('dashboard.home.hero.startCta'),
       to: '/skills',
     }
   }
   const next = recommendedCourses.value[0]
   if (next) {
     return {
-      eyebrow: 'Recommended for you',
+      eyebrow: t('dashboard.home.hero.recommendedEyebrow'),
       title: next.title,
-      cta: 'Open course',
+      cta: t('dashboard.home.hero.recommendedCta'),
       to: `/courses/${next.id}`,
     }
   }
   return {
-    eyebrow: 'Explore',
-    title: 'Discover courses from your peers',
-    cta: 'Browse courses',
+    eyebrow: t('dashboard.home.hero.exploreEyebrow'),
+    title: t('dashboard.home.hero.exploreTitle'),
+    cta: t('dashboard.home.hero.exploreCta'),
     to: '/courses',
   }
 })
@@ -233,7 +236,7 @@ onMounted(async () => {
         {{ greeting }}{{ firstName ? `, ${firstName}` : '' }}
       </h1>
       <p class="mt-1 text-sm text-muted-foreground">
-        Your decentralized learning node is {{ p2pStatus?.is_running ? 'online' : p2pStatus != null ? 'offline' : 'starting up' }}.
+        {{ p2pStatus?.is_running ? t('network.appOnline') : p2pStatus != null ? t('network.appOffline') : t('network.appStarting') }}
       </p>
     </div>
 
@@ -242,12 +245,12 @@ onMounted(async () => {
       v-if="usernameConflict"
       class="mb-6 rounded-xl border border-warning/40 bg-warning/10 px-4 py-3 text-sm"
     >
-      <span class="font-semibold text-foreground">@{{ usernameConflict.username }} is held by another user.</span>
+      <span class="font-semibold text-foreground">{{ $t('dashboard.home.conflict.held', { name: usernameConflict.username }) }}</span>
       <span class="text-muted-foreground">
-        Their claim predates yours in the username registry, so lookups resolve to them.
+        {{ $t('dashboard.home.conflict.explain') }}
       </span>
       <button class="ml-1 font-medium text-primary hover:underline" @click="router.push('/settings/account')">
-        Pick a new username →
+        {{ $t('dashboard.home.conflict.pick') }}
       </button>
     </div>
 
@@ -273,35 +276,35 @@ onMounted(async () => {
     <section class="mb-6">
       <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <div class="relative">
-          <button class="stat-card w-full" @click="router.push('/dashboard/reputation')">
+          <button class="stat-card w-full" @click="router.push('/reputation')">
             <span class="stat-head">
               <span class="stat-icon stat-icon--teaching">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path stroke-linecap="round" stroke-linejoin="round" d="M12 14l9-5-9-5-9 5 9 5z"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 14l6.16-3.42A12 12 0 0112 21a12 12 0 01-6.16-10.42L12 14z"/></svg>
               </span>
-              <span class="stat-label">Teaching impact</span>
+              <span class="stat-label">{{ $t('dashboard.home.stats.teaching') }}</span>
             </span>
             <span class="stat-value">{{ teachingImpact }}</span>
           </button>
           <InfoTip
             class="absolute right-2 top-2"
-            label="What is teaching impact?"
-            text="Reputation you've earned by teaching — the weighted value of credentials learners claimed from your courses and tutorials."
+            :label="$t('dashboard.home.stats.teachingTipLabel')"
+            :text="$t('dashboard.home.stats.teachingTipText')"
           />
         </div>
         <div class="relative">
-          <button class="stat-card w-full" @click="router.push('/dashboard/reputation')">
+          <button class="stat-card w-full" @click="router.push('/reputation')">
             <span class="stat-head">
               <span class="stat-icon stat-icon--learning">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6.5C10.5 5.5 8.5 5 6.5 5 5.5 5 4.7 5.1 4 5.3v12.4c.7-.2 1.5-.3 2.5-.3 2 0 4 .5 5.5 1.5m0-13.4c1.5-1 3.5-1.5 5.5-1.5 1 0 1.8.1 2.5.3v12.4c-.7-.2-1.5-.3-2.5-.3-2 0-4 .5-5.5 1.5m0-13.4V19.9"/></svg>
               </span>
-              <span class="stat-label">Learning impact</span>
+              <span class="stat-label">{{ $t('dashboard.home.stats.learning') }}</span>
             </span>
             <span class="stat-value">{{ learningImpact }}</span>
           </button>
           <InfoTip
             class="absolute right-2 top-2"
-            label="What is learning impact?"
-            text="Reputation you've earned as a learner — the weighted value of credentials you've claimed by completing courses."
+            :label="$t('dashboard.home.stats.learningTipLabel')"
+            :text="$t('dashboard.home.stats.learningTipText')"
           />
         </div>
         <div class="relative">
@@ -310,30 +313,30 @@ onMounted(async () => {
               <span class="stat-icon stat-icon--skills">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.5l2 2 4-4.5M12 3l2.09 1.26 2.43-.1.99 2.22 1.99 1.4-.55 2.37.55 2.37-1.99 1.4-.99 2.22-2.43-.1L12 21l-2.09-1.26-2.43.1-.99-2.22-1.99-1.4.55-2.37L4.5 10l1.99-1.4.99-2.22 2.43.1L12 3z"/></svg>
               </span>
-              <span class="stat-label">Skills proven</span>
+              <span class="stat-label">{{ $t('dashboard.home.stats.skills') }}</span>
             </span>
             <span class="stat-value">{{ skillsProven }}</span>
           </button>
           <InfoTip
             class="absolute right-2 top-2"
-            label="What does skills proven mean?"
-            text="Distinct skills backed by at least one verifiable credential in your graph."
+            :label="$t('dashboard.home.stats.skillsTipLabel')"
+            :text="$t('dashboard.home.stats.skillsTipText')"
           />
         </div>
         <div class="relative">
-          <button class="stat-card w-full" @click="router.push('/dashboard/reputation')">
+          <button class="stat-card w-full" @click="router.push('/reputation')">
             <span class="stat-head">
               <span class="stat-icon stat-icon--confidence">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3l7 3v5c0 4.5-3 8.5-7 10-4-1.5-7-5.5-7-10V6l7-3z"/><path stroke-linecap="round" stroke-linejoin="round" d="M9.5 12l1.8 1.8 3.2-3.6"/></svg>
               </span>
-              <span class="stat-label">Confidence</span>
+              <span class="stat-label">{{ $t('dashboard.home.stats.confidence') }}</span>
             </span>
             <span class="stat-value">{{ avgConfidence }}%</span>
           </button>
           <InfoTip
             class="absolute right-2 top-2"
-            label="What is confidence?"
-            text="Average integrity score across your credentials — how strongly the network trusts the assessments behind them."
+            :label="$t('dashboard.home.stats.confidenceTipLabel')"
+            :text="$t('dashboard.home.stats.confidenceTipText')"
           />
         </div>
       </div>
@@ -343,11 +346,11 @@ onMounted(async () => {
     <section class="mb-8">
       <div class="mb-3 flex items-center justify-between">
         <div class="flex items-center gap-2">
-          <h2 class="text-base font-semibold text-foreground">Your goals</h2>
+          <h2 class="text-base font-semibold text-foreground">{{ $t('dashboard.home.goals.title') }}</h2>
           <span v-if="goals.length" class="text-xs text-muted-foreground">{{ goals.length }}</span>
         </div>
         <button class="sb-view-all text-xs text-primary hover:underline" @click="router.push('/goals')">
-          View all
+          {{ $t('dashboard.home.goals.viewAll') }}
         </button>
       </div>
 
@@ -377,16 +380,16 @@ onMounted(async () => {
               {{ t.label }}
             </p>
             <p v-if="pathNext(goalPaths[t.id])" class="mt-0.5 truncate text-xs text-muted-foreground">
-              Next: {{ pathNext(goalPaths[t.id]) }}
+              {{ $t('dashboard.home.goals.next', { name: pathNext(goalPaths[t.id]) }) }}
             </p>
-            <p v-else class="mt-0.5 truncate text-xs text-success">Prereqs cleared 🎉</p>
+            <p v-else class="mt-0.5 truncate text-xs text-success">{{ $t('dashboard.home.goals.ready') }}</p>
           </div>
         </button>
 
         <!-- add goal -->
         <button class="goal-card goal-card--add" @click="router.push('/skills')">
           <span class="text-2xl leading-none text-muted-foreground">+</span>
-          <span class="text-sm font-medium text-muted-foreground">Add a goal</span>
+          <span class="text-sm font-medium text-muted-foreground">{{ $t('dashboard.home.goals.add') }}</span>
         </button>
 
         <!-- trailing gap: WebKit drops a scroll container's right padding -->
@@ -402,16 +405,16 @@ onMounted(async () => {
           @click="graphExpanded = !graphExpanded"
         >
           <div class="flex items-center gap-2">
-            <span class="text-base font-semibold text-foreground">Your skill graph</span>
+            <span class="text-base font-semibold text-foreground">{{ $t('dashboard.home.graph.title') }}</span>
             <span class="text-xs text-muted-foreground">
-              {{ skillsProven }} skill{{ skillsProven === 1 ? '' : 's' }} proven
+              {{ $t('dashboard.home.graph.proven', { count: skillsProven }, skillsProven) }}
             </span>
           </div>
-          <span class="text-xs text-muted-foreground">{{ graphExpanded ? 'Hide ▴' : 'Expand ▾' }}</span>
+          <span class="text-xs text-muted-foreground">{{ graphExpanded ? $t('dashboard.home.graph.hide') : $t('dashboard.home.graph.expand') }}</span>
         </button>
         <div v-if="graphExpanded" class="border-t border-border p-4">
           <div v-if="skillsProven === 0" class="text-sm text-muted-foreground">
-            No proven skills yet. Earn credentials by completing courses, then they'll appear here.
+            {{ $t('dashboard.home.graph.empty') }}
           </div>
           <div v-else class="flex flex-wrap gap-2">
             <button
@@ -419,7 +422,7 @@ onMounted(async () => {
               :key="n.id"
               class="graph-chip"
               :class="{ 'graph-chip--teaching': n.teaching, 'graph-chip--private': !n.public }"
-              :title="`Bloom level: ${n.bloom_level}`"
+              :title="$t('dashboard.home.graph.levelTitle', { level: n.bloom_level })"
               @click="router.push(`/skills/${n.id}`)"
             >
               <span class="graph-chip-dot" :style="{ background: bloomFill(n.bloom_level) }" />
@@ -428,7 +431,7 @@ onMounted(async () => {
           </div>
           <div class="mt-4">
             <AppButton variant="outline" size="sm" @click="router.push('/skills')">
-              Manage visibility & teaching
+              {{ $t('dashboard.home.graph.manage') }}
             </AppButton>
           </div>
         </div>
@@ -476,7 +479,7 @@ onMounted(async () => {
       <!-- Continue Learning -->
       <section v-if="enrollments.length > 0" class="mb-10">
         <div class="flex items-center justify-between mb-4">
-          <h2 class="text-base font-semibold text-foreground">Continue Learning</h2>
+          <h2 class="text-base font-semibold text-foreground">{{ $t('dashboard.home.continue') }}</h2>
         </div>
         <div class="-mx-4 flex gap-5 snap-x snap-mandatory overflow-x-auto px-4 pb-2 scrollbar-thin sm:mx-0 sm:px-0">
           <router-link
@@ -498,13 +501,13 @@ onMounted(async () => {
                 <div class="absolute top-2 left-2">
                   <span v-if="enrolledCourseMap[enrollment.course_id]?.kind === 'tutorial'" class="inline-flex items-center gap-1 rounded-full bg-[color-mix(in_srgb,var(--app-primary)_85%,black)] px-2 py-0.5 text-[10px] font-semibold text-white shadow">
                     <svg class="h-3 w-3" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
-                    Tutorial
+                    {{ $t('dashboard.home.pill.tutorial') }}
                   </span>
                   <span v-else class="inline-flex items-center gap-1 rounded-full bg-[color-mix(in_srgb,var(--app-success)_80%,black)] px-2 py-0.5 text-[10px] font-semibold text-white shadow">
                     <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
                       <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
                     </svg>
-                    Course
+                    {{ $t('dashboard.home.pill.course') }}
                   </span>
                 </div>
                 <!-- Progress bar overlay at bottom -->
@@ -514,12 +517,12 @@ onMounted(async () => {
               </div>
               <div class="p-4">
                 <h3 class="text-sm font-medium text-foreground truncate group-hover:text-primary transition-colors">
-                  {{ enrolledCourseMap[enrollment.course_id]?.title ?? 'Loading...' }}
+                  {{ enrolledCourseMap[enrollment.course_id]?.title ?? $t('common.actions.loading') }}
                 </h3>
                 <div class="flex items-center gap-2 mt-1.5">
                   <StatusBadge :status="enrollment.status" />
                   <span class="text-xs text-muted-foreground">
-                    Enrolled {{ new Date(enrollment.enrolled_at).toLocaleDateString() }}
+                    {{ $t('dashboard.home.enrolledOn', { date: new Date(enrollment.enrolled_at).toLocaleDateString() }) }}
                   </span>
                 </div>
               </div>
@@ -539,10 +542,10 @@ onMounted(async () => {
               <path stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
               <path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
-            <h2 class="text-base font-semibold text-foreground">Quick Tutorials</h2>
+            <h2 class="text-base font-semibold text-foreground">{{ $t('dashboard.home.tutorials.title') }}</h2>
           </div>
           <span class="text-xs text-muted-foreground">
-            {{ tutorials.length }} tutorial{{ tutorials.length !== 1 ? 's' : '' }}
+            {{ $t('dashboard.home.tutorials.count', { count: tutorials.length }, tutorials.length) }}
           </span>
         </div>
         <div class="-mx-4 flex gap-5 snap-x snap-mandatory overflow-x-auto px-4 pb-2 scrollbar-thin sm:mx-0 sm:px-0">
@@ -565,7 +568,7 @@ onMounted(async () => {
                 <!-- Play badge -->
                 <div class="absolute top-2 left-2 flex items-center gap-1 rounded-full bg-primary/90 px-2 py-0.5 text-[10px] font-semibold text-white shadow">
                   <svg class="h-3 w-3" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
-                  Tutorial
+                  {{ $t('dashboard.home.pill.tutorial') }}
                 </div>
               </div>
               <div class="p-3">
@@ -588,10 +591,10 @@ onMounted(async () => {
       <section>
         <div class="flex items-center justify-between mb-4">
           <h2 class="text-base font-semibold text-foreground">
-            {{ enrollments.length > 0 ? 'Recommended For You' : 'Courses' }}
+            {{ enrollments.length > 0 ? $t('dashboard.home.courses.recommendedTitle') : $t('dashboard.home.courses.title') }}
           </h2>
           <span v-if="recommendedCourses.length > 0" class="text-xs text-muted-foreground">
-            {{ recommendedCourses.length }} course{{ recommendedCourses.length !== 1 ? 's' : '' }}
+            {{ $t('dashboard.home.courses.count', { count: recommendedCourses.length }, recommendedCourses.length) }}
           </span>
         </div>
 
@@ -603,15 +606,15 @@ onMounted(async () => {
           <svg class="mx-auto mb-3 h-10 w-10 text-muted-foreground/30" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
             <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
           </svg>
-          <p class="text-sm font-medium text-foreground">No courses yet</p>
+          <p class="text-sm font-medium text-foreground">{{ $t('dashboard.home.courses.emptyTitle') }}</p>
           <p class="mt-1 text-xs text-muted-foreground">
-            Create your first course or discover them from peers.
+            {{ $t('dashboard.home.courses.emptyBody') }}
           </p>
           <router-link
             to="/instructor/courses/new"
             class="inline-flex items-center mt-4 px-4 py-2 text-sm font-medium rounded-lg bg-primary text-white hover:bg-primary-hover transition-colors"
           >
-            Create Course
+            {{ $t('dashboard.home.courses.create') }}
           </router-link>
         </div>
 
@@ -631,7 +634,7 @@ onMounted(async () => {
       v-if="isMobilePlatform && isDev"
       class="fixed bottom-20 right-3 z-50 flex h-8 w-8 items-center justify-center rounded-full bg-destructive/80 text-white shadow-lg text-xs font-bold"
       @click="readDiagLog"
-      title="Read diag.log"
+      :title="$t('dashboard.home.diag.read')"
     >
       D
     </button>
@@ -642,9 +645,9 @@ onMounted(async () => {
         <div class="bg-card rounded-xl p-4 max-w-lg mx-auto mt-12">
           <div class="flex items-center justify-between mb-2">
             <h3 class="text-sm font-semibold text-foreground">diag.log</h3>
-            <button class="text-xs text-muted-foreground" @click="showDiag = false">Close</button>
+            <button class="text-xs text-muted-foreground" @click="showDiag = false">{{ $t('common.actions.close') }}</button>
           </div>
-          <pre class="text-[0.55rem] text-muted-foreground whitespace-pre-wrap leading-tight max-h-[70vh] overflow-y-auto">{{ diagLog ?? 'Loading...' }}</pre>
+          <pre class="text-[0.55rem] text-muted-foreground whitespace-pre-wrap leading-tight max-h-[70vh] overflow-y-auto">{{ diagLog ?? $t('common.actions.loading') }}</pre>
         </div>
       </div>
     </Teleport>

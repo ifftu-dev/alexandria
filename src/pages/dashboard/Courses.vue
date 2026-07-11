@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import type { RouteLocationRaw } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { useCredentials } from '@/composables/useCredentials'
 import { AppButton } from '@/components/ui'
@@ -15,6 +16,7 @@ import {
   type VerifiableCredential,
 } from '@/types'
 
+const { t } = useI18n()
 const { invoke } = useLocalApi()
 const { list: listCredentials, credentials } = useCredentials()
 
@@ -54,12 +56,12 @@ function formatRelativeTime(dateStr: string | null): string {
   const weeks = Math.floor(days / 7)
   const months = Math.floor(days / 30)
 
-  if (seconds < 60) return 'just now'
-  if (minutes < 60) return `${minutes}m ago`
-  if (hours < 24) return `${hours}h ago`
-  if (days < 7) return `${days}d ago`
-  if (weeks < 5) return `${weeks}w ago`
-  return `${months}mo ago`
+  if (seconds < 60) return t('courses.relativeTime.justNow')
+  if (minutes < 60) return t('courses.relativeTime.minutesAgo', { count: minutes })
+  if (hours < 24) return t('courses.relativeTime.hoursAgo', { count: hours })
+  if (days < 7) return t('courses.relativeTime.daysAgo', { count: days })
+  if (weeks < 5) return t('courses.relativeTime.weeksAgo', { count: weeks })
+  return t('courses.relativeTime.monthsAgo', { count: months })
 }
 
 async function computeEnrollmentProgressPercent(enrollment: Enrollment): Promise<number> {
@@ -96,7 +98,7 @@ function isTutorial(courseId: string): boolean {
 
 /** Display label for the kind badge. */
 function kindLabel(courseId: string): string {
-  return isTutorial(courseId) ? 'Tutorial' : 'Course'
+  return isTutorial(courseId) ? t('courses.dashboard.kindTutorial') : t('courses.dashboard.kindCourse')
 }
 
 /**
@@ -124,13 +126,13 @@ function credentialLinkFor(enrollment: Enrollment): RouteLocationRaw {
   const matches = credentialsForCourse(enrollment.course_id)
   const only = matches.length === 1 ? matches[0] : undefined
   if (only?.id) {
-    return { name: 'dashboard-credential-detail', params: { id: only.id } }
+    return { name: 'credential-detail', params: { id: only.id } }
   }
   const firstSkill = courseMap.value[enrollment.course_id]?.skill_ids?.[0]
   if (matches.length > 1 && firstSkill) {
-    return { name: 'dashboard-credentials', query: { skill: firstSkill } }
+    return { name: 'credentials', query: { skill: firstSkill } }
   }
-  return { name: 'dashboard-credentials' }
+  return { name: 'credentials' }
 }
 
 onMounted(async () => {
@@ -170,9 +172,9 @@ onMounted(async () => {
   <div class="min-h-screen">
     <!-- Header -->
     <div>
-      <h1 class="text-3xl font-bold">My Learning</h1>
+      <h1 class="text-3xl font-bold">{{ $t('courses.dashboard.title') }}</h1>
       <p class="mt-2 text-muted-foreground">
-        Track your courses and tutorials, and continue where you left off.
+        {{ $t('courses.dashboard.subtitle') }}
       </p>
     </div>
 
@@ -220,15 +222,15 @@ onMounted(async () => {
         <!-- Stats grid -->
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div class="rounded-xl bg-card shadow-sm p-6">
-            <p class="text-sm text-muted-foreground">Total Enrolled</p>
+            <p class="text-sm text-muted-foreground">{{ $t('courses.dashboard.totalEnrolled') }}</p>
             <p class="text-3xl font-bold mt-1">{{ total }}</p>
           </div>
           <div class="rounded-xl bg-card shadow-sm p-6">
-            <p class="text-sm text-muted-foreground">In Progress</p>
+            <p class="text-sm text-muted-foreground">{{ $t('courses.dashboard.inProgress') }}</p>
             <p class="text-3xl font-bold text-yellow-400 mt-1">{{ inProgress }}</p>
           </div>
           <div class="rounded-xl bg-card shadow-sm p-6">
-            <p class="text-sm text-muted-foreground">Completed</p>
+            <p class="text-sm text-muted-foreground">{{ $t('courses.dashboard.completed') }}</p>
             <p class="text-3xl font-bold text-green-400 mt-1">{{ completed }}</p>
           </div>
         </div>
@@ -242,7 +244,7 @@ onMounted(async () => {
               : 'bg-muted/30 text-muted-foreground hover:bg-muted/50'"
             @click="showCompleted = false"
           >
-            In Progress
+            {{ $t('courses.dashboard.filterInProgress') }}
           </button>
           <button
             class="rounded-lg px-4 py-2 text-sm font-medium transition-colors"
@@ -251,7 +253,7 @@ onMounted(async () => {
               : 'bg-muted/30 text-muted-foreground hover:bg-muted/50'"
             @click="showCompleted = true"
           >
-            All
+            {{ $t('courses.dashboard.filterAll') }}
           </button>
         </div>
 
@@ -275,12 +277,12 @@ onMounted(async () => {
               />
             </svg>
           </div>
-          <h3 class="text-lg font-semibold mb-2">Nothing here yet</h3>
+          <h3 class="text-lg font-semibold mb-2">{{ $t('courses.dashboard.emptyTitle') }}</h3>
           <p class="text-sm text-muted-foreground max-w-sm mb-6">
-            Browse available courses and tutorials, and enroll to start your learning journey.
+            {{ $t('courses.dashboard.emptyBody') }}
           </p>
           <AppButton @click="$router.push('/courses')">
-            Browse Courses
+            {{ $t('courses.dashboard.browseCourses') }}
           </AppButton>
         </div>
 
@@ -290,7 +292,7 @@ onMounted(async () => {
           class="flex flex-col items-center justify-center py-16 text-center"
         >
           <p class="text-sm text-muted-foreground">
-            Nothing in progress. Switch to "All" to see completed courses and tutorials.
+            {{ $t('courses.dashboard.filteredEmpty') }}
           </p>
         </div>
 
@@ -336,7 +338,7 @@ onMounted(async () => {
                         clip-rule="evenodd"
                       />
                     </svg>
-                    Completed
+                    {{ $t('courses.dashboard.badgeCompleted') }}
                   </span>
                 </div>
               </div>
@@ -370,7 +372,7 @@ onMounted(async () => {
                 <!-- Progress bar -->
                 <div class="mt-4">
                   <div class="flex items-center justify-between text-xs mb-1.5">
-                    <span class="text-muted-foreground">Progress</span>
+                    <span class="text-muted-foreground">{{ $t('courses.dashboard.progress') }}</span>
                     <span
                       v-if="!progressLoading || isProgressReady(enrollment)"
                       class="font-medium"
@@ -395,13 +397,13 @@ onMounted(async () => {
                 <div class="mt-4 flex flex-wrap items-center justify-between gap-3">
                   <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
                     <span>
-                      Started {{ formatDate(enrollment.enrolled_at) }}
+                      {{ $t('courses.dashboard.started', { date: formatDate(enrollment.enrolled_at) }) }}
                     </span>
                     <span v-if="enrollment.updated_at && !enrollment.completed_at">
-                      Last accessed {{ formatRelativeTime(enrollment.updated_at) }}
+                      {{ $t('courses.dashboard.lastAccessed', { time: formatRelativeTime(enrollment.updated_at) }) }}
                     </span>
                     <span v-if="enrollment.completed_at">
-                      Completed {{ formatDate(enrollment.completed_at) }}
+                      {{ $t('courses.dashboard.completedOn', { date: formatDate(enrollment.completed_at) }) }}
                     </span>
                   </div>
                   <div class="flex flex-wrap items-center gap-2">
@@ -415,7 +417,7 @@ onMounted(async () => {
                       <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                         <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
                       </svg>
-                      View credential
+                      {{ $t('courses.dashboard.viewCredential') }}
                     </button>
                     <span
                       class="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors"
@@ -424,8 +426,8 @@ onMounted(async () => {
                         : 'bg-primary/10 text-primary group-hover:bg-primary/20'"
                     >
                       {{ enrollment.completed_at
-                        ? (isTutorial(enrollment.course_id) ? 'Rewatch Tutorial' : 'Review Course')
-                        : 'Continue Learning' }}
+                        ? (isTutorial(enrollment.course_id) ? $t('courses.dashboard.rewatchTutorial') : $t('courses.dashboard.reviewCourse'))
+                        : $t('courses.dashboard.continueLearning') }}
                       <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                         <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
                       </svg>
