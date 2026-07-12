@@ -343,6 +343,52 @@ const EDITOR_TS_BUNDLE: BuiltinBundle<'static> = BuiltinBundle {
     ],
 };
 
+/// Code Editor: C++ — graded coding element. The learner writes C/C++,
+/// interpreted by the bundled JSCPP engine running inside the same Boa wasm core
+/// (both for in-browser live eval and the deterministic Wasmtime grader). Intro
+/// subset only (no STL/templates).
+const EDITOR_CPP_BUNDLE: BuiltinBundle<'static> = BuiltinBundle {
+    slug: "editor-cpp",
+    manifest_json: include_bytes!("../../../plugins/builtin/editor-cpp/manifest.json"),
+    grader_wasm: Some(include_bytes!(
+        "../../../plugins/builtin/editor-cpp/grader/dist/editor_cpp_grader.wasm"
+    )),
+    ui_files: &[
+        (
+            "ui/index.html",
+            include_bytes!("../../../plugins/builtin/editor-cpp/ui/index.html"),
+        ),
+        (
+            "ui/style.css",
+            include_bytes!("../../../plugins/builtin/editor-cpp/ui/style.css"),
+        ),
+        (
+            "ui/config.js",
+            include_bytes!("../../../plugins/builtin/editor-cpp/ui/config.js"),
+        ),
+        (
+            "ui/app.js",
+            include_bytes!("../../../plugins/builtin/editor-cpp/ui/app.js"),
+        ),
+        (
+            "ui/vendor/cm6.js",
+            include_bytes!("../../../plugins/builtin/editor-cpp/ui/vendor/cm6.js"),
+        ),
+        (
+            "ui/vendor/runner-wasm.js",
+            include_bytes!("../../../plugins/builtin/editor-cpp/ui/vendor/runner-wasm.js"),
+        ),
+        (
+            "icon.svg",
+            include_bytes!("../../../plugins/builtin/editor-cpp/icon.svg"),
+        ),
+        (
+            "README.md",
+            include_bytes!("../../../plugins/builtin/editor-cpp/README.md"),
+        ),
+    ],
+};
+
 /// codejudge (umbrella) — runs no code itself; its manifest declares the
 /// per-language judge plugins as `dependencies`, so installing it pulls them
 /// in. Must be registered AFTER its dependencies in `BUILTIN_PLUGINS` so
@@ -394,6 +440,7 @@ pub const BUILTIN_PLUGINS: &[BuiltinBundle<'static>] = &[
     CODEJUDGE_JS_BUNDLE,
     EDITOR_JS_BUNDLE,
     EDITOR_TS_BUNDLE,
+    EDITOR_CPP_BUNDLE,
     // Umbrella last: it depends on the two language plugins above.
     CODEJUDGE_MULTILANG_BUNDLE,
 ];

@@ -18,7 +18,7 @@
 //! (export "memory"       (memory))
 //! ```
 
-use boa_runner_core::{grade, pack, read_input, run};
+use boa_runner_core::{grade, pack, read_input, run, Lang};
 
 #[no_mangle]
 pub extern "C" fn alex_alloc(len: i32) -> i32 {
@@ -45,11 +45,11 @@ pub unsafe extern "C" fn alex_dealloc(ptr: i32, len: i32) {
 #[no_mangle]
 pub extern "C" fn alex_grade(ptr: i32, len: i32) -> i64 {
     let bytes = unsafe { read_input(ptr, len) };
-    pack(grade(&bytes, None))
+    pack(grade(&bytes, Lang::Js))
 }
 
 #[no_mangle]
 pub extern "C" fn alex_run(ptr: i32, len: i32) -> i64 {
     let bytes = unsafe { read_input(ptr, len) };
-    pack(run(&bytes, None))
+    pack(run(&bytes, Lang::Js))
 }

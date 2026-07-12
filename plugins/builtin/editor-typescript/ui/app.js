@@ -9,19 +9,37 @@
   'use strict';
 
   var CM = self.AlexCM6;
-  var IS_TS = !!(self.ALEX_EDITOR && self.ALEX_EDITOR.typescript);
-  var LANG = IS_TS ? 'TypeScript' : 'JavaScript';
+  var CFG = self.ALEX_EDITOR || {};
+  // `lang` is the source of truth; fall back to the older `typescript` boolean.
+  var LANG_ID = CFG.lang || (CFG.typescript ? 'typescript' : 'javascript');
+  var LANG = ({ javascript: 'JavaScript', typescript: 'TypeScript', cpp: 'C++', python: 'Python' })[LANG_ID] || 'Code';
   var LIVE_DEBOUNCE_MS = 400;
   var SAVE_DEBOUNCE_MS = 600;
   var INIT_TIMEOUT_MS = 6000;
 
-  var DEFAULT_SOURCE = IS_TS
-    ? '// Write TypeScript. Types are stripped before running.\n' +
-      '//   const n: number = Number(readLine());\n' +
-      '//   console.log(n * 2);\n\n'
-    : '// Write JavaScript. Print with console.log; read input with readLine().\n' +
+  var DEFAULT_SOURCES = {
+    javascript:
+      '// Write JavaScript. Print with console.log; read input with readLine().\n' +
       '//   const n = Number(readLine());\n' +
-      '//   console.log(n * 2);\n\n';
+      '//   console.log(n * 2);\n\n',
+    typescript:
+      '// Write TypeScript. Types are stripped before running.\n' +
+      '//   const n: number = Number(readLine());\n' +
+      '//   console.log(n * 2);\n\n',
+    cpp:
+      '#include <iostream>\nusing namespace std;\n\n' +
+      'int main() {\n    int n;\n    cin >> n;\n    cout << n * 2 << endl;\n    return 0;\n}\n',
+    python:
+      '# Write Python. Print with print(); read input with input().\n' +
+      'n = int(input())\nprint(n * 2)\n',
+  };
+  var DEFAULT_SOURCE = DEFAULT_SOURCES[LANG_ID] || DEFAULT_SOURCES.javascript;
+
+  function langExtension() {
+    if (LANG_ID === 'cpp') return CM.cpp();
+    if (LANG_ID === 'python') return CM.python();
+    return CM.javascript(LANG_ID === 'typescript' ? { typescript: true } : {});
+  }
 
   var els = {
     title: document.getElementById('title'),
@@ -136,7 +154,7 @@
       CM.highlightActiveLine(),
       CM.highlightSelectionMatches(),
       CM.syntaxHighlighting(CM.defaultHighlightStyle, { fallback: true }),
-      CM.javascript(IS_TS ? { typescript: true } : {}),
+      langExtension(),
       CM.oneDark,
       CM.keymap.of(
         [].concat(

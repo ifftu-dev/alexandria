@@ -4,14 +4,17 @@
   "version": "0.1.0",
   "description": "Builds a self-contained CodeMirror 6 IIFE bundle (window.AlexCM6) for the editor plugins. Offline, no CDN, CSP-safe (no eval).",
   "scripts": {
-    "build": "npm run build:cm6 && npm run build:sucrase",
+    "build": "npm run build:cm6 && npm run build:sucrase && npm run build:jscpp",
     "build:cm6": "esbuild src/cm6.js --bundle --format=iife --global-name=AlexCM6 --minify --outfile=dist/cm6.js",
-    "build:sucrase": "esbuild src/sucrase.js --bundle --format=iife --global-name=AlexSucrase --minify --outfile=dist/sucrase.js"
+    "build:sucrase": "esbuild src/sucrase.js --bundle --format=iife --global-name=AlexSucrase --minify --outfile=dist/sucrase.js",
+    "build:jscpp": "esbuild src/jscpp.js --bundle --format=iife --global-name=AlexJSCPP --minify --target=es2017 --alias:util=./src/stubs/util.js --alias:stream=./src/stubs/stream.js --outfile=dist/jscpp.js"
   },
   "devDependencies": {
     "@codemirror/autocomplete": "^6.18.0",
     "@codemirror/commands": "^6.8.0",
+    "@codemirror/lang-cpp": "^6.0.3",
     "@codemirror/lang-javascript": "^6.2.0",
+    "@codemirror/lang-python": "^6.2.1",
     "@codemirror/language": "^6.10.0",
     "@codemirror/search": "^6.5.0",
     "@codemirror/state": "^6.5.0",
@@ -20,6 +23,7 @@
     "esbuild": "^0.24.0"
   },
   "dependencies": {
+    "JSCPP": "^2.0.9",
     "sucrase": "^3.35.1"
   }
 }

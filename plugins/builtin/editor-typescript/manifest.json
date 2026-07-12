@@ -11,8 +11,8 @@
   ],
   "capabilities": [],
   "grader": {
-    "cid": "4678bc70ba35db73fbc74c8e5296c9bfe299f2b4261a6fee0aa7d4d3bb541792",
-    "blake3": "4678bc70ba35db73fbc74c8e5296c9bfe299f2b4261a6fee0aa7d4d3bb541792",
+    "cid": "4a183350a75ca87f10390db26bebe1c7f2c26e9bf9cee8ca2f6bec0d9364b4be",
+    "blake3": "4a183350a75ca87f10390db26bebe1c7f2c26e9bf9cee8ca2f6bec0d9364b4be",
     "entrypoint": "alex_grade"
   },
   "subject_tags": [

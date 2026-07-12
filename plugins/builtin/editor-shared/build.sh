@@ -82,4 +82,11 @@ case "$target" in
     build_lang editor-typescript editor_typescript_grader
     ;;
 esac
+case "$target" in
+  cpp|all)
+    # The C/C++ grader embeds JSCPP via include_str!; refresh it from the bundle.
+    cp "$HERE/cm6-build/dist/jscpp.js" "$BUILTIN/editor-cpp/grader/src/jscpp.js"
+    build_lang editor-cpp editor_cpp_grader
+    ;;
+esac
 echo "done."

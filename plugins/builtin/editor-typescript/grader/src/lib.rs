@@ -12,7 +12,7 @@
 //! (export "memory"       (memory))
 //! ```
 
-use boa_runner_core::{grade, pack, read_input, run};
+use boa_runner_core::{grade, pack, read_input, run, Lang};
 
 /// Bundled sucrase (IIFE exposing `AlexSucrase.transform`). Produced by
 /// `editor-shared/build.sh` from `editor-shared/cm6-build`.
@@ -43,11 +43,11 @@ pub unsafe extern "C" fn alex_dealloc(ptr: i32, len: i32) {
 #[no_mangle]
 pub extern "C" fn alex_grade(ptr: i32, len: i32) -> i64 {
     let bytes = unsafe { read_input(ptr, len) };
-    pack(grade(&bytes, Some(SUCRASE)))
+    pack(grade(&bytes, Lang::Ts(SUCRASE)))
 }
 
 #[no_mangle]
 pub extern "C" fn alex_run(ptr: i32, len: i32) -> i64 {
     let bytes = unsafe { read_input(ptr, len) };
-    pack(run(&bytes, Some(SUCRASE)))
+    pack(run(&bytes, Lang::Ts(SUCRASE)))
 }

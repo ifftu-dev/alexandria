@@ -44,11 +44,12 @@ use wasmtime::{
 /// request more in later phases.
 pub const DEFAULT_MEMORY_MAX_BYTES: usize = 128 * 1024 * 1024; // 128 MiB
 
-// ~10B wasm instructions. Still bounded (an infinite loop traps in well under a
-// second), but high enough for graders that run a real language engine inside
-// wasm — the TypeScript editor grader spends ~1.9B just type-stripping with
-// sucrase-in-Boa before it runs the submission against the test cases.
-pub const DEFAULT_FUEL: u64 = 10_000_000_000;
+// ~50B wasm instructions. Still bounded (a runaway loop traps in ~a second of
+// JITted execution), but high enough for graders that run a whole language
+// engine inside wasm across several test cases — the TypeScript grader spends
+// ~1.9B type-stripping with sucrase-in-Boa, and the C/C++ grader spends ~4.6B
+// per test interpreting with JSCPP-in-Boa (re-parsed per test).
+pub const DEFAULT_FUEL: u64 = 50_000_000_000;
 pub const DEFAULT_OUTPUT_MAX_BYTES: usize = 1024 * 1024; // 1 MiB
 
 /// JSON envelope passed to the grader.
@@ -665,6 +666,75 @@ mod tests {
                 .grade(
                     &cid,
                     EDITOR_TS_GRADER_WASM,
+                    &input,
+                    GraderBudgets::default(),
+                )
+                .unwrap_or_else(|e| panic!("grade #{i} failed: {e}"));
+            assert_eq!(serde_json::to_vec(&r).unwrap(), first_bytes);
+        }
+    }
+
+    /// Bytes of the import-stubbed C/C++ editor grader (Boa + JSCPP).
+    const EDITOR_CPP_GRADER_WASM: &[u8] =
+        include_bytes!("../../../plugins/builtin/editor-cpp/grader/dist/editor_cpp_grader.wasm");
+
+    fn run_editor_cpp(content: serde_json::Value, source: &str) -> ScoreRecord {
+        let runtime = GraderRuntime::new().expect("runtime");
+        let cid = blake3::hash(EDITOR_CPP_GRADER_WASM).to_hex().to_string();
+        let input = serde_json::to_vec(&serde_json::json!({
+            "version": "1",
+            "content": content,
+            "submission": {"source": source},
+        }))
+        .unwrap();
+        runtime
+            .grade(
+                &cid,
+                EDITOR_CPP_GRADER_WASM,
+                &input,
+                GraderBudgets::default(),
+            )
+            .expect("grade succeeds")
+    }
+
+    #[test]
+    fn editor_cpp_interprets_and_scores() {
+        // C/C++ interpreted in-engine by JSCPP; reads stdin, prints stdout.
+        let r = run_editor_cpp(
+            serde_json::json!({
+                "tests": [{"name": "ex", "stdin": "4", "expected_stdout": "8"}],
+                "grader_private": {"tests": [{"name": "big", "stdin": "1000", "expected_stdout": "2000"}]},
+            }),
+            "#include <iostream>\nusing namespace std;\nint main(){int n;cin>>n;cout<<n*2<<endl;return 0;}",
+        );
+        assert_eq!(r.score, 1.0);
+    }
+
+    #[test]
+    fn editor_cpp_grader_is_byte_reproducible() {
+        let runtime = GraderRuntime::new().expect("runtime");
+        let cid = blake3::hash(EDITOR_CPP_GRADER_WASM).to_hex().to_string();
+        let input = serde_json::to_vec(&serde_json::json!({
+            "version": "1",
+            "content": {"tests": [{"stdin": "6", "expected_stdout": "36"}]},
+            "submission": {"source": "#include <iostream>\nusing namespace std;\nint main(){int n;cin>>n;cout<<n*n<<endl;return 0;}"},
+        }))
+        .unwrap();
+        let first = runtime
+            .grade(
+                &cid,
+                EDITOR_CPP_GRADER_WASM,
+                &input,
+                GraderBudgets::default(),
+            )
+            .expect("first grade");
+        let first_bytes = serde_json::to_vec(&first).unwrap();
+        assert_eq!(first.score, 1.0);
+        for i in 1..20 {
+            let r = runtime
+                .grade(
+                    &cid,
+                    EDITOR_CPP_GRADER_WASM,
                     &input,
                     GraderBudgets::default(),
                 )

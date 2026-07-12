@@ -120,18 +120,54 @@ struct RunResult {
 // Public entry points (called by each language cdylib's ABI)
 // ---------------------------------------------------------------------------
 
+/// Which language the submission is, and the bundled JS tool it needs (if any).
+/// All three run on the same Boa engine: JS directly, TypeScript after an
+/// in-engine sucrase type-strip, C/C++ via the bundled JSCPP interpreter.
+pub enum Lang<'a> {
+    Js,
+    /// TypeScript — carries the sucrase bundle source.
+    Ts(&'a str),
+    /// C/C++ — carries the JSCPP bundle source.
+    Cpp(&'a str),
+}
+
 /// Grade a `{version, content, submission}` envelope, returning serialized
-/// `ScoreRecord` bytes. `sucrase` is `Some` for TypeScript.
-pub fn grade(bytes: &[u8], sucrase: Option<&str>) -> Vec<u8> {
-    let record = grade_inner(bytes, sucrase);
+/// `ScoreRecord` bytes.
+pub fn grade(bytes: &[u8], lang: Lang) -> Vec<u8> {
+    let record = grade_inner(bytes, lang);
     serde_json::to_vec(&record).expect("ScoreRecord serializes")
 }
 
 /// Run a `{source, stdin}` envelope for live eval, returning serialized
-/// `RunResult` bytes. `sucrase` is `Some` for TypeScript.
-pub fn run(bytes: &[u8], sucrase: Option<&str>) -> Vec<u8> {
-    let result = run_inner(bytes, sucrase);
+/// `RunResult` bytes.
+pub fn run(bytes: &[u8], lang: Lang) -> Vec<u8> {
+    let result = run_inner(bytes, lang);
     serde_json::to_vec(&result).expect("RunResult serializes")
+}
+
+/// A submission prepared for repeated execution against test cases.
+enum Exec<'a> {
+    /// Plain JavaScript (already type-stripped for TS).
+    Js(String),
+    /// C/C++ source + the JSCPP bundle to interpret it with.
+    Cpp(&'a str, &'a str),
+}
+
+/// Prepare a submission for execution: type-strip TypeScript once (sucrase is
+/// expensive in-engine), pass JavaScript through, and defer C/C++ to JSCPP.
+fn prepare<'a>(lang: Lang<'a>, source: &'a str) -> Result<Exec<'a>, String> {
+    match lang {
+        Lang::Js => Ok(Exec::Js(source.to_string())),
+        Lang::Ts(sucrase) => Ok(Exec::Js(transpile_ts(sucrase, source)?)),
+        Lang::Cpp(jscpp) => Ok(Exec::Cpp(source, jscpp)),
+    }
+}
+
+fn run_exec(exec: &Exec, stdin: &str, loop_limit: Option<u64>) -> RunResult {
+    match exec {
+        Exec::Js(js) => run_boa_js(js, stdin, loop_limit),
+        Exec::Cpp(source, jscpp) => run_boa_cpp(source, stdin, jscpp, loop_limit),
+    }
 }
 
 /// Copy `len` bytes at `ptr` out of linear memory. Returns empty for a
@@ -156,7 +192,7 @@ pub fn pack(bytes: Vec<u8>) -> i64 {
     ((ptr & 0xFFFF_FFFF) << 32) | (len & 0xFFFF_FFFF)
 }
 
-fn grade_inner(bytes: &[u8], sucrase: Option<&str>) -> ScoreRecord {
+fn grade_inner(bytes: &[u8], lang: Lang) -> ScoreRecord {
     let input: GradeInput = match serde_json::from_slice(bytes) {
         Ok(v) => v,
         Err(e) => return grade_error(format!("invalid grade input: {e}")),
@@ -174,11 +210,10 @@ fn grade_inner(bytes: &[u8], sucrase: Option<&str>) -> ScoreRecord {
         return grade_error("content has no test cases".to_string());
     }
 
-    // TypeScript: strip types ONCE per grade (sucrase is expensive in-engine),
-    // then run the resulting JavaScript against every test case.
-    let source = match transpiled(sucrase, &input.submission.source) {
-        Ok(s) => s,
-        Err(e) => return grade_error(format!("TypeScript error: {e}")),
+    // Prepare once (TypeScript type-strip is expensive), then run every test.
+    let exec = match prepare(lang, &input.submission.source) {
+        Ok(e) => e,
+        Err(e) => return grade_error(e),
     };
 
     let mut passed = 0u32;
@@ -186,7 +221,7 @@ fn grade_inner(bytes: &[u8], sucrase: Option<&str>) -> ScoreRecord {
     for (i, (t, is_hidden)) in all.iter().enumerate() {
         // No Boa loop cap for grading — the host's Wasmtime fuel budget bounds
         // runtime deterministically.
-        let outcome = run_js(&source, &t.stdin, None);
+        let outcome = run_exec(&exec, &t.stdin, None);
         let ok = outcome.error.is_none() && outcome.stdout.trim() == t.expected_stdout.trim();
         if ok {
             passed += 1;
@@ -238,7 +273,7 @@ fn grade_error(msg: String) -> ScoreRecord {
     }
 }
 
-fn run_inner(bytes: &[u8], sucrase: Option<&str>) -> RunResult {
+fn run_inner(bytes: &[u8], lang: Lang) -> RunResult {
     let input: RunInput = match serde_json::from_slice(bytes) {
         Ok(v) => v,
         Err(e) => {
@@ -249,43 +284,38 @@ fn run_inner(bytes: &[u8], sucrase: Option<&str>) -> RunResult {
             }
         }
     };
-    let source = match transpiled(sucrase, &input.source) {
-        Ok(s) => s,
+    let exec = match prepare(lang, &input.source) {
+        Ok(e) => e,
         Err(e) => {
             return RunResult {
                 stdout: String::new(),
                 stderr: String::new(),
-                error: Some(format!("TypeScript error: {e}")),
+                error: Some(e),
             }
         }
     };
     // Live eval runs on the iframe main thread (no worker), so cap loop
     // iterations to keep a runaway program from freezing the UI. Generous enough
     // for real solutions; the credential grader (host, fuel-bounded) uses no cap.
-    run_js(&source, &input.stdin, Some(LIVE_LOOP_LIMIT))
+    run_exec(&exec, &input.stdin, Some(LIVE_LOOP_LIMIT))
 }
 
 /// Boa loop-iteration cap for in-browser live eval. Real solutions stay well
 /// under this; an infinite loop errors out instead of hanging the iframe.
 const LIVE_LOOP_LIMIT: u64 = 20_000_000;
 
-/// Return `source` unchanged for JavaScript, or the type-stripped JavaScript for
-/// TypeScript (`sucrase` is `Some`). Runs sucrase once in a throwaway context.
-fn transpiled(sucrase: Option<&str>, source: &str) -> Result<String, String> {
-    match sucrase {
-        None => Ok(source.to_string()),
-        Some(suc) => {
-            let mut ctx = Context::default();
-            strip_typescript(&mut ctx, suc, source)
-        }
-    }
+/// Type-strip TypeScript to JavaScript with the bundled sucrase, run once in a
+/// throwaway Boa context.
+fn transpile_ts(sucrase: &str, source: &str) -> Result<String, String> {
+    let mut ctx = Context::default();
+    strip_typescript(&mut ctx, sucrase, source).map_err(|e| format!("TypeScript error: {e}"))
 }
 
 /// Execute `source` (already plain JavaScript) in a fresh Boa context.
 /// `console.log` → stdout, `console.error`/`warn` → stderr,
 /// `readLine()`/`input()` read `stdin`. `loop_limit` caps loop iterations when
 /// `Some` (used for main-thread live eval); grading passes `None`.
-fn run_js(source: &str, stdin: &str, loop_limit: Option<u64>) -> RunResult {
+fn run_boa_js(source: &str, stdin: &str, loop_limit: Option<u64>) -> RunResult {
     STDOUT.with(|o| o.borrow_mut().clear());
     STDERR.with(|o| o.borrow_mut().clear());
     STDIN.with(|q| {
@@ -327,6 +357,65 @@ fn run_js(source: &str, stdin: &str, loop_limit: Option<u64>) -> RunResult {
         stderr: STDERR.with(|o| o.borrow().clone()),
         error,
     }
+}
+
+/// Boa doesn't implement the deprecated Annex-B `String.prototype.substr`, which
+/// JSCPP uses — polyfill it before loading JSCPP.
+const SUBSTR_POLYFILL: &str = "if(!String.prototype.substr){Object.defineProperty(String.prototype,'substr',{value:function(start,length){var s=String(this);var len=s.length;start=Math.trunc(start)||0;if(start<0)start=Math.max(len+start,0);if(length===undefined)length=len-start;else{length=Math.trunc(length)||0;if(length<0)length=0;}return s.slice(start,start+length);},writable:true,configurable:true});}";
+
+/// Interpret C/C++ `source` with the bundled JSCPP running inside Boa. `stdin`
+/// is fed to the program; stdout is captured. A compile/runtime error from
+/// JSCPP (or a Boa loop-limit interruption) is returned in `error`.
+fn run_boa_cpp(source: &str, stdin: &str, jscpp: &str, loop_limit: Option<u64>) -> RunResult {
+    let mut ctx = Context::default();
+    if let Some(limit) = loop_limit {
+        ctx.runtime_limits_mut().set_loop_iteration_limit(limit);
+    }
+    let prelude = format!("var self=globalThis;var window=globalThis;{SUBSTR_POLYFILL}");
+    if ctx.eval(Source::from_bytes(prelude.as_bytes())).is_err()
+        || ctx.eval(Source::from_bytes(jscpp.as_bytes())).is_err()
+    {
+        return RunResult {
+            stdout: String::new(),
+            stderr: String::new(),
+            error: Some("C/C++ runtime failed to load".to_string()),
+        };
+    }
+
+    let src_lit = serde_json::to_string(source).unwrap_or_else(|_| "\"\"".to_string());
+    let stdin_lit = serde_json::to_string(stdin).unwrap_or_else(|_| "\"\"".to_string());
+    let harness = format!(
+        "globalThis.__O='';globalThis.__ERR='';\
+         var __cfg={{stdio:{{write:function(s){{globalThis.__O+=s;}}}}}};\
+         try{{AlexJSCPP.JSCPP.run({src_lit},{stdin_lit},__cfg);}}\
+         catch(e){{globalThis.__ERR=(e&&e.message)?String(e.message):String(e);}}"
+    );
+    let boa_err = ctx
+        .eval(Source::from_bytes(harness.as_bytes()))
+        .err()
+        .map(|e| e.to_string());
+
+    let stdout = read_global(&mut ctx, "__O");
+    let jscpp_err = read_global(&mut ctx, "__ERR");
+    let error = if !jscpp_err.is_empty() {
+        Some(jscpp_err)
+    } else {
+        boa_err
+    };
+    RunResult {
+        stdout,
+        stderr: String::new(),
+        error,
+    }
+}
+
+fn read_global(ctx: &mut Context, name: &str) -> String {
+    let expr = format!("String(globalThis.{name}||'')");
+    ctx.eval(Source::from_bytes(expr.as_bytes()))
+        .ok()
+        .and_then(|v| v.to_string(ctx).ok())
+        .map(|s| s.to_std_string_escaped())
+        .unwrap_or_default()
 }
 
 /// Load the bundled sucrase into the context and strip TypeScript types,
