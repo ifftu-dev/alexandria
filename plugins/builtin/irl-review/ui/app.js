@@ -404,17 +404,33 @@
 
   // ----- Refresh: ask host for my submissions -----
   let lastRefreshAt = 0;
-  async function refreshSubmissions() {
+  async function refreshSubmissions(showFeedback) {
     lastRefreshAt = Date.now();
     try {
       const resp = await alex.emitEvent('irl_refresh', {});
       const submissions = (resp && resp.submissions) || [];
       renderReviews(submissions);
+      if (showFeedback) {
+        const reviewed = submissions.filter((s) => s.status === 'reviewed').length;
+        const n = submissions.length;
+        setStatus(
+          n === 0
+            ? 'No submissions yet.'
+            : `${n} submission${n === 1 ? '' : 's'}${reviewed ? `, ${reviewed} reviewed` : ' — awaiting review'}.`,
+          'ok',
+        );
+      }
     } catch (err) {
       setStatus(`Could not load submissions: ${err.message || err}`, 'error');
     }
   }
-  refreshBtn.addEventListener('click', () => void refreshSubmissions());
+  // Manual refresh checks for new instructor review replies (status/score/
+  // feedback). Show a status line so the button visibly does something even
+  // when nothing changed.
+  refreshBtn.addEventListener('click', () => {
+    setStatus('Checking for updates…');
+    void refreshSubmissions(true);
+  });
 
   // Poll periodically for review replies — host returns instantly from
   // the in-memory SQLite read so the cost is negligible.
