@@ -258,7 +258,7 @@ function formatDate(iso: string) {
     <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
       <!-- Create Room -->
       <button
-        class="group rounded-xl border border-border bg-card p-6 text-left transition-all hover:border-primary/40 hover:shadow-md"
+        class="group rounded-xl border border-border bg-card p-6 text-start transition-all hover:border-primary/40 hover:shadow-md"
         @click="showCreateModal = true; createStep = 'form'"
       >
         <div class="flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10 transition-colors group-hover:bg-primary/20">
@@ -274,7 +274,7 @@ function formatDate(iso: string) {
 
       <!-- Join Room -->
       <button
-        class="group rounded-xl border border-border bg-card p-6 text-left transition-all hover:border-primary/40 hover:shadow-md"
+        class="group rounded-xl border border-border bg-card p-6 text-start transition-all hover:border-primary/40 hover:shadow-md"
         @click="showJoinModal = true; joinStep = 'form'"
       >
         <div class="flex h-12 w-12 items-center justify-center rounded-lg bg-accent/10 transition-colors group-hover:bg-accent/20">

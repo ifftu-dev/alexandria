@@ -288,7 +288,7 @@ function onKeydown(event: KeyboardEvent) {
                 v-if="unlocking && unlockStatus"
                 class="flex items-center gap-2 text-xs text-muted-foreground"
               >
-                <span class="inline-block h-3 w-3 rounded-full border-2 border-current border-r-transparent animate-spin" />
+                <span class="inline-block h-3 w-3 rounded-full border-2 border-current border-e-transparent animate-spin" />
                 <span>{{ unlockStatus }}</span>
               </div>
             </Transition>
@@ -320,7 +320,7 @@ function onKeydown(event: KeyboardEvent) {
               :disabled="unlocking || biometricLoading"
               @click="unlockWithBiometric(false)"
             >
-              <svg class="mr-1.5 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+              <svg class="me-1.5 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M12 11c-1.1 0-2 .9-2 2v1m4-3c1.1 0 2 .9 2 2v2m-9-5a7 7 0 0110 0M5 8a10 10 0 0114 0M9 19c-.5-1-1-2.2-1-4m8 3a14 14 0 00.5-5" />
               </svg>
               {{ $t('onboarding.profileSelect.unlockBiometric') }}

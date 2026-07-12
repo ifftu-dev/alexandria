@@ -62,13 +62,13 @@ onMounted(async () => {
       </div>
       <div class="flex gap-2">
         <AppButton variant="ghost" size="sm" @click="$router.push('/instructor/tutorials/new')">
-          <svg class="w-4 h-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <svg class="w-4 h-4 me-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M8 5v14l11-7z" />
           </svg>
           {{ $t('courses.index.newTutorial') }}
         </AppButton>
         <AppButton variant="primary" size="sm" @click="$router.push('/instructor/courses/new')">
-          <svg class="w-4 h-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <svg class="w-4 h-4 me-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
           </svg>
           {{ $t('courses.index.newCourse') }}
@@ -91,7 +91,7 @@ onMounted(async () => {
         @click="setKindFilter(opt)"
       >
         {{ opt === 'all' ? $t('courses.index.filterAll') : opt === 'course' ? $t('courses.index.filterCourses') : $t('courses.index.filterTutorials') }}
-        <span class="ml-1 opacity-70">{{ counts[opt] }}</span>
+        <span class="ms-1 opacity-70">{{ counts[opt] }}</span>
       </button>
     </div>
 

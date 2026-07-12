@@ -91,7 +91,7 @@ async function claim() {
       <button
         v-for="d in docTypes"
         :key="d.id"
-        class="rounded-xl border p-3 text-left transition-colors"
+        class="rounded-xl border p-3 text-start transition-colors"
         :class="docType === d.id ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/40'"
         @click="docType = d.id"
       >

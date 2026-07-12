@@ -409,18 +409,18 @@ async function loadMySubmissions() {
       <template v-else>
         <!-- Search -->
         <div class="relative mb-4">
-          <svg class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <svg class="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0z" />
           </svg>
           <input
             v-model="pluginQuery"
             type="text"
             :placeholder="$t('settings.plugins.searchPlaceholder')"
-            class="w-full rounded-lg border border-border bg-background py-2 pl-9 pr-8 text-sm text-foreground outline-none focus:border-primary"
+            class="w-full rounded-lg border border-border bg-background py-2 ps-9 pe-8 text-sm text-foreground outline-none focus:border-primary"
           >
           <button
             v-if="pluginQuery"
-            class="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            class="absolute end-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
             :aria-label="$t('settings.plugins.clearSearch')"
             @click="pluginQuery = ''"
           >
@@ -440,7 +440,7 @@ async function loadMySubmissions() {
           :key="p.plugin_cid"
           role="button"
           tabindex="0"
-          class="group relative flex cursor-pointer flex-col rounded-2xl border border-border bg-card/40 p-4 text-left transition-all hover:border-primary/50 hover:bg-card/70 hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          class="group relative flex cursor-pointer flex-col rounded-2xl border border-border bg-card/40 p-4 text-start transition-all hover:border-primary/50 hover:bg-card/70 hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
           :class="{ 'opacity-60': !p.enabled }"
           @click="openDocs(p)"
           @keydown.enter="openDocs(p)"
@@ -554,7 +554,7 @@ async function loadMySubmissions() {
           </div>
 
           <!-- Open-docs affordance -->
-          <span class="pointer-events-none absolute right-3 top-3 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">
+          <span class="pointer-events-none absolute end-3 top-3 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">
             <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
             </svg>
@@ -667,7 +667,7 @@ async function loadMySubmissions() {
               :key="skill"
             >
               <span class="text-muted-foreground">{{ skill }}</span>
-              <span class="text-foreground text-right">{{ Math.round((rating || 0) * 100) }}%</span>
+              <span class="text-foreground text-end">{{ Math.round((rating || 0) * 100) }}%</span>
             </template>
           </div>
         </li>
@@ -775,7 +775,7 @@ async function loadMySubmissions() {
               step="0.01"
               class="flex-1"
             />
-            <span class="w-12 text-right font-medium">{{ Math.round(reviewScore * 100) }}%</span>
+            <span class="w-12 text-end font-medium">{{ Math.round(reviewScore * 100) }}%</span>
           </div>
         </div>
 
@@ -801,7 +801,7 @@ async function loadMySubmissions() {
                 step="0.01"
                 class="flex-1"
               />
-              <span class="w-12 text-right text-sm">
+              <span class="w-12 text-end text-sm">
                 {{ Math.round((reviewSkillRatings[skill] ?? 0) * 100) }}%
               </span>
             </div>

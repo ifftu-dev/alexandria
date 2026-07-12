@@ -479,7 +479,7 @@ function peerInitials(nodeId: string): string {
           <!-- Unread badge -->
           <span
             v-if="unreadChatCount > 0 && !showChat"
-            class="absolute -top-1.5 -right-1.5 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-destructive px-1 text-[0.6rem] font-bold text-destructive-foreground"
+            class="absolute -top-1.5 -end-1.5 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-destructive px-1 text-[0.6rem] font-bold text-destructive-foreground"
           >
             {{ unreadChatCount > 99 ? '99+' : unreadChatCount }}
           </span>
@@ -502,7 +502,7 @@ function peerInitials(nodeId: string): string {
     <!-- Main content area with optional chat sidebar -->
     <div class="flex flex-1 overflow-hidden">
       <!-- Video / Audio area -->
-      <div class="flex-1 flex flex-col" :class="showChat ? 'border-r border-border' : ''">
+      <div class="flex-1 flex flex-col" :class="showChat ? 'border-e border-border' : ''">
         <div v-if="isActive" class="flex-1 overflow-auto p-4">
           <div class="mx-auto max-w-5xl space-y-4">
 
@@ -569,7 +569,7 @@ function peerInitials(nodeId: string): string {
                 </div>
 
                 <!-- Status overlay -->
-                <div class="absolute bottom-3 left-3 flex items-center gap-2 rounded-lg bg-black/60 px-3 py-1.5 backdrop-blur-sm">
+                <div class="absolute bottom-3 start-3 flex items-center gap-2 rounded-lg bg-black/60 px-3 py-1.5 backdrop-blur-sm">
                   <span class="relative flex h-2 w-2" v-if="videoEnabled">
                     <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-success opacity-75" />
                     <span class="relative inline-flex h-2 w-2 rounded-full bg-success" />
@@ -579,7 +579,7 @@ function peerInitials(nodeId: string): string {
                 </div>
 
                 <!-- Audio indicator overlay -->
-                <div class="absolute bottom-3 right-3 flex items-center gap-1.5 rounded-lg bg-black/60 px-2 py-1 backdrop-blur-sm">
+                <div class="absolute bottom-3 end-3 flex items-center gap-1.5 rounded-lg bg-black/60 px-2 py-1 backdrop-blur-sm">
                   <svg v-if="audioEnabled" class="h-3 w-3 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
                   </svg>
@@ -640,7 +640,7 @@ function peerInitials(nodeId: string): string {
                     </div>
                   </div>
                   <!-- Peer status overlay (shown over video) -->
-                  <div v-if="videoFrames[peer.node_id]" class="absolute bottom-2 left-2 flex items-center gap-1.5 rounded bg-black/60 px-2 py-1 backdrop-blur-sm">
+                  <div v-if="videoFrames[peer.node_id]" class="absolute bottom-2 start-2 flex items-center gap-1.5 rounded bg-black/60 px-2 py-1 backdrop-blur-sm">
                     <span
                       class="h-1.5 w-1.5 rounded-full"
                       :class="peer.connected ? 'bg-success' : 'bg-warning'"
@@ -650,7 +650,7 @@ function peerInitials(nodeId: string): string {
                     </span>
                   </div>
                   <!-- Speaker VU indicator -->
-                  <div v-if="outputLevel > 0.05" class="flex items-center gap-1 shrink-0" :class="videoFrames[peer.node_id] ? 'absolute bottom-2 right-2 rounded bg-black/60 px-1.5 py-1 backdrop-blur-sm' : 'absolute right-4 top-1/2 -translate-y-1/2'">
+                  <div v-if="outputLevel > 0.05" class="flex items-center gap-1 shrink-0" :class="videoFrames[peer.node_id] ? 'absolute bottom-2 end-2 rounded bg-black/60 px-1.5 py-1 backdrop-blur-sm' : 'absolute end-4 top-1/2 -translate-y-1/2'">
                     <svg class="h-4 w-4 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                       <path stroke-linecap="round" stroke-linejoin="round" d="M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" />
                     </svg>
@@ -718,7 +718,7 @@ function peerInitials(nodeId: string): string {
                 </div>
 
                 <!-- Status overlay -->
-                <div class="absolute bottom-3 left-3 flex items-center gap-2 rounded-lg bg-black/60 px-3 py-1.5 backdrop-blur-sm">
+                <div class="absolute bottom-3 start-3 flex items-center gap-2 rounded-lg bg-black/60 px-3 py-1.5 backdrop-blur-sm">
                   <span class="relative flex h-2 w-2" v-if="videoEnabled || screenSharing">
                     <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-success opacity-75" />
                     <span class="relative inline-flex h-2 w-2 rounded-full bg-success" />
@@ -728,7 +728,7 @@ function peerInitials(nodeId: string): string {
                 </div>
 
                 <!-- Audio indicator with VU meter -->
-                <div class="absolute bottom-3 right-3 flex items-center gap-1.5 rounded-lg bg-black/60 px-2 py-1 backdrop-blur-sm">
+                <div class="absolute bottom-3 end-3 flex items-center gap-1.5 rounded-lg bg-black/60 px-2 py-1 backdrop-blur-sm">
                   <svg v-if="audioEnabled" class="h-3 w-3 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
                   </svg>
@@ -776,7 +776,7 @@ function peerInitials(nodeId: string): string {
                     <span class="text-xs opacity-60">{{ peerDisplayName(peer.node_id) }}</span>
                   </div>
                   <!-- Peer status overlay -->
-                  <div class="absolute bottom-2 left-2 flex items-center gap-1.5 rounded bg-black/60 px-2 py-1 backdrop-blur-sm">
+                  <div class="absolute bottom-2 start-2 flex items-center gap-1.5 rounded bg-black/60 px-2 py-1 backdrop-blur-sm">
                     <span
                       class="h-1.5 w-1.5 rounded-full"
                       :class="peer.connected ? 'bg-success' : 'bg-warning'"
@@ -786,7 +786,7 @@ function peerInitials(nodeId: string): string {
                     </span>
                   </div>
                   <!-- Speaker VU indicator on peer card -->
-                  <div v-if="outputLevel > 0.05" class="absolute bottom-2 right-2 flex items-center gap-1 rounded bg-black/60 px-1.5 py-1 backdrop-blur-sm">
+                  <div v-if="outputLevel > 0.05" class="absolute bottom-2 end-2 flex items-center gap-1 rounded bg-black/60 px-1.5 py-1 backdrop-blur-sm">
                     <svg class="h-3 w-3 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                       <path stroke-linecap="round" stroke-linejoin="round" d="M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" />
                     </svg>
@@ -976,7 +976,7 @@ function peerInitials(nodeId: string): string {
         leave-from-class="translate-x-0 sm:w-72 opacity-100"
         leave-to-class="translate-x-full sm:translate-x-0 sm:w-0 opacity-0"
       >
-        <div v-if="showChat && isActive" class="absolute right-0 top-0 bottom-0 z-30 sm:relative sm:inset-auto sm:z-auto flex w-[min(20rem,85vw)] sm:w-72 flex-col border-l border-border bg-card shrink-0 overflow-hidden shadow-xl sm:shadow-none">
+        <div v-if="showChat && isActive" class="absolute end-0 top-0 bottom-0 z-30 sm:relative sm:inset-auto sm:z-auto flex w-[min(20rem,85vw)] sm:w-72 flex-col border-s border-border bg-card shrink-0 overflow-hidden shadow-xl sm:shadow-none">
           <!-- Chat header -->
           <div class="flex items-center justify-between border-b border-border px-4 py-3 shrink-0">
             <h3 class="text-sm font-semibold text-foreground">{{ $t('tutoring.chat.title') }}</h3>
@@ -1008,8 +1008,8 @@ function peerInitials(nodeId: string): string {
               <div
                 class="rounded-lg px-3 py-2 text-sm"
                 :class="msg.sender === 'self'
-                  ? 'bg-primary/10 ml-6'
-                  : 'bg-muted mr-6'"
+                  ? 'bg-primary/10 ms-6'
+                  : 'bg-muted me-6'"
               >
                 <div class="flex items-center gap-2 mb-0.5">
                   <span class="text-[0.65rem] font-semibold" :class="msg.sender === 'self' ? 'text-primary' : 'text-foreground'">

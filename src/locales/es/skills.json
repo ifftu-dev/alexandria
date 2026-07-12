@@ -40,7 +40,17 @@
     "legendAvailable": "Disponibles ({count})",
     "legendLocked": "Bloqueadas ({count})",
     "legendNodeSize": "El tamaño del punto indica el nivel de habilidad (Recordar → Crear)",
-    "summary": "{skills} habilidades, {edges} enlaces de prerrequisitos"
+    "summary": "{skills} habilidades, {edges} enlaces de prerrequisitos",
+    "expandHint": "Doble clic para ampliar",
+    "expandTitle": "Ampliar mapa de habilidades",
+    "earnedTitle": "Tienes una credencial verificada para estas habilidades",
+    "availableTip": "Todos los requisitos cumplidos",
+    "lockedTip": "Requisitos aún no obtenidos",
+    "skillsProgress": "{earned} / {total} habilidades",
+    "vaultLocked": "Desbloquea tu cuenta para ver el mapa de habilidades",
+    "noSkillsLoaded": "Aún no hay habilidades cargadas",
+    "modalTitle": "Mapa de habilidades",
+    "skillsEarnedProgress": "{earned} / {total} habilidades obtenidas"
   },
   "credentials": {
     "emptyTitle": "Aún no hay credenciales",

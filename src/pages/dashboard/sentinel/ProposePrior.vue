@@ -284,7 +284,7 @@ function reset() {
         <input
           type="file"
           accept="application/json,.json"
-          class="block w-full text-sm text-muted-foreground file:mr-3 file:rounded-md file:border-0 file:bg-primary/10 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-primary file:hover:bg-primary/20"
+          class="block w-full text-sm text-muted-foreground file:me-3 file:rounded-md file:border-0 file:bg-primary/10 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-primary file:hover:bg-primary/20"
           @change="onFileChosen"
         />
         <div v-if="fileName" class="text-xs text-muted-foreground">
@@ -340,7 +340,7 @@ function reset() {
             :key="s.id"
             :value="s.id"
           >
-            {{ s.started_at }} — status: {{ s.status }}
+            {{ $t('sentinel.propose.statusOption', { date: s.started_at, status: s.status }) }}
           </option>
         </select>
       </div>

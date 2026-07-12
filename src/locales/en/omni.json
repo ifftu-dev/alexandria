@@ -1,0 +1,14 @@
+{
+  "ariaLabel": "Search",
+  "placeholder": "Search skills, courses, communities, classrooms…",
+  "searching": "Searching…",
+  "emptyHint": "Start typing to search across skills, courses, communities, and classrooms.",
+  "tryLabel": "Try:",
+  "example1": "graphs",
+  "example2": "cybersecurity",
+  "example3": "design",
+  "noResults": "No results for “{query}”",
+  "recent": "Recent",
+  "hintNavigate": "navigate",
+  "hintSelect": "select"
+}

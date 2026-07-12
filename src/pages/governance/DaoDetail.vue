@@ -724,7 +724,7 @@ const proposalCategories = ['policy', 'taxonomy', 'curriculum', 'technical', 'go
             class="rounded-xl border border-border bg-card p-5 transition-all hover:border-primary/30"
           >
             <div class="flex items-start justify-between mb-3">
-              <div class="min-w-0 flex-1 mr-3">
+              <div class="min-w-0 flex-1 me-3">
                 <div class="flex items-center gap-2 mb-1">
                   <span
                     class="inline-flex items-center px-2 py-0.5 rounded-md text-[0.65rem] font-medium border"
@@ -790,13 +790,13 @@ const proposalCategories = ['policy', 'taxonomy', 'curriculum', 'technical', 'go
               <template v-else-if="proposal.status === 'published'">
                 <ProficiencyGate :required-level="proposal.min_vote_proficiency || 'remember'" :met="true" />
                 <AppButton size="xs" variant="outline" @click="voteOnProposal(proposal.id, true)">
-                  <svg class="w-3 h-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <svg class="w-3 h-3 me-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
                   </svg>
                   {{ $t('governance.detail.proposals.actions.voteFor') }}
                 </AppButton>
                 <AppButton size="xs" variant="danger" @click="voteOnProposal(proposal.id, false)">
-                  <svg class="w-3 h-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <svg class="w-3 h-3 me-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
                   </svg>
                   {{ $t('governance.detail.proposals.actions.voteAgainst') }}

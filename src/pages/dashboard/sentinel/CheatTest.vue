@@ -278,24 +278,24 @@ const FEATURE_DIM = FEATURE_NAMES.length
 
     <div v-if="rows.length > 0" class="card p-5">
       <div class="overflow-x-auto">
-        <table class="w-full text-left text-sm">
+        <table class="w-full text-start text-sm">
           <thead>
             <tr class="border-b border-border text-xs text-muted-foreground">
-              <th class="py-2 pr-3">{{ $t('sentinel.cheatTest.colPattern') }}</th>
-              <th class="py-2 pr-3">{{ $t('sentinel.cheatTest.colExpected') }}</th>
-              <th class="py-2 pr-3">{{ $t('sentinel.cheatTest.colScore') }}</th>
-              <th class="py-2 pr-3">{{ $t('sentinel.cheatTest.colFlag') }}</th>
-              <th class="py-2 pr-3">{{ $t('sentinel.cheatTest.colVerdict') }}</th>
+              <th class="py-2 pe-3">{{ $t('sentinel.cheatTest.colPattern') }}</th>
+              <th class="py-2 pe-3">{{ $t('sentinel.cheatTest.colExpected') }}</th>
+              <th class="py-2 pe-3">{{ $t('sentinel.cheatTest.colScore') }}</th>
+              <th class="py-2 pe-3">{{ $t('sentinel.cheatTest.colFlag') }}</th>
+              <th class="py-2 pe-3">{{ $t('sentinel.cheatTest.colVerdict') }}</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="r in rows" :key="r.label" class="border-b border-border/50">
-              <td class="py-2 pr-3 font-mono">{{ r.label }}</td>
-              <td class="py-2 pr-3">{{ r.expectedDetection }}</td>
-              <td class="py-2 pr-3 font-mono">
+              <td class="py-2 pe-3 font-mono">{{ r.label }}</td>
+              <td class="py-2 pe-3">{{ r.expectedDetection }}</td>
+              <td class="py-2 pe-3 font-mono">
                 {{ r.rawScore < 0 ? '—' : r.rawScore.toFixed(3) }}
               </td>
-              <td class="py-2 pr-3">
+              <td class="py-2 pe-3">
                 <AppBadge
                   :variant="
                     r.flag === 'critical' ? 'error'
@@ -307,7 +307,7 @@ const FEATURE_DIM = FEATURE_NAMES.length
                   {{ r.flag }}
                 </AppBadge>
               </td>
-              <td class="py-2 pr-3">
+              <td class="py-2 pe-3">
                 <AppBadge
                   :variant="
                     r.passOrFail === 'pass' ? 'success'
@@ -328,17 +328,17 @@ const FEATURE_DIM = FEATURE_NAMES.length
           {{ $t('sentinel.cheatTest.featureDetails') }}
         </summary>
         <div class="mt-3 overflow-x-auto">
-          <table class="w-full text-left text-xs">
+          <table class="w-full text-start text-xs">
             <thead>
               <tr class="border-b border-border text-muted-foreground">
-                <th class="py-1 pr-2">{{ $t('sentinel.cheatTest.featureLabel') }}</th>
-                <th v-for="(name, i) in FEATURE_NAMES" :key="i" class="py-1 pr-2">{{ name }}</th>
+                <th class="py-1 pe-2">{{ $t('sentinel.cheatTest.featureLabel') }}</th>
+                <th v-for="(name, i) in FEATURE_NAMES" :key="i" class="py-1 pe-2">{{ name }}</th>
               </tr>
             </thead>
             <tbody>
               <tr v-for="r in rows" :key="r.label" class="border-b border-border/50 font-mono">
-                <td class="py-1 pr-2">{{ r.label }}</td>
-                <td v-for="i in FEATURE_DIM" :key="i" class="py-1 pr-2">
+                <td class="py-1 pe-2">{{ r.label }}</td>
+                <td v-for="i in FEATURE_DIM" :key="i" class="py-1 pe-2">
                   {{ r.features[i - 1]?.toFixed(2) ?? '—' }}
                 </td>
               </tr>

@@ -40,7 +40,17 @@
     "legendAvailable": "উপলব্ধ ({count})",
     "legendLocked": "লক করা ({count})",
     "legendNodeSize": "বিন্দুর আকার দক্ষতার স্তর দেখায় (মনে রাখা → সৃষ্টি করা)",
-    "summary": "{skills}টি দক্ষতা, {edges}টি পূর্বশর্ত সংযোগ"
+    "summary": "{skills}টি দক্ষতা, {edges}টি পূর্বশর্ত সংযোগ",
+    "expandHint": "বড় করতে ডাবল-ক্লিক করুন",
+    "expandTitle": "স্কিল ম্যাপ বড় করুন",
+    "earnedTitle": "এই দক্ষতাগুলোর জন্য আপনার যাচাইকৃত ক্রেডেনশিয়াল আছে",
+    "availableTip": "সব পূর্বশর্ত পূরণ",
+    "lockedTip": "পূর্বশর্ত এখনও অর্জিত হয়নি",
+    "skillsProgress": "{earned} / {total} দক্ষতা",
+    "vaultLocked": "স্কিল ম্যাপ দেখতে আপনার অ্যাকাউন্ট আনলক করুন",
+    "noSkillsLoaded": "এখনও কোনো দক্ষতা লোড হয়নি",
+    "modalTitle": "স্কিল ম্যাপ",
+    "skillsEarnedProgress": "{earned} / {total} দক্ষতা অর্জিত"
   },
   "credentials": {
     "emptyTitle": "এখনও কোনো ক্রেডেনশিয়াল নেই",

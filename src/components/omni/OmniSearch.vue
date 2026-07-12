@@ -129,7 +129,7 @@ watch(isOpen, async (val) => {
             class="card overflow-hidden w-full max-w-[40rem] shadow-lg"
             role="dialog"
             aria-modal="true"
-            aria-label="Omni search"
+            :aria-label="$t('omni.ariaLabel')"
           >
             <!-- Search input -->
             <div class="flex items-center gap-3 px-4 h-12 border-b border-border">
@@ -140,12 +140,12 @@ watch(isOpen, async (val) => {
                 ref="inputRef"
                 :value="query"
                 type="text"
-                placeholder="Search skills, courses, DAOs, classrooms..."
+                :placeholder="$t('omni.placeholder')"
                 class="flex-1 bg-transparent outline-none text-sm text-foreground placeholder:text-muted-foreground"
                 @input="onInput"
                 @keydown="onKeydown"
               />
-              <span v-if="loading" class="text-xs text-muted-foreground">Searching…</span>
+              <span v-if="loading" class="text-xs text-muted-foreground">{{ $t('omni.searching') }}</span>
               <kbd class="hidden sm:inline-flex items-center gap-0.5 px-1.5 h-5 text-[10px] font-mono text-muted-foreground bg-muted/50 border border-border rounded">
                 esc
               </kbd>
@@ -154,17 +154,17 @@ watch(isOpen, async (val) => {
             <!-- Empty hint (no query, no recents) -->
             <div v-if="showEmptyHint" class="px-4 py-8 text-center">
               <p class="text-sm text-muted-foreground">
-                Start typing to search across skills, courses, DAOs, and classrooms.
+                {{ $t('omni.emptyHint') }}
               </p>
               <p class="mt-2 text-xs text-muted-foreground/70">
-                Try: <span class="font-mono">graphs</span>, <span class="font-mono">cybersecurity</span>, <span class="font-mono">design</span>
+                {{ $t('omni.tryLabel') }} <span class="font-mono">{{ $t('omni.example1') }}</span>, <span class="font-mono">{{ $t('omni.example2') }}</span>, <span class="font-mono">{{ $t('omni.example3') }}</span>
               </p>
             </div>
 
             <!-- No results -->
             <div v-else-if="showNoResults" class="px-4 py-8 text-center">
               <p class="text-sm text-muted-foreground">
-                No results for "<span class="font-medium text-foreground">{{ query }}</span>"
+                {{ $t('omni.noResults', { query }) }}
               </p>
             </div>
 
@@ -179,7 +179,7 @@ watch(isOpen, async (val) => {
                 v-if="query.length === 0"
                 class="px-4 pt-1 pb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
               >
-                Recent
+                {{ $t('omni.recent') }}
               </p>
 
               <!-- Grouped results (when query present) -->
@@ -193,7 +193,7 @@ watch(isOpen, async (val) => {
                     :key="item.id"
                     type="button"
                     :data-omni-selected="flatIndexFor(item.type, item.id) === selectedIndex"
-                    class="w-full flex items-center gap-3 px-4 py-2 text-left transition-colors"
+                    class="w-full flex items-center gap-3 px-4 py-2 text-start transition-colors"
                     :class="
                       flatIndexFor(item.type, item.id) === selectedIndex
                         ? 'bg-primary/10 text-foreground'
@@ -238,7 +238,7 @@ watch(isOpen, async (val) => {
                   :key="item.id"
                   type="button"
                   :data-omni-selected="index === selectedIndex"
-                  class="w-full flex items-center gap-3 px-4 py-2 text-left transition-colors"
+                  class="w-full flex items-center gap-3 px-4 py-2 text-start transition-colors"
                   :class="
                     index === selectedIndex
                       ? 'bg-primary/10 text-foreground'
@@ -272,11 +272,11 @@ watch(isOpen, async (val) => {
                 <span class="flex items-center gap-1">
                   <kbd class="inline-flex items-center px-1 h-4 font-mono text-[10px] bg-muted/50 border border-border rounded">↑</kbd>
                   <kbd class="inline-flex items-center px-1 h-4 font-mono text-[10px] bg-muted/50 border border-border rounded">↓</kbd>
-                  navigate
+                  {{ $t('omni.hintNavigate') }}
                 </span>
                 <span class="flex items-center gap-1">
                   <kbd class="inline-flex items-center px-1 h-4 font-mono text-[10px] bg-muted/50 border border-border rounded">↵</kbd>
-                  select
+                  {{ $t('omni.hintSelect') }}
                 </span>
               </div>
               <span>

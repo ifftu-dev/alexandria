@@ -56,12 +56,12 @@ function hours(seconds: number): string {
     <div v-else class="overflow-x-auto rounded-xl border border-border bg-card">
       <table class="w-full text-sm">
         <thead>
-          <tr class="border-b border-border text-left text-xs text-muted-foreground">
+          <tr class="border-b border-border text-start text-xs text-muted-foreground">
             <th class="px-4 py-3 font-medium">{{ $t('instructor.courseLearners.colLearner') }}</th>
             <th class="px-4 py-3 font-medium">{{ $t('instructor.courseLearners.colStatus') }}</th>
-            <th class="px-4 py-3 font-medium text-right">{{ $t('instructor.courseLearners.colProgress') }}</th>
-            <th class="px-4 py-3 font-medium text-right">{{ $t('instructor.courseLearners.colAvgScore') }}</th>
-            <th class="px-4 py-3 font-medium text-right">{{ $t('instructor.courseLearners.colTimeSpent') }}</th>
+            <th class="px-4 py-3 font-medium text-end">{{ $t('instructor.courseLearners.colProgress') }}</th>
+            <th class="px-4 py-3 font-medium text-end">{{ $t('instructor.courseLearners.colAvgScore') }}</th>
+            <th class="px-4 py-3 font-medium text-end">{{ $t('instructor.courseLearners.colTimeSpent') }}</th>
             <th class="px-4 py-3 font-medium">{{ $t('instructor.courseLearners.colLastActivity') }}</th>
           </tr>
         </thead>
@@ -73,16 +73,16 @@ function hours(seconds: number): string {
               </span>
             </td>
             <td class="px-4 py-3"><StatusBadge :status="l.enrollment_status" /></td>
-            <td class="px-4 py-3 text-right">
+            <td class="px-4 py-3 text-end">
               {{ l.completed_elements }}/{{ l.total_elements }}
               <span class="text-xs text-muted-foreground">
                 ({{ l.total_elements ? Math.round((l.completed_elements / l.total_elements) * 100) : 0 }}%)
               </span>
             </td>
-            <td class="px-4 py-3 text-right">
+            <td class="px-4 py-3 text-end">
               {{ l.avg_score === null ? '—' : `${Math.round(l.avg_score * 100)}%` }}
             </td>
-            <td class="px-4 py-3 text-right">{{ hours(l.time_spent_seconds) }}</td>
+            <td class="px-4 py-3 text-end">{{ hours(l.time_spent_seconds) }}</td>
             <td class="px-4 py-3 text-xs text-muted-foreground">{{ l.last_activity?.slice(0, 16) ?? '—' }}</td>
           </tr>
         </tbody>

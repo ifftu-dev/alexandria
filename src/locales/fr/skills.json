@@ -40,7 +40,17 @@
     "legendAvailable": "Disponibles ({count})",
     "legendLocked": "Verrouillées ({count})",
     "legendNodeSize": "La taille du point indique le niveau de compétence (Se souvenir → Créer)",
-    "summary": "{skills} compétences, {edges} liens de prérequis"
+    "summary": "{skills} compétences, {edges} liens de prérequis",
+    "expandHint": "Double-cliquez pour agrandir",
+    "expandTitle": "Agrandir la carte des compétences",
+    "earnedTitle": "Vous avez une attestation vérifiée pour ces compétences",
+    "availableTip": "Tous les prérequis remplis",
+    "lockedTip": "Prérequis pas encore obtenus",
+    "skillsProgress": "{earned} / {total} compétences",
+    "vaultLocked": "Déverrouillez votre compte pour voir la carte des compétences",
+    "noSkillsLoaded": "Aucune compétence chargée",
+    "modalTitle": "Carte des compétences",
+    "skillsEarnedProgress": "{earned} / {total} compétences obtenues"
   },
   "credentials": {
     "emptyTitle": "Aucun justificatif pour l'instant",

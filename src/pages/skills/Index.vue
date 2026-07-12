@@ -390,7 +390,7 @@ onBeforeUnmount(() => {
               <p class="text-[10px] font-semibold text-muted-foreground mb-3 tracking-wider uppercase">{{ $t('skills.browse.areas') }}</p>
               <button
                 v-if="selectedField"
-                class="w-full text-left text-xs px-2 py-1 mb-1 rounded-lg text-primary hover:bg-primary/10"
+                class="w-full text-start text-xs px-2 py-1 mb-1 rounded-lg text-primary hover:bg-primary/10"
                 @click="selectField(null)"
               >
                 {{ $t('skills.browse.showAll') }}
@@ -406,7 +406,7 @@ onBeforeUnmount(() => {
               >
                 <div class="flex items-center justify-between">
                   <span class="truncate">
-                    <span v-if="field.icon_emoji" class="mr-1.5">{{ field.icon_emoji }}</span>{{ field.name }}
+                    <span v-if="field.icon_emoji" class="me-1.5">{{ field.icon_emoji }}</span>{{ field.name }}
                   </span>
                   <span class="text-xs text-muted-foreground tabular-nums">{{ field.skill_count }}</span>
                 </div>
@@ -421,7 +421,7 @@ onBeforeUnmount(() => {
               <p class="text-[10px] font-semibold text-muted-foreground mb-3 tracking-wider uppercase">{{ $t('skills.browse.topics') }}</p>
               <button
                 v-if="selectedSubject"
-                class="w-full text-left text-xs px-2 py-1 mb-1 rounded-lg text-primary hover:bg-primary/10"
+                class="w-full text-start text-xs px-2 py-1 mb-1 rounded-lg text-primary hover:bg-primary/10"
                 @click="selectSubject(null)"
               >
                 {{ $t('skills.browse.showAll') }}
@@ -583,7 +583,7 @@ onBeforeUnmount(() => {
                   {{ BLOOM_ORDER[extractSkillClaim(vc.credentialSubject)?.level ?? 2] ?? 'apply' }}
                 </AppBadge>
               </div>
-              <div class="text-right flex-shrink-0">
+              <div class="text-end flex-shrink-0">
                 <div class="font-mono text-lg font-bold text-primary">
                   {{ ((extractSkillClaim(vc.credentialSubject)?.score ?? 0) * 100).toFixed(0) }}%
                 </div>

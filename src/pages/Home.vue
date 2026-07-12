@@ -249,7 +249,7 @@ onMounted(async () => {
       <span class="text-muted-foreground">
         {{ $t('dashboard.home.conflict.explain') }}
       </span>
-      <button class="ml-1 font-medium text-primary hover:underline" @click="router.push('/settings/account')">
+      <button class="ms-1 font-medium text-primary hover:underline" @click="router.push('/settings/account')">
         {{ $t('dashboard.home.conflict.pick') }}
       </button>
     </div>
@@ -260,7 +260,7 @@ onMounted(async () => {
       class="home-hero group mb-6"
       @click="router.push(heroAction.to)"
     >
-      <div class="min-w-0 text-left">
+      <div class="min-w-0 text-start">
         <p class="home-hero-eyebrow">{{ heroAction.eyebrow }}</p>
         <p class="home-hero-title">{{ heroAction.title }}</p>
       </div>
@@ -286,7 +286,7 @@ onMounted(async () => {
             <span class="stat-value">{{ teachingImpact }}</span>
           </button>
           <InfoTip
-            class="absolute right-2 top-2"
+            class="absolute end-2 top-2"
             :label="$t('dashboard.home.stats.teachingTipLabel')"
             :text="$t('dashboard.home.stats.teachingTipText')"
           />
@@ -302,7 +302,7 @@ onMounted(async () => {
             <span class="stat-value">{{ learningImpact }}</span>
           </button>
           <InfoTip
-            class="absolute right-2 top-2"
+            class="absolute end-2 top-2"
             :label="$t('dashboard.home.stats.learningTipLabel')"
             :text="$t('dashboard.home.stats.learningTipText')"
           />
@@ -318,7 +318,7 @@ onMounted(async () => {
             <span class="stat-value">{{ skillsProven }}</span>
           </button>
           <InfoTip
-            class="absolute right-2 top-2"
+            class="absolute end-2 top-2"
             :label="$t('dashboard.home.stats.skillsTipLabel')"
             :text="$t('dashboard.home.stats.skillsTipText')"
           />
@@ -334,7 +334,7 @@ onMounted(async () => {
             <span class="stat-value">{{ avgConfidence }}%</span>
           </button>
           <InfoTip
-            class="absolute right-2 top-2"
+            class="absolute end-2 top-2"
             :label="$t('dashboard.home.stats.confidenceTipLabel')"
             :text="$t('dashboard.home.stats.confidenceTipText')"
           />
@@ -375,7 +375,7 @@ onMounted(async () => {
               {{ pathPct(goalPaths[t.id]) }}%
             </text>
           </svg>
-          <div class="min-w-0 text-left">
+          <div class="min-w-0 text-start">
             <p class="truncate text-sm font-medium text-foreground group-hover:text-primary">
               {{ t.label }}
             </p>
@@ -401,7 +401,7 @@ onMounted(async () => {
     <section class="mb-8">
       <div class="card overflow-hidden">
         <button
-          class="flex w-full items-center justify-between p-4 text-left"
+          class="flex w-full items-center justify-between p-4 text-start"
           @click="graphExpanded = !graphExpanded"
         >
           <div class="flex items-center gap-2">
@@ -498,7 +498,7 @@ onMounted(async () => {
                   </svg>
                 </div>
                 <!-- Content-type pill -->
-                <div class="absolute top-2 left-2">
+                <div class="absolute top-2 start-2">
                   <span v-if="enrolledCourseMap[enrollment.course_id]?.kind === 'tutorial'" class="inline-flex items-center gap-1 rounded-full bg-[color-mix(in_srgb,var(--app-primary)_85%,black)] px-2 py-0.5 text-[10px] font-semibold text-white shadow">
                     <svg class="h-3 w-3" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
                     {{ $t('dashboard.home.pill.tutorial') }}
@@ -511,7 +511,7 @@ onMounted(async () => {
                   </span>
                 </div>
                 <!-- Progress bar overlay at bottom -->
-                <div class="absolute bottom-0 left-0 right-0 h-1.5 bg-black/30">
+                <div class="absolute bottom-0 start-0 end-0 h-1.5 bg-black/30">
                   <div class="h-full bg-primary" style="width: 0%" />
                 </div>
               </div>
@@ -566,7 +566,7 @@ onMounted(async () => {
                   </svg>
                 </div>
                 <!-- Play badge -->
-                <div class="absolute top-2 left-2 flex items-center gap-1 rounded-full bg-primary/90 px-2 py-0.5 text-[10px] font-semibold text-white shadow">
+                <div class="absolute top-2 start-2 flex items-center gap-1 rounded-full bg-primary/90 px-2 py-0.5 text-[10px] font-semibold text-white shadow">
                   <svg class="h-3 w-3" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
                   {{ $t('dashboard.home.pill.tutorial') }}
                 </div>
@@ -632,7 +632,7 @@ onMounted(async () => {
     <!-- Floating diagnostic button (mobile only, for iOS freeze debugging) -->
     <button
       v-if="isMobilePlatform && isDev"
-      class="fixed bottom-20 right-3 z-50 flex h-8 w-8 items-center justify-center rounded-full bg-destructive/80 text-white shadow-lg text-xs font-bold"
+      class="fixed bottom-20 end-3 z-50 flex h-8 w-8 items-center justify-center rounded-full bg-destructive/80 text-white shadow-lg text-xs font-bold"
       @click="readDiagLog"
       :title="$t('dashboard.home.diag.read')"
     >

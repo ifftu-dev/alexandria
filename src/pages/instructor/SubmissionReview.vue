@@ -91,7 +91,7 @@ async function postReview() {
           <StatusBadge :status="submission.status" />
           <span class="text-muted-foreground">{{ $t('instructor.submissionReview.from') }}</span>
           <code class="text-xs text-muted-foreground">{{ submission.learner_did.slice(0, 32) }}…</code>
-          <span class="ml-auto text-xs text-muted-foreground">{{ submission.created_at.slice(0, 16) }}</span>
+          <span class="ms-auto text-xs text-muted-foreground">{{ submission.created_at.slice(0, 16) }}</span>
         </div>
         <div v-if="declaredSkills.length" class="flex flex-wrap gap-1.5">
           <AppBadge v-for="s in declaredSkills" :key="s" size="xs">{{ s }}</AppBadge>
@@ -124,7 +124,7 @@ async function postReview() {
               step="0.05"
               class="flex-1"
             >
-            <span class="w-10 text-right text-xs text-muted-foreground">
+            <span class="w-10 text-end text-xs text-muted-foreground">
               {{ Math.round((skillRatings[s] ?? 0) * 100) }}%
             </span>
           </div>

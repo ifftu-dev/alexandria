@@ -83,11 +83,11 @@ async function handleLeave() {
   <div
     v-if="isVisible"
     class="fixed z-50"
-    :class="isMobilePlatform ? 'bottom-24 right-3 left-3' : 'bottom-6 right-6 w-[21rem]'"
+    :class="isMobilePlatform ? 'bottom-24 end-3 start-3' : 'bottom-6 end-6 w-[21rem]'"
   >
     <div class="overflow-hidden rounded-2xl border border-border/80 bg-card/96 shadow-2xl ring-1 ring-black/5 backdrop-blur-md">
       <button
-        class="relative block w-full overflow-hidden text-left"
+        class="relative block w-full overflow-hidden text-start"
         :class="isMobilePlatform ? 'aspect-[16/7]' : 'aspect-[16/9]'"
         @click="openSession"
       >
@@ -99,7 +99,7 @@ async function handleLeave() {
         />
         <div v-else class="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(34,197,94,0.22),_transparent_48%),linear-gradient(135deg,_rgba(15,23,42,0.96),_rgba(30,41,59,0.88))]" />
         <div class="absolute inset-0 bg-gradient-to-t from-black/75 via-black/20 to-transparent" />
-        <div class="absolute left-3 top-3 flex items-center gap-2 rounded-full bg-black/60 px-2.5 py-1 text-[0.65rem] font-semibold uppercase tracking-[0.18em] text-white backdrop-blur-sm">
+        <div class="absolute start-3 top-3 flex items-center gap-2 rounded-full bg-black/60 px-2.5 py-1 text-[0.65rem] font-semibold uppercase tracking-[0.18em] text-white backdrop-blur-sm">
           <span class="relative flex h-2 w-2">
             <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-80" />
             <span class="relative inline-flex h-2 w-2 rounded-full bg-emerald-400" />

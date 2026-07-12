@@ -63,7 +63,7 @@ onMounted(async () => {
       <button
         v-for="course in mine"
         :key="course.id"
-        class="rounded-xl border border-border bg-card p-5 text-left transition-colors hover:border-primary/50"
+        class="rounded-xl border border-border bg-card p-5 text-start transition-colors hover:border-primary/50"
         @click="router.push(`/instructor/composer/${course.id}`)"
       >
         <div class="mb-2 flex items-center gap-2">

@@ -158,7 +158,7 @@ function typeLabel(type: string): string {
           {{ chIdx + 1 }}
         </span>
         <span class="text-sm font-medium text-foreground truncate">{{ chapter.title }}</span>
-        <span class="ml-auto text-xs text-muted-foreground shrink-0">
+        <span class="ms-auto text-xs text-muted-foreground shrink-0">
           {{ (elements[chapter.id] ?? []).length }}
         </span>
       </div>
@@ -168,7 +168,7 @@ function typeLabel(type: string): string {
         <button
           v-for="el in elements[chapter.id] ?? []"
           :key="el.id"
-          class="w-full flex items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm transition-colors cursor-grab"
+          class="w-full flex items-center gap-2 rounded-md px-2.5 py-2 text-start text-sm transition-colors cursor-grab"
           :class="[
             selectedElementId === el.id ? 'bg-primary/10 text-primary' : 'text-foreground hover:bg-muted/40',
             { 'opacity-50': dragFor(chapter.id).draggingId.value === el.id },
@@ -181,7 +181,7 @@ function typeLabel(type: string): string {
           @dragend="dragFor(chapter.id).onDragEnd"
         >
           <span class="truncate">{{ el.title }}</span>
-          <span class="ml-auto text-[10px] uppercase tracking-wide text-muted-foreground shrink-0">
+          <span class="ms-auto text-[10px] uppercase tracking-wide text-muted-foreground shrink-0">
             {{ typeLabel(el.element_type) }}
           </span>
         </button>
@@ -207,7 +207,7 @@ function typeLabel(type: string): string {
         </div>
         <button
           v-else
-          class="w-full rounded-md px-2.5 py-1.5 text-left text-xs text-muted-foreground hover:text-primary hover:bg-muted/30 transition-colors"
+          class="w-full rounded-md px-2.5 py-1.5 text-start text-xs text-muted-foreground hover:text-primary hover:bg-muted/30 transition-colors"
           @click="addingToChapter = chapter.id; newElementTitle = ''"
         >
           {{ $t('instructor.outline.addElement') }}

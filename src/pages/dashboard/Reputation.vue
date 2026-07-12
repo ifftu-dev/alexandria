@@ -146,7 +146,7 @@ function formatConfidence(n: number): string {
                 </span>
               </div>
             </div>
-            <div class="text-right">
+            <div class="text-end">
               <p class="text-lg font-bold text-primary">{{ assertion.score.toFixed(3) }}</p>
               <p class="text-xs text-muted-foreground">{{ $t('dashboard.reputation.assertion.confidenceSuffix', { value: formatConfidence(assertion.confidence) }) }}</p>
             </div>

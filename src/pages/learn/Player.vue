@@ -751,7 +751,7 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
     <!-- Loading skeleton -->
     <div v-if="loading" class="flex-1 min-h-0 flex gap-0">
       <!-- Sidebar skeleton — hidden on mobile -->
-      <div class="hidden md:block w-72 shrink-0 border-r border-border p-4 space-y-4">
+      <div class="hidden md:block w-72 shrink-0 border-e border-border p-4 space-y-4">
         <div class="h-4 w-24 animate-pulse rounded bg-muted/40" />
         <div class="space-y-1">
           <div class="h-5 w-48 animate-pulse rounded bg-muted/40" />
@@ -815,7 +815,7 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
 
           <!-- Opens the chapter navigator sheet -->
           <button
-            class="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-1 text-left active:bg-muted"
+            class="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-1 text-start active:bg-muted"
             :aria-label="$t('learn.player.openChapterNav')"
             @click="openMobileNav"
           >
@@ -847,7 +847,7 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
       <!-- ============================== -->
       <!-- SIDEBAR: Chapter/Element Nav   -->
       <!-- ============================== -->
-      <div v-if="!isTutorial" class="hidden md:block w-80 shrink-0 overflow-y-auto border-r border-border bg-card/30">
+      <div v-if="!isTutorial" class="hidden md:block w-80 shrink-0 overflow-y-auto border-e border-border bg-card/30">
         <div class="p-4 space-y-4">
           <!-- Back link -->
           <button
@@ -946,7 +946,7 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
                 />
               </span>
               <span class="text-xs font-medium text-foreground">{{ $t('learn.player.integrityMonitoring') }}</span>
-              <InfoTip :label="$t('learn.player.whyMonitoringLabel')" placement="bottom" class="ml-auto">
+              <InfoTip :label="$t('learn.player.whyMonitoringLabel')" placement="bottom" class="ms-auto">
                 <span class="mb-1 block font-semibold text-foreground">{{ $t('learn.player.whyMonitoringTitle') }}</span>
                 {{ $t('learn.player.whyMonitoringBody') }}
                 <span class="mt-2 mb-1 block font-semibold text-foreground">{{ $t('learn.player.privacyTitle') }}</span>
@@ -995,7 +995,7 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
                  one yields blank frames and "no face detected". -->
             <video
               ref="cameraVideoRef"
-              class="pointer-events-none fixed -left-[10000px] top-0 h-[240px] w-[320px] opacity-0"
+              class="pointer-events-none fixed -start-[10000px] top-0 h-[240px] w-[320px] opacity-0"
               playsinline
               autoplay
               muted
@@ -1031,7 +1031,7 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
             <button
               v-for="el in elements[ch.id] ?? []"
               :key="el.id"
-              class="group flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left transition-all duration-200 md:hover:-translate-y-px md:hover:shadow-sm"
+              class="group flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-start transition-all duration-200 md:hover:-translate-y-px md:hover:shadow-sm"
               :class="activeElement === el.id
                 ? 'bg-primary/10 shadow-sm ring-1 ring-primary/20'
                 : 'hover:bg-muted/50'"
@@ -1133,7 +1133,7 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
                       <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
                     </svg>
                     {{ $t('learn.player.completed') }}
-                    <span v-if="progress[currentElement.id]?.score != null" class="ml-0.5">
+                    <span v-if="progress[currentElement.id]?.score != null" class="ms-0.5">
                       {{ Math.round((progress[currentElement.id]!.score!) * 100) }}%
                     </span>
                   </span>
@@ -1216,7 +1216,7 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
           <div :class="['mx-auto flex items-center justify-between gap-2', isVideoElement ? 'max-w-7xl' : 'max-w-4xl']">
             <!-- Previous -->
             <AppButton variant="secondary" size="sm" :disabled="!hasPrevElement" @click="goToPrev">
-              <svg class="mr-1.5 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <svg class="me-1.5 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
               </svg>
               {{ $t('learn.player.previous') }}
@@ -1237,7 +1237,7 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
               size="sm"
               @click="markComplete()"
             >
-              <svg class="mr-1.5 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <svg class="me-1.5 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
               </svg>
               {{ $t('learn.player.markComplete') }}
@@ -1256,13 +1256,13 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
               @click="finishCourse"
             >
               {{ $t('learn.player.finishCourse') }}
-              <svg class="ml-1.5 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <svg class="ms-1.5 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
               </svg>
             </AppButton>
             <AppButton v-else size="sm" :disabled="!hasNextElement" @click="goToNext">
               {{ $t('common.actions.next') }}
-              <svg class="ml-1.5 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <svg class="ms-1.5 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
               </svg>
             </AppButton>
@@ -1328,7 +1328,7 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
               <div class="px-2 pb-2">
                 <div v-for="(ch, chIndex) in chapters" :key="ch.id" class="mb-1">
                   <button
-                    class="flex w-full items-center gap-2 rounded-lg px-2 py-2.5 text-left active:bg-muted/50"
+                    class="flex w-full items-center gap-2 rounded-lg px-2 py-2.5 text-start active:bg-muted/50"
                     @click="toggleChapterExpanded(ch.id)"
                   >
                     <span
@@ -1354,7 +1354,7 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
                     </svg>
                   </button>
 
-                  <div v-show="expandedChapters.has(ch.id)" class="pl-1">
+                  <div v-show="expandedChapters.has(ch.id)" class="ps-1">
                     <button
                       v-for="el in elements[ch.id] ?? []"
                       :key="el.id"
@@ -1381,7 +1381,7 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
                           <path stroke-linecap="round" stroke-linejoin="round" :d="elementTypeIcon(el.element_type)" />
                         </svg>
                       </span>
-                      <span class="truncate text-left text-[13px]">{{ el.title }}</span>
+                      <span class="truncate text-start text-[13px]">{{ el.title }}</span>
                     </button>
                   </div>
                 </div>

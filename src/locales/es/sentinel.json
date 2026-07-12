@@ -263,7 +263,8 @@
     "untrained": "Sentinel no está configurado aquí, así que no hay ningún resultado que mostrar. Configura Sentinel primero.",
     "verdictHuman": "Conjunto de pruebas de usuario honesto: el nivel medio de alarma de Sentinel fue del {score}% (más bajo es mejor). El {adv}% de las muestras activó la alarma: esa es tu tasa de falsas alarmas.",
     "verdictAttack": "Conjunto de pruebas de trampa: el nivel medio de alarma de Sentinel fue del {score}% (más alto es mejor). El {adv}% de {count} muestras {kind} se detectaron como trampa: esa es tu tasa de detección para la familia «{label}».",
-    "note": "El conjunto de pruebas desbloqueado permanece en este dispositivo. No compartas las muestras etiquetadas: filtrarlas entrega a los tramposos la clave de respuestas."
+    "note": "El conjunto de pruebas desbloqueado permanece en este dispositivo. No compartas las muestras etiquetadas: filtrarlas entrega a los tramposos la clave de respuestas.",
+    "holdoutOption": "{kind} · umbral {threshold} · {date}"
   },
   "propose": {
     "back": "Volver a Sentinel",
@@ -304,7 +305,8 @@
       "unsupportedSchema": "Formato no compatible: {schema}.",
       "emptyLabel": "La etiqueta no puede estar vacía.",
       "readFailed": "No se pudo leer el archivo: {error}"
-    }
+    },
+    "statusOption": "{date} — estado: {status}"
   },
   "wizard": {
     "welcomeTitle": "Configurar Sentinel",

@@ -40,7 +40,17 @@
     "legendAvailable": "उपलब्ध ({count})",
     "legendLocked": "लॉक ({count})",
     "legendNodeSize": "बिंदु का आकार कौशल स्तर दर्शाता है (याद रखें → बनाएँ)",
-    "summary": "{skills} कौशल, {edges} पूर्वापेक्षा लिंक"
+    "summary": "{skills} कौशल, {edges} पूर्वापेक्षा लिंक",
+    "expandHint": "बड़ा करने के लिए डबल-क्लिक करें",
+    "expandTitle": "स्किल मैप बड़ा करें",
+    "earnedTitle": "इन कौशलों के लिए आपके पास सत्यापित क्रेडेंशियल है",
+    "availableTip": "सभी पूर्वापेक्षाएँ पूरी",
+    "lockedTip": "पूर्वापेक्षाएँ अभी अर्जित नहीं",
+    "skillsProgress": "{earned} / {total} कौशल",
+    "vaultLocked": "स्किल मैप देखने के लिए अपना खाता अनलॉक करें",
+    "noSkillsLoaded": "अभी कोई कौशल लोड नहीं हुआ",
+    "modalTitle": "स्किल मैप",
+    "skillsEarnedProgress": "{earned} / {total} कौशल अर्जित"
   },
   "credentials": {
     "emptyTitle": "अभी तक कोई प्रमाण-पत्र नहीं",

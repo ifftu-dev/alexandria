@@ -263,7 +263,8 @@
     "untrained": "Sentinel n'est pas configuré ici, il n'y a donc aucun résultat à afficher. Configurez d'abord Sentinel.",
     "verdictHuman": "Jeu de test d'utilisateurs honnêtes : le niveau d'alerte moyen de Sentinel était de {score}% (plus bas est meilleur). {adv}% des échantillons ont déclenché l'alerte — c'est votre taux de fausses alertes.",
     "verdictAttack": "Jeu de test de triche : le niveau d'alerte moyen de Sentinel était de {score}% (plus haut est meilleur). {adv}% des {count} échantillons {kind} ont été détectés comme triche — c'est votre taux de détection pour la famille « {label} ».",
-    "note": "Le jeu de test déverrouillé reste sur cet appareil. Ne partagez pas les échantillons étiquetés — les divulguer donne aux tricheurs le corrigé."
+    "note": "Le jeu de test déverrouillé reste sur cet appareil. Ne partagez pas les échantillons étiquetés — les divulguer donne aux tricheurs le corrigé.",
+    "holdoutOption": "{kind} · seuil {threshold} · {date}"
   },
   "propose": {
     "back": "Retour à Sentinel",
@@ -304,7 +305,8 @@
       "unsupportedSchema": "Format non pris en charge : {schema}.",
       "emptyLabel": "L'étiquette ne peut pas être vide.",
       "readFailed": "Impossible de lire le fichier : {error}"
-    }
+    },
+    "statusOption": "{date} — statut : {status}"
   },
   "wizard": {
     "welcomeTitle": "Configurer Sentinel",

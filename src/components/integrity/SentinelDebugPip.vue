@@ -182,7 +182,7 @@ onBeforeUnmount(() => {
     <!-- Panel (toggled from Develop → Sentinel Live View, ⌘⇧S) -->
     <div
       v-if="open"
-      class="fixed bottom-16 right-4 z-[200] w-72 overflow-hidden rounded-xl border border-border bg-card shadow-2xl"
+      class="fixed bottom-16 end-4 z-[200] w-72 overflow-hidden rounded-xl border border-border bg-card shadow-2xl"
     >
       <div class="flex items-center justify-between border-b border-border px-3 py-2">
         <span class="text-xs font-semibold text-foreground">{{ $t('sentinel.debug.title') }}</span>
@@ -203,7 +203,7 @@ onBeforeUnmount(() => {
             {{ $t('sentinel.debug.startPreview') }}
           </button>
         </div>
-        <span v-if="cameraOn && lastGaze" class="absolute left-1.5 top-1.5 rounded px-1.5 py-0.5 text-[10px] font-medium"
+        <span v-if="cameraOn && lastGaze" class="absolute start-1.5 top-1.5 rounded px-1.5 py-0.5 text-[10px] font-medium"
           :class="lastGaze.occluded ? 'bg-gray-500 text-white' : lastGaze.onScreen ? 'bg-emerald-500 text-white' : 'bg-red-500 text-white'">
           {{ lastGaze.occluded ? $t('sentinel.debug.pillNoFace') : lastGaze.onScreen ? $t('sentinel.debug.pillOnScreen') : $t('sentinel.debug.pillOffScreen') }}
         </span>
@@ -216,94 +216,94 @@ onBeforeUnmount(() => {
           <!-- Outcome -->
           <p class="col-span-2 mt-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/70">{{ $t('sentinel.debug.sectionOutcome') }}</p>
           <span class="text-muted-foreground">{{ $t('sentinel.debug.rowSession') }}</span>
-          <span class="text-right font-mono" :class="debug.active ? 'text-emerald-500' : 'text-muted-foreground'">{{ debug.active ? $t('sentinel.debug.valActive') : $t('sentinel.debug.valIdle') }}</span>
+          <span class="text-end font-mono" :class="debug.active ? 'text-emerald-500' : 'text-muted-foreground'">{{ debug.active ? $t('sentinel.debug.valActive') : $t('sentinel.debug.valIdle') }}</span>
           <span class="text-muted-foreground">{{ $t('sentinel.debug.rowIntegrity') }}</span>
-          <span class="text-right font-mono text-foreground">{{ pct(debug.integrity) }}</span>
+          <span class="text-end font-mono text-foreground">{{ pct(debug.integrity) }}</span>
           <span class="text-muted-foreground">{{ $t('sentinel.debug.rowConsistency') }}</span>
-          <span class="text-right font-mono text-foreground">{{ pct(debug.consistency) }}</span>
+          <span class="text-end font-mono text-foreground">{{ pct(debug.consistency) }}</span>
 
           <!-- Typing -->
           <p class="col-span-2 mt-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/70">{{ $t('sentinel.debug.sectionTyping') }}</p>
           <span class="text-muted-foreground">{{ $t('sentinel.debug.rowConsistency') }}</span>
-          <span class="text-right font-mono text-foreground">{{ fmt(debug.signals?.typing_consistency) }}</span>
+          <span class="text-end font-mono text-foreground">{{ fmt(debug.signals?.typing_consistency) }}</span>
           <span class="text-muted-foreground">{{ $t('sentinel.debug.rowSpeed') }}</span>
-          <span class="text-right font-mono text-foreground">{{ fmt(debug.signals?.typing_speed_wpm, 0) }} wpm</span>
+          <span class="text-end font-mono text-foreground">{{ fmt(debug.signals?.typing_speed_wpm, 0) }} wpm</span>
           <span class="text-muted-foreground">{{ $t('sentinel.debug.rowKeystrokeBuffer') }}</span>
-          <span class="text-right font-mono text-foreground">{{ debug.keystrokeBufferLen }}</span>
+          <span class="text-end font-mono text-foreground">{{ debug.keystrokeBufferLen }}</span>
 
           <!-- Mouse -->
           <p class="col-span-2 mt-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/70">{{ $t('sentinel.debug.sectionMouse') }}</p>
           <span class="text-muted-foreground">{{ $t('sentinel.debug.rowConsistency') }}</span>
-          <span class="text-right font-mono text-foreground">{{ fmt(debug.signals?.mouse_consistency) }}</span>
+          <span class="text-end font-mono text-foreground">{{ fmt(debug.signals?.mouse_consistency) }}</span>
           <span class="text-muted-foreground">{{ $t('sentinel.debug.rowHumanLike') }}</span>
-          <span class="text-right font-mono" :class="debug.signals?.is_human_likely === false ? 'text-red-500' : 'text-foreground'">{{ yn(debug.signals?.is_human_likely) }}</span>
+          <span class="text-end font-mono" :class="debug.signals?.is_human_likely === false ? 'text-red-500' : 'text-foreground'">{{ yn(debug.signals?.is_human_likely) }}</span>
           <span class="text-muted-foreground">{{ $t('sentinel.debug.rowPointsBuffer') }}</span>
-          <span class="text-right font-mono text-foreground">{{ debug.mouseBufferLen }}</span>
+          <span class="text-end font-mono text-foreground">{{ debug.mouseBufferLen }}</span>
 
           <!-- Clipboard -->
           <p class="col-span-2 mt-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/70">{{ $t('sentinel.debug.sectionClipboard') }}</p>
           <span class="text-muted-foreground">{{ $t('sentinel.debug.rowPasteEvents') }}</span>
-          <span class="text-right font-mono text-foreground">{{ debug.signals?.paste_events ?? 0 }}</span>
+          <span class="text-end font-mono text-foreground">{{ debug.signals?.paste_events ?? 0 }}</span>
           <span class="text-muted-foreground">{{ $t('sentinel.debug.rowPastedChars') }}</span>
-          <span class="text-right font-mono text-foreground">{{ debug.signals?.pasted_chars ?? 0 }}</span>
+          <span class="text-end font-mono text-foreground">{{ debug.signals?.pasted_chars ?? 0 }}</span>
 
           <!-- Environment -->
           <p class="col-span-2 mt-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/70">{{ $t('sentinel.debug.sectionEnvironment') }}</p>
           <span class="text-muted-foreground">{{ $t('sentinel.debug.rowTabSwitches') }}</span>
-          <span class="text-right font-mono text-foreground">{{ debug.signals?.tab_switches ?? 0 }}</span>
+          <span class="text-end font-mono text-foreground">{{ debug.signals?.tab_switches ?? 0 }}</span>
           <span class="text-muted-foreground">{{ $t('sentinel.debug.rowUnfocused') }}</span>
-          <span class="text-right font-mono text-foreground">{{ Math.round((debug.signals?.unfocused_ms ?? 0) / 1000) }}s</span>
+          <span class="text-end font-mono text-foreground">{{ Math.round((debug.signals?.unfocused_ms ?? 0) / 1000) }}s</span>
           <span class="text-muted-foreground">{{ $t('sentinel.debug.rowDevtools') }}</span>
-          <span class="text-right font-mono" :class="debug.signals?.devtools_detected ? 'text-red-500' : 'text-foreground'">{{ yn(debug.signals?.devtools_detected) }}</span>
+          <span class="text-end font-mono" :class="debug.signals?.devtools_detected ? 'text-red-500' : 'text-foreground'">{{ yn(debug.signals?.devtools_detected) }}</span>
           <span class="text-muted-foreground">{{ $t('sentinel.debug.rowEnvChanged') }}</span>
-          <span class="text-right font-mono" :class="debug.signals?.environment_changed ? 'text-red-500' : 'text-foreground'">{{ yn(debug.signals?.environment_changed) }}</span>
+          <span class="text-end font-mono" :class="debug.signals?.environment_changed ? 'text-red-500' : 'text-foreground'">{{ yn(debug.signals?.environment_changed) }}</span>
           <span class="text-muted-foreground">{{ $t('sentinel.debug.rowAppFocusLost') }}</span>
-          <span class="text-right font-mono" :class="debug.appFocusLostCount ? 'text-red-500' : 'text-foreground'">{{ debug.appFocusLostCount }}× / {{ Math.round(debug.appFocusLostMs / 1000) }}s</span>
+          <span class="text-end font-mono" :class="debug.appFocusLostCount ? 'text-red-500' : 'text-foreground'">{{ debug.appFocusLostCount }}× / {{ Math.round(debug.appFocusLostMs / 1000) }}s</span>
           <span class="text-muted-foreground">{{ $t('sentinel.debug.rowSwitchedTo') }}</span>
-          <span class="text-right font-mono text-foreground truncate">{{ debug.lastApp || '—' }}</span>
+          <span class="text-end font-mono text-foreground truncate">{{ debug.lastApp || '—' }}</span>
 
           <!-- Camera -->
           <p class="col-span-2 mt-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/70">{{ $t('sentinel.debug.sectionCamera') }}</p>
           <span class="text-muted-foreground">{{ $t('sentinel.debug.rowFaces') }}</span>
-          <span class="text-right font-mono text-foreground">{{ lastDetections.length }}</span>
+          <span class="text-end font-mono text-foreground">{{ lastDetections.length }}</span>
           <span class="text-muted-foreground">{{ $t('sentinel.debug.rowFacePresent') }}</span>
-          <span class="text-right font-mono text-foreground">{{ yn(debug.signals?.face_present) }}</span>
+          <span class="text-end font-mono text-foreground">{{ yn(debug.signals?.face_present) }}</span>
           <span class="text-muted-foreground">{{ $t('sentinel.debug.rowFaceConsistency') }}</span>
-          <span class="text-right font-mono text-foreground">{{ fmt(debug.signals?.face_consistency) }}</span>
+          <span class="text-end font-mono text-foreground">{{ fmt(debug.signals?.face_consistency) }}</span>
           <span class="text-muted-foreground">{{ $t('sentinel.debug.rowFaceSimMatch') }}</span>
-          <span class="text-right font-mono text-foreground">{{ fmt(debug.signals?.ai_face_similarity) }} / {{ yn(debug.signals?.ai_face_match) }}</span>
+          <span class="text-end font-mono text-foreground">{{ fmt(debug.signals?.ai_face_similarity) }} / {{ yn(debug.signals?.ai_face_match) }}</span>
 
           <!-- Gaze -->
           <p class="col-span-2 mt-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/70">{{ $t('sentinel.debug.sectionGaze') }}</p>
           <span class="text-muted-foreground">{{ $t('sentinel.debug.rowSessionChecks') }}</span>
-          <span class="text-right font-mono" :class="debug.active ? 'text-emerald-500' : 'text-muted-foreground'">{{ debug.sessionGazeChecks }} <span class="text-muted-foreground/70">(~1/s)</span></span>
+          <span class="text-end font-mono" :class="debug.active ? 'text-emerald-500' : 'text-muted-foreground'">{{ debug.sessionGazeChecks }} <span class="text-muted-foreground/70">(~1/s)</span></span>
           <span class="text-muted-foreground">{{ $t('sentinel.debug.rowSessionRead') }}</span>
-          <span class="text-right font-mono text-foreground">{{ debug.sessionGazeChecks ? `${debug.sessionGazeYaw.toFixed(2)} / ${debug.sessionGazePitch.toFixed(2)}` : '—' }}</span>
+          <span class="text-end font-mono text-foreground">{{ debug.sessionGazeChecks ? `${debug.sessionGazeYaw.toFixed(2)} / ${debug.sessionGazePitch.toFixed(2)}` : '—' }}</span>
           <span class="text-muted-foreground">{{ $t('sentinel.debug.rowPreviewYawPitch') }}</span>
-          <span class="text-right font-mono text-foreground">{{ lastGaze ? `${lastGaze.yaw.toFixed(2)} / ${lastGaze.pitch.toFixed(2)}` : '—' }}</span>
+          <span class="text-end font-mono text-foreground">{{ lastGaze ? `${lastGaze.yaw.toFixed(2)} / ${lastGaze.pitch.toFixed(2)}` : '—' }}</span>
           <span class="text-muted-foreground">{{ $t('sentinel.debug.rowOffscreenRatio') }}</span>
-          <span class="text-right font-mono text-foreground">{{ debug.gazeOffscreenRatio != null ? pct(debug.gazeOffscreenRatio) : '—' }}</span>
+          <span class="text-end font-mono text-foreground">{{ debug.gazeOffscreenRatio != null ? pct(debug.gazeOffscreenRatio) : '—' }}</span>
           <span class="text-muted-foreground">{{ $t('sentinel.debug.rowDownGlances') }}</span>
-          <span class="text-right font-mono text-foreground">{{ debug.gazeDownGlances }}/{{ debug.gazeTotalChecks }}</span>
+          <span class="text-end font-mono text-foreground">{{ debug.gazeDownGlances }}/{{ debug.gazeTotalChecks }}</span>
           <span class="text-muted-foreground">{{ $t('sentinel.debug.rowOccludedChecks') }}</span>
-          <span class="text-right font-mono text-foreground">{{ debug.gazeOccludedChecks }}</span>
+          <span class="text-end font-mono text-foreground">{{ debug.gazeOccludedChecks }}</span>
 
           <!-- AI scores -->
           <p class="col-span-2 mt-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/70">{{ $t('sentinel.debug.sectionAiScores') }}</p>
           <span class="text-muted-foreground">{{ $t('sentinel.debug.rowPasteAnomaly') }}</span>
-          <span class="text-right font-mono text-foreground">{{ debug.signals?.ai_paste_anomaly != null ? pct(debug.signals.ai_paste_anomaly) : $t('sentinel.debug.valNa') }}</span>
+          <span class="text-end font-mono text-foreground">{{ debug.signals?.ai_paste_anomaly != null ? pct(debug.signals.ai_paste_anomaly) : $t('sentinel.debug.valNa') }}</span>
           <span class="text-muted-foreground">{{ $t('sentinel.debug.rowKeystrokeAnomaly') }}</span>
-          <span class="text-right font-mono text-foreground">{{ debug.signals?.ai_keystroke_anomaly != null ? pct(debug.signals.ai_keystroke_anomaly) : $t('sentinel.debug.valNa') }}</span>
+          <span class="text-end font-mono text-foreground">{{ debug.signals?.ai_keystroke_anomaly != null ? pct(debug.signals.ai_keystroke_anomaly) : $t('sentinel.debug.valNa') }}</span>
           <span class="text-muted-foreground">{{ $t('sentinel.debug.rowMouseHumanProb') }}</span>
-          <span class="text-right font-mono text-foreground">{{ debug.signals?.ai_mouse_human_prob != null ? pct(debug.signals.ai_mouse_human_prob) : $t('sentinel.debug.valNa') }}</span>
+          <span class="text-end font-mono text-foreground">{{ debug.signals?.ai_mouse_human_prob != null ? pct(debug.signals.ai_mouse_human_prob) : $t('sentinel.debug.valNa') }}</span>
           <span class="text-muted-foreground">{{ $t('sentinel.debug.rowInferLatency') }}</span>
-          <span class="text-right font-mono text-foreground">{{ inferMs }}ms</span>
+          <span class="text-end font-mono text-foreground">{{ inferMs }}ms</span>
         </div>
       </div>
       <div v-if="debug.flags.length" class="flex flex-wrap gap-1 px-3 pb-2">
         <span v-for="f in debug.flags" :key="f" class="rounded bg-red-100 px-1.5 py-0.5 text-[10px] text-red-700 dark:bg-red-900/30 dark:text-red-400">{{ f }}</span>
       </div>
-      <div v-if="cameraOn" class="border-t border-border px-3 py-1.5 text-right">
+      <div v-if="cameraOn" class="border-t border-border px-3 py-1.5 text-end">
         <button class="text-[11px] text-muted-foreground hover:text-foreground" @click="stopCamera">{{ $t('sentinel.debug.stopCamera') }}</button>
       </div>
     </div>

@@ -198,17 +198,25 @@ impl BlockfrostFetcher {
                 );
                 continue;
             };
+            // Per-UTxO datum parse failures are logged at debug, not warn:
+            // scanning the script address routinely encounters UTxOs whose
+            // inline datum is not a registry entry (other formats / unrelated
+            // outputs), and warning on each one every refresh tick floods the
+            // logs. Operational failures (fetch/witness) stay at warn below.
             let datum_bytes = match hex::decode(&datum_hex) {
                 Ok(b) => b,
                 Err(e) => {
-                    log::warn!("registry refresh: bad datum hex on {}: {e}", utxo.tx_hash);
+                    log::debug!("registry refresh: bad datum hex on {}: {e}", utxo.tx_hash);
                     continue;
                 }
             };
             let datum = match stake_pubkey::decode_datum(&datum_bytes) {
                 Ok(d) => d,
                 Err(e) => {
-                    log::warn!("registry refresh: bad datum CBOR on {}: {e}", utxo.tx_hash);
+                    log::debug!(
+                        "registry refresh: non-registry datum on {}: {e}",
+                        utxo.tx_hash
+                    );
                     continue;
                 }
             };
@@ -218,7 +226,7 @@ impl BlockfrostFetcher {
             ) {
                 Ok(s) => s,
                 Err(e) => {
-                    log::warn!(
+                    log::debug!(
                         "registry refresh: bad stake key hash on {}: {e}",
                         utxo.tx_hash
                     );

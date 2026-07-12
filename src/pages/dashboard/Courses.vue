@@ -328,7 +328,7 @@ onMounted(async () => {
                 <!-- Completed badge -->
                 <div
                   v-if="enrollment.completed_at"
-                  class="absolute top-3 right-3 sm:top-2 sm:right-2"
+                  class="absolute top-3 end-3 sm:top-2 sm:end-2"
                 >
                   <span class="inline-flex items-center gap-1 rounded-full bg-green-500/10 px-2.5 py-1 text-xs font-medium text-green-400">
                     <svg class="h-3 w-3" fill="currentColor" viewBox="0 0 20 20">

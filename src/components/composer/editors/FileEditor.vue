@@ -50,7 +50,7 @@ async function onFileChange(e: Event) {
     <input
       type="file"
       :accept="element.element_type === 'pdf' ? 'application/pdf' : undefined"
-      class="block w-full text-sm text-muted-foreground file:mr-4 file:rounded-md file:border-0 file:bg-primary/10 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-primary hover:file:bg-primary/15 cursor-pointer"
+      class="block w-full text-sm text-muted-foreground file:me-4 file:rounded-md file:border-0 file:bg-primary/10 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-primary hover:file:bg-primary/15 cursor-pointer"
       :disabled="uploading"
       @change="onFileChange"
     >

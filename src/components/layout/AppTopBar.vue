@@ -288,7 +288,7 @@ const avatarEmoji = computed(() => {
           leave-from-class="transform scale-100 opacity-100"
           leave-to-class="transform scale-95 opacity-0"
         >
-          <div v-if="themeMenuOpen" class="absolute right-0 mt-2 w-36 origin-top-right rounded-lg border border-border bg-card shadow-lg z-50">
+          <div v-if="themeMenuOpen" class="absolute end-0 mt-2 w-36 origin-top-right rounded-lg border border-border bg-card shadow-lg z-50">
             <div class="p-1">
               <button
                 v-for="opt in [
@@ -297,7 +297,7 @@ const avatarEmoji = computed(() => {
                   { value: 'system' as const, label: $t('nav.theme.system'), icon: 'M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z' },
                 ]"
                 :key="opt.value"
-                class="flex items-center gap-2 w-full px-3 py-2 text-sm rounded-md transition-colors text-left"
+                class="flex items-center gap-2 w-full px-3 py-2 text-sm rounded-md transition-colors text-start"
                 :class="theme === opt.value
                   ? 'bg-primary/10 text-primary font-medium'
                   : 'text-foreground hover:bg-muted'"
@@ -338,7 +338,7 @@ const avatarEmoji = computed(() => {
           leave-from-class="transform scale-100 opacity-100"
           leave-to-class="transform scale-95 opacity-0"
         >
-          <div v-if="userMenuOpen" class="absolute right-0 mt-2 w-56 origin-top-right rounded-xl border border-border bg-card shadow-lg z-50">
+          <div v-if="userMenuOpen" class="absolute end-0 mt-2 w-56 origin-top-right rounded-xl border border-border bg-card shadow-lg z-50">
             <!-- User info header -->
             <div class="border-b border-border px-4 py-3">
               <div class="flex items-center gap-2">
@@ -438,7 +438,7 @@ const avatarEmoji = computed(() => {
                   <path stroke-linecap="round" stroke-linejoin="round" d="M17 20h5v-2a4 4 0 00-3-3.87M9 20H4v-2a4 4 0 013-3.87m6-5a4 4 0 11-8 0 4 4 0 018 0zm6 0a4 4 0 11-8 0 4 4 0 018 0z" />
                 </svg>
                 {{ $t('nav.userMenu.switchUser') }}
-                <span class="ml-auto text-xs text-muted-foreground">{{ shortcuts['switch-profile'] ? formatCombo(shortcuts['switch-profile'].keys) : '' }}</span>
+                <span class="ms-auto text-xs text-muted-foreground">{{ shortcuts['switch-profile'] ? formatCombo(shortcuts['switch-profile'].keys) : '' }}</span>
               </button>
               <button
                 class="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-error transition-colors hover:bg-error/10"

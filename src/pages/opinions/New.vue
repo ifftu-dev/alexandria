@@ -315,7 +315,7 @@ async function submit() {
           <input
             type="file"
             accept="video/*"
-            class="block w-full text-sm text-muted-foreground file:mr-4 file:rounded-md file:border-0 file:bg-primary/10 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-primary hover:file:bg-primary/15 cursor-pointer"
+            class="block w-full text-sm text-muted-foreground file:me-4 file:rounded-md file:border-0 file:bg-primary/10 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-primary hover:file:bg-primary/15 cursor-pointer"
             :disabled="videoUploading"
             @change="onVideoChange"
           />
@@ -338,7 +338,7 @@ async function submit() {
           <input
             type="file"
             accept="image/*"
-            class="block w-full text-sm text-muted-foreground file:mr-4 file:rounded-md file:border-0 file:bg-muted file:px-3 file:py-1.5 file:text-sm file:text-foreground hover:file:bg-muted/80 cursor-pointer"
+            class="block w-full text-sm text-muted-foreground file:me-4 file:rounded-md file:border-0 file:bg-muted file:px-3 file:py-1.5 file:text-sm file:text-foreground hover:file:bg-muted/80 cursor-pointer"
             :disabled="thumbUploading"
             @change="onThumbChange"
           />
@@ -374,8 +374,8 @@ async function submit() {
             <div class="min-w-0 flex-1">
               <div class="text-sm font-medium text-foreground">
                 {{ describeSkill(vc) }}
-                <AppBadge variant="secondary" class="ml-2">{{ claimLevel(vc) }}</AppBadge>
-                <AppBadge v-if="vc.witness" variant="success" class="ml-1">{{ $t('opinions.new.verified') }}</AppBadge>
+                <AppBadge variant="secondary" class="ms-2">{{ claimLevel(vc) }}</AppBadge>
+                <AppBadge v-if="vc.witness" variant="success" class="ms-1">{{ $t('opinions.new.verified') }}</AppBadge>
               </div>
               <div class="text-xs text-muted-foreground">
                 {{ $t('opinions.new.credentialMeta', { score: Math.round(claimScore(vc) * 100), date: vc.validFrom.slice(0, 10) }) }}

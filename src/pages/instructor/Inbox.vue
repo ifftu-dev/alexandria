@@ -77,7 +77,7 @@ function iconFor(kind: InboxItem['kind']): string {
       <button
         v-for="item in visible"
         :key="`${item.kind}-${item.id}`"
-        class="flex w-full items-center gap-3 rounded-xl border border-border bg-card p-4 text-left transition-colors hover:border-primary/50"
+        class="flex w-full items-center gap-3 rounded-xl border border-border bg-card p-4 text-start transition-colors hover:border-primary/50"
         @click="open(item)"
       >
         <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">

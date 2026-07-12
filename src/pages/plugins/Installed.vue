@@ -300,7 +300,7 @@ function shortCid(cid: string): string {
                 >
                   <span>
                     <span class="font-medium text-foreground">{{ perm.capability }}</span>
-                    <span class="ml-2 text-muted-foreground">({{ perm.scope }})</span>
+                    <span class="ms-2 text-muted-foreground">({{ perm.scope }})</span>
                   </span>
                   <button
                     class="text-destructive transition-colors hover:text-destructive/80"

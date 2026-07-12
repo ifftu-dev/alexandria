@@ -690,11 +690,11 @@ onUnmounted(() => {
             @input="onVolumeInput"
           >
 
-          <span class="ml-1 text-xs font-mono text-white/90">
+          <span class="ms-1 text-xs font-mono text-white/90">
             {{ formatTime(currentTime) }} / {{ formatTime(duration) }}
           </span>
 
-          <div class="ml-auto flex items-center gap-1">
+          <div class="ms-auto flex items-center gap-1">
             <button
               v-if="!isTouchDevice"
               type="button"
@@ -717,13 +717,13 @@ onUnmounted(() => {
                 </svg>
               </button>
 
-              <div v-if="showSettings" class="absolute bottom-10 right-0 w-64 rounded-lg border border-white/10 bg-black/90 p-2 shadow-xl">
+              <div v-if="showSettings" class="absolute bottom-10 end-0 w-64 rounded-lg border border-white/10 bg-black/90 p-2 shadow-xl">
                 <div class="px-2 py-1 text-[11px] uppercase tracking-wide text-white/60">{{ $t('courses.video.playbackSpeed') }}</div>
                 <button
                   v-for="speed in speedOptions"
                   :key="speed.id"
                   type="button"
-                  class="flex w-full items-center justify-between rounded px-2 py-1.5 text-left text-sm hover:bg-white/10"
+                  class="flex w-full items-center justify-between rounded px-2 py-1.5 text-start text-sm hover:bg-white/10"
                   @click="setPlaybackRate(speed.id)"
                 >
                   <span>{{ speed.label }}</span>
@@ -735,7 +735,7 @@ onUnmounted(() => {
                   v-for="quality in qualityOptions"
                   :key="quality.id"
                   type="button"
-                  class="flex w-full items-center justify-between rounded px-2 py-1.5 text-left text-sm hover:bg-white/10"
+                  class="flex w-full items-center justify-between rounded px-2 py-1.5 text-start text-sm hover:bg-white/10"
                   @click="selectQuality(quality)"
                 >
                   <span>{{ quality.label }}</span>
@@ -763,7 +763,7 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <div v-if="isPiP" class="absolute right-3 top-3 rounded-md bg-black/70 px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-white/90">
+      <div v-if="isPiP" class="absolute end-3 top-3 rounded-md bg-black/70 px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-white/90">
         PiP
       </div>
     </div>

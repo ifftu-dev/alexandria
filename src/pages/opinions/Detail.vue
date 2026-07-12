@@ -177,7 +177,7 @@ onMounted(async () => {
                 <div class="text-sm font-medium text-foreground">
                   <template v-if="skillClaim(vc)">
                     {{ skillClaim(vc)!.skillId }}
-                    <AppBadge variant="secondary" class="ml-2 text-[0.6rem]">
+                    <AppBadge variant="secondary" class="ms-2 text-[0.6rem]">
                       {{ bloomOrder[skillClaim(vc)!.level] ?? 'apply' }}
                     </AppBadge>
                   </template>
@@ -194,7 +194,7 @@ onMounted(async () => {
                   </div>
                 </details>
               </div>
-              <div class="text-right flex-shrink-0 space-y-1">
+              <div class="text-end flex-shrink-0 space-y-1">
                 <AppBadge v-if="vc.witness" variant="success" class="text-[0.6rem]">
                   {{ $t('opinions.detail.verifiedProof') }}
                 </AppBadge>
@@ -213,7 +213,7 @@ onMounted(async () => {
             <span
               v-for="pid in unresolvedIds()"
               :key="pid"
-              class="inline-block ml-1 font-mono"
+              class="inline-block ms-1 font-mono"
             >
               {{ pid.slice(0, 16) }}…
             </span>
