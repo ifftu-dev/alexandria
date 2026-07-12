@@ -1,0 +1,33 @@
+{
+  "id": "did:key:z6MkvDqGT54cXesYGvABpF1UapVNwjCqRcafi4Px6Thv5T3Z#editor-python",
+  "version": "0.1.0",
+  "api_version": "1",
+  "host_min_version": "0.1.0",
+  "name": "Code Editor: Python",
+  "description": "Write and run Python with syntax highlighting and live evaluation. Your code runs locally on the RustPython engine (compiled to sandboxed WebAssembly) against test cases \u2014 no network, no server. Teaching subset (builtins only; no import math). Graded submissions are re-run by the host's deterministic grader for credential-bearing scoring.",
+  "author_did": "did:key:z6MkvDqGT54cXesYGvABpF1UapVNwjCqRcafi4Px6Thv5T3Z",
+  "kinds": [
+    "graded"
+  ],
+  "capabilities": [],
+  "grader": {
+    "cid": "845f120db5c39becde8c63ecbffbc9efcbb733b5937a0442e304a8958045621d",
+    "blake3": "845f120db5c39becde8c63ecbffbc9efcbb733b5937a0442e304a8958045621d",
+    "entrypoint": "alex_grade"
+  },
+  "subject_tags": [
+    "programming",
+    "python",
+    "coding-challenge",
+    "practice"
+  ],
+  "platforms": [
+    "macos",
+    "windows",
+    "linux",
+    "ios",
+    "android"
+  ],
+  "icon_path": "icon.svg",
+  "entry": "ui/index.html"
+}

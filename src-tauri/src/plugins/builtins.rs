@@ -389,6 +389,52 @@ const EDITOR_CPP_BUNDLE: BuiltinBundle<'static> = BuiltinBundle {
     ],
 };
 
+/// Code Editor: Python — graded coding element. The learner writes Python; it
+/// runs on the RustPython VM (pure Rust) compiled to a zero-import wasm — both
+/// for in-browser live eval and the deterministic Wasmtime grader. Teaching
+/// subset (builtins only; no `import math`).
+const EDITOR_PYTHON_BUNDLE: BuiltinBundle<'static> = BuiltinBundle {
+    slug: "editor-python",
+    manifest_json: include_bytes!("../../../plugins/builtin/editor-python/manifest.json"),
+    grader_wasm: Some(include_bytes!(
+        "../../../plugins/builtin/editor-python/grader/dist/editor_python_grader.wasm"
+    )),
+    ui_files: &[
+        (
+            "ui/index.html",
+            include_bytes!("../../../plugins/builtin/editor-python/ui/index.html"),
+        ),
+        (
+            "ui/style.css",
+            include_bytes!("../../../plugins/builtin/editor-python/ui/style.css"),
+        ),
+        (
+            "ui/config.js",
+            include_bytes!("../../../plugins/builtin/editor-python/ui/config.js"),
+        ),
+        (
+            "ui/app.js",
+            include_bytes!("../../../plugins/builtin/editor-python/ui/app.js"),
+        ),
+        (
+            "ui/vendor/cm6.js",
+            include_bytes!("../../../plugins/builtin/editor-python/ui/vendor/cm6.js"),
+        ),
+        (
+            "ui/vendor/runner-wasm.js",
+            include_bytes!("../../../plugins/builtin/editor-python/ui/vendor/runner-wasm.js"),
+        ),
+        (
+            "icon.svg",
+            include_bytes!("../../../plugins/builtin/editor-python/icon.svg"),
+        ),
+        (
+            "README.md",
+            include_bytes!("../../../plugins/builtin/editor-python/README.md"),
+        ),
+    ],
+};
+
 /// codejudge (umbrella) — runs no code itself; its manifest declares the
 /// per-language judge plugins as `dependencies`, so installing it pulls them
 /// in. Must be registered AFTER its dependencies in `BUILTIN_PLUGINS` so
@@ -441,6 +487,7 @@ pub const BUILTIN_PLUGINS: &[BuiltinBundle<'static>] = &[
     EDITOR_JS_BUNDLE,
     EDITOR_TS_BUNDLE,
     EDITOR_CPP_BUNDLE,
+    EDITOR_PYTHON_BUNDLE,
     // Umbrella last: it depends on the two language plugins above.
     CODEJUDGE_MULTILANG_BUNDLE,
 ];

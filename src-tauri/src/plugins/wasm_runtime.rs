@@ -743,6 +743,84 @@ mod tests {
         }
     }
 
+    /// Bytes of the import-stubbed Python editor grader (RustPython VM).
+    const EDITOR_PYTHON_GRADER_WASM: &[u8] = include_bytes!(
+        "../../../plugins/builtin/editor-python/grader/dist/editor_python_grader.wasm"
+    );
+
+    fn run_editor_python(content: serde_json::Value, source: &str) -> ScoreRecord {
+        let runtime = GraderRuntime::new().expect("runtime");
+        let cid = blake3::hash(EDITOR_PYTHON_GRADER_WASM).to_hex().to_string();
+        let input = serde_json::to_vec(&serde_json::json!({
+            "version": "1",
+            "content": content,
+            "submission": {"source": source},
+        }))
+        .unwrap();
+        runtime
+            .grade(
+                &cid,
+                EDITOR_PYTHON_GRADER_WASM,
+                &input,
+                GraderBudgets::default(),
+            )
+            .expect("grade succeeds")
+    }
+
+    #[test]
+    fn editor_python_runs_and_scores() {
+        let r = run_editor_python(
+            serde_json::json!({
+                "tests": [{"name": "ex", "stdin": "4", "expected_stdout": "8"}],
+                "grader_private": {"tests": [{"name": "big", "stdin": "1000", "expected_stdout": "2000"}]},
+            }),
+            "n = int(input())\nprint(n * 2)",
+        );
+        assert_eq!(r.score, 1.0);
+    }
+
+    #[test]
+    fn editor_python_loops_and_comprehensions() {
+        let r = run_editor_python(
+            serde_json::json!({"tests": [{"stdin": "10", "expected_stdout": "55"}]}),
+            "print(sum(i for i in range(1, int(input()) + 1)))",
+        );
+        assert_eq!(r.score, 1.0);
+    }
+
+    #[test]
+    fn editor_python_grader_is_byte_reproducible() {
+        let runtime = GraderRuntime::new().expect("runtime");
+        let cid = blake3::hash(EDITOR_PYTHON_GRADER_WASM).to_hex().to_string();
+        let input = serde_json::to_vec(&serde_json::json!({
+            "version": "1",
+            "content": {"tests": [{"stdin": "7", "expected_stdout": "49"}]},
+            "submission": {"source": "n = int(input())\nprint(n * n)"},
+        }))
+        .unwrap();
+        let first = runtime
+            .grade(
+                &cid,
+                EDITOR_PYTHON_GRADER_WASM,
+                &input,
+                GraderBudgets::default(),
+            )
+            .expect("first grade");
+        let first_bytes = serde_json::to_vec(&first).unwrap();
+        assert_eq!(first.score, 1.0);
+        for i in 1..30 {
+            let r = runtime
+                .grade(
+                    &cid,
+                    EDITOR_PYTHON_GRADER_WASM,
+                    &input,
+                    GraderBudgets::default(),
+                )
+                .unwrap_or_else(|e| panic!("grade #{i} failed: {e}"));
+            assert_eq!(serde_json::to_vec(&r).unwrap(), first_bytes);
+        }
+    }
+
     #[test]
     fn fuel_exhaustion_is_a_trap() {
         // Infinite-loop grader. The host's fuel limit must trap it.

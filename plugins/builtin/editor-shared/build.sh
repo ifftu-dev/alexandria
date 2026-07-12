@@ -89,4 +89,11 @@ case "$target" in
     build_lang editor-cpp editor_cpp_grader
     ;;
 esac
+case "$target" in
+  python|all)
+    # Python embeds nothing external (RustPython is a cargo dep). Its grader crate
+    # pins rustc 1.97 via its own rust-toolchain.toml.
+    build_lang editor-python editor_python_grader
+    ;;
+esac
 echo "done."

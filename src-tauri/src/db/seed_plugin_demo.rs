@@ -20,6 +20,7 @@ const EL_CODE_JS_PRIMES: &str = "el_plugin_demo_code_js_primes";
 const EL_EDITOR_JS: &str = "el_plugin_demo_editor_js_double";
 const EL_EDITOR_TS: &str = "el_plugin_demo_editor_ts_sum";
 const EL_EDITOR_CPP: &str = "el_plugin_demo_editor_cpp_double";
+const EL_EDITOR_PYTHON: &str = "el_plugin_demo_editor_python_double";
 const ENROLLMENT_ID: &str = "enroll_plugin_demo";
 
 /// Resolve a builtin plugin's CID by its manifest `id` slug. The full id is
@@ -129,7 +130,7 @@ pub fn seed_plugin_demo_course(conn: &Connection) -> Result<(), rusqlite::Error>
         params![
             COURSE_ID,
             "Plugins Showcase",
-            "A short course that demonstrates the first-party plugins: Music Reviews (live pitch-matched note review), IRL Review (human-instructor review of uploaded work), codejudge (solve coding challenges in JavaScript and Lua, run locally against test cases), and the graded code editors (write JavaScript, TypeScript, or C++ with live evaluation and submit for a deterministic score).",
+            "A short course that demonstrates the first-party plugins: Music Reviews (live pitch-matched note review), IRL Review (human-instructor review of uploaded work), codejudge (solve coding challenges in JavaScript and Lua, run locally against test cases), and the graded code editors (write JavaScript, TypeScript, C++, or Python with live evaluation and submit for a deterministic score).",
             "addr_demo_learner",
             "[\"demo\",\"plugins\"]",
             "[]",
@@ -363,7 +364,34 @@ pub fn seed_plugin_demo_course(conn: &Connection) -> Result<(), rusqlite::Error>
                     &cpp_content,
                 )?;
             }
-            log::info!("plugin demo course: graded editor chapter seeded (js + ts + cpp)");
+
+            // Python (RustPython) — added only when the Python editor is installed.
+            if let Some(epy_cid) = find_plugin_cid(conn, "editor-python") {
+                let py_content = serde_json::json!({
+                    "title": "Double the number",
+                    "prompt": "Read an integer **n** from input and print **n × 2**.",
+                    "starter_code": "n = int(input())\n# print n doubled\n",
+                    "tests": [
+                        { "name": "example", "stdin": "4", "expected_stdout": "8" }
+                    ],
+                    "grader_private": {
+                        "tests": [
+                            { "name": "zero", "stdin": "0", "expected_stdout": "0" },
+                            { "name": "large", "stdin": "1000000", "expected_stdout": "2000000" }
+                        ]
+                    }
+                });
+                seed_editor_element(
+                    conn,
+                    EL_EDITOR_PYTHON,
+                    CHAPTER_EDITOR,
+                    "Double the number (Python)",
+                    3,
+                    &epy_cid,
+                    &py_content,
+                )?;
+            }
+            log::info!("plugin demo course: graded editor chapter seeded (js + ts + cpp + python)");
         }
         _ => {
             log::debug!("plugin demo seed: editor plugins not installed — skipping editor chapter");
@@ -472,7 +500,7 @@ mod tests {
 
         seed_plugin_demo_course(db.conn()).expect("seed");
 
-        // Three graded editor elements land in the editor chapter (JS, TS, C++).
+        // Four graded editor elements land in the editor chapter (JS, TS, C++, Python).
         let count: i64 = db
             .conn()
             .query_row(
@@ -482,7 +510,7 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(count, 3);
+        assert_eq!(count, 4);
 
         // Each element pins its own editor plugin (not the codejudge ones), and
         // carries inline visible tests plus hidden `grader_private` tests.
@@ -522,6 +550,16 @@ mod tests {
             .unwrap();
         assert_eq!(cpp_cid, find_plugin_cid(db.conn(), "editor-cpp").unwrap());
 
+        let py_cid: String = db
+            .conn()
+            .query_row(
+                "SELECT plugin_cid FROM course_elements WHERE id = ?1",
+                params![EL_EDITOR_PYTHON],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(py_cid, find_plugin_cid(db.conn(), "editor-python").unwrap());
+
         // Idempotent.
         seed_plugin_demo_course(db.conn()).expect("reseed");
         let count2: i64 = db
@@ -532,6 +570,6 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(count2, 3);
+        assert_eq!(count2, 4);
     }
 }

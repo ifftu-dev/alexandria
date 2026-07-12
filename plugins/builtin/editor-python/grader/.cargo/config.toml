@@ -1,0 +1,4 @@
+# RustPython pulls getrandom, which needs a backend on wasm32-unknown-unknown.
+# We supply a deterministic custom one (see __getrandom_v03_custom in lib.rs).
+[target.wasm32-unknown-unknown]
+rustflags = ["--cfg", "getrandom_backend=\"custom\""]

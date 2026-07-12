@@ -1,0 +1,5 @@
+# RustPython (git main) requires rustc >= 1.95; the rest of the repo builds on
+# the pinned workspace toolchain. Isolated here so only this grader needs 1.97.
+[toolchain]
+channel = "1.97.0"
+targets = ["wasm32-unknown-unknown"]
