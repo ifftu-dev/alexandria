@@ -1,0 +1,25 @@
+{
+  "name": "editor-cm6-build",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Builds a self-contained CodeMirror 6 IIFE bundle (window.AlexCM6) for the editor plugins. Offline, no CDN, CSP-safe (no eval).",
+  "scripts": {
+    "build": "npm run build:cm6 && npm run build:sucrase",
+    "build:cm6": "esbuild src/cm6.js --bundle --format=iife --global-name=AlexCM6 --minify --outfile=dist/cm6.js",
+    "build:sucrase": "esbuild src/sucrase.js --bundle --format=iife --global-name=AlexSucrase --minify --outfile=dist/sucrase.js"
+  },
+  "devDependencies": {
+    "@codemirror/autocomplete": "^6.18.0",
+    "@codemirror/commands": "^6.8.0",
+    "@codemirror/lang-javascript": "^6.2.0",
+    "@codemirror/language": "^6.10.0",
+    "@codemirror/search": "^6.5.0",
+    "@codemirror/state": "^6.5.0",
+    "@codemirror/theme-one-dark": "^6.1.0",
+    "@codemirror/view": "^6.36.0",
+    "esbuild": "^0.24.0"
+  },
+  "dependencies": {
+    "sucrase": "^3.35.1"
+  }
+}

@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Code Editor: JavaScript</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main id="app">
+      <section id="problem">
+        <h1 id="title">JavaScript</h1>
+        <div id="statement"></div>
+        <div id="samples"></div>
+      </section>
+
+      <section id="workbench">
+        <div id="editor-wrap">
+          <div id="editor"></div>
+        </div>
+
+        <div id="io">
+          <label class="io-label" for="stdin">stdin</label>
+          <textarea id="stdin" spellcheck="false" placeholder="Input passed to readLine() / one line per row"></textarea>
+          <div class="toolbar">
+            <button id="run" type="button" disabled>Run</button>
+            <button id="test" type="button" disabled>Run tests</button>
+            <button id="submit" type="button" disabled>Submit for grading</button>
+            <span id="status"></span>
+          </div>
+          <label class="io-label">output</label>
+          <pre id="console" aria-live="polite"></pre>
+          <div id="results"></div>
+        </div>
+      </section>
+    </main>
+
+    <script src="config.js"></script>
+    <script src="vendor/cm6.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>

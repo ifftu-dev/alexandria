@@ -318,7 +318,7 @@ function sendResponse(requestId: number, payload: unknown, error?: string) {
   port.postMessage({
     api_version: API_VERSION,
     response_id: requestId,
-    payload,
+    payload: toPlain(payload),
     error: error ?? null,
   })
 }
@@ -360,7 +360,20 @@ function collectHostThemeVars(): Record<string, string> {
 function sendHostMessage(msg: Record<string, unknown>) {
   const port = hostPort.value
   if (!port) return
-  port.postMessage(msg)
+  // The payload can hold Vue reactive proxies (e.g. `content` from a computed),
+  // which WebKit's structured clone rejects with DataCloneError — that would
+  // silently drop `init` and leave the plugin stuck. Deep-plainify first; every
+  // host→plugin payload is plain JSON data, so the round-trip is lossless.
+  port.postMessage(toPlain(msg))
+}
+
+/** Strip reactivity/proxies so `postMessage` structured-clone can serialize. */
+function toPlain<T>(value: T): T {
+  try {
+    return JSON.parse(JSON.stringify(value)) as T
+  } catch {
+    return value
+  }
 }
 
 function teardown() {

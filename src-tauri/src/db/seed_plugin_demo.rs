@@ -11,11 +11,14 @@ const COURSE_ID: &str = "course_plugin_demo";
 const CHAPTER_MUSIC: &str = "ch_plugin_demo_music";
 const CHAPTER_IRL: &str = "ch_plugin_demo_irl";
 const CHAPTER_CODE: &str = "ch_plugin_demo_code";
+const CHAPTER_EDITOR: &str = "ch_plugin_demo_editor";
 const EL_MUSIC: &str = "el_plugin_demo_music_reviews";
 const EL_IRL: &str = "el_plugin_demo_irl_review";
 const EL_CODE_JS_TWOSUM: &str = "el_plugin_demo_code_js_twosum";
 const EL_CODE_LUA_REVERSE: &str = "el_plugin_demo_code_lua_reverse";
 const EL_CODE_JS_PRIMES: &str = "el_plugin_demo_code_js_primes";
+const EL_EDITOR_JS: &str = "el_plugin_demo_editor_js_double";
+const EL_EDITOR_TS: &str = "el_plugin_demo_editor_ts_sum";
 const ENROLLMENT_ID: &str = "enroll_plugin_demo";
 
 /// Resolve a builtin plugin's CID by its manifest `id` slug. The full id is
@@ -76,6 +79,35 @@ fn seed_code_element(
     Ok(())
 }
 
+/// Seed (and refresh) one graded code-editor element. Unlike codejudge, the
+/// editor plugins carry their problem inline: `content` holds the prompt,
+/// starter code, visible `tests`, and a `grader_private.tests` array of hidden
+/// cases. The host strips `grader_private` before the iframe sees the content,
+/// so hidden expectations never reach the learner, but the deterministic grader
+/// (run on submit) scores against every case.
+fn seed_editor_element(
+    conn: &Connection,
+    id: &str,
+    chapter_id: &str,
+    title: &str,
+    position: i64,
+    plugin_cid: &str,
+    content: &serde_json::Value,
+) -> Result<(), rusqlite::Error> {
+    let content = content.to_string();
+    conn.execute(
+        "INSERT OR IGNORE INTO course_elements \
+         (id, chapter_id, title, element_type, position, duration_seconds, plugin_cid, plugin_version, content_inline) \
+         VALUES (?1, ?2, ?3, 'plugin', ?4, NULL, ?5, '0.1.0', ?6)",
+        params![id, chapter_id, title, position, plugin_cid, content],
+    )?;
+    conn.execute(
+        "UPDATE course_elements SET content_inline = ?1, plugin_cid = ?2 WHERE id = ?3",
+        params![content, plugin_cid, id],
+    )?;
+    Ok(())
+}
+
 /// Insert (or refresh) the demo plugin course. Skips silently if either
 /// builtin plugin is not yet installed — the next call after a successful
 /// install will fill it in.
@@ -96,7 +128,7 @@ pub fn seed_plugin_demo_course(conn: &Connection) -> Result<(), rusqlite::Error>
         params![
             COURSE_ID,
             "Plugins Showcase",
-            "A short course that demonstrates the first-party plugins: Music Reviews (live pitch-matched note review), IRL Review (human-instructor review of uploaded work), and codejudge (solve coding challenges in JavaScript and Lua, run locally against test cases).",
+            "A short course that demonstrates the first-party plugins: Music Reviews (live pitch-matched note review), IRL Review (human-instructor review of uploaded work), codejudge (solve coding challenges in JavaScript and Lua, run locally against test cases), and the graded code editors (write JavaScript or TypeScript with live evaluation and submit for a deterministic score).",
             "addr_demo_learner",
             "[\"demo\",\"plugins\"]",
             "[]",
@@ -234,6 +266,82 @@ pub fn seed_plugin_demo_course(conn: &Connection) -> Result<(), rusqlite::Error>
         }
     }
 
+    // Chapter 4 — Graded code editors. The editor plugins are `kind: graded`:
+    // the learner writes code with live eval + visible tests, then submits for a
+    // credential-bearing score computed by the host's deterministic grader.
+    // Additive: only seeded when both editor plugins are installed.
+    match (
+        find_plugin_cid(conn, "editor-javascript"),
+        find_plugin_cid(conn, "editor-typescript"),
+    ) {
+        (Some(ejs_cid), Some(ets_cid)) => {
+            conn.execute(
+                "INSERT OR IGNORE INTO course_chapters (id, course_id, title, description, position) \
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![
+                    CHAPTER_EDITOR,
+                    COURSE_ID,
+                    "Graded code editors",
+                    "Write JavaScript or TypeScript with syntax highlighting and live evaluation, run the visible tests, then submit for a graded score. Hidden tests are checked by the host's deterministic grader.",
+                    3,
+                ],
+            )?;
+
+            let js_content = serde_json::json!({
+                "title": "Double the number",
+                "prompt": "Read an integer **n** from input (one line) and print **n × 2**.",
+                "starter_code": "const n = Number(readLine());\n// print n doubled\n",
+                "tests": [
+                    { "name": "example", "stdin": "4", "expected_stdout": "8" }
+                ],
+                "grader_private": {
+                    "tests": [
+                        { "name": "zero", "stdin": "0", "expected_stdout": "0" },
+                        { "name": "negative", "stdin": "-5", "expected_stdout": "-10" },
+                        { "name": "large", "stdin": "1000000", "expected_stdout": "2000000" }
+                    ]
+                }
+            });
+            seed_editor_element(
+                conn,
+                EL_EDITOR_JS,
+                CHAPTER_EDITOR,
+                "Double the number (JavaScript)",
+                0,
+                &ejs_cid,
+                &js_content,
+            )?;
+
+            let ts_content = serde_json::json!({
+                "title": "Sum to n",
+                "prompt": "Read an integer **n** and print the sum **1 + 2 + … + n**. Type annotations are allowed — they're stripped before running.",
+                "starter_code": "const n: number = Number(readLine());\n// print the sum 1..n\n",
+                "tests": [
+                    { "name": "example", "stdin": "10", "expected_stdout": "55" }
+                ],
+                "grader_private": {
+                    "tests": [
+                        { "name": "one", "stdin": "1", "expected_stdout": "1" },
+                        { "name": "hundred", "stdin": "100", "expected_stdout": "5050" }
+                    ]
+                }
+            });
+            seed_editor_element(
+                conn,
+                EL_EDITOR_TS,
+                CHAPTER_EDITOR,
+                "Sum to n (TypeScript)",
+                1,
+                &ets_cid,
+                &ts_content,
+            )?;
+            log::info!("plugin demo course: graded editor chapter seeded (js + ts)");
+        }
+        _ => {
+            log::debug!("plugin demo seed: editor plugins not installed — skipping editor chapter");
+        }
+    }
+
     // Auto-enroll the demo learner so the course appears on the dashboard
     // immediately. Single-user app: enrollments are not scoped to a
     // stake address column in the schema.
@@ -325,5 +433,67 @@ mod tests {
             )
             .unwrap();
         assert_eq!(count2, 3);
+    }
+
+    #[test]
+    fn seeds_graded_editor_chapter() {
+        let db = Database::open_in_memory().expect("db");
+        db.run_migrations().expect("migrations");
+        let dir = TempDir::new().unwrap();
+        builtins::install_all(&db, dir.path());
+
+        seed_plugin_demo_course(db.conn()).expect("seed");
+
+        // Two graded editor elements land in the editor chapter.
+        let count: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM course_elements \
+                 WHERE chapter_id = ?1 AND element_type = 'plugin'",
+                params![CHAPTER_EDITOR],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 2);
+
+        // Each element pins its own editor plugin (not the codejudge ones), and
+        // carries inline visible tests plus hidden `grader_private` tests.
+        let ejs_cid = find_plugin_cid(db.conn(), "editor-javascript").unwrap();
+        let ets_cid = find_plugin_cid(db.conn(), "editor-typescript").unwrap();
+        assert_ne!(ejs_cid, ets_cid);
+
+        let (js_cid, js_content): (String, String) = db
+            .conn()
+            .query_row(
+                "SELECT plugin_cid, content_inline FROM course_elements WHERE id = ?1",
+                params![EL_EDITOR_JS],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(js_cid, ejs_cid);
+        assert!(js_content.contains("\"grader_private\""));
+        assert!(js_content.contains("\"tests\""));
+
+        let ts_cid: String = db
+            .conn()
+            .query_row(
+                "SELECT plugin_cid FROM course_elements WHERE id = ?1",
+                params![EL_EDITOR_TS],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(ts_cid, ets_cid);
+
+        // Idempotent.
+        seed_plugin_demo_course(db.conn()).expect("reseed");
+        let count2: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM course_elements WHERE chapter_id = ?1",
+                params![CHAPTER_EDITOR],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count2, 2);
     }
 }

@@ -1,0 +1,17 @@
+[package]
+name = "boa-runner-core"
+version = "0.1.0"
+edition = "2021"
+description = "Shared Boa JS engine core for the editor plugins' graders/runners (JavaScript + TypeScript). Provides grade/run over the mcq grader wire format; TypeScript strips types via bundled sucrase inside the engine."
+license = "MIT OR Apache-2.0"
+publish = false
+
+[dependencies]
+boa_engine = "0.20"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Deterministic RNG so getrandom builds for wasm32-unknown-unknown without the
+# wasm-bindgen (`js`) feature and Math.random is reproducible in the grader.
+getrandom = { version = "0.2", features = ["custom"] }
+
+[workspace]

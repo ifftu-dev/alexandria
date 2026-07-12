@@ -83,15 +83,28 @@ const pluginCid = computed(() => props.element.plugin_cid ?? '')
 
 /** Parsed `content_inline` JSON passed to the iframe in `init`. Plugins
  *  see this as `msg.payload.content` and use it to configure their UI
- *  (e.g. Music Reviews reads its target-notes sequence here). */
+ *  (e.g. Music Reviews reads its target-notes sequence here).
+ *
+ *  Security: the top-level `grader_private` key is stripped before the content
+ *  reaches the sandboxed iframe. Graded plugins (e.g. the code editors) put
+ *  hidden test expectations there; the learner can read anything the iframe
+ *  receives, but the deterministic grader still gets the full content because
+ *  `submitElement` passes the raw `content_inline` to `plugin_submit_and_grade`. */
 const elementContent = computed<unknown>(() => {
   const raw = props.element.content_inline
   if (!raw) return null
+  let parsed: unknown
   try {
-    return JSON.parse(raw)
+    parsed = JSON.parse(raw)
   } catch {
     return raw
   }
+  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && 'grader_private' in parsed) {
+    const clone = { ...(parsed as Record<string, unknown>) }
+    delete clone.grader_private
+    return clone
+  }
+  return parsed
 })
 
 const grantedCapabilities = computed<PluginCapability[]>(() => {

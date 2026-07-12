@@ -1,0 +1,20 @@
+[package]
+name = "wasmstub"
+version = "0.1.0"
+edition = "2021"
+description = "Build tool: rewrite a grader wasm's function imports into zero-returning local stubs, yielding a zero-import module for Alexandria's empty-linker Wasmtime grader sandbox."
+license = "MIT OR Apache-2.0"
+publish = false
+
+[[bin]]
+name = "wasmstub"
+path = "src/main.rs"
+
+[dependencies]
+walrus = "0.23"
+blake3 = "1"
+
+# Standalone: built out-of-workspace for its own target (wasm for the
+# grader; host for the tool). The empty table stops cargo from attaching this
+# crate to an ancestor workspace (matters inside nested git worktrees).
+[workspace]

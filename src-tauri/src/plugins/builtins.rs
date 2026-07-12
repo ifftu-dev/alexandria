@@ -248,6 +248,101 @@ const CODEJUDGE_JS_BUNDLE: BuiltinBundle<'static> = BuiltinBundle {
     ],
 };
 
+/// Code Editor: JavaScript — graded coding element (v0.1.1: lazy wasm load, main
+/// thread, instant-eval toggle). The learner writes JS in a
+/// CodeMirror 6 editor; the same Boa wasm engine powers both in-browser live
+/// eval (run on the iframe main thread from `ui/vendor/runner-wasm.js` — the
+/// sandboxed opaque-origin iframe can't spawn a cross-origin `plugin://` Worker)
+/// and the host-side credential grader (`editor-javascript-grader.wasm`, run in
+/// the deterministic Wasmtime sandbox). The grader wasm is import-stubbed to zero
+/// imports; `ui/vendor/*` are build-time produced by `editor-shared/build.sh`.
+const EDITOR_JS_BUNDLE: BuiltinBundle<'static> = BuiltinBundle {
+    slug: "editor-javascript",
+    manifest_json: include_bytes!("../../../plugins/builtin/editor-javascript/manifest.json"),
+    grader_wasm: Some(include_bytes!(
+        "../../../plugins/builtin/editor-javascript/grader/dist/editor_javascript_grader.wasm"
+    )),
+    ui_files: &[
+        (
+            "ui/index.html",
+            include_bytes!("../../../plugins/builtin/editor-javascript/ui/index.html"),
+        ),
+        (
+            "ui/style.css",
+            include_bytes!("../../../plugins/builtin/editor-javascript/ui/style.css"),
+        ),
+        (
+            "ui/config.js",
+            include_bytes!("../../../plugins/builtin/editor-javascript/ui/config.js"),
+        ),
+        (
+            "ui/app.js",
+            include_bytes!("../../../plugins/builtin/editor-javascript/ui/app.js"),
+        ),
+        (
+            "ui/vendor/cm6.js",
+            include_bytes!("../../../plugins/builtin/editor-javascript/ui/vendor/cm6.js"),
+        ),
+        (
+            "ui/vendor/runner-wasm.js",
+            include_bytes!("../../../plugins/builtin/editor-javascript/ui/vendor/runner-wasm.js"),
+        ),
+        (
+            "icon.svg",
+            include_bytes!("../../../plugins/builtin/editor-javascript/icon.svg"),
+        ),
+        (
+            "README.md",
+            include_bytes!("../../../plugins/builtin/editor-javascript/README.md"),
+        ),
+    ],
+};
+
+/// Code Editor: TypeScript — graded coding element. Identical to the JavaScript
+/// editor except the Boa runner strips TypeScript types (bundled sucrase, run
+/// in-engine) before executing. Same zero-import grader wasm + in-browser worker.
+const EDITOR_TS_BUNDLE: BuiltinBundle<'static> = BuiltinBundle {
+    slug: "editor-typescript",
+    manifest_json: include_bytes!("../../../plugins/builtin/editor-typescript/manifest.json"),
+    grader_wasm: Some(include_bytes!(
+        "../../../plugins/builtin/editor-typescript/grader/dist/editor_typescript_grader.wasm"
+    )),
+    ui_files: &[
+        (
+            "ui/index.html",
+            include_bytes!("../../../plugins/builtin/editor-typescript/ui/index.html"),
+        ),
+        (
+            "ui/style.css",
+            include_bytes!("../../../plugins/builtin/editor-typescript/ui/style.css"),
+        ),
+        (
+            "ui/config.js",
+            include_bytes!("../../../plugins/builtin/editor-typescript/ui/config.js"),
+        ),
+        (
+            "ui/app.js",
+            include_bytes!("../../../plugins/builtin/editor-typescript/ui/app.js"),
+        ),
+        (
+            "ui/vendor/cm6.js",
+            include_bytes!("../../../plugins/builtin/editor-typescript/ui/vendor/cm6.js"),
+        ),
+        (
+            "ui/vendor/runner-wasm.js",
+            include_bytes!("../../../plugins/builtin/editor-typescript/ui/vendor/runner-wasm.js"),
+        ),
+        (
+            "icon.svg",
+            include_bytes!("../../../plugins/builtin/editor-typescript/icon.svg"),
+        ),
+        (
+            "README.md",
+            include_bytes!("../../../plugins/builtin/editor-typescript/README.md"),
+        ),
+    ],
+};
+
 /// codejudge (umbrella) — runs no code itself; its manifest declares the
 /// per-language judge plugins as `dependencies`, so installing it pulls them
 /// in. Must be registered AFTER its dependencies in `BUILTIN_PLUGINS` so
@@ -297,6 +392,8 @@ pub const BUILTIN_PLUGINS: &[BuiltinBundle<'static>] = &[
     IRL_REVIEW_BUNDLE,
     CODEJUDGE_LUA_BUNDLE,
     CODEJUDGE_JS_BUNDLE,
+    EDITOR_JS_BUNDLE,
+    EDITOR_TS_BUNDLE,
     // Umbrella last: it depends on the two language plugins above.
     CODEJUDGE_MULTILANG_BUNDLE,
 ];

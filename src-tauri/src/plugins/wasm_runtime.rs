@@ -43,7 +43,12 @@ use wasmtime::{
 /// Default per-grade budgets. Conservative for Phase 2; manifests can
 /// request more in later phases.
 pub const DEFAULT_MEMORY_MAX_BYTES: usize = 128 * 1024 * 1024; // 128 MiB
-pub const DEFAULT_FUEL: u64 = 1_000_000_000; // ~1B wasm instructions
+
+// ~10B wasm instructions. Still bounded (an infinite loop traps in well under a
+// second), but high enough for graders that run a real language engine inside
+// wasm — the TypeScript editor grader spends ~1.9B just type-stripping with
+// sucrase-in-Boa before it runs the submission against the test cases.
+pub const DEFAULT_FUEL: u64 = 10_000_000_000;
 pub const DEFAULT_OUTPUT_MAX_BYTES: usize = 1024 * 1024; // 1 MiB
 
 /// JSON envelope passed to the grader.
@@ -464,6 +469,207 @@ mod tests {
                 bytes, first_bytes,
                 "grade #{i} produced different bytes than the first run"
             );
+        }
+    }
+
+    /// Bytes of the import-stubbed JavaScript editor grader (Boa engine).
+    /// Rebuild via `plugins/builtin/editor-shared/build.sh javascript`.
+    const EDITOR_JS_GRADER_WASM: &[u8] = include_bytes!(
+        "../../../plugins/builtin/editor-javascript/grader/dist/editor_javascript_grader.wasm"
+    );
+
+    fn run_editor_js(content: serde_json::Value, source: &str) -> ScoreRecord {
+        let runtime = GraderRuntime::new().expect("runtime");
+        let cid = blake3::hash(EDITOR_JS_GRADER_WASM).to_hex().to_string();
+        let input = serde_json::to_vec(&serde_json::json!({
+            "version": "1",
+            "content": content,
+            "submission": {"source": source},
+        }))
+        .unwrap();
+        runtime
+            .grade(
+                &cid,
+                EDITOR_JS_GRADER_WASM,
+                &input,
+                GraderBudgets::default(),
+            )
+            .expect("grade succeeds")
+    }
+
+    #[test]
+    fn editor_js_grader_has_zero_imports() {
+        // The grader must run under the empty linker. If the stub step regressed
+        // and left a wasm-bindgen import, module compilation would still succeed
+        // but instantiation against the empty linker would fail — assert here.
+        let runtime = GraderRuntime::new().expect("runtime");
+        let cid = blake3::hash(EDITOR_JS_GRADER_WASM).to_hex().to_string();
+        let input = serde_json::to_vec(&serde_json::json!({
+            "version": "1",
+            "content": {"tests": [{"expected_stdout": "1"}]},
+            "submission": {"source": "console.log(1)"},
+        }))
+        .unwrap();
+        // A missing-import instantiation error surfaces from grade().
+        runtime
+            .grade(
+                &cid,
+                EDITOR_JS_GRADER_WASM,
+                &input,
+                GraderBudgets::default(),
+            )
+            .expect("instantiates under empty linker (zero imports)");
+    }
+
+    #[test]
+    fn editor_js_all_tests_pass_scores_one() {
+        let r = run_editor_js(
+            serde_json::json!({
+                "tests": [{"name": "t1", "stdin": "", "expected_stdout": "3"}],
+                "grader_private": {"tests": [{"name": "hidden", "stdin": "", "expected_stdout": "3"}]},
+            }),
+            "console.log(1 + 2)",
+        );
+        assert_eq!(r.score, 1.0);
+    }
+
+    #[test]
+    fn editor_js_partial_score_counts_hidden() {
+        // One visible test passes, one hidden test fails: 1 of 2 = 0.5.
+        let r = run_editor_js(
+            serde_json::json!({
+                "tests": [{"expected_stdout": "3"}],
+                "grader_private": {"tests": [{"expected_stdout": "4"}]},
+            }),
+            "console.log(3)",
+        );
+        assert!((r.score - 0.5).abs() < 1e-12, "got {}", r.score);
+    }
+
+    #[test]
+    fn editor_js_reads_stdin() {
+        let r = run_editor_js(
+            serde_json::json!({"tests": [{"stdin": "world", "expected_stdout": "hi world"}]}),
+            "console.log('hi ' + readLine())",
+        );
+        assert_eq!(r.score, 1.0);
+    }
+
+    #[test]
+    fn editor_js_grader_is_byte_reproducible() {
+        let runtime = GraderRuntime::new().expect("runtime");
+        let cid = blake3::hash(EDITOR_JS_GRADER_WASM).to_hex().to_string();
+        let input = serde_json::to_vec(&serde_json::json!({
+            "version": "1",
+            "content": {
+                "tests": [{"stdin": "5", "expected_stdout": "25"}],
+                "grader_private": {"tests": [{"stdin": "9", "expected_stdout": "81"}]},
+            },
+            "submission": {"source": "const n = Number(readLine()); console.log(n * n)"},
+        }))
+        .unwrap();
+
+        let first = runtime
+            .grade(
+                &cid,
+                EDITOR_JS_GRADER_WASM,
+                &input,
+                GraderBudgets::default(),
+            )
+            .expect("first grade");
+        let first_bytes = serde_json::to_vec(&first).unwrap();
+        assert_eq!(first.score, 1.0);
+
+        for i in 1..50 {
+            let r = runtime
+                .grade(
+                    &cid,
+                    EDITOR_JS_GRADER_WASM,
+                    &input,
+                    GraderBudgets::default(),
+                )
+                .unwrap_or_else(|e| panic!("grade #{i} failed: {e}"));
+            assert_eq!(
+                serde_json::to_vec(&r).unwrap(),
+                first_bytes,
+                "grade #{i} produced different bytes"
+            );
+        }
+    }
+
+    /// Bytes of the import-stubbed TypeScript editor grader (Boa + sucrase).
+    const EDITOR_TS_GRADER_WASM: &[u8] = include_bytes!(
+        "../../../plugins/builtin/editor-typescript/grader/dist/editor_typescript_grader.wasm"
+    );
+
+    fn run_editor_ts(content: serde_json::Value, source: &str) -> ScoreRecord {
+        let runtime = GraderRuntime::new().expect("runtime");
+        let cid = blake3::hash(EDITOR_TS_GRADER_WASM).to_hex().to_string();
+        let input = serde_json::to_vec(&serde_json::json!({
+            "version": "1",
+            "content": content,
+            "submission": {"source": source},
+        }))
+        .unwrap();
+        runtime
+            .grade(
+                &cid,
+                EDITOR_TS_GRADER_WASM,
+                &input,
+                GraderBudgets::default(),
+            )
+            .expect("grade succeeds")
+    }
+
+    #[test]
+    fn editor_ts_strips_types_and_runs() {
+        // Type annotations must be stripped in-engine (sucrase) before running.
+        let r = run_editor_ts(
+            serde_json::json!({"tests": [{"stdin": "20", "expected_stdout": "40"}]}),
+            "const n: number = Number(readLine()); const d = (x: number): number => x * 2; console.log(d(n));",
+        );
+        assert_eq!(r.score, 1.0);
+    }
+
+    #[test]
+    fn editor_ts_interfaces_and_generics_are_erased() {
+        let r = run_editor_ts(
+            serde_json::json!({"tests": [{"expected_stdout": "3"}]}),
+            "interface Box<T> { v: T } const b: Box<number> = { v: 3 }; function id<T>(x: T): T { return x; } console.log(id(b).v);",
+        );
+        assert_eq!(r.score, 1.0);
+    }
+
+    #[test]
+    fn editor_ts_grader_is_byte_reproducible() {
+        let runtime = GraderRuntime::new().expect("runtime");
+        let cid = blake3::hash(EDITOR_TS_GRADER_WASM).to_hex().to_string();
+        let input = serde_json::to_vec(&serde_json::json!({
+            "version": "1",
+            "content": {"tests": [{"stdin": "7", "expected_stdout": "49"}]},
+            "submission": {"source": "const n: number = Number(readLine()); console.log(n * n);"},
+        }))
+        .unwrap();
+        let first = runtime
+            .grade(
+                &cid,
+                EDITOR_TS_GRADER_WASM,
+                &input,
+                GraderBudgets::default(),
+            )
+            .expect("first grade");
+        let first_bytes = serde_json::to_vec(&first).unwrap();
+        assert_eq!(first.score, 1.0);
+        for i in 1..30 {
+            let r = runtime
+                .grade(
+                    &cid,
+                    EDITOR_TS_GRADER_WASM,
+                    &input,
+                    GraderBudgets::default(),
+                )
+                .unwrap_or_else(|e| panic!("grade #{i} failed: {e}"));
+            assert_eq!(serde_json::to_vec(&r).unwrap(), first_bytes);
         }
     }
 

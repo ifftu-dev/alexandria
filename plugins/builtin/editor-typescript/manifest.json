@@ -1,0 +1,33 @@
+{
+  "id": "did:key:z6MkvDqGT54cXesYGvABpF1UapVNwjCqRcafi4Px6Thv5T3Z#editor-typescript",
+  "version": "0.1.1",
+  "api_version": "1",
+  "host_min_version": "0.1.0",
+  "name": "Code Editor: TypeScript",
+  "description": "Write and run TypeScript with syntax highlighting and live evaluation. Types are stripped in-engine (sucrase) and the result runs locally in a sandboxed Boa engine (WebAssembly) against test cases \u2014 no network, no server. Graded submissions are re-run by the host's deterministic grader for credential-bearing scoring.",
+  "author_did": "did:key:z6MkvDqGT54cXesYGvABpF1UapVNwjCqRcafi4Px6Thv5T3Z",
+  "kinds": [
+    "graded"
+  ],
+  "capabilities": [],
+  "grader": {
+    "cid": "4678bc70ba35db73fbc74c8e5296c9bfe299f2b4261a6fee0aa7d4d3bb541792",
+    "blake3": "4678bc70ba35db73fbc74c8e5296c9bfe299f2b4261a6fee0aa7d4d3bb541792",
+    "entrypoint": "alex_grade"
+  },
+  "subject_tags": [
+    "programming",
+    "typescript",
+    "coding-challenge",
+    "practice"
+  ],
+  "platforms": [
+    "macos",
+    "windows",
+    "linux",
+    "ios",
+    "android"
+  ],
+  "icon_path": "icon.svg",
+  "entry": "ui/index.html"
+}
