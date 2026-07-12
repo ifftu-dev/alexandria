@@ -116,6 +116,17 @@ pub fn handle(plugins_dir: &Path, request: Request<Vec<u8>>) -> Response<Vec<u8>
         .header("Content-Security-Policy", csp)
         .header("X-Content-Type-Options", "nosniff")
         .header("Referrer-Policy", "no-referrer")
+        // The plugin iframe runs `sandbox="allow-scripts"` only (no
+        // allow-same-origin), so its document origin is opaque ("null").
+        // ES-module plugins (`<script type="module">` importing `./foo.js`)
+        // fetch their own module graph in CORS mode with `Origin: null`; without
+        // these headers the browser blocks the import and the plugin never
+        // boots. `*` is safe here — cross-plugin loads are still blocked by the
+        // per-plugin CSP (`script-src` only lists this plugin's own origin), and
+        // `connect-src 'none'` blocks all other network. This lets a plugin load
+        // its own files without granting it a real, storage-bearing origin.
+        .header("Access-Control-Allow-Origin", "*")
+        .header("Cross-Origin-Resource-Policy", "cross-origin")
         // Prevent this response from being cached across plugin versions.
         // CID-addressed bundles can't collide, but a user re-installing the
         // same CID during development should still see fresh bytes.
