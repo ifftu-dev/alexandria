@@ -422,7 +422,7 @@ function sendSubmitAck(submissionCid: string, score: number | null) {
     :key="`${pluginCid}|${entry}|${allowAttribute}`"
     ref="iframeEl"
     :src="srcUrl"
-    sandbox="allow-scripts allow-same-origin"
+    sandbox="allow-scripts"
     :allow="allowAttribute"
     referrerpolicy="no-referrer"
     class="plugin-iframe block w-full h-full min-h-[400px] bg-background"
