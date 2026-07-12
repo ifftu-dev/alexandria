@@ -313,7 +313,11 @@ async function onEmitEvent(requestId: number, type: string, payload: unknown) {
     }
     return
   }
+  // Fire-and-forget event (e.g. note_correct/note_wrong telemetry). Resolve it
+  // so the plugin's emitEvent promise settles — the iframe no longer sends a
+  // default response of its own.
   console.debug('[alex] plugin event', type, payload)
+  iframeRef.value?.resolveEvent(requestId, null)
 }
 
 async function onSubmit(requestId: number, submission: unknown, metadata: unknown) {

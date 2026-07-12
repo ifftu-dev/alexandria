@@ -107,6 +107,38 @@
       kind === 'error' ? '#dc2626' : kind === 'ok' ? '#16a34a' : '';
   }
 
+  // Trigger a browser download for a stored attachment ({ name, mime, data_b64 }).
+  // Requires the iframe's `allow-downloads` sandbox token.
+  function downloadFile(f) {
+    try {
+      const bin = atob(f.data_b64 || '');
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      const blob = new Blob([bytes], { type: f.mime || 'application/octet-stream' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = f.name || 'download';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1500);
+    } catch (err) {
+      setStatus(`Could not download "${f.name}": ${err && err.message ? err.message : err}`, 'error');
+    }
+  }
+
+  // Load a past submission back into the editable form (view / resubmit).
+  function loadSubmissionIntoForm(payload, skills) {
+    commentEl.value = payload && payload.comment ? payload.comment : '';
+    state.files = payload && Array.isArray(payload.files) ? payload.files.map((f) => ({ ...f })) : [];
+    state.skills = Array.isArray(skills) ? [...skills] : [];
+    renderFiles();
+    renderSkills();
+    setStatus('Loaded a past submission into the form above.', 'ok');
+    if (form && form.scrollIntoView) form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
   function renderReviews(submissions) {
     if (!submissions || submissions.length === 0) {
       reviewsListEl.innerHTML = '<p class="sub">No submissions yet.</p>';
@@ -183,6 +215,44 @@
           }
         }
       }
+
+      // Attachments — downloadable from the snapshot.
+      const attachedFiles = Array.isArray(submissionPayload.files) ? submissionPayload.files : [];
+      if (attachedFiles.length > 0) {
+        const filesWrap = document.createElement('div');
+        filesWrap.style.marginTop = '8px';
+        const heading = document.createElement('div');
+        heading.className = 'sub';
+        heading.textContent = 'Attachments';
+        filesWrap.appendChild(heading);
+        attachedFiles.forEach((f) => {
+          const frow = document.createElement('div');
+          frow.className = 'file-row';
+          const nm = document.createElement('div');
+          nm.textContent = f.name;
+          const meta = document.createElement('span');
+          meta.className = 'meta';
+          meta.textContent = ` ${formatBytes(f.size || 0)} · ${f.mime || 'unknown'}`;
+          nm.appendChild(meta);
+          const dl = document.createElement('button');
+          dl.type = 'button';
+          dl.textContent = 'Download';
+          dl.addEventListener('click', (e) => {
+            e.stopPropagation();
+            downloadFile(f);
+          });
+          frow.appendChild(nm);
+          frow.appendChild(dl);
+          filesWrap.appendChild(frow);
+        });
+        card.appendChild(filesWrap);
+      }
+
+      // Click the card (outside the download buttons) to load this submission
+      // back into the editable form above.
+      card.style.cursor = 'pointer';
+      card.title = 'Click to load this submission into the form';
+      card.addEventListener('click', () => loadSubmissionIntoForm(submissionPayload, skills));
 
       reviewsListEl.appendChild(card);
     });

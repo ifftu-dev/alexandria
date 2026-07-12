@@ -269,13 +269,14 @@ function onPluginMessage(ev: MessageEvent) {
       return
     }
     case 'emit_event': {
+      // Like `submit`, the host resolves via `resolveEvent` — synchronously for
+      // fire-and-forget events, or asynchronously for ones that await IPC (e.g.
+      // `irl_refresh` returning the learner's submissions). Do NOT send a
+      // default response here: doing so races the async handler and delivers
+      // `null` before the real payload arrives. The host resolves every event.
       const type = typeof payload.type === 'string' ? payload.type : 'unknown'
       pendingResponses.add(msg.request_id)
       emit('emit-event', msg.request_id, type, payload.payload)
-      if (pendingResponses.has(msg.request_id)) {
-        pendingResponses.delete(msg.request_id)
-        sendResponse(msg.request_id, null)
-      }
       return
     }
     case 'submit': {
@@ -438,7 +439,7 @@ function sendSubmitAck(submissionCid: string, score: number | null) {
     :key="`${pluginCid}|${entry}|${allowAttribute}`"
     ref="iframeEl"
     :src="srcUrl"
-    sandbox="allow-scripts"
+    sandbox="allow-scripts allow-downloads"
     :allow="allowAttribute"
     referrerpolicy="no-referrer"
     class="plugin-iframe block w-full h-full min-h-[400px] bg-background"
