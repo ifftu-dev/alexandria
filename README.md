@@ -8,7 +8,7 @@
   <img src="https://github.com/ifftu-dev/alexandria/actions/workflows/release-mobile.yml/badge.svg" alt="Release Mobile">
 </p>
 
-**Decentralized learning platform — desktop and mobile node.**
+**Free, open-source learning that runs on every device — you own your credentials and your data.**
 
 <p>
   <a href="docs/architecture.md">Architecture</a> &middot;
@@ -24,6 +24,16 @@
 > **This software is in active development. It is NOT production-ready. Do not use with real credentials, real funds, or sensitive data.**
 
 ## What Alexandria Does
+
+**In plain terms — what you get as a learner:**
+
+- **Learn for free** — courses, tutorials, and interactive lessons that work offline.
+- **Earn credentials you truly own** — verified proof of your skills that no platform can revoke, shareable even offline.
+- **Keep your data on your device** — no accounts, no servers, no data collection; the app connects you directly to other learners.
+- **One device, many learners** — fully separate, private profiles for households, classrooms, and shared devices.
+- **In your language** — the interface ships in 9 languages, including right-to-left (Urdu).
+
+The capabilities below describe how each of these works — the underlying technical implementation.
 
 - **Courses & Assessments** — Rich HTML, video, and interactive quiz content with per-element progress tracking, notes, and skill tagging. Separately, **dynamic assessments** verify claimed skills through community-contributed, DAO-ratified question banks: each attempt draws a randomized, difficulty-stratified subset, is graded host-side (the answer key never reaches the client), and auto-activates Sentinel — a pass issues an `AssessmentCredential`.
 - **Goals & Learning Paths** — learners set a goal (a nationalized exam, a K-12 board-grade curriculum, a job role, or a pasted/linked job description); it resolves to an ideal skill graph via DAO-ratified goal templates or on-device job-description parsing, and computed prerequisite paths chart the route.
