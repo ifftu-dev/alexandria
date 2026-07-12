@@ -126,7 +126,7 @@ async function save() {
     <div class="flex items-center justify-between">
       <h3 class="text-sm font-semibold text-foreground">
         {{ $t('instructor.editors.quiz.questionsHeading') }}
-        <span class="ml-1 text-xs font-normal text-muted-foreground">
+        <span class="ms-1 text-xs font-normal text-muted-foreground">
           ({{ element.element_type === 'objective_multi_mcq' ? $t('instructor.editors.quiz.multiHint') : $t('instructor.editors.quiz.singleHint') }})
         </span>
       </h3>
@@ -166,7 +166,7 @@ async function save() {
         </button>
       </div>
 
-      <div class="space-y-1.5 pl-6">
+      <div class="space-y-1.5 ps-6">
         <div v-for="(_, oi) in q.options" :key="oi" class="flex items-center gap-2">
           <button
             type="button"

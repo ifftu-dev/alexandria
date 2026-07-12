@@ -57,7 +57,7 @@ function score(c: CourseOverview): string {
       <div class="flex shrink-0 gap-2">
         <AppButton variant="outline" size="sm" @click="router.push('/instructor/inbox')">
           {{ $t('instructor.dashboard.inbox') }}
-          <span v-if="inboxCount" class="ml-1.5 rounded-full bg-error px-1.5 text-[10px] font-bold text-white">
+          <span v-if="inboxCount" class="ms-1.5 rounded-full bg-error px-1.5 text-[10px] font-bold text-white">
             {{ inboxCount }}
           </span>
         </AppButton>
@@ -82,7 +82,7 @@ function score(c: CourseOverview): string {
         <p class="mt-1 text-2xl font-bold text-primary">{{ totals.enrollments }}</p>
       </div>
       <button
-        class="rounded-xl border border-border bg-card p-5 text-left transition-colors hover:border-primary/50"
+        class="rounded-xl border border-border bg-card p-5 text-start transition-colors hover:border-primary/50"
         @click="router.push('/instructor/inbox')"
       >
         <p class="text-xs text-muted-foreground">{{ $t('instructor.dashboard.statPendingReviews') }}</p>
@@ -106,13 +106,13 @@ function score(c: CourseOverview): string {
     <div v-else class="overflow-x-auto rounded-xl border border-border bg-card">
       <table class="w-full text-sm">
         <thead>
-          <tr class="border-b border-border text-left text-xs text-muted-foreground">
+          <tr class="border-b border-border text-start text-xs text-muted-foreground">
             <th class="px-4 py-3 font-medium">{{ $t('instructor.dashboard.colCourse') }}</th>
             <th class="px-4 py-3 font-medium">{{ $t('instructor.dashboard.colStatus') }}</th>
-            <th class="px-4 py-3 font-medium text-right">{{ $t('instructor.dashboard.colEnrolled') }}</th>
-            <th class="px-4 py-3 font-medium text-right">{{ $t('instructor.dashboard.colCompletion') }}</th>
-            <th class="px-4 py-3 font-medium text-right">{{ $t('instructor.dashboard.colAvgScore') }}</th>
-            <th class="px-4 py-3 font-medium text-right">{{ $t('instructor.dashboard.colReviews') }}</th>
+            <th class="px-4 py-3 font-medium text-end">{{ $t('instructor.dashboard.colEnrolled') }}</th>
+            <th class="px-4 py-3 font-medium text-end">{{ $t('instructor.dashboard.colCompletion') }}</th>
+            <th class="px-4 py-3 font-medium text-end">{{ $t('instructor.dashboard.colAvgScore') }}</th>
+            <th class="px-4 py-3 font-medium text-end">{{ $t('instructor.dashboard.colReviews') }}</th>
             <th class="px-4 py-3 font-medium">{{ $t('instructor.dashboard.colLastActivity') }}</th>
           </tr>
         </thead>
@@ -125,13 +125,13 @@ function score(c: CourseOverview): string {
           >
             <td class="px-4 py-3">
               <span class="font-medium text-foreground">{{ c.title }}</span>
-              <span class="ml-2 rounded-full bg-muted px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">{{ c.kind }}</span>
+              <span class="ms-2 rounded-full bg-muted px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">{{ c.kind }}</span>
             </td>
             <td class="px-4 py-3"><StatusBadge :status="c.status" /></td>
-            <td class="px-4 py-3 text-right">{{ c.enrollment_count }}</td>
-            <td class="px-4 py-3 text-right">{{ pct(c) }}</td>
-            <td class="px-4 py-3 text-right">{{ score(c) }}</td>
-            <td class="px-4 py-3 text-right">
+            <td class="px-4 py-3 text-end">{{ c.enrollment_count }}</td>
+            <td class="px-4 py-3 text-end">{{ pct(c) }}</td>
+            <td class="px-4 py-3 text-end">{{ score(c) }}</td>
+            <td class="px-4 py-3 text-end">
               <span v-if="c.pending_reviews" class="rounded-full bg-warning/15 px-2 py-0.5 text-xs font-semibold text-warning">
                 {{ c.pending_reviews }}
               </span>

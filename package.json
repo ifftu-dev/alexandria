@@ -15,6 +15,7 @@
     "tauri": "tauri",
     "i18n:keys": "node scripts/i18n/gen-keys.mjs",
     "i18n:parity": "node scripts/i18n/check-parity.mjs",
+    "i18n:no-raw-text": "node scripts/i18n/check-no-raw-text.mjs",
     "i18n:translate": "node scripts/i18n/translate.mjs",
     "bump": "bash scripts/bump-version.sh"
   },

@@ -91,12 +91,12 @@ async function untag(skillId: string) {
         >
         <div
           v-if="results.length"
-          class="absolute z-20 top-full left-0 mt-1 w-64 max-h-48 overflow-y-auto rounded-lg border border-border bg-card shadow-lg"
+          class="absolute z-20 top-full start-0 mt-1 w-64 max-h-48 overflow-y-auto rounded-lg border border-border bg-card shadow-lg"
         >
           <button
             v-for="skill in results"
             :key="skill.id"
-            class="w-full text-left px-3 py-1.5 text-xs hover:bg-muted/30 flex items-center justify-between gap-2 disabled:opacity-40"
+            class="w-full text-start px-3 py-1.5 text-xs hover:bg-muted/30 flex items-center justify-between gap-2 disabled:opacity-40"
             :disabled="isTagged(skill.id)"
             @click="tag(skill)"
           >

@@ -174,7 +174,7 @@ function elementTypeLabel(elementType: string): string {
             variant="primary"
             @click="enroll"
           >
-            <svg class="w-4 h-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <svg class="w-4 h-4 me-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
             </svg>
             {{ $t('courses.detail.enroll') }}
@@ -184,7 +184,7 @@ function elementTypeLabel(elementType: string): string {
             variant="primary"
             @click="router.push(`/learn/${course.id}`)"
           >
-            <svg class="w-4 h-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <svg class="w-4 h-4 me-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
             </svg>
             {{ $t('courses.detail.continueLearning') }}
@@ -246,7 +246,7 @@ function elementTypeLabel(elementType: string): string {
                 {{ chapter.description }}
               </p>
             </div>
-            <span v-if="elements[chapter.id]?.length" class="ml-auto text-xs text-muted-foreground shrink-0">
+            <span v-if="elements[chapter.id]?.length" class="ms-auto text-xs text-muted-foreground shrink-0">
               {{ $t('courses.detail.lessonsCount', { count: elements[chapter.id]?.length ?? 0 }, elements[chapter.id]?.length ?? 0) }}
             </span>
           </div>
@@ -264,7 +264,7 @@ function elementTypeLabel(elementType: string): string {
                 </svg>
               </span>
               <span class="text-sm truncate">{{ el.title }}</span>
-              <span class="ml-auto badge badge-secondary text-[10px]">
+              <span class="ms-auto badge badge-secondary text-[10px]">
                 {{ elementTypeLabel(el.element_type) }}
               </span>
             </div>

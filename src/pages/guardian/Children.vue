@@ -106,7 +106,7 @@ function statusLabel(status: string): string {
       <button
         v-for="child in children"
         :key="child.id"
-        class="rounded-xl border border-border bg-card p-5 text-left transition-colors hover:border-primary/50"
+        class="rounded-xl border border-border bg-card p-5 text-start transition-colors hover:border-primary/50"
         @click="router.push(`/guardian/child/${child.id}`)"
       >
         <div class="flex items-center gap-3">
@@ -116,13 +116,13 @@ function statusLabel(status: string): string {
           <div class="min-w-0">
             <p class="truncate font-semibold text-foreground">
               {{ child.peer_display_name ?? $t('guardian.children.unnamedChild') }}
-              <span v-if="childAge(child) !== null" class="ml-1 text-sm font-normal text-muted-foreground">
+              <span v-if="childAge(child) !== null" class="ms-1 text-sm font-normal text-muted-foreground">
                 · {{ $t('guardian.children.ageShort', { age: childAge(child) }) }}
               </span>
             </p>
             <p class="truncate text-xs text-muted-foreground">{{ child.peer_did.slice(0, 28) }}…</p>
           </div>
-          <AppBadge :variant="statusVariant(child.status)" class="ml-auto shrink-0 capitalize">
+          <AppBadge :variant="statusVariant(child.status)" class="ms-auto shrink-0 capitalize">
             {{ statusLabel(child.status) }}
           </AppBadge>
         </div>

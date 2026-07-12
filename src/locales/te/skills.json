@@ -40,7 +40,17 @@
     "legendAvailable": "అందుబాటులో ({count})",
     "legendLocked": "లాక్ చేయబడినవి ({count})",
     "legendNodeSize": "చుక్క పరిమాణం నైపుణ్య స్థాయిని చూపుతుంది (గుర్తుంచుకో → సృష్టించు)",
-    "summary": "{skills} నైపుణ్యాలు, {edges} ముందస్తు అవసర లింక్‌లు"
+    "summary": "{skills} నైపుణ్యాలు, {edges} ముందస్తు అవసర లింక్‌లు",
+    "expandHint": "విస్తరించడానికి డబుల్ క్లిక్ చేయండి",
+    "expandTitle": "స్కిల్ మ్యాప్‌ను విస్తరించు",
+    "earnedTitle": "ఈ నైపుణ్యాలకు మీకు ధృవీకరించిన క్రెడెన్షియల్ ఉంది",
+    "availableTip": "అన్ని ముందస్తు అవసరాలు తీరాయి",
+    "lockedTip": "ముందస్తు అవసరాలు ఇంకా సాధించలేదు",
+    "skillsProgress": "{earned} / {total} నైపుణ్యాలు",
+    "vaultLocked": "స్కిల్ మ్యాప్ చూడటానికి మీ ఖాతాను అన్‌లాక్ చేయండి",
+    "noSkillsLoaded": "ఇంకా నైపుణ్యాలు లోడ్ కాలేదు",
+    "modalTitle": "స్కిల్ మ్యాప్",
+    "skillsEarnedProgress": "{earned} / {total} నైపుణ్యాలు సాధించారు"
   },
   "credentials": {
     "emptyTitle": "ఇంకా క్రెడెన్షియల్‌లు లేవు",

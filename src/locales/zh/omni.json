@@ -1,0 +1,14 @@
+{
+  "ariaLabel": "搜索",
+  "placeholder": "搜索技能、课程、社区、教室…",
+  "searching": "搜索中…",
+  "emptyHint": "开始输入以搜索技能、课程、社区和教室。",
+  "tryLabel": "试试：",
+  "example1": "图谱",
+  "example2": "网络安全",
+  "example3": "设计",
+  "noResults": "没有找到“{query}”的结果",
+  "recent": "最近",
+  "hintNavigate": "导航",
+  "hintSelect": "选择"
+}

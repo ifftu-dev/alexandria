@@ -105,26 +105,26 @@ async function backToProfiles() {
           {{ $t('onboarding.guardianGate.subtitle') }}
         </p>
 
-        <div class="card p-5 mb-5 text-left">
+        <div class="card p-5 mb-5 text-start">
           <h2 class="text-sm font-semibold text-foreground mb-2">{{ $t('onboarding.guardianGate.howHeading') }}</h2>
           <ul class="space-y-2 text-sm text-muted-foreground">
             <li class="flex items-start gap-2">
-              <span class="text-primary mt-0.5 font-mono text-xs w-4 text-right shrink-0">01</span>
+              <span class="text-primary mt-0.5 font-mono text-xs w-4 text-end shrink-0">01</span>
               {{ $t('onboarding.guardianGate.how1') }}
             </li>
             <li class="flex items-start gap-2">
-              <span class="text-primary mt-0.5 font-mono text-xs w-4 text-right shrink-0">02</span>
+              <span class="text-primary mt-0.5 font-mono text-xs w-4 text-end shrink-0">02</span>
               {{ $t('onboarding.guardianGate.how2') }}
             </li>
             <li class="flex items-start gap-2">
-              <span class="text-primary mt-0.5 font-mono text-xs w-4 text-right shrink-0">03</span>
+              <span class="text-primary mt-0.5 font-mono text-xs w-4 text-end shrink-0">03</span>
               {{ $t('onboarding.guardianGate.how3') }}
             </li>
           </ul>
         </div>
 
         <!-- Invite code -->
-        <div class="card p-5 mb-5 text-left">
+        <div class="card p-5 mb-5 text-start">
           <div class="flex items-center justify-between mb-2">
             <h2 class="text-sm font-semibold text-foreground">{{ $t('onboarding.guardianGate.codeHeading') }}</h2>
             <button

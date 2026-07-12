@@ -40,7 +40,17 @@
     "legendAvailable": "دستیاب ({count})",
     "legendLocked": "مقفل ({count})",
     "legendNodeSize": "نقطے کا حجم مہارت کی سطح دکھاتا ہے (یاد رکھنا → تخلیق)",
-    "summary": "{skills} مہارتیں، {edges} پیشگی شرط لنکس"
+    "summary": "{skills} مہارتیں، {edges} پیشگی شرط لنکس",
+    "expandHint": "بڑا کرنے کے لیے ڈبل کلک کریں",
+    "expandTitle": "سکل میپ بڑا کریں",
+    "earnedTitle": "ان مہارتوں کے لیے آپ کے پاس تصدیق شدہ کریڈینشل ہے",
+    "availableTip": "تمام پیشگی شرائط پوری",
+    "lockedTip": "پیشگی شرائط ابھی حاصل نہیں",
+    "skillsProgress": "{earned} / {total} مہارتیں",
+    "vaultLocked": "سکل میپ دیکھنے کے لیے اپنا اکاؤنٹ اَن لاک کریں",
+    "noSkillsLoaded": "ابھی کوئی مہارت لوڈ نہیں ہوئی",
+    "modalTitle": "سکل میپ",
+    "skillsEarnedProgress": "{earned} / {total} مہارتیں حاصل"
   },
   "credentials": {
     "emptyTitle": "ابھی کوئی سند نہیں",

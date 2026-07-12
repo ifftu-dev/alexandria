@@ -321,13 +321,13 @@ onBeforeUnmount(() => {
         ref="containerRef"
         class="h-[180px] w-full cursor-pointer overflow-hidden rounded-lg"
         style="background: color-mix(in srgb, var(--app-foreground) 3%, transparent)"
-        title="Double-click to expand"
+        :title="$t('skills.graph.expandHint')"
         @dblclick.stop="isModalOpen = true"
       />
 
       <button
-        title="Expand skill graph"
-        class="absolute right-1.5 top-1.5 z-10 rounded-md p-1 text-muted-foreground backdrop-blur-sm transition-colors"
+        :title="$t('skills.graph.expandTitle')"
+        class="absolute end-1.5 top-1.5 z-10 rounded-md p-1 text-muted-foreground backdrop-blur-sm transition-colors"
         style="background: color-mix(in srgb, var(--app-muted) 88%, transparent)"
         @click.stop="isModalOpen = true"
       >
@@ -339,24 +339,24 @@ onBeforeUnmount(() => {
 
     <!-- Legend -->
     <div class="mt-2 flex items-center justify-center gap-3 text-[10px]">
-      <span class="flex items-center gap-1" title="You have a skill proof for these skills">
+      <span class="flex items-center gap-1" :title="$t('skills.graph.earnedTitle')">
         <span class="inline-block h-2 w-2 rounded-full bg-success" />
-        <span class="text-muted-foreground">Earned ({{ earnedCount }})</span>
+        <span class="text-muted-foreground">{{ $t('skills.graph.legendEarned', { count: earnedCount }) }}</span>
       </span>
-      <span v-if="availableCount > 0" class="flex items-center gap-1" title="All prerequisites met">
+      <span v-if="availableCount > 0" class="flex items-center gap-1" :title="$t('skills.graph.availableTip')">
         <span class="inline-block h-2 w-2 rounded-full bg-warning" />
-        <span class="text-muted-foreground">Available ({{ availableCount }})</span>
+        <span class="text-muted-foreground">{{ $t('skills.graph.legendAvailable', { count: availableCount }) }}</span>
       </span>
-      <span class="flex items-center gap-1" title="Prerequisites still unearned">
+      <span class="flex items-center gap-1" :title="$t('skills.graph.lockedTip')">
         <span class="inline-block h-1.5 w-1.5 rounded-full" style="background: rgba(100, 116, 139, 0.4)" />
-        <span class="text-muted-foreground">Locked ({{ lockedCount }})</span>
+        <span class="text-muted-foreground">{{ $t('skills.graph.legendLocked', { count: lockedCount }) }}</span>
       </span>
     </div>
 
     <!-- Summary link -->
     <div class="mt-1 text-center">
       <button class="text-[10px] text-muted-foreground transition-colors hover:text-primary" @click="router.push('/skills')">
-        {{ earnedCount }} / {{ totalCount }} skills
+        {{ $t('skills.graph.skillsProgress', { earned: earnedCount, total: totalCount }) }}
       </button>
     </div>
 
@@ -382,16 +382,16 @@ onBeforeUnmount(() => {
       <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6z" />
     </svg>
     <p v-if="loadError" class="sb-graph-empty__text">
-      Unlock your vault to see the skill graph
+      {{ $t('skills.graph.vaultLocked') }}
     </p>
     <p v-else class="sb-graph-empty__text">
-      No skills loaded yet
+      {{ $t('skills.graph.noSkillsLoaded') }}
     </p>
     <button
       class="sb-graph-empty__retry"
       @click="loaded = false; loadError = false; loadData()"
     >
-      Retry
+      {{ $t('common.actions.retry') }}
     </button>
   </div>
 </template>

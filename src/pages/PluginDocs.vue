@@ -49,7 +49,13 @@ onMounted(async () => {
     await nextTick()
     await resolveImages()
   } catch (e) {
-    html.value = `<p class="text-destructive">${t('plugins.docs.loadError', { error: String(e) })}</p>`
+    // Escape the error string: `html` is rendered via v-html, and a backend
+    // error message could otherwise inject markup. The surrounding i18n text
+    // is trusted.
+    const safeError = String(e).replace(/[&<>"']/g, (c) =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string,
+    )
+    html.value = `<p class="text-destructive">${t('plugins.docs.loadError', { error: safeError })}</p>`
   } finally {
     loading.value = false
   }

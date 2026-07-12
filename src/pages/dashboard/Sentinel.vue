@@ -618,7 +618,7 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
               </div>
 
               <!-- Right: integrity score -->
-              <div v-if="session.integrity_score !== null && session.integrity_score !== undefined" class="flex-shrink-0 text-right">
+              <div v-if="session.integrity_score !== null && session.integrity_score !== undefined" class="flex-shrink-0 text-end">
                 <p class="font-mono text-2xl font-bold text-foreground">
                   {{ (session.integrity_score * 100).toFixed(0) }}<span class="text-sm font-normal text-muted-foreground">%</span>
                 </p>
@@ -626,7 +626,7 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
                   {{ session.integrity_score >= 0.8 ? $t('sentinel.sessions.scoreHigh') : session.integrity_score >= 0.5 ? $t('sentinel.sessions.scoreMedium') : $t('sentinel.sessions.scoreLow') }}
                 </AppBadge>
               </div>
-              <div v-else class="flex-shrink-0 text-right">
+              <div v-else class="flex-shrink-0 text-end">
                 <p class="font-mono text-lg text-muted-foreground">--</p>
                 <p class="text-[0.65rem] text-muted-foreground">{{ $t('sentinel.sessions.inProgress') }}</p>
               </div>
@@ -865,7 +865,7 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
                   </AppBadge>
                 </div>
                 <div v-if="aiStatus.keystrokeAE?.trained" class="flex items-center justify-between">
-                  <span class="pl-2 text-[0.65rem] text-muted-foreground">{{ $t('sentinel.profile.errorSamples') }}</span>
+                  <span class="ps-2 text-[0.65rem] text-muted-foreground">{{ $t('sentinel.profile.errorSamples') }}</span>
                   <span class="font-mono text-[0.65rem] text-muted-foreground">
                     {{ aiStatus.keystrokeAE.loss.toFixed(4) }} / {{ aiStatus.keystrokeAE.samples }}
                   </span>
@@ -878,7 +878,7 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
                   </AppBadge>
                 </div>
                 <div v-if="aiStatus.mouseCNN?.trained" class="flex items-center justify-between">
-                  <span class="pl-2 text-[0.65rem] text-muted-foreground">{{ $t('sentinel.profile.errorSamples') }}</span>
+                  <span class="ps-2 text-[0.65rem] text-muted-foreground">{{ $t('sentinel.profile.errorSamples') }}</span>
                   <span class="font-mono text-[0.65rem] text-muted-foreground">
                     {{ aiStatus.mouseCNN.loss.toFixed(4) }} / {{ aiStatus.mouseCNN.samples }}
                   </span>
@@ -891,7 +891,7 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
                   </AppBadge>
                 </div>
                 <div v-if="aiStatus.faceEmbedder?.enrolled" class="flex items-center justify-between">
-                  <span class="pl-2 text-[0.65rem] text-muted-foreground">{{ $t('sentinel.profile.setupProgress') }}</span>
+                  <span class="ps-2 text-[0.65rem] text-muted-foreground">{{ $t('sentinel.profile.setupProgress') }}</span>
                   <span class="font-mono text-[0.65rem] text-muted-foreground">
                     {{ Math.round(aiStatus.faceEmbedder.progress * 100) }}%
                   </span>
@@ -1014,7 +1014,7 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
               <div class="text-muted-foreground">{{ $t('sentinel.pasteClassifier.loadedModel') }}</div>
               <div class="font-mono text-foreground">
                 {{ loadedClassifier.version ?? '—' }}
-                <span v-if="loadedClassifier.source" class="ml-1 text-muted-foreground">
+                <span v-if="loadedClassifier.source" class="ms-1 text-muted-foreground">
                   ({{ loadedClassifier.source }})
                 </span>
               </div>
@@ -1023,7 +1023,7 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
               <div class="text-muted-foreground">{{ $t('sentinel.pasteClassifier.activeModel') }}</div>
               <div v-if="activeDaoClassifier" class="font-mono text-foreground">
                 {{ activeDaoClassifier.version }}
-                <span class="ml-1 text-muted-foreground">
+                <span class="ms-1 text-muted-foreground">
                   TPR={{ activeDaoClassifier.eval_tpr.toFixed(2) }}
                   FPR={{ activeDaoClassifier.eval_fpr.toFixed(2) }}
                 </span>

@@ -191,7 +191,7 @@ const verdictSummary = computed<string | null>(() => {
       >
         <option value="">{{ $t('sentinel.holdoutEval.selectPlaceholder') }}</option>
         <option v-for="h in holdouts" :key="h.id" :value="h.id">
-          {{ h.model_kind }} · threshold {{ h.threshold }} · {{ h.created_at }}
+          {{ $t('sentinel.holdoutEval.holdoutOption', { kind: h.model_kind, threshold: h.threshold, date: h.created_at }) }}
         </option>
       </select>
       <div v-if="policyError" class="rounded-md bg-red-500/10 px-3 py-2 text-xs text-red-600 dark:text-red-400">

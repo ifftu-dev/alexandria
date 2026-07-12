@@ -103,10 +103,10 @@ const relationLabels: Record<string, string> = {
               <div class="h-7 w-20 rounded-full bg-muted/30" />
             </div>
           </div>
-          <div class="text-right space-y-2 shrink-0">
-            <div class="h-8 w-16 rounded bg-muted ml-auto" />
-            <div class="h-3 w-20 rounded bg-muted/50 ml-auto" />
-            <div class="h-5 w-16 rounded-full bg-muted/30 ml-auto" />
+          <div class="text-end space-y-2 shrink-0">
+            <div class="h-8 w-16 rounded bg-muted ms-auto" />
+            <div class="h-3 w-20 rounded bg-muted/50 ms-auto" />
+            <div class="h-5 w-16 rounded-full bg-muted/30 ms-auto" />
           </div>
         </div>
       </div>
@@ -230,7 +230,7 @@ const relationLabels: Record<string, string> = {
         <div class="card p-5">
           <h2 class="text-sm font-semibold text-foreground mb-3">
             {{ $t('skills.detail.prerequisites') }}
-            <span class="text-muted-foreground font-normal ml-1">
+            <span class="text-muted-foreground font-normal ms-1">
               ({{ detail.prerequisites.length }})
             </span>
           </h2>
@@ -261,7 +261,7 @@ const relationLabels: Record<string, string> = {
         <div class="card p-5">
           <h2 class="text-sm font-semibold text-foreground mb-3">
             {{ $t('skills.detail.dependents') }}
-            <span class="text-muted-foreground font-normal ml-1">
+            <span class="text-muted-foreground font-normal ms-1">
               ({{ detail.dependents.length }})
             </span>
           </h2>
@@ -293,7 +293,7 @@ const relationLabels: Record<string, string> = {
       <div v-if="detail.related.length > 0" class="card p-5 mt-6">
         <h2 class="text-sm font-semibold text-foreground mb-3">
           {{ $t('skills.detail.related') }}
-          <span class="text-muted-foreground font-normal ml-1">
+          <span class="text-muted-foreground font-normal ms-1">
             ({{ detail.related.length }})
           </span>
         </h2>
@@ -338,7 +338,7 @@ const relationLabels: Record<string, string> = {
                 >
                   {{ BLOOM_ORDER[extractSkillClaim(vc.credentialSubject)?.level ?? 2] ?? 'apply' }}
                 </AppBadge>
-                <span class="ml-2 text-sm font-medium text-foreground">
+                <span class="ms-2 text-sm font-medium text-foreground">
                   {{ $t('skills.detail.scorePct', { percent: ((extractSkillClaim(vc.credentialSubject)?.score ?? 0) * 100).toFixed(0) }) }}
                 </span>
               </div>

@@ -247,7 +247,7 @@ watch(() => props.elementId, () => {
         <button
           v-for="(option, idx) in mcq.options"
           :key="option.id || idx"
-          class="flex w-full items-start gap-3 rounded-lg border p-4 text-left text-sm transition-all"
+          class="flex w-full items-start gap-3 rounded-lg border p-4 text-start text-sm transition-all"
           :class="[
             selectedIndices.includes(idx) && !submitted
               ? 'border-primary bg-primary/6'

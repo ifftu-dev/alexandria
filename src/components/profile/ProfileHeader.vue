@@ -100,7 +100,7 @@ async function copyDid() {
           {{ $t('common.advanced.toggle') }}
         </summary>
         <div class="mt-1.5 text-[0.65rem] text-muted-foreground">
-          <span class="mr-1">{{ $t('profile.header.publicId') }}</span>
+          <span class="me-1">{{ $t('profile.header.publicId') }}</span>
           <button
             class="inline-flex items-center gap-1 hover:text-foreground"
             :title="profile.did"

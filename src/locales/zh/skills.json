@@ -40,7 +40,17 @@
     "legendAvailable": "可开始（{count}）",
     "legendLocked": "已锁定（{count}）",
     "legendNodeSize": "圆点大小表示技能等级（记忆 → 创造）",
-    "summary": "{skills} 项技能，{edges} 条先修连接"
+    "summary": "{skills} 项技能，{edges} 条先修连接",
+    "expandHint": "双击展开",
+    "expandTitle": "展开技能图",
+    "earnedTitle": "你拥有这些技能的已验证凭证",
+    "availableTip": "已满足所有前置条件",
+    "lockedTip": "前置条件尚未达成",
+    "skillsProgress": "{earned} / {total} 项技能",
+    "vaultLocked": "解锁你的账户以查看技能图",
+    "noSkillsLoaded": "尚未加载技能",
+    "modalTitle": "技能图",
+    "skillsEarnedProgress": "已获得 {earned} / {total} 项技能"
   },
   "credentials": {
     "emptyTitle": "还没有凭证",

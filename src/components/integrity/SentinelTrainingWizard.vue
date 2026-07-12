@@ -499,7 +499,7 @@ onBeforeUnmount(() => {
         </p>
 
         <!-- What the wizard trains vs what's already protecting you -->
-        <div class="mb-4 rounded-lg border border-border bg-muted/30 p-3 text-left text-xs">
+        <div class="mb-4 rounded-lg border border-border bg-muted/30 p-3 text-start text-xs">
           <p class="mb-2 font-medium text-foreground">{{ $t('sentinel.wizard.buildsTitle') }}</p>
           <ul class="space-y-1 text-muted-foreground">
             <li>• {{ $t('sentinel.wizard.buildsTyping') }}
@@ -519,7 +519,7 @@ onBeforeUnmount(() => {
           </ul>
         </div>
 
-        <div class="mb-6 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-left dark:border-emerald-800/40 dark:bg-emerald-900/20">
+        <div class="mb-6 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-start dark:border-emerald-800/40 dark:bg-emerald-900/20">
           <p class="text-xs text-emerald-700 dark:text-emerald-400">
             {{ $t('sentinel.wizard.privacyNote') }}
           </p>

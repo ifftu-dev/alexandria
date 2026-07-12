@@ -26,7 +26,7 @@ defineEmits<{ 'update:modelValue': [key: string] }>()
       {{ tab.label }}
       <span
         v-if="tab.count !== undefined"
-        class="ml-1 text-xs opacity-70"
+        class="ms-1 text-xs opacity-70"
       >{{ tab.count }}</span>
     </button>
   </div>

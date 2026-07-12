@@ -263,7 +263,8 @@
     "untrained": "Sentinel isn't set up here, so there's no result to show. Set up Sentinel first.",
     "verdictHuman": "Honest-user test set: Sentinel's average alarm level was {score}% (lower is better). {adv}% of samples tripped the alarm — that's your false-alarm rate.",
     "verdictAttack": "Cheat test set: Sentinel's average alarm level was {score}% (higher is better). {adv}% of {count} {kind} samples were caught as cheating — that's your catch rate for the '{label}' family.",
-    "note": "The unlocked test set stays on this device. Don't share the labeled samples — leaking them hands cheaters the answer key."
+    "note": "The unlocked test set stays on this device. Don't share the labeled samples — leaking them hands cheaters the answer key.",
+    "holdoutOption": "{kind} · threshold {threshold} · {date}"
   },
   "propose": {
     "back": "Back to Sentinel",
@@ -304,7 +305,8 @@
       "unsupportedSchema": "Unsupported format: {schema}.",
       "emptyLabel": "The label can't be empty.",
       "readFailed": "Couldn't read the file: {error}"
-    }
+    },
+    "statusOption": "{date} — status: {status}"
   },
   "wizard": {
     "welcomeTitle": "Set up Sentinel",

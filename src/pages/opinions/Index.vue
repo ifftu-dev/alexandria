@@ -97,7 +97,7 @@ onMounted(async () => {
         </p>
       </div>
       <AppButton variant="primary" size="sm" @click="$router.push('/opinions/new')">
-        <svg class="w-4 h-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+        <svg class="w-4 h-4 me-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
           <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
         </svg>
         {{ $t('opinions.index.post') }}
@@ -116,7 +116,7 @@ onMounted(async () => {
         ]"
         @click="setField('')"
       >
-        {{ $t('opinions.index.filterAll') }} <span class="ml-1 opacity-70">{{ opinions.length }}</span>
+        {{ $t('opinions.index.filterAll') }} <span class="ms-1 opacity-70">{{ opinions.length }}</span>
       </button>
       <button
         v-for="f in fields"
@@ -131,7 +131,7 @@ onMounted(async () => {
         @click="setField(f.id)"
       >
         {{ f.icon_emoji ? f.icon_emoji + ' ' : '' }}{{ f.name }}
-        <span class="ml-1 opacity-70">{{ counts.get(f.id) ?? 0 }}</span>
+        <span class="ms-1 opacity-70">{{ counts.get(f.id) ?? 0 }}</span>
       </button>
     </div>
 
@@ -160,7 +160,7 @@ onMounted(async () => {
       <section v-for="group in grouped" :key="group.id">
         <h2 class="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-3">
           {{ group.name }}
-          <span class="ml-1 text-xs font-normal opacity-60">
+          <span class="ms-1 text-xs font-normal opacity-60">
             · {{ $t('opinions.index.opinionCount', { count: group.opinions.length }, group.opinions.length) }}
           </span>
         </h2>

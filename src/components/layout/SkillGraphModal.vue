@@ -168,11 +168,11 @@ onBeforeUnmount(() => {
         <div class="relative z-10 mx-4 flex h-[85vh] w-full max-w-7xl flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl">
           <div class="flex items-center justify-between border-b border-border px-6 py-4">
             <div class="flex items-center gap-3">
-              <h2 class="text-lg font-semibold text-foreground">Skill Graph</h2>
-              <span class="text-sm text-muted-foreground">{{ earnedCount }} / {{ totalCount }} skills earned</span>
+              <h2 class="text-lg font-semibold text-foreground">{{ $t('skills.graph.modalTitle') }}</h2>
+              <span class="text-sm text-muted-foreground">{{ $t('skills.graph.skillsEarnedProgress', { earned: earnedCount, total: totalCount }) }}</span>
             </div>
             <button
-              title="Close"
+              :title="$t('common.actions.close')"
               class="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
               @click="emit('close')"
             >
@@ -185,24 +185,24 @@ onBeforeUnmount(() => {
           <div class="relative flex-1 bg-slate-950">
             <div ref="containerRef" class="h-full w-full" />
 
-            <div class="absolute bottom-4 left-4 flex items-center gap-4 rounded-lg bg-black/80 px-3 py-2 text-xs backdrop-blur-sm">
+            <div class="absolute bottom-4 start-4 flex items-center gap-4 rounded-lg bg-black/80 px-3 py-2 text-xs backdrop-blur-sm">
               <span class="flex items-center gap-1.5">
                 <span class="inline-block h-2.5 w-2.5 rounded-full bg-success" />
-                <span class="text-white">Earned ({{ earnedCount }})</span>
+                <span class="text-white">{{ $t('skills.graph.legendEarned', { count: earnedCount }) }}</span>
               </span>
               <span v-if="availableCount > 0" class="flex items-center gap-1.5">
                 <span class="inline-block h-2.5 w-2.5 rounded-full bg-warning" />
-                <span class="text-white">Available ({{ availableCount }})</span>
+                <span class="text-white">{{ $t('skills.graph.legendAvailable', { count: availableCount }) }}</span>
               </span>
               <span class="flex items-center gap-1.5">
                 <span class="inline-block h-2 w-2 rounded-full bg-slate-500/40" />
-                <span class="text-slate-300/80">Locked ({{ lockedCount }})</span>
+                <span class="text-slate-300/80">{{ $t('skills.graph.legendLocked', { count: lockedCount }) }}</span>
               </span>
               <span class="text-slate-500/70">·</span>
-              <span class="text-slate-300/80">size = Bloom level (Remember→Create)</span>
+              <span class="text-slate-300/80">{{ $t('skills.graph.legendNodeSize') }}</span>
             </div>
 
-            <div class="pointer-events-none absolute bottom-0 left-0 right-0 h-16 bg-gradient-to-t from-slate-950 to-transparent" />
+            <div class="pointer-events-none absolute bottom-0 start-0 end-0 h-16 bg-gradient-to-t from-slate-950 to-transparent" />
           </div>
         </div>
       </div>

@@ -53,7 +53,7 @@ const mobileStatusMessage = computed(() => {
 </script>
 
 <template>
-  <div class="md:hidden fixed bottom-0 left-0 right-0 z-[70]">
+  <div class="md:hidden fixed bottom-0 start-0 end-0 z-[70]">
     <div
       v-if="mobileStatusMessage"
       class="mobile-sync-status border-t border-border/60 bg-card/95 px-3 py-1 text-[0.65rem] text-muted-foreground backdrop-blur"

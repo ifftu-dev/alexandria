@@ -1,0 +1,14 @@
+{
+  "ariaLabel": "Rechercher",
+  "placeholder": "Rechercher compétences, cours, communautés, classes…",
+  "searching": "Recherche…",
+  "emptyHint": "Commencez à taper pour rechercher parmi les compétences, cours, communautés et classes.",
+  "tryLabel": "Essayez :",
+  "example1": "graphes",
+  "example2": "cybersécurité",
+  "example3": "design",
+  "noResults": "Aucun résultat pour «{query}»",
+  "recent": "Récent",
+  "hintNavigate": "naviguer",
+  "hintSelect": "sélectionner"
+}

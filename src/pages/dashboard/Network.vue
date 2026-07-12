@@ -124,7 +124,7 @@ async function refreshPeers() {
         </div>
         <div class="flex items-start justify-between py-2.5">
           <span class="text-sm text-muted-foreground shrink-0">{{ t('network.advanced.addresses') }}</span>
-          <div v-if="p2pStatus?.listening_addresses?.length" class="text-right ml-4">
+          <div v-if="p2pStatus?.listening_addresses?.length" class="text-end ms-4">
             <div
               v-for="addr in p2pStatus.listening_addresses"
               :key="addr"

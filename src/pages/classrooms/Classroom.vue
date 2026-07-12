@@ -23,7 +23,7 @@
     </div>
 
     <!-- ── Left sidebar: channels (desktop) ──────────────────── -->
-    <div class="hidden md:flex w-60 flex-shrink-0 flex-col bg-card border-r border-border">
+    <div class="hidden md:flex w-60 flex-shrink-0 flex-col bg-card border-e border-border">
       <!-- Classroom header -->
       <div class="px-4 py-3 border-b border-border flex items-center justify-between">
         <div class="flex items-center gap-2 min-w-0">
@@ -70,7 +70,7 @@
         <RouterLink
           v-if="currentClassroom?.my_role === 'owner' || currentClassroom?.my_role === 'moderator'"
           :to="{ name: 'classroom-requests', params: { id: classroomId } }"
-          class="ml-2 text-primary hover:text-primary/80"
+          class="ms-2 text-primary hover:text-primary/80"
         >
           {{ $t('classrooms.requests.link') }}{{ joinRequests.length > 0 ? ` (${joinRequests.length})` : '' }}
         </RouterLink>
@@ -184,7 +184,7 @@
     </div>
 
     <!-- ── Right sidebar: members (desktop) ──────────────────── -->
-    <div class="hidden md:block w-52 flex-shrink-0 bg-card border-l border-border overflow-y-auto">
+    <div class="hidden md:block w-52 flex-shrink-0 bg-card border-s border-border overflow-y-auto">
       <MemberList :members="members" />
     </div>
 
@@ -209,7 +209,7 @@
             leave-to-class="-translate-x-full"
             appear
           >
-            <div class="absolute inset-y-0 left-0 w-72 bg-card border-r border-border flex flex-col safe-area-top safe-area-bottom safe-area-lr">
+            <div class="absolute inset-y-0 start-0 w-72 bg-card border-e border-border flex flex-col safe-area-top safe-area-bottom safe-area-lr">
               <!-- Header -->
               <div class="px-4 py-3 border-b border-border flex items-center justify-between">
                 <div class="flex items-center gap-2 min-w-0">
@@ -250,7 +250,7 @@
                 <RouterLink
                   v-if="currentClassroom?.my_role === 'owner' || currentClassroom?.my_role === 'moderator'"
                   :to="{ name: 'classroom-settings', params: { id: classroomId } }"
-                  class="ml-2 text-primary hover:text-primary/80"
+                  class="ms-2 text-primary hover:text-primary/80"
                   @click="showChannelDrawer = false"
                 >
                   {{ $t('classrooms.nav.settings') }}
@@ -283,7 +283,7 @@
             leave-to-class="translate-x-full"
             appear
           >
-            <div class="absolute inset-y-0 right-0 w-72 bg-card border-l border-border safe-area-top safe-area-bottom safe-area-lr overflow-y-auto">
+            <div class="absolute inset-y-0 end-0 w-72 bg-card border-s border-border safe-area-top safe-area-bottom safe-area-lr overflow-y-auto">
               <div class="px-4 py-3 border-b border-border flex items-center justify-between">
                 <span class="font-semibold text-foreground text-sm">{{ $t('classrooms.members.heading') }}</span>
                 <button @click="showMembersDrawer = false" class="p-1 text-muted-foreground hover:text-foreground">
@@ -379,7 +379,7 @@ const ChannelList = defineComponent({
               key: ch.id,
               onClick: () => emit('select', ch.id),
               class: [
-                'w-full flex items-center gap-2 px-3 py-1.5 rounded mx-1 text-sm transition-colors text-left',
+                'w-full flex items-center gap-2 px-3 py-1.5 rounded mx-1 text-sm transition-colors text-start',
                 props.activeChannelId === ch.id
                   ? 'bg-primary/10 text-primary font-medium'
                   : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
@@ -389,7 +389,7 @@ const ChannelList = defineComponent({
               h('span', { class: 'text-muted-foreground/60 text-xs' }, '#'),
               h('span', { class: 'truncate' }, ch.name),
               ch.channel_type === 'announcement'
-                ? h('span', { class: 'ml-auto text-xs text-warning', title: t('classrooms.channels.announcementBadge') }, '📢')
+                ? h('span', { class: 'ms-auto text-xs text-warning', title: t('classrooms.channels.announcementBadge') }, '📢')
                 : null,
             ],
           ),

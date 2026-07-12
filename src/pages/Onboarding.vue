@@ -553,23 +553,23 @@ function enterApp() {
           {{ $t('onboarding.welcome.tagline') }}
         </p>
 
-        <div class="card p-6 mb-6 text-left">
+        <div class="card p-6 mb-6 text-start">
           <h2 class="text-base font-semibold mb-3">{{ $t('onboarding.welcome.whatHappens') }}</h2>
           <ul class="space-y-2 text-sm text-muted-foreground">
             <li class="flex items-start gap-2">
-              <span class="text-primary mt-0.5 font-mono text-xs w-4 text-right shrink-0">01</span>
+              <span class="text-primary mt-0.5 font-mono text-xs w-4 text-end shrink-0">01</span>
               {{ $t('onboarding.welcome.step1') }}
             </li>
             <li class="flex items-start gap-2">
-              <span class="text-primary mt-0.5 font-mono text-xs w-4 text-right shrink-0">02</span>
+              <span class="text-primary mt-0.5 font-mono text-xs w-4 text-end shrink-0">02</span>
               {{ $t('onboarding.welcome.step2') }}
             </li>
             <li class="flex items-start gap-2">
-              <span class="text-primary mt-0.5 font-mono text-xs w-4 text-right shrink-0">03</span>
+              <span class="text-primary mt-0.5 font-mono text-xs w-4 text-end shrink-0">03</span>
               {{ $t('onboarding.welcome.step3') }}
             </li>
             <li class="flex items-start gap-2">
-              <span class="text-primary mt-0.5 font-mono text-xs w-4 text-right shrink-0">04</span>
+              <span class="text-primary mt-0.5 font-mono text-xs w-4 text-end shrink-0">04</span>
               {{ $t('onboarding.welcome.step4') }}
             </li>
           </ul>
@@ -621,7 +621,7 @@ function enterApp() {
           <button
             v-for="card in roleCards"
             :key="card.id"
-            class="w-full card p-5 text-left flex items-start gap-4 transition-colors border hover:border-primary/60 hover:bg-primary/5"
+            class="w-full card p-5 text-start flex items-start gap-4 transition-colors border hover:border-primary/60 hover:bg-primary/5"
             :class="selectedRole === card.id ? 'border-primary bg-primary/5' : 'border-border'"
             @click="chooseRole(card.id)"
           >
@@ -746,7 +746,7 @@ function enterApp() {
                 {{ $t('onboarding.password.usernameLabel') }}
               </label>
               <div class="relative">
-                <span class="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">@</span>
+                <span class="absolute start-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">@</span>
                 <input
                   v-model="username"
                   type="text"
@@ -755,7 +755,7 @@ function enterApp() {
                   autocorrect="off"
                   spellcheck="false"
                   :placeholder="$t('onboarding.password.usernamePlaceholder')"
-                  class="w-full pl-8 pr-3 py-2 text-sm rounded-md border border-border bg-background focus:outline-none focus:ring-2 focus:ring-ring"
+                  class="w-full ps-8 pe-3 py-2 text-sm rounded-md border border-border bg-background focus:outline-none focus:ring-2 focus:ring-ring"
                 >
               </div>
               <p class="mt-1 text-xs" :class="username && !usernameValid ? 'text-warning' : 'text-muted-foreground'">
@@ -905,7 +905,7 @@ function enterApp() {
         </p>
 
         <!-- Live log output -->
-        <div class="card p-4 text-left mb-4">
+        <div class="card p-4 text-start mb-4">
           <div class="font-mono text-xs space-y-1.5 min-h-[80px]">
             <div
               v-for="(line, i) in progressLines"
@@ -944,7 +944,7 @@ function enterApp() {
               :key="i"
               class="flex items-center gap-2 text-sm py-1.5 px-2.5 rounded bg-muted/30"
             >
-              <span class="text-xs text-muted-foreground w-5 text-right font-mono">{{ String(i + 1).padStart(2, '0') }}</span>
+              <span class="text-xs text-muted-foreground w-5 text-end font-mono">{{ String(i + 1).padStart(2, '0') }}</span>
               <span class="font-mono font-medium">{{ word }}</span>
             </div>
           </div>
@@ -1105,7 +1105,7 @@ function enterApp() {
           {{ biometricHint }}
         </p>
 
-        <div v-if="isMinorLearner" class="card p-4 mb-4 border-warning bg-warning/5 text-left">
+        <div v-if="isMinorLearner" class="card p-4 mb-4 border-warning bg-warning/5 text-start">
           <p class="text-sm text-warning font-medium">
             {{ $t('onboarding.done.minorNotice') }}
           </p>

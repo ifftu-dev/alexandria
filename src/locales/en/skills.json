@@ -40,7 +40,17 @@
     "legendAvailable": "Available ({count})",
     "legendLocked": "Locked ({count})",
     "legendNodeSize": "Dot size shows skill level (Remember → Create)",
-    "summary": "{skills} skills, {edges} prerequisite links"
+    "summary": "{skills} skills, {edges} prerequisite links",
+    "expandHint": "Double-click to expand",
+    "expandTitle": "Expand skill map",
+    "earnedTitle": "You have a verified credential for these skills",
+    "availableTip": "All prerequisites met",
+    "lockedTip": "Prerequisites still unearned",
+    "skillsProgress": "{earned} / {total} skills",
+    "vaultLocked": "Unlock your account to see your skill map",
+    "noSkillsLoaded": "No skills loaded yet",
+    "modalTitle": "Skill Map",
+    "skillsEarnedProgress": "{earned} / {total} skills earned"
   },
   "credentials": {
     "emptyTitle": "No credentials yet",

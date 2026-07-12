@@ -453,26 +453,26 @@ function onSectionClick(id: SettingsSectionId) {
 <template>
   <div class="settings-page flex w-full flex-1 min-h-0 flex-col sm:flex-row gap-0 overflow-hidden bg-background">
             <!-- Sidebar nav -->
-            <aside class="settings-sidebar shrink-0 sm:w-64 border-b sm:border-b-0 sm:border-r border-border bg-muted/20 flex flex-col">
+            <aside class="settings-sidebar shrink-0 sm:w-64 border-b sm:border-b-0 sm:border-e border-border bg-muted/20 flex flex-col">
               <div class="px-4 pt-5 pb-3">
                 <h2 class="text-sm font-semibold tracking-wide uppercase text-muted-foreground mb-3">
                   {{ $t('settings.nav.heading') }}
                 </h2>
                 <!-- Search -->
                 <div class="relative">
-                  <svg class="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <svg class="pointer-events-none absolute start-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0z" />
                   </svg>
                   <input
                     v-model="searchQuery"
                     type="text"
                     :placeholder="$t('settings.nav.searchPlaceholder')"
-                    class="w-full rounded-lg border border-border bg-background py-1.5 pl-8 pr-7 text-sm text-foreground outline-none focus:border-primary"
+                    class="w-full rounded-lg border border-border bg-background py-1.5 ps-8 pe-7 text-sm text-foreground outline-none focus:border-primary"
                     @keyup.enter="onSearchEnter"
                   >
                   <button
                     v-if="searchQuery"
-                    class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    class="absolute end-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                     :aria-label="$t('settings.nav.clearSearch')"
                     @click="searchQuery = ''"
                   >
@@ -516,7 +516,7 @@ function onSectionClick(id: SettingsSectionId) {
                       <path stroke-linecap="round" stroke-linejoin="round" d="M4 7h16M4 12h16M4 17h16" />
                     </svg>
                   </span>
-                  <span class="flex flex-col text-left min-w-0">
+                  <span class="flex flex-col text-start min-w-0">
                     <span class="text-sm font-medium truncate">{{ s.label }}</span>
                     <span class="hidden sm:block text-[11px] text-muted-foreground truncate">{{ s.desc }}</span>
                     <span v-if="matchedKeywords(s).length" class="hidden sm:flex flex-wrap gap-1 mt-1">
@@ -986,7 +986,7 @@ function onSectionClick(id: SettingsSectionId) {
                 :key="i"
                 class="flex items-center gap-2 text-sm py-1.5 px-2.5 rounded bg-muted/30"
               >
-                <span class="text-xs text-muted-foreground w-5 text-right">{{ i + 1 }}.</span>
+                <span class="text-xs text-muted-foreground w-5 text-end">{{ i + 1 }}.</span>
                 <span class="font-mono font-medium">{{ word }}</span>
               </div>
             </div>

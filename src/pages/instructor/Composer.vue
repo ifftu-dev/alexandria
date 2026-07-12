@@ -263,7 +263,7 @@ async function deleteCourse() {
           <span class="text-xs text-muted-foreground">v{{ course.version }}</span>
         </div>
         <button
-          class="group flex items-center gap-2 text-left"
+          class="group flex items-center gap-2 text-start"
           :title="$t('instructor.compose.editMeta')"
           @click="openMetaEditor"
         >
@@ -293,7 +293,7 @@ async function deleteCourse() {
     <!-- Publish blockers / result -->
     <div v-if="course.status === 'draft' && publishBlockers.length" class="rounded-lg border border-warning/30 bg-warning/5 px-4 py-3">
       <p class="text-xs font-semibold uppercase tracking-wide text-warning mb-1">{{ $t('instructor.compose.beforePublish') }}</p>
-      <ul class="text-sm text-warning list-disc pl-4">
+      <ul class="text-sm text-warning list-disc ps-4">
         <li v-for="b in publishBlockers" :key="b">{{ b }}</li>
       </ul>
     </div>

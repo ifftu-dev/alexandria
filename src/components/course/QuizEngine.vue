@@ -288,7 +288,7 @@ watch(() => props.contentCid, init)
           <button
             v-for="(option, idx) in currentQuestion.options"
             :key="idx"
-            class="w-full text-left p-3 rounded-lg border text-sm transition-all"
+            class="w-full text-start p-3 rounded-lg border text-sm transition-all"
             :class="[
               isOptionSelected(currentQuestion.id, idx)
                 ? 'border-primary bg-primary/8'

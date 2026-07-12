@@ -263,7 +263,8 @@
     "untrained": "Sentinel 在此尚未设置，因此没有结果可显示。请先设置 Sentinel。",
     "verdictHuman": "诚实用户测试集：Sentinel 的平均告警水平为 {score}%（越低越好）。{adv}% 的样本触发了告警——这就是你的误报率。",
     "verdictAttack": "作弊测试集：Sentinel 的平均告警水平为 {score}%（越高越好）。{count} 个{kind}样本中有 {adv}% 被识别为作弊——这就是你对“{label}”类别的捕获率。",
-    "note": "已解锁的测试集留在此设备上。请勿分享带标签的样本——泄露它们等于把答案交给作弊者。"
+    "note": "已解锁的测试集留在此设备上。请勿分享带标签的样本——泄露它们等于把答案交给作弊者。",
+    "holdoutOption": "{kind} · 阈值 {threshold} · {date}"
   },
   "propose": {
     "back": "返回 Sentinel",
@@ -304,7 +305,8 @@
       "unsupportedSchema": "不支持的格式：{schema}。",
       "emptyLabel": "标签不能为空。",
       "readFailed": "无法读取该文件：{error}"
-    }
+    },
+    "statusOption": "{date} — 状态：{status}"
   },
   "wizard": {
     "welcomeTitle": "设置 Sentinel",
