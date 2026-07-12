@@ -6,12 +6,31 @@
  * `/Users/hack/.claude/plans/prancy-bubbling-grove.md`.
  *
  * Security contract:
- *  - sandbox="allow-scripts" only — never `allow-same-origin`, never
- *    `allow-top-navigation`, never `allow-popups`.
- *  - The `allow` attribute is built exclusively from `grantedCapabilities`.
- *    Revoked capabilities are absent from the attribute entirely.
- *  - Each plugin loads from its own `plugin://<cid>/` origin, so the browser's
- *    same-origin policy gives cross-plugin isolation for free.
+ *  - sandbox = `allow-scripts allow-same-origin allow-downloads`, never
+ *    `allow-top-navigation`, never `allow-popups`, never `allow-modals`.
+ *
+ *    `allow-same-origin` is REQUIRED, not incidental: it gives the iframe its
+ *    real `plugin://<cid>` origin, without which (a) ES-module plugins can't
+ *    load their own module graph, (b) WKWebView refuses `getUserMedia`
+ *    (mic/camera) to the resulting opaque/null origin, and (c) the file picker
+ *    breaks. The security boundary for untrusted plugin code is therefore NOT
+ *    the sandbox origin but the layers below, which all hold with
+ *    `allow-same-origin` present:
+ *      · a strict per-plugin CSP (`asset_protocol.rs`): `connect-src 'none'`
+ *        (no network of any kind), `default-src`/`script-src` limited to this
+ *        plugin's own `plugin://<cid>` origin (no cross-plugin loads),
+ *        `object-src`/`base-uri 'none'`, nonce'd bootstrap;
+ *      · `bootstrap.js` deletes `__TAURI__`/`__TAURI_INTERNALS__` before plugin
+ *        scripts run, and the Tauri capability ACL is scoped to window `main`,
+ *        so plugin code cannot reach backend IPC;
+ *      · each plugin has a distinct `plugin://<cid>` origin, so same-origin
+ *        policy still gives cross-plugin isolation.
+ *    Residual risk vs. an opaque origin: a plugin gets same-origin storage
+ *    (localStorage/IndexedDB) scoped to its own CID — cross-session, not
+ *    cleared on uninstall. Accepted so mic/camera/module/upload plugins work.
+ *  - The `allow` (Permissions Policy) attribute is built from the plugin's
+ *    manifest-declared capabilities (static, set once at mount); actual consent
+ *    is gated by the host's capability-grant prompt.
  *  - The host sends the MessagePort to the iframe via a one-shot
  *    `window.postMessage` with `{ __alex_init__: true }`. The bootstrap
  *    script injected by the asset protocol handler picks this up and
@@ -439,7 +458,7 @@ function sendSubmitAck(submissionCid: string, score: number | null) {
     :key="`${pluginCid}|${entry}|${allowAttribute}`"
     ref="iframeEl"
     :src="srcUrl"
-    sandbox="allow-scripts allow-downloads"
+    sandbox="allow-scripts allow-same-origin allow-downloads"
     :allow="allowAttribute"
     referrerpolicy="no-referrer"
     class="plugin-iframe block w-full h-full min-h-[400px] bg-background"

@@ -7,8 +7,9 @@
 //
 // Hardening notes:
 // - Deletes `window.__TAURI__` and any Tauri globals before the plugin's
-//   own scripts run. The iframe sandbox without `allow-same-origin`
-//   already blocks access, this is defense-in-depth.
+//   own scripts run. This is the PRIMARY barrier keeping untrusted plugin code
+//   away from backend IPC (the iframe uses `allow-same-origin`, so the origin
+//   itself is not the boundary — see PluginIframe.vue's security contract).
 // - Rejects messages whose api_version doesn't match. New host versions
 //   will add optional fields, never break old plugins.
 // - Freezes `window.alex` after setup so a hostile plugin script can't
