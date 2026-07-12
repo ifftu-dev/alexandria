@@ -19,6 +19,8 @@
 
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { open as openFileDialog } from '@tauri-apps/plugin-dialog'
+import { readFile } from '@tauri-apps/plugin-fs'
 import { useLocalApi } from '@/composables/useLocalApi'
 import PluginIframe from './PluginIframe.vue'
 import PermissionPrompt from './PermissionPrompt.vue'
@@ -76,6 +78,12 @@ interface PendingCapability {
   reason: string
 }
 const pendingCapability = ref<PendingCapability | null>(null)
+// Requests that arrived while a prompt was already open. Instead of
+// auto-denying them (which breaks plugins that fire a request per user action,
+// e.g. clicking a "Start" button that needs the mic), they queue and are
+// resolved after the current decision — auto-granted if the user just granted
+// the same capability, otherwise prompted in turn.
+const pendingQueue = ref<PendingCapability[]>([])
 
 const iframeRef = ref<InstanceType<typeof PluginIframe> | null>(null)
 
@@ -158,6 +166,8 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   // Once-grants do not persist beyond a single plugin mount.
   onceGrants.value.clear()
+  pendingCapability.value = null
+  pendingQueue.value = []
 })
 
 // Proxy plugin events back to the element registry.
@@ -175,13 +185,32 @@ function onRequestCapability(requestId: number, name: PluginCapability, reason: 
     iframeRef.value?.sendCapabilityGranted(name, 'session')
     return
   }
-  // A second concurrent prompt is auto-denied — Phase 1 only supports
-  // one active consent dialog at a time.
+  // A prompt is already open — queue this request instead of denying it, so a
+  // plugin that requests the capability again (e.g. a second Start click) isn't
+  // spuriously rejected. It resolves when the current decision is made.
   if (pendingCapability.value) {
-    iframeRef.value?.resolveCapabilityRequest(requestId, false)
+    pendingQueue.value.push({ requestId, name, reason })
     return
   }
   pendingCapability.value = { requestId, name, reason }
+}
+
+/** After a decision, resolve any queued requests: auto-grant ones the user just
+ *  allowed, and promote the next still-ungranted request to the active prompt. */
+function drainCapabilityQueue() {
+  const still: PendingCapability[] = []
+  for (const q of pendingQueue.value) {
+    if (grantedCapabilities.value.includes(q.name)) {
+      iframeRef.value?.resolveCapabilityRequest(q.requestId, true)
+      iframeRef.value?.sendCapabilityGranted(q.name, 'session')
+    } else {
+      still.push(q)
+    }
+  }
+  pendingQueue.value = still
+  if (!pendingCapability.value && still.length > 0) {
+    pendingCapability.value = still.shift() ?? null
+  }
 }
 
 async function onPermissionDecision(decision: 'once' | 'session' | 'always' | 'deny') {
@@ -194,6 +223,7 @@ async function onPermissionDecision(decision: 'once' | 'session' | 'always' | 'd
 
   if (decision === 'deny') {
     iframe.resolveCapabilityRequest(pending.requestId, false)
+    drainCapabilityQueue()
     return
   }
 
@@ -219,6 +249,36 @@ async function onPermissionDecision(decision: 'once' | 'session' | 'always' | 'd
 
   iframe.resolveCapabilityRequest(pending.requestId, true)
   iframe.sendCapabilityGranted(pending.name, decision)
+  drainCapabilityQueue()
+}
+
+/**
+ * Open the host's native file picker on the plugin's behalf. The sandboxed
+ * iframe can't present one itself; the user's file selection is its own consent
+ * (no capability grant needed). Reads the chosen files and returns their bytes
+ * to the plugin over the port.
+ */
+async function onPickFiles(requestId: number, options: unknown) {
+  const iframe = iframeRef.value
+  if (!iframe) return
+  const opts = (options ?? {}) as { multiple?: boolean; accept?: string[] }
+  try {
+    const selection = await openFileDialog({
+      multiple: opts.multiple ?? true,
+      directory: false,
+    })
+    const paths = selection == null ? [] : Array.isArray(selection) ? selection : [selection]
+    const files = await Promise.all(
+      paths.map(async (p) => {
+        const data = await readFile(p)
+        const name = p.split(/[\\/]/).pop() ?? p
+        return { name, size: data.byteLength, data }
+      }),
+    )
+    iframe.resolvePickFiles(requestId, { files })
+  } catch (e) {
+    iframe.resolvePickFiles(requestId, { files: [] }, String(e))
+  }
 }
 
 function onPersistState(blob: unknown) {
@@ -373,6 +433,7 @@ function onIframeError(msg: string) {
           @emit-event="onEmitEvent"
           @submit="onSubmit"
           @complete="onComplete"
+          @pick-files="onPickFiles"
           @error="onIframeError"
         />
       </div>

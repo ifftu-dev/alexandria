@@ -217,9 +217,55 @@
     });
   }
 
+  function uint8ToBase64(u8) {
+    let s = '';
+    const chunk = 0x8000;
+    for (let i = 0; i < u8.length; i += chunk) {
+      s += String.fromCharCode.apply(null, u8.subarray(i, i + chunk));
+    }
+    return btoa(s);
+  }
+
+  const MIME_BY_EXT = {
+    png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
+    webp: 'image/webp', pdf: 'application/pdf', mp4: 'video/mp4', mov: 'video/quicktime',
+    mp3: 'audio/mpeg', wav: 'audio/wav', txt: 'text/plain',
+  };
+
+  // Files chosen through the host's native picker (the sandboxed iframe can't
+  // show its own). Each: { name, size, data: Uint8Array }.
+  async function addPickedFile(f) {
+    if (f.size > config.max_file_bytes) {
+      setStatus(`File "${f.name}" exceeds ${formatBytes(config.max_file_bytes)} cap.`, 'error');
+      return;
+    }
+    const ext = (f.name.split('.').pop() || '').toLowerCase();
+    state.files.push({
+      name: f.name,
+      mime: MIME_BY_EXT[ext] || 'application/octet-stream',
+      size: f.size,
+      data_b64: uint8ToBase64(f.data instanceof Uint8Array ? f.data : new Uint8Array(f.data)),
+    });
+    renderFiles();
+  }
+
   filesInput.addEventListener('change', async () => {
     for (const f of Array.from(filesInput.files || [])) await addFile(f);
     filesInput.value = '';
+  });
+
+  // The sandboxed iframe can't open a native file dialog from <input type=file>,
+  // so route clicks through the host's picker via the alex bridge.
+  dropEl.addEventListener('click', async (e) => {
+    e.preventDefault();
+    try {
+      const res = await alex.pickFiles({ multiple: true });
+      if (res && Array.isArray(res.files)) {
+        for (const f of res.files) await addPickedFile(f);
+      }
+    } catch (err) {
+      setStatus(`Could not open file picker: ${err && err.message ? err.message : err}`, 'error');
+    }
   });
 
   dropEl.addEventListener('dragover', (e) => {

@@ -66,6 +66,9 @@ const emit = defineEmits<{
   (e: 'submit', requestId: number, submission: unknown, metadata: unknown): void
   /** Plugin marked the element complete. */
   (e: 'complete', progress: number, advisoryScore: number | null): void
+  /** Plugin requested the host's native file picker. Host resolves via
+   *  [`resolvePickFiles`] with the selected files. */
+  (e: 'pick-files', requestId: number, options: unknown): void
   /** Host-internal error (sandbox escape attempt, malformed message, etc.). */
   (e: 'error', message: string): void
 }>()
@@ -74,6 +77,7 @@ defineExpose({
   resolveCapabilityRequest,
   resolveSubmit,
   resolveEvent,
+  resolvePickFiles,
   sendCapabilityGranted,
   sendCapabilityRevoked,
   sendSubmitAck,
@@ -284,6 +288,13 @@ function onPluginMessage(ev: MessageEvent) {
       }
       return
     }
+    case 'pick_files': {
+      // Host-resolved asynchronously via `resolvePickFiles` (opens the native
+      // file dialog + reads the chosen files).
+      pendingResponses.add(msg.request_id)
+      emit('pick-files', msg.request_id, payload)
+      return
+    }
     case 'complete': {
       const progress =
         typeof payload.progress_fraction === 'number' ? payload.progress_fraction : 1
@@ -380,6 +391,11 @@ function resolveCapabilityRequest(requestId: number, granted: boolean) {
 
 /** Host resolves a pending `submit` request (e.g. with `{submission_id}`). */
 function resolveSubmit(requestId: number, payload: unknown, error?: string) {
+  if (!pendingResponses.delete(requestId)) return
+  sendResponse(requestId, payload, error)
+}
+
+function resolvePickFiles(requestId: number, payload: unknown, error?: string) {
   if (!pendingResponses.delete(requestId)) return
   sendResponse(requestId, payload, error)
 }

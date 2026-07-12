@@ -159,6 +159,16 @@
       return postToHost('submit', { submission, metadata: metadata || {} });
     },
 
+    /**
+     * Open the host's native file picker (the sandboxed iframe cannot show one
+     * itself). User-initiated file selection is its own consent, so no
+     * capability grant is required. Resolves with
+     * `{ files: [{ name, type, size, data: Uint8Array }] }` (empty if cancelled).
+     */
+    pickFiles(options) {
+      return postToHost('pick_files', options || {});
+    },
+
     /** Mark the element as complete for interactive plugins. */
     complete(progressFraction, optionalAdvisoryScore) {
       return postToHost('complete', {

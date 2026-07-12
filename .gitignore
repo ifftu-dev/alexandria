@@ -101,3 +101,4 @@ cardano/governance/build/
 
 # Cardano signing keys (treasury etc.) — never commit
 keys/
+.claude/
