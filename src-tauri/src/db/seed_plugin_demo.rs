@@ -57,6 +57,7 @@ fn find_plugin_cid(conn: &Connection, slug: &str) -> Option<String> {
 /// cases. The host strips `grader_private` before the iframe sees the content,
 /// so hidden expectations never reach the learner, but the deterministic grader
 /// (run on submit) scores against every case.
+#[allow(clippy::too_many_arguments)]
 fn seed_editor_element(
     conn: &Connection,
     id: &str,
@@ -65,6 +66,7 @@ fn seed_editor_element(
     position: i64,
     plugin_cid: &str,
     content: &serde_json::Value,
+    skill_id: &str,
 ) -> Result<(), rusqlite::Error> {
     let content = content.to_string();
     conn.execute(
@@ -76,6 +78,16 @@ fn seed_editor_element(
     conn.execute(
         "UPDATE course_elements SET content_inline = ?1, plugin_cid = ?2 WHERE id = ?3",
         params![content, plugin_cid, id],
+    )?;
+    // Skill tag drives the graded-submission credential path: on a passing
+    // grade, plugin_submit_and_grade issues an AssessmentCredential per tag.
+    // Conditional on the skill existing — the taxonomy is `dev-seed`-only, but
+    // this demo seed runs unconditionally, so skip the tag (and thus the
+    // credential) rather than trip the skills FK when the taxonomy is absent.
+    conn.execute(
+        "INSERT OR IGNORE INTO element_skill_tags (element_id, skill_id, weight) \
+         SELECT ?1, ?2, 1.0 WHERE EXISTS (SELECT 1 FROM skills WHERE id = ?2)",
+        params![id, skill_id],
     )?;
     Ok(())
 }
@@ -229,6 +241,7 @@ pub fn seed_plugin_demo_course(conn: &Connection) -> Result<(), rusqlite::Error>
                 0,
                 &ejs_cid,
                 &js_content,
+                "skill_javascript",
             )?;
 
             let ts_content = serde_json::json!({
@@ -253,6 +266,7 @@ pub fn seed_plugin_demo_course(conn: &Connection) -> Result<(), rusqlite::Error>
                 1,
                 &ets_cid,
                 &ts_content,
+                "skill_typescript",
             )?;
 
             // C++ (JSCPP) — added only when the C++ editor is installed.
@@ -279,6 +293,7 @@ pub fn seed_plugin_demo_course(conn: &Connection) -> Result<(), rusqlite::Error>
                     2,
                     &ecpp_cid,
                     &cpp_content,
+                    "skill_cpp",
                 )?;
             }
 
@@ -306,6 +321,7 @@ pub fn seed_plugin_demo_course(conn: &Connection) -> Result<(), rusqlite::Error>
                     3,
                     &epy_cid,
                     &py_content,
+                    "skill_python",
                 )?;
             }
             log::info!("plugin demo course: graded editor chapter seeded (js + ts + cpp + python)");

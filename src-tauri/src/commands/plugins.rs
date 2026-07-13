@@ -578,8 +578,8 @@ pub async fn plugin_submit_and_grade(
     // Derive the learner's DID from the unlocked keystore. The keystore
     // must be open — graded plugin submissions only make sense for an
     // enrolled learner whose vault is unlocked anyway.
-    let (_signing_key, learner_did) = load_learner_did(&state).await?;
-    let learner_did_str = learner_did.0;
+    let (signing_key, learner_did) = load_learner_did(&state).await?;
+    let learner_did_str = learner_did.0.clone();
 
     // Resolve manifest + grader path in a short DB-lock scope so we don't
     // hold the lock across grader execution.
@@ -649,9 +649,19 @@ pub async fn plugin_submit_and_grade(
         GraderBudgets::default(),
     )?;
 
-    // Persist the reproducibility bundle. `signed_attestation` stays NULL
-    // for now; the VC-signing path lands separately so this code doesn't
-    // need to touch the keystore yet.
+    // Durability: pin the exact grader-input bundle to the content store so the
+    // deterministic grade can be re-derived later. Soft-fail — a blob-store
+    // hiccup must never fail an otherwise-valid grade. `add_bytes` is async, so
+    // this runs BEFORE we take the (non-Send) DB lock below. Note: if a content
+    // key is set the bytes are AES-encrypted and the returned hash is of the
+    // ciphertext (device-local key), so this provides durability + local
+    // reproducibility, not public remote re-verification (that arrives with the
+    // unencrypted-evidence path in a later phase).
+    let bundle_pin = crate::ipfs::content::add_bytes(&state.content_node, &envelope_bytes)
+        .await
+        .map_err(|e| log::warn!("plugin grade: failed to pin submission bundle: {e}"))
+        .ok();
+
     let db_guard = state
         .db
         .lock()
@@ -673,6 +683,64 @@ pub async fn plugin_submit_and_grade(
         },
     )?;
 
+    // Promote the bundle blob to a permanent pin so eviction never reclaims a
+    // submission's reproducibility bytes.
+    if let Some(pin) = &bundle_pin {
+        crate::ipfs::storage::upsert_pin(db.conn(), &pin.hash, "submission", pin.size, false);
+    }
+
+    // Issue a signed Verifiable Credential for a passing grade — one per skill
+    // the element is tagged with (`element_skill_tags`). Self-issued (subject ==
+    // learner), same pipeline as the assessment path. Best-effort: a failure to
+    // issue must not fail the grade itself, and each skill is independent.
+    if record.score >= PLUGIN_PASS_THRESHOLD {
+        let skills = element_skill_ids(db, &element_id).unwrap_or_default();
+        if !skills.is_empty() {
+            let now = crate::commands::credentials::now_rfc3339();
+            let evidence = vec![
+                submission_cid.clone(),
+                content_cid.clone(),
+                grader_cid.clone(),
+            ];
+            for skill_id in skills {
+                let claim = crate::domain::vc::SkillClaim {
+                    skill_id: skill_id.clone(),
+                    level: crate::aggregation::level::map_level(record.score),
+                    score: record.score,
+                    evidence_refs: evidence.clone(),
+                    rubric_version: Some(manifest.version.clone()),
+                    assessment_method: Some("plugin_grader".to_string()),
+                    provenance: None,
+                };
+                let req = crate::commands::credentials::IssueCredentialRequest {
+                    credential_type: crate::domain::vc::CredentialType::AssessmentCredential,
+                    subject: learner_did.clone(),
+                    claim: crate::domain::vc::Claim::Skill(claim),
+                    evidence_refs: vec![submission_cid.clone()],
+                    expiration_date: None,
+                    supersedes: None,
+                    integrity_session_id: None,
+                    integrity_policy: None,
+                };
+                match crate::commands::credentials::issue_credential_impl(
+                    db.conn(),
+                    &signing_key,
+                    &learner_did,
+                    &req,
+                    &now,
+                ) {
+                    Ok(vc) => log::info!(
+                        "plugin grade: issued credential {:?} for skill {skill_id}",
+                        vc.id
+                    ),
+                    Err(e) => {
+                        log::warn!("plugin grade: credential issuance failed for {skill_id}: {e}")
+                    }
+                }
+            }
+        }
+    }
+
     log::info!(
         "plugin grade: cid={plugin_cid} element={element_id} score={} ({})",
         record.score,
@@ -680,6 +748,31 @@ pub async fn plugin_submit_and_grade(
     );
 
     Ok(record)
+}
+
+/// Minimum grade fraction (0.0–1.0) that earns a skill credential from a graded
+/// plugin. A single challenge is coarse evidence, so the bar is a strong-but-
+/// not-perfect pass; the aggregation layer weighs it by provenance afterward.
+const PLUGIN_PASS_THRESHOLD: f64 = 0.7;
+
+/// Skills a graded element is tagged with (`element_skill_tags`), highest weight
+/// first. Drives which skill(s) a passing grade credentials.
+fn element_skill_ids(db: &Database, element_id: &str) -> Result<Vec<String>, String> {
+    let conn = db.conn();
+    let mut stmt = conn
+        .prepare(
+            "SELECT skill_id FROM element_skill_tags WHERE element_id = ?1 \
+             ORDER BY weight DESC, skill_id ASC",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(params![element_id], |r| r.get::<_, String>(0))
+        .map_err(|e| e.to_string())?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r.map_err(|e| e.to_string())?);
+    }
+    Ok(out)
 }
 
 /// Bundle of fields the host writes to `element_submissions` per grade.
@@ -958,4 +1051,125 @@ pub async fn plugin_ingest_attestation(
         .map_err(|_| "database lock poisoned".to_string())?;
     let db = db_guard.as_ref().ok_or("database not initialized")?;
     attestation::persist_event(db, &event)
+}
+
+#[cfg(test)]
+mod grade_credential_tests {
+    use super::*;
+    use crate::crypto::did::derive_did_key;
+    use crate::db::Database;
+    use ed25519_dalek::SigningKey;
+
+    /// Seed a minimal skill taxonomy plus one plugin element tagged with two
+    /// skills at different weights, so the credential path has real
+    /// `element_skill_tags`. Built from raw inserts (not the `dev-seed` seeder)
+    /// so the test runs under the default feature set CI checks.
+    fn seed_tagged_element(db: &Database) {
+        let c = db.conn();
+        c.execute(
+            "INSERT INTO subject_fields (id, name) VALUES ('sf_cs', 'Computer Science')",
+            [],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO subjects (id, name, subject_field_id) VALUES ('sub_lang', 'Languages', 'sf_cs')",
+            [],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO skills (id, name, subject_id) VALUES \
+             ('skill_javascript', 'JavaScript', 'sub_lang'), \
+             ('skill_python', 'Python', 'sub_lang')",
+            [],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO courses (id, title, author_address) VALUES ('c_grade', 'Grade test', 'addr1')",
+            [],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO course_chapters (id, course_id, title, position) VALUES ('ch_grade', 'c_grade', 'Ch', 0)",
+            [],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO course_elements (id, chapter_id, title, element_type, position) \
+             VALUES ('el_grade', 'ch_grade', 'Double', 'plugin', 0)",
+            [],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO element_skill_tags (element_id, skill_id, weight) \
+             VALUES ('el_grade', 'skill_python', 0.5), ('el_grade', 'skill_javascript', 1.0)",
+            [],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn element_skill_ids_orders_by_weight_desc() {
+        let db = Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+        seed_tagged_element(&db);
+        let skills = element_skill_ids(&db, "el_grade").unwrap();
+        assert_eq!(
+            skills,
+            vec!["skill_javascript".to_string(), "skill_python".to_string()]
+        );
+        // Untagged element yields nothing (no spurious credentials).
+        assert!(element_skill_ids(&db, "el_missing").unwrap().is_empty());
+    }
+
+    #[test]
+    fn passing_grade_issues_one_credential_per_tagged_skill() {
+        let db = Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+        seed_tagged_element(&db);
+
+        let signing_key = SigningKey::from_bytes(&[7u8; 32]);
+        let learner = derive_did_key(&signing_key);
+        let now = "2026-07-13T00:00:00Z";
+        let score = 0.9_f64;
+        assert!(score >= PLUGIN_PASS_THRESHOLD);
+
+        let skills = element_skill_ids(&db, "el_grade").unwrap();
+        for skill_id in &skills {
+            let claim = crate::domain::vc::SkillClaim {
+                skill_id: skill_id.clone(),
+                level: crate::aggregation::level::map_level(score),
+                score,
+                evidence_refs: vec!["sub_cid".into()],
+                rubric_version: Some("0.1.0".into()),
+                assessment_method: Some("plugin_grader".into()),
+                provenance: None,
+            };
+            let req = crate::commands::credentials::IssueCredentialRequest {
+                credential_type: crate::domain::vc::CredentialType::AssessmentCredential,
+                subject: learner.clone(),
+                claim: crate::domain::vc::Claim::Skill(claim),
+                evidence_refs: vec!["sub_cid".into()],
+                expiration_date: None,
+                supersedes: None,
+                integrity_session_id: None,
+                integrity_policy: None,
+            };
+            let vc = crate::commands::credentials::issue_credential_impl(
+                db.conn(),
+                &signing_key,
+                &learner,
+                &req,
+                now,
+            )
+            .expect("issue credential");
+            // Self-issued: subject == issuer == learner.
+            assert_eq!(vc.credential_subject.id.0, learner.0);
+        }
+
+        let n: i64 = db
+            .conn()
+            .query_row("SELECT COUNT(*) FROM credentials", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, skills.len() as i64);
+    }
 }

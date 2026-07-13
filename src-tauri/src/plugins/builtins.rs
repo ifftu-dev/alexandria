@@ -533,4 +533,66 @@ mod tests {
         let dependents = registry::list_dependents(&db, &js_cid).unwrap();
         assert!(dependents.iter().any(|p| p.plugin_cid == collection_cid));
     }
+
+    /// End-to-end wiring of the graded-submission path, minus the Tauri
+    /// `AppState`: install the JavaScript editor builtin, read `grader.wasm`
+    /// back off disk, re-verify its hash against the manifest (exactly as
+    /// `plugin_submit_and_grade` does), then grade a correct and a wrong
+    /// submission through the real Wasmtime sandbox and assert the scores.
+    #[cfg(desktop)]
+    #[test]
+    fn editor_js_install_to_grade_wiring() {
+        use crate::plugins::wasm_runtime::{GraderBudgets, GraderRuntime};
+
+        let db = test_db();
+        let dir = TempDir::new().unwrap();
+        registry::install_builtin(&db, dir.path(), &EDITOR_JS_BUNDLE).expect("install js editor");
+
+        let cid = verifier::compute_plugin_cid(EDITOR_JS_BUNDLE.manifest_json);
+        let installed = registry::get_installed(&db, &cid)
+            .unwrap()
+            .expect("installed record");
+        let manifest = registry::get_manifest(&db, &cid).unwrap();
+        let grader_cid = manifest.grader.expect("editor has grader").cid;
+
+        // Read the grader off disk and re-verify — the same tamper check the
+        // command performs before every grade.
+        let grader_path = Path::new(&installed.install_path).join(registry::GRADER_FILENAME);
+        let wasm = std::fs::read(&grader_path).expect("grader.wasm on disk");
+        assert_eq!(
+            blake3::hash(&wasm).to_hex().to_string(),
+            grader_cid,
+            "on-disk grader hash must match the manifest"
+        );
+
+        // The demo "double the number" challenge: one visible + hidden tests.
+        let content = serde_json::json!({
+            "tests": [{ "name": "example", "stdin": "4", "expected_stdout": "8" }],
+            "grader_private": { "tests": [
+                { "name": "zero", "stdin": "0", "expected_stdout": "0" },
+                { "name": "negative", "stdin": "-5", "expected_stdout": "-10" },
+            ]}
+        });
+        let runtime = GraderRuntime::new().expect("runtime");
+        let grade = |source: &str| {
+            let input = serde_json::to_vec(&serde_json::json!({
+                "version": "1",
+                "content": content,
+                "submission": { "source": source },
+            }))
+            .unwrap();
+            runtime
+                .grade(&grader_cid, &wasm, None, &input, GraderBudgets::default())
+                .expect("grade")
+                .score
+        };
+
+        // Correct solution passes every visible + hidden test.
+        assert_eq!(
+            grade("const n = Number(readLine()); console.log(n * 2);"),
+            1.0
+        );
+        // A wrong solution scores below the credential threshold (0.7).
+        assert!(grade("const n = Number(readLine()); console.log(n + 1);") < 0.7);
+    }
 }
