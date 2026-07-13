@@ -1,0 +1,20 @@
+{
+  "banner": {
+    "title": "Mise à jour disponible",
+    "message": "Alexandria {version} est prête à être installée.",
+    "install": "Installer et redémarrer",
+    "later": "Plus tard",
+    "downloading": "Téléchargement…",
+    "installing": "Installation…"
+  },
+  "settings": {
+    "title": "Mises à jour",
+    "description": "Gardez Alexandria à jour. Les mises à jour sont vérifiées avant leur installation.",
+    "check": "Rechercher des mises à jour",
+    "checking": "Vérification…",
+    "current": "Version actuelle : {version}",
+    "uptodate": "Vous disposez de la dernière version.",
+    "available": "La version {version} est disponible.",
+    "error": "Impossible de rechercher des mises à jour. Réessayez plus tard."
+  }
+}

@@ -23,6 +23,7 @@ import type { SettingsSectionId } from '@/composables/useSettingsModal'
 import { AppButton, AppInput, AppTextarea, AppModal, AppAlert } from '@/components/ui'
 import AdvancedSettingsPanel from '@/components/settings/AdvancedSettingsPanel.vue'
 import RelayManager from '@/components/settings/RelayManager.vue'
+import UpdatePanel from '@/components/settings/UpdatePanel.vue'
 import PluginsPanel from '@/components/settings/PluginsPanel.vue'
 import GuardianPanel from '@/components/settings/GuardianPanel.vue'
 import LanguageSelector from '@/components/settings/LanguageSelector.vue'
@@ -811,6 +812,8 @@ function onSectionClick(id: SettingsSectionId) {
 
                 <!-- ──────────── System ──────────── -->
                 <template v-else-if="activeSection === 'system'">
+                  <UpdatePanel />
+
                   <div>
                     <h4 class="settings-group-title">{{ $t('settings.storage.title') }}</h4>
                     <div v-if="storageStats" class="space-y-5 rounded-lg border border-border p-4">

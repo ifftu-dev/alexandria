@@ -19,5 +19,6 @@ import sentinel from './sentinel.json'
 import nav from './nav.json'
 import dashboard from './dashboard.json'
 import omni from './omni.json'
+import update from './update.json'
 
-export default { common, onboarding, settings, network, credentials, courses, learn, skills, opinions, governance, tutoring, classrooms, instructor, guardian, plugins, profile, goals, sentinel, nav, dashboard, omni }
+export default { common, onboarding, settings, network, credentials, courses, learn, skills, opinions, governance, tutoring, classrooms, instructor, guardian, plugins, profile, goals, sentinel, nav, dashboard, omni, update }

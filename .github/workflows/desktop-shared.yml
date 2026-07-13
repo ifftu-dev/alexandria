@@ -256,8 +256,13 @@ jobs:
         with:
           projectPath: alexandria
           releaseId: ${{ needs.prepare.outputs.release_id }}
-          args: --target aarch64-apple-darwin --bundles dmg --config src-tauri/tauri.desktop.macos.conf.json
-          includeUpdaterJson: false
+          # `app` alongside `dmg` so the signed .app is emitted for the updater
+          # tarball (createUpdaterArtifacts in tauri.conf.json); the DMG stays
+          # the human download. `includeUpdaterJson` then publishes the signed
+          # `latest.json` the in-app updater polls. Only the signed path carries
+          # TAURI_SIGNING_PRIVATE_KEY, so only it can produce updater artifacts.
+          args: --target aarch64-apple-darwin --bundles app,dmg --config src-tauri/tauri.desktop.macos.conf.json
+          includeUpdaterJson: true
 
       - name: Rename macOS release assets
         if: inputs.mode == 'release'
