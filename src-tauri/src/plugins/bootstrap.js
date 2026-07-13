@@ -7,8 +7,9 @@
 //
 // Hardening notes:
 // - Deletes `window.__TAURI__` and any Tauri globals before the plugin's
-//   own scripts run. The iframe sandbox without `allow-same-origin`
-//   already blocks access, this is defense-in-depth.
+//   own scripts run. This is the PRIMARY barrier keeping untrusted plugin code
+//   away from backend IPC (the iframe uses `allow-same-origin`, so the origin
+//   itself is not the boundary — see PluginIframe.vue's security contract).
 // - Rejects messages whose api_version doesn't match. New host versions
 //   will add optional fields, never break old plugins.
 // - Freezes `window.alex` after setup so a hostile plugin script can't
@@ -157,6 +158,16 @@
     /** Submit a credential-bearing submission (Phase 2+; accepted but ungraded in Phase 1). */
     submit(submission, metadata) {
       return postToHost('submit', { submission, metadata: metadata || {} });
+    },
+
+    /**
+     * Open the host's native file picker (the sandboxed iframe cannot show one
+     * itself). User-initiated file selection is its own consent, so no
+     * capability grant is required. Resolves with
+     * `{ files: [{ name, type, size, data: Uint8Array }] }` (empty if cancelled).
+     */
+    pickFiles(options) {
+      return postToHost('pick_files', options || {});
     },
 
     /** Mark the element as complete for interactive plugins. */

@@ -1,0 +1,25 @@
+[package]
+name = "editor-python-grader"
+version = "0.1.0"
+edition = "2021"
+description = "Deterministic Python code grader/runner. RustPython VM compiled to wasm32-unknown-unknown (zero imports), run in Alexandria's empty-linker Wasmtime grader; the same wasm powers in-browser live eval. Built with rustc 1.97 (RustPython MSRV) via rust-toolchain.toml — isolated to this crate."
+license = "MIT"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+rustpython-vm = { git = "https://github.com/RustPython/RustPython", rev = "492e41cfbbd69495fca728f555fa73ddb36bb672", default-features = false, features = ["compiler"] }
+getrandom = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "z"
+panic = "abort"
+strip = true
+
+[workspace]

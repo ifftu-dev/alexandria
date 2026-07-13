@@ -1716,6 +1716,7 @@ export type PluginCapability =
   | 'clipboard'
   | 'storage'
   | 'ml_inference'
+  | 'instructor_review'
 
 export type PluginKind = 'interactive' | 'graded'
 

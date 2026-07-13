@@ -565,6 +565,7 @@ INSERT INTO skills (id, name, description, subject_id, bloom_level) VALUES
     ('skill_rust',          'Rust Programming',                 'Write safe, concurrent Rust code using ownership and lifetimes',     'sub_lang',     'apply'),
     ('skill_typescript',    'TypeScript',                       'Build type-safe applications with TypeScript and its type system',   'sub_lang',     'apply'),
     ('skill_python',        'Python',                           'Write idiomatic Python for scripting, data, and web development',   'sub_lang',     'apply'),
+    ('skill_cpp',           'C++',                              'Write correct C++ using functions, control flow, and the STL',      'sub_lang',     'apply'),
     ('skill_functional',    'Functional Programming',           'Apply FP concepts: immutability, higher-order functions, monads',   'sub_lang',     'understand'),
 
     -- Computer Networks

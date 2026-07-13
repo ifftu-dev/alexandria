@@ -79,7 +79,8 @@
       "fullscreen": "填满整个屏幕",
       "clipboard": "读取并更改你的剪贴板",
       "storage": "在此设备上保存你的进度",
-      "mlInference": "直接在你的设备上运行 AI 模型"
+      "mlInference": "直接在你的设备上运行 AI 模型",
+      "instructorReview": "将你的作业发送到讲师的评审收件箱"
     },
     "sandbox": "插件由社区制作，运行在一个安全的沙箱中。",
     "madeBy": "制作者",

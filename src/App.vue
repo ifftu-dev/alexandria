@@ -13,6 +13,8 @@ import { initShortcutsFromSettings } from '@/composables/useKeyboardShortcuts'
 import { initOmniRecentsFromSettings } from '@/composables/useOmniSearch'
 import { initSentinelFlagsFromSettings } from '@/composables/useSentinel'
 import SentinelDebugPip from '@/components/integrity/SentinelDebugPip.vue'
+import UpdateBanner from '@/components/update/UpdateBanner.vue'
+import { initUpdateCheck } from '@/composables/useAppUpdate'
 import { useDeepLinks } from '@/deeplink/useDeepLinks'
 
 const isDev = import.meta.env.DEV
@@ -133,6 +135,10 @@ onMounted(async () => {
 
   // Show the window now that the frontend is rendered and themed
   getCurrentWebviewWindow().show()
+
+  // Silent, fail-closed check for a signed update — reveals the banner only
+  // when one is genuinely available. Desktop Tauri only; inert elsewhere.
+  initUpdateCheck()
 })
 
 onUnmounted(() => {
@@ -151,6 +157,9 @@ onUnmounted(() => {
   <component v-else :is="layout">
     <router-view />
   </component>
+
+  <!-- Signed-update prompt; self-hides until a check finds an update. -->
+  <UpdateBanner />
 
   <!-- Dev-only live Sentinel observability PiP. -->
   <SentinelDebugPip v-if="isDev" />

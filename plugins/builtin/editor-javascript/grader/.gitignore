@@ -1,0 +1,5 @@
+/target
+# The compiled wasm in dist/ IS checked in (parent .gitignore would otherwise
+# drop it). It is post-processed (import-stubbed) from target/ output.
+!dist/
+!dist/**

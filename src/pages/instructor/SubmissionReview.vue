@@ -6,7 +6,8 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { AppButton, AppBadge, EmptyState, StatusBadge } from '@/components/ui'
-import type { IrlSubmission } from '@/types'
+import PluginHost from '@/components/plugin/PluginHost.vue'
+import type { Element, IrlSubmission, PluginManifest } from '@/types'
 
 const { invoke } = useLocalApi()
 const route = useRoute()
@@ -15,8 +16,50 @@ const router = useRouter()
 const submissionId = route.params.id as string
 
 const submission = ref<IrlSubmission | null>(null)
+const pluginManifest = ref<PluginManifest | null>(null)
 const loading = ref(true)
 const error = ref('')
+
+// A plugin that declares the `instructor_review` capability renders its OWN
+// review surface (mounted below in `mode: 'review'`); everything else falls
+// back to the generic JSON-dump + scoring form.
+const usesPluginReviewUi = computed(() =>
+  pluginManifest.value?.capabilities?.includes('instructor_review') ?? false,
+)
+
+// Synthetic element that feeds the submitted work to the plugin's review UI as
+// its `init` content, keyed by the submission id.
+const reviewElement = computed<Element | null>(() => {
+  const s = submission.value
+  if (!s) return null
+  let payload: unknown = s.submission_json
+  try {
+    payload = JSON.parse(s.submission_json)
+  } catch {
+    /* leave as raw string */
+  }
+  let skills: unknown = []
+  try {
+    skills = JSON.parse(s.skills_json)
+  } catch {
+    /* default to [] */
+  }
+  return {
+    id: s.id,
+    chapter_id: '',
+    title: 'review',
+    element_type: 'plugin',
+    content_cid: null,
+    content_inline: JSON.stringify({ submission: payload, skills }),
+    position: 0,
+    duration_seconds: null,
+    plugin_cid: s.plugin_cid,
+  }
+})
+
+function onReviewPosted() {
+  router.replace('/instructor/inbox')
+}
 
 const scorePct = ref(80)
 const feedback = ref('')
@@ -44,6 +87,14 @@ onMounted(async () => {
   try {
     submission.value = await invoke<IrlSubmission | null>('irl_get_submission', { submissionId })
     for (const s of declaredSkills.value) skillRatings.value[s] = 0.8
+    // Load the submitting plugin's manifest to decide whether it renders its
+    // own review UI. Best-effort — fall back to the native form on failure.
+    const cid = submission.value?.plugin_cid
+    if (cid) {
+      pluginManifest.value = await invoke<PluginManifest>('plugin_get_manifest', {
+        pluginCid: cid,
+      }).catch(() => null)
+    }
   } catch (e) {
     error.value = String(e)
   } finally {
@@ -102,7 +153,27 @@ async function postReview() {
         </div>
       </div>
 
-      <div v-if="submission.status === 'pending'" class="rounded-xl border border-border bg-card p-5 space-y-4">
+      <!-- Plugin-rendered review UI (mode: 'review') for plugins that declare
+           the instructor_review capability. -->
+      <div
+        v-if="submission.status === 'pending' && usesPluginReviewUi && reviewElement"
+        class="rounded-xl border border-border bg-card p-5 space-y-3"
+      >
+        <h2 class="text-sm font-semibold text-foreground">{{ $t('instructor.submissionReview.yourReview') }}</h2>
+        <div class="h-[32rem] min-h-0 overflow-hidden rounded-lg border border-border">
+          <PluginHost
+            :element="reviewElement"
+            mode="review"
+            :review-submission-id="submission.id"
+            @complete="onReviewPosted"
+          />
+        </div>
+      </div>
+
+      <div
+        v-else-if="submission.status === 'pending'"
+        class="rounded-xl border border-border bg-card p-5 space-y-4"
+      >
         <h2 class="text-sm font-semibold text-foreground">{{ $t('instructor.submissionReview.yourReview') }}</h2>
 
         <div>

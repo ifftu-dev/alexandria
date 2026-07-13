@@ -79,7 +79,8 @@
       "fullscreen": "ocupar toda la pantalla",
       "clipboard": "leer y cambiar tu portapapeles",
       "storage": "guardar tu progreso en este dispositivo",
-      "mlInference": "ejecutar modelos de IA directamente en tu dispositivo"
+      "mlInference": "ejecutar modelos de IA directamente en tu dispositivo",
+      "instructorReview": "enviar tu trabajo a la bandeja de revisión del instructor"
     },
     "sandbox": "Los plugins los crea la comunidad y se ejecutan en un entorno aislado seguro.",
     "madeBy": "Creado por",

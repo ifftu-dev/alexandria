@@ -1,0 +1,35 @@
+{
+  "id": "did:key:z6MkvDqGT54cXesYGvABpF1UapVNwjCqRcafi4Px6Thv5T3Z#editor-cpp",
+  "version": "0.1.0",
+  "api_version": "1",
+  "host_min_version": "0.1.0",
+  "name": "Code Editor: C++",
+  "description": "Write and run C/C++ with syntax highlighting and live evaluation. Your code is interpreted locally by the bundled JSCPP engine (in a sandboxed Boa WebAssembly runtime) against test cases \u2014 no network, no server. Intro subset (no STL/templates). Graded submissions are re-run by the host's deterministic grader for credential-bearing scoring.",
+  "author_did": "did:key:z6MkvDqGT54cXesYGvABpF1UapVNwjCqRcafi4Px6Thv5T3Z",
+  "kinds": [
+    "graded"
+  ],
+  "scope": "course",
+  "capabilities": [],
+  "grader": {
+    "cid": "9b09f577d460afac8a035d0cca3290940519db8dba1d94e37ec468ca03c6605b",
+    "blake3": "9b09f577d460afac8a035d0cca3290940519db8dba1d94e37ec468ca03c6605b",
+    "entrypoint": "alex_grade"
+  },
+  "subject_tags": [
+    "programming",
+    "cpp",
+    "c",
+    "coding-challenge",
+    "practice"
+  ],
+  "platforms": [
+    "macos",
+    "windows",
+    "linux",
+    "ios",
+    "android"
+  ],
+  "icon_path": "icon.svg",
+  "entry": "ui/index.html"
+}

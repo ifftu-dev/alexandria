@@ -79,7 +79,8 @@
       "fullscreen": "fill the whole screen",
       "clipboard": "read and change your clipboard",
       "storage": "save your progress on this device",
-      "mlInference": "run AI models right on your device"
+      "mlInference": "run AI models right on your device",
+      "instructorReview": "send your work to the instructor's review inbox"
     },
     "sandbox": "Plugins are made by the community and run in a safe sandbox.",
     "madeBy": "Made by",

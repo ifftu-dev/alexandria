@@ -1,0 +1,22 @@
+[package]
+name = "editor-typescript-grader"
+version = "0.1.0"
+edition = "2021"
+description = "Deterministic TypeScript code grader/runner. Thin ABI over boa-runner-core; strips TS types with bundled sucrase inside the engine, then runs on Boa. Compiled to wasm32-unknown-unknown for the empty-linker Wasmtime grader; the same wasm powers in-browser live eval."
+license = "MIT OR Apache-2.0"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+boa-runner-core = { path = "../../editor-shared/boa-runner-core" }
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "z"
+panic = "abort"
+strip = true
+
+[workspace]

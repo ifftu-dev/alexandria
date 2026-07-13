@@ -79,7 +79,8 @@
       "fullscreen": "occuper tout l'écran",
       "clipboard": "lire et modifier votre presse-papiers",
       "storage": "enregistrer votre progression sur cet appareil",
-      "mlInference": "exécuter des modèles d'IA directement sur votre appareil"
+      "mlInference": "exécuter des modèles d'IA directement sur votre appareil",
+      "instructorReview": "envoyer votre travail à la boîte de révision de l'instructeur"
     },
     "sandbox": "Les extensions sont créées par la communauté et s'exécutent dans un bac à sable sécurisé.",
     "madeBy": "Créé par",

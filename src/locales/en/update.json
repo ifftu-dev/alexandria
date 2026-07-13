@@ -1,0 +1,20 @@
+{
+  "banner": {
+    "title": "Update available",
+    "message": "Alexandria {version} is ready to install.",
+    "install": "Install & restart",
+    "later": "Later",
+    "downloading": "Downloading…",
+    "installing": "Installing…"
+  },
+  "settings": {
+    "title": "Updates",
+    "description": "Keep Alexandria up to date. Updates are verified before they install.",
+    "check": "Check for updates",
+    "checking": "Checking…",
+    "current": "Current version: {version}",
+    "uptodate": "You're on the latest version.",
+    "available": "Version {version} is available.",
+    "error": "Couldn't check for updates. Please try again later."
+  }
+}

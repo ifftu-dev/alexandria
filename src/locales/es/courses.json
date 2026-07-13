@@ -209,5 +209,18 @@
   "unknown": {
     "contentId": "ID de contenido",
     "noContent": "Aún no se ha añadido contenido."
+  },
+  "enrollPlugins": {
+    "title": "Complementos de este curso",
+    "bodyInstall": "Este curso usa {count} complemento(s) que aún no están en tu equipo. Se instalarán antes de inscribirte.",
+    "bodyReady": "Los complementos de este curso ya están instalados en tu equipo.",
+    "continue": "Continuar",
+    "continueInstall": "Instalar e inscribirse",
+    "status": {
+      "ready": "Instalado",
+      "installing": "Instalando…",
+      "failed": "Error",
+      "willInstall": "Se instalará"
+    }
   }
 }

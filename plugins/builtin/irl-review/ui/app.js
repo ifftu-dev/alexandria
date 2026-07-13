@@ -107,6 +107,38 @@
       kind === 'error' ? '#dc2626' : kind === 'ok' ? '#16a34a' : '';
   }
 
+  // Trigger a browser download for a stored attachment ({ name, mime, data_b64 }).
+  // Requires the iframe's `allow-downloads` sandbox token.
+  function downloadFile(f) {
+    try {
+      const bin = atob(f.data_b64 || '');
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      const blob = new Blob([bytes], { type: f.mime || 'application/octet-stream' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = f.name || 'download';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1500);
+    } catch (err) {
+      setStatus(`Could not download "${f.name}": ${err && err.message ? err.message : err}`, 'error');
+    }
+  }
+
+  // Load a past submission back into the editable form (view / resubmit).
+  function loadSubmissionIntoForm(payload, skills) {
+    commentEl.value = payload && payload.comment ? payload.comment : '';
+    state.files = payload && Array.isArray(payload.files) ? payload.files.map((f) => ({ ...f })) : [];
+    state.skills = Array.isArray(skills) ? [...skills] : [];
+    renderFiles();
+    renderSkills();
+    setStatus('Loaded a past submission into the form above.', 'ok');
+    if (form && form.scrollIntoView) form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
   function renderReviews(submissions) {
     if (!submissions || submissions.length === 0) {
       reviewsListEl.innerHTML = '<p class="sub">No submissions yet.</p>';
@@ -184,6 +216,44 @@
         }
       }
 
+      // Attachments — downloadable from the snapshot.
+      const attachedFiles = Array.isArray(submissionPayload.files) ? submissionPayload.files : [];
+      if (attachedFiles.length > 0) {
+        const filesWrap = document.createElement('div');
+        filesWrap.style.marginTop = '8px';
+        const heading = document.createElement('div');
+        heading.className = 'sub';
+        heading.textContent = 'Attachments';
+        filesWrap.appendChild(heading);
+        attachedFiles.forEach((f) => {
+          const frow = document.createElement('div');
+          frow.className = 'file-row';
+          const nm = document.createElement('div');
+          nm.textContent = f.name;
+          const meta = document.createElement('span');
+          meta.className = 'meta';
+          meta.textContent = ` ${formatBytes(f.size || 0)} · ${f.mime || 'unknown'}`;
+          nm.appendChild(meta);
+          const dl = document.createElement('button');
+          dl.type = 'button';
+          dl.textContent = 'Download';
+          dl.addEventListener('click', (e) => {
+            e.stopPropagation();
+            downloadFile(f);
+          });
+          frow.appendChild(nm);
+          frow.appendChild(dl);
+          filesWrap.appendChild(frow);
+        });
+        card.appendChild(filesWrap);
+      }
+
+      // Click the card (outside the download buttons) to load this submission
+      // back into the editable form above.
+      card.style.cursor = 'pointer';
+      card.title = 'Click to load this submission into the form';
+      card.addEventListener('click', () => loadSubmissionIntoForm(submissionPayload, skills));
+
       reviewsListEl.appendChild(card);
     });
   }
@@ -217,9 +287,55 @@
     });
   }
 
+  function uint8ToBase64(u8) {
+    let s = '';
+    const chunk = 0x8000;
+    for (let i = 0; i < u8.length; i += chunk) {
+      s += String.fromCharCode.apply(null, u8.subarray(i, i + chunk));
+    }
+    return btoa(s);
+  }
+
+  const MIME_BY_EXT = {
+    png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
+    webp: 'image/webp', pdf: 'application/pdf', mp4: 'video/mp4', mov: 'video/quicktime',
+    mp3: 'audio/mpeg', wav: 'audio/wav', txt: 'text/plain',
+  };
+
+  // Files chosen through the host's native picker (the sandboxed iframe can't
+  // show its own). Each: { name, size, data: Uint8Array }.
+  async function addPickedFile(f) {
+    if (f.size > config.max_file_bytes) {
+      setStatus(`File "${f.name}" exceeds ${formatBytes(config.max_file_bytes)} cap.`, 'error');
+      return;
+    }
+    const ext = (f.name.split('.').pop() || '').toLowerCase();
+    state.files.push({
+      name: f.name,
+      mime: MIME_BY_EXT[ext] || 'application/octet-stream',
+      size: f.size,
+      data_b64: uint8ToBase64(f.data instanceof Uint8Array ? f.data : new Uint8Array(f.data)),
+    });
+    renderFiles();
+  }
+
   filesInput.addEventListener('change', async () => {
     for (const f of Array.from(filesInput.files || [])) await addFile(f);
     filesInput.value = '';
+  });
+
+  // The sandboxed iframe can't open a native file dialog from <input type=file>,
+  // so route clicks through the host's picker via the alex bridge.
+  dropEl.addEventListener('click', async (e) => {
+    e.preventDefault();
+    try {
+      const res = await alex.pickFiles({ multiple: true });
+      if (res && Array.isArray(res.files)) {
+        for (const f of res.files) await addPickedFile(f);
+      }
+    } catch (err) {
+      setStatus(`Could not open file picker: ${err && err.message ? err.message : err}`, 'error');
+    }
   });
 
   dropEl.addEventListener('dragover', (e) => {
@@ -288,17 +404,33 @@
 
   // ----- Refresh: ask host for my submissions -----
   let lastRefreshAt = 0;
-  async function refreshSubmissions() {
+  async function refreshSubmissions(showFeedback) {
     lastRefreshAt = Date.now();
     try {
       const resp = await alex.emitEvent('irl_refresh', {});
       const submissions = (resp && resp.submissions) || [];
       renderReviews(submissions);
+      if (showFeedback) {
+        const reviewed = submissions.filter((s) => s.status === 'reviewed').length;
+        const n = submissions.length;
+        setStatus(
+          n === 0
+            ? 'No submissions yet.'
+            : `${n} submission${n === 1 ? '' : 's'}${reviewed ? `, ${reviewed} reviewed` : ' — awaiting review'}.`,
+          'ok',
+        );
+      }
     } catch (err) {
       setStatus(`Could not load submissions: ${err.message || err}`, 'error');
     }
   }
-  refreshBtn.addEventListener('click', () => void refreshSubmissions());
+  // Manual refresh checks for new instructor review replies (status/score/
+  // feedback). Show a status line so the button visibly does something even
+  // when nothing changed.
+  refreshBtn.addEventListener('click', () => {
+    setStatus('Checking for updates…');
+    void refreshSubmissions(true);
+  });
 
   // Poll periodically for review replies — host returns instantly from
   // the in-memory SQLite read so the cost is negligible.

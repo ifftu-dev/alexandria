@@ -209,5 +209,18 @@
   "unknown": {
     "contentId": "Identifiant du contenu",
     "noContent": "Aucun contenu ajouté pour l'instant."
+  },
+  "enrollPlugins": {
+    "title": "Modules de ce cours",
+    "bodyInstall": "Ce cours utilise {count} module(s) qui ne sont pas encore sur votre machine. Ils seront installés avant votre inscription.",
+    "bodyReady": "Les modules de ce cours sont déjà installés sur votre machine.",
+    "continue": "Continuer",
+    "continueInstall": "Installer et s'inscrire",
+    "status": {
+      "ready": "Installé",
+      "installing": "Installation…",
+      "failed": "Échec",
+      "willInstall": "À installer"
+    }
   }
 }

@@ -11,6 +11,7 @@
     "core:window:allow-start-dragging",
     "biometry:default",
     "updater:default",
+    "process:allow-restart",
     "deep-link:default",
     "dialog:default",
     "os:allow-locale",

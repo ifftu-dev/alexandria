@@ -19,6 +19,8 @@
 
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { open as openFileDialog } from '@tauri-apps/plugin-dialog'
+import { readFile } from '@tauri-apps/plugin-fs'
 import { useLocalApi } from '@/composables/useLocalApi'
 import PluginIframe from './PluginIframe.vue'
 import PermissionPrompt from './PermissionPrompt.vue'
@@ -45,6 +47,9 @@ const props = defineProps<{
   /** Enrollment the learner is taking this element under. Required for
    *  graded plugins to persist a submission row. */
   enrollmentId?: string | null
+  /** In `review` mode, the id of the submission being reviewed. The plugin's
+   *  review UI submits its verdict and the host posts it against this row. */
+  reviewSubmissionId?: string | null
 }>()
 
 const emit = defineEmits<{
@@ -76,6 +81,12 @@ interface PendingCapability {
   reason: string
 }
 const pendingCapability = ref<PendingCapability | null>(null)
+// Requests that arrived while a prompt was already open. Instead of
+// auto-denying them (which breaks plugins that fire a request per user action,
+// e.g. clicking a "Start" button that needs the mic), they queue and are
+// resolved after the current decision — auto-granted if the user just granted
+// the same capability, otherwise prompted in turn.
+const pendingQueue = ref<PendingCapability[]>([])
 
 const iframeRef = ref<InstanceType<typeof PluginIframe> | null>(null)
 
@@ -83,15 +94,28 @@ const pluginCid = computed(() => props.element.plugin_cid ?? '')
 
 /** Parsed `content_inline` JSON passed to the iframe in `init`. Plugins
  *  see this as `msg.payload.content` and use it to configure their UI
- *  (e.g. Music Reviews reads its target-notes sequence here). */
+ *  (e.g. Music Reviews reads its target-notes sequence here).
+ *
+ *  Security: the top-level `grader_private` key is stripped before the content
+ *  reaches the sandboxed iframe. Graded plugins (e.g. the code editors) put
+ *  hidden test expectations there; the learner can read anything the iframe
+ *  receives, but the deterministic grader still gets the full content because
+ *  `submitElement` passes the raw `content_inline` to `plugin_submit_and_grade`. */
 const elementContent = computed<unknown>(() => {
   const raw = props.element.content_inline
   if (!raw) return null
+  let parsed: unknown
   try {
-    return JSON.parse(raw)
+    parsed = JSON.parse(raw)
   } catch {
     return raw
   }
+  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && 'grader_private' in parsed) {
+    const clone = { ...(parsed as Record<string, unknown>) }
+    delete clone.grader_private
+    return clone
+  }
+  return parsed
 })
 
 const grantedCapabilities = computed<PluginCapability[]>(() => {
@@ -158,6 +182,8 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   // Once-grants do not persist beyond a single plugin mount.
   onceGrants.value.clear()
+  pendingCapability.value = null
+  pendingQueue.value = []
 })
 
 // Proxy plugin events back to the element registry.
@@ -175,13 +201,32 @@ function onRequestCapability(requestId: number, name: PluginCapability, reason: 
     iframeRef.value?.sendCapabilityGranted(name, 'session')
     return
   }
-  // A second concurrent prompt is auto-denied — Phase 1 only supports
-  // one active consent dialog at a time.
+  // A prompt is already open — queue this request instead of denying it, so a
+  // plugin that requests the capability again (e.g. a second Start click) isn't
+  // spuriously rejected. It resolves when the current decision is made.
   if (pendingCapability.value) {
-    iframeRef.value?.resolveCapabilityRequest(requestId, false)
+    pendingQueue.value.push({ requestId, name, reason })
     return
   }
   pendingCapability.value = { requestId, name, reason }
+}
+
+/** After a decision, resolve any queued requests: auto-grant ones the user just
+ *  allowed, and promote the next still-ungranted request to the active prompt. */
+function drainCapabilityQueue() {
+  const still: PendingCapability[] = []
+  for (const q of pendingQueue.value) {
+    if (grantedCapabilities.value.includes(q.name)) {
+      iframeRef.value?.resolveCapabilityRequest(q.requestId, true)
+      iframeRef.value?.sendCapabilityGranted(q.name, 'session')
+    } else {
+      still.push(q)
+    }
+  }
+  pendingQueue.value = still
+  if (!pendingCapability.value && still.length > 0) {
+    pendingCapability.value = still.shift() ?? null
+  }
 }
 
 async function onPermissionDecision(decision: 'once' | 'session' | 'always' | 'deny') {
@@ -194,6 +239,7 @@ async function onPermissionDecision(decision: 'once' | 'session' | 'always' | 'd
 
   if (decision === 'deny') {
     iframe.resolveCapabilityRequest(pending.requestId, false)
+    drainCapabilityQueue()
     return
   }
 
@@ -219,11 +265,41 @@ async function onPermissionDecision(decision: 'once' | 'session' | 'always' | 'd
 
   iframe.resolveCapabilityRequest(pending.requestId, true)
   iframe.sendCapabilityGranted(pending.name, decision)
+  drainCapabilityQueue()
+}
+
+/**
+ * Open the host's native file picker on the plugin's behalf. The sandboxed
+ * iframe can't present one itself; the user's file selection is its own consent
+ * (no capability grant needed). Reads the chosen files and returns their bytes
+ * to the plugin over the port.
+ */
+async function onPickFiles(requestId: number, options: unknown) {
+  const iframe = iframeRef.value
+  if (!iframe) return
+  const opts = (options ?? {}) as { multiple?: boolean; accept?: string[] }
+  try {
+    const selection = await openFileDialog({
+      multiple: opts.multiple ?? true,
+      directory: false,
+    })
+    const paths = selection == null ? [] : Array.isArray(selection) ? selection : [selection]
+    const files = await Promise.all(
+      paths.map(async (p) => {
+        const data = await readFile(p)
+        const name = p.split(/[\\/]/).pop() ?? p
+        return { name, size: data.byteLength, data }
+      }),
+    )
+    iframe.resolvePickFiles(requestId, { files })
+  } catch (e) {
+    iframe.resolvePickFiles(requestId, { files: [] }, String(e))
+  }
 }
 
 function onPersistState(blob: unknown) {
   // Durably persist the plugin's opaque per-element state so unsubmitted work
-  // (e.g. a codejudge editor's source) survives navigating away and restarting
+  // (e.g. a code editor's source) survives navigating away and restarting
   // the app. Best-effort + fire-and-forget: a failed save must not disrupt the
   // plugin. Reloaded into the plugin's `init` payload on next mount.
   elementState.value = blob
@@ -253,7 +329,11 @@ async function onEmitEvent(requestId: number, type: string, payload: unknown) {
     }
     return
   }
+  // Fire-and-forget event (e.g. note_correct/note_wrong telemetry). Resolve it
+  // so the plugin's emitEvent promise settles — the iframe no longer sends a
+  // default response of its own.
   console.debug('[alex] plugin event', type, payload)
+  iframeRef.value?.resolveEvent(requestId, null)
 }
 
 async function onSubmit(requestId: number, submission: unknown, metadata: unknown) {
@@ -263,12 +343,47 @@ async function onSubmit(requestId: number, submission: unknown, metadata: unknow
     return
   }
 
-  // IRL Review path — route to the local instructor inbox IPC.
-  const meta = (metadata as { type?: string } | null) ?? null
-  if (meta?.type === 'irl_review') {
-    const skills = Array.isArray((meta as { skills?: unknown }).skills)
-      ? ((meta as { skills?: unknown[] }).skills as unknown[])
-      : []
+  const meta = (metadata as Record<string, unknown> | null) ?? null
+
+  // Review mode — the instructor's review UI is posting its verdict for the
+  // submission being reviewed. Route to the generalized review-post IPC.
+  if (props.mode === 'review') {
+    if (!props.reviewSubmissionId) {
+      iframeRef.value?.resolveSubmit(requestId, null, 'no submission to review')
+      return
+    }
+    const sub = (submission as Record<string, unknown> | null) ?? {}
+    const pick = <T,>(key: string): T | undefined =>
+      (meta?.[key] as T | undefined) ?? (sub[key] as T | undefined)
+    const score = pick<number>('score')
+    if (typeof score !== 'number' || !isFinite(score)) {
+      iframeRef.value?.resolveSubmit(requestId, null, 'review is missing a numeric score')
+      return
+    }
+    const feedback = pick<string>('feedback') ?? ''
+    const skillRatings = pick<Record<string, number>>('skill_ratings') ?? {}
+    try {
+      await invoke('irl_post_review', {
+        submissionId: props.reviewSubmissionId,
+        score,
+        feedback,
+        skillRatingsJson: JSON.stringify(skillRatings),
+      })
+      iframeRef.value?.resolveSubmit(requestId, { reviewed: true })
+      emit('complete')
+    } catch (e) {
+      iframeRef.value?.resolveSubmit(requestId, null, String(e))
+    }
+    return
+  }
+
+  // Learner submit → instructor inbox, for any plugin that declares the
+  // `instructor_review` capability (the IRL Review plugin's `type:'irl_review'`
+  // metadata is still honoured for backward compatibility).
+  const isReviewSubmit =
+    meta?.type === 'irl_review' || (m.capabilities?.includes('instructor_review') ?? false)
+  if (isReviewSubmit) {
+    const skills = Array.isArray(meta?.skills) ? (meta.skills as unknown[]) : []
     try {
       const submissionId = await invoke<string>('irl_submit_for_review', {
         pluginCid: pluginCid.value,
@@ -373,6 +488,7 @@ function onIframeError(msg: string) {
           @emit-event="onEmitEvent"
           @submit="onSubmit"
           @complete="onComplete"
+          @pick-files="onPickFiles"
           @error="onIframeError"
         />
       </div>

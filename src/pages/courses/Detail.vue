@@ -1,9 +1,15 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import { listen } from '@tauri-apps/api/event'
+import type { UnlistenFn } from '@tauri-apps/api/event'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { AppButton, StatusBadge, EmptyState, ProvenanceBadge } from '@/components/ui'
+import EnrollPluginDialog, {
+  type RequiredPlugin,
+  type PluginProgress,
+} from '@/components/course/EnrollPluginDialog.vue'
 import type { Course, Chapter, Element, Enrollment } from '@/types'
 
 const { t } = useI18n()
@@ -59,17 +65,80 @@ onMounted(async () => {
   }
 })
 
+// --- Enrollment pre-flight: install course-required plugins first ---
+const pluginDialogOpen = ref(false)
+const requiredPlugins = ref<RequiredPlugin[]>([])
+const installing = ref(false)
+const installProgress = ref<Record<string, PluginProgress>>({})
+const installError = ref<string | null>(null)
+let unlistenProgress: UnlistenFn | null = null
+
 async function enroll() {
   if (!course.value) return
   enrolling.value = true
   try {
-    enrollment.value = await invoke<Enrollment>('enroll', { courseId: course.value.id })
+    const plugins = await invoke<RequiredPlugin[]>('course_required_plugins', {
+      courseId: course.value.id,
+    }).catch(() => [] as RequiredPlugin[])
+
+    // No plugins, or all already installed → enroll directly, no dialog.
+    if (plugins.length === 0 || plugins.every(p => p.installed)) {
+      enrollment.value = await invoke<Enrollment>('enroll', { courseId: course.value.id })
+      return
+    }
+
+    // Otherwise show the pre-flight dialog and let the user Continue/Cancel.
+    requiredPlugins.value = plugins
+    installProgress.value = {}
+    installError.value = null
+    pluginDialogOpen.value = true
   } catch (e) {
     console.error('Failed to enroll:', e)
   } finally {
     enrolling.value = false
   }
 }
+
+async function confirmEnrollWithPlugins() {
+  if (!course.value || installing.value) return
+  installing.value = true
+  installError.value = null
+
+  unlistenProgress = await listen<{ plugin_cid: string } & PluginProgress>(
+    'plugin-install-progress',
+    (event) => {
+      const { plugin_cid, step, index, total } = event.payload
+      installProgress.value = {
+        ...installProgress.value,
+        [plugin_cid]: { step, index, total },
+      }
+    },
+  )
+
+  try {
+    await invoke('install_course_plugins', { courseId: course.value.id })
+    enrollment.value = await invoke<Enrollment>('enroll', { courseId: course.value.id })
+    pluginDialogOpen.value = false
+  } catch (e) {
+    installError.value = String(e)
+    console.error('Failed to install course plugins:', e)
+  } finally {
+    installing.value = false
+    if (unlistenProgress) {
+      unlistenProgress()
+      unlistenProgress = null
+    }
+  }
+}
+
+function cancelEnroll() {
+  if (installing.value) return
+  pluginDialogOpen.value = false
+}
+
+onUnmounted(() => {
+  if (unlistenProgress) unlistenProgress()
+})
 
 function elementTypeIcon(elementType: string): string {
   switch (elementType) {
@@ -313,5 +382,15 @@ function elementTypeLabel(elementType: string): string {
         </div>
       </div>
     </div>
+
+    <EnrollPluginDialog
+      :open="pluginDialogOpen"
+      :plugins="requiredPlugins"
+      :installing="installing"
+      :progress="installProgress"
+      :error="installError"
+      @continue="confirmEnrollWithPlugins"
+      @cancel="cancelEnroll"
+    />
   </div>
 </template>

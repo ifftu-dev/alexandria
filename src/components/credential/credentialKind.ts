@@ -43,7 +43,7 @@ export const CREDENTIAL_KINDS: Record<CredentialClass, CredentialKindMeta> = {
     text: 'text-indigo-600 dark:text-indigo-400',
     icon: 'M12 14l9-5-9-5-9 5 9 5zm0 0l6.16-3.42M12 14v7m-6-9.5V17a6 3 0 0012 0v-5.5',
   },
-  // Result of a graded evaluation (quiz/exam/codejudge).
+  // Result of a graded evaluation (quiz/exam/code editor).
   AssessmentCredential: {
     label: 'credentials.kind.assessment.label',
     short: 'credentials.kind.assessment.short',

@@ -27,6 +27,11 @@ pub enum PluginCapability {
     Clipboard,
     Storage,
     MlInference,
+    /// The plugin may post learner submissions to the instructor's review inbox
+    /// and provide its own review UI there (rendered with `mode: "review"`).
+    /// Gates the generalized submit-for-review routing in the host — a plugin
+    /// without this capability cannot land rows in the review queue.
+    InstructorReview,
 }
 
 impl PluginCapability {
@@ -39,6 +44,7 @@ impl PluginCapability {
             PluginCapability::Clipboard => "clipboard",
             PluginCapability::Storage => "storage",
             PluginCapability::MlInference => "ml_inference",
+            PluginCapability::InstructorReview => "instructor_review",
         }
     }
 
@@ -51,6 +57,7 @@ impl PluginCapability {
             "clipboard" => Some(Self::Clipboard),
             "storage" => Some(Self::Storage),
             "ml_inference" => Some(Self::MlInference),
+            "instructor_review" => Some(Self::InstructorReview),
             _ => None,
         }
     }
@@ -65,6 +72,22 @@ pub enum PluginKind {
     /// Requires a deterministic WASM grader (Phase 2+). Eligible for
     /// credential issuance subject to Plugin DAO attestation.
     Graded,
+}
+
+/// When a plugin is installed on a learner's machine. Author-declared and part
+/// of what the Plugin DAO attests (the attestation covers the whole manifest).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PluginScope {
+    /// Installed for everyone at startup — broadly useful (e.g. MCQ).
+    #[default]
+    Global,
+    /// Installed on demand the first time a learner enrolls in a course that
+    /// requires it. Once installed it is machine-wide (shared by any course
+    /// referencing the same `plugin_cid`). Heavier plugins (e.g. the code
+    /// editors, with multi-MB graders) are course-scoped so they aren't
+    /// compiled for users who never take a course that needs them.
+    Course,
 }
 
 /// The signed manifest that identifies a plugin bundle. Parsed from
@@ -92,6 +115,12 @@ pub struct PluginManifest {
     pub author_did: String,
     /// Which element kinds the plugin provides.
     pub kinds: Vec<PluginKind>,
+    /// When the plugin is installed on a learner's machine. `Global` installs at
+    /// startup for everyone; `Course` installs on first enrollment in a course
+    /// that requires it. Author-declared, covered by the DAO manifest attestation.
+    /// Defaults to `Global` so pre-scope manifests are unchanged.
+    #[serde(default)]
+    pub scope: PluginScope,
     /// Declared capabilities. Per-capability consent is required at runtime.
     #[serde(default)]
     pub capabilities: Vec<PluginCapability>,
@@ -191,6 +220,9 @@ pub struct IrlSubmission {
     pub skill_ratings_json: Option<String>,
     pub created_at: String,
     pub reviewed_at: Option<String>,
+    /// Course this submission belongs to, when resolvable. Scopes the row to an
+    /// instructor's inbox. `None` for legacy rows / when it couldn't be derived.
+    pub course_id: Option<String>,
 }
 
 /// A persisted per-plugin permission record. Mirrors `plugin_permissions`.
