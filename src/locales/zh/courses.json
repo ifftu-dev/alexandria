@@ -209,5 +209,18 @@
   "unknown": {
     "contentId": "内容 ID",
     "noContent": "尚未添加内容。"
+  },
+  "enrollPlugins": {
+    "title": "本课程的插件",
+    "bodyInstall": "本课程使用了 {count} 个尚未安装到你设备上的插件。它们会在你报名前安装。",
+    "bodyReady": "本课程的插件已安装到你的设备上。",
+    "continue": "继续",
+    "continueInstall": "安装并报名",
+    "status": {
+      "ready": "已安装",
+      "installing": "正在安装…",
+      "failed": "失败",
+      "willInstall": "将安装"
+    }
   }
 }
