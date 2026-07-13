@@ -6,12 +6,31 @@
  * `/Users/hack/.claude/plans/prancy-bubbling-grove.md`.
  *
  * Security contract:
- *  - sandbox="allow-scripts" only — never `allow-same-origin`, never
- *    `allow-top-navigation`, never `allow-popups`.
- *  - The `allow` attribute is built exclusively from `grantedCapabilities`.
- *    Revoked capabilities are absent from the attribute entirely.
- *  - Each plugin loads from its own `plugin://<cid>/` origin, so the browser's
- *    same-origin policy gives cross-plugin isolation for free.
+ *  - sandbox = `allow-scripts allow-same-origin allow-downloads`, never
+ *    `allow-top-navigation`, never `allow-popups`, never `allow-modals`.
+ *
+ *    `allow-same-origin` is REQUIRED, not incidental: it gives the iframe its
+ *    real `plugin://<cid>` origin, without which (a) ES-module plugins can't
+ *    load their own module graph, (b) WKWebView refuses `getUserMedia`
+ *    (mic/camera) to the resulting opaque/null origin, and (c) the file picker
+ *    breaks. The security boundary for untrusted plugin code is therefore NOT
+ *    the sandbox origin but the layers below, which all hold with
+ *    `allow-same-origin` present:
+ *      · a strict per-plugin CSP (`asset_protocol.rs`): `connect-src 'none'`
+ *        (no network of any kind), `default-src`/`script-src` limited to this
+ *        plugin's own `plugin://<cid>` origin (no cross-plugin loads),
+ *        `object-src`/`base-uri 'none'`, nonce'd bootstrap;
+ *      · `bootstrap.js` deletes `__TAURI__`/`__TAURI_INTERNALS__` before plugin
+ *        scripts run, and the Tauri capability ACL is scoped to window `main`,
+ *        so plugin code cannot reach backend IPC;
+ *      · each plugin has a distinct `plugin://<cid>` origin, so same-origin
+ *        policy still gives cross-plugin isolation.
+ *    Residual risk vs. an opaque origin: a plugin gets same-origin storage
+ *    (localStorage/IndexedDB) scoped to its own CID — cross-session, not
+ *    cleared on uninstall. Accepted so mic/camera/module/upload plugins work.
+ *  - The `allow` (Permissions Policy) attribute is built from the plugin's
+ *    manifest-declared capabilities (static, set once at mount); actual consent
+ *    is gated by the host's capability-grant prompt.
  *  - The host sends the MessagePort to the iframe via a one-shot
  *    `window.postMessage` with `{ __alex_init__: true }`. The bootstrap
  *    script injected by the asset protocol handler picks this up and
@@ -66,6 +85,9 @@ const emit = defineEmits<{
   (e: 'submit', requestId: number, submission: unknown, metadata: unknown): void
   /** Plugin marked the element complete. */
   (e: 'complete', progress: number, advisoryScore: number | null): void
+  /** Plugin requested the host's native file picker. Host resolves via
+   *  [`resolvePickFiles`] with the selected files. */
+  (e: 'pick-files', requestId: number, options: unknown): void
   /** Host-internal error (sandbox escape attempt, malformed message, etc.). */
   (e: 'error', message: string): void
 }>()
@@ -74,6 +96,7 @@ defineExpose({
   resolveCapabilityRequest,
   resolveSubmit,
   resolveEvent,
+  resolvePickFiles,
   sendCapabilityGranted,
   sendCapabilityRevoked,
   sendSubmitAck,
@@ -266,13 +289,14 @@ function onPluginMessage(ev: MessageEvent) {
       return
     }
     case 'emit_event': {
+      // Like `submit`, the host resolves via `resolveEvent` — synchronously for
+      // fire-and-forget events, or asynchronously for ones that await IPC (e.g.
+      // `irl_refresh` returning the learner's submissions). Do NOT send a
+      // default response here: doing so races the async handler and delivers
+      // `null` before the real payload arrives. The host resolves every event.
       const type = typeof payload.type === 'string' ? payload.type : 'unknown'
       pendingResponses.add(msg.request_id)
       emit('emit-event', msg.request_id, type, payload.payload)
-      if (pendingResponses.has(msg.request_id)) {
-        pendingResponses.delete(msg.request_id)
-        sendResponse(msg.request_id, null)
-      }
       return
     }
     case 'submit': {
@@ -283,6 +307,13 @@ function onPluginMessage(ev: MessageEvent) {
         // once its async work (e.g. IPC) settles. Leave the entry in
         // pendingResponses; resolveSubmit / resolveEvent clears it.
       }
+      return
+    }
+    case 'pick_files': {
+      // Host-resolved asynchronously via `resolvePickFiles` (opens the native
+      // file dialog + reads the chosen files).
+      pendingResponses.add(msg.request_id)
+      emit('pick-files', msg.request_id, payload)
       return
     }
     case 'complete': {
@@ -399,6 +430,11 @@ function resolveSubmit(requestId: number, payload: unknown, error?: string) {
   sendResponse(requestId, payload, error)
 }
 
+function resolvePickFiles(requestId: number, payload: unknown, error?: string) {
+  if (!pendingResponses.delete(requestId)) return
+  sendResponse(requestId, payload, error)
+}
+
 /** Host resolves a pending `emit_event` request with a custom payload
  *  (e.g. answering an `irl_refresh` with `{submissions:[…]}`). */
 function resolveEvent(requestId: number, payload: unknown, error?: string) {
@@ -437,7 +473,7 @@ function sendSubmitAck(submissionCid: string, score: number | null) {
     :key="`${pluginCid}|${entry}|${allowAttribute}`"
     ref="iframeEl"
     :src="srcUrl"
-    sandbox="allow-scripts"
+    sandbox="allow-scripts allow-same-origin allow-downloads"
     :allow="allowAttribute"
     referrerpolicy="no-referrer"
     class="plugin-iframe block w-full h-full min-h-[400px] bg-background"
