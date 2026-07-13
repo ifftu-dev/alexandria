@@ -1433,6 +1433,10 @@ pub fn run() {
             commands::plugins::plugin_set_enabled,
             commands::plugins::plugin_get_docs,
             commands::plugins::plugin_read_asset_data_url,
+            // Enrollment-gated install: course-scoped plugins install on first
+            // enrollment, with a per-plugin progress event.
+            commands::plugins::course_required_plugins,
+            commands::plugins::install_course_plugins,
             // IRL Review — local instructor inbox
             commands::plugins::irl_submit_for_review,
             commands::plugins::irl_list_my_submissions,

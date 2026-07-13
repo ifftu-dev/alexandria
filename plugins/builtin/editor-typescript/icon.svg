@@ -1,6 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none">
-  <rect width="48" height="48" rx="10" fill="#1e1e2e"/>
-  <rect x="6" y="10" width="36" height="28" rx="4" fill="#252536" stroke="#363650"/>
-  <path d="M14 22l-4 4 4 4" stroke="#7aa2f7" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
-  <text x="26" y="31" font-family="ui-monospace, monospace" font-size="12" font-weight="700" fill="#7aa2f7">TS</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <rect width="64" height="64" rx="14" fill="#0b1020"/>
+  <text x="32" y="29" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="15" fill="#3178c6">&gt;_</text>
+  <text x="32" y="48" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="#9aa4b2">TS</text>
 </svg>

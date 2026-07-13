@@ -78,6 +78,7 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (68, "skill_provenance", MIGRATION_068),
     (69, "goal_templates", MIGRATION_069),
     (70, "assessment_question_banks", MIGRATION_070),
+    (71, "plugin_review_course_scope", MIGRATION_071),
 ];
 
 const MIGRATION_001: &str = r#"
@@ -2476,7 +2477,7 @@ const MIGRATION_064: &str = r#"
 -- Migration 064: Plugin element state (durable persistState)
 --
 -- Opaque per-element state a plugin saves via `alex.persistState(blob)` —
--- e.g. a codejudge editor's in-progress (unsubmitted) source. Keyed by the
+-- e.g. a code editor's in-progress (unsubmitted) source. Keyed by the
 -- course element; the host returns it in the plugin's `init` payload so work
 -- survives navigating away and restarting the app. One row per element
 -- (single-user local DB); the newest write wins.
@@ -2738,4 +2739,38 @@ CREATE TABLE IF NOT EXISTS assessment_attempts (
     graded_at             TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_assessment_attempts_subject ON assessment_attempts(subject_did, skill_id);
+"#;
+
+const MIGRATION_071: &str = r#"
+-- ============================================================
+-- Migration 071: course-scope the plugin review inbox
+-- ============================================================
+-- Generalize `plugin_irl_submissions` from the IRL-Review-specific table into
+-- the shared submit-for-review store used by any plugin holding the
+-- `instructor_review` capability. Adds a `course_id` so the instructor inbox
+-- can be scoped to the courses an instructor owns (today it is unscoped).
+
+ALTER TABLE plugin_irl_submissions ADD COLUMN course_id TEXT;
+
+-- Backfill existing rows: prefer the enrollment's course, else the element's
+-- chapter/course. Legacy rows that resolve to neither stay NULL and remain
+-- globally visible in the inbox (the pre-scope behaviour).
+UPDATE plugin_irl_submissions
+   SET course_id = (
+       SELECT e.course_id FROM enrollments e
+        WHERE e.id = plugin_irl_submissions.enrollment_id
+   )
+ WHERE course_id IS NULL AND enrollment_id IS NOT NULL;
+
+UPDATE plugin_irl_submissions
+   SET course_id = (
+       SELECT ch.course_id
+         FROM course_elements ce
+         JOIN course_chapters ch ON ce.chapter_id = ch.id
+        WHERE ce.id = plugin_irl_submissions.element_id
+   )
+ WHERE course_id IS NULL AND element_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_irl_submissions_course
+    ON plugin_irl_submissions(course_id);
 "#;

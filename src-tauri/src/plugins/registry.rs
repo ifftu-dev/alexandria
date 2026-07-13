@@ -19,7 +19,12 @@ use crate::plugins::{manifest, verifier};
 
 const MANIFEST_FILENAME: &str = "manifest.json";
 const SIGNATURE_FILENAME: &str = "manifest.sig";
-const GRADER_FILENAME: &str = "grader.wasm";
+pub const GRADER_FILENAME: &str = "grader.wasm";
+/// Precompiled (`Engine::precompile_module`) sibling of `grader.wasm`, written
+/// at install time so the first grade of a session is a fast `deserialize`
+/// instead of a cranelift compile. Host/arch/wasmtime-version specific and
+/// always regenerable from `grader.wasm`, so it is never shipped or verified.
+pub const GRADER_CWASM_FILENAME: &str = "grader.cwasm";
 
 pub const SOURCE_LOCAL_FILE: &str = "local_file";
 pub const SOURCE_BUILTIN: &str = "builtin";
@@ -36,6 +41,21 @@ pub struct InstallStats {
 /// the caller hands over the directory path directly (the app file picker
 /// in `plugins/Installed.vue` is what talks to this). Phase 3 adds a P2P
 /// fetch path that resolves a CID to bytes and then calls through to here.
+/// Best-effort: ahead-of-time compile a grader's wasm into its `.cwasm`
+/// sibling so the first grade of a session is a fast `deserialize` rather than
+/// a cranelift compile. Never fails the install — a precompile error just means
+/// grading falls back to JIT (and rewrites the `.cwasm`) on first use.
+fn write_precompiled_grader(dest_dir: &Path, grader_bytes: &[u8]) {
+    match crate::plugins::wasm_runtime::precompile_grader(grader_bytes) {
+        Ok(cwasm) => {
+            if let Err(e) = fs::write(dest_dir.join(GRADER_CWASM_FILENAME), &cwasm) {
+                log::warn!("failed to write precompiled grader: {e}");
+            }
+        }
+        Err(e) => log::warn!("failed to precompile grader (will JIT on first grade): {e}"),
+    }
+}
+
 pub fn install_from_directory(
     db: &Database,
     plugins_dir: &Path,
@@ -98,6 +118,14 @@ pub fn install_from_directory(
     if verifier::compute_plugin_cid(&copied_manifest) != plugin_cid {
         let _ = fs::remove_dir_all(&dest_dir);
         return Err("plugin bundle changed during install".into());
+    }
+
+    // Precompile the grader (if any) from the CID-verified copy on disk. Never
+    // trust a `.cwasm` a community bundle might ship — regenerate it locally.
+    if manifest.grader.is_some() {
+        if let Ok(grader_bytes) = fs::read(dest_dir.join(GRADER_FILENAME)) {
+            write_precompiled_grader(&dest_dir, &grader_bytes);
+        }
     }
 
     let record = InstalledPlugin {
@@ -207,6 +235,7 @@ pub fn install_builtin(
         }
         fs::write(dest_dir.join(GRADER_FILENAME), grader_bytes)
             .map_err(|e| format!("failed to write builtin grader: {e}"))?;
+        write_precompiled_grader(&dest_dir, grader_bytes);
     }
 
     for (rel_path, bytes) in bundle.ui_files {
@@ -290,6 +319,14 @@ fn refresh_builtin_files(
     if let Some(grader_bytes) = bundle.grader_wasm {
         fs::write(dest_dir.join(GRADER_FILENAME), grader_bytes)
             .map_err(|e| format!("failed to refresh builtin grader: {e}"))?;
+        // The grader bytes are keyed by the (stable) manifest CID, so the
+        // `.cwasm` from the initial install is still valid — only (re)compile
+        // when it's missing, so we don't pay a multi-MB cranelift compile on
+        // every startup. A wasmtime-version-stale artifact is caught + rebuilt
+        // lazily at grade time instead.
+        if !dest_dir.join(GRADER_CWASM_FILENAME).exists() {
+            write_precompiled_grader(&dest_dir, grader_bytes);
+        }
     }
 
     for (rel_path, bytes) in bundle.ui_files {
@@ -786,7 +823,7 @@ mod tests {
         let dep = install_from_directory(&db, plugins_dir.path(), dep_src.path()).unwrap();
 
         let parent_src = TempDir::new().unwrap();
-        build_bundle_slug(parent_src.path(), "parent", &[dep_id.clone()]);
+        build_bundle_slug(parent_src.path(), "parent", std::slice::from_ref(&dep_id));
         let parent = install_from_directory(&db, plugins_dir.path(), parent_src.path()).unwrap();
 
         let deps = list_dependencies(&db, &parent.plugin_cid).unwrap();

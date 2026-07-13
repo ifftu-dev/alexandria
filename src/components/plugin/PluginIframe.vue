@@ -101,6 +101,7 @@ const allowAttribute = computed(() => {
     clipboard: 'clipboard-read; clipboard-write',
     storage: null, // handled host-side via persist_state
     ml_inference: null, // no browser feature
+    instructor_review: null, // host-side submit routing, no browser feature
   }
   const features: string[] = []
   for (const cap of props.declaredCapabilities) {
@@ -308,7 +309,8 @@ function isKnownCapability(name: string): boolean {
     name === 'fullscreen' ||
     name === 'clipboard' ||
     name === 'storage' ||
-    name === 'ml_inference'
+    name === 'ml_inference' ||
+    name === 'instructor_review'
   )
 }
 

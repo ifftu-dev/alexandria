@@ -209,5 +209,18 @@
   "unknown": {
     "contentId": "Content ID",
     "noContent": "No content added yet."
+  },
+  "enrollPlugins": {
+    "title": "Plugins for this course",
+    "bodyInstall": "This course uses {count} plugin(s) that aren't on your machine yet. They'll be installed before you enroll.",
+    "bodyReady": "This course's plugins are already installed on your machine.",
+    "continue": "Continue",
+    "continueInstall": "Install & enroll",
+    "status": {
+      "ready": "Installed",
+      "installing": "Installing…",
+      "failed": "Failed",
+      "willInstall": "Will install"
+    }
   }
 }

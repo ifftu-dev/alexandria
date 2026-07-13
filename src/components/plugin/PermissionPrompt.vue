@@ -46,6 +46,10 @@ function capabilityLabel(c: PluginCapability): string {
       return t('plugins.permission.capabilities.storage')
     case 'ml_inference':
       return t('plugins.permission.capabilities.mlInference')
+    case 'instructor_review':
+      // Not a runtime-prompted permission (host-side submit routing), but the
+      // switch is exhaustive over the capability union.
+      return t('plugins.permission.capabilities.instructorReview')
   }
 }
 

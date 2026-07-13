@@ -33,6 +33,7 @@
 //! is pure compute and does not need it.
 
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
@@ -103,31 +104,58 @@ pub struct GraderRuntime {
     cache: Arc<Mutex<HashMap<String, Module>>>,
 }
 
+/// The one true grader `Config`. Determinism-critical and shared by every
+/// path that compiles a grader — the live [`GraderRuntime`] engine AND the
+/// engine-free [`precompile_grader`]. They MUST use identical config, or a
+/// `.cwasm` produced by one won't `deserialize` into the other (Wasmtime
+/// fingerprints the config into the artifact and refuses a mismatch).
+pub fn grader_config() -> Config {
+    let mut config = Config::new();
+
+    // Determinism — the most important config in this whole module.
+    // NaN canonicalization makes float operations bit-identical across
+    // platforms (Wasmtime would otherwise be free to leave NaN payloads
+    // implementation-defined).
+    config.cranelift_nan_canonicalization(true);
+
+    // Fuel-based interruption. We never use wall-clock deadlines —
+    // those would tie the determinism story to scheduler whims.
+    config.consume_fuel(true);
+
+    // Disable nondeterministic / unsupported features. Threads and
+    // async are off by default in this build (default features are
+    // off in Cargo.toml); the explicit calls below cover the proposals
+    // that *are* compiled in.
+    config.wasm_relaxed_simd(false);
+    config.wasm_multi_memory(false);
+    config.wasm_memory64(false);
+    // Reference types are deterministic and useful; leave enabled.
+
+    config
+}
+
+/// Ahead-of-time compile a grader `wasm` into a serialized `.cwasm` artifact
+/// (native code) using the canonical grader config. Called at plugin *install*
+/// time so the first `grade` of a session is a fast `deserialize` (mmap of
+/// native code) instead of a multi-second cranelift compile.
+///
+/// Engine-free: builds a throwaway engine, so no live [`GraderRuntime`] /
+/// `AppState` is needed at install time. The output is host- and
+/// wasmtime-version-specific — never ship it between machines; always
+/// regenerate from the CID-verified `grader.wasm`. Deserialization that fails
+/// (version/arch mismatch) is non-fatal at grade time: it falls back to JIT.
+pub fn precompile_grader(wasm: &[u8]) -> Result<Vec<u8>, String> {
+    let engine = Engine::new(&grader_config())
+        .map_err(|e| format!("failed to create wasmtime engine: {e}"))?;
+    engine
+        .precompile_module(wasm)
+        .map_err(|e| format!("failed to precompile grader: {e}"))
+}
+
 impl GraderRuntime {
     pub fn new() -> Result<Self, String> {
-        let mut config = Config::new();
-
-        // Determinism — the most important config in this whole module.
-        // NaN canonicalization makes float operations bit-identical across
-        // platforms (Wasmtime would otherwise be free to leave NaN payloads
-        // implementation-defined).
-        config.cranelift_nan_canonicalization(true);
-
-        // Fuel-based interruption. We never use wall-clock deadlines —
-        // those would tie the determinism story to scheduler whims.
-        config.consume_fuel(true);
-
-        // Disable nondeterministic / unsupported features. Threads and
-        // async are off by default in this build (default features are
-        // off in Cargo.toml); the explicit calls below cover the proposals
-        // that *are* compiled in.
-        config.wasm_relaxed_simd(false);
-        config.wasm_multi_memory(false);
-        config.wasm_memory64(false);
-        // Reference types are deterministic and useful; leave enabled.
-
-        let engine =
-            Engine::new(&config).map_err(|e| format!("failed to create wasmtime engine: {e}"))?;
+        let engine = Engine::new(&grader_config())
+            .map_err(|e| format!("failed to create wasmtime engine: {e}"))?;
 
         Ok(Self {
             engine,
@@ -142,14 +170,21 @@ impl GraderRuntime {
     /// `grader_cid` is the BLAKE3 hex of `wasm_bytes` — the caller is
     /// responsible for passing a CID that matches the bytes (the install
     /// flow already verified this). The CID is used as a cache key.
+    ///
+    /// `cwasm_path`, when supplied, points at the precompiled `.cwasm` sibling
+    /// of `grader.wasm` written at install time. On a cold cache the runtime
+    /// tries to `deserialize` it (fast mmap of native code); if that fails or
+    /// the file is absent it falls back to compiling `wasm_bytes` and rewrites
+    /// the `.cwasm` for next time. Passing `None` always JIT-compiles.
     pub fn grade(
         &self,
         grader_cid: &str,
         wasm_bytes: &[u8],
+        cwasm_path: Option<&Path>,
         input_json: &[u8],
         budgets: GraderBudgets,
     ) -> Result<ScoreRecord, String> {
-        let module = self.load_module(grader_cid, wasm_bytes)?;
+        let module = self.load_module(grader_cid, wasm_bytes, cwasm_path)?;
 
         // Each grade gets its own Store — no shared state between
         // submissions, ever.
@@ -242,7 +277,12 @@ impl GraderRuntime {
         Ok(record)
     }
 
-    fn load_module(&self, grader_cid: &str, wasm_bytes: &[u8]) -> Result<Module, String> {
+    fn load_module(
+        &self,
+        grader_cid: &str,
+        wasm_bytes: &[u8],
+        cwasm_path: Option<&Path>,
+    ) -> Result<Module, String> {
         if let Some(m) = self
             .cache
             .lock()
@@ -252,12 +292,63 @@ impl GraderRuntime {
         {
             return Ok(m);
         }
-        let module = Module::from_binary(&self.engine, wasm_bytes)
-            .map_err(|e| format!("failed to compile grader wasm: {e}"))?;
+
+        // Prefer the precompiled `.cwasm`: `deserialize` is an mmap of native
+        // code, orders of magnitude faster than a cranelift compile. It is
+        // `unsafe` because Wasmtime trusts the bytes are its own output for
+        // this exact engine config + version + arch; we only ever deserialize
+        // a file *we* wrote from the CID-verified wasm, and a mismatch is
+        // caught (returns Err) rather than trusted, so we fall back to JIT.
+        let module = match cwasm_path {
+            Some(path) if path.exists() => {
+                // SAFETY: `path` was written by `precompile_grader` on this
+                // machine from the CID-verified `grader.wasm`. A stale artifact
+                // (different wasmtime version/arch/config) fails deserialization
+                // with Err instead of executing, so this cannot run foreign code.
+                match unsafe { Module::deserialize_file(&self.engine, path) } {
+                    Ok(m) => m,
+                    Err(e) => {
+                        log::warn!(
+                            "precompiled grader {grader_cid} failed to deserialize ({e}); \
+                             recompiling from wasm and rewriting {}",
+                            path.display()
+                        );
+                        self.compile_and_persist(wasm_bytes, Some(path))?
+                    }
+                }
+            }
+            other => self.compile_and_persist(wasm_bytes, other)?,
+        };
+
         self.cache
             .lock()
             .map_err(|_| "grader cache poisoned".to_string())?
             .insert(grader_cid.to_string(), module.clone());
+        Ok(module)
+    }
+
+    /// Cranelift-compile `wasm_bytes`, and (best-effort) write the serialized
+    /// artifact to `cwasm_path` so the next cold load can `deserialize` it.
+    fn compile_and_persist(
+        &self,
+        wasm_bytes: &[u8],
+        cwasm_path: Option<&Path>,
+    ) -> Result<Module, String> {
+        let module = Module::from_binary(&self.engine, wasm_bytes)
+            .map_err(|e| format!("failed to compile grader wasm: {e}"))?;
+        if let Some(path) = cwasm_path {
+            match module.serialize() {
+                Ok(bytes) => {
+                    if let Err(e) = std::fs::write(path, &bytes) {
+                        log::warn!(
+                            "failed to persist precompiled grader to {}: {e}",
+                            path.display()
+                        );
+                    }
+                }
+                Err(e) => log::warn!("failed to serialize grader for persistence: {e}"),
+            }
+        }
         Ok(module)
     }
 }
@@ -330,10 +421,72 @@ mod tests {
         }))
         .unwrap();
         let result = runtime
-            .grade(&cid, &echo, &input, GraderBudgets::default())
+            .grade(&cid, &echo, None, &input, GraderBudgets::default())
             .expect("grade succeeds");
         assert_eq!(result.version, "1");
         assert!((result.score - 0.42).abs() < 1e-12);
+    }
+
+    #[test]
+    fn precompiled_cwasm_round_trips() {
+        // precompile_grader → deserialize_file must yield a runnable module.
+        let echo = echo_grader_wasm();
+        let cid = blake3::hash(&echo).to_hex().to_string();
+        let dir = tempfile::TempDir::new().unwrap();
+        let cwasm = dir.path().join("grader.cwasm");
+        let bytes = precompile_grader(&echo).expect("precompile");
+        std::fs::write(&cwasm, &bytes).unwrap();
+
+        let input = serde_json::to_vec(&serde_json::json!({
+            "version": "1", "score": 0.7, "details": {},
+        }))
+        .unwrap();
+        // Fresh runtime (empty in-memory cache) so the load goes through the
+        // `.cwasm` deserialize path, not a cached module.
+        let runtime = GraderRuntime::new().expect("runtime");
+        let result = runtime
+            .grade(
+                &cid,
+                &echo,
+                Some(cwasm.as_path()),
+                &input,
+                GraderBudgets::default(),
+            )
+            .expect("grade via precompiled artifact succeeds");
+        assert!((result.score - 0.7).abs() < 1e-12);
+    }
+
+    #[test]
+    fn corrupt_cwasm_falls_back_to_jit_and_rewrites() {
+        // A garbage `.cwasm` (e.g. a wasmtime-version-stale artifact) must not
+        // be fatal: the grade falls back to JIT from `grader.wasm` and rewrites
+        // a valid `.cwasm` for next time.
+        let echo = echo_grader_wasm();
+        let cid = blake3::hash(&echo).to_hex().to_string();
+        let dir = tempfile::TempDir::new().unwrap();
+        let cwasm = dir.path().join("grader.cwasm");
+        std::fs::write(&cwasm, b"not a real cwasm artifact").unwrap();
+
+        let input = serde_json::to_vec(&serde_json::json!({
+            "version": "1", "score": 0.3, "details": {},
+        }))
+        .unwrap();
+        let runtime = GraderRuntime::new().expect("runtime");
+        let result = runtime
+            .grade(
+                &cid,
+                &echo,
+                Some(cwasm.as_path()),
+                &input,
+                GraderBudgets::default(),
+            )
+            .expect("grade falls back to JIT despite corrupt cwasm");
+        assert!((result.score - 0.3).abs() < 1e-12);
+
+        // The corrupt artifact was rewritten with a real one.
+        let rewritten = std::fs::read(&cwasm).unwrap();
+        assert_ne!(rewritten, b"not a real cwasm artifact");
+        assert!(!rewritten.is_empty());
     }
 
     #[test]
@@ -344,7 +497,7 @@ mod tests {
         let cid = blake3::hash(&bytes).to_hex().to_string();
         let input =
             serde_json::to_vec(&serde_json::json!({"version":"1","score":0,"details":{}})).unwrap();
-        let err = runtime.grade(&cid, &bytes, &input, GraderBudgets::default());
+        let err = runtime.grade(&cid, &bytes, None, &input, GraderBudgets::default());
         assert!(err.is_err());
     }
 
@@ -357,7 +510,7 @@ mod tests {
             serde_json::to_vec(&serde_json::json!({"version":"1","score":1.5,"details":{}}))
                 .unwrap();
         assert!(runtime
-            .grade(&cid, &echo, &input, GraderBudgets::default())
+            .grade(&cid, &echo, None, &input, GraderBudgets::default())
             .is_err());
     }
 
@@ -377,7 +530,13 @@ mod tests {
         }))
         .unwrap();
         runtime
-            .grade(&cid, MCQ_GRADER_WASM, &input, GraderBudgets::default())
+            .grade(
+                &cid,
+                MCQ_GRADER_WASM,
+                None,
+                &input,
+                GraderBudgets::default(),
+            )
             .expect("grade succeeds")
     }
 
@@ -457,13 +616,25 @@ mod tests {
         .unwrap();
 
         let first = runtime
-            .grade(&cid, MCQ_GRADER_WASM, &input, GraderBudgets::default())
+            .grade(
+                &cid,
+                MCQ_GRADER_WASM,
+                None,
+                &input,
+                GraderBudgets::default(),
+            )
             .expect("first grade");
         let first_bytes = serde_json::to_vec(&first).unwrap();
 
         for i in 1..100 {
             let r = runtime
-                .grade(&cid, MCQ_GRADER_WASM, &input, GraderBudgets::default())
+                .grade(
+                    &cid,
+                    MCQ_GRADER_WASM,
+                    None,
+                    &input,
+                    GraderBudgets::default(),
+                )
                 .unwrap_or_else(|e| panic!("grade #{i} failed: {e}"));
             let bytes = serde_json::to_vec(&r).unwrap();
             assert_eq!(
@@ -492,6 +663,7 @@ mod tests {
             .grade(
                 &cid,
                 EDITOR_JS_GRADER_WASM,
+                None,
                 &input,
                 GraderBudgets::default(),
             )
@@ -516,6 +688,7 @@ mod tests {
             .grade(
                 &cid,
                 EDITOR_JS_GRADER_WASM,
+                None,
                 &input,
                 GraderBudgets::default(),
             )
@@ -574,6 +747,7 @@ mod tests {
             .grade(
                 &cid,
                 EDITOR_JS_GRADER_WASM,
+                None,
                 &input,
                 GraderBudgets::default(),
             )
@@ -586,6 +760,7 @@ mod tests {
                 .grade(
                     &cid,
                     EDITOR_JS_GRADER_WASM,
+                    None,
                     &input,
                     GraderBudgets::default(),
                 )
@@ -616,6 +791,7 @@ mod tests {
             .grade(
                 &cid,
                 EDITOR_TS_GRADER_WASM,
+                None,
                 &input,
                 GraderBudgets::default(),
             )
@@ -655,6 +831,7 @@ mod tests {
             .grade(
                 &cid,
                 EDITOR_TS_GRADER_WASM,
+                None,
                 &input,
                 GraderBudgets::default(),
             )
@@ -666,6 +843,7 @@ mod tests {
                 .grade(
                     &cid,
                     EDITOR_TS_GRADER_WASM,
+                    None,
                     &input,
                     GraderBudgets::default(),
                 )
@@ -691,6 +869,7 @@ mod tests {
             .grade(
                 &cid,
                 EDITOR_CPP_GRADER_WASM,
+                None,
                 &input,
                 GraderBudgets::default(),
             )
@@ -724,6 +903,7 @@ mod tests {
             .grade(
                 &cid,
                 EDITOR_CPP_GRADER_WASM,
+                None,
                 &input,
                 GraderBudgets::default(),
             )
@@ -735,6 +915,7 @@ mod tests {
                 .grade(
                     &cid,
                     EDITOR_CPP_GRADER_WASM,
+                    None,
                     &input,
                     GraderBudgets::default(),
                 )
@@ -761,6 +942,7 @@ mod tests {
             .grade(
                 &cid,
                 EDITOR_PYTHON_GRADER_WASM,
+                None,
                 &input,
                 GraderBudgets::default(),
             )
@@ -802,6 +984,7 @@ mod tests {
             .grade(
                 &cid,
                 EDITOR_PYTHON_GRADER_WASM,
+                None,
                 &input,
                 GraderBudgets::default(),
             )
@@ -813,6 +996,7 @@ mod tests {
                 .grade(
                     &cid,
                     EDITOR_PYTHON_GRADER_WASM,
+                    None,
                     &input,
                     GraderBudgets::default(),
                 )
@@ -839,7 +1023,7 @@ mod tests {
             fuel: 10_000,
             ..GraderBudgets::default()
         };
-        let err = runtime.grade(&cid, &bytes, b"{}", budgets);
+        let err = runtime.grade(&cid, &bytes, None, b"{}", budgets);
         assert!(err.is_err(), "fuel exhaustion must trap");
     }
 }

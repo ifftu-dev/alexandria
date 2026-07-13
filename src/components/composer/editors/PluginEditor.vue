@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// Plugin element editor: bind an installed plugin (e.g. codejudge) and
+// Plugin element editor: bind an installed plugin (e.g. a code editor) and
 // author its per-element config, stored as a blob → plugin_config_cid.
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'

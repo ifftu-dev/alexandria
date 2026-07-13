@@ -9,6 +9,7 @@
   "kinds": [
     "graded"
   ],
+  "scope": "course",
   "capabilities": [],
   "grader": {
     "cid": "9b09f577d460afac8a035d0cca3290940519db8dba1d94e37ec468ca03c6605b",

@@ -1,0 +1,22 @@
+{
+  "id": "did:key:z6MkvDqGT54cXesYGvABpF1UapVNwjCqRcafi4Px6Thv5T3Z#editors",
+  "version": "0.1.0",
+  "api_version": "1",
+  "host_min_version": "0.1.0",
+  "name": "Code Editors",
+  "description": "A suite of graded code editors. Installing it pulls in the per-language editor plugins (JavaScript, TypeScript, C++, Python), each of which highlights, live-evaluates, and grades the learner's code locally against test cases.",
+  "author_did": "did:key:z6MkvDqGT54cXesYGvABpF1UapVNwjCqRcafi4Px6Thv5T3Z",
+  "kinds": ["interactive"],
+  "scope": "course",
+  "capabilities": [],
+  "dependencies": [
+    "did:key:z6MkvDqGT54cXesYGvABpF1UapVNwjCqRcafi4Px6Thv5T3Z#editor-javascript",
+    "did:key:z6MkvDqGT54cXesYGvABpF1UapVNwjCqRcafi4Px6Thv5T3Z#editor-typescript",
+    "did:key:z6MkvDqGT54cXesYGvABpF1UapVNwjCqRcafi4Px6Thv5T3Z#editor-cpp",
+    "did:key:z6MkvDqGT54cXesYGvABpF1UapVNwjCqRcafi4Px6Thv5T3Z#editor-python"
+  ],
+  "subject_tags": ["programming", "coding-challenge", "practice"],
+  "platforms": ["macos", "windows", "linux", "ios", "android"],
+  "icon_path": "icon.svg",
+  "entry": "ui/index.html"
+}

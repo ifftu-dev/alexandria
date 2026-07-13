@@ -6,9 +6,11 @@
 
 use std::path::{Path, PathBuf};
 
+use std::collections::HashSet;
+
 use ed25519_dalek::SigningKey;
 use rusqlite::params;
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
 
 use crate::crypto::did::{derive_did_key, Did};
 use crate::crypto::hash::entity_id;
@@ -20,7 +22,7 @@ use crate::domain::plugin::{
 };
 #[cfg(desktop)]
 use crate::plugins::wasm_runtime::{GraderBudgets, ScoreRecord};
-use crate::plugins::{attestation, catalog, irl_review, registry};
+use crate::plugins::{attestation, builtins, catalog, irl_review, manifest, registry, verifier};
 use crate::AppState;
 
 /// Install a plugin from a directory on the user's local filesystem.
@@ -43,6 +45,234 @@ pub async fn plugin_install_from_file(
     let src = PathBuf::from(&directory);
     let plugins_dir = state.plugins_dir()?;
     registry::install_from_directory(db, &plugins_dir, &src)
+}
+
+/// A plugin a course requires, plus whether it is already installed on this
+/// machine. Powers the enrollment pre-flight dialog: the user sees which
+/// plugins a course uses and which will be installed before continuing.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct RequiredPlugin {
+    pub plugin_cid: String,
+    pub name: String,
+    pub icon_path: Option<String>,
+    /// `"global"` or `"course"`.
+    pub scope: String,
+    pub installed: bool,
+}
+
+/// Per-plugin progress emitted on the `plugin-install-progress` event while a
+/// course's plugins install on enrollment. `step` is one of `installing`,
+/// `done`, or `failed`.
+#[derive(Debug, Clone, serde::Serialize)]
+struct PluginInstallProgress {
+    plugin_cid: String,
+    name: String,
+    /// 1-based position of this plugin in the install batch.
+    index: usize,
+    total: usize,
+    step: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
+/// The distinct plugin CIDs a course's elements reference.
+fn course_plugin_cids(db: &Database, course_id: &str) -> Result<Vec<String>, String> {
+    let conn = db.conn();
+    let mut stmt = conn
+        .prepare(
+            "SELECT DISTINCT e.plugin_cid FROM course_elements e \
+             JOIN course_chapters c ON e.chapter_id = c.id \
+             WHERE c.course_id = ?1 AND e.element_type = 'plugin' \
+               AND e.plugin_cid IS NOT NULL AND e.plugin_cid <> ''",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(params![course_id], |r| r.get::<_, String>(0))
+        .map_err(|e| e.to_string())?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r.map_err(|e| e.to_string())?);
+    }
+    Ok(out)
+}
+
+/// Expand a set of directly-required builtin CIDs into the full ordered list of
+/// builtin bundles to install — including transitive builtin dependencies, and
+/// ordered so a dependency always precedes the plugin that needs it (the
+/// `BUILTIN_PLUGINS` declaration order is topological).
+fn builtin_install_plan(direct_cids: &[String]) -> Vec<&'static registry::BuiltinBundle<'static>> {
+    let mut wanted: HashSet<String> = HashSet::new();
+    let mut stack: Vec<String> = direct_cids.to_vec();
+    while let Some(cid) = stack.pop() {
+        if !wanted.insert(cid.clone()) {
+            continue;
+        }
+        if let Some(bundle) = builtins::find_bundle_by_cid(&cid) {
+            if let Ok(m) = manifest::parse_and_validate(bundle.manifest_json) {
+                for dep_id in &m.dependencies {
+                    if let Some(dep) = builtins::find_bundle_by_id(dep_id) {
+                        stack.push(verifier::compute_plugin_cid(dep.manifest_json));
+                    }
+                }
+            }
+        }
+    }
+    builtins::BUILTIN_PLUGINS
+        .iter()
+        .filter(|b| wanted.contains(&verifier::compute_plugin_cid(b.manifest_json)))
+        .collect()
+}
+
+/// List the plugins a course requires and whether each is already installed.
+/// Called before enrollment so the UI can show a pre-flight dialog.
+#[tauri::command]
+pub async fn course_required_plugins(
+    state: State<'_, AppState>,
+    course_id: String,
+) -> Result<Vec<RequiredPlugin>, String> {
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
+
+    let cids = course_plugin_cids(db, &course_id)?;
+    let mut out = Vec::with_capacity(cids.len());
+    for cid in cids {
+        let installed = registry::get_installed(db, &cid)?;
+        // Prefer the installed manifest; fall back to the embedded builtin
+        // manifest so not-yet-installed plugins still show a name + icon.
+        let manifest = match &installed {
+            Some(_) => registry::get_manifest(db, &cid).ok(),
+            None => builtins::find_bundle_by_cid(&cid)
+                .and_then(|b| manifest::parse_and_validate(b.manifest_json).ok()),
+        };
+        let (name, icon_path, scope) = match manifest {
+            Some(m) => {
+                let scope = match m.scope {
+                    crate::domain::plugin::PluginScope::Global => "global",
+                    crate::domain::plugin::PluginScope::Course => "course",
+                };
+                (m.name, m.icon_path, scope.to_string())
+            }
+            None => (cid.clone(), None, "global".to_string()),
+        };
+        out.push(RequiredPlugin {
+            plugin_cid: cid,
+            name,
+            icon_path,
+            scope,
+            installed: installed.is_some(),
+        });
+    }
+    Ok(out)
+}
+
+/// Install every not-yet-installed builtin plugin a course requires (plus their
+/// dependencies), precompiling graders as part of each install. Emits a
+/// `plugin-install-progress` event per plugin so the UI can render a live
+/// progress bar. Called on enrollment *before* `enroll`; if it returns an error
+/// the caller must not enroll.
+///
+/// Only builtin plugins install here — community (non-builtin) plugins a course
+/// might reference are a follow-up (courses today ship only builtins).
+#[tauri::command]
+pub async fn install_course_plugins(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    course_id: String,
+) -> Result<(), String> {
+    let plugins_dir = state.plugins_dir()?;
+
+    // Resolve the ordered install plan (not-installed builtins + their deps)
+    // under a short DB lock; the bundles are `'static` so we can hold them
+    // across the install loop without borrowing the DB.
+    let plan: Vec<&'static registry::BuiltinBundle<'static>> = {
+        let db_guard = state
+            .db
+            .lock()
+            .map_err(|_| "database lock poisoned".to_string())?;
+        let db = db_guard.as_ref().ok_or("database not initialized")?;
+
+        let required = course_plugin_cids(db, &course_id)?;
+        let mut candidates = builtin_install_plan(&required);
+        // Drop anything already installed (a dependency may already be present).
+        let mut keep = Vec::new();
+        for bundle in candidates.drain(..) {
+            let cid = verifier::compute_plugin_cid(bundle.manifest_json);
+            if registry::get_installed(db, &cid)?.is_none() {
+                keep.push(bundle);
+            }
+        }
+        keep
+    };
+
+    let total = plan.len();
+    if total == 0 {
+        return Ok(());
+    }
+
+    for (i, bundle) in plan.iter().enumerate() {
+        let cid = verifier::compute_plugin_cid(bundle.manifest_json);
+        let name = manifest::parse_and_validate(bundle.manifest_json)
+            .map(|m| m.name)
+            .unwrap_or_else(|_| cid.clone());
+
+        let _ = app.emit(
+            "plugin-install-progress",
+            PluginInstallProgress {
+                plugin_cid: cid.clone(),
+                name: name.clone(),
+                index: i + 1,
+                total,
+                step: "installing".to_string(),
+                error: None,
+            },
+        );
+
+        // install_builtin writes the bundle AND precompiles the grader (the
+        // slow part), so a single "installing" step covers both.
+        let result = {
+            let db_guard = state
+                .db
+                .lock()
+                .map_err(|_| "database lock poisoned".to_string())?;
+            let db = db_guard.as_ref().ok_or("database not initialized")?;
+            registry::install_builtin(db, &plugins_dir, bundle)
+        };
+
+        match result {
+            Ok(_) => {
+                let _ = app.emit(
+                    "plugin-install-progress",
+                    PluginInstallProgress {
+                        plugin_cid: cid,
+                        name,
+                        index: i + 1,
+                        total,
+                        step: "done".to_string(),
+                        error: None,
+                    },
+                );
+            }
+            Err(e) => {
+                let _ = app.emit(
+                    "plugin-install-progress",
+                    PluginInstallProgress {
+                        plugin_cid: cid,
+                        name,
+                        index: i + 1,
+                        total,
+                        step: "failed".to_string(),
+                        error: Some(e.clone()),
+                    },
+                );
+                return Err(e);
+            }
+        }
+    }
+
+    Ok(())
 }
 
 /// Uninstall a plugin by CID. Removes the bundle directory and cascades
@@ -77,7 +307,7 @@ pub async fn plugin_uninstall(
 }
 
 /// Persist a plugin's opaque per-element state (the `alex.persistState` blob —
-/// e.g. a codejudge editor's unsubmitted source). Upserts one row per element
+/// e.g. a code editor's unsubmitted source). Upserts one row per element
 /// so the latest write wins; the state is returned to the plugin in its `init`
 /// payload by [`plugin_load_element_state`].
 #[tauri::command]
@@ -353,7 +583,7 @@ pub async fn plugin_submit_and_grade(
 
     // Resolve manifest + grader path in a short DB-lock scope so we don't
     // hold the lock across grader execution.
-    let (manifest, grader_path, grader_cid) = {
+    let (manifest, grader_path, cwasm_path, grader_cid) = {
         let db_guard = state
             .db
             .lock()
@@ -370,8 +600,9 @@ pub async fn plugin_submit_and_grade(
                 "plugin manifest has no grader (Phase 2 graded path requires one)".to_string()
             })?
             .clone();
-        let grader_path = Path::new(&installed.install_path).join("grader.wasm");
-        (manifest, grader_path, grader.cid)
+        let grader_path = Path::new(&installed.install_path).join(registry::GRADER_FILENAME);
+        let cwasm_path = Path::new(&installed.install_path).join(registry::GRADER_CWASM_FILENAME);
+        (manifest, grader_path, cwasm_path, grader.cid)
     };
 
     let wasm_bytes =
@@ -413,6 +644,7 @@ pub async fn plugin_submit_and_grade(
     let record = state.grader_runtime.grade(
         &grader_cid,
         &wasm_bytes,
+        Some(cwasm_path.as_path()),
         &envelope_bytes,
         GraderBudgets::default(),
     )?;
@@ -545,15 +777,48 @@ pub async fn irl_submit_for_review(
         .map_err(|_| "database lock poisoned".to_string())?;
     let db = db_guard.as_ref().ok_or("database not initialized")?;
 
+    let course_id =
+        resolve_submission_course_id(db, enrollment_id.as_deref(), element_id.as_deref());
+
     irl_review::submit(
         db,
         &plugin_cid,
         element_id.as_deref(),
         enrollment_id.as_deref(),
+        course_id.as_deref(),
         &learner_did.0,
         &submission_json,
         &skills_json,
     )
+}
+
+/// Resolve the course a review submission belongs to: prefer the enrollment's
+/// course, else the element's chapter/course. `None` if neither resolves.
+fn resolve_submission_course_id(
+    db: &Database,
+    enrollment_id: Option<&str>,
+    element_id: Option<&str>,
+) -> Option<String> {
+    if let Some(eid) = enrollment_id {
+        if let Ok(cid) = db.conn().query_row(
+            "SELECT course_id FROM enrollments WHERE id = ?1",
+            params![eid],
+            |r| r.get::<_, String>(0),
+        ) {
+            return Some(cid);
+        }
+    }
+    if let Some(elid) = element_id {
+        if let Ok(cid) = db.conn().query_row(
+            "SELECT ch.course_id FROM course_elements ce \
+             JOIN course_chapters ch ON ce.chapter_id = ch.id WHERE ce.id = ?1",
+            params![elid],
+            |r| r.get::<_, String>(0),
+        ) {
+            return Some(cid);
+        }
+    }
+    None
 }
 
 /// List the caller's own IRL Review submissions, newest first. Optionally
@@ -587,7 +852,10 @@ pub async fn irl_list_pending(
         .map_err(|_| "database lock poisoned".to_string())?;
     let db = db_guard.as_ref().ok_or("database not initialized")?;
 
-    irl_review::list_pending(db, plugin_cid.as_deref())
+    // Single-user local node: the local user is the instructor and sees every
+    // pending row, so course scoping stays disabled here (`None`). The
+    // course-scoped path exists for multi-instructor / federated review later.
+    irl_review::list_pending(db, plugin_cid.as_deref(), None)
 }
 
 /// Fetch a single submission by id (for instructors to open the review

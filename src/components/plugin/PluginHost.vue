@@ -45,6 +45,9 @@ const props = defineProps<{
   /** Enrollment the learner is taking this element under. Required for
    *  graded plugins to persist a submission row. */
   enrollmentId?: string | null
+  /** In `review` mode, the id of the submission being reviewed. The plugin's
+   *  review UI submits its verdict and the host posts it against this row. */
+  reviewSubmissionId?: string | null
 }>()
 
 const emit = defineEmits<{
@@ -236,7 +239,7 @@ async function onPermissionDecision(decision: 'once' | 'session' | 'always' | 'd
 
 function onPersistState(blob: unknown) {
   // Durably persist the plugin's opaque per-element state so unsubmitted work
-  // (e.g. a codejudge editor's source) survives navigating away and restarting
+  // (e.g. a code editor's source) survives navigating away and restarting
   // the app. Best-effort + fire-and-forget: a failed save must not disrupt the
   // plugin. Reloaded into the plugin's `init` payload on next mount.
   elementState.value = blob
@@ -276,12 +279,47 @@ async function onSubmit(requestId: number, submission: unknown, metadata: unknow
     return
   }
 
-  // IRL Review path — route to the local instructor inbox IPC.
-  const meta = (metadata as { type?: string } | null) ?? null
-  if (meta?.type === 'irl_review') {
-    const skills = Array.isArray((meta as { skills?: unknown }).skills)
-      ? ((meta as { skills?: unknown[] }).skills as unknown[])
-      : []
+  const meta = (metadata as Record<string, unknown> | null) ?? null
+
+  // Review mode — the instructor's review UI is posting its verdict for the
+  // submission being reviewed. Route to the generalized review-post IPC.
+  if (props.mode === 'review') {
+    if (!props.reviewSubmissionId) {
+      iframeRef.value?.resolveSubmit(requestId, null, 'no submission to review')
+      return
+    }
+    const sub = (submission as Record<string, unknown> | null) ?? {}
+    const pick = <T,>(key: string): T | undefined =>
+      (meta?.[key] as T | undefined) ?? (sub[key] as T | undefined)
+    const score = pick<number>('score')
+    if (typeof score !== 'number' || !isFinite(score)) {
+      iframeRef.value?.resolveSubmit(requestId, null, 'review is missing a numeric score')
+      return
+    }
+    const feedback = pick<string>('feedback') ?? ''
+    const skillRatings = pick<Record<string, number>>('skill_ratings') ?? {}
+    try {
+      await invoke('irl_post_review', {
+        submissionId: props.reviewSubmissionId,
+        score,
+        feedback,
+        skillRatingsJson: JSON.stringify(skillRatings),
+      })
+      iframeRef.value?.resolveSubmit(requestId, { reviewed: true })
+      emit('complete')
+    } catch (e) {
+      iframeRef.value?.resolveSubmit(requestId, null, String(e))
+    }
+    return
+  }
+
+  // Learner submit → instructor inbox, for any plugin that declares the
+  // `instructor_review` capability (the IRL Review plugin's `type:'irl_review'`
+  // metadata is still honoured for backward compatibility).
+  const isReviewSubmit =
+    meta?.type === 'irl_review' || (m.capabilities?.includes('instructor_review') ?? false)
+  if (isReviewSubmit) {
+    const skills = Array.isArray(meta?.skills) ? (meta.skills as unknown[]) : []
     try {
       const submissionId = await invoke<string>('irl_submit_for_review', {
         pluginCid: pluginCid.value,
