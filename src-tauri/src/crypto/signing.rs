@@ -63,8 +63,11 @@ mod tests {
 
     #[test]
     fn sign_and_verify_roundtrip() {
-        let mut rng = rand::thread_rng();
-        let key = SigningKey::generate(&mut rng);
+        let key = {
+            let mut __s = [0u8; 32];
+            rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut __s);
+            SigningKey::from_bytes(&__s)
+        };
         let message = b"hello alexandria";
 
         let signed = sign(message, &key);
@@ -73,8 +76,11 @@ mod tests {
 
     #[test]
     fn verify_rejects_tampered_payload() {
-        let mut rng = rand::thread_rng();
-        let key = SigningKey::generate(&mut rng);
+        let key = {
+            let mut __s = [0u8; 32];
+            rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut __s);
+            SigningKey::from_bytes(&__s)
+        };
         let message = b"original message";
 
         let mut signed = sign(message, &key);
@@ -85,9 +91,16 @@ mod tests {
 
     #[test]
     fn verify_rejects_wrong_key() {
-        let mut rng = rand::thread_rng();
-        let key1 = SigningKey::generate(&mut rng);
-        let key2 = SigningKey::generate(&mut rng);
+        let key1 = {
+            let mut __s = [0u8; 32];
+            rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut __s);
+            SigningKey::from_bytes(&__s)
+        };
+        let key2 = {
+            let mut __s = [0u8; 32];
+            rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut __s);
+            SigningKey::from_bytes(&__s)
+        };
         let message = b"test message";
 
         let mut signed = sign(message, &key1);

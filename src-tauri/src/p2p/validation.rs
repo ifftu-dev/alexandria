@@ -291,8 +291,11 @@ mod tests {
     use ed25519_dalek::SigningKey;
 
     fn test_key() -> SigningKey {
-        let mut rng = rand::thread_rng();
-        SigningKey::generate(&mut rng)
+        {
+            let mut __s = [0u8; 32];
+            rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut __s);
+            SigningKey::from_bytes(&__s)
+        }
     }
 
     fn valid_message(key: &SigningKey, topic: &str) -> SignedGossipMessage {

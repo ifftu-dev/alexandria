@@ -136,8 +136,11 @@ mod tests {
     use super::*;
 
     fn make_test_key() -> SigningKey {
-        let mut rng = rand::thread_rng();
-        SigningKey::generate(&mut rng)
+        {
+            let mut __s = [0u8; 32];
+            rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut __s);
+            SigningKey::from_bytes(&__s)
+        }
     }
 
     fn make_test_payload(stake_address: &str) -> ProfilePayload {

@@ -1369,7 +1369,11 @@ mod tests {
         let (elec, nom) = insert_voting_election(&db);
 
         // A real signing key + its registered stake↔pubkey binding.
-        let key = SigningKey::generate(&mut rand::thread_rng());
+        let key = {
+            let mut __s = [0u8; 32];
+            rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut __s);
+            SigningKey::from_bytes(&__s)
+        };
         let pubkey_hex = hex::encode(key.verifying_key().to_bytes());
         let voter = "stake_test1uevoter".to_string();
         db.conn()
@@ -1446,7 +1450,11 @@ mod tests {
         insert_test_dao(&db);
         let (elec, nom) = insert_voting_election(&db);
 
-        let key = SigningKey::generate(&mut rand::thread_rng());
+        let key = {
+            let mut __s = [0u8; 32];
+            rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut __s);
+            SigningKey::from_bytes(&__s)
+        };
         let voter = "stake_test1uunregistered".to_string();
         // NOTE: no stake_pubkey_registry row inserted.
 
