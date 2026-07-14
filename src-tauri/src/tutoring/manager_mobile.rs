@@ -3044,7 +3044,7 @@ impl TutoringManager {
                 match maybe_frame {
                     Some(frame) => {
                         frame_count += 1;
-                        if frame_count == 1 || frame_count % 100 == 0 {
+                        if frame_count == 1 || frame_count.is_multiple_of(100) {
                             log::info!(
                                 "tutoring: frame bridge {node_id}: received frame #{frame_count}"
                             );

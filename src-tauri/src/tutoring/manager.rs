@@ -1903,7 +1903,7 @@ impl TutoringManager {
                 match maybe_frame {
                     Some(frame) => {
                         frame_count += 1;
-                        if frame_count == 1 || frame_count % 100 == 0 {
+                        if frame_count == 1 || frame_count.is_multiple_of(100) {
                             let img = frame.img();
                             let (w, h) = img.dimensions();
                             let buf_len = img.as_raw().len();
