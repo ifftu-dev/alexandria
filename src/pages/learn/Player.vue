@@ -216,9 +216,11 @@ function isMcqType(type: string): boolean {
   return type === 'objective_single_mcq' || type === 'objective_multi_mcq' || type === 'subjective_mcq'
 }
 
-// Check if assessment element (Sentinel activates for these)
+// Check if assessment element (Sentinel activates for these). Plugin elements
+// are included because graded plugins (code editors) mint credentials and are
+// monitored + integrity-bound just like a native assessment.
 function isAssessmentElement(type: string): boolean {
-  return isMcqType(type) || type === 'essay' || type === 'quiz' || type === 'assessment' || type === 'interactive'
+  return isMcqType(type) || type === 'essay' || type === 'quiz' || type === 'assessment' || type === 'interactive' || type === 'plugin'
 }
 
 // Total progress stats
@@ -743,6 +745,7 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
     downloading: downloadingElementId.value === el.id,
     downloadError: downloadError.value,
     enrollmentId: enrollment.value?.id ?? null,
+    integritySessionId: sentinelStarted.value ? sentinel.getSessionId() : null,
     readOnly: courseCompleted.value,
     onDownload: onDownloadClick,
     onComplete: () => { void markComplete() },
@@ -996,6 +999,12 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
               </button>
             </div>
             <p v-if="cameraError" class="text-[11px] text-red-600 dark:text-red-400">{{ cameraError }}</p>
+            <!-- Camera off (declined or not enabled): behavioral monitoring still
+                 runs, but without presence verification the credential earned here
+                 carries lower assurance. Tell the learner so the choice is informed. -->
+            <p v-if="!cameraStream" class="text-[11px] text-amber-600 dark:text-amber-400">
+              {{ $t('learn.player.reducedConfidenceNoCamera') }}
+            </p>
 
             <!-- Video drives on-device face detection. Rendered off-screen
                  (fixed, far off-viewport) rather than display:none — WKWebView

@@ -74,6 +74,7 @@
       "essay": "Respuesta escrita",
       "interactive": "Interactivo",
       "content": "Contenido"
-    }
+    },
+    "reducedConfidenceNoCamera": "Cámara desactivada: las habilidades obtenidas aquí tendrán menor confianza."
   }
 }

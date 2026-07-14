@@ -74,6 +74,7 @@
       "essay": "Réponse rédigée",
       "interactive": "Interactif",
       "content": "Contenu"
-    }
+    },
+    "reducedConfidenceNoCamera": "Caméra désactivée — les compétences obtenues ici auront une confiance moindre."
   }
 }

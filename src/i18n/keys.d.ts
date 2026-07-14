@@ -967,6 +967,7 @@ export type MessageKey =
   | 'learn.player.privacyBody'
   | 'learn.player.privacyTitle'
   | 'learn.player.publicRecordSaved'
+  | 'learn.player.reducedConfidenceNoCamera'
   | 'learn.player.whyMonitoringBody'
   | 'learn.player.whyMonitoringLabel'
   | 'learn.player.whyMonitoringTitle'

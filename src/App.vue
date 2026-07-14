@@ -17,7 +17,6 @@ import UpdateBanner from '@/components/update/UpdateBanner.vue'
 import { initUpdateCheck } from '@/composables/useAppUpdate'
 import { useDeepLinks } from '@/deeplink/useDeepLinks'
 
-const isDev = import.meta.env.DEV
 import { clearSettingsCache, useSettings } from '@/composables/useSettings'
 import { isMac } from '@/composables/usePlatform'
 
@@ -161,6 +160,7 @@ onUnmounted(() => {
   <!-- Signed-update prompt; self-hides until a check finds an update. -->
   <UpdateBanner />
 
-  <!-- Dev-only live Sentinel observability PiP. -->
-  <SentinelDebugPip v-if="isDev" />
+  <!-- Live Sentinel observability PiP — stays hidden until toggled from the
+       Develop menu (Sentinel Live View, ⌘⇧S), so it's safe to always mount. -->
+  <SentinelDebugPip />
 </template>
