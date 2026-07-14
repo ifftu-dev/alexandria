@@ -46,6 +46,10 @@ pub struct InstallStats {
 /// a cranelift compile. Never fails the install — a precompile error just means
 /// grading falls back to JIT (and rewrites the `.cwasm`) on first use.
 fn write_precompiled_grader(dest_dir: &Path, grader_bytes: &[u8]) {
+    // The Wasmtime grader sandbox is desktop-only (`plugins::wasm_runtime` is
+    // `#[cfg(desktop)]`). On mobile there is no grader runtime to precompile
+    // for, so skip — graded plugins simply aren't offered there.
+    #[cfg(desktop)]
     match crate::plugins::wasm_runtime::precompile_grader(grader_bytes) {
         Ok(cwasm) => {
             if let Err(e) = fs::write(dest_dir.join(GRADER_CWASM_FILENAME), &cwasm) {
@@ -54,6 +58,8 @@ fn write_precompiled_grader(dest_dir: &Path, grader_bytes: &[u8]) {
         }
         Err(e) => log::warn!("failed to precompile grader (will JIT on first grade): {e}"),
     }
+    #[cfg(not(desktop))]
+    let _ = (dest_dir, grader_bytes);
 }
 
 pub fn install_from_directory(
