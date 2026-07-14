@@ -1,9 +1,11 @@
 //! Seed a single demo course that exercises the first-party plugins
 //! (Music Reviews, IRL Review, and the graded code editors). Runs
-//! after `builtins::install_all` so the plugin CIDs are resolvable, and is
-//! idempotent against re-invocation (uses `INSERT OR IGNORE` against
-//! deterministic ids). The code editors are course-scoped, so this seed only
-//! finds them under the `dev-seed` feature (which installs every builtin).
+//! after `builtins::install_all` and is idempotent against re-invocation
+//! (uses `INSERT OR IGNORE` against deterministic ids). The global Music/IRL
+//! plugins are installed at startup; the graded code editors are course-scoped
+//! and install lazily on enrollment, so the editor elements reference them by
+//! their bundle CID — enrolling in this course then surfaces the plugin
+//! install/consent pre-flight for them.
 
 use rusqlite::{params, Connection};
 
@@ -48,6 +50,18 @@ fn find_plugin_cid(conn: &Connection, slug: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// CID of a builtin plugin computed directly from its embedded bundle —
+/// resolvable even before the plugin is installed. The graded code editors are
+/// course-scoped and install lazily on enrollment, so the demo course must
+/// reference them by their bundle CID (not their installed row, which doesn't
+/// exist yet). Enrolling then surfaces the install/consent pre-flight for them.
+fn builtin_cid(slug: &str) -> Option<String> {
+    crate::plugins::builtins::BUILTIN_PLUGINS
+        .iter()
+        .find(|b| b.slug == slug)
+        .map(|b| crate::plugins::verifier::compute_plugin_cid(b.manifest_json))
 }
 
 /// Seed (and refresh) one graded code-editor element. The editor plugins carry
@@ -198,11 +212,12 @@ pub fn seed_plugin_demo_course(conn: &Connection) -> Result<(), rusqlite::Error>
     // Chapter 3 — Graded code editors. The editor plugins are `kind: graded`:
     // the learner writes code with live eval + visible tests, then submits for a
     // credential-bearing score computed by the host's deterministic grader.
-    // The editors are course-scoped, so this is only seeded under `dev-seed`
-    // (which installs every builtin); additive — skipped if they aren't present.
+    // The editors are course-scoped (install lazily on enrollment), so reference
+    // them by their bundle CID rather than an installed row — this is what makes
+    // enrolling in this course surface the plugin install/consent pre-flight.
     match (
-        find_plugin_cid(conn, "editor-javascript"),
-        find_plugin_cid(conn, "editor-typescript"),
+        builtin_cid("editor-javascript"),
+        builtin_cid("editor-typescript"),
     ) {
         (Some(ejs_cid), Some(ets_cid)) => {
             conn.execute(
@@ -269,7 +284,7 @@ pub fn seed_plugin_demo_course(conn: &Connection) -> Result<(), rusqlite::Error>
             )?;
 
             // C++ (JSCPP) — added only when the C++ editor is installed.
-            if let Some(ecpp_cid) = find_plugin_cid(conn, "editor-cpp") {
+            if let Some(ecpp_cid) = builtin_cid("editor-cpp") {
                 let cpp_content = serde_json::json!({
                     "title": "Double the number",
                     "prompt": "Read an integer **n** from input and print **n × 2**.",
@@ -297,7 +312,7 @@ pub fn seed_plugin_demo_course(conn: &Connection) -> Result<(), rusqlite::Error>
             }
 
             // Python (RustPython) — added only when the Python editor is installed.
-            if let Some(epy_cid) = find_plugin_cid(conn, "editor-python") {
+            if let Some(epy_cid) = builtin_cid("editor-python") {
                 let py_content = serde_json::json!({
                     "title": "Double the number",
                     "prompt": "Read an integer **n** from input and print **n × 2**.",
