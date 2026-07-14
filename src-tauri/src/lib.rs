@@ -228,8 +228,11 @@ impl AppState {
             }
         }
 
-        // 7. Seed iroh content blobs in the background for dev builds.
-        #[cfg(feature = "dev-seed")]
+        // 7. Seed iroh content blobs (demo video/pdf media) in the background on
+        // every platform. Downloads the public seed-asset URLs once into iroh and
+        // fills in each element's content_cid so the demo videos actually play.
+        // Best-effort + non-blocking — a network-less first launch just leaves the
+        // media unresolved until a later boot with connectivity.
         {
             let db_handle = Arc::clone(&self.db);
             let node_handle = self.content_node.clone();
@@ -516,27 +519,27 @@ pub fn run() {
             }
         }))
         .menu(|handle| {
-            // Standard macOS menus. In dev builds only, append a Develop
-            // submenu with "Reload Webviews" (reload all webviews without
-            // restarting) and "Sentinel Live View" (toggle the debug PiP).
+            // Standard menus plus a Develop submenu available in ALL builds:
+            // "Reload Webviews" (reload without restarting), "Open DevTools"
+            // (web inspector), and "Sentinel Live View" (toggle the debug PiP).
             let menu = tauri::menu::Menu::default(handle)?;
-            if cfg!(debug_assertions) {
-                let reload =
-                    tauri::menu::MenuItemBuilder::with_id("reload_webviews", "Reload Webviews")
-                        .accelerator("CmdOrCtrl+R")
-                        .build(handle)?;
-                let pip = tauri::menu::MenuItemBuilder::with_id(
-                    "toggle_sentinel_pip",
-                    "Sentinel Live View",
-                )
-                .accelerator("CmdOrCtrl+Shift+S")
+            let reload =
+                tauri::menu::MenuItemBuilder::with_id("reload_webviews", "Reload Webviews")
+                    .accelerator("CmdOrCtrl+Shift+R")
+                    .build(handle)?;
+            let devtools = tauri::menu::MenuItemBuilder::with_id("open_devtools", "Open DevTools")
+                .accelerator("CmdOrCtrl+Alt+I")
                 .build(handle)?;
-                let develop = tauri::menu::SubmenuBuilder::new(handle, "Develop")
-                    .item(&reload)
-                    .item(&pip)
-                    .build()?;
-                menu.append(&develop)?;
-            }
+            let pip =
+                tauri::menu::MenuItemBuilder::with_id("toggle_sentinel_pip", "Sentinel Live View")
+                    .accelerator("CmdOrCtrl+Shift+S")
+                    .build(handle)?;
+            let develop = tauri::menu::SubmenuBuilder::new(handle, "Develop")
+                .item(&reload)
+                .item(&devtools)
+                .item(&pip)
+                .build()?;
+            menu.append(&develop)?;
             Ok(menu)
         })
         .on_menu_event(|app, event| {
@@ -545,6 +548,11 @@ pub fn run() {
                 "reload_webviews" => {
                     for (_, w) in app.webview_windows() {
                         let _ = w.eval("window.location.reload()");
+                    }
+                }
+                "open_devtools" => {
+                    for (_, w) in app.webview_windows() {
+                        w.open_devtools();
                     }
                 }
                 "toggle_sentinel_pip" => {
