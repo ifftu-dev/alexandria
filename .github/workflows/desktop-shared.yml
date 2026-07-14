@@ -1024,85 +1024,37 @@ jobs:
       (inputs.include_linux != true || needs.build-linux-x64.result == 'success') &&
       (inputs.include_windows != true || needs.build-windows.result == 'success')
     steps:
-      - name: Download all release artifacts
-        uses: actions/download-artifact@v6
-        with:
-          path: artifacts
-          merge-multiple: true
-
-      - name: Generate latest.json for auto-updater
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          BUILD_LINUX_ARM64_RESULT: ${{ needs.build-linux-arm64.result }}
-        run: |
-          set -euo pipefail
-          REPO="${{ github.repository }}"
-          BASE_URL="https://github.com/${REPO}/releases/download/${RELEASE_TAG}"
-
-          find_artifact() { find artifacts -name "$1" -type f 2>/dev/null | head -1; }
-
-          MACOS_SIG_FILE=$(find_artifact "*macOS-Apple-Silicon.dmg.sig")
-          LINUX_X64_SIG_FILE=$(find_artifact "*Linux-x86_64.AppImage.sig")
-          WINDOWS_SIG_FILE=$(find_artifact "*Windows-x64-Setup.nsis.zip.sig")
-
-          PLATFORMS="{}"
-          PLATFORM_COUNT=0
-          add_platform() {
-            local key="$1" sig_file="$2"
-            local sig pkg url
-            sig=$(cat "$sig_file")
-            pkg=$(basename "$sig_file" .sig)
-            url="$BASE_URL/$pkg"
-            PLATFORMS=$(echo "$PLATFORMS" | jq \
-              --arg sig "$sig" --arg url "$url" \
-              ".\"$key\" = {signature: \$sig, url: \$url}")
-            PLATFORM_COUNT=$((PLATFORM_COUNT + 1))
-          }
-
-          if [ -n "$MACOS_SIG_FILE" ]; then
-            add_platform "darwin-aarch64" "$MACOS_SIG_FILE"
-          else
-            echo "WARNING: macOS .dmg.sig not found — skipping darwin-aarch64 in latest.json"
-          fi
-
-          if [ -n "$LINUX_X64_SIG_FILE" ]; then
-            add_platform "linux-x86_64" "$LINUX_X64_SIG_FILE"
-          else
-            echo "WARNING: Linux x64 .AppImage.sig not found — skipping linux-x86_64 in latest.json"
-          fi
-
-          if [ -n "$WINDOWS_SIG_FILE" ]; then
-            add_platform "windows-x86_64" "$WINDOWS_SIG_FILE"
-          else
-            echo "WARNING: Windows .nsis.zip.sig not found — skipping windows-x86_64 in latest.json"
-          fi
-
-          if [ "$BUILD_LINUX_ARM64_RESULT" = "success" ]; then
-            LINUX_ARM64_SIG_FILE=$(find_artifact "*Linux-ARM64.AppImage.sig")
-            if [ -n "$LINUX_ARM64_SIG_FILE" ]; then
-              add_platform "linux-aarch64" "$LINUX_ARM64_SIG_FILE"
-            fi
-          fi
-
-          if [ "$PLATFORM_COUNT" -eq 0 ]; then
-            echo "WARNING: No platform signatures found — skipping latest.json generation"
-            echo '{}' > latest.json
-          else
-            echo "Generating latest.json with $PLATFORM_COUNT platform(s)"
-          fi
-
-          VERSION="${RELEASE_TAG#v}"
-          TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-
-          jq -n \
-            --arg version "$VERSION" \
-            --arg notes "" \
-            --arg pub_date "$TIMESTAMP" \
-            --argjson platforms "$PLATFORMS" \
-            '{version: $version, notes: $notes, pub_date: $pub_date, platforms: $platforms}' \
-            > latest.json
-
-      - name: Upload latest.json
+      # The signed macOS build (tauri-action, includeUpdaterJson: true) already
+      # uploaded a correct `latest.json` to the release, pointing at the signed
+      # `.app.tar.gz` updater artifact — the format the tauri macOS updater
+      # actually installs (a dmg is not updater-installable). We do NOT
+      # regenerate it here; doing so previously clobbered it with a dmg URL.
+      #
+      # Instead, publish the draft as the repository's *latest* (non-draft,
+      # non-prerelease) release. The updater endpoint the app polls —
+      # `releases/latest/download/latest.json` — resolves only to the
+      # non-prerelease "latest" release, so leaving alphas as drafts/prereleases
+      # made every update check 404.
+      - name: Verify latest.json is present on the release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "${RELEASE_TAG}" latest.json --clobber --repo "${GITHUB_REPOSITORY}"
+        run: |
+          set -euo pipefail
+          if gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --json assets \
+               --jq '.assets[].name' | grep -qx 'latest.json'; then
+            echo "latest.json present on ${RELEASE_TAG}"
+          else
+            echo "ERROR: latest.json missing — the signed macOS build did not publish it." >&2
+            exit 1
+          fi
+
+      - name: Publish release as latest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh release edit "${RELEASE_TAG}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --draft=false \
+            --prerelease=false \
+            --latest
