@@ -154,8 +154,8 @@ jobs:
           path: iroh-live-patched
           token: ${{ secrets.CROSS_REPO_PAT }}
 
-      - name: Setup Rust 1.83.0 (MSRV)
-        uses: dtolnay/rust-toolchain@1.89.0
+      - name: Setup Rust 1.91.0 (MSRV)
+        uses: dtolnay/rust-toolchain@1.91.0
 
       - name: Add ARM64 Apple target
         run: rustup target add aarch64-apple-darwin
@@ -394,8 +394,8 @@ jobs:
           path: iroh-live-patched
           token: ${{ secrets.CROSS_REPO_PAT }}
 
-      - name: Setup Rust 1.83.0 (MSRV)
-        uses: dtolnay/rust-toolchain@1.89.0
+      - name: Setup Rust 1.91.0 (MSRV)
+        uses: dtolnay/rust-toolchain@1.91.0
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -572,8 +572,8 @@ jobs:
           path: iroh-live-patched
           token: ${{ secrets.CROSS_REPO_PAT }}
 
-      - name: Setup Rust 1.83.0 (MSRV)
-        uses: dtolnay/rust-toolchain@1.89.0
+      - name: Setup Rust 1.91.0 (MSRV)
+        uses: dtolnay/rust-toolchain@1.91.0
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -732,8 +732,8 @@ jobs:
           echo "FFMPEG_DIR=$ffmpegDir" >> $env:GITHUB_ENV
           echo "$ffmpegDir\bin" >> $env:GITHUB_PATH
 
-      - name: Setup Rust 1.83.0 (MSRV)
-        uses: dtolnay/rust-toolchain@1.89.0
+      - name: Setup Rust 1.91.0 (MSRV)
+        uses: dtolnay/rust-toolchain@1.91.0
 
       - name: Setup Node.js
         uses: actions/setup-node@v6

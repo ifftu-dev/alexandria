@@ -189,9 +189,9 @@ jobs:
           cache: 'npm'
           cache-dependency-path: alexandria/package-lock.json
 
-      - name: Setup Rust 1.83.0 (MSRV)
+      - name: Setup Rust 1.91.0 (MSRV)
         if: needs.changes.outputs.backend == 'true'
-        uses: dtolnay/rust-toolchain@1.89.0
+        uses: dtolnay/rust-toolchain@1.91.0
         with:
           components: rustfmt, clippy
 
