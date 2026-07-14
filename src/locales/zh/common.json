@@ -53,5 +53,13 @@
   "provenance": {
     "exampleLabel": "AI 生成的示例",
     "exampleTooltip": "这是为演示添加的 AI 生成示例内容，并非真实的课程、教程或观点。"
+  },
+  "birthdate": {
+    "day": "日",
+    "month": "月",
+    "year": "年",
+    "dayPlaceholder": "日",
+    "monthPlaceholder": "月",
+    "yearPlaceholder": "年"
   }
 }
