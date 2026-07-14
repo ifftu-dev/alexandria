@@ -271,10 +271,7 @@ impl VideoDecoder for VtDecoder {
             if !packet.keyframe {
                 return Ok(());
             }
-            let raw_data: Vec<u8> = packet
-                .payload
-                .iter().copied()
-                .collect();
+            let raw_data: Vec<u8> = packet.payload.iter().copied().collect();
             if raw_data.is_empty() {
                 return Ok(());
             }
@@ -329,10 +326,7 @@ impl VideoDecoder for VtDecoder {
             }
         }
 
-        let raw_data: Vec<u8> = packet
-            .payload
-            .iter().copied()
-            .collect();
+        let raw_data: Vec<u8> = packet.payload.iter().copied().collect();
         if raw_data.is_empty() {
             return Ok(());
         }
