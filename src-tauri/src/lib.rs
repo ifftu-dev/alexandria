@@ -1103,6 +1103,7 @@ pub fn run() {
             commands::health::read_diag_log,
             commands::health::frontend_log,
             commands::health::release_secure_input,
+            commands::updater::fetch_update_manifest,
             // App settings (per-profile, scope=sync|device)
             commands::settings::list_settings,
             commands::settings::set_setting,

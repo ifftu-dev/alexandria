@@ -5,7 +5,8 @@
     "install": "इंस्टॉल करा आणि पुन्हा सुरू करा",
     "later": "नंतर",
     "downloading": "डाउनलोड होत आहे…",
-    "installing": "इंस्टॉल होत आहे…"
+    "installing": "इंस्टॉल होत आहे…",
+    "getUpdate": "अपडेट मिळवा"
   },
   "settings": {
     "title": "अपडेट",

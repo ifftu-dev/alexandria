@@ -5,7 +5,8 @@
     "install": "Install & restart",
     "later": "Later",
     "downloading": "Downloading…",
-    "installing": "Installing…"
+    "installing": "Installing…",
+    "getUpdate": "Get update"
   },
   "settings": {
     "title": "Updates",
