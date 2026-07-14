@@ -203,6 +203,14 @@ const isTutorial = computed(() => course.value?.kind === 'tutorial')
 // readable text width.
 const isVideoElement = computed(() => currentElement.value?.element_type === 'video')
 
+// Plugin elements render a sandboxed iframe that manages its own layout — it
+// must fill the whole content area with no host padding (same as video).
+const isPluginElement = computed(() => currentElement.value?.element_type === 'plugin')
+
+// Element types that should get an edge-to-edge content area (no host padding),
+// letting the renderer own all available space on desktop and mobile.
+const isFullBleedElement = computed(() => isVideoElement.value || isPluginElement.value)
+
 // Check if an element type is MCQ
 function isMcqType(type: string): boolean {
   return type === 'objective_single_mcq' || type === 'objective_multi_mcq' || type === 'subjective_mcq'
@@ -1080,8 +1088,14 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
       <!-- ============================== -->
       <div class="flex-1 flex flex-col overflow-hidden">
         <div v-if="currentElement" :key="currentElement.id" class="lesson-body flex-1 min-h-0 flex flex-col overflow-hidden bg-gradient-to-b from-muted/20 via-transparent to-transparent">
-            <!-- Element header -->
-            <div class="shrink-0 z-10 border-b border-border/70 bg-background/90 px-4 md:px-6 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/70">
+            <!-- Element header. For full-bleed elements (plugins/video) it is
+                 hidden on mobile — the compact top header already carries the
+                 chapter/element/progress context, so the renderer gets the
+                 whole viewport. -->
+            <div
+              class="shrink-0 z-10 border-b border-border/70 bg-background/90 px-4 md:px-6 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/70"
+              :class="{ 'hidden md:block': isFullBleedElement }"
+            >
               <!-- Breadcrumb -->
               <div class="flex items-center gap-1.5 text-xs text-muted-foreground mb-3">
                 <span>{{ currentChapter?.title }}</span>
@@ -1178,7 +1192,7 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
             <!-- ============================== -->
             <div
               class="lesson-content flex-1 min-h-0 flex overflow-y-auto"
-              :class="isVideoElement
+              :class="isFullBleedElement
                 ? ''
                 : 'px-4 md:px-6 py-4 md:py-6 pb-[calc(1rem+var(--sab,env(safe-area-inset-bottom)))]'"
             >
@@ -1209,7 +1223,7 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
         <!-- ============================== -->
         <!-- NAVIGATION FOOTER              -->
         <!-- ============================== -->
-        <div v-if="currentElement" class="flex-shrink-0 border-t border-border bg-card/60 px-3 pt-2 pb-[calc(0.5rem+var(--sab,env(safe-area-inset-bottom)))] md:px-6 md:py-3">
+        <div v-if="currentElement" class="flex-shrink-0 border-t border-border bg-card/60 px-3 py-2 md:px-6 md:py-3">
           <p v-if="claimError" class="mx-auto mb-2 max-w-4xl text-xs text-destructive">
             {{ $t('learn.player.finishError', { error: claimError }) }}
           </p>
