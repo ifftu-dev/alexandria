@@ -258,11 +258,11 @@ jobs:
           releaseId: ${{ needs.prepare.outputs.release_id }}
           # `app` alongside `dmg` so the signed .app is emitted for the updater
           # tarball (createUpdaterArtifacts in tauri.conf.json); the DMG stays
-          # the human download. `includeUpdaterJson` then publishes the signed
-          # `latest.json` the in-app updater polls. Only the signed path carries
-          # TAURI_SIGNING_PRIVATE_KEY, so only it can produce updater artifacts.
+          # the human download. latest.json is NOT emitted per-platform here —
+          # the `finalize` job aggregates every platform's signed updater
+          # artifact into one manifest (see below).
           args: --target aarch64-apple-darwin --bundles app,dmg --config src-tauri/tauri.desktop.macos.conf.json
-          includeUpdaterJson: true
+          includeUpdaterJson: false
 
       - name: Rename macOS release assets
         if: inputs.mode == 'release'
@@ -1024,30 +1024,77 @@ jobs:
       (inputs.include_linux != true || needs.build-linux-x64.result == 'success') &&
       (inputs.include_windows != true || needs.build-windows.result == 'success')
     steps:
-      # The signed macOS build (tauri-action, includeUpdaterJson: true) already
-      # uploaded a correct `latest.json` to the release, pointing at the signed
-      # `.app.tar.gz` updater artifact — the format the tauri macOS updater
-      # actually installs (a dmg is not updater-installable). We do NOT
-      # regenerate it here; doing so previously clobbered it with a dmg URL.
+      # Aggregate every platform's signed updater artifact into one `latest.json`.
+      # Each build (mac/win/linux) that ran with the signing key uploaded its
+      # updater artifact + `.sig` to the release; we read those `.sig` assets and
+      # map each to a tauri updater platform key, pointing at the release-hosted
+      # artifact. Whichever platforms are present get included — a macOS-only run
+      # yields darwin-aarch64 only; a full matrix yields all three.
       #
-      # Instead, publish the draft as the repository's *latest* (non-draft,
-      # non-prerelease) release. The updater endpoint the app polls —
-      # `releases/latest/download/latest.json` — resolves only to the
-      # non-prerelease "latest" release, so leaving alphas as drafts/prereleases
-      # made every update check 404.
-      - name: Verify latest.json is present on the release
+      # macOS must use the `.app.tar.gz` (the format the macOS updater installs —
+      # a dmg is not updater-installable); Windows the NSIS `.nsis.zip`; Linux the
+      # `.AppImage`. We key off the `.sig` filename to select the right one.
+      - name: Aggregate signed updater artifacts into latest.json
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          if gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --json assets \
-               --jq '.assets[].name' | grep -qx 'latest.json'; then
-            echo "latest.json present on ${RELEASE_TAG}"
-          else
-            echo "ERROR: latest.json missing — the signed macOS build did not publish it." >&2
+          BASE_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}"
+          mkdir -p sigs && cd sigs
+
+          # Every signed updater artifact uploaded a companion `<artifact>.sig`.
+          # Iterate those, classify each by the artifact name, and keep the first
+          # per platform (there is one updater artifact per platform).
+          sigs=$(gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" \
+                   --json assets --jq '.assets[].name | select(endswith(".sig"))')
+
+          PLATFORMS='{}'
+          COUNT=0
+          declare -A SEEN
+          add_platform() {  # key, artifact-name
+            local key="$1" artifact="$2"
+            [ -n "${SEEN[$key]:-}" ] && return 0
+            gh release download "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" \
+              --pattern "${artifact}.sig" --dir . --clobber
+            local sig; sig=$(cat "${artifact}.sig")
+            PLATFORMS=$(echo "$PLATFORMS" | jq \
+              --arg sig "$sig" --arg url "${BASE_URL}/${artifact}" \
+              ".\"$key\" = {signature: \$sig, url: \$url}")
+            SEEN[$key]=1
+            COUNT=$((COUNT + 1))
+            echo "  + $key -> $artifact"
+          }
+
+          while IFS= read -r signame; do
+            [ -z "$signame" ] && continue
+            artifact="${signame%.sig}"
+            case "$artifact" in
+              *.app.tar.gz)            add_platform "darwin-aarch64" "$artifact" ;;
+              *.nsis.zip)              add_platform "windows-x86_64" "$artifact" ;;
+              *.AppImage|*.AppImage.tar.gz) add_platform "linux-x86_64" "$artifact" ;;
+            esac
+          done <<< "$sigs"
+
+          if [ "$COUNT" -eq 0 ]; then
+            echo "ERROR: no signed updater artifacts found on ${RELEASE_TAG}." >&2
             exit 1
           fi
 
+          VERSION="${RELEASE_TAG#v}"
+          jq -n --arg version "$VERSION" --arg notes "" \
+                --argjson platforms "$PLATFORMS" \
+            '{version: $version, notes: $notes, platforms: $platforms}' > ../latest.json
+          cat ../latest.json
+
+      - name: Upload latest.json
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${RELEASE_TAG}" latest.json --clobber --repo "${GITHUB_REPOSITORY}"
+
+      # Publish as the repository's *latest* (non-draft, non-prerelease) release.
+      # The updater endpoint `releases/latest/download/latest.json` resolves only
+      # to the non-prerelease "latest" release, so leaving alphas as
+      # drafts/prereleases made every update check 404.
       - name: Publish release as latest
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

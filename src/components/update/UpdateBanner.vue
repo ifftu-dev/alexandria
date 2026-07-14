@@ -8,8 +8,10 @@ const {
   availableVersion,
   downloadProgress,
   bannerDismissed,
+  manualOnly,
   downloadAndInstall,
   dismissBanner,
+  openManual,
 } = useAppUpdate()
 
 // Visible only once a check has surfaced an update the user hasn't dismissed,
@@ -53,7 +55,18 @@ const visible = computed(
           >
             {{ $t('update.banner.later') }}
           </AppButton>
+          <!-- Mobile: no self-install — link out to the download page. -->
           <AppButton
+            v-if="manualOnly"
+            variant="primary"
+            size="sm"
+            @click="openManual()"
+          >
+            {{ $t('update.banner.getUpdate') }}
+          </AppButton>
+          <!-- Desktop: download + install in place. -->
+          <AppButton
+            v-else
             variant="primary"
             size="sm"
             :loading="phase === 'downloading' || phase === 'ready'"

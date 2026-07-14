@@ -37,6 +37,7 @@ pub mod settings;
 pub mod skill_bootstrap;
 pub mod snapshot;
 pub mod taxonomy;
+pub mod updater;
 pub mod username_registry;
 pub mod users;
 

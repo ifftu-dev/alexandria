@@ -1,6 +1,8 @@
 import { readonly, ref } from 'vue'
 import { check, type Update } from '@tauri-apps/plugin-updater'
 import { relaunch } from '@tauri-apps/plugin-process'
+import { invoke } from '@tauri-apps/api/core'
+import { getVersion } from '@tauri-apps/api/app'
 import { isMobilePlatform, currentPlatform } from '@/composables/usePlatform'
 
 /**
@@ -36,11 +38,66 @@ const errorMessage = ref<string | null>(null)
 /** Dismissing the banner hides it until the next check finds a newer version. */
 const bannerDismissed = ref(false)
 
+/**
+ * True when an update exists but can't be self-installed — i.e. on mobile,
+ * where the tauri updater is unsupported and app stores forbid self-updating.
+ * The banner then links out to the release page instead of offering Install.
+ */
+const manualOnly = ref(false)
+/** Where to send the user to get the update manually (mobile). */
+const manualUrl = ref<string | null>(null)
+
 let pendingUpdate: Update | null = null
 
-/** Desktop Tauri only — the updater plugin is absent everywhere else. */
+/**
+ * Desktop Tauri (macOS/Windows/Linux) — where the updater plugin can actually
+ * download + install an update. Mobile is handled by the manual-notice path.
+ */
 function supported(): boolean {
   return !isMobilePlatform && currentPlatform !== 'unknown'
+}
+
+/** Compare dotted numeric cores (ignoring any `-prerelease` suffix). */
+function isNewer(remote: string, local: string): boolean {
+  const core = (v: string) => (v.split('-')[0] ?? '').split('.').map((n) => parseInt(n, 10) || 0)
+  const r = core(remote)
+  const l = core(local)
+  for (let i = 0; i < Math.max(r.length, l.length); i++) {
+    const a = r[i] ?? 0
+    const b = l[i] ?? 0
+    if (a !== b) return a > b
+  }
+  // Same numeric core: treat a differing string as "not newer" — alpha tracks
+  // bump the core on every release, so this avoids nagging within a version.
+  return false
+}
+
+/**
+ * Mobile update notice: fetch the published manifest via the Rust command
+ * (the webview CSP blocks a direct fetch to GitHub), compare to the running
+ * version, and — if newer — surface a link-out banner. Never self-installs.
+ */
+async function checkMobileUpdate(): Promise<void> {
+  try {
+    const info = await invoke<{
+      version: string
+      notes: string
+      releases_url: string
+    } | null>('fetch_update_manifest')
+    if (!info) return
+    const current = await getVersion()
+    if (isNewer(info.version, current)) {
+      availableVersion.value = info.version
+      currentVersion.value = current
+      releaseNotes.value = info.notes || null
+      manualUrl.value = info.releases_url
+      manualOnly.value = true
+      bannerDismissed.value = false
+      phase.value = 'available'
+    }
+  } catch (e) {
+    console.warn('[update] mobile check failed:', e)
+  }
 }
 
 /**
@@ -49,7 +106,13 @@ function supported(): boolean {
  * banner when an update genuinely exists.
  */
 async function checkForUpdate(opts: { silent?: boolean } = {}): Promise<void> {
-  if (!supported() || phase.value === 'checking' || phase.value === 'downloading') return
+  if (phase.value === 'checking' || phase.value === 'downloading') return
+
+  // Mobile can't self-install — fall back to the link-out notice.
+  if (!supported()) {
+    if (isMobilePlatform) await checkMobileUpdate()
+    return
+  }
 
   phase.value = 'checking'
   errorMessage.value = null
@@ -123,9 +186,14 @@ function dismissBanner(): void {
   bannerDismissed.value = true
 }
 
-/** Fire-and-forget silent check for App start-up. */
+/** Open the manual-download page (mobile). */
+function openManual(): void {
+  if (manualUrl.value) window.open(manualUrl.value, '_blank', 'noopener,noreferrer')
+}
+
+/** Fire-and-forget silent check for App start-up (desktop self-update + mobile notice). */
 export function initUpdateCheck(): void {
-  if (!supported()) return
+  if (!supported() && !isMobilePlatform) return
   void checkForUpdate({ silent: true })
 }
 
@@ -138,9 +206,12 @@ export function useAppUpdate() {
     downloadProgress: readonly(downloadProgress),
     errorMessage: readonly(errorMessage),
     bannerDismissed: readonly(bannerDismissed),
+    manualOnly: readonly(manualOnly),
+    manualUrl: readonly(manualUrl),
     supported,
     checkForUpdate,
     downloadAndInstall,
     dismissBanner,
+    openManual,
   }
 }

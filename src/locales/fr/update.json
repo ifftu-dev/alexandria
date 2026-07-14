@@ -5,7 +5,8 @@
     "install": "Installer et redémarrer",
     "later": "Plus tard",
     "downloading": "Téléchargement…",
-    "installing": "Installation…"
+    "installing": "Installation…",
+    "getUpdate": "Obtenir la mise à jour"
   },
   "settings": {
     "title": "Mises à jour",
