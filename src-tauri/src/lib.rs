@@ -519,7 +519,7 @@ pub fn run() {
             }
         }))
         .menu(|handle| {
-            // Standard menus plus a Develop submenu available in ALL builds:
+            // Standard menus plus a Developer submenu available in ALL builds:
             // "Reload Webviews" (reload without restarting), "Open DevTools"
             // (web inspector), and "Sentinel Live View" (toggle the debug PiP).
             let menu = tauri::menu::Menu::default(handle)?;
@@ -534,7 +534,7 @@ pub fn run() {
                 tauri::menu::MenuItemBuilder::with_id("toggle_sentinel_pip", "Sentinel Live View")
                     .accelerator("CmdOrCtrl+Shift+S")
                     .build(handle)?;
-            let develop = tauri::menu::SubmenuBuilder::new(handle, "Develop")
+            let develop = tauri::menu::SubmenuBuilder::new(handle, "Developer")
                 .item(&reload)
                 .item(&devtools)
                 .item(&pip)
