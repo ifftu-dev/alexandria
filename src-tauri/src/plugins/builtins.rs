@@ -403,7 +403,7 @@ pub fn install_all(db: &Database, plugins_dir: &Path) -> InstallStats {
         let scope = manifest::parse_and_validate(bundle.manifest_json)
             .map(|m| m.scope)
             .unwrap_or(PluginScope::Global);
-        if !cfg!(feature = "dev-seed") && scope == PluginScope::Course {
+        if scope == PluginScope::Course {
             log::debug!(
                 "builtin plugin '{}' is course-scoped — deferred to enrollment",
                 bundle.slug

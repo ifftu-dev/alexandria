@@ -349,11 +349,14 @@ impl AppState {
             Err(e) => log::warn!("stake-pubkey registry: bootstrap seed failed: {e}"),
         }
 
-        #[cfg(feature = "dev-seed")]
-        {
-            if let Err(e) = crate::db::seed::seed_if_empty(database.conn()) {
-                log::warn!("seed failed (non-fatal): {e}");
-            }
+        // Seed the skill taxonomy, goal templates, and browsable demo courses
+        // on every platform (mobile/release included) — these are product data
+        // the goals + skill-graph features need, not dev-only fixtures. The
+        // heavy iroh content-blob seeding stays behind `dev-seed` above. Fresh
+        // profiles are NOT auto-enrolled (see BACKFILL_SQL) and course plugins
+        // install through the enrollment pre-flight (see builtins::install_all).
+        if let Err(e) = crate::db::seed::seed_if_empty(database.conn()) {
+            log::warn!("seed failed (non-fatal): {e}");
         }
 
         {

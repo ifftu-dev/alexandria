@@ -18,7 +18,6 @@ const EL_EDITOR_JS: &str = "el_plugin_demo_editor_js_double";
 const EL_EDITOR_TS: &str = "el_plugin_demo_editor_ts_sum";
 const EL_EDITOR_CPP: &str = "el_plugin_demo_editor_cpp_double";
 const EL_EDITOR_PYTHON: &str = "el_plugin_demo_editor_python_double";
-const ENROLLMENT_ID: &str = "enroll_plugin_demo";
 
 /// Resolve a builtin plugin's CID by its manifest `id` slug. The full id is
 /// `did:key:<author>#<slug>`, so we match on the parsed `id` field ending in
@@ -331,14 +330,9 @@ pub fn seed_plugin_demo_course(conn: &Connection) -> Result<(), rusqlite::Error>
         }
     }
 
-    // Auto-enroll the demo learner so the course appears on the dashboard
-    // immediately. Single-user app: enrollments are not scoped to a
-    // stake address column in the schema.
-    conn.execute(
-        "INSERT OR IGNORE INTO enrollments (id, course_id, enrolled_at, status) \
-         VALUES (?1, ?2, datetime('now'), 'active')",
-        params![ENROLLMENT_ID, COURSE_ID],
-    )?;
+    // Intentionally NOT auto-enrolled: a fresh user discovers this course in
+    // the catalog and enrolls themselves, which triggers the plugin
+    // install/consent pre-flight (course_required_plugins + install_course_plugins).
 
     log::info!(
         "plugin demo course seeded (music_cid={} irl_cid={})",
