@@ -1,0 +1,999 @@
+// Copyright 2025 N0, INC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+use std::{collections::BTreeMap, sync::Arc, time::Duration};
+
+use hang::catalog::{AudioConfig, Catalog};
+use moq_lite::{BroadcastConsumer, Track};
+use moq_mux::container::Timestamp;
+// Video-only imports (used solely under the video feature gates below).
+#[cfg(any(feature = "video", feature = "video-ios"))]
+use hang::catalog::VideoConfig;
+#[cfg(any(feature = "video", feature = "video-ios"))]
+use tokio_util::sync::DropGuard;
+
+/// moq-mux container consumer bound to the hang Legacy wire format. Replaces
+/// hang 0.19's removed `FrameConsumer`.
+type FrameConsumer = moq_mux::container::Consumer<moq_mux::container::legacy::Wire>;
+/// moq-mux hang catalog consumer. Replaces hang 0.19's removed `CatalogConsumer`.
+type CatalogConsumer = moq_mux::catalog::hang::Consumer;
+
+/// Project moq-mux's hang catalog wrapper (base media sections + extensions)
+/// down to the plain `hang::catalog::Catalog` the rest of this module uses.
+fn to_hang_catalog(c: moq_mux::catalog::hang::Catalog) -> Catalog {
+    Catalog {
+        video: c.video,
+        audio: c.audio,
+    }
+}
+use n0_error::{Result, StackResultExt, StdResultExt};
+use n0_future::task::AbortOnDropHandle;
+#[allow(unused_imports)] // Watcher trait required for .update() and .peek() on Direct<T>
+use n0_watcher::{Watchable, Watcher};
+use tokio::{
+    sync::mpsc::{self, error::TryRecvError},
+    time::Instant,
+};
+use tokio_util::sync::CancellationToken;
+use tracing::{Span, debug, error, info, info_span, trace, warn};
+
+#[cfg(any(feature = "video", feature = "video-ios"))]
+use crate::av::VideoSource;
+#[cfg(any(feature = "video", feature = "video-ios"))]
+use crate::av::{DecodeConfig, DecodedFrame, Decoders, PlaybackConfig, VideoDecoder};
+#[cfg(feature = "video")]
+use crate::ffmpeg::util::Rescaler;
+use crate::{
+    av::{AudioDecoder, AudioSink, AudioSinkHandle, Quality},
+    util::spawn_thread,
+};
+
+const DEFAULT_MAX_LATENCY: Duration = Duration::from_millis(150);
+
+// 30s timeout — 5s was too aggressive for audio (silence, network spikes, GC pauses).
+const AUDIO_READ_TIMEOUT: Duration = Duration::from_secs(30);
+
+// Track priority for audio subscriptions (hang 0.19's catalog `Audio` no longer
+// carries a per-track priority; the old code used 2 for audio).
+const AUDIO_TRACK_PRIORITY: u8 = 2;
+
+// Track priority for video subscriptions (hang 0.19's catalog `Video` no longer
+// carries a per-track priority; the old code used 1 for video).
+#[cfg(any(feature = "video", feature = "video-ios"))]
+const VIDEO_TRACK_PRIORITY: u8 = 1;
+
+#[derive(derive_more::Debug, Clone)]
+pub struct SubscribeBroadcast {
+    broadcast_name: String,
+    #[debug("BroadcastConsumer")]
+    broadcast: BroadcastConsumer,
+    // catalog_watcher: n0_watcher::Direct<CatalogWrapper>,
+    catalog_watchable: Watchable<CatalogWrapper>,
+    shutdown: CancellationToken,
+    _catalog_task: Arc<AbortOnDropHandle<()>>,
+}
+
+#[derive(Debug, derive_more::PartialEq, derive_more::Eq, Default, Clone, derive_more::Deref)]
+pub struct CatalogWrapper {
+    #[eq(skip)]
+    #[deref]
+    inner: Arc<Catalog>,
+    seq: usize,
+}
+
+impl CatalogWrapper {
+    fn new(inner: Catalog, seq: usize) -> Self {
+        Self {
+            inner: Arc::new(inner),
+            seq,
+        }
+    }
+
+    #[cfg(any(feature = "video", feature = "video-ios"))]
+    pub fn video_renditions(&self) -> impl Iterator<Item = &str> {
+        // hang 0.19 `Catalog.video` is a plain `Video` (not `Option`); an empty
+        // `renditions` map means "no video".
+        let mut renditions: Vec<_> = self
+            .inner
+            .video
+            .renditions
+            .iter()
+            .map(|(name, config)| (name.as_str(), config.coded_width))
+            .collect();
+        renditions.sort_by_key(|a| a.1);
+        renditions.into_iter().map(|(name, _w)| name)
+    }
+
+    pub fn audio_renditions(&self) -> impl Iterator<Item = &str> + '_ {
+        self.inner.audio.renditions.keys().map(|name| name.as_str())
+    }
+
+    #[cfg(any(feature = "video", feature = "video-ios"))]
+    pub fn select_video_rendition(&self, quality: Quality) -> Result<String> {
+        let track_name = select_video_rendition(&self.inner.video.renditions, quality)
+            .context("no video renditions")?;
+        Ok(track_name)
+    }
+
+    pub fn select_audio_rendition(&self, quality: Quality) -> Result<String> {
+        let track_name = select_audio_rendition(&self.inner.audio.renditions, quality)
+            .context("no audio renditions")?;
+        Ok(track_name)
+    }
+}
+
+impl CatalogWrapper {
+    pub fn into_inner(self) -> Arc<Catalog> {
+        self.inner
+    }
+}
+
+impl SubscribeBroadcast {
+    pub async fn new(broadcast_name: String, broadcast: BroadcastConsumer) -> Result<Self> {
+        let (catalog_watchable, catalog_task) = {
+            let track = broadcast
+                .subscribe_track(&Catalog::default_track())
+                .std_context("subscribe to catalog track")?;
+            let mut consumer = CatalogConsumer::new(track);
+            let initial_catalog = consumer
+                .next()
+                .await
+                .std_context("Broadcast closed before receiving catalog")?
+                .context("Catalog track closed before receiving catalog")?;
+            let watchable =
+                Watchable::new(CatalogWrapper::new(to_hang_catalog(initial_catalog), 0));
+
+            // Use a SEPARATE token for the catalog task so its exit doesn't
+            // kill audio/video subscriptions. Previously, the catalog task
+            // shared `shutdown` and called `shutdown.cancel()` on exit, which
+            // cancelled all active audio and video tracks — causing a 3-second
+            // audio dropout every time the catalog track closed.
+            let catalog_shutdown = CancellationToken::new();
+
+            let task = tokio::spawn({
+                let catalog_shutdown = catalog_shutdown.clone();
+                let watchable = watchable.clone();
+                async move {
+                    for seq in 1.. {
+                        match consumer.next().await {
+                            Ok(Some(catalog)) => {
+                                watchable
+                                    .set(CatalogWrapper::new(to_hang_catalog(catalog), seq))
+                                    .ok();
+                            }
+                            Ok(None) => {
+                                debug!("subscribed broadcast catalog track ended");
+                                break;
+                            }
+                            Err(err) => {
+                                debug!("subscribed broadcast closed: {err:#}");
+                                break;
+                            }
+                        }
+                    }
+                    // Only cancel the catalog's own token — `shutdown` (used by
+                    // audio/video tracks) stays alive so playback continues.
+                    catalog_shutdown.cancel();
+                }
+            });
+            (watchable, task)
+        };
+        Ok(Self {
+            broadcast_name,
+            broadcast,
+            catalog_watchable,
+            _catalog_task: Arc::new(AbortOnDropHandle::new(catalog_task)),
+            shutdown: CancellationToken::new(),
+        })
+    }
+
+    pub fn broadcast_name(&self) -> &str {
+        &self.broadcast_name
+    }
+
+    pub fn catalog_watcher(&mut self) -> n0_watcher::Direct<CatalogWrapper> {
+        self.catalog_watchable.watch()
+    }
+
+    pub fn catalog(&self) -> CatalogWrapper {
+        self.catalog_watchable.get()
+    }
+
+    #[cfg(any(feature = "video", feature = "video-ios"))]
+    pub fn watch_and_listen<D: Decoders>(
+        self,
+        audio_out: impl AudioSink,
+        playback_config: PlaybackConfig,
+    ) -> Result<AvRemoteTrack> {
+        AvRemoteTrack::new::<D>(self, audio_out, playback_config)
+    }
+
+    #[cfg(any(feature = "video", feature = "video-ios"))]
+    pub fn watch<D: VideoDecoder>(&self) -> Result<WatchTrack> {
+        self.watch_with::<D>(&Default::default(), Quality::Highest)
+    }
+
+    #[cfg(any(feature = "video", feature = "video-ios"))]
+    pub fn watch_with<D: VideoDecoder>(
+        &self,
+        playback_config: &DecodeConfig,
+        quality: Quality,
+    ) -> Result<WatchTrack> {
+        let track_name = self.catalog().select_video_rendition(quality)?;
+        info!(
+            "watch_with: selected rendition '{}' for quality={:?} on broadcast='{}'",
+            track_name, quality, self.broadcast_name
+        );
+        self.watch_rendition::<D>(playback_config, &track_name)
+    }
+
+    #[cfg(any(feature = "video", feature = "video-ios"))]
+    pub fn watch_rendition<D: VideoDecoder>(
+        &self,
+        playback_config: &DecodeConfig,
+        track_name: &str,
+    ) -> Result<WatchTrack> {
+        let catalog = self.catalog();
+        // hang 0.19 `Catalog.video` is a plain `Video` (not `Option`).
+        let video = &catalog.video;
+        let config = video
+            .renditions
+            .get(track_name)
+            .context("rendition not found")?;
+        let has_desc = config.description.is_some();
+        let desc_len = config.description.as_ref().map(|d| d.len()).unwrap_or(0);
+        info!(
+            "watch_rendition: broadcast='{}' subscribing to video track '{}' ({}x{}, desc={has_desc}/{desc_len}B, max_latency={:?})",
+            self.broadcast_name,
+            track_name,
+            config.coded_width.unwrap_or(0),
+            config.coded_height.unwrap_or(0),
+            DEFAULT_MAX_LATENCY,
+        );
+        // Subscribe to the raw moq-net track, then wrap it in a moq-mux Legacy
+        // container consumer (replaces hang 0.19's removed `hang::TrackConsumer`).
+        let track = self
+            .broadcast
+            .subscribe_track(&Track::new(track_name).with_priority(VIDEO_TRACK_PRIORITY))
+            .std_context("subscribe to video track")?;
+        let consumer = FrameConsumer::new(track, moq_mux::container::legacy::Wire)
+            .with_latency(DEFAULT_MAX_LATENCY);
+        let span = info_span!("videodec", %track_name);
+        WatchTrack::from_consumer::<D>(
+            track_name.to_string(),
+            consumer,
+            config,
+            playback_config,
+            self.shutdown.child_token(),
+            span,
+        )
+    }
+    pub fn listen<D: AudioDecoder>(&self, output: impl AudioSink) -> Result<AudioTrack> {
+        self.listen_with::<D>(Quality::Highest, output)
+    }
+
+    pub fn listen_with<D: AudioDecoder>(
+        &self,
+        quality: Quality,
+        output: impl AudioSink,
+    ) -> Result<AudioTrack> {
+        let track_name = self.catalog().select_audio_rendition(quality)?;
+        self.listen_rendition::<D>(&track_name, output)
+    }
+
+    pub fn listen_rendition<D: AudioDecoder>(
+        &self,
+        name: &str,
+        output: impl AudioSink,
+    ) -> Result<AudioTrack> {
+        let catalog = self.catalog();
+        // hang 0.19 `Catalog.audio` is a plain `Audio` (not `Option`).
+        let audio = &catalog.audio;
+        let config = audio.renditions.get(name).context("rendition not found")?;
+        info!(
+            "listen_rendition: subscribing to audio track '{}' (sample_rate={}, channels={}, max_latency={:?})",
+            name, config.sample_rate, config.channel_count, DEFAULT_MAX_LATENCY,
+        );
+        // Subscribe to the raw moq-net track, then wrap it in a moq-mux Legacy
+        // container consumer (replaces hang 0.19's removed `hang::TrackConsumer`).
+        let track = self
+            .broadcast
+            .subscribe_track(&Track::new(name).with_priority(AUDIO_TRACK_PRIORITY))
+            .std_context("subscribe to audio track")?;
+        let consumer = FrameConsumer::new(track, moq_mux::container::legacy::Wire)
+            .with_latency(DEFAULT_MAX_LATENCY);
+        let span = info_span!("audiodec", %name);
+        AudioTrack::spawn::<D>(
+            name.to_string(),
+            consumer,
+            config.clone(),
+            output,
+            self.shutdown.child_token(),
+            span,
+        )
+    }
+
+    pub fn closed(&self) -> impl Future<Output = ()> + 'static {
+        // moq-net's `BroadcastConsumer::closed` resolves to the close `Error`;
+        // the old hang API resolved to `()`. Discard the reason to keep the
+        // signature stable for callers.
+        let broadcast = self.broadcast.clone();
+        async move {
+            broadcast.closed().await;
+        }
+    }
+
+    pub fn shutdown(&self) {
+        self.shutdown.cancel();
+    }
+}
+
+fn select_rendition<T, P: ToString>(
+    renditions: &BTreeMap<String, T>,
+    order: &[P],
+) -> Option<String> {
+    order
+        .iter()
+        .map(ToString::to_string)
+        .find(|k| renditions.contains_key(k.as_str()))
+        .or_else(|| renditions.keys().next().cloned())
+}
+
+#[cfg(any(feature = "video", feature = "video-ios"))]
+fn select_video_rendition<T>(renditions: &BTreeMap<String, T>, q: Quality) -> Option<String> {
+    use crate::av::VideoPreset::*;
+    let order = match q {
+        Quality::Highest => [P1080, P720, P360, P180],
+        Quality::High => [P720, P360, P180, P1080],
+        Quality::Mid => [P360, P180, P720, P1080],
+        Quality::Low => [P180, P360, P720, P1080],
+    };
+    let prefixed: Vec<String> = order.iter().map(|p| format!("video-{p}")).collect();
+    select_rendition(renditions, &prefixed)
+}
+
+fn select_audio_rendition<T>(renditions: &BTreeMap<String, T>, q: Quality) -> Option<String> {
+    use crate::av::AudioPreset::*;
+    let order = match q {
+        Quality::Highest | Quality::High => [Hq, Lq],
+        Quality::Mid | Quality::Low => [Lq, Hq],
+    };
+    let prefixed: Vec<String> = order.iter().map(|p| format!("audio-{p}")).collect();
+    select_rendition(renditions, &prefixed)
+}
+
+pub struct AudioTrack {
+    name: String,
+    handle: Box<dyn AudioSinkHandle>,
+    shutdown_token: CancellationToken,
+    _task_handle: AbortOnDropHandle<()>,
+    _thread_handle: std::thread::JoinHandle<()>,
+}
+
+impl AudioTrack {
+    pub(crate) fn spawn<D: AudioDecoder>(
+        name: String,
+        consumer: FrameConsumer,
+        config: AudioConfig,
+        output: impl AudioSink,
+        shutdown: CancellationToken,
+        span: Span,
+    ) -> Result<Self> {
+        let _guard = span.enter();
+        let (packet_tx, packet_rx) = mpsc::channel(32);
+        let output_format = output.format()?;
+        info!(?config, "audio thread start");
+        let decoder = D::new(&config, output_format)?;
+        let handle = output.handle();
+        let thread_name = format!("adec-{}", name);
+        let thread = spawn_thread(thread_name, {
+            let shutdown = shutdown.clone();
+            let span = span.clone();
+            move || {
+                let _guard = span.enter();
+                if let Err(err) = Self::run_loop(decoder, packet_rx, output, &shutdown) {
+                    error!("audio decoder failed: {err:#}");
+                }
+                info!("audio decoder thread stop");
+            }
+        });
+        let task = tokio::spawn(forward_frames(consumer, packet_tx));
+        Ok(Self {
+            name,
+            handle,
+            shutdown_token: shutdown,
+            _task_handle: AbortOnDropHandle::new(task),
+            _thread_handle: thread,
+        })
+    }
+
+    pub fn stopped(&self) -> impl Future<Output = ()> + 'static {
+        let shutdown_token = self.shutdown_token.clone();
+        async move { shutdown_token.cancelled().await }
+    }
+
+    pub fn rendition(&self) -> &str {
+        &self.name
+    }
+
+    pub fn handle(&self) -> &dyn AudioSinkHandle {
+        self.handle.as_ref()
+    }
+
+    pub(crate) fn run_loop(
+        mut decoder: impl AudioDecoder,
+        mut packet_rx: mpsc::Receiver<moq_mux::container::Frame>,
+        mut sink: impl AudioSink,
+        shutdown: &CancellationToken,
+    ) -> Result<()> {
+        const INTERVAL: Duration = Duration::from_millis(10);
+        let mut remote_start = None;
+        let loop_start = Instant::now();
+        let mut audio_pkt_count: u64 = 0;
+        let mut consecutive_sink_failures: u32 = 0;
+        info!("audiodec: run_loop starting, waiting for packets...");
+
+        'main: for i in 0.. {
+            let tick = Instant::now();
+
+            if shutdown.is_cancelled() {
+                info!("audiodec: cancelled after {audio_pkt_count} packets");
+                break;
+            }
+
+            loop {
+                match packet_rx.try_recv() {
+                    Ok(packet) => {
+                        audio_pkt_count += 1;
+                        if audio_pkt_count <= 3 || audio_pkt_count.is_multiple_of(500) {
+                            info!(
+                                "audiodec: packet #{audio_pkt_count}, bytes={}, paused={}",
+                                packet.payload.len(),
+                                sink.is_paused()
+                            );
+                        }
+                        let remote_start = *remote_start.get_or_insert(packet.timestamp);
+
+                        if tracing::enabled!(tracing::Level::TRACE) {
+                            let loop_elapsed = tick.duration_since(loop_start);
+                            let remote_elapsed: Duration = packet
+                                .timestamp
+                                .checked_sub(remote_start)
+                                .unwrap_or(Timestamp::ZERO)
+                                .into();
+                            let diff_ms =
+                                (loop_elapsed.as_secs_f32() - remote_elapsed.as_secs_f32()) * 1000.;
+                            trace!(len = packet.payload.len(), ts=?packet.timestamp, ?loop_elapsed, ?remote_elapsed, ?diff_ms, "recv packet");
+                        }
+
+                        // TODO: Skip outdated packets?
+
+                        if !sink.is_paused() {
+                            match decoder.push_packet(packet) {
+                                Ok(()) => match decoder.pop_samples() {
+                                    Ok(Some(samples)) => {
+                                        if let Err(e) = sink.push_samples(samples) {
+                                            warn!(
+                                                "audiodec: push_samples failed (pkt #{audio_pkt_count}): {e:#}"
+                                            );
+                                            sink.resume();
+                                            consecutive_sink_failures += 1;
+                                            if consecutive_sink_failures >= 25 {
+                                                warn!(
+                                                    "audiodec: output sink failed {} times in a row, restarting track",
+                                                    consecutive_sink_failures
+                                                );
+                                                break 'main;
+                                            }
+                                        } else {
+                                            consecutive_sink_failures = 0;
+                                        }
+                                    }
+                                    Ok(None) => {}
+                                    Err(e) => {
+                                        warn!(
+                                            "audiodec: pop_samples failed (pkt #{audio_pkt_count}): {e:#}"
+                                        );
+                                    }
+                                },
+                                Err(e) => {
+                                    warn!(
+                                        "audiodec: decode failed (pkt #{audio_pkt_count}): {e:#}"
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    Err(TryRecvError::Disconnected) => {
+                        info!("audiodec: disconnected after {audio_pkt_count} packets");
+                        break 'main;
+                    }
+                    Err(TryRecvError::Empty) => {
+                        trace!("no packet to recv");
+                        break;
+                    }
+                }
+            }
+
+            let target_time = i * INTERVAL;
+            let real_time = Instant::now().duration_since(loop_start);
+            let sleep = target_time.saturating_sub(real_time);
+            if !sleep.is_zero() {
+                std::thread::sleep(sleep);
+            }
+        }
+        shutdown.cancel();
+        Ok(())
+    }
+}
+
+impl Drop for AudioTrack {
+    fn drop(&mut self) {
+        self.shutdown_token.cancel();
+    }
+}
+
+#[cfg(any(feature = "video", feature = "video-ios"))]
+pub struct WatchTrack {
+    video_frames: WatchTrackFrames,
+    handle: WatchTrackHandle,
+}
+
+#[cfg(any(feature = "video", feature = "video-ios"))]
+pub struct WatchTrackHandle {
+    rendition: String,
+    viewport: Watchable<(u32, u32)>,
+    _guard: WatchTrackGuard,
+}
+
+#[cfg(any(feature = "video", feature = "video-ios"))]
+impl WatchTrackHandle {
+    pub fn set_viewport(&self, w: u32, h: u32) {
+        self.viewport.set((w, h)).ok();
+    }
+
+    pub fn rendition(&self) -> &str {
+        &self.rendition
+    }
+}
+
+#[cfg(any(feature = "video", feature = "video-ios"))]
+pub struct WatchTrackFrames {
+    rx: mpsc::Receiver<DecodedFrame>,
+}
+
+#[cfg(any(feature = "video", feature = "video-ios"))]
+impl WatchTrackFrames {
+    pub fn current_frame(&mut self) -> Option<DecodedFrame> {
+        let mut out = None;
+        while let Ok(item) = self.rx.try_recv() {
+            out = Some(item);
+        }
+        out
+    }
+
+    pub async fn next_frame(&mut self) -> Option<DecodedFrame> {
+        if let Some(frame) = self.current_frame() {
+            Some(frame)
+        } else {
+            self.rx.recv().await
+        }
+    }
+}
+
+#[cfg(any(feature = "video", feature = "video-ios"))]
+struct WatchTrackGuard {
+    _shutdown_token_guard: DropGuard,
+    _task_handle: Option<AbortOnDropHandle<()>>,
+    _thread_handle: Option<std::thread::JoinHandle<()>>,
+}
+
+#[cfg(any(feature = "video", feature = "video-ios"))]
+impl WatchTrack {
+    pub fn empty(rendition: impl ToString) -> Self {
+        let (tx, rx) = mpsc::channel(1);
+        let task = tokio::task::spawn(async move {
+            std::future::pending::<()>().await;
+            let _ = tx;
+        });
+        let guard = WatchTrackGuard {
+            _shutdown_token_guard: CancellationToken::new().drop_guard(),
+            _task_handle: Some(AbortOnDropHandle::new(task)),
+            _thread_handle: None,
+        };
+        Self {
+            video_frames: WatchTrackFrames { rx },
+            handle: WatchTrackHandle {
+                rendition: rendition.to_string(),
+                viewport: Default::default(),
+                _guard: guard,
+            },
+        }
+    }
+
+    /// Local video preview — requires ffmpeg Rescaler (desktop only).
+    #[cfg(feature = "video")]
+    pub fn from_video_source(
+        rendition: String,
+        shutdown: CancellationToken,
+        mut source: impl VideoSource,
+        decode_config: DecodeConfig,
+    ) -> Self {
+        let viewport = Watchable::new((1u32, 1u32));
+        let (frame_tx, frame_rx) = tokio::sync::mpsc::channel::<DecodedFrame>(2);
+        let thread_name = format!("vpr-{:>4}-{:>4}", source.name(), rendition);
+        let thread = spawn_thread(thread_name, {
+            let mut viewport = viewport.watch();
+            let shutdown = shutdown.clone();
+            move || {
+                // TODO: Make configurable.
+                let fps = 30;
+                let mut rescaler = Rescaler::new(decode_config.pixel_format.to_ffmpeg(), None)
+                    .expect("failed to create rescaler");
+                let frame_duration = Duration::from_secs_f32(1. / fps as f32);
+                if let Err(err) = source.start() {
+                    warn!("Video source failed to start: {err:?}");
+                    return;
+                }
+                let start = Instant::now();
+                for i in 1.. {
+                    // let t = Instant::now();
+                    if shutdown.is_cancelled() {
+                        break;
+                    }
+                    if viewport.update() {
+                        let (w, h) = viewport.peek();
+                        rescaler.set_target_dimensions(*w, *h);
+                    }
+                    match source.pop_frame() {
+                        Ok(Some(frame)) => {
+                            // trace!(t=?t.elapsed(), "pop");
+                            let frame = frame.to_ffmpeg();
+                            let frame = rescaler.process(&frame).expect("rescaler failed");
+                            let frame =
+                                DecodedFrame::from_ffmpeg(frame, frame_duration, start.elapsed());
+                            // trace!(t=?t.elapsed(), "convert");
+                            let _ = frame_tx.blocking_send(frame);
+                            // trace!(t=?t.elapsed(), "send");
+                        }
+                        Ok(None) => {}
+                        Err(_) => break,
+                    }
+                    let expected_time = i * frame_duration;
+                    let actual_time = start.elapsed();
+                    if expected_time > actual_time {
+                        std::thread::sleep(expected_time - actual_time);
+                        // trace!(t=?t.elapsed(), slept=?(actual_time - expected_time), ?expected_time, ?actual_time, "done");
+                    }
+                }
+                if let Err(err) = source.stop() {
+                    warn!("Video source failed to stop: {err:?}");
+                }
+            }
+        });
+        let guard = WatchTrackGuard {
+            _shutdown_token_guard: shutdown.drop_guard(),
+            _task_handle: None,
+            _thread_handle: Some(thread),
+        };
+        WatchTrack {
+            video_frames: WatchTrackFrames { rx: frame_rx },
+            handle: WatchTrackHandle {
+                rendition,
+                viewport,
+                _guard: guard,
+            },
+        }
+    }
+
+    /// Local video preview for iOS — no ffmpeg dependency.
+    ///
+    /// Converts raw camera frames (BGRA) to RGBA directly, without
+    /// ffmpeg's Rescaler. Suitable for self-preview where the camera
+    /// resolution is already appropriate (640×480 from AVCaptureSession).
+    #[cfg(feature = "video-ios")]
+    pub fn from_video_source_raw(
+        rendition: String,
+        shutdown: CancellationToken,
+        mut source: impl VideoSource,
+    ) -> Self {
+        use crate::av::PixelFormat;
+
+        let viewport = Watchable::new((1u32, 1u32));
+        let (frame_tx, frame_rx) = tokio::sync::mpsc::channel::<DecodedFrame>(2);
+        let thread_name = format!("vpr-{:>4}-{:>4}", source.name(), rendition);
+        let thread = spawn_thread(thread_name, {
+            let shutdown = shutdown.clone();
+            move || {
+                let fps = 24;
+                let frame_duration = Duration::from_secs_f32(1. / fps as f32);
+                if let Err(err) = source.start() {
+                    warn!("Video source failed to start: {err:?}");
+                    return;
+                }
+                let start = std::time::Instant::now();
+                for i in 1u64.. {
+                    if shutdown.is_cancelled() {
+                        break;
+                    }
+                    match source.pop_frame() {
+                        Ok(Some(frame)) => {
+                            let [w, h] = frame.format.dimensions;
+                            let raw = &frame.raw;
+
+                            // Convert BGRA → RGBA if needed (swap B and R channels)
+                            let rgba_data = match frame.format.pixel_format {
+                                PixelFormat::Bgra => {
+                                    let mut rgba = Vec::with_capacity(raw.len());
+                                    for chunk in raw.chunks_exact(4) {
+                                        rgba.push(chunk[2]); // R (was B)
+                                        rgba.push(chunk[1]); // G
+                                        rgba.push(chunk[0]); // B (was R)
+                                        rgba.push(chunk[3]); // A
+                                    }
+                                    rgba
+                                }
+                                PixelFormat::Rgba => raw.to_vec(),
+                            };
+
+                            if let Some(img) = image::RgbaImage::from_raw(w, h, rgba_data) {
+                                let final_img = if w > h {
+                                    image::DynamicImage::ImageRgba8(img).rotate90().to_rgba8()
+                                } else {
+                                    img
+                                };
+                                let decoded = DecodedFrame {
+                                    frame: image::Frame::new(final_img),
+                                    timestamp: start.elapsed(),
+                                };
+                                let _ = frame_tx.blocking_send(decoded);
+                            }
+                        }
+                        Ok(None) => {}
+                        Err(_) => break,
+                    }
+                    let expected_time = frame_duration * i as u32;
+                    let actual_time = start.elapsed();
+                    if expected_time > actual_time {
+                        std::thread::sleep(expected_time - actual_time);
+                    }
+                }
+                if let Err(err) = source.stop() {
+                    warn!("Video source failed to stop: {err:?}");
+                }
+            }
+        });
+        let guard = WatchTrackGuard {
+            _shutdown_token_guard: shutdown.drop_guard(),
+            _task_handle: None,
+            _thread_handle: Some(thread),
+        };
+        WatchTrack {
+            video_frames: WatchTrackFrames { rx: frame_rx },
+            handle: WatchTrackHandle {
+                rendition,
+                viewport,
+                _guard: guard,
+            },
+        }
+    }
+
+    pub(crate) fn from_consumer<D: VideoDecoder>(
+        rendition: String,
+        consumer: FrameConsumer,
+        config: &VideoConfig,
+        playback_config: &DecodeConfig,
+        shutdown: CancellationToken,
+        span: Span,
+    ) -> Result<Self> {
+        let (packet_tx, packet_rx) = mpsc::channel(32);
+        let (frame_tx, frame_rx) = mpsc::channel(32);
+        let viewport = Watchable::new((1u32, 1u32));
+        let viewport_watcher = viewport.watch();
+
+        let _guard = span.enter();
+        debug!(?config, "video decoder start");
+        let decoder = D::new(config, playback_config)?;
+        let thread_name = format!("vdec-{}", rendition);
+        let thread = spawn_thread(thread_name, {
+            let shutdown = shutdown.clone();
+            let span = span.clone();
+            move || {
+                let _guard = span.enter();
+                if let Err(err) =
+                    Self::run_loop(&shutdown, packet_rx, frame_tx, viewport_watcher, decoder)
+                {
+                    error!("video decoder failed: {err:#}");
+                }
+                shutdown.cancel();
+            }
+        });
+        let task = tokio::task::spawn(forward_frames(consumer, packet_tx));
+        let guard = WatchTrackGuard {
+            _shutdown_token_guard: shutdown.drop_guard(),
+            _task_handle: Some(AbortOnDropHandle::new(task)),
+            _thread_handle: Some(thread),
+        };
+        Ok(WatchTrack {
+            video_frames: WatchTrackFrames { rx: frame_rx },
+            handle: WatchTrackHandle {
+                rendition,
+                viewport,
+                _guard: guard,
+            },
+        })
+    }
+
+    pub fn split(self) -> (WatchTrackFrames, WatchTrackHandle) {
+        (self.video_frames, self.handle)
+    }
+
+    pub fn set_viewport(&self, w: u32, h: u32) {
+        self.handle.set_viewport(w, h);
+    }
+
+    pub fn rendition(&self) -> &str {
+        self.handle.rendition()
+    }
+
+    pub fn current_frame(&mut self) -> Option<DecodedFrame> {
+        self.video_frames.current_frame()
+    }
+
+    pub(crate) fn run_loop(
+        shutdown: &CancellationToken,
+        mut input_rx: mpsc::Receiver<moq_mux::container::Frame>,
+        output_tx: mpsc::Sender<DecodedFrame>,
+        mut viewport_watcher: n0_watcher::Direct<(u32, u32)>,
+        mut decoder: impl VideoDecoder,
+    ) -> Result<(), anyhow::Error> {
+        let mut pkt_count: u64 = 0;
+        let mut decoded_count: u64 = 0;
+        info!("videodec: run_loop starting, waiting for first packet...");
+        loop {
+            if shutdown.is_cancelled() {
+                info!(
+                    "videodec: run_loop cancelled after {pkt_count} packets, {decoded_count} decoded frames"
+                );
+                break;
+            }
+            let Some(packet) = input_rx.blocking_recv() else {
+                info!(
+                    "videodec: run_loop input channel closed after {pkt_count} packets, {decoded_count} decoded frames"
+                );
+                break;
+            };
+            pkt_count += 1;
+            if viewport_watcher.update() {
+                let (w, h) = viewport_watcher.peek();
+                decoder.set_viewport(*w, *h);
+            }
+            let t = Instant::now();
+            decoder
+                .push_packet(packet)
+                .context("failed to push packet")?;
+            trace!(t=?t.elapsed(), "videodec: push_packet");
+            while let Some(frame) = decoder.pop_frame().context("failed to pop frame")? {
+                decoded_count += 1;
+                if decoded_count <= 3 || decoded_count.is_multiple_of(100) {
+                    let img = frame.img();
+                    info!(
+                        "videodec: decoded frame #{decoded_count} (from {pkt_count} packets), {}x{}, elapsed={:?}",
+                        img.width(),
+                        img.height(),
+                        t.elapsed()
+                    );
+                }
+                if output_tx.blocking_send(frame).is_err() {
+                    warn!("videodec: output channel closed at decoded frame #{decoded_count}");
+                    break;
+                }
+                trace!(t=?t.elapsed(), "videodec: tx");
+            }
+            if pkt_count <= 3 || pkt_count.is_multiple_of(100) {
+                info!(
+                    "videodec: processed packet #{pkt_count}, total decoded frames: {decoded_count}"
+                );
+            }
+        }
+        Ok(())
+    }
+}
+
+async fn forward_frames(mut track: FrameConsumer, sender: mpsc::Sender<moq_mux::container::Frame>) {
+    let start = tokio::time::Instant::now();
+    info!("forward_frames: STARTED, waiting for first frame from TrackConsumer");
+    let mut count: u64 = 0;
+    loop {
+        let frame = match tokio::time::timeout(AUDIO_READ_TIMEOUT, track.read()).await {
+            Ok(result) => result,
+            Err(_) => {
+                let elapsed = start.elapsed();
+                warn!(
+                    "forward_frames: read_frame timeout after {count} frames ({elapsed:?}) — track likely dead"
+                );
+                break;
+            }
+        };
+        match frame {
+            Ok(Some(frame)) => {
+                count += 1;
+                if count <= 5 || count.is_multiple_of(100) {
+                    let elapsed = start.elapsed();
+                    info!(
+                        "forward_frames: #{count} payload_bytes={} keyframe={} elapsed={elapsed:?}",
+                        frame.payload.len(),
+                        frame.keyframe
+                    );
+                }
+                if sender.send(frame).await.is_err() {
+                    info!("forward_frames: receiver dropped after {count} frames");
+                    break;
+                }
+            }
+            Ok(None) => {
+                let elapsed = start.elapsed();
+                if count == 0 && elapsed < std::time::Duration::from_secs(2) {
+                    warn!(
+                        "forward_frames: track ended IMMEDIATELY after {elapsed:?} with 0 frames — \
+                         subscription likely failed (TrackConsumer closed)"
+                    );
+                } else {
+                    info!("forward_frames: track ended after {count} frames ({elapsed:?})");
+                }
+                break;
+            }
+            Err(err) => {
+                let elapsed = start.elapsed();
+                warn!("forward_frames: read error after {count} frames ({elapsed:?}): {err:?}");
+                break;
+            }
+        }
+    }
+}
+
+#[cfg(any(feature = "video", feature = "video-ios"))]
+pub struct AvRemoteTrack {
+    pub broadcast: SubscribeBroadcast,
+    pub video: Option<WatchTrack>,
+    pub audio: Option<AudioTrack>,
+}
+
+#[cfg(any(feature = "video", feature = "video-ios"))]
+impl AvRemoteTrack {
+    pub fn new<D: Decoders>(
+        broadcast: SubscribeBroadcast,
+        audio_out: impl AudioSink,
+        playback_config: PlaybackConfig,
+    ) -> Result<Self> {
+        let audio = broadcast
+            .listen_with::<D::Audio>(playback_config.quality, audio_out)
+            .inspect_err(|err| tracing::warn!("AvRemoteTrack: audio subscription failed: {err:#}"))
+            .ok();
+        let video = broadcast
+            .watch_with::<D::Video>(&playback_config.decode_config, playback_config.quality)
+            .inspect_err(|err| tracing::warn!("AvRemoteTrack: video subscription failed: {err:#}"))
+            .ok();
+        info!(
+            "AvRemoteTrack::new: audio={}, video={}",
+            audio.is_some(),
+            video.is_some()
+        );
+        Ok(Self {
+            broadcast,
+            audio,
+            video,
+        })
+    }
+}

@@ -41,6 +41,8 @@ mod anchor;
 mod antigaming;
 #[path = "e2e_vc/did.rs"]
 mod did;
+#[path = "e2e_vc/offline_peer_fetch.rs"]
+mod offline_peer_fetch;
 #[path = "e2e_vc/p2p_did_status.rs"]
 mod p2p_did_status;
 #[path = "e2e_vc/p2p_survival.rs"]

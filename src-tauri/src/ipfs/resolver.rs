@@ -22,6 +22,7 @@ use thiserror::Error;
 use crate::db::Database;
 use crate::ipfs::cid::{self, ContentId};
 use crate::ipfs::content;
+use crate::ipfs::fetch;
 use crate::ipfs::gateway::GatewayClient;
 use crate::ipfs::node::ContentNode;
 
@@ -133,22 +134,47 @@ pub struct ResolveResult {
     pub size: u64,
 }
 
-/// Content resolver with local cache and gateway fallback.
+/// Content resolver with local cache, iroh peer fetch, and gateway fallback.
 #[derive(Clone)]
 pub struct ContentResolver {
     node: Arc<ContentNode>,
     gateway: GatewayClient,
     db: Arc<Mutex<Option<Database>>>,
+    /// Optional iroh content-provider discovery. When present, a local
+    /// cache-miss for a BLAKE3 hash is first served by fetching from known
+    /// peers (pinners) over iroh, before falling back to the IPFS gateway.
+    discovery: Option<Arc<super::discovery::ContentDiscovery>>,
 }
 
 impl ContentResolver {
-    /// Create a new resolver.
+    /// Create a new resolver without peer discovery (gateway-only fallback).
     pub fn new(
         node: Arc<ContentNode>,
         gateway: GatewayClient,
         db: Arc<Mutex<Option<Database>>>,
     ) -> Self {
-        Self { node, gateway, db }
+        Self {
+            node,
+            gateway,
+            db,
+            discovery: None,
+        }
+    }
+
+    /// Create a resolver that fetches cache-misses from iroh peers (via
+    /// `discovery`) before falling back to the gateway.
+    pub fn with_discovery(
+        node: Arc<ContentNode>,
+        gateway: GatewayClient,
+        db: Arc<Mutex<Option<Database>>>,
+        discovery: Arc<super::discovery::ContentDiscovery>,
+    ) -> Self {
+        Self {
+            node,
+            gateway,
+            db,
+            discovery: Some(discovery),
+        }
     }
 
     /// Resolve content by any supported identifier (BLAKE3 hex or IPFS CID).
@@ -186,12 +212,44 @@ impl ContentResolver {
                 });
             }
             Err(content::ContentError::NotFound(_)) => {
-                // Continue to mapping lookup
+                // Continue to peer fetch, then mapping lookup
             }
             Err(e) => return Err(ResolveError::Store(e.to_string())),
         }
 
-        // Step 2: Check if we have a CID mapping for this BLAKE3 hash,
+        // Step 2: iroh peer fetch. If discovery knows providers for this hash
+        // (e.g. PinBoard pinners), pull it directly over iroh before touching
+        // the gateway. This is the decentralized path — content served by peers,
+        // BLAKE3-verified end to end.
+        if let Some(discovery) = &self.discovery {
+            if let Ok(parsed) = content::parse_hash(hash) {
+                let providers = discovery.find_providers(parsed).await;
+                if !providers.is_empty() {
+                    match fetch::fetch_from_any(&self.node, &providers, parsed).await {
+                        Ok(_provider) => {
+                            if let Ok(bytes) = content::get_bytes(&self.node, hash).await {
+                                let size = bytes.len() as u64;
+                                let ipfs_cid = self.lookup_cid_for_blake3(hash).await;
+                                return Ok(ResolveResult {
+                                    bytes,
+                                    blake3_hash: hash.to_string(),
+                                    ipfs_cid,
+                                    source: ResolveSource::Local,
+                                    size,
+                                });
+                            }
+                        }
+                        Err(e) => {
+                            log::debug!(
+                                "resolver: p2p fetch of {hash} failed: {e}; trying gateway"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        // Step 3: Check if we have a CID mapping for this BLAKE3 hash,
         // and if so, try fetching by that CID from gateways
         if let Some(mapped_cid) = self.lookup_cid_for_blake3(hash).await {
             if let Ok(result) = self.fetch_and_cache(&mapped_cid).await {
@@ -406,6 +464,39 @@ mod tests {
         assert_eq!(result.size, data.len() as u64);
 
         resolver.node.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn resolve_blake3_fetches_from_peer_before_gateway() {
+        use crate::ipfs::discovery::ContentDiscovery;
+
+        // Provider node holds the content.
+        let provider_tmp = TempDir::new().expect("provider temp");
+        let provider = ContentNode::new(provider_tmp.path());
+        provider.start(None).await.expect("start provider");
+        let data = b"resolver p2p path: served by a peer, not the gateway";
+        let add = content::add_bytes(&provider, data).await.expect("add");
+        let provider_addr = provider.endpoint_addr().await.expect("provider addr");
+
+        // Resolver's own node starts empty; seed discovery with the provider.
+        let (resolver_base, _tmp) = make_resolver().await;
+        let discovery = Arc::new(ContentDiscovery::new());
+        let parsed = content::parse_hash(&add.hash).expect("hash");
+        discovery.seed(parsed, provider_addr).await;
+        let resolver = ContentResolver::with_discovery(
+            resolver_base.node.clone(),
+            resolver_base.gateway.clone(),
+            resolver_base.db.clone(),
+            discovery,
+        );
+
+        // Gateway is unreachable (127.0.0.1:1); success proves the peer path.
+        let result = resolver.resolve(&add.hash).await.expect("resolve via peer");
+        assert_eq!(result.bytes, data);
+        assert_eq!(result.source, ResolveSource::Local);
+
+        resolver.node.shutdown().await.expect("shutdown resolver");
+        provider.shutdown().await.expect("shutdown provider");
     }
 
     #[tokio::test]

@@ -121,8 +121,10 @@ zeroize = { version = "1", features = ["derive"] }
 aes-gcm = "0.10"
 
 # Content-addressed storage (iroh embedded BLAKE3 blob store)
-iroh = "0.96"
-iroh-blobs = { version = "0.98", features = ["fs-store"] }
+# Force the `ring` TLS backend (not aws-lc-rs): aws-lc-sys needs a C/asm build
+# that does not cross-compile to iOS/Android.
+iroh = { version = "1.0.2", default-features = false, features = ["metrics", "fast-apple-datapath", "portmapper", "tls-ring"] }
+iroh-blobs = { version = "0.103", features = ["fs-store"] }
 
 # P2P networking (libp2p swarm) — all platforms
 # Uses private Alexandria DHT (/alexandria/kad/1.0) with relay bootstrap.
@@ -133,8 +135,8 @@ futures = "0.3"
 # Live tutoring — Media over QUIC (iroh-live) — ALL platforms
 # Base: audio-only (default-features = false). Platform-specific Tauri configs
 # opt into the appropriate media feature set for release parity.
-iroh-gossip = "0.96"
-iroh-live = { git = "https://github.com/ifftu-dev/iroh-live", rev = "a7e3e0fa8c073021d7e140813197705eb0f670fd", default-features = false }
+iroh-gossip = "0.101"
+iroh-live = { path = "../crates/iroh-live", default-features = false }
 postcard = { version = "1", features = ["alloc"] }
 blake3 = "1"
 

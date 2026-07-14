@@ -157,9 +157,19 @@ impl ContentNode {
             ))
             .build();
 
-        // Create QUIC endpoint with persistent identity
+        // Create QUIC endpoint with persistent identity.
+        // iroh 1.0 requires a preset on `builder`; `presets::N0` preserves the
+        // prior default (n0 relays + DNS discovery).
         crate::diag::log("node.start: Endpoint::bind()...");
-        let endpoint = Endpoint::builder()
+        let builder = Endpoint::builder(iroh::endpoint::presets::N0);
+        // iOS: the default `DnsResolver` reads the system DNS configuration via
+        // CoreFoundation, which returns NULL and panics on iOS / the simulator
+        // (same class of bug as the `if-watch` SCDynamicStore patch). Use an
+        // explicit public nameserver there instead; desktop keeps system DNS.
+        #[cfg(target_os = "ios")]
+        let builder =
+            builder.dns_resolver(iroh::dns::DnsResolver::with_nameserver(([1, 1, 1, 1], 53).into()));
+        let endpoint = builder
             .secret_key(secret_key)
             .transport_config(transport_config)
             .bind()
@@ -248,6 +258,15 @@ impl ContentNode {
     pub async fn node_id(&self) -> Option<String> {
         let inner = self.inner.lock().await;
         inner.as_ref().map(|n| n.router.endpoint().id().to_string())
+    }
+
+    /// Get this node's dialable address (endpoint id + relay + direct addrs).
+    ///
+    /// Used to hand a peer a `BlobTicket`/provider address so it can fetch our
+    /// content over iroh. Returns `None` if the node is not running.
+    pub async fn endpoint_addr(&self) -> Option<iroh::EndpointAddr> {
+        let inner = self.inner.lock().await;
+        inner.as_ref().map(|n| n.router.endpoint().addr())
     }
 
     /// Get a clone of the running Endpoint for use by other protocols.

@@ -1547,7 +1547,9 @@ impl TutoringManager {
         node_id: &str,
         name: &str,
     ) {
-        if broadcast.catalog().audio.is_none() {
+        // hang 0.19: `Catalog.audio` is a plain `Audio` (not `Option`); empty
+        // renditions means "no audio".
+        if broadcast.catalog().audio.renditions.is_empty() {
             return;
         }
 
@@ -1621,7 +1623,7 @@ impl TutoringManager {
         app_handle: &AppHandle,
     ) {
         let catalog = broadcast.catalog();
-        if catalog.video.is_none() {
+        if catalog.video.renditions.is_empty() {
             return;
         }
 
@@ -2879,7 +2881,7 @@ impl TutoringManager {
                         }
                     };
 
-                    let catalog_has_audio = broadcast.catalog().audio.is_some();
+                    let catalog_has_audio = !broadcast.catalog().audio.renditions.is_empty();
                     crate::diag::log(&format!("  [{short_id}] catalog audio={catalog_has_audio}"));
                     if !catalog_has_audio {
                         log::warn!(
@@ -2895,12 +2897,15 @@ impl TutoringManager {
                     // Log catalog contents for debugging
                     crate::diag::log(&format!("  [{short_id}] step 3: checking catalog..."));
                     let catalog = broadcast.catalog();
-                    let has_video_in_catalog = catalog.video.is_some();
-                    let has_audio_in_catalog = catalog.audio.is_some();
+                    // hang 0.19: video/audio are plain structs; empty renditions
+                    // means the media kind is absent.
+                    let has_video_in_catalog = !catalog.video.renditions.is_empty();
+                    let has_audio_in_catalog = !catalog.audio.renditions.is_empty();
                     crate::diag::log(&format!(
                         "  [{short_id}] catalog: video={has_video_in_catalog}, audio={has_audio_in_catalog}"
                     ));
-                    if let Some(ref video_cat) = catalog.video {
+                    {
+                        let video_cat = &catalog.video;
                         for (rname, vcfg) in &video_cat.renditions {
                             let has_desc = vcfg.description.is_some();
                             let desc_len = vcfg.description.as_ref().map(|d| d.len()).unwrap_or(0);

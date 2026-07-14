@@ -1,6 +1,8 @@
 pub mod cid;
 pub mod content;
 pub mod course;
+pub mod discovery;
+pub mod fetch;
 pub mod gateway;
 pub mod node;
 pub mod pinboard;

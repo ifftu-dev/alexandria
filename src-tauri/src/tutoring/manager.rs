@@ -1076,7 +1076,9 @@ impl TutoringManager {
         node_id: &str,
         name: &str,
     ) {
-        if broadcast.catalog().audio.is_none() {
+        // hang 0.19: `Catalog.audio` is a plain `Audio` (not `Option`); an empty
+        // renditions map means "no audio".
+        if broadcast.catalog().audio.renditions.is_empty() {
             return;
         }
 
@@ -1144,7 +1146,9 @@ impl TutoringManager {
         name: &str,
         app_handle: &AppHandle,
     ) {
-        if broadcast.catalog().video.is_none() {
+        // hang 0.19: `Catalog.video` is a plain `Video` (not `Option`); empty
+        // renditions means "no video".
+        if broadcast.catalog().video.renditions.is_empty() {
             return;
         }
 
@@ -1738,12 +1742,15 @@ impl TutoringManager {
 
                     // Log catalog contents for diagnostics
                     let catalog = broadcast.catalog();
-                    let catalog_has_video = catalog.video.is_some();
-                    let catalog_has_audio = catalog.audio.is_some();
+                    // hang 0.19: video/audio are plain structs; empty renditions
+                    // means the media kind is absent.
+                    let catalog_has_video = !catalog.video.renditions.is_empty();
+                    let catalog_has_audio = !catalog.audio.renditions.is_empty();
                     log::info!(
                         "tutoring: {short_id}:{name} catalog: video={catalog_has_video}, audio={catalog_has_audio}"
                     );
-                    if let Some(ref video_cat) = catalog.video {
+                    {
+                        let video_cat = &catalog.video;
                         for (rname, vcfg) in &video_cat.renditions {
                             let has_desc = vcfg.description.is_some();
                             let desc_len = vcfg.description.as_ref().map(|d| d.len()).unwrap_or(0);
@@ -1754,7 +1761,8 @@ impl TutoringManager {
                             );
                         }
                     }
-                    if let Some(ref audio_cat) = catalog.audio {
+                    {
+                        let audio_cat = &catalog.audio;
                         for (rname, acfg) in &audio_cat.renditions {
                             log::info!(
                                 "tutoring: {short_id} audio '{rname}': {}Hz {}ch",

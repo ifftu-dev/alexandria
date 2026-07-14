@@ -1,0 +1,747 @@
+// Copyright 2025 N0, INC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+use std::{
+    collections::{BTreeMap, HashMap},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::{Duration, Instant},
+};
+
+use anyhow::Context;
+use hang::catalog::AudioConfig;
+use moq_lite::BroadcastProducer;
+use n0_error::Result;
+use n0_future::task::AbortOnDropHandle;
+use tokio_util::sync::CancellationToken;
+use tracing::{error, info, info_span, trace, warn};
+// Video-only imports (used solely under the video feature gates below).
+#[cfg(any(feature = "video", feature = "video-ios"))]
+use hang::catalog::VideoConfig;
+#[cfg(any(feature = "video", feature = "video-ios"))]
+use std::sync::atomic::AtomicU32;
+#[cfg(any(feature = "video", feature = "video-ios"))]
+use tokio_util::sync::DropGuard;
+#[cfg(any(feature = "video", feature = "video-ios"))]
+use tracing::debug;
+
+/// moq-mux container producer bound to the hang Legacy wire format (one media
+/// frame per moq-lite frame). Replaces hang 0.19's removed `hang::TrackProducer`.
+type FrameProducer = moq_mux::container::Producer<moq_mux::container::legacy::Wire>;
+
+#[cfg(any(feature = "video", feature = "video-ios"))]
+use crate::av::{VideoEncoder, VideoEncoderInner, VideoPreset, VideoSource};
+#[cfg(any(feature = "video", feature = "video-ios"))]
+use crate::{av::DecodeConfig, subscribe::WatchTrack};
+use crate::{
+    av::{AudioEncoder, AudioEncoderInner, AudioPreset, AudioSource},
+    util::spawn_thread,
+};
+
+pub struct PublishBroadcast {
+    producer: BroadcastProducer,
+    catalog: moq_mux::catalog::Producer,
+    state: Arc<Mutex<State>>,
+    _task: Arc<AbortOnDropHandle<()>>,
+}
+
+impl Default for PublishBroadcast {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl PublishBroadcast {
+    pub fn new() -> Self {
+        // moq-net 0.17: build the broadcast producer, then let moq-mux create
+        // and manage the catalog track on it (replaces the old
+        // `Catalog::default().produce()` + manual `insert_track`).
+        let mut producer = moq_lite::Broadcast::new().produce();
+        let catalog = moq_mux::catalog::Producer::new(&mut producer)
+            .expect("create catalog track on a fresh broadcast never fails");
+
+        let state = Arc::new(Mutex::new(State::default()));
+        let task_handle = tokio::spawn(Self::run(state.clone(), producer.clone()));
+
+        Self {
+            producer,
+            catalog,
+            state,
+            _task: Arc::new(AbortOnDropHandle::new(task_handle)),
+        }
+    }
+
+    pub fn producer(&self) -> BroadcastProducer {
+        self.producer.clone()
+    }
+
+    async fn run(state: Arc<Mutex<State>>, producer: BroadcastProducer) {
+        // moq-net 0.17: the lazy "serve a track when a consumer requests it"
+        // loop lives on `BroadcastDynamic` (via `producer.dynamic()`), and
+        // `requested_track` returns `Result` (Err when the broadcast closes),
+        // not `Option`.
+        let mut dynamic = producer.dynamic();
+        while let Ok(track) = dynamic.requested_track().await {
+            let name = track.name().to_string();
+            if state
+                .lock()
+                .expect("poisoned")
+                .start_track(track.clone())
+                .inspect_err(|err| warn!(%name, "failed to start requested track: {err:#}"))
+                .is_ok()
+            {
+                info!("started track: {name}");
+                tokio::spawn({
+                    let state = state.clone();
+                    async move {
+                        let _ = track.unused().await;
+                        info!("stopping track: {name}");
+                        state.lock().expect("poisoned").stop_track(&name);
+                    }
+                });
+            }
+        }
+    }
+
+    /// Create a local WatchTrack from the current video source, if present.
+    ///
+    /// On desktop (`feature = "video"`): uses ffmpeg Rescaler for format conversion.
+    /// On iOS (`feature = "video-ios"`): uses lightweight BGRA→RGBA conversion.
+    #[cfg(feature = "video")]
+    pub fn watch_local(&self, decode_config: DecodeConfig) -> Option<WatchTrack> {
+        let (source, shutdown) = {
+            let state = self.state.lock().expect("poisoned");
+            let source = state
+                .available_video
+                .as_ref()
+                .map(|video| video.source.clone())?;
+            Some((source, state.shutdown_token.child_token()))
+        }?;
+        Some(WatchTrack::from_video_source(
+            "local".to_string(),
+            shutdown,
+            source,
+            decode_config,
+        ))
+    }
+
+    /// Create a local WatchTrack from the current video source (iOS variant).
+    ///
+    /// Uses lightweight BGRA→RGBA conversion without ffmpeg dependency.
+    #[cfg(all(feature = "video-ios", not(feature = "video")))]
+    pub fn watch_local(&self, _decode_config: DecodeConfig) -> Option<WatchTrack> {
+        let (source, shutdown) = {
+            let state = self.state.lock().expect("poisoned");
+            let source = state
+                .available_video
+                .as_ref()
+                .map(|video| video.source.clone())?;
+            Some((source, state.shutdown_token.child_token()))
+        }?;
+        Some(WatchTrack::from_video_source_raw(
+            "local".to_string(),
+            shutdown,
+            source,
+        ))
+    }
+
+    #[cfg(any(feature = "video", feature = "video-ios"))]
+    pub fn set_video(&mut self, renditions: Option<VideoRenditions>) -> Result<()> {
+        match renditions {
+            Some(renditions) => {
+                let configs = renditions.available_renditions()?;
+                // hang 0.19 `Video` dropped the `priority` field; `Catalog.video`
+                // is a plain `Video` (not `Option`). The moq-mux catalog Guard
+                // republishes on drop.
+                let video = hang::catalog::Video {
+                    renditions: configs,
+                    display: None,
+                    rotation: None,
+                    flip: None,
+                };
+                {
+                    let mut catalog = self.catalog.lock();
+                    catalog.video = video;
+                }
+                self.state.lock().expect("poisoned").available_video = Some(renditions);
+                // TODO: Drop active encodings if their rendition is no longer available?
+            }
+            None => {
+                // Clear catalog and stop any active video encoders
+                self.state.lock().expect("poisoned").remove_video();
+                {
+                    let mut catalog = self.catalog.lock();
+                    catalog.video = hang::catalog::Video::default();
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub fn set_audio(&mut self, renditions: Option<AudioRenditions>) -> Result<()> {
+        match renditions {
+            Some(renditions) => {
+                let configs = renditions.available_renditions()?;
+                // hang 0.19 `Audio` dropped `priority`; `Catalog.audio` is a
+                // plain `Audio` (not `Option`).
+                let audio = hang::catalog::Audio {
+                    renditions: configs,
+                };
+                {
+                    let mut catalog = self.catalog.lock();
+                    catalog.audio = audio;
+                }
+                let mut state = self.state.lock().expect("poisoned");
+                state.audio_muted.store(false, Ordering::Relaxed);
+                state.available_audio = Some(renditions);
+            }
+            None => {
+                // Clear catalog and stop any active audio encoders
+                self.state.lock().expect("poisoned").remove_audio();
+                {
+                    let mut catalog = self.catalog.lock();
+                    catalog.audio = hang::catalog::Audio::default();
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub fn set_audio_muted(&self, muted: bool) {
+        self.state
+            .lock()
+            .expect("poisoned")
+            .audio_muted
+            .store(muted, Ordering::Relaxed);
+    }
+}
+
+impl Drop for PublishBroadcast {
+    fn drop(&mut self) {
+        self.state.lock().expect("poisoned").shutdown_token.cancel();
+        // moq-net's BroadcastProducer closes the broadcast when the last handle
+        // drops; there is no explicit `close()`.
+    }
+}
+
+#[derive(Default)]
+struct State {
+    shutdown_token: CancellationToken,
+    #[cfg(any(feature = "video", feature = "video-ios"))]
+    available_video: Option<VideoRenditions>,
+    available_audio: Option<AudioRenditions>,
+    audio_muted: Arc<AtomicBool>,
+    #[cfg(any(feature = "video", feature = "video-ios"))]
+    active_video: HashMap<String, EncoderThread>,
+    active_audio: HashMap<String, EncoderThread>,
+}
+
+impl State {
+    fn stop_track(&mut self, name: &str) {
+        #[cfg(any(feature = "video", feature = "video-ios"))]
+        let thread = self
+            .active_video
+            .remove(name)
+            .or_else(|| self.active_audio.remove(name));
+        #[cfg(not(any(feature = "video", feature = "video-ios")))]
+        let thread = self.active_audio.remove(name);
+        if let Some(thread) = thread {
+            thread.shutdown.cancel();
+        }
+    }
+
+    fn remove_audio(&mut self) {
+        for (_name, thread) in self.active_audio.drain() {
+            thread.shutdown.cancel();
+        }
+        self.available_audio = None;
+    }
+
+    #[cfg(any(feature = "video", feature = "video-ios"))]
+    fn remove_video(&mut self) {
+        for (_name, thread) in self.active_video.drain() {
+            thread.shutdown.cancel();
+        }
+        self.available_video = None;
+    }
+
+    fn start_track(&mut self, track: moq_lite::TrackProducer) -> Result<()> {
+        let name = track.name().to_string();
+        // moq-mux's container Producer replaces hang 0.19's removed
+        // `FrameProducer`: it maps keyframe frames to moq-net group
+        // boundaries. Legacy = one media frame per moq-lite frame.
+        let track = FrameProducer::new(track, moq_mux::container::legacy::Wire);
+        let shutdown_token = self.shutdown_token.child_token();
+        #[cfg(any(feature = "video", feature = "video-ios"))]
+        if let Some(video) = self.available_video.as_mut()
+            && video.contains_rendition(&name)
+        {
+            let thread = video.start_encoder(&name, track, shutdown_token)?;
+            self.active_video.insert(name, thread);
+            return Ok(());
+        }
+        if let Some(audio) = self.available_audio.as_mut()
+            && audio.contains_rendition(&name)
+        {
+            let thread =
+                audio.start_encoder(&name, track, shutdown_token, self.audio_muted.clone())?;
+            self.active_audio.insert(name, thread);
+            Ok(())
+        } else {
+            info!("ignoring track request {name}: rendition not available");
+            Err(n0_error::anyerr!("rendition not available"))
+        }
+    }
+}
+
+pub struct AudioRenditions {
+    make_encoder: Box<dyn Fn(AudioPreset) -> Result<Box<dyn AudioEncoder>> + Send>,
+    source: Box<dyn AudioSource>,
+    renditions: HashMap<String, AudioPreset>,
+}
+
+impl AudioRenditions {
+    pub fn new<E: AudioEncoder>(
+        source: impl AudioSource,
+        presets: impl IntoIterator<Item = AudioPreset>,
+    ) -> Self {
+        let renditions = presets
+            .into_iter()
+            .map(|preset| (format!("audio-{preset}"), preset))
+            .collect();
+        let format = source.format();
+        Self {
+            make_encoder: Box::new(move |preset| Ok(Box::new(E::with_preset(format, preset)?))),
+            renditions,
+            source: Box::new(source),
+        }
+    }
+
+    pub fn available_renditions(&self) -> Result<BTreeMap<String, AudioConfig>> {
+        let mut renditions = BTreeMap::new();
+        for (name, preset) in self.renditions.iter() {
+            // We need to create the encoder to get the config, even though we drop it
+            // again (it will be created on deman). Not ideal, but works for now.
+            let config = (self.make_encoder)(*preset)?.config();
+            renditions.insert(name.clone(), config);
+        }
+        Ok(renditions)
+    }
+
+    pub fn encoder(&mut self, name: &str) -> Option<Result<Box<dyn AudioEncoder>>> {
+        let preset = self.renditions.get(name)?;
+        Some((self.make_encoder)(*preset))
+    }
+
+    pub fn contains_rendition(&self, name: &str) -> bool {
+        self.renditions.contains_key(name)
+    }
+
+    pub fn start_encoder(
+        &mut self,
+        name: &str,
+        producer: FrameProducer,
+        shutdown_token: CancellationToken,
+        muted: Arc<AtomicBool>,
+    ) -> Result<EncoderThread> {
+        let preset = self
+            .renditions
+            .get(name)
+            .context("rendition not available")?;
+        let encoder = (self.make_encoder)(*preset)?;
+        let thread = EncoderThread::spawn_audio(
+            self.source.cloned_boxed(),
+            encoder,
+            producer,
+            shutdown_token,
+            muted,
+        );
+        Ok(thread)
+    }
+}
+
+#[cfg(any(feature = "video", feature = "video-ios"))]
+pub struct VideoRenditions {
+    make_encoder: Box<dyn Fn(VideoPreset) -> Result<Box<dyn VideoEncoder>> + Send>,
+    source: SharedVideoSource,
+    renditions: HashMap<String, VideoPreset>,
+    _shared_source_cancel_guard: DropGuard,
+}
+
+#[cfg(any(feature = "video", feature = "video-ios"))]
+impl VideoRenditions {
+    pub fn new<E: VideoEncoder>(
+        source: impl VideoSource,
+        presets: impl IntoIterator<Item = VideoPreset>,
+    ) -> Self {
+        let shutdown_token = CancellationToken::new();
+        let source = SharedVideoSource::new(source, shutdown_token.clone());
+        let renditions = presets
+            .into_iter()
+            .map(|preset| (format!("video-{preset}"), preset))
+            .collect();
+        Self {
+            make_encoder: Box::new(|preset| Ok(Box::new(E::with_preset(preset)?))),
+            renditions,
+            source,
+            _shared_source_cancel_guard: shutdown_token.drop_guard(),
+        }
+    }
+
+    pub fn available_renditions(&self) -> Result<BTreeMap<String, VideoConfig>> {
+        let mut renditions = BTreeMap::new();
+        for (name, preset) in self.renditions.iter() {
+            // We need to create the encoder to get the config, even though we drop it
+            // again (it will be created on deman). Not ideal, but works for now.
+            let config = (self.make_encoder)(*preset)?.config();
+            renditions.insert(name.clone(), config);
+        }
+        Ok(renditions)
+    }
+
+    pub fn contains_rendition(&self, name: &str) -> bool {
+        self.renditions.contains_key(name)
+    }
+
+    pub fn start_encoder(
+        &mut self,
+        name: &str,
+        producer: FrameProducer,
+        shutdown_token: CancellationToken,
+    ) -> Result<EncoderThread> {
+        let preset = self
+            .renditions
+            .get(name)
+            .context("rendition not available")?;
+        let encoder = (self.make_encoder)(*preset)?;
+        let thread =
+            EncoderThread::spawn_video(self.source.clone(), encoder, producer, shutdown_token);
+        Ok(thread)
+    }
+}
+
+#[cfg(any(feature = "video", feature = "video-ios"))]
+#[derive(Debug, Clone)]
+pub(crate) struct SharedVideoSource {
+    name: String,
+    frames_rx: tokio::sync::watch::Receiver<Option<crate::av::VideoFrame>>,
+    format: crate::av::VideoFormat,
+    running: Arc<AtomicBool>,
+    thread: Arc<std::thread::JoinHandle<()>>,
+    subscriber_count: Arc<AtomicU32>,
+}
+
+#[cfg(any(feature = "video", feature = "video-ios"))]
+impl SharedVideoSource {
+    fn new(mut source: impl VideoSource, shutdown: CancellationToken) -> Self {
+        let name = source.name().to_string();
+        let format = source.format();
+        let (tx, rx) = tokio::sync::watch::channel(None);
+        let running = Arc::new(AtomicBool::new(false));
+        let thread = spawn_thread(format!("vshr-{}", source.name()), {
+            let shutdown = shutdown.clone();
+            let running = running.clone();
+            move || {
+                let frame_time = Duration::from_secs_f32(1. / 30.);
+                let start = Instant::now();
+                for i in 0.. {
+                    if shutdown.is_cancelled() {
+                        break;
+                    }
+
+                    loop {
+                        if running.load(Ordering::Relaxed) {
+                            break;
+                        }
+                        if let Err(err) = source.stop() {
+                            warn!("Failed to stop video source: {err:#}");
+                        }
+                        std::thread::park();
+                        if let Err(err) = source.start() {
+                            warn!("Failed to stop video source: {err:#}");
+                        }
+                    }
+
+                    match source.pop_frame() {
+                        Ok(Some(frame)) => {
+                            let _ = tx.send(Some(frame));
+                        }
+                        Ok(None) => {}
+                        Err(_) => break,
+                    }
+                    let expected = frame_time * i;
+                    let actual = start.elapsed();
+                    if actual < expected {
+                        std::thread::sleep(expected - actual);
+                    }
+                }
+            }
+        });
+        Self {
+            name,
+            format,
+            frames_rx: rx,
+            thread: Arc::new(thread),
+            running,
+            subscriber_count: Default::default(),
+        }
+    }
+}
+
+#[cfg(any(feature = "video", feature = "video-ios"))]
+impl VideoSource for SharedVideoSource {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn format(&self) -> crate::av::VideoFormat {
+        self.format.clone()
+    }
+
+    fn start(&mut self) -> anyhow::Result<()> {
+        let prev_count = self.subscriber_count.fetch_add(1, Ordering::Relaxed);
+        if prev_count == 0 {
+            self.running.store(true, Ordering::Relaxed);
+            self.thread.thread().unpark();
+        }
+        Ok(())
+    }
+
+    fn stop(&mut self) -> anyhow::Result<()> {
+        if self
+            .subscriber_count
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |val| {
+                Some(val.saturating_sub(1))
+            })
+            .expect("always returns Some")
+            == 1
+        {
+            self.running.store(false, Ordering::Relaxed);
+        }
+        Ok(())
+    }
+
+    fn pop_frame(&mut self) -> anyhow::Result<Option<crate::av::VideoFrame>> {
+        let frame = self.frames_rx.borrow_and_update().clone();
+        Ok(frame)
+    }
+}
+
+pub struct EncoderThread {
+    _thread_handle: std::thread::JoinHandle<()>,
+    shutdown: CancellationToken,
+}
+
+impl EncoderThread {
+    #[cfg(any(feature = "video", feature = "video-ios"))]
+    pub fn spawn_video(
+        mut source: impl VideoSource,
+        mut encoder: impl VideoEncoderInner,
+        mut producer: FrameProducer,
+        shutdown: CancellationToken,
+    ) -> Self {
+        let thread_name = format!("venc-{:<4}-{:<4}", source.name(), encoder.name());
+        let span = info_span!("videoenc", source = source.name(), encoder = encoder.name());
+        let handle = spawn_thread(thread_name, {
+            let shutdown = shutdown.clone();
+            move || {
+                let _guard = span.enter();
+                if let Err(err) = source.start() {
+                    warn!("video source failed to start: {err:#}");
+                    return;
+                }
+                let format = source.format();
+                tracing::debug!(
+                    src_format = ?format,
+                    dst_config = ?encoder.config(),
+                    "video encoder thread start"
+                );
+                let framerate = encoder.config().framerate.unwrap_or(30.0);
+                let interval = Duration::from_secs_f64(1. / framerate);
+                let mut enc_frame_count: u64 = 0;
+                let mut enc_pkt_count: u64 = 0;
+                let mut null_frame_count: u64 = 0;
+                loop {
+                    let start = Instant::now();
+                    if shutdown.is_cancelled() {
+                        debug!("stop video encoder: cancelled");
+                        break;
+                    }
+                    let frame = match source.pop_frame() {
+                        Ok(frame) => frame,
+                        Err(err) => {
+                            warn!("video encoder failed: {err:#}");
+                            break;
+                        }
+                    };
+                    if let Some(frame) = frame {
+                        enc_frame_count += 1;
+                        if let Err(err) = encoder.push_frame(frame) {
+                            warn!("video encoder failed: {err:#}");
+                            break;
+                        };
+                        while let Ok(Some(pkt)) = encoder.pop_packet() {
+                            enc_pkt_count += 1;
+                            if enc_pkt_count <= 3 || enc_pkt_count.is_multiple_of(100) {
+                                info!(
+                                    "videoenc: packet #{enc_pkt_count} (from {enc_frame_count} frames), bytes={}",
+                                    pkt.payload.len()
+                                );
+                            }
+                            if let Err(err) = producer.write(pkt) {
+                                warn!("failed to write frame to producer: {err:#}");
+                            }
+                        }
+                    } else {
+                        null_frame_count += 1;
+                        if null_frame_count == 1
+                            || null_frame_count == 30
+                            || null_frame_count.is_multiple_of(300)
+                        {
+                            warn!(
+                                "videoenc: source returned None ({null_frame_count} times, {enc_frame_count} frames so far)"
+                            );
+                        }
+                    }
+                    std::thread::sleep(interval.saturating_sub(start.elapsed()));
+                }
+                let _ = producer.finish();
+                if let Err(err) = source.stop() {
+                    warn!("video source failed to stop: {err:#}");
+                }
+                tracing::debug!("video encoder thread stop");
+            }
+        });
+        Self {
+            _thread_handle: handle,
+            shutdown,
+        }
+    }
+
+    pub fn spawn_audio(
+        mut source: Box<dyn AudioSource>,
+        mut encoder: impl AudioEncoderInner,
+        mut producer: FrameProducer,
+        shutdown: CancellationToken,
+        muted: Arc<AtomicBool>,
+    ) -> Self {
+        let sd = shutdown.clone();
+        let name = encoder.name();
+        let thread_name = format!("aenc-{:<4}", name);
+        let span = info_span!("audioenc", %name);
+        let handle = spawn_thread(thread_name, move || {
+            let _guard = span.enter();
+            tracing::debug!(config=?encoder.config(), "audio encoder thread start");
+            let shutdown = sd;
+            // 20ms framing to align with typical Opus config (48kHz → 960 samples/ch)
+            const INTERVAL: Duration = Duration::from_millis(20);
+            // Audio frames are independently decodable, but `FrameProducer`
+            // starts a new group on every keyframe. Marking every 20ms Opus packet
+            // as a keyframe creates a flood of tiny groups, and that has been
+            // stalling live audio delivery while video keeps flowing. Group audio
+            // more coarsely so the transport sees a continuous stream instead of a
+            // new group every packet.
+            const AUDIO_KEYFRAME_INTERVAL_PACKETS: u64 = 25; // 500ms at 20ms/packet
+            let format = source.format();
+            let samples_per_frame = (format.sample_rate / 1000) * INTERVAL.as_millis() as u32;
+            let mut buf = vec![0.0f32; samples_per_frame as usize * format.channel_count as usize];
+            let start = Instant::now();
+            let mut audio_pkt_count: u64 = 0;
+            let mut audio_none_count: u64 = 0;
+            for tick in 0.. {
+                trace!("tick");
+                if shutdown.is_cancelled() {
+                    break;
+                }
+                let have_samples = if muted.load(Ordering::Relaxed) {
+                    buf.fill(0.0);
+                    true
+                } else {
+                    match source.pop_samples(&mut buf) {
+                        Ok(Some(_n)) => true,
+                        Ok(None) => {
+                            audio_none_count += 1;
+                            if audio_none_count == 1
+                                || audio_none_count == 50
+                                || audio_none_count.is_multiple_of(500)
+                            {
+                                warn!("audioenc: source returned None ({audio_none_count} times)");
+                            }
+                            false
+                        }
+                        Err(err) => {
+                            error!("audio source failed: {err:#}");
+                            break;
+                        }
+                    }
+                };
+                if have_samples {
+                    // Expect a full frame; if shorter, zero-pad via slice len
+                    if let Err(err) = encoder.push_samples(&buf) {
+                        error!(buf_len = buf.len(), "audio push_samples failed: {err:#}");
+                        break;
+                    }
+                    while let Ok(Some(mut pkt)) = encoder
+                        .pop_packet()
+                        .inspect_err(|err| warn!("encoder error: {err:#}"))
+                    {
+                        let packet_index = audio_pkt_count + 1;
+                        pkt.keyframe = packet_index == 1
+                            || packet_index.is_multiple_of(AUDIO_KEYFRAME_INTERVAL_PACKETS);
+                        audio_pkt_count = packet_index;
+                        if audio_pkt_count <= 3 || audio_pkt_count.is_multiple_of(500) {
+                            info!(
+                                "audioenc: packet #{audio_pkt_count}, bytes={}, keyframe={}",
+                                pkt.payload.len(),
+                                pkt.keyframe
+                            );
+                        }
+                        if let Err(err) = producer.write(pkt) {
+                            warn!("failed to write frame to producer: {err:#}");
+                        }
+                    }
+                }
+                let expected_time = (tick + 1) * INTERVAL;
+                let actual_time = start.elapsed();
+                if actual_time > expected_time {
+                    warn!("audio thread too slow by {:?}", actual_time - expected_time);
+                }
+                let sleep = expected_time.saturating_sub(start.elapsed());
+                if sleep > Duration::ZERO {
+                    std::thread::sleep(sleep);
+                }
+            }
+            // drain
+            while let Ok(Some(pkt)) = encoder.pop_packet() {
+                if let Err(err) = producer.write(pkt) {
+                    warn!("failed to write frame to producer: {err:#}");
+                }
+            }
+            let _ = producer.finish();
+            tracing::debug!("audio encoder thread stop");
+        });
+        Self {
+            _thread_handle: handle,
+            shutdown,
+        }
+    }
+}
+
+impl Drop for EncoderThread {
+    fn drop(&mut self) {
+        self.shutdown.cancel();
+    }
+}

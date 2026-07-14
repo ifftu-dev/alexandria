@@ -55,6 +55,17 @@ pub async fn content_add(
     // Trigger eviction if over quota
     storage::maybe_evict(&state.content_node, &state.db).await;
 
+    // Announce over iroh that this node now serves the blob, so peers can fetch
+    // it directly (the P2P storage path) instead of via the IPFS gateway.
+    if let (Ok(hash), Some(endpoint)) = (
+        content::parse_hash(&result.hash),
+        state.content_node.endpoint().await,
+    ) {
+        if let Err(e) = state.discovery.announce_have(hash, &endpoint).await {
+            log::debug!("content_add: discovery announce failed: {e}");
+        }
+    }
+
     Ok(result)
 }
 

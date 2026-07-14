@@ -1,6 +1,12 @@
 [workspace]
 resolver = "2"
-members = ["src-tauri", "cli"]
+members = [
+    "src-tauri",
+    "cli",
+    "crates/iroh-moq",
+    "crates/moq-media",
+    "crates/iroh-live",
+]
 # Built-in plugin graders compile to wasm32-unknown-unknown and live
 # outside the desktop/mobile workspace so the main build doesn't try to
 # pull them in for the host target. Each grader has its own Cargo.toml
@@ -33,7 +39,5 @@ webrtc-audio-processing-sys = { path = "patches/webrtc-audio-processing-sys" }
 ffmpeg-sys-next = { path = "patches/ffmpeg-sys-next" }
 ffmpeg-next = { path = "patches/ffmpeg-next" }
 
-[patch."https://github.com/ifftu-dev/iroh-live"]
-iroh-live = { path = "../iroh-live-patched/iroh-live" }
-moq-media = { path = "../iroh-live-patched/moq-media" }
-iroh-moq = { path = "../iroh-live-patched/iroh-moq" }
+# iroh-live / iroh-moq / moq-media are now owned in-tree under crates/ (ported to
+# iroh 1.0), referenced by path from src-tauri — no git dependency or patch.

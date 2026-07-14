@@ -95,6 +95,9 @@ pub struct AppState {
     /// that take `&state.content_node` keep working unchanged.
     pub content_node: Arc<ContentNode>,
     pub resolver: Arc<Mutex<Option<ContentResolver>>>,
+    /// iroh content-provider discovery, shared with the resolver so cache-misses
+    /// are served from peers (pinners) over iroh before the IPFS gateway.
+    pub discovery: Arc<ipfs::discovery::ContentDiscovery>,
     pub p2p_node: Arc<Mutex<Option<P2pNode>>>,
 }
 
@@ -202,10 +205,22 @@ impl AppState {
             .map_err(|e| format!("failed to start iroh content node: {e}"))?;
         log::info!("iroh content node started for profile {}", paths.id);
 
-        // 4. Build the resolver (content_node + IPFS gateway fallback).
+        // 4. Start iroh content discovery (gossip ingest) so cache-misses can be
+        //    served from peers, then build the resolver wired to it (peer fetch
+        //    first, IPFS gateway as last resort).
+        if let Some(gossip) = self.content_node.gossip().await {
+            if let Err(e) = self.discovery.start(&gossip, vec![]).await {
+                log::warn!("content discovery gossip start failed: {e}");
+            }
+        }
         match GatewayClient::with_defaults() {
             Ok(gateway) => {
-                let r = ContentResolver::new(self.content_node.clone(), gateway, self.db.clone());
+                let r = ContentResolver::with_discovery(
+                    self.content_node.clone(),
+                    gateway,
+                    self.db.clone(),
+                    self.discovery.clone(),
+                );
                 *self.resolver.lock().await = Some(r);
             }
             Err(e) => log::error!("failed to create gateway client: {e}"),
@@ -630,6 +645,7 @@ pub fn run() {
             let content_node = Arc::new(ContentNode::new(&app_dir.join("iroh-staging")));
             let resolver: Arc<Mutex<Option<ContentResolver>>> =
                 Arc::new(Mutex::new(None));
+            let discovery = Arc::new(ipfs::discovery::ContentDiscovery::new());
             let p2p_node: Arc<Mutex<Option<P2pNode>>> = Arc::new(Mutex::new(None));
             let active: Arc<std::sync::RwLock<Option<ActiveProfile>>> =
                 Arc::new(std::sync::RwLock::new(None));
@@ -927,6 +943,7 @@ pub fn run() {
                 keystore,
                 content_node,
                 resolver,
+                discovery,
                 p2p_node,
             };
 

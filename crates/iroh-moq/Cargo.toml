@@ -1,0 +1,22 @@
+[package]
+name = "iroh-moq"
+version = "0.1.0"
+edition = "2024"
+description = "audio and video live streaming over iroh"
+authors = ["Franz Heinzmann <frando@n0.computer>"]
+repository = "https://github.com/n0-computer/iroh-live"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+iroh = "1.0.2"
+moq-lite = "0.17"
+n0-error = { version = "1", features = ["anyhow"] }
+n0-future = "0.3.1"
+tokio = { version = "1.48.0", features = ["sync"] }
+tokio-util = "0.7.17"
+tracing = "0.1.41"
+url = "2.5.7"
+# Force the `ring` TLS backend, not aws-lc-rs: aws-lc-sys pulls a C/asm build
+# that does not cross-compile cleanly to iOS/Android (which this app targets).
+# iroh itself already defaults to tls-ring; this keeps web-transport-iroh aligned.
+web-transport-iroh = { version = "0.6", default-features = false, features = ["ring", "metrics", "portmapper"] }
