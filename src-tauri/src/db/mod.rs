@@ -1,7 +1,5 @@
 pub mod schema;
-#[cfg(feature = "dev-seed")]
 pub mod seed;
-#[cfg(feature = "dev-seed")]
 pub mod seed_content;
 pub mod seed_plugin_demo;
 

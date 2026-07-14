@@ -31,6 +31,10 @@ export interface ElementHostContext {
    *  browsing without enrolling — graded plugin submissions require an
    *  enrollment id and refuse to grade otherwise. */
   enrollmentId: string | null
+  /** Active Sentinel integrity session id, or `null` when monitoring is not
+   *  running. Graded plugins forward it so the earned credential is bound to
+   *  the session and carries its assurance level. */
+  integritySessionId: string | null
   /** True once the course/enrollment is completed. Assessment elements
    *  become read-only: prior responses are shown but can't be re-submitted. */
   readOnly: boolean
@@ -172,10 +176,11 @@ const builtinRegistry = new Map<string, ElementBinding>([
   // their submission bundle to element_submissions.
   ['plugin', {
     component: PluginHost,
-    props: ({ element, enrollmentId }) => ({
+    props: ({ element, enrollmentId, integritySessionId }) => ({
       element,
       mode: 'learn',
       enrollmentId,
+      integritySessionId,
     }),
     events: ({ onComplete, onScoredComplete }) => ({
       complete: onComplete,

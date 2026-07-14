@@ -74,6 +74,7 @@
       "essay": "书面作答",
       "interactive": "互动",
       "content": "内容"
-    }
+    },
+    "reducedConfidenceNoCamera": "摄像头已关闭——在此获得的技能可信度将降低。"
   }
 }

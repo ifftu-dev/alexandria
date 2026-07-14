@@ -47,7 +47,7 @@ cc = "1"
 # a packaged build where no .env is present.
 dotenvy = "0.15"
 # Tauri
-tauri = { version = "2.10.0", features = ["macos-private-api", "protocol-asset"] }
+tauri = { version = "2.10.0", features = ["macos-private-api", "protocol-asset", "devtools"] }
 tauri-plugin-log = "2"
 tauri-plugin-biometry = "0.2"
 tauri-plugin-os = "2"
