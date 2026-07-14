@@ -58,6 +58,33 @@ int SCDynamicStoreSetNotificationKeys(void *store, CFArrayRef keys, CFArrayRef p
 }
 
 uint32_t kSCDynamicStoreUseSessionKeys = 0;
+
+// --- Additional macOS-only SystemConfiguration symbols referenced by the
+// `netdev` crate (pulled in by iroh 1.0 for interface discovery). The
+// SCNetworkService / SCPreferences / SCNetworkInterface APIs don't exist on
+// iOS; stub them so linking succeeds. iroh falls back to other discovery.
+void *SCDynamicStoreCreate(CFAllocatorRef a, CFStringRef n, void *c, void *ctx) { return NULL; }
+void *SCDynamicStoreCopyValue(void *store, CFStringRef key) { return NULL; }
+void *SCDynamicStoreKeyCreateNetworkGlobalEntity(CFAllocatorRef a, CFStringRef domain, CFStringRef entity) { return NULL; }
+void *SCDynamicStoreKeyCreateNetworkServiceEntity(CFAllocatorRef a, CFStringRef domain, CFStringRef svc, CFStringRef entity) { return NULL; }
+void *SCPreferencesCreate(CFAllocatorRef a, CFStringRef name, CFStringRef prefsID) { return NULL; }
+void *SCNetworkServiceCopyAll(void *prefs) { return NULL; }
+void *SCNetworkServiceGetInterface(void *service) { return NULL; }
+CFStringRef SCNetworkServiceGetName(void *service) { return NULL; }
+void *SCNetworkServiceCopyProtocol(void *service, CFStringRef protocolType) { return NULL; }
+void *SCNetworkInterfaceCopyAll(void) { return NULL; }
+CFStringRef SCNetworkInterfaceGetBSDName(void *iface) { return NULL; }
+CFStringRef SCNetworkInterfaceGetInterfaceType(void *iface) { return NULL; }
+CFStringRef SCNetworkInterfaceGetLocalizedDisplayName(void *iface) { return NULL; }
+CFDictionaryRef SCNetworkProtocolGetConfiguration(void *protocol) { return NULL; }
+
+const CFStringRef kSCDynamicStoreDomainState = NULL;
+const CFStringRef kSCDynamicStorePropNetPrimaryService = NULL;
+const CFStringRef kSCEntNetDNS = NULL;
+const CFStringRef kSCEntNetIPv4 = NULL;
+const CFStringRef kSCNetworkProtocolTypeIPv4 = NULL;
+const CFStringRef kSCNetworkProtocolTypeIPv6 = NULL;
+const CFStringRef kSCPropNetDNSServerAddresses = NULL;
 "#,
         )
         .expect("failed to write SC stubs");
