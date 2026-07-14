@@ -53,5 +53,13 @@
   "provenance": {
     "exampleLabel": "AI سے تیار کردہ مثال",
     "exampleTooltip": "یہ مظاہرے کے لیے شامل کیا گیا AI سے تیار کردہ مثالی مواد ہے۔ یہ کوئی حقیقی کورس، ٹیوٹوریل یا رائے نہیں ہے۔"
+  },
+  "birthdate": {
+    "day": "دن",
+    "month": "مہینہ",
+    "year": "سال",
+    "dayPlaceholder": "دن",
+    "monthPlaceholder": "مہینہ",
+    "yearPlaceholder": "سال"
   }
 }

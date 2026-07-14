@@ -7,12 +7,13 @@ import { biometricSupported, storeVaultPasswordForBiometric } from '@/composable
 import { listen } from '@tauri-apps/api/event'
 import type { UnlistenFn } from '@tauri-apps/api/event'
 import Starfield from '@/components/auth/Starfield.vue'
+import LanguageSelector from '@/components/settings/LanguageSelector.vue'
+import { BirthdateInput } from '@/components/ui'
 import GoalPicker from '@/components/goals/GoalPicker.vue'
 import SkillBootstrapPanel from '@/components/skills/SkillBootstrapPanel.vue'
 import { useGoals } from '@/composables/useGoals'
 import { useLocale } from '@/composables/useLocale'
 import { useI18n } from 'vue-i18n'
-import type { AppLocale } from '@/locales/meta'
 import type { AccountRole } from '@/types'
 
 const { t } = useI18n()
@@ -21,14 +22,10 @@ const route = useRoute()
 const { profiles, refreshProfiles, createProfile, restoreProfileWithMnemonic, activeProfileId } = useProfiles()
 const { invoke } = useLocalApi()
 
-// Language can be chosen before any profile exists — the pick lives in the
-// pre-unlock cache and is seeded into the new profile on completion.
-const { available: localeChoices, preference: localePreference, setLocale, persistLocaleToProfile } =
-  useLocale()
-function onLocaleChange(e: Event) {
-  const value = (e.target as HTMLSelectElement).value
-  void setLocale(value === 'system' ? 'system' : (value as AppLocale))
-}
+// Language can be chosen before any profile exists (via the LanguageSelector
+// card grid on the welcome step, which writes to the pre-unlock locale cache);
+// the pick is seeded into the new profile on completion.
+const { persistLocaleToProfile } = useLocale()
 
 const vaultExists = computed(() => profiles.value.length > 0)
 const username = ref('')
@@ -515,23 +512,18 @@ function enterApp() {
       <!-- ============================================ -->
       <div v-if="step === 'welcome'" class="text-center">
         <!-- Language picker — chosen before any profile exists; the choice is
-             saved to the new profile and synced across devices on completion. -->
-        <div class="flex items-center justify-center gap-2 mb-6">
-          <svg class="w-4 h-4 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true">
-            <circle cx="12" cy="12" r="9" />
-            <path stroke-linecap="round" stroke-linejoin="round" d="M3 12h18M12 3a15 15 0 010 18M12 3a15 15 0 000 18" />
-          </svg>
-          <select
-            class="text-sm rounded-md border border-border bg-background text-foreground px-2.5 py-1.5"
-            :value="localePreference"
-            :aria-label="$t('common.language.label')"
-            @change="onLocaleChange"
-          >
-            <option value="system">{{ $t('common.language.system') }}</option>
-            <option v-for="loc in localeChoices" :key="loc.code" :value="loc.code">
-              {{ loc.endonym }}
-            </option>
-          </select>
+             saved to the new profile and synced across devices on completion.
+             Card grid (same control as Settings) so every language is shown in
+             its own script and picked in a single tap. -->
+        <div class="mx-auto mb-6 max-w-md text-start">
+          <div class="mb-2 flex items-center justify-center gap-1.5 text-xs font-medium text-muted-foreground">
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true">
+              <circle cx="12" cy="12" r="9" />
+              <path stroke-linecap="round" stroke-linejoin="round" d="M3 12h18M12 3a15 15 0 010 18M12 3a15 15 0 000 18" />
+            </svg>
+            {{ $t('common.language.label') }}
+          </div>
+          <LanguageSelector />
         </div>
 
         <!-- Alexandria logo -->
@@ -661,13 +653,8 @@ function enterApp() {
           <label class="block text-xs font-medium text-muted-foreground mb-1.5">
             {{ $t('onboarding.birthdate.label') }}
           </label>
-          <input
-            v-model="birthdate"
-            type="date"
-            class="w-full px-3 py-2 text-sm rounded-md border border-border bg-background focus:outline-none focus:ring-2 focus:ring-ring"
-            @keyup.enter.exact.prevent="proceedFromBirthdate"
-          >
-          <p v-if="ageYears !== null && birthdateValid" class="mt-2 text-sm text-foreground">
+          <BirthdateInput v-model="birthdate" :max-age="120" />
+          <p v-if="ageYears !== null && birthdateValid" class="mt-3 text-sm text-foreground">
             {{ $t('onboarding.birthdate.ageStatement', { age: ageYears }) }}
           </p>
         </div>

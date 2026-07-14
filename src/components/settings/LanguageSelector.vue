@@ -30,8 +30,13 @@ function choose(code: Choice) {
       :aria-pressed="isActive('system')"
       @click="choose('system')"
     >
-      <span class="locale-endonym">{{ t('common.language.system') }}</span>
-      <span class="locale-english">{{ t('common.language.systemHint') }}</span>
+      <span class="locale-text">
+        <span class="locale-endonym">{{ t('common.language.system') }}</span>
+        <span class="locale-english">{{ t('common.language.systemHint') }}</span>
+      </span>
+      <svg v-if="isActive('system')" class="locale-check" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+        <path fill-rule="evenodd" d="M16.7 5.3a1 1 0 010 1.4l-7.5 7.5a1 1 0 01-1.4 0L3.3 9.7a1 1 0 011.4-1.4l3.3 3.3 6.8-6.8a1 1 0 011.4 0z" clip-rule="evenodd" />
+      </svg>
     </button>
 
     <button
@@ -44,8 +49,13 @@ function choose(code: Choice) {
       :dir="loc.dir"
       @click="choose(loc.code)"
     >
-      <span class="locale-endonym">{{ loc.endonym }}</span>
-      <span class="locale-english" dir="ltr">{{ loc.englishName }}</span>
+      <span class="locale-text">
+        <span class="locale-endonym">{{ loc.endonym }}</span>
+        <span class="locale-english" dir="ltr">{{ loc.englishName }}</span>
+      </span>
+      <svg v-if="isActive(loc.code)" class="locale-check" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+        <path fill-rule="evenodd" d="M16.7 5.3a1 1 0 010 1.4l-7.5 7.5a1 1 0 01-1.4 0L3.3 9.7a1 1 0 011.4-1.4l3.3 3.3 6.8-6.8a1 1 0 011.4 0z" clip-rule="evenodd" />
+      </svg>
     </button>
   </div>
 </template>
@@ -53,15 +63,30 @@ function choose(code: Choice) {
 <style scoped>
 .locale-card {
   display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-  align-items: flex-start;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
   padding: 0.625rem 0.75rem;
   border: 1px solid var(--color-border, hsl(var(--border)));
   border-radius: var(--radius, 0.5rem);
   background: transparent;
   text-align: start;
   transition: border-color 0.15s, background-color 0.15s;
+}
+
+.locale-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.locale-check {
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+  color: var(--color-primary, hsl(var(--primary)));
 }
 
 .locale-card:hover {
