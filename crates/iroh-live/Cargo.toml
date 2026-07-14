@@ -2,6 +2,10 @@
 name = "iroh-live"
 version = "0.1.0"
 edition = "2024"
+# The bundled examples/ target the old iroh 0.x API and don't build against
+# iroh 1.0; they aren't part of the app. Skip auto-discovery so `cargo test`
+# (which compiles examples) doesn't try to build them.
+autoexamples = false
 description = "audio and video live streaming over iroh"
 authors = ["Franz Heinzmann <frando@n0.computer>"]
 repository = "https://github.com/n0-computer/iroh-live"
