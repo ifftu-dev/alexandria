@@ -150,21 +150,16 @@ pub struct PeerInfo {
 ///
 /// Determined by AutoNAT probing — peers try to dial us back
 /// to determine if we're publicly reachable.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "status", content = "address")]
 pub enum NatState {
     /// NAT status not yet determined (probing in progress).
+    #[default]
     Unknown,
     /// Node is publicly reachable at the given address.
     Public(String),
     /// Node is behind a NAT and not directly reachable.
     Private,
-}
-
-impl Default for NatState {
-    fn default() -> Self {
-        Self::Unknown
-    }
 }
 
 /// P2P network status reported to the frontend.

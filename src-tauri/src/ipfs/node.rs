@@ -167,8 +167,9 @@ impl ContentNode {
         // (same class of bug as the `if-watch` SCDynamicStore patch). Use an
         // explicit public nameserver there instead; desktop keeps system DNS.
         #[cfg(target_os = "ios")]
-        let builder =
-            builder.dns_resolver(iroh::dns::DnsResolver::with_nameserver(([1, 1, 1, 1], 53).into()));
+        let builder = builder.dns_resolver(iroh::dns::DnsResolver::with_nameserver(
+            ([1, 1, 1, 1], 53).into(),
+        ));
         let endpoint = builder
             .secret_key(secret_key)
             .transport_config(transport_config)
