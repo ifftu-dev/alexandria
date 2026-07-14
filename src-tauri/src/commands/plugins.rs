@@ -572,6 +572,10 @@ pub async fn plugin_submit_and_grade(
     enrollment_id: String,
     content_json: String,
     submission_json: String,
+    // Active Sentinel integrity session for this attempt (if any). When set, the
+    // issued credential is bound to it, so its assurance reflects how closely the
+    // learner was monitored while solving.
+    integrity_session_id: Option<String>,
 ) -> Result<ScoreRecord, String> {
     check_rate_limit(&state, "plugin_submit_and_grade")?;
 
@@ -719,7 +723,7 @@ pub async fn plugin_submit_and_grade(
                     evidence_refs: vec![submission_cid.clone()],
                     expiration_date: None,
                     supersedes: None,
-                    integrity_session_id: None,
+                    integrity_session_id: integrity_session_id.clone(),
                     integrity_policy: None,
                 };
                 match crate::commands::credentials::issue_credential_impl(

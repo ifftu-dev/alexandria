@@ -53,5 +53,13 @@
   "provenance": {
     "exampleLabel": "Exemple généré par IA",
     "exampleTooltip": "Ceci est un contenu d'exemple généré par IA, ajouté pour la démonstration. Ce n'est pas un vrai cours, tutoriel ou avis."
+  },
+  "birthdate": {
+    "day": "Jour",
+    "month": "Mois",
+    "year": "Année",
+    "dayPlaceholder": "Jour",
+    "monthPlaceholder": "Mois",
+    "yearPlaceholder": "Année"
   }
 }

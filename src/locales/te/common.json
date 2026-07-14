@@ -53,5 +53,13 @@
   "provenance": {
     "exampleLabel": "AI-రూపొందించిన ఉదాహరణ",
     "exampleTooltip": "ఇది డెమో కోసం జోడించబడిన AI-రూపొందించిన ఉదాహరణ కంటెంట్. ఇది నిజమైన కోర్సు, ట్యుటోరియల్ లేదా అభిప్రాయం కాదు."
+  },
+  "birthdate": {
+    "day": "రోజు",
+    "month": "నెల",
+    "year": "సంవత్సరం",
+    "dayPlaceholder": "రోజు",
+    "monthPlaceholder": "నెల",
+    "yearPlaceholder": "సంవత్సరం"
   }
 }

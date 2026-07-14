@@ -53,5 +53,13 @@
   "provenance": {
     "exampleLabel": "AI द्वारा तैयार उदाहरण",
     "exampleTooltip": "यह डेमो के लिए जोड़ी गई AI द्वारा तैयार उदाहरण सामग्री है। यह कोई वास्तविक कोर्स, ट्यूटोरियल या राय नहीं है।"
+  },
+  "birthdate": {
+    "day": "दिन",
+    "month": "माह",
+    "year": "वर्ष",
+    "dayPlaceholder": "दिन",
+    "monthPlaceholder": "माह",
+    "yearPlaceholder": "वर्ष"
   }
 }

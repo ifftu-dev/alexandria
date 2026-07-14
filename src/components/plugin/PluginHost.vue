@@ -47,6 +47,9 @@ const props = defineProps<{
   /** Enrollment the learner is taking this element under. Required for
    *  graded plugins to persist a submission row. */
   enrollmentId?: string | null
+  /** Active Sentinel integrity session id. Forwarded to the grader so a
+   *  passing graded submission mints an integrity-bound credential. */
+  integritySessionId?: string | null
   /** In `review` mode, the id of the submission being reviewed. The plugin's
    *  review UI submits its verdict and the host posts it against this row. */
   reviewSubmissionId?: string | null
@@ -421,6 +424,7 @@ async function onSubmit(requestId: number, submission: unknown, metadata: unknow
       enrollmentId: props.enrollmentId,
       contentJson,
       submissionJson,
+      integritySessionId: props.integritySessionId ?? null,
     })
     iframeRef.value?.resolveSubmit(requestId, { score: score.score })
     iframeRef.value?.sendSubmitAck(blake3HexHint(), score.score)

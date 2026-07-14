@@ -132,7 +132,41 @@ INSERT OR IGNORE INTO goal_templates (id, kind, key, label, board, grade, skill_
   ('gt_cur_cbse10', 'curriculum', 'cbse.grade10', 'CBSE — Grade 10', 'CBSE', '10',
    '["skill_logic","skill_sets","skill_probability"]', 'genesis', 1),
   ('gt_cur_icse10', 'curriculum', 'icse.grade10', 'ICSE — Grade 10', 'ICSE', '10',
-   '["skill_logic","skill_sets","skill_probability"]', 'genesis', 1);
+   '["skill_logic","skill_sets","skill_probability"]', 'genesis', 1),
+
+  -- Additional job roles
+  ('gt_role_be', 'job_role', 'backend_engineer', 'Backend Engineer', NULL, NULL,
+   '["skill_rest_api","skill_db_design","skill_sql","skill_docker","skill_ci_cd"]', 'genesis', 1),
+  ('gt_role_fs', 'job_role', 'fullstack_engineer', 'Full-Stack Engineer', NULL, NULL,
+   '["skill_javascript","skill_react","skill_rest_api","skill_db_design"]', 'genesis', 1),
+  ('gt_role_ds', 'job_role', 'data_scientist', 'Data Scientist', NULL, NULL,
+   '["skill_python","skill_regression","skill_probability","skill_distributions","skill_inference"]', 'genesis', 1),
+  ('gt_role_de', 'job_role', 'data_engineer', 'Data Engineer', NULL, NULL,
+   '["skill_etl","skill_sql","skill_streaming","skill_db_design"]', 'genesis', 1),
+  ('gt_role_devops', 'job_role', 'devops_engineer', 'DevOps Engineer', NULL, NULL,
+   '["skill_docker","skill_ci_cd","skill_dns","skill_concurrency"]', 'genesis', 1),
+  ('gt_role_sec', 'job_role', 'security_engineer', 'Security Engineer', NULL, NULL,
+   '["skill_symmetric","skill_asymmetric","skill_tls","skill_firewalls","skill_auth"]', 'genesis', 1),
+  ('gt_role_pd', 'job_role', 'product_designer', 'Product Designer', NULL, NULL,
+   '["skill_ia","skill_design_systems","skill_color_theory","skill_accessibility"]', 'genesis', 1),
+
+  -- Additional exams
+  ('gt_exam_gate', 'exam', 'gate_cse', 'GATE — Computer Science', NULL, NULL,
+   '["skill_big_o","skill_arrays","skill_graphs","skill_dp","skill_logic"]', 'genesis', 1),
+  ('gt_exam_gre', 'exam', 'gre', 'GRE (General)', NULL, NULL,
+   '["skill_logic","skill_probability","skill_combinatorics"]', 'genesis', 1),
+  ('gt_exam_upsc', 'exam', 'upsc_prelims', 'UPSC Civil Services (Prelims)', NULL, NULL,
+   '["skill_constitutional_literacy","skill_federalism_vs_centralism","skill_public_finance_literacy","skill_media_literacy_political"]', 'genesis', 1),
+
+  -- Additional curricula
+  ('gt_cur_cbse12', 'curriculum', 'cbse.grade12', 'CBSE — Grade 12', 'CBSE', '12',
+   '["skill_derivatives","skill_integrals","skill_probability","skill_logic"]', 'genesis', 1),
+  ('gt_cur_icse12', 'curriculum', 'icse.grade12', 'ICSE — Grade 12', 'ICSE', '12',
+   '["skill_derivatives","skill_integrals","skill_sets"]', 'genesis', 1),
+  ('gt_cur_ib_math', 'curriculum', 'ib.dp.math', 'IB Diploma — Mathematics', 'IB', '12',
+   '["skill_derivatives","skill_integrals","skill_matrices","skill_probability"]', 'genesis', 1),
+  ('gt_cur_alevel_cs', 'curriculum', 'alevels.cs', 'A-Levels — Computer Science', 'A-Levels', '12',
+   '["skill_big_o","skill_arrays","skill_python","skill_logic"]', 'genesis', 1);
 "#;
 
 /// Rewrite any demo-learner sentinel rows to the real wallet address.
@@ -245,8 +279,9 @@ fn backfill_demo_data(conn: &Connection) -> Result<(), rusqlite::Error> {
     // existing seeded DBs pick up the new content. The idempotent
     // `ON CONFLICT` clauses in BACKFILL_SQL handle the case where
     // some tables already have rows but others don't.
-    if needs_backfill("enrollments")
-        || needs_backfill("governance_dao_members")
+    // NB: enrollments are intentionally never seeded (no auto-enrol), so they
+    // can't be a backfill trigger — key off other demo tables instead.
+    if needs_backfill("governance_dao_members")
         || needs_backfill("classrooms")
         || needs_backfill("video_chapters")
         || needs_backfill("opinions")
@@ -1322,59 +1357,12 @@ PRAGMA foreign_keys = OFF;
 -- ============================================================
 -- P1: ENROLLMENTS & PROGRESS
 -- ============================================================
--- 4 enrollments: 1 completed, 2 active (in-progress), 1 recently started
-INSERT INTO enrollments (id, course_id, enrolled_at, completed_at, status) VALUES
-    ('enroll_algo',   'course_algo_101',      '2026-01-15T10:00:00', '2026-03-20T16:45:00', 'completed'),
-    ('enroll_web',    'course_web_fullstack', '2026-02-01T09:30:00', NULL,                   'active'),
-    ('enroll_ml',     'course_ml_foundations','2026-03-10T14:00:00', NULL,                   'active'),
-    ('enroll_crypto', 'course_crypto_101',        '2026-04-01T11:15:00', NULL,                   'active');
-
--- Algo 101: fully completed (all elements done)
-INSERT INTO element_progress (id, enrollment_id, element_id, status, score, time_spent, completed_at) VALUES
-    ('ep_a1_1', 'enroll_algo', 'el_algo_1_1', 'completed', NULL, 420,  '2026-01-16T11:00:00'),
-    ('ep_a1_2', 'enroll_algo', 'el_algo_1_2', 'completed', NULL, 1200, '2026-01-18T14:30:00'),
-    ('ep_a1_3', 'enroll_algo', 'el_algo_1_3', 'completed', 0.92, 900,  '2026-01-20T10:15:00'),
-    ('ep_a2_1', 'enroll_algo', 'el_algo_2_1', 'completed', NULL, 480,  '2026-01-22T09:00:00'),
-    ('ep_a2_2', 'enroll_algo', 'el_algo_2_2', 'completed', NULL, 1500, '2026-01-25T16:00:00'),
-    ('ep_a2_3', 'enroll_algo', 'el_algo_2_3', 'completed', 0.88, 1080, '2026-01-28T11:30:00'),
-    ('ep_a3_1', 'enroll_algo', 'el_algo_3_1', 'completed', NULL, 600,  '2026-02-01T10:00:00'),
-    ('ep_a3_2', 'enroll_algo', 'el_algo_3_2', 'completed', NULL, 1800, '2026-02-05T15:45:00'),
-    ('ep_a3_3', 'enroll_algo', 'el_algo_3_3', 'completed', 0.95, 720,  '2026-02-08T10:30:00'),
-    ('ep_a4_1', 'enroll_algo', 'el_algo_4_1', 'completed', NULL, 360,  '2026-02-10T09:15:00'),
-    ('ep_a4_2', 'enroll_algo', 'el_algo_4_2', 'completed', NULL, 2400, '2026-02-15T14:00:00'),
-    ('ep_a4_3', 'enroll_algo', 'el_algo_4_3', 'completed', 0.90, 1200, '2026-03-20T16:45:00');
-
--- Web fullstack: 60% through (chapters 1-3 done, partway through 4)
-INSERT INTO element_progress (id, enrollment_id, element_id, status, score, time_spent, completed_at) VALUES
-    ('ep_w1_1', 'enroll_web', 'el_web_1_1', 'completed', NULL, 300,  '2026-02-02T10:00:00'),
-    ('ep_w1_2', 'enroll_web', 'el_web_1_2', 'completed', NULL, 900,  '2026-02-04T11:30:00'),
-    ('ep_w1_3', 'enroll_web', 'el_web_1_3', 'completed', 0.96, 600,  '2026-02-06T09:45:00'),
-    ('ep_w2_1', 'enroll_web', 'el_web_2_1', 'completed', NULL, 480,  '2026-02-08T14:00:00'),
-    ('ep_w2_2', 'enroll_web', 'el_web_2_2', 'completed', NULL, 1200, '2026-02-11T10:30:00'),
-    ('ep_w2_3', 'enroll_web', 'el_web_2_3', 'completed', 0.84, 900,  '2026-02-14T16:00:00'),
-    ('ep_w3_1', 'enroll_web', 'el_web_3_1', 'completed', NULL, 600,  '2026-02-16T09:00:00'),
-    ('ep_w3_2', 'enroll_web', 'el_web_3_2', 'completed', NULL, 1500, '2026-02-20T13:15:00'),
-    ('ep_w3_3', 'enroll_web', 'el_web_3_3', 'completed', 0.91, 1080, '2026-02-24T11:00:00'),
-    ('ep_w4_1', 'enroll_web', 'el_web_4_1', 'completed', NULL, 540,  '2026-03-01T10:00:00'),
-    ('ep_w4_2', 'enroll_web', 'el_web_4_2', 'in_progress', NULL, 600, NULL);
-
--- ML foundations: just started (chapter 1 done)
-INSERT INTO element_progress (id, enrollment_id, element_id, status, score, time_spent, completed_at) VALUES
-    ('ep_m1_1', 'enroll_ml', 'el_ml_1_1', 'completed',   NULL, 360, '2026-03-12T10:00:00'),
-    ('ep_m1_2', 'enroll_ml', 'el_ml_1_2', 'completed',   NULL, 900, '2026-03-14T14:30:00'),
-    ('ep_m1_3', 'enroll_ml', 'el_ml_1_3', 'completed',   0.87, 720, '2026-03-16T11:00:00'),
-    ('ep_m2_1', 'enroll_ml', 'el_ml_2_1', 'in_progress', NULL, 180, NULL);
-
--- Crypto: barely started
-INSERT INTO element_progress (id, enrollment_id, element_id, status, score, time_spent, completed_at) VALUES
-    ('ep_c1_1', 'enroll_crypto', 'el_cry_1_1', 'completed',   NULL, 480, '2026-04-02T10:30:00'),
-    ('ep_c1_2', 'enroll_crypto', 'el_cry_1_2', 'in_progress', NULL, 120, NULL);
-
--- Course notes
-INSERT INTO course_notes (id, enrollment_id, chapter_id, element_id, preview_text) VALUES
-    ('note_001', 'enroll_algo', 'ch_algo_1', 'el_algo_1_2', 'Key insight: amortized O(1) for dynamic arrays because doubling only happens log(n) times. Think of it like paying a little extra each insertion to cover the rare expensive resize.'),
-    ('note_002', 'enroll_web',  'ch_web_2',  'el_web_2_2',  'Vue 3 Composition API vs Options API: use composables for shared stateful logic. defineProps + defineEmits for type-safe component contracts. Remember: ref() for primitives, reactive() for objects.'),
-    ('note_003', 'enroll_ml',   'ch_ml_1',   'el_ml_1_2',   'Bias-variance tradeoff: high bias = underfitting (model too simple), high variance = overfitting (model too complex). Cross-validation is the practical tool to detect both.');
+-- Intentionally empty. A fresh user is NOT auto-enrolled — they discover
+-- the seeded demo courses in the catalog and enrol themselves (which runs
+-- the plugin install pre-flight for plugin courses). Seeding enrollments
+-- here would auto-enrol every new profile, since enrollments are not
+-- profile-scoped. element_progress / course_notes / integrity_sessions are
+-- omitted for the same reason (they hang off enrollments).
 
 -- ============================================================
 -- P2: ASSESSMENTS, EVIDENCE RECORDS, & PROOF LINKS
@@ -1575,25 +1563,9 @@ INSERT INTO classroom_join_requests (id, classroom_id, stake_address, message, s
 -- ============================================================
 -- P6: SENTINEL (integrity), TUTORING, APP SETTINGS
 -- ============================================================
--- Integrity sessions (tied to algo enrollment)
-INSERT INTO integrity_sessions (id, enrollment_id, status, integrity_score, started_at, ended_at) VALUES
-    ('isess_001', 'enroll_algo', 'completed', 0.94, '2026-01-20T10:00:00', '2026-01-20T10:45:00'),
-    ('isess_002', 'enroll_algo', 'completed', 0.91, '2026-02-08T10:00:00', '2026-02-08T11:00:00'),
-    ('isess_003', 'enroll_web',  'completed', 0.96, '2026-02-06T09:30:00', '2026-02-06T10:00:00'),
-    ('isess_004', 'enroll_ml',   'completed', 0.89, '2026-03-16T10:45:00', '2026-03-16T11:30:00');
-
--- Integrity snapshots (behavioral signals per session)
-INSERT INTO integrity_snapshots (id, session_id, typing_score, mouse_score, human_score, tab_score, paste_score, devtools_score, camera_score, composite_score, captured_at) VALUES
-    ('isnap_001a', 'isess_001', 0.95, 0.92, 0.98, 1.0, 1.0, 1.0, 0.88, 0.94, '2026-01-20T10:05:00'),
-    ('isnap_001b', 'isess_001', 0.93, 0.94, 0.97, 1.0, 1.0, 1.0, 0.90, 0.95, '2026-01-20T10:15:00'),
-    ('isnap_001c', 'isess_001', 0.96, 0.91, 0.96, 1.0, 1.0, 1.0, 0.87, 0.93, '2026-01-20T10:30:00'),
-    ('isnap_002a', 'isess_002', 0.91, 0.88, 0.95, 1.0, 0.95, 1.0, 0.85, 0.91, '2026-02-08T10:10:00'),
-    ('isnap_002b', 'isess_002', 0.89, 0.90, 0.94, 1.0, 1.0,  1.0, 0.86, 0.92, '2026-02-08T10:30:00'),
-    ('isnap_002c', 'isess_002', 0.92, 0.87, 0.96, 0.95, 1.0, 1.0, 0.88, 0.91, '2026-02-08T10:50:00'),
-    ('isnap_003a', 'isess_003', 0.97, 0.95, 0.99, 1.0, 1.0, 1.0, 0.92, 0.96, '2026-02-06T09:40:00'),
-    ('isnap_003b', 'isess_003', 0.96, 0.96, 0.98, 1.0, 1.0, 1.0, 0.94, 0.97, '2026-02-06T09:55:00'),
-    ('isnap_004a', 'isess_004', 0.88, 0.85, 0.92, 1.0, 1.0, 1.0, 0.80, 0.89, '2026-03-16T11:00:00'),
-    ('isnap_004b', 'isess_004', 0.90, 0.84, 0.91, 0.90, 1.0, 1.0, 0.82, 0.88, '2026-03-16T11:15:00');
+-- Integrity sessions + snapshots omitted: they FK to the demo enrollments,
+-- which are no longer seeded (a fresh user is not auto-enrolled). Real
+-- integrity sessions are created when the user actually takes an assessment.
 
 -- Tutoring sessions
 INSERT INTO tutoring_sessions (id, title, status, created_at, ended_at) VALUES

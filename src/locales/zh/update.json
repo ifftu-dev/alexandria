@@ -5,7 +5,8 @@
     "install": "安装并重启",
     "later": "稍后",
     "downloading": "正在下载…",
-    "installing": "正在安装…"
+    "installing": "正在安装…",
+    "getUpdate": "获取更新"
   },
   "settings": {
     "title": "更新",

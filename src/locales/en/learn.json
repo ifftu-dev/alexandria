@@ -74,6 +74,7 @@
       "essay": "Written response",
       "interactive": "Interactive",
       "content": "Content"
-    }
+    },
+    "reducedConfidenceNoCamera": "Camera off — skills earned here will carry lower confidence."
   }
 }
