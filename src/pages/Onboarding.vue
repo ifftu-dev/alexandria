@@ -1107,16 +1107,16 @@ function enterApp() {
    numbered step list on the left, content on the right. Matches the accent-
    options design study. Colours come from the live theme tokens (stays indigo). */
 .onb-frame {
-  border: 1px solid hsl(var(--border));
+  border: 1px solid var(--app-border);
   border-radius: 1rem;
   overflow: hidden;
-  background: hsl(var(--card));
+  background: var(--app-card);
   box-shadow: 0 30px 70px -30px rgb(0 0 0 / 0.5);
 }
 .onb-rail {
   padding: 2rem 1.75rem;
-  background: linear-gradient(180deg, color-mix(in srgb, hsl(var(--primary)) 9%, hsl(var(--card))), hsl(var(--card)));
-  border-inline-end: 1px solid hsl(var(--border));
+  background: linear-gradient(180deg, color-mix(in srgb, var(--app-primary) 9%, var(--app-card)), var(--app-card));
+  border-inline-end: 1px solid var(--app-border);
 }
 .onb-glyph {
   width: 2.75rem;
@@ -1124,9 +1124,9 @@ function enterApp() {
   border-radius: 0.85rem;
   display: grid;
   place-items: center;
-  background: hsl(var(--primary));
-  color: hsl(var(--primary-foreground));
-  box-shadow: 0 8px 20px -8px hsl(var(--primary));
+  background: var(--app-primary);
+  color: var(--app-primary-foreground);
+  box-shadow: 0 8px 20px -8px var(--app-primary);
   margin-bottom: 1.25rem;
 }
 .onb-lead {
@@ -1134,13 +1134,13 @@ function enterApp() {
   font-weight: 650;
   line-height: 1.3;
   letter-spacing: -0.015em;
-  color: hsl(var(--foreground));
+  color: var(--app-foreground);
   margin: 0;
   text-wrap: balance;
 }
 .onb-lead-sub {
   font-size: 0.8125rem;
-  color: hsl(var(--muted-foreground));
+  color: var(--app-muted-foreground);
   margin: 0.4rem 0 1.75rem;
   line-height: 1.5;
 }
@@ -1155,7 +1155,7 @@ function enterApp() {
   gap: 0.75rem;
   padding: 0.5rem 0;
   font-size: 0.8125rem;
-  color: hsl(var(--muted-foreground));
+  color: var(--app-muted-foreground);
 }
 .onb-step__n {
   width: 1.5rem;
@@ -1166,7 +1166,7 @@ function enterApp() {
   place-items: center;
   font-size: 0.6875rem;
   font-weight: 700;
-  border: 1.5px solid hsl(var(--border));
+  border: 1.5px solid var(--app-border);
   background: transparent;
   transition: border-color 0.15s, background-color 0.15s, box-shadow 0.15s;
 }
@@ -1174,21 +1174,21 @@ function enterApp() {
   font-weight: 500;
 }
 .onb-step--done {
-  color: hsl(var(--foreground));
+  color: var(--app-foreground);
 }
 .onb-step--done .onb-step__n {
-  background: hsl(var(--primary));
-  color: hsl(var(--primary-foreground));
-  border-color: hsl(var(--primary));
+  background: var(--app-primary);
+  color: var(--app-primary-foreground);
+  border-color: var(--app-primary);
 }
 .onb-step--now {
-  color: hsl(var(--foreground));
+  color: var(--app-foreground);
   font-weight: 600;
 }
 .onb-step--now .onb-step__n {
-  border-color: hsl(var(--primary));
-  color: hsl(var(--primary));
-  box-shadow: 0 0 0 3px hsl(var(--primary) / 0.15);
+  border-color: var(--app-primary);
+  color: var(--app-primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--app-primary) 15%, transparent);
 }
 .onb-motif {
   margin-top: auto;
@@ -1196,7 +1196,7 @@ function enterApp() {
   font-size: 0.6875rem;
   font-style: italic;
   letter-spacing: 0.02em;
-  color: hsl(var(--muted-foreground));
+  color: var(--app-muted-foreground);
 }
 .onb-content {
   padding: 1.75rem 1.5rem;
@@ -1211,7 +1211,7 @@ function enterApp() {
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: hsl(var(--primary));
+  color: var(--app-primary);
   margin-bottom: 0.6rem;
 }
 /* Primary call-to-action — accent fill with a soft glow. */
@@ -1220,16 +1220,16 @@ function enterApp() {
   height: 2.9rem;
   border: none;
   border-radius: 0.75rem;
-  background: hsl(var(--primary));
-  color: hsl(var(--primary-foreground));
+  background: var(--app-primary);
+  color: var(--app-primary-foreground);
   font-size: 0.9375rem;
   font-weight: 700;
   cursor: pointer;
   transition: background 0.15s, box-shadow 0.15s, opacity 0.15s;
-  box-shadow: 0 10px 24px -10px hsl(var(--primary));
+  box-shadow: 0 10px 24px -10px var(--app-primary);
 }
 .onb-cta:hover:not(:disabled) {
-  background: hsl(var(--primary-hover));
+  background: var(--app-primary-hover);
 }
 .onb-cta:disabled {
   opacity: 0.5;
