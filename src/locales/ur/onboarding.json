@@ -184,5 +184,6 @@
     "checking": "جانچا جا رہا ہے…",
     "checkActivation": "فعالیت جانچیں",
     "backToProfiles": "پروفائلز کی طرف واپس"
-  }
+  },
+  "stepOf": "مرحلہ {current} از {total}"
 }

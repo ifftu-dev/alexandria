@@ -184,5 +184,6 @@
     "checking": "Comprobando…",
     "checkActivation": "Comprobar activación",
     "backToProfiles": "Volver a los perfiles"
-  }
+  },
+  "stepOf": "Paso {current} de {total}"
 }
