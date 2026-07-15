@@ -239,12 +239,6 @@ const activeStepIndex = computed(() => {
   const idx = wizardSteps.value.findIndex((s) => s.id === step.value)
   return idx >= 0 ? idx : 0
 })
-const progressPercent = computed(() => {
-  const maxIndex = wizardSteps.value.length - 1
-  if (maxIndex <= 0) return 0
-  return Math.round((activeStepIndex.value / maxIndex) * 100)
-})
-
 function formatOnboardingError(cause: unknown, action: 'create' | 'restore'): string {
   const raw = cause instanceof Error ? cause.message : String(cause)
 
@@ -487,17 +481,10 @@ function enterApp() {
               <span class="onb-step__label">{{ wizardStep.label }}</span>
             </div>
           </div>
-
-          <div class="onb-motif">{{ $t('onboarding.motif.ubuntu') }}</div>
         </aside>
 
         <div class="onb-content">
-          <div class="mb-5">
-            <div class="onb-kick">{{ $t('onboarding.stepOf', { current: activeStepIndex + 1, total: wizardSteps.length }) }}</div>
-            <div class="h-1 rounded-full bg-muted/50 overflow-hidden">
-              <div class="h-full bg-primary transition-all duration-500" :style="{ width: `${progressPercent}%` }" />
-            </div>
-          </div>
+          <div class="onb-kick">{{ $t('onboarding.stepOf', { current: activeStepIndex + 1, total: wizardSteps.length }) }}</div>
 
       <!-- ============================================ -->
       <!-- WELCOME                                      -->
@@ -591,7 +578,7 @@ function enterApp() {
         <h1 class="onb-h2">{{ $t('onboarding.role.heading') }}</h1>
         <p class="onb-sub">{{ $t('onboarding.role.subtitle') }}</p>
 
-        <div class="flex flex-col gap-3">
+        <div class="onb-roles">
           <button
             v-for="card in roleCards"
             :key="card.id"
@@ -1122,18 +1109,16 @@ function enterApp() {
   pointer-events: none;
 }
 .onb-frame {
-  border: 1px solid color-mix(in srgb, var(--app-border) 80%, transparent);
+  border: 1px solid var(--app-border);
   border-radius: 1rem;
   overflow: hidden;
-  background: color-mix(in srgb, var(--app-background) 76%, transparent);
-  backdrop-filter: blur(14px) saturate(120%);
-  -webkit-backdrop-filter: blur(14px) saturate(120%);
+  background: var(--app-background);
   box-shadow: 0 24px 60px -20px rgb(0 0 0 / 0.7);
 }
 .onb-rail {
   padding: 1.875rem 1.625rem;
-  background: linear-gradient(180deg, color-mix(in srgb, var(--app-primary) 10%, transparent), transparent);
-  border-inline-end: 1px solid color-mix(in srgb, var(--app-border) 70%, transparent);
+  background: linear-gradient(180deg, rgb(20, 27, 42), rgb(15, 21, 34));
+  border-inline-end: 1px solid var(--app-border);
 }
 .onb-glyph {
   width: 2.375rem;
@@ -1146,33 +1131,36 @@ function enterApp() {
   box-shadow: 0 6px 18px -6px var(--app-primary);
   margin-bottom: 1.625rem;
 }
+/* The rail is a fixed dark navy panel (matching the study) in both themes, so
+   its text is pinned light rather than following the theme foreground token. */
 .onb-lead {
   font-size: 1.1875rem;
   font-weight: 650;
   line-height: 1.32;
   letter-spacing: -0.015em;
-  color: var(--app-foreground);
+  color: rgb(249, 250, 251);
   margin: 0;
   text-wrap: balance;
 }
 .onb-lead-sub {
   font-size: 0.8125rem;
-  color: var(--app-muted-foreground);
+  color: rgb(156, 163, 175);
   margin: 0.375rem 0 1.875rem;
   line-height: 1.5;
 }
 .onb-steps {
   display: flex;
   flex-direction: column;
-  gap: 0.1rem;
+  gap: 0.125rem;
+  margin-top: auto;
 }
 .onb-step {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  padding: 0.5rem 0;
+  padding: 0.5625rem 0;
   font-size: 0.8125rem;
-  color: var(--app-muted-foreground);
+  color: rgb(156, 163, 175);
 }
 .onb-step__n {
   width: 1.5rem;
@@ -1183,7 +1171,7 @@ function enterApp() {
   place-items: center;
   font-size: 0.6875rem;
   font-weight: 700;
-  border: 1.5px solid var(--app-border);
+  border: 1.5px solid rgb(55, 65, 81);
   background: transparent;
   transition: border-color 0.15s, background-color 0.15s, box-shadow 0.15s;
 }
@@ -1191,7 +1179,7 @@ function enterApp() {
   font-weight: 500;
 }
 .onb-step--done {
-  color: var(--app-foreground);
+  color: rgb(249, 250, 251);
 }
 .onb-step--done .onb-step__n {
   background: var(--app-primary);
@@ -1199,21 +1187,13 @@ function enterApp() {
   border-color: var(--app-primary);
 }
 .onb-step--now {
-  color: var(--app-foreground);
+  color: rgb(249, 250, 251);
   font-weight: 600;
 }
 .onb-step--now .onb-step__n {
   border-color: var(--app-primary);
   color: var(--app-primary);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--app-primary) 15%, transparent);
-}
-.onb-motif {
-  margin-top: auto;
-  padding-top: 1.5rem;
-  font-size: 0.6875rem;
-  font-style: italic;
-  letter-spacing: 0.02em;
-  color: var(--app-muted-foreground);
 }
 .onb-content {
   padding: 1.75rem 1.5rem;
@@ -1256,6 +1236,12 @@ function enterApp() {
   padding: 1.25rem 1.375rem;
 }
 /* Role / option cards — icon tile + title + subtitle + check radio. */
+.onb-roles {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  max-width: 27.5rem;
+}
 .onb-role {
   display: flex;
   align-items: center;
