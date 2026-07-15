@@ -184,5 +184,6 @@
     "checking": "जाँच हो रही है…",
     "checkActivation": "सक्रियण जाँचें",
     "backToProfiles": "प्रोफ़ाइलों पर वापस"
-  }
+  },
+  "stepOf": "चरण {current} / {total}"
 }

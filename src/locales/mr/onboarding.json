@@ -184,5 +184,6 @@
     "checking": "तपासत आहे…",
     "checkActivation": "सक्रियकरण तपासा",
     "backToProfiles": "प्रोफाइलवर परत"
-  }
+  },
+  "stepOf": "पायरी {current} / {total}"
 }

@@ -457,52 +457,42 @@ function enterApp() {
   <div class="min-h-full bg-background relative overflow-y-auto flex items-center justify-center p-4 sm:p-6 lg:p-8">
     <Starfield />
 
-    <div class="w-full max-w-6xl relative z-10">
-      <div class="grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)] lg:gap-6 xl:gap-8">
-        <aside class="hidden lg:flex lg:flex-col rounded-2xl border border-border/70 bg-card/70 backdrop-blur p-6">
-          <div class="mb-6">
-            <div class="relative w-12 h-12 mb-4">
-              <div class="absolute inset-0 rounded-full bg-primary/10 animate-ping" style="animation-duration: 3s;" />
-              <div class="relative w-12 h-12 flex items-center justify-center">
-                <svg class="w-9 h-9 text-primary" viewBox="0 0 32 32" fill="none">
-                  <path d="M16 2L4 8v16l12 6 12-6V8L16 2z" stroke="currentColor" stroke-width="2" fill="none" />
-                  <path d="M16 8v16M8 12l8 4 8-4" stroke="currentColor" stroke-width="2" />
-                </svg>
-              </div>
-            </div>
-            <h2 class="text-xl font-semibold text-foreground">{{ $t('onboarding.aside.title') }}</h2>
-            <p class="mt-1 text-sm text-muted-foreground">{{ $t('onboarding.aside.subtitle') }}</p>
+    <div class="w-full max-w-5xl relative z-10">
+      <div class="onb-frame grid lg:grid-cols-[300px_minmax(0,1fr)]">
+        <aside class="onb-rail hidden lg:flex lg:flex-col">
+          <div class="onb-glyph">
+            <svg class="w-6 h-6" viewBox="0 0 32 32" fill="none">
+              <path d="M16 2L4 8v16l12 6 12-6V8L16 2z" stroke="currentColor" stroke-width="2.2" fill="none" />
+              <path d="M16 8v16M8 12l8 4 8-4" stroke="currentColor" stroke-width="2.2" />
+            </svg>
           </div>
+          <h2 class="onb-lead">{{ $t('onboarding.aside.title') }}</h2>
+          <p class="onb-lead-sub">{{ $t('onboarding.aside.subtitle') }}</p>
 
-          <div class="space-y-2.5">
+          <div class="onb-steps">
             <div
               v-for="(wizardStep, index) in wizardSteps"
               :key="wizardStep.id"
-              class="flex items-center gap-3 rounded-lg px-2.5 py-2"
-              :class="index === activeStepIndex ? 'bg-primary/10 text-primary' : index < activeStepIndex ? 'text-foreground' : 'text-muted-foreground'"
+              class="onb-step"
+              :class="{ 'onb-step--done': index < activeStepIndex, 'onb-step--now': index === activeStepIndex }"
             >
-              <span
-                class="flex h-6 w-6 items-center justify-center rounded-full border text-xs font-semibold"
-                :class="index <= activeStepIndex ? 'border-primary/50 bg-primary/10' : 'border-border/70 bg-background/70'"
-              >
-                {{ index + 1 }}
+              <span class="onb-step__n">
+                <svg v-if="index < activeStepIndex" class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="m5 12 5 5L20 6" />
+                </svg>
+                <template v-else>{{ index + 1 }}</template>
               </span>
-              <span class="text-sm font-medium">{{ wizardStep.label }}</span>
+              <span class="onb-step__label">{{ wizardStep.label }}</span>
             </div>
           </div>
 
-          <div class="mt-auto pt-6 text-xs text-muted-foreground italic tracking-wide">
-            {{ $t('onboarding.motif.ubuntu') }}
-          </div>
+          <div class="onb-motif">{{ $t('onboarding.motif.ubuntu') }}</div>
         </aside>
 
-        <div class="rounded-2xl border border-border/70 bg-card/80 backdrop-blur px-4 py-5 sm:px-6 sm:py-6 lg:px-8 lg:py-8">
+        <div class="onb-content">
           <div class="mb-5">
-            <div class="flex items-center justify-between text-xs text-muted-foreground mb-2">
-              <span>{{ wizardSteps[activeStepIndex]?.label }}</span>
-              <span>{{ progressPercent }}%</span>
-            </div>
-            <div class="h-1.5 rounded-full bg-muted/50 overflow-hidden">
+            <div class="onb-kick">{{ $t('onboarding.stepOf', { current: activeStepIndex + 1, total: wizardSteps.length }) }}</div>
+            <div class="h-1 rounded-full bg-muted/50 overflow-hidden">
               <div class="h-full bg-primary transition-all duration-500" :style="{ width: `${progressPercent}%` }" />
             </div>
           </div>
@@ -560,7 +550,7 @@ function enterApp() {
         </div>
 
         <button
-          class="w-full py-2.5 px-4 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary-hover transition-colors"
+          class="onb-cta"
           @click="startCreate"
         >
           {{ $t('onboarding.welcome.createAccount') }}
@@ -665,7 +655,7 @@ function enterApp() {
         </div>
 
         <button
-          class="w-full py-2.5 px-4 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary-hover transition-colors disabled:opacity-50"
+          class="onb-cta"
           :disabled="!birthdateValid"
           @click="proceedFromBirthdate"
         >
@@ -845,7 +835,7 @@ function enterApp() {
         </div>
 
         <button
-          class="w-full py-2.5 px-4 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary-hover transition-colors"
+          class="onb-cta"
           @click="proceedFromPassword"
         >
           {{ mode === 'create' ? $t('onboarding.password.submitCreate') : $t('onboarding.password.submitImport') }}
@@ -953,7 +943,7 @@ function enterApp() {
         </div>
 
         <button
-          class="w-full py-2.5 px-4 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary-hover transition-colors"
+          class="onb-cta"
           @click="confirmBackup"
         >
           {{ $t('onboarding.backup.confirm') }}
@@ -1046,7 +1036,7 @@ function enterApp() {
         </div>
 
         <button
-          class="w-full py-2.5 px-4 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary-hover transition-colors disabled:opacity-50"
+          class="onb-cta"
           :disabled="!childInviteCode.trim() || linkingChild"
           @click="linkChild"
         >
@@ -1095,7 +1085,7 @@ function enterApp() {
         </p>
 
         <button
-          class="w-full py-2.5 px-4 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary-hover transition-colors"
+          class="onb-cta"
           @click="enterApp"
         >
           {{ isMinorLearner ? $t('onboarding.done.enterGuardian') : selectedRole === 'parent' ? $t('onboarding.done.enterParent') : $t('onboarding.done.enterLearner') }}
@@ -1111,3 +1101,139 @@ function enterApp() {
     </div>
   </div>
 </template>
+
+<style scoped>
+/* Onboarding shell — a single framed "app window": gradient brand rail with a
+   numbered step list on the left, content on the right. Matches the accent-
+   options design study. Colours come from the live theme tokens (stays indigo). */
+.onb-frame {
+  border: 1px solid hsl(var(--border));
+  border-radius: 1rem;
+  overflow: hidden;
+  background: hsl(var(--card));
+  box-shadow: 0 30px 70px -30px rgb(0 0 0 / 0.5);
+}
+.onb-rail {
+  padding: 2rem 1.75rem;
+  background: linear-gradient(180deg, color-mix(in srgb, hsl(var(--primary)) 9%, hsl(var(--card))), hsl(var(--card)));
+  border-inline-end: 1px solid hsl(var(--border));
+}
+.onb-glyph {
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: 0.85rem;
+  display: grid;
+  place-items: center;
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+  box-shadow: 0 8px 20px -8px hsl(var(--primary));
+  margin-bottom: 1.25rem;
+}
+.onb-lead {
+  font-size: 1.15rem;
+  font-weight: 650;
+  line-height: 1.3;
+  letter-spacing: -0.015em;
+  color: hsl(var(--foreground));
+  margin: 0;
+  text-wrap: balance;
+}
+.onb-lead-sub {
+  font-size: 0.8125rem;
+  color: hsl(var(--muted-foreground));
+  margin: 0.4rem 0 1.75rem;
+  line-height: 1.5;
+}
+.onb-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+.onb-step {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0;
+  font-size: 0.8125rem;
+  color: hsl(var(--muted-foreground));
+}
+.onb-step__n {
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 50%;
+  flex: none;
+  display: grid;
+  place-items: center;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  border: 1.5px solid hsl(var(--border));
+  background: transparent;
+  transition: border-color 0.15s, background-color 0.15s, box-shadow 0.15s;
+}
+.onb-step__label {
+  font-weight: 500;
+}
+.onb-step--done {
+  color: hsl(var(--foreground));
+}
+.onb-step--done .onb-step__n {
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+  border-color: hsl(var(--primary));
+}
+.onb-step--now {
+  color: hsl(var(--foreground));
+  font-weight: 600;
+}
+.onb-step--now .onb-step__n {
+  border-color: hsl(var(--primary));
+  color: hsl(var(--primary));
+  box-shadow: 0 0 0 3px hsl(var(--primary) / 0.15);
+}
+.onb-motif {
+  margin-top: auto;
+  padding-top: 1.5rem;
+  font-size: 0.6875rem;
+  font-style: italic;
+  letter-spacing: 0.02em;
+  color: hsl(var(--muted-foreground));
+}
+.onb-content {
+  padding: 1.75rem 1.5rem;
+}
+@media (min-width: 1024px) {
+  .onb-content {
+    padding: 2.5rem 2.5rem;
+  }
+}
+.onb-kick {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: hsl(var(--primary));
+  margin-bottom: 0.6rem;
+}
+/* Primary call-to-action — accent fill with a soft glow. */
+.onb-cta {
+  width: 100%;
+  height: 2.9rem;
+  border: none;
+  border-radius: 0.75rem;
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+  font-size: 0.9375rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s, box-shadow 0.15s, opacity 0.15s;
+  box-shadow: 0 10px 24px -10px hsl(var(--primary));
+}
+.onb-cta:hover:not(:disabled) {
+  background: hsl(var(--primary-hover));
+}
+.onb-cta:disabled {
+  opacity: 0.5;
+  cursor: default;
+  box-shadow: none;
+}
+</style>

@@ -184,5 +184,6 @@
     "checking": "తనిఖీ చేస్తోంది…",
     "checkActivation": "యాక్టివేషన్ తనిఖీ చేయండి",
     "backToProfiles": "ప్రొఫైల్‌లకు తిరిగి"
-  }
+  },
+  "stepOf": "అడుగు {current} / {total}"
 }
