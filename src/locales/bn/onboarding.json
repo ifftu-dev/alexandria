@@ -184,6 +184,5 @@
     "checking": "যাচাই করা হচ্ছে…",
     "checkActivation": "সক্রিয়করণ যাচাই করুন",
     "backToProfiles": "প্রোফাইলে ফিরে যান"
-  },
-  "stepOf": "ধাপ {current} / {total}"
+  }
 }
