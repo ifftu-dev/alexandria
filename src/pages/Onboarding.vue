@@ -455,7 +455,9 @@ function enterApp() {
 
 <template>
   <div class="min-h-full bg-background relative overflow-y-auto flex items-center justify-center p-4 sm:p-6 lg:p-8">
-    <Starfield />
+    <div class="onb-stars">
+      <Starfield />
+    </div>
 
     <div class="w-full max-w-5xl relative z-10">
       <div class="onb-frame grid lg:grid-cols-[300px_minmax(0,1fr)]">
@@ -527,8 +529,8 @@ function enterApp() {
           {{ $t('onboarding.welcome.tagline') }}
         </p>
 
-        <div class="card p-6 mb-6 text-start">
-          <h2 class="text-base font-semibold mb-3">{{ $t('onboarding.welcome.whatHappens') }}</h2>
+        <div class="onb-panel mb-6 text-start">
+          <h2 class="text-sm font-semibold mb-3">{{ $t('onboarding.welcome.whatHappens') }}</h2>
           <ul class="space-y-2 text-sm text-muted-foreground">
             <li class="flex items-start gap-2">
               <span class="text-primary mt-0.5 font-mono text-xs w-4 text-end shrink-0">01</span>
@@ -586,27 +588,30 @@ function enterApp() {
           {{ $t('common.actions.back') }}
         </button>
 
-        <h1 class="text-2xl font-bold mb-2 text-center">{{ $t('onboarding.role.heading') }}</h1>
-        <p class="text-sm text-muted-foreground mb-6 text-center">
-          {{ $t('onboarding.role.subtitle') }}
-        </p>
+        <h1 class="onb-h2">{{ $t('onboarding.role.heading') }}</h1>
+        <p class="onb-sub">{{ $t('onboarding.role.subtitle') }}</p>
 
-        <div class="space-y-3">
+        <div class="flex flex-col gap-3">
           <button
             v-for="card in roleCards"
             :key="card.id"
-            class="w-full card p-5 text-start flex items-start gap-4 transition-colors border hover:border-primary/60 hover:bg-primary/5"
-            :class="selectedRole === card.id ? 'border-primary bg-primary/5' : 'border-border'"
+            class="onb-role"
+            :class="{ 'onb-role--sel': selectedRole === card.id }"
             @click="chooseRole(card.id)"
           >
-            <span class="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-              <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+            <span class="onb-role__ic">
+              <svg class="w-[22px] h-[22px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
                 <path stroke-linecap="round" stroke-linejoin="round" :d="card.icon" />
               </svg>
             </span>
-            <span>
-              <span class="block text-sm font-semibold text-foreground">{{ card.title }}</span>
-              <span class="mt-0.5 block text-sm text-muted-foreground">{{ card.desc }}</span>
+            <span class="onb-role__body">
+              <span class="onb-role__title">{{ card.title }}</span>
+              <span class="onb-role__desc">{{ card.desc }}</span>
+            </span>
+            <span class="onb-role__chk">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="m5 12 5 5L20 6" />
+              </svg>
             </span>
           </button>
         </div>
@@ -626,8 +631,8 @@ function enterApp() {
           {{ $t('common.actions.back') }}
         </button>
 
-        <h1 class="text-2xl font-bold mb-2 text-center">{{ $t('onboarding.birthdate.heading') }}</h1>
-        <p class="text-sm text-muted-foreground mb-6 text-center">
+        <h1 class="onb-h2">{{ $t('onboarding.birthdate.heading') }}</h1>
+        <p class="onb-sub">
           {{ $t('onboarding.birthdate.subtitle') }}
         </p>
 
@@ -677,10 +682,10 @@ function enterApp() {
           {{ $t('common.actions.back') }}
         </button>
 
-        <h1 class="text-2xl font-bold mb-2 text-center">
+        <h1 class="onb-h2">
           {{ mode === 'create' ? $t('onboarding.password.titleCreate') : $t('onboarding.password.titleImport') }}
         </h1>
-        <p class="text-sm text-muted-foreground mb-6 text-center">
+        <p class="onb-sub">
           {{ mode === 'create'
             ? $t('onboarding.password.subtitleCreate')
             : $t('onboarding.password.subtitleImport')
@@ -901,7 +906,7 @@ function enterApp() {
       <!-- BACKUP                                       -->
       <!-- ============================================ -->
       <div v-else-if="step === 'backup'" class="text-center">
-        <h1 class="text-2xl font-bold mb-2">{{ $t('onboarding.backup.heading') }}</h1>
+        <h1 class="onb-h2">{{ $t('onboarding.backup.heading') }}</h1>
         <p class="text-sm text-muted-foreground mb-6">
           {{ $t('onboarding.backup.subtitle') }}
         </p>
@@ -954,8 +959,8 @@ function enterApp() {
       <!-- GOALS (learners)                             -->
       <!-- ============================================ -->
       <div v-else-if="step === 'goals'">
-        <h1 class="text-2xl font-bold mb-2 text-center">{{ $t('onboarding.goals.heading') }}</h1>
-        <p class="text-sm text-muted-foreground mb-6 text-center">
+        <h1 class="onb-h2">{{ $t('onboarding.goals.heading') }}</h1>
+        <p class="onb-sub">
           {{ $t('onboarding.goals.subtitle') }}
         </p>
 
@@ -981,8 +986,8 @@ function enterApp() {
       <!-- BOOTSTRAP SKILLS (learners)                  -->
       <!-- ============================================ -->
       <div v-else-if="step === 'bootstrap'">
-        <h1 class="text-2xl font-bold mb-2 text-center">{{ $t('onboarding.bootstrap.heading') }}</h1>
-        <p class="text-sm text-muted-foreground mb-6 text-center">
+        <h1 class="onb-h2">{{ $t('onboarding.bootstrap.heading') }}</h1>
+        <p class="onb-sub">
           {{ $t('onboarding.bootstrap.subtitle') }}
         </p>
 
@@ -1008,8 +1013,8 @@ function enterApp() {
       <!-- LINK CHILD (parents)                         -->
       <!-- ============================================ -->
       <div v-else-if="step === 'link-child'">
-        <h1 class="text-2xl font-bold mb-2 text-center">{{ $t('onboarding.linkChild.heading') }}</h1>
-        <p class="text-sm text-muted-foreground mb-6 text-center">
+        <h1 class="onb-h2">{{ $t('onboarding.linkChild.heading') }}</h1>
+        <p class="onb-sub">
           {{ $t('onboarding.linkChild.subtitle') }}
         </p>
 
@@ -1060,7 +1065,7 @@ function enterApp() {
             <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
           </svg>
         </div>
-        <h1 class="text-2xl font-bold mb-2">{{ $t('onboarding.done.heading') }}</h1>
+        <h1 class="onb-h2">{{ $t('onboarding.done.heading') }}</h1>
         <p class="text-muted-foreground mb-2">
           {{ mode === 'create'
             ? $t('onboarding.done.bodyCreate')
@@ -1106,33 +1111,45 @@ function enterApp() {
 /* Onboarding shell — a single framed "app window": gradient brand rail with a
    numbered step list on the left, content on the right. Matches the accent-
    options design study. Colours come from the live theme tokens (stays indigo). */
+/* Single container: one framed glass window sitting on the subtle starfield.
+   The frame is translucent + blurred so the starfield reads faintly through
+   the whole surface, rather than stacking an opaque card on top of the page. */
+/* Starfield: kept faint so it reads as texture behind the one glass frame. */
+.onb-stars {
+  position: absolute;
+  inset: 0;
+  opacity: 0.4;
+  pointer-events: none;
+}
 .onb-frame {
-  border: 1px solid var(--app-border);
+  border: 1px solid color-mix(in srgb, var(--app-border) 80%, transparent);
   border-radius: 1rem;
   overflow: hidden;
-  background: var(--app-card);
-  box-shadow: 0 30px 70px -30px rgb(0 0 0 / 0.5);
+  background: color-mix(in srgb, var(--app-background) 76%, transparent);
+  backdrop-filter: blur(14px) saturate(120%);
+  -webkit-backdrop-filter: blur(14px) saturate(120%);
+  box-shadow: 0 24px 60px -20px rgb(0 0 0 / 0.7);
 }
 .onb-rail {
-  padding: 2rem 1.75rem;
-  background: linear-gradient(180deg, color-mix(in srgb, var(--app-primary) 9%, var(--app-card)), var(--app-card));
-  border-inline-end: 1px solid var(--app-border);
+  padding: 1.875rem 1.625rem;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--app-primary) 10%, transparent), transparent);
+  border-inline-end: 1px solid color-mix(in srgb, var(--app-border) 70%, transparent);
 }
 .onb-glyph {
-  width: 2.75rem;
-  height: 2.75rem;
-  border-radius: 0.85rem;
+  width: 2.375rem;
+  height: 2.375rem;
+  border-radius: 0.6875rem;
   display: grid;
   place-items: center;
   background: var(--app-primary);
   color: var(--app-primary-foreground);
-  box-shadow: 0 8px 20px -8px var(--app-primary);
-  margin-bottom: 1.25rem;
+  box-shadow: 0 6px 18px -6px var(--app-primary);
+  margin-bottom: 1.625rem;
 }
 .onb-lead {
-  font-size: 1.15rem;
+  font-size: 1.1875rem;
   font-weight: 650;
-  line-height: 1.3;
+  line-height: 1.32;
   letter-spacing: -0.015em;
   color: var(--app-foreground);
   margin: 0;
@@ -1141,7 +1158,7 @@ function enterApp() {
 .onb-lead-sub {
   font-size: 0.8125rem;
   color: var(--app-muted-foreground);
-  margin: 0.4rem 0 1.75rem;
+  margin: 0.375rem 0 1.875rem;
   line-height: 1.5;
 }
 .onb-steps {
@@ -1203,7 +1220,7 @@ function enterApp() {
 }
 @media (min-width: 1024px) {
   .onb-content {
-    padding: 2.5rem 2.5rem;
+    padding: 2.75rem 2.875rem;
   }
 }
 .onb-kick {
@@ -1212,12 +1229,112 @@ function enterApp() {
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--app-primary);
-  margin-bottom: 0.6rem;
+  margin-bottom: 0.625rem;
+}
+/* Step heading + subtitle — matched to the accent-options study. */
+.onb-h2 {
+  font-size: 1.625rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  color: var(--app-foreground);
+  margin: 0 0 0.4375rem;
+  text-wrap: balance;
+}
+.onb-sub {
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: var(--app-muted-foreground);
+  margin: 0 0 1.625rem;
+}
+/* Subtle inline panel — a faint tint on the glass frame rather than a second
+   opaque card, so it reads as content within the one container. */
+.onb-panel {
+  border-radius: 0.8125rem;
+  background: color-mix(in srgb, var(--app-foreground) 4%, transparent);
+  border: 1px solid color-mix(in srgb, var(--app-border) 60%, transparent);
+  padding: 1.25rem 1.375rem;
+}
+/* Role / option cards — icon tile + title + subtitle + check radio. */
+.onb-role {
+  display: flex;
+  align-items: center;
+  gap: 0.9375rem;
+  width: 100%;
+  padding: 1rem 1.0625rem;
+  border-radius: 0.8125rem;
+  background: var(--app-card);
+  border: 1.5px solid var(--app-border);
+  text-align: start;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.onb-role:hover {
+  border-color: color-mix(in srgb, var(--app-primary) 55%, var(--app-border));
+}
+.onb-role--sel {
+  border-color: var(--app-primary);
+  background: color-mix(in srgb, var(--app-primary) 13%, transparent);
+}
+.onb-role__ic {
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: 0.6875rem;
+  flex: none;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--app-foreground) 8%, transparent);
+  color: var(--app-muted-foreground);
+  transition: background 0.15s, color 0.15s;
+}
+.onb-role--sel .onb-role__ic {
+  background: var(--app-primary);
+  color: var(--app-primary-foreground);
+}
+.onb-role__body {
+  flex: 1;
+  min-width: 0;
+}
+.onb-role__title {
+  display: block;
+  font-size: 0.9375rem;
+  font-weight: 650;
+  color: var(--app-foreground);
+}
+.onb-role__desc {
+  display: block;
+  margin-top: 0.125rem;
+  font-size: 0.78125rem;
+  line-height: 1.4;
+  color: var(--app-muted-foreground);
+}
+.onb-role__chk {
+  width: 1.375rem;
+  height: 1.375rem;
+  border-radius: 50%;
+  flex: none;
+  border: 2px solid var(--app-border);
+  display: grid;
+  place-items: center;
+  transition: background 0.15s, border-color 0.15s;
+}
+.onb-role--sel .onb-role__chk {
+  background: var(--app-primary);
+  border-color: var(--app-primary);
+}
+.onb-role__chk svg {
+  width: 0.8125rem;
+  height: 0.8125rem;
+  stroke: var(--app-primary-foreground);
+  opacity: 0;
+}
+.onb-role--sel .onb-role__chk svg {
+  opacity: 1;
 }
 /* Primary call-to-action — accent fill with a soft glow. */
 .onb-cta {
   width: 100%;
-  height: 2.9rem;
+  height: 3rem;
   border: none;
   border-radius: 0.75rem;
   background: var(--app-primary);
