@@ -7,7 +7,7 @@ import { biometricSupported, storeVaultPasswordForBiometric } from '@/composable
 import { listen } from '@tauri-apps/api/event'
 import type { UnlistenFn } from '@tauri-apps/api/event'
 import Starfield from '@/components/auth/Starfield.vue'
-import LanguageSelector from '@/components/settings/LanguageSelector.vue'
+import LocaleDropdown from '@/components/settings/LocaleDropdown.vue'
 import { BirthdateInput } from '@/components/ui'
 import GoalPicker from '@/components/goals/GoalPicker.vue'
 import SkillBootstrapPanel from '@/components/skills/SkillBootstrapPanel.vue'
@@ -22,9 +22,9 @@ const route = useRoute()
 const { profiles, refreshProfiles, createProfile, restoreProfileWithMnemonic, activeProfileId } = useProfiles()
 const { invoke } = useLocalApi()
 
-// Language can be chosen before any profile exists (via the LanguageSelector
-// card grid on the welcome step, which writes to the pre-unlock locale cache);
-// the pick is seeded into the new profile on completion.
+// Language can be chosen before any profile exists (via the LocaleDropdown on
+// the welcome step, which writes to the pre-unlock locale cache); the pick is
+// seeded into the new profile on completion.
 const { persistLocaleToProfile } = useLocale()
 
 const vaultExists = computed(() => profiles.value.length > 0)
@@ -513,17 +513,9 @@ function enterApp() {
       <div v-if="step === 'welcome'" class="text-center">
         <!-- Language picker — chosen before any profile exists; the choice is
              saved to the new profile and synced across devices on completion.
-             Card grid (same control as Settings) so every language is shown in
-             its own script and picked in a single tap. -->
-        <div class="mx-auto mb-6 max-w-md text-start">
-          <div class="mb-2 flex items-center justify-center gap-1.5 text-xs font-medium text-muted-foreground">
-            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true">
-              <circle cx="12" cy="12" r="9" />
-              <path stroke-linecap="round" stroke-linejoin="round" d="M3 12h18M12 3a15 15 0 010 18M12 3a15 15 0 000 18" />
-            </svg>
-            {{ $t('common.language.label') }}
-          </div>
-          <LanguageSelector />
+             Compact custom dropdown showing each language in its own script. -->
+        <div class="mb-6 flex justify-center">
+          <LocaleDropdown />
         </div>
 
         <!-- Alexandria logo -->
