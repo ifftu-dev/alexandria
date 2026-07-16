@@ -1,0 +1,15 @@
+# GitHub Linguist overrides.
+#
+# `patches/` holds vendored third-party crates carrying their own
+# upstream C/C++ sources (opus, webrtc-audio-processing), patched only
+# where Alexandria needs them. They are not Alexandria's own code and
+# should not count toward the repository's language statistics — without
+# this, ~704 vendored C/C++ files render a Rust project as ~36% C.
+patches/** linguist-vendored
+
+# Compiled Plutus blueprints and Aiken build output are artifacts, not
+# hand-written source. (Aiken itself is detected natively by Linguist;
+# the validators under cardano/governance/validators are real source and
+# are deliberately left alone here.)
+**/plutus.json linguist-generated
+cardano/governance/build/** linguist-generated
