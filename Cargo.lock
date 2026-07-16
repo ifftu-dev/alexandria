@@ -8217,8 +8217,6 @@ dependencies = [
 [[package]]
 name = "netdev"
 version = "0.45.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "569dfbdd2efd771b24ec9bb57f956e04d4fbfc72f62b2f11961723f9b3f4b020"
 dependencies = [
  "block2 0.6.2",
  "dispatch2",

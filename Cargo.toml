@@ -33,6 +33,11 @@ strip = true
 # if-watch 3.2.1 uses SCDynamicStore on iOS which returns NULL and panics.
 # Our patch routes iOS to the fallback (timer-based) backend instead.
 [patch.crates-io]
+# netdev 0.45 (via netwatch → iroh 1.0) aborts on iOS: its interface
+# enumeration augments getifaddrs with macOS-only Network.framework /
+# SystemConfiguration / route data and unwraps a None, crashing the p2p node
+# right after wallet unlock. Our patch returns the plain getifaddrs list.
+netdev = { path = "patches/netdev" }
 if-watch = { path = "patches/if-watch" }
 audiopus_sys = { path = "patches/audiopus_sys" }
 webrtc-audio-processing-sys = { path = "patches/webrtc-audio-processing-sys" }
