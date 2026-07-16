@@ -12,9 +12,14 @@
   <true/>
   <key>com.apple.security.device.audio-input</key>
   <true/>
+  <!-- Team-ID prefix hardcoded: Tauri's macOS bundler does not expand the
+       Xcode $(AppIdentifierPrefix) build variable, so the literal macro string
+       was an invalid keychain access group. That poisoned the app's default
+       group and made every biometry keychain write fail with -34018, silently
+       downgrading biometric unlock to a non-persistent in-memory fallback. -->
   <key>com.apple.security.keychain-access-groups</key>
   <array>
-    <string>$(AppIdentifierPrefix)org.alexandria.node</string>
+    <string>VLMNL3V44U.org.alexandria.node</string>
   </array>
 </dict>
 </plist>
