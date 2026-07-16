@@ -1,7 +1,12 @@
 //! Pull-based credential fetch via libp2p request-response on
 //! `/alexandria/vc-fetch/1.0`. Authority-respecting — a subject opts
-//! in per credential to whether it's publicly fetchable.
-//! Stub — implementation in PR 9.
+//! in per credential to whether it's publicly fetchable, and may
+//! additionally restrict a credential to an allowlist of requestor
+//! DIDs (`allow_fetch` / `disallow_fetch` / `is_allowlisted`).
+//!
+//! Request-response, not gossip: 1-to-1, served only when the node has
+//! a `Database` wired into its swarm event loop. Wired up in
+//! `p2p::network` (behaviour field `vc_fetch`).
 
 use crate::crypto::did::Did;
 use crate::domain::vc::VerifiableCredential;
