@@ -46,7 +46,18 @@ This means a brilliant calculus instructor isn't automatically assumed to be a b
 
 ### Assessment Integrity Is Built In
 
-The Sentinel anti-cheat system monitors assessment integrity through multi-signal behavioral fingerprinting: a keystroke autoencoder, a mouse trajectory CNN, and a face embedder (LBP histograms). The keystroke autoencoder and mouse-trajectory CNN run in Rust on the `candle` ML framework (`src-tauri/src/sentinel/keystroke_ae.rs`, `mouse_cnn.rs`); only the face embedder is hand-written in TypeScript. All three are trained on-device during a calibration wizard.
+The Sentinel anti-cheat system monitors assessment integrity through multi-signal behavioral fingerprinting. Six signals run on-device, almost all of them in Rust (`src-tauri/src/sentinel/`):
+
+| Signal | Implementation |
+|---|---|
+| Keystroke autoencoder | Rust + `candle`, per-user, trained on-device (`keystroke_ae.rs`) |
+| Mouse-trajectory CNN | Rust + `candle`, reservoir-style (`mouse_cnn.rs`) |
+| Paste / typing-bot classifier | Rust, frozen ONNX via `tract` (`paste_classifier.rs`, `features.rs`) |
+| Face detection | Rust, YuNet ONNX via `tract` — bundled at compile time, fixed 640×640 input (`face_detect.rs`) |
+| Gaze / second-device detection | Rust, head-pose proxies + per-user calibration MLP (`gaze.rs`) |
+| Frontmost-application detection | Rust, native platform APIs (`active_app.rs`) |
+
+`tract` is pure Rust — no WASM, no native ONNX runtime — so every model compiles for all Tauri targets including iOS and Android. The only ML remaining in TypeScript is the LBP face embedder (`src/utils/sentinel/face-embedder.ts`, pure pixel math), which consumes the boxes YuNet detects. The per-user models are trained on-device during a calibration wizard.
 
 Raw behavioral data — keystrokes, mouse movements, video frames — **never leaves the device**. Only derived integrity scores (0.0–1.0) and categorical flags are stored and transmitted. This is enforced by the code architecture, not by policy.
 
