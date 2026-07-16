@@ -2,12 +2,10 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter, useRoute } from 'vue-router'
-import { useContentSync } from '@/composables/useContentSync'
 
 const { t } = useI18n()
 const router = useRouter()
 const route = useRoute()
-const { visible: contentSyncVisible, statusMessage: contentSyncMessage } = useContentSync()
 
 interface Tab {
   label: string
@@ -46,22 +44,10 @@ function navigate(path: string) {
   router.push(path)
 }
 
-const mobileStatusMessage = computed(() => {
-  if (!contentSyncVisible.value || !contentSyncMessage.value) return ''
-  return contentSyncMessage.value
-})
 </script>
 
 <template>
   <div class="md:hidden fixed bottom-0 start-0 end-0 z-[70]">
-    <div
-      v-if="mobileStatusMessage"
-      class="mobile-sync-status border-t border-border/60 bg-card/95 px-3 py-1 text-[0.65rem] text-muted-foreground backdrop-blur"
-      :title="mobileStatusMessage"
-    >
-      {{ mobileStatusMessage }}
-    </div>
-
     <nav class="flex items-stretch border-t border-border bg-card safe-area-bottom">
       <button
         v-for="tab in tabs"
@@ -78,11 +64,3 @@ const mobileStatusMessage = computed(() => {
     </nav>
   </div>
 </template>
-
-<style scoped>
-.mobile-sync-status {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-</style>
