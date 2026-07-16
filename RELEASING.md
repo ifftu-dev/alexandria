@@ -8,7 +8,7 @@ To manage releases for Alexandria, you need:
 - An Apple Developer Program membership for macOS and iOS signing. The App Store Connect API key used for iOS must hold the **App Manager** role so CI can mint provisioning profiles.
 - A GitHub account with administrator access to the repository.
 - Rust and Cargo installed locally for generating signing keys.
-- Access to the `iroh-live-patched` private repository.
+- ~~Access to the `iroh-live-patched` private repository.~~ **No longer required** — the patched `iroh-live` crate is now vendored in-tree at `crates/iroh-live` and referenced by path as a workspace member.
 
 ## GitHub Secrets Setup
 
@@ -16,7 +16,7 @@ Configure these secrets in your GitHub repository settings under **Settings > Se
 
 | Secret Name | Description | How to Obtain |
 | :--- | :--- | :--- |
-| `CROSS_REPO_PAT` | GitHub Personal Access Token with `repo` scope. | Create in GitHub Developer Settings. Required to clone the private `iroh-live-patched` repository. |
+| `CROSS_REPO_PAT` | GitHub Personal Access Token with `repo` scope. | **Obsolete** — was used to clone the private `iroh-live-patched` repository. The crate is now vendored in-tree at `crates/iroh-live`, so this secret is no longer needed for builds. |
 | `APPLE_MAC_CERTIFICATE` | macOS **Developer ID Application** signing certificate (.p12 file). | Export from Keychain Access on macOS. Base64 encode the file: `base64 -i cert.p12 \| pbcopy`. |
 | `APPLE_MAC_CERTIFICATE_PASSWORD` | Password for the macOS `.p12` certificate file. | Set this when exporting the certificate from Keychain Access. |
 | `APPLE_MAC_SIGNING_IDENTITY` | macOS certificate name string. | Find in Keychain Access (e.g., "Developer ID Application: Name (TEAMID)"). |
@@ -111,4 +111,4 @@ The Linux builds use `maximize-build-space` to ensure enough room for the heavy 
 ARM64 builds for Linux run on `ubuntu-22.04-arm` runners. These are only available for public repositories on GitHub's free tier. If your repository is private, you must use a self-hosted runner or a paid GitHub runner plan.
 
 ### iroh-live-patched Repository
-The workflows assume the patched library is at `ifftu-dev/iroh-live`. If your repository uses a different slug, update the `repository` field in the checkout steps of all workflow files.
+The patched `iroh-live` crate is now vendored in-tree at `crates/iroh-live` (a path-referenced workspace member), so builds no longer depend on the private `ifftu-dev/iroh-live` repository. The `Checkout iroh-live-patched` steps still present in the workflow files are vestigial — they clone into a separate `iroh-live-patched/` path that the build never consumes, and can be removed.

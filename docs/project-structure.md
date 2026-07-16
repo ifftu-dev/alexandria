@@ -8,7 +8,7 @@
 
 ```
 alexandria/
-├── Cargo.toml              # Workspace root (members: src-tauri, cli)
+├── Cargo.toml              # Workspace root (members: src-tauri, cli, crates/*)
 ├── package.json            # npm scripts (dev, build, preview)
 ├── vite.config.ts          # Vite + Vue + Tailwind plugins
 ├── tsconfig.json           # TypeScript project references
@@ -17,7 +17,8 @@ alexandria/
 ├── src-tauri/              # Rust backend (Tauri v2 app)
 ├── src/                    # Vue 3 frontend
 ├── cli/                    # Developer CLI (alex)
-├── patches/                # Local crate patches (if-watch iOS/Android fix)
+├── crates/                 # Workspace member crates (iroh-live, iroh-moq, moq-media)
+├── patches/                # Local crate patches (netdev, if-watch, audiopus_sys, webrtc-audio-processing-sys, ffmpeg-sys-next, ffmpeg-next)
 ├── docs/                   # Documentation
 ├── bootstrap/              # Seed data (public_courses.json)
 └── scripts/                # Build/dev scripts (incl. check-tauri-commands.mjs: CI guard that every registered command has a frontend caller or is allowlisted)
@@ -84,13 +85,13 @@ src-tauri/
     │   ├── aggregation.rs  # Derived skill-state queries
     │   ├── presentation.rs # Selective-disclosure presentation create/verify
     │   ├── health.rs       # Health check + diag log access
-    │   └── graph.rs      # NFT minting + course registration helpers
+    │   └── graph.rs      # Skill-graph fetch + learning-path helpers
     │
     ├── crypto/             # BIP-39 wallet, keystore, Ed25519, did:key
     ├── db/                 # SQLite, migrations, seed data
     ├── domain/             # Core types and VC domain models
     ├── aggregation/        # Trust aggregation / anti-gaming pipeline (provenance-weighted)
-    ├── evidence/           # Reputation, attestation, challenge logic
+    ├── evidence/           # Reputation, challenge, taxonomy, thresholds logic
     ├── goals/              # Goal → skill-graph resolver + on-device JD/resume parser
     │   ├── mod.rs
     │   └── jd_parser.rs    # Pure n-gram matcher over skill names + synonyms
@@ -188,7 +189,6 @@ src/
 ├── composables/            # Shared singletons
 │   ├── useProfiles.ts      # Canonical multi-user surface (list/unlock/lock/create/rename/delete/avatar) + onProfileReady / onProfileLocked fan-out hooks
 │   ├── useSettings.ts      # Reactive mirror of the per-profile settings registry; `useSetting<T>(key)` two-way ref
-│   ├── useTargets.ts       # Learning targets (synced)
 │   ├── useGraphPrefs.ts    # Skill-graph visibility prefs
 │   ├── useAuth.ts          # Compat shim over useProfiles — removed lifecycle methods throw
 │   ├── useBiometricVault.ts
@@ -256,9 +256,12 @@ src/
 │   │   ├── DaoDetail.vue
 │   │   └── Index.vue
 │   ├── instructor/
-│   │   ├── CourseEdit.vue
-│   │   ├── CourseNew.vue
-│   │   └── TutorialNew.vue
+│   │   ├── Composer.vue
+│   │   ├── CourseLearners.vue
+│   │   ├── Dashboard.vue
+│   │   ├── Inbox.vue
+│   │   ├── MyCourses.vue
+│   │   └── SubmissionReview.vue
 │   ├── learn/
 │   │   ├── Player.vue
 │   │   └── AssessmentRunner.vue # Sentinel-gated dynamic assessment (/assessment/:skillId)
@@ -304,9 +307,12 @@ cli/
     └── commands/
         ├── mod.rs
         ├── dev.rs          # dev run/check/test/clippy/fmt/all
+        ├── run.rs          # Run on desktop / iOS / Android (device + emulator selection)
         ├── db.rs           # db status/reset
         ├── build.rs        # build check/release
         ├── config.rs       # config show/path
+        ├── credentials.rs  # List/show/verify local credentials + survivability bundle export
+        ├── synth_sentinel.rs # Generate synthetic Sentinel training/holdout data blobs
         ├── health.rs       # process + data health check
         └── clean.rs        # clean build/data/all
 ```

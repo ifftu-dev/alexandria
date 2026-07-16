@@ -34,9 +34,9 @@ But content delivery is only the beginning. Alexandria's real contribution is wh
 
 ### Skills Replace Resumes
 
-Traditional resumes are proxy documents. They summarise claims about education and experience but provide no verifiable evidence of what someone can actually do. Alexandria replaces this with **verifiable, skill-based credentials** — stored locally on the learner's device, optionally minted on a public blockchain (Cardano), and independently verifiable by anyone without relying on the platform.
+Traditional resumes are proxy documents. They summarise claims about education and experience but provide no verifiable evidence of what someone can actually do. Alexandria replaces this with **verifiable, skill-based credentials** — self-signed W3C Verifiable Credentials (under a `did:key` identity) stored locally on the learner's device, optionally anchored on a public blockchain (Cardano), and independently verifiable by anyone without relying on the platform.
 
-When a learner demonstrates proficiency (through assessments, projects, and peer-attested evidence), they earn a **SkillProof**: a cryptographic credential that records exactly what they know, at what Bloom's taxonomy level, backed by weighted evidence with confidence scores.
+When a learner demonstrates proficiency (through assessments, projects, and peer-attested evidence), they earn a **Verifiable Credential**: a cryptographic credential that records exactly what they know, at what Bloom's taxonomy level, backed by weighted evidence with confidence scores.
 
 ### Reputation Is Earned, Not Declared
 
@@ -64,7 +64,7 @@ If Alexandria the organisation disappeared tomorrow, every learner's locally-hel
 
 ### Offline-First by Design
 
-Every operation works without network access. The local SQLite database (~75 tables), iroh content store, and encrypted vault provide complete functionality offline. Sync is opportunistic — when connectivity returns, nodes exchange updates via GossipSub topics and cross-device sync.
+Every operation works without network access. The local SQLite database (~102 tables), iroh content store, and encrypted vault provide complete functionality offline. Sync is opportunistic — when connectivity returns, nodes exchange updates via GossipSub topics and cross-device sync.
 
 ### Shared Devices, Separate Lives
 
@@ -81,7 +81,7 @@ iOS and Android are not thin clients. The mobile app is a fully functional node 
 ### For Policymakers
 
 - Portable, verifiable credentials give governments a tool for workforce measurement that doesn't depend on institutional self-reporting.
-- Credential inflation is structurally reduced — you can't buy a SkillProof; you have to demonstrate competence with weighted, confidence-scored evidence.
+- Credential inflation is structurally reduced — you can't buy a Verifiable Credential; you have to demonstrate competence with weighted, confidence-scored evidence.
 - Public funding can target skills directly rather than routing through institutions as intermediaries.
 - The entire system runs without servers — no data centre to regulate, no company to subpoena for learner data.
 

@@ -16,7 +16,7 @@
 > [`vc-migration.md`](./vc-migration.md) for the full diff.
 
 **Engine**: SQLite (rusqlite 0.38, bundled)
-**Migrations**: 70
+**Migrations**: 71
 
 ---
 
@@ -92,7 +92,7 @@
 | 55 | `username_claim_cache` | `username_claims` — verified DHT registry winners (`tier` 0 bare / 1 receipted / 2 anchored) |
 | 56 | `username_anchor_verified` | `anchor_verified` flag gating tier 2 in conflict ordering |
 | 53 | `plugin_enabled_and_irl_review` | Add `enabled` flag to `plugin_installed` (disabled plugins stay installed but the player refuses to mount them). New `plugin_irl_submissions` table — the local instructor-review inbox backing the `irl-review` builtin plugin. See [`plugins.md`](plugins.md). |
-| 66 | `account_role_birthdate` | Add `account_role` (`learner`/`instructor`/`parent`), `birthdate` (ISO-8601, on-device only), and `activation_state` (`active`/`pending_guardian`) to `local_identity`. Age is **recomputed** from `birthdate` each unlock — never stored — so turning 18 resolves automatically. |
+| 66 | `account_role_birthdate_activation` | Add `account_role` (`learner`/`instructor`/`parent`), `birthdate` (ISO-8601, on-device only), and `activation_state` (`active`/`pending_guardian`) to `local_identity`. Age is **recomputed** from `birthdate` each unlock — never stored — so turning 18 resolves automatically. |
 | 67 | `guardian_links` | Cross-device parental oversight: `guardian_links` (ward↔guardian pairing, vault-sealed shared key, W3C VC ids, `status`), `guardian_pending_invites` (single-use `code_hash` PK, mirrors the pairing-code pattern), `guardian_activity_rows` (sealed activity the child pushes to the guardian). See [`protocol-specification.md`](protocol-specification.md#guardian-link-protocol). **Never** added to device-sync `SYNCABLE_TABLES` or gossip. |
 | 57 | `dht_record_mirror` | `dht_records` — local mirror of signed DHT registry records |
 | 58 | `governance_vote_signatures` | Add `signature` / `public_key` to `governance_election_votes` and `governance_proposal_votes` (off-chain signed votes for the lean on-chain governance bridge) |
@@ -106,6 +106,7 @@
 | 68 | `skill_provenance` | Add `provenance` to `credentials` (denormalized `ProvenanceTier` mirror of `credentialSubject.provenance`) and `dominant_provenance` to `derived_skill_states` (highest provenance tier backing the skill) |
 | 69 | `goal_templates` | `goal_templates` + `goal_template_versions` (DAO-ratified exam/curriculum/job-role → ideal skill graph); add `synonyms` to `skills` for on-device JD/resume matching |
 | 70 | `assessment_question_banks` | `question_banks`, `bank_questions` (answer key `correct_indices` **never** sent to the client), `question_bank_versions`, `assessment_attempts` — dynamic Sentinel-gated community assessments |
+| 71 | `plugin_review_course_scope` | Add `course_id` to `plugin_irl_submissions`, generalizing it into the shared submit-for-review store for any plugin with the `instructor_review` capability; backfills course scope so the instructor inbox can be scoped to owned courses (legacy unresolved rows stay NULL / globally visible) |
 
 ---
 

@@ -132,7 +132,8 @@ alexandria/
 │   ├── composables/  # useProfiles (canonical), useSettings (per-profile prefs + cross-device sync), useAuth (compat shim), useTheme, useP2P, useSentinel, useLocalApi, useBiometricVault, useClassroom, useContentSync, useCredentials, useOmniSearch, usePlatform, useSkillGraphState, useSkillGraphHover, useTutoringRoom
 │   └── assets/       # Tailwind CSS v4 design system
 ├── cli/              # Developer CLI (alex) — Rust + clap
-├── patches/          # Local crate patches (if-watch iOS fix)
+├── crates/           # Vendored workspace members (iroh-live, iroh-moq, moq-media)
+├── patches/          # Local crate patches (6: netdev, if-watch, ffmpeg-sys-next, ffmpeg-next, audiopus_sys, webrtc-audio-processing-sys)
 └── docs/             # Architecture, schema, protocol, structure docs
 ```
 
@@ -142,7 +143,7 @@ alexandria/
 | Backend | Rust (2021 edition), tokio async runtime |
 | Frontend | Vue 3, TypeScript, Vite, Tailwind CSS 4 |
 | Database | SQLite + SQLCipher (rusqlite, bundled-sqlcipher) |
-| Content storage | iroh 0.96 (BLAKE3 content-addressed blobs) |
+| Content storage | iroh 1.0.2 / iroh-blobs 0.103 (BLAKE3 content-addressed blobs) |
 | P2P networking | libp2p 0.56 (TCP, QUIC, GossipSub, Kademlia, Relay, DCUtR) |
 | Wallet (desktop) | BIP-39 + CIP-1852 (pallas), per-profile IOTA Stronghold vault |
 | Wallet (mobile) | BIP-39 + CIP-1852 (pallas), per-profile AES-256-GCM + Argon2id vault |
@@ -529,7 +530,7 @@ Use `alex config path` to print this directory on any platform.
 | [Multi-User Profiles](docs/multi-user-profiles.md) | Per-profile vault + DB + iroh isolation, picker UX, auto-migration |
 | [Settings](docs/settings.md) | Unified per-profile settings store + cross-device sync + how to add a new setting |
 | [Database Schema](docs/database-schema.md) | All tables + per-profile DB layout |
-| [Protocol Specification](docs/protocol-specification.md) | Wire formats, VC protocol, 13 gossip topics, validation, peer scoring |
+| [Protocol Specification](docs/protocol-specification.md) | Wire formats, VC protocol, 15 gossip topics, validation, peer scoring |
 | [Stake-Pubkey Registry](docs/stake-pubkey-registry.md) | Persistent stake-address ↔ gossip pubkey registry that backs privileged-topic authority (replaces in-memory TOFU) |
 | [Stake-Pubkey Runbook](docs/stake-pubkey-registry-runbook.md) | Operational steps: founder keypair ceremony + multisig signing of `bootstrap_registry.json` + preprod smoke test |
 | [Project Structure](docs/project-structure.md) | Directory layouts, module responsibilities |

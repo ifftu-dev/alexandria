@@ -81,7 +81,7 @@ All state lives on the user's device in three locations:
 | Store | Purpose |
 |-------|---------|
 | Profile index | Public sidecar `profiles_index.json` — display names + avatars only (no crypto material). Rendered by the picker before any vault is unlocked. |
-| SQLite | Per-profile relational data (courses, skills, evidence, governance, verifiable credentials) — ~75 tables, 56 migrations. One DB per profile at `profiles/<uuid>/alexandria.db`. |
+| SQLite | Per-profile relational data (courses, skills, evidence, governance, verifiable credentials) — ~102 tables, 71 migrations. One DB per profile at `profiles/<uuid>/alexandria.db`. |
 | Encrypted vault | Per-profile wallet keys and mnemonic — IOTA Stronghold (desktop) or AES-256-GCM + Argon2id (mobile). One vault per profile under `profiles/<uuid>/vault/`. |
 | iroh | Per-profile content-addressed blobs (course HTML, profiles) — BLAKE3 hashes. One blob store + node secret per profile at `profiles/<uuid>/iroh/`. |
 
@@ -102,7 +102,7 @@ The architecture MUST satisfy:
 | Backend | Rust (2021 edition), tokio async runtime |
 | Frontend | Vue 3, TypeScript, Vite, Tailwind CSS v4 |
 | Database | SQLite (rusqlite, bundled) |
-| Content storage | iroh 0.96 (BLAKE3 content-addressed blobs) |
+| Content storage | iroh 1.0.2 / iroh-blobs 0.103 (BLAKE3 content-addressed blobs) |
 | P2P networking | libp2p 0.56 (TCP, QUIC, GossipSub, Kademlia, Relay, DCUtR) |
 | Wallet (desktop) | BIP-39 + CIP-1852 (pallas), per-profile IOTA Stronghold vault |
 | Wallet (mobile) | BIP-39 + CIP-1852 (pallas), per-profile AES-256-GCM + Argon2id vault |
@@ -110,7 +110,7 @@ The architecture MUST satisfy:
 
 ### 2.4 IPC Boundary
 
-The frontend communicates with the Rust backend via ~200 Tauri IPC commands registered in `tauri::generate_handler!`. Commands are split across 29 domain-facing IPC modules (profile, settings, classroom, governance, taxonomy, tutoring, identity, credentials, sync, courses, attestation, challenge, opinions, integrity, content, pinning, storage, snapshot, reputation, enrollment, elements, chapters, catalog, p2p, evidence, aggregation, presentation, health, cardano), with `commands/` containing 33 Rust source files total (`mod.rs`, `ratelimit.rs`, and the two tutoring platform variants included). The `profile` module owns the multi-user lifecycle (`list_profiles`, `create_profile`, `restore_profile_with_mnemonic`, `unlock_profile`, `lock_profile`, `rename_profile`, `set_profile_avatar`, `delete_profile`, `get_active_profile_id`); the `identity` module is reduced to operations against the active profile (`export_mnemonic`, `is_biometric_available`, `get_wallet_info`, `get_local_did`, `get_profile`, `update_profile`, `publish_profile`, `resolve_profile`); the `settings` module owns the unified per-profile preference store (`list_settings`, `set_setting`, `reset_setting`), with `scope='sync'` rows propagated across the user's other devices via the existing cross-device sync (LWW on `updated_at`).
+The frontend communicates with the Rust backend via ~313 Tauri IPC commands registered in `tauri::generate_handler!`. Commands are split across many domain-facing IPC modules (profile, settings, classroom, governance, taxonomy, tutoring, identity, credentials, sync, courses, attestation, challenge, opinions, integrity, content, pinning, storage, snapshot, reputation, enrollment, elements, chapters, catalog, p2p, evidence, aggregation, presentation, health, cardano, guardian, instructor, completion, auto_issuance, pairing, assessment, goal_templates, skill_bootstrap, content_governance, role_assessment, sentinel_gaze, sentinel_holdout, sentinel_dao, sentinel_ml, updater, users, username_registry), with `commands/` containing 52 Rust source files (excluding `mod.rs`; `ratelimit.rs` and the two tutoring platform variants included). The `profile` module owns the multi-user lifecycle (`list_profiles`, `create_profile`, `restore_profile_with_mnemonic`, `unlock_profile`, `lock_profile`, `rename_profile`, `set_profile_avatar`, `delete_profile`, `get_active_profile_id`); the `identity` module is reduced to operations against the active profile (`export_mnemonic`, `is_biometric_available`, `get_wallet_info`, `get_local_did`, `get_profile`, `update_profile`, `publish_profile`, `resolve_profile`); the `settings` module owns the unified per-profile preference store (`list_settings`, `set_setting`, `reset_setting`), with `scope='sync'` rows propagated across the user's other devices via the existing cross-device sync (LWW on `updated_at`).
 
 ---
 
@@ -816,7 +816,7 @@ Sentinel is a client-side anti-cheat system that monitors assessment integrity t
 1. **Privacy-first** — All behavioral data (keystrokes, mouse movements, video frames) is processed entirely on-device. Only numeric scores and categorical flags are stored and broadcast.
 2. **Non-punitive by default** — Sentinel informs rather than punishes. Flagged sessions surface for review; automated suspensions require multiple strong signals.
 3. **Dual scoring** — Rule-based and AI-based systems run in parallel. Rule-based is authoritative; AI is advisory until validated with labeled data.
-4. **On-device, no downloads** — All ML models run on-device with no model downloads or remote inference. The keystroke autoencoder and mouse-trajectory CNN run in Rust on the `candle` framework; the face embedder is hand-written TypeScript (LBP histograms). The retired paste classifier ran via `tract` (pure Rust, weights embedded with `include_bytes!`).
+4. **On-device, no downloads** — All ML models run on-device with no model downloads or remote inference. The keystroke autoencoder and mouse-trajectory CNN run in Rust on the `candle` framework; the face embedder is hand-written TypeScript (LBP histograms). The active paste classifier runs via `tract` (pure Rust ONNX); its bundled fallback weights are embedded with `include_bytes!` and can be replaced at runtime by DAO-ratified weights (`set_dao_session`).
 5. **Incremental trust** — Behavioral profiles build over time. Consistency scoring activates after 10+ samples.
 
 ### 12.3 Signal Taxonomy
@@ -1844,10 +1844,10 @@ The reference implementation is a Tauri v2 application — a single binary that 
 | Component | Technology | Purpose |
 |-----------|------------|---------|
 | Backend | Rust (tokio) | Business logic, wallet, P2P, database, evidence, governance |
-| Frontend | Vue 3, TypeScript, Tailwind CSS v4 | 30 pages, 34 components, 14 composables |
-| Database | SQLite (rusqlite, bundled) | ~75 tables, 56 migrations |
-| Content | iroh 0.96 | BLAKE3 content-addressed blob store |
-| P2P | libp2p 0.56 | Kademlia, GossipSub, Relay, DCUtR, request-response/CBOR for vc-fetch, sync, graph-fetch, profile-fetch, username-reg |
+| Frontend | Vue 3, TypeScript, Tailwind CSS v4 | 48 pages, 77 components, 30 composables |
+| Database | SQLite (rusqlite, bundled) | ~102 tables, 71 migrations |
+| Content | iroh 1.0.2 / iroh-blobs 0.103 | BLAKE3 content-addressed blob store |
+| P2P | libp2p 0.56 | Kademlia, GossipSub, Relay, DCUtR, request-response/CBOR for vc-fetch, sync, graph-fetch, profile-fetch, username-reg, guardian (`/alexandria/guardian/1.0`) |
 | Wallet | pallas 0.35, Stronghold / AES-256-GCM | Conway era transactions, encrypted key storage |
 | Cardano | pallas, Blockfrost | VC integrity anchoring (label 1697), DAO governance, completion-witness minting, challenge-stake escrow, CIP-68 soulbound reputation snapshots |
 | Integrity | Rust (candle) + TypeScript | Keystroke autoencoder (candle), mouse CNN (candle), face embedder (hand-written TypeScript LBP) |
@@ -1860,7 +1860,7 @@ The reference implementation is a Tauri v2 application — a single binary that 
 
 ### 15.2 Database
 
-**Engine**: SQLite (rusqlite 0.38, bundled). **Tables**: ~75 across 56 migrations.
+**Engine**: SQLite (rusqlite 0.38, bundled). **Tables**: ~102 across 71 migrations.
 
 | Domain | Tables |
 |--------|--------|

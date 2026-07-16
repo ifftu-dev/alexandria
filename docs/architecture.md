@@ -65,11 +65,11 @@ central API, no hosted database, and no Docker infrastructure.
 |                                                       |
 |  +----------------+         +----------------------+  |
 |  |   Vue 3 UI     |--IPC--->|    Rust Backend      |  |
-|  |   (WebView)    | 194     |                      |  |
+|  |   (WebView)    | ~313    |                      |  |
 |  |                | cmds    |  +----------------+  |  |
-|  |  29 pages      |         |  |   SQLite DB    |  |  |
-|  |  34 components |         |  |   ~78 tables    |  |  |
-|  |  14 composables|         |  |   70 migrations|  |  |
+|  |  48 pages      |         |  |   SQLite DB    |  |  |
+|  |  77 components |         |  |   ~102 tables  |  |  |
+|  |  30 composables|         |  |   71 migrations|  |  |
 |  +----------------+         |  +----------------+  |  |
 |                             |                      |  |
 |                             |  +----------------+  |  |
@@ -198,7 +198,7 @@ device-sync (`SYNCABLE_TABLES`) or gossip — an invariant covered by unit tests
 
 **Engine**: SQLite (rusqlite 0.38, bundled)
 
-**Tables**: ~90 across 70 migrations
+**Tables**: ~102 across 71 migrations
 
 | Domain | Tables |
 |--------|--------|
@@ -234,7 +234,7 @@ See [Database Schema](database-schema.md) for the full DDL.
 
 ## 5. Content Storage (iroh)
 
-**Engine**: iroh 0.96 with `fs-store` backend
+**Engine**: iroh 1.0.2 / iroh-blobs 0.103 with `fs-store` backend
 
 iroh provides a BLAKE3 content-addressed blob store. Content is
 identified by its hash, ensuring integrity and deduplication.
@@ -391,8 +391,8 @@ See [Protocol Specification](protocol-specification.md) for full wire formats.
 | Fee estimation | Linear fee model from protocol params |
 | VC integrity anchoring | Metadata-only tx (label 1697) timestamping the canonical VC hash |
 | Completion-witness minting | Merkle-root completion witness; validator deployed |
-| Challenge-stake escrow | 5 ADA locked at `challenge_escrow.ak`; lock works on preprod, settle gated on reference-script deploy |
-| Reputation snapshots | CIP-68 soulbound builder path with CBOR datum; mint gated on reference-script deploy |
+| Challenge-stake escrow | 5 ADA locked at `challenge_escrow.ak`; lock works on preprod, settle uses the deployed escrow reference script |
+| Reputation snapshots | CIP-68 soulbound builder path with CBOR datum; mint uses the deployed reference script |
 | Governance metadata | DAO/election/proposal tx builders and queue records; validator-backed enforcement is still pending |
 | Coin selection | Greedy UTxO selection with min-ADA enforcement |
 
@@ -400,8 +400,8 @@ See [Protocol Specification](protocol-specification.md) for full wire formats.
 
 1. **VC Integrity Anchor** — Metadata-only transaction (label 1697) that timestamps the canonical hash of a W3C Verifiable Credential without publishing credential content. (The legacy SkillProof NFT and course-registration mints were retired in migration 040.)
 2. **Completion Witness** — Mints a completion witness keyed to the Merkle root of a learner's graded element submissions; the completion validator is deployed.
-3. **Reputation Snapshot** — Soulbound/CIP-68-style builder path with CBOR-encoded datum; currently gated on undeployed reference scripts
-4. **Challenge-Stake Escrow** — Locks 5 ADA at the `challenge_escrow.ak` validator; on resolution the DAO authority settles (Refund → challenger / Forfeit → treasury), gated on the escrow reference script being deployed
+3. **Reputation Snapshot** — Soulbound/CIP-68-style builder path with CBOR-encoded datum; the reference scripts are deployed
+4. **Challenge-Stake Escrow** — Locks 5 ADA at the `challenge_escrow.ak` validator; on resolution the DAO authority settles (Refund → challenger / Forfeit → treasury), using the deployed escrow reference script
 5. **Governance Actions** — Metadata-bearing transactions and queue entries for DAO ops, elections, proposals, votes
 
 ---
@@ -453,8 +453,9 @@ on_credential_accepted → distribution-based reputation
 Completion-attestation requirements and credential challenges are now
 handled by the VC-first command modules (`commands::attestation`,
 `commands::challenge`), not a `skill_proof` aggregator. The
-`evidence/aggregator`, `evidence/attestation`, and `evidence/challenge`
-modules were removed.
+`evidence/aggregator` and `evidence/attestation` modules were removed
+(`evidence/challenge` was rebuilt against the VC status-list flow and
+remains).
 
 ### Challenge Mechanism
 
@@ -463,7 +464,7 @@ modules were removed.
 - 2/3 supermajority required to uphold
 - Upheld: targeted credential **revoked** via its RevocationList2020 status list; DAO authority refunds the stake to the challenger
 - Rejected: DAO authority forfeits the stake to the DAO treasury
-- Settlement is gated on the escrow reference script being deployed
+- Settlement uses the deployed escrow reference script (`challenge_escrow_deployed()` returns true)
 
 ---
 
@@ -511,8 +512,8 @@ are deployed + verified on preprod but are not on the live path.
 | Courses Index | `/courses` | Browse course catalog |
 | Course Detail | `/courses/:id` | Course info, chapters, enrollment |
 | Course Player | `/learn/:id` | Content player (text, video, quiz) |
-| Course New | `/instructor/courses/new` | Create a new course |
-| Course Edit | `/instructor/courses/:id` | Edit existing course |
+| Composer (new) | `/instructor/composer/new` | Create a course or tutorial (supersedes the old course editor) |
+| Composer (edit) | `/instructor/composer/:id` | Edit an existing course or tutorial |
 | Skills Index | `/skills` | Browse skill taxonomy |
 | Skill Detail | `/skills/:id` | Skill info, prerequisites, proofs |
 | Governance Index | `/governance` | Browse DAOs |
@@ -543,7 +544,7 @@ CSS custom properties with light/dark mode via `.dark` class on `<html>`:
 
 ## 11. IPC Boundary
 
-The frontend communicates with the Rust backend via ~200 Tauri IPC commands registered in `tauri::generate_handler!`. The `commands/` directory holds **32 modules** (excluding `mod.rs`); `tutoring_mobile.rs` and `tutoring_stubs.rs` are platform-conditional variants of `tutoring`, and `ratelimit.rs` is an internal helper not registered as IPC. The 28 modules with registered commands:
+The frontend communicates with the Rust backend via ~313 registered Tauri IPC handlers in `tauri::generate_handler!`. The `commands/` directory holds **52 files** (excluding `mod.rs`); `tutoring_mobile.rs` and `tutoring_stubs.rs` are platform-conditional variants of `tutoring`, and `ratelimit.rs` is an internal helper not registered as IPC. The table below is a non-exhaustive sample of the command modules (others include `guardian`, `instructor`, `completion`, `auto_issuance`, `pairing`, `assessment`, `goal_templates`, `skill_bootstrap`, `content_governance`, `role_assessment`, `sentinel_gaze`, `sentinel_holdout`, `sentinel_dao`, `sentinel_ml`, `updater`, `users`, `username_registry`):
 
 | Module | Commands | Examples |
 |--------|----------|---------|
@@ -610,9 +611,9 @@ Note: `tutoring` has platform-specific variants (desktop with video, mobile stub
 VC-first credential model implemented in PRs 2–13 from the normative
 spec at [`docs/protocol-specification.md`](protocol-specification.md).
 The layer is local-first, signature-verifiable without
-Alexandria infrastructure (§20.4 survivability), and orthogonal to
-the legacy skill-proof + NFT pipeline (which remains for backwards
-compatibility with content already on-chain).
+Alexandria infrastructure (§20.4 survivability). The legacy
+skill-proof + NFT pipeline it replaced has been deleted (no
+`mint_skill_proof_nft` / `register_course_onchain` remain in the code).
 
 ### Six layers
 
@@ -686,7 +687,7 @@ this on every test run.
 | §16 (derived skill state output) | PR 6 + PR 13 | Implemented + cached |
 | §17 (recruiter/consumer queries) | PR 13 | Cached lookups via `get_derived_skill_state` |
 | §18 (selective disclosure) | PR 11 | Redact-and-resign MVP; BBS+/zk follow-up |
-| §19 (NFT wrapper rules) | — | Existing skill-proof NFT pipeline retained; no VC-NFT wrapper yet |
+| §19 (NFT wrapper rules) | — | Legacy skill-proof NFT pipeline deleted (retired in migration 040); no VC-NFT wrapper yet |
 | §20 (survivability) | PR 12 | Bundle export + offline verifier |
 | §21–§22 (interfaces + pseudocode) | PR 4–11 | Implemented |
 | §23 (security requirements) | PR 4–11 | Canonicalization, replay resistance, audit logging |

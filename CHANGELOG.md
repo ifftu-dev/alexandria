@@ -7,6 +7,41 @@ and this project loosely follows [Semantic Versioning](https://semver.org/spec/v
 
 ## [Unreleased]
 
+### Added
+
+- **iroh 1.0 P2P storage layer** — the blob/content stack moved to the iroh 1.0 endpoint + router API, with the MoQ live-media crates now owned in-tree.
+- **Onboarding roles + birthdate** (migration 66) — the node owner declares learner / instructor / parent-guardian; learners self-assert a birthdate that is stored local-only and never published or gossiped.
+- **Guardian links** (migration 67) — a minor learner's profile stays gated in `pending_guardian` until a parent/guardian on their own device accepts a sealed cross-device invite over the `/alexandria/guardian/1.0` protocol; guardian tables never join sync or gossip.
+- **Governance on-chain bridge** (migrations 58–59) — an on-chain state machine plus off-chain signed votes and a Cardano-anchored tally; operator-signed create-DAO / proposal / vote / outcome anchoring, verified on preprod.
+- **Stake-pubkey registry** (migration 52) — a persistent stake-address → libp2p Ed25519 pubkey registry seeded from a multisig-signed bootstrap and reconciled against on-chain registration txs, replacing in-memory TOFU.
+- **Username registry** (migrations 54–57) — claimable usernames + profile visibility distributed over the DHT, with on-chain anchor verification and a local record mirror for desktop DHT servers.
+- **Role / job-description assessments** (migration 62) — enterprise sponsors fund role-specific assessments tied to a JD and issuance policy; passing with a satisfying integrity session yields a gated RoleCredential.
+- **Goal templates** (migration 69) — learner goals (exams, board-grade curricula, job roles, or parsed JDs) resolve to a target "ideal skill graph"; curated maps are DAO-ratified and distributed over `/alexandria/goal-templates/1.0`.
+- **Assessment question banks** (migration 70) — DAO-ratified banks draw randomized, difficulty-stratified, host-graded attempts (correct answers never leave the node); passing issues a Sentinel-gated AssessmentCredential.
+- **Skill-claim provenance tiers** (migration 68) — evidence quality is weighted by provenance (self-declared < document-backed < accredited-institution < distinct-issuer VC) instead of a flat 1.0, and the highest tier badges the skill in the UI.
+- **Skill-graph bootstrap from documents** — onboarding can ingest an uploaded resume/transcript to seed the learner's current skill graph.
+- **Editor / code plugins** — graded in-browser code editors that run locally in sandboxed WebAssembly (JavaScript/TypeScript on Boa, Python on RustPython, C/C++ via JSCPP inside Boa); graded submissions are re-run by the host's deterministic grader and passing issues a signed credential.
+- **Desktop auto-updater** — in-app self-update (macOS signed path, then Windows/Linux) with a mobile update notice.
+- **Deep linking** on all platforms (`alexandria://` + `https` app-links).
+- **Localization** — UI translated into 9 languages with a plain-language copy rewrite.
+- **Sentinel gaze / second-device detection** (migration 60) and automated integrity attestation with an assurance ladder (migration 61), feeding an Integrity → VC issuance gate.
+- Auto-mint on course completion with a celebration modal, a derived-credentials page with evidence drill-down, and persisted/read-only assessment responses.
+
+### Changed
+
+- **Bumped iroh 0.x → 1.0.2, iroh-blobs 0.98 → 0.103, iroh-gossip → 0.101**; the minimum supported Rust version (MSRV) is now 1.91.0.
+- **Vendored `iroh-live`, `iroh-moq`, and `moq-media` in-tree** under `crates/`, ported to iroh 1.0 and referenced by path — no git dependency or patch.
+- Completion-credential mints are paid by the treasury; the learner only signs.
+- Renamed the "Targets" feature to **Goals**.
+- Seed taxonomy + goals on every platform and stopped auto-enrolling fresh users.
+- Raised the minimum iOS version to 16.4.
+
+### Fixed
+
+- **Plutus-script txs were invalid on-chain** (Spend redeemer with no `script_data_hash`); all governance flows and challenge-escrow settlement now build valid txs and are verified on preprod.
+- macOS biometric-unlock entitlement restored, and the mobile sync-status bar is hidden.
+- iOS P2P crash after wallet unlock fixed by patching `netdev` for iroh 1.0.
+
 ### Launch-readiness UI pass + biometric unlock
 
 User-facing polish for the alpha, plus a fix that restored biometric

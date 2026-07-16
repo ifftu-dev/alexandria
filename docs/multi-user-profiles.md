@@ -132,7 +132,7 @@ Every `local_identity` query that today reads `WHERE id = 1` keeps working uncha
 
 Each profile gets its own libp2p peer ID and iroh node ID, derived from that profile's keypair. Switching profiles tears down the active swarm and starts a new one. Two profiles on the same device are network-indistinguishable from two devices on the same LAN; nothing in the protocol layer leaks the shared host.
 
-The iroh blob store is a per-device singleton (`AppState::content_node: Arc<ContentNode>`) but is repointed at the active profile's blob directory on every unlock via `ContentNode::set_data_dir`. Lock (`stop_active_profile`) calls both `Router::shutdown` AND `Store::shutdown` — the latter is required so the iroh-blobs Actor exits its private tokio runtime and releases the redb `blobs.db` file lock. Without `Store::shutdown`, a follow-up `FsStore::load` on the same path within the same process hangs indefinitely (observed early on; fixed via the iroh-blobs 0.98 public `Store::shutdown` API — no fork needed).
+The iroh blob store is a per-device singleton (`AppState::content_node: Arc<ContentNode>`) but is repointed at the active profile's blob directory on every unlock via `ContentNode::set_data_dir`. Lock (`stop_active_profile`) calls both `Router::shutdown` AND `Store::shutdown` — the latter is required so the iroh-blobs Actor exits its private tokio runtime and releases the redb `blobs.db` file lock. Without `Store::shutdown`, a follow-up `FsStore::load` on the same path within the same process hangs indefinitely (observed early on; fixed via the iroh-blobs 0.103 public `Store::shutdown` API — no fork needed).
 
 The cost: in-flight tutoring sessions are terminated on switch. We surface a confirmation dialog when active sessions exist.
 
