@@ -500,10 +500,12 @@ npx vue-tsc -b
 ```
 
 The test suite includes:
-- **700+ synchronous tests** across crypto, database, P2P, evidence, cardano, credentials, aggregation, governance, and domain modules (run `cargo test -p alexandria-node --lib` for the exact current count)
-- **30+ async tests** (tokio) for iroh content operations, P2P swarm lifecycle, and network integration
-- **~1500 lines of stress tests** covering high-volume gossip (200+ messages), concurrent validation (1000 messages / 10 threads), sync conflicts, and adversarial inputs
-- **Frontend Vitest suite** — first wave of composable tests (e.g. `useOmniSearch`), expanding
+- **900+ synchronous tests** across crypto, database, P2P, evidence, cardano, credentials, aggregation, governance, and domain modules (run `cargo test -p alexandria-node --lib` for the exact current count)
+- **Async tests** (tokio) for iroh content operations, P2P swarm lifecycle, and network integration
+- **End-to-end integration suites** — `e2e_vc` (VC issue/verify, anchoring, offline peer fetch, DID status), `guardian_e2e`, and `settings_sync_e2e`
+- **Frontend Vitest suite** — first wave of composable/parser tests (e.g. `useOmniSearch`, deeplink parsing, i18n), expanding
+
+> The original ~1500-line P2P stress suite was retired in the VC-first cutover (its evidence/skill-proof/attestation subsystems are gone or being rebuilt); `p2p/stress.rs` is now a stub tracking the VC-first replacements and is not live coverage.
 
 ## Data Storage
 
