@@ -1232,7 +1232,7 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
         <!-- ============================== -->
         <!-- NAVIGATION FOOTER              -->
         <!-- ============================== -->
-        <div v-if="currentElement" class="flex-shrink-0 border-t border-border bg-card/60 px-3 py-2 md:px-6 md:py-3">
+        <div v-if="currentElement" class="flex-shrink-0 border-t border-border bg-card/60 px-3 pt-2 pb-[calc(0.5rem+3.25rem+env(safe-area-inset-bottom))] md:px-6 md:py-3 md:pb-3">
           <p v-if="claimError" class="mx-auto mb-2 max-w-4xl text-xs text-destructive">
             {{ $t('learn.player.finishError', { error: claimError }) }}
           </p>

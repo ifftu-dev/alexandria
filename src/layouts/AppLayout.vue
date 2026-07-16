@@ -20,6 +20,12 @@ import { getCurrentWindow } from '@tauri-apps/api/window'
 // the player can reach the screen edges.
 const route = useRoute()
 const isImmersiveRoute = computed(() => route.name === 'learn' || route.name === 'settings')
+// The player is full-bleed *and* owns a pinned prev/next footer that must sit
+// directly on top of the mobile tab bar. The shell's mobile-content-padding
+// (tab-bar clearance for scrolling pages) would instead float the whole
+// full-height player up, leaving an empty band above the tab bar — so skip it
+// here and let the footer clear the tab bar itself.
+const isPlayerRoute = computed(() => route.name === 'learn')
 
 // Sidebar collapsed state lives in the per-profile settings store
 // (`ui.sidebar_collapsed`, scope=sync) so it propagates to the
@@ -115,7 +121,7 @@ function toggleSidebar() {
       </div>
 
       <!-- Content area -->
-      <main class="flex-1 overflow-y-auto mobile-content-padding">
+      <main class="flex-1 overflow-y-auto" :class="{ 'mobile-content-padding': !isPlayerRoute }">
         <div :class="isImmersiveRoute ? 'h-full flex flex-col' : 'px-4 pt-6 pb-8 sm:px-6 lg:px-8'">
           <slot />
         </div>
