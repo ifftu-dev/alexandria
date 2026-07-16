@@ -126,7 +126,7 @@ Credentials are W3C Verifiable Credentials stored in the `credentials` table (th
 - Lifecycle (issue / suspend / reinstate / revoke) tracked via a RevocationList2020 status list (`credential_status_lists`)
 - Credential **integrity** is anchored on Cardano with a metadata-only transaction (label 1697) that timestamps the canonical VC hash — no NFT mint, no on-chain credential content
 
-The legacy native-script SkillProof NFT mint (CIP-25 metadata) was retired in migration 040. A CIP-68 soulbound **reputation snapshot** path exists (`submit_snapshot_tx`) but the mint is gated on its reference script being deployed.
+The legacy native-script SkillProof NFT mint (CIP-25 metadata) was retired in migration 040. A CIP-68 soulbound **reputation snapshot** path exists (`submit_snapshot_tx`); its reference scripts (`REPUTATION_MINTING_REF_UTXO` / `SOULBOUND_REF_UTXO`) are deployed on preprod, so the mint is live.
 
 ---
 
@@ -210,7 +210,7 @@ Impact(I, S, P) =
 
 Computed in `evidence/reputation.rs` directly from the subject's non-revoked `credentials` (the `reputation_impact_deltas` table was dropped in migration 040 — there is no per-evidence delta store).
 
-Reputation snapshots can be anchored on-chain as CIP-68 soulbound tokens with CBOR-encoded datums (`reputation_snapshots` table); the mint is gated on its reference script being deployed.
+Reputation snapshots can be anchored on-chain as CIP-68 soulbound tokens with CBOR-encoded datums (`reputation_snapshots` table); the reference scripts (`REPUTATION_MINTING_REF_UTXO` / `SOULBOUND_REF_UTXO`) are deployed on preprod, so the mint is live.
 
 ---
 

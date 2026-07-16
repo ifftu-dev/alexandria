@@ -8,7 +8,7 @@
 
 ## Overview
 
-Vue 3 SPA frontend for the Tauri app. Module-level singleton composables (no Pinia/Vuex), 30+ route views, and a 1332-line `types/index.ts`. Supports multiple user profiles on one device — the picker (`/profiles`, `pages/ProfileSelect.vue`) is the first screen on launch when at least one profile exists.
+Vue 3 SPA frontend for the Tauri app. Module-level singleton composables (no Pinia/Vuex), 30+ route views, and a 2049-line `types/index.ts`. Supports multiple user profiles on one device — the picker (`/profiles`, `pages/ProfileSelect.vue`) is the first screen on launch when at least one profile exists.
 
 ## WHERE TO LOOK
 
@@ -20,7 +20,7 @@ Vue 3 SPA frontend for the Tauri app. Module-level singleton composables (no Pin
 | State | `composables/` | Module-level singleton refs (no Pinia/Vuex) |
 | UI design system | `components/ui/` | Barrel-exported primitives |
 | Profile picker UI | `components/profile/` | `ProfileTile`, `AddProfileTile`, `ProfileAvatar` |
-| Pages | `pages/` | Root pages (`ProfileSelect`, `Onboarding`, `Home`) + 12 feature dirs (`classrooms`, `courses`, `dashboard`, `goals`, `governance`, `instructor`, `learn`, `opinions`, `plugins`, `skills`, `tutoring`, `u` — public user profiles) + `ProfileMe.vue` (/profile) |
+| Pages | `pages/` | Root pages (`ProfileSelect`, `Onboarding`, `Home`) + 13 feature dirs (`classrooms`, `courses`, `dashboard`, `goals`, `governance`, `guardian`, `instructor`, `learn`, `opinions`, `plugins`, `skills`, `tutoring`, `u` — public user profiles) + `ProfileMe.vue` (/profile) |
 | Types | `types/index.ts` | All TS interfaces (mirrors Rust domain) |
 | Styling | `assets/css/` | Tailwind v4 + CSS custom properties |
 | Routing | `router/` | Vue Router config |
@@ -85,12 +85,12 @@ ProvenanceBadge
 
 | File | Lines | Role |
 |------|-------|------|
-| `composables/useSentinel.ts` | ~1.4k | Sentinel monitoring — event buffers + IPC dispatch to backend ML |
-| `types/index.ts` | ~1.4k | All TS domain interfaces |
+| `composables/useSentinel.ts` | ~1.8k | Sentinel monitoring — event buffers + IPC dispatch to backend ML |
+| `types/index.ts` | ~2.0k | All TS domain interfaces |
 | `utils/sentinel/face-embedder.ts` | 380 | LBP face embedder (pure pixel math, only TS ML left after backend rewrite) |
 | `../src-tauri/src/sentinel/paste_classifier.rs` | ~420 | tract ONNX paste classifier (backend) |
 | `../src-tauri/src/sentinel/keystroke_ae.rs` | ~440 | candle autoencoder (backend) |
 | `../src-tauri/src/sentinel/mouse_cnn.rs` | ~390 | candle dense-head CNN (backend) |
 | `../src-tauri/src/sentinel/features.rs` | ~210 | 12-dim feature extractor (backend) |
-| `pages/learn/Player.vue` | 1037 | Course player with video/quiz |
-| `pages/tutoring/Session.vue` | 1137 | Live tutoring UI |
+| `pages/learn/Player.vue` | 1445 | Course player with video/quiz |
+| `pages/tutoring/Session.vue` | 1310 | Live tutoring UI |

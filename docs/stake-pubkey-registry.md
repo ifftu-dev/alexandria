@@ -189,6 +189,10 @@ for authority. Today that's exactly the set returned by
   adversarial-prior announcements.
 - `/alexandria/plugin-attestations/1.0` — Plugin DAO threshold-signed
   `(plugin_cid, grader_cid)` approvals.
+- `/alexandria/goal-templates/1.0` — DAO-ratified goal-template
+  publications.
+- `/alexandria/question-banks/1.0` — DAO-ratified question-bank
+  publications.
 
 Non-privileged topics (`profiles`, `opinions`, catalog, plugin
 announcements, VC-layer topics, classroom messages, etc.) skip the

@@ -117,7 +117,7 @@ alexandria/
 │       ├── classroom/ # Encrypted group messaging, membership, gossip
 │       ├── commands/ # IPC command handlers across ~50 modules (frontend ↔ backend), including profile/* lifecycle
 │       ├── crypto/   # BIP-39 wallet, per-profile vault (Stronghold / portable), Ed25519, did:key
-│       ├── db/       # SQLite (~90 tables, 70 migrations, seed data) — one DB per profile
+│       ├── db/       # SQLite (~92 live tables, 71 migrations, seed data) — one DB per profile
 │       ├── diag.rs   # File-based diagnostic logger + panic hook
 │       ├── domain/   # Business logic (courses, tutorials, opinions, vc, evidence, governance, ...)
 │       ├── evidence/ # Proficiency taxonomy + thresholds (reputation/attestation/challenge disabled post-VC-first cutover)
@@ -132,7 +132,8 @@ alexandria/
 │   ├── composables/  # useProfiles (canonical), useSettings (per-profile prefs + cross-device sync), useAuth (compat shim), useTheme, useP2P, useSentinel, useLocalApi, useBiometricVault, useClassroom, useContentSync, useCredentials, useOmniSearch, usePlatform, useSkillGraphState, useSkillGraphHover, useTutoringRoom
 │   └── assets/       # Tailwind CSS v4 design system
 ├── cli/              # Developer CLI (alex) — Rust + clap
-├── patches/          # Local crate patches (if-watch iOS fix)
+├── crates/           # Vendored workspace members (iroh-live, iroh-moq, moq-media)
+├── patches/          # Local crate patches (6: netdev, if-watch, ffmpeg-sys-next, ffmpeg-next, audiopus_sys, webrtc-audio-processing-sys)
 └── docs/             # Architecture, schema, protocol, structure docs
 ```
 
@@ -142,7 +143,7 @@ alexandria/
 | Backend | Rust (2021 edition), tokio async runtime |
 | Frontend | Vue 3, TypeScript, Vite, Tailwind CSS 4 |
 | Database | SQLite + SQLCipher (rusqlite, bundled-sqlcipher) |
-| Content storage | iroh 0.96 (BLAKE3 content-addressed blobs) |
+| Content storage | iroh 1.0.2 / iroh-blobs 0.103 (BLAKE3 content-addressed blobs) |
 | P2P networking | libp2p 0.56 (TCP, QUIC, GossipSub, Kademlia, Relay, DCUtR) |
 | Wallet (desktop) | BIP-39 + CIP-1852 (pallas), per-profile IOTA Stronghold vault |
 | Wallet (mobile) | BIP-39 + CIP-1852 (pallas), per-profile AES-256-GCM + Argon2id vault |
@@ -499,10 +500,12 @@ npx vue-tsc -b
 ```
 
 The test suite includes:
-- **700+ synchronous tests** across crypto, database, P2P, evidence, cardano, credentials, aggregation, governance, and domain modules (run `cargo test -p alexandria-node --lib` for the exact current count)
-- **30+ async tests** (tokio) for iroh content operations, P2P swarm lifecycle, and network integration
-- **~1500 lines of stress tests** covering high-volume gossip (200+ messages), concurrent validation (1000 messages / 10 threads), sync conflicts, and adversarial inputs
-- **Frontend Vitest suite** — first wave of composable tests (e.g. `useOmniSearch`), expanding
+- **900+ synchronous tests** across crypto, database, P2P, evidence, cardano, credentials, aggregation, governance, and domain modules (run `cargo test -p alexandria-node --lib` for the exact current count)
+- **Async tests** (tokio) for iroh content operations, P2P swarm lifecycle, and network integration
+- **End-to-end integration suites** — `e2e_vc` (VC issue/verify, anchoring, offline peer fetch, DID status), `guardian_e2e`, and `settings_sync_e2e`
+- **Frontend Vitest suite** — first wave of composable/parser tests (e.g. `useOmniSearch`, deeplink parsing, i18n), expanding
+
+> The original ~1500-line P2P stress suite was retired in the VC-first cutover (its evidence/skill-proof/attestation subsystems are gone or being rebuilt); `p2p/stress.rs` is now a stub tracking the VC-first replacements and is not live coverage.
 
 ## Data Storage
 
@@ -512,7 +515,7 @@ All data lives in `~/Library/Application Support/org.alexandria.node/` (macOS). 
 |----------------|---------|
 | `profiles_index.json` | Public sidecar — display names, avatars, colors, timestamps. Read by the picker before any vault is unlocked. **No keys, DIDs, or stake addresses.** |
 | `profiles/<uuid>/vault/` | Per-profile encrypted vault (Stronghold on desktop, AES-256-GCM + Argon2id on mobile) |
-| `profiles/<uuid>/alexandria.db` | Per-profile SQLCipher database (~78 tables), key derived from that profile's password |
+| `profiles/<uuid>/alexandria.db` | Per-profile SQLCipher database (~92 live tables), key derived from that profile's password |
 | `profiles/<uuid>/iroh/` | Per-profile content-addressed blob store (course content, user profiles) and node secret |
 | `profiles/<uuid>/plugins/` | Per-profile installed plugin bundles |
 | `profiles/<uuid>/videocache/` | Per-profile materialized video files (served via Tauri's asset protocol) |
@@ -529,7 +532,7 @@ Use `alex config path` to print this directory on any platform.
 | [Multi-User Profiles](docs/multi-user-profiles.md) | Per-profile vault + DB + iroh isolation, picker UX, auto-migration |
 | [Settings](docs/settings.md) | Unified per-profile settings store + cross-device sync + how to add a new setting |
 | [Database Schema](docs/database-schema.md) | All tables + per-profile DB layout |
-| [Protocol Specification](docs/protocol-specification.md) | Wire formats, VC protocol, 13 gossip topics, validation, peer scoring |
+| [Protocol Specification](docs/protocol-specification.md) | Wire formats, VC protocol, 15 gossip topics, validation, peer scoring |
 | [Stake-Pubkey Registry](docs/stake-pubkey-registry.md) | Persistent stake-address ↔ gossip pubkey registry that backs privileged-topic authority (replaces in-memory TOFU) |
 | [Stake-Pubkey Runbook](docs/stake-pubkey-registry-runbook.md) | Operational steps: founder keypair ceremony + multisig signing of `bootstrap_registry.json` + preprod smoke test |
 | [Project Structure](docs/project-structure.md) | Directory layouts, module responsibilities |

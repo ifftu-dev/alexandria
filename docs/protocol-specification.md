@@ -23,9 +23,9 @@ Two credential pipelines coexisted in earlier drafts of this
 specification; the SkillProof pipeline has now been retired. What
 remains:
 
-- **Legacy path (§4 + §5)** — **retired**. Historical reference only.
-  Cardano NFT mint. Still implemented and supported. See
-  `evidence::aggregator`, `commands::cardano::mint_skill_proof_nft`.
+- **Legacy path (§4 + §5)** — **retired and deleted** in migration
+  040. Historical reference only; the evidence aggregator and the
+  Cardano SkillProof NFT-mint command no longer exist in the codebase.
 - **VC-first path (§14)** — `did:key` identity + signed VCs +
   status-list revocation + deterministic aggregation +
   selective-disclosure presentations + offline survivability bundle.
@@ -81,7 +81,7 @@ All state lives on the user's device in three locations:
 | Store | Purpose |
 |-------|---------|
 | Profile index | Public sidecar `profiles_index.json` — display names + avatars only (no crypto material). Rendered by the picker before any vault is unlocked. |
-| SQLite | Per-profile relational data (courses, skills, evidence, governance, verifiable credentials) — ~75 tables, 56 migrations. One DB per profile at `profiles/<uuid>/alexandria.db`. |
+| SQLite | Per-profile relational data (courses, skills, evidence, governance, verifiable credentials) — ~92 live tables (102 CREATE TABLE across 71 migrations; 10 dropped in migration 040). One DB per profile at `profiles/<uuid>/alexandria.db`. |
 | Encrypted vault | Per-profile wallet keys and mnemonic — IOTA Stronghold (desktop) or AES-256-GCM + Argon2id (mobile). One vault per profile under `profiles/<uuid>/vault/`. |
 | iroh | Per-profile content-addressed blobs (course HTML, profiles) — BLAKE3 hashes. One blob store + node secret per profile at `profiles/<uuid>/iroh/`. |
 
@@ -102,7 +102,7 @@ The architecture MUST satisfy:
 | Backend | Rust (2021 edition), tokio async runtime |
 | Frontend | Vue 3, TypeScript, Vite, Tailwind CSS v4 |
 | Database | SQLite (rusqlite, bundled) |
-| Content storage | iroh 0.96 (BLAKE3 content-addressed blobs) |
+| Content storage | iroh 1.0.2 / iroh-blobs 0.103 (BLAKE3 content-addressed blobs) |
 | P2P networking | libp2p 0.56 (TCP, QUIC, GossipSub, Kademlia, Relay, DCUtR) |
 | Wallet (desktop) | BIP-39 + CIP-1852 (pallas), per-profile IOTA Stronghold vault |
 | Wallet (mobile) | BIP-39 + CIP-1852 (pallas), per-profile AES-256-GCM + Argon2id vault |
@@ -110,7 +110,7 @@ The architecture MUST satisfy:
 
 ### 2.4 IPC Boundary
 
-The frontend communicates with the Rust backend via ~200 Tauri IPC commands registered in `tauri::generate_handler!`. Commands are split across 29 domain-facing IPC modules (profile, settings, classroom, governance, taxonomy, tutoring, identity, credentials, sync, courses, attestation, challenge, opinions, integrity, content, pinning, storage, snapshot, reputation, enrollment, elements, chapters, catalog, p2p, evidence, aggregation, presentation, health, cardano), with `commands/` containing 33 Rust source files total (`mod.rs`, `ratelimit.rs`, and the two tutoring platform variants included). The `profile` module owns the multi-user lifecycle (`list_profiles`, `create_profile`, `restore_profile_with_mnemonic`, `unlock_profile`, `lock_profile`, `rename_profile`, `set_profile_avatar`, `delete_profile`, `get_active_profile_id`); the `identity` module is reduced to operations against the active profile (`export_mnemonic`, `is_biometric_available`, `get_wallet_info`, `get_local_did`, `get_profile`, `update_profile`, `publish_profile`, `resolve_profile`); the `settings` module owns the unified per-profile preference store (`list_settings`, `set_setting`, `reset_setting`), with `scope='sync'` rows propagated across the user's other devices via the existing cross-device sync (LWW on `updated_at`).
+The frontend communicates with the Rust backend via ~313 Tauri IPC commands registered in `tauri::generate_handler!`. Commands are split across many domain-facing IPC modules (profile, settings, classroom, governance, taxonomy, tutoring, identity, credentials, sync, courses, attestation, challenge, opinions, integrity, content, pinning, storage, snapshot, reputation, enrollment, elements, chapters, catalog, p2p, evidence, aggregation, presentation, health, guardian, instructor, completion, auto_issuance, pairing, assessment, goal_templates, skill_bootstrap, content_governance, role_assessment, sentinel_gaze, sentinel_holdout, sentinel_dao, sentinel_ml, updater, users, username_registry), with `commands/` containing 51 Rust source files (excluding `mod.rs`; `ratelimit.rs` and the two tutoring platform variants included). The `profile` module owns the multi-user lifecycle (`list_profiles`, `create_profile`, `restore_profile_with_mnemonic`, `unlock_profile`, `lock_profile`, `rename_profile`, `set_profile_avatar`, `delete_profile`, `get_active_profile_id`); the `identity` module is reduced to operations against the active profile (`export_mnemonic`, `is_biometric_available`, `get_wallet_info`, `get_local_did`, `get_profile`, `update_profile`, `publish_profile`, `resolve_profile`); the `settings` module owns the unified per-profile preference store (`list_settings`, `set_setting`, `reset_setting`), with `scope='sync'` rows propagated across the user's other devices via the existing cross-device sync (LWW on `updated_at`).
 
 ---
 
@@ -358,7 +358,7 @@ Alexandria uses libp2p 0.56 to build a fully decentralized P2P network where eve
 |:-----:|------|-------------|
 | 8 | Application | Tauri IPC commands, frontend events |
 | 7 | P2P Events | PeerConnected, GossipMessage, NatChanged |
-| 6 | Sync | Cross-device sync (encrypted, LWW/append-only) |
+| 6 | Sync | Cross-device sync (encrypted, LWW) |
 | 5 | Domain | Catalog, Evidence, Taxonomy, Governance, Profiles, Classrooms |
 | 4 | Validation | Signature, Identity, Freshness, Dedup, Schema, Authority |
 | 3 | GossipSub | 15 global topics + per-classroom dynamic topics, peer scoring, rate limiting |
@@ -486,7 +486,7 @@ Flow:
    dashboard open.
 
 Requests: `GuardianRequest::{Link, ActivityPush, ActivityPull, Revoke}`.
-Responses: `GuardianResponse::{Linked, Ok, Sealed, Unauthorized, Error}`.
+Responses: `GuardianResponse::{Linked, Merged { rows }, Sealed, Unauthorized, Error}`.
 The handler is the pure fn `handle_guardian_request(conn, peer_id, req)`
 (unit-tested in `tests/guardian_e2e.rs` with real wallets and VC signing).
 
@@ -608,16 +608,14 @@ Sync messages are encrypted with a key derived from the wallet signing key (AES-
 | `enrollments` | LWW | Course enrollment status |
 | `element_progress` | LWW | Learning progress per element |
 | `course_notes` | LWW | User's course notes |
-| `evidence_records` | Append-only | Skill evidence (never deleted) |
-| `skill_proof_evidence` | Append-only | Proof-evidence links |
 
-**Derived tables** (not synced, recomputed locally): `skill_proofs`, `reputation_assertions`.
+`SYNCABLE_TABLES` (`domain/sync.rs`) currently holds exactly these three tables, all Last-Writer-Wins. **No append-only tables ship.** The `evidence_records` and `skill_proof_evidence` tables that earlier drafts synced append-only, and the `skill_proofs` / `reputation_assertions` tables, were all dropped in migration 040 and no longer exist.
 
 ### 7.3 Merge Strategies
 
 **LWW (Last-Writer-Wins)**: Compare `updated_at` timestamps (ISO 8601 string comparison). Remote wins only if `remote.updated_at > local.updated_at` (strictly newer). Ties: local wins.
 
-**Append-Only Union**: Insert if primary key does not exist. Never update or delete existing records.
+**Append-Only Union**: Insert if primary key does not exist. Never update or delete existing records. The merge helper is implemented but currently unused — no table in `SYNCABLE_TABLES` uses this strategy since migration 040.
 
 ### 7.4 Sync Message Protocol
 
@@ -816,7 +814,7 @@ Sentinel is a client-side anti-cheat system that monitors assessment integrity t
 1. **Privacy-first** — All behavioral data (keystrokes, mouse movements, video frames) is processed entirely on-device. Only numeric scores and categorical flags are stored and broadcast.
 2. **Non-punitive by default** — Sentinel informs rather than punishes. Flagged sessions surface for review; automated suspensions require multiple strong signals.
 3. **Dual scoring** — Rule-based and AI-based systems run in parallel. Rule-based is authoritative; AI is advisory until validated with labeled data.
-4. **On-device, no downloads** — All ML models run on-device with no model downloads or remote inference. The keystroke autoencoder and mouse-trajectory CNN run in Rust on the `candle` framework; the face embedder is hand-written TypeScript (LBP histograms). The retired paste classifier ran via `tract` (pure Rust, weights embedded with `include_bytes!`).
+4. **On-device, no downloads** — All ML models run on-device with no model downloads or remote inference. The keystroke autoencoder and mouse-trajectory CNN run in Rust on the `candle` framework; the face embedder is hand-written TypeScript (LBP histograms). The active paste classifier runs via `tract` (pure Rust ONNX); its bundled fallback weights are embedded with `include_bytes!` and can be replaced at runtime by DAO-ratified weights (`set_dao_session`).
 5. **Incremental trust** — Behavioral profiles build over time. Consistency scoring activates after 10+ samples.
 
 ### 12.3 Signal Taxonomy
@@ -877,7 +875,7 @@ These guarantees are architectural — they are enforced by the code structure, 
 
 **Threat**: Instructors or assessors inflate scores to boost downstream reputation.
 
-**Mitigations**: Assessment definitions independent of instructor. Difficulty and assessment type weighting. Sentinel integrity scoring lowers trust_factor on flagged assessments. Variance and confidence penalties for inconsistent outcomes. Stake-based evidence challenges (5 ADA, 2/3 supermajority vote).
+**Mitigations**: Assessment definitions independent of instructor. Difficulty and assessment type weighting. Sentinel integrity scoring lowers trust_factor on flagged assessments. Variance and confidence penalties for inconsistent outcomes. Stake-based credential challenges (5 ADA, 2/3 supermajority vote).
 
 ### 13.3 Sybil Attacks
 
@@ -1539,7 +1537,7 @@ The aggregation layer MUST produce an explainable object:
   "evidenceMass": 3.92,
   "uniqueIssuerClusters": 3,
   "activeEvidenceCount": 5,
-  "calculationVersion": "1.0",
+  "calculationVersion": "1.1",
   "sources": [
     "urn:uuid:credential-1",
     "urn:uuid:credential-2",
@@ -1782,7 +1780,7 @@ w_1 = w_issuer,1 × w_type,1 × w_fresh,1 × w_quality,1 × w_independence,1
 **Evidence 2** — assessment credential, `q_2 = 0.78`:
 
 ```
-w_2 = 0.85 × 0.90 × 0.95 × 0.88 × 0.85 = 0.544221
+w_2 = 0.85 × 0.90 × 0.95 × 0.88 × 0.85 = 0.543609
 ```
 
 **Evidence 3** — attestation, `q_3 = 0.80`:
@@ -1795,18 +1793,18 @@ w_3 = 0.70 × 0.35 × 0.98 × 0.70 × 0.80 = 0.134456
 
 ```
 Q_{s,k} = (w_1 q_1 + w_2 q_2 + w_3 q_3) / (w_1 + w_2 + w_3)
-        = (0.7866·0.90 + 0.544221·0.78 + 0.134456·0.80) / 1.465277
-        = 1.240 / 1.465277
+        = (0.7866·0.90 + 0.543609·0.78 + 0.134456·0.80) / 1.464665
+        = 1.240 / 1.464665
         ≈ 0.846
 ```
 
-**Evidence Mass**: `M_{s,k} = 1.465277`. Assume `U_{s,k} = 3`, `β = 0.6`, `γ = 0.7`.
+**Evidence Mass**: `M_{s,k} = 1.464665`. Assume `U_{s,k} = 3`, `β = 0.6`, `γ = 0.7`.
 
 **Confidence**:
 
 ```
-C_{s,k} = (1 - exp(-0.6 × 1.465277)) × (1 - exp(-0.7 × 3))
-        = (1 - exp(-0.8791662)) × (1 - exp(-2.1))
+C_{s,k} = (1 - exp(-0.6 × 1.464665)) × (1 - exp(-0.7 × 3))
+        = (1 - exp(-0.878799)) × (1 - exp(-2.1))
         ≈ (1 - 0.415) × (1 - 0.122)
         ≈ 0.585 × 0.878
         ≈ 0.514
@@ -1844,10 +1842,10 @@ The reference implementation is a Tauri v2 application — a single binary that 
 | Component | Technology | Purpose |
 |-----------|------------|---------|
 | Backend | Rust (tokio) | Business logic, wallet, P2P, database, evidence, governance |
-| Frontend | Vue 3, TypeScript, Tailwind CSS v4 | 30 pages, 34 components, 14 composables |
-| Database | SQLite (rusqlite, bundled) | ~75 tables, 56 migrations |
-| Content | iroh 0.96 | BLAKE3 content-addressed blob store |
-| P2P | libp2p 0.56 | Kademlia, GossipSub, Relay, DCUtR, request-response/CBOR for vc-fetch, sync, graph-fetch, profile-fetch, username-reg |
+| Frontend | Vue 3, TypeScript, Tailwind CSS v4 | 48 pages, 77 components, 30 composables |
+| Database | SQLite (rusqlite, bundled) | ~92 tables, 71 migrations |
+| Content | iroh 1.0.2 / iroh-blobs 0.103 | BLAKE3 content-addressed blob store |
+| P2P | libp2p 0.56 | Kademlia, GossipSub, Relay, DCUtR, request-response/CBOR for vc-fetch, sync, graph-fetch, profile-fetch, username-reg, guardian (`/alexandria/guardian/1.0`) |
 | Wallet | pallas 0.35, Stronghold / AES-256-GCM | Conway era transactions, encrypted key storage |
 | Cardano | pallas, Blockfrost | VC integrity anchoring (label 1697), DAO governance, completion-witness minting, challenge-stake escrow, CIP-68 soulbound reputation snapshots |
 | Integrity | Rust (candle) + TypeScript | Keystroke autoencoder (candle), mouse CNN (candle), face embedder (hand-written TypeScript LBP) |
@@ -1860,7 +1858,7 @@ The reference implementation is a Tauri v2 application — a single binary that 
 
 ### 15.2 Database
 
-**Engine**: SQLite (rusqlite 0.38, bundled). **Tables**: ~75 across 56 migrations.
+**Engine**: SQLite (rusqlite 0.38, bundled). **Tables**: ~92 across 71 migrations.
 
 | Domain | Tables |
 |--------|--------|
@@ -1886,7 +1884,9 @@ Key design decisions: deterministic IDs via `hex(blake2b_256(parts.join("|")))`,
 
 ### 15.3 Test Suite
 
-700+ library unit tests (`cargo test -p alexandria-node --lib`; run for current count) and 40 end-to-end VC tests (`cargo test --test e2e_vc`), all passing with 0 ignored at the latest pre-launch revision. Coverage spans the `crypto`, `db`, `p2p`, `evidence`, `cardano`, `domain`, `aggregation`, `commands`, and `ipfs` modules. ~1500 lines of P2P stress tests cover high-volume gossip (200+ messages), concurrent validation (1000 messages / 10 threads), sync conflicts, and adversarial inputs. The §14.26 worked example is locked in by `tests/e2e_vc/aggregation.rs`.
+900+ library unit tests (`cargo test -p alexandria-node --lib`; run for current count) and ~40 end-to-end VC tests (`cargo test --test e2e_vc`), plus the `guardian_e2e` and `settings_sync_e2e` integration suites, all passing with 0 ignored at the latest pre-launch revision. Coverage spans the `crypto`, `db`, `p2p`, `evidence`, `cardano`, `domain`, `aggregation`, `commands`, and `ipfs` modules. The §14.26 worked example is locked in by `tests/e2e_vc/aggregation.rs`.
+
+> **P2P stress suite:** the original ~1500-line stress suite (evidence gossip, skill-proof aggregation, multi-party attestation, challenge committee under load) was retired in the VC-first cutover — those subsystems are gone or being rebuilt against `credentials`. `p2p/stress.rs` is currently a stub tracking the VC-first replacements (VC gossip publish-rate/dedup/spam resistance, credential sync merge races, challenge-committee voting under contention). It is **not** live coverage today.
 
 ---
 

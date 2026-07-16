@@ -33,8 +33,8 @@ A manifest may declare other plugins it requires via an optional
 
 ```json
 "dependencies": [
-  "did:key:z6Mk…#codejudge-javascript",
-  "did:key:z6Mk…#codejudge-lua"
+  "did:key:z6Mk…#editor-javascript",
+  "did:key:z6Mk…#editor-typescript"
 ]
 ```
 
@@ -51,7 +51,7 @@ Two guarantees follow:
 - **Auto-install** — installing a plugin pulls its dependencies in first.
   For built-ins this just means registering a plugin *after* the plugins
   it depends on in `builtins::BUILTIN_PLUGINS` (the umbrella
-  `codejudge-multilang` is registered last, after its language plugins).
+  `editors` is registered last, after its language plugins).
 - **Uninstall guard** — `plugin_uninstall` refuses to remove a plugin that
   other installed plugins still depend on ("still required by …"); the
   dependents must be removed first.
@@ -202,16 +202,18 @@ are interactive (replay, retry, review results), so the learner clicks
 | `music-trainer` | interactive | Capability-prompt demo (mic + amplitude meter) |
 | `music-reviews` | interactive | Scrolling-timeline pitch trainer; see its `README.md`. Pitch detection unit-tested via `ui/pitch.test.js` |
 | `irl-review` | interactive | Upload work for human instructor review |
-| `codejudge-javascript` | interactive | Solve coding challenges in JS; runs the solution locally in a QuickJS WebAssembly sandbox against stdin/stdout test cases |
-| `codejudge-lua` | interactive | Same, in Lua via wasmoon (Lua 5.4 → WebAssembly) |
-| `codejudge-multilang` | interactive | Umbrella that `depends on` the codejudge language plugins; installing it auto-installs them |
+| `editor-javascript` | graded | Write and run JavaScript with live evaluation; runs locally in a sandboxed Boa engine (pure-Rust JS → WebAssembly) against test cases; graded submissions are re-run by the host's deterministic grader |
+| `editor-typescript` | graded | Same, TypeScript — types are stripped in-engine (sucrase) then run on Boa |
+| `editor-python` | graded | Same, Python on the RustPython engine (compiled to sandboxed WebAssembly); teaching subset (builtins only) |
+| `editor-cpp` | graded | Write and run C/C++, interpreted locally by the bundled JSCPP engine inside the Boa WebAssembly runtime; intro subset (no STL/templates) |
+| `editors` | umbrella | Umbrella that `depends on` the editor language plugins; installing it auto-installs them |
 
-The codejudge plugins' in-browser runtimes (QuickJS, wasmoon) and
-CodeMirror live in each bundle's `ui/vendor/` (with the problem bank baked
-into `ui/problems.js`) and **are committed**, so the app and CI build with no
-extra step. Regenerate them with
-`plugins/builtin/codejudge-shared/fetch-runtimes.sh` only after bumping a
-runtime version or the problem bank; they are embedded via `include_bytes!`.
+The editor plugins' in-browser runtimes (the Boa pure-Rust JS engine
+compiled to wasm for JS/TS, RustPython for Python, JSCPP interpreted inside
+Boa for C/C++) and CodeMirror live in each bundle's `ui/vendor/` and
+**are committed**, so the app and CI build with no extra step. Regenerate
+them with `plugins/builtin/editor-shared/build.sh` only after bumping a
+runtime version; they are embedded via `include_bytes!`.
 
 ## IRL Review flow
 

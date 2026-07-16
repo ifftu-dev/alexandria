@@ -14,9 +14,9 @@ source scripts/env.completion
 # 2. Sanity check.
 ./scripts/preflight.sh
 
-# 3. Deploy reference scripts on preprod. Costs ~40 tADA total
-#    (5 ADA × 8 reference scripts), takes a few minutes per script
-#    while the chain confirms.
+# 3. Deploy reference scripts on preprod. Costs ~50 tADA total
+#    (5 ADA × 9 reference scripts, plus fees), takes a few minutes
+#    per script while the chain confirms.
 ./cardano/governance/deploy_reference_scripts.sh
 
 # 4. Patch script_refs.rs in place from the deployment_results.json

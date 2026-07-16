@@ -2,7 +2,7 @@
 
 **Date**: 2026-02-24 (updated 2026-03-25)
 **Scope**: Full Rust backend (`src-tauri/src/`), CLI (`cli/`), frontend config, Cargo workspace
-**Files audited**: Every file in `commands/` (20), `db/` (4), `evidence/` (7), `p2p/` (15), `ipfs/` (8), plus `lib.rs`, both `Cargo.toml` files, `package.json`, `vite.config.ts`
+**Files audited**: Every file in `commands/` (52), `db/` (6), `evidence/` (5), `p2p/` (35), `ipfs/` (12), plus `lib.rs`, both `Cargo.toml` files, `package.json`, `vite.config.ts` (counts current as of this update; the original snapshot predates the VC-first migration, which restructured these directories)
 
 **Summary**: 2 critical, 5 high, 8 medium, 5 low, 3 informational findings. The codebase is generally well-structured with good patterns (WAL mode, `spawn_blocking` for crypto, proper lock scoping in several places), but has a systemic architectural bottleneck in the global DB mutex and several targeted issues worth addressing.
 
@@ -14,11 +14,11 @@
 
 **File**: `src-tauri/src/lib.rs:43`
 
-`AppState.db` is `Arc<std::sync::Mutex<Database>>` (blocking mutex, not tokio):
+`AppState.db` is `Arc<std::sync::Mutex<Option<Database>>>` (blocking mutex, not tokio):
 
 ```rust
 pub struct AppState {
-    pub db: Arc<Mutex<Database>>,
+    pub db: Arc<Mutex<Option<Database>>>,
     ...
 }
 ```
@@ -31,11 +31,19 @@ Every single Tauri command acquires this lock for the duration of its DB access.
 
 ---
 
-### C-2: DB lock held during entire gossip message processing loop
+### ~~C-2: DB lock held during entire gossip message processing loop~~ — **RESOLVED**
+
+**Status**: Resolved. Gossip is now processed by a dedicated `mpsc`
+channel worker — exactly the recommended fix below. Events push to
+`tokio::sync::mpsc::channel(256)` (`commands/p2p.rs:152`) and a spawned
+consumer task drains them (`commands/p2p.rs:157`). The DB lock is a
+per-message `std::sync::Mutex` guard scoped to a single match arm and
+dropped between messages, not a `tokio` lock held across a burst. The
+description below is retained for historical context.
 
 **File**: `src-tauri/src/commands/p2p.rs:76-130`
 
-The gossip event handler acquires `db_for_events.lock().await` at line 76 and holds it through the entire if/else-if chain. Every incoming gossip message holds the global DB mutex. After PR 144 wired the VC + opinions + pinboard handlers, the chain now covers 9 topics + classroom:
+The gossip event handler acquires `db_for_events.lock().await` at line 76 and holds it through the entire if/else-if chain. Every incoming gossip message holds the global DB mutex. After PR 144 wired the VC + opinions + pinboard handlers, the chain now covers 11 topics + classroom:
 
 ```rust
 crate::p2p::types::P2pEvent::GossipMessage { topic, message } => {
@@ -135,9 +143,7 @@ for (ch_id, ch_title, ch_desc, ch_pos) in &chapter_rows {
 ### M-1: No pagination on list queries
 
 **Files**:
-- `commands/evidence.rs:22` -- `list_skill_proofs` (no LIMIT)
-- `commands/evidence.rs:58,66` -- `list_evidence` (no LIMIT)
-- `commands/evidence.rs:112,120` -- `list_reputation` (no LIMIT)
+- `commands/evidence.rs` -- `list_reputation` (no LIMIT) — the only list command remaining in this file after the VC migration removed `list_skill_proofs` and `list_evidence`
 - `commands/enrollment.rs:28,35` -- `list_enrollments` (no LIMIT)
 - `commands/courses.rs:22` -- `list_courses` (no LIMIT)
 - `commands/governance.rs:70` -- `list_daos` (no LIMIT)
@@ -165,15 +171,18 @@ The `enrollments` table has `idx_enrollments_course` on `course_id` but no index
 
 ---
 
-### M-3: Missing index on `skill_assessments(course_id, source_element_id, skill_id)`
+### ~~M-3: Missing index on `skill_assessments(course_id, source_element_id, skill_id)`~~ — **OBSOLETE**
 
-**File**: `src-tauri/src/evidence/aggregator.rs:166-168`
+**Status**: Superseded. The SkillProof aggregation path this described
+was removed in the VC migration. Neither `evidence/aggregator.rs` nor
+`find_or_create_assessment` exists anymore (`evidence/` now contains
+only `challenge`, `mod`, `reputation`, `taxonomy`, `thresholds`). No
+replacement index recommendation is made here; re-audit the VC
+aggregation path (`aggregation/`) separately.
 
-`find_or_create_assessment` queries `WHERE course_id = ?1 AND source_element_id = ?2 AND skill_id = ?3` with no covering index. This is called for every evidence record aggregation.
-
-**Impact**: Table scan on `skill_assessments` for each evidence submission. As assessments accumulate, this slows the evidence pipeline.
-
-**Fix**: Add migration: `CREATE INDEX idx_assessments_lookup ON skill_assessments(course_id, source_element_id, skill_id);`
+The original finding described a missing covering index on the
+`skill_assessments(course_id, source_element_id, skill_id)` lookup
+performed for every evidence record aggregation.
 
 ---
 
@@ -356,11 +365,14 @@ The content seeding function acquires the DB lock, reads what is needed, drops t
 ## Deferred scope: VC-layer modules (PRs 2–19, post-audit)
 
 This audit's snapshot date (2026-03-25) precedes the VC-first
-credential migration. C-1 (global DB mutex) and C-2 (gossip lock)
-remain accurate descriptions of the current code at HEAD —
-`AppState.db` is still `Arc<Mutex<Database>>` — and the VC layer
-inherits both bottlenecks. The following risks were not measured
-in this audit and warrant follow-up:
+credential migration. C-1 (global DB mutex) remains an accurate
+description of the current code — `AppState.db` is still an
+`Arc<Mutex<...>>` (now `Arc<Mutex<Option<Database>>>`) — and the VC
+layer inherits that bottleneck. C-2 (gossip lock) has since been
+RESOLVED: gossip is now handled by an `mpsc` channel worker (see the
+C-2 status note above), so it no longer holds a lock across a burst.
+The following risks were not measured in this audit and warrant
+follow-up:
 
 - **`aggregation::aggregate_skill_state`** is invoked per-skill on
   cache miss in `get_derived_skill_state` and over the entire

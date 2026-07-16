@@ -47,7 +47,7 @@ cargo run -p alex -- synth-sentinel generate-holdout --out-dir tools/sentinel-tr
 
 Output is deterministic per seed; the golden-hash test in
 `cli/src/synth/generators.rs` will catch any drift from
-`SYNTH_VERSION = "v1"`.
+`SYNTH_VERSION = "v2"`.
 
 ### Step 2 — Featurize, train, eval
 
@@ -252,10 +252,10 @@ When you legitimately change a generator distribution (e.g. add a new
 attack class), the golden hashes will fail. To bump cleanly:
 
 1. Edit `cli/src/synth/generators.rs` distributions.
-2. Bump `SYNTH_VERSION` in `cli/src/synth/blob.rs` from `"v1"` to `"v2"`.
-3. Update `golden_hashes_match_synth_v1` test in `generators.rs`:
-   - Rename to `golden_hashes_match_synth_v2`.
-   - Update the version assertion (`SYNTH_VERSION == "v2"`).
+2. Bump `SYNTH_VERSION` in `cli/src/synth/blob.rs` (currently `"v2"`) to the next version (e.g. `"v3"`).
+3. Update the `golden_hashes_match_synth_v2` test in `generators.rs`:
+   - Rename it to match the new version (e.g. `golden_hashes_match_synth_v3`).
+   - Update the version assertion (e.g. `SYNTH_VERSION == "v3"`).
    - Regenerate hashes using the recipe in the test doc-comment.
 4. Run `cargo test -p alex synth` — must pass.
 5. Retrain the classifier (Procedure 1), because the training corpus
