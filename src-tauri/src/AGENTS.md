@@ -8,7 +8,7 @@
 
 ## Overview
 
-Rust backend for the Tauri v2 desktop/mobile app. Core responsibilities include a per-profile data model (each user gets their own vault + SQLCipher DB + iroh blob store under `<app_data>/profiles/<uuid>/`), ~313 registered Tauri commands (multi-user `profile` module + unified per-profile `settings` store), a ~102-table SQLite schema per profile, libp2p networking, iroh content storage, and Cardano integration. Command/table counts drift with every PR — treat them as approximate.
+Rust backend for the Tauri v2 desktop/mobile app. Core responsibilities include a per-profile data model (each user gets their own vault + SQLCipher DB + iroh blob store under `<app_data>/profiles/<uuid>/`), ~313 registered Tauri commands (multi-user `profile` module + unified per-profile `settings` store), a ~92-live-table SQLite schema per profile (102 created, 10 dropped in migration 040), libp2p networking, iroh content storage, and Cardano integration. Command/table counts drift with every PR — treat them as approximate.
 
 ## WHERE TO LOOK
 
@@ -85,11 +85,13 @@ mod tests {
 
 ## COMPLEXITY HOTSPOTS
 
+Line counts drift with every PR; regenerate with `wc -l` before relying on them.
+
 | File | Lines | Risk |
 |------|-------|------|
-| `tutoring/manager_mobile.rs` | 2918 | Mobile tutoring logic |
-| `p2p/stress.rs` | 1775 | Stress testing utilities |
-| `tutoring/manager.rs` | 1939 | Desktop tutoring |
-| `evidence/reputation.rs` | 1442 | Reputation system |
-| `commands/governance.rs` | 1734 | Governance command surface |
-| `p2p/sync.rs` | 1203 | P2P sync protocol |
+| `tutoring/manager_mobile.rs` | 3129 | Mobile tutoring logic |
+| `p2p/stress.rs` | 14 | Stub (retired in VC-first cutover; placeholder) |
+| `tutoring/manager.rs` | 1997 | Desktop tutoring |
+| `evidence/reputation.rs` | 679 | Reputation system |
+| `commands/governance.rs` | 2106 | Governance command surface |
+| `p2p/sync.rs` | 1498 | P2P sync protocol |

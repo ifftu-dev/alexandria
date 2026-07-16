@@ -177,11 +177,11 @@ This creates an instant replay window where ALL previously-seen messages become 
 
 ---
 
-### H-6: Updater public key is a placeholder
+### H-6: Updater public key
 
-**File**: `src-tauri/tauri.conf.json:62`
+**File**: `src-tauri/tauri.conf.json:74`
 
-The Tauri updater signature verification key is set to `"pubkey": "PLACEHOLDER_PUBKEY"`. If the updater is activated before this is replaced with a real key, the app may accept unsigned updates or fail to verify updates.
+The Tauri updater signature verification key now holds a real base64-encoded minisign public key (no longer the `"PLACEHOLDER_PUBKEY"` string the original finding described). Per the remediation table, CI warns on a placeholder value and the signing keypair must still be generated/managed manually.
 
 **Impact**: Potential malicious update injection if the updater endpoint is compromised or MITM'd.
 
@@ -500,7 +500,7 @@ If any thread panics while holding the database mutex, the mutex becomes poisone
 
 ### I-1: All SQL queries use parameterized statements
 
-**Files**: All files in `commands/`, `p2p/catalog.rs`, `p2p/evidence.rs`, `p2p/governance.rs`, `p2p/taxonomy.rs`, `p2p/sync.rs`, `evidence/`
+**Files**: All files in `commands/`, `p2p/catalog.rs`, `p2p/governance.rs`, `p2p/taxonomy.rs`, `p2p/sync.rs`, `evidence/`
 
 Every SQL query across the entire codebase uses `params![]` for value binding. No string interpolation of user-supplied values into SQL. The only dynamic SQL is in `p2p/sync.rs` where table names are sanitized via an allowlist (`sanitize_table_name` at line 638-655). Column names from sync JSON are the exception (see M-7).
 
@@ -526,15 +526,15 @@ The capabilities file only grants `core:default` and `core:window:allow-show`. N
 
 **File**: `src-tauri/src/p2p/scoring.rs`
 
-All 6 topics have individually tuned scoring parameters. Taxonomy has the strongest invalid message penalty (`-50.0` with slow decay `0.3`). IP colocation penalty discourages Sybil attacks from the same IP. Thresholds are properly ordered (graylist < publish < gossip < 0). All parameters pass libp2p's built-in validation.
+Of the 15 `TOPIC_*` constants, 14 have individually tuned scoring parameters (all except `TOPIC_PEER_EXCHANGE`, which is intentionally unscored). Taxonomy has the strongest invalid message penalty (`-50.0` with slow decay `0.3`). IP colocation penalty discourages Sybil attacks from the same IP. Thresholds are properly ordered (graylist < publish < gossip < 0). All parameters pass libp2p's built-in validation.
 
 ---
 
 ### I-5: Evidence score range validation
 
-**File**: `src-tauri/src/p2p/evidence.rs:57-62`
+**File**: `src-tauri/src/evidence/thresholds.rs`, `src-tauri/src/evidence/reputation.rs` (e.g. `reputation.rs:164,253` clamp scores to `[0.0, 1.0]`)
 
-Evidence announcements validate that `score` is in `[0.0, 1.0]` before storing. This prevents invalid evidence data from entering the local database via gossip.
+Evidence scores are constrained to `[0.0, 1.0]` before use. This prevents invalid evidence data from entering the local database. (The original `p2p/evidence.rs` gossip-validation site was deleted in the VC migration; the score-range logic now lives in the `evidence/` module.)
 
 ---
 

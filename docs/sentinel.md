@@ -212,7 +212,7 @@ The Rust extractor in `sentinel::features` and the Python featurizer in `tools/s
 
 **Model artifact**: `src-tauri/resources/sentinel/paste-v1.onnx` (~4.6 KB, weights inline; PyTorch `dynamo=False` export so tract can parse without sidecar `.data` files). Pinned via `src-tauri/resources/sentinel/paste-v1.onnx.sha256` lockfile (CI verifies on every push). The DAO-update path (see §Runtime Model Updates) can replace the active session at runtime without an app upgrade.
 
-**Storage**: No per-user state. The classifier is a global attack detector — calibration is done via the existing `KeystrokeAutoencoder` for per-user personalization. The two scores blend `0.7 * onnx + 0.3 * autoencoder` once both are available.
+**Storage**: No per-user state. The classifier is a global attack detector — calibration is done via the existing `KeystrokeAutoencoder` for per-user personalization. There is no blend between the two: `sentinel_score_paste` returns the raw ONNX score, and `ai_paste_anomaly` and `ai_keystroke_anomaly` fold into the integrity score as **independent** advisory signals, each weighted `AI_ADVISORY_WEIGHT = 0.05` (`useSentinel.ts`).
 
 **Training**: `tools/sentinel-train/{featurize,train,eval}.py`. Outputs ONNX opset 17. Default 30 epochs, AdamW lr=3e-4, batch=128, label smoothing 0.05, 2× class weight on the `llm_paste_edit` class.
 
@@ -248,13 +248,13 @@ The Rust extractor in `sentinel::features` and the Python featurizer in `tools/s
 
 The per-window `gaze_offscreen_ratio` is persisted on `integrity_snapshots` (migration 060) for dashboard observability.
 
-**Frontend**: `Player.vue`'s camera loop calls `sentinel.scoreGaze(video)` (fire-and-forget) alongside the existing LBP presence check. It downscales the frame to ≤320px and forwards RGBA over IPC; cadence is intended to be assurance-level dependent (faster in high-assurance mode). The 9-point calibration is a step in `SentinelTrainingWizard.vue`.
+**Frontend**: `Player.vue`'s camera loop calls `sentinel.scoreGaze(video)` (fire-and-forget) alongside the existing LBP presence check. It downscales the frame to ≤224px and forwards RGBA over IPC; cadence is intended to be assurance-level dependent (faster in high-assurance mode). The 9-point calibration is a step in `SentinelTrainingWizard.vue`.
 
 **Phase 2 (deferred)**: precise point-of-regard via a MediaPipe iris model (Apache-2.0, needs a tflite→ONNX conversion); a gaze × keystroke-timing correlation signal (the high-confidence "copying" flag); face *recognition* via ArcFace (runtime-trivial on tract, but weights are license-gated — buy an InsightFace commercial license). See [sentinel-gaze.md](sentinel-gaze.md) for the full design.
 
 ### Runtime Toggle
 
-AI signals are advisory by default and do not contribute to the integrity score. A per-device toggle (`sentinel_ai_scoring_enabled` in localStorage, exposed in the Sentinel dashboard Profile tab) folds them in at a 0.05 weight each:
+AI signals are advisory by default and do not contribute to the integrity score. A per-profile toggle (`setSetting('sentinel.ai_scoring_enabled')` in the profile-scoped settings DB, exposed in the Sentinel dashboard Profile tab) folds them in at a 0.05 weight each:
 - `(1 − ai_keystroke_anomaly)` × 0.05
 - `ai_mouse_human_prob` × 0.05
 - `ai_face_similarity` × 0.05 (only if camera opted in)
@@ -262,7 +262,7 @@ AI signals are advisory by default and do not contribute to the integrity score.
 
 Total advisory contribution is capped at 0.20 (all four signals at once), well under any single rule-based weight. Toggle off if false-positive rate spikes.
 
-**Per-signal opt-out**: the paste classifier has its own toggle in the Sentinel dashboard ("Paste Classifier (ONNX)") backed by `sentinel_paste_classifier_enabled` in localStorage. Defaults to `on`; flipping it off keeps the other AI signals contributing. Useful if the paste classifier specifically generates FPs.
+**Per-signal opt-out**: the paste classifier has its own toggle in the Sentinel dashboard ("Paste Classifier (ONNX)") backed by `setSetting('sentinel.paste_classifier_enabled')` in the profile-scoped settings DB. Defaults to `on`; flipping it off keeps the other AI signals contributing. Useful if the paste classifier specifically generates FPs.
 
 ## Runtime Model Updates
 
@@ -295,7 +295,7 @@ Failure modes — all fall back to bundled, never crash monitoring:
 
 `signature` on a weights row is currently the `compute_prior_signature` Blake2b digest over `(cid|label|model_kind|schema_version)`. **This is not an authenticated signature — anyone can compute it.** It binds metadata to the row but doesn't certify DAO ratification. Until the real threshold-sig infrastructure lands ([sentinel-federation.md](sentinel-federation.md) §12), the safeguards are:
 
-- `sentinel_ai_scoring_enabled` defaults to `false` on every device.
+- `sentinel.ai_scoring_enabled` (profile-scoped settings DB) defaults to `false` on every device.
 - Kill switch (`sentinel_set_kill_switch`) globally disables the classifier without an app update.
 - Version blocklist (`sentinel_blocklist_version`) rolls back a single faulty version.
 - Server-side re-verify in `verify_weights_candidate` re-fetches envelope + eval JSON, rejects mismatches.

@@ -97,7 +97,7 @@ Everything the client consumes is public and signed. Nothing the client produces
 - **Forfeiture hook (decision 3):** proposal submission blocks if `source_session_id` (optional field on the proposal) references an `integrity_sessions` row with status `flagged` or `suspended`. Enforced at `sentinel_propose_prior` entry point.
 - **Validation** at ratification time: blob parses, required fields present, sample count ≥ 20, no face kind. (Weights kind takes a different validation path — see §Phase 4.)
 
-**Deliverable:** a ratified prior is queryable via `sentinel_list_priors(model_kind)` and the blob is verifiably signed.
+**Deliverable:** a ratified prior is queryable via `sentinel_priors_list(model_kind)` and the blob is verifiably signed.
 
 ### Phase 3 — Client fetch + cache · ~3 days
 
@@ -314,7 +314,7 @@ All follow existing `integrity_*` command conventions (AppState + rusqlite + ser
 
 - **Unit tests (Rust):** severity-of-classifier-on-prior set, signature verification, forfeiture check, schema migrations apply cleanly on existing DB.
 - **Unit tests (TS):** autoencoder / CNN trained with synthetic + ratified priors has expected anomaly-threshold shift; no runtime regressions in `useSentinel.computeScores()`.
-- **Integration tests:** end-to-end propose → vote → ratify → client sync → train. Lives in a new `tests/sentinel_priors.rs`.
+- **Integration tests:** end-to-end propose → vote → ratify → client sync → train. Planned for a new `tests/sentinel_priors.rs` — **not yet present** (the only Sentinel-adjacent integration tests today are `tests/e2e_vc.rs`, `tests/guardian_e2e.rs`, and `tests/settings_sync_e2e.rs`).
 - **Attack simulation:** pre-ratification, the DAO curator runs the proposed blob through the current classifier to confirm it's detectable as anomalous *before* adding it — prevents ratifying priors that the model already correctly classifies as human.
 
 ---
@@ -340,7 +340,7 @@ All follow existing `integrity_*` command conventions (AppState + rusqlite + ser
 - Training wizard surfaces "trained against N curated patterns" in its result screen
 - Holdout evaluation card visible in `Sentinel.vue` for any user who is a Sentinel DAO committee member
 - `sentinel.md` guarantees #4 and #6 updated per [sentinel-federation.md §9](sentinel-federation.md#9-privacy-guarantee-rewrite-for-sentinelmd)
-- New unit + integration tests pass; `cargo fmt --check`, `cargo clippy -- -D warnings`, `vue-tsc -b --noEmit` all green
+- New unit tests pass (the `tests/sentinel_priors.rs` integration suite is not yet present — see §5); `cargo fmt --check`, `cargo clippy -- -D warnings`, `vue-tsc -b --noEmit` all green
 
 ---
 

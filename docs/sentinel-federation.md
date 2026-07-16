@@ -326,7 +326,7 @@ Option A without any one of those is a mission regression disguised as a feature
 | Per-snapshot AI score plumbing | ✅ shipped | `useSentinel.ts`, migration 044 |
 | Synthetic-data generator | ✅ shipped | `alex synth-sentinel` subcommand, `cli/src/synth/` |
 | Offline training kit | ✅ shipped | `tools/sentinel-train/{featurize,train,eval}.py` |
-| ONNX paste classifier (bundled v1) | ✅ shipped | `src-tauri/resources/sentinel/paste-v1.onnx` (~5 KB), embedded via `include_bytes!`, SHA-pinned |
+| ONNX paste classifier (bundled v1) | ✅ shipped | `src-tauri/resources/sentinel/paste-v1.onnx` (~4.6 KB / 4741 bytes), embedded via `include_bytes!`, SHA-pinned |
 | Backend ML rewrite (tract + candle) | ✅ shipped | `sentinel::paste_classifier` (tract), `sentinel::keystroke_ae` + `sentinel::mouse_cnn` (candle). Frontend only buffers events. |
 | Per-user model weights in SQLite | ✅ shipped | Migration 047 added `sentinel_user_models`. Encrypted at rest via sqlcipher. Replaces legacy localStorage. |
 | iOS + Android build verified | ✅ iOS / ⏳ Android | `cargo tauri ios build` produces signed `.ipa`. Android blocked by NDK toolchain in CI env (pre-existing). |
@@ -341,7 +341,7 @@ Option A without any one of those is a mission regression disguised as a feature
 | Version blocklist (migration 046) | ✅ shipped | `sentinel_blocklist_version` / `sentinel_unblocklist_version` |
 | Per-signal opt-out toggle | ✅ shipped | `sentinel_paste_classifier_enabled` localStorage flag |
 | Operator runbook | ✅ shipped | `docs/sentinel-runbook.md` (5 procedures + incident template) |
-| Synthetic-data golden hash regression test | ✅ shipped | `golden_hashes_match_synth_v1` in `cli/src/synth/generators.rs` |
+| Synthetic-data golden hash regression test | ✅ shipped | `golden_hashes_match_synth_v2` in `cli/src/synth/generators.rs` |
 | CI integrity checks | ✅ shipped | model SHA verify + golden-hash test + bundle-size budget |
 | Threshold-sig over weights envelope | ⏳ placeholder | `compute_prior_signature` is Blake2b; threshold-sig replacement pending. Mitigated by default-off toggle + kill switch + blocklist + re-verify |
 | Real-world holdout evaluation | ⏳ pending | Synthetic-only holdout achieves TPR=1.0 / FPR=0.0; real FPR unmeasured |

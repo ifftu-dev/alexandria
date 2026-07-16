@@ -68,7 +68,7 @@ central API, no hosted database, and no Docker infrastructure.
 |  |   (WebView)    | ~313    |                      |  |
 |  |                | cmds    |  +----------------+  |  |
 |  |  48 pages      |         |  |   SQLite DB    |  |  |
-|  |  77 components |         |  |   ~102 tables  |  |  |
+|  |  77 components |         |  |   ~92 tables   |  |  |
 |  |  30 composables|         |  |   71 migrations|  |  |
 |  +----------------+         |  +----------------+  |  |
 |                             |                      |  |
@@ -198,7 +198,7 @@ device-sync (`SYNCABLE_TABLES`) or gossip — an invariant covered by unit tests
 
 **Engine**: SQLite (rusqlite 0.38, bundled)
 
-**Tables**: ~102 across 71 migrations
+**Tables**: ~92 live (102 created, 10 dropped in migration 040) across 71 migrations
 
 | Domain | Tables |
 |--------|--------|
@@ -549,7 +549,7 @@ The frontend communicates with the Rust backend via ~313 registered Tauri IPC ha
 | Module | Commands | Examples |
 |--------|----------|---------|
 | classroom | 24 | `classroom_create`, `classroom_approve_member`, `classroom_send_message`, `classroom_start_call` |
-| governance | 19 | `list_daos`, `submit_proposal`, `cast_proposal_vote`, `open_election`, `finalize_election` |
+| governance | 20 | `list_daos`, `submit_proposal`, `cast_proposal_vote`, `open_election`, `finalize_election` |
 | tutoring | 15 | `tutoring_create_room`, `tutoring_join_room`, `tutoring_toggle_video` |
 | taxonomy | 15 | `list_skills`, `list_subjects`, `propose_taxonomy_change`, `list_skill_graph_edges` |
 | profile | 9 | `list_profiles`, `get_active_profile_id`, `create_profile`, `restore_profile_with_mnemonic`, `unlock_profile`, `lock_profile`, `rename_profile`, `set_profile_avatar`, `delete_profile` |

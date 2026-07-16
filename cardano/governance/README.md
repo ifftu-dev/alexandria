@@ -1,6 +1,6 @@
 # Alexandria Governance Smart Contracts
 
-On-chain governance for the Alexandria learning platform, implementing whitepaper Section 4. Written in [Aiken](https://aiken-lang.org) v1.1.21 targeting Plutus v3 (Conway era).
+On-chain governance for the Alexandria learning platform, implementing Section 10 (Governance) of `docs/protocol-specification.md`. Written in [Aiken](https://aiken-lang.org) v1.1.21 targeting Plutus v3 (Conway era).
 
 > **Status: deployed + verified on preprod.** All validators are deployed as CIP-33 reference scripts (parameterized validators applied; hashes + ref UTxOs in `src-tauri/src/cardano/script_refs.rs`) and every flow has been verified on-chain.
 >
@@ -43,7 +43,7 @@ Produces `plutus.json` — the CIP-57 blueprint containing all validator scripts
 aiken check
 ```
 
-7 unit tests covering quorum, majority, supermajority, and top-N selection logic.
+12 unit tests: 7 in `utils.ak` (quorum, majority, supermajority, and top-N selection logic) and 5 in `completion.ak` (Merkle proof construction and CIP-68 asset-name encoding).
 
 ## Architecture
 
@@ -55,12 +55,12 @@ aiken check
 
 ## Deploying to Preprod
 
-A deployment script is provided to deploy all 7 validators as reference scripts on Cardano preprod testnet.
+A deployment script is provided to deploy all 9 validators as reference scripts on Cardano preprod testnet.
 
 ### Prerequisites
 
 - `cardano-cli` installed (Conway-era compatible)
-- A funded preprod wallet (needs ~40 tADA for 7 reference script UTxOs + fees)
+- A funded preprod wallet (needs ~50 tADA for 9 reference script UTxOs + fees)
 - `BLOCKFROST_PROJECT_ID` environment variable set (get one from [blockfrost.io](https://blockfrost.io))
 
 ### Deploy
@@ -84,7 +84,7 @@ Update `src-tauri/src/cardano/script_refs.rs` with the deployment tx hashes from
 
 ```rust
 pub const DAO_REGISTRY_REF_UTXO: (&str, u64) = ("<tx_hash>", 0);
-// ... repeat for all 7 validators
+// ... repeat for all 9 validators
 ```
 
 Once updated, `ref_utxos_deployed()` returns `true` and the governance on-chain queue begins submitting Plutus transactions automatically.
@@ -102,4 +102,4 @@ The Rust backend integrates with these validators through:
 | `cardano/script_refs.rs` | Script hashes and reference UTxO locations |
 | `commands/snapshot.rs` | `submit_snapshot_tx` command for soulbound minting |
 
-See `docs/whitepaper-consolidated-v0.0.1.md` Section 4 for the full governance specification.
+See `docs/protocol-specification.md` Section 10 (Governance) for the full governance specification.

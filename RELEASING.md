@@ -105,7 +105,7 @@ The dispatch entrypoints are thin wrappers over the shared `desktop-shared.yml` 
 Verify your Apple API Key has the "App Manager" or "Admin" role. Check the workflow logs for specific error codes from Apple's `notarytool`.
 
 ### Linux Build Space
-The Linux builds use `maximize-build-space` to ensure enough room for the heavy Rust compilation. If builds fail with "No space left on device", check if the runner has changed its default disk layout.
+The Linux builds run a "Free Linux disk space" step and redirect `RUSTUP_HOME`, `CARGO_HOME`, `CARGO_TARGET_DIR`, and `TMPDIR` to the larger `/mnt` volume (see `desktop-shared.yml`) to ensure enough room for the heavy Rust compilation. If builds fail with "No space left on device", check if the runner has changed its default disk layout or the size of the `/mnt` volume.
 
 ### ARM64 Linux Availability
 ARM64 builds for Linux run on `ubuntu-22.04-arm` runners. These are only available for public repositories on GitHub's free tier. If your repository is private, you must use a self-hosted runner or a paid GitHub runner plan.

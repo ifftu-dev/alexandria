@@ -114,13 +114,13 @@ src-tauri/
     │
     ├── p2p/                # libp2p network stack
     │   ├── network.rs      # Swarm, relay bootstrap, event loop
-    │   ├── types.rs        # 13 gossip topics + shared message types
+    │   ├── types.rs        # 15 gossip topics + shared message types
     │   ├── gossip.rs       # Typed publish helpers
     │   ├── signing.rs      # Gossip envelope signing/verification
     │   ├── validation.rs   # Signature, identity (via registry), freshness, dedup, schema, authority
     │   ├── registry.rs     # stake_pubkey_registry lookups + bootstrap snapshot loader
     │   ├── registry_chain.rs # Background refresh of registry from on-chain registrations
-    │   ├── scoring.rs      # Per-topic GossipSub peer scoring (12 scored topics)
+    │   ├── scoring.rs      # Per-topic GossipSub peer scoring (14 scored topics)
     │   ├── discovery.rs    # Relay bootstrap + namespace discovery
     │   ├── catalog.rs      # Catalog topic handler
     │   ├── taxonomy.rs     # Taxonomy topic handler
@@ -136,7 +136,7 @@ src-tauri/
     │   ├── presentation.rs # Inbound presentation parse/accept path
     │   ├── pinboard.rs     # PinBoard commitment observations
     │   ├── archive.rs      # Replay/archive helpers
-    │   └── stress.rs       # High-volume P2P stress tests
+    │   └── stress.rs       # Stub (retired in VC-first cutover; 14-line placeholder)
     │
     ├── classroom/          # Classroom manager + gossip/types
     ├── sentinel/           # Backend Sentinel ML (tract + candle)
@@ -169,9 +169,9 @@ src-tauri/
 
 ## Vue Frontend (`src/`)
 
-This section is exhaustive for route views and composables, but only
-representative for components. UI components move around more often than
-feature routes do.
+This section is representative for route views, composables, and
+components — not every file is listed. UI components move around more
+often than feature routes do.
 
 ```
 src/

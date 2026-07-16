@@ -42,9 +42,11 @@ synth-sentinel  ->  featurize.py  ->  train.py  ->  paste-v1.onnx
    python3 eval.py --model ./paste-v1.onnx --holdout ./holdout.npz --out eval.json
    ```
 
-5. Ship: copy `paste-v1.onnx` to `src/assets/models/paste-v1.onnx` (and bundle
-   via `tauri.conf.json` `resources` once added). The DAO-ratified path
-   (Phase 4) replaces this manual copy.
+5. Ship: copy `paste-v1.onnx` to `src-tauri/resources/sentinel/paste-v1.onnx`,
+   where it is embedded into the Rust binary at compile time via `include_bytes!`
+   (see `src-tauri/src/sentinel/paste_classifier.rs`) — no `tauri.conf.json`
+   `resources` entry is needed. Refresh the `paste-v1.onnx.sha256` lockfile
+   alongside it. The DAO-ratified path (Phase 4) replaces this manual copy.
 
 ## Why MLP, not transformer
 
