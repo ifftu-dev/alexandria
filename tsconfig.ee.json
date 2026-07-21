@@ -1,0 +1,16 @@
+{
+  // Enterprise-build typecheck. Identical to tsconfig.app.json except that
+  // `@ee` resolves to the real enterprise sources instead of the MIT stub.
+  // Run via `npm run typecheck:ee`; CI runs both so the two implementations
+  // of `EntitlementProvider` cannot drift apart.
+  "extends": "./tsconfig.app.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.ee.tsbuildinfo",
+    "composite": false,
+    "paths": {
+      "@/*": ["src/*"],
+      "@ee/*": ["src/ee/*"]
+    }
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.vue"]
+}

@@ -5,7 +5,13 @@
     "types": ["vite/client"],
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["src/*"],
+      // Default typecheck targets the MIT community stub — the build that
+      // must always compile. `tsconfig.ee.json` repoints this at `src/ee`
+      // to typecheck the enterprise build. Both implement the shared
+      // `EntitlementProvider` contract, so drift between them is a type
+      // error rather than a runtime surprise.
+      "@ee/*": ["src/ee-stub/*"]
     },
 
     /* Linting */

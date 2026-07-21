@@ -7,6 +7,9 @@ import vue from '@vitejs/plugin-vue'
  *
  * - jsdom for DOM APIs (matchMedia, localStorage, etc.)
  * - `@/` alias mirrors `vite.config.ts`
+ * - `@ee/` resolves to the MIT community stub, so the default test run
+ *   exercises the community edition. Enterprise tests, when they exist,
+ *   override this alias per-file.
  * - `@tauri-apps/api/core` is mocked by tests that need it (see
  *   `src/composables/__tests__/useOmniSearch.test.ts`); no global mock
  *   here so non-Tauri composables stay testable.
@@ -16,6 +19,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
+      '@ee': fileURLToPath(new URL('./src/ee-stub', import.meta.url)),
     },
   },
   test: {

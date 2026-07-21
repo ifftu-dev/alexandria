@@ -7,6 +7,10 @@ pub mod crypto;
 pub mod db;
 pub mod diag;
 pub mod domain;
+/// Enterprise Edition modules. This is the **only** unconditional reference
+/// to `ee` in core — see `docs/enterprise-boundary.md`.
+#[cfg(feature = "ee")]
+pub mod ee;
 pub mod evidence;
 pub mod goals;
 pub mod ipfs;
