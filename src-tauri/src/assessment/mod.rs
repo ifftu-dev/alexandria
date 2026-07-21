@@ -6,6 +6,7 @@
 //! grader — it is not part of any client payload.
 
 pub mod grader;
+pub mod items;
 pub mod randomizer;
 
 /// A tiny deterministic PRNG (SplitMix64) so a stored `seed` reproduces the
