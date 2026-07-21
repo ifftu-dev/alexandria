@@ -12,5 +12,10 @@
 	<array>
 		<string>audio</string>
 	</array>
+	<!-- Hide the native OS status bar (clock/battery) on mobile. -->
+	<key>UIStatusBarHidden</key>
+	<true/>
+	<key>UIViewControllerBasedStatusBarAppearance</key>
+	<false/>
 </dict>
 </plist>
