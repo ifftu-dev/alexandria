@@ -17,7 +17,15 @@
     "nextStep": "পরবর্তী: {name}",
     "allCleared": "আপনি প্রতিটি ধাপের জন্য প্রস্তুত 🎉",
     "viewPath": "পথ দেখুন",
-    "hidePath": "পথ লুকান"
+    "hidePath": "পথ লুকান",
+    "addGoal": "Add a goal",
+    "addGoalTitle": "Add a goal",
+    "addGoalIntro": "Set a new learning goal — pick a curated role, exam or curriculum, or paste a job description.",
+    "updateSkillsTitle": "Add or change your skills",
+    "updateSkillsIntro": "Want to add or change any skills you already have?",
+    "updateSkillsSelfMade": "These are recorded as self-made claims unless we already have on-platform evidence for them.",
+    "skillsClaimed": "Added {count} skill | Added {count} skills",
+    "done": "Done"
   },
   "picker": {
     "jobRole": "চাকরির ভূমিকা",

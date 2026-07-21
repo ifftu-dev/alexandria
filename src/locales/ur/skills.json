@@ -76,7 +76,9 @@
       "related": "متعلقہ",
       "complementary": "تکمیلی",
       "alternative": "متبادل"
-    }
+    },
+    "relatedContent": "Related content",
+    "relatedOpinions": "Opinions in this field"
   },
   "bootstrap": {
     "title": "اپنی مہارتیں شامل کریں",

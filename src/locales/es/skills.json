@@ -76,7 +76,9 @@
       "related": "Relacionada",
       "complementary": "Complementaria",
       "alternative": "Alternativa"
-    }
+    },
+    "relatedContent": "Related content",
+    "relatedOpinions": "Opinions in this field"
   },
   "bootstrap": {
     "title": "Añade tus habilidades",

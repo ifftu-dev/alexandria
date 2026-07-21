@@ -5,8 +5,10 @@ import { useRouter } from 'vue-router'
 import { useGoals } from '@/composables/useGoals'
 import { useSettings } from '@/composables/useSettings'
 import { useLocalApi } from '@/composables/useLocalApi'
-import { AppButton, AppInput, EmptyState, AppSpinner } from '@/components/ui'
+import { AppButton, AppInput, AppModal, EmptyState, AppSpinner } from '@/components/ui'
 import LearningPathView from '@/components/skills/LearningPathView.vue'
+import GoalPicker from '@/components/goals/GoalPicker.vue'
+import SkillBootstrapPanel from '@/components/skills/SkillBootstrapPanel.vue'
 import type { LearningPath, Goal } from '@/types'
 
 const router = useRouter()
@@ -32,8 +34,17 @@ function openUserProfile() {
 const loading = ref(true)
 const paths = ref<Record<string, LearningPath>>({})
 const combined = ref<LearningPath | null>(null)
-const expanded = ref<string | null>(null)
+// Set of expanded goal ids — each card opens/closes independently.
+const expanded = ref<Set<string>>(new Set())
 const showCombined = ref(false)
+
+function isExpanded(id: string): boolean {
+  return expanded.value.has(id)
+}
+function toggleExpand(id: string): void {
+  if (expanded.value.has(id)) expanded.value.delete(id)
+  else expanded.value.add(id)
+}
 
 async function loadAll() {
   loading.value = true
@@ -71,6 +82,36 @@ async function onRemove(t: Goal) {
   await loadAll()
 }
 
+// ---- Add a goal (same flow as onboarding) --------------------------------
+// Opens a modal that reuses the onboarding GoalPicker, then offers to add or
+// change skills via the resume/transcript bootstrap — those are recorded as
+// self-asserted (self-made) claims, exactly as during onboarding.
+const showAddGoal = ref(false)
+const addStep = ref<'goal' | 'skills'>('goal')
+const skillsClaimed = ref(0)
+
+function openAddGoal() {
+  addStep.value = 'goal'
+  skillsClaimed.value = 0
+  showAddGoal.value = true
+}
+
+async function onGoalAdded() {
+  // A goal was set — refresh paths, then ask about skills.
+  await loadAll()
+  addStep.value = 'skills'
+}
+
+function onSkillsClaimed(n: number) {
+  skillsClaimed.value += n
+}
+
+async function closeAddGoal() {
+  showAddGoal.value = false
+  addStep.value = 'goal'
+  await loadAll()
+}
+
 const dash = computed(() => 2 * Math.PI * 20)
 </script>
 
@@ -83,14 +124,19 @@ const dash = computed(() => 2 * Math.PI * 20)
           {{ $t('goals.index.subtitle') }}
         </p>
       </div>
-      <AppButton
-        v-if="goals.length > 1"
-        variant="outline"
-        size="sm"
-        @click="showCombined = !showCombined"
-      >
-        {{ showCombined ? $t('goals.index.perGoal') : $t('goals.index.combinedPath') }}
-      </AppButton>
+      <div class="flex items-center gap-2">
+        <AppButton
+          v-if="goals.length > 1"
+          variant="outline"
+          size="sm"
+          @click="showCombined = !showCombined"
+        >
+          {{ showCombined ? $t('goals.index.perGoal') : $t('goals.index.combinedPath') }}
+        </AppButton>
+        <AppButton size="sm" data-testid="add-goal" @click="openAddGoal">
+          {{ $t('goals.index.addGoal') }}
+        </AppButton>
+      </div>
     </div>
 
     <!-- User lookup -->
@@ -125,7 +171,10 @@ const dash = computed(() => 2 * Math.PI * 20)
       :description="$t('goals.index.emptyDescription')"
     >
       <template #action>
-        <AppButton class="mt-4" @click="router.push('/skills')">{{ $t('goals.index.browseSkills') }}</AppButton>
+        <div class="mt-4 flex flex-wrap justify-center gap-2">
+          <AppButton data-testid="add-goal-empty" @click="openAddGoal">{{ $t('goals.index.addGoal') }}</AppButton>
+          <AppButton variant="outline" @click="router.push('/skills')">{{ $t('goals.index.browseSkills') }}</AppButton>
+        </div>
       </template>
     </EmptyState>
 
@@ -173,8 +222,8 @@ const dash = computed(() => 2 * Math.PI * 20)
         </div>
 
         <div class="mt-4 flex items-center gap-2">
-          <AppButton size="sm" @click="expanded = expanded === t.id ? null : t.id">
-            {{ expanded === t.id ? $t('goals.index.hidePath') : $t('goals.index.viewPath') }}
+          <AppButton size="sm" @click="toggleExpand(t.id)">
+            {{ isExpanded(t.id) ? $t('goals.index.hidePath') : $t('goals.index.viewPath') }}
           </AppButton>
           <button
             class="text-xs text-muted-foreground hover:text-destructive"
@@ -184,11 +233,38 @@ const dash = computed(() => 2 * Math.PI * 20)
           </button>
         </div>
 
-        <div v-if="expanded === t.id && paths[t.id]" class="mt-4 border-t border-border pt-4">
+        <div v-if="isExpanded(t.id) && paths[t.id]" class="mt-4 border-t border-border pt-4">
           <LearningPathView :path="paths[t.id]!" />
         </div>
       </div>
     </div>
+
+    <!-- Add-a-goal modal — same flow as onboarding -->
+    <AppModal
+      :open="showAddGoal"
+      :title="addStep === 'goal' ? $t('goals.index.addGoalTitle') : $t('goals.index.updateSkillsTitle')"
+      max-width="34rem"
+      @close="closeAddGoal"
+    >
+      <!-- Step 1: pick a goal (curated templates or a job description) -->
+      <div v-if="addStep === 'goal'">
+        <p class="mb-4 text-sm text-muted-foreground">{{ $t('goals.index.addGoalIntro') }}</p>
+        <GoalPicker @added="onGoalAdded" />
+      </div>
+
+      <!-- Step 2: optionally add/change skills (self-made claims) -->
+      <div v-else>
+        <p class="mb-1 text-sm text-muted-foreground">{{ $t('goals.index.updateSkillsIntro') }}</p>
+        <p class="mb-4 text-xs text-muted-foreground/80">{{ $t('goals.index.updateSkillsSelfMade') }}</p>
+        <SkillBootstrapPanel @claimed="onSkillsClaimed" />
+        <p v-if="skillsClaimed > 0" class="mt-3 text-xs text-success">
+          {{ $t('goals.index.skillsClaimed', { count: skillsClaimed }, skillsClaimed) }}
+        </p>
+        <div class="mt-5 flex justify-end">
+          <AppButton data-testid="add-goal-done" @click="closeAddGoal">{{ $t('goals.index.done') }}</AppButton>
+        </div>
+      </div>
+    </AppModal>
   </div>
 </template>
 

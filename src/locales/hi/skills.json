@@ -76,7 +76,9 @@
       "related": "संबंधित",
       "complementary": "पूरक",
       "alternative": "वैकल्पिक"
-    }
+    },
+    "relatedContent": "Related content",
+    "relatedOpinions": "Opinions in this field"
   },
   "bootstrap": {
     "title": "अपने कौशल जोड़ें",

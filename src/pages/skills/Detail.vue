@@ -3,20 +3,66 @@ import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { useLocalApi } from '@/composables/useLocalApi'
+import { useGoals } from '@/composables/useGoals'
 import { AppBadge, EmptyState } from '@/components/ui'
-import { extractSkillClaim, type SkillDetail, type VerifiableCredential } from '@/types'
+import CourseCard from '@/components/course/CourseCard.vue'
+import { extractSkillClaim, type SkillDetail, type VerifiableCredential, type Course, type OpinionRow } from '@/types'
 import { BLOOM_ORDER, bloomBadge } from '@/utils/bloom'
 
 const { invoke } = useLocalApi()
 const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
+const { goals } = useGoals()
 
 const skillId = route.params.id as string
 
 const detail = ref<SkillDetail | null>(null)
 const loading = ref(true)
 const error = ref<string | null>(null)
+
+// Related content for this skill — courses/tutorials that teach it and
+// opinions in its subject field. Ordered by alignment with the user's goals
+// first (most impactful to them), then by recency.
+const allCourses = ref<Course[]>([])
+const allOpinions = ref<OpinionRow[]>([])
+
+// Union of every skill across the user's active goals — used to rank content
+// that also advances what they're working toward.
+const goalSkillSet = computed(() => new Set(goals.value.flatMap((g) => g.goal_skill_ids)))
+
+function goalOverlap(skillIds: string[] | null | undefined): number {
+  if (!skillIds) return 0
+  let n = 0
+  for (const id of skillIds) if (goalSkillSet.value.has(id)) n++
+  return n
+}
+
+const relatedCourses = computed<Course[]>(() => {
+  const matches = allCourses.value.filter((c) => (c.skill_ids ?? []).includes(skillId))
+  return [...matches].sort((a, b) => {
+    // Most impactful for the user: more overlap with their goals first.
+    const g = goalOverlap(b.skill_ids) - goalOverlap(a.skill_ids)
+    if (g !== 0) return g
+    // Then broader coverage, then most recent.
+    const s = (b.skill_ids?.length ?? 0) - (a.skill_ids?.length ?? 0)
+    if (s !== 0) return s
+    return (b.published_at ?? b.created_at).localeCompare(a.published_at ?? a.created_at)
+  })
+})
+
+const relatedOpinions = computed<OpinionRow[]>(() => {
+  const field = detail.value?.skill.subject_field_id
+  if (!field) return []
+  return allOpinions.value
+    .filter((o) => o.subject_field_id === field && !o.withdrawn)
+    .sort((a, b) => b.published_at.localeCompare(a.published_at))
+    .slice(0, 6)
+})
+
+const hasRelatedContent = computed(
+  () => relatedCourses.value.length > 0 || relatedOpinions.value.length > 0,
+)
 
 // Credentials the local user holds that target this skill. Read via
 // `list_credentials(subject=<localDid>, skill_id=<skillId>)` so only
@@ -41,13 +87,22 @@ const bestCredential = computed<VerifiableCredential | null>(() => {
 
 onMounted(async () => {
   try {
-    const [d, did, creds] = await Promise.all([
+    const [d, did, creds, courses, opinions] = await Promise.all([
       invoke<SkillDetail>('get_skill', { skillId }),
       invoke<string | null>('get_local_did').catch(() => null),
       invoke<VerifiableCredential[]>('list_credentials', { skillId }).catch(() => []),
+      invoke<Course[]>('list_courses').catch(() => []),
+      invoke<OpinionRow[]>('list_opinions', {
+        subjectFieldId: null,
+        authorAddress: null,
+        includeWithdrawn: false,
+        limit: 200,
+      }).catch(() => []),
     ])
     detail.value = d
     localDid.value = did
+    allCourses.value = courses
+    allOpinions.value = opinions
     myCredentials.value = creds.filter((vc) => {
       if (did && vc.credentialSubject.id !== did) return false
       const claim = extractSkillClaim(vc.credentialSubject)
@@ -313,6 +368,36 @@ const relationLabels: Record<string, string> = {
             <span class="text-xs text-muted-foreground">
               {{ relationLabels[rel.relation_type] ?? rel.relation_type }}
             </span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Related content — ordered by goal alignment, then recency -->
+      <div v-if="hasRelatedContent" class="mt-6">
+        <h2 class="text-sm font-semibold text-foreground mb-3">
+          {{ $t('skills.detail.relatedContent') }}
+        </h2>
+
+        <!-- Courses & tutorials that teach this skill -->
+        <div v-if="relatedCourses.length > 0" class="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          <CourseCard v-for="c in relatedCourses" :key="c.id" :course="c" />
+        </div>
+
+        <!-- Opinions in this subject field -->
+        <div v-if="relatedOpinions.length > 0" class="card p-5 mt-4">
+          <h3 class="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
+            {{ $t('skills.detail.relatedOpinions') }}
+          </h3>
+          <div class="space-y-1">
+            <router-link
+              v-for="op in relatedOpinions"
+              :key="op.id"
+              :to="`/opinions/${op.id}`"
+              class="flex items-center gap-2 rounded-lg px-3 py-2.5 transition-all hover:bg-muted/40"
+            >
+              <svg class="w-4 h-4 text-primary/60 flex-shrink-0" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
+              <span class="text-sm truncate text-foreground">{{ op.title }}</span>
+            </router-link>
           </div>
         </div>
       </div>

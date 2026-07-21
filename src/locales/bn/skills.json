@@ -76,7 +76,9 @@
       "related": "সম্পর্কিত",
       "complementary": "পরিপূরক",
       "alternative": "বিকল্প"
-    }
+    },
+    "relatedContent": "Related content",
+    "relatedOpinions": "Opinions in this field"
   },
   "bootstrap": {
     "title": "আপনার দক্ষতা যোগ করুন",

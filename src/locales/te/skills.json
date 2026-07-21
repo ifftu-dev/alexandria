@@ -76,7 +76,9 @@
       "related": "సంబంధిత",
       "complementary": "అనుబంధ",
       "alternative": "ప్రత్యామ్నాయ"
-    }
+    },
+    "relatedContent": "Related content",
+    "relatedOpinions": "Opinions in this field"
   },
   "bootstrap": {
     "title": "మీ నైపుణ్యాలను జోడించండి",

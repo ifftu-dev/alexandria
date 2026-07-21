@@ -23,6 +23,18 @@ export function useGoals() {
 
   const goals = computed<Goal[]>(() => setting.ref.value ?? [])
 
+  /** Stable identity for a goal: same source DID, or same set of target
+   *  skills. Used to prevent adding the same goal twice. */
+  function sameGoal(a: Pick<Goal, 'source_did' | 'goal_skill_ids'>, b: typeof a): boolean {
+    // A goal sourced from another user's profile is identified by that DID.
+    if (a.source_did && b.source_did) return a.source_did === b.source_did
+    if (a.source_did || b.source_did) return false
+    // Otherwise identify by the target skill set (order-independent).
+    const sa = [...new Set(a.goal_skill_ids)].sort()
+    const sb = [...new Set(b.goal_skill_ids)].sort()
+    return sa.length === sb.length && sa.every((id, i) => id === sb[i])
+  }
+
   async function addGoal(input: {
     label: string
     goalSkillIds: string[]
@@ -33,6 +45,14 @@ export function useGoals() {
     resolutionProvenance?: Goal['resolution_provenance']
     taxonomyVersion?: string
   }): Promise<Goal> {
+    // Don't add the same goal twice — return the existing one instead.
+    const candidate = {
+      source_did: input.sourceDid ?? null,
+      goal_skill_ids: input.goalSkillIds,
+    }
+    const existing = (setting.ref.value ?? []).find((g) => sameGoal(g, candidate))
+    if (existing) return existing
+
     const goal: Goal = {
       id: genId(),
       label: input.label,
