@@ -5,7 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project loosely follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.1-alpha → 0.4.5-alpha] - 2026-04-14 → 2026-07-14
+
+> Covers every release after `0.1.0-alpha` up to and including `0.4.5-alpha`.
+> These entries were written in retrospective batches rather than per release,
+> so per-version attribution was not reconstructed — any bullet below may have
+> shipped in any release within this span.
 
 ### Added
 

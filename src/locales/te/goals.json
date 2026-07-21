@@ -17,7 +17,15 @@
     "nextStep": "తదుపరి: {name}",
     "allCleared": "మీరు ప్రతి దశకు సిద్ధంగా ఉన్నారు 🎉",
     "viewPath": "మార్గాన్ని చూడు",
-    "hidePath": "మార్గాన్ని దాచు"
+    "hidePath": "మార్గాన్ని దాచు",
+    "addGoal": "Add a goal",
+    "addGoalTitle": "Add a goal",
+    "addGoalIntro": "Set a new learning goal — pick a curated role, exam or curriculum, or paste a job description.",
+    "updateSkillsTitle": "Add or change your skills",
+    "updateSkillsIntro": "Want to add or change any skills you already have?",
+    "updateSkillsSelfMade": "These are recorded as self-made claims unless we already have on-platform evidence for them.",
+    "skillsClaimed": "Added {count} skill | Added {count} skills",
+    "done": "Done"
   },
   "picker": {
     "jobRole": "ఉద్యోగ పాత్ర",

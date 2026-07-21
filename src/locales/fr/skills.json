@@ -76,7 +76,9 @@
       "related": "Associée",
       "complementary": "Complémentaire",
       "alternative": "Alternative"
-    }
+    },
+    "relatedContent": "Related content",
+    "relatedOpinions": "Opinions in this field"
   },
   "bootstrap": {
     "title": "Ajoutez vos compétences",

@@ -754,6 +754,23 @@ pub async fn plugin_submit_and_grade(
     Ok(record)
 }
 
+/// Mobile stub for [`plugin_submit_and_grade`]. The wasmtime grader runtime is
+/// desktop-only (`wasm_runtime` is `#[cfg(desktop)]`), so on iOS / Android this
+/// returns a stable, catchable `GraderUnavailable` marker instead of failing as
+/// an unknown command. The editor plugin UIs match on this marker to show a
+/// clean "runs on desktop" message rather than a raw error. In-browser "Run
+/// tests" still works on mobile — only graded submission (which relies on the
+/// grader's hidden tests) is unavailable here.
+#[cfg(not(desktop))]
+#[tauri::command]
+pub async fn plugin_submit_and_grade() -> Result<serde_json::Value, String> {
+    Err(
+        "GraderUnavailable: graded submission runs on the desktop app; \
+         this device can run tests but not submit for a grade"
+            .to_string(),
+    )
+}
+
 /// Minimum grade fraction (0.0–1.0) that earns a skill credential from a graded
 /// plugin. A single challenge is coarse evidence, so the bar is a strong-but-
 /// not-perfect pass; the aggregation layer weighs it by provenance afterward.

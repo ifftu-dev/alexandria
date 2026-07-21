@@ -6,8 +6,8 @@ import { useLocalApi } from '@/composables/useLocalApi'
 import { useSkillGraphHover } from '@/composables/useSkillGraphHover'
 import { AppBadge, AppTabs } from '@/components/ui'
 import GraphVisibilityEditor from '@/components/skills/GraphVisibilityEditor.vue'
+import CredentialsPanel from '@/pages/dashboard/Credentials.vue'
 import {
-  extractSkillClaim,
   type SubjectFieldInfo,
   type SubjectInfo,
   type SkillInfo,
@@ -35,11 +35,11 @@ const search = ref('')
 const selectedField = ref<string | null>(null)
 const selectedSubject = ref<string | null>(null)
 
-const activeTab = ref('graph')
+const activeTab = ref('credentials')
 const tabs = computed(() => [
+  { key: 'credentials', label: t('skills.tabs.credentials') },
   { key: 'graph', label: t('skills.tabs.graph') },
   { key: 'browse', label: t('skills.tabs.browse') },
-  { key: 'credentials', label: t('skills.tabs.credentials') },
 ])
 
 onMounted(async () => {
@@ -121,12 +121,6 @@ const earnedSkillIdSet = computed(() =>
   earnedSkillIdsFromCredentials(myCredentials.value, localDid.value),
 )
 
-const mySkillCredentials = computed(() =>
-  myCredentials.value.filter((vc) => {
-    if (localDid.value && vc.credentialSubject.id !== localDid.value) return false
-    return extractSkillClaim(vc.credentialSubject) !== null
-  }),
-)
 
 const prereqMap = computed(() => {
   const map = new Map<string, string[]>()
@@ -551,58 +545,10 @@ onBeforeUnmount(() => {
       </div>
 
       <!-- ============ CREDENTIALS TAB ============ -->
+      <!-- Combined "Skills and Credentials" view: the full My Credentials
+           page is embedded here so both live under one nav entry. -->
       <div v-if="activeTab === 'credentials'">
-        <div v-if="mySkillCredentials.length === 0" class="py-16 text-center">
-          <div class="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-primary/10">
-            <svg class="h-8 w-8 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12c0 1.268-.63 2.39-1.593 3.068a3.745 3.745 0 01-1.043 3.296 3.745 3.745 0 01-3.296 1.043A3.745 3.745 0 0112 21c-1.268 0-2.39-.63-3.068-1.593a3.746 3.746 0 01-3.296-1.043 3.745 3.745 0 01-1.043-3.296A3.745 3.745 0 013 12c0-1.268.63-2.39 1.593-3.068a3.745 3.745 0 011.043-3.296 3.746 3.746 0 013.296-1.043A3.746 3.746 0 0112 3c1.268 0 2.39.63 3.068 1.593a3.746 3.746 0 013.296 1.043 3.746 3.746 0 011.043 3.296A3.745 3.745 0 0121 12z" />
-            </svg>
-          </div>
-          <h3 class="text-lg font-semibold text-foreground">{{ $t('skills.credentials.emptyTitle') }}</h3>
-          <p class="mt-1 text-sm text-muted-foreground max-w-md mx-auto">
-            {{ $t('skills.credentials.emptyBody') }}
-          </p>
-        </div>
-
-        <div v-else class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div
-            v-for="vc in mySkillCredentials"
-            :key="vc.id ?? vc.issuer + vc.validFrom"
-            class="rounded-xl bg-card shadow-sm p-5 cursor-pointer transition-shadow hover:shadow-md"
-            @click="extractSkillClaim(vc.credentialSubject) && goToSkill(extractSkillClaim(vc.credentialSubject)!.skillId)"
-          >
-            <div class="flex items-start justify-between mb-3 gap-3">
-              <div class="min-w-0">
-                <div class="text-sm font-medium truncate text-foreground">
-                  {{ skills.find(s => s.id === extractSkillClaim(vc.credentialSubject)?.skillId)?.name ?? extractSkillClaim(vc.credentialSubject)?.skillId }}
-                </div>
-                <AppBadge
-                  :variant="bloomBadge(BLOOM_ORDER[extractSkillClaim(vc.credentialSubject)?.level ?? 2] ?? 'apply')"
-                  class="mt-1.5"
-                >
-                  {{ BLOOM_ORDER[extractSkillClaim(vc.credentialSubject)?.level ?? 2] ?? 'apply' }}
-                </AppBadge>
-              </div>
-              <div class="text-end flex-shrink-0">
-                <div class="font-mono text-lg font-bold text-primary">
-                  {{ ((extractSkillClaim(vc.credentialSubject)?.score ?? 0) * 100).toFixed(0) }}%
-                </div>
-                <div class="text-[10px] text-muted-foreground">{{ $t('skills.credentials.score') }}</div>
-              </div>
-            </div>
-            <div class="flex flex-wrap gap-1.5 mt-2.5">
-              <AppBadge v-if="vc.witness" variant="success" class="text-[0.6rem]">
-                {{ $t('common.status.verified') }}
-              </AppBadge>
-              <AppBadge v-else variant="secondary" class="text-[0.6rem]">
-                {{ vc.type[vc.type.length - 1] }}
-              </AppBadge>
-              <span class="text-[10px] text-muted-foreground font-mono">
-                {{ vc.validFrom.slice(0, 10) }}
-              </span>
-            </div>
-          </div>
-        </div>
+        <CredentialsPanel />
       </div>
     </template>
   </div>

@@ -1474,8 +1474,10 @@ pub fn run() {
             commands::plugins::irl_get_submission,
             commands::plugins::irl_post_review,
             // Phase 2 — submit-and-grade against deterministic WASM graders.
-            // Desktop-only: wasmtime v27 lacks iOS / Android support.
-            #[cfg(desktop)]
+            // Desktop runs the real wasmtime grader; on mobile (wasmtime v27
+            // lacks iOS / Android support) a stub returns a catchable
+            // GraderUnavailable marker so the UI shows a clean message instead
+            // of an "unknown command" failure.
             commands::plugins::plugin_submit_and_grade,
             // Phase 3 — P2P discovery + Plugin DAO attestation
             commands::plugins::plugin_browse_catalog,

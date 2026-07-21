@@ -68,6 +68,10 @@ const permissions = ref<PluginPermissionRecord[]>([])
 const loading = ref(true)
 const loadError = ref<string | null>(null)
 const refusalReason = ref<string | null>(null)
+/** Non-fatal notice shown alongside a running plugin — currently the
+ *  "grading runs on desktop" message on mobile. Unlike `refusalReason` this
+ *  does not replace the iframe: the plugin stays usable, only grading is off. */
+const gradeNotice = ref<string | null>(null)
 // Opaque state the plugin last persisted for this element (e.g. an editor's
 // unsubmitted source). Loaded before the iframe mounts so it reaches the
 // plugin's `init`; the iframe is keyed on it so a late load still re-inits.
@@ -426,14 +430,31 @@ async function onSubmit(requestId: number, submission: unknown, metadata: unknow
       submissionJson,
       integritySessionId: props.integritySessionId ?? null,
     })
+    gradeNotice.value = null
     iframeRef.value?.resolveSubmit(requestId, { score: score.score })
     iframeRef.value?.sendSubmitAck(blake3HexHint(), score.score)
     emit('scored-complete', score.score)
   } catch (e) {
-    console.error('[alex] grade failed', e)
-    iframeRef.value?.resolveSubmit(requestId, null, String(e))
+    // The wasmtime grader is desktop-only, so on mobile the backend answers
+    // with a `GraderUnavailable:` marker instead of grading. That's an
+    // expected platform limit, not a failure — surface it as a plain notice
+    // and hand the plugin a clean reason rather than the raw marker string.
+    if (isGraderUnavailable(e)) {
+      gradeNotice.value = t('plugins.host.graderUnavailable')
+      iframeRef.value?.resolveSubmit(requestId, null, gradeNotice.value)
+    } else {
+      console.error('[alex] grade failed', e)
+      iframeRef.value?.resolveSubmit(requestId, null, String(e))
+    }
     iframeRef.value?.sendSubmitAck('', null)
   }
+}
+
+/** Marker prefix returned by the mobile stub of `plugin_submit_and_grade`
+ *  (see `src-tauri/src/commands/plugins.rs`). Matched as a prefix so the
+ *  human-readable tail can change without breaking detection. */
+function isGraderUnavailable(e: unknown): boolean {
+  return String(e).includes('GraderUnavailable')
 }
 
 /** The host computes BLAKE3 of the submission bytes for the persisted row;
@@ -474,6 +495,12 @@ function onIframeError(msg: string) {
     </AppAlert>
 
     <template v-else-if="manifest">
+      <!-- Grading unavailable on this platform. The plugin still runs, so this
+           sits above the iframe rather than replacing it. -->
+      <AppAlert v-if="gradeNotice" variant="warning" class="mb-3">
+        {{ gradeNotice }}
+      </AppAlert>
+
       <div class="flex-1 min-h-0 flex flex-col">
         <PluginIframe
           ref="iframeRef"

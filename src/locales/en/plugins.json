@@ -95,6 +95,7 @@
     "disabled": "This plugin is turned off. Turn it back on in Settings → Plugins to use it.",
     "noKinds": "This plugin doesn't define any activities, so it can't run.",
     "noGrader": "This plugin is set up for grading but has no grader attached. The author needs to publish a fix.",
-    "loadFailed": "Couldn't load the plugin: {error}"
+    "loadFailed": "Couldn't load the plugin: {error}",
+    "graderUnavailable": "Grading runs on the desktop app. You can still run the tests here, but this device can't submit for a grade."
   }
 }

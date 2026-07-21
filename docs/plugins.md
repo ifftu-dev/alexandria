@@ -80,9 +80,12 @@ IPC commands live in `src-tauri/src/commands/plugins.rs`: install /
 uninstall / list / get-manifest, capability grant/revoke/list,
 `plugin_set_enabled`, `plugin_get_docs`, `plugin_read_asset_data_url`
 (icons + README images as `data:` URLs), `plugin_submit_and_grade`
-(desktop), the `irl_*` inbox commands, and the Phase-3 catalog +
-attestation commands. DID→username resolution is
-`resolve_display_names` in `commands/identity.rs`.
+(registered on every platform — desktop runs the real wasmtime grader,
+mobile returns a `GraderUnavailable:` marker so callers can show a
+"runs on desktop" message instead of an unknown-command failure), the
+`irl_*` inbox commands, and the Phase-3 catalog + attestation commands.
+DID→username resolution is `resolve_display_names` in
+`commands/identity.rs`.
 
 ### Frontend (Vue)
 

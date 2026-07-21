@@ -95,6 +95,7 @@
     "disabled": "Cette extension est désactivée. Réactivez-la dans Paramètres → Extensions pour l'utiliser.",
     "noKinds": "Cette extension ne définit aucune activité, elle ne peut donc pas s'exécuter.",
     "noGrader": "Cette extension est configurée pour la notation mais n'a aucun correcteur associé. L'auteur doit publier un correctif.",
-    "loadFailed": "Impossible de charger l'extension : {error}"
+    "loadFailed": "Impossible de charger l'extension : {error}",
+    "graderUnavailable": "La notation s'exécute dans l'application de bureau. Vous pouvez lancer les tests ici, mais cet appareil ne peut pas soumettre pour notation."
   }
 }

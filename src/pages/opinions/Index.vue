@@ -1,12 +1,21 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { useRouter } from 'vue-router'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { AppButton, EmptyState, ProvenanceBadge } from '@/components/ui'
 import { useDisplayNames } from '@/composables/useDisplayNames'
 import type { OpinionRow, SubjectFieldInfo } from '@/types'
 
 const { invoke } = useLocalApi()
+const router = useRouter()
 const { displayName, ensureNames } = useDisplayNames()
+
+// Open an opinion author's public instructor profile. The card is itself a
+// router-link, so stop propagation / prevent default to avoid navigating to
+// the opinion at the same time.
+function goToInstructor(address: string) {
+  if (address) router.push(`/u/${address}`)
+}
 
 const loading = ref(true)
 const opinions = ref<OpinionRow[]>([])
@@ -202,7 +211,15 @@ onBeforeUnmount(() => {
                 </h3>
                 <ProvenanceBadge :provenance="op.provenance" />
               </div>
-              <div class="mt-1 truncate text-xs text-muted-foreground">
+              <button
+                v-if="op.author_address"
+                type="button"
+                class="op-card__author"
+                @click.stop.prevent="goToInstructor(op.author_address)"
+              >
+                {{ displayName(op.author_address) }}
+              </button>
+              <div v-else class="mt-1 truncate text-xs text-muted-foreground">
                 {{ displayName(op.author_address) }}
               </div>
               <div class="text-xs text-muted-foreground/80">
@@ -217,10 +234,27 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+/* Match the Home page "Courses" grid exactly so opinion cards render at the
+   same size: Tailwind gap-6 (1.5rem) and sm/lg/xl → 2/3/4 columns. */
 .op-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 1.25rem 1rem;
+  gap: 1.5rem;
+  grid-template-columns: 1fr;
+}
+@media (min-width: 640px) {
+  .op-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (min-width: 1024px) {
+  .op-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+@media (min-width: 1280px) {
+  .op-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
 }
 .op-card {
   display: block;
@@ -246,6 +280,25 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   background: linear-gradient(135deg, color-mix(in srgb, var(--app-primary) 14%, transparent), transparent);
+}
+.op-card__author {
+  display: block;
+  margin-top: 0.25rem;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: none;
+  border: 0;
+  padding: 0;
+  font-size: 0.75rem;
+  color: var(--app-muted-foreground);
+  cursor: pointer;
+  text-align: start;
+}
+.op-card__author:hover {
+  color: var(--app-primary);
+  text-decoration: underline;
 }
 .op-card__dur {
   position: absolute;

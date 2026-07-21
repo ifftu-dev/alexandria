@@ -135,6 +135,12 @@ const tutorials = computed(() =>
   courses.value.filter(c => c.kind === 'tutorial')
 )
 
+// Open a content author's public instructor profile. Cards are router-links,
+// so callers use @click.stop.prevent to suppress the card's own navigation.
+function openInstructor(address: string | null | undefined) {
+  if (address) router.push(`/u/${address}`)
+}
+
 // Single highest-value next action, surfaced as the dashboard hero. Priority:
 // resume an in-progress course → set a first target → start a first course →
 // browse. Keeps the landing screen action-oriented rather than passive.
@@ -578,6 +584,14 @@ onMounted(async () => {
                 <p v-if="tut.description" class="mt-0.5 text-xs text-muted-foreground line-clamp-1">
                   {{ tut.description }}
                 </p>
+                <button
+                  v-if="tut.author_address"
+                  type="button"
+                  class="mt-1 block max-w-full truncate text-start text-xs text-muted-foreground hover:text-primary hover:underline"
+                  @click.stop.prevent="openInstructor(tut.author_address)"
+                >
+                  {{ tut.author_name || tut.author_address.slice(0, 16) + '…' }}
+                </button>
               </div>
             </div>
           </router-link>

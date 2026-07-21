@@ -1,9 +1,21 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { invoke } from '@tauri-apps/api/core'
 import type { Course } from '@/types'
 import { sanitizeSvg } from '@/utils/sanitize'
 import { ProvenanceBadge } from '@/components/ui'
+
+const router = useRouter()
+
+// Navigate to the author's public instructor profile. The card itself is a
+// router-link to the content, so stop propagation / prevent default to avoid
+// also triggering the outer navigation.
+function goToInstructor() {
+  if (props.course.author_address) {
+    router.push(`/u/${props.course.author_address}`)
+  }
+}
 
 interface Props {
   course: Course
@@ -97,12 +109,27 @@ onMounted(async () => {
 
       <!-- Author + provenance -->
       <div class="cc-author">
-        <div class="cc-avatar">
-          <span>{{ (course.author_name || 'A').charAt(0).toUpperCase() }}</span>
+        <button
+          v-if="course.author_address"
+          type="button"
+          class="cc-author__link"
+          @click.stop.prevent="goToInstructor"
+        >
+          <div class="cc-avatar">
+            <span>{{ (course.author_name || 'A').charAt(0).toUpperCase() }}</span>
+          </div>
+          <span class="cc-author__name">
+            {{ course.author_name || course.author_address.slice(0, 16) + '...' }}
+          </span>
+        </button>
+        <div v-else class="cc-author__link cc-author__link--static">
+          <div class="cc-avatar">
+            <span>{{ (course.author_name || 'A').charAt(0).toUpperCase() }}</span>
+          </div>
+          <span class="cc-author__name">
+            {{ course.author_name || $t('courses.card.unknownAuthor') }}
+          </span>
         </div>
-        <span class="cc-author__name">
-          {{ course.author_name || (course.author_address ? course.author_address.slice(0, 16) + '...' : $t('courses.card.unknownAuthor')) }}
-        </span>
         <ProvenanceBadge :provenance="course.provenance" class="cc-author__badge" />
       </div>
     </div>
@@ -313,6 +340,28 @@ onMounted(async () => {
   font-size: 0.5rem;
   font-weight: 700;
   color: white;
+}
+
+.cc-author__link {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+  background: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  text-align: start;
+}
+
+.cc-author__link--static {
+  cursor: default;
+}
+
+.cc-author__link:not(.cc-author__link--static):hover .cc-author__name {
+  color: var(--app-primary);
+  text-decoration: underline;
 }
 
 .cc-author__name {

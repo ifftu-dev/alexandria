@@ -76,7 +76,9 @@
       "related": "Related",
       "complementary": "Complementary",
       "alternative": "Alternative"
-    }
+    },
+    "relatedContent": "Related content",
+    "relatedOpinions": "Opinions in this field"
   },
   "bootstrap": {
     "title": "Add your skills",

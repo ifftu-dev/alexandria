@@ -363,36 +363,12 @@ const avatarEmoji = computed(() => {
                 </svg>
                 {{ $t('nav.userMenu.myProfile') }}
               </button>
-              <!-- My Learning -->
-              <button class="flex items-center gap-2 rounded-lg px-3 py-2 w-full text-sm text-foreground transition-colors hover:bg-muted" @click="navigateFromMenu('/learning')">
-                <svg class="h-4 w-4 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-                </svg>
-                {{ $t('nav.userMenu.myLearning') }}
-              </button>
-
-              <!-- My Credentials -->
-              <button class="flex items-center gap-2 rounded-lg px-3 py-2 w-full text-sm text-foreground transition-colors hover:bg-muted" @click="navigateFromMenu('/credentials')">
-                <svg class="h-4 w-4 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-                </svg>
-                {{ $t('nav.userMenu.myCredentials') }}
-              </button>
-
               <!-- Sponsor -->
               <button class="flex items-center gap-2 rounded-lg px-3 py-2 w-full text-sm text-foreground transition-colors hover:bg-muted" @click="navigateFromMenu('/sponsor')">
                 <svg class="h-4 w-4 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M3 21v-2a4 4 0 014-4h10a4 4 0 014 4v2M7 7a4 4 0 108 0 4 4 0 00-8 0z" />
                 </svg>
                 {{ $t('nav.userMenu.sponsor') }}
-              </button>
-
-              <!-- My Skills -->
-              <button class="flex items-center gap-2 rounded-lg px-3 py-2 w-full text-sm text-foreground transition-colors hover:bg-muted" @click="navigateFromMenu('/skills')">
-                <svg class="h-4 w-4 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-                </svg>
-                {{ $t('nav.userMenu.mySkills') }}
               </button>
 
               <!-- My Reputation -->
@@ -409,14 +385,6 @@ const avatarEmoji = computed(() => {
                   <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
                 </svg>
                 {{ $t('nav.userMenu.sentinel') }}
-              </button>
-
-              <!-- Governance -->
-              <button class="flex items-center gap-2 rounded-lg px-3 py-2 w-full text-sm text-foreground transition-colors hover:bg-muted" @click="navigateFromMenu('/community')">
-                <svg class="h-4 w-4 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M3 21h18M3 10h18M5 6l7-3 7 3M4 10v11m16-11v11M8 14v3m4-3v3m4-3v3" />
-                </svg>
-                {{ $t('nav.userMenu.community') }}
               </button>
 
               <!-- Settings -->
