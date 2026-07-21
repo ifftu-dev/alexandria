@@ -190,7 +190,9 @@ const dash = computed(() => 2 * Math.PI * 20)
     </div>
 
     <!-- Per-goal cards -->
-    <div v-else class="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
+    <!-- items-start: grid rows default to stretch, which would inflate every
+         card in a row to match an expanded sibling's height. -->
+    <div v-else class="grid items-start gap-5 sm:grid-cols-2 xl:grid-cols-3">
       <div v-for="t in goals" :key="t.id" class="card flex flex-col p-5">
         <div class="flex items-start gap-4">
           <!-- progress ring -->
