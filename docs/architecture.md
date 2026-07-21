@@ -514,8 +514,8 @@ are deployed + verified on preprod but are not on the live path.
 | Course Player | `/learn/:id` | Content player (text, video, quiz) |
 | Composer (new) | `/instructor/composer/new` | Create a course or tutorial (supersedes the old course editor) |
 | Composer (edit) | `/instructor/composer/:id` | Edit an existing course or tutorial |
-| Skills Index | `/skills` | Browse skill taxonomy |
-| Skill Detail | `/skills/:id` | Skill info, prerequisites, proofs |
+| Skills & Credentials | `/skills` | Combined surface — the user's credentials (default tab), the skill graph, and taxonomy browsing |
+| Skill Detail | `/skills/:id` | Skill info, prerequisites, proofs, and related content (courses teaching it + opinions in its field, ranked by goal alignment) |
 | Governance Index | `/governance` | Browse DAOs |
 | DAO Detail | `/governance/:id` | DAO info, proposals, elections |
 | Classrooms Index | `/classrooms` | List joined classrooms |
@@ -525,7 +525,7 @@ are deployed + verified on preprod but are not on the live path.
 | Tutoring Index | `/tutoring` | Live tutoring sessions list |
 | Tutoring Session | `/tutoring/:id` | Active video/audio/screen session |
 | My Courses | `/dashboard/courses` | Enrolled courses, progress |
-| Credentials | `/dashboard/credentials` | W3C Verifiable Credentials |
+| Credentials | `/dashboard/credentials` | W3C Verifiable Credentials — the same view is embedded as the default tab of `/skills` |
 | Reputation | `/dashboard/reputation` | Distribution-based reputation (median/p25/p75) |
 | Network | `/dashboard/network` | P2P status, connected peers |
 | Sync | `/dashboard/sync` | Cross-device sync status |
