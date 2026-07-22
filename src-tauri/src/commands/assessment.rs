@@ -20,6 +20,9 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::assessment::items::{self, GradeEngine};
+use crate::assessment::policy::{
+    evaluate_attempt_policy, AttemptPolicy, AttemptRecord, PolicyDecision, ScorePolicy,
+};
 use crate::assessment::randomizer::{draw, QuestionMeta};
 use crate::commands::credentials::load_issuer_key;
 use crate::domain::vc::{Claim, CredentialType, SkillClaim};
@@ -60,6 +63,39 @@ fn parse_json_vec<T: serde::de::DeserializeOwned>(s: &str) -> Vec<T> {
     serde_json::from_str(s).unwrap_or_default()
 }
 
+/// Prior attempts for one learner and skill, newest first.
+///
+/// Scoped by skill rather than by bank: a skill may be backed by more than
+/// one ratified bank, and switching between them must not reset the
+/// cooldown — that would be the same re-roll by another route.
+fn load_attempt_history(
+    conn: &rusqlite::Connection,
+    subject_did: &str,
+    skill_id: &str,
+) -> Result<Vec<AttemptRecord>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT started_at, graded_at, passed FROM assessment_attempts \
+              WHERE subject_did = ?1 AND skill_id = ?2 \
+              ORDER BY started_at DESC LIMIT 200",
+        )
+        .map_err(|e| e.to_string())?;
+
+    let rows = stmt
+        .query_map(params![subject_did, skill_id], |r| {
+            Ok(AttemptRecord {
+                started_at: r.get(0)?,
+                graded_at: r.get(1)?,
+                passed: r.get::<_, Option<i64>>(2)?.map(|p| p != 0),
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .filter_map(|x| x.ok())
+        .collect();
+
+    Ok(rows)
+}
+
 // ---- start attempt ------------------------------------------------------
 
 /// Begin an attempt for `skill_id`: pick a ratified bank, draw a randomized,
@@ -84,12 +120,30 @@ pub async fn assessment_start_attempt(
     }
 
     // Pick a ratified bank for the skill.
-    let (bank_id, pass_threshold, draw_count): (String, f64, i64) = conn
+    let (bank_id, pass_threshold, draw_count, policy) = conn
         .query_row(
-            "SELECT id, pass_threshold, draw_count FROM question_banks \
-             WHERE skill_id = ?1 AND ratified = 1 ORDER BY created_at LIMIT 1",
+            "SELECT id, pass_threshold, draw_count, \
+                    max_attempts, cooldown_hours, attempt_window_days, score_policy \
+               FROM question_banks \
+              WHERE skill_id = ?1 AND ratified = 1 ORDER BY created_at LIMIT 1",
             params![skill_id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            |r| {
+                let cooldowns: String = r.get(4)?;
+                let window: i64 = r.get(5)?;
+                let score_policy: String = r.get(6)?;
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, f64>(1)?,
+                    r.get::<_, i64>(2)?,
+                    AttemptPolicy {
+                        max_attempts: r.get::<_, Option<i64>>(3)?.map(|m| m.max(0) as u32),
+                        cooldown_hours: serde_json::from_str(&cooldowns)
+                            .unwrap_or_else(|_| AttemptPolicy::default().cooldown_hours),
+                        attempt_window_days: (window > 0).then_some(window as u32),
+                        score_policy: ScorePolicy::parse_lenient(&score_policy),
+                    },
+                ))
+            },
         )
         .map_err(|e| match e {
             rusqlite::Error::QueryReturnedNoRows => {
@@ -97,6 +151,17 @@ pub async fn assessment_start_attempt(
             }
             other => other.to_string(),
         })?;
+
+    // Rate-limit credential-bearing attempts. Study is untouched; this only
+    // governs attempts that can mint a credential, because a score built by
+    // re-rolling until a favourable draw measures persistence rather than
+    // capability. See `assessment::policy`.
+    let history = load_attempt_history(conn, &subject_did, &skill_id)?;
+    let decision = evaluate_attempt_policy(&history, &policy, &now);
+    let attempt_ordinal = match &decision {
+        PolicyDecision::Allow { ordinal } => *ordinal,
+        refused => return Err(refused.refusal().unwrap_or_default()),
+    };
 
     // Load the bank's items. Reading `assessment_items` rather than
     // `bank_questions` is what routes this attempt through the unified
@@ -182,8 +247,8 @@ pub async fn assessment_start_attempt(
     conn.execute(
         "INSERT INTO assessment_attempts \
          (id, subject_did, bank_id, skill_id, seed, question_ids, option_orders, \
-          integrity_session_id, started_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+          integrity_session_id, started_at, attempt_ordinal) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         params![
             attempt_id,
             subject_did,
@@ -194,6 +259,7 @@ pub async fn assessment_start_attempt(
             serde_json::to_string(&drawn.option_orders).unwrap(),
             integrity_session_id,
             now,
+            attempt_ordinal as i64,
         ],
     )
     .map_err(|e| e.to_string())?;
@@ -258,18 +324,30 @@ pub fn grade_attempt_impl(
     let conn = db.conn();
 
     // Load attempt.
-    let (bank_id, skill_id, question_ids_json, option_orders_json, integrity_session_id): (
-        String,
-        String,
-        String,
-        String,
-        Option<String>,
-    ) = conn
+    #[allow(clippy::type_complexity)]
+    let (
+        bank_id,
+        skill_id,
+        question_ids_json,
+        option_orders_json,
+        integrity_session_id,
+        attempt_ordinal,
+    ): (String, String, String, String, Option<String>, Option<i64>) = conn
         .query_row(
-            "SELECT bank_id, skill_id, question_ids, option_orders, integrity_session_id \
-             FROM assessment_attempts WHERE id = ?1 AND graded_at IS NULL",
+            "SELECT bank_id, skill_id, question_ids, option_orders, integrity_session_id, \
+                    attempt_ordinal \
+               FROM assessment_attempts WHERE id = ?1 AND graded_at IS NULL",
             params![attempt_id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+            |r| {
+                Ok((
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    r.get(3)?,
+                    r.get(4)?,
+                    r.get::<_, Option<i64>>(5)?,
+                ))
+            },
         )
         .map_err(|e| match e {
             rusqlite::Error::QueryReturnedNoRows => "attempt not found or already graded".into(),
@@ -368,6 +446,14 @@ pub fn grade_attempt_impl(
                 "grade:{}:{}:{}",
                 g.grade.grader_cid, g.grade.content_cid, g.grade.submission_cid
             ));
+        }
+
+        // Which try this was. A score says nothing about how many attempts
+        // preceded it, and "passed on the seventh" is information an
+        // employer is entitled to — it is the difference between capability
+        // and persistence.
+        if let Some(ordinal) = attempt_ordinal {
+            evidence_refs.push(format!("attempt_ordinal:{ordinal}"));
         }
 
         let claim = SkillClaim {
@@ -492,8 +578,9 @@ mod tests {
         db.conn()
             .execute(
                 "INSERT INTO assessment_attempts \
-                 (id, subject_did, bank_id, skill_id, seed, question_ids, option_orders, started_at) \
-                 VALUES ('att_1', ?1, 'bank_t', 'skill_rust', 1, ?2, ?3, ?4)",
+                 (id, subject_did, bank_id, skill_id, seed, question_ids, option_orders, \
+                  started_at, attempt_ordinal) \
+                 VALUES ('att_1', ?1, 'bank_t', 'skill_rust', 1, ?2, ?3, ?4, 1)",
                 params![
                     did.0,
                     r#"["q1","q2"]"#,
@@ -692,5 +779,101 @@ mod tests {
         assert_eq!(score, 1.0);
         assert_eq!(passed, 1);
         assert!(graded_at.is_some());
+    }
+
+    #[test]
+    fn credential_records_which_attempt_succeeded() {
+        // "Passed on attempt 1" and "passed on attempt 9" describe very
+        // different learners, and only the credential can carry that.
+        let ctx = setup();
+        let r = grade(&ctx, &[answer("q1", &[0]), answer("q2", &[1])]);
+
+        let vc_json: String = ctx
+            .db
+            .conn()
+            .query_row(
+                "SELECT signed_vc_json FROM credentials WHERE id = ?1",
+                params![r.credential_id.unwrap()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(
+            vc_json.contains("attempt_ordinal:"),
+            "credential should record the attempt ordinal: {vc_json}"
+        );
+    }
+
+    #[test]
+    fn attempt_history_is_scoped_to_one_learner_and_skill() {
+        // A cooldown must not leak across learners or skills; either would
+        // block someone for another person's activity.
+        let ctx = setup();
+        ctx.db
+            .conn()
+            .execute_batch(
+                "INSERT INTO assessment_attempts
+                   (id, subject_did, bank_id, skill_id, seed, question_ids, option_orders, started_at)
+                 VALUES
+                   ('other_did', 'did:key:zSomeoneElse', 'bank_t', 'skill_rust', 1, '[]', '[]',
+                    '2026-07-22T11:00:00Z'),
+                   ('other_skill', 'did:key:zSelf', 'bank_t', 'skill_go', 1, '[]', '[]',
+                    '2026-07-22T11:00:00Z');",
+            )
+            .unwrap();
+
+        let mine = load_attempt_history(ctx.db.conn(), &ctx.did.0, "skill_rust").unwrap();
+        assert_eq!(
+            mine.len(),
+            1,
+            "only this learner's attempts at this skill should count"
+        );
+    }
+
+    #[test]
+    fn history_reports_ungraded_attempts_as_open() {
+        let ctx = setup();
+        let history = load_attempt_history(ctx.db.conn(), &ctx.did.0, "skill_rust").unwrap();
+        assert_eq!(history.len(), 1);
+        assert!(
+            history[0].graded_at.is_none(),
+            "the seeded attempt has not been graded yet"
+        );
+        assert!(history[0].passed.is_none());
+    }
+
+    #[test]
+    fn history_reflects_a_graded_attempt() {
+        let ctx = setup();
+        grade(&ctx, &[answer("q1", &[0]), answer("q2", &[1])]);
+
+        let history = load_attempt_history(ctx.db.conn(), &ctx.did.0, "skill_rust").unwrap();
+        assert_eq!(history.len(), 1);
+        assert!(history[0].graded_at.is_some());
+        assert_eq!(history[0].passed, Some(true));
+    }
+
+    #[test]
+    fn banks_carry_the_default_policy_after_migration() {
+        // Existing banks must acquire a sane policy rather than NULLs that
+        // would parse into something permissive by accident.
+        let ctx = setup();
+        let (cooldowns, window, score_policy, max): (String, i64, String, Option<i64>) = ctx
+            .db
+            .conn()
+            .query_row(
+                "SELECT cooldown_hours, attempt_window_days, score_policy, max_attempts
+                   FROM question_banks WHERE id = 'bank_t'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .unwrap();
+
+        assert_eq!(cooldowns, "[0,24,72,168]");
+        assert_eq!(window, 90);
+        assert_eq!(score_policy, "best");
+        assert!(
+            max.is_none(),
+            "no hard cap by default — cooldowns do the work"
+        );
     }
 }

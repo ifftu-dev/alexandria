@@ -8,6 +8,7 @@
 pub mod grader;
 pub mod items;
 pub mod mcq;
+pub mod policy;
 pub mod randomizer;
 
 /// A tiny deterministic PRNG (SplitMix64) so a stored `seed` reproduces the

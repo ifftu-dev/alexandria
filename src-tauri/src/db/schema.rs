@@ -81,6 +81,7 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (71, "plugin_review_course_scope", MIGRATION_071),
     (72, "unified_assessment_items", MIGRATION_072),
     (73, "bloom_level_normalisation", MIGRATION_073),
+    (74, "assessment_attempt_policy", MIGRATION_074),
 ];
 
 const MIGRATION_001: &str = r#"
@@ -2958,4 +2959,44 @@ UPDATE assessment_items
        'apply'
    )
  WHERE bloom_level IS NULL;
+"#;
+
+const MIGRATION_074: &str = r#"
+-- ============================================================
+-- Migration 074: attempt policy
+--
+-- A credential is issued only when an attempt passes, so a skill's
+-- aggregated score is a weighted mean of successes only — failures leave no
+-- trace. With unlimited attempts and a fresh random seed each time, a
+-- learner could re-roll until a favourable draw and bank the one result that
+-- counted. A passing score then measures persistence, not capability.
+--
+-- Two changes close that. Banks carry an attempt policy, and attempts record
+-- which try they were.
+--
+-- The default is escalating cooldowns and *no* hard cap: waiting always
+-- restores an attempt, and `attempt_window_days` means a learner returning
+-- months later starts fresh. Learning is free and unlimited; only the
+-- credential is rate-limited. A cap would punish the learner who genuinely
+-- needs six tries without distinguishing them from someone farming draws,
+-- which is what `attempt_ordinal` is for — it makes "passed on the seventh
+-- attempt" visible to whoever reads the credential instead of hidden.
+-- ============================================================
+
+-- NULL max_attempts means unlimited. Cooldowns are a JSON array of hours
+-- indexed by attempts already used; the last entry repeats, so escalation
+-- plateaus rather than growing without bound.
+ALTER TABLE question_banks ADD COLUMN max_attempts INTEGER;
+ALTER TABLE question_banks ADD COLUMN cooldown_hours TEXT NOT NULL DEFAULT '[0,24,72,168]';
+ALTER TABLE question_banks ADD COLUMN attempt_window_days INTEGER NOT NULL DEFAULT 90;
+ALTER TABLE question_banks ADD COLUMN score_policy TEXT NOT NULL DEFAULT 'best';
+
+-- 1-based index of this attempt within the policy window, copied onto the
+-- issued claim.
+ALTER TABLE assessment_attempts ADD COLUMN attempt_ordinal INTEGER;
+
+-- The policy reads a learner's recent attempts for one skill on every start,
+-- ordered by time.
+CREATE INDEX IF NOT EXISTS idx_assessment_attempts_history
+    ON assessment_attempts(subject_did, skill_id, started_at DESC);
 "#;
