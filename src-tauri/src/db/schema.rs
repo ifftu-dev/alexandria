@@ -80,6 +80,7 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (70, "assessment_question_banks", MIGRATION_070),
     (71, "plugin_review_course_scope", MIGRATION_071),
     (72, "unified_assessment_items", MIGRATION_072),
+    (73, "bloom_level_normalisation", MIGRATION_073),
 ];
 
 const MIGRATION_001: &str = r#"
@@ -2908,4 +2909,53 @@ JOIN question_banks b ON b.id = q.bank_id;
 -- shape serves both cases.
 INSERT OR IGNORE INTO assessment_item_skills (item_id, skill_id, weight)
 SELECT id, skill_id, 1.0 FROM assessment_items;
+"#;
+
+const MIGRATION_073: &str = r#"
+-- ============================================================
+-- Migration 073: Bloom levels become a real, ordered type
+--
+-- `skills.bloom_level` has been a free-text column since the initial
+-- schema, documented in a trailing comment and read by nobody. Governance
+-- separately carried its own `&[&str]` ordering to gate proposal and
+-- election eligibility. Those are now one type — `domain::bloom::BloomLevel`
+-- — so "at least analyze" means the same thing to a DAO gate, an assessment
+-- blueprint, and a capability query.
+--
+-- This migration only reconciles the data. Two jobs:
+--
+--   1. Normalise any `skills.bloom_level` that is not one of the six known
+--      tokens. The type parses leniently (unknown becomes 'apply'), so
+--      leaving stray values would mean the row and the type disagree about
+--      what the skill is.
+--
+--   2. Backfill `assessment_items.bloom_level`, which migration 072 added
+--      but left NULL. An item inherits its skill's level as a starting
+--      point; item-level overrides are authored later, and are the reason
+--      the column lives on the item rather than being read through the join
+--      every time.
+--
+-- No CHECK constraint is added. Every write now goes through `BloomLevel`'s
+-- `ToSql`, which can only emit a known token, and adding one would require
+-- rebuilding `skills` — a table with foreign keys pointing at it from
+-- `skill_prerequisites`, `skill_relations`, `credentials` and more. The
+-- constraint would buy defence against hand-written SQL at the cost of a
+-- risky table rebuild; the type is the real guarantee.
+-- ============================================================
+
+UPDATE skills
+   SET bloom_level = 'apply'
+ WHERE bloom_level IS NULL
+    OR LOWER(TRIM(bloom_level)) NOT IN
+       ('remember', 'understand', 'apply', 'analyze', 'evaluate', 'create');
+
+-- Fold case/whitespace variants onto the canonical token.
+UPDATE skills SET bloom_level = LOWER(TRIM(bloom_level));
+
+UPDATE assessment_items
+   SET bloom_level = COALESCE(
+       (SELECT s.bloom_level FROM skills s WHERE s.id = assessment_items.skill_id),
+       'apply'
+   )
+ WHERE bloom_level IS NULL;
 "#;

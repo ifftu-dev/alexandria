@@ -84,7 +84,16 @@ pub struct TaxonomySkill {
     pub name: String,
     pub description: Option<String>,
     pub subject_id: String,
-    pub bloom_level: String,
+    /// Cognitive level this skill sits at.
+    ///
+    /// Typed rather than free text so it can be compared, but deliberately
+    /// lenient on the way in: taxonomy documents arrive over gossip from
+    /// peers who may run a different build, and an unrecognised level
+    /// normalises to the default instead of rejecting the whole document.
+    /// The wire representation is unchanged — the same lowercase tokens as
+    /// before — so existing documents parse and re-encode identically.
+    #[serde(default)]
+    pub bloom_level: crate::domain::bloom::BloomLevel,
 }
 
 /// A taxonomy version record as stored in the local `taxonomy_versions` table.

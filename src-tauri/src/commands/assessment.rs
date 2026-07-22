@@ -104,7 +104,7 @@ pub async fn assessment_start_attempt(
     // key cannot be selected here even by accident.
     let mut stmt = conn
         .prepare(
-            "SELECT id, content_public, difficulty FROM assessment_items \
+            "SELECT id, content_public, difficulty, bloom_level FROM assessment_items \
              WHERE bank_id = ?1 ORDER BY id",
         )
         .map_err(|e| e.to_string())?;
@@ -113,6 +113,7 @@ pub async fn assessment_start_attempt(
         prompt: String,
         options: Vec<String>,
         difficulty: u8,
+        bloom: crate::domain::bloom::BloomLevel,
     }
     let all: Vec<Q> = stmt
         .query_map(params![bank_id], |r| {
@@ -136,6 +137,11 @@ pub async fn assessment_start_attempt(
                     })
                     .unwrap_or_default(),
                 difficulty: r.get::<_, i64>(2)? as u8,
+                // NULL for items authored before the Bloom axis existed;
+                // `FromSql` normalises those to the default level.
+                bloom: r
+                    .get::<_, Option<crate::domain::bloom::BloomLevel>>(3)?
+                    .unwrap_or_default(),
             })
         })
         .map_err(|e| e.to_string())?
@@ -151,6 +157,7 @@ pub async fn assessment_start_attempt(
             id: q.id.clone(),
             difficulty: q.difficulty,
             option_count: q.options.len(),
+            bloom: q.bloom,
         })
         .collect();
     let drawn = draw(&metas, draw_count.max(1) as usize, seed);

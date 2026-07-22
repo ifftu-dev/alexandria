@@ -240,3 +240,204 @@ fn item_kind_is_constrained() {
     );
     assert!(err.is_err(), "CHECK constraint should reject unknown kinds");
 }
+
+// ---- migration 073: bloom levels -----------------------------------------
+
+fn rerun_migration(db: &Database, version: i64) {
+    let (_, _, sql) = MIGRATIONS
+        .iter()
+        .find(|(v, _, _)| *v == version)
+        .unwrap_or_else(|| panic!("migration {version} exists"));
+    db.conn()
+        .execute_batch(sql)
+        .unwrap_or_else(|e| panic!("migration {version} re-runs cleanly: {e}"));
+}
+
+/// `skills.subject_id` is a real foreign key, so a skill fixture needs a
+/// subject and a subject field behind it.
+fn seed_subject(db: &Database) {
+    db.conn()
+        .execute_batch(
+            "INSERT OR IGNORE INTO subject_fields (id, name) VALUES ('sf', 'Field');
+             INSERT OR IGNORE INTO subjects (id, name, subject_field_id)
+             VALUES ('sub', 'Subject', 'sf');",
+        )
+        .expect("seed subject");
+}
+
+fn skill_level(db: &Database, id: &str) -> String {
+    db.conn()
+        .query_row("SELECT bloom_level FROM skills WHERE id = ?1", [id], |r| {
+            r.get(0)
+        })
+        .expect("skill row")
+}
+
+#[test]
+fn normalises_unknown_bloom_levels_to_the_column_default() {
+    // A row the type would read as `apply` must not keep claiming to be
+    // something else — the row and the type have to agree.
+    let db = Database::open_in_memory().expect("db");
+    db.run_migrations().expect("migrations");
+    seed_subject(&db);
+    db.conn()
+        .execute_batch(
+            "INSERT INTO skills (id, name, subject_id, bloom_level)
+             VALUES ('s_bad', 'Bad', 'sub', 'synthesize'),
+                    ('s_empty', 'Empty', 'sub', '');",
+        )
+        .expect("seed");
+    rerun_migration(&db, 73);
+
+    assert_eq!(skill_level(&db, "s_bad"), "apply");
+    assert_eq!(skill_level(&db, "s_empty"), "apply");
+}
+
+#[test]
+fn folds_case_and_whitespace_onto_the_canonical_token() {
+    let db = Database::open_in_memory().expect("db");
+    db.run_migrations().expect("migrations");
+    seed_subject(&db);
+    db.conn()
+        .execute_batch(
+            "INSERT INTO skills (id, name, subject_id, bloom_level)
+             VALUES ('s_case', 'Case', 'sub', '  Analyze ');",
+        )
+        .expect("seed");
+    rerun_migration(&db, 73);
+
+    assert_eq!(skill_level(&db, "s_case"), "analyze");
+}
+
+#[test]
+fn leaves_valid_bloom_levels_untouched() {
+    let db = Database::open_in_memory().expect("db");
+    db.run_migrations().expect("migrations");
+    seed_subject(&db);
+    for level in [
+        "remember",
+        "understand",
+        "apply",
+        "analyze",
+        "evaluate",
+        "create",
+    ] {
+        db.conn()
+            .execute(
+                "INSERT INTO skills (id, name, subject_id, bloom_level) VALUES (?1, 'S', 'sub', ?2)",
+                rusqlite::params![format!("s_{level}"), level],
+            )
+            .expect("seed");
+    }
+    rerun_migration(&db, 73);
+
+    for level in [
+        "remember",
+        "understand",
+        "apply",
+        "analyze",
+        "evaluate",
+        "create",
+    ] {
+        assert_eq!(skill_level(&db, &format!("s_{level}")), level);
+    }
+}
+
+#[test]
+fn backfills_item_bloom_level_from_the_parent_skill() {
+    // Migration 072 left the column NULL; an item should start at its
+    // skill's level rather than at a guess.
+    let db = Database::open_in_memory().expect("db");
+    db.run_migrations().expect("migrations");
+    seed_subject(&db);
+    db.conn()
+        .execute_batch(
+            "INSERT INTO skills (id, name, subject_id, bloom_level)
+             VALUES ('s_eval', 'Eval', 'sub', 'evaluate');
+             INSERT INTO assessment_items (id, item_kind, skill_id, content_public, bloom_level)
+             VALUES ('i_1', 'mcq', 's_eval', '{}', NULL);",
+        )
+        .expect("seed");
+    rerun_migration(&db, 73);
+
+    let level: String = db
+        .conn()
+        .query_row(
+            "SELECT bloom_level FROM assessment_items WHERE id = 'i_1'",
+            [],
+            |r| r.get(0),
+        )
+        .expect("item row");
+    assert_eq!(level, "evaluate");
+}
+
+#[test]
+fn item_backfill_does_not_overwrite_an_authored_level() {
+    // The column exists on the item precisely so it can differ from the
+    // skill's; a re-run must not flatten that back.
+    let db = Database::open_in_memory().expect("db");
+    db.run_migrations().expect("migrations");
+    seed_subject(&db);
+    db.conn()
+        .execute_batch(
+            "INSERT INTO skills (id, name, subject_id, bloom_level)
+             VALUES ('s_x', 'X', 'sub', 'remember');
+             INSERT INTO assessment_items (id, item_kind, skill_id, content_public, bloom_level)
+             VALUES ('i_authored', 'mcq', 's_x', '{}', 'create');",
+        )
+        .expect("seed");
+    rerun_migration(&db, 73);
+    rerun_migration(&db, 73);
+
+    let level: String = db
+        .conn()
+        .query_row(
+            "SELECT bloom_level FROM assessment_items WHERE id = 'i_authored'",
+            [],
+            |r| r.get(0),
+        )
+        .expect("item row");
+    assert_eq!(level, "create");
+}
+
+#[test]
+fn item_with_a_missing_skill_still_gets_a_level() {
+    let db = Database::open_in_memory().expect("db");
+    db.run_migrations().expect("migrations");
+    db.conn()
+        .execute_batch(
+            "INSERT INTO assessment_items (id, item_kind, skill_id, content_public, bloom_level)
+             VALUES ('i_orphan', 'mcq', 'no_such_skill', '{}', NULL);",
+        )
+        .expect("seed");
+    rerun_migration(&db, 73);
+
+    let level: String = db
+        .conn()
+        .query_row(
+            "SELECT bloom_level FROM assessment_items WHERE id = 'i_orphan'",
+            [],
+            |r| r.get(0),
+        )
+        .expect("item row");
+    assert_eq!(level, "apply");
+}
+
+#[test]
+fn seeded_taxonomy_carries_only_known_bloom_levels() {
+    // The shipped seed is the largest real dataset here; if it contained a
+    // stray level the normalisation above would silently rewrite content.
+    let db = Database::open_in_memory().expect("db");
+    db.run_migrations().expect("migrations");
+
+    let bad: i64 = db
+        .conn()
+        .query_row(
+            "SELECT COUNT(*) FROM skills WHERE bloom_level NOT IN
+             ('remember','understand','apply','analyze','evaluate','create')",
+            [],
+            |r| r.get(0),
+        )
+        .expect("count");
+    assert_eq!(bad, 0, "seeded skills must use canonical Bloom tokens");
+}
