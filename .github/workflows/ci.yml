@@ -356,9 +356,13 @@ jobs:
           workspaces: alexandria -> target
           key: mobile-${{ matrix.target }}
 
+      # Scoped to -p alexandria-node deliberately. A bare `cargo check` at the
+      # workspace root also checks vendored members like patches/ffmpeg-sys-next,
+      # whose build script needs a cross-compile pkg-config sysroot we have no
+      # reason to set up for a type-check.
       - name: Type-check ${{ matrix.label }}
         working-directory: alexandria
-        run: cargo check --target ${{ matrix.target }} --features ${{ matrix.features }}
+        run: cargo check -p alexandria-node --target ${{ matrix.target }} --features ${{ matrix.features }}
 
   release-readiness:
     name: Release Readiness
