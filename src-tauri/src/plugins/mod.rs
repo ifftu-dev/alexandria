@@ -27,5 +27,8 @@ pub mod verifier;
 // is desktop-only; mobile builds omit it. The IPC layer exposes a stub
 // that returns a `GraderUnavailable` error on mobile — native built-in
 // graders (MCQ, essay) continue to work everywhere.
+// The grade envelope is platform-independent even though the wasm engine
+// below is not — native graders on mobile speak the same contract.
+pub mod grade_contract;
 #[cfg(desktop)]
 pub mod wasm_runtime;

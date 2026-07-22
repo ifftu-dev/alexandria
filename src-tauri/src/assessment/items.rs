@@ -45,13 +45,36 @@
 //! stable for an item across every attempt — which is what a verifier needs
 //! in order to re-derive a score from the item alone.
 
-use std::path::{Path, PathBuf};
-
 use serde::{Deserialize, Serialize};
 
 use crate::db::Database;
+use crate::plugins::grade_contract::ScoreRecord;
 use crate::plugins::registry;
-use crate::plugins::wasm_runtime::{GradeInput, GraderBudgets, GraderRuntime};
+
+#[cfg(desktop)]
+use crate::plugins::grade_contract::GradeInput;
+#[cfg(desktop)]
+use crate::plugins::wasm_runtime::{GraderBudgets, GraderRuntime};
+
+/// Grading engine for one call.
+///
+/// Wasmtime has no mobile target, so the runtime is `#[cfg(desktop)]`. This
+/// carries it where it exists and is empty where it does not, keeping one
+/// `grade_item` signature on every platform instead of two cfg'd copies of
+/// the whole function. Both variants take a lifetime so that signature is
+/// literally identical — a mobile-only unit struct would not compile against
+/// `&GradeEngine<'_>`.
+#[cfg(desktop)]
+pub struct GradeEngine<'a> {
+    pub runtime: &'a GraderRuntime,
+    pub budgets: GraderBudgets,
+}
+
+/// Mobile: no wasm engine. MCQ still grades natively; plugin items refuse,
+/// matching the existing `GraderUnavailable` behaviour.
+#[cfg(not(desktop))]
+#[derive(Default)]
+pub struct GradeEngine<'a>(std::marker::PhantomData<&'a ()>);
 
 /// Kind of gradeable item. `Mcq` is host-provided and graded by the built-in
 /// `mcq-grader`; `Plugin` delegates to the grader named by the item's
@@ -228,8 +251,7 @@ pub fn map_selection_to_original(selected_positions: &[usize], option_order: &[u
 /// Where a grader's bytes live on disk, plus the CID that must match them.
 struct ResolvedGrader {
     cid: String,
-    wasm_path: PathBuf,
-    cwasm_path: PathBuf,
+    install_path: String,
 }
 
 /// Resolve which grader runs an item.
@@ -256,8 +278,7 @@ fn resolve_grader(db: &Database, item: &AssessmentItem) -> Result<ResolvedGrader
 
     Ok(ResolvedGrader {
         cid: grader.cid.clone(),
-        wasm_path: Path::new(&installed.install_path).join(registry::GRADER_FILENAME),
-        cwasm_path: Path::new(&installed.install_path).join(registry::GRADER_CWASM_FILENAME),
+        install_path: installed.install_path,
     })
 }
 
@@ -273,15 +294,51 @@ fn resolve_grader(db: &Database, item: &AssessmentItem) -> Result<ResolvedGrader
 /// so a verifier re-running with the same three inputs gets the same score.
 pub fn grade_item(
     db: &Database,
-    runtime: &GraderRuntime,
+    engine: &GradeEngine<'_>,
     item: &AssessmentItem,
     submission: &serde_json::Value,
     option_order: Option<&[usize]>,
-    budgets: GraderBudgets,
 ) -> Result<ItemGrade, String> {
     let resolved = resolve_grader(db, item)?;
 
-    let wasm_bytes = std::fs::read(&resolved.wasm_path)
+    let submission = normalize_submission(item, submission, option_order)?;
+    let content = grade_content(item);
+
+    // Serialize each half once and hash exactly those bytes, so the CIDs
+    // describe what the grader actually saw.
+    let content_bytes = serde_json::to_vec(&content).map_err(|e| e.to_string())?;
+    let submission_bytes = serde_json::to_vec(&submission).map_err(|e| e.to_string())?;
+    let content_cid = blake3::hash(&content_bytes).to_hex().to_string();
+    let submission_cid = blake3::hash(&submission_bytes).to_hex().to_string();
+
+    let record = run_grader(engine, &resolved, item, &content, &submission)?;
+
+    Ok(ItemGrade {
+        // A grader returning out-of-range is a bug in that grader, not a
+        // reason to reject the attempt — clamp and carry on.
+        score: record.score.clamp(0.0, 1.0),
+        details: record.details,
+        grader_cid: resolved.cid,
+        content_cid,
+        submission_cid,
+    })
+}
+
+/// Desktop: run the published wasm artifact.
+#[cfg(desktop)]
+fn run_grader(
+    engine: &GradeEngine<'_>,
+    resolved: &ResolvedGrader,
+    item: &AssessmentItem,
+    content: &serde_json::Value,
+    submission: &serde_json::Value,
+) -> Result<ScoreRecord, String> {
+    use std::path::Path;
+
+    let wasm_path = Path::new(&resolved.install_path).join(registry::GRADER_FILENAME);
+    let cwasm_path = Path::new(&resolved.install_path).join(registry::GRADER_CWASM_FILENAME);
+
+    let wasm_bytes = std::fs::read(&wasm_path)
         .map_err(|e| format!("failed to read grader.wasm for item {}: {e}", item.id))?;
 
     // Re-check the bytes against the declared CID. Install already verified
@@ -295,40 +352,42 @@ pub fn grade_item(
         ));
     }
 
-    let submission = normalize_submission(item, submission, option_order)?;
-    let content = grade_content(item);
-
-    // Serialize each half once and hash exactly those bytes, so the CIDs
-    // describe what the grader actually saw.
-    let content_bytes = serde_json::to_vec(&content).map_err(|e| e.to_string())?;
-    let submission_bytes = serde_json::to_vec(&submission).map_err(|e| e.to_string())?;
-    let content_cid = blake3::hash(&content_bytes).to_hex().to_string();
-    let submission_cid = blake3::hash(&submission_bytes).to_hex().to_string();
-
     let envelope = GradeInput {
         version: "1".to_string(),
-        content,
-        submission,
+        content: content.clone(),
+        submission: submission.clone(),
     };
     let envelope_bytes = serde_json::to_vec(&envelope).map_err(|e| e.to_string())?;
 
-    let record = runtime.grade(
+    engine.runtime.grade(
         &resolved.cid,
         &wasm_bytes,
-        Some(&resolved.cwasm_path),
+        Some(&cwasm_path),
         &envelope_bytes,
-        budgets,
-    )?;
+        engine.budgets,
+    )
+}
 
-    Ok(ItemGrade {
-        // A grader returning out-of-range is a bug in that grader, not a
-        // reason to reject the attempt — clamp and carry on.
-        score: record.score.clamp(0.0, 1.0),
-        details: record.details,
-        grader_cid: resolved.cid,
-        content_cid,
-        submission_cid,
-    })
+/// Mobile: no wasm engine exists. MCQ grades through the native
+/// implementation, which [`crate::assessment::mcq`] proves equivalent to the
+/// wasm artifact whose CID is recorded — so a score produced here still
+/// re-derives correctly elsewhere. Plugin items cannot run and say so.
+#[cfg(not(desktop))]
+fn run_grader(
+    _engine: &GradeEngine<'_>,
+    _resolved: &ResolvedGrader,
+    item: &AssessmentItem,
+    content: &serde_json::Value,
+    submission: &serde_json::Value,
+) -> Result<ScoreRecord, String> {
+    match item.item_kind {
+        ItemKind::Mcq => Ok(crate::assessment::mcq::score(content, submission)),
+        ItemKind::Plugin => Err(
+            "GraderUnavailable: this item is graded by a plugin, which runs on the desktop app; \
+             open it there to submit for a credential"
+                .to_string(),
+        ),
+    }
 }
 
 /// Rewrite a submission into the shape its grader expects.
@@ -527,9 +586,10 @@ mod tests {
 /// prove the pieces are actually wired to each other — that
 /// [`resolve_grader`] finds the built-in plugin by its derived CID, that the
 /// bytes on disk verify, and that a shuffled attempt grades correctly.
-#[cfg(test)]
+#[cfg(all(test, desktop))]
 mod e2e {
     use super::*;
+    use crate::plugins::wasm_runtime::{GraderBudgets, GraderRuntime};
     use crate::plugins::{builtins, registry};
     use tempfile::TempDir;
 
@@ -537,6 +597,15 @@ mod e2e {
         db: Database,
         runtime: GraderRuntime,
         _dir: TempDir,
+    }
+
+    impl Fixture {
+        fn engine(&self) -> GradeEngine<'_> {
+            GradeEngine {
+                runtime: &self.runtime,
+                budgets: GraderBudgets::default(),
+            }
+        }
     }
 
     fn fixture() -> Fixture {
@@ -595,11 +664,10 @@ mod e2e {
             .expect("item exists");
         grade_item(
             &f.db,
-            &f.runtime,
+            &f.engine(),
             &item,
             &serde_json::json!({ "selected_positions": positions }),
             order,
-            GraderBudgets::default(),
         )
         .expect("grade succeeds")
     }
@@ -711,15 +779,7 @@ mod e2e {
             .expect("insert");
 
         let item = load_item(&f.db, "q_bad").unwrap().unwrap();
-        let err = grade_item(
-            &f.db,
-            &f.runtime,
-            &item,
-            &serde_json::json!({}),
-            None,
-            GraderBudgets::default(),
-        )
-        .unwrap_err();
+        let err = grade_item(&f.db, &f.engine(), &item, &serde_json::json!({}), None).unwrap_err();
         assert!(err.contains("no plugin_cid"), "unexpected error: {err}");
     }
 
@@ -748,7 +808,7 @@ mod e2e {
 /// 2. `wasm == 1.0` exactly when `host == 1.0` — full marks are awarded on
 ///    precisely the same answers as before. Partial credit fills the gap
 ///    between 0 and 1; it never redefines "correct".
-#[cfg(test)]
+#[cfg(all(test, desktop))]
 mod equivalence {
     use crate::assessment::grader::{grade as host_grade, GradedQuestion};
     use crate::plugins::wasm_runtime::{GraderBudgets, GraderRuntime};

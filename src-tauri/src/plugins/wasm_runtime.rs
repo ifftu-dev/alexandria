@@ -36,7 +36,6 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use serde::{Deserialize, Serialize};
 use wasmtime::{
     Config, Engine, Linker, Memory, Module, Store, StoreLimits, StoreLimitsBuilder, TypedFunc,
 };
@@ -53,23 +52,11 @@ pub const DEFAULT_MEMORY_MAX_BYTES: usize = 128 * 1024 * 1024; // 128 MiB
 pub const DEFAULT_FUEL: u64 = 50_000_000_000;
 pub const DEFAULT_OUTPUT_MAX_BYTES: usize = 1024 * 1024; // 1 MiB
 
-/// JSON envelope passed to the grader.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GradeInput {
-    pub version: String,
-    pub content: serde_json::Value,
-    pub submission: serde_json::Value,
-}
-
-/// JSON envelope returned by the grader. The `score` is a fraction in
-/// `[0.0, 1.0]`; `details` is plugin-defined.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ScoreRecord {
-    pub version: String,
-    pub score: f64,
-    #[serde(default)]
-    pub details: serde_json::Value,
-}
+// The envelope types live in `grade_contract` so mobile — where this whole
+// module is cfg'd out — can still speak ABI v1 with a native grader.
+// Re-exported here so existing `wasm_runtime::{GradeInput, ScoreRecord}`
+// imports keep working.
+pub use super::grade_contract::{GradeInput, ScoreRecord};
 
 #[derive(Debug, Clone, Copy)]
 pub struct GraderBudgets {
