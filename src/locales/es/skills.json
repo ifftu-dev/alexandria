@@ -125,6 +125,8 @@
     "statusLocked": "Bloqueada",
     "goalBadge": "★ meta",
     "empty": "Nada que aprender: ya has demostrado todo en esta meta.",
-    "noCourse": "Aún no hay ningún curso que cubra esto."
+    "noCourse": "Aún no hay ningún curso que cubra esto.",
+    "assess": "Assess",
+    "cooldownUntil": "in {when}"
   }
 }

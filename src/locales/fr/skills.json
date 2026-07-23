@@ -125,6 +125,8 @@
     "statusLocked": "Verrouillée",
     "goalBadge": "★ objectif",
     "empty": "Rien à apprendre — vous avez déjà tout prouvé dans cet objectif.",
-    "noCourse": "Aucun cours ne couvre encore ceci."
+    "noCourse": "Aucun cours ne couvre encore ceci.",
+    "assess": "Assess",
+    "cooldownUntil": "in {when}"
   }
 }

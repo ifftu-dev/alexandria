@@ -1,12 +1,32 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
-import type { LearningPath, LearningStepStatus } from '@/types'
+import type { LearningPath, LearningStepStatus, GoalAssessmentStep } from '@/types'
 
-defineProps<{ path: LearningPath }>()
+const props = defineProps<{
+  path: LearningPath
+  /** Per-skill assessability, keyed by skill_id. When present, an "Assess"
+   *  affordance appears on skills that can be assessed right now, driving the
+   *  standalone assessment runner. Absent → no assessment UI (the view's
+   *  original behaviour, still used where assessment isn't in scope). */
+  assess?: Record<string, GoalAssessmentStep>
+}>()
 
 const { t } = useI18n()
 const router = useRouter()
+
+/** Short, locale-agnostic "in Nd"/"in Nh" until an attempt reopens. */
+function cooldownLabel(untilIso: string): string {
+  const ms = new Date(untilIso).getTime() - Date.now()
+  if (!Number.isFinite(ms) || ms <= 0) return ''
+  const hours = Math.ceil(ms / 3_600_000)
+  const when = hours >= 24 ? `${Math.ceil(hours / 24)}d` : `${hours}h`
+  return t('skills.path.cooldownUntil', { when })
+}
+
+function assessFor(skillId: string): GoalAssessmentStep | undefined {
+  return props.assess?.[skillId]
+}
 
 const statusMeta: Record<LearningStepStatus, { dot: string; label: string; cls: string }> = {
   earned: { dot: '✓', label: t('skills.path.statusEarned'), cls: 'step--earned' },
@@ -38,7 +58,25 @@ const statusMeta: Record<LearningStepStatus, { dot: string; label: string; cls: 
               {{ step.name }}
             </button>
             <span v-if="step.is_goal" class="goal-badge">{{ $t('skills.path.goalBadge') }}</span>
-            <span class="ml-auto shrink-0 text-[0.65rem] uppercase tracking-wide text-muted-foreground">
+
+            <!-- Assessment affordance, only when the parent supplied a plan. -->
+            <button
+              v-if="assessFor(step.skill_id)?.assessable_now"
+              class="assess-btn ml-auto"
+              @click="router.push(`/assessment/${step.skill_id}`)"
+            >
+              {{ $t('skills.path.assess') }}
+            </button>
+            <span
+              v-else-if="assessFor(step.skill_id)?.cooldown_until"
+              class="ml-auto shrink-0 text-[0.65rem] text-muted-foreground"
+            >
+              {{ cooldownLabel(assessFor(step.skill_id)!.cooldown_until!) }}
+            </span>
+            <span
+              v-else
+              class="ml-auto shrink-0 text-[0.65rem] uppercase tracking-wide text-muted-foreground"
+            >
               {{ statusMeta[step.status].label }}
             </span>
           </div>
@@ -118,5 +156,20 @@ const statusMeta: Record<LearningStepStatus, { dot: string; label: string; cls: 
 }
 .course-pill:hover {
   background: color-mix(in srgb, var(--app-primary) 18%, var(--app-muted));
+}
+.assess-btn {
+  flex-shrink: 0;
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 0.12rem 0.55rem;
+  border-radius: 999px;
+  color: var(--app-primary-foreground, #fff);
+  background: var(--app-primary);
+  transition: filter 0.15s;
+}
+.assess-btn:hover {
+  filter: brightness(1.08);
 }
 </style>

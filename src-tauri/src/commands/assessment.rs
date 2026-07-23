@@ -96,6 +96,129 @@ fn load_attempt_history(
     Ok(rows)
 }
 
+/// Resolve a skill's ratified bank and its attempt policy, if one exists.
+///
+/// Returns the same bank-selection query `assessment_start_attempt` uses, so
+/// the plan and the start path agree on which bank is in play.
+fn resolve_bank_policy(
+    conn: &rusqlite::Connection,
+    skill_id: &str,
+) -> Result<Option<(String, AttemptPolicy)>, String> {
+    conn.query_row(
+        "SELECT id, max_attempts, cooldown_hours, attempt_window_days, score_policy \
+           FROM question_banks \
+          WHERE skill_id = ?1 AND ratified = 1 ORDER BY created_at LIMIT 1",
+        params![skill_id],
+        |r| {
+            let cooldowns: String = r.get(2)?;
+            let window: i64 = r.get(3)?;
+            let score_policy: String = r.get(4)?;
+            Ok((
+                r.get::<_, String>(0)?,
+                AttemptPolicy {
+                    max_attempts: r.get::<_, Option<i64>>(1)?.map(|m| m.max(0) as u32),
+                    cooldown_hours: serde_json::from_str(&cooldowns)
+                        .unwrap_or_else(|_| AttemptPolicy::default().cooldown_hours),
+                    attempt_window_days: (window > 0).then_some(window as u32),
+                    score_policy: ScorePolicy::parse_lenient(&score_policy),
+                },
+            ))
+        },
+    )
+    .map(Some)
+    .or_else(|e| match e {
+        rusqlite::Error::QueryReturnedNoRows => Ok(None),
+        other => Err(other.to_string()),
+    })
+}
+
+/// Build a goal assessment plan: order the goal's skills by prerequisite,
+/// then annotate each with whether it can be assessed right now.
+///
+/// A goal assessment is a sequence of ordinary single-skill attempts, so
+/// this is planning and navigation — the learner walks the plan and each
+/// assessable skill runs through `assessment_start_attempt` /
+/// `assessment_grade` unchanged. See `assessment::goal_plan`.
+#[tauri::command]
+pub async fn assessment_plan_goal(
+    state: State<'_, AppState>,
+    goal_skill_ids: Vec<String>,
+) -> Result<crate::assessment::goal_plan::GoalAssessmentPlan, String> {
+    let now = crate::commands::credentials::now_rfc3339();
+    let guard = state.db.lock().map_err(|_| "database lock poisoned")?;
+    let db = guard.as_ref().ok_or("database not initialized")?;
+    let conn = db.conn();
+    let subject_did = SettingsStore::get(conn, keys::IDENTITY_LOCAL_DID);
+    plan_goal_impl(conn, &subject_did, &goal_skill_ids, &now)
+}
+
+/// Planning core, separated from Tauri state so the DB glue — bank
+/// resolution, earned-skill lookup, per-skill policy evaluation — is
+/// testable without a running app.
+pub fn plan_goal_impl(
+    conn: &rusqlite::Connection,
+    subject_did: &str,
+    goal_skill_ids: &[String],
+    now: &str,
+) -> Result<crate::assessment::goal_plan::GoalAssessmentPlan, String> {
+    use crate::assessment::goal_plan::{assemble_goal_plan, AssessInfo, PlanStepInput};
+
+    // Skills already proven — same query the learning path uses.
+    let earned: std::collections::HashSet<String> = if subject_did.is_empty() {
+        std::collections::HashSet::new()
+    } else {
+        let mut stmt = conn
+            .prepare(
+                "SELECT DISTINCT skill_id FROM credentials \
+                  WHERE subject_did = ?1 AND skill_id IS NOT NULL AND revoked = 0",
+            )
+            .map_err(|e| e.to_string())?;
+        let set = stmt
+            .query_map([subject_did], |r| r.get::<_, String>(0))
+            .map_err(|e| e.to_string())?
+            .filter_map(|x| x.ok())
+            .collect();
+        set
+    };
+
+    // Reuse the learning path: prerequisite-ordered, cycle-guarded.
+    let path = crate::commands::graph::compute_path(conn, goal_skill_ids, &earned)?;
+
+    // Per-skill assessability: does a ratified bank exist, and what does the
+    // attempt policy say for this learner right now.
+    let mut info = std::collections::HashMap::new();
+    for step in &path.steps {
+        let entry = match resolve_bank_policy(conn, &step.skill_id)? {
+            None => AssessInfo {
+                has_bank: false,
+                decision: None,
+            },
+            Some((_bank_id, policy)) => {
+                let history = load_attempt_history(conn, subject_did, &step.skill_id)?;
+                AssessInfo {
+                    has_bank: true,
+                    decision: Some(evaluate_attempt_policy(&history, &policy, now)),
+                }
+            }
+        };
+        info.insert(step.skill_id.clone(), entry);
+    }
+
+    let inputs: Vec<PlanStepInput> = path
+        .steps
+        .iter()
+        .map(|s| PlanStepInput {
+            skill_id: s.skill_id.clone(),
+            name: s.name.clone(),
+            bloom_level: crate::domain::bloom::BloomLevel::parse_lenient(&s.bloom_level),
+            status: s.status.clone(),
+            is_goal: s.is_goal,
+        })
+        .collect();
+
+    Ok(assemble_goal_plan(&inputs, &info))
+}
+
 // ---- start attempt ------------------------------------------------------
 
 /// Begin an attempt for `skill_id`: pick a ratified bank, draw a randomized,
@@ -874,6 +997,160 @@ mod tests {
         assert!(
             max.is_none(),
             "no hard cap by default — cooldowns do the work"
+        );
+    }
+
+    fn hours_before_now(h: i64) -> String {
+        (chrono::DateTime::parse_from_rfc3339(NOW).unwrap() - chrono::Duration::hours(h))
+            .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+    }
+
+    fn seed_taxonomy(ctx: &Ctx) {
+        // compute_path joins skills -> subjects; a plan needs real skill rows.
+        ctx.db
+            .conn()
+            .execute_batch(
+                "INSERT OR IGNORE INTO subject_fields (id, name) VALUES ('sf', 'Field');
+                 INSERT OR IGNORE INTO subjects (id, name, subject_field_id)
+                 VALUES ('sub', 'Subject', 'sf');
+                 INSERT OR IGNORE INTO skills (id, name, subject_id, bloom_level)
+                 VALUES ('skill_rust', 'Rust', 'sub', 'apply'),
+                        ('skill_async', 'Async', 'sub', 'analyze');
+                 INSERT OR IGNORE INTO skill_prerequisites (skill_id, prerequisite_id)
+                 VALUES ('skill_async', 'skill_rust');",
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn plan_marks_a_skill_with_a_ratified_bank_assessable() {
+        let ctx = setup();
+        seed_taxonomy(&ctx);
+        // Clear the seeded open attempt so it doesn't drive a cooldown.
+        ctx.db
+            .conn()
+            .execute_batch("DELETE FROM assessment_attempts")
+            .unwrap();
+
+        let plan = plan_goal_impl(&ctx.db.conn(), &ctx.did.0, &["skill_rust".into()], NOW).unwrap();
+        let rust = plan
+            .steps
+            .iter()
+            .find(|s| s.skill_id == "skill_rust")
+            .unwrap();
+        assert!(rust.has_assessment);
+        assert!(rust.assessable_now);
+        assert_eq!(plan.next_skill_id.as_deref(), Some("skill_rust"));
+    }
+
+    #[test]
+    fn plan_pulls_in_prerequisites_and_orders_them_first() {
+        let ctx = setup();
+        seed_taxonomy(&ctx);
+        ctx.db
+            .conn()
+            .execute_batch("DELETE FROM assessment_attempts")
+            .unwrap();
+
+        // Goal is the advanced skill; its prerequisite must appear, earlier.
+        let plan =
+            plan_goal_impl(&ctx.db.conn(), &ctx.did.0, &["skill_async".into()], NOW).unwrap();
+        let ids: Vec<&str> = plan.steps.iter().map(|s| s.skill_id.as_str()).collect();
+        assert!(
+            ids.contains(&"skill_rust"),
+            "prerequisite should be in the plan"
+        );
+        let rust_pos = ids.iter().position(|s| *s == "skill_rust").unwrap();
+        let async_pos = ids.iter().position(|s| *s == "skill_async").unwrap();
+        assert!(
+            rust_pos < async_pos,
+            "prerequisite must precede its dependent"
+        );
+    }
+
+    #[test]
+    fn plan_locks_a_skill_whose_prerequisite_is_unproven() {
+        let ctx = setup();
+        seed_taxonomy(&ctx);
+        ctx.db
+            .conn()
+            .execute_batch("DELETE FROM assessment_attempts")
+            .unwrap();
+
+        let plan =
+            plan_goal_impl(&ctx.db.conn(), &ctx.did.0, &["skill_async".into()], NOW).unwrap();
+        let adv = plan
+            .steps
+            .iter()
+            .find(|s| s.skill_id == "skill_async")
+            .unwrap();
+        assert_eq!(adv.status, "locked");
+        assert!(!adv.assessable_now);
+        assert_eq!(
+            adv.blocked_reason.as_deref(),
+            Some("prerequisites not yet met")
+        );
+    }
+
+    #[test]
+    fn plan_reflects_a_cooldown_from_recent_attempts() {
+        let ctx = setup();
+        seed_taxonomy(&ctx);
+        // A graded attempt one hour ago triggers the first (24h) cooldown.
+        ctx.db
+            .conn()
+            .execute_batch("DELETE FROM assessment_attempts")
+            .unwrap();
+        ctx.db
+            .conn()
+            .execute(
+                "INSERT INTO assessment_attempts
+                   (id, subject_did, bank_id, skill_id, seed, question_ids, option_orders,
+                    started_at, graded_at, passed, attempt_ordinal)
+                 VALUES ('recent', ?1, 'bank_t', 'skill_rust', 1, '[]', '[]', ?2, ?2, 0, 1)",
+                params![ctx.did.0, hours_before_now(1)],
+            )
+            .unwrap();
+
+        let plan = plan_goal_impl(&ctx.db.conn(), &ctx.did.0, &["skill_rust".into()], NOW).unwrap();
+        let rust = plan
+            .steps
+            .iter()
+            .find(|s| s.skill_id == "skill_rust")
+            .unwrap();
+        assert!(
+            !rust.assessable_now,
+            "a skill in cooldown is not assessable"
+        );
+        assert!(rust.cooldown_until.is_some());
+        assert_eq!(rust.blocked_reason.as_deref(), Some("in cooldown"));
+    }
+
+    #[test]
+    fn plan_says_no_assessment_when_the_bank_is_unratified() {
+        let ctx = setup();
+        seed_taxonomy(&ctx);
+        ctx.db
+            .conn()
+            .execute_batch(
+                "DELETE FROM assessment_attempts;
+             UPDATE question_banks SET ratified = 0 WHERE id = 'bank_t';",
+            )
+            .unwrap();
+
+        let plan = plan_goal_impl(&ctx.db.conn(), &ctx.did.0, &["skill_rust".into()], NOW).unwrap();
+        let rust = plan
+            .steps
+            .iter()
+            .find(|s| s.skill_id == "skill_rust")
+            .unwrap();
+        assert!(
+            !rust.has_assessment,
+            "an unratified bank is not an available assessment"
+        );
+        assert_eq!(
+            rust.blocked_reason.as_deref(),
+            Some("no assessment available yet")
         );
     }
 }
