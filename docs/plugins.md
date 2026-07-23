@@ -73,19 +73,34 @@ away automatically when either endpoint is uninstalled.
 | `builtins` | First-party bundles embedded via `include_bytes!`, installed (and refreshed) at startup; prunes stale builtin rows when a builtin's manifest/CID changes |
 | `catalog` | Discovery cache for the `/alexandria/plugins/1.0` gossip topic |
 | `attestation` | Plugin DAO multi-sig attestation verify + store |
-| `wasm_runtime` | Wasmtime grader sandbox (desktop only) |
+| `wasm_runtime` | Wasmtime grader sandbox (everywhere except iOS — see the `grader` cfg in `build.rs`) |
 | `irl_review` | Local instructor-review inbox (see below) |
 
 IPC commands live in `src-tauri/src/commands/plugins.rs`: install /
 uninstall / list / get-manifest, capability grant/revoke/list,
 `plugin_set_enabled`, `plugin_get_docs`, `plugin_read_asset_data_url`
 (icons + README images as `data:` URLs), `plugin_submit_and_grade`
-(registered on every platform — desktop runs the real wasmtime grader,
-mobile returns a `GraderUnavailable:` marker so callers can show a
-"runs on desktop" message instead of an unknown-command failure), the
+(registered on every platform — desktop and Android run the real wasmtime
+grader, iOS returns a `GraderUnavailable:` marker so callers can show a
+"runs elsewhere" message instead of an unknown-command failure), the
 `irl_*` inbox commands, and the Phase-3 catalog + attestation commands.
 DID→username resolution is `resolve_display_names` in
 `commands/identity.rs`.
+
+### Grader platform support
+
+The grader runs wherever Cranelift can emit native code at runtime, which
+is everywhere except iOS. `build.rs` emits a `grader` cfg for exactly that
+set, and every gate in `plugins/` keys off it rather than `desktop`.
+
+iOS is the sole exception, and the reason is the platform's JIT
+prohibition — not a Wasmtime limitation. Wasmtime 36 supports
+`aarch64-linux-android` directly; what iOS lacks is any way to make
+compiled output executable. Running graders there needs Wasmtime's Pulley
+interpreter backend instead of native codegen. Pulley executes the same
+modules with identical fuel accounting and bit-identical results, but
+roughly 10–20x slower, which is fine for the lighter graders and not yet
+viable for the TypeScript and C/C++ ones.
 
 ### Frontend (Vue)
 

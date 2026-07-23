@@ -539,7 +539,7 @@ mod tests {
     /// back off disk, re-verify its hash against the manifest (exactly as
     /// `plugin_submit_and_grade` does), then grade a correct and a wrong
     /// submission through the real Wasmtime sandbox and assert the scores.
-    #[cfg(desktop)]
+    #[cfg(grader)]
     #[test]
     fn editor_js_install_to_grade_wiring() {
         use crate::plugins::wasm_runtime::{GraderBudgets, GraderRuntime};
