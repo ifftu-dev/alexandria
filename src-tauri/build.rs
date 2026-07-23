@@ -20,6 +20,21 @@ fn main() {
     // linker succeeds. The code paths using SCDynamicStore are never reached
     // on iOS (mDNS is disabled, and if-watch falls back to polling).
     let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+
+    // The Wasmtime grader sandbox is available wherever Cranelift can emit
+    // native code at runtime — desktop and Android. iOS is the sole exception:
+    // the platform forbids JIT, so there is no executable-page path for
+    // Cranelift output. (This is a JIT restriction, not a Wasmtime one —
+    // Wasmtime supports aarch64-linux-android directly.)
+    //
+    // Gate on this named cfg rather than `desktop` so the distinction stays
+    // legible at every call site, and so the iOS-only carve-out is a single
+    // decision recorded here instead of ten scattered target checks.
+    println!("cargo::rustc-check-cfg=cfg(grader)");
+    if target_os != "ios" {
+        println!("cargo:rustc-cfg=grader");
+    }
+
     if target_os == "macos" {
         // Carbon provides IsSecureEventInputEnabled / DisableSecureEventInput,
         // used to clear a WKWebView Secure Event Input leak that otherwise

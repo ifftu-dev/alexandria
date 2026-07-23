@@ -80,7 +80,7 @@ pub struct AppState {
     /// Desktop-only — wasmtime v27 does not support iOS / Android; mobile
     /// builds do not carry the runtime and the corresponding IPC command
     /// returns `GraderUnavailable` on mobile.
-    #[cfg(desktop)]
+    #[cfg(grader)]
     pub grader_runtime: Arc<plugins::wasm_runtime::GraderRuntime>,
     /// Last IPC activity timestamp for session timeout (auto-lock).
     pub last_activity: Arc<std::sync::Mutex<std::time::Instant>>,
@@ -930,9 +930,10 @@ pub fn run() {
 
             // Deterministic Wasmtime engine for plugin graders (Phase 2).
             // Construction is cheap; the engine + module cache live for
-            // the app's lifetime. Desktop-only because wasmtime v27 does
-            // not support iOS / Android targets.
-            #[cfg(desktop)]
+            // the app's lifetime. Present wherever native codegen is allowed
+            // — everywhere except iOS (JIT prohibition). See the `grader` cfg
+            // in build.rs.
+            #[cfg(grader)]
             let grader_runtime = Arc::new(
                 plugins::wasm_runtime::GraderRuntime::new()
                     .expect("failed to create grader runtime"),
@@ -944,7 +945,7 @@ pub fn run() {
                 active,
                 tutoring,
                 classroom,
-                #[cfg(desktop)]
+                #[cfg(grader)]
                 grader_runtime,
                 last_activity: Arc::new(std::sync::Mutex::new(std::time::Instant::now())),
                 ipc_limiter: Arc::new(std::sync::Mutex::new(

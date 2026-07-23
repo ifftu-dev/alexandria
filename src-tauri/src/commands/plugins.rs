@@ -20,7 +20,7 @@ use crate::domain::plugin::{
     InstalledPlugin, IrlSubmission, PluginAttestationEvent, PluginAttestationStatus,
     PluginCapability, PluginCatalogEntry, PluginManifest, PluginPermissionRecord,
 };
-#[cfg(desktop)]
+#[cfg(grader)]
 use crate::plugins::wasm_runtime::{GraderBudgets, ScoreRecord};
 use crate::plugins::{attestation, builtins, catalog, irl_review, manifest, registry, verifier};
 use crate::AppState;
@@ -563,7 +563,7 @@ pub async fn plugin_list_permissions(
 /// already, but signing a verifiable attestation is best added with the
 /// VC-issuance code in §10.x). The persisted row carries `signed_attestation
 /// = NULL` until that lands.
-#[cfg(desktop)]
+#[cfg(grader)]
 #[tauri::command]
 pub async fn plugin_submit_and_grade(
     state: State<'_, AppState>,
@@ -754,14 +754,15 @@ pub async fn plugin_submit_and_grade(
     Ok(record)
 }
 
-/// Mobile stub for [`plugin_submit_and_grade`]. The wasmtime grader runtime is
-/// desktop-only (`wasm_runtime` is `#[cfg(desktop)]`), so on iOS / Android this
-/// returns a stable, catchable `GraderUnavailable` marker instead of failing as
-/// an unknown command. The editor plugin UIs match on this marker to show a
-/// clean "runs on desktop" message rather than a raw error. In-browser "Run
-/// tests" still works on mobile — only graded submission (which relies on the
+/// iOS stub for [`plugin_submit_and_grade`]. The wasmtime grader runtime runs
+/// wherever native codegen is allowed — desktop and Android — but iOS forbids
+/// JIT, so there it is compiled out (`wasm_runtime` is `#[cfg(grader)]`) and
+/// this stub returns a stable, catchable `GraderUnavailable` marker instead of
+/// failing as an unknown command. The editor plugin UIs match on this marker to
+/// show a clean "runs elsewhere" message rather than a raw error. In-browser
+/// "Run tests" still works on iOS — only graded submission (which relies on the
 /// grader's hidden tests) is unavailable here.
-#[cfg(not(desktop))]
+#[cfg(not(grader))]
 #[tauri::command]
 pub async fn plugin_submit_and_grade() -> Result<serde_json::Value, String> {
     Err(
