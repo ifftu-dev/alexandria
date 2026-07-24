@@ -364,6 +364,120 @@ jobs:
         working-directory: alexandria
         run: cargo check -p alexandria-node --target ${{ matrix.target }} --features ${{ matrix.features }}
 
+  # Runtime proof that the WASM grader actually JIT-compiles and executes on
+  # Android — the step `mobile-check` (compile-only) and desktop tests cannot
+  # cover. Runs the existing headless grade-wiring test on an arm64 AVD via a
+  # cargo target-runner that adb-pushes the cross-compiled test binary.
+  #
+  # v1 config: x86_64 host + emulated arm64-v8a AVD. The arm64 ABI is the point
+  # (it's what users run, and what the JIT emits). Runs on an arm64 host so the
+  # arm64 AVD boots with native KVM acceleration — an emulated arm64 AVD on an
+  # x86_64 host times out on boot. The NDK step below picks the host-matching
+  # toolchain (linux-aarch64), installing an r27+ NDK if the preinstalled one
+  # predates linux-aarch64 host support.
+  mobile-grader-test:
+    name: Android grader (on-device)
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-22.04-arm
+    timeout-minutes: 60
+    steps:
+      # Best-effort: on arm64 hosted runners KVM is already configured, and the
+      # x86_64 udev-rule dance can error. Never let it fail the job — the
+      # emulator uses whatever acceleration is present.
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules || true
+          sudo udevadm control --reload-rules || true
+          sudo udevadm trigger --name-match=kvm || true
+          ls -l /dev/kvm || true
+
+      - name: Checkout alexandria
+        uses: actions/checkout@v5
+        with:
+          path: alexandria
+
+      - name: Checkout iroh-live-patched
+        uses: actions/checkout@v5
+        with:
+          repository: ifftu-dev/iroh-live
+          path: iroh-live-patched
+          token: ${{ secrets.CROSS_REPO_PAT }}
+
+      # arm64 runner images do not reliably ship the Android SDK, so provision
+      # it explicitly rather than assume ANDROID_SDK_ROOT is populated.
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Set up Android NDK (host-matching toolchain)
+        run: |
+          set -eu
+          # The linux-aarch64 host toolchain the arm64 runner needs only ships
+          # from NDK r27. Install r27c explicitly. Note: no `yes | …` pipe —
+          # under pipefail the `yes` SIGPIPE would fail the step even on a
+          # successful install; sdkmanager needs no prompt for a plain install.
+          sdkmanager "ndk;27.2.12479018"
+          host="linux-$(uname -m)"          # linux-aarch64 on arm64 runners
+          NDK_DIR="$ANDROID_SDK_ROOT/ndk/27.2.12479018"
+          PREBUILT="$NDK_DIR/toolchains/llvm/prebuilt/$host"
+          if [ ! -d "$PREBUILT" ]; then
+            echo "Expected NDK toolchain at $PREBUILT" >&2
+            ls -la "$NDK_DIR/toolchains/llvm/prebuilt/" || true
+            exit 1
+          fi
+          NDK_BIN="$PREBUILT/bin"
+          SHIM_DIR="$RUNNER_TEMP/android-ndk-bin"
+          mkdir -p "$SHIM_DIR"
+          for t in ar ranlib nm strip; do ln -sf "$NDK_BIN/llvm-$t" "$SHIM_DIR/aarch64-linux-android-$t"; done
+          {
+            echo "ANDROID_NDK_HOME=$NDK_DIR"
+            echo "CARGO_NDK_SYSROOT_PATH=$PREBUILT/sysroot"
+            echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$NDK_BIN/aarch64-linux-android28-clang"
+            echo "CC_aarch64_linux_android=$NDK_BIN/aarch64-linux-android28-clang"
+            echo "AR_aarch64_linux_android=$NDK_BIN/llvm-ar"
+          } >> $GITHUB_ENV
+          echo "$SHIM_DIR" >> $GITHUB_PATH
+
+      - name: Install cmake
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake
+
+      - name: Setup Rust 1.91.0 (MSRV)
+        uses: dtolnay/rust-toolchain@1.91.0
+        with:
+          targets: aarch64-linux-android
+
+      - name: Cache Rust artifacts
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: alexandria -> target
+          key: android-ondevice
+
+      # Cross-compile the test binary now (host-side) so the emulator step only
+      # pushes + runs — keeps the AVD alive for the minimum time.
+      - name: Build grade-wiring test (no-run)
+        working-directory: alexandria
+        run: |
+          cargo test -p alexandria-node --lib --no-run \
+            --target aarch64-linux-android --features tutoring-video-android \
+            plugins::builtins::tests::editor_js_install_to_grade_wiring
+
+      - name: Run grade test on arm64 emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: arm64-v8a
+          target: google_apis
+          force-avd-creation: true
+          emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect
+          disable-animations: true
+          script: |
+            cd alexandria
+            export CARGO_TARGET_AARCH64_LINUX_ANDROID_RUNNER="$GITHUB_WORKSPACE/alexandria/scripts/ci/android-test-runner.sh"
+            cargo test -p alexandria-node --lib \
+              --target aarch64-linux-android --features tutoring-video-android \
+              plugins::builtins::tests::editor_js_install_to_grade_wiring -- --exact --nocapture
+
   release-readiness:
     name: Release Readiness
     needs: changes
