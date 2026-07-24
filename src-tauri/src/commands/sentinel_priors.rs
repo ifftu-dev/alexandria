@@ -24,10 +24,10 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::commands::sentinel_dao::{SENTINEL_DAO_ID, SENTINEL_PRIOR_CATEGORY};
+use crate::content_store::storage;
 use crate::crypto::hash::{blake2b_256, entity_id};
 use crate::crypto::wallet;
 use crate::domain::sentinel::SentinelPriorAnnouncement;
-use crate::ipfs::storage;
 use crate::AppState;
 
 /// Pin type for ratified adversarial-prior blobs. Distinct from 'cache'
@@ -1144,7 +1144,7 @@ struct EvalReport {
 /// envelope/eval pair — at which point the signature check is the last
 /// line of defense (currently placeholder; see `compute_prior_signature`).
 async fn verify_weights_candidate(
-    resolver: &crate::ipfs::resolver::ContentResolver,
+    resolver: &crate::content_store::resolver::ContentResolver,
     c: &WeightsCandidate,
 ) -> Result<(), String> {
     // ---- Layer 1↔2: envelope must agree with DB ------------------------

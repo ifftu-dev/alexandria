@@ -1149,7 +1149,7 @@ export interface EndSessionRequest {
   overall_consistency_score: number
 }
 
-/** Content document structure returned from IPFS */
+/** Content document structure returned from the content store */
 export interface ContentDocument {
   content_type: string
   body: string

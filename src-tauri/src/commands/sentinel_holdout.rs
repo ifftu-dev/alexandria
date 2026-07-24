@@ -34,10 +34,10 @@ use x25519_dalek::{PublicKey, StaticSecret};
 use zeroize::Zeroizing;
 
 use crate::commands::sentinel_priors::{validate_prior_blob, ModelKind, PriorBlob};
+use crate::content_store::{content, storage};
 use crate::crypto::group_key::{decrypt_message, encrypt_message, generate_group_key};
 use crate::crypto::hash::entity_id;
 use crate::crypto::shamir::{self, Share};
-use crate::ipfs::{content, storage};
 use crate::AppState;
 
 /// Pin type for encrypted holdout blobs. Separate from 'sentinel_prior'

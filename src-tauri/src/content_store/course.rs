@@ -1,6 +1,6 @@
 //! Course document publishing and resolution via iroh.
 //!
-//! Handles the full lifecycle of IPFS-backed course documents:
+//! Handles the full lifecycle of content-addressed course documents:
 //! 1. Build a CourseDocumentPayload from local SQLite data
 //! 2. Sign it with the author's Ed25519 key
 //! 3. Store the signed JSON as an iroh blob
@@ -9,11 +9,11 @@
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use thiserror::Error;
 
+use crate::content_store::content;
+use crate::content_store::node::ContentNode;
 use crate::domain::course_document::{
     CourseDocumentPayload, PublishCourseResult, SignedCourseDocument,
 };
-use crate::ipfs::content;
-use crate::ipfs::node::ContentNode;
 
 #[derive(Error, Debug)]
 pub enum CourseDocError {

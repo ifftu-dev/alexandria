@@ -21,7 +21,7 @@ use crate::domain::taxonomy::{
 /// Propose a taxonomy change by creating a governance proposal.
 ///
 /// Stores the taxonomy changes as JSON in the proposal's content_cid field
-/// (initially as a placeholder — the actual IPFS CID is set when published).
+/// (initially as a placeholder — the actual content ID is set when published).
 /// Returns the proposal ID.
 pub fn propose_taxonomy_change(
     conn: &Connection,
@@ -179,7 +179,7 @@ pub fn publish_taxonomy_ratification(
     // Build the taxonomy document
     let doc = TaxonomyDocument {
         version,
-        root_cid: String::new(), // Will be set after IPFS upload
+        root_cid: String::new(), // Will be set after storing in iroh
         previous_cid: previous_cid.clone(),
         ratified_by: ratified_by.to_vec(),
         ratified_at: now.clone(),
@@ -187,7 +187,7 @@ pub fn publish_taxonomy_ratification(
         content: changes.clone(),
     };
 
-    // Serialize to JSON for IPFS storage (CID computed from content)
+    // Serialize to JSON for the iroh content store (CID computed from content)
     let doc_json = serde_json::to_string_pretty(&doc)
         .map_err(|e| format!("failed to serialize taxonomy document: {e}"))?;
 

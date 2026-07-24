@@ -20,7 +20,7 @@ pub struct PinboardCommitment {
 pub fn handle_pinboard_message(db: &Database, message: &SignedGossipMessage) -> Result<(), String> {
     let commit: PinboardCommitment = serde_json::from_slice(&message.payload)
         .map_err(|e| format!("malformed pinboard payload: {e}"))?;
-    crate::ipfs::pinboard::record_observation(db.conn(), &commit)
+    crate::content_store::pinboard::record_observation(db.conn(), &commit)
 }
 
 #[cfg(test)]
@@ -79,7 +79,7 @@ mod tests {
         handle_pinboard_message(&db, &msg).unwrap();
         // Round-trip: the observation must now be findable via the
         // local `list_pinners_for(subject)` query.
-        let found = crate::ipfs::pinboard::list_pinners_for(
+        let found = crate::content_store::pinboard::list_pinners_for(
             db.conn(),
             &crate::crypto::did::Did("did:key:zSubject".into()),
         )

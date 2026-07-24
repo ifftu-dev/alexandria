@@ -198,7 +198,7 @@ pub fn hash_to_hex(hash: &Hash) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ipfs::node::ContentNode;
+    use crate::content_store::node::ContentNode;
     use tempfile::TempDir;
 
     async fn make_node() -> (ContentNode, TempDir) {

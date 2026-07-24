@@ -2,7 +2,7 @@
   "_comment": "Registered Tauri commands that intentionally have NO frontend invoke() caller yet. Each is forward-built backend surface (pending UI, operator/admin tooling, on-chain flow, or test-covered inner fn). check-tauri-commands.mjs fails CI if a NEWLY registered command is missing here AND has no caller, or if an entry here has since gained a caller (remove it then) or no longer exists (remove it then). Shrink this list as UI lands. Value = the gap is tracked, not silent.",
   "check_health": "diagnostic; documented, no UI",
   "is_biometric_available": "capability probe; pending UI",
-  "resolve_profile": "inner fn unit-tested (ipfs/profile.rs)",
+  "resolve_profile": "inner fn unit-tested (content_store/profile.rs)",
   "content_has": "content CRUD; read half unused",
   "content_node_status": "content diagnostics; pending UI",
   "content_resolve": "documented content path; pending UI",

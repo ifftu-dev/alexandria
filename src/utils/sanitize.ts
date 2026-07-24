@@ -1,7 +1,7 @@
 import DOMPurify from 'dompurify'
 
 /**
- * Sanitize untrusted HTML content (e.g. course text from IPFS).
+ * Sanitize untrusted HTML content (e.g. course text fetched from peers).
  * Strips scripts, event handlers, and other XSS vectors.
  */
 export function sanitizeHtml(raw: string): string {

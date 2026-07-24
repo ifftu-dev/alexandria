@@ -9,10 +9,10 @@ use rusqlite::params;
 use serde::Serialize;
 use tauri::State;
 
+use crate::content_store::profile as content_profile;
 use crate::crypto::wallet;
 use crate::domain::identity::{AccountStatus, Identity, ProfileUpdate, WalletInfo, ACCOUNT_ROLES};
 use crate::domain::profile::{ProfilePayload, PublishProfileResult, SignedProfile};
-use crate::ipfs::profile as ipfs_profile;
 use crate::AppState;
 
 /// Combined response from unlock/create flows.
@@ -513,10 +513,10 @@ pub async fn publish_profile(state: State<'_, AppState>) -> Result<PublishProfil
         updated_at,
     };
 
-    let signed = ipfs_profile::sign_profile(&payload, &w.signing_key).map_err(|e| e.to_string())?;
+    let signed = content_profile::sign_profile(&payload, &w.signing_key).map_err(|e| e.to_string())?;
 
     let content_node = state.content_node_required().await?;
-    let result = ipfs_profile::publish_profile(&content_node, &signed)
+    let result = content_profile::publish_profile(&content_node, &signed)
         .await
         .map_err(|e| e.to_string())?;
 
@@ -542,7 +542,7 @@ pub async fn resolve_profile(
     hash: String,
 ) -> Result<SignedProfile, String> {
     let content_node = state.content_node_required().await?;
-    ipfs_profile::resolve_profile(&content_node, &hash)
+    content_profile::resolve_profile(&content_node, &hash)
         .await
         .map_err(|e| e.to_string())
 }

@@ -2,7 +2,7 @@
 
 use tauri::State;
 
-use crate::ipfs::storage;
+use crate::content_store::storage;
 use crate::AppState;
 
 /// Get the current storage quota in bytes (0 = unlimited).

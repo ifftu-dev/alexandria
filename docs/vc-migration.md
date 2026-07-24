@@ -67,11 +67,13 @@ SkillProof / EvidenceRecord / SkillAssessment artifacts.
    `completion.ak` validator, carrying the course ID and completion
    Merkle root. The completion validator **is deployed**
    (`COMPLETION_MINTING_REF_UTXO` populated).
-5. An observer watches Blockfrost for confirmed txs at that script
-   address. On confirmation it auto-issues a self-signed VC to the
-   learner's local `credentials` table, embedding the witness tx
-   hash (**implemented** — observer + auto-issuance run on the 60s
-   queue loop).
+5. The credential is **self-issued locally at claim time** into the
+   learner's `credentials` table, whether or not the on-chain witness
+   mint succeeds (`commands/completion.rs`: "Always self-issue
+   locally"; the on-chain mint is best-effort — an upgrade, not a
+   gate). A Blockfrost observer + auto-issuance loop (60s) run as a
+   **secondary** path that backfills the witness tx hash once the mint
+   confirms.
 6. Verifiers check the VC's JWS signature **and** resolve the
    witness tx on Cardano to confirm the validator accepted the
    completion claim.
@@ -82,15 +84,15 @@ SkillProof / EvidenceRecord / SkillAssessment artifacts.
    via `cardano/anchor_queue.rs` (wired).
 2. **DAO governance** — election/proposal/vote txs via
    `cardano/gov_tx_builder.rs` and `cardano/onchain_queue.rs`
-   (wired; on-chain enforcement gated on validator deploy).
+   (wired; reference scripts deployed on preprod — see
+   `cardano/script_refs.rs`).
 3. **Completion-witness minting** — `completion.ak` validator
    (deployed) + observer + auto-issuance (live).
 4. **Challenge-stake escrow** — `challenge_escrow.ak` validator; lock
-   works on preprod, settle gated on the escrow reference script
-   deploy.
+   and settle both work on preprod (escrow reference script deployed).
 5. **CIP-68 soulbound reputation snapshots** — `soulbound_tx_builder.rs`
-   / `submit_snapshot_tx`; mint gated on the reputation-minting
-   reference script deploy.
+   / `submit_snapshot_tx`; mint works on preprod (reputation-minting
+   reference script deployed).
 
 ## What compiles today
 

@@ -8,10 +8,10 @@ use rusqlite::params;
 use serde::Deserialize;
 use tauri::State;
 
+use crate::content_store::course as content_course;
 use crate::crypto::hash::entity_id;
 use crate::domain::catalog::CatalogEntry;
 use crate::domain::course_document::SignedCourseDocument;
-use crate::ipfs::course as ipfs_course;
 use crate::AppState;
 
 const BOOTSTRAP_PUBLIC_COURSES_JSON: &str = include_str!("../../../bootstrap/public_courses.json");
@@ -379,7 +379,7 @@ pub async fn hydrate_catalog_courses(
             let doc: SignedCourseDocument = serde_json::from_slice(&resolved.bytes)
                 .map_err(|e| format!("invalid course document for {}: {e}", row.content_cid))?;
 
-            ipfs_course::verify_course_document(&doc)
+            content_course::verify_course_document(&doc)
                 .map_err(|e| format!("invalid signature for {}: {e}", row.content_cid))?;
             let expected_course_id = entity_id(&[&row.author_address, &row.content_cid]);
             if row.course_id != expected_course_id {

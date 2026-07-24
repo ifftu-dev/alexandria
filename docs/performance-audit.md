@@ -2,7 +2,7 @@
 
 **Date**: 2026-02-24 (updated 2026-03-25)
 **Scope**: Full Rust backend (`src-tauri/src/`), CLI (`cli/`), frontend config, Cargo workspace
-**Files audited**: Every file in `commands/` (52), `db/` (6), `evidence/` (5), `p2p/` (35), `ipfs/` (12), plus `lib.rs`, both `Cargo.toml` files, `package.json`, `vite.config.ts` (counts current as of this update; the original snapshot predates the VC-first migration, which restructured these directories)
+**Files audited**: Every file in `commands/` (52), `db/` (6), `evidence/` (5), `p2p/` (35), `content_store/` (12), plus `lib.rs`, both `Cargo.toml` files, `package.json`, `vite.config.ts` (counts current as of this update; the original snapshot predates the VC-first migration, which restructured these directories)
 
 **Summary**: 2 critical, 5 high, 8 medium, 5 low, 3 informational findings. The codebase is generally well-structured with good patterns (WAL mode, `spawn_blocking` for crypto, proper lock scoping in several places), but has a systemic architectural bottleneck in the global DB mutex and several targeted issues worth addressing.
 
@@ -12,7 +12,7 @@
 
 ### C-1: Global DB mutex serializes all commands
 
-**File**: `src-tauri/src/lib.rs:43`
+**File**: `src-tauri/src/lib.rs:71-91` (`struct AppState`, `db` field)
 
 `AppState.db` is `Arc<std::sync::Mutex<Option<Database>>>` (blocking mutex, not tokio):
 
@@ -73,7 +73,7 @@ crate::p2p::types::P2pEvent::GossipMessage { topic, message } => {
 
 ### H-1: N+1 query in `publish_course`
 
-**File**: `src-tauri/src/commands/courses.rs:303-327`
+**File**: `src-tauri/src/commands/courses.rs:315-341`
 
 Iterates `chapter_rows` and runs a separate SELECT per chapter inside the loop:
 
@@ -96,13 +96,13 @@ for (ch_id, ch_title, ch_desc, ch_pos) in &chapter_rows {
 
 ---
 
-### H-2: Content resolver mutex held during gateway HTTP fetch
+### H-2: Content resolver mutex held during public URL HTTP fetch
 
-**File**: `src-tauri/src/commands/content.rs:96-104`
+**File**: `src-tauri/src/commands/content.rs:126-134` (also `:180-188`, `:233-241`)
 
-`state.resolver.lock().await` is held while `resolver.resolve(&identifier).await` executes. The resolver chain includes IPFS gateway fallback (`gateway.rs`) which makes HTTP requests with a 30-second timeout.
+`state.resolver.lock().await` is held while `resolver.resolve(&identifier).await` executes. The resolver chain includes public URL fallback (`http.rs`) which makes HTTP requests with a 30-second timeout.
 
-**Impact**: If a gateway is slow or unreachable, the resolver mutex is held for up to 30 seconds. All other `content_resolve` / `content_resolve_bytes` calls queue behind it. One slow resolution blocks all content fetching.
+**Impact**: If the origin server is slow or unreachable, the resolver mutex is held for up to 30 seconds. All other `content_resolve` / `content_resolve_bytes` calls queue behind it. One slow resolution blocks all content fetching.
 
 **Fix**: Clone the resolver (or wrap in `Arc`) so the mutex is only held to extract a reference, not during the actual I/O. Or use `RwLock` and take a read guard.
 
@@ -110,7 +110,7 @@ for (ch_id, ch_title, ch_desc, ch_pos) in &chapter_rows {
 
 ### H-3: ContentNode inner mutex serializes all blob operations
 
-**File**: `src-tauri/src/ipfs/node.rs:55`
+**File**: `src-tauri/src/content_store/node.rs:69-70` (`struct ContentNode`, `inner` field)
 
 `ContentNode.inner` is `Arc<Mutex<Option<RunningNode>>>`. Every blob operation (`store_bytes`, `read_bytes`, `list_blobs`, etc. in `content.rs`) must acquire this lock to access the `FsStore`.
 
@@ -122,7 +122,7 @@ for (ch_id, ch_title, ch_desc, ch_pos) in &chapter_rows {
 
 ### H-4: Repeated PBKDF2 key derivation on every signing command
 
-**File**: `src-tauri/src/commands/courses.rs:276`, `enrollment.rs:304`, `identity.rs:79,215,427`, `p2p.rs:46`, `cardano.rs:36,108`
+**File**: `crypto::keystore::wallet_from_mnemonic`, called from ~20 command handlers that need the wallet (e.g. `commands/{courses,identity,p2p,completion,credentials,profile,pinning,governance,snapshot,username_registry}.rs`). Grep `wallet_from_mnemonic(` for the current call sites — the PBKDF2-per-command cost applies to every one.
 
 `wallet_from_mnemonic()` is called on every command that needs signing. BIP-39 mnemonic-to-seed derivation uses PBKDF2 with 2048 rounds. This is called in at least 8 different command paths.
 

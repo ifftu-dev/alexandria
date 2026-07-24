@@ -13,7 +13,7 @@
 //! `maybe_evict`.
 
 use super::common::new_test_db;
-use app_lib::ipfs::storage::list_evictable_pins_for_test;
+use app_lib::content_store::storage::list_evictable_pins_for_test;
 
 fn seed_pin(
     db: &app_lib::db::Database,

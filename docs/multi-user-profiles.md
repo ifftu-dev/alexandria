@@ -235,7 +235,7 @@ From the investigation pass:
 - `src-tauri/src/profile/` — new module (manager, index, migration).
 - `src-tauri/src/commands/identity.rs` — `unlock_vault`/`generate_wallet`/`restore_wallet`/`lock_vault` become `unlock_profile`/`create_profile`/`restore_profile`/`lock_profile`; legacy names kept as `#[deprecated]` shims for one release.
 - `src-tauri/src/commands/profile.rs` — new IPC surface (`list_profiles`, `delete_profile`, `rename_profile`, `set_profile_avatar`, `get_active_profile_id`).
-- `src-tauri/src/ipfs/node.rs` — `ContentNode::new` takes per-profile dir; already does.
+- `src-tauri/src/content_store/node.rs` — `ContentNode::new` takes per-profile dir; already does.
 - `src-tauri/src/p2p/sync.rs:66,823` — unchanged (per-profile DB).
 - 23 `WHERE id = 1` queries — **unchanged** (per-profile DB).
 - `src/composables/useProfiles.ts` — new.

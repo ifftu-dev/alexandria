@@ -687,6 +687,7 @@ mod tests {
             .unwrap()
         };
 
+        #[allow(clippy::type_complexity)]
         let (redeemer, cont_datum, refs, inval, valfrom): (
             Vec<u8>,
             Vec<u8>,
@@ -841,6 +842,7 @@ mod tests {
         let after_slot =
             |ms: i64| -> u64 { (tip as i64 + (ms - now_ms) / 1000 + 60).max(1) as u64 };
 
+        #[allow(clippy::type_complexity)]
         let (redeemer, cont_datum, refs, signers, inval, valfrom): (
             Vec<u8>,
             Vec<u8>,

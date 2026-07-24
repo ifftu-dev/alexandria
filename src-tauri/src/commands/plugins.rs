@@ -661,7 +661,7 @@ pub async fn plugin_submit_and_grade(
     // ciphertext (device-local key), so this provides durability + local
     // reproducibility, not public remote re-verification (that arrives with the
     // unencrypted-evidence path in a later phase).
-    let bundle_pin = crate::ipfs::content::add_bytes(&state.content_node, &envelope_bytes)
+    let bundle_pin = crate::content_store::content::add_bytes(&state.content_node, &envelope_bytes)
         .await
         .map_err(|e| log::warn!("plugin grade: failed to pin submission bundle: {e}"))
         .ok();
@@ -690,7 +690,13 @@ pub async fn plugin_submit_and_grade(
     // Promote the bundle blob to a permanent pin so eviction never reclaims a
     // submission's reproducibility bytes.
     if let Some(pin) = &bundle_pin {
-        crate::ipfs::storage::upsert_pin(db.conn(), &pin.hash, "submission", pin.size, false);
+        crate::content_store::storage::upsert_pin(
+            db.conn(),
+            &pin.hash,
+            "submission",
+            pin.size,
+            false,
+        );
     }
 
     // Issue a signed Verifiable Credential for a passing grade — one per skill

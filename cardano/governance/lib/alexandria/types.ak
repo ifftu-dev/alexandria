@@ -282,7 +282,7 @@ pub type ProposalDatum {
   membership_subjects: List<ByteArray>,
   /// Reputation policy for verification
   reputation_policy: PolicyId,
-  /// IPFS CID of full proposal content
+  /// Content ID (BLAKE3 hash) of full proposal content
   content_cid: ByteArray,
   /// POSIX ms when voting ends (set when Published)
   voting_deadline: Int,

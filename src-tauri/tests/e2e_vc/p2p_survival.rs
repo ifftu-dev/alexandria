@@ -2,7 +2,7 @@
 
 use super::common::{await_gossip_on, await_peers_connected, new_test_db, start_test_node};
 use app_lib::crypto::did::Did;
-use app_lib::ipfs::pinboard::{declare_commitment, list_pinners_for, revoke_commitment};
+use app_lib::content_store::pinboard::{declare_commitment, list_pinners_for, revoke_commitment};
 use app_lib::p2p::pinboard::{handle_pinboard_message, PinboardCommitment};
 
 #[tokio::test]

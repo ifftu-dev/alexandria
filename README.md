@@ -120,8 +120,8 @@ alexandria/
 │       ├── db/       # SQLite (~92 live tables, 71 migrations, seed data) — one DB per profile
 │       ├── diag.rs   # File-based diagnostic logger + panic hook
 │       ├── domain/   # Business logic (courses, tutorials, opinions, vc, evidence, governance, ...)
-│       ├── evidence/ # Proficiency taxonomy + thresholds (reputation/attestation/challenge disabled post-VC-first cutover)
-│       ├── ipfs/     # iroh node, BLAKE3 content-addressed blobs, CID resolution
+│       ├── evidence/ # Proficiency taxonomy + thresholds + VC-first reputation engine (attestation/challenge live in commands/; legacy evidence pipeline retired at mig 040)
+│       ├── content_store/ # iroh node, BLAKE3 content-addressed blobs, URL resolution
 │       ├── p2p/      # libp2p swarm — DHT, relay, gossip, peer exchange, vc-fetch, graph-fetch, profile-fetch, username-reg
 │       ├── profile/  # Multi-user profile manager + public profiles_index.json sidecar + auto-migrator
 │       ├── settings/ # Unified per-profile settings: typed registry + sync/device-scoped store

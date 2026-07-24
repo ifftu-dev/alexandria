@@ -9,11 +9,13 @@
 //! 3. Verify the Ed25519 signature over the canonical payload bytes.
 //! 4. Check that the `subject_field_id` exists locally.
 //! 5. Check that at least one of the referenced
-//!    `credential_proof_ids` corresponds to a local `skill_proof`
-//!    under that subject field at level `apply`+. If *no* referenced
-//!    proofs are known yet, queue the opinion in
+//!    `credential_proof_ids` corresponds to a local credential (row in
+//!    the `credentials` table, `claim_kind='skill'`, not revoked) under
+//!    that subject field at level `apply`+. If *no* referenced
+//!    credentials are known yet, queue the opinion in
 //!    `opinions_pending_verification` — a future sweep can promote it
-//!    once the referenced proofs arrive via the evidence topic.
+//!    once the referenced credentials arrive via VC gossip
+//!    (`vc-did` / `vc-status`).
 //! 6. If all checks pass, UPSERT into the `opinions` table.
 //!
 //! The outgoing side (building + publishing) lives in the `publish_opinion`
@@ -204,9 +206,9 @@ pub fn handle_opinion_message(
             .map_err(|e| format!("insert opinion: {e}"))?;
         Ok(OpinionIngest::Stored)
     } else if !any_known {
-        // Queue for later — the referenced proofs may arrive via the
-        // evidence topic, at which point a sweeper promotes queued
-        // opinions into the main table.
+        // Queue for later — the referenced credentials may arrive via
+        // VC gossip (`vc-did` / `vc-status`), at which point a sweeper
+        // promotes queued opinions into the main table.
         db.conn()
             .execute(
                 "INSERT INTO opinions_pending_verification (id, author_address, subject_field_id, \

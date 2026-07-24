@@ -1,6 +1,6 @@
 //! Profile publishing and resolution via iroh.
 //!
-//! Handles the full lifecycle of IPFS-backed user profiles:
+//! Handles the full lifecycle of content-addressed user profiles:
 //! 1. Build a ProfilePayload from the local identity
 //! 2. Sign it with the wallet's Ed25519 key
 //! 3. Store the signed JSON as an iroh blob
@@ -9,9 +9,9 @@
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use thiserror::Error;
 
+use crate::content_store::content;
+use crate::content_store::node::ContentNode;
 use crate::domain::profile::{ProfilePayload, PublishProfileResult, SignedProfile};
-use crate::ipfs::content;
-use crate::ipfs::node::ContentNode;
 
 #[derive(Error, Debug)]
 pub enum ProfileError {

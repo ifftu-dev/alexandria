@@ -5,7 +5,7 @@
 //! evicted under storage pressure (`auto_unpin`).
 //!
 //! When a user-configured quota is exceeded, the eviction engine removes
-//! content in priority-tier order (cached gateway content first, then
+//! content in priority-tier order (opportunistically-cached content first, then
 //! unenrolled course content, then completed-enrollment content), using
 //! LRU within each tier.
 
@@ -169,7 +169,7 @@ pub fn list_evictable_pins_for_test(conn: &Connection) -> Vec<PinRecord> {
 /// 5-tier precedence (higher number = evicted earlier, lower number
 /// = retained longer). Matches the spec §12 + §20.4 pinning contract:
 ///
-/// Tier 5 (evict first): `pin_type = 'cache'` — opportunistic gateway fetches.
+/// Tier 5 (evict first): `pin_type = 'cache'` — opportunistic URL fetches.
 /// Tier 4: course content with NO active enrollment, LRU.
 /// Tier 3: course content for completed/dropped enrollments, LRU.
 /// Tier 2: content we've committed to pin for other subjects via
@@ -342,7 +342,7 @@ pub fn backfill_pins(conn: &Connection) {
         "INSERT OR IGNORE INTO pins (cid, pin_type, size_bytes, auto_unpin, pinned_at) \
          SELECT cm.blake3_hash, 'course', COALESCE(cm.size_bytes, 0), 0, datetime('now') \
          FROM courses c \
-         JOIN content_mappings cm ON cm.ipfs_cid = c.content_cid \
+         JOIN content_mappings cm ON cm.external_id = c.content_cid \
          JOIN local_identity li ON li.stake_address = c.author_address \
          WHERE cm.blake3_hash IS NOT NULL",
         [],
@@ -356,7 +356,7 @@ pub fn backfill_pins(conn: &Connection) {
          JOIN course_chapters cc ON ce.chapter_id = cc.id \
          JOIN courses c ON cc.course_id = c.id \
          JOIN local_identity li ON li.stake_address = c.author_address \
-         JOIN content_mappings cm ON cm.ipfs_cid = ce.content_cid \
+         JOIN content_mappings cm ON cm.external_id = ce.content_cid \
          WHERE cm.blake3_hash IS NOT NULL",
         [],
     );

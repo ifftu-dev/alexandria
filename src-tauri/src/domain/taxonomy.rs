@@ -2,7 +2,7 @@
 //!
 //! The taxonomy defines the skill DAG: Subject Fields → Subjects → Skills
 //! with prerequisite edges. It is a DAO-ratified, versioned document stored
-//! on IPFS. Updates propagate via `/alexandria/taxonomy/1.0` gossip.
+//! in the iroh content store. Updates propagate via `/alexandria/taxonomy/1.0` gossip.
 //!
 //! Two announcement types:
 //!
@@ -19,13 +19,13 @@ use serde::{Deserialize, Serialize};
 ///
 /// Per spec §8.1-8.2: the DAO committee signs a new taxonomy version
 /// after supermajority approval. The CID points to the full taxonomy
-/// document on IPFS. Nodes validate the signature chain (`previous_cid`)
+/// document in the iroh content store. Nodes validate the signature chain (`previous_cid`)
 /// before applying.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaxonomyUpdate {
     /// Monotonically increasing version number.
     pub version: i64,
-    /// BLAKE3 hash (iroh) or IPFS CID of the full taxonomy document.
+    /// BLAKE3 hash (iroh) or content ID (BLAKE3 hash) of the full taxonomy document.
     pub cid: String,
     /// CID of the previous taxonomy version (for chain validation).
     pub previous_cid: Option<String>,
@@ -99,10 +99,10 @@ pub struct TaxonomyVersion {
     pub applied_at: String,
 }
 
-/// A taxonomy version document stored on IPFS.
+/// A taxonomy version document stored in the iroh content store.
 ///
 /// This is the full artifact produced by the ratification workflow.
-/// Stored as JSON on IPFS, with the CID anchored on-chain.
+/// Stored as JSON in the iroh content store, with the CID anchored on-chain.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaxonomyDocument {
     /// Monotonically increasing version number.
@@ -160,7 +160,7 @@ pub struct TaxonomyPreview {
 pub struct TaxonomyPublishResult {
     /// The new version number assigned.
     pub version: i64,
-    /// IPFS CID (BLAKE3) of the published taxonomy document.
+    /// Content ID (BLAKE3 hash) of the published taxonomy document.
     pub content_cid: String,
     /// Number of changes applied to local skill tables.
     pub changes_applied: i64,

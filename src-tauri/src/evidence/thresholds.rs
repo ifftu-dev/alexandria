@@ -1,4 +1,5 @@
-//! Bloom's taxonomy proficiency thresholds for skill proof aggregation.
+//! Bloom's taxonomy proficiency thresholds for credential-based
+//! proficiency aggregation.
 //!
 //! Each level has minimum evidence count, minimum confidence, and
 //! optional type requirements. Levels are evaluated lowest-to-highest;

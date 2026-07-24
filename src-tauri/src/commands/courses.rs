@@ -5,11 +5,11 @@ use crate::crypto::hash::entity_id;
 use crate::domain::course::{Course, CreateCourseRequest, UpdateCourseRequest};
 use crate::AppState;
 
+use crate::content_store::course as content_course;
 use crate::crypto::wallet;
 use crate::domain::course_document::{
     CourseDocumentPayload, DocumentChapter, DocumentElement, PublishCourseResult,
 };
-use crate::ipfs::course as ipfs_course;
 use crate::p2p::catalog;
 
 /// List all courses in the local database.
@@ -425,10 +425,10 @@ pub async fn publish_course(
 
     // Sign the document
     let signed =
-        ipfs_course::sign_course_document(&payload, &w.signing_key).map_err(|e| e.to_string())?;
+        content_course::sign_course_document(&payload, &w.signing_key).map_err(|e| e.to_string())?;
 
     // Publish to iroh
-    let result = ipfs_course::publish_course_document(&state.content_node, &signed)
+    let result = content_course::publish_course_document(&state.content_node, &signed)
         .await
         .map_err(|e| e.to_string())?;
 
@@ -449,7 +449,7 @@ pub async fn publish_course(
             .map_err(|e| e.to_string())?;
 
         // Track as a non-evictable pin (authored content)
-        crate::ipfs::storage::upsert_pin(
+        crate::content_store::storage::upsert_pin(
             db.conn(),
             &result.content_hash,
             "course",
