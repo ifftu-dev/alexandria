@@ -5,8 +5,10 @@
 //! and the logic is unit-testable. The correct-answer key never leaves the
 //! grader — it is not part of any client payload.
 
+pub mod adaptive;
 pub mod goal_plan;
 pub mod grader;
+pub mod irt;
 pub mod items;
 pub mod mcq;
 pub mod policy;
