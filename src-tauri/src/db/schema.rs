@@ -82,6 +82,7 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (72, "unified_assessment_items", MIGRATION_072),
     (73, "bloom_level_normalisation", MIGRATION_073),
     (74, "assessment_attempt_policy", MIGRATION_074),
+    (75, "assessment_adaptive_delivery", MIGRATION_075),
 ];
 
 const MIGRATION_001: &str = r#"
@@ -2999,4 +3000,31 @@ ALTER TABLE assessment_attempts ADD COLUMN attempt_ordinal INTEGER;
 -- ordered by time.
 CREATE INDEX IF NOT EXISTS idx_assessment_attempts_history
     ON assessment_attempts(subject_did, skill_id, started_at DESC);
+"#;
+
+const MIGRATION_075: &str = r#"
+-- ============================================================
+-- Migration 075: adaptive delivery
+--
+-- A bank may be delivered fixed-form (the historical behaviour: draw a
+-- stratified subset, grade it all) or adaptively (pick each next item from
+-- the running ability estimate, stop when the estimate is precise enough).
+-- Fixed is the default so every existing bank is unchanged.
+--
+-- Adaptive attempts reuse `assessment_attempts` as their container and
+-- `attempt_items` for per-item results; `attempt_items.theta_after` /
+-- `se_after` (added in migration 072) record how the ability estimate
+-- evolved after each answer. No item-parameter table is added here: 2PL
+-- parameters bootstrap from the existing `difficulty` column at runtime, and
+-- storing calibrated parameters is a later, data-dependent change.
+-- ============================================================
+
+ALTER TABLE question_banks ADD COLUMN delivery_mode TEXT NOT NULL DEFAULT 'fixed'
+    CHECK (delivery_mode IN ('fixed', 'adaptive'));
+
+-- Target standard error and item-count bounds for adaptive attempts. Ignored
+-- for fixed-form banks. Defaults match assessment::adaptive::StopRule.
+ALTER TABLE question_banks ADD COLUMN adaptive_se_target REAL NOT NULL DEFAULT 0.3;
+ALTER TABLE question_banks ADD COLUMN adaptive_min_items INTEGER NOT NULL DEFAULT 5;
+ALTER TABLE question_banks ADD COLUMN adaptive_max_items INTEGER NOT NULL DEFAULT 20;
 "#;

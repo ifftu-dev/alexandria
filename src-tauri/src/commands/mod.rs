@@ -1,3 +1,4 @@
+pub mod adaptive;
 pub mod aggregation;
 pub mod assessment;
 pub mod attestation;

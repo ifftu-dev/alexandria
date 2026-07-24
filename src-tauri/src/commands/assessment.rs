@@ -68,7 +68,7 @@ fn parse_json_vec<T: serde::de::DeserializeOwned>(s: &str) -> Vec<T> {
 /// Scoped by skill rather than by bank: a skill may be backed by more than
 /// one ratified bank, and switching between them must not reset the
 /// cooldown — that would be the same re-roll by another route.
-fn load_attempt_history(
+pub(crate) fn load_attempt_history(
     conn: &rusqlite::Connection,
     subject_did: &str,
     skill_id: &str,
@@ -100,7 +100,7 @@ fn load_attempt_history(
 ///
 /// Returns the same bank-selection query `assessment_start_attempt` uses, so
 /// the plan and the start path agree on which bank is in play.
-fn resolve_bank_policy(
+pub(crate) fn resolve_bank_policy(
     conn: &rusqlite::Connection,
     skill_id: &str,
 ) -> Result<Option<(String, AttemptPolicy)>, String> {

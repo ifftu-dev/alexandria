@@ -1265,6 +1265,9 @@ pub fn run() {
             commands::assessment::assessment_start_attempt,
             commands::assessment::assessment_grade,
             commands::assessment::assessment_plan_goal,
+            commands::adaptive::assessment_start_adaptive,
+            commands::adaptive::assessment_submit_adaptive_item,
+            commands::adaptive::assessment_finalize_adaptive,
             // Community-content DAO ratification (propose→publish→apply)
             commands::content_governance::propose_goal_template_change,
             commands::content_governance::publish_goal_template_ratification,

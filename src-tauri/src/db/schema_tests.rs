@@ -441,3 +441,46 @@ fn seeded_taxonomy_carries_only_known_bloom_levels() {
         .expect("count");
     assert_eq!(bad, 0, "seeded skills must use canonical Bloom tokens");
 }
+
+// ---- migration 075: adaptive delivery ------------------------------------
+
+#[test]
+fn banks_default_to_fixed_delivery_after_migration() {
+    let db = Database::open_in_memory().expect("db");
+    db.run_migrations().expect("migrations");
+    db.conn()
+        .execute_batch(
+            "INSERT INTO question_banks (id, skill_id, label, ratified)
+             VALUES ('b', 's', 'L', 1);",
+        )
+        .expect("seed");
+
+    let (mode, se, min, max): (String, f64, i64, i64) = db
+        .conn()
+        .query_row(
+            "SELECT delivery_mode, adaptive_se_target, adaptive_min_items, adaptive_max_items
+               FROM question_banks WHERE id = 'b'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        )
+        .expect("row");
+    assert_eq!(mode, "fixed", "existing banks must stay fixed-form");
+    assert_eq!(se, 0.3);
+    assert_eq!(min, 5);
+    assert_eq!(max, 20);
+}
+
+#[test]
+fn delivery_mode_is_constrained() {
+    let db = Database::open_in_memory().expect("db");
+    db.run_migrations().expect("migrations");
+    let bad = db.conn().execute(
+        "INSERT INTO question_banks (id, skill_id, label, ratified, delivery_mode)
+         VALUES ('b', 's', 'L', 1, 'psychic')",
+        [],
+    );
+    assert!(
+        bad.is_err(),
+        "delivery_mode CHECK should reject unknown modes"
+    );
+}
