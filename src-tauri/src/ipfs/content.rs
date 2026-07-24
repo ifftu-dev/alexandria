@@ -91,6 +91,49 @@ pub async fn add_bytes(node: &ContentNode, data: &[u8]) -> Result<AddResult, Con
     })
 }
 
+/// Add raw bytes to the content store **without encryption**, regardless of
+/// whether a content key is set on the node.
+///
+/// [`add_bytes`] encrypts when a content key is present, so the stored blob's
+/// hash is of the ciphertext and only a holder of the device-local key can
+/// read it back — durable and locally reproducible, but not verifiable by a
+/// third party. Published evidence is the opposite case: the whole point is
+/// that anyone can fetch the exact bytes a grader saw and re-derive the score.
+/// So this stores plaintext, and the returned BLAKE3 hash is of the plaintext
+/// — which means content pinned here is addressable at the same
+/// `content_cid` / `submission_cid` recorded on the submission.
+///
+/// Publishing a submission this way makes it world-readable; it must only be
+/// called on an explicit, per-submission opt-in.
+pub async fn add_bytes_unencrypted(
+    node: &ContentNode,
+    data: &[u8],
+) -> Result<AddResult, ContentError> {
+    let store = node
+        .store()
+        .await
+        .map_err(|_| ContentError::NodeNotRunning)?;
+    let size = data.len() as u64;
+
+    let temp = store
+        .add_slice(data)
+        .temp_tag()
+        .await
+        .map_err(|e| ContentError::Store(e.to_string()))?;
+    let hash_hex = temp.hash().to_hex().to_string();
+
+    store
+        .tags()
+        .set(&hash_hex, temp.hash_and_format())
+        .await
+        .map_err(|e| ContentError::Store(e.to_string()))?;
+
+    Ok(AddResult {
+        hash: hash_hex,
+        size,
+    })
+}
+
 /// Fetch content from the local store by BLAKE3 hash.
 ///
 /// Returns the raw bytes. Returns `ContentError::NotFound` if the
@@ -322,6 +365,54 @@ mod tests {
         let content_info = info(&node, &result.hash).await.expect("info");
         assert!(content_info.is_local);
         assert_eq!(content_info.hash, result.hash);
+
+        node.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn unencrypted_evidence_is_addressable_at_its_plaintext_cid() {
+        // The property Phase 3 re-derivation depends on: even with a content
+        // key set (so ordinary content is encrypted), published evidence is
+        // stored plaintext and addressable at blake3(plaintext) — the same
+        // content_cid recorded on the submission.
+        let (node, _tmp) = make_node().await;
+        node.set_content_key([42u8; 32]).await;
+
+        let evidence = br#"{"content":{"kind":"single"},"submission":{"x":1}}"#;
+        let expected_cid = blake3::hash(evidence).to_hex().to_string();
+
+        let result = add_bytes_unencrypted(&node, evidence).await.expect("add");
+        assert_eq!(
+            result.hash, expected_cid,
+            "unencrypted pin must be addressable at the plaintext CID"
+        );
+
+        // And it reads back as plaintext for anyone — get_bytes returns the
+        // raw bytes since there is no version prefix to decrypt.
+        let fetched = get_bytes(&node, &result.hash).await.expect("get");
+        assert_eq!(
+            fetched, evidence,
+            "published evidence must be readable as-is"
+        );
+
+        node.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn encrypted_add_hides_the_plaintext_cid() {
+        // Contrast: the ordinary encrypted path stores ciphertext, so its hash
+        // is NOT the plaintext CID — which is exactly why it cannot be
+        // re-derived by a third party.
+        let (node, _tmp) = make_node().await;
+        node.set_content_key([42u8; 32]).await;
+
+        let data = b"a learner submission";
+        let plaintext_cid = blake3::hash(data).to_hex().to_string();
+        let encrypted = add_bytes(&node, data).await.expect("add");
+        assert_ne!(
+            encrypted.hash, plaintext_cid,
+            "encrypted storage must not expose the plaintext CID"
+        );
 
         node.shutdown().await.expect("shutdown");
     }

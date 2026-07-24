@@ -84,6 +84,7 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (74, "assessment_attempt_policy", MIGRATION_074),
     (75, "assessment_adaptive_delivery", MIGRATION_075),
     (76, "derived_skill_state_history", MIGRATION_076),
+    (77, "submission_evidence_published", MIGRATION_077),
 ];
 
 const MIGRATION_001: &str = r#"
@@ -3060,4 +3061,21 @@ CREATE TABLE IF NOT EXISTS derived_skill_state_history (
 );
 CREATE INDEX IF NOT EXISTS idx_dss_history_subject_skill
     ON derived_skill_state_history(subject_did, skill_id, snapshot_date);
+"#;
+
+const MIGRATION_077: &str = r#"
+-- ============================================================
+-- Migration 077: submission evidence publication
+--
+-- A graded submission's reproducibility bytes (content + submission) are
+-- pinned encrypted with a device-local key, so its content_cid/submission_cid
+-- resolve only on this device — durable, but not verifiable by anyone else.
+-- A learner may opt in, per submission, to publish those bytes unencrypted so
+-- a third party can fetch the exact inputs a grader saw and re-derive the
+-- score (the basis of independent verification). This flag records that
+-- choice; it is 0 (private) by default. Publishing makes the submission
+-- world-readable, so it is only ever set on an explicit opt-in.
+-- ============================================================
+
+ALTER TABLE element_submissions ADD COLUMN evidence_published INTEGER NOT NULL DEFAULT 0;
 "#;

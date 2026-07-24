@@ -429,6 +429,10 @@ async function onSubmit(requestId: number, submission: unknown, metadata: unknow
       contentJson,
       submissionJson,
       integritySessionId: props.integritySessionId ?? null,
+      // Off until a per-submission consent toggle is added: publishing pins the
+      // raw submission unencrypted for third-party re-derivation, making it
+      // world-readable. Backend defaults to private when this is false/omitted.
+      publishEvidence: false,
     })
     gradeNotice.value = null
     iframeRef.value?.resolveSubmit(requestId, { score: score.score })

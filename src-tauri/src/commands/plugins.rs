@@ -565,6 +565,7 @@ pub async fn plugin_list_permissions(
 /// = NULL` until that lands.
 #[cfg(desktop)]
 #[tauri::command]
+#[allow(clippy::too_many_arguments)] // Tauri command; each arg is a distinct IPC field.
 pub async fn plugin_submit_and_grade(
     state: State<'_, AppState>,
     plugin_cid: String,
@@ -576,7 +577,12 @@ pub async fn plugin_submit_and_grade(
     // issued credential is bound to it, so its assurance reflects how closely the
     // learner was monitored while solving.
     integrity_session_id: Option<String>,
+    // Opt-in to publish this submission's evidence unencrypted so a third party
+    // can re-derive the score. Off by default: publishing makes the submission
+    // world-readable, so it is only ever an explicit choice.
+    #[allow(non_snake_case)] publish_evidence: Option<bool>,
 ) -> Result<ScoreRecord, String> {
+    let publish_evidence = publish_evidence.unwrap_or(false);
     check_rate_limit(&state, "plugin_submit_and_grade")?;
 
     // Derive the learner's DID from the unlocked keystore. The keystore
@@ -666,6 +672,26 @@ pub async fn plugin_submit_and_grade(
         .map_err(|e| log::warn!("plugin grade: failed to pin submission bundle: {e}"))
         .ok();
 
+    // On explicit opt-in, also pin the content and submission plaintext
+    // unencrypted, each addressable at the content_cid / submission_cid
+    // recorded below, so a third party can fetch the exact grader inputs and
+    // re-derive the score. Soft-fail like the bundle pin.
+    let published_pins: Vec<crate::ipfs::content::AddResult> = if publish_evidence {
+        let mut pins = Vec::new();
+        for (label, bytes) in [
+            ("content", &content_bytes),
+            ("submission", &submission_bytes),
+        ] {
+            match crate::ipfs::content::add_bytes_unencrypted(&state.content_node, bytes).await {
+                Ok(p) => pins.push(p),
+                Err(e) => log::warn!("plugin grade: failed to publish {label} evidence: {e}"),
+            }
+        }
+        pins
+    } else {
+        Vec::new()
+    };
+
     let db_guard = state
         .db
         .lock()
@@ -684,6 +710,7 @@ pub async fn plugin_submit_and_grade(
             details: &record.details,
             learner_did: &learner_did_str,
             grader_version: &manifest.version,
+            evidence_published: publish_evidence && !published_pins.is_empty(),
         },
     )?;
 
@@ -691,6 +718,17 @@ pub async fn plugin_submit_and_grade(
     // submission's reproducibility bytes.
     if let Some(pin) = &bundle_pin {
         crate::ipfs::storage::upsert_pin(db.conn(), &pin.hash, "submission", pin.size, false);
+    }
+    // Published plaintext evidence is likewise permanent — a verifier may
+    // fetch it long after the grade.
+    for pin in &published_pins {
+        crate::ipfs::storage::upsert_pin(
+            db.conn(),
+            &pin.hash,
+            "published_evidence",
+            pin.size,
+            false,
+        );
     }
 
     // Issue a signed Verifiable Credential for a passing grade — one per skill
@@ -878,6 +916,9 @@ struct SubmissionRow<'a> {
     details: &'a serde_json::Value,
     learner_did: &'a str,
     grader_version: &'a str,
+    /// Whether the learner opted to publish this submission's evidence
+    /// unencrypted for third-party re-derivation.
+    evidence_published: bool,
 }
 
 fn persist_submission(db: &Database, row: &SubmissionRow<'_>) -> Result<(), String> {
@@ -894,8 +935,8 @@ fn persist_submission(db: &Database, row: &SubmissionRow<'_>) -> Result<(), Stri
         .execute(
             "INSERT INTO element_submissions \
              (id, element_id, enrollment_id, submission_cid, grader_cid, content_cid, \
-              score, score_details_json, learner_did, grader_version) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+              score, score_details_json, learner_did, grader_version, evidence_published) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 id,
                 row.element_id,
@@ -907,6 +948,7 @@ fn persist_submission(db: &Database, row: &SubmissionRow<'_>) -> Result<(), Stri
                 details_json,
                 row.learner_did,
                 row.grader_version,
+                row.evidence_published as i64,
             ],
         )
         .map_err(|e| format!("failed to record element submission: {e}"))?;
@@ -1358,5 +1400,83 @@ mod grade_credential_tests {
             None,
             "a deprecation notice must not block issuance"
         );
+    }
+
+    #[test]
+    fn persist_submission_records_the_evidence_publication_flag() {
+        let db = Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+        seed_tagged_element(&db);
+        db.conn()
+            .execute(
+                "INSERT INTO enrollments (id, course_id) VALUES ('enr1', 'c_grade')",
+                [],
+            )
+            .unwrap();
+
+        persist_submission(
+            &db,
+            &SubmissionRow {
+                element_id: "el_grade",
+                enrollment_id: "enr1",
+                submission_cid: "s".repeat(64).as_str(),
+                grader_cid: "g".repeat(64).as_str(),
+                content_cid: "c".repeat(64).as_str(),
+                score: 0.9,
+                details: &serde_json::json!({}),
+                learner_did: "did:key:zL",
+                grader_version: "1.0.0",
+                evidence_published: true,
+            },
+        )
+        .unwrap();
+
+        let published: i64 = db
+            .conn()
+            .query_row(
+                "SELECT evidence_published FROM element_submissions WHERE element_id = 'el_grade'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(published, 1, "opt-in must be recorded on the submission");
+    }
+
+    #[test]
+    fn submissions_are_private_by_default() {
+        let db = Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+        seed_tagged_element(&db);
+        db.conn()
+            .execute(
+                "INSERT INTO enrollments (id, course_id) VALUES ('enr1', 'c_grade')",
+                [],
+            )
+            .unwrap();
+        persist_submission(
+            &db,
+            &SubmissionRow {
+                element_id: "el_grade",
+                enrollment_id: "enr1",
+                submission_cid: "s".repeat(64).as_str(),
+                grader_cid: "g".repeat(64).as_str(),
+                content_cid: "c".repeat(64).as_str(),
+                score: 0.9,
+                details: &serde_json::json!({}),
+                learner_did: "did:key:zL",
+                grader_version: "1.0.0",
+                evidence_published: false,
+            },
+        )
+        .unwrap();
+        let published: i64 = db
+            .conn()
+            .query_row(
+                "SELECT evidence_published FROM element_submissions WHERE element_id = 'el_grade'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(published, 0, "evidence stays private unless opted in");
     }
 }
