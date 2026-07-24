@@ -370,15 +370,16 @@ jobs:
   # cargo target-runner that adb-pushes the cross-compiled test binary.
   #
   # v1 config: x86_64 host + emulated arm64-v8a AVD. The arm64 ABI is the point
-  # (it's what users run, and what the JIT emits); the x86_64 host keeps the
-  # proven linux-x86_64 NDK cross-compile path. Moving to an arm64 host
-  # (ubuntu-22.04-arm) for KVM speed is a follow-up gated on the NDK shipping
-  # linux-aarch64 host binaries (r27+).
+  # (it's what users run, and what the JIT emits). Runs on an arm64 host so the
+  # arm64 AVD boots with native KVM acceleration — an emulated arm64 AVD on an
+  # x86_64 host times out on boot. The NDK step below picks the host-matching
+  # toolchain (linux-aarch64), installing an r27+ NDK if the preinstalled one
+  # predates linux-aarch64 host support.
   mobile-grader-test:
     name: Android grader (on-device)
     needs: changes
     if: needs.changes.outputs.backend == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04-arm
     timeout-minutes: 60
     steps:
       - name: Enable KVM
@@ -400,17 +401,30 @@ jobs:
           path: iroh-live-patched
           token: ${{ secrets.CROSS_REPO_PAT }}
 
-      - name: Use preinstalled Android NDK
+      - name: Set up Android NDK (host-matching toolchain)
         run: |
+          set -euo pipefail
+          # Pick a host-matching prebuilt toolchain. On this arm64 runner that is
+          # linux-aarch64, which the NDK only ships from r27 onward; install r27c
+          # if the preinstalled NDK is older (x86_64-host-only).
+          host="linux-$(uname -m)"          # linux-aarch64 on arm64 runners
           NDK_DIR="$(find "$ANDROID_SDK_ROOT/ndk" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
-          SYSROOT_DIR="$NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
-          NDK_BIN="$NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          if [ -z "$NDK_DIR" ] || [ ! -d "$NDK_DIR/toolchains/llvm/prebuilt/$host" ]; then
+            echo "No $host NDK toolchain found; installing r27c…"
+            yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "ndk;27.2.12479018" >/dev/null
+            NDK_DIR="$ANDROID_SDK_ROOT/ndk/27.2.12479018"
+          fi
+          PREBUILT="$NDK_DIR/toolchains/llvm/prebuilt/$host"
+          if [ ! -d "$PREBUILT" ]; then
+            echo "Expected NDK toolchain at $PREBUILT after install" >&2; exit 1
+          fi
+          NDK_BIN="$PREBUILT/bin"
           SHIM_DIR="$RUNNER_TEMP/android-ndk-bin"
           mkdir -p "$SHIM_DIR"
           for t in ar ranlib nm strip; do ln -sf "$NDK_BIN/llvm-$t" "$SHIM_DIR/aarch64-linux-android-$t"; done
           {
             echo "ANDROID_NDK_HOME=$NDK_DIR"
-            echo "CARGO_NDK_SYSROOT_PATH=$SYSROOT_DIR"
+            echo "CARGO_NDK_SYSROOT_PATH=$PREBUILT/sysroot"
             echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$NDK_BIN/aarch64-linux-android28-clang"
             echo "CC_aarch64_linux_android=$NDK_BIN/aarch64-linux-android28-clang"
             echo "AR_aarch64_linux_android=$NDK_BIN/llvm-ar"
