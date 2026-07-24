@@ -98,9 +98,25 @@ function onWindowFocus() {
   void invoke('release_secure_input').catch(() => {})
 }
 
+// Same leak, intra-window variant. `onWindowFocus` only fires on a window
+// focus transition, so it misses the case where a password field is blurred
+// while the window stays key — e.g. entering a vault password in Settings or
+// Onboarding, then clicking elsewhere in the app without ever switching away.
+// `focusout` bubbles (unlike `blur`), so one document listener covers every
+// password field. Release when focus leaves a password field for anything
+// that is not itself a password field.
+function onFocusOut(e: FocusEvent) {
+  const from = e.target as HTMLElement | null
+  if (!(from instanceof HTMLInputElement) || from.type !== 'password') return
+  const to = e.relatedTarget as HTMLElement | null
+  if (to instanceof HTMLInputElement && to.type === 'password') return
+  void invoke('release_secure_input').catch(() => {})
+}
+
 onMounted(async () => {
   document.addEventListener('wheel', onWheel, { passive: false })
   window.addEventListener('focus', onWindowFocus)
+  document.addEventListener('focusout', onFocusOut)
 
   try {
     const state = await initialize()
@@ -143,6 +159,7 @@ onMounted(async () => {
 onUnmounted(() => {
   document.removeEventListener('wheel', onWheel)
   window.removeEventListener('focus', onWindowFocus)
+  document.removeEventListener('focusout', onFocusOut)
 })
 </script>
 
