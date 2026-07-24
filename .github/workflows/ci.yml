@@ -405,22 +405,26 @@ jobs:
           path: iroh-live-patched
           token: ${{ secrets.CROSS_REPO_PAT }}
 
+      # arm64 runner images do not reliably ship the Android SDK, so provision
+      # it explicitly rather than assume ANDROID_SDK_ROOT is populated.
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
       - name: Set up Android NDK (host-matching toolchain)
         run: |
-          set -euo pipefail
-          # Pick a host-matching prebuilt toolchain. On this arm64 runner that is
-          # linux-aarch64, which the NDK only ships from r27 onward; install r27c
-          # if the preinstalled NDK is older (x86_64-host-only).
+          set -eu
+          # The linux-aarch64 host toolchain the arm64 runner needs only ships
+          # from NDK r27. Install r27c explicitly. Note: no `yes | …` pipe —
+          # under pipefail the `yes` SIGPIPE would fail the step even on a
+          # successful install; sdkmanager needs no prompt for a plain install.
+          sdkmanager "ndk;27.2.12479018"
           host="linux-$(uname -m)"          # linux-aarch64 on arm64 runners
-          NDK_DIR="$(find "$ANDROID_SDK_ROOT/ndk" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
-          if [ -z "$NDK_DIR" ] || [ ! -d "$NDK_DIR/toolchains/llvm/prebuilt/$host" ]; then
-            echo "No $host NDK toolchain found; installing r27c…"
-            yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "ndk;27.2.12479018" >/dev/null
-            NDK_DIR="$ANDROID_SDK_ROOT/ndk/27.2.12479018"
-          fi
+          NDK_DIR="$ANDROID_SDK_ROOT/ndk/27.2.12479018"
           PREBUILT="$NDK_DIR/toolchains/llvm/prebuilt/$host"
           if [ ! -d "$PREBUILT" ]; then
-            echo "Expected NDK toolchain at $PREBUILT after install" >&2; exit 1
+            echo "Expected NDK toolchain at $PREBUILT" >&2
+            ls -la "$NDK_DIR/toolchains/llvm/prebuilt/" || true
+            exit 1
           fi
           NDK_BIN="$PREBUILT/bin"
           SHIM_DIR="$RUNNER_TEMP/android-ndk-bin"
