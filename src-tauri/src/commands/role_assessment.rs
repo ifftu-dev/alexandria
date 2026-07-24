@@ -19,7 +19,7 @@ use tauri::State;
 use crate::commands::credentials::{
     issue_credential_impl, load_issuer_key, now_rfc3339, IssuancePolicy, IssueCredentialRequest,
 };
-use crate::crypto::did::Did;
+use crate::crypto::did::{derive_did_key, Did};
 use crate::crypto::hash::entity_id;
 use crate::domain::vc::{Claim, CredentialType, RoleClaim, VerifiableCredential};
 use crate::AppState;
@@ -288,6 +288,50 @@ pub fn issue_role_credential_impl(
     let org = get_organization_impl(conn, &ra.org_id)?
         .ok_or_else(|| format!("organization {} not found", ra.org_id))?;
 
+    // Issue under the organisation's own DID, not the caller's personal one.
+    //
+    // This is what makes the credential independent evidence. Aggregation
+    // weighs a skill by how many *distinct* issuer clusters back it
+    // (`unique_issuer_clusters`); a learner's own self-issued assessment
+    // credentials all share one cluster and so cannot raise confidence past a
+    // structural cap. An organisation issuing under its own stable DID is a
+    // second, independent cluster — the thing an employer is actually paying
+    // for. Using the caller's personal DID here would collapse every org this
+    // person administers into one issuer and defeat that.
+    //
+    // The caller must hold the org's key: an org's DID defaults to its
+    // owner's, so the owner acts as the org. If the org carries a DID the
+    // caller cannot sign for, issuance is refused rather than silently
+    // falling back to a personal signature.
+    let signer_did = derive_did_key(issuer_key);
+    let org_did = match org.did.as_deref() {
+        Some(did) if did == signer_did.0 => did.to_string(),
+        Some(did) => {
+            return Err(format!(
+                "cannot issue as organization '{}': its DID is {did}, but you hold {}",
+                org.name, signer_did.0
+            ));
+        }
+        // No DID yet — adopt the owner's, so the org has a stable issuer
+        // identity from its first issuance onward.
+        None => {
+            conn.execute(
+                "UPDATE organizations SET did = ?1 WHERE id = ?2",
+                params![signer_did.0, org.id],
+            )
+            .map_err(|e| e.to_string())?;
+            signer_did.0.clone()
+        }
+    };
+    let org_issuer = Did(org_did);
+
+    // A learner cannot be issued an independent role credential by "their own
+    // organisation" — that would be self-issuance wearing an org hat, and it
+    // must not count as a second cluster.
+    if org_issuer.0 == subject.0 {
+        return Err("an organization cannot issue a role credential to itself".into());
+    }
+
     // Fold the role's required assurance level into its issuance policy
     // so a single gate covers both the integrity bounds and the
     // attestation requirement.
@@ -309,7 +353,10 @@ pub fn issue_role_credential_impl(
         integrity_session_id: Some(integrity_session_id.to_string()),
         integrity_policy: Some(policy),
     };
-    issue_credential_impl(conn, issuer_key, issuer_did, &req, now)
+    // `issuer_did` is retained in the signature for API compatibility but the
+    // credential is issued under the org's DID.
+    let _ = issuer_did;
+    issue_credential_impl(conn, issuer_key, &org_issuer, &req, now)
 }
 
 // ============================================================================
@@ -571,5 +618,174 @@ mod tests {
             issue_role_credential_impl(conn, &key, &issuer, &ra.id, &subject, "sess_bad", NOW)
                 .unwrap_err();
         assert!(err.contains("issuance policy"), "got: {err}");
+    }
+
+    /// Helper: a completed org + role assessment + clean session, ready to
+    /// issue. `org_did` seeds the organization's DID column (None to adopt).
+    fn ready_to_issue(conn: &Connection, org_did: Option<&str>) -> String {
+        let org = create_organization_impl(conn, "Acme", "stake_owner", org_did, NOW).unwrap();
+        let ra = create_role_assessment_impl(
+            conn,
+            &CreateRoleAssessmentRequest {
+                org_id: org.id,
+                role_title: "SRE L4".into(),
+                job_description: None,
+                course_id: None,
+                skill_ids: vec![],
+                issuance_policy: None,
+                required_assurance_level: None,
+            },
+            NOW,
+        )
+        .unwrap();
+        seed_session(conn, "sess_ok", "completed", 0.95, 0);
+        ra.id
+    }
+
+    #[test]
+    fn credential_is_issued_under_the_org_did_not_the_owner_personal_did() {
+        // The core of 1.7: the issuer is the organisation, so its credentials
+        // form one stable, independent cluster rather than the owner's
+        // personal identity.
+        let (db, key, owner, subject) = setup();
+        let conn = db.conn();
+        let ra = ready_to_issue(conn, Some(&owner.0)); // org DID == owner DID
+        let vc =
+            issue_role_credential_impl(conn, &key, &owner, &ra, &subject, "sess_ok", NOW).unwrap();
+        assert_eq!(vc.issuer, owner, "issued under the org's DID");
+        assert_ne!(
+            vc.issuer.0, subject.0,
+            "issuer is independent of the subject"
+        );
+    }
+
+    #[test]
+    fn an_org_without_a_did_adopts_the_owners_on_first_issuance() {
+        let (db, key, owner, subject) = setup();
+        let conn = db.conn();
+        let ra = ready_to_issue(conn, None);
+        issue_role_credential_impl(conn, &key, &owner, &ra, &subject, "sess_ok", NOW).unwrap();
+
+        // The org now carries a stable DID for every future issuance.
+        let org_id: String = conn
+            .query_row(
+                "SELECT org_id FROM role_assessments WHERE id = ?1",
+                [&ra],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let org = get_organization_impl(conn, &org_id).unwrap().unwrap();
+        assert_eq!(org.did.as_deref(), Some(owner.0.as_str()));
+    }
+
+    #[test]
+    fn issuance_is_refused_when_the_caller_does_not_hold_the_org_key() {
+        // The org's DID belongs to someone else; this caller cannot sign as it
+        // and must be refused rather than silently signing personally.
+        let (db, key, owner, subject) = setup();
+        let conn = db.conn();
+        let other_org_did = derive_did_key(&SigningKey::from_bytes(&[9u8; 32])).0;
+        let ra = ready_to_issue(conn, Some(&other_org_did));
+        let err = issue_role_credential_impl(conn, &key, &owner, &ra, &subject, "sess_ok", NOW)
+            .unwrap_err();
+        assert!(
+            err.contains("cannot issue as organization"),
+            "unexpected: {err}"
+        );
+    }
+
+    #[test]
+    fn an_org_cannot_issue_a_role_credential_to_itself() {
+        // Issuing to the org's own DID would be self-issuance in disguise and
+        // must not count as an independent cluster.
+        let (db, key, owner, _subject) = setup();
+        let conn = db.conn();
+        let ra = ready_to_issue(conn, Some(&owner.0));
+        let err = issue_role_credential_impl(conn, &key, &owner, &ra, &owner, "sess_ok", NOW)
+            .unwrap_err();
+        assert!(err.contains("to itself"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn an_org_credential_is_a_distinct_issuer_cluster_from_self_assessment() {
+        // The payoff finding 1 predicted: a learner's own assessment
+        // credentials share one issuer cluster and cannot lift confidence past
+        // a cap, but an org-issued role credential is a second, independent
+        // cluster — so it raises the count aggregation weighs.
+        use crate::commands::aggregation::recompute_all_impl;
+        use crate::commands::credentials::{issue_credential_impl, IssueCredentialRequest};
+        use crate::domain::vc::SkillClaim;
+
+        let (db, owner_key, owner, _subject) = setup();
+        let conn = db.conn();
+        let learner_key = SigningKey::from_bytes(&[7u8; 32]);
+        let learner = derive_did_key(&learner_key);
+
+        // Learner self-issues two assessment credentials for a skill.
+        for i in 0..2 {
+            let req = IssueCredentialRequest {
+                credential_type: CredentialType::AssessmentCredential,
+                subject: learner.clone(),
+                claim: Claim::Skill(SkillClaim {
+                    skill_id: "skill:sre".into(),
+                    level: 3,
+                    score: 0.8,
+                    evidence_refs: vec![format!("attempt_{i}")],
+                    rubric_version: None,
+                    assessment_method: Some("proctored_quiz".into()),
+                    provenance: None,
+                }),
+                evidence_refs: vec![],
+                expiration_date: None,
+                supersedes: None,
+                integrity_session_id: None,
+                integrity_policy: None,
+            };
+            issue_credential_impl(conn, &learner_key, &learner, &req, NOW).unwrap();
+        }
+        recompute_all_impl(conn, NOW).unwrap();
+        let self_only: i64 = conn
+            .query_row(
+                "SELECT unique_issuer_clusters FROM derived_skill_states                   WHERE subject_did = ?1 AND skill_id = 'skill:sre'",
+                [&learner.0],
+                |r| r.get(0),
+            )
+            .unwrap();
+
+        // The org now issues a *skill* credential for the same skill under its
+        // own DID (distinct issuer). Independent cluster count must rise.
+        let skill_req = IssueCredentialRequest {
+            credential_type: CredentialType::AssessmentCredential,
+            subject: learner.clone(),
+            claim: Claim::Skill(SkillClaim {
+                skill_id: "skill:sre".into(),
+                level: 3,
+                score: 0.8,
+                evidence_refs: vec![],
+                rubric_version: None,
+                assessment_method: Some("org_assessment".into()),
+                provenance: None,
+            }),
+            evidence_refs: vec![],
+            expiration_date: None,
+            supersedes: None,
+            integrity_session_id: None,
+            integrity_policy: None,
+        };
+        issue_credential_impl(conn, &owner_key, &owner, &skill_req, NOW).unwrap();
+        recompute_all_impl(conn, NOW).unwrap();
+        let with_org: i64 = conn
+            .query_row(
+                "SELECT unique_issuer_clusters FROM derived_skill_states                   WHERE subject_did = ?1 AND skill_id = 'skill:sre'",
+                [&learner.0],
+                |r| r.get(0),
+            )
+            .unwrap();
+
+        assert_eq!(self_only, 1, "self-issued credentials are one cluster");
+        assert!(
+            with_org > self_only,
+            "an independent org issuer must raise the cluster count: {with_org} !> {self_only}"
+        );
     }
 }
