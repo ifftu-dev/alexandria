@@ -79,5 +79,6 @@
   "apply_content_version": "gossip-inbound / import path; no direct UI caller",
   "assessment_start_adaptive": "adaptive delivery; turn-by-turn runner UI pending (fixed-form path is wired)",
   "assessment_submit_adaptive_item": "adaptive delivery; turn-by-turn runner UI pending",
-  "assessment_finalize_adaptive": "adaptive delivery; turn-by-turn runner UI pending"
+  "assessment_finalize_adaptive": "adaptive delivery; turn-by-turn runner UI pending",
+  "get_skill_state_history": "confidence decay-curve + velocity data; curve UI pending"
 }

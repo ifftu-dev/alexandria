@@ -244,6 +244,41 @@ fn upsert_cached(conn: &Connection, state: &DerivedSkillState) -> Result<(), Str
         ],
     )
     .map_err(|e| e.to_string())?;
+
+    snapshot_history(conn, state)?;
+    Ok(())
+}
+
+/// Record a dated snapshot of this state for the decay curve and velocity.
+///
+/// One row per (subject, skill, day): `INSERT ... ON CONFLICT DO UPDATE` so a
+/// second recompute on the same day overwrites that day's snapshot rather
+/// than duplicating it, keeping the history one point per day.
+fn snapshot_history(conn: &Connection, state: &DerivedSkillState) -> Result<(), String> {
+    conn.execute(
+        "INSERT INTO derived_skill_state_history \
+         (subject_did, skill_id, snapshot_date, raw_score, confidence, trust_score, \
+          level, evidence_mass, computed_at) \
+         VALUES (?1, ?2, date(?3), ?4, ?5, ?6, ?7, ?8, ?3) \
+         ON CONFLICT(subject_did, skill_id, snapshot_date) DO UPDATE SET \
+            raw_score = excluded.raw_score, \
+            confidence = excluded.confidence, \
+            trust_score = excluded.trust_score, \
+            level = excluded.level, \
+            evidence_mass = excluded.evidence_mass, \
+            computed_at = excluded.computed_at",
+        params![
+            state.subject.as_str(),
+            state.skill_id,
+            state.computed_at,
+            state.raw_score,
+            state.confidence,
+            state.trust_score,
+            state.level,
+            state.evidence_mass,
+        ],
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -309,6 +344,55 @@ pub async fn recompute_all(state: State<'_, AppState>) -> Result<u32, String> {
         .map_err(|_| "database lock poisoned".to_string())?;
     let db = db_guard.as_ref().ok_or("database not initialized")?;
     recompute_all_impl(db.conn(), &now)
+}
+
+/// One dated point on a skill's confidence/trust history.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SkillHistoryPoint {
+    pub snapshot_date: String,
+    pub raw_score: f64,
+    pub confidence: f64,
+    pub trust_score: f64,
+    pub level: u8,
+    pub evidence_mass: f64,
+}
+
+/// The dated trust/confidence history for one skill, oldest first — the data
+/// behind a decay curve and a learning-velocity readout.
+#[tauri::command]
+pub async fn get_skill_state_history(
+    state: State<'_, AppState>,
+    subject_did: String,
+    skill_id: String,
+) -> Result<Vec<SkillHistoryPoint>, String> {
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
+    let mut stmt = db
+        .conn()
+        .prepare(
+            "SELECT snapshot_date, raw_score, confidence, trust_score, level, evidence_mass \
+               FROM derived_skill_state_history \
+              WHERE subject_did = ?1 AND skill_id = ?2 ORDER BY snapshot_date ASC",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(params![subject_did, skill_id], |r| {
+            Ok(SkillHistoryPoint {
+                snapshot_date: r.get(0)?,
+                raw_score: r.get(1)?,
+                confidence: r.get(2)?,
+                trust_score: r.get(3)?,
+                level: r.get::<_, i64>(4)? as u8,
+                evidence_mass: r.get(5)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .filter_map(|x| x.ok())
+        .collect();
+    Ok(rows)
 }
 
 // ---------------------------------------------------------------------------
@@ -464,5 +548,83 @@ mod tests {
             parse_credential_type(&vc),
             CredentialType::AttestationCredential
         );
+    }
+
+    fn history(db: &Database, subject: &Did, skill: &str) -> Vec<(String, f64)> {
+        db.conn()
+            .prepare(
+                "SELECT snapshot_date, trust_score FROM derived_skill_state_history                   WHERE subject_did = ?1 AND skill_id = ?2 ORDER BY snapshot_date",
+            )
+            .unwrap()
+            .query_map(params![subject.as_str(), skill], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, f64>(1)?))
+            })
+            .unwrap()
+            .map(|x| x.unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn recompute_at_a_later_time_lowers_confidence() {
+        // The whole point of 1.6: a credential earned long ago is worth less
+        // now. Recomputing at a later `now` must decay trust, with no new
+        // evidence — otherwise displayed confidence is frozen at issuance.
+        let (db, subject, skill) = setup_with("skill_decay", 0.9);
+
+        recompute_all_impl(db.conn(), "2026-04-13T00:00:00Z").unwrap();
+        let fresh =
+            get_derived_skill_state_impl(db.conn(), &subject, &skill, "2026-04-13T00:00:00Z")
+                .unwrap()
+                .unwrap()
+                .trust_score;
+
+        // Four years later, same evidence.
+        recompute_all_impl(db.conn(), "2030-04-13T00:00:00Z").unwrap();
+        let stale =
+            get_derived_skill_state_impl(db.conn(), &subject, &skill, "2030-04-13T00:00:00Z")
+                .unwrap()
+                .unwrap()
+                .trust_score;
+
+        assert!(
+            stale < fresh,
+            "trust should decay over time: {stale} !< {fresh}"
+        );
+    }
+
+    #[test]
+    fn recompute_records_a_dated_history_snapshot() {
+        let (db, subject, skill) = setup_with("skill_hist", 0.8);
+        recompute_all_impl(db.conn(), "2026-04-13T00:00:00Z").unwrap();
+
+        let h = history(&db, &subject, &skill);
+        assert_eq!(h.len(), 1, "one snapshot after one recompute");
+        assert_eq!(h[0].0, "2026-04-13", "snapshot dated to the recompute day");
+    }
+
+    #[test]
+    fn same_day_recompute_overwrites_rather_than_duplicates() {
+        let (db, subject, skill) = setup_with("skill_sameday", 0.8);
+        recompute_all_impl(db.conn(), "2026-04-13T09:00:00Z").unwrap();
+        recompute_all_impl(db.conn(), "2026-04-13T18:00:00Z").unwrap();
+
+        let h = history(&db, &subject, &skill);
+        assert_eq!(
+            h.len(),
+            1,
+            "two recomputes on one day are one history point"
+        );
+    }
+
+    #[test]
+    fn history_accumulates_one_point_per_day() {
+        let (db, subject, skill) = setup_with("skill_curve", 0.9);
+        for day in ["2026-04-13", "2027-04-13", "2028-04-13"] {
+            recompute_all_impl(db.conn(), &format!("{day}T00:00:00Z")).unwrap();
+        }
+        let h = history(&db, &subject, &skill);
+        assert_eq!(h.len(), 3, "three distinct days, three points");
+        // Trust falls across the snapshots as the evidence ages.
+        assert!(h[0].1 > h[2].1, "the curve should decline: {:?}", h);
     }
 }

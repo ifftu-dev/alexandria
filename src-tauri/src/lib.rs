@@ -243,6 +243,22 @@ impl AppState {
             }
         }
 
+        // 6b. Recompute derived skill states on unlock. Confidence decays with
+        // time, but recompute otherwise only runs after a passing assessment,
+        // so without this a learner's displayed confidence would be frozen at
+        // their last credential. Running it here means every app open reflects
+        // the current decay, and records a dated history snapshot. Best-effort.
+        if let Ok(guard) = self.db.lock() {
+            if let Some(db) = guard.as_ref() {
+                let now = commands::credentials::now_rfc3339();
+                match commands::aggregation::recompute_all_impl(db.conn(), &now) {
+                    Ok(n) if n > 0 => log::info!("recomputed {n} derived skill states on unlock"),
+                    Ok(_) => {}
+                    Err(e) => log::warn!("skill-state recompute on unlock failed: {e}"),
+                }
+            }
+        }
+
         // 7. Seed iroh content blobs (demo video/pdf media) in the background on
         // every platform. Downloads the public seed-asset URLs once into iroh and
         // fills in each element's content_cid so the demo videos actually play.
@@ -1452,6 +1468,7 @@ pub fn run() {
             commands::aggregation::get_derived_skill_state,
             commands::aggregation::list_derived_states,
             commands::aggregation::recompute_all,
+            commands::aggregation::get_skill_state_history,
             // Community plugin system (Phase 1 — local-file install,
             // iframe-sandboxed interactive plugins)
             commands::plugins::plugin_install_from_file,

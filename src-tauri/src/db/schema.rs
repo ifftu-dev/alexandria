@@ -83,6 +83,7 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (73, "bloom_level_normalisation", MIGRATION_073),
     (74, "assessment_attempt_policy", MIGRATION_074),
     (75, "assessment_adaptive_delivery", MIGRATION_075),
+    (76, "derived_skill_state_history", MIGRATION_076),
 ];
 
 const MIGRATION_001: &str = r#"
@@ -3027,4 +3028,36 @@ ALTER TABLE question_banks ADD COLUMN delivery_mode TEXT NOT NULL DEFAULT 'fixed
 ALTER TABLE question_banks ADD COLUMN adaptive_se_target REAL NOT NULL DEFAULT 0.3;
 ALTER TABLE question_banks ADD COLUMN adaptive_min_items INTEGER NOT NULL DEFAULT 5;
 ALTER TABLE question_banks ADD COLUMN adaptive_max_items INTEGER NOT NULL DEFAULT 20;
+"#;
+
+const MIGRATION_076: &str = r#"
+-- ============================================================
+-- Migration 076: derived skill-state history
+--
+-- Confidence decays with time (aggregation applies an exponential freshness
+-- weight), but nothing recomputed on a schedule — the cache was only
+-- refreshed after a passing assessment, so a learner's displayed confidence
+-- was frozen at their last credential. Recompute now runs on profile unlock
+-- and periodically, and each recompute records a dated snapshot here.
+--
+-- One row per (subject, skill, day): a daily granularity enough to draw a
+-- decay curve and compute learning velocity (the slope of trust over time)
+-- without unbounded growth. Append-only history — the live value stays in
+-- `derived_skill_states`.
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS derived_skill_state_history (
+    subject_did    TEXT NOT NULL,
+    skill_id       TEXT NOT NULL,
+    snapshot_date  TEXT NOT NULL,
+    raw_score      REAL NOT NULL,
+    confidence     REAL NOT NULL,
+    trust_score    REAL NOT NULL,
+    level          INTEGER NOT NULL,
+    evidence_mass  REAL NOT NULL,
+    computed_at    TEXT NOT NULL,
+    PRIMARY KEY (subject_did, skill_id, snapshot_date)
+);
+CREATE INDEX IF NOT EXISTS idx_dss_history_subject_skill
+    ON derived_skill_state_history(subject_did, skill_id, snapshot_date);
 "#;
