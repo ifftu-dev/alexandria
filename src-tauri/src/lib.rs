@@ -3,13 +3,13 @@ pub mod assessment;
 pub mod cardano;
 pub mod classroom;
 pub mod commands;
+pub mod content_store;
 pub mod crypto;
 pub mod db;
 pub mod diag;
 pub mod domain;
 pub mod evidence;
 pub mod goals;
-pub mod ipfs;
 pub mod p2p;
 pub mod plugins;
 pub mod profile;
@@ -30,10 +30,10 @@ use tauri::Manager;
 use tokio::sync::Mutex;
 
 use classroom::ClassroomManager;
+use content_store::http::HttpClient;
+use content_store::node::ContentNode;
+use content_store::resolver::ContentResolver;
 use crypto::keystore::Keystore;
-use ipfs::gateway::GatewayClient;
-use ipfs::node::ContentNode;
-use ipfs::resolver::ContentResolver;
 use p2p::network::P2pNode;
 use profile::{ProfileId, ProfileManager, ProfilePaths};
 use tutoring::TutoringManager;
@@ -96,8 +96,8 @@ pub struct AppState {
     pub content_node: Arc<ContentNode>,
     pub resolver: Arc<Mutex<Option<ContentResolver>>>,
     /// iroh content-provider discovery, shared with the resolver so cache-misses
-    /// are served from peers (pinners) over iroh before the IPFS gateway.
-    pub discovery: Arc<ipfs::discovery::ContentDiscovery>,
+    /// are served from peers (pinners) over iroh before the public URL origin.
+    pub discovery: Arc<content_store::discovery::ContentDiscovery>,
     pub p2p_node: Arc<Mutex<Option<P2pNode>>>,
 }
 
@@ -207,27 +207,27 @@ impl AppState {
 
         // 4. Start iroh content discovery (gossip ingest) so cache-misses can be
         //    served from peers, then build the resolver wired to it (peer fetch
-        //    first, IPFS gateway as last resort).
+        //    first, public URL as last resort).
         if let Some(gossip) = self.content_node.gossip().await {
             if let Err(e) = self.discovery.start(&gossip, vec![]).await {
                 log::warn!("content discovery gossip start failed: {e}");
             }
         }
-        match GatewayClient::with_defaults() {
-            Ok(gateway) => {
+        match HttpClient::with_defaults() {
+            Ok(http) => {
                 let r = ContentResolver::with_discovery(
                     self.content_node.clone(),
-                    gateway,
+                    http,
                     self.db.clone(),
                     self.discovery.clone(),
                 );
                 *self.resolver.lock().await = Some(r);
             }
-            Err(e) => log::error!("failed to create gateway client: {e}"),
+            Err(e) => log::error!("failed to create HTTP content client: {e}"),
         }
 
         // 5. Best-effort startup eviction.
-        let result = ipfs::storage::maybe_evict(&self.content_node, &self.db).await;
+        let result = content_store::storage::maybe_evict(&self.content_node, &self.db).await;
         if result.blobs_evicted > 0 {
             log::info!(
                 "startup eviction: freed {} bytes from {} blobs",
@@ -239,7 +239,7 @@ impl AppState {
         // 6. Backfill pins for older DBs.
         if let Ok(guard) = self.db.lock() {
             if let Some(db) = guard.as_ref() {
-                ipfs::storage::backfill_pins(db.conn());
+                content_store::storage::backfill_pins(db.conn());
             }
         }
 
@@ -422,6 +422,56 @@ impl AppState {
 
         Ok(())
     }
+}
+
+/// Initialize `ndk_context` with the JVM and Application context as soon as
+/// this native library loads.
+///
+/// Tauri's Android entry (`TauriActivity` → wry) does not initialize
+/// `ndk_context`, and `android-activity` — which normally would — is bypassed.
+/// Left uninitialized, iroh's internal `DnsResolver::new()` calls (net_report,
+/// the relay actor) read Android system DNS through `ndk_context` on a tokio
+/// worker right after wallet unlock and panic with "android context was not
+/// initialized"; under `panic = "abort"` that aborts the process.
+///
+/// `JNI_OnLoad` runs once, on library load, before any app code — well before
+/// the P2P node starts — so the context is ready when the resolver needs it.
+/// The Application context is fetched via `ActivityThread.currentApplication()`
+/// (valid from any thread once the process's Application object exists) and
+/// held in a leaked global ref so the pointer stays valid for the process's
+/// lifetime, as `ndk_context` requires.
+#[cfg(target_os = "android")]
+#[no_mangle]
+pub extern "C" fn JNI_OnLoad(
+    vm: jni::JavaVM,
+    _reserved: *mut std::ffi::c_void,
+) -> jni::sys::jint {
+    let vm_ptr = vm.get_java_vm_pointer() as *mut std::ffi::c_void;
+
+    if let Ok(mut env) = vm.attach_current_thread() {
+        let app = env
+            .call_static_method(
+                "android/app/ActivityThread",
+                "currentApplication",
+                "()Landroid/app/Application;",
+                &[],
+            )
+            .and_then(|v| v.l());
+        if let Ok(app) = app {
+            if !app.is_null() {
+                if let Ok(global) = env.new_global_ref(&app) {
+                    let ctx_ptr = global.as_raw() as *mut std::ffi::c_void;
+                    // SAFETY: `vm_ptr` is the process JavaVM (valid for the
+                    // process lifetime) and `ctx_ptr` refers to a global ref we
+                    // deliberately leak below so it outlives this scope.
+                    unsafe { ndk_context::initialize_android_context(vm_ptr, ctx_ptr) };
+                    std::mem::forget(global);
+                }
+            }
+        }
+    }
+
+    jni::sys::JNI_VERSION_1_6
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -656,7 +706,7 @@ pub fn run() {
             let content_node = Arc::new(ContentNode::new(&app_dir.join("iroh-staging")));
             let resolver: Arc<Mutex<Option<ContentResolver>>> =
                 Arc::new(Mutex::new(None));
-            let discovery = Arc::new(ipfs::discovery::ContentDiscovery::new());
+            let discovery = Arc::new(content_store::discovery::ContentDiscovery::new());
             let p2p_node: Arc<Mutex<Option<P2pNode>>> = Arc::new(Mutex::new(None));
             let active: Arc<std::sync::RwLock<Option<ActiveProfile>>> =
                 Arc::new(std::sync::RwLock::new(None));
