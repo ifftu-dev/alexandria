@@ -162,15 +162,17 @@ impl ContentNode {
         // prior default (n0 relays + DNS discovery).
         crate::diag::log("node.start: Endpoint::bind()...");
         let builder = Endpoint::builder(iroh::endpoint::presets::N0);
-        // Mobile: the default `DnsResolver` reads the system DNS configuration
-        // through platform APIs that abort on both mobile targets — on iOS via
-        // CoreFoundation returning NULL (same class as the `if-watch`
-        // SCDynamicStore patch), and on Android via `hickory-resolver` calling
-        // `ndk_context::android_context()`, which panics with "android context
-        // was not initialized" when iroh's DNS discovery starts after unlock
-        // (SIGABRT). Use an explicit public nameserver on both; desktop keeps
-        // system DNS.
-        #[cfg(any(target_os = "ios", target_os = "android"))]
+        // iOS: the default `DnsResolver` reads the system DNS configuration via
+        // CoreFoundation, which returns NULL and panics on iOS / the simulator
+        // (same class of bug as the `if-watch` SCDynamicStore patch). Use an
+        // explicit public nameserver there instead; desktop keeps system DNS.
+        //
+        // Android reads system DNS through `ndk_context`; rather than override
+        // the resolver here (which iroh's internal `DnsResolver::new()` calls in
+        // net_report / the relay actor would bypass anyway), `JNI_OnLoad` in
+        // lib.rs initializes `ndk_context` up front so the real system read
+        // works everywhere. So Android keeps system DNS like desktop.
+        #[cfg(target_os = "ios")]
         let builder = builder.dns_resolver(iroh::dns::DnsResolver::with_nameserver(
             ([1, 1, 1, 1], 53).into(),
         ));

@@ -160,6 +160,17 @@ block2 = "0.6"
 # Image encoding (JPEG) for bridging video frames to the webview on mobile.
 image = { version = "0.25", default-features = false, features = ["jpeg"] }
 
+# ── Android JNI context bootstrap ────────────────────────────────────
+# Tauri's Android entry (TauriActivity → wry) never initializes `ndk_context`,
+# and `android-activity` (which would) is bypassed. Without it, iroh's internal
+# `DnsResolver::new()` calls read Android system DNS via `ndk_context` and
+# panic ("android context was not initialized") on a tokio worker after unlock;
+# under `panic = "abort"` that panic aborts the process. `JNI_OnLoad` in
+# `lib.rs` initializes the context so the read succeeds. See node.rs.
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.21"
+ndk-context = "0.1"
+
 # ── macOS / Linux SQLCipher dependencies ─────────────────────────────
 [target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
 # macOS/Linux desktop builds can link SQLCipher against the runner's native crypto stack.
