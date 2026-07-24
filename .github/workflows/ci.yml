@@ -382,12 +382,16 @@ jobs:
     runs-on: ubuntu-22.04-arm
     timeout-minutes: 60
     steps:
+      # Best-effort: on arm64 hosted runners KVM is already configured, and the
+      # x86_64 udev-rule dance can error. Never let it fail the job — the
+      # emulator uses whatever acceleration is present.
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
-            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules || true
+          sudo udevadm control --reload-rules || true
+          sudo udevadm trigger --name-match=kvm || true
+          ls -l /dev/kvm || true
 
       - name: Checkout alexandria
         uses: actions/checkout@v5
