@@ -184,5 +184,6 @@
     "checking": "Checking…",
     "checkActivation": "Check Activation",
     "backToProfiles": "Back to profiles"
-  }
+  },
+  "stepOf": "Step {current} of {total}"
 }
