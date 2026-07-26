@@ -45,8 +45,15 @@ const elementTypeCounts = computed(() => {
 onMounted(async () => {
   const courseId = route.params.id as string
   try {
-    const [c, chs, enrollments] = await Promise.all([
-      invoke<Course | null>('get_course', { courseId }),
+    const c = await invoke<Course | null>('get_course', { courseId })
+    // Tutorials have no meaningful detail/enroll step — clicking one should
+    // start playing immediately. Whatever entry point routed here, hand off to
+    // the player, which auto-enrolls tutorials and resumes the first element.
+    if (c?.kind === 'tutorial') {
+      router.replace(`/learn/${courseId}`)
+      return
+    }
+    const [chs, enrollments] = await Promise.all([
       invoke<Chapter[]>('list_chapters', { courseId }).catch(() => []),
       invoke<Enrollment[]>('list_enrollments').catch(() => []),
     ])
@@ -201,7 +208,7 @@ function elementTypeLabel(elementType: string): string {
 
     <div v-else class="max-w-4xl">
       <!-- Header -->
-      <div class="flex items-start justify-between gap-6 mb-8">
+      <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between sm:gap-6 mb-8">
         <div class="min-w-0">
           <div class="flex items-center gap-2 mb-2">
             <StatusBadge :status="course.status" />
@@ -214,7 +221,7 @@ function elementTypeLabel(elementType: string): string {
           </p>
 
           <!-- Stats pills -->
-          <div class="flex items-center gap-3 mt-4">
+          <div class="flex flex-wrap items-center gap-x-3 gap-y-1.5 mt-4">
             <span class="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
               <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
@@ -236,11 +243,12 @@ function elementTypeLabel(elementType: string): string {
           </div>
         </div>
 
-        <div class="shrink-0 flex flex-col gap-2">
+        <div class="shrink-0 flex flex-col gap-2 w-full sm:w-auto">
           <AppButton
             v-if="!enrollment"
             :loading="enrolling"
             variant="primary"
+            class="w-full sm:w-auto"
             @click="enroll"
           >
             <svg class="w-4 h-4 me-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -251,6 +259,7 @@ function elementTypeLabel(elementType: string): string {
           <AppButton
             v-else-if="enrollment.status === 'active'"
             variant="primary"
+            class="w-full sm:w-auto"
             @click="router.push(`/learn/${course.id}`)"
           >
             <svg class="w-4 h-4 me-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">

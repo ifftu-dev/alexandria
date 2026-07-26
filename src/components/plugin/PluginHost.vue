@@ -66,6 +66,11 @@ const { invoke } = useLocalApi()
 const manifest = ref<PluginManifest | null>(null)
 const permissions = ref<PluginPermissionRecord[]>([])
 const loading = ref(true)
+// The iframe mounts as soon as the manifest resolves, but the plugin inside
+// still has to fetch its assets and run its bootstrap before anything renders.
+// Keep a skeleton over the frame until it handshakes (`ready`) so the user
+// never sees a blank rectangle.
+const pluginReady = ref(false)
 const loadError = ref<string | null>(null)
 const refusalReason = ref<string | null>(null)
 /** Non-fatal notice shown alongside a running plugin — currently the
@@ -197,6 +202,7 @@ onBeforeUnmount(() => {
 function onReady(declared: string[]) {
   // The plugin has shown us which capabilities it actually intends to
   // use. Not persisted — just logged for debugging.
+  pluginReady.value = true
   console.debug('[alex] plugin ready', pluginCid.value, declared)
 }
 
@@ -483,7 +489,7 @@ function onIframeError(msg: string) {
 <template>
   <div class="plugin-host flex flex-col h-full min-h-0">
     <div v-if="loading" class="flex items-center justify-center p-10">
-      <AppSpinner />
+      <AppSpinner size="lg" :label="$t('plugins.host.loading')" />
     </div>
 
     <AppAlert v-else-if="loadError" variant="error">
@@ -501,7 +507,19 @@ function onIframeError(msg: string) {
         {{ gradeNotice }}
       </AppAlert>
 
-      <div class="flex-1 min-h-0 flex flex-col">
+      <div class="relative flex-1 min-h-0 flex flex-col">
+        <!-- Skeleton over the frame until the plugin handshakes. -->
+        <Transition name="plugin-fade">
+          <div
+            v-if="!pluginReady"
+            class="ph-loading absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-card"
+          >
+            <div class="ph-loading__orbit">
+              <span></span><span></span><span></span>
+            </div>
+            <p class="text-sm text-muted-foreground">{{ $t('plugins.host.loading') }}</p>
+          </div>
+        </Transition>
         <PluginIframe
           ref="iframeRef"
           :plugin-cid="pluginCid"
@@ -535,3 +553,39 @@ function onIframeError(msg: string) {
     />
   </div>
 </template>
+
+<style scoped>
+/* Three dots orbiting a point — a calmer, on-brand "plugin is booting" cue
+   than a bare spinner, which read as janky mid-load. */
+.ph-loading__orbit {
+  position: relative;
+  width: 2.75rem;
+  height: 2.75rem;
+}
+.ph-loading__orbit span {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 9999px;
+  background: var(--app-primary);
+  animation: ph-orbit 1.1s ease-in-out infinite;
+}
+.ph-loading__orbit span:nth-child(1) { animation-delay: 0s; }
+.ph-loading__orbit span:nth-child(2) { animation-delay: -0.37s; }
+.ph-loading__orbit span:nth-child(3) { animation-delay: -0.74s; }
+
+@keyframes ph-orbit {
+  0%   { transform: rotate(0deg) translateX(1.05rem) scale(0.6); opacity: 0.35; }
+  50%  { transform: rotate(180deg) translateX(1.05rem) scale(1); opacity: 1; }
+  100% { transform: rotate(360deg) translateX(1.05rem) scale(0.6); opacity: 0.35; }
+}
+
+.plugin-fade-leave-active { transition: opacity 0.25s ease; }
+.plugin-fade-leave-to { opacity: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  .ph-loading__orbit span { animation-duration: 2.4s; }
+}
+</style>

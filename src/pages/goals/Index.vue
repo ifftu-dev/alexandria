@@ -4,32 +4,14 @@ import { useRouter } from 'vue-router'
 
 import { useGoals } from '@/composables/useGoals'
 import { useSettings } from '@/composables/useSettings'
-import { useLocalApi } from '@/composables/useLocalApi'
-import { AppButton, AppInput, AppModal, EmptyState, AppSpinner } from '@/components/ui'
+import { AppButton, AppModal, EmptyState, AppSpinner } from '@/components/ui'
 import LearningPathView from '@/components/skills/LearningPathView.vue'
 import GoalPicker from '@/components/goals/GoalPicker.vue'
 import SkillBootstrapPanel from '@/components/skills/SkillBootstrapPanel.vue'
 import type { LearningPath, Goal } from '@/types'
 
 const router = useRouter()
-const { invoke } = useLocalApi()
 const { goals, removeGoal, pathFor, combinedPath } = useGoals()
-
-// Look up another user by @username (or, as a power-user fallback, DID).
-const lookupQuery = ref('')
-const myUsername = ref<string | null>(null)
-function openUserProfile() {
-  // Mobile keyboards auto-capitalize typed input. Usernames are
-  // lowercase by definition; for DIDs only the scheme prefix is
-  // case-insensitive — normalize accordingly.
-  let q = lookupQuery.value.trim()
-  if (/^did:key:/i.test(q)) {
-    q = q.replace(/^did:key:/i, 'did:key:')
-  } else {
-    q = q.replace(/^@/, '').toLowerCase()
-  }
-  if (q) router.push(`/u/${encodeURIComponent(q)}`)
-}
 
 const loading = ref(true)
 const paths = ref<Record<string, LearningPath>>({})
@@ -63,8 +45,6 @@ async function loadAll() {
 
 onMounted(async () => {
   await useSettings().initialize()
-  const me = await invoke<{ username: string | null } | null>('get_profile').catch(() => null)
-  myUsername.value = me?.username ?? null
   await loadAll()
 })
 
@@ -137,27 +117,6 @@ const dash = computed(() => 2 * Math.PI * 20)
           {{ $t('goals.index.addGoal') }}
         </AppButton>
       </div>
-    </div>
-
-    <!-- User lookup -->
-    <div class="card mb-6 p-4">
-      <p class="mb-2 text-sm font-semibold text-foreground">{{ $t('goals.index.findSomeone') }}</p>
-      <div class="flex items-end gap-2">
-        <div class="min-w-0 flex-1">
-          <AppInput
-            v-model="lookupQuery"
-            :placeholder="$t('goals.index.usernamePlaceholder')"
-            data-testid="user-lookup-input"
-            @keyup.enter="openUserProfile"
-          />
-        </div>
-        <AppButton :disabled="!lookupQuery.trim()" data-testid="user-lookup-go" @click="openUserProfile">
-          {{ $t('goals.index.viewProfile') }}
-        </AppButton>
-      </div>
-      <p v-if="myUsername" class="mt-2 text-[0.65rem] text-muted-foreground" data-testid="my-username">
-        {{ $t('goals.index.yourHandle', { name: myUsername }) }}
-      </p>
     </div>
 
     <div v-if="loading" class="flex justify-center py-16">

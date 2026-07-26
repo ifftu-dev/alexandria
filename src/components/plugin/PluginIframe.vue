@@ -6,8 +6,11 @@
  * `/Users/hack/.claude/plans/prancy-bubbling-grove.md`.
  *
  * Security contract:
- *  - sandbox = `allow-scripts allow-same-origin allow-downloads`, never
- *    `allow-top-navigation`, never `allow-popups`, never `allow-modals`.
+ *  - sandbox = `allow-scripts allow-same-origin allow-downloads allow-forms`
+ *    (allow-forms lets a plugin's own `<form>` fire its submit event, which the
+ *    plugin intercepts via JS; the per-response CSP `form-action 'self'` still
+ *    bars posting a form to any external origin). Never `allow-top-navigation`,
+ *    never `allow-popups`, never `allow-modals`.
  *
  *    `allow-same-origin` is REQUIRED, not incidental: it gives the iframe its
  *    real `plugin://<cid>` origin, without which (a) ES-module plugins can't
@@ -39,6 +42,7 @@
 
 import { ref, shallowRef, onMounted, onBeforeUnmount, watch, computed } from 'vue'
 import type { PluginCapability } from '@/types'
+import { isAndroid, currentPlatform } from '@/composables/usePlatform'
 
 const props = defineProps<{
   pluginCid: string
@@ -134,7 +138,18 @@ const allowAttribute = computed(() => {
   return features.join('; ')
 })
 
-const srcUrl = computed(() => `plugin://${props.pluginCid}/${props.entry.replace(/^\/+/, '')}`)
+// Android and Windows WebViews (WebView2 / Android System WebView) don't serve
+// true custom schemes — Tauri routes them through `http://<scheme>.localhost`,
+// so the plugin CID has to travel in the path. WKWebView (macOS/iOS) and
+// webkit2gtk (Linux) serve `plugin://<cid>/…` directly, which also gives every
+// plugin its own origin. `asset_protocol::handle` accepts both shapes.
+const usesHttpScheme = isAndroid || currentPlatform === 'windows'
+const srcUrl = computed(() => {
+  const entry = props.entry.replace(/^\/+/, '')
+  return usesHttpScheme
+    ? `http://plugin.localhost/${props.pluginCid}/${entry}`
+    : `plugin://${props.pluginCid}/${entry}`
+})
 
 onMounted(() => {
   window.addEventListener('message', onWindowMessage)
@@ -473,7 +488,7 @@ function sendSubmitAck(submissionCid: string, score: number | null) {
     :key="`${pluginCid}|${entry}|${allowAttribute}`"
     ref="iframeEl"
     :src="srcUrl"
-    sandbox="allow-scripts allow-same-origin allow-downloads"
+    sandbox="allow-scripts allow-same-origin allow-downloads allow-forms"
     :allow="allowAttribute"
     referrerpolicy="no-referrer"
     class="plugin-iframe block w-full h-full min-h-[400px] bg-background"

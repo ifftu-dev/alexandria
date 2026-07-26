@@ -21,6 +21,13 @@ const EL_EDITOR_TS: &str = "el_plugin_demo_editor_ts_sum";
 const EL_EDITOR_CPP: &str = "el_plugin_demo_editor_cpp_double";
 const EL_EDITOR_PYTHON: &str = "el_plugin_demo_editor_python_double";
 
+/// Inline SVG cover art for the demo course, stored in `courses.thumbnail_svg`
+/// (same convention as `COURSE_THUMBNAILS` in `seed.rs`: raw 640×360 SVG markup,
+/// gradient + decorative motifs + centred title). Without it the catalog card
+/// renders blank. Themed for plugins — interlocking puzzle pieces plus code
+/// brackets and a music note nodding to the three showcased plugins.
+const THUMBNAIL_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#8b5cf6"/><stop offset="100%" stop-color="#06b6d4"/></linearGradient></defs><rect width="640" height="360" fill="url(#g)"/><g opacity="0.12" fill="none" stroke="#fff" stroke-width="2"><path d="M90 70 L150 70 Q150 52 168 52 Q186 52 186 70 L246 70 L246 130 Q264 130 264 148 Q264 166 246 166 L246 226 L90 226 L90 166 Q72 166 72 148 Q72 130 90 130 Z"/><path d="M400 150 L460 150 Q460 132 478 132 Q496 132 496 150 L556 150 L556 210 Q574 210 574 228 Q574 246 556 246 L556 306 L400 306 L400 246 Q382 246 382 228 Q382 210 400 210 Z"/></g><g opacity="0.1" fill="#fff"><path d="M470 88 L440 118 L470 148 L460 158 L420 118 L460 78 Z"/><path d="M540 88 L570 118 L540 148 L550 158 L590 118 L550 78 Z"/></g><g opacity="0.12" fill="#fff"><circle cx="150" cy="290" r="12"/><rect x="160" y="248" width="8" height="46" rx="3"/><path d="M160 248 L192 240 L192 254 L168 262 Z"/><circle cx="184" cy="278" r="12"/><rect x="194" y="238" width="8" height="42" rx="3"/></g><text x="320" y="172" text-anchor="middle" fill="#fff" font-family="system-ui,sans-serif" font-size="30" font-weight="700" opacity="0.92">Plugins Showcase</text><text x="320" y="206" text-anchor="middle" fill="#fff" font-family="system-ui,sans-serif" font-size="14" opacity="0.7">Music &middot; IRL Review &middot; Code Editors</text></svg>"##;
+
 /// Resolve a builtin plugin's CID by its manifest `id` slug. The full id is
 /// `did:key:<author>#<slug>`, so we match on the parsed `id` field ending in
 /// `#<slug>` — NOT a substring of the whole manifest. A substring match would
@@ -120,8 +127,8 @@ pub fn seed_plugin_demo_course(conn: &Connection) -> Result<(), rusqlite::Error>
 
     // Course shell.
     conn.execute(
-        "INSERT OR IGNORE INTO courses (id, title, description, author_address, tags, skill_ids, status, published_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'published', datetime('now'))",
+        "INSERT OR IGNORE INTO courses (id, title, description, author_address, tags, skill_ids, status, published_at, thumbnail_svg) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'published', datetime('now'), ?7)",
         params![
             COURSE_ID,
             "Plugins Showcase",
@@ -129,7 +136,16 @@ pub fn seed_plugin_demo_course(conn: &Connection) -> Result<(), rusqlite::Error>
             "addr_demo_learner",
             "[\"demo\",\"plugins\"]",
             "[]",
+            THUMBNAIL_SVG,
         ],
+    )?;
+    // Backfill the cover art on DBs seeded before it was added (INSERT OR
+    // IGNORE leaves the existing row untouched). Only fills when missing so a
+    // user-supplied thumbnail is never overwritten.
+    conn.execute(
+        "UPDATE courses SET thumbnail_svg = ?1 \
+         WHERE id = ?2 AND (thumbnail_svg IS NULL OR thumbnail_svg = '')",
+        params![THUMBNAIL_SVG, COURSE_ID],
     )?;
 
     // Chapters.

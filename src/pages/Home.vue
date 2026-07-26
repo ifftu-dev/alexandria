@@ -11,14 +11,16 @@ import { useContentSync } from '@/composables/useContentSync'
 import { usePlatform } from '@/composables/usePlatform'
 import { useSettings } from '@/composables/useSettings'
 import { useGoals } from '@/composables/useGoals'
-import { StatusBadge, AppButton, InfoTip } from '@/components/ui'
+import { StatusBadge, AppButton, InfoTip, AppModal } from '@/components/ui'
 import { bloomFill } from '@/utils/bloom'
 import { sanitizeSvg } from '@/utils/sanitize'
 import CourseCard from '@/components/course/CourseCard.vue'
+import LearningPathView from '@/components/skills/LearningPathView.vue'
 import type {
   Course,
   Enrollment,
   FullReputationAssertion,
+  Goal,
   LearningPath,
   PublicSkillGraph,
 } from '@/types'
@@ -42,6 +44,13 @@ const usernameConflict = ref<{ username: string; winner_did: string } | null>(nu
 const myGraph = ref<PublicSkillGraph | null>(null)
 const goalPaths = ref<Record<string, LearningPath>>({})
 const graphExpanded = ref(false)
+
+// Goal detail modal — clicking a goal card on the dashboard opens its
+// learning path in place rather than navigating away.
+const selectedGoal = ref<Goal | null>(null)
+function openGoalModal(g: Goal) {
+  selectedGoal.value = g
+}
 
 const teachingImpact = computed(() =>
   Math.round(reputation.value.filter((a) => a.role === 'instructor').reduce((s, a) => s + a.score, 0)),
@@ -366,7 +375,7 @@ onMounted(async () => {
           v-for="t in goals"
           :key="t.id"
           class="goal-card group"
-          @click="router.push('/goals')"
+          @click="openGoalModal(t)"
         >
           <svg width="46" height="46" viewBox="0 0 46 46" class="shrink-0">
             <circle cx="23" cy="23" r="18" fill="none" stroke="var(--app-border)" stroke-width="4" />
@@ -554,7 +563,7 @@ onMounted(async () => {
             {{ $t('dashboard.home.tutorials.count', { count: tutorials.length }, tutorials.length) }}
           </span>
         </div>
-        <div class="-mx-4 flex gap-5 snap-x snap-mandatory overflow-x-auto px-4 pb-2 scrollbar-thin sm:mx-0 sm:px-0">
+        <div class="-mx-4 flex gap-5 snap-x snap-mandatory overflow-x-auto px-4 pb-2 scrollbar-thin scroll-pl-4 sm:mx-0 sm:px-0 sm:scroll-pl-0">
           <router-link
             v-for="tut in tutorials"
             :key="tut.id"
@@ -665,6 +674,29 @@ onMounted(async () => {
         </div>
       </div>
     </Teleport>
+
+    <!-- Goal detail modal (dashboard goal-card click) -->
+    <AppModal
+      :open="selectedGoal !== null"
+      :title="selectedGoal?.label ?? ''"
+      max-width="40rem"
+      @close="selectedGoal = null"
+    >
+      <div v-if="selectedGoal">
+        <LearningPathView v-if="goalPaths[selectedGoal.id]" :path="goalPaths[selectedGoal.id]!" />
+        <p v-else class="py-8 text-center text-sm text-muted-foreground">
+          {{ $t('dashboard.home.goals.ready') }}
+        </p>
+        <div class="mt-5 flex justify-end gap-2">
+          <AppButton variant="outline" size="sm" @click="selectedGoal = null">
+            {{ $t('common.actions.close') }}
+          </AppButton>
+          <AppButton size="sm" @click="router.push('/goals')">
+            {{ $t('dashboard.home.goals.viewAll') }}
+          </AppButton>
+        </div>
+      </div>
+    </AppModal>
   </div>
 </template>
 
