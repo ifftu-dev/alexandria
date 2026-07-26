@@ -12,6 +12,7 @@ import { BirthdateInput } from '@/components/ui'
 import GoalPicker from '@/components/goals/GoalPicker.vue'
 import SkillBootstrapPanel from '@/components/skills/SkillBootstrapPanel.vue'
 import { useGoals } from '@/composables/useGoals'
+import { isMac } from '@/composables/usePlatform'
 import { useLocale } from '@/composables/useLocale'
 import { useI18n } from 'vue-i18n'
 import type { AccountRole } from '@/types'
@@ -448,13 +449,13 @@ function enterApp() {
 </script>
 
 <template>
-  <div class="min-h-full bg-background relative overflow-y-auto">
+  <div class="min-h-screen bg-background relative overflow-y-auto flex flex-col">
     <div class="onb-stars">
       <Starfield />
     </div>
 
-    <div class="relative z-10 min-h-full">
-      <div class="onb-frame grid lg:grid-cols-[300px_minmax(0,1fr)] min-h-full">
+    <div class="relative z-10 flex flex-1 flex-col">
+      <div class="onb-frame grid flex-1 lg:grid-cols-[300px_minmax(0,1fr)]" :class="{ 'onb-frame--macos': isMac }">
         <aside class="onb-rail hidden lg:flex lg:flex-col">
           <div class="onb-glyph">
             <svg class="w-6 h-6" viewBox="0 0 32 32" fill="none">
@@ -1115,6 +1116,16 @@ function enterApp() {
   padding: 1.875rem 1.625rem;
   background: linear-gradient(180deg, rgb(20, 27, 42), rgb(15, 21, 34));
   border-inline-end: 1px solid var(--app-border);
+}
+/* macOS: the window uses an Overlay title bar with traffic-light controls at
+   top-left (see tauri.conf trafficLightPosition). This page is full-bleed with
+   no AppTopBar, so push the rail glyph and the content clear of that zone. The
+   rail/content backgrounds still reach the top edge behind the controls. */
+.onb-frame--macos .onb-rail {
+  padding-top: 3.25rem;
+}
+.onb-frame--macos .onb-content {
+  padding-top: 3.25rem;
 }
 .onb-glyph {
   width: 2.375rem;
