@@ -448,13 +448,13 @@ function enterApp() {
 </script>
 
 <template>
-  <div class="min-h-full bg-background relative overflow-y-auto flex items-center justify-center p-4 sm:p-6 lg:p-8">
+  <div class="min-h-full bg-background relative overflow-y-auto">
     <div class="onb-stars">
       <Starfield />
     </div>
 
-    <div class="w-full max-w-5xl relative z-10">
-      <div class="onb-frame grid lg:grid-cols-[300px_minmax(0,1fr)]">
+    <div class="relative z-10 min-h-full">
+      <div class="onb-frame grid lg:grid-cols-[300px_minmax(0,1fr)] min-h-full">
         <aside class="onb-rail hidden lg:flex lg:flex-col">
           <div class="onb-glyph">
             <svg class="w-6 h-6" viewBox="0 0 32 32" fill="none">
@@ -1098,22 +1098,18 @@ function enterApp() {
 /* Onboarding shell — a single framed "app window": gradient brand rail with a
    numbered step list on the left, content on the right. Matches the accent-
    options design study. Colours come from the live theme tokens (stays indigo). */
-/* Single container: one framed glass window sitting on the subtle starfield.
-   The frame is translucent + blurred so the starfield reads faintly through
-   the whole surface, rather than stacking an opaque card on top of the page. */
-/* Starfield: kept faint so it reads as texture behind the one glass frame. */
+/* Single full-bleed container: the onboarding IS the window — a navy brand rail
+   beside the content, edge to edge, with the subtle starfield reading as the one
+   background behind the content. No floating card stacked on a larger page box. */
+/* Starfield: kept faint so it reads as texture behind the content, not a frame. */
 .onb-stars {
-  position: absolute;
+  position: fixed;
   inset: 0;
   opacity: 0.4;
   pointer-events: none;
 }
 .onb-frame {
-  border: 1px solid var(--app-border);
-  border-radius: 1rem;
-  overflow: hidden;
-  background: var(--app-background);
-  box-shadow: 0 24px 60px -20px rgb(0 0 0 / 0.7);
+  background: transparent;
 }
 .onb-rail {
   padding: 1.875rem 1.625rem;
