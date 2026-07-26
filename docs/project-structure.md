@@ -99,7 +99,7 @@ src-tauri/
     │   ├── mod.rs          # SplitMix64 PRNG + option shuffle
     │   ├── randomizer.rs   # Difficulty-stratified question draw (per-attempt seed)
     │   └── grader.rs       # Host-side grading against the withheld answer key
-    ├── ipfs/               # iroh node + resolver + gateway fallback
+    ├── content_store/      # iroh node + resolver + public URL fallback
     │
     ├── profile/            # Multi-user profile manager
     │   ├── mod.rs          # Module exports
@@ -153,7 +153,7 @@ src-tauri/
     │
     └── cardano/            # Cardano integration
         ├── blockfrost.rs   # REST client (preprod)
-        ├── tx_builder.rs   # Native-script/NFT tx building
+        ├── tx_builder.rs   # Shared tx-builder primitives (fee/metadata/hash; NFT minters moved out at mig 040)
         ├── username_anchor.rs # Batched label-1698 username-claim anchoring
         ├── gov_tx_builder.rs # Governance tx builders
         ├── soulbound_tx_builder.rs # Soulbound/reputation tx builder path

@@ -137,11 +137,15 @@ async function unlockProfile(id: string, password: string): Promise<UnlockProfil
 }
 
 async function lockProfile(): Promise<void> {
-  await invoke('lock_profile')
+  // Flip local state first so `isUnlocked` and the UI react instantly — the
+  // Rust `lock_profile` teardown (iroh network + blob-store shutdown) can take
+  // several seconds, and callers redirect to the picker off the state change,
+  // not the invoke. The backend teardown then runs without freezing the view.
   activeProfileId.value = null
   activeWallet.value = null
   activeIdentity.value = null
   await runProfileLockedCallbacks()
+  await invoke('lock_profile')
 }
 
 // ── onProfileReady hook ─────────────────────────────────────────

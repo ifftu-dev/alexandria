@@ -2,16 +2,16 @@
 //!
 //! Per spec §12 + §20.4: a node can opt-in to pin specific subjects'
 //! content, and observe other peers' commitments. The IPC handlers
-//! are thin adapters around `ipfs::pinboard` + `crypto::wallet` —
+//! are thin adapters around `content_store::pinboard` + `crypto::wallet` —
 //! unit tests hit the impls directly.
 
 use ed25519_dalek::SigningKey;
 use rusqlite::Connection;
 use tauri::State;
 
+use crate::content_store::pinboard::{declare_commitment, list_pinners_for, revoke_commitment};
 use crate::crypto::did::{derive_did_key, Did};
 use crate::crypto::wallet;
-use crate::ipfs::pinboard::{declare_commitment, list_pinners_for, revoke_commitment};
 use crate::p2p::pinboard::PinboardCommitment;
 use crate::AppState;
 
@@ -25,7 +25,7 @@ pub struct QuotaBreakdown {
 }
 
 /// Pure-function declare path. Inserts the commitment via
-/// `ipfs::pinboard::declare_commitment`, returns the row to the
+/// `content_store::pinboard::declare_commitment`, returns the row to the
 /// caller. The signature/public_key fields are populated as
 /// `(unsigned, pinner_did)` placeholders — callers that want to
 /// broadcast must sign before publishing on `TOPIC_PINBOARD`.
@@ -84,7 +84,7 @@ pub fn list_incoming_commitments_impl(
 pub fn quota_breakdown_impl(conn: &Connection) -> Result<QuotaBreakdown, String> {
     // Per-tier byte accounting via SQL aggregates on the `pins`
     // table. Mirrors the 5-tier eviction classification in
-    // `ipfs::storage::list_evictable_pins`:
+    // `content_store::storage::list_evictable_pins`:
     //   - subject_authored: auto_unpin = 0
     //   - pinboard:         pin_type = 'pinboard'
     //   - enrollment:       pin_type = 'course' (regardless of

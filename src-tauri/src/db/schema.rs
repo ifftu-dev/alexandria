@@ -150,7 +150,7 @@ CREATE TABLE IF NOT EXISTS skill_relations (
 -- Taxonomy version tracking (signed by DAO)
 CREATE TABLE IF NOT EXISTS taxonomy_versions (
     version      INTEGER PRIMARY KEY,
-    cid          TEXT NOT NULL,       -- IPFS CID of the full taxonomy document
+    cid          TEXT NOT NULL,       -- content ID (BLAKE3 hash) of the full taxonomy document
     previous_cid TEXT,                -- CID of the previous version
     ratified_by  TEXT,                -- DAO committee multisig info
     ratified_at  TEXT,
@@ -165,7 +165,7 @@ CREATE TABLE IF NOT EXISTS courses (
     title           TEXT NOT NULL,
     description     TEXT,
     author_address  TEXT NOT NULL,     -- Cardano stake address of the author
-    content_cid     TEXT,              -- IPFS CID of course content root
+    content_cid     TEXT,              -- content ID (BLAKE3 hash) of course content root
     thumbnail_cid   TEXT,
     tags            TEXT,              -- JSON array
     skill_ids       TEXT,              -- JSON array of skill IDs
@@ -192,7 +192,7 @@ CREATE TABLE IF NOT EXISTS course_elements (
     chapter_id  TEXT NOT NULL REFERENCES course_chapters(id) ON DELETE CASCADE,
     title       TEXT NOT NULL,
     element_type TEXT NOT NULL,  -- video|text|quiz|interactive|assessment
-    content_cid TEXT,            -- IPFS CID of element content
+    content_cid TEXT,            -- content ID (BLAKE3 hash) of element content
     position    INTEGER NOT NULL DEFAULT 0,
     duration_seconds INTEGER,
     created_at  TEXT NOT NULL DEFAULT (datetime('now'))
@@ -236,7 +236,7 @@ CREATE TABLE IF NOT EXISTS course_notes (
     enrollment_id TEXT NOT NULL REFERENCES enrollments(id) ON DELETE CASCADE,
     chapter_id    TEXT REFERENCES course_chapters(id),
     element_id    TEXT REFERENCES course_elements(id),
-    content_cid   TEXT,           -- IPFS CID of note content
+    content_cid   TEXT,           -- content ID (BLAKE3 hash) of note content
     preview_text  TEXT,
     video_timestamp_seconds INTEGER,
     created_at    TEXT NOT NULL DEFAULT (datetime('now')),
@@ -268,7 +268,7 @@ CREATE TABLE IF NOT EXISTS evidence_records (
     instructor_address    TEXT,              -- Cardano stake address
     integrity_session_id  TEXT,
     integrity_score       REAL,
-    cid                   TEXT,              -- IPFS CID of evidence document
+    cid                   TEXT,              -- content ID (BLAKE3 hash) of evidence document
     signature             TEXT,              -- Ed25519 signature
     created_at            TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -281,7 +281,7 @@ CREATE TABLE IF NOT EXISTS skill_proofs (
     proficiency_level TEXT NOT NULL,
     confidence        REAL NOT NULL,
     evidence_count    INTEGER NOT NULL DEFAULT 0,
-    cid               TEXT,              -- IPFS CID of proof document
+    cid               TEXT,              -- content ID (BLAKE3 hash) of proof document
     nft_policy_id     TEXT,              -- Cardano NFT policy ID
     nft_asset_name    TEXT,              -- Cardano NFT asset name
     nft_tx_hash       TEXT,              -- Minting transaction hash
@@ -313,7 +313,7 @@ CREATE TABLE IF NOT EXISTS reputation_assertions (
     window_start      TEXT,
     window_end        TEXT,
     computation_spec  TEXT NOT NULL DEFAULT 'v2',
-    cid               TEXT,              -- IPFS CID of reputation proof
+    cid               TEXT,              -- content ID (BLAKE3 hash) of reputation proof
     updated_at        TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -354,7 +354,7 @@ CREATE TABLE IF NOT EXISTS peers (
     reputation    REAL
 );
 
--- IPFS content pinning state
+-- Content pinning state
 CREATE TABLE IF NOT EXISTS pins (
     cid           TEXT PRIMARY KEY,
     pin_type      TEXT NOT NULL,       -- course|evidence|profile|taxonomy
@@ -451,14 +451,14 @@ ALTER TABLE local_identity ADD COLUMN profile_hash TEXT;
 const MIGRATION_003: &str = r#"
 -- ============================================================
 -- Migration 003: Content Mappings
--- Bridges IPFS CIDs (SHA-256, used by v1 content on Blockfrost)
--- to iroh BLAKE3 hashes (used natively by v2). When content is
--- fetched from an IPFS gateway, it's cached in iroh and the
--- CID↔BLAKE3 mapping is recorded here for future lookups.
+-- Maps an external identifier (a public URL) to the iroh BLAKE3 hash
+-- of the content once fetched. When content is pulled from a public
+-- URL origin, it's cached in iroh and the URL↔BLAKE3 mapping is
+-- recorded here so future lookups resolve locally / from peers.
 -- ============================================================
 
 CREATE TABLE IF NOT EXISTS content_mappings (
-    ipfs_cid    TEXT PRIMARY KEY,
+    external_id    TEXT PRIMARY KEY,
     blake3_hash TEXT NOT NULL,
     size_bytes  INTEGER,
     mapped_at   TEXT NOT NULL DEFAULT (datetime('now'))
@@ -666,7 +666,7 @@ const MIGRATION_009: &str = r#"
 -- proposals, enabling the DAO taxonomy ratification workflow:
 --   propose → gossip → submit → vote → resolve+publish → apply
 -- content_cid stores the serialized taxonomy changes JSON
--- (replaced with the IPFS CID on publish). taxonomy_version
+-- (replaced with the content ID on publish). taxonomy_version
 -- records the target version number for the ratified taxonomy.
 -- ============================================================
 
@@ -746,7 +746,7 @@ CREATE TABLE IF NOT EXISTS evidence_challenges (
     challenger      TEXT NOT NULL,
     target_type     TEXT NOT NULL,          -- evidence|skill_proof
     target_ids      TEXT NOT NULL,          -- JSON array of IDs
-    evidence_cids   TEXT NOT NULL,          -- JSON array of IPFS CIDs
+    evidence_cids   TEXT NOT NULL,          -- JSON array of content IDs
     reason          TEXT NOT NULL,
     stake_lovelace  INTEGER NOT NULL,
     stake_tx_hash   TEXT,
@@ -832,7 +832,7 @@ const MIGRATION_013: &str = r#"
 ALTER TABLE courses ADD COLUMN author_name TEXT;
 
 -- Inline SVG thumbnail stored as a data URI string.
--- Avoids the IPFS/iroh dependency for seed thumbnails while keeping
+-- Avoids the iroh dependency for seed thumbnails while keeping
 -- the existing `thumbnail_cid` column for user-uploaded images.
 ALTER TABLE courses ADD COLUMN thumbnail_svg TEXT;
 
@@ -848,7 +848,7 @@ const MIGRATION_014: &str = r#"
 -- Migration 014: Inline Content
 -- Adds a content_inline column to course_elements for storing
 -- text/HTML/JSON content directly in the database. This allows
--- content to be available without an iroh/IPFS node (essential
+-- content to be available without an iroh node (essential
 -- for mobile and seed data).
 -- ============================================================
 
@@ -1289,8 +1289,8 @@ const MIGRATION_025: &str = r#"
 -- ============================================================
 --
 -- One row per (pinner_did, subject_did, scope, commitment_since).
--- Both `ipfs::pinboard::declare_commitment` (local) and
--- `ipfs::pinboard::record_observation` (remote, fed by
+-- Both `content_store::pinboard::declare_commitment` (local) and
+-- `content_store::pinboard::record_observation` (remote, fed by
 -- `p2p::pinboard::handle_pinboard_message`) write here. The 5-tier
 -- eviction logic in `commands::pinning` reads this table to figure
 -- out which content stays pinned even under storage pressure.

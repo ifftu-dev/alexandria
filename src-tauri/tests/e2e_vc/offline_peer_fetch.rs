@@ -1,11 +1,11 @@
 //! The iroh P2P storage layer: content survives its origin going offline
 //! because a pinner replicated it and can serve it to a third node — all over
-//! iroh, with no IPFS gateway involved.
+//! iroh, with no external URL origin involved.
 //!
 //! This is the acceptance test for the "iroh as a real storage layer" work.
 //! Before it, the iroh store was a local cache only: a node that lacked a blob
-//! fetched it over HTTP from the Blockfrost/public IPFS gateway, and nothing
-//! honored PinBoard commitments. `ipfs::fetch` adds true peer blob transfer;
+//! fetched it over HTTP from the Blockfrost/external URL origin, and nothing
+//! honored PinBoard commitments. `content_store::fetch` adds true peer blob transfer;
 //! this test proves the survival property end to end:
 //!
 //!   1. A stores a blob (hash H).
@@ -17,9 +17,9 @@
 //! Nodes talk over loopback: `endpoint.addr()` carries direct socket addresses,
 //! so `connect` establishes a direct QUIC path without depending on relays.
 
-use app_lib::ipfs::content::{self, parse_hash};
-use app_lib::ipfs::fetch;
-use app_lib::ipfs::node::ContentNode;
+use app_lib::content_store::content::{self, parse_hash};
+use app_lib::content_store::fetch;
+use app_lib::content_store::node::ContentNode;
 use tempfile::TempDir;
 
 /// Start a fresh unencrypted content node in its own temp dir.
@@ -67,7 +67,7 @@ async fn blob_survives_origin_offline_via_pinner() {
             .expect("B has-check"),
         "B must start without the blob"
     );
-    let served_by = fetch::fetch_from_any(&node_b, &[addr_p.clone()], hash)
+    let served_by = fetch::fetch_from_any(&node_b, std::slice::from_ref(&addr_p), hash)
         .await
         .expect("B fetches H from the pinner while A is offline");
 

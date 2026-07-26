@@ -774,7 +774,7 @@ pub async fn preview_taxonomy_change(
 ///
 /// Called after a taxonomy_change proposal is approved by the DAO.
 /// Applies changes to local skill tables, records the version,
-/// and prepares the taxonomy document for IPFS storage.
+/// and prepares the taxonomy document for the iroh content store.
 #[tauri::command]
 pub async fn publish_taxonomy_ratification(
     state: State<'_, AppState>,

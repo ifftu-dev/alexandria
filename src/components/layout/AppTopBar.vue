@@ -130,10 +130,25 @@ function navigateFromMenu(path: string) {
   router.push(path)
 }
 
+const switching = ref(false)
+
 async function handleSwitchProfile() {
+  // In-flight guard: without it the button gives no feedback during the
+  // multi-second teardown, so repeat clicks (and the keyboard shortcut) fire
+  // concurrent `lock_profile` calls that race each other.
+  if (switching.value) return
+  switching.value = true
   userMenuOpen.value = false
-  try { await lockProfile() } catch (e) { console.warn('lock failed:', e) }
+  // Redirect to the picker immediately; lockProfile flips the local locked
+  // state up front and runs the slow backend teardown in the background.
   router.replace('/profiles')
+  try {
+    await lockProfile()
+  } catch (e) {
+    console.warn('lock failed:', e)
+  } finally {
+    switching.value = false
+  }
 }
 
 registerAction('switch-profile', () => {

@@ -13,7 +13,7 @@
 ```
 ┌─ Proposer (any learner / researcher / instructor) ──────────────┐
 │   1. Capture or synthesize a cheat pattern                      │
-│   2. Upload as IPFS blob + create governance_proposal(          │
+│   2. Upload as iroh content-store blob + create governance_proposal( │
 │        dao_id = Sentinel DAO, category = 'sentinel_prior')      │
 └────────────────────────────────┬────────────────────────────────┘
                                  │
@@ -66,7 +66,7 @@ Everything the client consumes is public and signed. Nothing the client produces
   CREATE TABLE IF NOT EXISTS sentinel_priors (
       id              TEXT PRIMARY KEY,  -- blake2b(cid + label + model_kind)
       proposal_id     TEXT NOT NULL REFERENCES governance_proposals(id),
-      cid             TEXT NOT NULL,     -- IPFS CID of the labeled example blob
+      cid             TEXT NOT NULL,     -- content ID (BLAKE3 hash) of the labeled example blob
       model_kind      TEXT NOT NULL,     -- 'keystroke'|'mouse'
       label           TEXT NOT NULL,     -- 'bot_script'|'paste_macro'|'remote_control'|'teleport'|etc.
       schema_version  INTEGER NOT NULL,  -- blob format version
@@ -107,7 +107,7 @@ Everything the client consumes is public and signed. Nothing the client produces
   - `sentinel_priors_sync() -> SyncResult` — pulls new ratified rows, fetches missing CIDs, verifies signatures, updates local cache
   - `sentinel_priors_list(kind: String) -> Vec<PriorMetadata>` — client-facing listing
   - `sentinel_priors_load(id: String) -> PriorBlob` — lazy-load a specific blob (returns parsed JSON)
-- **Cache location:** separate IPFS pin set under `pin_type = 'sentinel_prior'` (add to existing `pins` enum).
+- **Cache location:** separate iroh pin set under `pin_type = 'sentinel_prior'` (add to existing `pins` enum).
 - **Sync cadence:** on app start + once daily while running. Cheap because blobs are small and content-addressed.
 - **Version handling:** clients ignore priors whose `schema_version` they don't understand, logged but non-fatal.
 
@@ -274,10 +274,10 @@ Apply the sentinel.md #4 / #6 hunks already drafted in [sentinel-federation.md �
 | Sentinel DAO row | `governance_daos` | SQLite, replicated |
 | Prior proposal | `governance_proposals` (category `sentinel_prior`) | SQLite, replicated |
 | Ratified prior metadata | `sentinel_priors` (migration 038, weights cols added in 045) | SQLite, replicated |
-| Labeled example blob | JSON blob | IPFS, pinned under `pin_type='sentinel_prior'` |
-| Classifier weights envelope | JSON blob (`WeightsBlobMeta`) | IPFS, pinned under `pin_type='sentinel_prior'` |
-| Classifier ONNX bytes | Binary blob | IPFS, cache-pinned on first fetch |
-| Holdout set | Encrypted JSON blob | IPFS, pinned by DAO committee members only |
+| Labeled example blob | JSON blob | iroh content store, pinned under `pin_type='sentinel_prior'` |
+| Classifier weights envelope | JSON blob (`WeightsBlobMeta`) | iroh content store, pinned under `pin_type='sentinel_prior'` |
+| Classifier ONNX bytes | Binary blob | iroh content store, cache-pinned on first fetch |
+| Holdout set | Encrypted JSON blob | iroh content store, pinned by DAO committee members only |
 | Client cache of priors | Same as replicated tables | Local SQLite |
 | User behavioral profile + AI weights | Unchanged | Device localStorage |
 | Bundled fallback ONNX model | `src-tauri/resources/sentinel/paste-v1.onnx` | Tauri app bundle |

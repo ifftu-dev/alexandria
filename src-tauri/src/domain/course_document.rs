@@ -1,7 +1,7 @@
-//! Course document types for IPFS publication.
+//! Course document types for iroh publication.
 //!
 //! A course document is a signed JSON blob stored on iroh (or fetched
-//! from IPFS gateways) that contains the full course structure:
+//! from a public URL origin) that contains the full course structure:
 //! metadata, chapters, elements, and asset references.
 //!
 //! The document format mirrors v1's protobuf structure but uses JSON

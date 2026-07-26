@@ -1,17 +1,16 @@
 //! Content resolver with fallback chain.
 //!
-//! Transparently resolves content by either BLAKE3 hash or IPFS CID,
-//! with an ordered resolution strategy:
+//! Resolves content by either BLAKE3 hash or public URL, with an ordered
+//! resolution strategy:
 //!
 //!   1. **Local iroh store** — check if we already have the content
-//!   2. **CID↔BLAKE3 mapping table** — if we know the other identifier,
-//!      check local store under that
-//!   3. **IPFS gateway** — fetch from Blockfrost / public gateways,
-//!      store locally, record the mapping
+//!   2. **iroh peer fetch** — pull from known providers (pinners) over iroh
+//!   3. **External URL mapping** — if we know a public URL for the content,
+//!      re-fetch it over HTTP, store locally, record the mapping
 //!
-//! The resolver bridges the gap between iroh's BLAKE3 addressing and
-//! IPFS's SHA-256 CIDs. Content fetched from gateways is automatically
-//! cached in the local iroh store and mapped for future lookups.
+//! Content is addressed and verified end to end by its BLAKE3 hash. Public
+//! URLs are only an origin of last resort for seeded / imported media; once
+//! fetched, the content lives in the iroh store and is served by peers.
 
 use std::sync::Arc;
 
@@ -19,12 +18,12 @@ use rusqlite::params;
 use std::sync::Mutex;
 use thiserror::Error;
 
+use crate::content_store::cid::{self, is_http_url, ContentId};
+use crate::content_store::content;
+use crate::content_store::fetch;
+use crate::content_store::http::HttpClient;
+use crate::content_store::node::ContentNode;
 use crate::db::Database;
-use crate::ipfs::cid::{self, ContentId};
-use crate::ipfs::content;
-use crate::ipfs::fetch;
-use crate::ipfs::gateway::GatewayClient;
-use crate::ipfs::node::ContentNode;
 
 #[derive(Error, Debug)]
 pub enum ResolveError {
@@ -34,8 +33,8 @@ pub enum ResolveError {
     InvalidId(String),
     #[error("local store error: {0}")]
     Store(String),
-    #[error("gateway error: {0}")]
-    Gateway(String),
+    #[error("fetch error: {0}")]
+    Fetch(String),
     #[error("database error: {0}")]
     Database(String),
     #[error("blocked URL: {0}")]
@@ -110,10 +109,8 @@ fn reject_private_url(url: &str) -> Result<(), ResolveError> {
 pub enum ResolveSource {
     /// Found in the local iroh store.
     Local,
-    /// Found via CID↔BLAKE3 mapping + local store.
+    /// Found via external-URL↔BLAKE3 mapping + local store.
     MappedLocal,
-    /// Fetched from an IPFS gateway and cached locally.
-    Gateway,
     /// Fetched from a public URL and cached locally.
     Url,
 }
@@ -126,64 +123,60 @@ pub struct ResolveResult {
     pub bytes: Vec<u8>,
     /// BLAKE3 hash of the content (always available after resolution).
     pub blake3_hash: String,
-    /// IPFS CID if known (from input or mapping table).
-    pub ipfs_cid: Option<String>,
+    /// Public URL for the content if known (from input or mapping table).
+    pub external_id: Option<String>,
     /// Where the content was resolved from.
     pub source: ResolveSource,
     /// Size in bytes.
     pub size: u64,
 }
 
-/// Content resolver with local cache, iroh peer fetch, and gateway fallback.
+/// Content resolver with local cache, iroh peer fetch, and URL fallback.
 #[derive(Clone)]
 pub struct ContentResolver {
     node: Arc<ContentNode>,
-    gateway: GatewayClient,
+    http: HttpClient,
     db: Arc<Mutex<Option<Database>>>,
     /// Optional iroh content-provider discovery. When present, a local
     /// cache-miss for a BLAKE3 hash is first served by fetching from known
-    /// peers (pinners) over iroh, before falling back to the IPFS gateway.
+    /// peers (pinners) over iroh, before falling back to the public URL.
     discovery: Option<Arc<super::discovery::ContentDiscovery>>,
 }
 
 impl ContentResolver {
-    /// Create a new resolver without peer discovery (gateway-only fallback).
-    pub fn new(
-        node: Arc<ContentNode>,
-        gateway: GatewayClient,
-        db: Arc<Mutex<Option<Database>>>,
-    ) -> Self {
+    /// Create a new resolver without peer discovery (URL-only fallback).
+    pub fn new(node: Arc<ContentNode>, http: HttpClient, db: Arc<Mutex<Option<Database>>>) -> Self {
         Self {
             node,
-            gateway,
+            http,
             db,
             discovery: None,
         }
     }
 
     /// Create a resolver that fetches cache-misses from iroh peers (via
-    /// `discovery`) before falling back to the gateway.
+    /// `discovery`) before falling back to the public URL.
     pub fn with_discovery(
         node: Arc<ContentNode>,
-        gateway: GatewayClient,
+        http: HttpClient,
         db: Arc<Mutex<Option<Database>>>,
         discovery: Arc<super::discovery::ContentDiscovery>,
     ) -> Self {
         Self {
             node,
-            gateway,
+            http,
             db,
             discovery: Some(discovery),
         }
     }
 
-    /// Resolve content by any supported identifier (BLAKE3 hex or IPFS CID).
+    /// Resolve content by any supported identifier (BLAKE3 hex or public URL).
     ///
     /// Resolution chain:
     ///   1. Parse identifier type
     ///   2. Try local iroh store directly
-    ///   3. Check CID↔BLAKE3 mapping table, try mapped hash locally
-    ///   4. If IPFS CID, fetch from gateway, cache locally, record mapping
+    ///   3. Fetch from iroh peers if providers are known
+    ///   4. If a public URL is known, fetch over HTTP, cache locally, map it
     ///   5. If nothing works, return NotFound
     pub async fn resolve(&self, identifier: &str) -> Result<ResolveResult, ResolveError> {
         let content_id = cid::parse_content_id(identifier)
@@ -191,22 +184,21 @@ impl ContentResolver {
 
         match &content_id {
             ContentId::Blake3Hex(hash) => self.resolve_blake3(hash).await,
-            ContentId::IpfsCid(cid_str) => self.resolve_cid(cid_str).await,
             ContentId::Url(url) => self.resolve_url(url).await,
         }
     }
 
-    /// Resolve by BLAKE3 hash: try local, then check if we have a CID mapping.
+    /// Resolve by BLAKE3 hash: local store, then peers, then mapped URL.
     async fn resolve_blake3(&self, hash: &str) -> Result<ResolveResult, ResolveError> {
         // Step 1: Try local store directly
         match content::get_bytes(&self.node, hash).await {
             Ok(bytes) => {
                 let size = bytes.len() as u64;
-                let ipfs_cid = self.lookup_cid_for_blake3(hash).await;
+                let external_id = self.lookup_external_for_blake3(hash).await;
                 return Ok(ResolveResult {
                     bytes,
                     blake3_hash: hash.to_string(),
-                    ipfs_cid,
+                    external_id,
                     source: ResolveSource::Local,
                     size,
                 });
@@ -219,8 +211,8 @@ impl ContentResolver {
 
         // Step 2: iroh peer fetch. If discovery knows providers for this hash
         // (e.g. PinBoard pinners), pull it directly over iroh before touching
-        // the gateway. This is the decentralized path — content served by peers,
-        // BLAKE3-verified end to end.
+        // the network origin. This is the decentralized path — content served
+        // by peers, BLAKE3-verified end to end.
         if let Some(discovery) = &self.discovery {
             if let Ok(parsed) = content::parse_hash(hash) {
                 let providers = discovery.find_providers(parsed).await;
@@ -229,73 +221,46 @@ impl ContentResolver {
                         Ok(_provider) => {
                             if let Ok(bytes) = content::get_bytes(&self.node, hash).await {
                                 let size = bytes.len() as u64;
-                                let ipfs_cid = self.lookup_cid_for_blake3(hash).await;
+                                let external_id = self.lookup_external_for_blake3(hash).await;
                                 return Ok(ResolveResult {
                                     bytes,
                                     blake3_hash: hash.to_string(),
-                                    ipfs_cid,
+                                    external_id,
                                     source: ResolveSource::Local,
                                     size,
                                 });
                             }
                         }
                         Err(e) => {
-                            log::debug!(
-                                "resolver: p2p fetch of {hash} failed: {e}; trying gateway"
-                            );
+                            log::debug!("resolver: p2p fetch of {hash} failed: {e}; trying URL");
                         }
                     }
                 }
             }
         }
 
-        // Step 3: Check if we have a CID mapping for this BLAKE3 hash,
-        // and if so, try fetching by that CID from gateways
-        if let Some(mapped_cid) = self.lookup_cid_for_blake3(hash).await {
-            if let Ok(result) = self.fetch_and_cache(&mapped_cid).await {
-                return Ok(result);
+        // Step 3: If we know a public URL for this BLAKE3 hash, re-fetch it.
+        if let Some(mapped_url) = self.lookup_external_for_blake3(hash).await {
+            if is_http_url(&mapped_url) {
+                if let Ok(result) = self.fetch_url_and_cache(&mapped_url).await {
+                    return Ok(result);
+                }
             }
         }
 
         Err(ResolveError::NotFound(format!("blake3:{}", hash)))
     }
 
-    /// Resolve by IPFS CID: check mapping → local, then gateway fallback.
-    async fn resolve_cid(&self, cid_str: &str) -> Result<ResolveResult, ResolveError> {
-        // Step 1: Check if we have a BLAKE3 mapping for this CID
-        if let Some(mapped_hash) = self.lookup_blake3_for_cid(cid_str).await {
-            match content::get_bytes(&self.node, &mapped_hash).await {
-                Ok(bytes) => {
-                    let size = bytes.len() as u64;
-                    return Ok(ResolveResult {
-                        bytes,
-                        blake3_hash: mapped_hash,
-                        ipfs_cid: Some(cid_str.to_string()),
-                        source: ResolveSource::MappedLocal,
-                        size,
-                    });
-                }
-                Err(content::ContentError::NotFound(_)) => {
-                    // Mapping exists but content was evicted — re-fetch
-                }
-                Err(e) => return Err(ResolveError::Store(e.to_string())),
-            }
-        }
-
-        // Step 2: Fetch from IPFS gateway
-        self.fetch_and_cache(cid_str).await
-    }
-
     /// Resolve by URL: mapping -> local first, then fetch URL and cache.
     async fn resolve_url(&self, url: &str) -> Result<ResolveResult, ResolveError> {
-        if let Some(mapped_hash) = self.lookup_blake3_for_cid(url).await {
+        if let Some(mapped_hash) = self.lookup_blake3_for_external(url).await {
             match content::get_bytes(&self.node, &mapped_hash).await {
                 Ok(bytes) => {
                     let size = bytes.len() as u64;
                     return Ok(ResolveResult {
                         bytes,
                         blake3_hash: mapped_hash,
-                        ipfs_cid: Some(url.to_string()),
+                        external_id: Some(url.to_string()),
                         source: ResolveSource::MappedLocal,
                         size,
                     });
@@ -308,48 +273,15 @@ impl ContentResolver {
         self.fetch_url_and_cache(url).await
     }
 
-    /// Fetch content from IPFS gateways, store in iroh, record mapping.
-    async fn fetch_and_cache(&self, cid_str: &str) -> Result<ResolveResult, ResolveError> {
-        let bytes = self
-            .gateway
-            .fetch_by_cid(cid_str)
-            .await
-            .map_err(|e| ResolveError::Gateway(e.to_string()))?;
-
-        // Store in iroh
-        let add_result = content::add_bytes(&self.node, &bytes)
-            .await
-            .map_err(|e| ResolveError::Store(e.to_string()))?;
-
-        // Record the CID↔BLAKE3 mapping
-        self.save_mapping(cid_str, &add_result.hash, add_result.size)
-            .await;
-
-        log::info!(
-            "cached CID {} → blake3:{} ({} bytes)",
-            cid_str,
-            add_result.hash,
-            add_result.size
-        );
-
-        Ok(ResolveResult {
-            bytes,
-            blake3_hash: add_result.hash,
-            ipfs_cid: Some(cid_str.to_string()),
-            source: ResolveSource::Gateway,
-            size: add_result.size,
-        })
-    }
-
-    /// Fetch content from a direct URL, store in iroh, record mapping.
+    /// Fetch content from a public URL, store in iroh, record mapping.
     async fn fetch_url_and_cache(&self, url: &str) -> Result<ResolveResult, ResolveError> {
         reject_private_url(url)?;
 
         let bytes = self
-            .gateway
+            .http
             .fetch_by_url(url)
             .await
-            .map_err(|e| ResolveError::Gateway(e.to_string()))?;
+            .map_err(|e| ResolveError::Fetch(e.to_string()))?;
 
         let add_result = content::add_bytes(&self.node, &bytes)
             .await
@@ -368,40 +300,40 @@ impl ContentResolver {
         Ok(ResolveResult {
             bytes,
             blake3_hash: add_result.hash,
-            ipfs_cid: Some(url.to_string()),
+            external_id: Some(url.to_string()),
             source: ResolveSource::Url,
             size: add_result.size,
         })
     }
 
-    /// Look up the BLAKE3 hash for a given IPFS CID in the mapping table.
-    async fn lookup_blake3_for_cid(&self, cid_str: &str) -> Option<String> {
+    /// Look up the BLAKE3 hash for a given external URL in the mapping table.
+    async fn lookup_blake3_for_external(&self, external_id: &str) -> Option<String> {
         let guard = self.db.lock().ok()?;
         let db = guard.as_ref()?;
         db.conn()
             .query_row(
-                "SELECT blake3_hash FROM content_mappings WHERE ipfs_cid = ?1",
-                params![cid_str],
+                "SELECT blake3_hash FROM content_mappings WHERE external_id = ?1",
+                params![external_id],
                 |row| row.get(0),
             )
             .ok()
     }
 
-    /// Look up the IPFS CID for a given BLAKE3 hash in the mapping table.
-    async fn lookup_cid_for_blake3(&self, blake3_hash: &str) -> Option<String> {
+    /// Look up the external URL for a given BLAKE3 hash in the mapping table.
+    async fn lookup_external_for_blake3(&self, blake3_hash: &str) -> Option<String> {
         let guard = self.db.lock().ok()?;
         let db = guard.as_ref()?;
         db.conn()
             .query_row(
-                "SELECT ipfs_cid FROM content_mappings WHERE blake3_hash = ?1",
+                "SELECT external_id FROM content_mappings WHERE blake3_hash = ?1",
                 params![blake3_hash],
                 |row| row.get(0),
             )
             .ok()
     }
 
-    /// Save a CID↔BLAKE3 mapping to the database.
-    async fn save_mapping(&self, cid_str: &str, blake3_hash: &str, size: u64) {
+    /// Save an external-URL↔BLAKE3 mapping to the database.
+    async fn save_mapping(&self, external_id: &str, blake3_hash: &str, size: u64) {
         let Ok(guard) = self.db.lock() else {
             log::warn!("database lock poisoned — skipping content mapping save");
             return;
@@ -410,8 +342,8 @@ impl ContentResolver {
             return;
         };
         if let Err(e) = db.conn().execute(
-            "INSERT OR REPLACE INTO content_mappings (ipfs_cid, blake3_hash, size_bytes) VALUES (?1, ?2, ?3)",
-            params![cid_str, blake3_hash, size as i64],
+            "INSERT OR REPLACE INTO content_mappings (external_id, blake3_hash, size_bytes) VALUES (?1, ?2, ?3)",
+            params![external_id, blake3_hash, size as i64],
         ) {
             log::warn!("failed to save content mapping: {}", e);
         }
@@ -421,7 +353,6 @@ impl ContentResolver {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ipfs::gateway::GatewayConfig;
     use std::time::Duration;
     use tempfile::TempDir;
 
@@ -437,14 +368,10 @@ mod tests {
         let node = Arc::new(ContentNode::new(tmp.path()));
         node.start(None).await.expect("start node");
 
-        // Use unreachable gateway (tests don't need real HTTP)
-        let config = GatewayConfig {
-            gateways: vec!["http://127.0.0.1:1/ipfs".to_string()],
-            timeout: Duration::from_millis(50),
-        };
-        let gateway = GatewayClient::new(config).expect("gateway");
+        // Short timeout — tests never reach a real HTTP origin.
+        let http = HttpClient::new(Duration::from_millis(50)).expect("http client");
 
-        let resolver = ContentResolver::new(node, gateway, db);
+        let resolver = ContentResolver::new(node, http, db);
         (resolver, tmp)
     }
 
@@ -467,14 +394,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn resolve_blake3_fetches_from_peer_before_gateway() {
-        use crate::ipfs::discovery::ContentDiscovery;
+    async fn resolve_blake3_fetches_from_peer_before_url() {
+        use crate::content_store::discovery::ContentDiscovery;
 
         // Provider node holds the content.
         let provider_tmp = TempDir::new().expect("provider temp");
         let provider = ContentNode::new(provider_tmp.path());
         provider.start(None).await.expect("start provider");
-        let data = b"resolver p2p path: served by a peer, not the gateway";
+        let data = b"resolver p2p path: served by a peer, not the origin";
         let add = content::add_bytes(&provider, data).await.expect("add");
         let provider_addr = provider.endpoint_addr().await.expect("provider addr");
 
@@ -485,12 +412,12 @@ mod tests {
         discovery.seed(parsed, provider_addr).await;
         let resolver = ContentResolver::with_discovery(
             resolver_base.node.clone(),
-            resolver_base.gateway.clone(),
+            resolver_base.http.clone(),
             resolver_base.db.clone(),
             discovery,
         );
 
-        // Gateway is unreachable (127.0.0.1:1); success proves the peer path.
+        // No reachable URL origin; success proves the peer path served it.
         let result = resolver.resolve(&add.hash).await.expect("resolve via peer");
         assert_eq!(result.bytes, data);
         assert_eq!(result.source, ResolveSource::Local);
@@ -500,35 +427,22 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn resolve_cid_returns_not_found_when_no_gateway() {
-        let (resolver, _tmp) = make_resolver().await;
-
-        // CID not in mapping table and gateway unreachable
-        let result = resolver
-            .resolve("QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG")
-            .await;
-        assert!(result.is_err());
-
-        resolver.node.shutdown().await.expect("shutdown");
-    }
-
-    #[tokio::test]
-    async fn resolve_cid_via_mapping_table() {
+    async fn resolve_url_via_mapping_table() {
         let (resolver, _tmp) = make_resolver().await;
 
         // Add content to iroh
         let data = b"mapped content";
         let add = content::add_bytes(&resolver.node, data).await.expect("add");
 
-        // Insert a fake CID→BLAKE3 mapping
-        let fake_cid = "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG";
-        resolver.save_mapping(fake_cid, &add.hash, add.size).await;
+        // Insert a URL→BLAKE3 mapping
+        let url = "https://example.org/media/mapped.bin";
+        resolver.save_mapping(url, &add.hash, add.size).await;
 
-        // Resolve by CID should find it via mapping
-        let result = resolver.resolve(fake_cid).await.expect("resolve");
+        // Resolve by URL should find it via mapping (no network fetch)
+        let result = resolver.resolve(url).await.expect("resolve");
         assert_eq!(result.bytes, data);
         assert_eq!(result.blake3_hash, add.hash);
-        assert_eq!(result.ipfs_cid.as_deref(), Some(fake_cid));
+        assert_eq!(result.external_id.as_deref(), Some(url));
         assert_eq!(result.source, ResolveSource::MappedLocal);
 
         resolver.node.shutdown().await.expect("shutdown");
@@ -551,38 +465,38 @@ mod tests {
         let data = b"bidirectional mapping test";
         let add = content::add_bytes(&resolver.node, data).await.expect("add");
 
-        let fake_cid = "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG";
-        resolver.save_mapping(fake_cid, &add.hash, add.size).await;
+        let url = "https://example.org/media/bidi.bin";
+        resolver.save_mapping(url, &add.hash, add.size).await;
 
-        // Lookup CID → BLAKE3
-        let hash = resolver.lookup_blake3_for_cid(fake_cid).await;
+        // Lookup URL → BLAKE3
+        let hash = resolver.lookup_blake3_for_external(url).await;
         assert_eq!(hash.as_deref(), Some(add.hash.as_str()));
 
-        // Lookup BLAKE3 → CID
-        let cid = resolver.lookup_cid_for_blake3(&add.hash).await;
-        assert_eq!(cid.as_deref(), Some(fake_cid));
+        // Lookup BLAKE3 → URL
+        let external = resolver.lookup_external_for_blake3(&add.hash).await;
+        assert_eq!(external.as_deref(), Some(url));
 
         resolver.node.shutdown().await.expect("shutdown");
     }
 
     #[tokio::test]
-    async fn resolve_blake3_includes_cid_when_mapped() {
+    async fn resolve_blake3_includes_external_when_mapped() {
         let (resolver, _tmp) = make_resolver().await;
 
         let data = b"content with mapping";
         let add = content::add_bytes(&resolver.node, data).await.expect("add");
 
-        // Without mapping: no CID
+        // Without mapping: no external URL
         let result = resolver.resolve(&add.hash).await.expect("resolve");
-        assert!(result.ipfs_cid.is_none());
+        assert!(result.external_id.is_none());
 
         // Add mapping
-        let fake_cid = "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG";
-        resolver.save_mapping(fake_cid, &add.hash, add.size).await;
+        let url = "https://example.org/media/withmap.bin";
+        resolver.save_mapping(url, &add.hash, add.size).await;
 
-        // With mapping: CID is included
+        // With mapping: external URL is included
         let result = resolver.resolve(&add.hash).await.expect("resolve 2");
-        assert_eq!(result.ipfs_cid.as_deref(), Some(fake_cid));
+        assert_eq!(result.external_id.as_deref(), Some(url));
 
         resolver.node.shutdown().await.expect("shutdown");
     }

@@ -4,7 +4,7 @@
 //! *P2P storage layer*: content the local node does not have is pulled from
 //! another iroh endpoint over the BLAKE3 blobs protocol, then tagged so it is
 //! retained and re-servable. The blob stays BLAKE3-addressed end to end — no
-//! IPFS gateway involved.
+//! external origin involved.
 //!
 //! Two entry points:
 //!   - [`fetch_from_peer`] — fetch from one known provider ([`EndpointAddr`]).

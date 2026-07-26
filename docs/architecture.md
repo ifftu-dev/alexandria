@@ -8,8 +8,10 @@
 > aggregator) has been retired. Credentials are now W3C Verifiable
 > Credentials auto-earned via a Cardano completion validator. See
 > [`vc-migration.md`](./vc-migration.md) for what replaces what.
-> Reputation/challenge/attestation subsystems are on the VC rebuild
-> list; their code is on disk but disabled from the module tree.
+> The reputation/challenge/attestation subsystems have since been
+> rebuilt on the VC-first model and are live: `commands::{reputation,
+> attestation,challenge}` are registered in `lib.rs` (see §8/§9/§11).
+> Only the legacy evidence-based versions were retired.
 
 **Status**: In progress — core local/P2P flows are implemented, with some on-chain and VC presentation surfaces still partial
 **Last updated**: 2026-04-24 (VC-first cutover)
@@ -196,7 +198,7 @@ device-sync (`SYNCABLE_TABLES`) or gossip — an invariant covered by unit tests
 
 ## 4. Database
 
-**Engine**: SQLite (rusqlite 0.38, bundled)
+**Engine**: SQLCipher (rusqlite 0.38, `bundled-sqlcipher`) — per-profile DBs are encrypted, opened with `PRAGMA key`
 
 **Tables**: ~92 live (102 created, 10 dropped in migration 040) across 71 migrations
 
@@ -252,8 +254,8 @@ identified by its hash, ensuring integrity and deduplication.
 When resolving content by CID or hash:
 
 1. **Local iroh store** — instant, offline
-2. **CID↔BLAKE3 mapping table** — bidirectional lookup in SQLite
-3. **IPFS gateway fallback** — Blockfrost → ipfs.io → dweb.link (HTTP, with caching)
+2. **iroh peer fetch** — pull from PinBoard pinners over the P2P network
+3. **Public URL fallback** — fetch from the mapped public URL origin over HTTP, then cache into the iroh store
 
 ### Content Types
 

@@ -1884,7 +1884,7 @@ Key design decisions: deterministic IDs via `hex(blake2b_256(parts.join("|")))`,
 
 ### 15.3 Test Suite
 
-900+ library unit tests (`cargo test -p alexandria-node --lib`; run for current count) and ~40 end-to-end VC tests (`cargo test --test e2e_vc`), plus the `guardian_e2e` and `settings_sync_e2e` integration suites, all passing with 0 ignored at the latest pre-launch revision. Coverage spans the `crypto`, `db`, `p2p`, `evidence`, `cardano`, `domain`, `aggregation`, `commands`, and `ipfs` modules. The §14.26 worked example is locked in by `tests/e2e_vc/aggregation.rs`.
+900+ library unit tests (`cargo test -p alexandria-node --lib`; run for current count) and ~40 end-to-end VC tests (`cargo test --test e2e_vc`), plus the `guardian_e2e` and `settings_sync_e2e` integration suites, all passing with 0 ignored at the latest pre-launch revision. Coverage spans the `crypto`, `db`, `p2p`, `evidence`, `cardano`, `domain`, `aggregation`, `commands`, and `content_store` modules. The §14.26 worked example is locked in by `tests/e2e_vc/aggregation.rs`.
 
 > **P2P stress suite:** the original ~1500-line stress suite (evidence gossip, skill-proof aggregation, multi-party attestation, challenge committee under load) was retired in the VC-first cutover — those subsystems are gone or being rebuilt against `credentials`. `p2p/stress.rs` is currently a stub tracking the VC-first replacements (VC gossip publish-rate/dedup/spam resistance, credential sync merge races, challenge-committee voting under contention). It is **not** live coverage today.
 

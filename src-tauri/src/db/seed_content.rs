@@ -11,9 +11,9 @@ use std::time::Duration;
 
 use std::collections::{HashMap, HashSet};
 
+use crate::content_store::content;
+use crate::content_store::node::ContentNode;
 use crate::db::Database;
-use crate::ipfs::content;
-use crate::ipfs::node::ContentNode;
 
 /// Seed content into iroh for elements that lack a `content_cid`.
 /// Returns the number of elements updated, or 0 if skipped.
@@ -142,7 +142,7 @@ pub async fn seed_content_if_needed(
 
         for (public_id, blake3_hash, size) in &mappings {
             conn.execute(
-                "INSERT OR REPLACE INTO content_mappings (ipfs_cid, blake3_hash, size_bytes) VALUES (?1, ?2, ?3)",
+                "INSERT OR REPLACE INTO content_mappings (external_id, blake3_hash, size_bytes) VALUES (?1, ?2, ?3)",
                 rusqlite::params![public_id, blake3_hash, *size as i64],
             )
             .map_err(|e| format!("failed to map public content ID {public_id}: {e}"))?;

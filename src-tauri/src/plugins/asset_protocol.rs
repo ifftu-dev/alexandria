@@ -43,21 +43,38 @@ const PLUGIN_CSP_TEMPLATE: &str = "default-src 'self' plugin://{cid}; \
     font-src 'self' data:; \
     object-src 'none'; \
     base-uri 'none'; \
-    form-action 'none'";
+    form-action 'self'";
 
 /// Synchronous handler for the `plugin://` scheme. Wired in via Tauri's
 /// builder (`.register_uri_scheme_protocol`) and called on every request
 /// the plugin iframe makes.
 pub fn handle(plugins_dir: &Path, request: Request<Vec<u8>>) -> Response<Vec<u8>> {
     let uri = request.uri();
-    let plugin_cid = match uri.host() {
+    let host = match uri.host() {
         Some(h) => h.to_string(),
         None => return error_response(StatusCode::BAD_REQUEST, "missing plugin host"),
+    };
+    let raw_path = uri.path().trim_start_matches('/');
+
+    // Two URL shapes reach this handler:
+    //   * WKWebView / webkit2gtk: `plugin://<cid>/<asset>` — CID is the host.
+    //   * Android / Windows WebView: the iframe loads
+    //     `http://plugin.localhost/<cid>/<asset>`, but Tauri normalizes that
+    //     back to the `plugin` scheme before it reaches us, so the host is a
+    //     bare `localhost` (or `plugin.localhost`) and the CID rides in the
+    //     path. Recover the CID and asset path from whichever shape applies.
+    let host_is_placeholder = host == "localhost" || host == "plugin.localhost";
+    let (plugin_cid, raw_path) = if host_is_placeholder {
+        match raw_path.split_once('/') {
+            Some((cid, rest)) => (cid.to_string(), rest),
+            None => (raw_path.to_string(), ""),
+        }
+    } else {
+        (host, raw_path)
     };
 
     // Normalize the path: strip leading slash, default to entry file
     // when the URL is just `plugin://<cid>/`.
-    let raw_path = uri.path().trim_start_matches('/');
     let asset_path = if raw_path.is_empty() {
         "ui/index.html".to_string()
     } else {
