@@ -199,7 +199,7 @@ nokhwa = { version = "0.10", default-features = false, features = ["input-native
 # Image encoding (JPEG) for bridging video frames to webview
 image = { version = "0.25", default-features = false, features = ["jpeg"] }
 
-# ── Grader runtime: everywhere except iOS ────────────────────────────
+# ── Grader runtime: every platform ───────────────────────────────────
 #
 # Phase 2 — WASM grader runtime for the community plugin system.
 #
@@ -211,14 +211,25 @@ image = { version = "0.25", default-features = false, features = ["jpeg"] }
 # credential-bearing assessments. wasi-virt support for graders that
 # legitimately need filesystem/RNG/clock arrives in a later session.
 #
-# Excluded on iOS only. Wasmtime 36 supports aarch64-linux-android directly
-# (see its `sys/unix/signals.rs`, which handles `target_os = "android"` on
-# aarch64); what iOS lacks is any way to make Cranelift's output executable,
-# since the platform forbids JIT. The `grader` cfg emitted by build.rs
-# mirrors this split. Running graders on iOS needs the Pulley interpreter
-# backend instead of native codegen — tracked separately.
+# Desktop + Android execute Cranelift's native machine code directly (JIT).
+# Wasmtime 36 supports aarch64-linux-android directly (see its
+# `sys/unix/signals.rs`, which handles `target_os = "android"` on aarch64).
+#
+# iOS forbids JIT — there is no way to map Cranelift's native output
+# executable — so iOS instead enables the `pulley` feature and targets
+# Wasmtime's portable bytecode interpreter (`Config::target("pulley64")`,
+# selected in `grader_config`, plugins/wasm_runtime.rs). Cranelift still
+# compiles the grader wasm on iOS, emitting Pulley bytecode rather than
+# native code, so the determinism config above is byte-for-byte identical
+# on every platform. The `grader` cfg emitted by build.rs is now set on
+# every target, iOS included.
 [target.'cfg(not(target_os = "ios"))'.dependencies]
 wasmtime = { version = "36", default-features = false, features = ["cranelift", "runtime"] }
+
+# iOS: same Wasmtime, plus the `pulley` feature so the interpreter backend
+# is compiled in and `Config::target("pulley64")` can run without a JIT.
+[target.'cfg(target_os = "ios")'.dependencies]
+wasmtime = { version = "36", default-features = false, features = ["cranelift", "runtime", "pulley"] }
 
 [dev-dependencies]
 tempfile = "3"

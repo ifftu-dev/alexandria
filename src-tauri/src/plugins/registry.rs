@@ -46,9 +46,10 @@ pub struct InstallStats {
 /// a cranelift compile. Never fails the install — a precompile error just means
 /// grading falls back to JIT (and rewrites the `.cwasm`) on first use.
 fn write_precompiled_grader(dest_dir: &Path, grader_bytes: &[u8]) {
-    // The Wasmtime grader sandbox is gated on the `grader` cfg (everywhere
-    // except iOS). Where it's absent there is no runtime to precompile for,
-    // so skip — graded plugins simply aren't offered there.
+    // The Wasmtime grader sandbox is gated on the `grader` cfg, now set on
+    // every platform. The `#[cfg(not(grader))]` arm is retained only as a
+    // fallback for any future target that cannot run Pulley, where there is no
+    // runtime to precompile for.
     #[cfg(grader)]
     match crate::plugins::wasm_runtime::precompile_grader(grader_bytes) {
         Ok(cwasm) => {

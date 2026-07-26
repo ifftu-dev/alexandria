@@ -77,9 +77,10 @@ pub struct AppState {
     pub classroom: Arc<ClassroomManager>,
     /// Deterministic Wasmtime grader runtime for community plugins (Phase 2).
     /// Cheap to clone; the underlying engine and module cache are shared.
-    /// Desktop-only — wasmtime v27 does not support iOS / Android; mobile
-    /// builds do not carry the runtime and the corresponding IPC command
-    /// returns `GraderUnavailable` on mobile.
+    /// Present on every platform: desktop and Android run the Cranelift JIT,
+    /// iOS runs the Pulley bytecode interpreter (JIT is forbidden there). See
+    /// `grader_config` in plugins/wasm_runtime.rs and the `grader` cfg in
+    /// build.rs.
     #[cfg(grader)]
     pub grader_runtime: Arc<plugins::wasm_runtime::GraderRuntime>,
     /// Last IPC activity timestamp for session timeout (auto-lock).
@@ -1475,10 +1476,11 @@ pub fn run() {
             commands::plugins::irl_get_submission,
             commands::plugins::irl_post_review,
             // Phase 2 — submit-and-grade against deterministic WASM graders.
-            // Desktop runs the real wasmtime grader; on mobile (wasmtime v27
-            // lacks iOS / Android support) a stub returns a catchable
-            // GraderUnavailable marker so the UI shows a clean message instead
-            // of an "unknown command" failure.
+            // The real wasmtime grader runs on every platform now (desktop and
+            // Android via the Cranelift JIT, iOS via the Pulley interpreter);
+            // the `#[cfg(not(grader))]` stub that returned a GraderUnavailable
+            // marker remains only as a fallback for any future target that
+            // cannot run Pulley.
             commands::plugins::plugin_submit_and_grade,
             // Phase 3 — P2P discovery + Plugin DAO attestation
             commands::plugins::plugin_browse_catalog,

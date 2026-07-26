@@ -112,6 +112,24 @@ pub struct GraderRuntime {
 pub fn grader_config() -> Config {
     let mut config = Config::new();
 
+    // iOS forbids JIT (W^X): Cranelift's native machine code can never be
+    // mapped executable, so the default native backend cannot run here.
+    // Target Pulley instead — Wasmtime's portable bytecode interpreter, which
+    // needs no executable pages. Cranelift still compiles the grader wasm, only
+    // it emits Pulley bytecode rather than native code, so every determinism
+    // setting below applies unchanged and prior investigation confirmed
+    // byte-identical fuel consumption and scores against the native path.
+    //
+    // Compile-time cfg rather than a runtime branch: the choice is fixed per
+    // platform (iOS = interpreter, everything else = JIT) and this keeps the
+    // native path zero-cost. `pulley64` is the 64-bit little-endian Pulley
+    // target, matching aarch64 iOS. The `pulley` Cargo feature (enabled for
+    // iOS in Cargo.toml) is what makes this target runnable.
+    #[cfg(target_os = "ios")]
+    config
+        .target("pulley64")
+        .expect("pulley64 is a supported Wasmtime target");
+
     // Determinism — the most important config in this whole module.
     // NaN canonicalization makes float operations bit-identical across
     // platforms (Wasmtime would otherwise be free to leave NaN payloads

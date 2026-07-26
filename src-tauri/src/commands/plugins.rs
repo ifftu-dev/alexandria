@@ -754,14 +754,14 @@ pub async fn plugin_submit_and_grade(
     Ok(record)
 }
 
-/// iOS stub for [`plugin_submit_and_grade`]. The wasmtime grader runtime runs
-/// wherever native codegen is allowed — desktop and Android — but iOS forbids
-/// JIT, so there it is compiled out (`wasm_runtime` is `#[cfg(grader)]`) and
-/// this stub returns a stable, catchable `GraderUnavailable` marker instead of
-/// failing as an unknown command. The editor plugin UIs match on this marker to
-/// show a clean "runs elsewhere" message rather than a raw error. In-browser
-/// "Run tests" still works on iOS — only graded submission (which relies on the
-/// grader's hidden tests) is unavailable here.
+/// Fallback stub for [`plugin_submit_and_grade`] on any target where the
+/// `grader` cfg is unset. The wasmtime grader now runs on every platform —
+/// desktop and Android via the Cranelift JIT, iOS via the Pulley interpreter —
+/// so `grader` is currently set everywhere and this arm is not compiled on any
+/// shipping target. It is kept only so a future target that cannot run Pulley
+/// still returns a stable, catchable `GraderUnavailable` marker (which the
+/// editor plugin UIs match on for a clean message) rather than failing as an
+/// unknown command.
 #[cfg(not(grader))]
 #[tauri::command]
 pub async fn plugin_submit_and_grade() -> Result<serde_json::Value, String> {
