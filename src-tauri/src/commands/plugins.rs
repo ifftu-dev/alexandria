@@ -605,7 +605,7 @@ pub async fn plugin_submit_and_grade(
             })?
             .clone();
         let grader_path = Path::new(&installed.install_path).join(registry::GRADER_FILENAME);
-        let cwasm_path = Path::new(&installed.install_path).join(registry::GRADER_CWASM_FILENAME);
+        let cwasm_path = Path::new(&installed.install_path).join(registry::grader_cwasm_filename());
         (manifest, grader_path, cwasm_path, grader.cid)
     };
 
