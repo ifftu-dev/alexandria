@@ -442,10 +442,7 @@ impl AppState {
 /// lifetime, as `ndk_context` requires.
 #[cfg(target_os = "android")]
 #[no_mangle]
-pub extern "C" fn JNI_OnLoad(
-    vm: jni::JavaVM,
-    _reserved: *mut std::ffi::c_void,
-) -> jni::sys::jint {
+pub extern "C" fn JNI_OnLoad(vm: jni::JavaVM, _reserved: *mut std::ffi::c_void) -> jni::sys::jint {
     let vm_ptr = vm.get_java_vm_pointer() as *mut std::ffi::c_void;
 
     if let Ok(mut env) = vm.attach_current_thread() {

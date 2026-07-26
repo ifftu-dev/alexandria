@@ -424,8 +424,8 @@ pub async fn publish_course(
     };
 
     // Sign the document
-    let signed =
-        content_course::sign_course_document(&payload, &w.signing_key).map_err(|e| e.to_string())?;
+    let signed = content_course::sign_course_document(&payload, &w.signing_key)
+        .map_err(|e| e.to_string())?;
 
     // Publish to iroh
     let result = content_course::publish_course_document(&state.content_node, &signed)

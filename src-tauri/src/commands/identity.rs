@@ -513,7 +513,8 @@ pub async fn publish_profile(state: State<'_, AppState>) -> Result<PublishProfil
         updated_at,
     };
 
-    let signed = content_profile::sign_profile(&payload, &w.signing_key).map_err(|e| e.to_string())?;
+    let signed =
+        content_profile::sign_profile(&payload, &w.signing_key).map_err(|e| e.to_string())?;
 
     let content_node = state.content_node_required().await?;
     let result = content_profile::publish_profile(&content_node, &signed)
