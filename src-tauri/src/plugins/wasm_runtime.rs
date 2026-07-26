@@ -172,8 +172,16 @@ pub fn precompile_grader(wasm: &[u8]) -> Result<Vec<u8>, String> {
 
 impl GraderRuntime {
     pub fn new() -> Result<Self, String> {
-        let engine = Engine::new(&grader_config())
-            .map_err(|e| format!("failed to create wasmtime engine: {e}"))?;
+        Self::with_config(grader_config())
+    }
+
+    /// Build a runtime on an explicit `Config`. Production always goes through
+    /// [`GraderRuntime::new`] so there is exactly one determinism config; this
+    /// exists so tests can stand up a second engine pinned to a different
+    /// compilation target (native vs `pulley64`) and prove the two agree.
+    pub fn with_config(config: Config) -> Result<Self, String> {
+        let engine =
+            Engine::new(&config).map_err(|e| format!("failed to create wasmtime engine: {e}"))?;
 
         Ok(Self {
             engine,
@@ -202,6 +210,26 @@ impl GraderRuntime {
         input_json: &[u8],
         budgets: GraderBudgets,
     ) -> Result<ScoreRecord, String> {
+        self.grade_with_fuel(grader_cid, wasm_bytes, cwasm_path, input_json, budgets)
+            .map(|(record, _fuel)| record)
+    }
+
+    /// As [`GraderRuntime::grade`], but also reports the fuel the grader burned.
+    ///
+    /// Fuel is metered by Wasmtime at the *wasm instruction* level, not the host
+    /// machine level, so the count is a backend- and machine-independent
+    /// fingerprint of the execution. Two runs that consume identical fuel
+    /// executed the same instruction sequence — which is what makes it the
+    /// check for "the Pulley interpreter and the native JIT agree" (see
+    /// `pulley_matches_native_fuel_and_score`).
+    pub fn grade_with_fuel(
+        &self,
+        grader_cid: &str,
+        wasm_bytes: &[u8],
+        cwasm_path: Option<&Path>,
+        input_json: &[u8],
+        budgets: GraderBudgets,
+    ) -> Result<(ScoreRecord, u64), String> {
         let module = self.load_module(grader_cid, wasm_bytes, cwasm_path)?;
 
         // Each grade gets its own Store — no shared state between
@@ -292,7 +320,14 @@ impl GraderRuntime {
             ));
         }
 
-        Ok(record)
+        // Fuel remaining is only unavailable if fuel metering were off, which
+        // `grader_config` guarantees it is not; saturate rather than unwrap so a
+        // future config change can never panic a grade.
+        let fuel_consumed = budgets
+            .fuel
+            .saturating_sub(store.get_fuel().unwrap_or(budgets.fuel));
+
+        Ok((record, fuel_consumed))
     }
 
     fn load_module(
@@ -745,6 +780,74 @@ mod tests {
             "console.log('hi ' + readLine())",
         );
         assert_eq!(r.score, 1.0);
+    }
+
+    /// iOS runs graders on Wasmtime's Pulley interpreter instead of the native
+    /// Cranelift JIT (Apple forbids W^X), and credential trust depends on both
+    /// backends agreeing exactly — a learner must not get a different score for
+    /// the same submission because they used an iPhone.
+    ///
+    /// This proves it on the host: compile and run the real JS grader twice,
+    /// once through the shipped native config and once through an otherwise
+    /// identical config pinned to `pulley64`, then compare score *and* fuel.
+    /// Fuel is metered per wasm instruction, so equal fuel means both backends
+    /// executed the same instruction sequence. Because Pulley bytecode
+    /// execution is host-independent, the pulley64 result obtained here is the
+    /// same one an iOS device produces — no device needed to catch a
+    /// divergence, and CI now guards it on every PR.
+    #[test]
+    fn pulley_matches_native_fuel_and_score() {
+        let cid = blake3::hash(EDITOR_JS_GRADER_WASM).to_hex().to_string();
+        let input = serde_json::to_vec(&serde_json::json!({
+            "version": "1",
+            "content": {
+                "tests": [{"stdin": "5", "expected_stdout": "25"}],
+                "grader_private": {"tests": [{"stdin": "9", "expected_stdout": "81"}]},
+            },
+            "submission": {"source": "const n = Number(readLine()); console.log(n * n)"},
+        }))
+        .unwrap();
+
+        let run = |config: Config| {
+            GraderRuntime::with_config(config)
+                .expect("runtime")
+                .grade_with_fuel(
+                    &cid,
+                    EDITOR_JS_GRADER_WASM,
+                    None,
+                    &input,
+                    GraderBudgets::default(),
+                )
+                .expect("grade succeeds")
+        };
+
+        // Native path: exactly what desktop and Android ship. Tests only ever
+        // build for the host, so `grader_config()` here is the native backend.
+        let (native_record, native_fuel) = run(grader_config());
+
+        // Interpreter path: what iOS ships.
+        let mut pulley = grader_config();
+        pulley.target("pulley64").expect("pulley64 is supported");
+        let (pulley_record, pulley_fuel) = run(pulley);
+
+        assert_eq!(
+            native_record.score, pulley_record.score,
+            "score diverged between native ({}) and pulley ({})",
+            native_record.score, pulley_record.score
+        );
+        assert_eq!(
+            native_record.details, pulley_record.details,
+            "per-test details diverged between backends"
+        );
+        assert_eq!(
+            native_fuel, pulley_fuel,
+            "fuel diverged: native burned {native_fuel}, pulley burned {pulley_fuel} — \
+             the two backends did not execute the same instruction sequence"
+        );
+        assert!(
+            native_fuel > 0,
+            "grader burned no fuel — did it actually run?"
+        );
     }
 
     #[test]

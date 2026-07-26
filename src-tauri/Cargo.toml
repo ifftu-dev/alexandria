@@ -233,6 +233,16 @@ wasmtime = { version = "36", default-features = false, features = ["cranelift", 
 
 [dev-dependencies]
 tempfile = "3"
+# Pull in Wasmtime's Pulley interpreter for test builds on every platform, not
+# just iOS. Cargo unions features across dependency kinds only when
+# dev-dependencies are in play, so this equips the test binary to build a
+# `pulley64` engine (see `pulley_matches_native_fuel_and_score`) without adding
+# the interpreter to shipped desktop/Android builds.
+wasmtime = { version = "36", default-features = false, features = [
+    "cranelift",
+    "runtime",
+    "pulley",
+] }
 # WebAssembly text format parser — used to keep grader runtime tests
 # readable by writing the test fixtures inline as WAT instead of shipping
 # pre-compiled .wasm blobs in the repo.

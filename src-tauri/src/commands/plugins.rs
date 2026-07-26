@@ -645,7 +645,7 @@ pub async fn plugin_submit_and_grade(
     let content_cid = blake3::hash(&content_bytes).to_hex().to_string();
     let submission_cid = blake3::hash(&submission_bytes).to_hex().to_string();
 
-    let record = state.grader_runtime.grade(
+    let (record, fuel_consumed) = state.grader_runtime.grade_with_fuel(
         &grader_cid,
         &wasm_bytes,
         Some(cwasm_path.as_path()),
@@ -745,9 +745,15 @@ pub async fn plugin_submit_and_grade(
         }
     }
 
+    // `fuel` is the wasm-instruction count the grader burned. It is metered by
+    // Wasmtime at the wasm level, so it is machine- and backend-independent: the
+    // same submission must report the same fuel on a desktop JIT and on the iOS
+    // Pulley interpreter. Logging it makes a cross-device determinism check a
+    // matter of diffing two log lines.
     log::info!(
-        "plugin grade: cid={plugin_cid} element={element_id} score={} ({})",
+        "plugin grade: cid={plugin_cid} element={element_id} score={} fuel={fuel_consumed} backend={} ({})",
         record.score,
+        if cfg!(target_os = "ios") { "pulley" } else { "native" },
         manifest.name,
     );
 
