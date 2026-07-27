@@ -12,8 +12,8 @@
   "scope": "course",
   "capabilities": [],
   "grader": {
-    "cid": "9b09f577d460afac8a035d0cca3290940519db8dba1d94e37ec468ca03c6605b",
-    "blake3": "9b09f577d460afac8a035d0cca3290940519db8dba1d94e37ec468ca03c6605b",
+    "cid": "27dbc3af84d6bc2aed08e732f3ed7c59340de6679ce069749e53d676a79df78d",
+    "blake3": "27dbc3af84d6bc2aed08e732f3ed7c59340de6679ce069749e53d676a79df78d",
     "entrypoint": "alex_grade"
   },
   "subject_tags": [

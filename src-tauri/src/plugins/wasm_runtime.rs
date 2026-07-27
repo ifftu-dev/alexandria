@@ -48,8 +48,8 @@ pub const DEFAULT_MEMORY_MAX_BYTES: usize = 128 * 1024 * 1024; // 128 MiB
 // ~50B wasm instructions. Still bounded (a runaway loop traps in ~a second of
 // JITted execution), but high enough for graders that run a whole language
 // engine inside wasm across several test cases — the TypeScript grader spends
-// ~1.9B type-stripping with sucrase-in-Boa, and the C/C++ grader spends ~4.6B
-// per test interpreting with JSCPP-in-Boa (re-parsed per test).
+// ~1.9B type-stripping with sucrase-in-Boa, and the C/C++ grader spends ~3.6B
+// loading JSCPP-in-Boa once per submission plus ~1B per test case interpreting.
 pub const DEFAULT_FUEL: u64 = 50_000_000_000;
 pub const DEFAULT_OUTPUT_MAX_BYTES: usize = 1024 * 1024; // 1 MiB
 
