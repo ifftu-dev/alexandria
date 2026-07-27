@@ -126,9 +126,7 @@ pub fn grader_config() -> Config {
     // target, matching aarch64 iOS. The `pulley` Cargo feature (enabled for
     // iOS in Cargo.toml) is what makes this target runnable.
     #[cfg(target_os = "ios")]
-    config
-        .target("pulley64")
-        .expect("pulley64 is a supported Wasmtime target");
+    apply_ios_tuning(&mut config);
 
     // Determinism — the most important config in this whole module.
     // NaN canonicalization makes float operations bit-identical across
@@ -150,6 +148,40 @@ pub fn grader_config() -> Config {
     // Reference types are deterministic and useful; leave enabled.
 
     config
+}
+
+/// Everything iOS needs on top of the shared determinism config: the Pulley
+/// interpreter backend, plus memory settings that fit inside what iOS will
+/// actually hand out.
+///
+/// iOS forbids JIT (W^X), so Cranelift's native machine code can never be mapped
+/// executable. `pulley64` is Wasmtime's portable bytecode interpreter — Cranelift
+/// still compiles the grader, it just emits Pulley bytecode instead of native
+/// code, so every determinism setting still applies.
+///
+/// iOS also will not hand out a multi-gigabyte virtual reservation. Wasmtime
+/// defaults to reserving 4GiB per linear memory (plus a 32MiB guard region) so
+/// generated code can skip explicit bounds checks and rely on signal-based
+/// traps. On iOS that reservation fails outright and instantiation dies with
+/// `mmap failed to reserve 0x100000000 bytes` — the grader compiles fine and
+/// then cannot start. So: reserve only what a grader is allowed to use, drop the
+/// guard region, and use explicit bounds checks. Pulley bounds-checks in
+/// software anyway, so this costs nothing on this backend. Memory may relocate
+/// on growth, which is safe — no raw host pointer outlives a grade.
+///
+/// Determinism is untouched. These are allocation-strategy knobs, not semantics,
+/// and fuel is metered per wasm instruction (bounds checks are not wasm
+/// instructions). `pulley_matches_native_fuel_and_score` runs this exact
+/// function's output against the native config to keep that honest.
+#[cfg(any(target_os = "ios", test))]
+fn apply_ios_tuning(config: &mut Config) {
+    config
+        .target("pulley64")
+        .expect("pulley64 is a supported Wasmtime target");
+    config.memory_reservation(DEFAULT_MEMORY_MAX_BYTES as u64);
+    config.memory_guard_size(0);
+    config.memory_may_move(true);
+    config.signals_based_traps(false);
 }
 
 /// Ahead-of-time compile a grader `wasm` into a serialized `.cwasm` artifact
@@ -825,9 +857,12 @@ mod tests {
         // build for the host, so `grader_config()` here is the native backend.
         let (native_record, native_fuel) = run(grader_config());
 
-        // Interpreter path: what iOS ships.
+        // Interpreter path: byte-for-byte the config iOS ships, including the
+        // constrained memory reservation and explicit bounds checks — not just
+        // the pulley64 target — so this also guards against a memory knob
+        // perturbing results.
         let mut pulley = grader_config();
-        pulley.target("pulley64").expect("pulley64 is supported");
+        apply_ios_tuning(&mut pulley);
         let (pulley_record, pulley_fuel) = run(pulley);
 
         assert_eq!(
