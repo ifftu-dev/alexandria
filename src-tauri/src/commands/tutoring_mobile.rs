@@ -7,7 +7,7 @@
 //!
 //! Screen share remains unavailable on mobile.
 
-use iroh_live::media::audio::AudioBackend;
+use live::media::audio::AudioBackend;
 use rusqlite::params;
 use serde::Serialize;
 use tauri::{AppHandle, State};

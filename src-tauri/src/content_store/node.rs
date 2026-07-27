@@ -25,7 +25,7 @@ use iroh::{Endpoint, SecretKey};
 use iroh_blobs::store::fs::FsStore;
 use iroh_blobs::BlobsProtocol;
 use iroh_gossip::Gossip;
-use iroh_live::Live;
+use live::Live;
 use thiserror::Error;
 use tokio::sync::Mutex;
 
@@ -192,8 +192,8 @@ impl ContentNode {
 
         // Register protocols on the shared router.
         // All platforms: blobs + gossip (room peer discovery) + MoQ (media streaming)
-        // Desktop: full video + audio via iroh-live with ffmpeg
-        // Mobile: audio-only via iroh-live without ffmpeg (pure Opus codec)
+        // Desktop: full video + audio via the live crate with ffmpeg
+        // Mobile: audio-only via the live crate without ffmpeg (pure Opus codec)
         let blobs = BlobsProtocol::new(&store, None);
         let gossip = Gossip::builder().spawn(endpoint.clone());
         let live = Live::new(endpoint.clone());
@@ -202,7 +202,7 @@ impl ContentNode {
         let router = Router::builder(endpoint)
             .accept(iroh_blobs::ALPN, blobs)
             .accept(iroh_gossip::ALPN, gossip.clone())
-            .accept(iroh_live::ALPN, live.protocol_handler())
+            .accept(live::ALPN, live.protocol_handler())
             .spawn();
         crate::diag::log("node.start: router spawned OK");
 

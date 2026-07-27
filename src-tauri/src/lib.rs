@@ -495,7 +495,7 @@ pub fn run() {
     // fallback. No-op in a packaged build with no `.env`.
     let _ = dotenvy::dotenv();
 
-    // Bridge tracing → log so that tracing events from iroh / iroh-live
+    // Bridge tracing → log so that tracing events from iroh / the live crate
     // are forwarded to tauri_plugin_log and become visible in the console.
     // We install a tracing Subscriber that converts tracing events into
     // log::log!() calls.  tauri_plugin_log then picks those up as normal
@@ -543,14 +543,14 @@ pub fn run() {
             event.record(&mut visitor);
             log::log!(target: meta.target(), level, "{}", visitor.0);
 
-            // Also write iroh-live / moq-media diagnostic events to diag.log
+            // Also write live-crate / moq-media diagnostic events to diag.log
             // so they appear in the in-app diagnostics modal alongside our own logs.
             let target = meta.target();
             if matches!(
                 *meta.level(),
                 tracing::Level::ERROR | tracing::Level::WARN | tracing::Level::INFO
             ) && (target.starts_with("moq_media")
-                || target.starts_with("iroh_live")
+                || target.starts_with("live")
                 || target.starts_with("hang")
                 || target.starts_with("moq_lite"))
             {
@@ -1447,7 +1447,7 @@ pub fn run() {
             commands::sentinel_holdout::sentinel_holdout_get_policy,
             commands::sentinel_holdout::sentinel_holdout_unseal_share,
             commands::sentinel_holdout::sentinel_holdout_evaluate,
-            // Live Tutoring (iroh-live rooms)
+            // Live Tutoring (live-crate rooms)
             commands::tutoring::tutoring_create_room,
             commands::tutoring::tutoring_join_room,
             commands::tutoring::tutoring_leave_room,

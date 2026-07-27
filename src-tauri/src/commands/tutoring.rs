@@ -4,7 +4,7 @@
 //! Room creation/joining requires the iroh content node to be running
 //! (it provides the shared QUIC endpoint, gossip, and live instances).
 
-use iroh_live::media::audio::AudioBackend;
+use live::media::audio::AudioBackend;
 use rusqlite::params;
 use serde::Serialize;
 use tauri::{AppHandle, State};
@@ -16,7 +16,7 @@ const VIDEO_DISABLED_ERROR: &str = "video support is disabled in this build";
 
 #[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
 async fn detect_camera() -> (bool, Option<String>) {
-    use iroh_live::media::capture::CameraCapturer;
+    use live::media::capture::CameraCapturer;
 
     match tokio::time::timeout(
         std::time::Duration::from_secs(5),
@@ -39,7 +39,7 @@ async fn detect_camera() -> (bool, Option<String>) {
 
 #[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
 async fn list_cameras() -> Vec<CameraDeviceInfo> {
-    use iroh_live::media::capture::CameraCapturer;
+    use live::media::capture::CameraCapturer;
 
     match tokio::time::timeout(
         std::time::Duration::from_secs(5),

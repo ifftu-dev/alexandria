@@ -866,7 +866,7 @@ const MIGRATION_016: &str = r#"
 -- Migration 016: Classrooms
 -- Persistent group spaces (like Discord servers) with text
 -- channels, message history, membership management, join
--- requests, and live A/V calls via iroh-live.
+-- requests, and live A/V calls via the live crate.
 -- ============================================================
 
 -- ---- Classrooms ----
@@ -993,7 +993,7 @@ VALUES ('storage_quota_bytes', '0');
 const MIGRATION_015: &str = r#"
 -- ============================================================
 -- Migration 015: Tutoring Sessions
--- Stores live tutoring session metadata. The iroh-live room
+-- Stores live tutoring session metadata. The live-crate room
 -- ticket is persisted so sessions can be re-joined (while the
 -- gossip topic is still alive) and for history/analytics.
 -- ============================================================

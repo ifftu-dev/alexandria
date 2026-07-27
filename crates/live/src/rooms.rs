@@ -1,16 +1,14 @@
-// Copyright 2025 N0, INC
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+//! Room actor: gossip-based peer presence + per-broadcast MoQ subscriptions.
+//!
+//! A room is a single [`iroh_gossip`] topic. Each peer floods a [`PeerAnnounce`]
+//! listing the broadcasts it publishes; on hearing a new broadcast a peer opens a
+//! MoQ subscription for it (with exponential-backoff retry and periodic
+//! reconciliation). MoQ sessions are shared bidirectionally (a peer both
+//! publishes to and subscribes from the same session), so subscription repair
+//! never closes the underlying session.
+//!
+//! Derived from n0-computer's `iroh-live` room layer (Apache-2.0/MIT), ported to
+//! iroh 1.0 and trimmed to the surface this app uses.
 
 use std::collections::{HashMap, HashSet};
 use std::pin::Pin;
@@ -32,20 +30,21 @@ use tracing::{Instrument, debug, error_span, info, warn};
 
 use crate::Live;
 
-pub use self::publisher::{PublishOpts, RoomPublisherSync, StreamKind};
 pub use self::ticket::RoomTicket;
 
 type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send + Sync + 'static>>;
 
-mod publisher;
-
+/// A joined room: an event stream plus a cloneable command [`RoomHandle`].
 pub struct Room {
     handle: RoomHandle,
     events: mpsc::Receiver<RoomEvent>,
 }
 
+/// The receiver half of a split [`Room`].
 pub type RoomEvents = mpsc::Receiver<RoomEvent>;
 
+/// Cloneable command handle to a room's actor. Dropping the last clone (and the
+/// owning [`Room`]) aborts the actor task.
 #[derive(Clone)]
 pub struct RoomHandle {
     me: EndpointId,
@@ -55,12 +54,14 @@ pub struct RoomHandle {
 }
 
 impl RoomHandle {
+    /// A ticket that points joiners at this endpoint as the bootstrap peer.
     pub fn ticket(&self) -> RoomTicket {
         let mut ticket = self.ticket.clone();
         ticket.bootstrap = vec![self.me];
         ticket
     }
 
+    /// Publish a broadcast into the room under `name`.
     pub async fn publish(&self, name: impl ToString, producer: BroadcastProducer) -> Result<()> {
         self.tx
             .send(ApiMessage::Publish {
@@ -71,9 +72,9 @@ impl RoomHandle {
             .map_err(|_| anyerr!("room actor died"))
     }
 
-    /// Force the room actor to remove a broadcast from active subscriptions and reconnect.
-    /// Call this when you detect a subscription has died (e.g., frame bridge ended)
-    /// but `broadcast.closed()` hasn't fired.
+    /// Force the room actor to drop a broadcast from active subscriptions and
+    /// reconnect. Call this when a subscription is known dead (e.g. the frame
+    /// bridge ended) but `broadcast.closed()` has not fired.
     pub async fn force_resubscribe(&self, remote: EndpointId, name: impl ToString) -> Result<()> {
         self.tx
             .send(ApiMessage::ForceResubscribe {
@@ -86,6 +87,8 @@ impl RoomHandle {
 }
 
 impl Room {
+    /// Join the room described by `ticket`, spawning its actor on the shared
+    /// `endpoint` / `gossip` / `live` handles.
     pub async fn new(
         endpoint: &Endpoint,
         gossip: Gossip,
@@ -121,22 +124,27 @@ impl Room {
         })
     }
 
+    /// Await the next room event.
     pub async fn recv(&mut self) -> Result<RoomEvent> {
         self.events.recv().await.std_context("sender stopped")
     }
 
+    /// Non-blocking poll for the next room event.
     pub fn try_recv(&mut self) -> Result<RoomEvent, TryRecvError> {
         self.events.try_recv()
     }
 
+    /// A ticket that points joiners at this endpoint.
     pub fn ticket(&self) -> RoomTicket {
         self.handle.ticket()
     }
 
+    /// Split into the event receiver and a cloneable command handle.
     pub fn split(self) -> (RoomEvents, RoomHandle) {
         (self.events, self.handle)
     }
 
+    /// Publish a broadcast into the room under `name`.
     pub async fn publish(&self, name: impl ToString, producer: BroadcastProducer) -> Result<()> {
         self.handle.publish(name, producer).await
     }
@@ -153,28 +161,29 @@ enum ApiMessage {
     },
 }
 
+/// Events surfaced to the app as the room's peer/broadcast set changes.
 pub enum RoomEvent {
+    /// A peer announced (or re-announced) the set of broadcasts it publishes.
     RemoteAnnounced {
         remote: EndpointId,
         broadcasts: Vec<String>,
     },
-    RemoteConnected {
-        session: MoqSession,
-    },
+    /// A MoQ session to a peer was established.
+    RemoteConnected { session: MoqSession },
+    /// A broadcast subscription became active.
     BroadcastSubscribed {
         session: MoqSession,
         broadcast: SubscribeBroadcast,
     },
 }
 
-/// Presence announcement flooded over the room's gossip topic. Replaces the
-/// signed iroh-smol-kv per-peer state that the old build carried over gossip.
+/// Presence announcement flooded over the room's gossip topic.
 ///
-/// `from` is the announcing endpoint; presence is keyed on it. Trust is
-/// bounded without a signature here: acting on a forged announcement only
-/// triggers a `MoqSession` connect, which authenticates the real remote
-/// endpoint id — a lie just yields a failed connect. (Signing presence is a
-/// possible hardening follow-up.)
+/// `from` is the announcing endpoint; presence is keyed on it. Trust is bounded
+/// without a signature: acting on a forged announcement only triggers a
+/// [`MoqSession`] connect, which authenticates the real remote endpoint id — a
+/// lie just yields a failed connect. (Signing presence is a possible hardening
+/// follow-up.)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct PeerAnnounce {
     from: EndpointId,
@@ -186,7 +195,6 @@ struct PeerAnnounce {
 const PRESENCE_INTERVAL: Duration = Duration::from_secs(15);
 
 /// Presence not refreshed within this window is pruned (peer assumed gone).
-/// Matches the old iroh-smol-kv expiry horizon.
 const PRESENCE_HORIZON: Duration = Duration::from_secs(120);
 
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, derive_more::Display)]
@@ -227,7 +235,7 @@ impl Actor {
         gossip: Gossip,
         ticket: RoomTicket,
     ) -> Result<Self> {
-        // Presence now rides the raw gossip topic directly (no iroh-smol-kv).
+        // Presence rides the raw gossip topic directly.
         let topic = gossip
             .subscribe(ticket.topic_id, ticket.bootstrap.clone())
             .await?;
@@ -258,9 +266,8 @@ impl Actor {
         // Presence updates arrive as raw gossip messages on the room topic.
         let mut updates = self.gossip_rx.take().expect("run called once");
 
-        // Periodic reconciliation: every 15s, check if any known remote broadcasts
-        // are missing from active_subscribe and reconnect them; also prune peers
-        // whose presence has expired.
+        // Periodic reconciliation: every 15s, reconnect any known remote
+        // broadcasts missing from active_subscribe; also prune expired peers.
         let mut reconcile_interval = tokio::time::interval(Duration::from_secs(15));
         reconcile_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
@@ -347,8 +354,8 @@ impl Actor {
     async fn handle_api_message(&mut self, msg: ApiMessage) {
         match msg {
             ApiMessage::Publish { name, producer } => {
-                // Hold the consumer inside the future: moq-net's `closed()`
-                // borrows `&self`, so it must outlive the await.
+                // Hold the consumer inside the future: moq's `closed()` borrows
+                // `&self`, so it must outlive the await.
                 let closed_consumer = producer.consume();
                 self.live.publish(name.clone(), producer).await.ok();
                 self.active_publish.insert(name.clone());
@@ -364,7 +371,7 @@ impl Actor {
                 self.active_subscribe.remove(&id);
                 self.retry_counts.remove(&id);
                 // Don't close the session — it's shared bidirectionally.
-                // handle_connect will reuse it if healthy or create a new one.
+                // start_connect_and_subscribe will create a new one.
                 self.active_sessions.remove(&id);
                 let still_known = self
                     .known_remote_broadcasts
@@ -505,7 +512,8 @@ impl Actor {
         self.start_connect_and_subscribe(id, remote, name);
     }
 
-    /// Periodic reconciliation: reconnect any known broadcasts that are not actively subscribed.
+    /// Periodic reconciliation: reconnect any known broadcasts that are not
+    /// actively subscribed.
     fn reconcile_subscriptions(&mut self) {
         // Collect missing subscriptions first to avoid borrow conflict.
         let active = &self.active_subscribe;
@@ -528,8 +536,7 @@ impl Actor {
     }
 
     /// Broadcast our current set of published broadcasts as a presence
-    /// announcement on the room gossip topic. (Named `update_kv` historically;
-    /// now a gossip flood rather than an iroh-smol-kv write.)
+    /// announcement on the room gossip topic.
     async fn update_kv(&self) {
         let ann = PeerAnnounce {
             from: self.me,
@@ -568,9 +575,12 @@ mod ticket {
 
     use iroh::EndpointId;
     use iroh_gossip::TopicId;
-    use n0_error::{Result, StdResultExt};
     use serde::{Deserialize, Serialize};
 
+    /// A shareable room join token: the gossip topic plus bootstrap peers.
+    ///
+    /// Encodes to the canonical `iroh-tickets` string form (KIND prefix +
+    /// base32) via [`Display`]; parses back via [`FromStr`].
     #[derive(Debug, Serialize, Deserialize, Clone, derive_more::Display)]
     #[display("{}", iroh_tickets::Ticket::encode_string(self))]
     pub struct RoomTicket {
@@ -579,6 +589,7 @@ mod ticket {
     }
 
     impl RoomTicket {
+        /// Build a ticket for an explicit topic + bootstrap set.
         pub fn new(topic_id: TopicId, bootstrap: impl IntoIterator<Item = EndpointId>) -> Self {
             Self {
                 bootstrap: bootstrap.into_iter().collect(),
@@ -586,38 +597,11 @@ mod ticket {
             }
         }
 
+        /// Generate a fresh room with a random topic and no bootstrap peers.
         pub fn generate() -> Self {
             Self {
                 bootstrap: vec![],
                 topic_id: TopicId::from_bytes(rand::random()),
-            }
-        }
-
-        pub fn new_from_env() -> Result<Self> {
-            if let Ok(value) = std::env::var("IROH_LIVE_ROOM") {
-                value
-                    .parse()
-                    .std_context("failed to parse ticket from IROH_LIVE_ROOM environment variable")
-            } else {
-                let topic_id = match std::env::var("IROH_LIVE_TOPIC") {
-                    Ok(topic) => TopicId::from_bytes(
-                        data_encoding::HEXLOWER
-                            .decode(topic.as_bytes())
-                            .std_context("invalid hex")?
-                            .as_slice()
-                            .try_into()
-                            .std_context("invalid length")?,
-                    ),
-                    Err(_) => {
-                        let topic = TopicId::from_bytes(rand::random());
-                        println!(
-                            "Created new topic. Reuse with IROH_TOPIC={}",
-                            data_encoding::HEXLOWER.encode(topic.as_bytes())
-                        );
-                        topic
-                    }
-                };
-                Ok(Self::new(topic_id, vec![]))
             }
         }
     }
@@ -633,9 +617,8 @@ mod ticket {
     impl iroh_tickets::Ticket for RoomTicket {
         const KIND: &'static str = "room";
 
-        // iroh-tickets 1.0 renamed the byte hooks to encode_bytes/decode_bytes;
-        // the canonical string form (KIND prefix + base32) is the provided
-        // encode_string/decode_string built on these.
+        // iroh-tickets 1.0 exposes byte hooks encode_bytes/decode_bytes; the
+        // canonical string form (KIND prefix + base32) is built on these.
         fn encode_bytes(&self) -> Vec<u8> {
             postcard::to_stdvec(self).unwrap()
         }

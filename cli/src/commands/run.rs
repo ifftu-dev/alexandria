@@ -305,7 +305,7 @@ fn run_ios_tauri_dev(
     // `--config` alone does not propagate `build.features` into the Rust
     // compile step in `cargo tauri ios dev` (verified empirically — the
     // compile invocation ends up with `--features ""` otherwise). Pass
-    // the feature explicitly so iroh-live's iOS media path compiles.
+    // the feature explicitly so the live crate's iOS media path compiles.
     args.extend(["--features", "tutoring-video-ios"]);
     if open {
         args.push("--open");

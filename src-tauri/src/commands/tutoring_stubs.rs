@@ -1,7 +1,7 @@
 //! Mobile stub commands for live tutoring.
 //!
 //! Phase 2 (in progress): audio-only tutoring on mobile.
-//! iroh-live is now available without ffmpeg via the pure Opus codec,
+//! the live crate is now available without ffmpeg via the pure Opus codec,
 //! and gossip + MoQ protocols are registered on mobile.
 //! These stubs will be replaced with real audio-only implementations.
 //!
