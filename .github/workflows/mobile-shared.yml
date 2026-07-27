@@ -277,13 +277,6 @@ jobs:
           path: alexandria
           ref: ${{ env.BUILD_REF }}
 
-      - name: Checkout iroh-live-patched
-        uses: actions/checkout@v5
-        with:
-          repository: ifftu-dev/iroh-live
-          path: iroh-live-patched
-          token: ${{ secrets.CROSS_REPO_PAT }}
-
       - name: Setup Rust 1.91.0 (MSRV)
         uses: dtolnay/rust-toolchain@1.91.0
         with:
@@ -645,13 +638,6 @@ jobs:
         with:
           path: alexandria
           ref: ${{ env.BUILD_REF }}
-
-      - name: Checkout iroh-live-patched
-        uses: actions/checkout@v5
-        with:
-          repository: ifftu-dev/iroh-live
-          path: iroh-live-patched
-          token: ${{ secrets.CROSS_REPO_PAT }}
 
       - name: Setup Java 21
         uses: actions/setup-java@v5
