@@ -14,15 +14,23 @@
 
 use std::time::Duration;
 
+// Only used by the Android-gated frame conversion below.
+#[cfg(not(target_os = "android"))]
 use bytes::{BufMut, BytesMut};
 use ffmpeg_next::util::{format::pixel::Pixel, frame::video::Video as FfmpegFrame};
 use image::{Delay, RgbaImage};
 use moq_mux::container::Timestamp;
 
+// Only the nokhwa capture path decodes MJPG, and that path is compiled out
+// on Android in favour of the NDK Camera2 source.
+#[cfg(not(target_os = "android"))]
 pub(crate) use self::mjpg_decoder::MjpgDecoder;
 pub(crate) use self::rescaler::Rescaler;
-use crate::av::{self, DecodedFrame, PixelFormat, VideoFormat, VideoFrame};
+use crate::av::{self, DecodedFrame, PixelFormat};
+#[cfg(not(target_os = "android"))]
+use crate::av::{VideoFormat, VideoFrame};
 
+#[cfg(not(target_os = "android"))]
 mod mjpg_decoder;
 mod rescaler;
 
@@ -123,6 +131,7 @@ impl PixelFormat {
 /// Returns `None` if the frame has an unsupported pixel format.
 ///
 /// This allocates the full frame into a vec, which we need anyway to cross the thread boundary.
+#[cfg(not(target_os = "android"))]
 pub(crate) fn ffmpeg_frame_to_video_frame(
     frame: &ffmpeg_next::util::frame::Video,
 ) -> Option<VideoFrame> {

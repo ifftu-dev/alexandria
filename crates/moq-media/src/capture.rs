@@ -12,23 +12,31 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// The nokhwa-backed camera path is compiled out on Android (see the
+// `CameraCapturer` alias below), so everything only it uses is gated the same
+// way. `CameraIndex` stays unconditional: it is the public index type both
+// backends hand back.
+#[cfg(not(target_os = "android"))]
 use std::str::FromStr;
 
-use anyhow::{Context, Result};
+#[cfg(not(target_os = "android"))]
+use anyhow::Context;
+use anyhow::Result;
 pub use nokhwa::utils::CameraIndex;
+#[cfg(not(target_os = "android"))]
 use nokhwa::{
     nokhwa_initialize,
     pixel_format::RgbFormat,
     utils::{CameraFormat, FrameFormat, RequestedFormat, RequestedFormatType, Resolution},
 };
+#[cfg(not(target_os = "android"))]
 use tracing::{debug, info, trace, warn};
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 use xcap::{Monitor, VideoRecorder};
 
-use crate::{
-    av::{PixelFormat, VideoFormat, VideoFrame, VideoSource},
-    ffmpeg::util::MjpgDecoder,
-};
+use crate::av::{PixelFormat, VideoFormat, VideoFrame, VideoSource};
+#[cfg(not(target_os = "android"))]
+use crate::ffmpeg::util::MjpgDecoder;
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 pub struct ScreenCapturer {
@@ -171,6 +179,14 @@ impl VideoSource for ScreenCapturer {
     }
 }
 
+// Camera capture is nokhwa-backed on desktop. nokhwa has no Android backend
+// (it gates on macos/windows/linux/ios only), so Android routes `CameraCapturer`
+// to the NDK Camera2 implementation instead — same constructors, same
+// `VideoSource` impl, so callers are unchanged.
+#[cfg(target_os = "android")]
+pub use crate::android::AndroidCameraSource as CameraCapturer;
+
+#[cfg(not(target_os = "android"))]
 pub struct CameraCapturer {
     pub(crate) camera: nokhwa::Camera,
     pub(crate) mjpg_decoder: MjpgDecoder,
@@ -178,6 +194,7 @@ pub struct CameraCapturer {
     pub(crate) height: u32,
 }
 
+#[cfg(not(target_os = "android"))]
 impl CameraCapturer {
     /// Create a camera capturer using the default camera (or `IROH_LIVE_CAMERA` env var).
     pub fn new() -> Result<Self> {
@@ -268,6 +285,7 @@ impl CameraCapturer {
     }
 }
 
+#[cfg(not(target_os = "android"))]
 impl VideoSource for CameraCapturer {
     fn name(&self) -> &str {
         "cam"

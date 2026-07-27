@@ -17,6 +17,8 @@
 // reference source we track.
 #![allow(clippy::needless_update, clippy::manual_clamp, clippy::never_loop)]
 
+#[cfg(all(target_os = "android", feature = "video"))]
+pub mod android;
 pub mod audio;
 pub mod av;
 #[cfg(feature = "video")]

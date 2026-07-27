@@ -696,7 +696,9 @@ pub async fn plugin_submit_and_grade(
             ("content", &content_bytes),
             ("submission", &submission_bytes),
         ] {
-            match crate::content_store::content::add_bytes_unencrypted(&state.content_node, bytes).await {
+            match crate::content_store::content::add_bytes_unencrypted(&state.content_node, bytes)
+                .await
+            {
                 Ok(p) => pins.push(p),
                 Err(e) => log::warn!("plugin grade: failed to publish {label} evidence: {e}"),
             }
