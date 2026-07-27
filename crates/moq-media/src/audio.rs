@@ -83,7 +83,16 @@ impl AudioBackend {
     ) -> Self {
         let (tx, rx) = mpsc::channel(32);
         let _handle = spawn_thread("audiodriver", move || {
-            AudioDriver::new_with_devices(rx, input_device_id, output_device_id).run()
+            // A failed stream build must not abort the process. The most common
+            // cause is a denied microphone permission (on Android cpal reports
+            // it as a BackendSpecific "Internal" error), and under panic=abort
+            // an unwrap here would take the whole app down mid-session.
+            match AudioDriver::try_new_with_devices(rx, input_device_id, output_device_id) {
+                Ok(mut driver) => driver.run(),
+                Err(e) => {
+                    tracing::error!("audio driver unavailable: {e:#}");
+                }
+            }
         });
         Self { tx }
     }
@@ -342,15 +351,15 @@ struct AudioDriver {
 
 impl AudioDriver {
     #[allow(dead_code)]
-    fn new(rx: mpsc::Receiver<DriverMessage>) -> Self {
-        Self::new_with_devices(rx, None, None)
+    fn new(rx: mpsc::Receiver<DriverMessage>) -> Result<Self> {
+        Self::try_new_with_devices(rx, None, None)
     }
 
-    fn new_with_devices(
+    fn try_new_with_devices(
         rx: mpsc::Receiver<DriverMessage>,
         input_device_id: Option<DeviceId>,
         output_device_id: Option<DeviceId>,
-    ) -> Self {
+    ) -> Result<Self> {
         let config = FirewheelConfig {
             num_graph_inputs: ChannelCount::new(1).unwrap(),
             ..Default::default()
@@ -367,7 +376,8 @@ impl AudioDriver {
                 ..Default::default()
             }),
         };
-        cx.start_stream(config).unwrap();
+        cx.start_stream(config)
+            .context("failed to start the audio stream (is the microphone permission granted?)")?;
         info!(
             "audio graph in: {:?}",
             cx.node_info(cx.graph_in_node_id()).map(|x| &x.info)
@@ -409,7 +419,7 @@ impl AudioDriver {
             (cx.graph_out_node_id(), cx.graph_in_node_id())
         };
 
-        Self {
+        Ok(Self {
             cx,
             rx,
             #[cfg(feature = "aec")]
@@ -418,7 +428,7 @@ impl AudioDriver {
             input_anchor,
             peak_meters: Default::default(),
             mono_peak_meters: Default::default(),
-        }
+        })
     }
 
     fn run(&mut self) {

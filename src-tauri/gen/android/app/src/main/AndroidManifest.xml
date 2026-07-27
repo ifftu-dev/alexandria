@@ -8,6 +8,15 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 
+    <!-- Live tutoring captures the mic through cpal. Without RECORD_AUDIO the
+         device still *enumerates* (so the pre-join check lists a microphone)
+         but opening the stream fails with a BackendSpecific "Internal" error.
+         MODIFY_AUDIO_SETTINGS is what the WebView's permission handler asks
+         for alongside it when a page calls getUserMedia with audio. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
+
     <!-- Foreground service for the libp2p mesh — keeps the process alive
          so Doze / battery optimisation doesn't suspend network traffic
          when the app is backgrounded. See P2pForegroundService.kt. -->
