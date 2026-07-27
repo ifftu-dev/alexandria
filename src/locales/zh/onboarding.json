@@ -184,5 +184,6 @@
     "checking": "正在检查…",
     "checkActivation": "检查激活状态",
     "backToProfiles": "返回档案列表"
-  }
+  },
+  "stepOf": "第 {current} / {total} 步"
 }

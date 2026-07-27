@@ -316,7 +316,7 @@
     if (!content.tests) content.tests = [];
     try {
       render();
-      makeEditor((content.starter_code) || (state && state.source) || DEFAULT_SOURCE);
+      makeEditor((state && state.source) || content.starter_code || DEFAULT_SOURCE);
     } catch (e) {
       els.results.innerHTML = '<div class="bad">Editor failed to load: ' + esc(e && e.message ? e.message : e) + '</div>';
       return;

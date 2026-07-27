@@ -1,16 +1,16 @@
-//! IPC commands for content-addressed storage (iroh + IPFS gateway).
+//! IPC commands for content-addressed storage (iroh blobs).
 //!
 //! These commands expose the iroh blob store to the frontend for
 //! adding, fetching, and querying content by BLAKE3 hash. The
-//! `content_resolve` command additionally supports IPFS CIDs with
-//! automatic gateway fallback.
+//! `content_resolve` command additionally accepts a public URL and
+//! caches the fetched bytes into the local store.
 
 use serde::Serialize;
 use tauri::State;
 
-use crate::ipfs::content;
-use crate::ipfs::resolver;
-use crate::ipfs::storage;
+use crate::content_store::content;
+use crate::content_store::resolver;
+use crate::content_store::storage;
 use crate::AppState;
 
 /// Status of the content node.
@@ -56,7 +56,7 @@ pub async fn content_add(
     storage::maybe_evict(&state.content_node, &state.db).await;
 
     // Announce over iroh that this node now serves the blob, so peers can fetch
-    // it directly (the P2P storage path) instead of via the IPFS gateway.
+    // it directly (the P2P storage path) instead of from the origin URL.
     if let (Ok(hash), Some(endpoint)) = (
         content::parse_hash(&result.hash),
         state.content_node.endpoint().await,
@@ -102,18 +102,18 @@ pub async fn content_has(state: State<'_, AppState>, hash: String) -> Result<boo
 pub struct ResolveResponse {
     /// BLAKE3 hash of the content.
     pub blake3_hash: String,
-    /// IPFS CID if known.
-    pub ipfs_cid: Option<String>,
+    /// Public URL for the content if known.
+    pub external_id: Option<String>,
     /// Where the content was resolved from.
     pub source: resolver::ResolveSource,
     /// Size in bytes.
     pub size: u64,
 }
 
-/// Resolve content by any identifier (BLAKE3 hex or IPFS CID).
+/// Resolve content by any identifier (BLAKE3 hex or public URL).
 ///
-/// Uses the full resolution chain: local store → CID mapping →
-/// IPFS gateway fallback. Content fetched from gateways is cached
+/// Uses the full resolution chain: local store → iroh peers →
+/// public URL fallback. Content fetched from a URL is cached
 /// locally and mapped for future lookups.
 ///
 /// Returns the raw bytes and metadata about the resolution.
@@ -155,7 +155,7 @@ pub async fn content_resolve(
 
     Ok(ResolveResponse {
         blake3_hash: result.blake3_hash,
-        ipfs_cid: result.ipfs_cid,
+        external_id: result.external_id,
         source: result.source,
         size: result.size,
     })

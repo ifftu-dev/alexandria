@@ -5,7 +5,7 @@
 //! - **`CatalogAnnouncement`**: The lightweight gossip payload broadcast on
 //!   `/alexandria/catalog/1.0`. Contains just enough for discovery (title,
 //!   author, content CID, skill tags, version). Peers use the `content_cid`
-//!   to fetch the full `SignedCourseDocument` from iroh/IPFS.
+//!   to fetch the full `SignedCourseDocument` from iroh.
 //!
 //! - **`CatalogEntry`**: A row from the local `catalog` SQLite table.
 //!   Includes metadata about when/how the entry was received.

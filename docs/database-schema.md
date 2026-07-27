@@ -15,7 +15,7 @@
 > `witness_validator_name`, `auto_issued`. See
 > [`vc-migration.md`](./vc-migration.md) for the full diff.
 
-**Engine**: SQLite (rusqlite 0.38, bundled)
+**Engine**: SQLCipher (rusqlite 0.38, `bundled-sqlcipher`) — per-profile DBs are encrypted, opened with `PRAGMA key`
 **Migrations**: 71
 
 ---
@@ -34,7 +34,7 @@
 - **Deterministic IDs**: Most application entities use `hex(blake2b_256(parts.join("|")))` instead of server-generated UUIDs.
 - **Singleton identity per profile**: `local_identity` is a one-row table with `CHECK (id = 1)`. Each user profile has its own SQLCipher database (see [`multi-user-profiles.md`](multi-user-profiles.md)), so "singleton" is scoped per-profile, not per-device — a device with three profiles has three independent `local_identity` rows, each in its own encrypted DB file.
 - **No server tables**: No hosted auth/session model exists; the app is profile-based and local-first.
-- **External content**: Course content, published profiles, evidence bundles, and other large artifacts live in iroh/IPFS-addressed blobs. SQLite stores metadata, references, and caches.
+- **External content**: Course content, published profiles, evidence bundles, and other large artifacts live in the iroh content store as content-addressed (BLAKE3) blobs. SQLite stores metadata, references, and caches.
 - **Text timestamps**: Time values are stored as ISO-8601-ish `TEXT` for portability and easy inspection.
 - **Canonical source**: The exact DDL, defaults, `CHECK` constraints, indexes, and migration bodies live in `src-tauri/src/db/schema.rs`.
 
@@ -46,7 +46,7 @@
 |---------|------|-------------|
 | 1 | `initial_schema` | Core tables: identity, taxonomy, courses, learning, evidence, integrity, P2P, governance |
 | 2 | `profile_hash` | Add `profile_hash` to `local_identity` |
-| 3 | `content_mappings` | Bidirectional CID↔BLAKE3 mapping for the iroh/IPFS bridge |
+| 3 | `content_mappings` | Bidirectional external ID (public URL)↔BLAKE3 mapping for the content store |
 | 4 | `assessment_columns` | Add `weight` and `source_element_id` to `skill_assessments` |
 | 5 | `governance_members` | DAO committee membership |
 | 6 | `reputation_engine` | Reputation evidence and impact-delta tables |
@@ -282,7 +282,7 @@ discovery (Phase 3).
 - **`pins`** — Local iroh pin state, including `size_bytes`,
   `last_accessed`, `auto_unpin`, and `pinned_at`.
 - **`sync_log`** — Broadcast/receive audit trail for gossip-synced entities.
-- **`content_mappings`** — IPFS CID ↔ iroh BLAKE3 bridge table.
+- **`content_mappings`** — external ID (public URL, `external_id`) ↔ iroh BLAKE3 bridge table.
 - **`devices`** — Known devices for cross-device sync (`id`, `device_name`,
   `platform`, `peer_id`, `is_local`, timestamps). Explicit pairing
   (migration 049) adds `stake_address` (sync only proceeds when it

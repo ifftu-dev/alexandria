@@ -130,20 +130,20 @@ onBeforeUnmount(unbind)
   align-items: center;
   gap: 0.5rem;
   padding: 0.5rem 0.75rem;
-  border: 1px solid hsl(var(--border));
+  border: 1px solid var(--app-border);
   border-radius: 0.625rem;
-  background: hsl(var(--background));
-  color: hsl(var(--foreground));
+  background: var(--app-background);
+  color: var(--app-foreground);
   font-size: 0.875rem;
   transition: border-color 0.15s, background-color 0.15s;
 }
 .locale-dd__trigger:hover {
-  border-color: hsl(var(--primary) / 0.5);
+  border-color: color-mix(in srgb, var(--app-primary) 50%, transparent);
 }
 .locale-dd__globe {
   width: 1rem;
   height: 1rem;
-  color: hsl(var(--muted-foreground));
+  color: var(--app-muted-foreground);
   flex-shrink: 0;
 }
 .locale-dd__current {
@@ -152,7 +152,7 @@ onBeforeUnmount(unbind)
 .locale-dd__chev {
   width: 1rem;
   height: 1rem;
-  color: hsl(var(--muted-foreground));
+  color: var(--app-muted-foreground);
   transition: transform 0.15s;
 }
 .locale-dd__chev--open {
@@ -166,12 +166,14 @@ onBeforeUnmount(unbind)
   inset-inline-start: 50%;
   transform: translateX(-50%);
   min-width: 15rem;
+  max-width: min(20rem, calc(100vw - 2rem));
   max-height: 18rem;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 0.25rem;
-  border: 1px solid hsl(var(--border));
+  border: 1px solid var(--app-border);
   border-radius: 0.75rem;
-  background: hsl(var(--popover, var(--card)));
+  background: var(--app-card);
   box-shadow: 0 10px 30px -12px rgb(0 0 0 / 0.35);
 }
 :global([dir='rtl']) .locale-dd__menu {
@@ -191,10 +193,10 @@ onBeforeUnmount(unbind)
   transition: background-color 0.12s;
 }
 .locale-dd__item:hover {
-  background: hsl(var(--muted) / 0.5);
+  background: color-mix(in srgb, var(--app-muted) 50%, transparent);
 }
 .locale-dd__item--active {
-  background: hsl(var(--primary) / 0.1);
+  background: color-mix(in srgb, var(--app-primary) 10%, transparent);
 }
 .locale-dd__text {
   display: flex;
@@ -205,18 +207,20 @@ onBeforeUnmount(unbind)
 .locale-dd__endonym {
   font-size: 0.875rem;
   font-weight: 500;
-  color: hsl(var(--foreground));
+  color: var(--app-foreground);
   line-height: 1.2;
+  overflow-wrap: anywhere;
 }
 .locale-dd__english {
   font-size: 0.6875rem;
-  color: hsl(var(--muted-foreground));
+  color: var(--app-muted-foreground);
+  overflow-wrap: anywhere;
 }
 .locale-dd__check {
   width: 1rem;
   height: 1rem;
   flex-shrink: 0;
-  color: hsl(var(--primary));
+  color: var(--app-primary);
 }
 
 .locale-dd-menu-enter-active,

@@ -156,7 +156,7 @@ Injected by `bootstrap.js`. The only surface a plugin needs:
 ### Capabilities
 
 Declarable in v1: `microphone`, `camera`, `midi`, `fullscreen`,
-`clipboard`, `storage`, `ml_inference`. Consent is per-plugin with scope
+`clipboard`, `storage`, `ml_inference`, `instructor_review`. Consent is per-plugin with scope
 `once` / `session` / `always`; `always` persists in `plugin_permissions`.
 
 ### Theming

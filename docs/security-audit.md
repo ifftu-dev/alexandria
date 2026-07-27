@@ -2,7 +2,7 @@
 
 **Date**: 2026-02-24 (updated 2026-03-23)
 **Scope**: Full Rust backend (`src-tauri/src/`), Tauri configuration, Cargo dependencies, Vue frontend (`src/`), CI/CD workflows
-**Files audited**: Every file in `crypto/`, `p2p/`, `commands/`, `db/`, `cardano/`, `evidence/`, `ipfs/`, plus `lib.rs`, `tauri.conf.json`, `capabilities/default.json`, both `Cargo.toml` files, all Vue components and composables
+**Files audited**: Every file in `crypto/`, `p2p/`, `commands/`, `db/`, `cardano/`, `evidence/`, `content_store/`, plus `lib.rs`, `tauri.conf.json`, `capabilities/default.json`, both `Cargo.toml` files, all Vue components and composables
 
 **Summary**: 1 critical, 7 high, 10 medium, 9 low, 5 informational findings.
 
@@ -164,12 +164,12 @@ This creates an instant replay window where ALL previously-seen messages become 
 ### H-5: Cross-Site Scripting (XSS) via `v-html` with untrusted content
 
 **Files**:
-- `src/components/course/TextContent.vue:53` — `v-html="content"` renders HTML loaded from IPFS/inline content
+- `src/components/course/TextContent.vue:53` — `v-html="content"` renders HTML loaded from the content store/inline content
 - `src/components/course/CourseCard.vue:19` — `v-html="course.thumbnail_svg"`
 - `src/pages/dashboard/Courses.vue:250` — `v-html="courseMap[enrollment.course_id]?.thumbnail_svg"`
 - `src/pages/Home.vue:177` — `v-html="enrolledCourseMap[enrollment.course_id]?.thumbnail_svg"`
 
-`TextContent.vue` renders raw HTML fetched from IPFS gateways or inline content via `v-html`. SVG thumbnails stored in the database are also rendered with `v-html`. Any course author can embed `<script>`, `<iframe>`, `<svg onload="...">`, or other XSS payloads. Since CSP is disabled (M-8), this runs with full Tauri IPC privileges.
+`TextContent.vue` renders raw HTML fetched from a public URL origin or inline content via `v-html`. SVG thumbnails stored in the database are also rendered with `v-html`. Any course author can embed `<script>`, `<iframe>`, `<svg onload="...">`, or other XSS payloads. Since CSP is disabled (M-8), this runs with full Tauri IPC privileges.
 
 **Impact**: Full Tauri IPC access. A malicious course author could steal the user's mnemonic via `invoke('export_mnemonic')`, mint NFTs, publish to the P2P network, or perform any other privileged operation. This is the primary exploitation vector for the disabled CSP (M-8).
 
@@ -460,15 +460,15 @@ If Stronghold changes its error message format in a future version, the wrong pa
 
 ---
 
-### L-7: IPFS content resolver accepts arbitrary URLs (SSRF risk)
+### L-7: Content resolver accepts arbitrary URLs (SSRF risk)
 
-**File**: `src-tauri/src/ipfs/resolver.rs:162-181`, `src-tauri/src/ipfs/cid.rs:68-69`
+**File**: `src-tauri/src/content_store/resolver.rs:45` (`fn reject_private_url`, called at `:278`)
 
-The content resolver accepts `http://` and `https://` URLs as identifiers and fetches them via the gateway client. A course author could embed a URL pointing to an internal/private IP.
+The content resolver accepts `http://` and `https://` URLs as identifiers and fetches them via the public URL HTTP client. A course author could embed a URL pointing to an internal/private IP.
 
 **Impact**: The reqwest client will attempt to connect to any URL, potentially probing internal networks (SSRF).
 
-**Fix**: Validate that URLs point to expected IPFS gateways, or add a blocklist for private IP ranges (127.0.0.0/8, 10.0.0.0/8, 192.168.0.0/16, etc.).
+**Fix**: Validate that URLs point to expected public URL origins, or add a blocklist for private IP ranges (127.0.0.0/8, 10.0.0.0/8, 192.168.0.0/16, etc.).
 
 ---
 
@@ -557,7 +557,7 @@ Evidence scores are constrained to `[0.0, 1.0]` before use. This prevents invali
 | 13 | M-7: Validate sync JSON column names | Low | Prevents SQL injection via column names |
 | 14 | M-6: Add per-peer rate limiting | Medium | Prevents resource exhaustion |
 | 15 | M-1: Protect salt file integrity | Low | Prevents DoS and precomputation |
-| 16 | L-7: Add SSRF blocklist to IPFS resolver | Low | Prevents internal network probing |
+| 16 | L-7: Add SSRF blocklist to content resolver | Low | Prevents internal network probing |
 
 ---
 
@@ -584,7 +584,7 @@ reviewed**:
   `/alexandria/vc-fetch/1.0`
 - `cardano/{anchor_queue,anchor_tx}.rs` — credential integrity
   anchoring on Cardano (label 1697 metadata transactions)
-- `ipfs/pinboard.rs` — PinBoard-driven 5-tier eviction policy
+- `content_store/pinboard.rs` — PinBoard-driven 5-tier eviction policy
 
 A follow-up audit pass should specifically cover:
 

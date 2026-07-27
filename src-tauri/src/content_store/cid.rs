@@ -1,11 +1,11 @@
 //! Content identifier detection and parsing.
 //!
-//! Alexandria uses two addressing schemes:
+//! Alexandria addresses content two ways:
 //!   - **BLAKE3 hex** (64-char hex) — native iroh content hashes
-//!   - **IPFS CID** (CIDv0 `Qm...` or CIDv1 `bafy...`) — v1 platform content
+//!   - **Public URL** — HTTP(S) source for seeded/imported media, cached
+//!     into iroh on first fetch
 //!
-//! This module detects which format an identifier uses and provides
-//! utilities for working with both.
+//! This module detects which format an identifier uses.
 
 use thiserror::Error;
 
@@ -15,13 +15,11 @@ pub enum CidError {
     Unrecognised(String),
 }
 
-/// A parsed content identifier — either a BLAKE3 hex hash or an IPFS CID.
+/// A parsed content identifier — either a BLAKE3 hex hash or a public URL.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ContentId {
     /// 64-char lowercase hex-encoded BLAKE3 hash (from iroh).
     Blake3Hex(String),
-    /// IPFS CID string (CIDv0 or CIDv1).
-    IpfsCid(String),
     /// Public HTTPS/HTTP URL.
     Url(String),
 }
@@ -31,7 +29,6 @@ impl ContentId {
     pub fn as_str(&self) -> &str {
         match self {
             ContentId::Blake3Hex(s) => s,
-            ContentId::IpfsCid(s) => s,
             ContentId::Url(s) => s,
         }
     }
@@ -41,9 +38,6 @@ impl ContentId {
 ///
 /// Detection rules:
 ///   - 64-char hex string → `Blake3Hex`
-///   - Starts with `Qm` and is 46 chars (CIDv0 base58) → `IpfsCid`
-///   - Starts with `bafy` (CIDv1 base32) → `IpfsCid`
-///   - Starts with `bafk` (CIDv1 base32, dag-cbor) → `IpfsCid`
 ///   - Starts with `http://` or `https://` → `Url`
 ///   - Otherwise → error
 pub fn parse_content_id(id: &str) -> Result<ContentId, CidError> {
@@ -51,10 +45,6 @@ pub fn parse_content_id(id: &str) -> Result<ContentId, CidError> {
 
     if is_blake3_hex(id) {
         return Ok(ContentId::Blake3Hex(id.to_lowercase()));
-    }
-
-    if is_ipfs_cid(id) {
-        return Ok(ContentId::IpfsCid(id.to_string()));
     }
 
     if is_http_url(id) {
@@ -74,32 +64,6 @@ pub fn is_blake3_hex(s: &str) -> bool {
     s.len() == 64 && s.chars().all(|c| c.is_ascii_hexdigit())
 }
 
-/// Check if the string looks like an IPFS CID (v0 or v1).
-pub fn is_ipfs_cid(s: &str) -> bool {
-    // CIDv0: starts with "Qm", exactly 46 chars, base58btc
-    if s.starts_with("Qm") && s.len() == 46 && is_base58(s) {
-        return true;
-    }
-
-    // CIDv1: starts with "bafy" (dag-pb) or "bafk" (dag-cbor), base32lower
-    // Typically 59 chars but can vary, so just check prefix + min length
-    if (s.starts_with("bafy") || s.starts_with("bafk")) && s.len() >= 50 {
-        return true;
-    }
-
-    false
-}
-
-/// Check if all characters are valid base58btc (no 0, O, I, l).
-fn is_base58(s: &str) -> bool {
-    s.chars().all(|c| {
-        matches!(c,
-            '1'..='9' | 'A'..='H' | 'J'..='N' | 'P'..='Z' |
-            'a'..='k' | 'm'..='z'
-        )
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -115,41 +79,20 @@ mod tests {
     }
 
     #[test]
-    fn detects_cidv0() {
-        // Real CIDv0 (base58, 46 chars, starts with Qm)
-        let cid = "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG";
-        assert!(is_ipfs_cid(cid));
-        assert_eq!(
-            parse_content_id(cid).unwrap(),
-            ContentId::IpfsCid(cid.to_string())
-        );
-    }
-
-    #[test]
-    fn detects_cidv1_dag_pb() {
-        let cid = "bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi";
-        assert!(is_ipfs_cid(cid));
-        assert_eq!(
-            parse_content_id(cid).unwrap(),
-            ContentId::IpfsCid(cid.to_string())
-        );
-    }
-
-    #[test]
-    fn detects_cidv1_dag_cbor() {
-        let cid = "bafkreihdwdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenesa7olm";
-        assert!(is_ipfs_cid(cid));
-        assert_eq!(
-            parse_content_id(cid).unwrap(),
-            ContentId::IpfsCid(cid.to_string())
-        );
-    }
-
-    #[test]
     fn rejects_garbage() {
         assert!(parse_content_id("hello world").is_err());
         assert!(parse_content_id("").is_err());
         assert!(parse_content_id("abc123").is_err());
+    }
+
+    #[test]
+    fn rejects_ipfs_cid() {
+        // Legacy IPFS CIDs are no longer a recognised addressing scheme.
+        assert!(parse_content_id("QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG").is_err());
+        assert!(
+            parse_content_id("bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi")
+                .is_err()
+        );
     }
 
     #[test]
@@ -167,10 +110,6 @@ mod tests {
         let id = ContentId::Blake3Hex(hash.clone());
         assert_eq!(id.as_str(), hash);
 
-        let cid = "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG";
-        let id = ContentId::IpfsCid(cid.to_string());
-        assert_eq!(id.as_str(), cid);
-
         let url = "https://example.org/file.bin";
         let id = ContentId::Url(url.to_string());
         assert_eq!(id.as_str(), url);
@@ -178,7 +117,7 @@ mod tests {
 
     #[test]
     fn detects_http_url() {
-        let url = "https://example.org/ipfs/file";
+        let url = "https://example.org/media/file";
         assert!(is_http_url(url));
         assert_eq!(
             parse_content_id(url).unwrap(),

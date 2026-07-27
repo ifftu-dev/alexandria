@@ -166,6 +166,12 @@ impl ContentNode {
         // CoreFoundation, which returns NULL and panics on iOS / the simulator
         // (same class of bug as the `if-watch` SCDynamicStore patch). Use an
         // explicit public nameserver there instead; desktop keeps system DNS.
+        //
+        // Android reads system DNS through `ndk_context`; rather than override
+        // the resolver here (which iroh's internal `DnsResolver::new()` calls in
+        // net_report / the relay actor would bypass anyway), `JNI_OnLoad` in
+        // lib.rs initializes `ndk_context` up front so the real system read
+        // works everywhere. So Android keeps system DNS like desktop.
         #[cfg(target_os = "ios")]
         let builder = builder.dns_resolver(iroh::dns::DnsResolver::with_nameserver(
             ([1, 1, 1, 1], 53).into(),

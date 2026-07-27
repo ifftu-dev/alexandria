@@ -1,4 +1,4 @@
-//! Profile document types for IPFS-backed user profiles.
+//! Profile document types for content-addressed user profiles.
 //!
 //! A profile document is a signed JSON blob stored on iroh. It contains
 //! the user's public identity information (name, bio, avatar) along with

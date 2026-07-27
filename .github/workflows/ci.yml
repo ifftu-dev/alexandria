@@ -147,14 +147,6 @@ jobs:
         with:
           path: alexandria
 
-      - name: Checkout iroh-live-patched
-        if: needs.changes.outputs.backend == 'true'
-        uses: actions/checkout@v5
-        with:
-          repository: ifftu-dev/iroh-live
-          path: iroh-live-patched
-          token: ${{ secrets.CROSS_REPO_PAT }}
-
       - name: Install Linux system dependencies
         if: needs.changes.outputs.backend == 'true'
         run: |
@@ -301,13 +293,6 @@ jobs:
         with:
           path: alexandria
 
-      - name: Checkout iroh-live-patched
-        uses: actions/checkout@v5
-        with:
-          repository: ifftu-dev/iroh-live
-          path: iroh-live-patched
-          token: ${{ secrets.CROSS_REPO_PAT }}
-
       # cargo check still runs build scripts, which compile C (e.g. the
       # SystemConfiguration stubs), so Android needs a working NDK toolchain
       # even though nothing is linked.
@@ -397,13 +382,6 @@ jobs:
         uses: actions/checkout@v5
         with:
           path: alexandria
-
-      - name: Checkout iroh-live-patched
-        uses: actions/checkout@v5
-        with:
-          repository: ifftu-dev/iroh-live
-          path: iroh-live-patched
-          token: ${{ secrets.CROSS_REPO_PAT }}
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable

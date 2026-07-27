@@ -96,6 +96,7 @@
     "noKinds": "Este plugin no define ninguna actividad, así que no puede ejecutarse.",
     "noGrader": "Este plugin está configurado para calificar pero no tiene ningún calificador adjunto. El autor necesita publicar una corrección.",
     "loadFailed": "No se pudo cargar el plugin: {error}",
-    "graderUnavailable": "La calificación se ejecuta en la aplicación de escritorio. Aquí puedes ejecutar las pruebas, pero este dispositivo no puede enviar para calificar."
+    "graderUnavailable": "La calificación se ejecuta en la aplicación de escritorio. Aquí puedes ejecutar las pruebas, pero este dispositivo no puede enviar para calificar.",
+    "loading": "Cargando complemento…"
   }
 }

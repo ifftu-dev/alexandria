@@ -8,7 +8,7 @@ To manage releases for Alexandria, you need:
 - An Apple Developer Program membership for macOS and iOS signing. The App Store Connect API key used for iOS must hold the **App Manager** role so CI can mint provisioning profiles.
 - A GitHub account with administrator access to the repository.
 - Rust and Cargo installed locally for generating signing keys.
-- ~~Access to the `iroh-live-patched` private repository.~~ **No longer required** — the patched `iroh-live` crate is now vendored in-tree at `crates/iroh-live` and referenced by path as a workspace member.
+- No access to any private `iroh-live` repository is needed — `iroh-live`, `iroh-moq`, and `moq-media` are vendored in-tree under `crates/` (ported to iroh 1.0) and referenced by path as workspace members.
 
 ## GitHub Secrets Setup
 
@@ -16,7 +16,6 @@ Configure these secrets in your GitHub repository settings under **Settings > Se
 
 | Secret Name | Description | How to Obtain |
 | :--- | :--- | :--- |
-| `CROSS_REPO_PAT` | GitHub Personal Access Token with `repo` scope. | **Obsolete** — was used to clone the private `iroh-live-patched` repository. The crate is now vendored in-tree at `crates/iroh-live`, so this secret is no longer needed for builds. |
 | `APPLE_MAC_CERTIFICATE` | macOS **Developer ID Application** signing certificate (.p12 file). | Export from Keychain Access on macOS. Base64 encode the file: `base64 -i cert.p12 \| pbcopy`. |
 | `APPLE_MAC_CERTIFICATE_PASSWORD` | Password for the macOS `.p12` certificate file. | Set this when exporting the certificate from Keychain Access. |
 | `APPLE_MAC_SIGNING_IDENTITY` | macOS certificate name string. | Find in Keychain Access (e.g., "Developer ID Application: Name (TEAMID)"). |
@@ -110,5 +109,14 @@ The Linux builds run a "Free Linux disk space" step and redirect `RUSTUP_HOME`, 
 ### ARM64 Linux Availability
 ARM64 builds for Linux run on `ubuntu-22.04-arm` runners. These are only available for public repositories on GitHub's free tier. If your repository is private, you must use a self-hosted runner or a paid GitHub runner plan.
 
-### iroh-live-patched Repository
-The patched `iroh-live` crate is now vendored in-tree at `crates/iroh-live` (a path-referenced workspace member), so builds no longer depend on the private `ifftu-dev/iroh-live` repository. The `Checkout iroh-live-patched` steps still present in the workflow files are vestigial — they clone into a separate `iroh-live-patched/` path that the build never consumes, and can be removed.
+### Vendored iroh-live / iroh-moq / moq-media
+These three crates are vendored in-tree under `crates/` (ported to iroh 1.0) as path-referenced workspace members, so builds do not depend on the private `ifftu-dev/iroh-live` repository, a git dependency, or a `[patch]` entry. The vestigial `Checkout iroh-live-patched` workflow steps — and the `CROSS_REPO_PAT` secret they consumed — have been removed; no workflow clones the fork any more.
+
+Note that `crates/iroh-live` has no `media` module of its own: `lib.rs` re-exports the in-tree `moq-media` crate as `iroh_live::media`. Its submodules (`av`, `publish`, `subscribe`, `videotoolbox`, `opus`, `audio`, `capture`, `ffmpeg`) are feature-gated behind `video` (desktop/Android, ffmpeg-based) and `video-ios` (VideoToolbox, no ffmpeg). Mobile type-checks must therefore pass the matching feature, exactly as CI does:
+
+```bash
+cargo check -p alexandria-node --target aarch64-apple-ios --features tutoring-video-ios
+cargo check -p alexandria-node --target aarch64-linux-android --features tutoring-video-android
+```
+
+Checking a mobile target without those features reports misleading "unresolved import" errors in `src/tutoring/manager_mobile.rs`.
