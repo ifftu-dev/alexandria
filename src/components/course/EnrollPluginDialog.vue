@@ -88,7 +88,7 @@ const progressPct = computed(() => {
           v-else-if="statusOf(p) === 'installing'"
           class="inline-flex items-center gap-1.5 text-xs text-muted-foreground"
         >
-          <AppSpinner class="w-3.5 h-3.5" />
+          <AppSpinner size="xs" />
           {{ $t('courses.enrollPlugins.status.installing') }}
         </span>
         <span
