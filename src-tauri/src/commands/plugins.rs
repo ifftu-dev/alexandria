@@ -4,7 +4,7 @@
 //! Phase 2 — submit-and-grade against deterministic WASM graders.
 //! Phase 3 (later) — discovery/gossip commands alongside these.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use std::collections::HashSet;
 
@@ -585,6 +585,16 @@ pub async fn plugin_submit_and_grade(
     let (signing_key, learner_did) = load_learner_did(&state).await?;
     let learner_did_str = learner_did.0.clone();
 
+    // Resolve the bundle directory from the *live* plugins dir rather than the
+    // `install_path` recorded in the DB at install time. That column is an
+    // absolute path, and the app-data root is not stable: on iOS the data
+    // container path changes across reinstalls, so a stored path goes stale and
+    // grading dies with "failed to read grader.wasm: No such file or directory"
+    // even though the bundle is sitting right there under the current root.
+    // Every other consumer (asset serving, docs, uninstall) already derives
+    // paths this way; this was the last one that did not.
+    let bundle_dir = state.plugins_dir()?.join(&plugin_cid);
+
     // Resolve manifest + grader path in a short DB-lock scope so we don't
     // hold the lock across grader execution.
     let (manifest, grader_path, cwasm_path, grader_cid) = {
@@ -594,7 +604,7 @@ pub async fn plugin_submit_and_grade(
             .map_err(|_| "database lock poisoned".to_string())?;
         let db = db_guard.as_ref().ok_or("database not initialized")?;
 
-        let installed = registry::get_installed(db, &plugin_cid)?
+        registry::get_installed(db, &plugin_cid)?
             .ok_or_else(|| format!("plugin not installed: {plugin_cid}"))?;
         let manifest = registry::get_manifest(db, &plugin_cid)?;
         let grader = manifest
@@ -604,13 +614,17 @@ pub async fn plugin_submit_and_grade(
                 "plugin manifest has no grader (Phase 2 graded path requires one)".to_string()
             })?
             .clone();
-        let grader_path = Path::new(&installed.install_path).join(registry::GRADER_FILENAME);
-        let cwasm_path = Path::new(&installed.install_path).join(registry::grader_cwasm_filename());
+        let grader_path = bundle_dir.join(registry::GRADER_FILENAME);
+        let cwasm_path = bundle_dir.join(registry::grader_cwasm_filename());
         (manifest, grader_path, cwasm_path, grader.cid)
     };
 
-    let wasm_bytes =
-        std::fs::read(&grader_path).map_err(|e| format!("failed to read grader.wasm: {e}"))?;
+    let wasm_bytes = std::fs::read(&grader_path).map_err(|e| {
+        format!(
+            "failed to read grader.wasm at {}: {e}",
+            grader_path.display()
+        )
+    })?;
 
     // Sanity check: the bytes on disk must match the cid in the manifest.
     // The plugin install flow already verified the manifest signature, but
