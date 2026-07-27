@@ -383,13 +383,6 @@ jobs:
         with:
           path: alexandria
 
-      - name: Checkout iroh-live-patched
-        uses: actions/checkout@v5
-        with:
-          repository: ifftu-dev/iroh-live
-          path: iroh-live-patched
-          token: ${{ secrets.CROSS_REPO_PAT }}
-
       # arm64 runner images do not reliably ship the Android SDK, so provision
       # it explicitly rather than assume ANDROID_SDK_ROOT is populated.
       - name: Set up Android SDK
