@@ -127,11 +127,18 @@ async function attachSelfStream() {
 }
 
 async function startSelfPreview() {
-  // iOS/Android cameras permit only one client. The Rust AVCaptureSession /
-  // Camera2 already holds the device to publish to peers, so getUserMedia from
-  // the webview returns a blank stream. Fall through to the Rust JPEG bridge
-  // (selfVideoSrc) on mobile.
-  if (isMobilePlatform) return
+  // A mobile camera permits only one client, so the webview must not open the
+  // device when the Rust side already holds it to publish to peers — there,
+  // getUserMedia returns a blank stream and the Rust JPEG bridge
+  // (selfVideoSrc) is the correct source.
+  //
+  // That is true on iOS, where manager_mobile drives an AVCaptureSession. It is
+  // NOT true on Android: the capture backend is nokhwa, which ships bindings
+  // for macOS, Windows and Linux only, so nothing claims the camera there and
+  // gating Android out left it with no camera path at all. Let the webview open
+  // it until an Android Camera2 backend exists, at which point this should go
+  // back to gating both platforms.
+  if (isIOS) return
   if (selfStream.value) return
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
