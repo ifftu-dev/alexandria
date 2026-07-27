@@ -56,6 +56,84 @@ const AIMAGE_FORMAT_YUV_420_888: i32 = 0x23;
 /// hold the other; more only adds latency given we keep just the newest frame.
 const MAX_IMAGES: i32 = 2;
 
+/// Which way a lens points.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Facing {
+    Front,
+    Back,
+    External,
+    Unknown,
+}
+
+impl Facing {
+    fn label(self) -> &'static str {
+        match self {
+            Facing::Front => "Front camera",
+            Facing::Back => "Back camera",
+            Facing::External => "External camera",
+            Facing::Unknown => "Camera",
+        }
+    }
+}
+
+/// What enumeration learns about one camera before it is given a display name.
+struct CameraInfo {
+    id: String,
+    facing: Facing,
+    focal_mm: Option<f32>,
+}
+
+/// Turn raw camera info into names a person can choose between.
+///
+/// Camera2 exposes no advertised product name — only an opaque id and
+/// characteristics — so the label is derived. One lens per side needs no
+/// qualifier ("Front camera"). When a side has several, they are ordered by
+/// focal length and named the way phone UIs do: the widest is the ultra-wide,
+/// the longest a telephoto, the rest the main lens. Ids are not shown; they
+/// mean nothing to the person picking.
+fn label_cameras(cams: Vec<CameraInfo>) -> Vec<(CameraIndex, String)> {
+    let mut out: Vec<(CameraIndex, String)> = Vec::with_capacity(cams.len());
+
+    for facing in [
+        Facing::Front,
+        Facing::Back,
+        Facing::External,
+        Facing::Unknown,
+    ] {
+        let mut group: Vec<&CameraInfo> = cams.iter().filter(|c| c.facing == facing).collect();
+        if group.is_empty() {
+            continue;
+        }
+        // Widest (shortest focal length) first; unknown focal lengths sort last
+        // so they never claim the "ultra-wide" name on a guess.
+        group.sort_by(|a, b| match (a.focal_mm, b.focal_mm) {
+            (Some(x), Some(y)) => x.total_cmp(&y),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => std::cmp::Ordering::Equal,
+        });
+
+        let base = facing.label();
+        let n = group.len();
+        for (i, cam) in group.iter().enumerate() {
+            let name = if n == 1 {
+                base.to_string()
+            } else if i == 0 {
+                format!("{base} (ultra-wide)")
+            } else if i == n - 1 {
+                format!("{base} (telephoto)")
+            } else if n == 3 && i == 1 {
+                format!("{base} (main)")
+            } else {
+                format!("{base} {}", i + 1)
+            };
+            out.push((CameraIndex::String(cam.id.clone()), name));
+        }
+    }
+
+    out
+}
+
 /// Newest captured frame, shared with the NDK callback thread.
 type FrameSlot = Arc<Mutex<Option<VideoFrame>>>;
 
@@ -119,7 +197,7 @@ impl AndroidCameraSource {
             bail!("ACameraManager_getCameraIdList failed: {status:?}");
         }
 
-        let mut out = Vec::new();
+        let mut cams: Vec<CameraInfo> = Vec::new();
         let count = (*id_list).numCameras.max(0) as usize;
         for i in 0..count {
             let raw_id = *(*id_list).cameraIds.add(i);
@@ -127,28 +205,35 @@ impl AndroidCameraSource {
                 continue;
             }
             let id = CStr::from_ptr(raw_id).to_string_lossy().into_owned();
-            let label = Self::describe(manager, raw_id, &id);
-            out.push((CameraIndex::String(id), label));
+            let (facing, focal_mm) = Self::characteristics(manager, raw_id);
+            cams.push(CameraInfo {
+                id,
+                facing,
+                focal_mm,
+            });
         }
         sys::ACameraManager_deleteCameraIdList(id_list);
-        Ok(out)
+
+        Ok(label_cameras(cams))
     }
 
-    /// Human-readable label for a camera id, from its lens facing. Falls back
-    /// to the bare id when characteristics are unavailable — a missing label
-    /// should never make a usable camera disappear from the list.
-    unsafe fn describe(
+    /// Lens facing and shortest available focal length (mm) for a camera id.
+    ///
+    /// Both are best-effort: a camera whose characteristics cannot be read is
+    /// still returned by the caller, just with a less specific label. A missing
+    /// label must never make a usable camera disappear from the list.
+    unsafe fn characteristics(
         manager: *mut sys::ACameraManager,
         raw_id: *const std::os::raw::c_char,
-        id: &str,
-    ) -> String {
+    ) -> (Facing, Option<f32>) {
         let mut chars: *mut sys::ACameraMetadata = ptr::null_mut();
         if sys::ACameraManager_getCameraCharacteristics(manager, raw_id, &mut chars)
             != sys::camera_status_t::ACAMERA_OK
             || chars.is_null()
         {
-            return format!("Camera {id}");
+            return (Facing::Unknown, None);
         }
+
         let mut entry = std::mem::zeroed::<sys::ACameraMetadata_const_entry>();
         let facing = if sys::ACameraMetadata_getConstEntry(
             chars,
@@ -158,29 +243,45 @@ impl AndroidCameraSource {
             && entry.count > 0
             && !entry.data.u8_.is_null()
         {
-            Some(*entry.data.u8_)
+            let raw = *entry.data.u8_ as u32;
+            if raw == sys::acamera_metadata_enum_acamera_lens_facing::ACAMERA_LENS_FACING_FRONT.0 {
+                Facing::Front
+            } else if raw
+                == sys::acamera_metadata_enum_acamera_lens_facing::ACAMERA_LENS_FACING_BACK.0
+            {
+                Facing::Back
+            } else {
+                Facing::External
+            }
+        } else {
+            Facing::Unknown
+        };
+
+        // Shortest focal length is what separates an ultra-wide from the main
+        // lens; devices report one entry per selectable lens.
+        let mut entry = std::mem::zeroed::<sys::ACameraMetadata_const_entry>();
+        let focal_mm = if sys::ACameraMetadata_getConstEntry(
+            chars,
+            sys::acamera_metadata_tag::ACAMERA_LENS_INFO_AVAILABLE_FOCAL_LENGTHS.0,
+            &mut entry,
+        ) == sys::camera_status_t::ACAMERA_OK
+            && entry.count > 0
+            && !entry.data.f.is_null()
+        {
+            let mut shortest = f32::MAX;
+            for i in 0..entry.count as usize {
+                let v = *entry.data.f.add(i);
+                if v > 0.0 && v < shortest {
+                    shortest = v;
+                }
+            }
+            (shortest < f32::MAX).then_some(shortest)
         } else {
             None
         };
-        sys::ACameraMetadata_free(chars);
 
-        match facing {
-            Some(f)
-                if f as u32
-                    == sys::acamera_metadata_enum_acamera_lens_facing::ACAMERA_LENS_FACING_FRONT
-                        .0 =>
-            {
-                format!("Front camera ({id})")
-            }
-            Some(f)
-                if f as u32
-                    == sys::acamera_metadata_enum_acamera_lens_facing::ACAMERA_LENS_FACING_BACK
-                        .0 =>
-            {
-                format!("Back camera ({id})")
-            }
-            _ => format!("Camera {id}"),
-        }
+        sys::ACameraMetadata_free(chars);
+        (facing, focal_mm)
     }
 
     /// Open the camera at `index`, or the first available one when `None`.
@@ -201,7 +302,16 @@ impl AndroidCameraSource {
                 .get(n as usize)
                 .cloned()
                 .ok_or_else(|| anyhow!("camera index {n} out of range"))?,
-            None => cameras[0].clone(),
+            // Default to a front camera: this is a tutoring call, so the
+            // subject is the person holding the phone. `label_cameras` emits
+            // front-facing entries first, so the first front-labelled entry is
+            // also the widest one on that side.
+            None => cameras
+                .iter()
+                .find(|(_, label)| label.starts_with("Front camera"))
+                .or_else(|| cameras.first())
+                .cloned()
+                .expect("camera list is non-empty"),
         };
         let id = match &chosen {
             CameraIndex::String(s) => s.clone(),

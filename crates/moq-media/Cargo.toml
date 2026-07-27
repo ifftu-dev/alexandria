@@ -103,8 +103,11 @@ ffmpeg-sys-next = { version = "8.0.1", optional = true, features = [
 ] }
 
 [target.'cfg(target_os = "android")'.dependencies]
+# MediaCodec is the only H264 encoder available on Android: libx264 is GPL and
+# deliberately not part of this build, so without it the encoder search finds
+# nothing and a session fails with "encoder libx264 not found".
 ffmpeg-sys-next = { version = "8.0.1", optional = true, features = [
-  # "build-mediacodec",
+  "build-mediacodec",
 ] }
 # NDK Camera2 + AImageReader bindings for `android::camera`. nokhwa has no
 # Android backend, so camera capture is implemented directly against the NDK.

@@ -44,9 +44,12 @@ enum HwBackend {
     Qsv,
     /// AMD GPUs
     Amf,
+    /// Android hardware encoder, the counterpart to VideoToolbox on Apple
+    /// platforms. Android ships no libx264 (it is GPL and not built here), so
+    /// this is the only H264 encoder available there.
+    MediaCodec,
     // TODO:
     // Add DirectX (Windows)
-    // Add MediaCodec (Android)
 }
 
 impl HwBackend {
@@ -58,6 +61,7 @@ impl HwBackend {
             Self::Nvenc => "h264_nvenc",
             Self::Qsv => "h264_qsv",
             Self::Amf => "h264_amf",
+            Self::MediaCodec => "h264_mediacodec",
         }
     }
 
@@ -78,7 +82,12 @@ impl HwBackend {
             #[cfg(target_os = "linux")]
             candidates.extend_from_slice(&[HwBackend::Vaapi, HwBackend::Nvenc, HwBackend::Qsv]);
 
-            // Always end with software
+            // Android has no software fallback to end with: libx264 is GPL and
+            // not part of the ffmpeg build, so MediaCodec is the only option.
+            #[cfg(target_os = "android")]
+            candidates.push(HwBackend::MediaCodec);
+
+            #[cfg(not(target_os = "android"))]
             candidates.push(HwBackend::Software);
         }
         candidates
