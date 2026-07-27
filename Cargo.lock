@@ -265,9 +265,9 @@ dependencies = [
  "iroh",
  "iroh-blobs",
  "iroh-gossip",
- "iroh-live",
  "libc",
  "libp2p",
+ "live",
  "log",
  "lru 0.12.5",
  "ndarray",
@@ -6219,38 +6219,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "iroh-live"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "byte-unit",
- "bytes",
- "clap",
- "data-encoding",
- "derive_more",
- "eframe",
- "hang",
- "image",
- "iroh",
- "iroh-gossip",
- "iroh-moq",
- "iroh-tickets",
- "moq-lite",
- "moq-media",
- "n0-error 1.0.0",
- "n0-future",
- "n0-watcher 0.6.1",
- "postcard",
- "rand 0.9.5",
- "serde",
- "strum 0.27.2",
- "tokio",
- "tokio-util",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "iroh-metrics"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7427,6 +7395,26 @@ name = "litrs"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "11d3d7f243d5c5a8b9bb5d6dd2b1602c0cb0b9db1621bafc7ed66e35ff9fe092"
+
+[[package]]
+name = "live"
+version = "0.1.0"
+dependencies = [
+ "derive_more",
+ "iroh",
+ "iroh-gossip",
+ "iroh-moq",
+ "iroh-tickets",
+ "moq-lite",
+ "moq-media",
+ "n0-error 1.0.0",
+ "n0-future",
+ "postcard",
+ "rand 0.9.5",
+ "serde",
+ "tokio",
+ "tracing",
+]
 
 [[package]]
 name = "lock_api"

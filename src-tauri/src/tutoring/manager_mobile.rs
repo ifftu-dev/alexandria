@@ -30,16 +30,16 @@ use bytes::Bytes;
 use image::ImageEncoder;
 use iroh::{Endpoint, EndpointId};
 use iroh_gossip::net::Gossip;
-use iroh_live::media::audio::{AudioBackend, InputStream, OutputStream};
-use iroh_live::media::av::{AudioPreset, AudioSinkHandle, VideoPreset};
-use iroh_live::media::opus::PureOpusDecoder;
-use iroh_live::media::opus::PureOpusEncoder;
-use iroh_live::media::publish::{AudioRenditions, PublishBroadcast, VideoRenditions};
-use iroh_live::media::subscribe::{SubscribeBroadcast, WatchTrack};
-use iroh_live::media::videotoolbox::{IosCameraSource, VtDecoder, VtEncoder};
-use iroh_live::moq::MoqSession;
-use iroh_live::rooms::{Room, RoomEvent, RoomHandle, RoomTicket};
-use iroh_live::Live;
+use live::media::audio::{AudioBackend, InputStream, OutputStream};
+use live::media::av::{AudioPreset, AudioSinkHandle, VideoPreset};
+use live::media::opus::PureOpusDecoder;
+use live::media::opus::PureOpusEncoder;
+use live::media::publish::{AudioRenditions, PublishBroadcast, VideoRenditions};
+use live::media::subscribe::{SubscribeBroadcast, WatchTrack};
+use live::media::videotoolbox::{IosCameraSource, VtDecoder, VtEncoder};
+use live::moq::MoqSession;
+use live::rooms::{Room, RoomEvent, RoomHandle, RoomTicket};
+use live::Live;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 use tokio::sync::{mpsc, Mutex};
@@ -1645,7 +1645,7 @@ impl TutoringManager {
         crate::diag::log(&format!(
             "  [{short_id}] video repair: subscribing (VtDecoder, quality=High)..."
         ));
-        match catalog.select_video_rendition(iroh_live::media::av::Quality::Highest) {
+        match catalog.select_video_rendition(live::media::av::Quality::Highest) {
             Ok(selected) => {
                 crate::diag::log(&format!(
                     "  [{short_id}] video repair: selected rendition {selected}"
@@ -1659,8 +1659,8 @@ impl TutoringManager {
         }
 
         match broadcast.watch_with::<VtDecoder>(
-            &iroh_live::media::av::DecodeConfig::default(),
-            iroh_live::media::av::Quality::Highest,
+            &live::media::av::DecodeConfig::default(),
+            live::media::av::Quality::Highest,
         ) {
             Ok(video_track) => {
                 log::info!("tutoring: watching video from {short_id}:{name}");
@@ -2966,7 +2966,7 @@ impl TutoringManager {
         broadcast: &mut PublishBroadcast,
         app_handle: AppHandle,
     ) -> Option<JoinHandle<()>> {
-        let config = iroh_live::media::av::DecodeConfig::default();
+        let config = live::media::av::DecodeConfig::default();
         let watch = broadcast.watch_local(config)?;
         log::info!("tutoring: starting self-preview (mobile)");
         crate::diag::log("self_preview: STARTED");

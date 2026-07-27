@@ -11,7 +11,7 @@
 //!
 //! [`node`] owns a single QUIC endpoint shared by three ALPNs:
 //! `iroh-blobs` (content), `iroh-gossip` (room discovery), and MoQ via
-//! `iroh-live` (tutoring media).
+//! the `live` crate (tutoring media).
 
 pub mod cid;
 pub mod content;

@@ -1,7 +1,7 @@
 //! TutoringManager — room lifecycle, media controls, video frame
 //! bridge, session chat, and peer identity.
 //!
-//! Manages creation/joining of iroh-live rooms, local media publishing
+//! Manages creation/joining of `live`-crate rooms, local media publishing
 //! (camera, mic, screen share), bridges decoded remote video frames
 //! to the webview via Tauri events, text chat via a gossip topic
 //! derived from the room topic, and peer display name exchange via
@@ -22,24 +22,24 @@ use image::ImageEncoder;
 use iroh::Endpoint;
 use iroh::EndpointId;
 use iroh_gossip::net::Gossip;
-use iroh_live::media::audio::{AudioBackend, DeviceId, InputStream, OutputStream};
-use iroh_live::media::av::{AudioPreset, AudioSinkHandle};
+use live::media::audio::{AudioBackend, DeviceId, InputStream, OutputStream};
+use live::media::av::{AudioPreset, AudioSinkHandle};
 #[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
-use iroh_live::media::av::{DecodeConfig, VideoPreset};
+use live::media::av::{DecodeConfig, VideoPreset};
 #[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
-use iroh_live::media::capture::{CameraCapturer, CameraIndex, ScreenCapturer};
+use live::media::capture::{CameraCapturer, CameraIndex, ScreenCapturer};
 #[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
-use iroh_live::media::ffmpeg::{FfmpegVideoDecoder, H264Encoder};
-use iroh_live::media::opus::{PureOpusDecoder, PureOpusEncoder};
+use live::media::ffmpeg::{FfmpegVideoDecoder, H264Encoder};
+use live::media::opus::{PureOpusDecoder, PureOpusEncoder};
 #[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
-use iroh_live::media::publish::VideoRenditions;
-use iroh_live::media::publish::{AudioRenditions, PublishBroadcast};
-use iroh_live::media::subscribe::SubscribeBroadcast;
+use live::media::publish::VideoRenditions;
+use live::media::publish::{AudioRenditions, PublishBroadcast};
+use live::media::subscribe::SubscribeBroadcast;
 #[cfg(any(feature = "tutoring-video", feature = "tutoring-video-static"))]
-use iroh_live::media::subscribe::WatchTrack;
-use iroh_live::moq::MoqSession;
-use iroh_live::rooms::{Room, RoomEvent, RoomHandle, RoomTicket};
-use iroh_live::Live;
+use live::media::subscribe::WatchTrack;
+use live::moq::MoqSession;
+use live::rooms::{Room, RoomEvent, RoomHandle, RoomTicket};
+use live::Live;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 use tokio::sync::{mpsc, Mutex};
@@ -1169,7 +1169,7 @@ impl TutoringManager {
 
         match broadcast.watch_with::<FfmpegVideoDecoder>(
             &DecodeConfig::default(),
-            iroh_live::media::av::Quality::Highest,
+            live::media::av::Quality::Highest,
         ) {
             Ok(video) => {
                 log::info!("tutoring: watching video from {short_id}:{name}");

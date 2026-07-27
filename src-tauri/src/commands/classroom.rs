@@ -2,7 +2,7 @@
 //!
 //! Classrooms are persistent group spaces (like Discord servers) with
 //! text channels, message history, join-request gating, and live A/V
-//! calls (via iroh-live, delegated to TutoringManager).
+//! calls (via the live crate, delegated to TutoringManager).
 
 use rusqlite::{params, OptionalExtension};
 use tauri::{AppHandle, State};
@@ -1242,7 +1242,7 @@ pub async fn classroom_unsubscribe(
 
 /// Start a voice/video call in a classroom (desktop only).
 ///
-/// Creates an iroh-live room and broadcasts the ticket to all members
+/// Creates a live-crate room and broadcasts the ticket to all members
 /// via the meta gossip topic so they can join.
 #[tauri::command]
 #[cfg(desktop)]
@@ -1445,7 +1445,7 @@ pub async fn classroom_end_call(call_id: String, state: State<'_, AppState>) -> 
         classroom_id
     };
 
-    // Leave the iroh-live room if we're in it
+    // Leave the live-crate room if we're in it
     let _ = state.tutoring.leave_room().await;
 
     // Broadcast call ended

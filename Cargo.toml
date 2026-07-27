@@ -5,7 +5,7 @@ members = [
     "cli",
     "crates/iroh-moq",
     "crates/moq-media",
-    "crates/iroh-live",
+    "crates/live",
 ]
 # Built-in plugin graders compile to wasm32-unknown-unknown and live
 # outside the desktop/mobile workspace so the main build doesn't try to
@@ -44,5 +44,7 @@ webrtc-audio-processing-sys = { path = "patches/webrtc-audio-processing-sys" }
 ffmpeg-sys-next = { path = "patches/ffmpeg-sys-next" }
 ffmpeg-next = { path = "patches/ffmpeg-next" }
 
-# iroh-live / iroh-moq / moq-media are now owned in-tree under crates/ (ported to
-# iroh 1.0), referenced by path from src-tauri — no git dependency or patch.
+# live / iroh-moq / moq-media are owned in-tree under crates/ (on iroh 1.0),
+# referenced by path from src-tauri — no git dependency or patch. `live` is our
+# own room/session layer (replaced the vendored n0 iroh-live crate); iroh-moq +
+# moq-media are the kept MoQ transport + media crates.

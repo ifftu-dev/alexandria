@@ -16,24 +16,24 @@ dev-seed = []
 # Enable desktop tutoring video without acoustic echo cancellation.
 # This keeps Windows buildable on GitHub's MSVC runners, where the bundled
 # webrtc-audio-processing autotools build is not currently stable.
-tutoring-video = ["iroh-live/video"]
+tutoring-video = ["live/video"]
 
 # Enable desktop tutoring video with acoustic echo cancellation.
 # macOS/Linux release paths can opt into this when the WebRTC AEC toolchain is available.
-tutoring-video-aec = ["tutoring-video", "iroh-live/aec"]
+tutoring-video-aec = ["tutoring-video", "live/aec"]
 
 # Enable video with statically-linked ffmpeg (for Linux CI builds without system ffmpeg).
 # Activated for Linux in CI via --features tutoring-video-static.
-tutoring-video-static = ["iroh-live/static", "iroh-live/aec"]
+tutoring-video-static = ["live/static", "live/aec"]
 
 # Enable Android tutoring video with statically-linked ffmpeg but without AEC.
 # This keeps Android on the shared video pipeline without pulling in the
 # desktop-only WebRTC AEC toolchain.
-tutoring-video-android = ["tutoring-video", "iroh-live/static"]
+tutoring-video-android = ["tutoring-video", "live/static"]
 
 # Enable iOS video support (VideoToolbox H264 encoder/decoder, no ffmpeg).
 # Activated by tauri.ios.conf.json for iOS builds.
-tutoring-video-ios = ["iroh-live/video-ios"]
+tutoring-video-ios = ["live/video-ios"]
 
 [lib]
 name = "app_lib"
@@ -133,11 +133,11 @@ iroh-blobs = { version = "0.103", features = ["fs-store"] }
 libp2p = { version = "0.56.0", features = ["gossipsub", "kad", "quic", "tcp", "noise", "identify", "tokio", "ed25519", "macros", "autonat", "relay", "dcutr", "yamux", "request-response", "cbor"] }
 futures = "0.3"
 
-# Live tutoring — Media over QUIC (iroh-live) — ALL platforms
+# Live tutoring — Media over QUIC (owned `live` crate) — ALL platforms
 # Base: audio-only (default-features = false). Platform-specific Tauri configs
 # opt into the appropriate media feature set for release parity.
 iroh-gossip = "0.101"
-iroh-live = { path = "../crates/iroh-live", default-features = false }
+live = { path = "../crates/live", default-features = false }
 postcard = { version = "1", features = ["alloc"] }
 blake3 = "1"
 

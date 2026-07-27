@@ -1,16 +1,8 @@
-// Copyright 2025 N0, INC
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+//! [`Live`] — a thin MoQ facade over [`iroh_moq::Moq`].
+//!
+//! Wraps connect / subscribe / publish so the room actor and the app share one
+//! MoQ handle bound to the process-wide iroh [`Endpoint`]. `connect_and_subscribe`
+//! carries the reconnect-on-subscribe-timeout behaviour the room layer relies on.
 
 use std::time::Duration;
 
@@ -18,30 +10,34 @@ use iroh::{Endpoint, EndpointAddr};
 use iroh_moq::{Moq, MoqProtocolHandler, MoqSession};
 use moq_lite::BroadcastProducer;
 use moq_media::subscribe::SubscribeBroadcast;
-#[cfg(feature = "video")]
-use moq_media::{
-    av::{AudioSink, Decoders, PlaybackConfig},
-    subscribe::AvRemoteTrack,
-};
 use n0_error::Result;
 use tracing::{info, warn};
 
+/// Clonable MoQ handle bound to a shared iroh [`Endpoint`].
 #[derive(Clone)]
 pub struct Live {
     pub moq: Moq,
 }
 
 impl Live {
+    /// Build a MoQ facade over the given endpoint.
     pub fn new(endpoint: Endpoint) -> Self {
         Self {
             moq: Moq::new(endpoint),
         }
     }
 
+    /// Open (or reuse) a MoQ session to `remote`.
     pub async fn connect(&self, remote: impl Into<EndpointAddr>) -> Result<MoqSession> {
         self.moq.connect(remote).await
     }
 
+    /// Connect to `remote` and subscribe to a named broadcast.
+    ///
+    /// A cached MoQ session can be half-dead: the QUIC connection survives but
+    /// the peer no longer serves the track, so `subscribe` hangs. Guard each
+    /// attempt with a 5s timeout; on the first timeout, drop the stale session
+    /// and retry once on a fresh connection before giving up.
     pub async fn connect_and_subscribe(
         &self,
         remote: impl Into<EndpointAddr>,
@@ -98,27 +94,18 @@ impl Live {
         Ok((session, broadcast))
     }
 
-    #[cfg(feature = "video")]
-    pub async fn watch_and_listen<D: Decoders>(
-        &self,
-        remote: impl Into<EndpointAddr>,
-        broadcast_name: &str,
-        audio_out: impl AudioSink,
-        config: PlaybackConfig,
-    ) -> Result<(MoqSession, AvRemoteTrack)> {
-        let (session, broadcast) = self.connect_and_subscribe(remote, broadcast_name).await?;
-        let track = broadcast.watch_and_listen::<D>(audio_out, config)?;
-        Ok((session, track))
-    }
-
+    /// The MoQ [`ProtocolHandler`](iroh::protocol::ProtocolHandler) to register
+    /// on the iroh router under [`crate::ALPN`].
     pub fn protocol_handler(&self) -> MoqProtocolHandler {
         self.moq.protocol_handler()
     }
 
+    /// Publish a broadcast under `name`.
     pub async fn publish(&self, name: impl ToString, producer: BroadcastProducer) -> Result<()> {
         self.moq.publish(name, producer).await
     }
 
+    /// Tear down the MoQ session actor.
     pub fn shutdown(&self) {
         self.moq.shutdown();
     }
