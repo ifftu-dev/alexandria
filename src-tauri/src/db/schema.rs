@@ -79,6 +79,12 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (69, "goal_templates", MIGRATION_069),
     (70, "assessment_question_banks", MIGRATION_070),
     (71, "plugin_review_course_scope", MIGRATION_071),
+    (72, "unified_assessment_items", MIGRATION_072),
+    (73, "bloom_level_normalisation", MIGRATION_073),
+    (74, "assessment_attempt_policy", MIGRATION_074),
+    (75, "assessment_adaptive_delivery", MIGRATION_075),
+    (76, "derived_skill_state_history", MIGRATION_076),
+    (77, "submission_evidence_published", MIGRATION_077),
 ];
 
 const MIGRATION_001: &str = r#"
@@ -2773,4 +2779,303 @@ UPDATE plugin_irl_submissions
 
 CREATE INDEX IF NOT EXISTS idx_irl_submissions_course
     ON plugin_irl_submissions(course_id);
+"#;
+
+const MIGRATION_072: &str = r#"
+-- ============================================================
+-- Migration 072: unified assessment items
+--
+-- Before this migration the app had three ways to grade something and
+-- two implementations of MCQ:
+--
+--   * `bank_questions` graded host-side by `assessment/grader.rs`
+--     (exact-set match, nothing reproducible afterwards)
+--   * plugin elements graded by `grader.wasm` under ABI v1, which emits a
+--     reproducible `(grader_cid, content_cid, submission_cid)` triple
+--   * built-in course elements, whose "grade" is whatever the frontend
+--     reported (`grader_cid = 'builtin:<type>'`)
+--
+-- This collapses the first onto the second. An *assessment item* is one
+-- gradeable thing of any kind, and every kind is graded through the same
+-- frozen wasm ABI. Consequences worth stating:
+--
+--   * a third party can re-derive any score from the recorded triple,
+--     which is what makes an Alexandria credential checkable by someone
+--     who does not trust the device that produced it;
+--   * a new item kind is a new plugin, not new host code;
+--   * MCQ gains the partial-credit scoring the wasm grader already
+--     implements. Scores can therefore only rise relative to the old
+--     exact-set grader, never fall — see the equivalence test in
+--     `assessment::items`.
+--
+-- The answer key stays server-side. It moves from
+-- `bank_questions.correct_indices` into `assessment_items.grader_private`,
+-- a column deliberately separate from `content_public` so the boundary is
+-- visible in the schema rather than living in a comment: `content_public`
+-- is the only half anything may hand to a client.
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS assessment_items (
+    id                TEXT PRIMARY KEY,
+    item_kind         TEXT NOT NULL CHECK (item_kind IN ('mcq', 'plugin')),
+    skill_id          TEXT NOT NULL,
+    -- Plugin providing the UI and grader. NULL for `mcq`, which resolves
+    -- the built-in mcq-grader at grade time (it is installed at startup,
+    -- so its CID is not knowable when this migration runs).
+    plugin_cid        TEXT,
+    -- Safe to send to a client: prompt, options, kind, starter code.
+    content_public    TEXT NOT NULL,
+    -- NEVER sent to a client. Answer keys, hidden test cases. Merged into
+    -- the grade envelope host-side as `content.grader_private`.
+    grader_private    TEXT,
+    difficulty        INTEGER NOT NULL DEFAULT 2,   -- 1 (easy) .. 5 (hard)
+    -- Populated in a follow-up once BloomLevel becomes a real enum;
+    -- orthogonal to difficulty (an easy "create" item is possible).
+    bloom_level       TEXT,
+    points            REAL NOT NULL DEFAULT 1.0,
+    -- Provenance: the bank this item came from, when it came from one.
+    bank_id           TEXT REFERENCES question_banks(id) ON DELETE CASCADE,
+    author_did        TEXT,
+    taxonomy_version  TEXT,
+    ratified          INTEGER NOT NULL DEFAULT 0,
+    created_at        TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_assessment_items_skill ON assessment_items(skill_id, ratified);
+CREATE INDEX IF NOT EXISTS idx_assessment_items_bank ON assessment_items(bank_id);
+
+-- An item may evidence more than one skill, with a weight, mirroring
+-- `element_skill_tags`. `assessment_items.skill_id` remains the primary
+-- skill so single-skill lookups stay a plain indexed read.
+CREATE TABLE IF NOT EXISTS assessment_item_skills (
+    item_id   TEXT NOT NULL REFERENCES assessment_items(id) ON DELETE CASCADE,
+    skill_id  TEXT NOT NULL,
+    weight    REAL NOT NULL DEFAULT 1.0,
+    PRIMARY KEY (item_id, skill_id)
+);
+CREATE INDEX IF NOT EXISTS idx_assessment_item_skills_skill ON assessment_item_skills(skill_id);
+
+-- Per-item result within an attempt. Carries the reproducibility triple so
+-- any individual item's score can be re-derived, not just the attempt
+-- total. `theta_after` / `se_after` are written by adaptive delivery once
+-- IRT lands; they stay NULL for fixed-form attempts.
+CREATE TABLE IF NOT EXISTS attempt_items (
+    attempt_id      TEXT NOT NULL REFERENCES assessment_attempts(id) ON DELETE CASCADE,
+    ordinal         INTEGER NOT NULL,   -- 0-based served order
+    item_id         TEXT NOT NULL,
+    option_order    TEXT,               -- JSON: served position -> original index
+    submission_json TEXT,               -- what the learner submitted
+    grader_cid      TEXT,               -- grader that actually produced `score`
+    content_cid     TEXT,
+    submission_cid  TEXT,
+    score           REAL,               -- [0,1] for this item
+    score_details   TEXT,               -- grader `details` blob
+    theta_after     REAL,
+    se_after        REAL,
+    graded_at       TEXT,
+    PRIMARY KEY (attempt_id, ordinal)
+);
+CREATE INDEX IF NOT EXISTS idx_attempt_items_item ON attempt_items(item_id);
+
+-- ---- backfill ------------------------------------------------------
+-- Existing bank questions become mcq items. The id is deliberately
+-- preserved: `assessment_attempts.question_ids` stores these ids, so
+-- in-flight and historical attempts stay resolvable.
+--
+-- `kind` is derived from the key's cardinality, matching how the wasm
+-- grader distinguishes single from multi.
+INSERT OR IGNORE INTO assessment_items (
+    id, item_kind, skill_id, plugin_cid,
+    content_public, grader_private,
+    difficulty, points, bank_id, taxonomy_version, ratified, created_at
+)
+SELECT
+    q.id,
+    'mcq',
+    b.skill_id,
+    NULL,
+    json_object(
+        'kind',    CASE WHEN json_array_length(q.correct_indices) = 1
+                        THEN 'single' ELSE 'multi' END,
+        'prompt',  q.prompt,
+        'options', json(q.options)
+    ),
+    json_object('correct_indices', json(q.correct_indices)),
+    q.difficulty,
+    q.points,
+    q.bank_id,
+    b.taxonomy_version,
+    b.ratified,
+    b.created_at
+FROM bank_questions q
+JOIN question_banks b ON b.id = q.bank_id;
+
+-- Primary skill also lands in the multi-skill table so a single query
+-- shape serves both cases.
+INSERT OR IGNORE INTO assessment_item_skills (item_id, skill_id, weight)
+SELECT id, skill_id, 1.0 FROM assessment_items;
+"#;
+
+const MIGRATION_073: &str = r#"
+-- ============================================================
+-- Migration 073: Bloom levels become a real, ordered type
+--
+-- `skills.bloom_level` has been a free-text column since the initial
+-- schema, documented in a trailing comment and read by nobody. Governance
+-- separately carried its own `&[&str]` ordering to gate proposal and
+-- election eligibility. Those are now one type — `domain::bloom::BloomLevel`
+-- — so "at least analyze" means the same thing to a DAO gate, an assessment
+-- blueprint, and a capability query.
+--
+-- This migration only reconciles the data. Two jobs:
+--
+--   1. Normalise any `skills.bloom_level` that is not one of the six known
+--      tokens. The type parses leniently (unknown becomes 'apply'), so
+--      leaving stray values would mean the row and the type disagree about
+--      what the skill is.
+--
+--   2. Backfill `assessment_items.bloom_level`, which migration 072 added
+--      but left NULL. An item inherits its skill's level as a starting
+--      point; item-level overrides are authored later, and are the reason
+--      the column lives on the item rather than being read through the join
+--      every time.
+--
+-- No CHECK constraint is added. Every write now goes through `BloomLevel`'s
+-- `ToSql`, which can only emit a known token, and adding one would require
+-- rebuilding `skills` — a table with foreign keys pointing at it from
+-- `skill_prerequisites`, `skill_relations`, `credentials` and more. The
+-- constraint would buy defence against hand-written SQL at the cost of a
+-- risky table rebuild; the type is the real guarantee.
+-- ============================================================
+
+UPDATE skills
+   SET bloom_level = 'apply'
+ WHERE bloom_level IS NULL
+    OR LOWER(TRIM(bloom_level)) NOT IN
+       ('remember', 'understand', 'apply', 'analyze', 'evaluate', 'create');
+
+-- Fold case/whitespace variants onto the canonical token.
+UPDATE skills SET bloom_level = LOWER(TRIM(bloom_level));
+
+UPDATE assessment_items
+   SET bloom_level = COALESCE(
+       (SELECT s.bloom_level FROM skills s WHERE s.id = assessment_items.skill_id),
+       'apply'
+   )
+ WHERE bloom_level IS NULL;
+"#;
+
+const MIGRATION_074: &str = r#"
+-- ============================================================
+-- Migration 074: attempt policy
+--
+-- A credential is issued only when an attempt passes, so a skill's
+-- aggregated score is a weighted mean of successes only — failures leave no
+-- trace. With unlimited attempts and a fresh random seed each time, a
+-- learner could re-roll until a favourable draw and bank the one result that
+-- counted. A passing score then measures persistence, not capability.
+--
+-- Two changes close that. Banks carry an attempt policy, and attempts record
+-- which try they were.
+--
+-- The default is escalating cooldowns and *no* hard cap: waiting always
+-- restores an attempt, and `attempt_window_days` means a learner returning
+-- months later starts fresh. Learning is free and unlimited; only the
+-- credential is rate-limited. A cap would punish the learner who genuinely
+-- needs six tries without distinguishing them from someone farming draws,
+-- which is what `attempt_ordinal` is for — it makes "passed on the seventh
+-- attempt" visible to whoever reads the credential instead of hidden.
+-- ============================================================
+
+-- NULL max_attempts means unlimited. Cooldowns are a JSON array of hours
+-- indexed by attempts already used; the last entry repeats, so escalation
+-- plateaus rather than growing without bound.
+ALTER TABLE question_banks ADD COLUMN max_attempts INTEGER;
+ALTER TABLE question_banks ADD COLUMN cooldown_hours TEXT NOT NULL DEFAULT '[0,24,72,168]';
+ALTER TABLE question_banks ADD COLUMN attempt_window_days INTEGER NOT NULL DEFAULT 90;
+ALTER TABLE question_banks ADD COLUMN score_policy TEXT NOT NULL DEFAULT 'best';
+
+-- 1-based index of this attempt within the policy window, copied onto the
+-- issued claim.
+ALTER TABLE assessment_attempts ADD COLUMN attempt_ordinal INTEGER;
+
+-- The policy reads a learner's recent attempts for one skill on every start,
+-- ordered by time.
+CREATE INDEX IF NOT EXISTS idx_assessment_attempts_history
+    ON assessment_attempts(subject_did, skill_id, started_at DESC);
+"#;
+
+const MIGRATION_075: &str = r#"
+-- ============================================================
+-- Migration 075: adaptive delivery
+--
+-- A bank may be delivered fixed-form (the historical behaviour: draw a
+-- stratified subset, grade it all) or adaptively (pick each next item from
+-- the running ability estimate, stop when the estimate is precise enough).
+-- Fixed is the default so every existing bank is unchanged.
+--
+-- Adaptive attempts reuse `assessment_attempts` as their container and
+-- `attempt_items` for per-item results; `attempt_items.theta_after` /
+-- `se_after` (added in migration 072) record how the ability estimate
+-- evolved after each answer. No item-parameter table is added here: 2PL
+-- parameters bootstrap from the existing `difficulty` column at runtime, and
+-- storing calibrated parameters is a later, data-dependent change.
+-- ============================================================
+
+ALTER TABLE question_banks ADD COLUMN delivery_mode TEXT NOT NULL DEFAULT 'fixed'
+    CHECK (delivery_mode IN ('fixed', 'adaptive'));
+
+-- Target standard error and item-count bounds for adaptive attempts. Ignored
+-- for fixed-form banks. Defaults match assessment::adaptive::StopRule.
+ALTER TABLE question_banks ADD COLUMN adaptive_se_target REAL NOT NULL DEFAULT 0.3;
+ALTER TABLE question_banks ADD COLUMN adaptive_min_items INTEGER NOT NULL DEFAULT 5;
+ALTER TABLE question_banks ADD COLUMN adaptive_max_items INTEGER NOT NULL DEFAULT 20;
+"#;
+
+const MIGRATION_076: &str = r#"
+-- ============================================================
+-- Migration 076: derived skill-state history
+--
+-- Confidence decays with time (aggregation applies an exponential freshness
+-- weight), but nothing recomputed on a schedule — the cache was only
+-- refreshed after a passing assessment, so a learner's displayed confidence
+-- was frozen at their last credential. Recompute now runs on profile unlock
+-- and periodically, and each recompute records a dated snapshot here.
+--
+-- One row per (subject, skill, day): a daily granularity enough to draw a
+-- decay curve and compute learning velocity (the slope of trust over time)
+-- without unbounded growth. Append-only history — the live value stays in
+-- `derived_skill_states`.
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS derived_skill_state_history (
+    subject_did    TEXT NOT NULL,
+    skill_id       TEXT NOT NULL,
+    snapshot_date  TEXT NOT NULL,
+    raw_score      REAL NOT NULL,
+    confidence     REAL NOT NULL,
+    trust_score    REAL NOT NULL,
+    level          INTEGER NOT NULL,
+    evidence_mass  REAL NOT NULL,
+    computed_at    TEXT NOT NULL,
+    PRIMARY KEY (subject_did, skill_id, snapshot_date)
+);
+CREATE INDEX IF NOT EXISTS idx_dss_history_subject_skill
+    ON derived_skill_state_history(subject_did, skill_id, snapshot_date);
+"#;
+
+const MIGRATION_077: &str = r#"
+-- ============================================================
+-- Migration 077: submission evidence publication
+--
+-- A graded submission's reproducibility bytes (content + submission) are
+-- pinned encrypted with a device-local key, so its content_cid/submission_cid
+-- resolve only on this device — durable, but not verifiable by anyone else.
+-- A learner may opt in, per submission, to publish those bytes unencrypted so
+-- a third party can fetch the exact inputs a grader saw and re-derive the
+-- score (the basis of independent verification). This flag records that
+-- choice; it is 0 (private) by default. Publishing makes the submission
+-- world-readable, so it is only ever set on an explicit opt-in.
+-- ============================================================
+
+ALTER TABLE element_submissions ADD COLUMN evidence_published INTEGER NOT NULL DEFAULT 0;
 "#;

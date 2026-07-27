@@ -22,6 +22,8 @@ pub mod irl_review;
 pub mod manifest;
 pub mod registry;
 pub mod verifier;
+// The grade envelope is platform-independent, so this module is always compiled.
+pub mod grade_contract;
 // The grader runtime runs on every platform (`grader` cfg, emitted
 // unconditionally by build.rs). Desktop and Android use the Cranelift JIT;
 // iOS uses Wasmtime's Pulley bytecode interpreter because the platform forbids

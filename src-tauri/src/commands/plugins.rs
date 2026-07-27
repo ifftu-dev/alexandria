@@ -565,6 +565,7 @@ pub async fn plugin_list_permissions(
 /// = NULL` until that lands.
 #[cfg(grader)]
 #[tauri::command]
+#[allow(clippy::too_many_arguments)] // Tauri command; each arg is a distinct IPC field.
 pub async fn plugin_submit_and_grade(
     state: State<'_, AppState>,
     plugin_cid: String,
@@ -576,7 +577,12 @@ pub async fn plugin_submit_and_grade(
     // issued credential is bound to it, so its assurance reflects how closely the
     // learner was monitored while solving.
     integrity_session_id: Option<String>,
+    // Opt-in to publish this submission's evidence unencrypted so a third party
+    // can re-derive the score. Off by default: publishing makes the submission
+    // world-readable, so it is only ever an explicit choice.
+    #[allow(non_snake_case)] publish_evidence: Option<bool>,
 ) -> Result<ScoreRecord, String> {
+    let publish_evidence = publish_evidence.unwrap_or(false);
     check_rate_limit(&state, "plugin_submit_and_grade")?;
 
     // Derive the learner's DID from the unlocked keystore. The keystore
@@ -680,6 +686,26 @@ pub async fn plugin_submit_and_grade(
         .map_err(|e| log::warn!("plugin grade: failed to pin submission bundle: {e}"))
         .ok();
 
+    // On explicit opt-in, also pin the content and submission plaintext
+    // unencrypted, each addressable at the content_cid / submission_cid
+    // recorded below, so a third party can fetch the exact grader inputs and
+    // re-derive the score. Soft-fail like the bundle pin.
+    let published_pins: Vec<crate::content_store::content::AddResult> = if publish_evidence {
+        let mut pins = Vec::new();
+        for (label, bytes) in [
+            ("content", &content_bytes),
+            ("submission", &submission_bytes),
+        ] {
+            match crate::content_store::content::add_bytes_unencrypted(&state.content_node, bytes).await {
+                Ok(p) => pins.push(p),
+                Err(e) => log::warn!("plugin grade: failed to publish {label} evidence: {e}"),
+            }
+        }
+        pins
+    } else {
+        Vec::new()
+    };
+
     let db_guard = state
         .db
         .lock()
@@ -698,6 +724,7 @@ pub async fn plugin_submit_and_grade(
             details: &record.details,
             learner_did: &learner_did_str,
             grader_version: &manifest.version,
+            evidence_published: publish_evidence && !published_pins.is_empty(),
         },
     )?;
 
@@ -712,12 +739,31 @@ pub async fn plugin_submit_and_grade(
             false,
         );
     }
+    // Published plaintext evidence is likewise permanent — a verifier may
+    // fetch it long after the grade.
+    for pin in &published_pins {
+        crate::content_store::storage::upsert_pin(
+            db.conn(),
+            &pin.hash,
+            "published_evidence",
+            pin.size,
+            false,
+        );
+    }
 
     // Issue a signed Verifiable Credential for a passing grade — one per skill
     // the element is tagged with (`element_skill_tags`). Self-issued (subject ==
     // learner), same pipeline as the assessment path. Best-effort: a failure to
     // issue must not fail the grade itself, and each skill is independent.
-    if record.score >= PLUGIN_PASS_THRESHOLD {
+    // Only a trusted grader may mint a credential. An untrusted grade still
+    // ran and its score is returned to the learner (practice is fine); it
+    // just carries no weight into the credential graph. See `credential_trust`.
+    let issuance_block = credential_trust(db, &plugin_cid, &grader_cid)?;
+    if let Some(reason) = &issuance_block {
+        log::info!("plugin grade: withholding credential for cid={plugin_cid} — {reason}");
+    }
+
+    if issuance_block.is_none() && record.score >= PLUGIN_PASS_THRESHOLD {
         let skills = element_skill_ids(db, &element_id).unwrap_or_default();
         if !skills.is_empty() {
             let now = crate::commands::credentials::now_rfc3339();
@@ -803,6 +849,66 @@ pub async fn plugin_submit_and_grade() -> Result<serde_json::Value, String> {
 /// not-perfect pass; the aggregation layer weighs it by provenance afterward.
 const PLUGIN_PASS_THRESHOLD: f64 = 0.7;
 
+/// Whether a passing grade from this grader may mint a credential.
+///
+/// The MCQ assessment path refuses to even start on an unratified bank; the
+/// plugin path had no equivalent gate, so any installed plugin — including a
+/// downloaded third-party one whose grader returns 1.0 unconditionally —
+/// could mint self-issued `AssessmentCredential`s. That is the governance
+/// hole this closes.
+///
+/// A grader is trusted for issuance when either:
+///
+/// * it is **built-in** — its bytes are `include_bytes!`'d into the app
+///   binary and CID-verified at install, so the app's own signature already
+///   vouches for them; committee attestation would be redundant; or
+/// * it carries a **committee attestation** for exactly this
+///   `(plugin_cid, grader_cid)` pair, and the committee has not since flagged
+///   the grader as `known_flawed`.
+///
+/// Grading itself is never blocked — running an unattested grader is
+/// harmless (sandboxed, deterministic) and useful for practice. Only
+/// credential *issuance* is gated, which is the thing that carries weight
+/// into the credential graph.
+///
+/// Returns `Ok(None)` when trusted, or `Ok(Some(reason))` explaining the
+/// refusal for the log and, later, the UI.
+fn credential_trust(
+    db: &Database,
+    plugin_cid: &str,
+    grader_cid: &str,
+) -> Result<Option<String>, String> {
+    // Built-in graders are vouched for by the signed app binary.
+    if crate::plugins::builtins::find_bundle_by_cid(plugin_cid).is_some() {
+        return Ok(None);
+    }
+
+    let status = crate::plugins::attestation::status_for(db, plugin_cid)?;
+    let Some(attestation) = status.attestation.as_ref() else {
+        return Ok(Some(
+            "grader is not attested by a governance committee".to_string(),
+        ));
+    };
+
+    // The attestation binds a specific grader; a plugin that swapped in a
+    // different grader after attestation must not ride the old approval.
+    if attestation.grader_cid != grader_cid {
+        return Ok(Some(format!(
+            "attestation covers grader {} but this grade used {grader_cid}",
+            attestation.grader_cid
+        )));
+    }
+
+    // An attested-but-since-flagged grader must not keep minting credentials.
+    if status.advisories.iter().any(|a| a.kind == "known_flawed") {
+        return Ok(Some(
+            "grader is under a 'known_flawed' advisory".to_string(),
+        ));
+    }
+
+    Ok(None)
+}
+
 /// Skills a graded element is tagged with (`element_skill_tags`), highest weight
 /// first. Drives which skill(s) a passing grade credentials.
 fn element_skill_ids(db: &Database, element_id: &str) -> Result<Vec<String>, String> {
@@ -837,6 +943,9 @@ struct SubmissionRow<'a> {
     details: &'a serde_json::Value,
     learner_did: &'a str,
     grader_version: &'a str,
+    /// Whether the learner opted to publish this submission's evidence
+    /// unencrypted for third-party re-derivation.
+    evidence_published: bool,
 }
 
 fn persist_submission(db: &Database, row: &SubmissionRow<'_>) -> Result<(), String> {
@@ -853,8 +962,8 @@ fn persist_submission(db: &Database, row: &SubmissionRow<'_>) -> Result<(), Stri
         .execute(
             "INSERT INTO element_submissions \
              (id, element_id, enrollment_id, submission_cid, grader_cid, content_cid, \
-              score, score_details_json, learner_did, grader_version) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+              score, score_details_json, learner_did, grader_version, evidence_published) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 id,
                 row.element_id,
@@ -866,6 +975,7 @@ fn persist_submission(db: &Database, row: &SubmissionRow<'_>) -> Result<(), Stri
                 details_json,
                 row.learner_did,
                 row.grader_version,
+                row.evidence_published as i64,
             ],
         )
         .map_err(|e| format!("failed to record element submission: {e}"))?;
@@ -1219,5 +1329,181 @@ mod grade_credential_tests {
             .query_row("SELECT COUNT(*) FROM credentials", [], |r| r.get(0))
             .unwrap();
         assert_eq!(n, skills.len() as i64);
+    }
+
+    // ---- credential_trust: the plugin governance gate --------------------
+
+    fn trust_db() -> Database {
+        let db = Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+        db
+    }
+
+    fn seed_attestation(db: &Database, plugin_cid: &str, grader_cid: &str) {
+        db.conn()
+            .execute(
+                "INSERT INTO plugin_attestations                  (plugin_cid, grader_cid, attestation_terms, threshold_signature_blob,                   committee_pubkeys_json, issued_at)                  VALUES (?1, ?2, '{}', x'00', '[]', '2026-07-23T00:00:00Z')",
+                params![plugin_cid, grader_cid],
+            )
+            .unwrap();
+    }
+
+    fn seed_advisory(db: &Database, plugin_cid: &str, kind: &str) {
+        db.conn()
+            .execute(
+                "INSERT INTO plugin_advisories                  (id, plugin_cid, kind, message, threshold_signature_blob, committee_pubkeys_json)                  VALUES (?1, ?2, ?3, 'flagged', x'00', '[]')",
+                params![format!("adv_{kind}"), plugin_cid, kind],
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn builtin_graders_are_trusted_without_attestation() {
+        // The built-in MCQ grader ships in the signed binary; requiring
+        // committee attestation for it would break the first-party graded
+        // flow that works today.
+        let db = trust_db();
+        let cid = crate::plugins::builtins::mcq_plugin_cid();
+        assert_eq!(
+            credential_trust(&db, &cid, "any-grader").unwrap(),
+            None,
+            "a builtin plugin must be trusted for issuance"
+        );
+    }
+
+    #[test]
+    fn an_unattested_third_party_grader_is_blocked() {
+        // The hole: any installed plugin could mint credentials. An unknown,
+        // unattested plugin must not.
+        let db = trust_db();
+        let reason = credential_trust(&db, "did:key:zEvil#grader", "g1").unwrap();
+        assert!(reason.is_some(), "unattested grader should be blocked");
+        assert!(reason.unwrap().contains("not attested"));
+    }
+
+    #[test]
+    fn an_attested_grader_is_trusted() {
+        let db = trust_db();
+        seed_attestation(&db, "did:key:zAuthor#p", "grader_v1");
+        assert_eq!(
+            credential_trust(&db, "did:key:zAuthor#p", "grader_v1").unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn attestation_does_not_cover_a_swapped_grader() {
+        // The attestation binds one grader; installing a different grader
+        // under the same plugin id must not inherit the old approval.
+        let db = trust_db();
+        seed_attestation(&db, "did:key:zAuthor#p", "grader_v1");
+        let reason = credential_trust(&db, "did:key:zAuthor#p", "grader_v2").unwrap();
+        assert!(
+            reason.is_some(),
+            "a swapped grader must not ride old attestation"
+        );
+        assert!(reason.unwrap().contains("attestation covers grader"));
+    }
+
+    #[test]
+    fn a_known_flawed_advisory_blocks_even_an_attested_grader() {
+        let db = trust_db();
+        seed_attestation(&db, "did:key:zAuthor#p", "grader_v1");
+        seed_advisory(&db, "did:key:zAuthor#p", "known_flawed");
+        let reason = credential_trust(&db, "did:key:zAuthor#p", "grader_v1").unwrap();
+        assert!(reason.is_some());
+        assert!(reason.unwrap().contains("known_flawed"));
+    }
+
+    #[test]
+    fn a_non_blocking_advisory_does_not_block_issuance() {
+        // 'deprecated' is informational — it should surface in the UI but not
+        // stop an otherwise-valid, attested grader from crediting.
+        let db = trust_db();
+        seed_attestation(&db, "did:key:zAuthor#p", "grader_v1");
+        seed_advisory(&db, "did:key:zAuthor#p", "deprecated");
+        assert_eq!(
+            credential_trust(&db, "did:key:zAuthor#p", "grader_v1").unwrap(),
+            None,
+            "a deprecation notice must not block issuance"
+        );
+    }
+
+    #[test]
+    fn persist_submission_records_the_evidence_publication_flag() {
+        let db = Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+        seed_tagged_element(&db);
+        db.conn()
+            .execute(
+                "INSERT INTO enrollments (id, course_id) VALUES ('enr1', 'c_grade')",
+                [],
+            )
+            .unwrap();
+
+        persist_submission(
+            &db,
+            &SubmissionRow {
+                element_id: "el_grade",
+                enrollment_id: "enr1",
+                submission_cid: "s".repeat(64).as_str(),
+                grader_cid: "g".repeat(64).as_str(),
+                content_cid: "c".repeat(64).as_str(),
+                score: 0.9,
+                details: &serde_json::json!({}),
+                learner_did: "did:key:zL",
+                grader_version: "1.0.0",
+                evidence_published: true,
+            },
+        )
+        .unwrap();
+
+        let published: i64 = db
+            .conn()
+            .query_row(
+                "SELECT evidence_published FROM element_submissions WHERE element_id = 'el_grade'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(published, 1, "opt-in must be recorded on the submission");
+    }
+
+    #[test]
+    fn submissions_are_private_by_default() {
+        let db = Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+        seed_tagged_element(&db);
+        db.conn()
+            .execute(
+                "INSERT INTO enrollments (id, course_id) VALUES ('enr1', 'c_grade')",
+                [],
+            )
+            .unwrap();
+        persist_submission(
+            &db,
+            &SubmissionRow {
+                element_id: "el_grade",
+                enrollment_id: "enr1",
+                submission_cid: "s".repeat(64).as_str(),
+                grader_cid: "g".repeat(64).as_str(),
+                content_cid: "c".repeat(64).as_str(),
+                score: 0.9,
+                details: &serde_json::json!({}),
+                learner_did: "did:key:zL",
+                grader_version: "1.0.0",
+                evidence_published: false,
+            },
+        )
+        .unwrap();
+        let published: i64 = db
+            .conn()
+            .query_row(
+                "SELECT evidence_published FROM element_submissions WHERE element_id = 'el_grade'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(published, 0, "evidence stays private unless opted in");
     }
 }

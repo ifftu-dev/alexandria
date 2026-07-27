@@ -1,4 +1,5 @@
 pub mod attestation;
+pub mod bloom;
 pub mod catalog;
 pub mod challenge;
 pub mod classroom;

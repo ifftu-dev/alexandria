@@ -17,6 +17,12 @@ use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 
 use crate::crypto::hash::entity_id;
+use crate::domain::bloom::BloomLevel;
+
+/// Minimum proficiency to author an assessment for a skill: a credential in
+/// that skill at `analyze` or above. High enough to mean real competence, low
+/// enough that many proven learners qualify.
+const MIN_AUTHOR_LEVEL: BloomLevel = BloomLevel::Analyze;
 
 /// The two community-content kinds ratified through this module.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -165,6 +171,13 @@ pub fn propose(
     // Validate the change doc parses for this kind.
     validate_change(kind, change_json)?;
 
+    // Assessment contributions are community-driven but skill-reputation
+    // gated: to author an assessment for a skill you must have proven that
+    // skill, or be on the DAO committee that seeds a skill's first content.
+    if kind == ContentKind::QuestionBank {
+        gate_question_bank_authorship(conn, dao_id, proposer, change_json)?;
+    }
+
     let next_version: i64 = conn
         .query_row(
             &format!(
@@ -194,6 +207,135 @@ pub fn propose(
     )
     .map_err(|e| e.to_string())?;
     Ok(proposal_id)
+}
+
+/// Enforce the authorship gate for a question-bank change.
+///
+/// Every bank in the change must target a skill that (a) falls within the
+/// proposing DAO's scope, and (b) the proposer is entitled to author for —
+/// either by holding a credential in that skill at [`MIN_AUTHOR_LEVEL`] or
+/// above, or by being on the DAO committee.
+///
+/// The committee bypass is what makes this non-deadlocking: the first
+/// assessment for a skill cannot require a credential that only that
+/// assessment could produce, so the elected committee seeds it. Once
+/// assessments exist, proven peers carry the load.
+fn gate_question_bank_authorship(
+    conn: &Connection,
+    dao_id: &str,
+    proposer: &str,
+    change_json: &str,
+) -> Result<(), String> {
+    let doc: QuestionBankDoc = serde_json::from_str(change_json)
+        .map_err(|e| format!("invalid question-bank change document: {e}"))?;
+
+    let is_committee = proposer_is_committee(conn, dao_id, proposer)?;
+
+    // The proposer's own DID, for the proficiency lookup. Proposals are
+    // authored locally, so this is the local identity.
+    let author_did = crate::settings::SettingsStore::get(
+        conn,
+        crate::settings::registry::keys::IDENTITY_LOCAL_DID,
+    );
+
+    for bank in &doc.banks {
+        if !skill_in_dao_scope(conn, dao_id, &bank.skill_id)? {
+            return Err(format!(
+                "skill '{}' is outside DAO '{dao_id}' scope — propose it to the DAO \
+                 that governs its subject",
+                bank.skill_id
+            ));
+        }
+
+        // Committee members may seed any in-scope skill; everyone else must
+        // have proven the specific skill they are authoring for.
+        if is_committee {
+            continue;
+        }
+        if !author_holds_skill(conn, &author_did, &bank.skill_id, MIN_AUTHOR_LEVEL)? {
+            return Err(format!(
+                "authoring an assessment for '{}' requires a credential in it at '{}' or above, \
+                 or DAO committee membership",
+                bank.skill_id,
+                MIN_AUTHOR_LEVEL.as_str()
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Whether `stake_address` is on the DAO's committee (or its chair).
+fn proposer_is_committee(
+    conn: &Connection,
+    dao_id: &str,
+    stake_address: &str,
+) -> Result<bool, String> {
+    conn.query_row(
+        "SELECT COUNT(*) > 0 FROM governance_dao_members \
+          WHERE dao_id = ?1 AND stake_address = ?2 AND role IN ('committee', 'chair')",
+        params![dao_id, stake_address],
+        |r| r.get(0),
+    )
+    .map_err(|e| e.to_string())
+}
+
+/// Whether `subject_did` holds a non-revoked skill credential for `skill_id`
+/// at or above `min_level`.
+///
+/// Reads the Bloom rank from the credential's `credentialSubject.level`,
+/// which serialises as an integer 0..=5 matching [`BloomLevel::rank`].
+fn author_holds_skill(
+    conn: &Connection,
+    subject_did: &str,
+    skill_id: &str,
+    min_level: BloomLevel,
+) -> Result<bool, String> {
+    if subject_did.is_empty() {
+        return Ok(false);
+    }
+    conn.query_row(
+        "SELECT COUNT(*) > 0 FROM credentials \
+          WHERE subject_did = ?1 AND skill_id = ?2 AND claim_kind = 'skill' AND revoked = 0 \
+            AND CAST(json_extract(signed_vc_json, '$.credentialSubject.level') AS INTEGER) >= ?3",
+        params![subject_did, skill_id, min_level.rank() as i64],
+        |r| r.get(0),
+    )
+    .map_err(|e| e.to_string())
+}
+
+/// Whether `skill_id` falls within the DAO's governed scope. DAOs are scoped
+/// to a subject field or a subject, never a single skill, so this walks
+/// skill → subject → subject_field to match. A `sentinel`-scoped DAO governs
+/// no skills and so authors no assessments.
+fn skill_in_dao_scope(conn: &Connection, dao_id: &str, skill_id: &str) -> Result<bool, String> {
+    let (scope_type, scope_id): (String, String) = conn
+        .query_row(
+            "SELECT scope_type, scope_id FROM governance_daos WHERE id = ?1",
+            params![dao_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .map_err(|e| format!("DAO not found: {e}"))?;
+
+    match scope_type.as_str() {
+        "subject" => conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM skills WHERE id = ?1 AND subject_id = ?2",
+                params![skill_id, scope_id],
+                |r| r.get(0),
+            )
+            .map_err(|e| e.to_string()),
+        "subject_field" => conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM skills sk \
+                 JOIN subjects sub ON sub.id = sk.subject_id \
+                 WHERE sk.id = ?1 AND sub.subject_field_id = ?2",
+                params![skill_id, scope_id],
+                |r| r.get(0),
+            )
+            .map_err(|e| e.to_string()),
+        // `sentinel` (or anything unrecognised) governs no skills.
+        _ => Ok(false),
+    }
 }
 
 fn validate_change(kind: ContentKind, change_json: &str) -> Result<(), String> {
@@ -501,5 +643,192 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM bank_questions", [], |r| r.get(0))
             .unwrap();
         assert_eq!((banks, qs), (1, 1));
+    }
+}
+
+/// The skill-reputation authorship gate for question-bank contributions.
+///
+/// Uses a full migrated database rather than the minimal `tests::setup`
+/// schema, because the gate reads governance scope, committee membership,
+/// credentials, and the local identity setting — tables the light fixture
+/// does not create.
+#[cfg(test)]
+mod authorship_gate_tests {
+    use super::*;
+    use crate::db::Database;
+    use crate::settings::{registry::keys, SettingsStore};
+
+    const AUTHOR_DID: &str = "did:key:zAuthor";
+    const AUTHOR_STAKE: &str = "stake_author";
+
+    /// A DAO scoped to subject `sub_cs`, one skill in scope and one out, plus
+    /// the local identity pointing at AUTHOR_DID. No committee membership and
+    /// no credentials by default — the strictest starting point.
+    fn base() -> Database {
+        let db = Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+        db.conn()
+            .execute_batch(
+                "INSERT INTO governance_daos (id, name, scope_type, scope_id, status)
+                 VALUES ('dao_cs', 'CS DAO', 'subject', 'sub_cs', 'active');
+                 INSERT INTO subject_fields (id, name) VALUES ('sf', 'Field');
+                 INSERT INTO subjects (id, name, subject_field_id) VALUES
+                   ('sub_cs', 'CS', 'sf'), ('sub_bio', 'Bio', 'sf');
+                 INSERT INTO skills (id, name, subject_id, bloom_level) VALUES
+                   ('skill_rust', 'Rust', 'sub_cs', 'apply'),
+                   ('skill_dna', 'DNA', 'sub_bio', 'apply');",
+            )
+            .unwrap();
+        SettingsStore::set(db.conn(), keys::IDENTITY_LOCAL_DID, AUTHOR_DID.to_string()).unwrap();
+        db
+    }
+
+    fn bank_change(skill_id: &str) -> String {
+        format!(r#"{{"banks":[{{"id":"b1","skill_id":"{skill_id}","label":"L"}}],"questions":[]}}"#)
+    }
+
+    fn grant_credential(db: &Database, subject_did: &str, skill_id: &str, level: u8) {
+        let vc = format!(r#"{{"credentialSubject":{{"level":{level}}}}}"#);
+        db.conn()
+            .execute(
+                "INSERT INTO credentials
+                   (id, issuer_did, subject_did, credential_type, claim_kind, skill_id,
+                    issuance_date, signed_vc_json, integrity_hash, revoked)
+                 VALUES (?1, 'did:key:zIssuer', ?2, 'AssessmentCredential', 'skill', ?3,
+                         '2026-01-01T00:00:00Z', ?4, 'hash', 0)",
+                params![
+                    format!("cred_{skill_id}_{level}"),
+                    subject_did,
+                    skill_id,
+                    vc
+                ],
+            )
+            .unwrap();
+    }
+
+    fn make_committee(db: &Database) {
+        db.conn()
+            .execute(
+                "INSERT INTO governance_dao_members (dao_id, stake_address, role)
+                 VALUES ('dao_cs', ?1, 'committee')",
+                params![AUTHOR_STAKE],
+            )
+            .unwrap();
+    }
+
+    fn try_propose(db: &Database, skill_id: &str) -> Result<String, String> {
+        propose(
+            db.conn(),
+            ContentKind::QuestionBank,
+            "dao_cs",
+            "New bank",
+            None,
+            &bank_change(skill_id),
+            AUTHOR_STAKE,
+        )
+    }
+
+    #[test]
+    fn an_unproven_non_committee_author_is_refused() {
+        // The gate's whole point: you cannot author an assessment for a skill
+        // you have not demonstrated.
+        let db = base();
+        let err = try_propose(&db, "skill_rust").unwrap_err();
+        assert!(err.contains("requires a credential"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn proving_the_skill_at_analyze_unlocks_authoring() {
+        let db = base();
+        grant_credential(&db, AUTHOR_DID, "skill_rust", 3); // analyze
+        assert!(try_propose(&db, "skill_rust").is_ok());
+    }
+
+    #[test]
+    fn a_credential_below_analyze_is_not_enough() {
+        let db = base();
+        grant_credential(&db, AUTHOR_DID, "skill_rust", 2); // apply
+        let err = try_propose(&db, "skill_rust").unwrap_err();
+        assert!(err.contains("requires a credential"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn a_credential_above_analyze_also_works() {
+        let db = base();
+        grant_credential(&db, AUTHOR_DID, "skill_rust", 5); // create
+        assert!(try_propose(&db, "skill_rust").is_ok());
+    }
+
+    #[test]
+    fn a_committee_member_may_seed_a_skill_they_have_not_proven() {
+        // The bootstrap escape: the first assessment for a skill cannot
+        // require a credential only that assessment could produce.
+        let db = base();
+        make_committee(&db);
+        assert!(
+            try_propose(&db, "skill_rust").is_ok(),
+            "committee should be able to seed content without a credential"
+        );
+    }
+
+    #[test]
+    fn a_revoked_credential_does_not_authorize() {
+        let db = base();
+        grant_credential(&db, AUTHOR_DID, "skill_rust", 4);
+        db.conn()
+            .execute("UPDATE credentials SET revoked = 1", [])
+            .unwrap();
+        assert!(try_propose(&db, "skill_rust").is_err());
+    }
+
+    #[test]
+    fn a_credential_in_a_different_skill_does_not_transfer() {
+        // Proving Rust does not authorize authoring for DNA.
+        let db = base();
+        grant_credential(&db, AUTHOR_DID, "skill_rust", 5);
+        // skill_dna is out of this DAO's scope anyway, so also assert scope.
+        let err = try_propose(&db, "skill_dna").unwrap_err();
+        assert!(err.contains("outside DAO"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn a_skill_outside_the_dao_scope_is_refused_even_when_proven() {
+        // Scope is checked before proficiency: a proven skill in the wrong
+        // DAO still cannot be authored there.
+        let db = base();
+        grant_credential(&db, AUTHOR_DID, "skill_dna", 5);
+        make_committee(&db); // even a committee member cannot cross scope
+        let err = try_propose(&db, "skill_dna").unwrap_err();
+        assert!(err.contains("outside DAO"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn a_credential_held_by_someone_else_does_not_authorize_me() {
+        // The gate must key on the proposer's own DID, not any credential in
+        // the local database.
+        let db = base();
+        grant_credential(&db, "did:key:zSomeoneElse", "skill_rust", 5);
+        assert!(try_propose(&db, "skill_rust").is_err());
+    }
+
+    #[test]
+    fn goal_template_proposals_are_not_subject_to_the_skill_gate() {
+        // The gate is specific to assessments. A goal-template proposal must
+        // still go through unimpeded.
+        let db = base();
+        let change = r#"{"templates":[{"id":"t1","kind":"job_role","key":"k","label":"L","skill_ids":["skill_rust"]}]}"#;
+        let r = propose(
+            db.conn(),
+            ContentKind::GoalTemplate,
+            "dao_cs",
+            "T",
+            None,
+            change,
+            AUTHOR_STAKE,
+        );
+        assert!(
+            r.is_ok(),
+            "goal templates should not hit the skill gate: {r:?}"
+        );
     }
 }

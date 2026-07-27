@@ -2040,6 +2040,34 @@ export interface GradeResult {
   credential_id: string | null
 }
 
+/** One skill in a goal assessment plan, with assessability resolved. */
+export interface GoalAssessmentStep {
+  skill_id: string
+  name: string
+  bloom_level: string
+  /** "earned" | "available" | "locked". */
+  status: string
+  is_goal: boolean
+  /** A ratified assessment exists for this skill. */
+  has_assessment: boolean
+  /** The learner can start an attempt right now. */
+  assessable_now: boolean
+  /** When an attempt becomes available again, if cooling down. */
+  cooldown_until: string | null
+  /** Why this skill cannot be assessed now; null when assessable. */
+  blocked_reason: string | null
+}
+
+/** An ordered, prerequisite-sequenced plan for assessing a goal's skills. */
+export interface GoalAssessmentPlan {
+  steps: GoalAssessmentStep[]
+  assessable_count: number
+  /** First assessable skill in prerequisite order — the natural "start here". */
+  next_skill_id: string | null
+  goals_earned: number
+  goals_total: number
+}
+
 /** The goal the learner is setting (matches the Rust `GoalInput` enum). */
 export type GoalInput =
   | { kind: 'exam'; key: string }

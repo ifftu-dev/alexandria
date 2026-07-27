@@ -358,6 +358,17 @@ pub const BUILTIN_PLUGINS: &[BuiltinBundle<'static>] = &[
 
 /// The builtin bundle whose manifest CID equals `cid`, if any. Used by the
 /// enrollment flow to install a course's required builtin plugins on demand.
+/// CID of the built-in MCQ plugin, whose grader is the canonical scorer for
+/// every `mcq` assessment item.
+///
+/// Derived from the embedded manifest bytes rather than stored, because
+/// `plugin_cid = blake3(manifest)` and the manifest is compiled in — so this
+/// is correct by construction even when the manifest changes, and it is
+/// knowable before the plugin has been installed (migrations run first).
+pub fn mcq_plugin_cid() -> String {
+    crate::plugins::verifier::compute_plugin_cid(MCQ_BUNDLE.manifest_json)
+}
+
 pub fn find_bundle_by_cid(cid: &str) -> Option<&'static BuiltinBundle<'static>> {
     BUILTIN_PLUGINS
         .iter()

@@ -1,11 +1,32 @@
 //! Per-attempt question selection + option shuffling (anti-gaming).
 //!
-//! A draw picks a difficulty-stratified subset of a bank's questions and, for
-//! each selected question, a shuffled option order — both deterministic in the
-//! attempt `seed` so grading can reproduce them. Because every attempt uses a
-//! fresh seed, no two attempts present the same questions in the same order.
+//! A draw picks a stratified subset of a bank's questions and, for each
+//! selected question, a shuffled option order — both deterministic in the
+//! attempt `seed`. Because every attempt uses a fresh seed, no two attempts
+//! present the same questions in the same order.
+//!
+//! # Two axes, not one
+//!
+//! Stratification spans a **(Bloom level, difficulty)** grid rather than
+//! difficulty alone. The two measure different things: difficulty is how hard
+//! an item is, a Bloom level is what kind of thinking it demands. A learner
+//! who can recall every fact but cannot apply any of them should not be able
+//! to draw a whole attempt from the `remember` row and pass — spanning both
+//! axes is what stops that.
+//!
+//! When every item shares one Bloom level the grid collapses to a single row
+//! and this behaves exactly as difficulty-only stratification did.
+//!
+//! # Changing the draw is safe
+//!
+//! An attempt persists its `question_ids` and `option_orders`; grading reads
+//! those back rather than re-deriving them from the seed. So the algorithm
+//! here can change without invalidating attempts already in flight.
+
+use std::collections::BTreeMap;
 
 use super::{shuffle, SplitMix64};
+use crate::domain::bloom::BloomLevel;
 
 /// Minimal metadata the randomizer needs about a bank question.
 #[derive(Debug, Clone, PartialEq)]
@@ -13,6 +34,10 @@ pub struct QuestionMeta {
     pub id: String,
     pub difficulty: u8,
     pub option_count: usize,
+    /// Cognitive level. Items authored before this axis existed default to
+    /// [`BloomLevel::Apply`], which puts them all in one row — the previous
+    /// behaviour.
+    pub bloom: BloomLevel,
 }
 
 /// The result of a draw: which questions (in served order) and, per question,
@@ -24,36 +49,64 @@ pub struct Draw {
     pub option_orders: Vec<Vec<usize>>,
 }
 
-/// Draw up to `count` questions, stratified across difficulty buckets so the
-/// set spans easy→hard rather than clustering, then shuffle each question's
-/// options. Deterministic in `seed`.
+/// Draw up to `count` questions, stratified across a (Bloom level,
+/// difficulty) grid so the set spans both axes rather than clustering, then
+/// shuffle each question's options. Deterministic in `seed`.
 pub fn draw(questions: &[QuestionMeta], count: usize, seed: u64) -> Draw {
     let mut rng = SplitMix64(seed);
 
-    // Bucket by difficulty (1..=5), shuffle within each bucket.
-    let mut buckets: Vec<Vec<&QuestionMeta>> = vec![Vec::new(); 6];
+    // Group into Bloom rows, each row holding its difficulty buckets.
+    // BTreeMaps throughout: iteration order must be fixed or the draw stops
+    // being reproducible for a seed.
+    let mut rows: BTreeMap<u8, BTreeMap<u8, Vec<&QuestionMeta>>> = BTreeMap::new();
     for q in questions {
-        let d = (q.difficulty.min(5)) as usize;
-        buckets[d].push(q);
+        rows.entry(q.bloom.rank())
+            .or_default()
+            .entry(q.difficulty.min(5))
+            .or_default()
+            .push(q);
     }
-    for b in buckets.iter_mut() {
-        shuffle(b, &mut rng);
+    for row in rows.values_mut() {
+        for bucket in row.values_mut() {
+            shuffle(bucket, &mut rng);
+        }
     }
 
-    // Round-robin across non-empty buckets (easy→hard) so the draw spreads
-    // difficulty, until we have `count` (or run out).
+    // Round-robin across Bloom rows *first*, taking one item per row per
+    // pass and advancing that row's difficulty cursor each time.
+    //
+    // Iterating a flat (bloom, difficulty) map instead would exhaust every
+    // difficulty within `remember` before reaching `understand`, so a short
+    // draw would sit entirely in the lowest Bloom level — precisely what
+    // this axis exists to prevent. Rows first means the first `n` picks span
+    // `n` distinct Bloom levels, while the cursor keeps difficulty spread
+    // inside each row.
+    let mut cursors: BTreeMap<u8, usize> = rows.keys().map(|&b| (b, 0usize)).collect();
     let mut selected: Vec<&QuestionMeta> = Vec::new();
     let want = count.min(questions.len());
     let mut progress = true;
+
     while selected.len() < want && progress {
         progress = false;
-        for b in buckets.iter_mut() {
+        for (bloom, row) in rows.iter_mut() {
             if selected.len() >= want {
                 break;
             }
-            if let Some(q) = b.pop() {
-                selected.push(q);
-                progress = true;
+            let difficulties: Vec<u8> = row.keys().copied().collect();
+            if difficulties.is_empty() {
+                continue;
+            }
+            let cursor = cursors.entry(*bloom).or_insert(0);
+
+            // Walk this row's difficulties from the cursor until one yields.
+            for step in 0..difficulties.len() {
+                let d = difficulties[(*cursor + step) % difficulties.len()];
+                if let Some(q) = row.get_mut(&d).and_then(|b| b.pop()) {
+                    selected.push(q);
+                    *cursor = (*cursor + step + 1) % difficulties.len();
+                    progress = true;
+                    break;
+                }
             }
         }
     }
@@ -78,6 +131,7 @@ pub fn draw(questions: &[QuestionMeta], count: usize, seed: u64) -> Draw {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::bloom::BloomLevel;
 
     fn bank(n: usize) -> Vec<QuestionMeta> {
         (0..n)
@@ -85,8 +139,26 @@ mod tests {
                 id: format!("q{i}"),
                 difficulty: (i % 5 + 1) as u8,
                 option_count: 4,
+                bloom: BloomLevel::Apply,
             })
             .collect()
+    }
+
+    /// A bank spanning both axes: Bloom level cycles independently of
+    /// difficulty, so the grid has many populated cells.
+    fn graded_bank(n: usize) -> Vec<QuestionMeta> {
+        (0..n)
+            .map(|i| QuestionMeta {
+                id: format!("q{i}"),
+                difficulty: (i % 5 + 1) as u8,
+                option_count: 4,
+                bloom: BloomLevel::ALL[i % BloomLevel::ALL.len()],
+            })
+            .collect()
+    }
+
+    fn bloom_of(id: &str, bank: &[QuestionMeta]) -> BloomLevel {
+        bank.iter().find(|q| q.id == id).unwrap().bloom
     }
 
     #[test]
@@ -150,5 +222,71 @@ mod tests {
             diffs.len() >= 3,
             "draw should span >= 3 difficulty levels, got {diffs:?}"
         );
+    }
+
+    #[test]
+    fn stratifies_across_bloom_levels() {
+        // The reason the second axis exists: an attempt must not be drawable
+        // entirely from the `remember` row.
+        let qs = graded_bank(36);
+        let d = draw(&qs, 6, 99);
+        let levels: std::collections::HashSet<BloomLevel> =
+            d.question_ids.iter().map(|id| bloom_of(id, &qs)).collect();
+        assert!(
+            levels.len() >= 3,
+            "draw should span >= 3 Bloom levels, got {levels:?}"
+        );
+    }
+
+    #[test]
+    fn spans_both_axes_at_once() {
+        let qs = graded_bank(36);
+        let d = draw(&qs, 6, 5);
+        let cells: std::collections::HashSet<(BloomLevel, u8)> = d
+            .question_ids
+            .iter()
+            .map(|id| {
+                let q = qs.iter().find(|q| &q.id == id).unwrap();
+                (q.bloom, q.difficulty)
+            })
+            .collect();
+        assert_eq!(
+            cells.len(),
+            d.question_ids.len(),
+            "each drawn item should come from a distinct grid cell: {cells:?}"
+        );
+    }
+
+    #[test]
+    fn uniform_bloom_still_stratifies_by_difficulty() {
+        // With one Bloom level the grid collapses to a single row, and the
+        // draw must behave exactly as difficulty-only stratification did.
+        let qs = bank(25);
+        let d = draw(&qs, 5, 99);
+        let diffs: std::collections::HashSet<u8> = d
+            .question_ids
+            .iter()
+            .map(|id| qs.iter().find(|q| &q.id == id).unwrap().difficulty)
+            .collect();
+        assert!(
+            diffs.len() >= 3,
+            "collapsing to one Bloom row must not lose difficulty spread, got {diffs:?}"
+        );
+    }
+
+    #[test]
+    fn bloom_axis_does_not_break_determinism() {
+        let qs = graded_bank(30);
+        assert_eq!(draw(&qs, 7, 1234), draw(&qs, 7, 1234));
+    }
+
+    #[test]
+    fn draws_without_duplicates_across_the_grid() {
+        let qs = graded_bank(30);
+        let d = draw(&qs, 12, 3);
+        let mut ids = d.question_ids.clone();
+        ids.sort();
+        ids.dedup();
+        assert_eq!(ids.len(), d.question_ids.len(), "no item drawn twice");
     }
 }

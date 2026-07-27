@@ -4,7 +4,12 @@
 // to the Sentinel integrity session, raising the skill's confidence.
 
 import { useLocalApi } from './useLocalApi'
-import type { StartedAttempt, SubmittedAnswer, GradeResult } from '@/types'
+import type {
+  StartedAttempt,
+  SubmittedAnswer,
+  GradeResult,
+  GoalAssessmentPlan,
+} from '@/types'
 
 export function useAssessment() {
   const { invoke } = useLocalApi()
@@ -20,5 +25,11 @@ export function useAssessment() {
     return invoke<GradeResult>('assessment_grade', { attemptId, answers })
   }
 
-  return { startAttempt, grade }
+  /** Order a goal's skills by prerequisite and annotate each with whether it
+   *  can be assessed right now. Drives the goal-assessment sequence. */
+  function planGoal(goalSkillIds: string[]): Promise<GoalAssessmentPlan> {
+    return invoke<GoalAssessmentPlan>('assessment_plan_goal', { goalSkillIds })
+  }
+
+  return { startAttempt, grade, planGoal }
 }

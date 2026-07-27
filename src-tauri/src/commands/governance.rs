@@ -11,9 +11,12 @@
 use rusqlite::params;
 use tauri::State;
 
+use std::str::FromStr;
+
 use crate::cardano::onchain_queue;
 use crate::crypto::hash::entity_id;
 use crate::crypto::wallet;
+use crate::domain::bloom::BloomLevel;
 use crate::domain::governance::{
     DaoInfo, DaoMember, Election, ElectionNominee, ElectionVote, GovernanceAnnouncement,
     GovernanceEventType, OpenElectionParams, Proposal, ProposalVote, SubmitProposalParams,
@@ -98,16 +101,6 @@ const DEFAULT_VOTING_DAYS: i64 = 14;
 /// Supermajority threshold for proposal resolution (2/3).
 const SUPERMAJORITY_THRESHOLD: f64 = 2.0 / 3.0;
 
-/// Bloom's taxonomy proficiency levels in ascending order.
-const BLOOM_ORDER: &[&str] = &[
-    "remember",
-    "understand",
-    "apply",
-    "analyze",
-    "evaluate",
-    "create",
-];
-
 /// Check if a stake_address has at least `min_level` proficiency for any
 /// skill within the scope of the given DAO.
 ///
@@ -119,10 +112,25 @@ fn check_proficiency(
     dao_id: &str,
     min_level: &str,
 ) -> Result<(), String> {
-    let min_idx = BLOOM_ORDER
-        .iter()
-        .position(|&l| l == min_level)
-        .unwrap_or(0);
+    // The level ordering is `domain::bloom::BloomLevel`, shared with the
+    // assessment side so "at least analyze" means one thing app-wide.
+    //
+    // An unrecognised `min_level` falls back to the *weakest* level, which
+    // is what this check has always done. Note that is permissive: a typo in
+    // a DAO's configured threshold opens the gate rather than closing it.
+    // Preserved deliberately — tightening it would lock members out of DAOs
+    // already carrying a malformed parameter, so it is a migration, not a
+    // refactor.
+    let min_idx = BloomLevel::from_str(min_level)
+        .map(|l| l.rank() as usize)
+        .unwrap_or_else(|_| {
+            log::warn!(
+                "DAO {dao_id} has unrecognised proficiency level '{min_level}'; \
+                 treating as '{}' (most permissive)",
+                BloomLevel::ALL[0]
+            );
+            0
+        });
 
     // Find the DAO's scope (subject_field or subject) to determine which
     // skills are in scope.

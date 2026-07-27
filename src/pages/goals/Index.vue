@@ -4,18 +4,33 @@ import { useRouter } from 'vue-router'
 
 import { useGoals } from '@/composables/useGoals'
 import { useSettings } from '@/composables/useSettings'
-import { AppButton, AppModal, EmptyState, AppSpinner } from '@/components/ui'
+import { useLocalApi } from '@/composables/useLocalApi'
+import { useAssessment } from '@/composables/useAssessment'
+import { AppButton, AppInput, AppModal, EmptyState, AppSpinner } from '@/components/ui'
 import LearningPathView from '@/components/skills/LearningPathView.vue'
 import GoalPicker from '@/components/goals/GoalPicker.vue'
 import SkillBootstrapPanel from '@/components/skills/SkillBootstrapPanel.vue'
-import type { LearningPath, Goal } from '@/types'
+import type { LearningPath, Goal, GoalAssessmentStep } from '@/types'
 
 const router = useRouter()
 const { goals, removeGoal, pathFor, combinedPath } = useGoals()
+const { planGoal } = useAssessment()
+
+/** Turn a goal plan into a skill_id -> step map for LearningPathView. */
+function assessMap(steps: GoalAssessmentStep[]): Record<string, GoalAssessmentStep> {
+  const m: Record<string, GoalAssessmentStep> = {}
+  for (const s of steps) m[s.skill_id] = s
+  return m
+}
 
 const loading = ref(true)
 const paths = ref<Record<string, LearningPath>>({})
 const combined = ref<LearningPath | null>(null)
+// Per-skill assessability, keyed the same way as `paths`. `combinedAssess`
+// covers the combined view. Populated alongside the paths, best-effort — a
+// failed plan lookup just means no Assess button, never a broken page.
+const assess = ref<Record<string, Record<string, GoalAssessmentStep>>>({})
+const combinedAssess = ref<Record<string, GoalAssessmentStep>>({})
 // Set of expanded goal ids — each card opens/closes independently.
 const expanded = ref<Set<string>>(new Set())
 const showCombined = ref(false)
@@ -38,6 +53,23 @@ async function loadAll() {
     for (const [id, p] of entries) if (p) map[id] = p
     paths.value = map
     combined.value = goals.value.length > 0 ? await combinedPath().catch(() => null) : null
+
+    // Assessability per goal, and for the combined view. Best-effort: the
+    // paths already rendered, and a plan failure must not blank the page.
+    const assessEntries = await Promise.all(
+      goals.value.map(
+        async (t) =>
+          [t.id, await planGoal(t.goal_skill_ids).catch(() => null)] as const,
+      ),
+    )
+    const am: Record<string, Record<string, GoalAssessmentStep>> = {}
+    for (const [id, plan] of assessEntries) if (plan) am[id] = assessMap(plan.steps)
+    assess.value = am
+
+    const allGoalSkills = [...new Set(goals.value.flatMap((t) => t.goal_skill_ids))]
+    const combinedPlan =
+      allGoalSkills.length > 0 ? await planGoal(allGoalSkills).catch(() => null) : null
+    combinedAssess.value = combinedPlan ? assessMap(combinedPlan.steps) : {}
   } finally {
     loading.value = false
   }
@@ -145,7 +177,7 @@ const dash = computed(() => 2 * Math.PI * 20)
           {{ $t('goals.index.skillsAcrossGoals', { earned: combined.earned_count, total: combined.total, goals: goals.length }) }}
         </span>
       </div>
-      <LearningPathView :path="combined" />
+      <LearningPathView :path="combined" :assess="combinedAssess" />
     </div>
 
     <!-- Per-goal cards -->
@@ -195,7 +227,7 @@ const dash = computed(() => 2 * Math.PI * 20)
         </div>
 
         <div v-if="isExpanded(t.id) && paths[t.id]" class="mt-4 border-t border-border pt-4">
-          <LearningPathView :path="paths[t.id]!" />
+          <LearningPathView :path="paths[t.id]!" :assess="assess[t.id]" />
         </div>
       </div>
     </div>

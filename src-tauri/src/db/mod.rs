@@ -1,4 +1,6 @@
 pub mod schema;
+#[cfg(test)]
+mod schema_tests;
 pub mod seed;
 pub mod seed_content;
 pub mod seed_plugin_demo;

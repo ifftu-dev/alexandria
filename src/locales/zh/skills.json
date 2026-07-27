@@ -125,6 +125,8 @@
     "statusLocked": "已锁定",
     "goalBadge": "★ 目标",
     "empty": "没有可学的了——此目标中的一切你都已经证明。",
-    "noCourse": "还没有课程涵盖这项。"
+    "noCourse": "还没有课程涵盖这项。",
+    "assess": "Assess",
+    "cooldownUntil": "in {when}"
   }
 }

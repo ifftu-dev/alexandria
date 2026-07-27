@@ -125,6 +125,8 @@
     "statusLocked": "Locked",
     "goalBadge": "★ goal",
     "empty": "Nothing to learn — you've already proven everything in this goal.",
-    "noCourse": "No course covers this yet."
+    "noCourse": "No course covers this yet.",
+    "assess": "Assess",
+    "cooldownUntil": "in {when}"
   }
 }
