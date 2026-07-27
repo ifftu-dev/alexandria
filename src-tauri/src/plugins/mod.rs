@@ -22,11 +22,11 @@ pub mod irl_review;
 pub mod manifest;
 pub mod registry;
 pub mod verifier;
-// The grader runtime runs wherever Cranelift can emit native code — desktop
-// and Android. iOS is the sole exception: the platform forbids JIT, so the
-// module is omitted there (`grader` cfg, emitted by build.rs) and the IPC
-// layer exposes a stub that returns a `GraderUnavailable` error. Native
-// built-in graders (MCQ, essay) continue to work everywhere, iOS included.
-// Wasmtime itself supports aarch64-linux-android directly.
+// The grader runtime runs on every platform (`grader` cfg, emitted
+// unconditionally by build.rs). Desktop and Android use the Cranelift JIT;
+// iOS uses Wasmtime's Pulley bytecode interpreter because the platform forbids
+// JIT — the interpreter/JIT choice lives entirely in `grader_config`. Wasmtime
+// supports aarch64-linux-android directly. Native built-in graders (MCQ, essay)
+// also work everywhere.
 #[cfg(grader)]
 pub mod wasm_runtime;

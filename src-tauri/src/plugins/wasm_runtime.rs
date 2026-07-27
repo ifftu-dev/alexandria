@@ -48,8 +48,8 @@ pub const DEFAULT_MEMORY_MAX_BYTES: usize = 128 * 1024 * 1024; // 128 MiB
 // ~50B wasm instructions. Still bounded (a runaway loop traps in ~a second of
 // JITted execution), but high enough for graders that run a whole language
 // engine inside wasm across several test cases — the TypeScript grader spends
-// ~1.9B type-stripping with sucrase-in-Boa, and the C/C++ grader spends ~4.6B
-// per test interpreting with JSCPP-in-Boa (re-parsed per test).
+// ~1.9B type-stripping with sucrase-in-Boa, and the C/C++ grader spends ~3.6B
+// loading JSCPP-in-Boa once per submission plus ~1B per test case interpreting.
 pub const DEFAULT_FUEL: u64 = 50_000_000_000;
 pub const DEFAULT_OUTPUT_MAX_BYTES: usize = 1024 * 1024; // 1 MiB
 
@@ -112,6 +112,22 @@ pub struct GraderRuntime {
 pub fn grader_config() -> Config {
     let mut config = Config::new();
 
+    // iOS forbids JIT (W^X): Cranelift's native machine code can never be
+    // mapped executable, so the default native backend cannot run here.
+    // Target Pulley instead — Wasmtime's portable bytecode interpreter, which
+    // needs no executable pages. Cranelift still compiles the grader wasm, only
+    // it emits Pulley bytecode rather than native code, so every determinism
+    // setting below applies unchanged and prior investigation confirmed
+    // byte-identical fuel consumption and scores against the native path.
+    //
+    // Compile-time cfg rather than a runtime branch: the choice is fixed per
+    // platform (iOS = interpreter, everything else = JIT) and this keeps the
+    // native path zero-cost. `pulley64` is the 64-bit little-endian Pulley
+    // target, matching aarch64 iOS. The `pulley` Cargo feature (enabled for
+    // iOS in Cargo.toml) is what makes this target runnable.
+    #[cfg(target_os = "ios")]
+    apply_ios_tuning(&mut config);
+
     // Determinism — the most important config in this whole module.
     // NaN canonicalization makes float operations bit-identical across
     // platforms (Wasmtime would otherwise be free to leave NaN payloads
@@ -134,6 +150,40 @@ pub fn grader_config() -> Config {
     config
 }
 
+/// Everything iOS needs on top of the shared determinism config: the Pulley
+/// interpreter backend, plus memory settings that fit inside what iOS will
+/// actually hand out.
+///
+/// iOS forbids JIT (W^X), so Cranelift's native machine code can never be mapped
+/// executable. `pulley64` is Wasmtime's portable bytecode interpreter — Cranelift
+/// still compiles the grader, it just emits Pulley bytecode instead of native
+/// code, so every determinism setting still applies.
+///
+/// iOS also will not hand out a multi-gigabyte virtual reservation. Wasmtime
+/// defaults to reserving 4GiB per linear memory (plus a 32MiB guard region) so
+/// generated code can skip explicit bounds checks and rely on signal-based
+/// traps. On iOS that reservation fails outright and instantiation dies with
+/// `mmap failed to reserve 0x100000000 bytes` — the grader compiles fine and
+/// then cannot start. So: reserve only what a grader is allowed to use, drop the
+/// guard region, and use explicit bounds checks. Pulley bounds-checks in
+/// software anyway, so this costs nothing on this backend. Memory may relocate
+/// on growth, which is safe — no raw host pointer outlives a grade.
+///
+/// Determinism is untouched. These are allocation-strategy knobs, not semantics,
+/// and fuel is metered per wasm instruction (bounds checks are not wasm
+/// instructions). `pulley_matches_native_fuel_and_score` runs this exact
+/// function's output against the native config to keep that honest.
+#[cfg(any(target_os = "ios", test))]
+fn apply_ios_tuning(config: &mut Config) {
+    config
+        .target("pulley64")
+        .expect("pulley64 is a supported Wasmtime target");
+    config.memory_reservation(DEFAULT_MEMORY_MAX_BYTES as u64);
+    config.memory_guard_size(0);
+    config.memory_may_move(true);
+    config.signals_based_traps(false);
+}
+
 /// Ahead-of-time compile a grader `wasm` into a serialized `.cwasm` artifact
 /// (native code) using the canonical grader config. Called at plugin *install*
 /// time so the first `grade` of a session is a fast `deserialize` (mmap of
@@ -154,8 +204,16 @@ pub fn precompile_grader(wasm: &[u8]) -> Result<Vec<u8>, String> {
 
 impl GraderRuntime {
     pub fn new() -> Result<Self, String> {
-        let engine = Engine::new(&grader_config())
-            .map_err(|e| format!("failed to create wasmtime engine: {e}"))?;
+        Self::with_config(grader_config())
+    }
+
+    /// Build a runtime on an explicit `Config`. Production always goes through
+    /// [`GraderRuntime::new`] so there is exactly one determinism config; this
+    /// exists so tests can stand up a second engine pinned to a different
+    /// compilation target (native vs `pulley64`) and prove the two agree.
+    pub fn with_config(config: Config) -> Result<Self, String> {
+        let engine =
+            Engine::new(&config).map_err(|e| format!("failed to create wasmtime engine: {e}"))?;
 
         Ok(Self {
             engine,
@@ -184,6 +242,26 @@ impl GraderRuntime {
         input_json: &[u8],
         budgets: GraderBudgets,
     ) -> Result<ScoreRecord, String> {
+        self.grade_with_fuel(grader_cid, wasm_bytes, cwasm_path, input_json, budgets)
+            .map(|(record, _fuel)| record)
+    }
+
+    /// As [`GraderRuntime::grade`], but also reports the fuel the grader burned.
+    ///
+    /// Fuel is metered by Wasmtime at the *wasm instruction* level, not the host
+    /// machine level, so the count is a backend- and machine-independent
+    /// fingerprint of the execution. Two runs that consume identical fuel
+    /// executed the same instruction sequence — which is what makes it the
+    /// check for "the Pulley interpreter and the native JIT agree" (see
+    /// `pulley_matches_native_fuel_and_score`).
+    pub fn grade_with_fuel(
+        &self,
+        grader_cid: &str,
+        wasm_bytes: &[u8],
+        cwasm_path: Option<&Path>,
+        input_json: &[u8],
+        budgets: GraderBudgets,
+    ) -> Result<(ScoreRecord, u64), String> {
         let module = self.load_module(grader_cid, wasm_bytes, cwasm_path)?;
 
         // Each grade gets its own Store — no shared state between
@@ -274,7 +352,14 @@ impl GraderRuntime {
             ));
         }
 
-        Ok(record)
+        // Fuel remaining is only unavailable if fuel metering were off, which
+        // `grader_config` guarantees it is not; saturate rather than unwrap so a
+        // future config change can never panic a grade.
+        let fuel_consumed = budgets
+            .fuel
+            .saturating_sub(store.get_fuel().unwrap_or(budgets.fuel));
+
+        Ok((record, fuel_consumed))
     }
 
     fn load_module(
@@ -727,6 +812,77 @@ mod tests {
             "console.log('hi ' + readLine())",
         );
         assert_eq!(r.score, 1.0);
+    }
+
+    /// iOS runs graders on Wasmtime's Pulley interpreter instead of the native
+    /// Cranelift JIT (Apple forbids W^X), and credential trust depends on both
+    /// backends agreeing exactly — a learner must not get a different score for
+    /// the same submission because they used an iPhone.
+    ///
+    /// This proves it on the host: compile and run the real JS grader twice,
+    /// once through the shipped native config and once through an otherwise
+    /// identical config pinned to `pulley64`, then compare score *and* fuel.
+    /// Fuel is metered per wasm instruction, so equal fuel means both backends
+    /// executed the same instruction sequence. Because Pulley bytecode
+    /// execution is host-independent, the pulley64 result obtained here is the
+    /// same one an iOS device produces — no device needed to catch a
+    /// divergence, and CI now guards it on every PR.
+    #[test]
+    fn pulley_matches_native_fuel_and_score() {
+        let cid = blake3::hash(EDITOR_JS_GRADER_WASM).to_hex().to_string();
+        let input = serde_json::to_vec(&serde_json::json!({
+            "version": "1",
+            "content": {
+                "tests": [{"stdin": "5", "expected_stdout": "25"}],
+                "grader_private": {"tests": [{"stdin": "9", "expected_stdout": "81"}]},
+            },
+            "submission": {"source": "const n = Number(readLine()); console.log(n * n)"},
+        }))
+        .unwrap();
+
+        let run = |config: Config| {
+            GraderRuntime::with_config(config)
+                .expect("runtime")
+                .grade_with_fuel(
+                    &cid,
+                    EDITOR_JS_GRADER_WASM,
+                    None,
+                    &input,
+                    GraderBudgets::default(),
+                )
+                .expect("grade succeeds")
+        };
+
+        // Native path: exactly what desktop and Android ship. Tests only ever
+        // build for the host, so `grader_config()` here is the native backend.
+        let (native_record, native_fuel) = run(grader_config());
+
+        // Interpreter path: byte-for-byte the config iOS ships, including the
+        // constrained memory reservation and explicit bounds checks — not just
+        // the pulley64 target — so this also guards against a memory knob
+        // perturbing results.
+        let mut pulley = grader_config();
+        apply_ios_tuning(&mut pulley);
+        let (pulley_record, pulley_fuel) = run(pulley);
+
+        assert_eq!(
+            native_record.score, pulley_record.score,
+            "score diverged between native ({}) and pulley ({})",
+            native_record.score, pulley_record.score
+        );
+        assert_eq!(
+            native_record.details, pulley_record.details,
+            "per-test details diverged between backends"
+        );
+        assert_eq!(
+            native_fuel, pulley_fuel,
+            "fuel diverged: native burned {native_fuel}, pulley burned {pulley_fuel} — \
+             the two backends did not execute the same instruction sequence"
+        );
+        assert!(
+            native_fuel > 0,
+            "grader burned no fuel — did it actually run?"
+        );
     }
 
     #[test]

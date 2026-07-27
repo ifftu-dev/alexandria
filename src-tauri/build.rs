@@ -21,19 +21,23 @@ fn main() {
     // on iOS (mDNS is disabled, and if-watch falls back to polling).
     let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
 
-    // The Wasmtime grader sandbox is available wherever Cranelift can emit
-    // native code at runtime — desktop and Android. iOS is the sole exception:
-    // the platform forbids JIT, so there is no executable-page path for
-    // Cranelift output. (This is a JIT restriction, not a Wasmtime one —
-    // Wasmtime supports aarch64-linux-android directly.)
+    // The Wasmtime grader sandbox now runs on every platform. Desktop and
+    // Android execute Cranelift's native machine code directly (JIT). iOS
+    // forbids JIT — Cranelift output can never be mapped executable — so iOS
+    // targets Wasmtime's Pulley bytecode interpreter instead (see
+    // `grader_config` in plugins/wasm_runtime.rs, and the iOS-only `pulley`
+    // feature on the wasmtime dependency in Cargo.toml). Pulley needs no
+    // executable pages, so the sandbox is available there too.
     //
-    // Gate on this named cfg rather than `desktop` so the distinction stays
-    // legible at every call site, and so the iOS-only carve-out is a single
-    // decision recorded here instead of ten scattered target checks.
+    // We keep the single named `grader` cfg — rather than a parallel
+    // `grader_pulley` — because the interpreter/JIT choice is entirely
+    // internal to `grader_config`: every call site (AppState field, IPC
+    // command, precompile step) is identical on all platforms. One cfg keeps
+    // that machinery in one shape everywhere; the only per-target branch is
+    // the Engine's target triple. `grader` is now set unconditionally and is
+    // retained as the compile-in switch for the whole grader subsystem.
     println!("cargo::rustc-check-cfg=cfg(grader)");
-    if target_os != "ios" {
-        println!("cargo:rustc-cfg=grader");
-    }
+    println!("cargo:rustc-cfg=grader");
 
     if target_os == "macos" {
         // Carbon provides IsSecureEventInputEnabled / DisableSecureEventInput,

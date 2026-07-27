@@ -20,11 +20,38 @@ use crate::plugins::{manifest, verifier};
 const MANIFEST_FILENAME: &str = "manifest.json";
 const SIGNATURE_FILENAME: &str = "manifest.sig";
 pub const GRADER_FILENAME: &str = "grader.wasm";
-/// Precompiled (`Engine::precompile_module`) sibling of `grader.wasm`, written
-/// at install time so the first grade of a session is a fast `deserialize`
-/// instead of a cranelift compile. Host/arch/wasmtime-version specific and
-/// always regenerable from `grader.wasm`, so it is never shipped or verified.
-pub const GRADER_CWASM_FILENAME: &str = "grader.cwasm";
+/// Backend tag baked into the `.cwasm` filename. iOS runs the Pulley
+/// interpreter; every other target runs the native Cranelift JIT. A `.cwasm`
+/// serialized by one backend fails to `deserialize` into the other (Wasmtime
+/// fingerprints the config into the artifact), so the two must not collide on
+/// one filename. Defined here (always compiled) rather than in the
+/// `#[cfg(grader)]` runtime module so the non-grader install path still builds.
+#[cfg(target_os = "ios")]
+const GRADER_BACKEND: &str = "pulley";
+#[cfg(not(target_os = "ios"))]
+const GRADER_BACKEND: &str = "cranelift";
+
+/// Filename for a grader's precompiled `.cwasm` sibling of `grader.wasm`,
+/// written at install time so the first grade of a session is a fast
+/// `deserialize` instead of a cranelift compile. Host/arch/wasmtime-version
+/// specific and always regenerable from `grader.wasm`, so it is never shipped
+/// or verified.
+///
+/// Made unique per OS + arch + backend: Wasmtime already refuses to
+/// `deserialize` an artifact whose config/arch doesn't match the engine, but a
+/// single fixed name means a plugins dir that ever holds another target's
+/// artifact (a cross-platform backup/restore, a synced dir, a dev machine
+/// building two targets) would deserialize-fail on every cold load, recompile,
+/// and rewrite it — only for the other target to do the same next time.
+/// Distinct names keep the fast `deserialize` path hot for each target.
+pub fn grader_cwasm_filename() -> String {
+    format!(
+        "grader.{}-{}-{}.cwasm",
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+        GRADER_BACKEND
+    )
+}
 
 pub const SOURCE_LOCAL_FILE: &str = "local_file";
 pub const SOURCE_BUILTIN: &str = "builtin";
@@ -46,13 +73,14 @@ pub struct InstallStats {
 /// a cranelift compile. Never fails the install — a precompile error just means
 /// grading falls back to JIT (and rewrites the `.cwasm`) on first use.
 fn write_precompiled_grader(dest_dir: &Path, grader_bytes: &[u8]) {
-    // The Wasmtime grader sandbox is gated on the `grader` cfg (everywhere
-    // except iOS). Where it's absent there is no runtime to precompile for,
-    // so skip — graded plugins simply aren't offered there.
+    // The Wasmtime grader sandbox is gated on the `grader` cfg, now set on
+    // every platform. The `#[cfg(not(grader))]` arm is retained only as a
+    // fallback for any future target that cannot run Pulley, where there is no
+    // runtime to precompile for.
     #[cfg(grader)]
     match crate::plugins::wasm_runtime::precompile_grader(grader_bytes) {
         Ok(cwasm) => {
-            if let Err(e) = fs::write(dest_dir.join(GRADER_CWASM_FILENAME), &cwasm) {
+            if let Err(e) = fs::write(dest_dir.join(grader_cwasm_filename()), &cwasm) {
                 log::warn!("failed to write precompiled grader: {e}");
             }
         }
@@ -330,7 +358,7 @@ fn refresh_builtin_files(
         // when it's missing, so we don't pay a multi-MB cranelift compile on
         // every startup. A wasmtime-version-stale artifact is caught + rebuilt
         // lazily at grade time instead.
-        if !dest_dir.join(GRADER_CWASM_FILENAME).exists() {
+        if !dest_dir.join(grader_cwasm_filename()).exists() {
             write_precompiled_grader(&dest_dir, grader_bytes);
         }
     }
@@ -759,6 +787,28 @@ mod tests {
         let db = Database::open_in_memory().expect("db");
         db.run_migrations().expect("migrations");
         db
+    }
+
+    #[test]
+    fn grader_cwasm_filename_is_target_scoped() {
+        let name = grader_cwasm_filename();
+        // grader.<os>-<arch>-<backend>.cwasm — carries this build's OS + arch so
+        // a cranelift artifact and a pulley artifact never share a filename.
+        assert!(name.starts_with("grader."), "unexpected prefix: {name}");
+        assert!(name.ends_with(".cwasm"), "unexpected suffix: {name}");
+        assert!(
+            name.contains(std::env::consts::OS) && name.contains(std::env::consts::ARCH),
+            "filename must encode os + arch: {name}"
+        );
+        let backend = if cfg!(target_os = "ios") {
+            "pulley"
+        } else {
+            "cranelift"
+        };
+        assert!(
+            name.contains(backend),
+            "filename must encode backend: {name}"
+        );
     }
 
     fn build_bundle(dir: &Path) -> (String, SigningKey) {

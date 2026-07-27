@@ -149,24 +149,39 @@ pub fn run(bytes: &[u8], lang: Lang) -> Vec<u8> {
 enum Exec<'a> {
     /// Plain JavaScript (already type-stripped for TS).
     Js(String),
-    /// C/C++ source + the JSCPP bundle to interpret it with.
-    Cpp(&'a str, &'a str),
+    /// C/C++ source plus a Boa context with JSCPP already loaded. The
+    /// interpreter is ~400KB of JavaScript, so parsing it per test case
+    /// dominated grading cost; it is loaded once here and reused.
+    Cpp {
+        source: &'a str,
+        ctx: Box<Context>,
+    },
 }
 
 /// Prepare a submission for execution: type-strip TypeScript once (sucrase is
-/// expensive in-engine), pass JavaScript through, and defer C/C++ to JSCPP.
-fn prepare<'a>(lang: Lang<'a>, source: &'a str) -> Result<Exec<'a>, String> {
+/// expensive in-engine) and load the C/C++ interpreter once (likewise).
+///
+/// `loop_limit` is baked into the prepared C/C++ context because Boa's runtime
+/// limits live on the context, which now outlives a single run.
+fn prepare<'a>(
+    lang: Lang<'a>,
+    source: &'a str,
+    loop_limit: Option<u64>,
+) -> Result<Exec<'a>, String> {
     match lang {
         Lang::Js => Ok(Exec::Js(source.to_string())),
         Lang::Ts(sucrase) => Ok(Exec::Js(transpile_ts(sucrase, source)?)),
-        Lang::Cpp(jscpp) => Ok(Exec::Cpp(source, jscpp)),
+        Lang::Cpp(jscpp) => Ok(Exec::Cpp {
+            source,
+            ctx: Box::new(load_jscpp(jscpp, loop_limit)?),
+        }),
     }
 }
 
-fn run_exec(exec: &Exec, stdin: &str, loop_limit: Option<u64>) -> RunResult {
+fn run_exec(exec: &mut Exec, stdin: &str, loop_limit: Option<u64>) -> RunResult {
     match exec {
         Exec::Js(js) => run_boa_js(js, stdin, loop_limit),
-        Exec::Cpp(source, jscpp) => run_boa_cpp(source, stdin, jscpp, loop_limit),
+        Exec::Cpp { source, ctx } => run_boa_cpp(source, stdin, ctx),
     }
 }
 
@@ -210,8 +225,11 @@ fn grade_inner(bytes: &[u8], lang: Lang) -> ScoreRecord {
         return grade_error("content has no test cases".to_string());
     }
 
-    // Prepare once (TypeScript type-strip is expensive), then run every test.
-    let exec = match prepare(lang, &input.submission.source) {
+    // Prepare once — the TypeScript type-strip and the C/C++ interpreter load
+    // are both expensive in-engine — then run every test against it. No Boa
+    // loop cap for grading, so the prepared context carries none either; the
+    // host's Wasmtime fuel budget bounds runtime deterministically.
+    let mut exec = match prepare(lang, &input.submission.source, None) {
         Ok(e) => e,
         Err(e) => return grade_error(e),
     };
@@ -219,9 +237,7 @@ fn grade_inner(bytes: &[u8], lang: Lang) -> ScoreRecord {
     let mut passed = 0u32;
     let mut cases = Vec::with_capacity(total as usize);
     for (i, (t, is_hidden)) in all.iter().enumerate() {
-        // No Boa loop cap for grading — the host's Wasmtime fuel budget bounds
-        // runtime deterministically.
-        let outcome = run_exec(&exec, &t.stdin, None);
+        let outcome = run_exec(&mut exec, &t.stdin, None);
         let ok = outcome.error.is_none() && outcome.stdout.trim() == t.expected_stdout.trim();
         if ok {
             passed += 1;
@@ -284,7 +300,10 @@ fn run_inner(bytes: &[u8], lang: Lang) -> RunResult {
             }
         }
     };
-    let exec = match prepare(lang, &input.source) {
+    // Live eval runs on the iframe main thread (no worker), so cap loop
+    // iterations to keep a runaway program from freezing the UI. Generous enough
+    // for real solutions; the credential grader (host, fuel-bounded) uses no cap.
+    let mut exec = match prepare(lang, &input.source, Some(LIVE_LOOP_LIMIT)) {
         Ok(e) => e,
         Err(e) => {
             return RunResult {
@@ -294,10 +313,7 @@ fn run_inner(bytes: &[u8], lang: Lang) -> RunResult {
             }
         }
     };
-    // Live eval runs on the iframe main thread (no worker), so cap loop
-    // iterations to keep a runaway program from freezing the UI. Generous enough
-    // for real solutions; the credential grader (host, fuel-bounded) uses no cap.
-    run_exec(&exec, &input.stdin, Some(LIVE_LOOP_LIMIT))
+    run_exec(&mut exec, &input.stdin, Some(LIVE_LOOP_LIMIT))
 }
 
 /// Boa loop-iteration cap for in-browser live eval. Real solutions stay well
@@ -363,10 +379,17 @@ fn run_boa_js(source: &str, stdin: &str, loop_limit: Option<u64>) -> RunResult {
 /// JSCPP uses — polyfill it before loading JSCPP.
 const SUBSTR_POLYFILL: &str = "if(!String.prototype.substr){Object.defineProperty(String.prototype,'substr',{value:function(start,length){var s=String(this);var len=s.length;start=Math.trunc(start)||0;if(start<0)start=Math.max(len+start,0);if(length===undefined)length=len-start;else{length=Math.trunc(length)||0;if(length<0)length=0;}return s.slice(start,start+length);},writable:true,configurable:true});}";
 
-/// Interpret C/C++ `source` with the bundled JSCPP running inside Boa. `stdin`
-/// is fed to the program; stdout is captured. A compile/runtime error from
-/// JSCPP (or a Boa loop-limit interruption) is returned in `error`.
-fn run_boa_cpp(source: &str, stdin: &str, jscpp: &str, loop_limit: Option<u64>) -> RunResult {
+/// Build a Boa context with the JSCPP interpreter loaded, ready to run C/C++
+/// sources. Parsing JSCPP is by far the most expensive step in C/C++ grading —
+/// roughly 400KB of JavaScript — so this happens once per submission rather
+/// than once per test case.
+///
+/// Reusing the context across test cases is safe because a C/C++ submission is
+/// *data* to JSCPP, not JavaScript evaluated in this context: the program's own
+/// variables live inside JSCPP's interpreter state, which `JSCPP.run` rebuilds
+/// per call. The only globals the harness touches (`__O`, `__ERR`) are reset at
+/// the start of every run.
+fn load_jscpp(jscpp: &str, loop_limit: Option<u64>) -> Result<Context, String> {
     let mut ctx = Context::default();
     if let Some(limit) = loop_limit {
         ctx.runtime_limits_mut().set_loop_iteration_limit(limit);
@@ -375,13 +398,15 @@ fn run_boa_cpp(source: &str, stdin: &str, jscpp: &str, loop_limit: Option<u64>) 
     if ctx.eval(Source::from_bytes(prelude.as_bytes())).is_err()
         || ctx.eval(Source::from_bytes(jscpp.as_bytes())).is_err()
     {
-        return RunResult {
-            stdout: String::new(),
-            stderr: String::new(),
-            error: Some("C/C++ runtime failed to load".to_string()),
-        };
+        return Err("C/C++ runtime failed to load".to_string());
     }
+    Ok(ctx)
+}
 
+/// Interpret C/C++ `source` in a context [`load_jscpp`] already prepared.
+/// `stdin` is fed to the program; stdout is captured. A compile/runtime error
+/// from JSCPP (or a Boa loop-limit interruption) is returned in `error`.
+fn run_boa_cpp(source: &str, stdin: &str, ctx: &mut Context) -> RunResult {
     let src_lit = serde_json::to_string(source).unwrap_or_else(|_| "\"\"".to_string());
     let stdin_lit = serde_json::to_string(stdin).unwrap_or_else(|_| "\"\"".to_string());
     let harness = format!(
@@ -395,8 +420,8 @@ fn run_boa_cpp(source: &str, stdin: &str, jscpp: &str, loop_limit: Option<u64>) 
         .err()
         .map(|e| e.to_string());
 
-    let stdout = read_global(&mut ctx, "__O");
-    let jscpp_err = read_global(&mut ctx, "__ERR");
+    let stdout = read_global(ctx, "__O");
+    let jscpp_err = read_global(ctx, "__ERR");
     let error = if !jscpp_err.is_empty() {
         Some(jscpp_err)
     } else {
