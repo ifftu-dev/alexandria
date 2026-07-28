@@ -11,15 +11,26 @@
 //! the software they are running. Only the resolver that consumes the snapshot
 //! is enterprise-licensed. See `docs/enterprise-boundary.md`.
 
+use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::domain::vc::entitlement::{parse_entitlement_with, TRUSTED_ENTITLEMENT_ISSUERS};
 use crate::domain::vc::verify::verify_credential;
 use crate::domain::vc::{
-    AcceptanceDecision, CredentialType, VerifiableCredential, VerificationPolicy,
+    AcceptanceDecision, CredentialType, RoleClaim, VerifiableCredential, VerificationPolicy,
 };
 use crate::AppState;
+
+/// The `role` token on a credential that makes its subject a member of the
+/// issuing organisation.
+///
+/// Deliberately an ordinary [`CredentialType::RoleCredential`] rather than a
+/// dedicated class: it is the same shape as the guardianship credential
+/// (`commands/guardian.rs` issues `role: "guardian"`, `scope: <issuer DID>`),
+/// and reusing it means no new credential class, no aggregation weight to
+/// decide, and no migration.
+pub const ORG_MEMBER_ROLE: &str = "member";
 
 /// What the frontend's `EntitlementSnapshot` needs from the backend.
 ///
@@ -68,6 +79,139 @@ fn entitlement_policy() -> VerificationPolicy {
     }
 }
 
+/// The policy a membership credential must satisfy.
+///
+/// A membership is an ordinary role credential, so it gets the ordinary
+/// treatment: expired, revoked, suspended or superseded memberships do not
+/// carry an entitlement. That is what lets an organisation take a seat back by
+/// revoking one credential, using the status-list path that already exists.
+fn membership_policy() -> VerificationPolicy {
+    VerificationPolicy {
+        reject_expired: true,
+        require_integrity_anchor: false,
+        allowed_types: vec![CredentialType::RoleCredential],
+        reject_suspended: true,
+        reject_superseded: true,
+    }
+}
+
+/// This device's DID, or `None` on a profile that has not established one.
+///
+/// `None` is not an error and must not be treated as "skip the check" — a
+/// device with no identity is entitled to nothing.
+fn local_did(conn: &rusqlite::Connection) -> Option<String> {
+    conn.query_row(
+        "SELECT value FROM app_settings WHERE key = 'identity.local_did'",
+        [],
+        |r| r.get::<_, String>(0),
+    )
+    .optional()
+    .ok()
+    .flatten()
+    .filter(|did| !did.is_empty())
+}
+
+/// Role credentials naming `subject_did` as their subject.
+///
+/// Filtered again by the caller against the credential body — see
+/// [`binds_to_holder`] for why the denormalized column alone is not enough.
+fn stored_memberships(
+    conn: &rusqlite::Connection,
+    subject_did: &str,
+) -> Result<Vec<VerifiableCredential>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT signed_vc_json FROM credentials \
+             WHERE credential_type = ?1 AND subject_did = ?2",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(
+            rusqlite::params![CredentialType::RoleCredential.as_str(), subject_did],
+            |r| r.get::<_, String>(0),
+        )
+        .map_err(|e| e.to_string())?;
+
+    let mut out = Vec::new();
+    for row in rows {
+        let json = row.map_err(|e| e.to_string())?;
+        if let Ok(vc) = serde_json::from_str::<VerifiableCredential>(&json) {
+            out.push(vc);
+        }
+    }
+    Ok(out)
+}
+
+/// Whether `entitlement` was issued to *this* device's holder.
+///
+/// Without this an entitlement is a bearer token: `verify_credential`'s subject
+/// check only asserts the subject looks like a DID (`starts_with("did:")`), so
+/// a credential copied to a second machine would unlock there too. One
+/// purchased seat would unlock unlimited devices.
+///
+/// Two routes bind, matching the two ways an entitlement is sold.
+///
+/// **Per-seat.** The entitlement names this device's holder directly.
+///
+/// **Per-org.** The entitlement names an *organisation* DID, which can never
+/// equal a user's DID, so the device must additionally hold a membership
+/// credential issued by that organisation. Every one of these must hold:
+///
+/// * the membership's subject is this device's holder — it is about *me*;
+/// * the membership's **issuer** is the entitlement's **subject** — signed by
+///   the very organisation the entitlement names;
+/// * its `scope` names that same organisation, so a membership cannot be
+///   replayed against a different one;
+/// * it independently verifies — unexpired, unrevoked, unsuspended.
+///
+/// The issuer condition is what makes this cryptographic rather than a string
+/// comparison. An organisation DID is a `did:key`, which is self-describing, so
+/// verifying the membership's signature checks it against the exact key the
+/// entitlement names as its subject. Forging membership needs the
+/// organisation's private key.
+///
+/// Seats are deliberately not counted here. A device cannot see the other
+/// members, so it cannot know the organisation is over its limit; that stays
+/// server-side, as `useEntitlements.ts` already says.
+fn binds_to_holder(
+    conn: &rusqlite::Connection,
+    entitlement: &VerifiableCredential,
+    local_did: &str,
+    now: &str,
+) -> bool {
+    let org_or_user = entitlement.credential_subject.id.as_str();
+
+    if org_or_user == local_did {
+        return true;
+    }
+
+    let policy = membership_policy();
+    for vc in stored_memberships(conn, local_did).unwrap_or_default() {
+        // Re-check the subject against the credential body. `subject_did` is a
+        // denormalized column, and a row whose column disagrees with the signed
+        // payload must not be able to bind an entitlement to the wrong holder.
+        if vc.credential_subject.id.as_str() != local_did {
+            continue;
+        }
+        if vc.issuer.as_str() != org_or_user {
+            continue;
+        }
+        let Some(role) = RoleClaim::extract(&vc.credential_subject) else {
+            continue;
+        };
+        if role.role != ORG_MEMBER_ROLE || role.scope.as_deref() != Some(org_or_user) {
+            continue;
+        }
+        if verify_credential(conn, &vc, now, &policy).acceptance_decision
+            == AcceptanceDecision::Accept
+        {
+            return true;
+        }
+    }
+
+    false
+}
+
 /// Every stored credential typed as an entitlement, newest first.
 ///
 /// Ordering matters: `org_id` and `plan` are single-valued in the snapshot,
@@ -100,18 +244,25 @@ fn stored_entitlements(conn: &rusqlite::Connection) -> Result<Vec<VerifiableCred
 
 /// Resolve the current entitlement snapshot.
 ///
-/// A credential counts only if it clears **both** gates:
+/// A credential counts only if it clears **all three** gates:
 ///
-/// 1. [`verify_credential`] accepts it — signature, issuer resolution, subject
-///    binding, expiry, revocation, suspension, supersession.
-/// 2. [`parse_entitlement`] accepts it — the issuer is one this build was
+/// 1. [`verify_credential`] accepts it — signature, issuer resolution, expiry,
+///    revocation, suspension, supersession.
+/// 2. [`parse_entitlement_with`] accepts it — the issuer is one this build was
 ///    compiled to trust.
+/// 3. [`binds_to_holder`] accepts it — it was issued to *this* device's holder,
+///    directly or through organisation membership.
 ///
-/// The second gate is not redundant. Verification proves a credential was
-/// signed by whoever its issuer DID *names*, and a `did:key` is
-/// self-describing, so anyone can mint one and self-issue a credential that
-/// verifies perfectly. Without the issuer pin the first gate alone would grant
-/// every feature to anybody who asked.
+/// None of the three is redundant.
+///
+/// Gate 2 exists because verification proves a credential was signed by whoever
+/// its issuer DID *names*, and a `did:key` is self-describing, so anyone can
+/// mint one and self-issue a credential that verifies perfectly. Without the
+/// issuer pin, gate 1 alone would grant every feature to anybody who asked.
+///
+/// Gate 3 exists because verification's subject check only asserts the subject
+/// looks like a DID at all. Without it, an entitlement is a bearer token: copy
+/// the file to another machine and it unlocks there too.
 pub fn get_entitlement_snapshot_impl(
     conn: &rusqlite::Connection,
     now: &str,
@@ -130,6 +281,16 @@ fn snapshot_with_trusted(
     now: &str,
     trusted: &[&str],
 ) -> Result<EntitlementSnapshot, String> {
+    // No identity, nothing to bind an entitlement to. Returning early rather
+    // than falling through keeps a fresh profile from being a hole in gate 3.
+    let Some(holder) = local_did(conn) else {
+        return Ok(EntitlementSnapshot {
+            features: Vec::new(),
+            org_id: None,
+            plan: None,
+        });
+    };
+
     let policy = entitlement_policy();
     let mut features: Vec<String> = Vec::new();
     let mut org_id = None;
@@ -143,6 +304,9 @@ fn snapshot_with_trusted(
         let Ok(claim) = parse_entitlement_with(&vc, trusted) else {
             continue;
         };
+        if !binds_to_holder(conn, &vc, &holder, now) {
+            continue;
+        }
 
         // Newest-first iteration means the first survivor is the newest.
         if org_id.is_none() {
@@ -187,6 +351,7 @@ mod tests {
     use crate::crypto::did::derive_did_key;
     use crate::crypto::did::{Did, VerificationMethodRef};
     use crate::db::Database;
+    use crate::domain::vc::entitlement::is_trusted_issuer_in;
     use crate::domain::vc::sign::{sign_credential, UnsignedCredential};
     use crate::domain::vc::{EntitlementClaim, Proof};
     use ed25519_dalek::SigningKey;
@@ -206,11 +371,12 @@ mod tests {
     fn store_entitlement(
         db: &Database,
         issuer_key: &SigningKey,
+        subject: &Did,
         features: &[&str],
         valid_until: Option<&str>,
     ) -> VerifiableCredential {
         let issuer = derive_did_key(issuer_key);
-        let subject = Did("did:key:z6MkOrgSubject".into());
+        let subject = subject.clone();
         let claim = EntitlementClaim {
             org_id: "org-1".into(),
             entitlement_plan: "enterprise".into(),
@@ -219,7 +385,11 @@ mod tests {
         };
         let vc = VerifiableCredential {
             context: vec!["https://www.w3.org/ns/credentials/v2".into()],
-            id: Some(format!("urn:test:entitlement:{}", features.join("-"))),
+            id: Some(format!(
+                "urn:test:entitlement:{}:{}",
+                subject.as_str(),
+                features.join("-")
+            )),
             type_: vec![
                 "VerifiableCredential".into(),
                 CredentialType::EntitlementCredential.as_str().to_string(),
@@ -273,10 +443,122 @@ mod tests {
         signed
     }
 
+    /// The DID this device's holder uses in these tests.
+    const LOCAL_DID: &str = "did:key:z6MkThisDeviceHolder";
+    fn holder() -> Did {
+        Did(LOCAL_DID.into())
+    }
+
+    /// The organisation's signing key. Route B verifies a real signature
+    /// against the DID the entitlement names as its subject, so the
+    /// organisation DID has to be a genuine `did:key` — a placeholder string
+    /// would make the membership unverifiable and the test vacuous.
+    fn org_key() -> SigningKey {
+        key("acme-org")
+    }
+
+    /// An organisation DID. Never equal to `LOCAL_DID`, which is the whole
+    /// reason route B exists.
+    fn org() -> Did {
+        derive_did_key(&org_key())
+    }
+
     fn open_db() -> Database {
         let db = Database::open_in_memory().unwrap();
         db.run_migrations().unwrap();
+        set_local_did(&db, LOCAL_DID);
         db
+    }
+
+    /// A database with no established identity, to prove that is not a hole.
+    fn open_db_without_identity() -> Database {
+        let db = Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+        db
+    }
+
+    fn set_local_did(db: &Database, did: &str) {
+        db.conn()
+            .execute(
+                "INSERT INTO app_settings (key, value, scope, updated_at) \
+                 VALUES ('identity.local_did', ?1, 'device', datetime('now')) \
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                rusqlite::params![did],
+            )
+            .unwrap();
+    }
+
+    /// Sign and store a membership role credential: `org_key` (the
+    /// organisation) attesting that `subject` is one of its members.
+    ///
+    /// `scope` is a parameter rather than derived so a test can build the
+    /// mismatched-scope replay case.
+    fn store_membership(
+        db: &Database,
+        org_key: &SigningKey,
+        subject: &Did,
+        role: &str,
+        scope: &str,
+        valid_until: Option<&str>,
+    ) -> VerifiableCredential {
+        let issuer = derive_did_key(org_key);
+        let claim = RoleClaim {
+            role: role.to_string(),
+            scope: Some(scope.to_string()),
+        };
+        let vc = VerifiableCredential {
+            context: vec!["https://www.w3.org/ns/credentials/v2".into()],
+            id: Some(format!(
+                "urn:test:membership:{}:{}:{}",
+                issuer.as_str(),
+                subject.as_str(),
+                scope
+            )),
+            type_: vec![
+                "VerifiableCredential".into(),
+                CredentialType::RoleCredential.as_str().to_string(),
+            ],
+            issuer: issuer.clone(),
+            valid_from: "2026-01-01T00:00:00Z".into(),
+            valid_until: valid_until.map(str::to_string),
+            credential_subject: crate::domain::vc::CredentialSubject {
+                id: subject.clone(),
+                properties: claim.into_properties(),
+            },
+            credential_status: None,
+            terms_of_use: None,
+            witness: None,
+            integrity: None,
+            proof: Proof {
+                type_: "Ed25519Signature2020".into(),
+                created: "2026-01-01T00:00:00Z".into(),
+                verification_method: VerificationMethodRef(format!("{}#key-1", issuer.as_str())),
+                proof_purpose: "assertionMethod".into(),
+                jws: String::new(),
+            },
+        };
+        let signed =
+            sign_credential(UnsignedCredential { credential: vc }, org_key, &issuer).unwrap();
+
+        db.conn()
+            .execute(
+                "INSERT INTO credentials \
+                 (id, issuer_did, subject_did, credential_type, claim_kind, \
+                  issuance_date, integrity_hash, signed_vc_json) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                rusqlite::params![
+                    signed.id.clone().unwrap(),
+                    signed.issuer.as_str(),
+                    signed.credential_subject.id.as_str(),
+                    CredentialType::RoleCredential.as_str(),
+                    "role",
+                    signed.valid_from,
+                    "test-integrity-hash",
+                    serde_json::to_string(&signed).unwrap(),
+                ],
+            )
+            .unwrap();
+        signed
     }
 
     /// The shipped configuration. No trusted issuer is compiled in, so a
@@ -286,7 +568,7 @@ mod tests {
     #[test]
     fn a_valid_but_self_issued_entitlement_grants_nothing() {
         let db = open_db();
-        let signed = store_entitlement(&db, &key("attacker"), &["talent_index"], None);
+        let signed = store_entitlement(&db, &key("attacker"), &holder(), &["talent_index"], None);
 
         // The credential really is valid — the refusal is about trust, not
         // about the credential being broken.
@@ -377,7 +659,7 @@ mod tests {
     fn a_trusted_entitlement_grants_its_features() {
         let db = open_db();
         let k = key("ifftu");
-        let signed = store_entitlement(&db, &k, &["talent_index"], None);
+        let signed = store_entitlement(&db, &k, &holder(), &["talent_index"], None);
         let trusted = [signed.issuer.as_str()];
 
         let snapshot = snapshot_with_trusted(db.conn(), NOW, &trusted).unwrap();
@@ -392,8 +674,14 @@ mod tests {
     fn features_from_several_entitlements_are_unioned() {
         let db = open_db();
         let k = key("ifftu");
-        let a = store_entitlement(&db, &k, &["talent_index"], None);
-        store_entitlement(&db, &k, &["employer_console", "talent_index"], None);
+        let a = store_entitlement(&db, &k, &holder(), &["talent_index"], None);
+        store_entitlement(
+            &db,
+            &k,
+            &holder(),
+            &["employer_console", "talent_index"],
+            None,
+        );
         let trusted = [a.issuer.as_str()];
 
         let snapshot = snapshot_with_trusted(db.conn(), NOW, &trusted).unwrap();
@@ -412,7 +700,13 @@ mod tests {
     fn an_expired_entitlement_is_ignored_even_when_trusted() {
         let db = open_db();
         let k = key("ifftu");
-        let signed = store_entitlement(&db, &k, &["talent_index"], Some("2026-02-01T00:00:00Z"));
+        let signed = store_entitlement(
+            &db,
+            &k,
+            &holder(),
+            &["talent_index"],
+            Some("2026-02-01T00:00:00Z"),
+        );
         let trusted = [signed.issuer.as_str()];
 
         // Valid before the term ends...
@@ -431,7 +725,7 @@ mod tests {
     fn a_tampered_entitlement_from_a_trusted_issuer_is_refused() {
         let db = open_db();
         let k = key("ifftu");
-        let signed = store_entitlement(&db, &k, &["talent_index"], None);
+        let signed = store_entitlement(&db, &k, &holder(), &["talent_index"], None);
         let trusted = [signed.issuer.as_str()];
 
         // Rewrite the stored VC to claim an extra feature, leaving the
@@ -456,5 +750,203 @@ mod tests {
             EntitlementSnapshot::empty(),
             "a broken signature must not be rescued by a trusted issuer"
         );
+    }
+
+    // ---- gate 3: binding to this device's holder -------------------------
+
+    /// The regression test for the bearer-token defect. `verify_credential`'s
+    /// subject check only asserts the subject looks like a DID, so before this
+    /// gate existed a credential copied to a second machine unlocked there
+    /// too — one purchased seat unlocking unlimited devices.
+    ///
+    /// Do not delete this test.
+    #[test]
+    fn an_entitlement_issued_to_someone_else_does_not_unlock_this_device() {
+        let db = open_db();
+        let k = key("ifftu");
+        let someone_else = Did("did:key:z6MkADifferentPersonEntirely".into());
+        let signed = store_entitlement(&db, &k, &someone_else, &["talent_index"], None);
+        let trusted = [signed.issuer.as_str()];
+
+        // The credential itself is beyond reproach: signed by a trusted
+        // issuer, unexpired, unrevoked. It simply is not ours.
+        let verified = verify_credential(db.conn(), &signed, NOW, &entitlement_policy());
+        assert_eq!(verified.acceptance_decision, AcceptanceDecision::Accept);
+        assert!(is_trusted_issuer_in(&signed.issuer, &trusted));
+
+        let snapshot = snapshot_with_trusted(db.conn(), NOW, &trusted).unwrap();
+        assert_eq!(snapshot, EntitlementSnapshot::empty());
+    }
+
+    /// Route B, the accept path: IFFTU signs to the organisation, the
+    /// organisation signs membership to this holder.
+    #[test]
+    fn an_org_entitlement_unlocks_via_a_membership_credential() {
+        let db = open_db();
+        let k = key("ifftu");
+        let signed = store_entitlement(&db, &k, &org(), &["talent_index"], None);
+        store_membership(
+            &db,
+            &org_key(),
+            &holder(),
+            ORG_MEMBER_ROLE,
+            org().as_str(),
+            None,
+        );
+        let trusted = [signed.issuer.as_str()];
+
+        let snapshot = snapshot_with_trusted(db.conn(), NOW, &trusted).unwrap();
+        assert_eq!(snapshot.features, vec!["talent_index".to_string()]);
+    }
+
+    /// The same entitlement without the membership grants nothing. An org DID
+    /// can never equal a user DID, so route A cannot rescue it.
+    #[test]
+    fn an_org_entitlement_alone_grants_nothing() {
+        let db = open_db();
+        let k = key("ifftu");
+        let signed = store_entitlement(&db, &k, &org(), &["talent_index"], None);
+        let trusted = [signed.issuer.as_str()];
+
+        let snapshot = snapshot_with_trusted(db.conn(), NOW, &trusted).unwrap();
+        assert_eq!(snapshot, EntitlementSnapshot::empty());
+    }
+
+    /// Being a member of some *other* organisation does not entitle you to
+    /// this one's plan. This is the condition that makes the check
+    /// cryptographic: the membership must be signed by the very key the
+    /// entitlement names as its subject.
+    #[test]
+    fn membership_of_a_different_org_does_not_bind() {
+        let db = open_db();
+        let k = key("ifftu");
+        let signed = store_entitlement(&db, &k, &org(), &["talent_index"], None);
+
+        let other_org_key = key("other-org");
+        let other_org = derive_did_key(&other_org_key);
+        assert_ne!(other_org.as_str(), org().as_str());
+        store_membership(
+            &db,
+            &other_org_key,
+            &holder(),
+            ORG_MEMBER_ROLE,
+            other_org.as_str(),
+            None,
+        );
+        let trusted = [signed.issuer.as_str()];
+
+        let snapshot = snapshot_with_trusted(db.conn(), NOW, &trusted).unwrap();
+        assert_eq!(snapshot, EntitlementSnapshot::empty());
+    }
+
+    /// The replay guard. A membership genuinely signed by some other
+    /// organisation, but whose `scope` names the *target* organisation, must
+    /// not bind — otherwise anyone able to issue themselves a role credential
+    /// could point it at a paying customer.
+    #[test]
+    fn a_membership_whose_scope_disagrees_with_its_issuer_does_not_bind() {
+        let db = open_db();
+        let k = key("ifftu");
+        let signed = store_entitlement(&db, &k, &org(), &["talent_index"], None);
+
+        let attacker_key = key("attacker-org");
+        store_membership(
+            &db,
+            &attacker_key,
+            &holder(),
+            ORG_MEMBER_ROLE,
+            // scope claims the target org, but the signature is the attacker's
+            org().as_str(),
+            None,
+        );
+        let trusted = [signed.issuer.as_str()];
+
+        let snapshot = snapshot_with_trusted(db.conn(), NOW, &trusted).unwrap();
+        assert_eq!(snapshot, EntitlementSnapshot::empty());
+    }
+
+    /// Revoking a seat is revoking the membership. Here the expiry path
+    /// stands in for the status list, which the same policy also honours.
+    #[test]
+    fn an_expired_membership_takes_the_seat_back() {
+        let db = open_db();
+        let k = key("ifftu");
+        let signed = store_entitlement(&db, &k, &org(), &["talent_index"], None);
+        store_membership(
+            &db,
+            &org_key(),
+            &holder(),
+            ORG_MEMBER_ROLE,
+            org().as_str(),
+            Some("2026-02-01T00:00:00Z"),
+        );
+        let trusted = [signed.issuer.as_str()];
+
+        // Inside the membership term the entitlement resolves...
+        let before = snapshot_with_trusted(db.conn(), "2026-01-15T00:00:00Z", &trusted).unwrap();
+        assert_eq!(before.features, vec!["talent_index".to_string()]);
+
+        // ...and once the membership lapses it does not, even though the
+        // entitlement itself never expires.
+        let after = snapshot_with_trusted(db.conn(), NOW, &trusted).unwrap();
+        assert_eq!(after, EntitlementSnapshot::empty());
+    }
+
+    /// A role credential from the right organisation but naming a different
+    /// role does not confer membership. Guards against any role the org
+    /// happens to issue doubling as an entitlement key.
+    #[test]
+    fn a_role_other_than_member_does_not_bind() {
+        let db = open_db();
+        let k = key("ifftu");
+        let signed = store_entitlement(&db, &k, &org(), &["talent_index"], None);
+        store_membership(&db, &org_key(), &holder(), "guardian", org().as_str(), None);
+        let trusted = [signed.issuer.as_str()];
+
+        let snapshot = snapshot_with_trusted(db.conn(), NOW, &trusted).unwrap();
+        assert_eq!(snapshot, EntitlementSnapshot::empty());
+    }
+
+    /// A membership issued to somebody else, sitting in this device's store,
+    /// binds nothing. Storing a credential is not holding it.
+    #[test]
+    fn a_membership_issued_to_another_person_does_not_bind() {
+        let db = open_db();
+        let k = key("ifftu");
+        let signed = store_entitlement(&db, &k, &org(), &["talent_index"], None);
+        let colleague = Did("did:key:z6MkSomeoneElseAtTheOrg".into());
+        store_membership(
+            &db,
+            &org_key(),
+            &colleague,
+            ORG_MEMBER_ROLE,
+            org().as_str(),
+            None,
+        );
+        let trusted = [signed.issuer.as_str()];
+
+        let snapshot = snapshot_with_trusted(db.conn(), NOW, &trusted).unwrap();
+        assert_eq!(snapshot, EntitlementSnapshot::empty());
+    }
+
+    /// A profile with no identity is entitled to nothing. Absent
+    /// `identity.local_did` the binding gate has nothing to compare against,
+    /// and that must fail closed rather than be skipped.
+    #[test]
+    fn a_device_without_an_identity_is_entitled_to_nothing() {
+        let db = open_db_without_identity();
+        let k = key("ifftu");
+        // Issued directly to a holder that would otherwise match route A.
+        let signed = store_entitlement(&db, &k, &holder(), &["talent_index"], None);
+        let trusted = [signed.issuer.as_str()];
+
+        assert!(local_did(db.conn()).is_none());
+        let snapshot = snapshot_with_trusted(db.conn(), NOW, &trusted).unwrap();
+        assert_eq!(snapshot, EntitlementSnapshot::empty());
+
+        // Establishing the identity is what turns it on.
+        set_local_did(&db, LOCAL_DID);
+        let after = snapshot_with_trusted(db.conn(), NOW, &trusted).unwrap();
+        assert_eq!(after.features, vec!["talent_index".to_string()]);
     }
 }
