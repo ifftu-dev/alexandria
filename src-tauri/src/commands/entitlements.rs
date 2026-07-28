@@ -375,6 +375,24 @@ mod tests {
         features: &[&str],
         valid_until: Option<&str>,
     ) -> VerifiableCredential {
+        let signed = signed_entitlement(issuer_key, subject, features, valid_until);
+        insert_credential(
+            db,
+            &signed,
+            CredentialType::EntitlementCredential,
+            "entitlement",
+        );
+        signed
+    }
+
+    /// Build and sign an entitlement without storing it — the shape a billing
+    /// service produces before delivery.
+    fn signed_entitlement(
+        issuer_key: &SigningKey,
+        subject: &Did,
+        features: &[&str],
+        valid_until: Option<&str>,
+    ) -> VerifiableCredential {
         let issuer = derive_did_key(issuer_key);
         let subject = subject.clone();
         let claim = EntitlementClaim {
@@ -422,6 +440,16 @@ mod tests {
         )
         .unwrap();
 
+        signed
+    }
+
+    /// Store an already-signed credential the way the issuance path would.
+    fn insert_credential(
+        db: &Database,
+        signed: &VerifiableCredential,
+        class: CredentialType,
+        claim_kind: &str,
+    ) {
         db.conn()
             .execute(
                 "INSERT INTO credentials \
@@ -432,15 +460,14 @@ mod tests {
                     signed.id.clone().unwrap(),
                     signed.issuer.as_str(),
                     signed.credential_subject.id.as_str(),
-                    CredentialType::EntitlementCredential.as_str(),
-                    "entitlement",
+                    class.as_str(),
+                    claim_kind,
                     signed.valid_from,
                     "test-integrity-hash",
-                    serde_json::to_string(&signed).unwrap(),
+                    serde_json::to_string(signed).unwrap(),
                 ],
             )
             .unwrap();
-        signed
     }
 
     /// The DID this device's holder uses in these tests.
@@ -501,6 +528,19 @@ mod tests {
         scope: &str,
         valid_until: Option<&str>,
     ) -> VerifiableCredential {
+        let signed = signed_membership(org_key, subject, role, scope, valid_until);
+        insert_credential(db, &signed, CredentialType::RoleCredential, "role");
+        signed
+    }
+
+    /// Build and sign a membership without storing it.
+    fn signed_membership(
+        org_key: &SigningKey,
+        subject: &Did,
+        role: &str,
+        scope: &str,
+        valid_until: Option<&str>,
+    ) -> VerifiableCredential {
         let issuer = derive_did_key(org_key);
         let claim = RoleClaim {
             role: role.to_string(),
@@ -540,24 +580,6 @@ mod tests {
         let signed =
             sign_credential(UnsignedCredential { credential: vc }, org_key, &issuer).unwrap();
 
-        db.conn()
-            .execute(
-                "INSERT INTO credentials \
-                 (id, issuer_did, subject_did, credential_type, claim_kind, \
-                  issuance_date, integrity_hash, signed_vc_json) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                rusqlite::params![
-                    signed.id.clone().unwrap(),
-                    signed.issuer.as_str(),
-                    signed.credential_subject.id.as_str(),
-                    CredentialType::RoleCredential.as_str(),
-                    "role",
-                    signed.valid_from,
-                    "test-integrity-hash",
-                    serde_json::to_string(&signed).unwrap(),
-                ],
-            )
-            .unwrap();
         signed
     }
 
@@ -948,5 +970,65 @@ mod tests {
         set_local_did(&db, LOCAL_DID);
         let after = snapshot_with_trusted(db.conn(), NOW, &trusted).unwrap();
         assert_eq!(after.features, vec!["talent_index".to_string()]);
+    }
+
+    // ---- the delivery seam ------------------------------------------------
+
+    /// The whole point of Unit 2: a credential that arrived from outside,
+    /// through `import_credential`, must resolve here.
+    ///
+    /// This is the seam most likely to break silently. `stored_entitlements`
+    /// filters on the denormalized `credential_type` column, which the import
+    /// path derives independently from the credential body — if the two ever
+    /// disagree an imported entitlement becomes invisible rather than
+    /// rejected, which is far harder to notice.
+    #[test]
+    fn an_imported_entitlement_resolves_through_the_snapshot() {
+        let db = open_db();
+        let k = key("ifftu");
+
+        // Build and sign it without touching the database, exactly as a
+        // billing service would, then hand it over as an opaque credential.
+        let unstored = signed_entitlement(&k, &holder(), &["talent_index"], None);
+        let trusted = [unstored.issuer.as_str()];
+
+        // Nothing yet.
+        assert_eq!(
+            snapshot_with_trusted(db.conn(), NOW, &trusted).unwrap(),
+            EntitlementSnapshot::empty()
+        );
+
+        let outcome =
+            crate::commands::import::import_credential_impl(db.conn(), &unstored, NOW).unwrap();
+        assert!(outcome.stored);
+
+        let snapshot = snapshot_with_trusted(db.conn(), NOW, &trusted).unwrap();
+        assert_eq!(snapshot.features, vec!["talent_index".to_string()]);
+        assert_eq!(snapshot.org_id.as_deref(), Some("org-1"));
+    }
+
+    /// The per-org half of the same seam: both credentials arrive by import,
+    /// and the chain still binds.
+    #[test]
+    fn an_imported_org_entitlement_and_membership_bind() {
+        let db = open_db();
+        let k = key("ifftu");
+
+        let ent = signed_entitlement(&k, &org(), &["talent_index"], None);
+        let trusted = [ent.issuer.as_str()];
+        crate::commands::import::import_credential_impl(db.conn(), &ent, NOW).unwrap();
+
+        // Entitlement alone binds nothing.
+        assert_eq!(
+            snapshot_with_trusted(db.conn(), NOW, &trusted).unwrap(),
+            EntitlementSnapshot::empty()
+        );
+
+        let membership =
+            signed_membership(&org_key(), &holder(), ORG_MEMBER_ROLE, org().as_str(), None);
+        crate::commands::import::import_credential_impl(db.conn(), &membership, NOW).unwrap();
+
+        let snapshot = snapshot_with_trusted(db.conn(), NOW, &trusted).unwrap();
+        assert_eq!(snapshot.features, vec!["talent_index".to_string()]);
     }
 }

@@ -547,7 +547,7 @@ fn allocate_status_index(conn: &Connection, list_id: &str) -> Result<i64, String
     Ok(next)
 }
 
-fn integrity_hash_of(vc: &VerifiableCredential) -> Result<String, String> {
+pub(crate) fn integrity_hash_of(vc: &VerifiableCredential) -> Result<String, String> {
     let mut clone = vc.clone();
     clone.proof.jws.clear();
     let value = serde_json::to_value(&clone).map_err(|e| e.to_string())?;

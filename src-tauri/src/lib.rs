@@ -1509,6 +1509,7 @@ pub fn run() {
             commands::credentials::verify_credential_cmd,
             commands::credentials::export_credentials_bundle,
             commands::entitlements::get_entitlement_snapshot,
+            commands::import::import_credential,
             // Selective-disclosure presentations (§18)
             commands::presentation::create_presentation,
             commands::presentation::verify_presentation,

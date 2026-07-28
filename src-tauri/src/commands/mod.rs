@@ -21,6 +21,7 @@ pub mod graph;
 pub mod guardian;
 pub mod health;
 pub mod identity;
+pub mod import;
 pub mod instructor;
 pub mod integrity;
 pub mod opinions;
