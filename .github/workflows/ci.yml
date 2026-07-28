@@ -54,6 +54,54 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
+  ee-license-guard:
+    name: EE License Guard
+    # The ee/ subtrees are under the IFFTU Enterprise License, not MIT. We
+    # cannot take externally-authored code into a proprietary tree without a
+    # contributor agreement, so those paths are closed to outside PRs. This
+    # is a licensing constraint, not a quality judgement — see CONTRIBUTING.md.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout alexandria
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Block external changes to ee/
+        shell: bash
+        env:
+          ASSOCIATION: ${{ github.event.pull_request.author_association }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+
+          ee_touched="$(git diff --name-only "${BASE_SHA}" "${GITHUB_SHA}" \
+            | grep -E '(^|/)ee/' || true)"
+
+          if [ -z "${ee_touched}" ]; then
+            echo "No ee/ paths touched."
+            exit 0
+          fi
+
+          case "${ASSOCIATION}" in
+            OWNER|MEMBER|COLLABORATOR)
+              echo "Author association ${ASSOCIATION} may modify ee/. Files:"
+              echo "${ee_touched}"
+              ;;
+            *)
+              echo "::error::This pull request modifies enterprise-licensed paths:"
+              echo "${ee_touched}"
+              echo ""
+              echo "Author association is '${ASSOCIATION}'. The ee/ directories are"
+              echo "under the IFFTU Enterprise License and are closed to external"
+              echo "contributions. Everything else in this repository is MIT and"
+              echo "very much open — see CONTRIBUTING.md and"
+              echo "docs/enterprise-boundary.md."
+              exit 1
+              ;;
+          esac
+
   changes:
     name: Detect changed surfaces
     runs-on: ubuntu-latest
@@ -223,6 +271,16 @@ jobs:
           CARGO_BUILD_JOBS: "2"
         run: cargo test --features tutoring-video-static
 
+      - name: Rust build (enterprise feature)
+        # Clippy and the test run above cover the *community* build — the
+        # default feature set, which is what ships and what must never
+        # depend on `ee/`. This step covers the other side of the seam.
+        # `check` rather than `clippy`: deps are already compiled by this
+        # point, so only the local crate recompiles.
+        if: needs.changes.outputs.backend == 'true'
+        working-directory: alexandria
+        run: cargo check -p alexandria-node --lib --features ee
+
       - name: Tauri command guard
         # Cross-checks lib.rs (backend) against invoke() sites (frontend), so
         # run whenever either surface changed. Pure Node, no npm deps needed.
@@ -230,10 +288,27 @@ jobs:
         working-directory: alexandria
         run: node scripts/check-tauri-commands.mjs
 
+      - name: Enterprise boundary guard
+        # Pure Node, no deps — cheap enough to run on any change. Enforces
+        # that core never references `ee` unconditionally and that every
+        # `@ee/` module exists in both the enterprise and stub trees, so a
+        # community checkout with `ee/` stripped still builds.
+        # See docs/enterprise-boundary.md.
+        if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.frontend == 'true'
+        working-directory: alexandria
+        run: node scripts/check-ee-boundary.mjs
+
       - name: TypeScript type-check
         if: needs.changes.outputs.frontend == 'true'
         working-directory: alexandria
         run: npx vue-tsc -b --noEmit
+
+      - name: TypeScript type-check (enterprise build)
+        # Same sources with `@ee` pointed at src/ee instead of the stub, so
+        # the two EntitlementProvider implementations cannot drift apart.
+        if: needs.changes.outputs.frontend == 'true'
+        working-directory: alexandria
+        run: npm run typecheck:ee
 
       - name: Frontend tests (vitest)
         if: needs.changes.outputs.frontend == 'true'

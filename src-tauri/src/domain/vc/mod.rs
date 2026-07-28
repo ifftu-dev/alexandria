@@ -26,6 +26,13 @@ pub enum CredentialType {
     RoleCredential,
     DerivedCredential,
     SelfAssertion,
+    /// Enterprise Edition entitlement (seats + feature keys), issued by the
+    /// IFFTU issuer DID. Carries no capability claim about a learner and
+    /// MUST NOT contribute to skill aggregation — see the 0.00 type weight
+    /// in `aggregation::config`. Verified with the same
+    /// `verify::verify_credential` path as any other VC, so entitlement
+    /// checks work offline and expiry/revocation reuse the status list.
+    EntitlementCredential,
 }
 
 /// Provenance tier of a skill claim's supporting evidence. Ordered weakest
@@ -134,6 +141,59 @@ impl RoleClaim {
     }
 }
 
+/// Strongly-typed view over an Enterprise Edition entitlement subject.
+///
+/// This is a commercial artifact, not a capability claim: it says which
+/// enterprise features an organisation has paid for and how many seats it
+/// holds. It rides in an ordinary VC so that entitlement checking reuses
+/// the existing signing, expiry, and status-list revocation machinery —
+/// no license server, and it verifies offline.
+///
+/// Seat *counting* is server-side; the client only ever answers "is there
+/// an unexpired, unrevoked entitlement granting feature X".
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct EntitlementClaim {
+    /// Organisation this entitlement was sold to.
+    pub org_id: String,
+    /// Plan identifier (e.g. `"team"`, `"enterprise"`). Doubles as the
+    /// marker key for [`EntitlementClaim::extract`], so it is deliberately
+    /// named distinctly enough not to collide with other claim shapes.
+    pub entitlement_plan: String,
+    /// Seats purchased. Informational on the client; enforced server-side.
+    pub seats: u32,
+    /// Feature keys this entitlement unlocks.
+    #[serde(default)]
+    pub features: Vec<String>,
+}
+
+impl EntitlementClaim {
+    /// Read an EntitlementClaim out of a subject's free-form properties.
+    /// Returns None if the subject doesn't carry the marker
+    /// `entitlementPlan`.
+    pub fn extract(subject: &CredentialSubject) -> Option<Self> {
+        if !subject.properties.contains_key("entitlementPlan") {
+            return None;
+        }
+        let v = serde_json::Value::Object(subject.properties.clone());
+        serde_json::from_value(v).ok()
+    }
+
+    pub fn into_properties(self) -> serde_json::Map<String, serde_json::Value> {
+        match serde_json::to_value(self).expect("EntitlementClaim serializes") {
+            serde_json::Value::Object(m) => m,
+            _ => unreachable!("EntitlementClaim always serializes to a JSON object"),
+        }
+    }
+
+    /// Whether this entitlement grants `feature`. Validity (signature,
+    /// expiry, revocation) is a separate concern — check the credential
+    /// with `verify::verify_credential` first.
+    pub fn grants(&self, feature: &str) -> bool {
+        self.features.iter().any(|f| f == feature)
+    }
+}
+
 /// Free-form custom claim — any properties the issuer wants to attach
 /// to the subject that aren't covered by [`SkillClaim`] / [`RoleClaim`].
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -158,6 +218,7 @@ impl CustomClaim {
 pub enum Claim {
     Skill(SkillClaim),
     Role(RoleClaim),
+    Entitlement(EntitlementClaim),
     Custom(CustomClaim),
 }
 
@@ -167,6 +228,7 @@ impl Claim {
         match self {
             Claim::Skill(_) => "skill",
             Claim::Role(_) => "role",
+            Claim::Entitlement(_) => "entitlement",
             Claim::Custom(_) => "custom",
         }
     }
@@ -185,6 +247,7 @@ impl Claim {
         let properties = match self {
             Claim::Skill(s) => s.into_properties(),
             Claim::Role(r) => r.into_properties(),
+            Claim::Entitlement(e) => e.into_properties(),
             Claim::Custom(c) => c.into_properties(),
         };
         CredentialSubject {
@@ -402,6 +465,12 @@ impl Default for VerificationPolicy {
                 CredentialType::RoleCredential,
                 CredentialType::DerivedCredential,
                 CredentialType::SelfAssertion,
+                // EntitlementCredential is deliberately absent. This policy
+                // governs *capability* credentials — what someone can do.
+                // An entitlement says who paid for which enterprise
+                // features, so accepting one here would let a commercial
+                // artifact through a hiring portal's verification path.
+                // Entitlement checks pass an explicit policy instead.
             ],
             reject_suspended: true,
             reject_superseded: true,
@@ -469,6 +538,84 @@ mod tests {
         // Spec §13.1 shows `"acceptanceDecision": "accept"`.
         let json = serde_json::to_string(&AcceptanceDecision::Accept).unwrap();
         assert_eq!(json, "\"accept\"");
+    }
+
+    fn sample_entitlement() -> EntitlementClaim {
+        EntitlementClaim {
+            org_id: "org_acme".into(),
+            entitlement_plan: "enterprise".into(),
+            seats: 25,
+            features: vec!["talent_index".into(), "bulk_verification".into()],
+        }
+    }
+
+    #[test]
+    fn default_policy_excludes_entitlement_credentials() {
+        // An entitlement is a commercial artifact, not evidence of
+        // capability. It must never satisfy a capability verification.
+        let p = VerificationPolicy::default();
+        assert!(!p
+            .allowed_types
+            .contains(&CredentialType::EntitlementCredential));
+    }
+
+    #[test]
+    fn entitlement_claim_round_trips_through_subject() {
+        let claim = sample_entitlement();
+        let subject = Claim::Entitlement(claim.clone()).into_subject(Did("did:key:zOrg".into()));
+        let extracted = EntitlementClaim::extract(&subject).expect("extracts");
+        assert_eq!(extracted, claim);
+    }
+
+    #[test]
+    fn entitlement_marker_does_not_collide_with_other_claims() {
+        // `extract` keys off `entitlementPlan`. A skill or role subject
+        // must not be mistaken for an entitlement, or a learner's own
+        // credential could be read as a paid license.
+        let skill = Claim::Skill(SkillClaim {
+            skill_id: "skill_x".into(),
+            level: 3,
+            score: 0.5,
+            evidence_refs: vec![],
+            rubric_version: None,
+            assessment_method: None,
+            provenance: None,
+        })
+        .into_subject(Did("did:key:zLearner".into()));
+        assert!(EntitlementClaim::extract(&skill).is_none());
+
+        let role = Claim::Role(RoleClaim {
+            role: "guardian".into(),
+            scope: None,
+        })
+        .into_subject(Did("did:key:zLearner".into()));
+        assert!(EntitlementClaim::extract(&role).is_none());
+
+        // And the converse: an entitlement is not a skill claim.
+        let ent = Claim::Entitlement(sample_entitlement()).into_subject(Did("did:key:zOrg".into()));
+        assert!(SkillClaim::extract(&ent).is_none());
+        assert!(RoleClaim::extract(&ent).is_none());
+    }
+
+    #[test]
+    fn entitlement_grants_only_listed_features() {
+        let claim = sample_entitlement();
+        assert!(claim.grants("talent_index"));
+        assert!(claim.grants("bulk_verification"));
+        assert!(!claim.grants("skills_intelligence"));
+        assert!(!claim.grants(""));
+    }
+
+    #[test]
+    fn entitlement_claim_kind_is_entitlement() {
+        assert_eq!(
+            Claim::Entitlement(sample_entitlement()).kind_str(),
+            "entitlement"
+        );
+        // Entitlements carry no skill, so the skill_id index column stays null.
+        assert!(Claim::Entitlement(sample_entitlement())
+            .skill_id()
+            .is_none());
     }
 
     #[test]

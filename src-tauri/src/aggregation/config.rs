@@ -51,6 +51,12 @@ impl Default for AggregationConfig {
         // by default and must be explicitly weighted by a verifier
         // policy that wants to consume derived states as inputs.
         type_weights.insert(CredentialType::DerivedCredential, 0.00);
+        // EntitlementCredential is a commercial artifact (who paid for
+        // which enterprise features), not evidence of capability. It must
+        // never influence a skill score, so it is pinned to 0 — and unlike
+        // DerivedCredential there is no legitimate verifier policy that
+        // would raise it. See `entitlement_credential_never_scores`.
+        type_weights.insert(CredentialType::EntitlementCredential, 0.00);
 
         // Provenance quality triples (rubric, proctoring, traceability).
         // Ascending strength: a bare self-declared claim carries little
@@ -202,6 +208,28 @@ mod tests {
             cfg.type_weights
                 .get(&crate::domain::vc::CredentialType::AttestationCredential),
             Some(&0.35)
+        );
+    }
+
+    #[test]
+    fn entitlement_credential_never_scores() {
+        // A paid enterprise entitlement is a commercial artifact, not
+        // evidence of capability. If this ever becomes non-zero, buying a
+        // subscription would raise a skill score — which would make every
+        // Alexandria credential worthless. There is no verifier policy
+        // that legitimately wants this weighted.
+        let cfg = AggregationConfig::default();
+        assert_eq!(
+            cfg.type_weights
+                .get(&crate::domain::vc::CredentialType::EntitlementCredential),
+            Some(&0.0)
+        );
+        assert_eq!(
+            crate::aggregation::weights::type_weight(
+                crate::domain::vc::CredentialType::EntitlementCredential,
+                &cfg
+            ),
+            0.0
         );
     }
 }

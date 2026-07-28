@@ -4,8 +4,14 @@ import tailwindcss from '@tailwindcss/vite'
 import vueI18n from '@intlify/unplugin-vue-i18n/vite'
 import { resolve } from 'path'
 
+// Enterprise Edition is selected by `--mode ee` (cross-platform, no extra
+// dependency) or by exporting `VITE_EE=1`. Anything else — every default
+// build, every CI build — is the community edition.
+// See docs/enterprise-boundary.md.
+const isEnterprise = (mode: string): boolean => mode === 'ee' || process.env.VITE_EE === '1'
+
 // https://vite.dev/config/
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   plugins: [
     vue(),
     tailwindcss(),
@@ -27,6 +33,11 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': resolve(__dirname, 'src'),
+      // Enterprise Edition seam. Resolves to `src/ee` (IFFTU Enterprise
+      // License) only in an enterprise build; otherwise to the MIT
+      // `src/ee-stub`, which grants no enterprise features. The community
+      // build never imports a single byte of enterprise code.
+      '@ee': resolve(__dirname, isEnterprise(mode) ? 'src/ee' : 'src/ee-stub'),
     },
   },
   // Tauri expects a fixed port in dev mode
@@ -43,4 +54,4 @@ export default defineConfig({
   clearScreen: false,
   // Tauri needs to know the dev server URL for the webview
   envPrefix: ['VITE_', 'TAURI_'],
-})
+}))

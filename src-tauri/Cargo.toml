@@ -13,6 +13,18 @@ default-run = "alexandria-node"
 [features]
 default = []
 dev-seed = []
+
+# Enterprise Edition. OFF by default: a plain `cargo build` produces the
+# community edition, which is fully functional. Code under `src/ee/` is
+# licensed under the IFFTU Enterprise License, not MIT — see
+# `docs/enterprise-boundary.md` for what qualifies as enterprise and
+# `src/ee/LICENSE.md` for the terms.
+#
+# Core references `ee` in exactly one place (`#[cfg(feature = "ee")] pub mod ee;`
+# in lib.rs). Every other core→ee interaction goes through a trait defined in
+# core with a no-op default impl, so the community build compiles with the
+# `ee/` directory removed entirely.
+ee = []
 # Enable desktop tutoring video without acoustic echo cancellation.
 # This keeps Windows buildable on GitHub's MSVC runners, where the bundled
 # webrtc-audio-processing autotools build is not currently stable.
