@@ -458,7 +458,9 @@ fn handle_link(
     let policy = VerificationPolicy {
         reject_expired: true,
         require_integrity_anchor: false,
-        allowed_types: vec![],
+        // Guardianship rides as a RoleCredential (role=guardian); nothing
+        // else may be accepted through this path.
+        allowed_types: vec![crate::domain::vc::CredentialType::RoleCredential],
         reject_suspended: true,
         reject_superseded: true,
     };

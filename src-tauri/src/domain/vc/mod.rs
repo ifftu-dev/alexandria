@@ -35,6 +35,25 @@ pub enum CredentialType {
     EntitlementCredential,
 }
 
+impl CredentialType {
+    /// The exact token this class occupies in a credential's `type` array and
+    /// in the denormalized `credentials.credential_type` column. Matches the
+    /// PascalCase serde representation — kept as a `match` rather than a
+    /// `to_string` round-trip so a rename can never silently change the wire
+    /// format.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            CredentialType::FormalCredential => "FormalCredential",
+            CredentialType::AssessmentCredential => "AssessmentCredential",
+            CredentialType::AttestationCredential => "AttestationCredential",
+            CredentialType::RoleCredential => "RoleCredential",
+            CredentialType::DerivedCredential => "DerivedCredential",
+            CredentialType::SelfAssertion => "SelfAssertion",
+            CredentialType::EntitlementCredential => "EntitlementCredential",
+        }
+    }
+}
+
 /// Provenance tier of a skill claim's supporting evidence. Ordered weakest
 /// → strongest; the ordering (derived from declaration order) is used to pick
 /// the dominant tier backing a skill. Feeds the aggregation quality weight.
@@ -604,6 +623,25 @@ mod tests {
         assert!(claim.grants("bulk_verification"));
         assert!(!claim.grants("skills_intelligence"));
         assert!(!claim.grants(""));
+    }
+
+    /// `as_str` is the wire format, so it must not drift from what serde
+    /// writes. Asserted for every variant rather than one, since a new
+    /// variant is exactly when the two can diverge.
+    #[test]
+    fn credential_type_as_str_matches_serde() {
+        for t in [
+            CredentialType::FormalCredential,
+            CredentialType::AssessmentCredential,
+            CredentialType::AttestationCredential,
+            CredentialType::RoleCredential,
+            CredentialType::DerivedCredential,
+            CredentialType::SelfAssertion,
+            CredentialType::EntitlementCredential,
+        ] {
+            let serde_form = serde_json::to_value(t).expect("credential type serializes");
+            assert_eq!(serde_form, serde_json::json!(t.as_str()));
+        }
     }
 
     #[test]

@@ -117,7 +117,7 @@ pub fn verify_credential(
             result.issuer_resolved = true;
             pk
         }
-        None => return finalize(result, policy),
+        None => return finalize(result, credential, policy),
     };
 
     // -- signature verification --------------------------------------------
@@ -125,7 +125,7 @@ pub fn verify_credential(
     // input, verify.
     result.valid_signature = verify_detached_jws(&issuer_pk, credential).unwrap_or(false);
 
-    finalize(result, policy)
+    finalize(result, credential, policy)
 }
 
 /// Resolve an issuer DID to a `VerifyingKey` valid at `at`.
@@ -206,11 +206,42 @@ fn verify_detached_jws(
     Ok(issuer_pk.verify_strict(&signing_input, &sig).is_ok())
 }
 
+/// Whether `credential`'s `type` array names a class this policy accepts.
+///
+/// An empty `allowed_types` means "no type constraint" rather than "accept
+/// nothing" — some callers verify a credential whose class they already know
+/// from context and have no filtering to do.
+///
+/// The credential's `type` array always carries `"VerifiableCredential"` plus
+/// its class, so this looks for *any* member that is an allowed class. A
+/// credential naming several classes is accepted if any one is allowed, which
+/// is the same permissive reading the rest of the type handling uses.
+fn type_allowed(credential: &VerifiableCredential, policy: &VerificationPolicy) -> bool {
+    if policy.allowed_types.is_empty() {
+        return true;
+    }
+    credential
+        .type_
+        .iter()
+        .any(|t| policy.allowed_types.iter().any(|a| a.as_str() == t))
+}
+
 /// Apply the acceptance predicate (§13.3) and return the result.
-fn finalize(mut result: VerificationResult, policy: &VerificationPolicy) -> VerificationResult {
+///
+/// `allowed_types` is enforced here rather than as its own
+/// [`VerificationResult`] field: a disallowed class is a policy refusal, not a
+/// defect in the credential, and every per-check flag on the result stays
+/// truthfully positive. The caller learns the outcome from
+/// `acceptance_decision`.
+fn finalize(
+    mut result: VerificationResult,
+    credential: &VerifiableCredential,
+    policy: &VerificationPolicy,
+) -> VerificationResult {
     let accept = result.valid_signature
         && result.issuer_resolved
         && result.subject_bound
+        && type_allowed(credential, policy)
         && !result.revoked
         && !(policy.reject_expired && result.expired)
         && !(policy.reject_suspended && result.suspended)
@@ -254,7 +285,9 @@ mod tests {
     use crate::crypto::did::{derive_did_key, VerificationMethodRef};
     use crate::db::Database;
     use crate::domain::vc::sign::{sign_credential, UnsignedCredential};
-    use crate::domain::vc::{Claim, Proof, SkillClaim, VerifiableCredential};
+    use crate::domain::vc::{Claim, CredentialType, Proof, SkillClaim, VerifiableCredential};
+
+    const NOW: &str = "2026-04-13T00:00:00Z";
     use ed25519_dalek::SigningKey;
 
     fn test_signing_key(role: &str) -> SigningKey {
@@ -313,6 +346,65 @@ mod tests {
         )
         .unwrap();
         (db, vc)
+    }
+
+    /// The default policy omits `EntitlementCredential` on purpose — a
+    /// commercial artifact must not pass a capability-credential check. That
+    /// only holds if `allowed_types` is actually enforced, so assert it on a
+    /// credential that is otherwise perfectly valid.
+    #[test]
+    fn entitlement_credential_is_refused_by_the_default_policy() {
+        let (db, mut vc) = signed(None);
+        vc.type_ = vec![
+            "VerifiableCredential".into(),
+            CredentialType::EntitlementCredential.as_str().to_string(),
+        ];
+        // Re-sign so the only thing standing between this VC and acceptance
+        // is the policy's type list.
+        let key = test_signing_key("issuer");
+        let issuer = derive_did_key(&key);
+        let vc = sign_credential(UnsignedCredential { credential: vc }, &key, &issuer).unwrap();
+
+        let result = verify_credential(db.conn(), &vc, NOW, &VerificationPolicy::default());
+        assert!(result.valid_signature, "signature must still be good");
+        assert!(result.issuer_resolved);
+        assert!(result.subject_bound);
+        assert!(!result.revoked && !result.expired);
+        assert_eq!(result.acceptance_decision, AcceptanceDecision::Reject);
+    }
+
+    /// The same credential is accepted when the caller explicitly asks for
+    /// entitlements — enforcement is a policy choice, not a blanket ban.
+    #[test]
+    fn entitlement_credential_is_accepted_under_an_entitlement_policy() {
+        let (db, mut vc) = signed(None);
+        vc.type_ = vec![
+            "VerifiableCredential".into(),
+            CredentialType::EntitlementCredential.as_str().to_string(),
+        ];
+        let key = test_signing_key("issuer");
+        let issuer = derive_did_key(&key);
+        let vc = sign_credential(UnsignedCredential { credential: vc }, &key, &issuer).unwrap();
+
+        let policy = VerificationPolicy {
+            allowed_types: vec![CredentialType::EntitlementCredential],
+            ..VerificationPolicy::default()
+        };
+        let result = verify_credential(db.conn(), &vc, NOW, &policy);
+        assert_eq!(result.acceptance_decision, AcceptanceDecision::Accept);
+    }
+
+    /// An empty list means "no type constraint", not "accept nothing" —
+    /// callers that already know the class from context rely on this.
+    #[test]
+    fn empty_allowed_types_imposes_no_type_constraint() {
+        let (db, vc) = signed(None);
+        let policy = VerificationPolicy {
+            allowed_types: vec![],
+            ..VerificationPolicy::default()
+        };
+        let result = verify_credential(db.conn(), &vc, NOW, &policy);
+        assert_eq!(result.acceptance_decision, AcceptanceDecision::Accept);
     }
 
     #[test]

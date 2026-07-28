@@ -197,7 +197,7 @@ pub fn issue_credential_impl(
     let list_id = ensure_status_list(conn, issuer_did)?;
     let index = allocate_status_index(conn, &list_id)?;
 
-    let type_name = serde_plain_variant(&req.credential_type);
+    let type_name = req.credential_type.as_str();
 
     // Build the VC envelope; sign_credential will stamp proof.jws.
     // For skill claims we fold the request's evidence_refs into the
@@ -252,7 +252,7 @@ pub fn issue_credential_impl(
     let vc = VerifiableCredential {
         context: vec![W3C_VC_V1.into(), ALEXANDRIA_V1.into()],
         id: Some(credential_id.clone()),
-        type_: vec!["VerifiableCredential".into(), type_name.clone()],
+        type_: vec!["VerifiableCredential".into(), type_name.to_string()],
         issuer: issuer_did.clone(),
         valid_from: now.to_string(),
         valid_until: req.expiration_date.clone(),
@@ -545,13 +545,6 @@ fn allocate_status_index(conn: &Connection, list_id: &str) -> Result<i64, String
         return Err(format!("status list {list_id} is full"));
     }
     Ok(next)
-}
-
-fn serde_plain_variant(t: &CredentialType) -> String {
-    // CredentialType serializes as PascalCase JSON string like
-    // `"FormalCredential"`; strip the quotes to get the bare variant.
-    let s = serde_json::to_string(t).unwrap_or_default();
-    s.trim_matches('"').to_string()
 }
 
 fn integrity_hash_of(vc: &VerifiableCredential) -> Result<String, String> {
