@@ -281,6 +281,21 @@ jobs:
         working-directory: alexandria
         run: cargo check -p alexandria-node --lib --features ee
 
+      - name: Rust tests (enterprise feature)
+        # `cargo check` above proves ee/ compiles; it does not run a single
+        # assertion in it. Filtered to `ee::` so this links one extra test
+        # binary and runs only the enterprise modules — the community set is
+        # already covered by "Run Rust tests" and re-running it here would
+        # double the slowest step in the job for no added coverage.
+        if: needs.changes.outputs.backend == 'true'
+        working-directory: alexandria
+        # Same memory budget as the community test run above: this is a
+        # distinct feature set, so it links its own test binary.
+        env:
+          CARGO_PROFILE_TEST_DEBUG: "0"
+          CARGO_BUILD_JOBS: "2"
+        run: cargo test -p alexandria-node --lib --features ee ee::
+
       - name: Tauri command guard
         # Cross-checks lib.rs (backend) against invoke() sites (frontend), so
         # run whenever either surface changed. Pure Node, no npm deps needed.

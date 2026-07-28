@@ -37,12 +37,12 @@
 //!
 //! ## Current contents
 //!
-//! None. The enterprise surface is introduced in Phase 2 (talent index and
-//! employer products). This module exists so the boundary — build wiring,
-//! CI gates, and license carve-out — is proven and enforced before there is
-//! any enterprise code to protect.
+//! * [`entitlement_issuer`] — mints `EntitlementCredential`s with the IFFTU
+//!   signing key. Verification of those credentials stays MIT, so a customer
+//!   can audit what they hold without enterprise sources; only minting is
+//!   restricted.
+//!
+//! The rest of the enterprise surface (talent index, employer products)
+//! follows in Phase 2.
 
-// Placeholder so the crate compiles under `--features ee` with no EE
-// features implemented yet. Remove when the first real module lands.
-#[allow(dead_code)]
-pub(crate) const EE_BUILD: bool = true;
+pub mod entitlement_issuer;

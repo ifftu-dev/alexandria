@@ -13,6 +13,7 @@ pub mod courses;
 pub mod credentials;
 pub mod elements;
 pub mod enrollment;
+pub mod entitlements;
 pub mod evidence;
 pub mod goal_templates;
 pub mod governance;
