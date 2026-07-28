@@ -13,10 +13,13 @@
 //! *what a credential means* to the readers. `get_entitlement_snapshot` decides
 //! whether an entitlement counts; this only decides whether it is real.
 
+use std::str::FromStr;
+
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
+use crate::content_store::{content, fetch};
 use crate::domain::vc::verify::verify_credential;
 use crate::domain::vc::{
     AcceptanceDecision, CredentialSubject, EntitlementClaim, RoleClaim, SkillClaim,
@@ -210,6 +213,79 @@ pub async fn import_credential(
     let db = db_guard.as_ref().ok_or("database not initialized")?;
     let now = super::credentials::now_rfc3339();
     import_credential_impl(db.conn(), &credential, &now)
+}
+
+/// Where a credential can be fetched from: a provider endpoint and the BLAKE3
+/// hash of the credential's bytes.
+///
+/// This pair is the whole "ticket". It is small enough to sit in an email line
+/// or an `alexandria://` deep link, which a whole credential is not.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CredentialTicket {
+    /// The provider's iroh endpoint id, base32-hex.
+    pub provider: String,
+    /// BLAKE3 hash of the credential JSON, hex.
+    pub hash: String,
+}
+
+/// Parse credential JSON that arrived as raw bytes.
+///
+/// Split out from the fetch so the decode half is testable without a live iroh
+/// node. Anything that is not a VC is rejected here rather than reaching the
+/// verifier with a half-populated envelope.
+fn credential_from_bytes(bytes: &[u8]) -> Result<VerifiableCredential, String> {
+    serde_json::from_slice(bytes)
+        .map_err(|e| format!("fetched bytes are not a verifiable credential: {e}"))
+}
+
+/// Resolve a ticket's provider field to an iroh address.
+///
+/// A bare endpoint id carries no transport addresses, so the connection relies
+/// on iroh's address lookup to find a route — which is the point: the customer
+/// copies one short string, not a set of IPs that go stale.
+fn provider_addr(provider: &str) -> Result<iroh::EndpointAddr, String> {
+    let id = iroh::EndpointId::from_str(provider.trim())
+        .map_err(|e| format!("bad provider endpoint id: {e}"))?;
+    Ok(iroh::EndpointAddr::from(id))
+}
+
+/// Fetch a credential from an iroh provider and import it.
+///
+/// Content addressing gives an integrity check that is independent of the
+/// signature: the bytes are verified against the BLAKE3 hash during the fetch,
+/// so a substituted payload fails before it ever reaches [`verify_credential`].
+/// The two checks answer different questions — the hash says "these are the
+/// bytes you asked for", the signature says "the issuer stands behind them" —
+/// and passing one does not imply the other.
+///
+/// Availability is a fetch-time concern only. Once imported, the credential
+/// lives in the local store and every later read verifies offline, so a device
+/// that activated once keeps working with every provider down.
+#[tauri::command]
+pub async fn import_credential_from_peer(
+    state: State<'_, AppState>,
+    ticket: CredentialTicket,
+) -> Result<ImportOutcome, String> {
+    let addr = provider_addr(&ticket.provider)?;
+    let node = state.content_node_required().await?;
+
+    fetch::fetch_hex_from_peer(&node, addr, &ticket.hash)
+        .await
+        .map_err(|e| format!("fetch credential {}: {e}", ticket.hash))?;
+
+    let bytes = content::get_bytes(&node, &ticket.hash)
+        .await
+        .map_err(|e| format!("read fetched credential {}: {e}", ticket.hash))?;
+    let vc = credential_from_bytes(&bytes)?;
+
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
+    let now = super::credentials::now_rfc3339();
+    import_credential_impl(db.conn(), &vc, &now)
 }
 
 #[cfg(test)]
@@ -451,5 +527,77 @@ mod tests {
 
         let err = import_credential_impl(db.conn(), &vc, NOW).unwrap_err();
         assert!(err.contains("envelope id"), "unexpected reason: {err}");
+    }
+
+    // ---- iroh delivery ----------------------------------------------------
+
+    /// The decode half of the fetch path, exercised without a live node.
+    /// Round-trips through the exact bytes a provider would serve.
+    #[test]
+    fn credential_bytes_round_trip_through_the_fetch_decoder() {
+        let vc = signed_vc(
+            &key("issuer"),
+            CredentialType::EntitlementCredential,
+            "urn:test:ticket:1",
+            entitlement_props(),
+            None,
+        );
+        let served = serde_json::to_vec(&vc).unwrap();
+
+        let decoded = credential_from_bytes(&served).unwrap();
+        // Compared as JSON rather than by PartialEq, which the domain type does
+        // not derive — and which is the stronger assertion anyway, since it
+        // catches a field silently dropped in the round trip.
+        assert_eq!(
+            serde_json::to_value(&decoded).unwrap(),
+            serde_json::to_value(&vc).unwrap()
+        );
+
+        // And it still imports, so the fetch path and the file path converge
+        // on the same credential rather than two nearly-identical ones.
+        let db = open_db();
+        assert!(
+            import_credential_impl(db.conn(), &decoded, NOW)
+                .unwrap()
+                .stored
+        );
+    }
+
+    /// A provider serving something that is not a credential must fail at the
+    /// decode step, not reach the verifier with a half-populated envelope.
+    #[test]
+    fn non_credential_bytes_are_rejected_before_verification() {
+        let err = credential_from_bytes(b"{\"not\": \"a credential\"}").unwrap_err();
+        assert!(err.contains("not a verifiable credential"), "got: {err}");
+
+        let err = credential_from_bytes(b"absolute nonsense").unwrap_err();
+        assert!(err.contains("not a verifiable credential"), "got: {err}");
+    }
+
+    /// A malformed provider id is caught locally rather than surfacing as an
+    /// opaque connection failure after a timeout.
+    #[test]
+    fn a_malformed_provider_id_is_rejected_up_front() {
+        assert!(provider_addr("not-an-endpoint-id").is_err());
+        assert!(provider_addr("").is_err());
+    }
+
+    /// A well-formed endpoint id parses to an address carrying that id.
+    #[test]
+    fn a_well_formed_provider_id_parses() {
+        let secret = iroh::SecretKey::generate();
+        let id = secret.public();
+        let addr = provider_addr(&id.to_string()).expect("a real endpoint id parses");
+        assert_eq!(addr.id, id);
+    }
+
+    /// Surrounding whitespace is survivable — this string is copied out of
+    /// emails and terminals.
+    #[test]
+    fn a_provider_id_with_surrounding_whitespace_still_parses() {
+        let secret = iroh::SecretKey::generate();
+        let id = secret.public();
+        let addr = provider_addr(&format!("  {id}\n")).expect("whitespace is trimmed");
+        assert_eq!(addr.id, id);
     }
 }

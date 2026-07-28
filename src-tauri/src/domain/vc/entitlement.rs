@@ -50,10 +50,45 @@ use super::{CredentialType, EntitlementClaim, VerifiableCredential};
 /// moment it changes. Rotation still requires a release; that is accepted for
 /// now and revisited if entitlements outlive release cadence.
 ///
-/// Empty in this build: no IFFTU signing key has been minted yet, and an empty
-/// allowlist fails closed — every entitlement is rejected, which is exactly the
-/// community behaviour. Populating this is a deliberate, reviewable act.
-pub const TRUSTED_ENTITLEMENT_ISSUERS: &[&str] = &[];
+/// Empty in a shipping build: no IFFTU signing key has been minted yet, and an
+/// empty allowlist fails closed — every entitlement is rejected, which is
+/// exactly the community behaviour. Populating this is a deliberate, reviewable
+/// act.
+///
+/// Under `--features ee-staging` it additionally contains
+/// [`STAGING_ISSUER_DID`], so the delivery and activation flow can be exercised
+/// without minting the production key. That feature must never be enabled for a
+/// release; `tests::the_shipped_allowlist_is_empty` fails if the staging entry
+/// ever reaches the default build.
+pub const TRUSTED_ENTITLEMENT_ISSUERS: &[&str] = &[
+    // Production issuer DIDs go here once minted.
+    #[cfg(feature = "ee-staging")]
+    STAGING_ISSUER_DID,
+];
+
+/// Seed of the staging issuer key, hex.
+///
+/// **Deliberately public, and deliberately worthless.** It is published here
+/// rather than kept secret precisely so it cannot be mistaken for a credential
+/// worth protecting: no shipping build trusts the DID it derives, because
+/// [`TRUSTED_ENTITLEMENT_ISSUERS`] only includes that DID under
+/// `ee-staging`, and `ee-staging` is never enabled for a release.
+///
+/// The alternative — a secret staging key — is worse in every direction. It
+/// would need custody and rotation for a key guarding nothing, and a leak would
+/// be indistinguishable from a leak that mattered.
+#[cfg(any(feature = "ee-staging", test))]
+/// ASCII `alexandria-staging-issuer-key-01`, hex-encoded.
+pub const STAGING_ISSUER_SEED_HEX: &str =
+    "616c6578616e647269612d73746167696e672d6973737565722d6b65792d3031";
+
+/// DID of the staging issuer, derived from [`STAGING_ISSUER_SEED_HEX`].
+///
+/// Asserted against the actual derivation in
+/// `tests::the_staging_did_matches_its_published_seed`, so this constant cannot
+/// silently drift from the key it claims to describe.
+#[cfg(any(feature = "ee-staging", test))]
+pub const STAGING_ISSUER_DID: &str = "did:key:z6Mkgj9P1ipmtK6Tf2bMQ3mcTcQJzQwkQfhUMaLQM7YVMZqb";
 
 /// Whether `issuer` is permitted to issue entitlements for this build.
 ///
@@ -204,10 +239,52 @@ mod tests {
 
     /// An empty allowlist must fail closed, not open. This is the shipped
     /// configuration, so the guarantee is worth asserting directly.
+    #[cfg(not(feature = "ee-staging"))]
     #[test]
     fn empty_allowlist_trusts_nobody() {
         assert!(TRUSTED_ENTITLEMENT_ISSUERS.is_empty());
         assert!(!is_trusted_issuer(&Did("did:key:z6MkAnyone".into())));
+    }
+
+    /// The leak guard for `ee-staging`.
+    ///
+    /// A mis-set feature flag is the only thing standing between a release
+    /// build and one that honours a key whose seed is published in this file.
+    /// This test runs in the default build and fails the moment the staging
+    /// anchor reaches it.
+    #[cfg(not(feature = "ee-staging"))]
+    #[test]
+    fn the_shipped_allowlist_is_empty() {
+        assert!(
+            TRUSTED_ENTITLEMENT_ISSUERS.is_empty(),
+            "a shipping build must trust no entitlement issuer; found {TRUSTED_ENTITLEMENT_ISSUERS:?}"
+        );
+        assert!(
+            !TRUSTED_ENTITLEMENT_ISSUERS.contains(&STAGING_ISSUER_DID),
+            "the staging issuer leaked into a non-staging build"
+        );
+    }
+
+    /// Under `ee-staging` the anchor is present — otherwise the feature would
+    /// silently do nothing and the end-to-end test would fail for a reason
+    /// nobody could find.
+    #[cfg(feature = "ee-staging")]
+    #[test]
+    fn the_staging_allowlist_contains_exactly_the_staging_issuer() {
+        assert_eq!(TRUSTED_ENTITLEMENT_ISSUERS, &[STAGING_ISSUER_DID]);
+        assert!(is_trusted_issuer(&Did(STAGING_ISSUER_DID.to_string())));
+    }
+
+    /// The published DID must actually be the one that published seed derives.
+    /// Without this the constant is an unverified assertion, and a wrong value
+    /// would present as "the flow silently grants nothing".
+    #[test]
+    fn the_staging_did_matches_its_published_seed() {
+        let bytes = hex::decode(STAGING_ISSUER_SEED_HEX).expect("seed is valid hex");
+        let seed: [u8; 32] = bytes.try_into().expect("seed is 32 bytes");
+        let derived =
+            crate::crypto::did::derive_did_key(&ed25519_dalek::SigningKey::from_bytes(&seed));
+        assert_eq!(derived.as_str(), STAGING_ISSUER_DID);
     }
 
     /// Exact match only — a DID that merely starts with a trusted prefix is

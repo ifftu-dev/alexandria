@@ -1031,4 +1031,62 @@ mod tests {
         let snapshot = snapshot_with_trusted(db.conn(), NOW, &trusted).unwrap();
         assert_eq!(snapshot.features, vec!["talent_index".to_string()]);
     }
+
+    /// Proves the per-org model needs no new issuance code.
+    ///
+    /// The organisation's admin mints membership with the ordinary
+    /// `issue_credential` command — which already signs with the local
+    /// identity, exactly what an org admin wants — using
+    /// `RoleCredential` + `role: "member"`. Nothing enterprise-specific is
+    /// involved, and nothing had to be added for it.
+    ///
+    /// This asserts against the real production issuance path rather than the
+    /// hand-rolled `store_membership` helper the other tests use, so a change
+    /// to `issue_credential_impl` that broke org membership would surface here.
+    #[test]
+    fn org_membership_can_be_minted_with_the_ordinary_issue_command() {
+        use crate::commands::credentials::{issue_credential_impl, IssueCredentialRequest};
+        use crate::domain::vc::Claim;
+
+        let db = open_db();
+        let org_signing_key = org_key();
+        let org_did = derive_did_key(&org_signing_key);
+
+        // The organisation admin issues membership to this device's holder.
+        let minted = issue_credential_impl(
+            db.conn(),
+            &org_signing_key,
+            &org_did,
+            &IssueCredentialRequest {
+                credential_type: CredentialType::RoleCredential,
+                subject: holder(),
+                claim: Claim::Role(RoleClaim {
+                    role: ORG_MEMBER_ROLE.to_string(),
+                    scope: Some(org_did.as_str().to_string()),
+                }),
+                evidence_refs: vec![],
+                expiration_date: None,
+                supersedes: None,
+                integrity_session_id: None,
+                integrity_policy: None,
+            },
+            "2026-01-01T00:00:00Z",
+        )
+        .expect("an org can mint membership with the existing command");
+
+        assert_eq!(minted.issuer.as_str(), org_did.as_str());
+        assert_eq!(minted.credential_subject.id.as_str(), LOCAL_DID);
+
+        // IFFTU's entitlement, addressed to the organisation.
+        let ent = signed_entitlement(&key("ifftu"), &org_did, &["talent_index"], None);
+        crate::commands::import::import_credential_impl(db.conn(), &ent, NOW).unwrap();
+        let trusted = [ent.issuer.as_str()];
+
+        let snapshot = snapshot_with_trusted(db.conn(), NOW, &trusted).unwrap();
+        assert_eq!(
+            snapshot.features,
+            vec!["talent_index".to_string()],
+            "membership minted by the ordinary path must bind the entitlement"
+        );
+    }
 }

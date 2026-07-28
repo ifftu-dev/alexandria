@@ -1510,6 +1510,7 @@ pub fn run() {
             commands::credentials::export_credentials_bundle,
             commands::entitlements::get_entitlement_snapshot,
             commands::import::import_credential,
+            commands::import::import_credential_from_peer,
             // Selective-disclosure presentations (§18)
             commands::presentation::create_presentation,
             commands::presentation::verify_presentation,

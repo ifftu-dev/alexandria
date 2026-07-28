@@ -36,6 +36,8 @@
 
 use ed25519_dalek::SigningKey;
 
+use crate::content_store::node::ContentNode;
+use crate::content_store::{content, storage};
 use crate::crypto::did::{derive_did_key, Did, VerificationMethodRef};
 use crate::domain::vc::sign::{sign_credential, UnsignedCredential};
 use crate::domain::vc::{
@@ -148,6 +150,84 @@ pub fn issue_entitlement(
         .map_err(|e| format!("sign entitlement: {e}"))
 }
 
+/// The staging issuer key, derived from the published seed in
+/// [`crate::domain::vc::entitlement::STAGING_ISSUER_SEED_HEX`].
+///
+/// Available only under `ee-staging`, which is the same feature that puts the
+/// matching DID in the trusted allowlist — so the key and the trust in it
+/// appear and disappear together, and neither can be enabled without the other.
+///
+/// Not a secret and not a shortcut around [`load_issuer_key`]: production
+/// issuance still reads a real key from the environment. This exists so the
+/// delivery and activation flow can be exercised without minting the
+/// production key first.
+#[cfg(feature = "ee-staging")]
+pub fn staging_issuer_key() -> SigningKey {
+    let bytes = hex::decode(crate::domain::vc::entitlement::STAGING_ISSUER_SEED_HEX)
+        .expect("published staging seed is valid hex");
+    let seed: [u8; 32] = bytes
+        .try_into()
+        .expect("published staging seed is 32 bytes");
+    SigningKey::from_bytes(&seed)
+}
+
+/// Where a published credential can be fetched from.
+///
+/// Mirrors `commands::import::CredentialTicket` — the issuer produces this,
+/// the customer's device consumes it. Kept as a separate type rather than
+/// shared because the MIT side must not depend on enterprise code.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PublishedCredential {
+    /// BLAKE3 hash of the credential JSON, hex. Half the ticket.
+    pub hash: String,
+    /// Size of the published bytes.
+    pub size: u64,
+}
+
+/// The `pins` row type used for published credentials.
+///
+/// Not one of the eviction tiers (`cache`, `course`, `evidence`, `profile`,
+/// `taxonomy`) because it is not any of those things: it is issuer-authored
+/// content whose whole purpose is to stay servable.
+const PIN_TYPE: &str = "entitlement";
+
+/// Publish a signed credential so customer devices can fetch it by hash.
+///
+/// Stored **unencrypted**. The credential is already signed, so confidentiality
+/// is the only thing at stake, and a 32-byte BLAKE3 hash is unguessable — the
+/// hash behaves as a capability, so nobody enumerates their way to an
+/// organisation's plan and seat count. Encrypting instead would mean shipping a
+/// content key alongside every ticket, which is strictly worse.
+///
+/// Pinned with `auto_unpin = false`, so storage pressure can never reclaim it.
+/// A provider that pins evictably will silently stop serving under load, and
+/// the failure looks identical to the customer as "your entitlement does not
+/// exist".
+///
+/// Availability past this point is replication, not protocol: iroh-blobs has no
+/// DHT-backed persistence, and content exists only while some node holding it
+/// is online. Run more than one provider. Note that a customer only needs the
+/// fetch to succeed **once** — after import the credential is local and
+/// verifies offline forever.
+pub async fn publish_entitlement(
+    node: &ContentNode,
+    conn: &rusqlite::Connection,
+    credential: &VerifiableCredential,
+) -> Result<PublishedCredential, String> {
+    let bytes = serde_json::to_vec(credential).map_err(|e| format!("serialize credential: {e}"))?;
+
+    let added = content::add_bytes_unencrypted(node, &bytes)
+        .await
+        .map_err(|e| format!("publish credential: {e}"))?;
+
+    storage::upsert_pin(conn, &added.hash, PIN_TYPE, added.size, false);
+
+    Ok(PublishedCredential {
+        hash: added.hash,
+        size: added.size,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -244,6 +324,102 @@ mod tests {
         let result = verify_credential(db.conn(), &vc, after_term, &policy());
         assert!(result.expired);
         assert_eq!(result.acceptance_decision, AcceptanceDecision::Reject);
+    }
+
+    /// A published credential must be pinned unevictably. A provider that
+    /// pins evictably stops serving under storage pressure, and to the
+    /// customer that is indistinguishable from the entitlement not existing.
+    #[test]
+    fn publishing_pins_unevictably() {
+        let db = crate::db::Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+
+        // Exercise the pin bookkeeping directly; adding bytes needs a running
+        // iroh node, which a unit test has no business starting.
+        storage::upsert_pin(db.conn(), "abc123", PIN_TYPE, 512, false);
+
+        let (pin_type, auto_unpin): (String, i64) = db
+            .conn()
+            .query_row(
+                "SELECT pin_type, auto_unpin FROM pins WHERE cid = ?1",
+                rusqlite::params!["abc123"],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(pin_type, PIN_TYPE);
+        assert_eq!(auto_unpin, 0, "published credentials must never be evicted");
+
+        // And it must not count as reclaimable space. Asserted against the
+        // table directly rather than through the eviction engine's private
+        // helper, which would mean widening its visibility for a test.
+        let evictable: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COALESCE(SUM(size_bytes), 0) FROM pins WHERE auto_unpin = 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(evictable, 0);
+    }
+
+    /// The bytes a provider serves are exactly what the importer parses. This
+    /// is the wire contract between the enterprise issuer and the MIT import
+    /// path, and nothing else pins it.
+    #[test]
+    fn published_bytes_are_what_the_importer_reads() {
+        let vc = issue_entitlement(&issuer_key(), &request(), "urn:test:ent:1", NOW).unwrap();
+        let served = serde_json::to_vec(&vc).unwrap();
+
+        let round_tripped: VerifiableCredential = serde_json::from_slice(&served).unwrap();
+        assert_eq!(
+            serde_json::to_value(&round_tripped).unwrap(),
+            serde_json::to_value(&vc).unwrap()
+        );
+    }
+
+    /// The full path in its real configuration: mint with the staging key,
+    /// import as a device would, resolve through the snapshot — using
+    /// `TRUSTED_ENTITLEMENT_ISSUERS` itself rather than an injected list.
+    ///
+    /// Every other accept-path test injects the allowlist, which proves the
+    /// logic but not the wiring. This is the one that would catch the staging
+    /// DID being present but wrong, or the feature enabling the key without
+    /// enabling the trust.
+    #[cfg(feature = "ee-staging")]
+    #[test]
+    fn the_staging_issuer_unlocks_end_to_end() {
+        use crate::commands::entitlements::get_entitlement_snapshot_impl;
+        use crate::commands::import::import_credential_impl;
+
+        let db = crate::db::Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+
+        // The device's holder, and the entitlement addressed to them.
+        let holder = Did("did:key:z6MkStagingTestHolder".into());
+        db.conn()
+            .execute(
+                "INSERT INTO app_settings (key, value, scope, updated_at) \
+                 VALUES ('identity.local_did', ?1, 'device', datetime('now'))",
+                rusqlite::params![holder.as_str()],
+            )
+            .unwrap();
+
+        let key = staging_issuer_key();
+        assert!(
+            crate::domain::vc::entitlement::is_trusted_issuer(&derive_did_key(&key)),
+            "the staging key must derive the DID the staging allowlist trusts"
+        );
+
+        let mut req = request();
+        req.org_did = holder;
+        let vc = issue_entitlement(&key, &req, "urn:test:staging:1", NOW).unwrap();
+
+        import_credential_impl(db.conn(), &vc, NOW).unwrap();
+
+        let snapshot = get_entitlement_snapshot_impl(db.conn(), NOW).unwrap();
+        assert_eq!(snapshot.features, vec!["talent_index", "employer_console"]);
+        assert_eq!(snapshot.org_id.as_deref(), Some("org-1"));
     }
 
     /// Absent configuration, a node is not an issuer. Asserted without

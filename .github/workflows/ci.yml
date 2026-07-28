@@ -296,6 +296,26 @@ jobs:
           CARGO_BUILD_JOBS: "2"
         run: cargo test -p alexandria-node --lib --features ee ee::
 
+      - name: Rust tests (enterprise staging feature)
+        # `ee-staging` puts a throwaway issuer DID in the compiled-in
+        # entitlement allowlist. It is the only configuration in which the
+        # accept path runs against the real TRUSTED_ENTITLEMENT_ISSUERS rather
+        # than an injected list, so it is the only place a staging DID that is
+        # present but wrong would be caught.
+        #
+        # The reverse guard — that this DID never reaches a shipping build —
+        # is `entitlement::tests::the_shipped_allowlist_is_empty`, which runs
+        # in the default "Run Rust tests" step above.
+        if: needs.changes.outputs.backend == 'true'
+        working-directory: alexandria
+        env:
+          CARGO_PROFILE_TEST_DEBUG: "0"
+          CARGO_BUILD_JOBS: "2"
+        # One filter, not two: `cargo test` accepts a single positional
+        # filter, and "entitlement" already matches domain::vc::entitlement,
+        # commands::entitlements and ee::entitlement_issuer.
+        run: cargo test -p alexandria-node --lib --features ee-staging entitlement
+
       - name: Tauri command guard
         # Cross-checks lib.rs (backend) against invoke() sites (frontend), so
         # run whenever either surface changed. Pure Node, no npm deps needed.

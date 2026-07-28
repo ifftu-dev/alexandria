@@ -25,6 +25,19 @@ dev-seed = []
 # core with a no-op default impl, so the community build compiles with the
 # `ee/` directory removed entirely.
 ee = []
+
+# Enterprise *staging*. Adds a throwaway issuer DID to the compiled-in
+# entitlement allowlist so the delivery and activation flow can be exercised
+# end to end without minting the production signing key.
+#
+# NEVER enable this for a release build. It is a compiled-in trust anchor: a
+# build with this feature honours entitlements signed by a key whose seed is
+# public (see `domain::vc::entitlement`). Implies `ee`, because trusting a
+# staging issuer in a community build would be meaningless.
+#
+# `entitlement::tests::the_shipped_allowlist_is_empty` fails in the default
+# build if the staging DID ever leaks into it.
+ee-staging = ["ee"]
 # Enable desktop tutoring video without acoustic echo cancellation.
 # This keeps Windows buildable on GitHub's MSVC runners, where the bundled
 # webrtc-audio-processing autotools build is not currently stable.
