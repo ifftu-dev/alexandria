@@ -383,6 +383,16 @@ jobs:
         with:
           path: alexandria
 
+      # The ubuntu-22.04-arm image defaults to JDK 11, but sdkmanager refuses to
+      # run on anything below 17 ("This tool requires JDK 17 or later"), so the
+      # SDK setup below fails before it starts. Pin 21 to match the mobile
+      # release workflow rather than relying on the image default.
+      - name: Setup Java 21
+        uses: actions/setup-java@v5
+        with:
+          java-version: '21'
+          distribution: temurin
+
       # arm64 runner images do not reliably ship the Android SDK, so provision
       # it explicitly rather than assume ANDROID_SDK_ROOT is populated.
       - name: Set up Android SDK
