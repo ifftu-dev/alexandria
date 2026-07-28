@@ -17,7 +17,7 @@ alexandria/
 ├── src-tauri/              # Rust backend (Tauri v2 app)
 ├── src/                    # Vue 3 frontend
 ├── cli/                    # Developer CLI (alex)
-├── crates/                 # Workspace member crates (iroh-live, iroh-moq, moq-media)
+├── crates/                 # Workspace member crates (live, iroh-moq, moq-media)
 ├── patches/                # Local crate patches (netdev, if-watch, audiopus_sys, webrtc-audio-processing-sys, ffmpeg-sys-next, ffmpeg-next)
 ├── docs/                   # Documentation
 ├── bootstrap/              # Seed data (public_courses.json)
@@ -98,7 +98,24 @@ src-tauri/
     ├── assessment/         # Dynamic assessment engine (pure)
     │   ├── mod.rs          # SplitMix64 PRNG + option shuffle
     │   ├── randomizer.rs   # Difficulty-stratified question draw (per-attempt seed)
+    │   ├── irt.rs          # Item-response-theory ability estimation
+    │   ├── adaptive.rs     # Adaptive item selection over the IRT engine
+    │   ├── items.rs        # Unified assessment items (migration 072)
+    │   ├── policy.rs       # Attempt limits + cooldowns (migration 074)
+    │   ├── mcq.rs          # MCQ item handling
+    │   ├── goal_plan.rs    # Goal → prerequisite path planning
     │   └── grader.rs       # Host-side grading against the withheld answer key
+    ├── plugins/            # Community plugin system + WASM grader
+    │   ├── wasm_runtime.rs # Wasmtime sandbox; Cranelift JIT, Pulley interpreter on iOS
+    │   ├── grade_contract.rs # Platform-independent grade envelope (ABI v1)
+    │   ├── registry.rs     # Install/uninstall + per-target .cwasm precompilation
+    │   ├── manifest.rs     # Manifest parse + validate
+    │   ├── verifier.rs     # Signature + CID verification
+    │   ├── catalog.rs      # Gossip discovery cache
+    │   ├── attestation.rs  # DAO multi-sig attestations
+    │   ├── builtins.rs     # Embedded builtin bundles (MCQ, editors, IRL review)
+    │   ├── asset_protocol.rs # plugin:// asset handler + per-plugin CSP
+    │   └── irl_review.rs   # Local instructor-review inbox
     ├── content_store/      # iroh node + resolver + public URL fallback
     │
     ├── profile/            # Multi-user profile manager
@@ -146,7 +163,7 @@ src-tauri/
     │   ├── keystroke_ae.rs # Per-user autoencoder (candle autograd)
     │   └── mouse_cnn.rs    # Reservoir-style trajectory CNN (candle dense head)
     │
-    ├── tutoring/           # iroh-live integration
+    ├── tutoring/           # `live` crate integration (MoQ rooms/sessions)
     │   ├── mod.rs
     │   ├── manager.rs      # Desktop + Android tutoring manager
     │   └── manager_mobile.rs # iOS/mobile tutoring manager

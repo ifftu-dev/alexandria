@@ -4,7 +4,7 @@ The release system is split into three lanes:
 
 - `CI`: fast verification on pushes and pull requests.
 - `Validate (Desktop)` / `Validate (Mobile)`: manual tag-based artifact builds without publishing.
-- `Release (Desktop)` / `Release (Mobile)`: manual publish workflows for real releases.
+- `Release (Desktop)` / `Release (Mobile)`: publish workflows for real releases. Pushing a `v*` tag fires them automatically with the dispatch defaults; `workflow_dispatch` stays available to override a run.
 
 The validate/release entrypoints are now thin wrappers over two shared reusable workflows:
 
@@ -34,9 +34,9 @@ Before publishing a public release, the repo must pass the cheap `Release Readin
 
 - CI uses change detection to skip Rust work for frontend-only changes and skip frontend work for backend-only changes.
 - Security audit only runs when Cargo, Rust, patch, or workflow files changed.
-- Desktop validation lets you opt into `macOS` and `Linux ARM64` instead of burning those minutes by default.
+- Desktop validation runs macOS by default and lets you opt into `Linux ARM64`, which is off.
 - Mobile validation defaults `iOS` off so the expensive macOS runner is only used intentionally, and Android validation uses a temporary CI keystore so it can build release-style Android artifacts without production signing secrets.
-- Publish workflows are manual-only and require an immutable tag, which keeps validation and publishing from competing with each other.
+- Publish workflows require an immutable tag, which keeps validation and publishing from competing with each other. They trigger on a `v*` tag push and can also be dispatched by hand.
 - All workflows keep `concurrency.cancel-in-progress` enabled so stale runs are canceled automatically.
 
 ## How to use it

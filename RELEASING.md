@@ -40,10 +40,16 @@ Configure these secrets in your GitHub repository settings under **Settings > Se
 The CI/CD pipeline automates the build and release process.
 
 ### Tag-based Releases
-Release builds are manual and consume an immutable tag:
-1. Create a tag: `git tag 0.0.1-alpha.2`.
-2. Push the tag: `git push origin 0.0.1-alpha.2`.
-3. Run `Release (Desktop)` and `Release (Mobile)` from the **Actions** tab using that tag.
+Release builds consume an immutable tag. **The tag must start with `v`** — that
+prefix is what the workflows trigger on, so a tag without it publishes nothing.
+
+1. Create a tag: `git tag v0.0.1-alpha.2`.
+2. Push the tag: `git push origin v0.0.1-alpha.2`.
+
+Pushing it runs `Release (Desktop)` and `Release (Mobile)` automatically with the
+dispatch defaults (desktop: every platform except Linux ARM64, signed updater;
+mobile: Android + iOS). To override those defaults, or to re-run against an
+existing tag, dispatch either workflow by hand from the **Actions** tab.
 
 The workflows build artifacts for macOS, Linux (x86_64 and ARM64), Windows, iOS, and Android.
 

@@ -16,7 +16,7 @@
 > [`vc-migration.md`](./vc-migration.md) for the full diff.
 
 **Engine**: SQLCipher (rusqlite 0.38, `bundled-sqlcipher`) — per-profile DBs are encrypted, opened with `PRAGMA key`
-**Migrations**: 71
+**Migrations**: 77
 
 ---
 
@@ -107,6 +107,12 @@
 | 69 | `goal_templates` | `goal_templates` + `goal_template_versions` (DAO-ratified exam/curriculum/job-role → ideal skill graph); add `synonyms` to `skills` for on-device JD/resume matching |
 | 70 | `assessment_question_banks` | `question_banks`, `bank_questions` (answer key `correct_indices` **never** sent to the client), `question_bank_versions`, `assessment_attempts` — dynamic Sentinel-gated community assessments |
 | 71 | `plugin_review_course_scope` | Add `course_id` to `plugin_irl_submissions`, generalizing it into the shared submit-for-review store for any plugin with the `instructor_review` capability; backfills course scope so the instructor inbox can be scoped to owned courses (legacy unresolved rows stay NULL / globally visible) |
+| 72 | `unified_assessment_items` | Adds `assessment_items`, `assessment_item_skills`, `attempt_items`; collapses host-side `bank_questions` grading onto the frozen wasm grader ABI |
+| 73 | `bloom_level_normalisation` | Normalises `skills.bloom_level` to the six `domain::bloom::BloomLevel` tokens and backfills `assessment_items.bloom_level` |
+| 74 | `assessment_attempt_policy` | `question_banks.max_attempts` + `cooldown_hours` (default `[0,24,72,168]`); `attempt_ordinal` on attempts |
+| 75 | `assessment_adaptive_delivery` | `question_banks.delivery_mode` (default `fixed`), `adaptive_se_target`, `adaptive_min_items`, `adaptive_max_items` |
+| 76 | `derived_skill_state_history` | Adds `derived_skill_state_history` — append-only daily snapshots per `(subject, skill, day)` |
+| 77 | `submission_evidence_published` | `element_submissions.evidence_published INTEGER NOT NULL DEFAULT 0` |
 
 ---
 
@@ -191,7 +197,7 @@ columns and indexes, use `src-tauri/src/db/schema.rs`.
 - **`catalog`** — Network-discovered course metadata mirroring the
   publishable subset of `courses`.
 
-### Community Plugins (7 tables)
+### Community Plugins (8 tables)
 
 The community plugin system (see [`plugins.md`](plugins.md)). Plugins are
 content-addressed iframe bundles; built-ins ship embedded in the host
@@ -241,7 +247,7 @@ discovery (Phase 3).
 - **`reputation_snapshots`** — Snapshot/anchoring records for
   reputation assertions, keyed by actor with `tx_status` and subject.
 
-### Integrity (Sentinel) (7 tables)
+### Integrity (Sentinel) (8 tables)
 
 - **`integrity_sessions`** — Sentinel sessions with `status`,
   `integrity_score`, `critical_count` / `warning_count` (migration 040),
@@ -276,7 +282,7 @@ discovery (Phase 3).
   `(user_address, device_fp_prefix, model_kind)`. Moved out of browser
   localStorage into the encrypted DB.
 
-### P2P, Content, and Sync Support (8 tables)
+### P2P, Content, and Sync Support (12 tables)
 
 - **`peers`** — Known libp2p peers with `addresses`, `roles`, and local `reputation`.
 - **`pins`** — Local iroh pin state, including `size_bytes`,
@@ -350,7 +356,7 @@ discovery (Phase 3).
 - **`classroom_join_requests`** — Join request queue with review state.
 - **`classroom_channels`** — Text/announcement channels per classroom.
 - **`classroom_messages`** — Persisted messages with edit/delete flags.
-- **`classroom_calls`** — Live classroom A/V calls backed by iroh-live tickets.
+- **`classroom_calls`** — Live classroom A/V calls backed by `live` room tickets.
 - **`classroom_group_keys`** — Encrypted per-classroom group keys for E2E messaging.
 - **`app_settings`** — Unified per-profile settings KV store
   (`key TEXT PRIMARY KEY`, `value TEXT`, `scope TEXT NOT NULL`,
@@ -413,7 +419,7 @@ These tables back the VC-first protocol described in
   `taxonomy_versions` (`version`, `content_cid`, `ratified_by`,
   `signature`, `taxonomy_version`, `published_at`).
 
-### Assessments (4 tables, migration 070)
+### Assessments (7 tables, migrations 070 + 072)
 
 - **`question_banks`** — DAO-ratified banks: `id`, `skill_id`, `label`,
   `difficulty_profile`, `taxonomy_version`, `dao_id`, `ratified`,

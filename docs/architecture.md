@@ -67,11 +67,11 @@ central API, no hosted database, and no Docker infrastructure.
 |                                                       |
 |  +----------------+         +----------------------+  |
 |  |   Vue 3 UI     |--IPC--->|    Rust Backend      |  |
-|  |   (WebView)    | ~313    |                      |  |
+|  |   (WebView)    | ~320    |                      |  |
 |  |                | cmds    |  +----------------+  |  |
 |  |  48 pages      |         |  |   SQLite DB    |  |  |
-|  |  77 components |         |  |   ~92 tables   |  |  |
-|  |  30 composables|         |  |   71 migrations|  |  |
+|  |  77 components |         |  |   ~96 tables   |  |  |
+|  |  30 composables|         |  |   77 migrations|  |  |
 |  +----------------+         |  +----------------+  |  |
 |                             |                      |  |
 |                             |  +----------------+  |  |
@@ -200,7 +200,7 @@ device-sync (`SYNCABLE_TABLES`) or gossip — an invariant covered by unit tests
 
 **Engine**: SQLCipher (rusqlite 0.38, `bundled-sqlcipher`) — per-profile DBs are encrypted, opened with `PRAGMA key`
 
-**Tables**: ~92 live (102 created, 10 dropped in migration 040) across 71 migrations
+**Tables**: ~96 live (106 created, 10 dropped in migration 040) across 77 migrations
 
 | Domain | Tables |
 |--------|--------|
@@ -546,7 +546,7 @@ CSS custom properties with light/dark mode via `.dark` class on `<html>`:
 
 ## 11. IPC Boundary
 
-The frontend communicates with the Rust backend via ~313 registered Tauri IPC handlers in `tauri::generate_handler!`. The `commands/` directory holds **52 files** (excluding `mod.rs`); `tutoring_mobile.rs` and `tutoring_stubs.rs` are platform-conditional variants of `tutoring`, and `ratelimit.rs` is an internal helper not registered as IPC. The table below is a non-exhaustive sample of the command modules (others include `guardian`, `instructor`, `completion`, `auto_issuance`, `pairing`, `assessment`, `goal_templates`, `skill_bootstrap`, `content_governance`, `role_assessment`, `sentinel_gaze`, `sentinel_holdout`, `sentinel_dao`, `sentinel_ml`, `updater`, `users`, `username_registry`):
+The frontend communicates with the Rust backend via ~320 registered Tauri IPC handlers in `tauri::generate_handler!`. The `commands/` directory holds **52 files** (excluding `mod.rs`); `tutoring_mobile.rs` and `tutoring_stubs.rs` are platform-conditional variants of `tutoring`, and `ratelimit.rs` is an internal helper not registered as IPC. The table below is a non-exhaustive sample of the command modules (others include `guardian`, `instructor`, `completion`, `auto_issuance`, `pairing`, `assessment`, `goal_templates`, `skill_bootstrap`, `content_governance`, `role_assessment`, `sentinel_gaze`, `sentinel_holdout`, `sentinel_dao`, `sentinel_ml`, `updater`, `users`, `username_registry`, `adaptive`, `graph`):
 
 | Module | Commands | Examples |
 |--------|----------|---------|
@@ -579,9 +579,10 @@ The frontend communicates with the Rust backend via ~313 registered Tauri IPC ha
 | evidence | 1 | `list_reputation` (legacy read surface; `skill_proofs`/`evidence` listings retired in migration 040 — use `list_credentials`) |
 | aggregation | 3 | `get_derived_skill_state`, `list_derived_states`, `recompute_all` |
 | presentation | 2 | `create_presentation`, `verify_presentation` |
-| health | 2 | `check_health`, `read_diag_log` |
+| plugins | 24 | `plugin_install_from_file`, `plugin_submit_and_grade`, `plugin_browse_catalog`, `plugin_list_dependencies`, capability grant/revoke, the `irl_*` review inbox, attestation status |
+| health | 4 | `check_health`, `read_diag_log`, `frontend_log`, `release_secure_input` |
 
-Note: `tutoring` has platform-specific variants (desktop with video, mobile stubs). Counts reflect the unique commands registered for the current build; tally is approximate and shifts with each PR.
+Note: `tutoring` has platform-specific variants. Desktop and Android share the full manager (`tutoring/manager.rs`); iOS has its own AVFoundation/VideoToolbox manager (`tutoring/manager_mobile.rs`); only targets that are neither desktop, iOS, nor Android fall back to `commands/tutoring_stubs.rs`. Counts reflect the unique commands registered for the current build; tally is approximate and shifts with each PR.
 
 ---
 

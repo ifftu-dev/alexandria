@@ -117,7 +117,7 @@ alexandria/
 │       ├── classroom/ # Encrypted group messaging, membership, gossip
 │       ├── commands/ # IPC command handlers across ~50 modules (frontend ↔ backend), including profile/* lifecycle
 │       ├── crypto/   # BIP-39 wallet, per-profile vault (Stronghold / portable), Ed25519, did:key
-│       ├── db/       # SQLite (~92 live tables, 71 migrations, seed data) — one DB per profile
+│       ├── db/       # SQLite (~96 live tables, 77 migrations, seed data) — one DB per profile
 │       ├── diag.rs   # File-based diagnostic logger + panic hook
 │       ├── domain/   # Business logic (courses, tutorials, opinions, vc, evidence, governance, ...)
 │       ├── evidence/ # Proficiency taxonomy + thresholds + VC-first reputation engine (attestation/challenge live in commands/; legacy evidence pipeline retired at mig 040)
@@ -132,7 +132,8 @@ alexandria/
 │   ├── composables/  # useProfiles (canonical), useSettings (per-profile prefs + cross-device sync), useAuth (compat shim), useTheme, useP2P, useSentinel, useLocalApi, useBiometricVault, useClassroom, useContentSync, useCredentials, useOmniSearch, usePlatform, useSkillGraphState, useSkillGraphHover, useTutoringRoom
 │   └── assets/       # Tailwind CSS v4 design system
 ├── cli/              # Developer CLI (alex) — Rust + clap
-├── crates/           # Vendored workspace members (iroh-live, iroh-moq, moq-media)
+├── crates/           # Workspace members: live (our room/session layer),
+│                     #   iroh-moq + moq-media (vendored MoQ transport + media)
 ├── patches/          # Local crate patches (6: netdev, if-watch, ffmpeg-sys-next, ffmpeg-next, audiopus_sys, webrtc-audio-processing-sys)
 └── docs/             # Architecture, schema, protocol, structure docs
 ```
@@ -177,7 +178,7 @@ The relay server lives in a [separate repository](https://github.com/ifftu-dev/a
 
 ### Prerequisites
 
-- **Rust 1.89+** with `cargo`
+- **Rust 1.91+** with `cargo` (iroh 1.0 sets the MSRV; see `rust-version` in `src-tauri/Cargo.toml`)
 - **Node.js 22+** with `npm`
 - **Tauri CLI**: `cargo install tauri-cli`
 
@@ -515,7 +516,7 @@ All data lives in `~/Library/Application Support/org.alexandria.node/` (macOS). 
 |----------------|---------|
 | `profiles_index.json` | Public sidecar — display names, avatars, colors, timestamps. Read by the picker before any vault is unlocked. **No keys, DIDs, or stake addresses.** |
 | `profiles/<uuid>/vault/` | Per-profile encrypted vault (Stronghold on desktop, AES-256-GCM + Argon2id on mobile) |
-| `profiles/<uuid>/alexandria.db` | Per-profile SQLCipher database (~92 live tables), key derived from that profile's password |
+| `profiles/<uuid>/alexandria.db` | Per-profile SQLCipher database (~96 live tables), key derived from that profile's password |
 | `profiles/<uuid>/iroh/` | Per-profile content-addressed blob store (course content, user profiles) and node secret |
 | `profiles/<uuid>/plugins/` | Per-profile installed plugin bundles |
 | `profiles/<uuid>/videocache/` | Per-profile materialized video files (served via Tauri's asset protocol) |

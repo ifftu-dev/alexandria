@@ -73,34 +73,47 @@ away automatically when either endpoint is uninstalled.
 | `builtins` | First-party bundles embedded via `include_bytes!`, installed (and refreshed) at startup; prunes stale builtin rows when a builtin's manifest/CID changes |
 | `catalog` | Discovery cache for the `/alexandria/plugins/1.0` gossip topic |
 | `attestation` | Plugin DAO multi-sig attestation verify + store |
-| `wasm_runtime` | Wasmtime grader sandbox (everywhere except iOS — see the `grader` cfg in `build.rs`) |
+| `wasm_runtime` | Wasmtime grader sandbox (every platform — see the `grader` cfg in `build.rs`) |
 | `irl_review` | Local instructor-review inbox (see below) |
 
 IPC commands live in `src-tauri/src/commands/plugins.rs`: install /
 uninstall / list / get-manifest, capability grant/revoke/list,
 `plugin_set_enabled`, `plugin_get_docs`, `plugin_read_asset_data_url`
 (icons + README images as `data:` URLs), `plugin_submit_and_grade`
-(registered on every platform — desktop and Android run the real wasmtime
-grader, iOS returns a `GraderUnavailable:` marker so callers can show a
-"runs elsewhere" message instead of an unknown-command failure), the
+(runs the real wasmtime grader on every platform; a `GraderUnavailable:`
+marker exists only as a dormant fallback for a hypothetical target that
+cannot run Pulley, and is compiled on none of the shipping ones), the
 `irl_*` inbox commands, and the Phase-3 catalog + attestation commands.
 DID→username resolution is `resolve_display_names` in
 `commands/identity.rs`.
 
 ### Grader platform support
 
-The grader runs wherever Cranelift can emit native code at runtime, which
-is everywhere except iOS. `build.rs` emits a `grader` cfg for exactly that
-set, and every gate in `plugins/` keys off it rather than `desktop`.
+The grader is compiled in on every platform. `build.rs` emits the `grader`
+cfg unconditionally, and every gate in `plugins/` keys off it rather than
+`desktop`.
 
-iOS is the sole exception, and the reason is the platform's JIT
-prohibition — not a Wasmtime limitation. Wasmtime 36 supports
-`aarch64-linux-android` directly; what iOS lacks is any way to make
-compiled output executable. Running graders there needs Wasmtime's Pulley
-interpreter backend instead of native codegen. Pulley executes the same
-modules with identical fuel accounting and bit-identical results, but
-roughly 10–20x slower, which is fine for the lighter graders and not yet
-viable for the TypeScript and C/C++ ones.
+The one per-target difference lives inside `grader_config()`: iOS forbids
+making compiled output executable (W^X), so instead of native codegen it
+targets `pulley64`, Wasmtime's portable bytecode interpreter, and reserves
+only as much linear memory as a grader is allowed to use — the default
+4GiB reservation is refused by iOS and fails instantiation. Everywhere else
+uses the Cranelift JIT. Wasmtime 36 supports `aarch64-linux-android`
+directly, so Android needs no special handling.
+
+Both backends produce identical results: the
+`pulley_matches_native_fuel_and_score` test runs the real JavaScript grader
+through the shipped iOS config and the native one and asserts the score,
+the per-case details, and the fuel consumed all match. Fuel is metered per
+wasm instruction, so equal fuel means both executed the same instruction
+sequence — which is what lets a credential earned on a phone mean the same
+thing as one earned on a laptop.
+
+Interpretation is roughly 10-20x slower than the JIT. All four editor
+graders run on iOS; the heavier ones (TypeScript, C/C++) simply take longer
+there. The C/C++ grader used to re-parse its interpreter for every test
+case and now loads it once per submission, which cut its fuel use by about
+half.
 
 ### Frontend (Vue)
 

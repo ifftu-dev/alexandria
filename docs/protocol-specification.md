@@ -81,7 +81,7 @@ All state lives on the user's device in three locations:
 | Store | Purpose |
 |-------|---------|
 | Profile index | Public sidecar `profiles_index.json` — display names + avatars only (no crypto material). Rendered by the picker before any vault is unlocked. |
-| SQLite | Per-profile relational data (courses, skills, evidence, governance, verifiable credentials) — ~92 live tables (102 CREATE TABLE across 71 migrations; 10 dropped in migration 040). One DB per profile at `profiles/<uuid>/alexandria.db`. |
+| SQLite | Per-profile relational data (courses, skills, evidence, governance, verifiable credentials) — ~96 live tables (106 CREATE TABLE across 77 migrations; 10 dropped in migration 040). One DB per profile at `profiles/<uuid>/alexandria.db`. |
 | Encrypted vault | Per-profile wallet keys and mnemonic — IOTA Stronghold (desktop) or AES-256-GCM + Argon2id (mobile). One vault per profile under `profiles/<uuid>/vault/`. |
 | iroh | Per-profile content-addressed blobs (course HTML, profiles) — BLAKE3 hashes. One blob store + node secret per profile at `profiles/<uuid>/iroh/`. |
 
@@ -110,7 +110,7 @@ The architecture MUST satisfy:
 
 ### 2.4 IPC Boundary
 
-The frontend communicates with the Rust backend via ~313 Tauri IPC commands registered in `tauri::generate_handler!`. Commands are split across many domain-facing IPC modules (profile, settings, classroom, governance, taxonomy, tutoring, identity, credentials, sync, courses, attestation, challenge, opinions, integrity, content, pinning, storage, snapshot, reputation, enrollment, elements, chapters, catalog, p2p, evidence, aggregation, presentation, health, guardian, instructor, completion, auto_issuance, pairing, assessment, goal_templates, skill_bootstrap, content_governance, role_assessment, sentinel_gaze, sentinel_holdout, sentinel_dao, sentinel_ml, updater, users, username_registry), with `commands/` containing 51 Rust source files (excluding `mod.rs`; `ratelimit.rs` and the two tutoring platform variants included). The `profile` module owns the multi-user lifecycle (`list_profiles`, `create_profile`, `restore_profile_with_mnemonic`, `unlock_profile`, `lock_profile`, `rename_profile`, `set_profile_avatar`, `delete_profile`, `get_active_profile_id`); the `identity` module is reduced to operations against the active profile (`export_mnemonic`, `is_biometric_available`, `get_wallet_info`, `get_local_did`, `get_profile`, `update_profile`, `publish_profile`, `resolve_profile`); the `settings` module owns the unified per-profile preference store (`list_settings`, `set_setting`, `reset_setting`), with `scope='sync'` rows propagated across the user's other devices via the existing cross-device sync (LWW on `updated_at`).
+The frontend communicates with the Rust backend via ~320 Tauri IPC commands registered in `tauri::generate_handler!`. Commands are split across many domain-facing IPC modules (profile, settings, classroom, governance, taxonomy, tutoring, identity, credentials, sync, courses, attestation, challenge, opinions, integrity, content, pinning, storage, snapshot, reputation, enrollment, elements, chapters, catalog, p2p, evidence, aggregation, presentation, health, guardian, instructor, completion, auto_issuance, pairing, assessment, goal_templates, skill_bootstrap, content_governance, role_assessment, sentinel_gaze, sentinel_holdout, sentinel_dao, sentinel_ml, updater, users, username_registry), with `commands/` containing 52 Rust source files (excluding `mod.rs`; `ratelimit.rs` and the three tutoring platform variants — `tutoring`, `tutoring_mobile`, `tutoring_stubs` — included). The `profile` module owns the multi-user lifecycle (`list_profiles`, `create_profile`, `restore_profile_with_mnemonic`, `unlock_profile`, `lock_profile`, `rename_profile`, `set_profile_avatar`, `delete_profile`, `get_active_profile_id`); the `identity` module is reduced to operations against the active profile (`export_mnemonic`, `is_biometric_available`, `get_wallet_info`, `get_local_did`, `get_profile`, `update_profile`, `publish_profile`, `resolve_profile`); the `settings` module owns the unified per-profile preference store (`list_settings`, `set_setting`, `reset_setting`), with `scope='sync'` rows propagated across the user's other devices via the existing cross-device sync (LWW on `updated_at`).
 
 ---
 
@@ -1843,13 +1843,13 @@ The reference implementation is a Tauri v2 application — a single binary that 
 |-----------|------------|---------|
 | Backend | Rust (tokio) | Business logic, wallet, P2P, database, evidence, governance |
 | Frontend | Vue 3, TypeScript, Tailwind CSS v4 | 48 pages, 77 components, 30 composables |
-| Database | SQLite (rusqlite, bundled) | ~92 tables, 71 migrations |
+| Database | SQLite (rusqlite, bundled) | ~96 tables, 77 migrations |
 | Content | iroh 1.0.2 / iroh-blobs 0.103 | BLAKE3 content-addressed blob store |
 | P2P | libp2p 0.56 | Kademlia, GossipSub, Relay, DCUtR, request-response/CBOR for vc-fetch, sync, graph-fetch, profile-fetch, username-reg, guardian (`/alexandria/guardian/1.0`) |
 | Wallet | pallas 0.35, Stronghold / AES-256-GCM | Conway era transactions, encrypted key storage |
 | Cardano | pallas, Blockfrost | VC integrity anchoring (label 1697), DAO governance, completion-witness minting, challenge-stake escrow, CIP-68 soulbound reputation snapshots |
 | Integrity | Rust (candle) + TypeScript | Keystroke autoencoder (candle), mouse CNN (candle), face embedder (hand-written TypeScript LBP) |
-| Tutoring | iroh-live | Video, audio, screenshare (desktop) |
+| Tutoring | live (+ iroh-moq, moq-media) | Video + audio on desktop and mobile; screenshare desktop-only |
 | CLI | Rust, clap 4 | Developer tooling (`alex`) |
 | **VC sign/verify** | `domain::vc/{mod,canonicalize,context,sign,verify}` | Ed25519Signature2020 detached JWS over RFC 8785 JCS bytes, §14.7 / §14.13 |
 | **Trust aggregation** | `aggregation::{mod,weights,level,independence,antigaming,config}` | §14.14 engine + §14.15 anti-gaming; reproduces the §14.26 worked example |
@@ -1858,7 +1858,7 @@ The reference implementation is a Tauri v2 application — a single binary that 
 
 ### 15.2 Database
 
-**Engine**: SQLite (rusqlite 0.38, bundled). **Tables**: ~92 across 71 migrations.
+**Engine**: SQLite (rusqlite 0.38, bundled). **Tables**: ~96 across 77 migrations.
 
 | Domain | Tables |
 |--------|--------|
