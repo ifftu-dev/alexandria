@@ -39,6 +39,7 @@ pub mod sentinel_priors;
 pub mod settings;
 pub mod skill_bootstrap;
 pub mod snapshot;
+pub mod talent_index;
 pub mod taxonomy;
 pub mod updater;
 pub mod username_registry;

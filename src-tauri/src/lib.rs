@@ -1509,6 +1509,8 @@ pub fn run() {
             commands::credentials::verify_credential_cmd,
             commands::credentials::export_credentials_bundle,
             commands::entitlements::get_entitlement_snapshot,
+            commands::talent_index::get_talent_index_preview,
+            commands::talent_index::set_talent_index_consent,
             commands::import::import_credential,
             commands::import::import_credential_from_peer,
             // Staging-only smoke test for the entitlement chain. Both cfgs are

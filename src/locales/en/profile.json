@@ -64,5 +64,24 @@
   "error": {
     "couldntLoad": "Couldn't load this profile: {error}",
     "offlineHint": "This profile is shared directly by its owner. They need to be online, and their profile set to public."
+  },
+  "talentIndex": {
+    "title": "Publish to talent index",
+    "description": "Employers can search a talent index for people with verified skills. Nothing here is published unless you choose it, and you can change your mind at any time.",
+    "nothingSelected": "You haven't chosen anything to publish. Nothing about you appears in any talent index.",
+    "noSkills": "You don't have any verified skills yet. Once you earn one, it will appear here as something you can choose to publish.",
+    "skillsHeading": "Skills you could publish",
+    "identityHeading": "Identity",
+    "includeDisplayName": "Include my display name",
+    "includeBio": "Include my bio",
+    "identityNote": "Without these, a listing shows your skills and your public ID, but not your name.",
+    "level": "Level {level}",
+    "issuers": "1 issuer | {count} independent issuers",
+    "previewHeading": "Exact record that would leave this device",
+    "save": "Save choices",
+    "saving": "Saving…",
+    "saved": "Saved.",
+    "saveFailed": "Couldn't save: {error}",
+    "notPublishedYet": "No talent index is connected yet, so nothing is being sent anywhere. These choices apply when one is."
   }
 }

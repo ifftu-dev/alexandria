@@ -11,6 +11,7 @@ import { describe, expect, it } from 'vitest'
 import { createI18n } from 'vue-i18n'
 
 import en from '@/locales/en'
+import zh from '@/locales/zh'
 import {
   APP_LOCALES,
   LOCALE_META,
@@ -106,5 +107,48 @@ describe('English source catalog', () => {
     expect(en.common.actions.save).toBeTruthy()
     expect(en.common.status.connected).toBeTruthy()
     expect(en.common.unreviewedBanner.message).toBeTruthy()
+  })
+})
+
+describe('untranslated keys fall back to English', () => {
+  /**
+   * Some surfaces ship English-only for a while — `check-parity.mjs` tracks
+   * them in PENDING_TRANSLATION. That is only acceptable because the runtime
+   * falls back to English rather than rendering a raw key path at the user.
+   *
+   * Asserted against the *real* catalogs rather than inline fixtures, because
+   * the guarantee that matters is about the strings actually shipped.
+   */
+  const i18n = createI18n({
+    legacy: false,
+    locale: 'zh',
+    fallbackLocale: 'en',
+    messages: { en, zh },
+    missingWarn: false,
+    fallbackWarn: false,
+  })
+  const t = i18n.global.t
+
+  it('renders English text, not the key path, for a key missing from a locale', () => {
+    const englishTitle = en.profile.talentIndex.title
+    expect(englishTitle.length).toBeGreaterThan(0)
+
+    const rendered = t('profile.talentIndex.title')
+    expect(rendered).toBe(englishTitle)
+    expect(rendered).not.toBe('profile.talentIndex.title')
+  })
+
+  it('falls back for interpolated and pluralized keys too', () => {
+    // A fallback that dropped interpolation would render the placeholder
+    // literally, which is worse than the English sentence.
+    expect(t('profile.talentIndex.level', { level: 3 })).toContain('3')
+    expect(t('profile.talentIndex.issuers', { count: 2 }, 2)).toContain('2')
+  })
+
+  it('still prefers the locale string where one exists', () => {
+    // The fallback must not swallow real translations.
+    const translated = t('common.actions.cancel')
+    expect(translated).toBe(zh.common.actions.cancel)
+    expect(translated).not.toBe(en.common.actions.cancel)
   })
 })

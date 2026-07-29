@@ -5,6 +5,7 @@ import { useRouter } from 'vue-router'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { AppButton, AppSpinner, EmptyState } from '@/components/ui'
 import ProfileHeader from '@/components/profile/ProfileHeader.vue'
+import TalentIndexConsent from '@/components/profile/TalentIndexConsent.vue'
 import type {
   FullReputationAssertion,
   Identity,
@@ -157,6 +158,8 @@ onMounted(async () => {
           </button>
         </div>
       </div>
+
+      <TalentIndexConsent />
     </div>
   </div>
 </template>

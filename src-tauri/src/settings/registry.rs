@@ -389,6 +389,24 @@ pub mod keys {
     /// skill graph. Shape: `{ "<skill_id>": { "public": bool,
     /// "teaching": bool } }`. Earned skills are public by default; an
     /// absent entry means public + not-teaching.
+    /// Talent-index publication consent. Shape:
+    /// `{ "skills": ["<skill_id>"], "displayName": bool, "bio": bool }`.
+    ///
+    /// Opt-in, and deliberately **not** derived from
+    /// [`INSTRUCTOR_GRAPH_PREFS`]. That preference defaults earned skills to
+    /// public for peer-to-peer discovery, which is right for a learning
+    /// network and wrong for an employer-facing commercial index — reusing it
+    /// would publish every existing user without asking. Default `{}` means
+    /// publish nothing.
+    pub const TALENT_INDEX_CONSENT: SettingKey<JsonSetting> = SettingKey {
+        key: "talent_index.consent",
+        scope: Scope::Sync,
+        category: "Privacy",
+        label: "Talent index publication",
+        description: "Which verified skills you have agreed to publish to a talent index.",
+        default: || JsonSetting(serde_json::json!({})),
+    };
+
     pub const INSTRUCTOR_GRAPH_PREFS: SettingKey<JsonSetting> = SettingKey {
         key: "instructor.graph_prefs",
         scope: Scope::Sync,
@@ -520,6 +538,7 @@ pub fn all_entries(
         entry!(P2P_DHT_SERVER),
         entry!(P2P_RELAY_REGISTRY_CACHE),
         entry!(INSTRUCTOR_GRAPH_PREFS),
+        entry!(TALENT_INDEX_CONSENT),
         entry!(LEARNER_TARGETS),
         entry!(IDENTITY_LOCAL_DID),
     ]
@@ -563,6 +582,7 @@ pub fn lookup_meta(key: &str) -> Option<(Scope, &'static str)> {
     check!(P2P_DHT_SERVER);
     check!(P2P_RELAY_REGISTRY_CACHE);
     check!(INSTRUCTOR_GRAPH_PREFS);
+    check!(TALENT_INDEX_CONSENT);
     check!(LEARNER_TARGETS);
     check!(IDENTITY_LOCAL_DID);
     None
