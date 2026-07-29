@@ -1511,6 +1511,14 @@ pub fn run() {
             commands::entitlements::get_entitlement_snapshot,
             commands::import::import_credential,
             commands::import::import_credential_from_peer,
+            // Staging-only smoke test for the entitlement chain. Both cfgs are
+            // required: `ee-staging` is what actually gates this, and the
+            // `ee` line must sit directly above the `crate::ee` reference to
+            // satisfy scripts/check-ee-boundary.mjs, which looks for that exact
+            // attribute adjacent to any ee path.
+            #[cfg(feature = "ee-staging")]
+            #[cfg(feature = "ee")]
+            crate::ee::entitlement_issuer::mint_staging_entitlement,
             // Selective-disclosure presentations (§18)
             commands::presentation::create_presentation,
             commands::presentation::verify_presentation,

@@ -228,6 +228,58 @@ pub async fn publish_entitlement(
     })
 }
 
+/// Mint a staging entitlement to this device's holder and install it.
+///
+/// A one-click smoke test for the whole chain, available only under
+/// `ee-staging` — the same feature that puts the staging DID in the trusted
+/// allowlist, so the key and the trust in it appear together.
+///
+/// It skips *delivery* deliberately: the credential is minted and imported
+/// locally, so a failure here is unambiguously the entitlement logic rather
+/// than a network problem. Exercising the real delivery path is what
+/// `import_credential_from_peer` is for.
+///
+/// The import goes through the ordinary MIT `import_credential_impl`, so this
+/// is not a back door around verification — the minted credential has to
+/// verify and bind exactly like one that arrived from outside.
+#[cfg(feature = "ee-staging")]
+#[tauri::command]
+pub async fn mint_staging_entitlement(
+    state: tauri::State<'_, crate::AppState>,
+    features: Vec<String>,
+) -> Result<crate::commands::import::ImportOutcome, String> {
+    let now = crate::commands::credentials::now_rfc3339();
+    // A year out. Long enough that a test session never trips the expiry, short
+    // enough that a forgotten staging credential does not live forever.
+    let valid_until = "2027-12-31T00:00:00Z".to_string();
+
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
+
+    let holder = crate::commands::entitlements::local_did(db.conn())
+        .ok_or("this profile has no identity yet — create or unlock one first")?;
+
+    let req = IssueEntitlementRequest {
+        org_did: Did(holder),
+        org_id: "staging-org".into(),
+        plan: "staging".into(),
+        seats: 1,
+        features,
+        valid_until,
+        status: None,
+    };
+
+    // Unique per mint so repeated clicks do not collide on the envelope id,
+    // which import treats as "already installed".
+    let credential_id = format!("urn:alexandria:staging-entitlement:{now}");
+    let vc = issue_entitlement(&staging_issuer_key(), &req, &credential_id, &now)?;
+
+    crate::commands::import::import_credential_impl(db.conn(), &vc, &now)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

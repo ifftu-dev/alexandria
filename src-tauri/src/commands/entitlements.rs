@@ -99,7 +99,7 @@ fn membership_policy() -> VerificationPolicy {
 ///
 /// `None` is not an error and must not be treated as "skip the check" — a
 /// device with no identity is entitled to nothing.
-fn local_did(conn: &rusqlite::Connection) -> Option<String> {
+pub(crate) fn local_did(conn: &rusqlite::Connection) -> Option<String> {
     conn.query_row(
         "SELECT value FROM app_settings WHERE key = 'identity.local_did'",
         [],

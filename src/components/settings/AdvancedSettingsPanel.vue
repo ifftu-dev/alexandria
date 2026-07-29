@@ -3,6 +3,7 @@ import { computed, onMounted } from 'vue'
 
 import { AppButton, AppInput } from '@/components/ui'
 import { useSettings, type SettingEntry } from '@/composables/useSettings'
+import EntitlementDevPanel from '@/components/settings/EntitlementDevPanel.vue'
 
 // Render every registered setting, grouped by category. The registry
 // drives the UI — when a new key is added to `settings::registry::keys`
@@ -39,6 +40,8 @@ async function setString(entry: SettingEntry, value: string) {
 <template>
   <div v-if="!ready" class="p-6 text-sm text-muted-foreground">{{ $t('settings.advanced.loading') }}</div>
   <div v-else class="space-y-6">
+    <!-- Dev-only; renders nothing in a community build. -->
+    <EntitlementDevPanel />
     <div
       v-for="(group, category) in grouped"
       :key="category"
