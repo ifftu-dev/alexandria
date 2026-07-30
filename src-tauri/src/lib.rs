@@ -623,6 +623,25 @@ pub fn run() {
                 .item(&pip)
                 .build()?;
             menu.append(&develop)?;
+
+            // Drop the empty Help submenu on macOS.
+            //
+            // Tauri's default menu builds a Help submenu whose only item —
+            // About — is `#[cfg(not(target_os = "macos"))]`, because macOS puts
+            // About in the app menu. So on macOS it renders an empty menu whose
+            // sole effect is that AppKit attaches its search field to it and
+            // claims Cmd+Shift+/ system-wide. That is the chord for Cmd+?,
+            // which the in-app keyboard shortcut sheet is bound to, and the OS
+            // wins before the webview ever sees the key.
+            //
+            // Removing a menu with nothing in it costs no functionality and
+            // hands the chord back to the app. Non-macOS keeps Help, where it
+            // holds a real About item.
+            #[cfg(target_os = "macos")]
+            if let Some(help) = menu.get(tauri::menu::HELP_SUBMENU_ID) {
+                menu.remove(&help)?;
+            }
+
             Ok(menu)
         })
         .on_menu_event(|app, event| {
