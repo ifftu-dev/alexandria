@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# Cargo target runner for aarch64-linux-android. Cargo invokes this with the
-# freshly cross-compiled test binary as $1 (plus any test args in $@); we push
-# it to a connected device/emulator over adb and run it there, forwarding the
-# exit code so `cargo test` reflects the on-device result.
+# Cargo target runner for Android. Cargo invokes this with the freshly
+# cross-compiled test binary as $1 (plus any test args in $@); we push it to a
+# connected device/emulator over adb and run it there, forwarding the exit code
+# so `cargo test` reflects the on-device result.
 #
-# Wired via CARGO_TARGET_AARCH64_LINUX_ANDROID_RUNNER. Requires an arm64 AVD
-# already booted (see the mobile-grader-test CI job) so native code JIT-compiled
-# by the grader executes on the ABI users actually run.
+# ABI-agnostic: wired via CARGO_TARGET_<ABI>_LINUX_ANDROID_RUNNER, and nothing
+# below depends on the architecture. CI uses x86_64 — see the mobile-grader-test
+# job for why an arm64 AVD is not available there — but pointing an arm64 target
+# at this script with a real device attached works unchanged.
 set -euo pipefail
 
 bin="$1"; shift
@@ -19,8 +20,13 @@ adb shell "chmod 755 $dev_bin"
 
 # TMPDIR: the wiring test writes a plugin bundle to a scratch dir; point it at
 # device-writable storage. Forward remaining args (test filter, --exact, etc.).
-adb shell "cd $dev_dir && TMPDIR=$dev_dir $dev_bin $*"
-code=$?
+#
+# `|| code=$?` rather than a bare call followed by `code=$?`: under `set -e` a
+# failing test aborts the script at the adb line, so the assignment on the next
+# line only ever ran after a *passing* test — meaning the cleanup below was
+# skipped for exactly the runs that leave a binary behind on the device.
+code=0
+adb shell "cd $dev_dir && TMPDIR=$dev_dir $dev_bin $*" || code=$?
 
 adb shell "rm -rf $dev_dir" || true
-exit $code
+exit "$code"

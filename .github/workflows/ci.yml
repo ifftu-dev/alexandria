@@ -461,25 +461,36 @@ jobs:
 
   # Runtime proof that the WASM grader actually JIT-compiles and executes on
   # Android — the step `mobile-check` (compile-only) and desktop tests cannot
-  # cover. Runs the existing headless grade-wiring test on an arm64 AVD via a
-  # cargo target-runner that adb-pushes the cross-compiled test binary.
+  # cover. Runs the existing headless grade-wiring test on an AVD via a cargo
+  # target-runner that adb-pushes the cross-compiled test binary.
   #
-  # v1 config: x86_64 host + emulated arm64-v8a AVD. The arm64 ABI is the point
-  # (it's what users run, and what the JIT emits). Runs on an arm64 host so the
-  # arm64 AVD boots with native KVM acceleration — an emulated arm64 AVD on an
-  # x86_64 host times out on boot. The NDK step below picks the host-matching
-  # toolchain (linux-aarch64), installing an r27+ NDK if the preinstalled one
-  # predates linux-aarch64 host support.
+  # Runs x86_64 host + x86_64 AVD, which is the only combination that works.
+  # The two arm64 routes are both dead ends:
+  #
+  #   * arm64 AVD on an x86_64 host — no KVM for a foreign ABI, so the AVD
+  #     times out on boot under full CPU emulation.
+  #   * arm64 AVD on an arm64 host — Google does not publish the Android
+  #     emulator for linux-aarch64 at all. sdkmanager on `ubuntu-22.04-arm`
+  #     answers "Dependant package with key emulator not found" and exits 1,
+  #     which is why this job failed every run between its introduction and
+  #     this change.
+  #
+  # What that costs: the aarch64 Cranelift backend is no longer exercised here.
+  # It is still covered by `pulley_matches_native_fuel_and_score`, which pins
+  # score and fuel to be identical across backends — so a codegen difference
+  # that changed a grade would fail the desktop suite. What this job uniquely
+  # covers is the Android *platform* (bionic, JNI, app sandbox, device paths),
+  # and that is ABI-independent.
   mobile-grader-test:
     name: Android grader (on-device)
     needs: changes
     if: needs.changes.outputs.backend == 'true'
-    runs-on: ubuntu-22.04-arm
+    runs-on: ubuntu-22.04
     timeout-minutes: 60
     steps:
-      # Best-effort: on arm64 hosted runners KVM is already configured, and the
-      # x86_64 udev-rule dance can error. Never let it fail the job — the
-      # emulator uses whatever acceleration is present.
+      # x86_64 hosted runners expose /dev/kvm but not to the runner user; the
+      # udev rule is the standard fix. Best-effort so a runner image that
+      # already handles it does not fail the job.
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
@@ -493,30 +504,29 @@ jobs:
         with:
           path: alexandria
 
-      # The ubuntu-22.04-arm image defaults to JDK 11, but sdkmanager refuses to
-      # run on anything below 17 ("This tool requires JDK 17 or later"), so the
-      # SDK setup below fails before it starts. Pin 21 to match the mobile
-      # release workflow rather than relying on the image default.
+      # sdkmanager refuses to run on anything below JDK 17 ("This tool requires
+      # JDK 17 or later"). Pin 21 to match the mobile release workflow rather
+      # than relying on whatever the runner image defaults to.
       - name: Setup Java 21
         uses: actions/setup-java@v5
         with:
           java-version: '21'
           distribution: temurin
 
-      # arm64 runner images do not reliably ship the Android SDK, so provision
-      # it explicitly rather than assume ANDROID_SDK_ROOT is populated.
+      # Provision the SDK explicitly rather than assume ANDROID_SDK_ROOT is
+      # populated by the image.
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
       - name: Set up Android NDK (host-matching toolchain)
         run: |
           set -eu
-          # The linux-aarch64 host toolchain the arm64 runner needs only ships
-          # from NDK r27. Install r27c explicitly. Note: no `yes | …` pipe —
+          # Pin the NDK rather than take the image default, so a runner image
+          # bump cannot silently change the toolchain. Note: no `yes | …` pipe —
           # under pipefail the `yes` SIGPIPE would fail the step even on a
           # successful install; sdkmanager needs no prompt for a plain install.
           sdkmanager "ndk;27.2.12479018"
-          host="linux-$(uname -m)"          # linux-aarch64 on arm64 runners
+          host="linux-$(uname -m)"          # linux-x86_64
           NDK_DIR="$ANDROID_SDK_ROOT/ndk/27.2.12479018"
           PREBUILT="$NDK_DIR/toolchains/llvm/prebuilt/$host"
           if [ ! -d "$PREBUILT" ]; then
@@ -527,13 +537,13 @@ jobs:
           NDK_BIN="$PREBUILT/bin"
           SHIM_DIR="$RUNNER_TEMP/android-ndk-bin"
           mkdir -p "$SHIM_DIR"
-          for t in ar ranlib nm strip; do ln -sf "$NDK_BIN/llvm-$t" "$SHIM_DIR/aarch64-linux-android-$t"; done
+          for t in ar ranlib nm strip; do ln -sf "$NDK_BIN/llvm-$t" "$SHIM_DIR/x86_64-linux-android-$t"; done
           {
             echo "ANDROID_NDK_HOME=$NDK_DIR"
             echo "CARGO_NDK_SYSROOT_PATH=$PREBUILT/sysroot"
-            echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$NDK_BIN/aarch64-linux-android28-clang"
-            echo "CC_aarch64_linux_android=$NDK_BIN/aarch64-linux-android28-clang"
-            echo "AR_aarch64_linux_android=$NDK_BIN/llvm-ar"
+            echo "CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER=$NDK_BIN/x86_64-linux-android28-clang"
+            echo "CC_x86_64_linux_android=$NDK_BIN/x86_64-linux-android28-clang"
+            echo "AR_x86_64_linux_android=$NDK_BIN/llvm-ar"
           } >> $GITHUB_ENV
           echo "$SHIM_DIR" >> $GITHUB_PATH
 
@@ -543,7 +553,7 @@ jobs:
       - name: Setup Rust 1.91.0 (MSRV)
         uses: dtolnay/rust-toolchain@1.91.0
         with:
-          targets: aarch64-linux-android
+          targets: x86_64-linux-android
 
       - name: Cache Rust artifacts
         uses: swatinem/rust-cache@v2
@@ -557,23 +567,23 @@ jobs:
         working-directory: alexandria
         run: |
           cargo test -p alexandria-node --lib --no-run \
-            --target aarch64-linux-android --features tutoring-video-android \
+            --target x86_64-linux-android --features tutoring-video-android \
             plugins::builtins::tests::editor_js_install_to_grade_wiring
 
-      - name: Run grade test on arm64 emulator
+      - name: Run grade test on emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 34
-          arch: arm64-v8a
+          arch: x86_64
           target: google_apis
           force-avd-creation: true
           emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect
           disable-animations: true
           script: |
             cd alexandria
-            export CARGO_TARGET_AARCH64_LINUX_ANDROID_RUNNER="$GITHUB_WORKSPACE/alexandria/scripts/ci/android-test-runner.sh"
+            export CARGO_TARGET_X86_64_LINUX_ANDROID_RUNNER="$GITHUB_WORKSPACE/alexandria/scripts/ci/android-test-runner.sh"
             cargo test -p alexandria-node --lib \
-              --target aarch64-linux-android --features tutoring-video-android \
+              --target x86_64-linux-android --features tutoring-video-android \
               plugins::builtins::tests::editor_js_install_to_grade_wiring -- --exact --nocapture
 
   release-readiness:
