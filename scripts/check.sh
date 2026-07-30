@@ -50,6 +50,12 @@ step "tauri command guard" node scripts/check-tauri-commands.mjs
 step "i18n catalog parity" node scripts/i18n/check-parity.mjs
 step "i18n no-raw-text" node scripts/i18n/check-no-raw-text.mjs
 step "vue-tsc type-check" npx vue-tsc -b --noEmit
+# `npm run build` and not just vue-tsc: the i18n catalogs are precompiled to
+# render functions by unplugin-vue-i18n at BUILD time, so a message with an
+# unescaped `{` — which vue-i18n reads as an interpolation placeholder — passes
+# the type-check, the tests and the parity guard, then fails the release build.
+# That is exactly how one slipped through.
+step "frontend build" npm run build
 step "vue-tsc type-check (enterprise)" npm run typecheck:ee
 step "frontend tests (vitest)" npm test
 
