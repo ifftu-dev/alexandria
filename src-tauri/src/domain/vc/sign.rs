@@ -73,13 +73,17 @@ pub(super) fn canonicalize_credential(vc: &VerifiableCredential) -> Result<Vec<u
 }
 
 /// Unpadded URL-safe base64 per RFC 7515.
-pub(super) fn b64url(bytes: &[u8]) -> String {
+///
+/// `pub(crate)` rather than `pub(super)`: `domain::talent_index` signs its
+/// published record with the same detached-JWS shape, and a second copy of
+/// signature encoding is exactly the kind of thing that drifts apart.
+pub(crate) fn b64url(bytes: &[u8]) -> String {
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
 }
 
 /// Decode an unpadded URL-safe base64 string. Returns `None` on any
 /// decode failure — verifiers treat this as a signature mismatch.
-pub(super) fn b64url_decode(s: &str) -> Option<Vec<u8>> {
+pub(crate) fn b64url_decode(s: &str) -> Option<Vec<u8>> {
     base64::engine::general_purpose::URL_SAFE_NO_PAD
         .decode(s.as_bytes())
         .ok()

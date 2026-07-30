@@ -17,7 +17,8 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::domain::talent_index::{
-    CandidateSkill, ProfileFields, TalentIndexConsent, TalentIndexRecord,
+    sign_record, CandidateSkill, ProfileFields, SignedTalentIndexRecord, TalentIndexConsent,
+    TalentIndexRecord,
 };
 use crate::settings::registry::{keys, JsonSetting};
 use crate::settings::SettingsStore;
@@ -124,14 +125,40 @@ fn profile_fields(conn: &Connection) -> ProfileFields {
     .unwrap_or_default()
 }
 
+/// How long a published record stays valid.
+///
+/// Short enough that a learner who stops republishing disappears from an index
+/// within a reasonable window, which is what makes expiry a usable withdrawal
+/// mechanism rather than a formality. Long enough that someone who opens the app
+/// occasionally is not constantly absent.
+pub const RECORD_TERM_DAYS: i64 = 30;
+
+fn record_term_end(now: &str) -> String {
+    chrono::DateTime::parse_from_rfc3339(now)
+        .map(|t| {
+            (t + chrono::Duration::days(RECORD_TERM_DAYS))
+                .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+        })
+        // An unparseable `now` is a programming error, not user input. Falling
+        // back to `now` yields an already-expired record — inert rather than
+        // long-lived, which is the safe direction to fail.
+        .unwrap_or_else(|_| now.to_string())
+}
+
 pub fn get_talent_index_preview_impl(
     conn: &Connection,
     subject_did: &str,
+    now: &str,
 ) -> Result<TalentIndexPreview, String> {
     let consent = load_consent(conn);
     let candidates = candidate_skills(conn, subject_did)?;
-    let record =
-        TalentIndexRecord::build(subject_did, &candidates, &profile_fields(conn), &consent);
+    let record = TalentIndexRecord::build(
+        subject_did,
+        &candidates,
+        &profile_fields(conn),
+        &consent,
+        &record_term_end(now),
+    );
 
     Ok(TalentIndexPreview {
         candidates: candidates
@@ -175,7 +202,8 @@ pub async fn get_talent_index_preview(
     let db = db_guard.as_ref().ok_or("database not initialized")?;
     let subject_did = crate::commands::entitlements::local_did(db.conn())
         .ok_or("this profile has no identity yet")?;
-    get_talent_index_preview_impl(db.conn(), &subject_did)
+    let now = crate::commands::credentials::now_rfc3339();
+    get_talent_index_preview_impl(db.conn(), &subject_did, &now)
 }
 
 #[tauri::command]
@@ -194,7 +222,45 @@ pub async fn set_talent_index_consent(
     set_talent_index_consent_impl(db.conn(), &consent)?;
     // Return the recomputed preview so the UI shows the record that consent
     // actually produced, rather than the one it predicted.
-    get_talent_index_preview_impl(db.conn(), &subject_did)
+    let now = crate::commands::credentials::now_rfc3339();
+    get_talent_index_preview_impl(db.conn(), &subject_did, &now)
+}
+
+/// Produce the signed record this device would publish.
+///
+/// Separate from the preview on purpose. The preview shows the *payload*, which
+/// is what a learner needs to judge; this adds the signature, which is a
+/// property of transmission and only matters once something is actually leaving.
+/// Keeping them apart also means the consent screen never has to render a JWS.
+///
+/// Requires an unlocked vault — the record is signed with the learner's own key,
+/// which is the entire point: it binds the record to the DID it names.
+///
+/// Nothing here transmits. There is no index to publish to yet, and the signed
+/// record is returned to the caller rather than sent anywhere.
+#[tauri::command]
+pub async fn sign_talent_index_record(
+    state: State<'_, AppState>,
+) -> Result<Option<SignedTalentIndexRecord>, String> {
+    let (signing_key, did) = crate::commands::credentials::load_issuer_key(&state).await?;
+    let now = crate::commands::credentials::now_rfc3339();
+
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
+
+    // Build from the same path the preview uses, so a learner cannot be shown
+    // one record and have another signed.
+    let preview = get_talent_index_preview_impl(db.conn(), did.as_str(), &now)?;
+    let Some(record) = preview.record else {
+        // Consent covers nothing, so there is nothing to sign. Not an error —
+        // it is the default state.
+        return Ok(None);
+    };
+
+    sign_record(&record, &signing_key, &now).map(Some)
 }
 
 #[cfg(test)]
@@ -203,6 +269,7 @@ mod tests {
     use crate::db::Database;
 
     const DID: &str = "did:key:z6MkLearner";
+    const NOW: &str = "2026-01-01T00:00:00Z";
 
     fn open_db() -> Database {
         let db = Database::open_in_memory().unwrap();
@@ -279,7 +346,7 @@ mod tests {
         let db = open_db();
         seed_skill(&db, "skill_rust", "Rust", 3, 2);
 
-        let preview = get_talent_index_preview_impl(db.conn(), DID).unwrap();
+        let preview = get_talent_index_preview_impl(db.conn(), DID, NOW).unwrap();
         assert_eq!(preview.candidates.len(), 1, "the skill is still offered");
         assert!(!preview.candidates[0].consented);
         assert!(
@@ -304,7 +371,7 @@ mod tests {
         )
         .unwrap();
 
-        let preview = get_talent_index_preview_impl(db.conn(), DID).unwrap();
+        let preview = get_talent_index_preview_impl(db.conn(), DID, NOW).unwrap();
         let record = preview.record.expect("consented, so a record exists");
         assert_eq!(record.skills.len(), 1);
         assert_eq!(record.skills[0].name, "Rust");
@@ -346,7 +413,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(load_consent(db.conn()), TalentIndexConsent::default());
-        let preview = get_talent_index_preview_impl(db.conn(), DID).unwrap();
+        let preview = get_talent_index_preview_impl(db.conn(), DID, NOW).unwrap();
         assert!(preview.record.is_none());
     }
 
@@ -365,13 +432,13 @@ mod tests {
             },
         )
         .unwrap();
-        assert!(get_talent_index_preview_impl(db.conn(), DID)
+        assert!(get_talent_index_preview_impl(db.conn(), DID, NOW)
             .unwrap()
             .record
             .is_some());
 
         set_talent_index_consent_impl(db.conn(), &TalentIndexConsent::default()).unwrap();
-        assert!(get_talent_index_preview_impl(db.conn(), DID)
+        assert!(get_talent_index_preview_impl(db.conn(), DID, NOW)
             .unwrap()
             .record
             .is_none());
@@ -396,7 +463,7 @@ mod tests {
         )
         .unwrap();
 
-        let preview = get_talent_index_preview_impl(db.conn(), DID).unwrap();
+        let preview = get_talent_index_preview_impl(db.conn(), DID, NOW).unwrap();
         assert!(
             preview.record.is_none(),
             "a publicly visible skill is still not consented for the talent index"
@@ -428,7 +495,7 @@ mod tests {
             "2026-06-01T00:00:00Z",
         );
 
-        let preview = get_talent_index_preview_impl(db.conn(), DID).unwrap();
+        let preview = get_talent_index_preview_impl(db.conn(), DID, NOW).unwrap();
         assert_eq!(preview.candidates.len(), 1, "one row per skill");
         assert_eq!(preview.candidates[0].level, 4, "the newest score wins");
         assert_eq!(preview.candidates[0].issuer_clusters, 3);
@@ -452,7 +519,7 @@ mod tests {
             )
             .unwrap();
 
-        let preview = get_talent_index_preview_impl(db.conn(), DID).unwrap();
+        let preview = get_talent_index_preview_impl(db.conn(), DID, NOW).unwrap();
         assert_eq!(preview.candidates.len(), 1);
         assert_eq!(preview.candidates[0].name, "skill_orphan");
     }
@@ -463,7 +530,8 @@ mod tests {
         let db = open_db();
         seed_skill(&db, "skill_rust", "Rust", 3, 2);
 
-        let preview = get_talent_index_preview_impl(db.conn(), "did:key:z6MkSomeoneElse").unwrap();
+        let preview =
+            get_talent_index_preview_impl(db.conn(), "did:key:z6MkSomeoneElse", NOW).unwrap();
         assert!(preview.candidates.is_empty());
         assert!(preview.record.is_none());
     }

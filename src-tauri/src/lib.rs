@@ -1530,6 +1530,7 @@ pub fn run() {
             commands::entitlements::get_entitlement_snapshot,
             commands::talent_index::get_talent_index_preview,
             commands::talent_index::set_talent_index_consent,
+            commands::talent_index::sign_talent_index_record,
             commands::import::import_credential,
             commands::import::import_credentials,
             commands::import::import_credential_from_peer,

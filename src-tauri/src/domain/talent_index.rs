@@ -24,6 +24,30 @@
 //! its own preference, it starts empty, and
 //! [`TalentIndexRecord::build`] emits nothing that was not explicitly named.
 //!
+//! ## The record is signed, and why it is not a presentation
+//!
+//! A record names a `subjectDid`. Without a signature nothing binds it to the
+//! holder of that DID, so anyone could submit one inventing skills for a real
+//! person — and the person named would have no way to notice. So a record that
+//! leaves the device is signed by the subject's key.
+//!
+//! It is deliberately **not** a Verifiable Presentation, even though that
+//! machinery exists and is tempting. A presentation is *audience-bound*, which
+//! is exactly right when showing credentials to one verifier and exactly wrong
+//! for a directory listing: a record bound to one index could not be forwarded
+//! to an employer. The threat a listing actually faces is an old record being
+//! replayed after the learner withdrew consent, and audience binding does
+//! nothing about that — [`TalentIndexRecord::valid_until`] does.
+//!
+//! It is also not a self-issued Verifiable Credential. That would put it in the
+//! credentials table and hand it an aggregation weight (`SelfAssertion` carries
+//! 0.25), letting a learner's own published claims feed back into their skill
+//! scores. A published record must never influence the graph it describes.
+//!
+//! What it does reuse is the envelope: JCS canonicalization and the same
+//! detached Ed25519 JWS shape as a credential proof, so the signature format is
+//! one thing to audit rather than two.
+//!
 //! ## The record is derived, never accumulated
 //!
 //! The published record is rebuilt from consent every time rather than being
@@ -109,6 +133,160 @@ pub struct TalentIndexRecord {
     /// Present only with explicit consent.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bio: Option<String>,
+    /// RFC 3339 instant after which this record must be ignored.
+    ///
+    /// Required, and inside the signed payload. This is the withdrawal
+    /// mechanism: a learner who unticks everything simply stops republishing,
+    /// and the record lapses without anyone having to honour a delete request.
+    /// An index that ignores expiry is misbehaving in a way a signature cannot
+    /// prevent — but a *stale* record cannot be passed off as current.
+    pub valid_until: String,
+}
+
+/// Detached-JWS proof over a [`TalentIndexRecord`].
+///
+/// Same shape as a credential's proof so there is one signature format in the
+/// system rather than two.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordProof {
+    #[serde(rename = "type")]
+    pub type_: String,
+    pub created: String,
+    /// The key that signed, as `<did>#key-1`.
+    pub verification_method: String,
+    /// Detached compact JWS: `header..signature`.
+    pub jws: String,
+}
+
+/// A record plus its signature — what actually leaves the device.
+///
+/// The proof sits alongside the payload rather than inside it, so signing needs
+/// no "clear the signature field first" dance and the consent preview can show
+/// the payload without a JWS blob in the middle of it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SignedTalentIndexRecord {
+    pub record: TalentIndexRecord,
+    pub proof: RecordProof,
+}
+
+/// Why a signed record was not accepted.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RecordError {
+    /// `subjectDid` is not a resolvable `did:key`.
+    UnresolvableSubject,
+    /// Signature did not verify against the subject's key.
+    BadSignature,
+    /// Proof was not the expected shape.
+    MalformedProof(String),
+    /// The record's term has passed.
+    Expired,
+}
+
+impl std::fmt::Display for RecordError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnresolvableSubject => write!(f, "subject DID is not resolvable"),
+            Self::BadSignature => write!(f, "signature does not match the subject"),
+            Self::MalformedProof(why) => write!(f, "malformed proof: {why}"),
+            Self::Expired => write!(f, "record has expired"),
+        }
+    }
+}
+
+/// JWS protected header. Fixed, so it canonicalizes identically for signer and
+/// verifier — same constant as the credential path, for the same reason.
+const JWS_HEADER_JSON: &str = r#"{"alg":"EdDSA","b64":false,"crit":["b64"]}"#;
+
+/// Bytes that get signed: `header_b64 || '.' || JCS(record)`.
+fn signing_input(record: &TalentIndexRecord, header_b64: &str) -> Result<Vec<u8>, String> {
+    let value = serde_json::to_value(record).map_err(|e| e.to_string())?;
+    let canonical = crate::domain::vc::canonicalize::canonicalize(&value)
+        .map_err(|e| format!("canonicalize record: {e}"))?;
+    let mut out = Vec::with_capacity(header_b64.len() + 1 + canonical.len());
+    out.extend_from_slice(header_b64.as_bytes());
+    out.push(b'.');
+    out.extend_from_slice(&canonical);
+    Ok(out)
+}
+
+/// Sign a record with the subject's key.
+///
+/// Refuses when the key does not derive the DID the record names. Signing a
+/// record about somebody else would produce something that verifies against the
+/// wrong key and fails at the far end for a confusing reason; better to fail
+/// here, where the cause is obvious.
+pub fn sign_record(
+    record: &TalentIndexRecord,
+    signing_key: &ed25519_dalek::SigningKey,
+    now: &str,
+) -> Result<SignedTalentIndexRecord, String> {
+    use ed25519_dalek::Signer;
+
+    let did = crate::crypto::did::derive_did_key(signing_key);
+    if did.as_str() != record.subject_did {
+        return Err(format!(
+            "cannot sign a record for {} with the key for {}",
+            record.subject_did,
+            did.as_str()
+        ));
+    }
+
+    let header_b64 = crate::domain::vc::sign::b64url(JWS_HEADER_JSON.as_bytes());
+    let input = signing_input(record, &header_b64)?;
+    let sig = signing_key.sign(&input);
+    let sig_b64 = crate::domain::vc::sign::b64url(&sig.to_bytes());
+
+    Ok(SignedTalentIndexRecord {
+        record: record.clone(),
+        proof: RecordProof {
+            type_: "DataIntegrityProof".into(),
+            created: now.to_string(),
+            verification_method: format!("{}#key-1", did.as_str()),
+            jws: format!("{header_b64}..{sig_b64}"),
+        },
+    })
+}
+
+/// Verify a signed record against the subject DID it names.
+///
+/// The key comes from the record's own `subjectDid` via `did:key`
+/// self-resolution, **not** from `proof.verificationMethod`. Trusting the proof
+/// to name its own key would let a forger sign with any key and point the
+/// verifier at it — the whole check would become "is this internally
+/// consistent", which every forgery is.
+pub fn verify_record(
+    signed: &SignedTalentIndexRecord,
+    verification_time: &str,
+) -> Result<(), RecordError> {
+    use ed25519_dalek::Verifier;
+
+    if signed.record.valid_until.as_str() <= verification_time {
+        return Err(RecordError::Expired);
+    }
+
+    let subject = crate::crypto::did::Did(signed.record.subject_did.clone());
+    let key = crate::crypto::did::resolve_did_key(&subject)
+        .map_err(|_| RecordError::UnresolvableSubject)?;
+
+    let (header_b64, sig_b64) = signed
+        .proof
+        .jws
+        .split_once("..")
+        .ok_or_else(|| RecordError::MalformedProof("expected detached compact JWS".into()))?;
+
+    let sig_bytes = crate::domain::vc::sign::b64url_decode(sig_b64)
+        .ok_or_else(|| RecordError::MalformedProof("signature is not base64url".into()))?;
+    let sig_array: [u8; 64] = sig_bytes
+        .try_into()
+        .map_err(|_| RecordError::MalformedProof("signature is not 64 bytes".into()))?;
+    let sig = ed25519_dalek::Signature::from_bytes(&sig_array);
+
+    let input = signing_input(&signed.record, header_b64).map_err(RecordError::MalformedProof)?;
+
+    key.verify(&input, &sig)
+        .map_err(|_| RecordError::BadSignature)
 }
 
 /// A skill the learner *could* publish, with everything the preview needs.
@@ -151,6 +329,7 @@ impl TalentIndexRecord {
         candidates: &[CandidateSkill],
         profile: &ProfileFields,
         consent: &TalentIndexConsent,
+        valid_until: &str,
     ) -> Option<Self> {
         if !consent.publishes_anything() {
             return None;
@@ -188,6 +367,7 @@ impl TalentIndexRecord {
                 .then(|| profile.display_name.clone())
                 .flatten(),
             bio: consent.bio.then(|| profile.bio.clone()).flatten(),
+            valid_until: valid_until.to_string(),
         })
     }
 }
@@ -197,6 +377,9 @@ mod tests {
     use super::*;
 
     const DID: &str = "did:key:z6MkLearner";
+    /// Well past every `NOW` used below, so expiry never accidentally drives a
+    /// consent test.
+    const TERM: &str = "2027-01-01T00:00:00Z";
 
     fn candidates() -> Vec<CandidateSkill> {
         vec![
@@ -230,7 +413,7 @@ mod tests {
         let consent = TalentIndexConsent::default();
         assert!(!consent.publishes_anything());
         assert_eq!(
-            TalentIndexRecord::build(DID, &candidates(), &profile(), &consent),
+            TalentIndexRecord::build(DID, &candidates(), &profile(), &consent, TERM),
             None
         );
     }
@@ -243,7 +426,8 @@ mod tests {
             skills: vec!["skill_rust".into()],
             ..Default::default()
         };
-        let record = TalentIndexRecord::build(DID, &candidates(), &profile(), &consent).unwrap();
+        let record =
+            TalentIndexRecord::build(DID, &candidates(), &profile(), &consent, TERM).unwrap();
 
         assert_eq!(record.skills.len(), 1);
         assert_eq!(record.skills[0].skill_id, "skill_rust");
@@ -261,7 +445,8 @@ mod tests {
             skills: vec!["skill_rust".into()],
             ..Default::default()
         };
-        let record = TalentIndexRecord::build(DID, &candidates(), &profile(), &consent).unwrap();
+        let record =
+            TalentIndexRecord::build(DID, &candidates(), &profile(), &consent, TERM).unwrap();
         assert_eq!(record.display_name, None);
         assert_eq!(record.bio, None);
 
@@ -270,7 +455,8 @@ mod tests {
             display_name: true,
             bio: false,
         };
-        let record = TalentIndexRecord::build(DID, &candidates(), &profile(), &named).unwrap();
+        let record =
+            TalentIndexRecord::build(DID, &candidates(), &profile(), &named, TERM).unwrap();
         assert_eq!(record.display_name.as_deref(), Some("Ada"));
         assert_eq!(record.bio, None, "bio was not consented");
     }
@@ -285,7 +471,7 @@ mod tests {
         };
         let empty_profile = ProfileFields::default();
         let record =
-            TalentIndexRecord::build(DID, &candidates(), &empty_profile, &consent).unwrap();
+            TalentIndexRecord::build(DID, &candidates(), &empty_profile, &consent, TERM).unwrap();
         assert_eq!(record.display_name, None);
         assert_eq!(record.bio, None);
     }
@@ -301,7 +487,7 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            TalentIndexRecord::build(DID, &candidates(), &profile(), &consent),
+            TalentIndexRecord::build(DID, &candidates(), &profile(), &consent, TERM),
             None,
             "a record with no skills must not be published just to carry a name"
         );
@@ -315,14 +501,15 @@ mod tests {
             skills: vec!["skill_rust".into(), "skill_async".into()],
             ..Default::default()
         };
-        let before = TalentIndexRecord::build(DID, &candidates(), &profile(), &both).unwrap();
+        let before = TalentIndexRecord::build(DID, &candidates(), &profile(), &both, TERM).unwrap();
         assert_eq!(before.skills.len(), 2);
 
         let withdrawn = TalentIndexConsent {
             skills: vec!["skill_rust".into()],
             ..Default::default()
         };
-        let after = TalentIndexRecord::build(DID, &candidates(), &profile(), &withdrawn).unwrap();
+        let after =
+            TalentIndexRecord::build(DID, &candidates(), &profile(), &withdrawn, TERM).unwrap();
         assert_eq!(after.skills.len(), 1);
         assert_eq!(after.skills[0].skill_id, "skill_rust");
     }
@@ -333,7 +520,8 @@ mod tests {
             skills: vec!["skill_rust".into(), "skill_rust".into()],
             ..Default::default()
         };
-        let record = TalentIndexRecord::build(DID, &candidates(), &profile(), &consent).unwrap();
+        let record =
+            TalentIndexRecord::build(DID, &candidates(), &profile(), &consent, TERM).unwrap();
         assert_eq!(record.skills.len(), 1);
     }
 
@@ -345,7 +533,8 @@ mod tests {
             skills: vec!["skill_rust".into()],
             ..Default::default()
         };
-        let record = TalentIndexRecord::build(DID, &candidates(), &profile(), &consent).unwrap();
+        let record =
+            TalentIndexRecord::build(DID, &candidates(), &profile(), &consent, TERM).unwrap();
         let json = serde_json::to_value(&record).unwrap();
 
         assert_eq!(
@@ -358,6 +547,7 @@ mod tests {
                     "level": 3,
                     "issuerClusters": 2,
                 }],
+                "validUntil": TERM,
             })
         );
         assert!(
@@ -376,7 +566,8 @@ mod tests {
             skills: vec!["skill_rust".into()],
             ..Default::default()
         };
-        let record = TalentIndexRecord::build(DID, &candidates(), &profile(), &consent).unwrap();
+        let record =
+            TalentIndexRecord::build(DID, &candidates(), &profile(), &consent, TERM).unwrap();
         let json = serde_json::to_string(&record).unwrap();
         for leaked in ["rawScore", "confidence", "trustScore", "evidenceMass"] {
             assert!(!json.contains(leaked), "{leaked} must not reach the wire");
@@ -392,5 +583,194 @@ mod tests {
                 .unwrap_or_default();
         assert_eq!(parsed, TalentIndexConsent::default());
         assert!(!parsed.publishes_anything());
+    }
+
+    // ---- signing and verification ----------------------------------------
+
+    const SIGN_NOW: &str = "2026-01-01T00:00:00Z";
+    const SIGN_TERM: &str = "2026-02-01T00:00:00Z";
+
+    fn learner_key(seed: u8) -> ed25519_dalek::SigningKey {
+        ed25519_dalek::SigningKey::from_bytes(&[seed; 32])
+    }
+
+    /// A record for whoever holds `key`, signed by it.
+    fn signed_for(key: &ed25519_dalek::SigningKey) -> SignedTalentIndexRecord {
+        let did = crate::crypto::did::derive_did_key(key);
+        let consent = TalentIndexConsent {
+            skills: vec!["skill_rust".into()],
+            ..Default::default()
+        };
+        let record =
+            TalentIndexRecord::build(did.as_str(), &candidates(), &profile(), &consent, SIGN_TERM)
+                .unwrap();
+        sign_record(&record, key, SIGN_NOW).unwrap()
+    }
+
+    #[test]
+    fn a_signed_record_verifies() {
+        let signed = signed_for(&learner_key(1));
+        assert_eq!(verify_record(&signed, SIGN_NOW), Ok(()));
+    }
+
+    /// The reason this module signs at all. Before signing, a record was a
+    /// bare claim: anyone could assert skills for any DID and nothing
+    /// contradicted them. Forging now requires the subject's private key.
+    #[test]
+    fn a_record_forged_for_someone_elses_did_does_not_verify() {
+        let victim = crate::crypto::did::derive_did_key(&learner_key(1));
+        let attacker = learner_key(2);
+
+        // The attacker names the victim and signs with their own key. Signing
+        // refuses outright, so they have to assemble it by hand.
+        let consent = TalentIndexConsent {
+            skills: vec!["skill_rust".into()],
+            ..Default::default()
+        };
+        let record = TalentIndexRecord::build(
+            victim.as_str(),
+            &candidates(),
+            &profile(),
+            &consent,
+            SIGN_TERM,
+        )
+        .unwrap();
+        assert!(
+            sign_record(&record, &attacker, SIGN_NOW).is_err(),
+            "signing a record for another DID must be refused at the source"
+        );
+
+        // Hand-built: the attacker's signature over the victim's record.
+        let mut forged = signed_for(&attacker);
+        forged.record.subject_did = victim.as_str().to_string();
+        assert_eq!(
+            verify_record(&forged, SIGN_NOW),
+            Err(RecordError::BadSignature)
+        );
+    }
+
+    /// The key comes from the record's own subjectDid, never from the proof.
+    /// If the proof could name its own key, a forger would sign with any key,
+    /// point the verifier at it, and every forgery would verify — the check
+    /// would degrade to "is this internally consistent".
+    #[test]
+    fn a_proof_cannot_nominate_the_key_that_checks_it() {
+        let victim = crate::crypto::did::derive_did_key(&learner_key(1));
+        let attacker = learner_key(2);
+        let attacker_did = crate::crypto::did::derive_did_key(&attacker);
+
+        let mut forged = signed_for(&attacker);
+        forged.record.subject_did = victim.as_str().to_string();
+        // Proof still honestly points at the attacker's key…
+        assert!(forged
+            .proof
+            .verification_method
+            .contains(attacker_did.as_str()));
+        // …and it makes no difference, because nothing reads it.
+        assert_eq!(
+            verify_record(&forged, SIGN_NOW),
+            Err(RecordError::BadSignature)
+        );
+    }
+
+    #[test]
+    fn tampering_with_a_skill_breaks_the_signature() {
+        let mut signed = signed_for(&learner_key(1));
+        signed.record.skills[0].level = 5;
+        assert_eq!(
+            verify_record(&signed, SIGN_NOW),
+            Err(RecordError::BadSignature)
+        );
+    }
+
+    /// Adding a skill the learner never consented to must not survive either.
+    #[test]
+    fn appending_a_skill_breaks_the_signature() {
+        let mut signed = signed_for(&learner_key(1));
+        signed.record.skills.push(PublishedSkill {
+            skill_id: "skill_never_consented".into(),
+            name: "Not Mine".into(),
+            level: 5,
+            issuer_clusters: 9,
+        });
+        assert_eq!(
+            verify_record(&signed, SIGN_NOW),
+            Err(RecordError::BadSignature)
+        );
+    }
+
+    /// Expiry is inside the signed payload, so it cannot be extended without
+    /// the subject's key. That is what makes it a usable withdrawal mechanism:
+    /// an index cannot keep a lapsed record alive by editing the date.
+    #[test]
+    fn the_term_cannot_be_extended_without_the_key() {
+        let mut signed = signed_for(&learner_key(1));
+        signed.record.valid_until = "2099-01-01T00:00:00Z".into();
+        assert_eq!(
+            verify_record(&signed, SIGN_NOW),
+            Err(RecordError::BadSignature)
+        );
+    }
+
+    #[test]
+    fn an_expired_record_is_refused() {
+        let signed = signed_for(&learner_key(1));
+        let after = "2026-03-01T00:00:00Z";
+        assert_eq!(verify_record(&signed, after), Err(RecordError::Expired));
+    }
+
+    /// Expiry is checked before the signature so a stale record reports the
+    /// useful reason rather than passing crypto and failing later.
+    #[test]
+    fn expiry_is_reported_ahead_of_signature_problems() {
+        let mut signed = signed_for(&learner_key(1));
+        signed.record.skills[0].level = 5; // also breaks the signature
+        let after = "2026-03-01T00:00:00Z";
+        assert_eq!(verify_record(&signed, after), Err(RecordError::Expired));
+    }
+
+    #[test]
+    fn a_malformed_proof_is_reported_as_such_not_as_a_bad_signature() {
+        let mut signed = signed_for(&learner_key(1));
+        signed.proof.jws = "not-a-jws".into();
+        assert!(matches!(
+            verify_record(&signed, SIGN_NOW),
+            Err(RecordError::MalformedProof(_))
+        ));
+
+        let mut short = signed_for(&learner_key(1));
+        let (h, _) = short.proof.jws.split_once("..").unwrap();
+        short.proof.jws = format!("{h}..{}", crate::domain::vc::sign::b64url(&[0u8; 8]));
+        assert!(matches!(
+            verify_record(&short, SIGN_NOW),
+            Err(RecordError::MalformedProof(_))
+        ));
+    }
+
+    #[test]
+    fn a_subject_that_is_not_a_resolvable_did_key_is_refused() {
+        let mut signed = signed_for(&learner_key(1));
+        signed.record.subject_did = "did:web:example.com".into();
+        assert_eq!(
+            verify_record(&signed, SIGN_NOW),
+            Err(RecordError::UnresolvableSubject)
+        );
+    }
+
+    /// Signing must not alter the payload — the bytes a learner previewed are
+    /// the bytes that get signed.
+    #[test]
+    fn signing_leaves_the_payload_untouched() {
+        let key = learner_key(1);
+        let did = crate::crypto::did::derive_did_key(&key);
+        let consent = TalentIndexConsent {
+            skills: vec!["skill_rust".into()],
+            ..Default::default()
+        };
+        let record =
+            TalentIndexRecord::build(did.as_str(), &candidates(), &profile(), &consent, SIGN_TERM)
+                .unwrap();
+        let signed = sign_record(&record, &key, SIGN_NOW).unwrap();
+        assert_eq!(signed.record, record);
     }
 }
