@@ -8,6 +8,7 @@ import { useProfiles } from '@/composables/useProfiles'
 import { useP2P } from '@/composables/useP2P'
 import { useTheme } from '@/composables/useTheme'
 import {
+  shortcutName,
   useKeyboardShortcuts,
   formatCombo,
   comboFromEvent,
@@ -775,7 +776,7 @@ function onSectionClick(id: SettingsSectionId) {
                         :key="def.id"
                         class="flex items-center justify-between px-4 py-3"
                       >
-                        <span class="text-sm text-foreground">{{ def.label }}</span>
+                        <span class="text-sm text-foreground">{{ shortcutName(def) }}</span>
                         <div class="flex items-center gap-2">
                           <template v-if="recordingShortcutId === def.id">
                             <kbd

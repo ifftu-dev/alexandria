@@ -49,6 +49,10 @@ const PENDING_TRANSLATION = [
   // Talent-index consent surface (EE Phase 2). Shipped English-only pending a
   // `npm run i18n:translate` pass; renders in English via the i18n fallback.
   'profile.talentIndex.',
+  // Keyboard-shortcut help sheet. English-only pending a translate pass;
+  // renders in English via the i18n fallback.
+  'settings.personalization.shortcutsModal',
+  'settings.personalization.shortcutNames.',
 ]
 
 const isPending = (key) => PENDING_TRANSLATION.some((p) => key.startsWith(p))

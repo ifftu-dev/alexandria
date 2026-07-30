@@ -106,7 +106,20 @@
     "shortcutsHint": "Click a shortcut's key binding to record a new one. Press Escape to cancel.",
     "pressKeys": "Press keys…",
     "resetToDefault": "Reset to default",
-    "reset": "reset"
+    "reset": "reset",
+    "shortcutsModalTitle": "Keyboard shortcuts",
+    "shortcutsModalHint": "Rebind any of these in Settings → Personalization.",
+    "shortcutNames": {
+      "search": "Search",
+      "toggle-sidebar": "Toggle sidebar",
+      "settings": "Open settings",
+      "nav-back": "Navigate back",
+      "nav-forward": "Navigate forward",
+      "focus-search": "Focus search",
+      "switch-profile": "Switch user",
+      "toggle-mode": "Switch learner/instructor mode",
+      "shortcuts-help": "Show keyboard shortcuts"
+    }
   },
   "storage": {
     "title": "Storage",

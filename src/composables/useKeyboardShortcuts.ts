@@ -7,6 +7,7 @@
  *   Cmd/Ctrl + , → settings
  *   Cmd/Ctrl + [ → navigate back
  *   Cmd/Ctrl + ] → navigate forward
+ *   Cmd/Ctrl + ? → show this list
  *   /            → focus search (outside editable fields)
  *
  * Users can rebind any shortcut via the Settings → Keyboard Shortcuts
@@ -20,10 +21,20 @@
  */
 
 import { reactive, onMounted, onUnmounted, readonly } from 'vue'
+import { i18n } from '@/i18n'
 import { isMac } from '@/composables/usePlatform'
 import { useSettings } from '@/composables/useSettings'
 
-const SETTING_KEY = 'input.keyboard_shortcuts'
+/**
+ * Per-profile settings key holding user overrides.
+ *
+ * Registered `Scope::Sync` in the Rust settings registry, which is what makes
+ * custom bindings follow a user to their other devices — see
+ * `settings::registry::keys::UI_KEYBOARD_SHORTCUTS` and the app-settings sync
+ * path in `p2p::sync`. Exported so a test can pin the two ends together.
+ */
+export const SHORTCUTS_SETTING_KEY = 'input.keyboard_shortcuts'
+const SETTING_KEY = SHORTCUTS_SETTING_KEY
 const LEGACY_LOCALSTORAGE_KEY = 'alexandria-keyboard-shortcuts'
 
 /** A single key combination: modifier flags + a key name. */
@@ -60,6 +71,31 @@ const DEFAULT_SHORTCUTS: Record<string, { label: string; keys: KeyCombo }> = {
   'focus-search': { label: 'Focus search (no modifier)', keys: combo('/', false) },
   'switch-profile': { label: 'Switch user', keys: combo('u', true, true) },
   'toggle-mode': { label: 'Switch learner/instructor mode', keys: combo('m', true, true) },
+  // `shift: true` is not decoration — on most layouts "?" is Shift+"/", so
+  // the event arrives with shiftKey set and key "?". A combo without it would
+  // never match. `formatCombo` hides the redundant ⇧ when rendering.
+  'shortcuts-help': { label: 'Show keyboard shortcuts', keys: combo('?', true, true) },
+}
+
+/** Ids of every shipped shortcut, in registration order. */
+export const DEFAULT_SHORTCUT_IDS = Object.keys(DEFAULT_SHORTCUTS)
+
+/**
+ * Display name for a shortcut, translated when a catalog entry exists.
+ *
+ * Falls back to the registry's English `label` rather than rendering a raw key
+ * path: a shortcut added in code but not yet given a translation key must
+ * still be nameable, since a settings row or cheat-sheet line that silently
+ * shows `settings.personalization.shortcutNames.foo` is worse than one showing
+ * English.
+ *
+ * Lives here rather than in either component so the Settings list and the help
+ * sheet cannot disagree about what a shortcut is called.
+ */
+export function shortcutName(def: ShortcutDefinition): string {
+  const key = `settings.personalization.shortcutNames.${def.id}`
+  const { t, te } = i18n.global
+  return te(key) ? t(key) : def.label
 }
 
 // ---- Global state (singleton) ----------------------------------------
@@ -246,11 +282,23 @@ function resetAll() {
   persist()
 }
 
-/** Human-readable label for a KeyCombo, e.g. "⌘F" or "Ctrl+B". */
+/**
+ * Whether the shift modifier is already implied by the key glyph itself.
+ *
+ * "?" is Shift+"/" on most layouts, so the binding legitimately carries
+ * `shift: true` — but rendering "⌘⇧?" tells the user to press shift twice.
+ * Letters and digits are excluded because ⇧A and A are genuinely different
+ * bindings and the modifier has to stay visible there.
+ */
+function shiftIsImpliedByGlyph(c: KeyCombo): boolean {
+  return c.shift && c.key.length === 1 && !/[a-z0-9]/i.test(c.key)
+}
+
+/** Human-readable label for a KeyCombo, e.g. "⌘F", "Ctrl+B", or "⌘?". */
 export function formatCombo(c: KeyCombo): string {
   const parts: string[] = []
   if (c.mod) parts.push(isMac ? '⌘' : 'Ctrl')
-  if (c.shift) parts.push(isMac ? '⇧' : 'Shift')
+  if (c.shift && !shiftIsImpliedByGlyph(c)) parts.push(isMac ? '⇧' : 'Shift')
   if (c.alt) parts.push(isMac ? '⌥' : 'Alt')
   const keyDisplay = c.key.length === 1 ? c.key.toUpperCase() : c.key
   parts.push(keyDisplay)

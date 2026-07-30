@@ -596,6 +596,25 @@ fn kind_of_default<T: SettingValue + 'static>(_: &SettingKey<T>) -> &'static str
 mod tests {
     use super::*;
 
+    /// Custom keyboard bindings must follow a user to their other devices.
+    ///
+    /// That is entirely a consequence of this scope: `p2p::sync` filters the
+    /// outbound settings snapshot to `scope = 'sync'` and refuses inbound
+    /// writes to anything else, so flipping this to `Device` would silently
+    /// strand a user's bindings on one machine with nothing else failing.
+    ///
+    /// The frontend half of the contract — that the composable writes to this
+    /// exact key — is pinned in `useKeyboardShortcuts.test.ts`.
+    #[test]
+    fn keyboard_shortcuts_are_sync_scoped() {
+        assert_eq!(keys::UI_KEYBOARD_SHORTCUTS.key, "input.keyboard_shortcuts");
+        assert_eq!(
+            keys::UI_KEYBOARD_SHORTCUTS.scope,
+            Scope::Sync,
+            "keyboard bindings must sync across a user's devices"
+        );
+    }
+
     #[test]
     fn bool_round_trip() {
         assert_eq!(bool::from_setting_string("true"), Some(true));

@@ -7,6 +7,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window'
 const { t } = useI18n()
 import { getVersion } from '@tauri-apps/api/app'
 import { AppBadge } from '@/components/ui'
+import ShortcutsHelpModal from '@/components/layout/ShortcutsHelpModal.vue'
 import ModeSwitcher from '@/components/layout/ModeSwitcher.vue'
 import { useMode } from '@/composables/useMode'
 import { useAccountStatus } from '@/composables/useAccountStatus'
@@ -30,6 +31,7 @@ const { role } = useAccountStatus()
 const { isMobilePlatform, isMac } = usePlatform()
 const omniSearch = useOmniSearch()
 const { shortcuts, registerAction } = useKeyboardShortcuts()
+const shortcutsHelpOpen = ref(false)
 
 function openOmniSearch() {
   omniSearch.open()
@@ -48,6 +50,11 @@ registerAction('settings', () => {
 registerAction('nav-back', () => router.back())
 registerAction('nav-forward', () => router.forward())
 registerAction('toggle-sidebar', () => emit('toggleSidebar'))
+// Toggle rather than open: pressing the same combo again should close the
+// sheet, which is what every other help overlay does.
+registerAction('shortcuts-help', () => {
+  shortcutsHelpOpen.value = !shortcutsHelpOpen.value
+})
 const canGoBack = ref(false)
 const canGoForward = ref(false)
 
@@ -439,6 +446,8 @@ const avatarEmoji = computed(() => {
       </div>
     </div>
   </header>
+
+  <ShortcutsHelpModal :open="shortcutsHelpOpen" @close="shortcutsHelpOpen = false" />
 </template>
 
 <style scoped>
