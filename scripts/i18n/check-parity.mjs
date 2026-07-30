@@ -53,6 +53,9 @@ const PENDING_TRANSLATION = [
   // renders in English via the i18n fallback.
   'settings.personalization.shortcutsModal',
   'settings.personalization.shortcutNames.',
+  // Credential import surface. English-only pending a translate pass.
+  'credentials.import.',
+  'credentials.page.import',
 ]
 
 const isPending = (key) => PENDING_TRANSLATION.some((p) => key.startsWith(p))

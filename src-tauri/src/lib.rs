@@ -1512,6 +1512,7 @@ pub fn run() {
             commands::talent_index::get_talent_index_preview,
             commands::talent_index::set_talent_index_consent,
             commands::import::import_credential,
+            commands::import::import_credentials,
             commands::import::import_credential_from_peer,
             // Staging-only smoke test for the entitlement chain. Both cfgs are
             // required: `ee-staging` is what actually gates this, and the

@@ -288,6 +288,125 @@ pub async fn import_credential_from_peer(
     import_credential_impl(db.conn(), &vc, &now)
 }
 
+/// Result of importing a payload that may hold many credentials.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportSummary {
+    /// Newly stored.
+    pub imported: u32,
+    /// Verified fine but already present.
+    pub already_present: u32,
+    /// Rejected, with the reason for each. Never silently dropped: a user who
+    /// hands over ten credentials and gets nine needs to know which one failed
+    /// and why.
+    pub failed: Vec<ImportFailure>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportFailure {
+    /// Envelope id when the credential had one, else a positional label.
+    pub credential_id: String,
+    pub reason: String,
+}
+
+/// Pull the credentials out of a payload that is either a single credential or
+/// an exported bundle.
+///
+/// Both shapes are accepted because `export_credentials_bundle` produces the
+/// bundle form, and an export you cannot re-import is not a backup. A single
+/// credential is what an issuer hands over directly.
+///
+/// A bundle's `keyRegistry` and `statusLists` are deliberately **ignored**. They
+/// are assertions about which keys belong to which issuer and which credentials
+/// are revoked — accepting those from whoever handed you a file would let them
+/// rewrite your trust and revocation state. Credentials themselves are safe to
+/// take from anyone precisely because each one carries a signature that is
+/// checked on the way in.
+fn credentials_in(payload: &str) -> Result<Vec<VerifiableCredential>, String> {
+    let value: serde_json::Value =
+        serde_json::from_str(payload).map_err(|e| format!("not valid JSON: {e}"))?;
+
+    if let Some(list) = value.get("credentials").and_then(|c| c.as_array()) {
+        let mut out = Vec::with_capacity(list.len());
+        for (i, item) in list.iter().enumerate() {
+            let vc: VerifiableCredential = serde_json::from_value(item.clone())
+                .map_err(|e| format!("bundle entry {i} is not a credential: {e}"))?;
+            out.push(vc);
+        }
+        return Ok(out);
+    }
+
+    // Bare array, for a payload that is just a list of credentials.
+    if let Some(list) = value.as_array() {
+        let mut out = Vec::with_capacity(list.len());
+        for (i, item) in list.iter().enumerate() {
+            let vc: VerifiableCredential = serde_json::from_value(item.clone())
+                .map_err(|e| format!("entry {i} is not a credential: {e}"))?;
+            out.push(vc);
+        }
+        return Ok(out);
+    }
+
+    let vc: VerifiableCredential =
+        serde_json::from_value(value).map_err(|e| format!("not a credential: {e}"))?;
+    Ok(vec![vc])
+}
+
+/// Import every credential in `payload`, continuing past individual failures.
+///
+/// One bad credential in a bundle must not cost the user the other nine, so
+/// each is imported independently and failures are collected rather than
+/// aborting. The payload failing to parse at all is still a hard error — that
+/// is a wrong file, not a partial one.
+pub fn import_credentials_impl(
+    conn: &rusqlite::Connection,
+    payload: &str,
+    now: &str,
+) -> Result<ImportSummary, String> {
+    let credentials = credentials_in(payload)?;
+    if credentials.is_empty() {
+        return Err("no credentials in this file".into());
+    }
+
+    let mut summary = ImportSummary {
+        imported: 0,
+        already_present: 0,
+        failed: Vec::new(),
+    };
+
+    for (i, vc) in credentials.iter().enumerate() {
+        let label = vc
+            .id
+            .clone()
+            .unwrap_or_else(|| format!("credential {}", i + 1));
+        match import_credential_impl(conn, vc, now) {
+            Ok(outcome) if outcome.stored => summary.imported += 1,
+            Ok(_) => summary.already_present += 1,
+            Err(reason) => summary.failed.push(ImportFailure {
+                credential_id: label,
+                reason,
+            }),
+        }
+    }
+
+    Ok(summary)
+}
+
+#[tauri::command]
+pub async fn import_credentials(
+    state: State<'_, AppState>,
+    payload: String,
+) -> Result<ImportSummary, String> {
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| "database lock poisoned".to_string())?;
+    let db = db_guard.as_ref().ok_or("database not initialized")?;
+    let now = super::credentials::now_rfc3339();
+    import_credentials_impl(db.conn(), &payload, &now)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -599,5 +718,169 @@ mod tests {
         let id = secret.public();
         let addr = provider_addr(&format!("  {id}\n")).expect("whitespace is trimmed");
         assert_eq!(addr.id, id);
+    }
+
+    // ---- bundle-aware import ---------------------------------------------
+
+    /// The export/import round trip. `export_credentials_bundle` produces the
+    /// bundle envelope, so an import that only understood bare credentials
+    /// would make the export unusable as a backup.
+    #[test]
+    fn a_bundle_envelope_imports_its_credentials() {
+        let db = open_db();
+        let a = signed_vc(
+            &key("issuer"),
+            CredentialType::EntitlementCredential,
+            "urn:test:bundle:a",
+            entitlement_props(),
+            None,
+        );
+        let b = signed_vc(
+            &key("issuer"),
+            CredentialType::RoleCredential,
+            "urn:test:bundle:b",
+            serde_json::json!({ "role": "member", "scope": "did:key:z6MkOrg" }),
+            None,
+        );
+        let bundle = serde_json::json!({
+            "formatVersion": "1",
+            "credentials": [a, b],
+            "keyRegistry": [],
+            "statusLists": [],
+        })
+        .to_string();
+
+        let summary = import_credentials_impl(db.conn(), &bundle, NOW).unwrap();
+        assert_eq!(summary.imported, 2);
+        assert!(summary.failed.is_empty());
+    }
+
+    /// A bundle's key registry and status lists are assertions about issuer
+    /// keys and revocation. Taking those from whoever handed you a file would
+    /// let them rewrite your trust state, so they are ignored — credentials
+    /// are safe to accept from anyone only because each carries a signature.
+    #[test]
+    fn a_bundle_cannot_smuggle_in_key_registry_or_status_lists() {
+        let db = open_db();
+        let vc = signed_vc(
+            &key("issuer"),
+            CredentialType::EntitlementCredential,
+            "urn:test:bundle:c",
+            entitlement_props(),
+            None,
+        );
+        let bundle = serde_json::json!({
+            "formatVersion": "1",
+            "credentials": [vc],
+            "keyRegistry": [{
+                "did": "did:key:z6MkAttacker",
+                "keyId": "k1",
+                "publicKeyHex": "00",
+                "validFrom": "2020-01-01T00:00:00Z",
+                "validUntil": null,
+                "rotatedBy": null,
+            }],
+            "statusLists": [{ "listId": "urn:evil", "bits": "AAAA" }],
+        })
+        .to_string();
+
+        import_credentials_impl(db.conn(), &bundle, NOW).unwrap();
+
+        let keys: i64 = db
+            .conn()
+            .query_row("SELECT COUNT(*) FROM key_registry", [], |r| r.get(0))
+            .unwrap();
+        let lists: i64 = db
+            .conn()
+            .query_row("SELECT COUNT(*) FROM credential_status_lists", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(
+            keys, 0,
+            "an imported bundle must not write the key registry"
+        );
+        assert_eq!(lists, 0, "an imported bundle must not write status lists");
+    }
+
+    /// One bad credential must not cost the user the good ones.
+    #[test]
+    fn a_failure_does_not_abort_the_rest_of_the_bundle() {
+        let db = open_db();
+        let good = signed_vc(
+            &key("issuer"),
+            CredentialType::EntitlementCredential,
+            "urn:test:bundle:good",
+            entitlement_props(),
+            None,
+        );
+        let mut tampered = signed_vc(
+            &key("issuer"),
+            CredentialType::EntitlementCredential,
+            "urn:test:bundle:bad",
+            entitlement_props(),
+            None,
+        );
+        let mut claim = EntitlementClaim::extract(&tampered.credential_subject).unwrap();
+        claim.features.push("employer_console".into());
+        tampered.credential_subject.properties = claim.into_properties();
+
+        let bundle = serde_json::json!({
+            "formatVersion": "1",
+            "credentials": [tampered, good],
+            "keyRegistry": [],
+            "statusLists": [],
+        })
+        .to_string();
+
+        let summary = import_credentials_impl(db.conn(), &bundle, NOW).unwrap();
+        assert_eq!(summary.imported, 1, "the good credential still lands");
+        assert_eq!(summary.failed.len(), 1);
+        assert_eq!(summary.failed[0].credential_id, "urn:test:bundle:bad");
+        assert!(summary.failed[0].reason.contains("signature"));
+    }
+
+    #[test]
+    fn a_bare_credential_still_imports() {
+        let db = open_db();
+        let vc = signed_vc(
+            &key("issuer"),
+            CredentialType::EntitlementCredential,
+            "urn:test:bare",
+            entitlement_props(),
+            None,
+        );
+        let summary =
+            import_credentials_impl(db.conn(), &serde_json::to_string(&vc).unwrap(), NOW).unwrap();
+        assert_eq!(summary.imported, 1);
+    }
+
+    #[test]
+    fn re_importing_reports_already_present_rather_than_failing() {
+        let db = open_db();
+        let vc = signed_vc(
+            &key("issuer"),
+            CredentialType::EntitlementCredential,
+            "urn:test:dupe",
+            entitlement_props(),
+            None,
+        );
+        let payload = serde_json::to_string(&vc).unwrap();
+        import_credentials_impl(db.conn(), &payload, NOW).unwrap();
+
+        let again = import_credentials_impl(db.conn(), &payload, NOW).unwrap();
+        assert_eq!(again.imported, 0);
+        assert_eq!(again.already_present, 1);
+        assert!(again.failed.is_empty());
+    }
+
+    /// The wrong file is a hard error, not a partial import.
+    #[test]
+    fn a_payload_that_is_not_credentials_is_rejected_outright() {
+        let db = open_db();
+        assert!(import_credentials_impl(db.conn(), "not json", NOW).is_err());
+        assert!(import_credentials_impl(db.conn(), "{\"unrelated\": true}", NOW).is_err());
+        let empty = serde_json::json!({ "credentials": [] }).to_string();
+        assert!(import_credentials_impl(db.conn(), &empty, NOW).is_err());
     }
 }

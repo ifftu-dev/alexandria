@@ -52,7 +52,11 @@ function extractRegistered() {
   if (end === -1) throw new Error("unbalanced generate_handler! bracket");
   const block = lib.slice(open, end);
   const set = new Set();
-  const re = /commands::\w+::(\w+)/g;
+  // Any `::`-separated path in the handler list, taking the final segment.
+  // Was `commands::\w+::(\w+)`, which missed commands registered from outside
+  // `commands::` — notably the cfg-gated `crate::ee::…` ones, so they looked
+  // unregistered to the invoked-but-not-registered check below.
+  const re = /(?:\w+::)+(\w+)\s*,/g;
   let m;
   while ((m = re.exec(block)) !== null) set.add(m[1]);
   return set;
@@ -122,8 +126,22 @@ const orphans = [...registered]
   .sort();
 const stale = [...allow].filter((c) => invoked.has(c)).sort();
 const dangling = [...allow].filter((c) => !registered.has(c)).sort();
+// The direction that actually breaks at runtime: the frontend calls a command
+// the backend never registered, so the button silently does nothing until
+// someone clicks it. Every other check here is about tidiness; this one is
+// about the app working.
+const missing = [...invoked].filter((c) => !registered.has(c)).sort();
 
 const failures = [];
+if (missing.length) {
+  failures.push(
+    `Invoked by the frontend but NOT registered (${missing.length}):\n` +
+      missing.map((c) => `    - ${c}`).join("\n") +
+      "\n  These fail at runtime the moment the calling UI is used.\n" +
+      "  Fix: add the command to generate_handler! in lib.rs, or correct the " +
+      "invoke() name.",
+  );
+}
 if (orphans.length) {
   failures.push(
     `Registered but never invoked and not allowlisted (${orphans.length}):\n` +

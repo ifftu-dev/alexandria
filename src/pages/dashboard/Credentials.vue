@@ -6,6 +6,7 @@ import { AppButton, AppModal, AppInput, EmptyState } from '@/components/ui'
 import { useCredentials } from '@/composables/useCredentials'
 import { useLocalApi } from '@/composables/useLocalApi'
 import SourceCredentialsModal from '@/components/credential/SourceCredentialsModal.vue'
+import ImportCredentialsModal from '@/components/credential/ImportCredentialsModal.vue'
 import {
   classNameOf,
   CREDENTIAL_KINDS,
@@ -277,6 +278,8 @@ async function copyEnvelope() {
 
 // Export ------------------------------------------------------------------
 const exporting = ref(false)
+const importOpen = ref(false)
+
 async function exportBundle() {
   exporting.value = true
   const json = await api.exportBundle()
@@ -311,6 +314,9 @@ async function exportBundle() {
         </AppButton>
         <AppButton variant="outline" :loading="exporting" @click="exportBundle">
           {{ $t('credentials.page.exportAll') }}
+        </AppButton>
+        <AppButton variant="outline" @click="importOpen = true">
+          {{ $t('credentials.page.import') }}
         </AppButton>
         <AppButton variant="ghost" @click="openPresent">{{ $t('credentials.page.share') }}</AppButton>
         <AppButton @click="openIssue">{{ $t('credentials.page.add') }}</AppButton>
@@ -534,5 +540,11 @@ async function exportBundle() {
         </div>
       </template>
     </AppModal>
+
+    <ImportCredentialsModal
+      :open="importOpen"
+      @close="importOpen = false"
+      @imported="refresh"
+    />
   </div>
 </template>
