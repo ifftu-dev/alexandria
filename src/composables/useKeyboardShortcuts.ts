@@ -43,8 +43,23 @@ export interface KeyCombo {
   mod: boolean
   shift: boolean
   alt: boolean
-  /** The `KeyboardEvent.key` value (case-insensitive match). */
+  /** The `KeyboardEvent.key` value (case-insensitive match), used for display. */
   key: string
+  /**
+   * Physical key (`KeyboardEvent.code`), matched in preference to `key` when
+   * present.
+   *
+   * Needed because `key` is the *produced character*, which is unreliable for
+   * punctuation. "?" is Shift+"/" on a US layout, but with a modifier held some
+   * engines report the unshifted "/" instead — so a binding stored as "?" never
+   * fires, while the same binding on a letter works fine because
+   * `toLowerCase()` collapses "U" and "u".
+   *
+   * Matching the physical key sidesteps the question entirely and is what
+   * editors do. Optional so existing stored bindings (and every letter
+   * shortcut) keep matching on `key` exactly as before.
+   */
+  code?: string
 }
 
 export interface ShortcutDefinition {
@@ -58,8 +73,8 @@ export interface ShortcutDefinition {
 
 // ---- Default bindings -----------------------------------------------
 
-function combo(key: string, mod = true, shift = false, alt = false): KeyCombo {
-  return { mod, shift, alt, key }
+function combo(key: string, mod = true, shift = false, alt = false, code?: string): KeyCombo {
+  return { mod, shift, alt, key, ...(code ? { code } : {}) }
 }
 
 const DEFAULT_SHORTCUTS: Record<string, { label: string; keys: KeyCombo }> = {
@@ -74,8 +89,17 @@ const DEFAULT_SHORTCUTS: Record<string, { label: string; keys: KeyCombo }> = {
   // `shift: true` is not decoration — on most layouts "?" is Shift+"/", so
   // the event arrives with shiftKey set and key "?". A combo without it would
   // never match. `formatCombo` hides the redundant ⇧ when rendering.
-  'shortcuts-help': { label: 'Show keyboard shortcuts', keys: combo('?', true, true) },
+  // `code: 'Slash'` is what actually matches; `key: '?'` is only what the sheet
+  // displays. See KeyCombo.code — a "?" binding matched by character does not
+  // reliably fire.
+  'shortcuts-help': {
+    label: 'Show keyboard shortcuts',
+    keys: combo('?', true, true, false, 'Slash'),
+  },
 }
+
+/** The shipped defaults, exposed so tests can assert on binding shape. */
+export const DEFAULT_SHORTCUTS_FOR_TEST = DEFAULT_SHORTCUTS
 
 /** Ids of every shipped shortcut, in registration order. */
 export const DEFAULT_SHORTCUT_IDS = Object.keys(DEFAULT_SHORTCUTS)
@@ -208,6 +232,8 @@ function matches(e: KeyboardEvent, c: KeyCombo): boolean {
   if (!c.mod && modPressed) return false
   if (c.shift !== e.shiftKey) return false
   if (c.alt !== e.altKey) return false
+  // Physical key wins when the binding names one — see KeyCombo.code.
+  if (c.code) return e.code === c.code
   return e.key.toLowerCase() === c.key.toLowerCase()
 }
 
@@ -314,6 +340,11 @@ export function comboFromEvent(e: KeyboardEvent): KeyCombo | null {
     shift: e.shiftKey,
     alt: e.altKey,
     key: e.key,
+    // Recorded for punctuation only. Letters and digits match reliably on the
+    // character and stay layout-independent that way; pinning them to a
+    // physical key would make a rebind on one layout fire a different key on
+    // another.
+    ...(/^[a-z0-9]$/i.test(e.key) || e.key.length > 1 ? {} : { code: e.code }),
   }
 }
 

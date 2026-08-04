@@ -10,6 +10,7 @@
 import { describe, it, expect } from 'vitest'
 
 import {
+  DEFAULT_SHORTCUTS_FOR_TEST,
   DEFAULT_SHORTCUT_IDS,
   SHORTCUTS_SETTING_KEY,
   formatCombo,
@@ -123,6 +124,42 @@ describe('shortcutName', () => {
       const name = shortcutName(def(id, `fallback-${id}`))
       expect(name, id).not.toContain('settings.personalization')
       expect(name.length, id).toBeGreaterThan(0)
+    }
+  })
+})
+
+describe('punctuation bindings match the physical key', () => {
+  /**
+   * `key` is the produced *character*, which is unreliable for punctuation:
+   * "?" is Shift+"/" and some engines report the unshifted "/" when a modifier
+   * is held. Letters escape this because `toLowerCase()` collapses "U" and
+   * "u"; punctuation has no such normalisation, which is why Cmd+? silently
+   * never fired.
+   *
+   * The help binding therefore matches on `code`, so it works whichever
+   * character the engine reports.
+   */
+  it('the help binding is pinned to a physical key, not a character', () => {
+    const help = DEFAULT_SHORTCUTS_FOR_TEST['shortcuts-help']
+    expect(help?.keys.code).toBe('Slash')
+  })
+
+  it('still displays as ? rather than the physical key name', () => {
+    const help = DEFAULT_SHORTCUTS_FOR_TEST['shortcuts-help']
+    expect(help?.keys.key).toBe('?')
+    expect(formatCombo(help!.keys)).toMatch(/\?$/)
+  })
+
+  /**
+   * Letter bindings must NOT be pinned to a physical key: rebinding on one
+   * layout would then fire a different key on another.
+   */
+  it('letter bindings are not pinned to a physical key', () => {
+    for (const id of DEFAULT_SHORTCUT_IDS) {
+      const def = DEFAULT_SHORTCUTS_FOR_TEST[id]
+      if (def && /^[a-z0-9]$/i.test(def.keys.key)) {
+        expect(def.keys.code, id).toBeUndefined()
+      }
     }
   })
 })
