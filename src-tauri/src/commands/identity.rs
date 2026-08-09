@@ -5,7 +5,7 @@
 //! commands (create / unlock / lock / delete) live in
 //! [`commands::profile`].
 
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 use serde::Serialize;
 use tauri::State;
 
@@ -14,6 +14,28 @@ use crate::crypto::wallet;
 use crate::domain::identity::{AccountStatus, Identity, ProfileUpdate, WalletInfo, ACCOUNT_ROLES};
 use crate::domain::profile::{ProfilePayload, PublishProfileResult, SignedProfile};
 use crate::AppState;
+
+/// This device's DID as cached in `app_settings`, or `None` on a profile that
+/// has not established one.
+///
+/// The cache is written by [`get_local_did`], which derives it from the
+/// keystore. Readers that have a database handle but no keystore — the swarm
+/// event loop, and anything running while the vault is locked — use this
+/// instead of re-deriving.
+///
+/// `None` is not an error and must never be read as "skip the check": a device
+/// with no identity is entitled to nothing and owns nothing.
+pub(crate) fn local_did(conn: &rusqlite::Connection) -> Option<String> {
+    conn.query_row(
+        "SELECT value FROM app_settings WHERE key = 'identity.local_did'",
+        [],
+        |r| r.get::<_, String>(0),
+    )
+    .optional()
+    .ok()
+    .flatten()
+    .filter(|did| !did.is_empty())
+}
 
 /// Combined response from unlock/create flows.
 #[derive(Debug, Serialize)]

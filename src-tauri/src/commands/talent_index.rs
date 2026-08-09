@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
 //! IPC for the talent-index consent and publish client.
 //!
-//! MIT and registered unconditionally. The index that *receives* a record is an
-//! enterprise product, but choosing what to send it is a learner's decision
-//! about their own data, and the code making that decision has to be readable
-//! by the person it affects. See `docs/enterprise-boundary.md`.
+//! The index that *receives* a record is a service outside this repository, but
+//! choosing what to send it is a learner's decision about their own data, and
+//! the code making that decision has to be readable by the person it affects.
+//! See `docs/enterprise-boundary.md`.
 //!
 //! Nothing here publishes anything yet — there is no index to publish to. What
 //! it does provide is the whole decision surface: the candidate skills, the
@@ -200,7 +200,7 @@ pub async fn get_talent_index_preview(
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
     let db = db_guard.as_ref().ok_or("database not initialized")?;
-    let subject_did = crate::commands::entitlements::local_did(db.conn())
+    let subject_did = crate::commands::identity::local_did(db.conn())
         .ok_or("this profile has no identity yet")?;
     let now = crate::commands::credentials::now_rfc3339();
     get_talent_index_preview_impl(db.conn(), &subject_did, &now)
@@ -216,7 +216,7 @@ pub async fn set_talent_index_consent(
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
     let db = db_guard.as_ref().ok_or("database not initialized")?;
-    let subject_did = crate::commands::entitlements::local_did(db.conn())
+    let subject_did = crate::commands::identity::local_did(db.conn())
         .ok_or("this profile has no identity yet")?;
 
     set_talent_index_consent_impl(db.conn(), &consent)?;

@@ -3,12 +3,15 @@
 //!
 //! A talent index is an employer-facing directory: enterprises search it to
 //! find people with particular verified skills. The index itself is a
-//! multi-tenant server-side product and therefore enterprise-licensed, but
-//! **this half is deliberately MIT** — the wire schema and the consent rules
-//! decide what leaves a learner's device, and a learner must be able to read
-//! that without enterprise sources. See `docs/enterprise-boundary.md`:
-//! *"Talent-index consent UI and publish client — MIT — learner must audit what
-//! leaves their device."*
+//! multi-tenant service that holds data about other people, and lives outside
+//! this repository. **This half — the wire schema and the consent rules — is
+//! here**, because it decides what leaves a learner's device and they must be
+//! able to read it. See `docs/enterprise-boundary.md`: the client is core, the
+//! service is not.
+//!
+//! Nothing here is bound to that service. A record is a signed, self-describing
+//! artifact; any index could consume it, including one a learner runs
+//! themselves.
 //!
 //! ## Consent is opt-in, and separate from graph visibility
 //!

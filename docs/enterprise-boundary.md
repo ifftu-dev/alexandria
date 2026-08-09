@@ -1,133 +1,118 @@
-# Enterprise Boundary
+# The enterprise boundary
 
-**Status:** Policy adopted; wiring on `feat/ee-boundary-wiring`
-**Date:** 2026-07-21
+Alexandria is MIT Expat in full. The commercial Enterprise Edition is a **shell
+around** this application, in a separate repository, and nothing here references
+or depends on it.
 
-Alexandria is open core. Everything in this repository is MIT Expat
-except the `ee/` subtrees, which fall under the IFFTU Enterprise License
-(see `LICENSE.md` and `src/ee/LICENSE.md` /
-`src-tauri/src/ee/LICENSE.md`).
+This document exists to keep it that way.
 
-This document defines **what qualifies as enterprise**. Before this
-existed, the license carved out a boundary that no written policy
-described, so every new feature re-litigated the question. The rubric
-below turns that argument into a checklist.
+## The rule, stated once
 
-## The three tests
+> The Enterprise Edition contains only what exists because an organisation has
+> multiple people, an IT department, or a compliance obligation. Never anything
+> that exists because a learner wants to learn or prove something.
 
-A feature may live under `ee/` only if it passes **all three**. Failing
-any one test means it is core, and core means MIT.
+## The guarantee
 
-| Test | Question | Core (MIT) if… |
-|---|---|---|
-| **Learner-value** | Does removing this degrade a solo learner's ability to learn, be assessed, or hold and present their own credentials? | Yes → MIT |
-| **Multi-tenant** | Does it require server-side state about *other people*, organisation tenancy, or seat accounting? | No → MIT |
-| **Graph-integrity** | Is it part of how a credential is produced, signed, verified, or independently re-derived? | Yes → MIT |
+> Credential verification is free, offline-capable, and permanent, forever. No
+> commercial feature may be required to verify a credential.
 
-The tests are deliberately biased toward MIT. When a feature sits on the
-line, it is core.
+An implementation that makes verification depend on a hosted service being
+reachable is wrong even if it passes tests.
 
-## Derived rules
+## What "shell" means in practice
 
-These follow from the three tests. They are written down so they are not
-re-argued per feature.
+Core is complete and unaware. It has no feature flags naming the commercial
+edition, no licence checks, no stub modules standing in for proprietary ones,
+and no conditional compilation that changes what a user gets. A build you
+compile yourself is the whole product.
 
-**Assessment engine internals are always MIT.** Item response theory,
-adaptive delivery, attempt policy, grader plugins, Bloom levels,
-aggregation and decay. A proprietary measurement engine makes a
-credential impossible to check, and an uncheckable credential is worth
-nothing to the employer who is being asked to trust it. The measurement
-engine is the product's foundation, not its upsell.
+That constrains what can be sold, deliberately: **nothing inside the app is ever
+withheld.** Organisations pay for running Alexandria *as an organisation* —
+identity and provisioning, policy and access control, audit and retention,
+hosted services the app talks to, and the operational guarantees around them.
 
-**Verification is always MIT.** `domain/vc/verify.rs` and the grader
-re-derivation path stay MIT permanently. What is sold is the *hosted,
-rate-limited, SLA-backed endpoint* — the operation, not the algorithm.
-Anyone must be able to verify an Alexandria credential offline with no
-subscription and no network. This is a hard constraint, not a
-preference: it is the reason the credential has value.
+The honest answer to "what stops a company just using the free app?" is
+*nothing*. A five-person team should. A five-hundred-person company will want
+SSO, provisioning, an audit trail and someone to call — none of which exists for
+an individual, which is exactly why charging for it is fair.
 
-**Anything scoped by `org_id` is EE.** Cross-tenant queries, employer
-consoles, seat metering, org-scoped analytics.
+## The test
 
-**The consent and publish client is MIT; the index that receives it is
-EE.** A learner must be able to read the code that decides what leaves
-their machine. The server that stores it is a different question.
+When unsure which side something belongs on:
 
-**Learning content and credential issuance are never gated.** Per
-`docs/vision.md`, learning content, credentials, and reputation data are
-free permanently and unconditionally.
+> Would a single individual with no employer ever want this?
 
-## Two constraints from `docs/vision.md`
-
-Both bear directly on where the line falls, and both are easy to violate
-by accident.
-
-**"Learner data is never sold, and all queries respect learner-controlled
-privacy settings"** (`vision.md:129`). Any enterprise product built on
-learner data must be consent-gated at the source. There is no enterprise
-tier that sees data a learner has not explicitly published, and no
-enterprise contract that overrides a learner's privacy setting.
-
-**"These operate through the same query system available to everyone"**
-(`vision.md:129`). Enterprise access is *quantitative* — rate limits,
-bulk operations, SLA, support, integrations — not a privileged query
-surface with access to fields nobody else can see. If an enterprise
-endpoint can answer a question the public one structurally cannot, that
-is a boundary violation, not a feature.
-
-Note also that Alexandria is structured as a non-profit
-(`vision.md:124`). Enterprise revenue funds the mission; it does not
-redefine it.
+If yes, it is core, and it is MIT. There is no third category.
 
 ## Worked examples
 
 | Feature | Verdict | Reasoning |
 |---|---|---|
-| Adaptive assessment / IRT | **MIT** | Fails learner-value and graph-integrity — it is how a score is produced |
-| Attempt policy and cooldowns | **MIT** | Credential integrity; a learner-side rule |
-| Artifact grader plugins (git repo, spreadsheet) | **MIT** | Graph-integrity — scores must be re-derivable by anyone |
-| Credential verification logic | **MIT** | Graph-integrity, permanently |
-| Talent-index consent UI and publish client | **MIT** | Learner must audit what leaves their device |
-| Wire schema for the published record | **MIT** | Must be publicly auditable |
-| Talent index service and storage | **EE** | Multi-tenant server-side state about other people |
-| Employer capability search console | **EE** | Scoped by `org_id` |
-| Hosted verification API (rate limits, keys, SLA) | **EE** | The hosted operation; the logic underneath stays MIT |
-| Bulk verification | **EE** | Metered enterprise operation |
-| Seat accounting and billing | **EE** | Definitionally multi-tenant |
-| Skills-intelligence aggregates | **EE** | Cross-user server-side aggregation |
-| Hosted AI oral-exam inference | **EE** | Metered server-side inference; learners retain every other assessment path |
+| Adaptive assessment / IRT | **Core** | It is how a score is produced |
+| Attempt policy and cooldowns | **Core** | A learner-side integrity rule |
+| Artifact grader plugins | **Core** | Scores must be re-derivable by anyone |
+| Credential issuance, holding, presentation | **Core** | The product |
+| Credential verification logic | **Core** | Permanently — see the guarantee above |
+| Selective disclosure | **Core** | Every learner gets it |
+| Sentinel on-device integrity | **Core** | Runs on the learner's machine |
+| Importing a credential someone handed you | **Core** | Receiving is not a commercial act |
+| Talent-index consent UI, publish client, wire schema | **Core** | A learner must audit what leaves their device |
+| SSO / SAML / OIDC, SCIM provisioning | **Enterprise** | Exists only because an org has many people |
+| Role-based access control, delegated admin | **Enterprise** | Same |
+| Immutable audit log, retention policy, data residency | **Enterprise** | Compliance obligation |
+| Org-operated relay with auth and quotas | **Enterprise** | Org infrastructure |
+| Talent index service and storage | **Enterprise** | Multi-tenant server-side state about other people |
+| Employer search console | **Enterprise** | Scoped to an organisation |
+| Hosted verification API — rate limits, keys, SLA | **Enterprise** | The hosted *operation*; the logic underneath stays core |
+| Bulk verification | **Enterprise** | A metered enterprise operation |
+| Human review queue over Sentinel flags | **Enterprise** | An org process with an adjudication workflow |
+| Cohort analytics, skills intelligence | **Enterprise** | Cross-user server-side aggregation |
+| Seat accounting and billing | **Enterprise** | Definitionally multi-tenant |
+
+Note the pattern in the split cases: the *client* is core and the *service* is
+enterprise. The talent-index publish client is core because it decides what
+leaves a learner's device; the index that receives it is enterprise because it
+holds data about other people. The verification logic is core; the hosted API
+with an SLA in front of it is enterprise.
 
 ## How the boundary is enforced
 
-Policy is not enough; the build enforces it mechanically.
+Structurally, not by policy:
 
-- The `ee` Cargo feature is **off by default**. A plain `cargo build`
-  produces the community edition, and it is fully functional.
-- Core references `ee` in exactly one place:
-  `#[cfg(feature = "ee")] mod ee;` in `src-tauri/src/lib.rs`. Every
-  other core→ee interaction goes through a trait defined in core with a
-  no-op MIT default implementation — one seam per engine.
-- The frontend resolves `@ee` to `src/ee` when `VITE_EE=1` and to the
-  MIT `src/ee-stub` otherwise.
-- CI gates every push: the no-feature build and test suite must pass,
-  the `--features ee` build must pass, no unconditional `ee::` or `@ee`
-  reference may appear outside an `ee/` tree, SPDX headers must be
-  present, and both frontend builds must succeed.
-
-The first gate is the one that matters. If core ever references `ee`
-unconditionally, the community build stops compiling — the boundary
-fails loudly rather than eroding quietly.
+- The commercial code is **not in this repository**. It cannot leak in, because
+  there is nowhere for it to go.
+- Core has no build flag, licence check, or module that names it. Nothing to
+  mis-set, nothing to strip, nothing to audit.
+- The Enterprise Edition depends on core through published, versioned
+  interfaces only — never a fork, never a patch, never reaching into internals.
+  Anything it needs goes upstream into core as a general-purpose interface,
+  which means every user gets it.
 
 ## Adding a feature
 
-1. Run the three tests. If any says core, it is MIT. Stop.
-2. If all three say enterprise, add it under `ee/` with the
-   `LicenseRef-IFFTU-Enterprise` SPDX header.
-3. If core needs to call it, use the existing trait seam for that
-   engine, or add one. Do not add a second seam to an engine that
-   already has one.
-4. Add a row to the worked-examples table above.
+1. Apply the test above.
+2. If it is core, build it here. That is the default and most things are.
+3. If it is enterprise, it does not belong in this repository at all — not
+   behind a flag, not as a stub.
+4. If it seems to need a hook *into* core, that hook is a general-purpose
+   interface other people would also want. Design it that way, or reconsider.
+5. Add a row to the worked examples above so the next person does not
+   re-litigate it.
 
-If a feature seems to need a new gossip topic or a widened
-`SYNCABLE_TABLES` to work, it is the wrong feature — see
-`domain/sync.rs` and the privacy invariants it asserts.
+## History
+
+Between 2026-07 and 2026-08 this repository briefly carried an in-core seam: an
+`ee` cargo feature, `src/ee` and `src/ee-stub` trees, an `@ee` alias, and a
+compiled-in trusted-issuer allowlist that gated features client-side.
+
+It was removed. A client-side gate is bypassable by anyone who can patch a
+binary — and with an MIT, publicly readable codebase, that is anyone who wants
+to. It also could not enforce the one thing the pricing model needed, seat
+counting, because a device cannot see the other members of an organisation. It
+took the reputational cost of visibly gating an open-source product while
+providing none of the protection.
+
+What survived the removal, because it was always core: the `allowed_types`
+verification fix, holder binding for credentials, `import_credential`, iroh
+credential delivery, and the talent-index consent client with signed records.

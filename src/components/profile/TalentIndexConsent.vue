@@ -2,8 +2,8 @@
 /**
  * Talent-index consent and publish client.
  *
- * MIT on purpose. The index that receives a record is an enterprise product,
- * but what leaves this device is the learner's decision, and the surface making
+ * The index that receives a record is a service outside this repository, but
+ * what leaves this device is the learner's decision, and the surface making
  * that decision has to be readable by the person it affects — see
  * `docs/enterprise-boundary.md`.
  *

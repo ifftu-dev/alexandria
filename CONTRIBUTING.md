@@ -5,27 +5,28 @@ free for learners, permanently — and contributions are welcome.
 
 ## Licensing: read this first
 
-Alexandria is **open core**. Almost everything is MIT Expat. Two small
-subtrees are not:
+Alexandria is **MIT Expat, all of it**. There is no proprietary subtree in
+this repository and no contribution path that lands in one.
 
-- `src/ee/` — enterprise frontend
-- `src-tauri/src/ee/` — enterprise backend
+The commercial Enterprise Edition is a *shell around* this application, not a
+layer inside it: organisation identity and provisioning, policy and access
+control, audit and compliance, hosted services the app talks to, and the
+operational guarantees that go with them. It lives in a separate repository
+and this one neither references nor depends on it. Alexandria is complete and
+useful with the Enterprise Edition absent from the universe.
 
-Those are licensed under the IFFTU Enterprise License (see `LICENSE.md`
-inside each, and the carve-out in the root `LICENSE.md`).
+Two consequences worth stating plainly:
 
-**External contributions are accepted to MIT paths only.** CI rejects pull
-requests that add or modify files under either `ee/` directory. This is not
-a judgement about the contribution — it is that we cannot accept
-externally-authored code into a proprietary tree without a contributor
-agreement we do not currently have.
+- **Nothing in the app is ever withheld from you.** No feature flag, no
+  licence check, no build that unlocks more than the one you can compile
+  yourself. Credential verification in particular is free, offline-capable
+  and permanent.
+- **Every path here accepts external contributions.** There is no directory
+  you are barred from.
 
-If you want to work on something and are not sure which side of the line it
-falls on, read `docs/enterprise-boundary.md` or open an issue and ask before
-writing code. The short version: anything a learner needs in order to learn,
-be assessed, or hold and verify their own credentials is MIT and always will
-be. That includes the assessment engine, the grader plugins, credential
-issuance, and all verification logic.
+If you are unsure whether an idea belongs in the app or in the commercial
+shell, the test is: *would a single individual with no employer ever want
+this?* If yes, it belongs here. See `docs/enterprise-boundary.md`.
 
 ## Before you push
 

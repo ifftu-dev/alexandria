@@ -7,7 +7,6 @@
 
 pub mod canonicalize;
 pub mod context;
-pub mod entitlement;
 pub mod id;
 pub mod sign;
 pub mod verify;

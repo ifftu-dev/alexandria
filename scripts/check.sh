@@ -40,12 +40,8 @@ step "cargo clippy -D warnings" cargo clippy -- -D warnings
 if [[ $FAST -eq 0 ]]; then
   step "cargo test" cargo test
 fi
-# The steps above are the community build (default features). This covers
-# the enterprise side of the seam — see docs/enterprise-boundary.md.
-step "cargo check --features ee" cargo check --lib --features ee
 
 cd "$ROOT"
-step "enterprise boundary guard" node scripts/check-ee-boundary.mjs
 step "tauri command guard" node scripts/check-tauri-commands.mjs
 step "i18n catalog parity" node scripts/i18n/check-parity.mjs
 step "i18n no-raw-text" node scripts/i18n/check-no-raw-text.mjs
@@ -56,7 +52,6 @@ step "vue-tsc type-check" npx vue-tsc -b --noEmit
 # the type-check, the tests and the parity guard, then fails the release build.
 # That is exactly how one slipped through.
 step "frontend build" npm run build
-step "vue-tsc type-check (enterprise)" npm run typecheck:ee
 step "frontend tests (vitest)" npm test
 
 if command -v cargo-audit >/dev/null 2>&1; then

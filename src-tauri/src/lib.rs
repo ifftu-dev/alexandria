@@ -8,10 +8,6 @@ pub mod crypto;
 pub mod db;
 pub mod diag;
 pub mod domain;
-/// Enterprise Edition modules. This is the **only** unconditional reference
-/// to `ee` in core — see `docs/enterprise-boundary.md`.
-#[cfg(feature = "ee")]
-pub mod ee;
 pub mod evidence;
 pub mod goals;
 pub mod p2p;
@@ -1527,21 +1523,12 @@ pub fn run() {
             commands::credentials::disallow_credential_fetch,
             commands::credentials::verify_credential_cmd,
             commands::credentials::export_credentials_bundle,
-            commands::entitlements::get_entitlement_snapshot,
             commands::talent_index::get_talent_index_preview,
             commands::talent_index::set_talent_index_consent,
             commands::talent_index::sign_talent_index_record,
             commands::import::import_credential,
             commands::import::import_credentials,
             commands::import::import_credential_from_peer,
-            // Staging-only smoke test for the entitlement chain. Both cfgs are
-            // required: `ee-staging` is what actually gates this, and the
-            // `ee` line must sit directly above the `crate::ee` reference to
-            // satisfy scripts/check-ee-boundary.mjs, which looks for that exact
-            // attribute adjacent to any ee path.
-            #[cfg(feature = "ee-staging")]
-            #[cfg(feature = "ee")]
-            crate::ee::entitlement_issuer::mint_staging_entitlement,
             // Selective-disclosure presentations (§18)
             commands::presentation::create_presentation,
             commands::presentation::verify_presentation,
