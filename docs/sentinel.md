@@ -1,6 +1,6 @@
 # Sentinel — Assessment Integrity System
 
-> Anti-cheat system for Alexandria that monitors learning-session integrity through multi-signal behavioral fingerprinting. No biometric or sensitive data ever leaves the device — only derived scores (0-1) and anomaly flags are stored locally.
+> Anti-cheat system for Alexandria that monitors learning-session integrity through multi-signal behavioral fingerprinting. Biometric and behavioural data is processed on-device and never persisted — only derived scores (0-1) and anomaly flags are stored locally. The one path by which anything more detailed reaches a server is a learner releasing it themselves to contest a flag; see [Review and adjudication](#review-and-adjudication).
 
 ## Design Principles
 
@@ -9,6 +9,7 @@
 3. **Dual scoring** — Rule-based and AI-based systems run in parallel. Rule-based is authoritative today; AI is advisory until validated with labeled data.
 4. **On-device ML only — backend-resident.** All ML runs in the Rust backend. The paste classifier uses `tract` (pure-Rust ONNX inference) with weights embedded at compile time via `include_bytes!` or hot-swapped from a DAO-ratified CID. The per-user keystroke autoencoder and mouse-trajectory CNN train + score via `candle` (Apache-2.0, HuggingFace) inside the same crate. The face embedder remains pure-pixel LBP math — no ML framework involved. The frontend only buffers raw events and forwards them to the backend over Tauri IPC.
 5. **Incremental trust** — Behavioral profiles build over time. New users start with generous defaults; consistency scoring activates after 10+ samples.
+6. **Evidence is the learner's to release** — A flag may travel; the evidence behind it may not, unless the learner releases it themselves. See [Review and adjudication](#review-and-adjudication).
 
 ## Architecture Overview
 
@@ -52,7 +53,7 @@
 └────────────────────────────────────────────────────────────────────┘
 ```
 
-All processing happens client-side. There is no server-side component — Alexandria is a fully decentralized desktop and mobile application. Integrity scores are stored locally in SQLite; the current implementation does not publish Sentinel snapshots over P2P.
+All processing happens client-side. There is no server-side component in the application itself — Alexandria is a fully decentralized desktop and mobile application. Integrity scores are stored locally in SQLite; the current implementation does not publish Sentinel snapshots over P2P. A commercial review queue may later receive *scores* for a flagged session, bounded by [Review and adjudication](#review-and-adjudication); processing never moves off the device.
 
 ## Signal Taxonomy
 
@@ -426,6 +427,67 @@ Stored in local SQLite. See [Database Schema](database-schema.md) for full DDL.
 - `setCameraOptedIn(bool)` when the learner accepts/declines camera verification on an assessment element
 - A `setInterval(3000)` in `Player.vue` calls `sentinel.verifyFace(videoEl)` while the camera stream is live; the hidden `<video>` element is torn down on disable or unmount
 
+## Review and adjudication
+
+Sentinel produces flags. A flag is an accusation in waiting, so what happens next
+is a design decision with real consequences for the person flagged.
+
+**The constraint, stated once:**
+
+> A flag may travel. The evidence behind it may not, unless the learner releases
+> it themselves.
+
+### What a flag may carry
+
+A flag that leaves the device carries the derived scores and nothing else: the
+per-signal values (`typing_score`, `mouse_score`, `human_score`, `tab_score`,
+`paste_score`, `devtools_score`, `camera_score`), the `composite_score`, and
+timestamps. These are already what `integrity_snapshots` holds locally, so no new
+class of data is created by sending them.
+
+It may **not** carry keystroke timings, mouse traces, face embeddings, gaze
+estimates, or anything else from which behaviour could be reconstructed. Those are
+never persisted even locally (see Privacy Guarantees 1–3), and a review queue is
+not a reason to start.
+
+### Why the reviewer does not get the evidence by default
+
+A human reviewing an integrity flag will want the underlying evidence, because
+eight numbers are thin grounds on which to fail someone. That instinct is correct
+and it is exactly why the default must be refused: satisfying it means an operator
+holding face frames, gaze traces and keystroke dynamics belonging to people
+accused of cheating. That is the most sensitive data this system can produce,
+about the people least able to object, held by the party with an interest in the
+outcome.
+
+### How an appeal works instead
+
+The learner can release the evidence for their own session, and only they can.
+
+1. A flagged session shows the learner what was flagged and the scores behind it.
+2. If they contest it, they may release the supporting evidence to the reviewer.
+   The release is explicit, per-session, and theirs to make.
+3. Releasing requires the evidence to still exist locally, so a flagged session
+   retains its raw signals on-device for a bounded appeal window. Nothing is
+   retained for unflagged sessions, and nothing is retained after the window.
+
+This inverts the usual arrangement deliberately. In most proctoring systems being
+accused is precisely when you lose control of your own data. Here it is the moment
+control matters most, so it stays with the learner — and the appeals path becomes
+the mechanism that makes the system fair rather than a formality bolted on
+afterwards.
+
+### What this forbids downstream
+
+Any control plane consuming Sentinel flags inherits this constraint. It may store
+scores, verdicts, reviewer identity, decision and rationale. It may not store raw
+behavioural capture, and it may not make evidence release a condition of using the
+product, of employment, or of an appeal being heard — a release extracted under
+those terms is not a release.
+
+If a customer asks for the raw evidence by default, the answer is no. This is not
+a configuration option.
+
 ## Privacy Guarantees
 
 These guarantees are architectural — they are enforced by the code structure, not by policy.
@@ -435,6 +497,6 @@ These guarantees are architectural — they are enforced by the code structure, 
 3. **Video frames never leave the device**: Face processing happens on a `<canvas>` element. Frames are forwarded to the Rust backend over in-process Tauri IPC for YuNet detection + gaze estimation, processed in memory, and **never persisted** — only derived values (944-float embedding, skin ratio, gaze yaw/pitch, off-screen ratio) are stored. The gaze calibration model encodes a statistical pose→screen mapping, not recoverable imagery.
 4. **AI model weights are not biometric data**: Autoencoder/CNN weights encode statistical patterns of typing/movement, not recoverable input data. LBP embeddings cannot be reverse-engineered into face images. Published *adversarial priors* (labeled cheat patterns and DAO-ratified classifier weights, curated by the Sentinel DAO — see [sentinel-adversarial-priors.md](sentinel-adversarial-priors.md)) contain no individual user data; they are catalog content, not per-user telemetry.
 5. **Profile keyed to device**: `sentinel_profile_{userId}_{deviceFingerprint[0:16]}` — profiles are device-specific.
-6. **No server-side data**: All behavioral processing happens on-device. The Rust backend stores only numeric scores and categorical flags in local SQLite. The Sentinel DAO-published prior/weights library is read-only from each client's perspective and carries no user identifiers — clients consume it, they never produce to it unless the learner explicitly proposes a pattern.
+6. **No server-side data**: All behavioral processing happens on-device. The Rust backend stores only numeric scores and categorical flags in local SQLite. The Sentinel DAO-published prior/weights library is read-only from each client's perspective and carries no user identifiers — clients consume it, they never produce to it unless the learner explicitly proposes a pattern. The single path by which anything derived from a session reaches a server is a learner-initiated evidence release during an appeal — see [Review and adjudication](#review-and-adjudication). There is no automatic one, and no operator-initiated one.
 7. **Inference is local**: The paste classifier runs entirely in the Rust backend via `tract` (pure Rust); the ONNX bytes are embedded at compile time with `include_bytes!`, so there is no runtime fetch from a CDN and no remote inference path. (The earlier ONNX Runtime Web / WASM backend was retired — see "Inference runtime" above.)
 8. **DAO weights are bounded**: Incoming weights blobs are capped at 1 MiB (envelope/eval JSON) and 50 MiB (ONNX bytes); resolver round trips time out at 5 s. A malicious envelope cannot trigger unbounded download or memory allocation.

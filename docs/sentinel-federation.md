@@ -235,7 +235,9 @@ If we ship Option B, sentinel.md's guarantee #4 and #6 stay essentially as-is, w
 
  6. **No server-side data**: All behavioral processing happens on-device.
     The Rust backend stores only numeric scores and categorical flags in
-    local SQLite.
+    local SQLite. The one exception is a learner releasing evidence to
+    contest a flag — see `sentinel.md` → *Review and adjudication*. It is
+    theirs to initiate; there is no automatic or operator-initiated path.
 +   The DAO-published adversarial-prior library is read-only from each
 +   client's perspective and carries no user identifiers.
 ```
