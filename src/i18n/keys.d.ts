@@ -1409,6 +1409,7 @@ export type MessageKey =
   | 'profile.talentIndex.saving'
   | 'profile.talentIndex.skillsHeading'
   | 'profile.talentIndex.title'
+  | 'profile.talentIndex.withdrawNote'
   | 'profile.teaches.hint'
   | 'profile.teaches.title'
   | 'profile.thisUser'

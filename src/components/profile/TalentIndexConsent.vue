@@ -197,6 +197,10 @@ onMounted(load)
         >
       </div>
 
+      <p class="text-xs text-muted-foreground">
+        {{ t('profile.talentIndex.withdrawNote') }}
+      </p>
+
       <div class="flex flex-wrap items-center gap-3 border-t border-border pt-4">
         <AppButton :disabled="saving" @click="save">
           {{ saving ? t('profile.talentIndex.saving') : t('profile.talentIndex.save') }}

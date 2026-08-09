@@ -66,22 +66,23 @@
     "offlineHint": "This profile is shared directly by its owner. They need to be online, and their profile set to public."
   },
   "talentIndex": {
-    "title": "Publish to talent index",
-    "description": "Employers can search a talent index for people with verified skills. Nothing here is published unless you choose it, and you can change your mind at any time.",
-    "nothingSelected": "You haven't chosen anything to publish. Nothing about you appears in any talent index.",
-    "noSkills": "You don't have any verified skills yet. Once you earn one, it will appear here as something you can choose to publish.",
-    "skillsHeading": "Skills you could publish",
-    "identityHeading": "Identity",
+    "title": "Let employers find you",
+    "description": "A talent index is a directory employers search to find people with particular verified skills. Ticking a skill means an employer looking for that skill can find you — not just that the skill appears somewhere. Anyone with access to the index can search it.",
+    "nothingSelected": "You haven't chosen any skills. You won't appear in a talent index, and no employer can find you through one.",
+    "noSkills": "You don't have any verified skills yet. Once you earn one, it will appear here as something you can choose to be findable by.",
+    "skillsHeading": "Skills employers could find you by",
+    "identityHeading": "Your name and bio",
     "includeDisplayName": "Include my display name",
     "includeBio": "Include my bio",
-    "identityNote": "Without these, a listing shows your skills and your public ID, but not your name.",
+    "identityNote": "Your public ID is always included — it is how an employer checks your credentials are real. Your name and bio are not, unless you tick them here.",
     "level": "Level {level}",
     "issuers": "1 issuer | {count} independent issuers",
-    "previewHeading": "Exact record that would leave this device",
+    "previewHeading": "Exactly what would leave this device",
     "save": "Save choices",
     "saving": "Saving…",
     "saved": "Saved.",
     "saveFailed": "Couldn't save: {error}",
-    "notPublishedYet": "No talent index is connected yet, so nothing is being sent anywhere. These choices apply when one is."
+    "notPublishedYet": "No talent index is connected yet, so nothing is being sent anywhere. These choices apply when one is.",
+    "withdrawNote": "A listing expires after 30 days. Untick a skill and it goes from the next listing; stop entirely and you drop out of the index without having to ask anyone to remove you."
   }
 }
