@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "src-tauri",
     "cli",
+    "crates/alexandria-verify",
     "crates/iroh-moq",
     "crates/moq-media",
     "crates/live",

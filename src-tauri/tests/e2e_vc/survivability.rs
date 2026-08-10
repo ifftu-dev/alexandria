@@ -88,3 +88,57 @@ async fn export_bundle_is_deterministic() {
         "bundle MUST be byte-identical across repeated exports"
     );
 }
+
+#[tokio::test]
+async fn exported_bundle_verifies_offline_under_a_rotated_issuer_key() {
+    // §5.3 survivability, through the bundle path — and the only scenario in
+    // which the bundle's key registry is load-bearing.
+    //
+    // `did:key` is self-resolving, so a credential signed under the key the DID
+    // embeds always verifies without consulting a registry at all. The registry
+    // matters in the other direction: after rotating, the issuer keeps their DID
+    // and signs *new* credentials with key_v2. Self-resolution then yields v1 and
+    // the signature fails; only the registry entry for the post-rotation window
+    // produces the right key.
+    //
+    // This is what covers `BundleStore::key_at`. Verified by neutering that
+    // method and confirming this test — and only this test — fails.
+    let db = new_test_db();
+    let issuer_key_v1 = test_key("issuer-survival");
+    let issuer = derive_did_key(&issuer_key_v1);
+    let issuer_key_v2 = test_key("issuer-rotated-v2");
+
+    app_lib::crypto::key_registry::rotate_key(db.conn(), &issuer, &issuer_key_v2).expect("rotate");
+
+    // Signed with v2 under the v1 DID, exactly as a post-rotation issuance is.
+    let req = IssueCredentialRequest {
+        credential_type: CredentialType::FormalCredential,
+        subject: test_did("subject-survival"),
+        claim: Claim::Skill(SkillClaim {
+            skill_id: "skill_survival_rotated".into(),
+            level: 4,
+            score: 0.85,
+            evidence_refs: vec![],
+            rubric_version: Some("v1".into()),
+            assessment_method: Some("exam".into()),
+            provenance: None,
+        }),
+        evidence_refs: vec![],
+        expiration_date: None,
+        supersedes: None,
+        integrity_session_id: None,
+        integrity_policy: None,
+    };
+    issue_credential_impl(db.conn(), &issuer_key_v2, &issuer, &req, TEST_NOW).expect("issue");
+
+    // Verify well after the rotation, so the open registry window is v2's.
+    let after_rotation = "2099-01-01T00:00:00Z";
+    let bundle = export_bundle_impl(db.conn()).expect("export");
+    let (accepted, total) = verify_bundle_offline_impl(&bundle, after_rotation).expect("verify");
+    assert_eq!(total, 1);
+    assert_eq!(
+        accepted, 1,
+        "a credential signed under the rotated key must verify from the bundle \
+         via the registry — did:key self-resolution yields the pre-rotation key"
+    );
+}

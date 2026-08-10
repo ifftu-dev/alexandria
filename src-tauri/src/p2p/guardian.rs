@@ -23,7 +23,7 @@
 use rusqlite::{Connection, OptionalExtension};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-use crate::domain::vc::{verify::verify_credential, VerifiableCredential, VerificationPolicy};
+use crate::domain::vc::{verify_credential_db, VerifiableCredential, VerificationPolicy};
 
 /// Tables mirrored to the guardian. Deliberately independent of the
 /// device-sync allowlist: adding a table here means a parent sees it.
@@ -464,7 +464,7 @@ fn handle_link(
         reject_suspended: true,
         reject_superseded: true,
     };
-    let result = verify_credential(conn, &vc, &now, &policy);
+    let result = verify_credential_db(conn, &vc, &now, &policy);
     if !result.valid_signature || !result.issuer_resolved {
         return GuardianResponse::Error("guardian VC signature verification failed".into());
     }

@@ -19,8 +19,8 @@
 //! with the original.
 
 use super::{canonicalize::canonicalize, Claim};
-use crate::crypto::did::Did;
-use crate::crypto::hash::{blake2b_256, entity_id};
+use crate::did::Did;
+use crate::hash::{blake2b_256, entity_id};
 
 /// Build the deterministic id for a VC about to be issued.
 ///
@@ -58,7 +58,7 @@ pub fn deterministic_credential_id(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::vc::{CustomClaim, SkillClaim};
+    use crate::vc::{CustomClaim, SkillClaim};
 
     fn did(s: &str) -> Did {
         Did(s.to_string())

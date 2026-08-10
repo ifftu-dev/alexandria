@@ -3,6 +3,7 @@ pub mod did;
 pub mod group_key;
 pub mod guardian;
 pub mod hash;
+pub mod key_registry;
 // Desktop uses the IOTA Stronghold-backed keystore; mobile (iOS/Android)
 // swaps in the portable AES-256-GCM + Argon2id keystore. Same `Keystore`
 // API either way. Keeping the switch here means this single module list

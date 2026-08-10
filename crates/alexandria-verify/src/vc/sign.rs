@@ -16,7 +16,7 @@ use base64::Engine;
 use ed25519_dalek::{Signer, SigningKey};
 
 use super::{canonicalize::canonicalize, VcError, VerifiableCredential};
-use crate::crypto::did::Did;
+use crate::did::Did;
 
 /// The unsigned portion of a VC — everything except `proof`.
 ///
@@ -77,13 +77,13 @@ pub(super) fn canonicalize_credential(vc: &VerifiableCredential) -> Result<Vec<u
 /// `pub(crate)` rather than `pub(super)`: `domain::talent_index` signs its
 /// published record with the same detached-JWS shape, and a second copy of
 /// signature encoding is exactly the kind of thing that drifts apart.
-pub(crate) fn b64url(bytes: &[u8]) -> String {
+pub fn b64url(bytes: &[u8]) -> String {
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
 }
 
 /// Decode an unpadded URL-safe base64 string. Returns `None` on any
 /// decode failure — verifiers treat this as a signature mismatch.
-pub(crate) fn b64url_decode(s: &str) -> Option<Vec<u8>> {
+pub fn b64url_decode(s: &str) -> Option<Vec<u8>> {
     base64::engine::general_purpose::URL_SAFE_NO_PAD
         .decode(s.as_bytes())
         .ok()
@@ -92,8 +92,8 @@ pub(crate) fn b64url_decode(s: &str) -> Option<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::crypto::did::derive_did_key;
-    use crate::domain::vc::{Claim, Proof, SkillClaim, VerifiableCredential};
+    use crate::did::derive_did_key;
+    use crate::vc::{Claim, Proof, SkillClaim, VerifiableCredential};
 
     fn test_signing_key(role: &str) -> SigningKey {
         let mut bytes = [0u8; 32];
@@ -130,7 +130,7 @@ mod tests {
                 proof: Proof {
                     type_: "Ed25519Signature2020".into(),
                     created: "2026-04-13T00:00:00Z".into(),
-                    verification_method: crate::crypto::did::VerificationMethodRef(
+                    verification_method: crate::did::VerificationMethodRef(
                         "did:key:z...#key-1".into(),
                     ),
                     proof_purpose: "assertionMethod".into(),

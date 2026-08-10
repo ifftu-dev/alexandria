@@ -712,7 +712,7 @@ pub async fn verify_credential_cmd(
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
     let db = db_guard.as_ref().ok_or("database not initialized")?;
-    Ok(crate::domain::vc::verify::verify_credential(
+    Ok(crate::domain::vc::verify_credential_db(
         db.conn(),
         &credential,
         &now,
@@ -853,10 +853,7 @@ pub fn verify_bundle_offline_impl(
     bundle_json: &str,
     verification_time: &str,
 ) -> Result<(u32, u32), String> {
-    use crate::db::Database;
-    use crate::domain::vc::verify::verify_credential;
-    use crate::domain::vc::{AcceptanceDecision, VerificationPolicy};
-    use base64::Engine;
+    use crate::domain::vc::{verify, AcceptanceDecision, VerificationPolicy};
 
     let bundle: CredentialBundle =
         serde_json::from_str(bundle_json).map_err(|e| format!("parse bundle: {e}"))?;
@@ -867,59 +864,98 @@ pub fn verify_bundle_offline_impl(
         ));
     }
 
-    // Spin up a clean DB so the verifier can't see any local state.
-    let db = Database::open_in_memory().map_err(|e| format!("open ephemeral db: {e}"))?;
-    db.run_migrations()
-        .map_err(|e| format!("ephemeral migrations: {e}"))?;
-
-    for entry in &bundle.key_registry {
-        db.conn()
-            .execute(
-                "INSERT OR IGNORE INTO key_registry \
-                 (did, key_id, public_key_hex, valid_from, valid_until, rotated_by) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                params![
-                    entry.did,
-                    entry.key_id,
-                    entry.public_key_hex,
-                    entry.valid_from,
-                    entry.valid_until,
-                    entry.rotated_by,
-                ],
-            )
-            .map_err(|e| e.to_string())?;
-    }
-    for list in &bundle.status_lists {
-        let bits = base64::engine::general_purpose::STANDARD
-            .decode(list.bits_b64.as_bytes())
-            .map_err(|e| format!("decode list bits: {e}"))?;
-        db.conn()
-            .execute(
-                "INSERT INTO credential_status_lists \
-                 (list_id, issuer_did, version, status_purpose, bits, bit_length) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                params![
-                    list.list_id,
-                    list.issuer_did,
-                    list.version,
-                    list.status_purpose,
-                    bits,
-                    list.bit_length,
-                ],
-            )
-            .map_err(|e| e.to_string())?;
-    }
+    let store = BundleStore::new(&bundle)?;
 
     let total = bundle.credentials.len() as u32;
     let mut accepted = 0u32;
     let policy = VerificationPolicy::default();
     for vc in &bundle.credentials {
-        let result = verify_credential(db.conn(), vc, verification_time, &policy);
+        let result = verify::verify_credential(&store, vc, verification_time, &policy);
         if result.acceptance_decision == AcceptanceDecision::Accept {
             accepted += 1;
         }
     }
     Ok((accepted, total))
+}
+
+/// A [`VerificationStore`] over a credential bundle's own contents.
+///
+/// A bundle is self-contained: it carries the key registry entries and status
+/// lists needed to check the credentials inside it, and nothing else. So the
+/// answer to "is this suspended?" or "is this superseded?" is always no — those
+/// are facts about a local collection, and a bundle is not one.
+///
+/// This used to be done by opening an in-memory SQLite database, running the
+/// entire application migration suite against it, and INSERTing the bundle's
+/// rows — solely because `verify_credential` demanded a `&Connection`. It never
+/// needed a database; it needed four lookups.
+struct BundleStore {
+    keys: Vec<KeyRegistryRow>,
+    status_lists: Vec<(String, Vec<u8>)>,
+}
+
+impl BundleStore {
+    /// Status-list bits are decoded up front so a corrupt bundle fails loudly
+    /// here rather than being silently read as "nothing is revoked" later.
+    fn new(bundle: &CredentialBundle) -> Result<Self, String> {
+        use base64::Engine;
+        let mut status_lists = Vec::with_capacity(bundle.status_lists.len());
+        for list in &bundle.status_lists {
+            let bits = base64::engine::general_purpose::STANDARD
+                .decode(list.bits_b64.as_bytes())
+                .map_err(|e| format!("decode list bits: {e}"))?;
+            status_lists.push((list.list_id.clone(), bits));
+        }
+        Ok(Self {
+            keys: bundle.key_registry.clone(),
+            status_lists,
+        })
+    }
+}
+
+impl crate::domain::vc::VerificationStore for BundleStore {
+    /// Mirrors the registry query in `crypto::key_registry::resolve_key_at`:
+    /// the entry whose `[valid_from, valid_until)` window contains `at`, latest
+    /// `valid_from` first.
+    fn key_at(
+        &self,
+        did: &alexandria_verify::did::Did,
+        at: &str,
+    ) -> Option<alexandria_verify::did::KeyRegistryEntry> {
+        self.keys
+            .iter()
+            .filter(|e| {
+                e.did == did.as_str()
+                    && e.valid_from.as_str() <= at
+                    && e.valid_until.as_deref().is_none_or(|u| u > at)
+            })
+            .max_by(|a, b| a.valid_from.cmp(&b.valid_from))
+            .and_then(|e| {
+                Some(alexandria_verify::did::KeyRegistryEntry {
+                    did: did.clone(),
+                    key_id: e.key_id.clone(),
+                    public_key_bytes: hex::decode(&e.public_key_hex).ok()?,
+                    valid_from: e.valid_from.clone(),
+                    valid_until: e.valid_until.clone(),
+                    rotated_by: e.rotated_by.clone(),
+                })
+            })
+    }
+
+    fn status_list_bits(&self, list_id: &str) -> Option<Vec<u8>> {
+        self.status_lists
+            .iter()
+            .find(|(id, _)| id == list_id)
+            .map(|(_, bits)| bits.clone())
+    }
+
+    fn suspension(&self, _credential_id: &str) -> Option<(bool, Option<String>)> {
+        None
+    }
+
+    fn is_superseded(&self, _credential_id: &str) -> bool {
+        false
+    }
 }
 
 #[tauri::command]
@@ -1193,20 +1229,20 @@ mod tests {
         // revoke → verify (reject) under default policy. This is what
         // PR 5.3 wires into verify_credential; locking it in here lets
         // verify.rs's test module stay focused on sign/verify only.
-        use crate::domain::vc::verify::verify_credential;
+        use crate::domain::vc::verify_credential_db;
         use crate::domain::vc::{AcceptanceDecision, VerificationPolicy};
 
         let (db, key, issuer, subject) = setup();
         let vc =
             issue_credential_impl(db.conn(), &key, &issuer, &sample_request(subject), NOW).unwrap();
 
-        let accepted = verify_credential(db.conn(), &vc, NOW, &VerificationPolicy::default());
+        let accepted = verify_credential_db(db.conn(), &vc, NOW, &VerificationPolicy::default());
         assert_eq!(accepted.acceptance_decision, AcceptanceDecision::Accept);
         assert!(!accepted.revoked);
 
         revoke_credential_impl(db.conn(), vc.id.as_deref().unwrap(), "test", NOW).unwrap();
 
-        let rejected = verify_credential(db.conn(), &vc, NOW, &VerificationPolicy::default());
+        let rejected = verify_credential_db(db.conn(), &vc, NOW, &VerificationPolicy::default());
         assert!(rejected.revoked, "revocation bit must propagate to verify");
         assert_eq!(rejected.acceptance_decision, AcceptanceDecision::Reject);
     }
@@ -1284,7 +1320,7 @@ mod tests {
 
     #[test]
     fn suspension_round_trip_flips_verify_decision() {
-        use crate::domain::vc::verify::verify_credential;
+        use crate::domain::vc::verify_credential_db;
         use crate::domain::vc::{AcceptanceDecision, VerificationPolicy};
 
         let (db, key, issuer, subject) = setup();
@@ -1292,7 +1328,7 @@ mod tests {
             issue_credential_impl(db.conn(), &key, &issuer, &sample_request(subject), NOW).unwrap();
 
         // Pre-suspension: accepted.
-        let pre = verify_credential(db.conn(), &vc, NOW, &VerificationPolicy::default());
+        let pre = verify_credential_db(db.conn(), &vc, NOW, &VerificationPolicy::default());
         assert_eq!(pre.acceptance_decision, AcceptanceDecision::Accept);
         assert!(!pre.suspended);
 
@@ -1305,20 +1341,20 @@ mod tests {
             NOW,
         )
         .unwrap();
-        let mid = verify_credential(db.conn(), &vc, NOW, &VerificationPolicy::default());
+        let mid = verify_credential_db(db.conn(), &vc, NOW, &VerificationPolicy::default());
         assert!(mid.suspended);
         assert_eq!(mid.acceptance_decision, AcceptanceDecision::Reject);
 
         // Reinstate.
         reinstate_credential_impl(db.conn(), vc.id.as_deref().unwrap()).unwrap();
-        let after = verify_credential(db.conn(), &vc, NOW, &VerificationPolicy::default());
+        let after = verify_credential_db(db.conn(), &vc, NOW, &VerificationPolicy::default());
         assert!(!after.suspended);
         assert_eq!(after.acceptance_decision, AcceptanceDecision::Accept);
     }
 
     #[test]
     fn suspension_with_until_in_past_is_no_longer_active() {
-        use crate::domain::vc::verify::verify_credential;
+        use crate::domain::vc::verify_credential_db;
         use crate::domain::vc::VerificationPolicy;
 
         let (db, key, issuer, subject) = setup();
@@ -1336,13 +1372,13 @@ mod tests {
             NOW,
         )
         .unwrap();
-        let result = verify_credential(db.conn(), &vc, NOW, &VerificationPolicy::default());
+        let result = verify_credential_db(db.conn(), &vc, NOW, &VerificationPolicy::default());
         assert!(!result.suspended);
     }
 
     #[test]
     fn permissive_policy_can_accept_suspended() {
-        use crate::domain::vc::verify::verify_credential;
+        use crate::domain::vc::verify_credential_db;
         use crate::domain::vc::{AcceptanceDecision, VerificationPolicy};
 
         let (db, key, issuer, subject) = setup();
@@ -1354,7 +1390,7 @@ mod tests {
             reject_suspended: false,
             ..Default::default()
         };
-        let result = verify_credential(db.conn(), &vc, NOW, &permissive);
+        let result = verify_credential_db(db.conn(), &vc, NOW, &permissive);
         assert!(result.suspended);
         assert_eq!(result.acceptance_decision, AcceptanceDecision::Accept);
     }
@@ -1363,7 +1399,7 @@ mod tests {
 
     #[test]
     fn supersession_marks_old_credential_superseded() {
-        use crate::domain::vc::verify::verify_credential;
+        use crate::domain::vc::verify_credential_db;
         use crate::domain::vc::{AcceptanceDecision, VerificationPolicy};
 
         let (db, key, issuer, subject) = setup();
@@ -1381,7 +1417,7 @@ mod tests {
         new_req.supersedes = old.id.clone();
         let _new = issue_credential_impl(db.conn(), &key, &issuer, &new_req, NOW).unwrap();
 
-        let result = verify_credential(db.conn(), &old, NOW, &VerificationPolicy::default());
+        let result = verify_credential_db(db.conn(), &old, NOW, &VerificationPolicy::default());
         assert!(result.superseded);
         assert_eq!(result.acceptance_decision, AcceptanceDecision::Reject);
     }

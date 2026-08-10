@@ -15,15 +15,15 @@
 //! handled by PR 8; until then `integrity_anchored = false`.
 
 use ed25519_dalek::{Signature, VerifyingKey};
-use rusqlite::Connection;
 
 use super::sign::{b64url_decode, canonicalize_credential};
 use super::{AcceptanceDecision, VerifiableCredential, VerificationPolicy, VerificationResult};
-use crate::crypto::did::{parse_did_key, resolve_did_key, resolve_key_at, Did};
+use crate::did::{parse_did_key, resolve_did_key, Did};
+use crate::VerificationStore;
 
 /// Verification algorithm per spec §13.2, steps 1–10.
 pub fn verify_credential(
-    db: &Connection,
+    db: &dyn VerificationStore,
     credential: &VerifiableCredential,
     verification_time: &str,
     policy: &VerificationPolicy,
@@ -72,7 +72,7 @@ pub fn verify_credential(
     // future policy flag. This is the conservative default.
     if let Some(status) = &credential.credential_status {
         if let Ok(idx) = status.status_list_index.parse::<i64>() {
-            if let Some(bits) = lookup_status_list_bits(db, &status.status_list_credential) {
+            if let Some(bits) = db.status_list_bits(&status.status_list_credential) {
                 let byte = (idx / 8) as usize;
                 let bit = (idx % 8) as u8;
                 if byte < bits.len() && (bits[byte] & (1 << bit)) != 0 {
@@ -89,7 +89,7 @@ pub fn verify_credential(
     // Skipped when the envelope has no `id` — local revocation/suspension
     // state is keyed by id and an id-less VC can't have any.
     if !credential_id.is_empty() {
-        if let Some((sus_flag, sus_until)) = lookup_suspension(db, &credential_id) {
+        if let Some((sus_flag, sus_until)) = db.suspension(&credential_id) {
             if sus_flag {
                 let active = match sus_until {
                     Some(until) => until.as_str() > verification_time,
@@ -106,7 +106,7 @@ pub fn verify_credential(
         // `supersedes` marks it as superseded. The match is on id only — the
         // stricter same-subject/same-claim/same-issuer invariant is enforced
         // at the INSERT site (see `supersede_credential_impl`).
-        if lookup_is_superseded(db, &credential_id) {
+        if db.is_superseded(&credential_id) {
             result.superseded = true;
         }
     }
@@ -135,9 +135,9 @@ pub fn verify_credential(
 /// entry whose window contains `at`, prefer it so that credentials
 /// signed under a pre-rotation key still verify after rotation
 /// (§5.3).
-fn resolve_issuer_key(db: &Connection, issuer: &Did, at: &str) -> Option<VerifyingKey> {
+fn resolve_issuer_key(db: &dyn VerificationStore, issuer: &Did, at: &str) -> Option<VerifyingKey> {
     // Prefer the time-anchored historical entry (§5.3) when present.
-    if let Ok(Some(entry)) = resolve_key_at(db, issuer, at) {
+    if let Some(entry) = db.key_at(issuer, at) {
         if let Ok(vk) = verifying_key_from_slice(&entry.public_key_bytes) {
             return Some(vk);
         }
@@ -146,18 +146,6 @@ fn resolve_issuer_key(db: &Connection, issuer: &Did, at: &str) -> Option<Verifyi
     // unsupported method short-circuits cleanly.
     parse_did_key(issuer.as_str()).ok()?;
     resolve_did_key(issuer).ok()
-}
-
-/// Look up the raw bits of a locally-known status list. Returns
-/// `None` if the list isn't in our `credential_status_lists` table —
-/// callers treat absence as "not known to be revoked".
-fn lookup_status_list_bits(db: &Connection, list_id: &str) -> Option<Vec<u8>> {
-    db.query_row(
-        "SELECT bits FROM credential_status_lists WHERE list_id = ?1",
-        rusqlite::params![list_id],
-        |r| r.get::<_, Vec<u8>>(0),
-    )
-    .ok()
 }
 
 fn verifying_key_from_slice(bytes: &[u8]) -> Result<VerifyingKey, String> {
@@ -254,38 +242,13 @@ fn finalize(
     result
 }
 
-/// Look up `(suspended, suspended_until)` for a credential id.
-/// Returns `None` if the row doesn't exist (e.g. a bundle-only
-/// credential the verifier hasn't stored).
-fn lookup_suspension(conn: &Connection, credential_id: &str) -> Option<(bool, Option<String>)> {
-    conn.query_row(
-        "SELECT suspended, suspended_until FROM credentials WHERE id = ?1",
-        rusqlite::params![credential_id],
-        |r| Ok((r.get::<_, i64>(0)? != 0, r.get::<_, Option<String>>(1)?)),
-    )
-    .ok()
-}
-
-/// True iff any newer credential in the local store declares this
-/// credential's id in its `supersedes` column.
-fn lookup_is_superseded(conn: &Connection, credential_id: &str) -> bool {
-    let count: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM credentials WHERE supersedes = ?1",
-            rusqlite::params![credential_id],
-            |r| r.get(0),
-        )
-        .unwrap_or(0);
-    count > 0
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::crypto::did::{derive_did_key, VerificationMethodRef};
-    use crate::db::Database;
-    use crate::domain::vc::sign::{sign_credential, UnsignedCredential};
-    use crate::domain::vc::{Claim, CredentialType, Proof, SkillClaim, VerifiableCredential};
+    use crate::did::{derive_did_key, VerificationMethodRef};
+    use crate::vc::sign::{sign_credential, UnsignedCredential};
+    use crate::vc::{Claim, CredentialType, Proof, SkillClaim, VerifiableCredential};
+    use crate::NullStore;
 
     const NOW: &str = "2026-04-13T00:00:00Z";
     use ed25519_dalek::SigningKey;
@@ -331,9 +294,7 @@ mod tests {
         }
     }
 
-    fn signed(expiration: Option<String>) -> (Database, VerifiableCredential) {
-        let db = Database::open_in_memory().unwrap();
-        db.run_migrations().unwrap();
+    fn signed(expiration: Option<String>) -> (NullStore, VerifiableCredential) {
         let key = test_signing_key("issuer");
         let issuer = derive_did_key(&key);
         let subject = derive_did_key(&test_signing_key("subject"));
@@ -345,7 +306,7 @@ mod tests {
             &issuer,
         )
         .unwrap();
-        (db, vc)
+        (NullStore, vc)
     }
 
     /// The default policy omits `EntitlementCredential` on purpose — a
@@ -365,7 +326,7 @@ mod tests {
         let issuer = derive_did_key(&key);
         let vc = sign_credential(UnsignedCredential { credential: vc }, &key, &issuer).unwrap();
 
-        let result = verify_credential(db.conn(), &vc, NOW, &VerificationPolicy::default());
+        let result = verify_credential(&db, &vc, NOW, &VerificationPolicy::default());
         assert!(result.valid_signature, "signature must still be good");
         assert!(result.issuer_resolved);
         assert!(result.subject_bound);
@@ -390,7 +351,7 @@ mod tests {
             allowed_types: vec![CredentialType::EntitlementCredential],
             ..VerificationPolicy::default()
         };
-        let result = verify_credential(db.conn(), &vc, NOW, &policy);
+        let result = verify_credential(&db, &vc, NOW, &policy);
         assert_eq!(result.acceptance_decision, AcceptanceDecision::Accept);
     }
 
@@ -403,7 +364,7 @@ mod tests {
             allowed_types: vec![],
             ..VerificationPolicy::default()
         };
-        let result = verify_credential(db.conn(), &vc, NOW, &policy);
+        let result = verify_credential(&db, &vc, NOW, &policy);
         assert_eq!(result.acceptance_decision, AcceptanceDecision::Accept);
     }
 
@@ -411,7 +372,7 @@ mod tests {
     fn result_echoes_credential_id_and_verification_time() {
         let (db, vc) = signed(None);
         let result = verify_credential(
-            db.conn(),
+            &db,
             &vc,
             "2026-04-13T00:00:00Z",
             &VerificationPolicy::default(),
@@ -425,7 +386,7 @@ mod tests {
         // Round-trip: sign → verify under default policy → Accept.
         let (db, vc) = signed(None);
         let result = verify_credential(
-            db.conn(),
+            &db,
             &vc,
             "2026-04-13T00:00:00Z",
             &VerificationPolicy::default(),
@@ -440,15 +401,14 @@ mod tests {
     #[test]
     fn bad_signature_short_circuits_to_reject() {
         // Acceptance predicate (§13.3): S(c)=0 ⇒ Accept=0.
-        let db = Database::open_in_memory().unwrap();
-        db.run_migrations().unwrap();
+        let db = NullStore;
         let key = test_signing_key("issuer");
         let issuer = derive_did_key(&key);
         let subject = derive_did_key(&test_signing_key("subject"));
         let mut vc = skeleton(issuer, subject, None);
         vc.proof.jws = "invalid-not-a-jws".into();
         let result = verify_credential(
-            db.conn(),
+            &db,
             &vc,
             "2026-04-13T00:00:00Z",
             &VerificationPolicy::default(),
@@ -469,7 +429,7 @@ mod tests {
             .properties
             .insert("score".into(), serde_json::json!(1.0));
         let result = verify_credential(
-            db.conn(),
+            &db,
             &vc,
             "2026-04-13T00:00:00Z",
             &VerificationPolicy::default(),
@@ -485,7 +445,7 @@ mod tests {
             reject_expired: true,
             ..Default::default()
         };
-        let result = verify_credential(db.conn(), &vc, "2026-04-13T00:00:00Z", &strict);
+        let result = verify_credential(&db, &vc, "2026-04-13T00:00:00Z", &strict);
         assert!(result.expired);
         assert_eq!(result.acceptance_decision, AcceptanceDecision::Reject);
     }
@@ -499,7 +459,7 @@ mod tests {
             reject_expired: false,
             ..Default::default()
         };
-        let result = verify_credential(db.conn(), &vc, "2026-04-13T00:00:00Z", &permissive);
+        let result = verify_credential(&db, &vc, "2026-04-13T00:00:00Z", &permissive);
         assert!(result.expired);
         assert!(result.valid_signature);
         assert_eq!(result.acceptance_decision, AcceptanceDecision::Accept);
@@ -509,8 +469,7 @@ mod tests {
     fn non_did_subject_is_not_subject_bound() {
         // §10: presenter identity must equal subject identity. A bare
         // string id that isn't a DID cannot be bound.
-        let db = Database::open_in_memory().unwrap();
-        db.run_migrations().unwrap();
+        let db = NullStore;
         let key = test_signing_key("issuer");
         let issuer = derive_did_key(&key);
         let bogus_subject = Did("not-a-did".into());
@@ -523,7 +482,7 @@ mod tests {
         )
         .unwrap();
         let result = verify_credential(
-            db.conn(),
+            &db,
             &vc,
             "2026-04-13T00:00:00Z",
             &VerificationPolicy::default(),

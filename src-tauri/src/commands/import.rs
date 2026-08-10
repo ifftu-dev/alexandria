@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::content_store::{content, fetch};
-use crate::domain::vc::verify::verify_credential;
+use crate::domain::vc::verify_credential_db;
 use crate::domain::vc::{
     AcceptanceDecision, CredentialSubject, EntitlementClaim, RoleClaim, SkillClaim,
     VerifiableCredential, VerificationPolicy,
@@ -97,7 +97,7 @@ pub fn import_credential_impl(
         .clone()
         .ok_or_else(|| "credential has no envelope id".to_string())?;
 
-    let result = verify_credential(conn, vc, now, &import_policy());
+    let result = verify_credential_db(conn, vc, now, &import_policy());
     if result.acceptance_decision != AcceptanceDecision::Accept {
         // Report the failed checks rather than a bare "invalid" — an import
         // that fails for an expired credential and one that fails for a bad

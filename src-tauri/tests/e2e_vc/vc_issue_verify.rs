@@ -3,8 +3,8 @@
 use super::common::{new_test_db, test_did, TEST_NOW};
 use app_lib::domain::vc::{
     sign::{sign_credential, UnsignedCredential},
-    verify::verify_credential,
-    AcceptanceDecision, Claim, Proof, SkillClaim, VerifiableCredential, VerificationPolicy,
+    verify_credential_db, AcceptanceDecision, Claim, Proof, SkillClaim, VerifiableCredential,
+    VerificationPolicy,
 };
 
 fn sample_unsigned(subject: app_lib::crypto::did::Did) -> UnsignedCredential {
@@ -52,7 +52,7 @@ async fn sign_then_verify_roundtrip_accepts() {
 
     let signed =
         sign_credential(sample_unsigned(subject.clone()), &issuer_key, &issuer_did).expect("sign");
-    let result = verify_credential(db.conn(), &signed, TEST_NOW, &VerificationPolicy::default());
+    let result = verify_credential_db(db.conn(), &signed, TEST_NOW, &VerificationPolicy::default());
     assert!(result.valid_signature);
     assert!(result.subject_bound);
     assert!(!result.revoked);
@@ -76,7 +76,7 @@ async fn tampered_payload_fails_verification() {
         .credential_subject
         .properties
         .insert("score".into(), serde_json::json!(1.0));
-    let result = verify_credential(db.conn(), &signed, TEST_NOW, &VerificationPolicy::default());
+    let result = verify_credential_db(db.conn(), &signed, TEST_NOW, &VerificationPolicy::default());
     assert!(!result.valid_signature);
     assert_eq!(result.acceptance_decision, AcceptanceDecision::Reject);
 }
@@ -115,14 +115,14 @@ async fn revoked_credential_is_rejected() {
         issue_credential_impl(db.conn(), &issuer_key, &issuer_did, &req, TEST_NOW).expect("issue");
 
     // Pre-revocation: verifier accepts.
-    let before = verify_credential(db.conn(), &vc, TEST_NOW, &VerificationPolicy::default());
+    let before = verify_credential_db(db.conn(), &vc, TEST_NOW, &VerificationPolicy::default());
     assert_eq!(before.acceptance_decision, AcceptanceDecision::Accept);
 
     revoke_credential_impl(db.conn(), vc.id.as_deref().unwrap(), "superseded", TEST_NOW)
         .expect("revoke");
 
     // Post-revocation: verifier rejects with revoked=true.
-    let after = verify_credential(db.conn(), &vc, TEST_NOW, &VerificationPolicy::default());
+    let after = verify_credential_db(db.conn(), &vc, TEST_NOW, &VerificationPolicy::default());
     assert!(after.revoked);
     assert_eq!(after.acceptance_decision, AcceptanceDecision::Reject);
 }
@@ -140,7 +140,7 @@ async fn wrong_subject_binding_is_rejected() {
     // Replace the subject with a non-DID identifier.
     unsigned.credential.credential_subject.id = app_lib::crypto::did::Did("not-a-did".into());
     let signed = sign_credential(unsigned, &issuer_key, &issuer_did).expect("sign");
-    let result = verify_credential(db.conn(), &signed, TEST_NOW, &VerificationPolicy::default());
+    let result = verify_credential_db(db.conn(), &signed, TEST_NOW, &VerificationPolicy::default());
     assert!(!result.subject_bound);
     assert_eq!(result.acceptance_decision, AcceptanceDecision::Reject);
 }
@@ -156,7 +156,7 @@ async fn expired_credential_is_rejected_under_strict_policy() {
     let mut unsigned = sample_unsigned(test_did("alice"));
     unsigned.credential.valid_until = Some("2026-01-01T00:00:00Z".into());
     let signed = sign_credential(unsigned, &issuer_key, &issuer_did).expect("sign");
-    let result = verify_credential(db.conn(), &signed, TEST_NOW, &VerificationPolicy::default());
+    let result = verify_credential_db(db.conn(), &signed, TEST_NOW, &VerificationPolicy::default());
     assert!(result.expired);
     assert_eq!(result.acceptance_decision, AcceptanceDecision::Reject);
 }

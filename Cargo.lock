@@ -241,6 +241,7 @@ name = "alexandria-node"
 version = "0.4.5-alpha"
 dependencies = [
  "aes-gcm",
+ "alexandria-verify",
  "anyhow",
  "argon2",
  "base64 0.21.7",
@@ -318,6 +319,23 @@ dependencies = [
  "x11rb",
  "x25519-dalek",
  "zeroize",
+]
+
+[[package]]
+name = "alexandria-verify"
+version = "0.1.0"
+dependencies = [
+ "base64 0.21.7",
+ "blake2",
+ "blake3",
+ "bs58",
+ "ed25519-dalek 2.2.0",
+ "hex",
+ "serde",
+ "serde_json",
+ "serde_json_canonicalizer",
+ "sha2 0.10.9",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
