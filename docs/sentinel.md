@@ -9,7 +9,7 @@
 3. **Dual scoring** — Rule-based and AI-based systems run in parallel. Rule-based is authoritative today; AI is advisory until validated with labeled data.
 4. **On-device ML only — backend-resident.** All ML runs in the Rust backend. The paste classifier uses `tract` (pure-Rust ONNX inference) with weights embedded at compile time via `include_bytes!` or hot-swapped from a DAO-ratified CID. The per-user keystroke autoencoder and mouse-trajectory CNN train + score via `candle` (Apache-2.0, HuggingFace) inside the same crate. The face embedder remains pure-pixel LBP math — no ML framework involved. The frontend only buffers raw events and forwards them to the backend over Tauri IPC.
 5. **Incremental trust** — Behavioral profiles build over time. New users start with generous defaults; consistency scoring activates after 10+ samples.
-6. **Evidence is the learner's to release** — A flag may travel; the evidence behind it may not, unless the learner releases it themselves. See [Review and adjudication](#review-and-adjudication).
+6. **Evidence is the learner's to release** — A flag may travel; the evidence behind it may not, unless the learner releases it themselves. Release is learner-initiated: a review console may not offer a control that asks for it, because a request that can be refused leaks the refusal. See [Review and adjudication](#review-and-adjudication).
 
 ## Architecture Overview
 
@@ -476,6 +476,37 @@ accused is precisely when you lose control of your own data. Here it is the mome
 control matters most, so it stays with the learner — and the appeals path becomes
 the mechanism that makes the system fair rather than a formality bolted on
 afterwards.
+
+### The reviewer cannot ask
+
+A release must be learner-initiated. That is not only a rule about consent, it is
+a constraint on the interface: **a review console may not offer a control that
+requests evidence.**
+
+Forbidding the request but keeping the button achieves nothing. A reviewer who can
+click *request evidence* learns, from the silence that follows, that evidence
+exists, that it was obtainable, and that the learner said no. The refusal leaks
+whether or not anyone records it, because the interface has already taught the
+reviewer what to infer. Suppressing the log entry does not suppress the
+inference.
+
+So the reviewer is shown the scores. If a learner releases evidence, it appears.
+If they do not, the reviewer never learns a decision point existed. A reviewer who
+is unaware there was a choice cannot hold the choice against anyone.
+
+This does not stop an employer asking out-of-band, and nothing can. What it stops
+is this product being the instrument of the ask.
+
+Two consequences follow:
+
+- **A learner's decision is not an event in the operator's audit log.** An
+  append-only, hash-chained log is exactly what makes an entry discoverable — by
+  administrators, in litigation, under subpoena. The operator's log records that a
+  review occurred and what the reviewer decided. Whether a learner was asked, and
+  what they chose, belongs in the learner's own record on their own device.
+- **An adjudication may not cite absent evidence.** "The learner did not
+  substantiate this" is the same penalty as a visible refusal, rebuilt in prose. A
+  decision rests on the scores or it does not stand.
 
 ### What this forbids downstream
 
