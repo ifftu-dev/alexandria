@@ -545,4 +545,4 @@ Use `alex config path` to print this directory on any platform.
 
 ## License
 
-This repo is available under the [MIT expat license](LICENSE.md), except for the ee directories (which have their own licenses) if and as applicable.
+Alexandria is free software under the [GNU Affero General Public License v3 or later](LICENSE.md). You may use, study, modify and redistribute it; if you modify it and offer it to others — including over a network — your changes must be published under the same licence. Vendored third-party crates keep their own licences (`crates/iroh-moq` and `crates/moq-media` are Copyright (C) 2025 N0, INC, MIT OR Apache-2.0, as is `crates/live`).

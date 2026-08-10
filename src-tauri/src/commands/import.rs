@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-or-later
 //! Accept a credential somebody handed you.
 //!
 //! Every other way a credential enters the local store either mints it here

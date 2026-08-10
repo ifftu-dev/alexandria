@@ -1,6 +1,6 @@
 # The enterprise boundary
 
-Alexandria is MIT Expat in full. The commercial Enterprise Edition is a **shell
+Alexandria is AGPL-3.0-or-later in full. The commercial Enterprise Edition is a **shell
 around** this application, in a separate repository, and nothing here references
 or depends on it.
 
@@ -43,7 +43,7 @@ When unsure which side something belongs on:
 
 > Would a single individual with no employer ever want this?
 
-If yes, it is core, and it is MIT. There is no third category.
+If yes, it is core, and it is AGPL. There is no third category.
 
 ## Worked examples
 
@@ -107,12 +107,14 @@ Between 2026-07 and 2026-08 this repository briefly carried an in-core seam: an
 compiled-in trusted-issuer allowlist that gated features client-side.
 
 It was removed. A client-side gate is bypassable by anyone who can patch a
-binary — and with an MIT, publicly readable codebase, that is anyone who wants
+binary — and with a publicly readable codebase, that is anyone who wants
 to. It also could not enforce the one thing the pricing model needed, seat
 counting, because a device cannot see the other members of an organisation. It
 took the reputational cost of visibly gating an open-source product while
 providing none of the protection.
 
 What survived the removal, because it was always core: the `allowed_types`
-verification fix, holder binding for credentials, `import_credential`, iroh
-credential delivery, and the talent-index consent client with signed records.
+verification fix, `CredentialType::as_str`, `import_credential`, iroh credential
+delivery, and the talent-index consent client with signed records. Holder
+binding went with it — it bound an *entitlement* to a device, so with
+entitlements gone it had no subject.

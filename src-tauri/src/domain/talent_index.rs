@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-or-later
 //! What a learner publishes to a talent index, and the consent that governs it.
 //!
 //! A talent index is an employer-facing directory: enterprises search it to

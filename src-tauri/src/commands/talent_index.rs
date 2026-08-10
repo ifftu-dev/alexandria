@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-or-later
 //! IPC for the talent-index consent and publish client.
 //!
 //! The index that *receives* a record is a service outside this repository, but

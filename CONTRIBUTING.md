@@ -5,8 +5,14 @@ free for learners, permanently — and contributions are welcome.
 
 ## Licensing: read this first
 
-Alexandria is **MIT Expat, all of it**. There is no proprietary subtree in
-this repository and no contribution path that lands in one.
+Alexandria is **AGPL-3.0-or-later, all of it**. There is no proprietary subtree
+in this repository and no contribution path that lands in one.
+
+Copyleft is the point rather than an inconvenience: MIT would let someone take
+this work, improve it, and keep the improvements closed. The AGPL keeps the
+commons a commons — anyone may use, study, modify and sell it, but a modified
+version offered to others must be published under the same terms. Nothing about
+that restricts a learner.
 
 The commercial Enterprise Edition is a *shell around* this application, not a
 layer inside it: organisation identity and provisioning, policy and access
@@ -21,6 +27,9 @@ Two consequences worth stating plainly:
   licence check, no build that unlocks more than the one you can compile
   yourself. Credential verification in particular is free, offline-capable
   and permanent.
+- **Vendored third-party crates keep their own licences.** `crates/iroh-moq`
+  and `crates/moq-media` are Copyright (C) 2025 N0, INC under MIT OR
+  Apache-2.0, as is `crates/live`. Contributions there follow upstream's terms.
 - **Every path here accepts external contributions.** There is no directory
   you are barred from.
 
