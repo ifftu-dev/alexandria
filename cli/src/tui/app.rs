@@ -23,26 +23,40 @@ pub enum Tab {
     Roles,
     Organizations,
     Database,
+    Verify,
+    Doctor,
 }
 
 impl Tab {
-    pub const ALL: [Tab; 4] = [
+    pub const ALL: [Tab; 6] = [
         Tab::Credentials,
         Tab::Roles,
         Tab::Organizations,
         Tab::Database,
+        Tab::Verify,
+        Tab::Doctor,
     ];
 
+    /// Short on purpose: the tab bar has to fit an 80-column terminal with
+    /// six entries and their counts.
     pub fn title(self) -> &'static str {
         match self {
             Tab::Credentials => "Credentials",
-            Tab::Roles => "Role assessments",
-            Tab::Organizations => "Organizations",
+            Tab::Roles => "Roles",
+            Tab::Organizations => "Orgs",
             Tab::Database => "Database",
+            Tab::Verify => "Verify",
+            Tab::Doctor => "Doctor",
         }
     }
 
-    fn index(self) -> usize {
+    /// Whether the tab bar shows a row count for this tab. Verify is a menu
+    /// and Doctor is a report, so a count would be noise.
+    pub fn shows_count(self) -> bool {
+        !matches!(self, Tab::Verify | Tab::Doctor)
+    }
+
+    pub(super) fn index(self) -> usize {
         Tab::ALL.iter().position(|t| *t == self).unwrap_or(0)
     }
 
@@ -50,6 +64,18 @@ impl Tab {
         Tab::ALL[i % Tab::ALL.len()]
     }
 }
+
+/// The two file-driven verifications, listed on the Verify tab.
+pub const VERIFY_ENTRIES: [(&str, &str); 2] = [
+    (
+        "Credential bundle (offline)",
+        "Check a §20.4 survivability bundle with no infrastructure",
+    ),
+    (
+        "Presentation",
+        "Check a presentation envelope against an expected audience",
+    ),
+];
 
 /// What the app is showing. The vault is unlocked once, up front, because
 /// every tab except a locked-out Database view needs the database open.
@@ -81,6 +107,12 @@ pub enum Pending {
     IssueRoleCredential {
         assessment_id: String,
     },
+    IssueCredential,
+    CreateAssessment,
+    VerifyBundle,
+    VerifyPresentation,
+    SetFilter,
+    DbSeed,
 }
 
 /// A modal over the browse screen.
@@ -132,6 +164,16 @@ impl Field {
     }
 }
 
+/// The outcome of the last verification, kept so the Verify tab can show it
+/// after the modal closes.
+pub struct VerifyOutcome {
+    pub title: String,
+    pub lines: Vec<(String, String)>,
+    pub ok: bool,
+}
+
+pub(crate) use crate::commands::doctor::Section as DoctorSection;
+
 /// A transient message shown in the status bar.
 pub struct Toast {
     pub text: String,
@@ -156,7 +198,18 @@ pub struct App {
     pub organizations: Vec<Organization>,
     pub db_tables: Vec<(String, i64)>,
 
-    pub selected: [usize; 4],
+    /// Substring filter applied to the credentials list. Matches id, issuer,
+    /// subject, and type, so one box covers every way a user might recall a
+    /// credential.
+    pub filter: Option<String>,
+    /// Applied and latest schema versions, for the Database detail pane.
+    pub migration: Option<(i64, i64)>,
+    /// Last verification result, shown on the Verify tab.
+    pub verify_result: Option<VerifyOutcome>,
+    /// Doctor sections, populated on first visit to the tab.
+    pub doctor: Vec<DoctorSection>,
+
+    pub selected: [usize; Tab::ALL.len()],
 }
 
 impl App {
@@ -177,7 +230,11 @@ impl App {
             assessments: Vec::new(),
             organizations: Vec::new(),
             db_tables: Vec::new(),
-            selected: [0; 4],
+            filter: None,
+            migration: None,
+            verify_result: None,
+            doctor: Vec::new(),
+            selected: [0; Tab::ALL.len()],
         };
 
         // A password file is the non-interactive path — honour it immediately
@@ -251,7 +308,17 @@ impl App {
             Err(e) => self.toast_err(format!("list organizations: {e}")),
         }
         self.load_db_tables();
+        self.load_migration_version();
         self.clamp_selection();
+    }
+
+    fn load_migration_version(&mut self) {
+        let Some(conn) = self.conn() else { return };
+        let latest = crate::commands::db::latest_version();
+        // A database with no _migrations table yet reports v0 rather than
+        // erroring — that is the honest answer before the first migrate.
+        let current = crate::commands::db::current_version(conn);
+        self.migration = Some((current, latest));
     }
 
     fn load_db_tables(&mut self) {
@@ -293,11 +360,34 @@ impl App {
 
     fn list_len(&self, tab: Tab) -> usize {
         match tab {
-            Tab::Credentials => self.credentials.len(),
+            Tab::Credentials => self.visible_credentials().len(),
             Tab::Roles => self.assessments.len(),
             Tab::Organizations => self.organizations.len(),
             Tab::Database => self.db_tables.len(),
+            Tab::Verify => VERIFY_ENTRIES.len(),
+            Tab::Doctor => self.doctor.len(),
         }
+    }
+
+    /// Credentials after the active filter. The filter is a plain substring
+    /// match, case-insensitive, across the fields a user is likely to
+    /// remember — one box rather than a subject/skill/type choice up front.
+    pub fn visible_credentials(&self) -> Vec<&VerifiableCredential> {
+        let Some(needle) = self.filter.as_ref().map(|f| f.to_lowercase()) else {
+            return self.credentials.iter().collect();
+        };
+        self.credentials
+            .iter()
+            .filter(|vc| {
+                let haystacks = [
+                    vc.id.clone().unwrap_or_default(),
+                    vc.issuer.as_str().to_string(),
+                    vc.credential_subject.id.as_str().to_string(),
+                    vc.type_.join(" "),
+                ];
+                haystacks.iter().any(|h| h.to_lowercase().contains(&needle))
+            })
+            .collect()
     }
 
     pub fn selected_index(&self) -> usize {
@@ -323,7 +413,9 @@ impl App {
     }
 
     pub fn selected_credential(&self) -> Option<&VerifiableCredential> {
-        self.credentials.get(self.selected_index())
+        self.visible_credentials()
+            .get(self.selected_index())
+            .copied()
     }
 
     pub fn selected_assessment(&self) -> Option<&RoleAssessment> {
@@ -361,20 +453,28 @@ impl App {
         ];
         keys.extend(match self.tab {
             Tab::Credentials => vec![
+                ("n", "issue a credential from a request file"),
                 ("r", "revoke (permanent, asks to confirm)"),
                 ("s", "suspend (reversible)"),
                 ("i", "reinstate a suspended credential"),
                 ("e", "export a survivability bundle"),
                 ("m", "import credentials from a file"),
+                ("/", "filter the list (esc clears)"),
             ],
             Tab::Roles => vec![
+                ("n", "new role assessment from a request file"),
                 ("p", "publish"),
                 ("a", "archive"),
                 ("d", "back to draft"),
                 ("c", "issue a role credential"),
             ],
             Tab::Organizations => vec![("n", "new organization")],
-            Tab::Database => vec![],
+            Tab::Database => vec![
+                ("m", "run pending migrations"),
+                ("s", "seed demo data if the database is empty"),
+            ],
+            Tab::Verify => vec![("⏎", "run the selected verification")],
+            Tab::Doctor => vec![("g", "re-run the checks")],
         });
         keys
     }
@@ -420,26 +520,51 @@ impl App {
         self.toast = None;
 
         match key.code {
-            KeyCode::Char('q') | KeyCode::Esc => self.should_quit = true,
+            KeyCode::Char('q') => self.should_quit = true,
+            // Esc clears a filter first — quitting out from under a filtered
+            // view is almost never what the key was meant to do.
+            KeyCode::Esc => {
+                if self.tab == Tab::Credentials && self.filter.is_some() {
+                    self.filter = None;
+                    self.clamp_selection();
+                    self.toast_ok("Filter cleared");
+                } else {
+                    self.should_quit = true;
+                }
+            }
             KeyCode::Tab | KeyCode::Right => {
                 self.tab = Tab::from_index(self.tab.index() + 1);
+                self.on_tab_entered();
             }
             KeyCode::BackTab | KeyCode::Left => {
                 self.tab = Tab::from_index(self.tab.index() + Tab::ALL.len() - 1);
+                self.on_tab_entered();
             }
             KeyCode::Down | KeyCode::Char('j') => self.move_selection(1),
             KeyCode::Up | KeyCode::Char('k') => self.move_selection(-1),
             KeyCode::Char('g') => {
-                self.refresh();
-                self.toast_ok("Refreshed");
+                if self.tab == Tab::Doctor {
+                    self.run_doctor();
+                    self.toast_ok("Checks re-run");
+                } else {
+                    self.refresh();
+                    self.toast_ok("Refreshed");
+                }
             }
             KeyCode::Char('?') => self.modal = Modal::Help,
-            KeyCode::Enter => self.open_detail(),
+            KeyCode::Enter => {
+                if self.tab == Tab::Verify {
+                    self.open_verify_form();
+                } else {
+                    self.open_detail();
+                }
+            }
             _ => match self.tab {
                 Tab::Credentials => self.on_key_credentials(key),
                 Tab::Roles => self.on_key_roles(key),
                 Tab::Organizations => self.on_key_orgs(key),
-                Tab::Database => {}
+                Tab::Database => self.on_key_database(key),
+                Tab::Verify | Tab::Doctor => {}
             },
         }
     }
@@ -498,7 +623,76 @@ impl App {
                     action: Pending::ImportFile,
                 };
             }
+            KeyCode::Char('n') => {
+                self.modal = Modal::Form {
+                    title: "Issue credential".into(),
+                    fields: vec![Field::new("Request JSON path", true)],
+                    active: 0,
+                    action: Pending::IssueCredential,
+                };
+            }
+            KeyCode::Char('/') => {
+                let mut field = Field::new("Match id, issuer, subject, or type", false);
+                field.value = self.filter.clone().unwrap_or_default();
+                self.modal = Modal::Form {
+                    title: "Filter credentials".into(),
+                    fields: vec![field],
+                    active: 0,
+                    action: Pending::SetFilter,
+                };
+            }
             _ => {}
+        }
+    }
+
+    /// Doctor's checks shell out, so they run on first arrival rather than on
+    /// every refresh of every other tab.
+    fn on_tab_entered(&mut self) {
+        if self.tab == Tab::Doctor && self.doctor.is_empty() {
+            self.run_doctor();
+        }
+    }
+
+    fn on_key_database(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Char('m') => self.run_migrate(),
+            KeyCode::Char('s') => {
+                self.modal = Modal::Confirm {
+                    title: "Seed demo data?".into(),
+                    body: "Inserts the demo taxonomy, courses, and governance rows \
+                           if the database is empty. Existing data is left alone."
+                        .into(),
+                    action: Pending::DbSeed,
+                };
+            }
+            _ => {}
+        }
+    }
+
+    fn open_verify_form(&mut self) {
+        match self.selected_index() {
+            0 => {
+                self.modal = Modal::Form {
+                    title: "Verify credential bundle".into(),
+                    fields: vec![
+                        Field::new("Bundle JSON path", true),
+                        Field::new("At (ISO 8601, optional)", false),
+                    ],
+                    active: 0,
+                    action: Pending::VerifyBundle,
+                };
+            }
+            _ => {
+                self.modal = Modal::Form {
+                    title: "Verify presentation".into(),
+                    fields: vec![
+                        Field::new("Envelope JSON path", true),
+                        Field::new("Expected audience", true),
+                    ],
+                    active: 0,
+                    action: Pending::VerifyPresentation,
+                };
+            }
         }
     }
 
@@ -516,6 +710,16 @@ impl App {
         };
         if let Some(status) = status {
             return self.set_role_status(&id, status);
+        }
+
+        if key.code == KeyCode::Char('n') {
+            self.modal = Modal::Form {
+                title: "New role assessment".into(),
+                fields: vec![Field::new("Request JSON path", true)],
+                active: 0,
+                action: Pending::CreateAssessment,
+            };
+            return;
         }
 
         if key.code == KeyCode::Char('c') {
@@ -645,6 +849,31 @@ impl App {
             }
             Pending::IssueRoleCredential { assessment_id } => {
                 self.issue_role_credential(&assessment_id, &values[0], &values[1])
+            }
+            Pending::IssueCredential => self.issue_credential(&values[0]),
+            Pending::CreateAssessment => self.create_assessment(&values[0]),
+            Pending::VerifyBundle => {
+                let at = values.get(1).filter(|s| !s.is_empty()).cloned();
+                self.verify_bundle(&values[0], at.as_deref())
+            }
+            Pending::VerifyPresentation => self.verify_presentation(&values[0], &values[1]),
+            Pending::DbSeed => self.db_seed(),
+            Pending::SetFilter => {
+                // Filtering touches no state the lists are derived from, so it
+                // skips the refresh every other action triggers.
+                let needle = values.first().cloned().unwrap_or_default();
+                self.filter = if needle.is_empty() {
+                    None
+                } else {
+                    Some(needle)
+                };
+                self.clamp_selection();
+                let count = self.visible_credentials().len();
+                match &self.filter {
+                    Some(f) => self.toast_ok(format!("{count} match \"{f}\" — esc clears")),
+                    None => self.toast_ok("Filter cleared"),
+                }
+                return;
             }
         };
 
@@ -788,7 +1017,11 @@ impl App {
             assessments: Vec::new(),
             organizations: Vec::new(),
             db_tables: Vec::new(),
-            selected: [0; 4],
+            filter: None,
+            migration: None,
+            verify_result: None,
+            doctor: Vec::new(),
+            selected: [0; Tab::ALL.len()],
         }
     }
 
@@ -798,6 +1031,150 @@ impl App {
             text: text.to_string(),
             is_error,
         });
+    }
+
+    fn issue_credential(&mut self, request_path: &str) -> Result<String> {
+        let raw = std::fs::read_to_string(request_path)?;
+        let req: app_lib::commands::credentials::IssueCredentialRequest =
+            serde_json::from_str(&raw)?;
+        let now = vault::now_rfc3339();
+        let signer = self
+            .signer
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("vault locked"))?;
+
+        let vc = app_lib::commands::credentials::issue_credential_impl(
+            &signer.conn,
+            &signer.signing_key,
+            &signer.issuer_did,
+            &req,
+            &now,
+        )
+        .map_err(|e| anyhow::anyhow!(e))?;
+
+        Ok(format!(
+            "Issued {}",
+            vc.id.as_deref().unwrap_or("(no envelope id)")
+        ))
+    }
+
+    fn create_assessment(&mut self, request_path: &str) -> Result<String> {
+        let raw = std::fs::read_to_string(request_path)?;
+        let req: app_lib::commands::role_assessment::CreateRoleAssessmentRequest =
+            serde_json::from_str(&raw)?;
+        let now = vault::now_rfc3339();
+        let conn = self.conn().ok_or_else(|| anyhow::anyhow!("vault locked"))?;
+        let ra = app_lib::commands::role_assessment::create_role_assessment_impl(conn, &req, &now)
+            .map_err(|e| anyhow::anyhow!(e))?;
+        Ok(format!("Created {}", ra.role_title))
+    }
+
+    fn verify_bundle(&mut self, path: &str, at: Option<&str>) -> Result<String> {
+        let json = std::fs::read_to_string(path)?;
+        let now = at.map(str::to_string).unwrap_or_else(vault::now_rfc3339);
+        let (accepted, total) =
+            app_lib::commands::credentials::verify_bundle_offline_impl(&json, &now)
+                .map_err(|e| anyhow::anyhow!(e))?;
+
+        let ok = accepted == total;
+        self.verify_result = Some(VerifyOutcome {
+            title: "Credential bundle".into(),
+            lines: vec![
+                ("Bundle".into(), path.to_string()),
+                ("At".into(), now),
+                ("Total".into(), total.to_string()),
+                ("Accepted".into(), accepted.to_string()),
+            ],
+            ok,
+        });
+
+        // A bundle that fails to verify is a result, not an error — the
+        // outcome pane reports it and the app carries on.
+        Ok(format!("{accepted}/{total} credential(s) verified"))
+    }
+
+    fn verify_presentation(&mut self, path: &str, audience: &str) -> Result<String> {
+        let raw = std::fs::read_to_string(path)?;
+        let envelope: app_lib::commands::presentation::PresentationEnvelope =
+            serde_json::from_str(&raw)?;
+        let conn = self.conn().ok_or_else(|| anyhow::anyhow!("vault locked"))?;
+        let verdict =
+            app_lib::commands::presentation::verify_presentation_impl(conn, &envelope, audience)
+                .map_err(|e| anyhow::anyhow!(e))?;
+
+        use app_lib::commands::presentation::PresentationVerification as V;
+        let explanation = match verdict {
+            V::Accepted => "signature, audience, and nonce all check out",
+            V::BadSignature => "signature does not verify",
+            V::AudienceMismatch => "not bound to this audience",
+            V::Replayed => "already used once",
+            V::Malformed => "envelope payload is malformed",
+        };
+        let ok = verdict == V::Accepted;
+
+        self.verify_result = Some(VerifyOutcome {
+            title: "Presentation".into(),
+            lines: vec![
+                ("Envelope".into(), path.to_string()),
+                ("Subject".into(), envelope.subject.clone()),
+                ("Audience".into(), audience.to_string()),
+                (
+                    "Verdict".into(),
+                    if ok { "accepted" } else { "rejected" }.to_string(),
+                ),
+                ("Reason".into(), explanation.to_string()),
+            ],
+            ok,
+        });
+
+        Ok(if ok {
+            "Presentation accepted".to_string()
+        } else {
+            format!("Presentation rejected — {explanation}")
+        })
+    }
+
+    fn run_migrate(&mut self) {
+        let result = (|| -> Result<String> {
+            let conn = self.conn().ok_or_else(|| anyhow::anyhow!("vault locked"))?;
+            crate::commands::db::ensure_migration_table(conn)?;
+            let before = crate::commands::db::current_version(conn);
+            let latest = crate::commands::db::latest_version();
+            if before >= latest {
+                return Ok(format!("Already at v{before} — nothing to migrate"));
+            }
+            let applied = crate::commands::db::apply_migrations(conn)?;
+            let after = crate::commands::db::current_version(conn);
+            Ok(format!(
+                "Applied {applied} migration(s) (v{before} → v{after})"
+            ))
+        })();
+        match result {
+            Ok(msg) => {
+                self.refresh();
+                self.toast_ok(msg);
+            }
+            Err(e) => self.toast_err(format!("{e:#}")),
+        }
+    }
+
+    fn db_seed(&mut self) -> Result<String> {
+        let conn = self.conn().ok_or_else(|| anyhow::anyhow!("vault locked"))?;
+        let inserted = crate::commands::db::seed_if_empty(conn)?;
+        Ok(if inserted {
+            "Seed data inserted".to_string()
+        } else {
+            "Database already has data — seed skipped".to_string()
+        })
+    }
+
+    /// Run the same checks `alexandria doctor` runs. Synchronous: the checks
+    /// shell out to rustup/java/xcodebuild, so the UI pauses briefly. That is
+    /// preferable to a background thread whose result could land after the
+    /// user has moved on.
+    pub fn run_doctor(&mut self) {
+        self.doctor = crate::commands::doctor::collect_sections(&self.ctx, true);
+        self.clamp_selection();
     }
 
     fn open_detail(&mut self) {
@@ -824,6 +1201,37 @@ impl App {
                 None => return,
             },
             Tab::Database => return,
+            Tab::Verify => match &self.verify_result {
+                Some(outcome) => (
+                    format!("Last verification — {}", outcome.title),
+                    outcome
+                        .lines
+                        .iter()
+                        .map(|(k, v)| format!("{k}: {v}"))
+                        .collect::<Vec<_>>()
+                        .join("\n"),
+                ),
+                None => return,
+            },
+            Tab::Doctor => match self.doctor.get(self.selected_index()) {
+                Some(section) => (
+                    crate::commands::doctor::section_title(section.name).to_string(),
+                    section
+                        .checks
+                        .iter()
+                        .map(|c| {
+                            format!(
+                                "{} {} — {}",
+                                if c.ok { "ok " } else { "FAIL" },
+                                c.label,
+                                c.detail
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n"),
+                ),
+                None => return,
+            },
         };
         self.modal = Modal::Detail {
             title,
@@ -870,7 +1278,11 @@ mod tests {
             assessments: Vec::new(),
             organizations: Vec::new(),
             db_tables: Vec::new(),
-            selected: [0; 4],
+            filter: None,
+            migration: None,
+            verify_result: None,
+            doctor: Vec::new(),
+            selected: [0; Tab::ALL.len()],
         };
         // The list contents never matter to navigation, only the lengths, so
         // the fixtures stay as cheap as the types allow.
@@ -900,7 +1312,7 @@ mod tests {
         // Backward from the first tab wraps to the last rather than
         // underflowing the index.
         app.on_key(key(KeyCode::BackTab));
-        assert_eq!(app.tab, Tab::Database);
+        assert_eq!(app.tab, *Tab::ALL.last().unwrap());
         app.on_key(key(KeyCode::Tab));
         assert_eq!(app.tab, Tab::Credentials);
     }
@@ -1101,6 +1513,190 @@ mod tests {
             app.tab = tab;
             assert!(has(&app, "quit"));
         }
+    }
+
+    /// Build a credential fixture with the fields the filter matches on.
+    ///
+    /// Constructed through serde rather than by hand: `VerifiableCredential`
+    /// has no `Default`, and going through the wire format means the fixture
+    /// stays valid if the struct gains fields.
+    fn credential(id: &str, issuer: &str, subject: &str, class: &str) -> VerifiableCredential {
+        serde_json::from_value(serde_json::json!({
+            "@context": ["https://www.w3.org/ns/credentials/v2"],
+            "id": id,
+            "type": ["VerifiableCredential", class],
+            "issuer": issuer,
+            "validFrom": "2026-01-01T00:00:00Z",
+            "credentialSubject": { "id": subject },
+            "proof": {
+                "type": "Ed25519Signature2020",
+                "created": "2026-01-01T00:00:00Z",
+                "verificationMethod": format!("{issuer}#key-1"),
+                "proofPurpose": "assertionMethod",
+                "jws": "test..signature",
+            },
+        }))
+        .expect("credential fixture")
+    }
+
+    fn app_with_credentials() -> App {
+        let mut app = browsing_app(0, 0);
+        app.credentials = vec![
+            credential(
+                "urn:uuid:aaa",
+                "did:key:issuer1",
+                "did:key:alice",
+                "SkillCredential",
+            ),
+            credential(
+                "urn:uuid:bbb",
+                "did:key:issuer2",
+                "did:key:bob",
+                "RoleCredential",
+            ),
+        ];
+        app
+    }
+
+    #[test]
+    fn filter_matches_across_id_issuer_subject_and_type() {
+        let mut app = app_with_credentials();
+        assert_eq!(app.visible_credentials().len(), 2);
+
+        for (needle, expected_id) in [
+            ("aaa", "urn:uuid:aaa"),
+            ("issuer2", "urn:uuid:bbb"),
+            ("alice", "urn:uuid:aaa"),
+            ("rolecredential", "urn:uuid:bbb"),
+        ] {
+            app.filter = Some(needle.to_string());
+            let visible = app.visible_credentials();
+            assert_eq!(visible.len(), 1, "filter {needle:?} should match one row");
+            assert_eq!(visible[0].id.as_deref(), Some(expected_id));
+        }
+    }
+
+    #[test]
+    fn filter_is_case_insensitive_and_can_match_nothing() {
+        let mut app = app_with_credentials();
+        app.filter = Some("ALICE".into());
+        assert_eq!(app.visible_credentials().len(), 1);
+        app.filter = Some("nothing-matches-this".into());
+        assert!(app.visible_credentials().is_empty());
+    }
+
+    #[test]
+    fn selection_follows_the_filtered_list_not_the_full_one() {
+        // The cursor indexes the visible rows; a filter that hides the
+        // selected row must not leave it pointing past the end.
+        let mut app = app_with_credentials();
+        app.selected[Tab::Credentials.index()] = 1;
+        assert_eq!(
+            app.selected_credential().unwrap().id.as_deref(),
+            Some("urn:uuid:bbb")
+        );
+
+        app.filter = Some("alice".into());
+        app.clamp_selection();
+        assert_eq!(app.selected_index(), 0);
+        assert_eq!(
+            app.selected_credential().unwrap().id.as_deref(),
+            Some("urn:uuid:aaa"),
+            "the cursor now refers to the filtered row"
+        );
+    }
+
+    #[test]
+    fn escape_clears_a_filter_before_it_quits() {
+        let mut app = app_with_credentials();
+        app.filter = Some("alice".into());
+        app.on_key(key(KeyCode::Esc));
+        assert!(app.filter.is_none(), "the first esc clears the filter");
+        assert!(!app.should_quit, "and does not quit");
+
+        app.on_key(key(KeyCode::Esc));
+        assert!(app.should_quit, "with no filter, esc quits");
+    }
+
+    #[test]
+    fn escape_still_quits_on_tabs_without_a_filter() {
+        let mut app = app_with_credentials();
+        app.filter = Some("alice".into());
+        app.tab = Tab::Database;
+        app.on_key(key(KeyCode::Esc));
+        assert!(app.should_quit, "the filter belongs to the credentials tab");
+    }
+
+    #[test]
+    fn slash_prefills_the_form_with_the_active_filter() {
+        let mut app = app_with_credentials();
+        app.filter = Some("alice".into());
+        app.on_key(key(KeyCode::Char('/')));
+        match &app.modal {
+            Modal::Form { fields, .. } => assert_eq!(fields[0].value, "alice"),
+            _ => panic!("expected the filter form"),
+        }
+    }
+
+    #[test]
+    fn verify_tab_offers_both_verifications() {
+        let mut app = browsing_app(0, 0);
+        app.tab = Tab::Verify;
+        assert_eq!(app.list_len(Tab::Verify), 2);
+
+        // Entry 0 is the bundle check: a path plus an optional time.
+        app.on_key(key(KeyCode::Enter));
+        match &app.modal {
+            Modal::Form { fields, title, .. } => {
+                assert!(title.contains("bundle"));
+                assert_eq!(fields.len(), 2);
+                assert!(fields[0].required);
+                assert!(!fields[1].required, "the verification time is optional");
+            }
+            _ => panic!("expected the bundle form"),
+        }
+
+        // Entry 1 is the presentation check, where the audience is required —
+        // without it there is nothing to bind against.
+        app.modal = Modal::None;
+        app.selected[Tab::Verify.index()] = 1;
+        app.on_key(key(KeyCode::Enter));
+        match &app.modal {
+            Modal::Form { fields, title, .. } => {
+                assert!(title.contains("presentation") || title.contains("Presentation"));
+                assert!(fields.iter().all(|f| f.required));
+            }
+            _ => panic!("expected the presentation form"),
+        }
+    }
+
+    #[test]
+    fn doctor_runs_on_first_arrival_and_reports_sections() {
+        let mut app = browsing_app(0, 0);
+        assert!(app.doctor.is_empty());
+        // Tab round the bar until Doctor comes up.
+        for _ in 0..Tab::ALL.len() {
+            app.on_key(key(KeyCode::Tab));
+            if app.tab == Tab::Doctor {
+                break;
+            }
+        }
+        assert_eq!(app.tab, Tab::Doctor);
+        assert!(
+            !app.doctor.is_empty(),
+            "arriving at the tab runs the checks"
+        );
+        assert!(app.doctor.iter().any(|s| s.name == "toolchain"));
+    }
+
+    #[test]
+    fn database_tab_offers_migrate_and_seed() {
+        let mut app = browsing_app(0, 0);
+        app.tab = Tab::Database;
+        // Seed asks first — it writes rows.
+        app.on_key(key(KeyCode::Char('s')));
+        assert!(matches!(app.modal, Modal::Confirm { .. }));
+        assert!(app.help_lines().iter().any(|(k, _)| *k == "m"));
     }
 
     #[test]

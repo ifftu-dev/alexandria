@@ -97,11 +97,14 @@ fn draw_tabs(frame: &mut Frame, app: &App, area: Rect) {
     let titles: Vec<Line> = Tab::ALL
         .iter()
         .map(|t| {
+            if !t.shows_count() {
+                return Line::from(t.title());
+            }
             let count = match t {
-                Tab::Credentials => app.credentials.len(),
+                Tab::Credentials => app.visible_credentials().len(),
                 Tab::Roles => app.assessments.len(),
                 Tab::Organizations => app.organizations.len(),
-                Tab::Database => app.db_tables.len(),
+                _ => 0,
             };
             Line::from(format!("{} ({})", t.title(), count))
         })
@@ -133,8 +136,8 @@ fn draw_body(frame: &mut Frame, app: &App, area: Rect) {
 fn draw_list(frame: &mut Frame, app: &App, area: Rect) {
     let items: Vec<ListItem> = match app.tab {
         Tab::Credentials => app
-            .credentials
-            .iter()
+            .visible_credentials()
+            .into_iter()
             .map(|vc| {
                 let class = vc
                     .type_
@@ -184,6 +187,35 @@ fn draw_list(frame: &mut Frame, app: &App, area: Rect) {
                             count.to_string()
                         },
                         Style::default().fg(MUTED),
+                    ),
+                ]))
+            })
+            .collect(),
+        Tab::Verify => crate::tui::app::VERIFY_ENTRIES
+            .iter()
+            .map(|(name, _)| ListItem::new(Line::from(Span::raw(*name))))
+            .collect(),
+        Tab::Doctor => app
+            .doctor
+            .iter()
+            .map(|section| {
+                let ok = section.ok();
+                let failed = section.checks.iter().filter(|c| !c.ok).count();
+                ListItem::new(Line::from(vec![
+                    Span::styled(
+                        format!(
+                            "{:<24}",
+                            crate::commands::doctor::section_title(section.name)
+                        ),
+                        Style::default(),
+                    ),
+                    Span::styled(
+                        if ok {
+                            "ok".to_string()
+                        } else {
+                            format!("{failed} failed")
+                        },
+                        Style::default().fg(if ok { Color::Green } else { Color::Red }),
                     ),
                 ]))
             })
@@ -292,18 +324,91 @@ fn draw_detail_pane(frame: &mut Frame, app: &App, area: Rect) {
             }
             None => vec![],
         },
-        Tab::Database => vec![
-            kv("Path", &app.ctx.db_path().display().to_string()),
-            kv("Tables", &app.db_tables.len().to_string()),
-            kv(
-                "Rows",
-                &app.db_tables
-                    .iter()
-                    .map(|(_, c)| (*c).max(0))
-                    .sum::<i64>()
-                    .to_string(),
-            ),
-        ],
+        Tab::Database => {
+            let mut l = vec![
+                kv("Path", &app.ctx.db_path().display().to_string()),
+                kv("Tables", &app.db_tables.len().to_string()),
+                kv(
+                    "Rows",
+                    &app.db_tables
+                        .iter()
+                        .map(|(_, c)| (*c).max(0))
+                        .sum::<i64>()
+                        .to_string(),
+                ),
+            ];
+            if let Some((current, latest)) = app.migration {
+                l.push(kv("Schema", &format!("v{current} of v{latest}")));
+                if current < latest {
+                    l.push(Line::from(""));
+                    l.push(Line::from(Span::styled(
+                        format!("  {} migration(s) pending — press m", latest - current),
+                        Style::default().fg(Color::Yellow),
+                    )));
+                }
+            }
+            l
+        }
+        Tab::Verify => {
+            let mut l = vec![Line::from(Span::styled(
+                format!(
+                    "  {}",
+                    crate::tui::app::VERIFY_ENTRIES
+                        .get(app.selected_index())
+                        .map(|(_, d)| *d)
+                        .unwrap_or("")
+                ),
+                Style::default().fg(MUTED),
+            ))];
+            l.push(Line::from(""));
+            l.push(Line::from(Span::styled(
+                "  ⏎ to run",
+                Style::default().fg(MUTED),
+            )));
+
+            if let Some(outcome) = &app.verify_result {
+                l.push(Line::from(""));
+                l.push(Line::from(vec![
+                    Span::styled("  Last result: ", Style::default().fg(MUTED)),
+                    Span::styled(
+                        outcome.title.clone(),
+                        Style::default().add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        if outcome.ok {
+                            "  accepted"
+                        } else {
+                            "  rejected"
+                        },
+                        Style::default().fg(if outcome.ok { Color::Green } else { Color::Red }),
+                    ),
+                ]));
+                for (k, v) in &outcome.lines {
+                    l.push(kv(k, v));
+                }
+            }
+            l
+        }
+        Tab::Doctor => match app.doctor.get(app.selected_index()) {
+            Some(section) => section
+                .checks
+                .iter()
+                .map(|c| {
+                    Line::from(vec![
+                        Span::styled(
+                            "  ● ",
+                            Style::default().fg(if c.ok { Color::Green } else { Color::Red }),
+                        ),
+                        Span::styled(format!("{:<26}", c.label), Style::default()),
+                        Span::styled(c.detail.clone(), Style::default().fg(MUTED)),
+                    ])
+                })
+                .collect(),
+            None => vec![Line::from(Span::styled(
+                "  running checks…",
+                Style::default().fg(MUTED),
+            ))],
+        },
     };
 
     let block = Block::default()
@@ -521,6 +626,13 @@ pub mod render_tests_support {
     pub fn sample_frames() -> Vec<(&'static str, String)> {
         let mut out = Vec::new();
         let mut a = app();
+        out.push(("tab bar at 80 columns", render_to_string(&a, 80, 8)));
+        a.tab = Tab::Verify;
+        out.push(("verify tab", render_to_string(&a, 100, 16)));
+        a.run_doctor();
+        a.tab = Tab::Doctor;
+        out.push(("doctor tab", render_to_string(&a, 100, 18)));
+        a.tab = Tab::Credentials;
         a.tab = Tab::Database;
         a.db_tables = vec![
             ("credentials".into(), 12),
@@ -602,7 +714,7 @@ mod render_tests {
         let app = test_app();
         let out = render(&app, 100, 24);
         assert!(out.contains("Credentials"));
-        assert!(out.contains("Organizations"));
+        assert!(out.contains("Orgs"));
         assert!(out.contains("nothing here yet"));
     }
 

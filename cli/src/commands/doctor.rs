@@ -37,10 +37,10 @@ pub struct DoctorArgs {
 // ── Check result ─────────────────────────────────────────────────────
 
 #[derive(Serialize)]
-struct Check {
-    label: String,
-    ok: bool,
-    detail: String,
+pub(crate) struct Check {
+    pub label: String,
+    pub ok: bool,
+    pub detail: String,
 }
 
 impl Check {
@@ -252,22 +252,24 @@ fn section_app_data(ctx: &ProjectContext) {
 
 /// A named group of checks. Sections return their checks rather than only a
 /// pass/fail so `--json` can report the same detail the human view shows.
-struct Section {
-    name: &'static str,
-    checks: Vec<Check>,
+pub(crate) struct Section {
+    pub name: &'static str,
+    pub checks: Vec<Check>,
 }
 
 impl Section {
-    fn ok(&self) -> bool {
+    pub fn ok(&self) -> bool {
         self.checks.iter().all(|c| c.ok)
     }
 }
 
-fn section_toolchain(ctx: &ProjectContext) -> Section {
-    output::blank();
-    output::header("Toolchain");
-
-    let mut checks: Vec<Check> = ["cargo", "rustc", "node", "npm"]
+/// Gather every check without printing anything.
+///
+/// Split out from the printing so the TUI's Doctor tab runs exactly the same
+/// checks the subcommand runs, instead of a second implementation that could
+/// drift. `include_mobile` mirrors `--no-mobile`.
+pub(crate) fn collect_sections(ctx: &ProjectContext, include_mobile: bool) -> Vec<Section> {
+    let mut toolchain: Vec<Check> = ["cargo", "rustc", "node", "npm"]
         .iter()
         .map(
             |tool| match runner::run_silent(&ctx.root, tool, &["--version"]) {
@@ -276,48 +278,63 @@ fn section_toolchain(ctx: &ProjectContext) -> Section {
             },
         )
         .collect();
-    checks.push(check_tauri_cli(ctx));
-    display(&checks);
-    Section {
-        name: "toolchain",
-        checks,
-    }
-}
+    toolchain.push(check_tauri_cli(ctx));
 
-fn section_mobile(ctx: &ProjectContext) -> Vec<Section> {
-    output::blank();
-    output::header("Android prerequisites");
+    let mut sections = vec![Section {
+        name: "toolchain",
+        checks: toolchain,
+    }];
+
+    if !include_mobile {
+        return sections;
+    }
+
     let mut android = vec![
         check_android_sdk(),
         check_android_ndk(),
         check_java_version(),
+        check_android_env(ctx),
     ];
-    android.push(check_android_env(ctx));
     android.extend(rust_target_checks(ANDROID_TRIPLES));
-    display(&android);
-
-    let mut sections = vec![Section {
+    sections.push(Section {
         name: "android",
         checks: android,
-    }];
-
-    if !cfg!(target_os = "macos") {
-        output::blank();
-        output::faint("iOS checks skipped — they require macOS.");
-        return sections;
-    }
-
-    output::blank();
-    output::header("iOS prerequisites");
-    let mut ios = vec![check_xcode()];
-    ios.extend(rust_target_checks(IOS_TRIPLES));
-    display(&ios);
-    sections.push(Section {
-        name: "ios",
-        checks: ios,
     });
 
+    // iOS tooling only exists on macOS, so the section is omitted rather than
+    // reported as a wall of failures on Linux and Windows.
+    if cfg!(target_os = "macos") {
+        let mut ios = vec![check_xcode()];
+        ios.extend(rust_target_checks(IOS_TRIPLES));
+        sections.push(Section {
+            name: "ios",
+            checks: ios,
+        });
+    }
+
     sections
+}
+
+/// Human-readable title for a section key.
+pub(crate) fn section_title(name: &str) -> &'static str {
+    match name {
+        "toolchain" => "Toolchain",
+        "android" => "Android prerequisites",
+        "ios" => "iOS prerequisites",
+        _ => "Checks",
+    }
+}
+
+fn print_sections(sections: &[Section]) {
+    for section in sections {
+        output::blank();
+        output::header(section_title(section.name));
+        display(&section.checks);
+    }
+    if !cfg!(target_os = "macos") && sections.iter().any(|s| s.name == "android") {
+        output::blank();
+        output::faint("iOS checks skipped — they require macOS.");
+    }
 }
 
 // ── Entry point ──────────────────────────────────────────────────────
@@ -326,10 +343,8 @@ pub fn execute(args: &DoctorArgs, ctx: &ProjectContext) -> Result<()> {
     section_project(ctx)?;
     section_app_data(ctx);
 
-    let mut sections = vec![section_toolchain(ctx)];
-    if !args.no_mobile {
-        sections.extend(section_mobile(ctx));
-    }
+    let sections = collect_sections(ctx, !args.no_mobile);
+    print_sections(&sections);
     let all_ok = sections.iter().all(Section::ok);
 
     output::blank();

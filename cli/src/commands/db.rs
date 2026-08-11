@@ -67,7 +67,7 @@ pub fn execute(
 // Mirrors the logic in src-tauri/src/db/mod.rs — small enough to
 // duplicate rather than pulling in the full app_lib crate.
 
-fn ensure_migration_table(conn: &Connection) -> Result<()> {
+pub(crate) fn ensure_migration_table(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS _migrations (
             version    INTEGER PRIMARY KEY,
@@ -79,7 +79,7 @@ fn ensure_migration_table(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-fn current_version(conn: &Connection) -> i64 {
+pub(crate) fn current_version(conn: &Connection) -> i64 {
     conn.query_row(
         "SELECT COALESCE(MAX(version), 0) FROM _migrations",
         [],
@@ -88,11 +88,11 @@ fn current_version(conn: &Connection) -> i64 {
     .unwrap_or(0)
 }
 
-fn latest_version() -> i64 {
+pub(crate) fn latest_version() -> i64 {
     schema::MIGRATIONS.last().map(|(v, _, _)| *v).unwrap_or(0)
 }
 
-fn apply_migrations(conn: &Connection) -> Result<usize> {
+pub(crate) fn apply_migrations(conn: &Connection) -> Result<usize> {
     ensure_migration_table(conn)?;
 
     let current = current_version(conn);
@@ -112,6 +112,14 @@ fn apply_migrations(conn: &Connection) -> Result<usize> {
     }
 
     Ok(applied)
+}
+
+/// Insert the demo taxonomy/courses/governance rows if the database is empty.
+///
+/// Returns whether anything was inserted. Shared with the TUI so both drive
+/// the same `seed::seed_if_empty` rather than diverging.
+pub(crate) fn seed_if_empty(conn: &Connection) -> Result<bool> {
+    seed::seed_if_empty(conn).map_err(|e| anyhow::anyhow!("Seed failed: {e}"))
 }
 
 // ── Open DB helper ──────────────────────────────────────────────────
