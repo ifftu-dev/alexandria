@@ -139,7 +139,57 @@ pub enum Modal {
     },
     /// The full key reference for the active tab.
     Help,
+    /// A page of rows from one database table.
+    Rows(TableRows),
 }
+
+/// A window onto a table's contents.
+///
+/// Rows are fetched with a LIMIT rather than streamed: the point is to look at
+/// what is in a table, and holding a million decrypted rows in memory to show
+/// twenty of them would be a poor trade. `total` is counted separately so the
+/// view can say how much it is not showing.
+pub struct TableRows {
+    pub table: String,
+    pub columns: Vec<String>,
+    pub rows: Vec<Vec<String>>,
+    pub total: i64,
+    /// First visible row.
+    pub row_offset: usize,
+    /// First visible column — wide tables scroll sideways.
+    pub col_offset: usize,
+}
+
+/// How many rows to pull in one look.
+const ROW_PAGE: usize = 500;
+
+/// Flatten and clip one cell for display.
+///
+/// Newlines and tabs are replaced rather than stripped: a value containing
+/// them would otherwise break the row grid apart, and showing a marker is more
+/// honest than silently joining the lines.
+fn truncate_cell(text: &str) -> String {
+    let flat: String = text
+        .chars()
+        .map(|c| {
+            if c == '\n' || c == '\r' || c == '\t' {
+                '⏎'
+            } else {
+                c
+            }
+        })
+        .collect();
+    if flat.chars().count() > MAX_CELL {
+        let kept: String = flat.chars().take(MAX_CELL).collect();
+        format!("{kept}…")
+    } else {
+        flat
+    }
+}
+
+/// Longest cell value kept in memory. Anything longer is truncated on load:
+/// a single column holding a base64 credential would otherwise dominate.
+const MAX_CELL: usize = 200;
 
 #[derive(Clone)]
 pub struct Field {
@@ -436,6 +486,7 @@ impl App {
             Modal::Confirm { .. } => "y confirm · n/esc cancel",
             Modal::Form { .. } => "⇥ field · ⏎ submit · esc cancel",
             Modal::Detail { .. } => "↑↓ scroll · esc close",
+            Modal::Rows(_) => "↑↓ rows · ←→ columns · esc close",
             Modal::Help => "esc close",
         }
     }
@@ -470,6 +521,7 @@ impl App {
             ],
             Tab::Organizations => vec![("n", "new organization")],
             Tab::Database => vec![
+                ("⏎", "browse the rows in this table"),
                 ("m", "run pending migrations"),
                 ("s", "seed demo data if the database is empty"),
             ],
@@ -760,6 +812,34 @@ impl App {
                     self.modal = Modal::None;
                 }
             }
+            Modal::Rows(view) => match key.code {
+                KeyCode::Esc | KeyCode::Char('q') => self.modal = Modal::None,
+                KeyCode::Down | KeyCode::Char('j') => {
+                    // Stop at the last row rather than scrolling into blank
+                    // space below it.
+                    let max = view.rows.len().saturating_sub(1);
+                    view.row_offset = (view.row_offset + 1).min(max);
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    view.row_offset = view.row_offset.saturating_sub(1);
+                }
+                KeyCode::PageDown => {
+                    let max = view.rows.len().saturating_sub(1);
+                    view.row_offset = (view.row_offset + 20).min(max);
+                }
+                KeyCode::PageUp => view.row_offset = view.row_offset.saturating_sub(20),
+                KeyCode::Home => view.row_offset = 0,
+                KeyCode::End => view.row_offset = view.rows.len().saturating_sub(1),
+                KeyCode::Right | KeyCode::Char('l') => {
+                    // Always leave one column visible.
+                    let max = view.columns.len().saturating_sub(1);
+                    view.col_offset = (view.col_offset + 1).min(max);
+                }
+                KeyCode::Left | KeyCode::Char('h') => {
+                    view.col_offset = view.col_offset.saturating_sub(1);
+                }
+                _ => {}
+            },
             Modal::Detail { scroll, .. } => match key.code {
                 KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q') => self.modal = Modal::None,
                 KeyCode::Down | KeyCode::Char('j') => *scroll = scroll.saturating_add(1),
@@ -1177,6 +1257,21 @@ impl App {
         self.clamp_selection();
     }
 
+    /// Load a page of rows from the selected table into a browsable modal.
+    fn open_table_rows(&mut self) {
+        let Some((table, _)) = self.db_tables.get(self.selected_index()).cloned() else {
+            return;
+        };
+        let result = self
+            .conn()
+            .ok_or_else(|| anyhow::anyhow!("vault locked"))
+            .and_then(|conn| read_table(conn, &table));
+        match result {
+            Ok(view) => self.modal = Modal::Rows(view),
+            Err(e) => self.toast_err(format!("{e:#}")),
+        }
+    }
+
     fn open_detail(&mut self) {
         let (title, body) = match self.tab {
             Tab::Credentials => match self.selected_credential() {
@@ -1200,7 +1295,7 @@ impl App {
                 ),
                 None => return,
             },
-            Tab::Database => return,
+            Tab::Database => return self.open_table_rows(),
             Tab::Verify => match &self.verify_result {
                 Some(outcome) => (
                     format!("Last verification — {}", outcome.title),
@@ -1700,6 +1795,151 @@ mod tests {
         assert!(app.help_lines().iter().any(|(k, _)| *k == "m"));
     }
 
+    // ---- Table row browser ---------------------------------------------
+
+    /// A real SQLite database, so the reader is exercised against the engine
+    /// rather than against a mock of it.
+    fn fixture_db() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE creds (
+                 id INTEGER PRIMARY KEY,
+                 subject TEXT,
+                 score REAL,
+                 payload BLOB,
+                 note TEXT
+             );
+             INSERT INTO creds VALUES (1, 'did:key:alice', 0.5, x'00112233', 'ok');
+             INSERT INTO creds VALUES (2, NULL, NULL, NULL, NULL);
+             CREATE TABLE empty_table (a TEXT);
+             CREATE TABLE \"order\" (x TEXT);
+             INSERT INTO \"order\" VALUES ('keyword-named table');",
+        )
+        .unwrap();
+        conn
+    }
+
+    #[test]
+    fn read_table_returns_columns_and_formats_every_sqlite_type() {
+        let conn = fixture_db();
+        let view = read_table(&conn, "creds").unwrap();
+
+        assert_eq!(view.columns, ["id", "subject", "score", "payload", "note"]);
+        assert_eq!(view.total, 2);
+        assert_eq!(view.rows.len(), 2);
+
+        assert_eq!(view.rows[0][0], "1");
+        assert_eq!(view.rows[0][1], "did:key:alice");
+        assert_eq!(view.rows[0][2], "0.5");
+        // Binary is described, never dumped — raw bytes corrupt the display.
+        assert_eq!(view.rows[0][3], "<blob 4 bytes>");
+
+        // NULL is spelled out rather than shown as an empty cell, which would
+        // be indistinguishable from an empty string.
+        assert_eq!(view.rows[1][1], "NULL");
+        assert_eq!(view.rows[1][3], "NULL");
+    }
+
+    #[test]
+    fn read_table_handles_an_empty_table_and_a_keyword_name() {
+        let conn = fixture_db();
+
+        let empty = read_table(&conn, "empty_table").unwrap();
+        assert_eq!(empty.total, 0);
+        assert!(empty.rows.is_empty());
+        assert_eq!(empty.columns, ["a"], "columns are known even with no rows");
+
+        // `order` is a reserved word; the query quotes table names for exactly
+        // this reason.
+        let kw = read_table(&conn, "order").unwrap();
+        assert_eq!(kw.rows[0][0], "keyword-named table");
+    }
+
+    #[test]
+    fn read_table_reports_a_missing_table_rather_than_panicking() {
+        let conn = fixture_db();
+        assert!(read_table(&conn, "no_such_table").is_err());
+    }
+
+    #[test]
+    fn cells_are_flattened_and_clipped() {
+        // Newlines would break the row grid apart, so they become a marker.
+        assert_eq!(truncate_cell("a\nb\tc"), "a⏎b⏎c");
+
+        let long = "x".repeat(MAX_CELL + 50);
+        let clipped = truncate_cell(&long);
+        assert_eq!(
+            clipped.chars().count(),
+            MAX_CELL + 1,
+            "kept MAX_CELL plus the ellipsis"
+        );
+        assert!(clipped.ends_with('…'));
+
+        // Multi-byte content must be clipped by characters, not bytes.
+        let wide = "é".repeat(MAX_CELL + 10);
+        assert_eq!(truncate_cell(&wide).chars().count(), MAX_CELL + 1);
+    }
+
+    fn rows_app(rows: usize, cols: usize) -> App {
+        let mut app = browsing_app(0, 0);
+        app.tab = Tab::Database;
+        app.modal = Modal::Rows(TableRows {
+            table: "t".into(),
+            columns: (0..cols).map(|i| format!("c{i}")).collect(),
+            rows: (0..rows)
+                .map(|r| (0..cols).map(|c| format!("{r}-{c}")).collect())
+                .collect(),
+            total: rows as i64,
+            row_offset: 0,
+            col_offset: 0,
+        });
+        app
+    }
+
+    #[test]
+    fn row_scrolling_clamps_at_both_ends() {
+        let mut app = rows_app(3, 2);
+        app.on_key(key(KeyCode::Up));
+        match &app.modal {
+            Modal::Rows(v) => assert_eq!(v.row_offset, 0, "cannot scroll above the first row"),
+            _ => panic!("expected the row browser"),
+        }
+        for _ in 0..10 {
+            app.on_key(key(KeyCode::Down));
+        }
+        match &app.modal {
+            Modal::Rows(v) => assert_eq!(v.row_offset, 2, "stops at the last row"),
+            _ => panic!("expected the row browser"),
+        }
+    }
+
+    #[test]
+    fn column_scrolling_always_leaves_one_column() {
+        let mut app = rows_app(1, 3);
+        for _ in 0..10 {
+            app.on_key(key(KeyCode::Right));
+        }
+        match &app.modal {
+            Modal::Rows(v) => assert_eq!(v.col_offset, 2, "never scrolls past the last column"),
+            _ => panic!("expected the row browser"),
+        }
+        for _ in 0..10 {
+            app.on_key(key(KeyCode::Left));
+        }
+        match &app.modal {
+            Modal::Rows(v) => assert_eq!(v.col_offset, 0),
+            _ => panic!("expected the row browser"),
+        }
+    }
+
+    #[test]
+    fn escape_closes_the_row_browser() {
+        let mut app = rows_app(2, 2);
+        app.on_key(key(KeyCode::Esc));
+        assert!(matches!(app.modal, Modal::None));
+        assert!(!app.should_quit, "closing the browser does not quit");
+    }
+
     #[test]
     fn question_mark_opens_and_closes_help() {
         let mut app = browsing_app(0, 0);
@@ -1709,4 +1949,53 @@ mod tests {
         assert!(matches!(app.modal, Modal::None));
         assert!(!app.should_quit, "closing help does not quit");
     }
+}
+
+/// Read a page of rows from `table`.
+///
+/// Free-standing rather than a method so it can be exercised against a real
+/// SQLite database in tests, without a vault or an unlocked keystore.
+pub(super) fn read_table(conn: &Connection, table: &str) -> Result<TableRows> {
+    use rusqlite::types::ValueRef;
+
+    // Table names come from sqlite_master, not from user input, so
+    // interpolating one here cannot inject. Quoted anyway, because plenty
+    // of them would otherwise collide with SQL keywords.
+    let total: i64 = conn
+        .query_row(&format!("SELECT count(*) FROM \"{table}\""), [], |r| {
+            r.get(0)
+        })
+        .unwrap_or(-1);
+
+    let mut stmt = conn.prepare(&format!("SELECT * FROM \"{table}\" LIMIT {ROW_PAGE}"))?;
+    let columns: Vec<String> = stmt.column_names().iter().map(|c| c.to_string()).collect();
+    let column_count = columns.len();
+
+    let rows = stmt
+        .query_map([], |row| {
+            (0..column_count)
+                .map(|i| {
+                    let text = match row.get_ref(i)? {
+                        ValueRef::Null => "NULL".to_string(),
+                        ValueRef::Integer(n) => n.to_string(),
+                        ValueRef::Real(f) => f.to_string(),
+                        ValueRef::Text(t) => String::from_utf8_lossy(t).to_string(),
+                        // Never dump binary into a terminal: it corrupts
+                        // the display and tells the reader nothing.
+                        ValueRef::Blob(b) => format!("<blob {} bytes>", b.len()),
+                    };
+                    Ok(truncate_cell(&text))
+                })
+                .collect::<rusqlite::Result<Vec<String>>>()
+        })?
+        .collect::<rusqlite::Result<Vec<Vec<String>>>>()?;
+
+    Ok(TableRows {
+        table: table.to_string(),
+        columns,
+        rows,
+        total,
+        row_offset: 0,
+        col_offset: 0,
+    })
 }

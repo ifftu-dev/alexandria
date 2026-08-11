@@ -132,6 +132,7 @@ fn draw_browse(frame: &mut Frame, app: &App) {
             scroll,
         } => draw_detail(frame, title, body, *scroll),
         Modal::Help => draw_help(frame, app),
+        Modal::Rows(view) => draw_rows(frame, view),
     }
 }
 
@@ -574,6 +575,139 @@ fn draw_help(frame: &mut Frame, app: &App) {
     frame.render_widget(Paragraph::new(lines).block(block), area);
 }
 
+/// Draw a page of table rows as a grid.
+///
+/// Column widths are sized to their contents rather than split evenly: an `id`
+/// column and a `json` column in the same table need very different room, and
+/// an even split wastes most of the screen on the narrow one.
+fn draw_rows(frame: &mut Frame, view: &crate::tui::app::TableRows) {
+    let full = frame.area();
+    let area = centered(
+        full,
+        full.width.saturating_sub(4),
+        full.height.saturating_sub(2),
+    );
+    frame.render_widget(Clear, area);
+
+    let shown = view.rows.len();
+    let title = if view.total > shown as i64 {
+        format!(" {} — {} of {} rows ", view.table, shown, view.total)
+    } else {
+        format!(" {} — {} rows ", view.table, shown)
+    };
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(ACCENT))
+        .title(title);
+
+    if view.columns.is_empty() || view.rows.is_empty() {
+        frame.render_widget(
+            Paragraph::new("  this table is empty")
+                .style(Style::default().fg(MUTED))
+                .block(block),
+            area,
+        );
+        return;
+    }
+
+    // Inside the border, minus the row-number gutter.
+    let inner_width = area.width.saturating_sub(2) as usize;
+    let gutter = 6usize;
+    let avail = inner_width.saturating_sub(gutter);
+
+    // Width each visible column wants, capped so one wide column cannot push
+    // every other column off the screen.
+    let widths: Vec<usize> = view
+        .columns
+        .iter()
+        .enumerate()
+        .map(|(i, name)| {
+            let longest = view
+                .rows
+                .iter()
+                .filter_map(|r| r.get(i))
+                .map(|v| v.chars().count())
+                .max()
+                .unwrap_or(0);
+            longest.max(name.chars().count()).clamp(3, 32)
+        })
+        .collect();
+
+    // Take columns from the scroll offset until the row is full.
+    let mut visible: Vec<usize> = Vec::new();
+    let mut used = 0usize;
+    for (i, width) in widths.iter().enumerate().skip(view.col_offset) {
+        let w = width + 1;
+        if used + w > avail && !visible.is_empty() {
+            break;
+        }
+        used += w;
+        visible.push(i);
+    }
+
+    let cell = |text: &str, w: usize| -> String {
+        let count = text.chars().count();
+        if count > w {
+            let kept: String = text.chars().take(w.saturating_sub(1)).collect();
+            format!("{kept}…")
+        } else {
+            format!("{text:<w$}")
+        }
+    };
+
+    let mut lines: Vec<Line> = Vec::new();
+
+    let mut header = vec![Span::styled(
+        format!("{:<gutter$}", "#"),
+        Style::default().fg(MUTED),
+    )];
+    for &i in &visible {
+        header.push(Span::styled(
+            format!("{} ", cell(&view.columns[i], widths[i])),
+            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+        ));
+    }
+    lines.push(Line::from(header));
+
+    let body_rows = area.height.saturating_sub(3) as usize;
+    for (n, row) in view
+        .rows
+        .iter()
+        .enumerate()
+        .skip(view.row_offset)
+        .take(body_rows)
+    {
+        let mut spans = vec![Span::styled(
+            format!("{:<gutter$}", n + 1),
+            Style::default().fg(MUTED),
+        )];
+        for &i in &visible {
+            let value = row.get(i).map(String::as_str).unwrap_or("");
+            let style = if value == "NULL" {
+                Style::default().fg(MUTED)
+            } else {
+                Style::default()
+            };
+            spans.push(Span::styled(format!("{} ", cell(value, widths[i])), style));
+        }
+        lines.push(Line::from(spans));
+    }
+
+    // Say what is off-screen; silently truncating reads as "that is all there
+    // is".
+    let hidden_left = view.col_offset;
+    let hidden_right = view.columns.len() - visible.last().map(|i| i + 1).unwrap_or(0);
+    if hidden_left > 0 || hidden_right > 0 {
+        lines.push(Line::from(Span::styled(
+            format!("  ← {hidden_left} more   {hidden_right} more →"),
+            Style::default().fg(MUTED),
+        )));
+    }
+
+    frame.render_widget(Paragraph::new(lines).block(block), area);
+}
+
 fn draw_detail(frame: &mut Frame, title: &str, body: &str, scroll: u16) {
     let full = frame.area();
     let area = centered(
@@ -665,6 +799,47 @@ pub mod render_tests_support {
             .join("\n")
     }
 
+    /// A fixture standing in for a real query result, so the grid can be
+    /// exercised without a decrypted database.
+    pub fn sample_rows() -> crate::tui::app::TableRows {
+        crate::tui::app::TableRows {
+            table: "credentials".into(),
+            columns: vec![
+                "id".into(),
+                "subject".into(),
+                "type".into(),
+                "issued_at".into(),
+                "payload".into(),
+            ],
+            rows: vec![
+                vec![
+                    "urn:uuid:aaa".into(),
+                    "did:key:z6MkAlice".into(),
+                    "SkillCredential".into(),
+                    "2026-01-01T00:00:00Z".into(),
+                    "<blob 2048 bytes>".into(),
+                ],
+                vec![
+                    "urn:uuid:bbb".into(),
+                    "did:key:z6MkBob".into(),
+                    "RoleCredential".into(),
+                    "2026-02-14T09:30:00Z".into(),
+                    "NULL".into(),
+                ],
+                vec![
+                    "urn:uuid:ccc".into(),
+                    "did:key:z6MkCarol".into(),
+                    "SkillCredential".into(),
+                    "2026-03-02T11:00:00Z".into(),
+                    "eyJhbGciOiJFZERTQSJ9.eyJzdWIiOiJ1cm46dXVpZDpjY2MifQ".into(),
+                ],
+            ],
+            total: 128,
+            row_offset: 0,
+            col_offset: 0,
+        }
+    }
+
     pub fn sample_frames() -> Vec<(&'static str, String)> {
         use crate::tui::app::Screen;
         let mut out = Vec::new();
@@ -691,6 +866,14 @@ pub mod render_tests_support {
         a.run_doctor();
         a.tab = Tab::Doctor;
         out.push(("doctor tab", render_to_string(&a, 100, 18)));
+        a.tab = Tab::Database;
+        a.modal = Modal::Rows(sample_rows());
+        out.push(("table rows", render_to_string(&a, 100, 14)));
+        let mut scrolled = sample_rows();
+        scrolled.col_offset = 3;
+        a.modal = Modal::Rows(scrolled);
+        out.push(("table rows, scrolled right", render_to_string(&a, 60, 12)));
+        a.modal = Modal::None;
         a.tab = Tab::Credentials;
         a.tab = Tab::Database;
         a.db_tables = vec![
