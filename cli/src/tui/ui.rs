@@ -604,8 +604,7 @@ pub mod render_tests_support {
 
     pub fn app() -> App {
         App::for_test(ProjectContext {
-            root: PathBuf::from("/tmp/project"),
-            tauri_dir: PathBuf::from("/tmp/project/src-tauri"),
+            root: Some(PathBuf::from("/tmp/project")),
             app_data_dir: PathBuf::from("/tmp/appdata"),
         })
     }
@@ -663,8 +662,7 @@ mod render_tests {
 
     fn test_app() -> App {
         App::for_test(ProjectContext {
-            root: PathBuf::from("/tmp/project"),
-            tauri_dir: PathBuf::from("/tmp/project/src-tauri"),
+            root: Some(PathBuf::from("/tmp/project")),
             app_data_dir: PathBuf::from("/tmp/appdata"),
         })
     }

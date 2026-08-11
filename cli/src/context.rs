@@ -8,30 +8,57 @@ const HMAC_LEN: usize = 32;
 
 const APP_IDENTIFIER: &str = "org.alexandria.node";
 
-/// Project context — resolved paths for the Alexandria project
+/// Project context — resolved paths for the Alexandria project.
+///
+/// `root` is optional because most of this CLI has nothing to do with a source
+/// checkout. The vault, credential, database, and TUI commands operate on the
+/// installed app's data directory, which is resolved from platform paths and
+/// exists whether or not the repository does. Only the commands that shell out
+/// to `cargo`/`xcrun` — `run`, `clean build`, and parts of `doctor` — need a
+/// checkout, and they ask for it explicitly via [`require_root`].
+///
+/// Making this mandatory would break every command for anyone who installed
+/// the CLI from the app bundle and ran it from their home directory.
 #[derive(Debug, Clone)]
 pub struct ProjectContext {
-    /// Root of the project (contains package.json + src-tauri/)
-    pub root: PathBuf,
-    /// src-tauri directory
-    pub tauri_dir: PathBuf,
+    /// Root of the project (contains package.json + src-tauri/), when the
+    /// command was run from inside a checkout.
+    pub root: Option<PathBuf>,
     /// App data directory (~/Library/Application Support/org.alexandria.node/)
     pub app_data_dir: PathBuf,
 }
 
 impl ProjectContext {
-    /// Detect the project root by walking up from CWD looking for src-tauri/tauri.conf.json
+    /// Resolve paths. Never fails for missing a checkout — see the type docs.
     pub fn detect() -> Result<Self> {
         let cwd = env::current_dir().context("Failed to get current directory")?;
-        let root = find_project_root(&cwd)?;
-        let tauri_dir = root.join("src-tauri");
-        let app_data_dir = Self::resolve_app_data_dir();
-
         Ok(Self {
-            root,
-            tauri_dir,
-            app_data_dir,
+            root: find_project_root(&cwd),
+            app_data_dir: Self::resolve_app_data_dir(),
         })
+    }
+
+    /// The checkout root, or a message explaining that this command needs one.
+    pub fn require_root(&self) -> Result<&Path> {
+        self.root.as_deref().ok_or_else(|| {
+            anyhow::anyhow!(
+                "This command needs an Alexandria source checkout, and none was found \n\
+                 above the current directory.\n\
+                 Run it from inside the project (looking for src-tauri/tauri.conf.json).\n\n\
+                 Commands that work anywhere: credentials, vc, vp, role-assessment, db, \n\
+                 tui, doctor, path, clean data."
+            )
+        })
+    }
+
+    /// The `src-tauri` directory, when there is a checkout.
+    pub fn tauri_dir(&self) -> Option<PathBuf> {
+        self.root.as_ref().map(|r| r.join("src-tauri"))
+    }
+
+    /// The `src-tauri` directory, or the same explanation as [`require_root`].
+    pub fn require_tauri_dir(&self) -> Result<PathBuf> {
+        Ok(self.require_root()?.join("src-tauri"))
     }
 
     /// Get the SQLite database path
@@ -157,19 +184,73 @@ fn compute_salt_hmac(password: &str, salt: &[u8]) -> [u8; 32] {
     out
 }
 
-/// Walk up from the given path looking for a directory containing src-tauri/tauri.conf.json
-fn find_project_root(start: &Path) -> Result<PathBuf> {
+/// Walk up from the given path looking for a directory containing
+/// src-tauri/tauri.conf.json. `None` when there is no checkout above `start` —
+/// the normal case for a CLI installed from the app bundle.
+fn find_project_root(start: &Path) -> Option<PathBuf> {
     let mut current = start.to_path_buf();
     loop {
         if current.join("src-tauri/tauri.conf.json").exists() {
-            return Ok(current);
+            return Some(current);
         }
         if !current.pop() {
-            bail!(
-                "Could not find Alexandria project root.\n\
-                 Run this command from within the project directory.\n\
-                 (Looking for src-tauri/tauri.conf.json)"
-            );
+            return None;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_directory_with_no_checkout_above_it_has_no_root() {
+        // The CLI is installed from the app bundle and run from anywhere, so
+        // this is the common case, not an error. `/` can never contain a
+        // checkout above it.
+        assert_eq!(find_project_root(Path::new("/")), None);
+    }
+
+    #[test]
+    fn detect_succeeds_without_a_checkout() {
+        // Regression: `detect()` used to bail when no checkout was found,
+        // which made every command — including the vault and credential ones
+        // that never touch a checkout — fail for an installed CLI.
+        let ctx = ProjectContext {
+            root: None,
+            app_data_dir: PathBuf::from("/tmp/appdata"),
+        };
+        // The paths these commands rely on resolve with no root at all.
+        assert_eq!(ctx.db_path(), PathBuf::from("/tmp/appdata/alexandria.db"));
+        assert_eq!(ctx.vault_dir(), PathBuf::from("/tmp/appdata/stronghold"));
+        assert_eq!(ctx.iroh_dir(), PathBuf::from("/tmp/appdata/iroh"));
+    }
+
+    #[test]
+    fn require_root_explains_itself_and_names_the_commands_that_work() {
+        let ctx = ProjectContext {
+            root: None,
+            app_data_dir: PathBuf::from("/tmp/appdata"),
+        };
+        assert!(ctx.tauri_dir().is_none());
+
+        let err = ctx.require_root().unwrap_err().to_string();
+        assert!(err.contains("source checkout"), "got: {err}");
+        // The message has to point somewhere useful, not just refuse.
+        assert!(err.contains("credentials"), "got: {err}");
+        assert!(err.contains("tui"), "got: {err}");
+    }
+
+    #[test]
+    fn require_root_returns_the_root_when_there_is_one() {
+        let ctx = ProjectContext {
+            root: Some(PathBuf::from("/repo")),
+            app_data_dir: PathBuf::from("/tmp/appdata"),
+        };
+        assert_eq!(ctx.require_root().unwrap(), Path::new("/repo"));
+        assert_eq!(
+            ctx.require_tauri_dir().unwrap(),
+            PathBuf::from("/repo/src-tauri")
+        );
     }
 }

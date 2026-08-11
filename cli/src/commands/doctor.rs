@@ -11,6 +11,7 @@ use owo_colors::OwoColorize;
 use serde::Serialize;
 use serde_json::json;
 use std::fs;
+use std::path::PathBuf;
 
 use crate::context::ProjectContext;
 use crate::output;
@@ -179,8 +180,16 @@ fn check_xcode() -> Check {
     }
 }
 
+/// Where to run tool-version probes from: the checkout when there is one, so
+/// per-directory toolchain overrides apply, otherwise the current directory.
+fn probe_dir(ctx: &ProjectContext) -> PathBuf {
+    ctx.root
+        .clone()
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_default())
+}
+
 fn check_tauri_cli(ctx: &ProjectContext) -> Check {
-    match runner::run_silent(&ctx.root, "cargo", &["tauri", "--version"]) {
+    match runner::run_silent(&probe_dir(ctx), "cargo", &["tauri", "--version"]) {
         Ok(out) => Check::new("Tauri CLI", true, out.trim().to_string()),
         Err(_) => Check::new(
             "Tauri CLI",
@@ -194,7 +203,14 @@ fn check_tauri_cli(ctx: &ProjectContext) -> Check {
 /// android` builds this env itself; surfacing it here turns a mid-build
 /// linker failure into an up-front diagnostic.
 fn check_android_env(ctx: &ProjectContext) -> Check {
-    match crate::android_env::AndroidEnv::detect(&ctx.root) {
+    let Some(root) = ctx.root.as_deref() else {
+        return Check::new(
+            "NDK toolchain",
+            true,
+            "not checked (no source checkout here)",
+        );
+    };
+    match crate::android_env::AndroidEnv::detect(root) {
         Ok(env) => Check::new(
             "NDK toolchain",
             true,
@@ -208,10 +224,17 @@ fn check_android_env(ctx: &ProjectContext) -> Check {
 
 fn section_project(ctx: &ProjectContext) -> Result<()> {
     output::header("Project");
-    output::kv("Root", &ctx.root.display().to_string());
-    output::kv("Tauri dir", &ctx.tauri_dir.display().to_string());
 
-    let conf_path = ctx.tauri_dir.join("tauri.conf.json");
+    // Installed from the app bundle and run outside a checkout: there is no
+    // project to describe, and that is not a problem worth flagging.
+    let (Some(root), Some(tauri_dir)) = (ctx.root.as_ref(), ctx.tauri_dir()) else {
+        output::kv("Root", "not in a source checkout");
+        return Ok(());
+    };
+    output::kv("Root", &root.display().to_string());
+    output::kv("Tauri dir", &tauri_dir.display().to_string());
+
+    let conf_path = tauri_dir.join("tauri.conf.json");
     if conf_path.exists() {
         let conf_str = fs::read_to_string(&conf_path).context("Failed to read tauri.conf.json")?;
         if let Ok(conf) = serde_json::from_str::<serde_json::Value>(&conf_str) {
@@ -272,7 +295,7 @@ pub(crate) fn collect_sections(ctx: &ProjectContext, include_mobile: bool) -> Ve
     let mut toolchain: Vec<Check> = ["cargo", "rustc", "node", "npm"]
         .iter()
         .map(
-            |tool| match runner::run_silent(&ctx.root, tool, &["--version"]) {
+            |tool| match runner::run_silent(&probe_dir(ctx), tool, &["--version"]) {
                 Ok(v) => Check::new(*tool, true, v.trim().to_string()),
                 Err(_) => Check::new(*tool, false, "not found"),
             },
@@ -356,7 +379,7 @@ pub fn execute(args: &DoctorArgs, ctx: &ProjectContext) -> Result<()> {
     output::blank();
 
     output::emit(&json!({
-        "root": ctx.root.display().to_string(),
+        "root": ctx.root.as_ref().map(|r| r.display().to_string()),
         "appDataDir": ctx.app_data_dir.display().to_string(),
         "appData": {
             "database": ctx.has_db(),

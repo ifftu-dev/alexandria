@@ -1261,8 +1261,7 @@ mod tests {
     /// reaches the backend would fail loudly rather than silently pass.
     fn browsing_app(credentials: usize, assessments: usize) -> App {
         let ctx = ProjectContext {
-            root: PathBuf::from("/tmp/project"),
-            tauri_dir: PathBuf::from("/tmp/project/src-tauri"),
+            root: Some(PathBuf::from("/tmp/project")),
             app_data_dir: PathBuf::from("/tmp/appdata"),
         };
         let mut app = App {

@@ -65,6 +65,11 @@ pub enum RunCommand {
 }
 
 pub fn execute(cmd: &RunCommand, ctx: &ProjectContext) -> Result<()> {
+    // Every path here shells out to cargo/xcrun inside the checkout. Check
+    // once up front so a missing checkout is reported immediately, rather than
+    // after scanning for devices and prompting the user to pick one.
+    ctx.require_root()?;
+
     match cmd {
         RunCommand::Ios {
             device,
@@ -227,7 +232,7 @@ fn run_ios(
         output::step(1, 4, &format!("{} already booted", selected.name));
     }
     // Bring the Simulator window forward (best-effort).
-    let _ = runner::run_silent(&ctx.root, "open", &["-a", "Simulator"]);
+    let _ = runner::run_silent(ctx.require_root()?, "open", &["-a", "Simulator"]);
 
     // Build the app for the simulator target.
     output::step(2, 4, "Building for iOS simulator");
@@ -237,11 +242,15 @@ fn run_ios(
     output::step(3, 4, "Installing app");
     let udid = &selected.id;
     let app_str = app_path.to_string_lossy();
-    runner::run_step(&ctx.root, "xcrun", &["simctl", "install", udid, &app_str])?;
+    runner::run_step(
+        ctx.require_root()?,
+        "xcrun",
+        &["simctl", "install", udid, &app_str],
+    )?;
 
     output::step(4, 4, "Launching app");
     runner::run_step(
-        &ctx.root,
+        ctx.require_root()?,
         "xcrun",
         &["simctl", "launch", udid, IOS_BUNDLE_ID],
     )?;
@@ -291,7 +300,7 @@ fn run_ios_tauri_dev(
     }
     args.push(&device_name);
 
-    runner::run_step(&ctx.root, "cargo", &args)?;
+    runner::run_step(ctx.require_root()?, "cargo", &args)?;
     Ok(())
 }
 
@@ -331,10 +340,12 @@ fn build_ios_sim_app(ctx: &ProjectContext, release: bool) -> Result<std::path::P
     if !release {
         args.push("--debug");
     }
-    runner::run_step(&ctx.root, "cargo", &args)?;
+    runner::run_step(ctx.require_root()?, "cargo", &args)?;
 
     // Tauri places the simulator .app at src-tauri/gen/apple/build/arm64-sim/*.app
-    let build_dir = ctx.root.join("src-tauri/gen/apple/build/arm64-sim");
+    let build_dir = ctx
+        .require_root()?
+        .join("src-tauri/gen/apple/build/arm64-sim");
     let mut apps = std::fs::read_dir(&build_dir)
         .map_err(|e| anyhow::anyhow!("failed to read {}: {}", build_dir.display(), e))?
         .filter_map(|e| e.ok())
@@ -466,8 +477,8 @@ fn run_android(
 
     // Set up the NDK cross-compile env before invoking Tauri so opus-sys /
     // openssl-sys can find the toolchain (matches mobile CI).
-    let env = crate::android_env::AndroidEnv::detect(&ctx.root)?.env_vars();
-    runner::run_step_with_env(&ctx.root, "cargo", &args, &env)?;
+    let env = crate::android_env::AndroidEnv::detect(ctx.require_root()?)?.env_vars();
+    runner::run_step_with_env(ctx.require_root()?, "cargo", &args, &env)?;
     Ok(())
 }
 
