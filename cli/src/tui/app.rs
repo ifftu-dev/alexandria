@@ -6,7 +6,7 @@
 
 use std::path::PathBuf;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use rusqlite::Connection;
 
@@ -75,6 +75,14 @@ pub const VERIFY_ENTRIES: [(&str, &str); 2] = [
         "Presentation",
         "Check a presentation envelope against an expected audience",
     ),
+];
+
+/// Extra guidance shown under the selected verification.
+pub const VERIFY_HELP: [&str; 2] = [
+    "Verify as of: check validity at a past moment — expiry, suspension \
+     windows, and which issuer key was current then. Defaults to now.",
+    "The audience is required: a presentation built for one verifier is \
+     rejected at another rather than silently accepted.",
 ];
 
 /// What the app is showing. The vault is unlocked once, up front, because
@@ -173,6 +181,20 @@ pub struct TableRows {
 
 /// How many rows to pull in one look.
 const ROW_PAGE: usize = 500;
+
+/// Read a JSON argument that may be either a path or the document itself.
+///
+/// Pasting a credential straight in is the common case when someone has been
+/// sent one; writing it to a file first is friction with no purpose. A value
+/// starting with `{` or `[` cannot be a sensible path, so the two are
+/// distinguishable without a flag.
+pub(super) fn read_json_input(value: &str) -> Result<String> {
+    let trimmed = value.trim();
+    if trimmed.starts_with('{') || trimmed.starts_with('[') {
+        return Ok(trimmed.to_string());
+    }
+    std::fs::read_to_string(trimmed).with_context(|| format!("read {trimmed}"))
+}
 
 /// Flatten and clip one cell for display.
 ///
@@ -570,6 +592,25 @@ impl App {
         }
     }
 
+    /// Insert pasted text into whatever is currently accepting input.
+    ///
+    /// Arrives as one event even when it spans many lines, so a pasted
+    /// credential does not submit the form at its first newline.
+    pub fn on_paste(&mut self, text: &str) {
+        match &mut self.screen {
+            Screen::Unlock { password, .. } => {
+                // A pasted password should not carry a trailing newline from
+                // the clipboard into the key derivation.
+                password.push_str(text.trim_end_matches(['\n', '\r']));
+            }
+            Screen::Browse => {
+                if let Modal::Form { fields, active, .. } = &mut self.modal {
+                    fields[*active].value.push_str(text);
+                }
+            }
+        }
+    }
+
     fn on_key_unlock(&mut self, key: KeyEvent) {
         let Screen::Unlock { password, .. } = &mut self.screen else {
             return;
@@ -691,7 +732,7 @@ impl App {
             KeyCode::Char('m') => {
                 self.modal = Modal::Form {
                     title: "Import credentials".into(),
-                    fields: vec![Field::new("File path", true)],
+                    fields: vec![Field::new("File (path or pasted JSON)", true)],
                     active: 0,
                     action: Pending::ImportFile,
                 };
@@ -699,7 +740,7 @@ impl App {
             KeyCode::Char('n') => {
                 self.modal = Modal::Form {
                     title: "Issue credential".into(),
-                    fields: vec![Field::new("Request JSON path", true)],
+                    fields: vec![Field::new("Request (path or pasted JSON)", true)],
                     active: 0,
                     action: Pending::IssueCredential,
                 };
@@ -748,8 +789,8 @@ impl App {
                 self.modal = Modal::Form {
                     title: "Verify credential bundle".into(),
                     fields: vec![
-                        Field::new("Bundle JSON path", true),
-                        Field::new("At (ISO 8601, optional)", false),
+                        Field::new("Bundle (path or pasted JSON)", true),
+                        Field::new("Verify as of (default: now)", false),
                     ],
                     active: 0,
                     action: Pending::VerifyBundle,
@@ -759,7 +800,7 @@ impl App {
                 self.modal = Modal::Form {
                     title: "Verify presentation".into(),
                     fields: vec![
-                        Field::new("Envelope JSON path", true),
+                        Field::new("Envelope (path or pasted JSON)", true),
                         Field::new("Expected audience", true),
                     ],
                     active: 0,
@@ -788,7 +829,7 @@ impl App {
         if key.code == KeyCode::Char('n') {
             self.modal = Modal::Form {
                 title: "New role assessment".into(),
-                fields: vec![Field::new("Request JSON path", true)],
+                fields: vec![Field::new("Request (path or pasted JSON)", true)],
                 active: 0,
                 action: Pending::CreateAssessment,
             };
@@ -1036,7 +1077,7 @@ impl App {
     }
 
     fn import_file(&mut self, path: &str) -> Result<String> {
-        let payload = std::fs::read_to_string(path)?;
+        let payload = read_json_input(path)?;
         let now = vault::now_rfc3339();
         let conn = self.conn().ok_or_else(|| anyhow::anyhow!("vault locked"))?;
         let summary = app_lib::commands::import::import_credentials_impl(conn, &payload, &now)
@@ -1143,7 +1184,7 @@ impl App {
     }
 
     fn issue_credential(&mut self, request_path: &str) -> Result<String> {
-        let raw = std::fs::read_to_string(request_path)?;
+        let raw = read_json_input(request_path)?;
         let req: app_lib::commands::credentials::IssueCredentialRequest =
             serde_json::from_str(&raw)?;
         let now = vault::now_rfc3339();
@@ -1168,7 +1209,7 @@ impl App {
     }
 
     fn create_assessment(&mut self, request_path: &str) -> Result<String> {
-        let raw = std::fs::read_to_string(request_path)?;
+        let raw = read_json_input(request_path)?;
         let req: app_lib::commands::role_assessment::CreateRoleAssessmentRequest =
             serde_json::from_str(&raw)?;
         let now = vault::now_rfc3339();
@@ -1179,7 +1220,7 @@ impl App {
     }
 
     fn verify_bundle(&mut self, path: &str, at: Option<&str>) -> Result<String> {
-        let json = std::fs::read_to_string(path)?;
+        let json = read_json_input(path)?;
         let now = at.map(str::to_string).unwrap_or_else(vault::now_rfc3339);
         let (accepted, total) =
             app_lib::commands::credentials::verify_bundle_offline_impl(&json, &now)
@@ -1203,7 +1244,7 @@ impl App {
     }
 
     fn verify_presentation(&mut self, path: &str, audience: &str) -> Result<String> {
-        let raw = std::fs::read_to_string(path)?;
+        let raw = read_json_input(path)?;
         let envelope: app_lib::commands::presentation::PresentationEnvelope =
             serde_json::from_str(&raw)?;
         let conn = self.conn().ok_or_else(|| anyhow::anyhow!("vault locked"))?;
@@ -2079,6 +2120,72 @@ mod tests {
             _ => panic!("esc should return to the grid, not close it"),
         }
         assert!(!app.should_quit);
+    }
+
+    // ---- Pasting -------------------------------------------------------
+
+    #[test]
+    fn json_input_accepts_a_pasted_document_or_a_path() {
+        // A document, used as-is.
+        let doc = r#"{"id":"urn:uuid:abc"}"#;
+        assert_eq!(read_json_input(doc).unwrap(), doc);
+        // Leading whitespace from a paste must not defeat the check.
+        assert_eq!(read_json_input(&format!("\n  {doc}  ")).unwrap(), doc);
+        // An array is a document too — bundles are sent both ways.
+        assert_eq!(read_json_input("[1,2]").unwrap(), "[1,2]");
+
+        // Anything else is a path, and a missing one says so rather than
+        // being silently treated as JSON.
+        let err = read_json_input("/nope/missing.json")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("/nope/missing.json"), "got: {err}");
+
+        // A real file still works.
+        let path = std::env::temp_dir().join("alexandria-json-input-test.json");
+        std::fs::write(&path, doc).unwrap();
+        assert_eq!(read_json_input(path.to_str().unwrap()).unwrap(), doc);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn paste_lands_in_the_active_field_without_submitting() {
+        let mut app = browsing_app(0, 0);
+        app.tab = Tab::Organizations;
+        app.on_key(key(KeyCode::Char('n')));
+        app.on_key(key(KeyCode::Tab)); // move to the second field
+
+        // Multi-line, as a real credential paste would be.
+        app.on_paste("{\n  \"a\": 1\n}");
+
+        match &app.modal {
+            Modal::Form { fields, active, .. } => {
+                assert_eq!(*active, 1, "paste must not move the cursor");
+                assert!(fields[0].value.is_empty(), "went to the wrong field");
+                assert!(fields[1].value.contains("\"a\""));
+                assert!(
+                    fields[1].value.contains('\n'),
+                    "newlines are kept — the value is JSON, not a line of text"
+                );
+            }
+            _ => panic!("the form must still be open — a paste is not a submit"),
+        }
+    }
+
+    #[test]
+    fn pasting_a_password_drops_a_trailing_newline() {
+        // Clipboards routinely carry one, and it would otherwise be fed
+        // straight into the key derivation and fail the unlock.
+        let mut app = browsing_app(0, 0);
+        app.screen = Screen::Unlock {
+            password: String::new(),
+            error: None,
+        };
+        app.on_paste("hunter2\n");
+        match &app.screen {
+            Screen::Unlock { password, .. } => assert_eq!(password, "hunter2"),
+            _ => panic!("expected the unlock screen"),
+        }
     }
 
     #[test]

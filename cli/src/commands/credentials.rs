@@ -106,10 +106,15 @@ pub enum CredentialsCommand {
 
     /// Offline-verify a bundle with no Alexandria infrastructure
     Verify {
-        /// Path to a bundle JSON file
+        /// Path to a bundle JSON file, or `-` to read it from stdin
         bundle: PathBuf,
 
-        /// Verification time (ISO 8601 UTC). Defaults to now.
+        /// Verify as of this moment (ISO 8601 UTC), rather than now.
+        ///
+        /// Changes three things: whether a credential had expired, whether a
+        /// suspension window was still open, and which issuer key was current
+        /// — so a credential signed before a key rotation still verifies when
+        /// checked at a time when that key was valid.
         #[arg(long)]
         at: Option<String>,
     },
@@ -388,8 +393,7 @@ fn run_verify(bundle_path: &Path, at: Option<&str>) -> Result<()> {
     output::header("Offline bundle verify");
     output::kv("Bundle", &bundle_path.display().to_string());
 
-    let json_text = fs::read_to_string(bundle_path)
-        .with_context(|| format!("read bundle at {}", bundle_path.display()))?;
+    let json_text = read_json_arg(bundle_path)?;
     let now_owned;
     let now = if let Some(t) = at {
         t

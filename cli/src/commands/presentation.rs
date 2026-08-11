@@ -46,6 +46,20 @@ pub fn execute(
     }
 }
 
+/// Read a JSON argument from a file, or from stdin when the path is `-`.
+fn read_json_arg(path: &Path) -> Result<String> {
+    if path.as_os_str() == "-" {
+        use std::io::Read;
+        let mut buf = String::new();
+        std::io::stdin()
+            .read_to_string(&mut buf)
+            .context("read JSON from stdin")?;
+        Ok(buf)
+    } else {
+        fs::read_to_string(path).with_context(|| format!("read {}", path.display()))
+    }
+}
+
 fn run_verify(
     ctx: &ProjectContext,
     password_file: Option<&Path>,
@@ -56,17 +70,7 @@ fn run_verify(
     output::kv("Envelope", &envelope_path.display().to_string());
     output::kv("Audience", audience);
 
-    let raw = if envelope_path.as_os_str() == "-" {
-        use std::io::Read;
-        let mut buf = String::new();
-        std::io::stdin()
-            .read_to_string(&mut buf)
-            .context("read envelope from stdin")?;
-        buf
-    } else {
-        fs::read_to_string(envelope_path)
-            .with_context(|| format!("read envelope at {}", envelope_path.display()))?
-    };
+    let raw = read_json_arg(envelope_path)?;
 
     let envelope: app_lib::commands::presentation::PresentationEnvelope =
         serde_json::from_str(&raw).context("parse PresentationEnvelope JSON")?;

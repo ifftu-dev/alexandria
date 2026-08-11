@@ -20,7 +20,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use crossterm::event::{self, Event};
+use crossterm::event::{self, DisableBracketedPaste, EnableBracketedPaste, Event};
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
@@ -75,13 +75,17 @@ fn setup() -> Result<Terminal<CrosstermBackend<io::Stdout>>> {
 
     enable_raw_mode().context("enable raw mode")?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen).context("enter alternate screen")?;
+    // Bracketed paste matters here rather than being a nicety: pasted JSON
+    // contains newlines, and without it the terminal delivers those as Enter
+    // keypresses — the form would submit partway through the paste.
+    execute!(stdout, EnterAlternateScreen, EnableBracketedPaste)
+        .context("enter alternate screen")?;
     Terminal::new(CrosstermBackend::new(stdout)).context("create terminal")
 }
 
 fn restore() -> Result<()> {
     let _ = disable_raw_mode();
-    let _ = execute!(io::stdout(), LeaveAlternateScreen);
+    let _ = execute!(io::stdout(), DisableBracketedPaste, LeaveAlternateScreen);
     Ok(())
 }
 
@@ -101,6 +105,8 @@ fn event_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut A
                     return Ok(());
                 }
             }
+            // One event for the whole paste, however many lines it spans.
+            Event::Paste(text) => app.on_paste(&text),
             _ => {}
         }
     }

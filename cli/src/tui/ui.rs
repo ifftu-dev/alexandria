@@ -408,6 +408,15 @@ fn draw_detail_pane(frame: &mut Frame, app: &App, area: Rect) {
                 ),
                 Style::default().fg(MUTED),
             ))];
+            if let Some(help) = crate::tui::app::VERIFY_HELP.get(app.selected_index()) {
+                l.push(Line::from(""));
+                for chunk in wrap_text(help, 46) {
+                    l.push(Line::from(Span::styled(
+                        format!("  {chunk}"),
+                        Style::default().fg(MUTED),
+                    )));
+                }
+            }
             l.push(Line::from(""));
             l.push(Line::from(Span::styled(
                 "  ⏎ to run",
@@ -539,8 +548,8 @@ fn draw_form(frame: &mut Frame, title: &str, fields: &[super::app::Field], activ
             Style::default().fg(MUTED)
         };
         lines.push(Line::from(vec![
-            Span::styled(format!("  {marker} {:<28}", field.label), label_style),
-            Span::raw(field.value.clone()),
+            Span::styled(format!("  {marker} {:<32}", field.label), label_style),
+            Span::raw(field_display(&field.value)),
             Span::styled(
                 if is_active { "▌" } else { "" },
                 Style::default().fg(ACCENT),
@@ -778,6 +787,48 @@ fn draw_row(
     );
 }
 
+/// Wrap on word boundaries. `Paragraph`'s own wrapping applies to the whole
+/// block; these lines need to wrap at the detail pane's width while sitting
+/// among lines that must not.
+fn wrap_text(text: &str, width: usize) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut line = String::new();
+    for word in text.split_whitespace() {
+        if !line.is_empty() && line.chars().count() + 1 + word.chars().count() > width {
+            out.push(std::mem::take(&mut line));
+        }
+        if !line.is_empty() {
+            line.push(' ');
+        }
+        line.push_str(word);
+    }
+    if !line.is_empty() {
+        out.push(line);
+    }
+    out
+}
+
+/// What to show in a form field.
+///
+/// A pasted credential is thousands of characters across many lines; printing
+/// it into a single-line field would flood the modal and tell the reader
+/// nothing. Summarise anything that large, and flatten newlines out of what is
+/// left so the layout survives.
+fn field_display(value: &str) -> String {
+    const VISIBLE: usize = 28;
+    let count = value.chars().count();
+    if count > VISIBLE {
+        let trimmed = value.trim_start();
+        let kind = if trimmed.starts_with('{') || trimmed.starts_with('[') {
+            "JSON"
+        } else {
+            "text"
+        };
+        return format!("<{kind}, {count} chars>");
+    }
+    value.replace(['\n', '\r', '\t'], " ")
+}
+
 fn draw_detail(frame: &mut Frame, title: &str, body: &str, scroll: u16) {
     let full = frame.area();
     let area = centered(
@@ -843,7 +894,7 @@ mod tests {
 pub mod render_tests_support {
     use super::*;
     use crate::context::{ProfileSelection, ProjectContext};
-    use crate::tui::app::{App, Modal, Pending, Tab};
+    use crate::tui::app::{App, Field, Modal, Pending, Tab};
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
     use std::path::PathBuf;
@@ -932,7 +983,28 @@ pub mod render_tests_support {
         a.screen = Screen::Browse;
         out.push(("tab bar at 80 columns", render_to_string(&a, 80, 8)));
         a.tab = Tab::Verify;
-        out.push(("verify tab", render_to_string(&a, 100, 16)));
+        out.push(("verify tab", render_to_string(&a, 100, 18)));
+        a.modal = Modal::Form {
+            title: "Verify credential bundle".into(),
+            fields: vec![
+                {
+                    let mut f = Field::for_test("Bundle (path or pasted JSON)", true);
+                    f.value = format!(
+                        "{{\"formatVersion\":1,\"credentials\":[{}]}}",
+                        "x".repeat(900)
+                    );
+                    f
+                },
+                Field::for_test("Verify as of (default: now)", false),
+            ],
+            active: 0,
+            action: Pending::VerifyBundle,
+        };
+        out.push((
+            "verify form with a pasted bundle",
+            render_to_string(&a, 100, 14),
+        ));
+        a.modal = Modal::None;
         a.run_doctor();
         a.tab = Tab::Doctor;
         out.push(("doctor tab", render_to_string(&a, 100, 18)));
@@ -1094,6 +1166,22 @@ mod render_tests {
         let out = render(&app, 100, 24);
         assert!(out.contains("Revoke permanently?"));
         assert!(out.contains("confirm"));
+    }
+
+    #[test]
+    fn a_large_paste_is_summarised_rather_than_dumped() {
+        // A pasted credential is thousands of characters; printing it into a
+        // single-line field would flood the modal.
+        let big = format!("{{\"vc\":\"{}\"}}", "x".repeat(4000));
+        let shown = field_display(&big);
+        assert!(shown.starts_with("<JSON, "), "got: {shown}");
+        assert!(shown.contains(&big.chars().count().to_string()));
+        assert!(shown.chars().count() < 40);
+
+        // Short values are shown as typed, with newlines flattened so a
+        // stray one cannot break the row.
+        assert_eq!(field_display("acme"), "acme");
+        assert_eq!(field_display("a\nb"), "a b");
     }
 
     #[test]
