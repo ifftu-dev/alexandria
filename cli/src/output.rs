@@ -137,10 +137,17 @@ pub fn blank() {
 /// in the same visual family as the TUI's borders, and so it stays 39 columns
 /// wide — narrow enough to survive a split terminal, where a block wordmark
 /// would wrap into noise.
+/// The X is deliberately out of style with the rest of the alphabet: plain
+/// diagonals (`╲ ╱` over `╳` over `╱ ╲`) instead of hooked corner pieces. The
+/// natural box-drawing X here — `═╗ ╦` / `╔╩╦╝` / `╩ ╚═` — puts a right-angle
+/// hook on each of four arms and reads as a swastika at a glance. That shipped
+/// in the first version of this banner and had to be pulled. Do not "fix" the
+/// X back into the surrounding style; `the_x_uses_plain_diagonals_not_hooked_arms`
+/// guards it.
 pub const WORDMARK: [&str; 3] = [
-    "╔═╗ ╦   ╔═╗ ═╗ ╦ ╔═╗ ╔╗╔ ╔╦╗ ╦═╗ ╦ ╔═╗",
-    "╠═╣ ║   ║╣  ╔╩╦╝ ╠═╣ ║║║  ║║ ╠╦╝ ║ ╠═╣",
-    "╩ ╩ ╩═╝ ╚═╝ ╩ ╚═ ╩ ╩ ╝╚╝ ═╩╝ ╩╚═ ╩ ╩ ╩",
+    "╔═╗ ╦   ╔═╗ ╲ ╱ ╔═╗ ╔╗╔ ╔╦╗ ╦═╗ ╦ ╔═╗",
+    "╠═╣ ║   ║╣   ╳  ╠═╣ ║║║  ║║ ╠╦╝ ║ ╠═╣",
+    "╩ ╩ ╩═╝ ╚═╝ ╱ ╲ ╩ ╩ ╝╚╝ ═╩╝ ╩╚═ ╩ ╩ ╩",
 ];
 
 /// Gradient endpoints, cyan → violet.
@@ -231,6 +238,24 @@ mod tests {
             "wordmark is {} columns",
             WORDMARK[0].chars().count()
         );
+    }
+
+    #[test]
+    fn the_x_uses_plain_diagonals_not_hooked_arms() {
+        // Regression, and not a cosmetic one. The natural box-drawing X in
+        // this alphabet is `═╗ ╦` / `╔╩╦╝` / `╩ ╚═`, whose four right-angle
+        // arms read as a swastika. That shipped once. The X must stay built
+        // from plain diagonals.
+        let x_rows: Vec<String> = WORDMARK
+            .iter()
+            .map(|r| r.chars().skip(12).take(3).collect())
+            .collect();
+        assert_eq!(x_rows, vec!["╲ ╱", " ╳ ", "╱ ╲"], "the X glyph changed");
+
+        // The hooked middle row must not appear anywhere in the wordmark.
+        for row in WORDMARK {
+            assert!(!row.contains("╔╩╦╝"), "hooked X arms are back in: {row}");
+        }
     }
 
     #[test]
