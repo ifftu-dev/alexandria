@@ -26,16 +26,69 @@ pub struct ProjectContext {
     pub root: Option<PathBuf>,
     /// App data directory (~/Library/Application Support/org.alexandria.node/)
     pub app_data_dir: PathBuf,
+    /// Which profile's data the vault/database commands operate on.
+    pub profile: ProfileSelection,
+}
+
+/// Where a profile's files live.
+///
+/// The app stores each profile under `profiles/<uuid>/` with its vault in
+/// `vault/`. Installs predating that migration keep a single flat layout with
+/// the desktop vault in `stronghold/`, so both are resolved here — a CLI that
+/// only understood one of them would silently look at the wrong place.
+#[derive(Debug, Clone)]
+pub enum ProfileSelection {
+    /// A profile from `profiles_index.json`.
+    Profile {
+        id: String,
+        display_name: String,
+        root: PathBuf,
+    },
+    /// Pre-migration single-vault layout, directly under the app data dir.
+    Legacy,
+}
+
+impl ProfileSelection {
+    fn root(&self, app_data_dir: &Path) -> PathBuf {
+        match self {
+            ProfileSelection::Profile { root, .. } => root.clone(),
+            ProfileSelection::Legacy => app_data_dir.to_path_buf(),
+        }
+    }
+
+    /// Human label for status output.
+    pub fn label(&self) -> String {
+        match self {
+            ProfileSelection::Profile {
+                display_name, id, ..
+            } => {
+                format!("{display_name} ({})", &id[..id.len().min(8)])
+            }
+            ProfileSelection::Legacy => "legacy single-vault layout".to_string(),
+        }
+    }
 }
 
 impl ProjectContext {
     /// Resolve paths. Never fails for missing a checkout — see the type docs.
-    pub fn detect() -> Result<Self> {
+    ///
+    /// `wanted` selects a profile by id (or id prefix) or display name. With
+    /// none given, the most recently unlocked profile is used, which is the
+    /// one the app itself would open.
+    pub fn detect(wanted: Option<&str>) -> Result<Self> {
         let cwd = env::current_dir().context("Failed to get current directory")?;
+        let app_data_dir = Self::resolve_app_data_dir();
+        let profile = resolve_profile(&app_data_dir, wanted)?;
         Ok(Self {
             root: find_project_root(&cwd),
-            app_data_dir: Self::resolve_app_data_dir(),
+            app_data_dir,
+            profile,
         })
+    }
+
+    /// Directory holding the selected profile's files.
+    pub fn profile_root(&self) -> PathBuf {
+        self.profile.root(&self.app_data_dir)
     }
 
     /// The checkout root, or a message explaining that this command needs one.
@@ -63,17 +116,31 @@ impl ProjectContext {
 
     /// Get the SQLite database path
     pub fn db_path(&self) -> PathBuf {
-        self.app_data_dir.join("alexandria.db")
+        self.profile_root().join("alexandria.db")
     }
 
-    /// Get the vault directory (stronghold/ on desktop, vault/ on mobile)
+    /// Get the vault directory.
+    ///
+    /// Profiles always use `vault/`. The pre-migration layout used
+    /// `stronghold/` on desktop and `vault/` on mobile, so both are accepted
+    /// there, preferring whichever actually exists.
     pub fn vault_dir(&self) -> PathBuf {
-        self.app_data_dir.join("stronghold")
+        match &self.profile {
+            ProfileSelection::Profile { .. } => self.profile_root().join("vault"),
+            ProfileSelection::Legacy => {
+                let stronghold = self.app_data_dir.join("stronghold");
+                if stronghold.join(SALT_FILENAME).exists() {
+                    stronghold
+                } else {
+                    self.app_data_dir.join("vault")
+                }
+            }
+        }
     }
 
     /// Get the iroh data directory
     pub fn iroh_dir(&self) -> PathBuf {
-        self.app_data_dir.join("iroh")
+        self.profile_root().join("iroh")
     }
 
     /// Check if app data directory exists
@@ -145,6 +212,90 @@ impl ProjectContext {
                 .join(format!(".{}", APP_IDENTIFIER))
         }
     }
+}
+
+// ── Profile resolution ──────────────────────────────────────────────
+
+/// Pick which profile's data to operate on.
+///
+/// Deserializes the app's own `profiles_index.json` through `app_lib`, so the
+/// CLI cannot drift from the format the app writes.
+fn resolve_profile(app_data_dir: &Path, wanted: Option<&str>) -> Result<ProfileSelection> {
+    use app_lib::profile::index::{ProfileIndex, INDEX_FILENAME};
+    use app_lib::profile::manager::PROFILES_DIRNAME;
+
+    let index_path = app_data_dir.join(INDEX_FILENAME);
+    let Ok(raw) = std::fs::read_to_string(&index_path) else {
+        // No index: either a pre-migration install or the app has never run.
+        // Either way the legacy paths are the only ones that could exist.
+        if let Some(name) = wanted {
+            bail!(
+                "No profiles found at {} — cannot select `{name}`.\n\
+                 Launch the app and create a profile first.",
+                index_path.display()
+            );
+        }
+        return Ok(ProfileSelection::Legacy);
+    };
+
+    let index: ProfileIndex = serde_json::from_str(&raw)
+        .with_context(|| format!("Failed to parse {}", index_path.display()))?;
+
+    if index.profiles.is_empty() {
+        return Ok(ProfileSelection::Legacy);
+    }
+
+    let chosen = match wanted {
+        Some(name) => {
+            let needle = name.to_lowercase();
+            let matches: Vec<_> = index
+                .profiles
+                .iter()
+                .filter(|p| {
+                    p.id.as_str() == name
+                        || p.id.as_str().starts_with(name)
+                        || p.display_name.to_lowercase() == needle
+                })
+                .collect();
+            match matches.as_slice() {
+                [one] => *one,
+                [] => bail!("{}", no_such_profile(name, &index)),
+                many => bail!(
+                    "`{name}` matches {} profiles. Use the full id:\n{}",
+                    many.len(),
+                    list_profiles(&index)
+                ),
+            }
+        }
+        // Most recently unlocked is the one the app itself would open.
+        None => index
+            .profiles
+            .iter()
+            .max_by_key(|p| p.last_unlocked_at.unwrap_or(p.created_at))
+            .expect("non-empty checked above"),
+    };
+
+    Ok(ProfileSelection::Profile {
+        id: chosen.id.as_str().to_string(),
+        display_name: chosen.display_name.clone(),
+        root: app_data_dir.join(PROFILES_DIRNAME).join(chosen.id.as_str()),
+    })
+}
+
+fn list_profiles(index: &app_lib::profile::index::ProfileIndex) -> String {
+    index
+        .profiles
+        .iter()
+        .map(|p| format!("  {}  {}", p.id.as_str(), p.display_name))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn no_such_profile(name: &str, index: &app_lib::profile::index::ProfileIndex) -> String {
+    format!(
+        "No profile matches `{name}`.\n\nAvailable profiles:\n{}",
+        list_profiles(index)
+    )
 }
 
 // ── Key derivation (mirrors src-tauri/src/crypto/keystore.rs) ───────
@@ -219,11 +370,116 @@ mod tests {
         let ctx = ProjectContext {
             root: None,
             app_data_dir: PathBuf::from("/tmp/appdata"),
+            profile: ProfileSelection::Legacy,
         };
-        // The paths these commands rely on resolve with no root at all.
         assert_eq!(ctx.db_path(), PathBuf::from("/tmp/appdata/alexandria.db"));
-        assert_eq!(ctx.vault_dir(), PathBuf::from("/tmp/appdata/stronghold"));
         assert_eq!(ctx.iroh_dir(), PathBuf::from("/tmp/appdata/iroh"));
+    }
+
+    #[test]
+    fn a_profile_puts_every_path_under_its_own_directory() {
+        // Regression: the CLI used the pre-migration flat layout, so it looked
+        // for a vault at <app-data>/stronghold while the app had moved
+        // everything to profiles/<uuid>/ with the vault in vault/. Every
+        // database and credential command failed with "No vault found".
+        let ctx = ProjectContext {
+            root: None,
+            app_data_dir: PathBuf::from("/tmp/appdata"),
+            profile: ProfileSelection::Profile {
+                id: "52fce5a0-8b4e-4db8-af45-db96d3f3e647".into(),
+                display_name: "Test".into(),
+                root: PathBuf::from("/tmp/appdata/profiles/52fce5a0-8b4e-4db8-af45-db96d3f3e647"),
+            },
+        };
+        let root = PathBuf::from("/tmp/appdata/profiles/52fce5a0-8b4e-4db8-af45-db96d3f3e647");
+        assert_eq!(ctx.db_path(), root.join("alexandria.db"));
+        assert_eq!(
+            ctx.vault_dir(),
+            root.join("vault"),
+            "profiles use vault/, not stronghold/"
+        );
+        assert_eq!(ctx.iroh_dir(), root.join("iroh"));
+    }
+
+    #[test]
+    fn legacy_prefers_stronghold_when_it_holds_the_salt() {
+        // Desktop installs predating the migration keep the vault in
+        // stronghold/; mobile used vault/. Pick whichever actually has a salt
+        // file rather than guessing from the platform.
+        let base = std::env::temp_dir().join("alexandria-ctx-legacy-test");
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join("stronghold")).unwrap();
+        std::fs::write(base.join("stronghold").join(SALT_FILENAME), b"x").unwrap();
+
+        let ctx = ProjectContext {
+            root: None,
+            app_data_dir: base.clone(),
+            profile: ProfileSelection::Legacy,
+        };
+        assert_eq!(ctx.vault_dir(), base.join("stronghold"));
+
+        // With no stronghold salt, fall back to the mobile-style vault/.
+        std::fs::remove_file(base.join("stronghold").join(SALT_FILENAME)).unwrap();
+        assert_eq!(ctx.vault_dir(), base.join("vault"));
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn resolve_profile_picks_the_most_recently_unlocked() {
+        let base = std::env::temp_dir().join("alexandria-ctx-index-test");
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        std::fs::write(
+            base.join("profiles_index.json"),
+            r#"{"version":1,"profiles":[
+                {"id":"11111111-1111-4111-8111-111111111111","display_name":"Older",
+                 "created_at":"2026-01-01T00:00:00Z","last_unlocked_at":"2026-01-02T00:00:00Z"},
+                {"id":"22222222-2222-4222-8222-222222222222","display_name":"Newer",
+                 "created_at":"2026-01-01T00:00:00Z","last_unlocked_at":"2026-06-01T00:00:00Z"}
+            ]}"#,
+        )
+        .unwrap();
+
+        // No selection: the app opens the most recently unlocked, so we do too.
+        match resolve_profile(&base, None).unwrap() {
+            ProfileSelection::Profile { display_name, .. } => assert_eq!(display_name, "Newer"),
+            other => panic!("expected a profile, got {other:?}"),
+        }
+
+        // By display name, case-insensitively.
+        match resolve_profile(&base, Some("older")).unwrap() {
+            ProfileSelection::Profile { display_name, .. } => assert_eq!(display_name, "Older"),
+            other => panic!("expected a profile, got {other:?}"),
+        }
+
+        // By id prefix.
+        match resolve_profile(&base, Some("11111111")).unwrap() {
+            ProfileSelection::Profile { display_name, .. } => assert_eq!(display_name, "Older"),
+            other => panic!("expected a profile, got {other:?}"),
+        }
+
+        // An unknown name lists what is available rather than just refusing.
+        let err = resolve_profile(&base, Some("nope"))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("Older") && err.contains("Newer"), "got: {err}");
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn resolve_profile_falls_back_to_legacy_with_no_index() {
+        let base = std::env::temp_dir().join("alexandria-ctx-noindex-test");
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        assert!(matches!(
+            resolve_profile(&base, None).unwrap(),
+            ProfileSelection::Legacy
+        ));
+        // Asking for a named profile when there is no index is an error, not a
+        // silent fall back to the wrong data.
+        assert!(resolve_profile(&base, Some("whatever")).is_err());
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]
@@ -231,6 +487,7 @@ mod tests {
         let ctx = ProjectContext {
             root: None,
             app_data_dir: PathBuf::from("/tmp/appdata"),
+            profile: ProfileSelection::Legacy,
         };
         assert!(ctx.tauri_dir().is_none());
 
@@ -246,6 +503,7 @@ mod tests {
         let ctx = ProjectContext {
             root: Some(PathBuf::from("/repo")),
             app_data_dir: PathBuf::from("/tmp/appdata"),
+            profile: ProfileSelection::Legacy,
         };
         assert_eq!(ctx.require_root().unwrap(), Path::new("/repo"));
         assert_eq!(

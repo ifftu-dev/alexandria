@@ -596,7 +596,7 @@ mod tests {
 #[cfg(test)]
 pub mod render_tests_support {
     use super::*;
-    use crate::context::ProjectContext;
+    use crate::context::{ProfileSelection, ProjectContext};
     use crate::tui::app::{App, Modal, Pending, Tab};
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
@@ -606,6 +606,7 @@ pub mod render_tests_support {
         App::for_test(ProjectContext {
             root: Some(PathBuf::from("/tmp/project")),
             app_data_dir: PathBuf::from("/tmp/appdata"),
+            profile: ProfileSelection::Legacy,
         })
     }
 
@@ -654,7 +655,7 @@ pub mod render_tests_support {
 #[cfg(test)]
 mod render_tests {
     use super::*;
-    use crate::context::ProjectContext;
+    use crate::context::{ProfileSelection, ProjectContext};
     use crate::tui::app::{App, Field, Modal, Pending, Screen, Tab};
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
@@ -664,6 +665,7 @@ mod render_tests {
         App::for_test(ProjectContext {
             root: Some(PathBuf::from("/tmp/project")),
             app_data_dir: PathBuf::from("/tmp/appdata"),
+            profile: ProfileSelection::Legacy,
         })
     }
 

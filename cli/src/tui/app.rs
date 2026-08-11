@@ -1244,6 +1244,7 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::context::ProfileSelection;
     use crossterm::event::KeyEventKind;
     use std::path::PathBuf;
 
@@ -1263,6 +1264,7 @@ mod tests {
         let ctx = ProjectContext {
             root: Some(PathBuf::from("/tmp/project")),
             app_data_dir: PathBuf::from("/tmp/appdata"),
+            profile: ProfileSelection::Legacy,
         };
         let mut app = App {
             ctx,

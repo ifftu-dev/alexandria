@@ -39,6 +39,12 @@ struct Cli {
     #[arg(long, global = true)]
     json: bool,
 
+    /// Which profile's data to operate on — a profile id, an id prefix, or a
+    /// display name. Defaults to the most recently unlocked profile, which is
+    /// the one the app itself opens.
+    #[arg(long, global = true)]
+    profile: Option<String>,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -112,7 +118,7 @@ fn run(cli: Cli) -> Result<()> {
 
     output::banner();
 
-    let ctx = ProjectContext::detect()?;
+    let ctx = ProjectContext::detect(cli.profile.as_deref())?;
     let password_file = cli.password_file.as_deref();
 
     match &cli.command {

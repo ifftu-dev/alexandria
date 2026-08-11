@@ -259,6 +259,7 @@ fn section_app_data(ctx: &ProjectContext) {
     output::blank();
     output::header("App data");
     output::kv("Directory", &ctx.app_data_dir.display().to_string());
+    output::kv("Profile", &ctx.profile.label());
 
     for (label, present) in [
         ("Database", ctx.has_db()),
@@ -381,6 +382,8 @@ pub fn execute(args: &DoctorArgs, ctx: &ProjectContext) -> Result<()> {
     output::emit(&json!({
         "root": ctx.root.as_ref().map(|r| r.display().to_string()),
         "appDataDir": ctx.app_data_dir.display().to_string(),
+        "profile": ctx.profile.label(),
+        "profileRoot": ctx.profile_root().display().to_string(),
         "appData": {
             "database": ctx.has_db(),
             "vault": ctx.has_vault(),
@@ -398,14 +401,24 @@ pub fn execute(args: &DoctorArgs, ctx: &ProjectContext) -> Result<()> {
     Ok(())
 }
 
-/// Print the app data directory to stdout for scripting: `cd $(alexandria path)`.
+/// Print the selected profile's data directory to stdout for scripting:
+/// `cd $(alexandria path)`.
+///
+/// This is the profile root, not the app data root — since the profile
+/// migration the database and vault live in `profiles/<uuid>/`, so the app
+/// data root by itself would land a script in a directory holding none of the
+/// data it came for. The JSON form carries both.
 ///
 /// The bare-path form is the whole point of this command, so human mode keeps
 /// printing exactly the path and nothing else.
 pub fn print_path(ctx: &ProjectContext) -> Result<()> {
-    let path = ctx.app_data_dir.display().to_string();
+    let path = ctx.profile_root().display().to_string();
     if is_json() {
-        return output::emit(&json!({ "path": path }));
+        return output::emit(&json!({
+            "path": path,
+            "appDataDir": ctx.app_data_dir.display().to_string(),
+            "profile": ctx.profile.label(),
+        }));
     }
     println!("{path}");
     Ok(())

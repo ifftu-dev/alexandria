@@ -328,6 +328,11 @@ Every command takes two global flags:
 |------|---------|
 | `--json` | Emit the result as JSON on stdout. Human output goes to stderr, so `alexandria --json … > out.json` captures exactly the result document. Failures emit `{"error": …}` on stderr. |
 | `--password-file <PATH>` | Read the vault password from a file instead of prompting, for CI and scripted runs. |
+| `--profile <ID\|NAME>` | Which profile's data to operate on — a profile id, an id prefix, or a display name. Defaults to the most recently unlocked profile, which is the one the app itself opens. |
+
+Every command that touches the vault or database operates on one profile's
+data under `profiles/<uuid>/`. `alexandria doctor` reports which profile was
+selected; an unrecognised `--profile` lists the ones that exist.
 
 #### Interactive UI
 
@@ -436,7 +441,7 @@ alexandria db reset --force # Delete ALL app data on this device
 alexandria doctor              # project, app data, toolchain, mobile prerequisites
 alexandria doctor --no-mobile  # skip the Android/iOS checks
 
-alexandria path                # print the app data directory, for `cd $(alexandria path)`
+alexandria path                # print the selected profile's data directory
 
 alexandria clean build         # Remove target/, dist/, .vite cache
 alexandria clean data --force  # Remove app data
@@ -555,7 +560,7 @@ All data lives in `~/Library/Application Support/org.alexandria.node/` (macOS). 
 
 On first launch after upgrading from a single-vault install, the legacy top-level files (`alexandria.db`, `stronghold/` or `vault/`, `iroh/`, `plugins/`, `videocache/`) are atomically moved into a fresh `profiles/<uuid>/` slot.
 
-Use `alexandria path` to print this directory on any platform.
+Use `alexandria path` to print the active profile's directory on any platform, and `alexandria --json path` for the app data root alongside it.
 
 ## Documentation
 
