@@ -12,6 +12,8 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use std::io::IsTerminal;
+
 use anyhow::{Context, Result};
 use owo_colors::OwoColorize;
 use serde::Serialize;
@@ -127,18 +129,137 @@ pub fn blank() {
     eprintln!();
 }
 
-/// Print the Alexandria banner
+// ---- Wordmark -----------------------------------------------------------
+
+/// The Alexandria wordmark.
+///
+/// Drawn in box-drawing characters rather than a solid block font so it sits
+/// in the same visual family as the TUI's borders, and so it stays 39 columns
+/// wide — narrow enough to survive a split terminal, where a block wordmark
+/// would wrap into noise.
+pub const WORDMARK: [&str; 3] = [
+    "╔═╗ ╦   ╔═╗ ═╗ ╦ ╔═╗ ╔╗╔ ╔╦╗ ╦═╗ ╦ ╔═╗",
+    "╠═╣ ║   ║╣  ╔╩╦╝ ╠═╣ ║║║  ║║ ╠╦╝ ║ ╠═╣",
+    "╩ ╩ ╩═╝ ╚═╝ ╩ ╚═ ╩ ╩ ╝╚╝ ═╩╝ ╩╚═ ╩ ╩ ╩",
+];
+
+/// Gradient endpoints, cyan → violet.
+const GRADIENT_FROM: (u8, u8, u8) = (34, 211, 238);
+const GRADIENT_TO: (u8, u8, u8) = (167, 139, 250);
+
+/// Colour for a character at horizontal position `t` in `0.0..=1.0`.
+pub fn gradient_at(t: f32) -> (u8, u8, u8) {
+    let t = t.clamp(0.0, 1.0);
+    let mix = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * t).round() as u8;
+    (
+        mix(GRADIENT_FROM.0, GRADIENT_TO.0),
+        mix(GRADIENT_FROM.1, GRADIENT_TO.1),
+        mix(GRADIENT_FROM.2, GRADIENT_TO.2),
+    )
+}
+
+/// Render one wordmark row with a horizontal gradient.
+///
+/// The gradient runs across the *whole* wordmark rather than per row, so the
+/// three rows line up into one continuous sweep.
+fn gradient_row(row: &str) -> String {
+    let width = WORDMARK[0].chars().count().max(1) as f32;
+    row.chars()
+        .enumerate()
+        .map(|(i, ch)| {
+            if ch == ' ' {
+                return " ".to_string();
+            }
+            let (r, g, b) = gradient_at(i as f32 / width);
+            ch.truecolor(r, g, b).to_string()
+        })
+        .collect()
+}
+
+/// Print the Alexandria banner.
+///
+/// The full wordmark is for a human at a terminal. Piped or redirected — a
+/// script reading `alexandria path`, a CI log — it collapses to one line,
+/// because three rows of box-drawing characters in a build log is vandalism.
 pub fn banner() {
     if is_json() {
         return;
     }
+    if std::io::stderr().is_terminal() {
+        wordmark_banner();
+    } else {
+        eprintln!("Alexandria CLI v{}", env!("CARGO_PKG_VERSION"));
+    }
+}
+
+fn wordmark_banner() {
     let version = env!("CARGO_PKG_VERSION");
     eprintln!();
+    for row in WORDMARK {
+        eprintln!("  {}", gradient_row(row));
+    }
     eprintln!(
-        "  {}  {}",
-        "⬡ Alexandria".bold(),
-        format!("v{}", version).dimmed()
+        "   {}  {}  {}",
+        "⬡".truecolor(GRADIENT_TO.0, GRADIENT_TO.1, GRADIENT_TO.2),
+        "learning you own".dimmed(),
+        format!("v{version}").dimmed()
     );
-    eprintln!("  {}", "Developer CLI".dimmed());
     eprintln!();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wordmark_rows_are_all_the_same_width() {
+        // Rows of differing width shear the letterforms apart. Counted in
+        // chars, not bytes — every glyph here is multi-byte.
+        let widths: Vec<usize> = WORDMARK.iter().map(|r| r.chars().count()).collect();
+        assert!(
+            widths.windows(2).all(|w| w[0] == w[1]),
+            "wordmark rows differ in width: {widths:?}"
+        );
+    }
+
+    #[test]
+    fn wordmark_fits_a_narrow_terminal() {
+        // It is printed with a two-space indent and shown inside a bordered
+        // TUI modal, so it has to leave room for both.
+        assert!(
+            WORDMARK[0].chars().count() <= 44,
+            "wordmark is {} columns",
+            WORDMARK[0].chars().count()
+        );
+    }
+
+    #[test]
+    fn gradient_runs_from_cyan_to_violet_and_clamps() {
+        assert_eq!(gradient_at(0.0), GRADIENT_FROM);
+        assert_eq!(gradient_at(1.0), GRADIENT_TO);
+        // Out-of-range positions must not wrap around to a wild colour.
+        assert_eq!(gradient_at(-5.0), GRADIENT_FROM);
+        assert_eq!(gradient_at(5.0), GRADIENT_TO);
+        // The midpoint sits between the endpoints on every channel.
+        let mid = gradient_at(0.5);
+        assert!(mid.0 > GRADIENT_FROM.0 && mid.0 < GRADIENT_TO.0);
+        assert!(mid.2 > GRADIENT_FROM.2 && mid.2 < GRADIENT_TO.2);
+    }
+
+    #[test]
+    fn gradient_row_preserves_the_characters() {
+        // Colouring must not change what is drawn, only how it looks.
+        let colored = gradient_row(WORDMARK[0]);
+        let stripped: String = colored
+            .chars()
+            .filter(|c| !c.is_control())
+            .collect::<String>()
+            .replace(
+                |c: char| c == '[' || c == 'm' || c.is_ascii_digit() || c == ';',
+                "",
+            );
+        for ch in WORDMARK[0].chars().filter(|c| *c != ' ') {
+            assert!(stripped.contains(ch), "lost `{ch}` while colouring");
+        }
+    }
 }

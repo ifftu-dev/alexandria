@@ -21,24 +21,60 @@ pub fn draw(frame: &mut Frame, app: &App) {
 
 // ---- Unlock -------------------------------------------------------------
 
+/// Build the wordmark as gradient-coloured lines, sharing the colour ramp with
+/// the CLI banner so the two surfaces look like one product.
+fn wordmark_lines() -> Vec<Line<'static>> {
+    let width = crate::output::WORDMARK[0].chars().count().max(1) as f32;
+    crate::output::WORDMARK
+        .iter()
+        .map(|row| {
+            let spans: Vec<Span> = row
+                .chars()
+                .enumerate()
+                .map(|(i, ch)| {
+                    let (r, g, b) = crate::output::gradient_at(i as f32 / width);
+                    Span::styled(ch.to_string(), Style::default().fg(Color::Rgb(r, g, b)))
+                })
+                .collect();
+            Line::from(spans)
+        })
+        .collect()
+}
+
 fn draw_unlock(frame: &mut Frame, app: &App) {
     let Screen::Unlock { password, error } = &app.screen else {
         return;
     };
 
-    let area = centered(frame.area(), 60, 9);
+    // The wordmark is 39 columns and 3 rows; drop it rather than let it wrap
+    // into noise when the terminal cannot hold it alongside the prompt.
+    let full = frame.area();
+    let show_wordmark = full.width >= 46 && full.height >= 15;
+    let height = if show_wordmark { 14 } else { 9 };
+
+    let area = centered(full, 60, height);
     frame.render_widget(Clear, area);
 
-    let masked = "•".repeat(password.chars().count());
-    let mut lines = vec![
-        Line::from(""),
-        Line::from(vec![
-            Span::styled("  Password  ", Style::default().fg(MUTED)),
-            Span::styled(masked, Style::default().fg(ACCENT)),
-            Span::styled("▌", Style::default().fg(ACCENT)),
-        ]),
-        Line::from(""),
-    ];
+    let mut lines: Vec<Line> = Vec::new();
+    if show_wordmark {
+        lines.push(Line::from(""));
+        for row in wordmark_lines() {
+            // Indent to centre the 39-column wordmark in the usable width.
+            let mut spans = vec![Span::raw("         ")];
+            spans.extend(row.spans);
+            lines.push(Line::from(spans));
+        }
+    }
+
+    let masked = "\u{2022}".repeat(password.chars().count());
+    lines.push(Line::from(""));
+    lines.push(Line::from(vec![
+        Span::styled("  Password  ", Style::default().fg(MUTED)),
+        Span::styled(masked, Style::default().fg(ACCENT)),
+        Span::styled("\u{258c}", Style::default().fg(ACCENT)),
+    ]));
+    lines.push(Line::from(""));
+
     if let Some(err) = error {
         lines.push(Line::from(Span::styled(
             format!("  {err}"),
@@ -47,14 +83,14 @@ fn draw_unlock(frame: &mut Frame, app: &App) {
         lines.push(Line::from(""));
     }
     lines.push(Line::from(Span::styled(
-        "  ⏎ unlock · esc quit",
+        "  \u{23ce} unlock \u{00b7} esc quit",
         Style::default().fg(MUTED),
     )));
 
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(ACCENT))
-        .title(" ⬡ Alexandria — unlock vault ");
+        .title(" unlock vault ");
 
     frame.render_widget(Paragraph::new(lines).block(block), area);
 }
@@ -624,8 +660,25 @@ pub mod render_tests_support {
     }
 
     pub fn sample_frames() -> Vec<(&'static str, String)> {
+        use crate::tui::app::Screen;
         let mut out = Vec::new();
         let mut a = app();
+        a.screen = Screen::Unlock {
+            password: "hunter2".into(),
+            error: None,
+        };
+        out.push(("unlock screen", render_to_string(&a, 80, 24)));
+        a.screen = Screen::Unlock {
+            password: String::new(),
+            error: Some("Incorrect vault password".into()),
+        };
+        out.push(("unlock, wrong password", render_to_string(&a, 80, 20)));
+        a.screen = Screen::Unlock {
+            password: "abc".into(),
+            error: None,
+        };
+        out.push(("unlock in a small terminal", render_to_string(&a, 44, 12)));
+        a.screen = Screen::Browse;
         out.push(("tab bar at 80 columns", render_to_string(&a, 80, 8)));
         a.tab = Tab::Verify;
         out.push(("verify tab", render_to_string(&a, 100, 16)));
@@ -681,6 +734,28 @@ mod render_tests {
             .map(|row| row.iter().map(|cell| cell.symbol()).collect::<String>())
             .collect::<Vec<_>>()
             .join("\n")
+    }
+
+    #[test]
+    fn unlock_screen_shows_the_wordmark_and_drops_it_when_cramped() {
+        let mut app = test_app();
+        app.screen = Screen::Unlock {
+            password: String::new(),
+            error: None,
+        };
+        // The wordmark's first row is distinctive enough to assert on.
+        let roomy = render(&app, 80, 24);
+        assert!(roomy.contains("╔═╗ ╦   ╔═╗"), "wordmark missing at 80x24");
+        assert!(roomy.contains("Password"));
+
+        // Too narrow or too short: the prompt survives, the wordmark does not
+        // — a wrapped wordmark is unreadable noise.
+        let cramped = render(&app, 44, 12);
+        assert!(
+            !cramped.contains("╔═╗ ╦   ╔═╗"),
+            "wordmark should be dropped"
+        );
+        assert!(cramped.contains("Password"), "the prompt must still render");
     }
 
     #[test]
