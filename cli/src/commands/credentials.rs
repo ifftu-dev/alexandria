@@ -390,8 +390,8 @@ fn run_export(ctx: &ProjectContext, password_file: Option<&Path>, out: &Path) ->
 }
 
 fn run_verify(bundle_path: &Path, at: Option<&str>) -> Result<()> {
-    output::header("Offline bundle verify");
-    output::kv("Bundle", &bundle_path.display().to_string());
+    output::header("Offline verify");
+    output::kv("Input", &bundle_path.display().to_string());
 
     let json_text = read_json_arg(bundle_path)?;
     let now_owned;
@@ -403,30 +403,78 @@ fn run_verify(bundle_path: &Path, at: Option<&str>) -> Result<()> {
     };
     output::kv("At", now);
 
-    let (accepted, total) =
-        app_lib::commands::credentials::verify_bundle_offline_impl(&json_text, now)
-            .map_err(|e| anyhow::anyhow!(e))
-            .context("verify_bundle_offline_impl failed")?;
+    let report = app_lib::commands::credentials::verify_offline_impl(&json_text, now)
+        .map_err(|e| anyhow::anyhow!(e))?;
+
+    use app_lib::commands::credentials::OfflineSource;
+    output::kv(
+        "Input kind",
+        match report.source {
+            OfflineSource::Bundle => "§20.4 bundle",
+            OfflineSource::Credential => "single credential",
+            OfflineSource::Credentials => "list of credentials",
+        },
+    );
 
     output::blank();
-    output::kv("Total", &total.to_string());
-    output::kv("Accepted", &accepted.to_string());
-    if accepted == total {
-        output::success("Every credential in the bundle verifies offline.");
+    output::kv("Total", &report.total.to_string());
+    output::kv("Accepted", &report.accepted.to_string());
+
+    // Name the failing check per credential. "2 of 3 accepted" without saying
+    // which check failed leaves the reader nowhere to go.
+    for result in &report.results {
+        if result.acceptance_decision == app_lib::domain::vc::AcceptanceDecision::Accept {
+            continue;
+        }
+        let mut reasons = Vec::new();
+        if !result.valid_signature {
+            reasons.push("bad signature");
+        }
+        if !result.issuer_resolved {
+            reasons.push("issuer key not resolvable");
+        }
+        if !result.subject_bound {
+            reasons.push("subject is not a DID");
+        }
+        if result.expired {
+            reasons.push("expired");
+        }
+        if result.revoked {
+            reasons.push("revoked");
+        }
+        if result.suspended {
+            reasons.push("suspended");
+        }
+        if result.superseded {
+            reasons.push("superseded");
+        }
+        let id = if result.credential_id.is_empty() {
+            "(no envelope id)"
+        } else {
+            &result.credential_id
+        };
+        output::warning(&format!("{id}: {}", reasons.join(", ")));
+    }
+
+    output::blank();
+    if report.accepted == report.total {
+        output::success("Every credential verifies offline.");
     } else {
         output::warning(&format!(
             "{} of {} credential(s) failed verification",
-            total - accepted,
-            total
+            report.total - report.accepted,
+            report.total
         ));
     }
 
-    output::emit(&json!({
-        "total": total,
-        "accepted": accepted,
-        "at": now,
-        "allAccepted": accepted == total,
-    }))
+    if report.revocation_unknown {
+        output::faint(
+            "No status list was supplied, so revocation and suspension are unknown \
+             rather than confirmed absent. Verify a §20.4 bundle for a conclusive answer.",
+        );
+    }
+
+    output::emit(&report)
 }
 
 /// Verification failures are a result, not a crash — the command still exits

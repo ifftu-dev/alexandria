@@ -69,8 +69,8 @@ impl Tab {
 /// The two file-driven verifications, listed on the Verify tab.
 pub const VERIFY_ENTRIES: [(&str, &str); 2] = [
     (
-        "Credential bundle (offline)",
-        "Check a §20.4 survivability bundle with no infrastructure",
+        "Credential or bundle (offline)",
+        "Check a credential, a list of them, or a §20.4 bundle — no infrastructure needed",
     ),
     (
         "Presentation",
@@ -80,8 +80,10 @@ pub const VERIFY_ENTRIES: [(&str, &str); 2] = [
 
 /// Extra guidance shown under the selected verification.
 pub const VERIFY_HELP: [&str; 2] = [
-    "Verify as of: check validity at a past moment — expiry, suspension \
-     windows, and which issuer key was current then. Defaults to now.",
+    "Paste a credential straight in, or give a path. A bare credential \
+     verifies on its own — the issuer's did:key carries the public key — but \
+     revocation stays unknown without a bundle. Verify as of: check validity \
+     at a past moment; defaults to now.",
     "The audience is required: a presentation built for one verifier is \
      rejected at another rather than silently accepted.",
 ];
@@ -1225,27 +1227,79 @@ impl App {
     }
 
     fn verify_bundle(&mut self, path: &str, at: Option<&str>) -> Result<String> {
+        use app_lib::commands::credentials::OfflineSource;
+
         let json = read_json_input(path)?;
         let now = at.map(str::to_string).unwrap_or_else(vault::now_rfc3339);
-        let (accepted, total) =
-            app_lib::commands::credentials::verify_bundle_offline_impl(&json, &now)
-                .map_err(|e| anyhow::anyhow!(e))?;
+        let report = app_lib::commands::credentials::verify_offline_impl(&json, &now)
+            .map_err(|e| anyhow::anyhow!(e))?;
 
-        let ok = accepted == total;
+        let kind = match report.source {
+            OfflineSource::Bundle => "§20.4 bundle",
+            OfflineSource::Credential => "single credential",
+            OfflineSource::Credentials => "list of credentials",
+        };
+
+        let mut lines = vec![
+            ("Input".into(), kind.to_string()),
+            ("At".into(), now),
+            ("Total".into(), report.total.to_string()),
+            ("Accepted".into(), report.accepted.to_string()),
+        ];
+
+        // Name the failing check rather than only the count.
+        for result in &report.results {
+            if result.acceptance_decision == app_lib::domain::vc::AcceptanceDecision::Accept {
+                continue;
+            }
+            let mut reasons = Vec::new();
+            if !result.valid_signature {
+                reasons.push("bad signature");
+            }
+            if !result.issuer_resolved {
+                reasons.push("issuer key not resolvable");
+            }
+            if !result.subject_bound {
+                reasons.push("subject is not a DID");
+            }
+            if result.expired {
+                reasons.push("expired");
+            }
+            if result.revoked {
+                reasons.push("revoked");
+            }
+            if result.suspended {
+                reasons.push("suspended");
+            }
+            if result.superseded {
+                reasons.push("superseded");
+            }
+            let id = if result.credential_id.is_empty() {
+                "(no id)".to_string()
+            } else {
+                result.credential_id.clone()
+            };
+            lines.push((id, reasons.join(", ")));
+        }
+
+        if report.revocation_unknown {
+            lines.push((
+                "Note".into(),
+                "no status list supplied — revocation unknown, not absent".into(),
+            ));
+        }
+
+        let ok = report.accepted == report.total;
         self.verify_result = Some(VerifyOutcome {
-            title: "Credential bundle".into(),
-            lines: vec![
-                ("Bundle".into(), path.to_string()),
-                ("At".into(), now),
-                ("Total".into(), total.to_string()),
-                ("Accepted".into(), accepted.to_string()),
-            ],
+            title: kind.to_string(),
+            lines,
             ok,
         });
 
-        // A bundle that fails to verify is a result, not an error — the
-        // outcome pane reports it and the app carries on.
-        Ok(format!("{accepted}/{total} credential(s) verified"))
+        Ok(format!(
+            "{}/{} credential(s) verified",
+            report.accepted, report.total
+        ))
     }
 
     fn verify_presentation(&mut self, path: &str, audience: &str) -> Result<String> {
