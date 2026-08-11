@@ -14,6 +14,7 @@ use app_lib::commands::role_assessment::{Organization, RoleAssessment};
 use app_lib::domain::vc::VerifiableCredential;
 
 use crate::context::ProjectContext;
+use crate::tui::clipboard;
 use crate::vault::{self, Signer};
 
 /// Top-level sections, in tab order.
@@ -521,12 +522,12 @@ impl App {
     /// the key that quits.
     pub fn hints(&self) -> &'static str {
         match self.modal {
-            Modal::None => "↑↓ move · ⏎ detail · ? keys · q quit",
+            Modal::None => "↑↓ move · ⏎ detail · y copy · ? keys · q quit",
             Modal::Confirm { .. } => "y confirm · n/esc cancel",
             Modal::Form { .. } => "⇥ field · ⏎ submit · esc cancel",
-            Modal::Detail { .. } => "↑↓ scroll · esc close",
+            Modal::Detail { .. } => "↑↓ scroll · y copy · esc close",
             Modal::Rows(_) => "↑↓ rows · ←→ columns · ⏎ full row · esc close",
-            Modal::Row { .. } => "↑↓ scroll · esc back",
+            Modal::Row { .. } => "↑↓ scroll · y copy · esc back",
             Modal::Help => "esc close",
         }
     }
@@ -538,6 +539,7 @@ impl App {
             ("⇥ / ⇧⇥", "switch tab"),
             ("⏎", "open the full record"),
             ("g", "refresh from the database"),
+            ("y", "copy what is on screen as JSON"),
             ("?", "this help"),
             ("q / esc", "quit"),
             ("ctrl-c", "quit from anywhere"),
@@ -666,6 +668,7 @@ impl App {
                 }
             }
             KeyCode::Char('?') => self.modal = Modal::Help,
+            KeyCode::Char('y') => self.copy_current(),
             KeyCode::Enter => {
                 if self.tab == Tab::Verify {
                     self.open_verify_form();
@@ -901,6 +904,7 @@ impl App {
                 }
             }
             Modal::Row { scroll, .. } => match key.code {
+                KeyCode::Char('y') => self.copy_current(),
                 // Esc goes back to the grid, not out of the browser entirely.
                 KeyCode::Esc | KeyCode::Char('q') | KeyCode::Enter => self.reopen_rows(),
                 KeyCode::Down | KeyCode::Char('j') => *scroll = scroll.saturating_add(1),
@@ -911,6 +915,7 @@ impl App {
                 _ => {}
             },
             Modal::Detail { scroll, .. } => match key.code {
+                KeyCode::Char('y') => self.copy_current(),
                 KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q') => self.modal = Modal::None,
                 KeyCode::Down | KeyCode::Char('j') => *scroll = scroll.saturating_add(1),
                 KeyCode::Up | KeyCode::Char('k') => *scroll = scroll.saturating_sub(1),
@@ -1378,6 +1383,54 @@ impl App {
     fn reopen_rows(&mut self) {
         if let Modal::Row { rows, .. } = std::mem::replace(&mut self.modal, Modal::None) {
             self.modal = Modal::Rows(rows);
+        }
+    }
+
+    /// Copy whatever is currently on screen as JSON.
+    ///
+    /// One key for every surface, because "copy what I am looking at" is the
+    /// same intent whether that is a credential in the list, an expanded
+    /// record, or a database row.
+    fn copy_current(&mut self) {
+        let Some(payload) = self.copy_payload() else {
+            return self.toast_err("Nothing here to copy");
+        };
+        let bytes = payload.len();
+        match clipboard::copy(&payload) {
+            Ok(method) => {
+                let how = method.describe();
+                self.toast_ok(format!("{bytes} bytes — {how}"))
+            }
+            Err(e) => self.toast_err(format!("Copy failed: {e:#}")),
+        }
+    }
+
+    /// What `y` would copy. Split out so it can be tested without touching the
+    /// real clipboard.
+    pub(super) fn copy_payload(&self) -> Option<String> {
+        match &self.modal {
+            Modal::Detail { body, .. } => Some(body.clone()),
+            Modal::Row { pairs, .. } => {
+                // A row has no JSON of its own, so build an object from its
+                // columns rather than copying the rendered layout.
+                let map: serde_json::Map<String, serde_json::Value> = pairs
+                    .iter()
+                    .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
+                    .collect();
+                serde_json::to_string_pretty(&map).ok()
+            }
+            _ => match self.tab {
+                Tab::Credentials => self
+                    .selected_credential()
+                    .and_then(|vc| serde_json::to_string_pretty(vc).ok()),
+                Tab::Roles => self
+                    .selected_assessment()
+                    .and_then(|ra| serde_json::to_string_pretty(ra).ok()),
+                Tab::Organizations => self
+                    .selected_organization()
+                    .and_then(|org| serde_json::to_string_pretty(org).ok()),
+                _ => None,
+            },
         }
     }
 
@@ -2120,6 +2173,85 @@ mod tests {
             _ => panic!("esc should return to the grid, not close it"),
         }
         assert!(!app.should_quit);
+    }
+
+    // ---- Copying -------------------------------------------------------
+
+    #[test]
+    fn copying_a_credential_yields_its_json() {
+        let mut app = app_with_credentials();
+        let payload = app.copy_payload().expect("a credential is selected");
+
+        // Must be the credential document, parseable by whoever it is pasted
+        // into — not the rendered summary.
+        let parsed: serde_json::Value = serde_json::from_str(&payload).expect("valid JSON");
+        assert_eq!(parsed["id"], "urn:uuid:aaa");
+        assert_eq!(parsed["issuer"], "did:key:issuer1");
+        assert!(
+            parsed["proof"].is_object(),
+            "the proof must survive the copy"
+        );
+
+        // Follows the cursor rather than always copying the first row.
+        app.selected[Tab::Credentials.index()] = 1;
+        let second = app.copy_payload().unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&second).unwrap();
+        assert_eq!(parsed["id"], "urn:uuid:bbb");
+    }
+
+    #[test]
+    fn copying_respects_the_filter() {
+        // The cursor indexes visible rows, so a filtered list must copy the
+        // row the user is actually looking at.
+        let mut app = app_with_credentials();
+        app.filter = Some("bob".into());
+        app.clamp_selection();
+        let parsed: serde_json::Value = serde_json::from_str(&app.copy_payload().unwrap()).unwrap();
+        assert_eq!(parsed["id"], "urn:uuid:bbb");
+    }
+
+    #[test]
+    fn copying_a_database_row_builds_an_object_from_its_columns() {
+        // A row has no document of its own; copying the rendered layout would
+        // paste ASCII art into whatever received it.
+        let mut app = browsing_app(0, 0);
+        app.tab = Tab::Database;
+        app.modal = Modal::Row {
+            rows: TableRows {
+                table: "creds".into(),
+                columns: vec!["id".into(), "subject".into()],
+                rows: vec![vec!["1".into(), "did:key:alice".into()]],
+                total: 1,
+                selected: 0,
+                col_offset: 0,
+            },
+            pairs: vec![
+                ("id".into(), "1".into()),
+                ("subject".into(), "did:key:alice".into()),
+            ],
+            scroll: 0,
+        };
+
+        let parsed: serde_json::Value = serde_json::from_str(&app.copy_payload().unwrap()).unwrap();
+        assert_eq!(parsed["id"], "1");
+        assert_eq!(parsed["subject"], "did:key:alice");
+    }
+
+    #[test]
+    fn copying_an_open_detail_copies_what_is_shown() {
+        let mut app = app_with_credentials();
+        app.modal = Modal::Detail {
+            title: "t".into(),
+            body: "{\"shown\": true}".into(),
+            scroll: 0,
+        };
+        assert_eq!(app.copy_payload().unwrap(), "{\"shown\": true}");
+    }
+
+    #[test]
+    fn there_is_nothing_to_copy_on_an_empty_list() {
+        let app = browsing_app(0, 0);
+        assert!(app.copy_payload().is_none());
     }
 
     // ---- Pasting -------------------------------------------------------
