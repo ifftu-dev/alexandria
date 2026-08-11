@@ -131,13 +131,6 @@ pub fn blank() {
 
 // ---- Wordmark -----------------------------------------------------------
 
-/// The hexagon mark from the app icon: the outline with its chevron and stem.
-///
-/// Drawn with half-blocks (`▀ ▄ █`), which give two vertical pixels per text
-/// row. Box-drawing characters only give one, and at this size the difference
-/// is between a recognisable logo and a smudge.
-pub const MARK: [&str; 4] = [" ▄▀▀▀▄ ", "█ ▀▄▀ █", "█  █  █", " ▀▄▄▄▀ "];
-
 /// ALEXANDRIA at 7 pixels tall, in half-blocks.
 ///
 /// The X is plain diagonals meeting at a centre. An X built from hooked corner
@@ -151,11 +144,7 @@ pub const WORDMARK: [&str; 4] = [
     "▀   ▀ ▀▀▀▀▀ ▀▀▀▀▀ ▀   ▀ ▀   ▀ ▀   ▀ ▀▀▀▀  ▀   ▀ ▀▀▀ ▀   ▀",
 ];
 
-/// Gap between the mark and the wordmark.
-const MARK_GAP: usize = 3;
-
-/// The app's own one-line description, from `tauri.conf.json`.
-const TAGLINE: &str = "Free learning, credentials you own";
+const TAGLINE: &str = "Knowledge belongs to everyone";
 
 /// Brand gradient, taken from the website's icon-tile gradient
 /// (`linear-gradient(135deg, primary, cyan)` in `website/assets/css/main.css`).
@@ -235,13 +224,8 @@ pub fn banner() {
         return;
     }
 
-    let cols = terminal_width();
-    let mark_width = MARK[0].chars().count();
-    let word_width = WORDMARK[0].chars().count();
-    let with_mark = cols >= mark_width + MARK_GAP + word_width + 4;
-    let wordmark_only = cols >= word_width + 4;
-
-    if !wordmark_only {
+    let width = WORDMARK[0].chars().count();
+    if terminal_width() < width + 4 {
         eprintln!();
         eprintln!("  {}  {}", "⬡ Alexandria".bold(), dim_version());
         eprintln!();
@@ -249,58 +233,12 @@ pub fn banner() {
     }
 
     let truecolor = supports_truecolor();
-    let width = if with_mark {
-        mark_width + MARK_GAP + word_width
-    } else {
-        word_width
-    };
-
     eprintln!();
-    for (y, word_row) in WORDMARK.iter().enumerate() {
-        if with_mark {
-            let mark = paint(MARK[y], y, width, MARK.len(), truecolor);
-            let word_x = mark_width + MARK_GAP;
-            let word = paint_offset(word_row, y, word_x, width, WORDMARK.len(), truecolor);
-            eprintln!("  {mark}{}{word}", " ".repeat(MARK_GAP));
-        } else {
-            eprintln!("  {}", paint(word_row, y, width, WORDMARK.len(), truecolor));
-        }
+    for (y, row) in WORDMARK.iter().enumerate() {
+        eprintln!("  {}", paint(row, y, width, WORDMARK.len(), truecolor));
     }
-
-    // Tagline indented to line up with the wordmark's left edge.
-    let indent = if with_mark { mark_width + MARK_GAP } else { 0 };
-    eprintln!(
-        "  {}{}  {}",
-        " ".repeat(indent),
-        TAGLINE.dimmed(),
-        dim_version()
-    );
+    eprintln!("  {}  {}", TAGLINE.dimmed(), dim_version());
     eprintln!();
-}
-
-/// Like [`paint`] but for art that starts at column `x0` of the whole block,
-/// so a continuous gradient runs across mark and wordmark together.
-fn paint_offset(
-    row: &str,
-    y: usize,
-    x0: usize,
-    width: usize,
-    height: usize,
-    truecolor: bool,
-) -> String {
-    row.chars()
-        .enumerate()
-        .map(|(x, ch)| {
-            if ch == ' ' {
-                return " ".to_string();
-            }
-            if !truecolor {
-                return ch.cyan().to_string();
-            }
-            let (r, g, b) = gradient_at(gradient_t(x0 + x, y, width, height));
-            ch.truecolor(r, g, b).to_string()
-        })
-        .collect()
 }
 
 fn dim_version() -> String {
@@ -331,13 +269,11 @@ mod tests {
     fn art_rows_are_all_the_same_width() {
         // Rows of differing width shear the letterforms apart. Counted in
         // chars, not bytes — every glyph here is multi-byte.
-        for (name, art) in [("mark", &MARK[..]), ("wordmark", &WORDMARK[..])] {
-            let widths: Vec<usize> = art.iter().map(|r| r.chars().count()).collect();
-            assert!(
-                widths.windows(2).all(|w| w[0] == w[1]),
-                "{name} rows differ in width: {widths:?}"
-            );
-        }
+        let widths: Vec<usize> = WORDMARK.iter().map(|r| r.chars().count()).collect();
+        assert!(
+            widths.windows(2).all(|w| w[0] == w[1]),
+            "wordmark rows differ in width: {widths:?}"
+        );
     }
 
     #[test]
@@ -347,23 +283,21 @@ mod tests {
         // (╔ ╗ ╚ ╝ ╠ ╣ ╦ ╩ ╬); half-blocks and spaces cannot form it at all.
         // Keeping the alphabet this narrow makes the whole class impossible
         // rather than policing one glyph.
-        for (name, art) in [("mark", &MARK[..]), ("wordmark", &WORDMARK[..])] {
-            for row in art {
-                for ch in row.chars() {
-                    assert!(
-                        matches!(ch, ' ' | '▀' | '▄' | '█'),
-                        "{name} contains `{ch}`, which is not a half-block"
-                    );
-                }
+        for row in WORDMARK {
+            for ch in row.chars() {
+                assert!(
+                    matches!(ch, ' ' | '▀' | '▄' | '█'),
+                    "wordmark contains `{ch}`, which is not a half-block"
+                );
             }
         }
     }
 
     #[test]
     fn the_banner_fits_a_standard_terminal() {
-        // Mark, gap, wordmark and a two-space indent have to clear 80 columns,
-        // or the art wraps and looks worse than no art at all.
-        let full = MARK[0].chars().count() + MARK_GAP + WORDMARK[0].chars().count() + 2;
+        // The wordmark plus a two-space indent has to clear 80 columns, or the
+        // art wraps and looks worse than no art at all.
+        let full = WORDMARK[0].chars().count() + 2;
         assert!(full <= 80, "banner is {full} columns");
     }
 
@@ -410,16 +344,5 @@ mod tests {
                 assert!(painted.contains(ch), "lost `{ch}` (truecolor={truecolor})");
             }
         }
-    }
-
-    #[test]
-    fn paint_offset_continues_the_same_gradient() {
-        // The wordmark starts partway across the block, so its colours must
-        // continue the mark's ramp rather than restarting it.
-        let x0 = MARK[0].chars().count() + MARK_GAP;
-        let width = x0 + WORDMARK[0].chars().count();
-        let at_start = gradient_at(gradient_t(0, 0, width, 4));
-        let at_wordmark = gradient_at(gradient_t(x0, 0, width, 4));
-        assert_ne!(at_start, at_wordmark, "the wordmark restarts the gradient");
     }
 }
