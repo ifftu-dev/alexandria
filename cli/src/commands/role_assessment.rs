@@ -1,4 +1,4 @@
-//! `alex role-assessment` — enterprise role assessments and the
+//! `alexandria role-assessment` — enterprise role assessments and the
 //! organizations that own them.
 //!
 //! This is the headless half of the Sentinel role-assessment surface: an

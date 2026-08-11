@@ -22,7 +22,7 @@ use context::ProjectContext;
 
 #[derive(Parser)]
 #[command(
-    name = "alex",
+    name = "alexandria",
     about = "Alexandria developer CLI",
     version,
     propagate_version = true
@@ -34,7 +34,7 @@ struct Cli {
     password_file: Option<PathBuf>,
 
     /// Emit the command's result as JSON on stdout instead of decorated
-    /// text. Human output goes to stderr, so `alex --json … > out.json`
+    /// text. Human output goes to stderr, so `alexandria --json … > out.json`
     /// captures exactly the result document.
     #[arg(long, global = true)]
     json: bool,

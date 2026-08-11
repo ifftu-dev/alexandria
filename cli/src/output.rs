@@ -6,8 +6,8 @@
 //! helpers fall silent and commands emit a single machine-readable document
 //! to **stdout** via [`emit`].
 //!
-//! The split matters: `alex path` and `alex credentials get` were already
-//! stdout-clean, so `cd $(alex path)` works. `--json` generalizes that to
+//! The split matters: `alexandria path` and `alexandria credentials get` were already
+//! stdout-clean, so `cd $(alexandria path)` works. `--json` generalizes that to
 //! every command rather than bolting a second output system beside it.
 
 use std::sync::atomic::{AtomicBool, Ordering};

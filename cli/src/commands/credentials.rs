@@ -1,4 +1,4 @@
-//! `alex credentials` (alias `alex vc`) — the full Verifiable Credential
+//! `alexandria credentials` (alias `alexandria vc`) — the full Verifiable Credential
 //! lifecycle.
 //!
 //! Opens the SQLCipher-encrypted database against the same vault password
@@ -296,7 +296,7 @@ fn run_suspend(
         .context("suspend_credential_impl failed")?;
 
     output::blank();
-    output::success("Suspended — reversible with `alex credentials reinstate`");
+    output::success("Suspended — reversible with `alexandria credentials reinstate`");
 
     output::emit(&json!({
         "id": id,

@@ -1,4 +1,4 @@
-//! `alex tui` — an interactive terminal UI over the same impl functions the
+//! `alexandria tui` — an interactive terminal UI over the same impl functions the
 //! subcommands call.
 //!
 //! The CLI is good at scripted, one-shot operations. It is poor at the other
@@ -38,7 +38,7 @@ const TICK: Duration = Duration::from_millis(200);
 
 pub fn run(ctx: &ProjectContext, password_file: Option<&Path>) -> Result<()> {
     if output::is_json() {
-        anyhow::bail!("`alex tui` is interactive and has no JSON form — drop --json");
+        anyhow::bail!("`alexandria tui` is interactive and has no JSON form — drop --json");
     }
     // Fail before entering the alternate screen. Otherwise the user gets an
     // unlock prompt that no password can satisfy, and the reason why is

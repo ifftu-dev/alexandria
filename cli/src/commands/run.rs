@@ -205,7 +205,7 @@ fn run_ios(
             .cloned()
             .ok_or_else(|| {
                 anyhow::anyhow!(
-                    "No iOS simulator matched '{}'. Run `alex run ios` to pick interactively.",
+                    "No iOS simulator matched '{}'. Run `alexandria run ios` to pick interactively.",
                     name
                 )
             })?

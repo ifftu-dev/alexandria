@@ -256,12 +256,12 @@ jobs:
         if: needs.changes.outputs.backend == 'true'
         working-directory: alexandria
         run: |
-          # The cli synth crate pins blake2b-512 hashes for SYNTH_VERSION=v1
+          # The cli synth crate pins blake2b-512 hashes for SYNTH_VERSION=v2
           # at count=64, seed=42 per attack class (see
-          # cli/src/synth/generators.rs `golden_hashes_match_synth_v1`).
+          # cli/src/synth/generators.rs `golden_hashes_match_synth_v2`).
           # Runs as part of `cargo test`, but call out explicitly so the
           # log surfaces it clearly.
-          cargo test -p alex --quiet synth::generators::tests::golden_hashes_match_synth_v1
+          cargo test -p alexandria --quiet synth::generators::tests::golden_hashes_match_synth_v2
 
   # Type-check the mobile targets on every PR. `Lint & Test` runs on Linux
   # only, so `#[cfg(mobile)]` / `#[cfg(not(desktop))]` code is otherwise never

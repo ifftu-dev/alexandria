@@ -15,7 +15,7 @@
 //!   4. Android Studio's bundled JBR
 //!   5. `/usr/libexec/java_home -v 21` on macOS
 //!
-//! Without this, `alex build android` / `alex run android` fails with
+//! Without this, `alexandria build android` / `alexandria run android` fails with
 //! `aarch64-linux-android-ranlib: command not found` (before NDK fix)
 //! and `A problem occurred configuring project ':buildSrc' > <version>`
 //! (before JDK fix).
@@ -263,7 +263,7 @@ fn host_tag() -> Result<&'static str> {
 fn shim_dir() -> Result<PathBuf> {
     let cache =
         dirs::cache_dir().ok_or_else(|| anyhow::anyhow!("could not determine user cache dir"))?;
-    Ok(cache.join("alex/android-ndk-bin"))
+    Ok(cache.join("alexandria/android-ndk-bin"))
 }
 
 /// Create the shim directory (if needed) with symlinks

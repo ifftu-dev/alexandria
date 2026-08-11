@@ -359,7 +359,7 @@ impl AppState {
         // only supported on-disk format. If we ever see a plaintext file, refuse
         // to touch it — silent deletion would lose data, silent open as encrypted
         // would corrupt the keystore mapping. Surface the error and let the user
-        // (or `alex db reset`) deal with it explicitly.
+        // (or `alexandria db reset`) deal with it explicitly.
         if Database::is_plaintext(&paths.db_path) {
             return Err(format!(
                 "refusing to open: {} is an unencrypted SQLite database. \

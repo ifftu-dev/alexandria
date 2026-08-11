@@ -207,7 +207,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "alex"
+name = "alexandria"
 version = "0.1.0"
 dependencies = [
  "alexandria-node",

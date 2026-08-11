@@ -1,5 +1,5 @@
 [package]
-name = "alex"
+name = "alexandria"
 version = "0.1.0"
 description = "Alexandria developer CLI"
 edition = "2021"
@@ -11,7 +11,7 @@ rust-version = "1.83.0"
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(has_app_lib)'] }
 
 [[bin]]
-name = "alex"
+name = "alexandria"
 path = "src/main.rs"
 
 [dependencies]
@@ -44,12 +44,12 @@ clap_complete = "4"
 ratatui = "0.29"
 crossterm = "0.28"
 
-# `alex credentials` shares its impl functions with the Tauri backend so
+# `alexandria credentials` shares its impl functions with the Tauri backend so
 # `list_credentials_impl`, `export_bundle_impl`, `verify_bundle_offline_impl`
 # stay one source of truth. The package name in src-tauri/Cargo.toml is
 # `alexandria-node`; the [lib] name is `app_lib`, which is what we use
 # for imports (`use app_lib::commands::credentials::*`). This pulls in
 # the full app_lib transitive tree (pallas, iroh, libp2p…) which slows
 # CLI builds, but it's the correctness vs ergonomics trade we're
-# explicitly making per the `alex credentials` design.
+# explicitly making per the `alexandria credentials` design.
 alexandria-node = { path = "../src-tauri" }

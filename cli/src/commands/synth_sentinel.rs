@@ -1,4 +1,4 @@
-//! `alex synth-sentinel` — Sentinel synthetic-data toolkit.
+//! `alexandria synth-sentinel` — Sentinel synthetic-data toolkit.
 //!
 //! Generates the JSON adversarial-prior blobs the paste classifier
 //! trains against. Inference and training happen elsewhere (Python

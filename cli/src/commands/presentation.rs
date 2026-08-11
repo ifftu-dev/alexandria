@@ -1,6 +1,6 @@
-//! `alex vp` — Verifiable Presentation verification.
+//! `alexandria vp` — Verifiable Presentation verification.
 //!
-//! The companion to `alex credentials verify`: that one checks a
+//! The companion to `alexandria credentials verify`: that one checks a
 //! survivability bundle offline, this one checks a presentation an
 //! individual handed to a verifier, including the audience binding that
 //! stops a presentation made for one party being replayed at another.

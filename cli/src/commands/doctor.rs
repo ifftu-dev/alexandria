@@ -1,9 +1,9 @@
 //! Environment diagnostics — project layout, app data, toolchain, and the
-//! mobile build prerequisites needed by `alex run ios` / `alex run android`.
+//! mobile build prerequisites needed by `alexandria run ios` / `alexandria run android`.
 //!
 //! This absorbs what used to live in three places: the prerequisite checks
-//! from `alex build`, the app-data status from `alex health`, and the
-//! project/tool listing from `alex config show`.
+//! from `alexandria build`, the app-data status from `alexandria health`, and the
+//! project/tool listing from `alexandria config show`.
 
 use anyhow::{Context, Result};
 use clap::Args;
@@ -190,7 +190,7 @@ fn check_tauri_cli(ctx: &ProjectContext) -> Check {
     }
 }
 
-/// Report whether the NDK cross-compilation matrix resolves. `alex run
+/// Report whether the NDK cross-compilation matrix resolves. `alexandria run
 /// android` builds this env itself; surfacing it here turns a mid-build
 /// linker failure into an up-front diagnostic.
 fn check_android_env(ctx: &ProjectContext) -> Check {
@@ -360,7 +360,7 @@ pub fn execute(args: &DoctorArgs, ctx: &ProjectContext) -> Result<()> {
     Ok(())
 }
 
-/// Print the app data directory to stdout for scripting: `cd $(alex path)`.
+/// Print the app data directory to stdout for scripting: `cd $(alexandria path)`.
 ///
 /// The bare-path form is the whole point of this command, so human mode keeps
 /// printing exactly the path and nothing else.
