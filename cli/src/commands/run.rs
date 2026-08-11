@@ -25,13 +25,6 @@ struct Device {
 
 #[derive(Subcommand)]
 pub enum RunCommand {
-    /// Run on desktop (cargo tauri dev)
-    Desktop {
-        /// Build in release mode
-        #[arg(long)]
-        release: bool,
-    },
-
     /// Run on an iOS simulator or connected device
     Ios {
         /// Device name to run on (skip selection prompt)
@@ -73,7 +66,6 @@ pub enum RunCommand {
 
 pub fn execute(cmd: &RunCommand, ctx: &ProjectContext) -> Result<()> {
     match cmd {
-        RunCommand::Desktop { release } => run_desktop(ctx, *release),
         RunCommand::Ios {
             device,
             open,
@@ -86,22 +78,6 @@ pub fn execute(cmd: &RunCommand, ctx: &ProjectContext) -> Result<()> {
             release,
         } => run_android(ctx, device.as_deref(), *open, *release),
     }
-}
-
-// ── Desktop ──────────────────────────────────────────────────────────
-
-fn run_desktop(ctx: &ProjectContext, release: bool) -> Result<()> {
-    output::header("Starting desktop dev server");
-    output::faint("Press Ctrl+C to stop");
-    output::blank();
-
-    let mut args = vec!["tauri", "dev"];
-    if release {
-        args.push("--release");
-    }
-
-    runner::run_step(&ctx.root, "cargo", &args)?;
-    Ok(())
 }
 
 // ── iOS ──────────────────────────────────────────────────────────────

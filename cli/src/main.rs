@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
-use commands::{build, clean, config, credentials, db, dev, health, run, synth_sentinel};
+use commands::{clean, credentials, db, doctor, run, synth_sentinel};
 use context::ProjectContext;
 
 #[derive(Parser)]
@@ -33,13 +33,9 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Run the app on desktop, iOS, or Android (with device picker)
+    /// Run the app on iOS or Android (with device picker)
     #[command(subcommand)]
     Run(run::RunCommand),
-
-    /// Development workflow commands (test, lint, fmt)
-    #[command(subcommand)]
-    Dev(dev::DevCommand),
 
     /// Database and app data operations
     #[command(subcommand)]
@@ -49,16 +45,11 @@ enum Commands {
     #[command(subcommand)]
     Credentials(credentials::CredentialsCommand),
 
-    /// Build and compile operations
-    #[command(subcommand)]
-    Build(build::BuildCommand),
+    /// Diagnose the project, app data, toolchain, and mobile prerequisites
+    Doctor(doctor::DoctorArgs),
 
-    /// Project and environment configuration
-    #[command(subcommand)]
-    Config(config::ConfigCommand),
-
-    /// Check if the app and services are running
-    Health,
+    /// Print the app data directory path (for scripting)
+    Path,
 
     /// Clean build artifacts and app data
     #[command(subcommand)]
@@ -86,12 +77,10 @@ fn run(cli: Cli) -> Result<()> {
 
     match &cli.command {
         Commands::Run(cmd) => run::execute(cmd, &ctx),
-        Commands::Dev(cmd) => dev::execute(cmd, &ctx),
         Commands::Db(cmd) => db::execute(cmd, &ctx, cli.password_file.as_deref()),
         Commands::Credentials(cmd) => credentials::execute(cmd, &ctx, cli.password_file.as_deref()),
-        Commands::Build(cmd) => build::execute(cmd, &ctx),
-        Commands::Config(cmd) => config::execute(cmd, &ctx),
-        Commands::Health => health::execute(&ctx),
+        Commands::Doctor(args) => doctor::execute(args, &ctx),
+        Commands::Path => doctor::print_path(&ctx),
         Commands::Clean(cmd) => clean::execute(cmd, &ctx),
         Commands::SynthSentinel(cmd) => synth_sentinel::execute(cmd),
     }

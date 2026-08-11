@@ -19,9 +19,7 @@ clap = { version = "4", features = ["derive"] }
 dialoguer = "0.12"
 owo-colors = "4"
 indicatif = "0.17"
-console = "0.16"
 rusqlite = { version = "0.38", features = ["bundled-sqlcipher"] }
-sysinfo = "0.33"
 dirs = "6"
 anyhow = "1"
 log = "0.4"
