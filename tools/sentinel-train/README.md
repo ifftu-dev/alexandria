@@ -22,8 +22,8 @@ synth-sentinel  ->  featurize.py  ->  train.py  ->  paste-v1.onnx
 
 1. Generate data:
    ```bash
-   cargo run -p alex -- synth-sentinel generate-all --out-dir ./priors
-   cargo run -p alex -- synth-sentinel generate-holdout --out-dir ./holdout
+   cargo run -p alexandria -- synth-sentinel generate-all --out-dir ./priors
+   cargo run -p alexandria -- synth-sentinel generate-holdout --out-dir ./holdout
    ```
 
 2. Featurize blobs into `(X, y)` arrays:

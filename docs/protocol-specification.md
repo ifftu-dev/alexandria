@@ -1850,7 +1850,7 @@ The reference implementation is a Tauri v2 application — a single binary that 
 | Cardano | pallas, Blockfrost | VC integrity anchoring (label 1697), DAO governance, completion-witness minting, challenge-stake escrow, CIP-68 soulbound reputation snapshots |
 | Integrity | Rust (candle) + TypeScript | Keystroke autoencoder (candle), mouse CNN (candle), face embedder (hand-written TypeScript LBP) |
 | Tutoring | live (+ iroh-moq, moq-media) | Video + audio on desktop and mobile; screenshare desktop-only |
-| CLI | Rust, clap 4 | Developer tooling (`alex`) |
+| CLI | Rust, clap 4 | Developer tooling (`alexandria`) |
 | **VC sign/verify** | `domain::vc/{mod,canonicalize,context,sign,verify}` | Ed25519Signature2020 detached JWS over RFC 8785 JCS bytes, §14.7 / §14.13 |
 | **Trust aggregation** | `aggregation::{mod,weights,level,independence,antigaming,config}` | §14.14 engine + §14.15 anti-gaming; reproduces the §14.26 worked example |
 | **VC P2P layer** | `p2p::{vc_did,vc_status,vc_fetch,presentation,pinboard,archive}` | Wire layer for §14.5, §14.11.2, §14.18, §14.12.2 |

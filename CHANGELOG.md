@@ -5,6 +5,49 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project loosely follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **The developer CLI is now `alexandria`, renamed from `alex`** — the crate and
+  the binary. `cargo test -p alex` becomes `cargo test -p alexandria`. Entries
+  below this section name the binary as it was at the time and are left as
+  shipped. The `window.alex` plugin JavaScript API is unaffected and keeps its
+  name: it is a separate contract that plugin authors code against.
+- **The CLI is no longer general dev tooling.** `alexandria build`, `dev`,
+  `health`, `config`, and `run desktop` were removed — they duplicated
+  `scripts/check.sh`, CI, and `cargo tauri`, and the duplicates had drifted
+  behind. `config show`/`health` are replaced by `alexandria doctor` and
+  `config path` by `alexandria path`.
+
+### Added
+
+- **`--json` on every command** — human output goes to stderr and the result
+  document to stdout, so `alexandria --json … > out.json` captures exactly the
+  result. Failures emit `{"error": …}` on stderr, letting a script tell a
+  failure from a result by stream alone.
+- **Full credential lifecycle in the CLI** — `alexandria vc` (alias of
+  `credentials`) gains `issue`, `revoke`, `suspend`, `reinstate`, and `import`
+  alongside the existing `list`/`get`/`export`/`verify`; `list` gains
+  `--subject` and `--skill`. Issuing unlocks Stronghold for the issuer key by
+  the same path the GUI uses, so a credential minted from the CLI is
+  indistinguishable from one the app mints.
+- **`alexandria vp verify`** — presentation verification against an explicit
+  `--audience`, so a presentation built for one verifier is rejected at another.
+- **`alexandria role-assessment`** — organizations, role assessments, status
+  transitions, and role credential issuance without a Tauri window in the loop.
+- **`alexandria tui`** — an interactive terminal UI over the same impl
+  functions, with tabs for credentials, role assessments, organizations, the
+  database, verification, and diagnostics.
+- **`alexandria completions <shell>`** — generated from the clap tree.
+
+### Fixed
+
+- **The Sentinel golden-hash CI step was running nothing.** It invoked
+  `golden_hashes_match_synth_v1`, but the test had been renamed to `_v2`; a
+  cargo test filter matching nothing still exits 0, so the guard had been
+  silently passing without executing since the rename.
+
 ## [0.1.1-alpha → 0.4.5-alpha] - 2026-04-14 → 2026-07-14
 
 > Covers every release after `0.1.0-alpha` up to and including `0.4.5-alpha`.
