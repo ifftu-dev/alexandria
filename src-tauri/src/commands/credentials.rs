@@ -877,6 +877,40 @@ pub struct OfflineVerification {
     pub revocation_unknown: bool,
 }
 
+/// Why a credential was rejected, in terms a reader can act on.
+///
+/// Order matters. When the issuer cannot be resolved, `verify_credential`
+/// returns before the signature is ever checked, so `valid_signature` is false
+/// because nothing was verified — not because a signature failed. Listing both
+/// would report two independent failures where only one thing happened, and
+/// would send the reader looking at the signature when the problem is the DID.
+pub fn rejection_reasons(result: &VerificationResult) -> Vec<&'static str> {
+    if !result.issuer_resolved {
+        return vec!["issuer DID could not be resolved — signature not checked"];
+    }
+
+    let mut reasons = Vec::new();
+    if !result.valid_signature {
+        reasons.push("signature does not match the issuer key");
+    }
+    if !result.subject_bound {
+        reasons.push("subject is not a DID");
+    }
+    if result.expired {
+        reasons.push("expired");
+    }
+    if result.revoked {
+        reasons.push("revoked");
+    }
+    if result.suspended {
+        reasons.push("suspended");
+    }
+    if result.superseded {
+        reasons.push("superseded");
+    }
+    reasons
+}
+
 /// Verify a bundle, a single credential, or an array of credentials.
 ///
 /// Callers should not have to know which shape they were sent. A bare
@@ -1219,6 +1253,72 @@ mod tests {
         assert!(
             !err.contains("format_version"),
             "leaked parser detail: {err}"
+        );
+    }
+
+    #[test]
+    fn an_unresolvable_issuer_is_not_reported_as_a_bad_signature() {
+        // Seed/demo credentials carry a placeholder issuer DID and a
+        // placeholder JWS. verify_credential returns before checking the
+        // signature, so saying "bad signature" would describe a check that
+        // never ran and point the reader at the wrong field.
+        let placeholder = r#"{
+            "@context":["https://www.w3.org/ns/credentials/v2"],
+            "id":"urn:uuid:demo",
+            "type":["VerifiableCredential","AssessmentCredential"],
+            "issuer":"did:key:z6MkSeedAuthor5CivicsInstructorXXXXXXXXXXXXXXX",
+            "validFrom":"2026-04-08T11:15:00Z",
+            "credentialSubject":{"id":"did:key:z6MkDemoLearnerPlaceholderXXXXXXXXXXXXXXXXXXXX"},
+            "proof":{"type":"Ed25519Signature2020","created":"2026-04-08T11:15:00Z",
+                     "verificationMethod":"did:key:z6MkSeedAuthor5CivicsInstructorXXXXXXXXXXXXXXX#key-1",
+                     "proofPurpose":"assertionMethod","jws":"seed..signature"}
+        }"#;
+
+        let report = verify_offline_impl(placeholder, NOW).unwrap();
+        assert_eq!(
+            report.accepted, 0,
+            "a placeholder credential must not verify"
+        );
+
+        let reasons = rejection_reasons(&report.results[0]);
+        assert_eq!(
+            reasons.len(),
+            1,
+            "one failure happened, not two: {reasons:?}"
+        );
+        assert!(reasons[0].contains("issuer DID"), "got: {reasons:?}");
+        assert!(
+            !reasons
+                .iter()
+                .any(|r| r.contains("signature does not match")),
+            "the signature was never checked: {reasons:?}"
+        );
+    }
+
+    #[test]
+    fn a_resolvable_issuer_with_a_broken_signature_says_so() {
+        // The other side of the same coin: when the DID does resolve, a
+        // signature failure is a real finding and must be named.
+        let (db, issuer_key, issuer, subject) = setup();
+        let vc = issue_credential_impl(
+            db.conn(),
+            &issuer_key,
+            &issuer,
+            &sample_request(subject),
+            NOW,
+        )
+        .unwrap();
+        let mut doc: serde_json::Value = serde_json::to_value(&vc).unwrap();
+        doc["credentialSubject"]["level"] = serde_json::json!(99);
+
+        let report = verify_offline_impl(&doc.to_string(), NOW).unwrap();
+        let reasons = rejection_reasons(&report.results[0]);
+        assert!(report.results[0].issuer_resolved);
+        assert!(
+            reasons
+                .iter()
+                .any(|r| r.contains("signature does not match")),
+            "got: {reasons:?}"
         );
     }
 

@@ -426,33 +426,12 @@ fn run_verify(bundle_path: &Path, at: Option<&str>) -> Result<()> {
         if result.acceptance_decision == app_lib::domain::vc::AcceptanceDecision::Accept {
             continue;
         }
-        let mut reasons = Vec::new();
-        if !result.valid_signature {
-            reasons.push("bad signature");
-        }
-        if !result.issuer_resolved {
-            reasons.push("issuer key not resolvable");
-        }
-        if !result.subject_bound {
-            reasons.push("subject is not a DID");
-        }
-        if result.expired {
-            reasons.push("expired");
-        }
-        if result.revoked {
-            reasons.push("revoked");
-        }
-        if result.suspended {
-            reasons.push("suspended");
-        }
-        if result.superseded {
-            reasons.push("superseded");
-        }
         let id = if result.credential_id.is_empty() {
             "(no envelope id)"
         } else {
             &result.credential_id
         };
+        let reasons = app_lib::commands::credentials::rejection_reasons(result);
         output::warning(&format!("{id}: {}", reasons.join(", ")));
     }
 
