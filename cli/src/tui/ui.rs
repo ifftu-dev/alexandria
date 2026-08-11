@@ -133,6 +133,11 @@ fn draw_browse(frame: &mut Frame, app: &App) {
         } => draw_detail(frame, title, body, *scroll),
         Modal::Help => draw_help(frame, app),
         Modal::Rows(view) => draw_rows(frame, view),
+        Modal::Row {
+            rows,
+            pairs,
+            scroll,
+        } => draw_row(frame, &rows.table, rows.selected + 1, pairs, *scroll),
     }
 }
 
@@ -670,21 +675,35 @@ fn draw_rows(frame: &mut Frame, view: &crate::tui::app::TableRows) {
     }
     lines.push(Line::from(header));
 
+    // The window follows the selection rather than being tracked separately,
+    // so the highlighted row is always on screen by construction.
     let body_rows = area.height.saturating_sub(3) as usize;
-    for (n, row) in view
-        .rows
-        .iter()
-        .enumerate()
-        .skip(view.row_offset)
-        .take(body_rows)
-    {
+    let first = if body_rows > 0 && view.selected >= body_rows {
+        view.selected + 1 - body_rows
+    } else {
+        0
+    };
+
+    for (n, row) in view.rows.iter().enumerate().skip(first).take(body_rows) {
+        let current = n == view.selected;
+        let base = if current {
+            Style::default().bg(ACCENT).fg(Color::Black)
+        } else {
+            Style::default()
+        };
         let mut spans = vec![Span::styled(
             format!("{:<gutter$}", n + 1),
-            Style::default().fg(MUTED),
+            if current {
+                base.add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(MUTED)
+            },
         )];
         for &i in &visible {
             let value = row.get(i).map(String::as_str).unwrap_or("");
-            let style = if value == "NULL" {
+            let style = if current {
+                base
+            } else if value == "NULL" {
                 Style::default().fg(MUTED)
             } else {
                 Style::default()
@@ -706,6 +725,57 @@ fn draw_rows(frame: &mut Frame, view: &crate::tui::app::TableRows) {
     }
 
     frame.render_widget(Paragraph::new(lines).block(block), area);
+}
+
+/// Draw one row: every column, values not clipped to a grid cell.
+///
+/// Laid out as label-above-value rather than in two columns, because the
+/// values this view exists for — JSON payloads, DIDs, signatures — are far
+/// wider than any label column would leave room for.
+fn draw_row(
+    frame: &mut Frame,
+    table: &str,
+    number: usize,
+    pairs: &[(String, String)],
+    scroll: u16,
+) {
+    let full = frame.area();
+    let area = centered(
+        full,
+        full.width.saturating_sub(4),
+        full.height.saturating_sub(2),
+    );
+    frame.render_widget(Clear, area);
+
+    let mut lines: Vec<Line> = Vec::new();
+    for (name, value) in pairs {
+        lines.push(Line::from(Span::styled(
+            format!("  {name}"),
+            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+        )));
+        let style = if value == "NULL" {
+            Style::default().fg(MUTED)
+        } else {
+            Style::default()
+        };
+        lines.push(Line::from(Span::styled(format!("    {value}"), style)));
+        lines.push(Line::from(""));
+    }
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(ACCENT))
+        .title(format!(" {table} — row {number} "));
+
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(block)
+            // Wrapped, so a long value is readable rather than running off the
+            // right edge where the grid already showed it truncated.
+            .wrap(Wrap { trim: false })
+            .scroll((scroll, 0)),
+        area,
+    );
 }
 
 fn draw_detail(frame: &mut Frame, title: &str, body: &str, scroll: u16) {
@@ -835,7 +905,7 @@ pub mod render_tests_support {
                 ],
             ],
             total: 128,
-            row_offset: 0,
+            selected: 0,
             col_offset: 0,
         }
     }
@@ -871,8 +941,22 @@ pub mod render_tests_support {
         out.push(("table rows", render_to_string(&a, 100, 14)));
         let mut scrolled = sample_rows();
         scrolled.col_offset = 3;
+        scrolled.selected = 1;
         a.modal = Modal::Rows(scrolled);
         out.push(("table rows, scrolled right", render_to_string(&a, 60, 12)));
+        let grid = sample_rows();
+        let pairs: Vec<(String, String)> = grid
+            .columns
+            .iter()
+            .cloned()
+            .zip(grid.rows[2].iter().cloned())
+            .collect();
+        a.modal = Modal::Row {
+            rows: grid,
+            pairs,
+            scroll: 0,
+        };
+        out.push(("expanded row", render_to_string(&a, 76, 18)));
         a.modal = Modal::None;
         a.tab = Tab::Credentials;
         a.tab = Tab::Database;

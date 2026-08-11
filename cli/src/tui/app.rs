@@ -141,6 +141,16 @@ pub enum Modal {
     Help,
     /// A page of rows from one database table.
     Rows(TableRows),
+    /// One row, every column, values not clipped to fit a grid cell.
+    ///
+    /// Carries the grid it was opened from so going back restores the exact
+    /// cursor and column scroll, rather than re-reading the table and dumping
+    /// the reader at the top again.
+    Row {
+        rows: TableRows,
+        pairs: Vec<(String, String)>,
+        scroll: u16,
+    },
 }
 
 /// A window onto a table's contents.
@@ -154,8 +164,9 @@ pub struct TableRows {
     pub columns: Vec<String>,
     pub rows: Vec<Vec<String>>,
     pub total: i64,
-    /// First visible row.
-    pub row_offset: usize,
+    /// The highlighted row. The visible window is derived from it at render
+    /// time, so there is no second scroll position to keep in sync.
+    pub selected: usize,
     /// First visible column — wide tables scroll sideways.
     pub col_offset: usize,
 }
@@ -168,7 +179,7 @@ const ROW_PAGE: usize = 500;
 /// Newlines and tabs are replaced rather than stripped: a value containing
 /// them would otherwise break the row grid apart, and showing a marker is more
 /// honest than silently joining the lines.
-fn truncate_cell(text: &str) -> String {
+fn clip(text: &str, limit: usize) -> String {
     let flat: String = text
         .chars()
         .map(|c| {
@@ -179,17 +190,23 @@ fn truncate_cell(text: &str) -> String {
             }
         })
         .collect();
-    if flat.chars().count() > MAX_CELL {
-        let kept: String = flat.chars().take(MAX_CELL).collect();
+    if flat.chars().count() > limit {
+        let kept: String = flat.chars().take(limit).collect();
         format!("{kept}…")
     } else {
         flat
     }
 }
 
-/// Longest cell value kept in memory. Anything longer is truncated on load:
-/// a single column holding a base64 credential would otherwise dominate.
+/// Longest cell value kept in memory for the grid. Anything longer is
+/// truncated on load: a single column holding a base64 credential would
+/// otherwise dominate.
 const MAX_CELL: usize = 200;
+
+/// Longest value shown when a single row is expanded. Far larger than the grid
+/// cap — the point of opening a row is to read what the grid had to cut — but
+/// still bounded, so one pathological column cannot lock up the renderer.
+const MAX_DETAIL_CELL: usize = 8192;
 
 #[derive(Clone)]
 pub struct Field {
@@ -486,7 +503,8 @@ impl App {
             Modal::Confirm { .. } => "y confirm · n/esc cancel",
             Modal::Form { .. } => "⇥ field · ⏎ submit · esc cancel",
             Modal::Detail { .. } => "↑↓ scroll · esc close",
-            Modal::Rows(_) => "↑↓ rows · ←→ columns · esc close",
+            Modal::Rows(_) => "↑↓ rows · ←→ columns · ⏎ full row · esc close",
+            Modal::Row { .. } => "↑↓ scroll · esc back",
             Modal::Help => "esc close",
         }
     }
@@ -521,7 +539,10 @@ impl App {
             ],
             Tab::Organizations => vec![("n", "new organization")],
             Tab::Database => vec![
-                ("⏎", "browse the rows in this table"),
+                (
+                    "⏎",
+                    "browse the rows in this table, then ⏎ again for one row",
+                ),
                 ("m", "run pending migrations"),
                 ("s", "seed demo data if the database is empty"),
             ],
@@ -812,32 +833,40 @@ impl App {
                     self.modal = Modal::None;
                 }
             }
-            Modal::Rows(view) => match key.code {
-                KeyCode::Esc | KeyCode::Char('q') => self.modal = Modal::None,
-                KeyCode::Down | KeyCode::Char('j') => {
-                    // Stop at the last row rather than scrolling into blank
-                    // space below it.
-                    let max = view.rows.len().saturating_sub(1);
-                    view.row_offset = (view.row_offset + 1).min(max);
+            Modal::Rows(view) => {
+                let last = view.rows.len().saturating_sub(1);
+                match key.code {
+                    KeyCode::Esc | KeyCode::Char('q') => self.modal = Modal::None,
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        view.selected = (view.selected + 1).min(last)
+                    }
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        view.selected = view.selected.saturating_sub(1)
+                    }
+                    KeyCode::PageDown => view.selected = (view.selected + 20).min(last),
+                    KeyCode::PageUp => view.selected = view.selected.saturating_sub(20),
+                    KeyCode::Home => view.selected = 0,
+                    KeyCode::End => view.selected = last,
+                    KeyCode::Right | KeyCode::Char('l') => {
+                        // Always leave one column visible.
+                        let max = view.columns.len().saturating_sub(1);
+                        view.col_offset = (view.col_offset + 1).min(max);
+                    }
+                    KeyCode::Left | KeyCode::Char('h') => {
+                        view.col_offset = view.col_offset.saturating_sub(1)
+                    }
+                    KeyCode::Enter => self.open_row_detail(),
+                    _ => {}
                 }
-                KeyCode::Up | KeyCode::Char('k') => {
-                    view.row_offset = view.row_offset.saturating_sub(1);
-                }
-                KeyCode::PageDown => {
-                    let max = view.rows.len().saturating_sub(1);
-                    view.row_offset = (view.row_offset + 20).min(max);
-                }
-                KeyCode::PageUp => view.row_offset = view.row_offset.saturating_sub(20),
-                KeyCode::Home => view.row_offset = 0,
-                KeyCode::End => view.row_offset = view.rows.len().saturating_sub(1),
-                KeyCode::Right | KeyCode::Char('l') => {
-                    // Always leave one column visible.
-                    let max = view.columns.len().saturating_sub(1);
-                    view.col_offset = (view.col_offset + 1).min(max);
-                }
-                KeyCode::Left | KeyCode::Char('h') => {
-                    view.col_offset = view.col_offset.saturating_sub(1);
-                }
+            }
+            Modal::Row { scroll, .. } => match key.code {
+                // Esc goes back to the grid, not out of the browser entirely.
+                KeyCode::Esc | KeyCode::Char('q') | KeyCode::Enter => self.reopen_rows(),
+                KeyCode::Down | KeyCode::Char('j') => *scroll = scroll.saturating_add(1),
+                KeyCode::Up | KeyCode::Char('k') => *scroll = scroll.saturating_sub(1),
+                KeyCode::PageDown => *scroll = scroll.saturating_add(10),
+                KeyCode::PageUp => *scroll = scroll.saturating_sub(10),
+                KeyCode::Home => *scroll = 0,
                 _ => {}
             },
             Modal::Detail { scroll, .. } => match key.code {
@@ -1269,6 +1298,45 @@ impl App {
         match result {
             Ok(view) => self.modal = Modal::Rows(view),
             Err(e) => self.toast_err(format!("{e:#}")),
+        }
+    }
+
+    /// Expand the highlighted row, re-reading it so values are not the ones
+    /// the grid had to clip.
+    fn open_row_detail(&mut self) {
+        let Modal::Rows(view) = &self.modal else {
+            return;
+        };
+        if view.rows.is_empty() {
+            return;
+        }
+        let (table, index) = (view.table.clone(), view.selected);
+
+        let result = self
+            .conn()
+            .ok_or_else(|| anyhow::anyhow!("vault locked"))
+            .and_then(|conn| read_row(conn, &table, index));
+
+        match result {
+            Ok(values) => {
+                let Modal::Rows(view) = std::mem::replace(&mut self.modal, Modal::None) else {
+                    return;
+                };
+                let pairs = view.columns.iter().cloned().zip(values).collect();
+                self.modal = Modal::Row {
+                    rows: view,
+                    pairs,
+                    scroll: 0,
+                };
+            }
+            Err(e) => self.toast_err(format!("{e:#}")),
+        }
+    }
+
+    /// Return from an expanded row to the grid it came from.
+    fn reopen_rows(&mut self) {
+        if let Modal::Row { rows, .. } = std::mem::replace(&mut self.modal, Modal::None) {
+            self.modal = Modal::Rows(rows);
         }
     }
 
@@ -1864,10 +1932,10 @@ mod tests {
     #[test]
     fn cells_are_flattened_and_clipped() {
         // Newlines would break the row grid apart, so they become a marker.
-        assert_eq!(truncate_cell("a\nb\tc"), "a⏎b⏎c");
+        assert_eq!(clip("a\nb\tc", MAX_CELL), "a⏎b⏎c");
 
         let long = "x".repeat(MAX_CELL + 50);
-        let clipped = truncate_cell(&long);
+        let clipped = clip(&long, MAX_CELL);
         assert_eq!(
             clipped.chars().count(),
             MAX_CELL + 1,
@@ -1877,7 +1945,7 @@ mod tests {
 
         // Multi-byte content must be clipped by characters, not bytes.
         let wide = "é".repeat(MAX_CELL + 10);
-        assert_eq!(truncate_cell(&wide).chars().count(), MAX_CELL + 1);
+        assert_eq!(clip(&wide, MAX_CELL).chars().count(), MAX_CELL + 1);
     }
 
     fn rows_app(rows: usize, cols: usize) -> App {
@@ -1890,25 +1958,25 @@ mod tests {
                 .map(|r| (0..cols).map(|c| format!("{r}-{c}")).collect())
                 .collect(),
             total: rows as i64,
-            row_offset: 0,
+            selected: 0,
             col_offset: 0,
         });
         app
     }
 
     #[test]
-    fn row_scrolling_clamps_at_both_ends() {
+    fn row_cursor_clamps_at_both_ends() {
         let mut app = rows_app(3, 2);
         app.on_key(key(KeyCode::Up));
         match &app.modal {
-            Modal::Rows(v) => assert_eq!(v.row_offset, 0, "cannot scroll above the first row"),
+            Modal::Rows(v) => assert_eq!(v.selected, 0, "cannot move above the first row"),
             _ => panic!("expected the row browser"),
         }
         for _ in 0..10 {
             app.on_key(key(KeyCode::Down));
         }
         match &app.modal {
-            Modal::Rows(v) => assert_eq!(v.row_offset, 2, "stops at the last row"),
+            Modal::Rows(v) => assert_eq!(v.selected, 2, "stops at the last row"),
             _ => panic!("expected the row browser"),
         }
     }
@@ -1930,6 +1998,87 @@ mod tests {
             Modal::Rows(v) => assert_eq!(v.col_offset, 0),
             _ => panic!("expected the row browser"),
         }
+    }
+
+    #[test]
+    fn read_row_returns_full_values_the_grid_had_to_clip() {
+        let conn = Connection::open_in_memory().unwrap();
+        let long = "x".repeat(MAX_CELL + 500);
+        conn.execute_batch("CREATE TABLE t (a TEXT, b BLOB);")
+            .unwrap();
+        conn.execute("INSERT INTO t VALUES (?1, x'0011')", [&long])
+            .unwrap();
+
+        // The grid clips to keep cells laid out...
+        let grid = read_table(&conn, "t").unwrap();
+        assert_eq!(grid.rows[0][0].chars().count(), MAX_CELL + 1);
+
+        // ...the expanded row is the whole point of not clipping that hard.
+        let row = read_row(&conn, "t", 0).unwrap();
+        assert_eq!(row[0].chars().count(), long.chars().count());
+        assert!(row[0].chars().count() > MAX_CELL);
+        // Blobs stay described even here — the cap is about text, not binary.
+        assert_eq!(row[1], "<blob 2 bytes>");
+    }
+
+    #[test]
+    fn read_row_picks_the_row_at_that_position() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE t (v TEXT);
+             INSERT INTO t VALUES ('first'), ('second'), ('third');",
+        )
+        .unwrap();
+
+        // Position must agree with what the grid put at that index, or the
+        // reader opens a different row than the one highlighted.
+        let grid = read_table(&conn, "t").unwrap();
+        for (i, expected) in grid.rows.iter().enumerate() {
+            assert_eq!(read_row(&conn, "t", i).unwrap()[0], expected[0]);
+        }
+        assert!(
+            read_row(&conn, "t", 99).is_err(),
+            "past the end is an error"
+        );
+    }
+
+    #[test]
+    fn enter_expands_the_selected_row_and_escape_returns_to_it() {
+        // Without a signer there is no connection, so this exercises the state
+        // machine: the grid must survive the round trip either way.
+        let mut app = rows_app(5, 3);
+        if let Modal::Rows(v) = &mut app.modal {
+            v.selected = 3;
+            v.col_offset = 1;
+        }
+
+        // Hand-build the expanded modal the way open_row_detail would, since
+        // the read itself needs a database.
+        let Modal::Rows(view) = std::mem::replace(&mut app.modal, Modal::None) else {
+            panic!("expected the grid")
+        };
+        let pairs = vec![("c0".to_string(), "3-0".to_string())];
+        app.modal = Modal::Row {
+            rows: view,
+            pairs,
+            scroll: 0,
+        };
+
+        app.on_key(key(KeyCode::Down));
+        match &app.modal {
+            Modal::Row { scroll, .. } => assert_eq!(*scroll, 1, "the expanded row scrolls"),
+            _ => panic!("expected the expanded row"),
+        }
+
+        app.on_key(key(KeyCode::Esc));
+        match &app.modal {
+            Modal::Rows(v) => {
+                assert_eq!(v.selected, 3, "cursor restored");
+                assert_eq!(v.col_offset, 1, "column scroll restored");
+            }
+            _ => panic!("esc should return to the grid, not close it"),
+        }
+        assert!(!app.should_quit);
     }
 
     #[test]
@@ -1955,9 +2104,45 @@ mod tests {
 ///
 /// Free-standing rather than a method so it can be exercised against a real
 /// SQLite database in tests, without a vault or an unlocked keystore.
-pub(super) fn read_table(conn: &Connection, table: &str) -> Result<TableRows> {
+/// Render one SQLite value as display text.
+///
+/// `limit` differs between the grid and the expanded row: the grid needs cells
+/// short enough to lay out, the expanded row exists precisely to show what the
+/// grid cut.
+fn cell_text(row: &rusqlite::Row, i: usize, limit: usize) -> rusqlite::Result<String> {
     use rusqlite::types::ValueRef;
 
+    let text = match row.get_ref(i)? {
+        ValueRef::Null => "NULL".to_string(),
+        ValueRef::Integer(n) => n.to_string(),
+        ValueRef::Real(f) => f.to_string(),
+        ValueRef::Text(t) => String::from_utf8_lossy(t).to_string(),
+        // Never dump binary into a terminal: it corrupts the display and tells
+        // the reader nothing.
+        ValueRef::Blob(b) => format!("<blob {} bytes>", b.len()),
+    };
+    Ok(clip(&text, limit))
+}
+
+/// Read every column of one row, without the grid's narrow cell cap.
+///
+/// Re-queried rather than taken from the loaded page, so the values are the
+/// full ones. `LIMIT 1 OFFSET n` against the same unordered `SELECT *` returns
+/// the same row the page put at position `n`: identical statement, unchanged
+/// table.
+pub(super) fn read_row(conn: &Connection, table: &str, index: usize) -> Result<Vec<String>> {
+    let mut stmt = conn.prepare(&format!("SELECT * FROM \"{table}\" LIMIT 1 OFFSET {index}"))?;
+    let count = stmt.column_count();
+    let mut rows = stmt.query([])?;
+    let row = rows
+        .next()?
+        .ok_or_else(|| anyhow::anyhow!("row {} is no longer there", index + 1))?;
+    Ok((0..count)
+        .map(|i| cell_text(row, i, MAX_DETAIL_CELL))
+        .collect::<rusqlite::Result<Vec<String>>>()?)
+}
+
+pub(super) fn read_table(conn: &Connection, table: &str) -> Result<TableRows> {
     // Table names come from sqlite_master, not from user input, so
     // interpolating one here cannot inject. Quoted anyway, because plenty
     // of them would otherwise collide with SQL keywords.
@@ -1974,18 +2159,7 @@ pub(super) fn read_table(conn: &Connection, table: &str) -> Result<TableRows> {
     let rows = stmt
         .query_map([], |row| {
             (0..column_count)
-                .map(|i| {
-                    let text = match row.get_ref(i)? {
-                        ValueRef::Null => "NULL".to_string(),
-                        ValueRef::Integer(n) => n.to_string(),
-                        ValueRef::Real(f) => f.to_string(),
-                        ValueRef::Text(t) => String::from_utf8_lossy(t).to_string(),
-                        // Never dump binary into a terminal: it corrupts
-                        // the display and tells the reader nothing.
-                        ValueRef::Blob(b) => format!("<blob {} bytes>", b.len()),
-                    };
-                    Ok(truncate_cell(&text))
-                })
+                .map(|i| cell_text(row, i, MAX_CELL))
                 .collect::<rusqlite::Result<Vec<String>>>()
         })?
         .collect::<rusqlite::Result<Vec<Vec<String>>>>()?;
@@ -1995,7 +2169,7 @@ pub(super) fn read_table(conn: &Connection, table: &str) -> Result<TableRows> {
         columns,
         rows,
         total,
-        row_offset: 0,
+        selected: 0,
         col_offset: 0,
     })
 }
