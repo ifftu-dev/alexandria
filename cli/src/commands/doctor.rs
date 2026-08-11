@@ -8,10 +8,13 @@
 use anyhow::{Context, Result};
 use clap::Args;
 use owo_colors::OwoColorize;
+use serde::Serialize;
+use serde_json::json;
 use std::fs;
 
 use crate::context::ProjectContext;
 use crate::output;
+use crate::output::is_json;
 use crate::runner;
 
 /// Rust triples needed to run on a physical Android device, an Android
@@ -33,6 +36,7 @@ pub struct DoctorArgs {
 
 // ── Check result ─────────────────────────────────────────────────────
 
+#[derive(Serialize)]
 struct Check {
     label: String,
     ok: bool,
@@ -50,6 +54,10 @@ impl Check {
 }
 
 fn display(checks: &[Check]) -> bool {
+    if is_json() {
+        // Sections are collected into the report document instead.
+        return checks.iter().all(|c| c.ok);
+    }
     for check in checks {
         let dot = if check.ok {
             "●".green().to_string()
@@ -242,7 +250,20 @@ fn section_app_data(ctx: &ProjectContext) {
     }
 }
 
-fn section_toolchain(ctx: &ProjectContext) -> bool {
+/// A named group of checks. Sections return their checks rather than only a
+/// pass/fail so `--json` can report the same detail the human view shows.
+struct Section {
+    name: &'static str,
+    checks: Vec<Check>,
+}
+
+impl Section {
+    fn ok(&self) -> bool {
+        self.checks.iter().all(|c| c.ok)
+    }
+}
+
+fn section_toolchain(ctx: &ProjectContext) -> Section {
     output::blank();
     output::header("Toolchain");
 
@@ -256,10 +277,14 @@ fn section_toolchain(ctx: &ProjectContext) -> bool {
         )
         .collect();
     checks.push(check_tauri_cli(ctx));
-    display(&checks)
+    display(&checks);
+    Section {
+        name: "toolchain",
+        checks,
+    }
 }
 
-fn section_mobile(ctx: &ProjectContext) -> bool {
+fn section_mobile(ctx: &ProjectContext) -> Vec<Section> {
     output::blank();
     output::header("Android prerequisites");
     let mut android = vec![
@@ -269,21 +294,30 @@ fn section_mobile(ctx: &ProjectContext) -> bool {
     ];
     android.push(check_android_env(ctx));
     android.extend(rust_target_checks(ANDROID_TRIPLES));
-    let android_ok = display(&android);
+    display(&android);
+
+    let mut sections = vec![Section {
+        name: "android",
+        checks: android,
+    }];
 
     if !cfg!(target_os = "macos") {
         output::blank();
         output::faint("iOS checks skipped — they require macOS.");
-        return android_ok;
+        return sections;
     }
 
     output::blank();
     output::header("iOS prerequisites");
     let mut ios = vec![check_xcode()];
     ios.extend(rust_target_checks(IOS_TRIPLES));
-    let ios_ok = display(&ios);
+    display(&ios);
+    sections.push(Section {
+        name: "ios",
+        checks: ios,
+    });
 
-    android_ok && ios_ok
+    sections
 }
 
 // ── Entry point ──────────────────────────────────────────────────────
@@ -292,10 +326,11 @@ pub fn execute(args: &DoctorArgs, ctx: &ProjectContext) -> Result<()> {
     section_project(ctx)?;
     section_app_data(ctx);
 
-    let mut all_ok = section_toolchain(ctx);
+    let mut sections = vec![section_toolchain(ctx)];
     if !args.no_mobile {
-        all_ok &= section_mobile(ctx);
+        sections.extend(section_mobile(ctx));
     }
+    let all_ok = sections.iter().all(Section::ok);
 
     output::blank();
     if all_ok {
@@ -305,13 +340,35 @@ pub fn execute(args: &DoctorArgs, ctx: &ProjectContext) -> Result<()> {
     }
     output::blank();
 
+    output::emit(&json!({
+        "root": ctx.root.display().to_string(),
+        "appDataDir": ctx.app_data_dir.display().to_string(),
+        "appData": {
+            "database": ctx.has_db(),
+            "vault": ctx.has_vault(),
+            "irohStore": ctx.iroh_dir().exists(),
+        },
+        "sections": sections
+            .iter()
+            .map(|s| json!({ "name": s.name, "ok": s.ok(), "checks": &s.checks }))
+            .collect::<Vec<_>>(),
+        "ok": all_ok,
+    }))?;
+
     // Diagnostics always exit 0: a missing Android NDK is a fact to report,
-    // not a failure of the `doctor` command itself.
+    // not a failure of the `doctor` command itself. Callers branch on `ok`.
     Ok(())
 }
 
 /// Print the app data directory to stdout for scripting: `cd $(alex path)`.
+///
+/// The bare-path form is the whole point of this command, so human mode keeps
+/// printing exactly the path and nothing else.
 pub fn print_path(ctx: &ProjectContext) -> Result<()> {
-    println!("{}", ctx.app_data_dir.display());
+    let path = ctx.app_data_dir.display().to_string();
+    if is_json() {
+        return output::emit(&json!({ "path": path }));
+    }
+    println!("{path}");
     Ok(())
 }
