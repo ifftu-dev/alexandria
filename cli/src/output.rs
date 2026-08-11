@@ -131,53 +131,89 @@ pub fn blank() {
 
 // ---- Wordmark -----------------------------------------------------------
 
-/// The Alexandria wordmark.
+/// The hexagon mark from the app icon: the outline with its chevron and stem.
 ///
-/// Drawn in box-drawing characters rather than a solid block font so it sits
-/// in the same visual family as the TUI's borders, and so it stays 39 columns
-/// wide — narrow enough to survive a split terminal, where a block wordmark
-/// would wrap into noise.
-/// The X is deliberately out of style with the rest of the alphabet: plain
-/// diagonals (`╲ ╱` over `╳` over `╱ ╲`) instead of hooked corner pieces. The
-/// natural box-drawing X here — `═╗ ╦` / `╔╩╦╝` / `╩ ╚═` — puts a right-angle
-/// hook on each of four arms and reads as a swastika at a glance. That shipped
-/// in the first version of this banner and had to be pulled. Do not "fix" the
-/// X back into the surrounding style; `the_x_uses_plain_diagonals_not_hooked_arms`
-/// guards it.
-pub const WORDMARK: [&str; 3] = [
-    "╔═╗ ╦   ╔═╗ ╲ ╱ ╔═╗ ╔╗╔ ╔╦╗ ╦═╗ ╦ ╔═╗",
-    "╠═╣ ║   ║╣   ╳  ╠═╣ ║║║  ║║ ╠╦╝ ║ ╠═╣",
-    "╩ ╩ ╩═╝ ╚═╝ ╱ ╲ ╩ ╩ ╝╚╝ ═╩╝ ╩╚═ ╩ ╩ ╩",
+/// Drawn with half-blocks (`▀ ▄ █`), which give two vertical pixels per text
+/// row. Box-drawing characters only give one, and at this size the difference
+/// is between a recognisable logo and a smudge.
+pub const MARK: [&str; 4] = [" ▄▀▀▀▄ ", "█ ▀▄▀ █", "█  █  █", " ▀▄▄▄▀ "];
+
+/// ALEXANDRIA at 7 pixels tall, in half-blocks.
+///
+/// The X is plain diagonals meeting at a centre. An X built from hooked corner
+/// pieces reads as a swastika — that shipped once in an earlier box-drawing
+/// version of this banner and had to be pulled. Whatever else changes here,
+/// the X must not grow right-angle arms.
+pub const WORDMARK: [&str; 4] = [
+    "▄▀▀▀▄ █     █▀▀▀▀ █   █ ▄▀▀▀▄ █▄  █ █▀▀▀▄ █▀▀▀▄ ▀█▀ ▄▀▀▀▄",
+    "█▄▄▄█ █     █▄▄▄   ▀▄▀  █▄▄▄█ █▀▄ █ █   █ █▄▄▄▀  █  █▄▄▄█",
+    "█   █ █     █     ▄▀ ▀▄ █   █ █  ██ █   █ █ ▀▄   █  █   █",
+    "▀   ▀ ▀▀▀▀▀ ▀▀▀▀▀ ▀   ▀ ▀   ▀ ▀   ▀ ▀▀▀▀  ▀   ▀ ▀▀▀ ▀   ▀",
 ];
 
-/// Gradient endpoints, cyan → violet.
-const GRADIENT_FROM: (u8, u8, u8) = (34, 211, 238);
-const GRADIENT_TO: (u8, u8, u8) = (167, 139, 250);
+/// Gap between the mark and the wordmark.
+const MARK_GAP: usize = 3;
 
-/// Colour for a character at horizontal position `t` in `0.0..=1.0`.
+/// The app's own one-line description, from `tauri.conf.json`.
+const TAGLINE: &str = "Free learning, credentials you own";
+
+/// Brand gradient, taken from the website's icon-tile gradient
+/// (`linear-gradient(135deg, primary, cyan)` in `website/assets/css/main.css`).
+///
+/// `primary` is the dark-mode value (`139 133 255`) rather than the light-mode
+/// `79 70 229`: terminals are overwhelmingly dark, and the site itself
+/// lightens primary for dark backgrounds for the same reason.
+const BRAND_INDIGO: (u8, u8, u8) = (139, 133, 255);
+const BRAND_CYAN: (u8, u8, u8) = (34, 211, 238);
+
+/// Colour at a point on the gradient, `t` in `0.0..=1.0`.
 pub fn gradient_at(t: f32) -> (u8, u8, u8) {
     let t = t.clamp(0.0, 1.0);
     let mix = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * t).round() as u8;
     (
-        mix(GRADIENT_FROM.0, GRADIENT_TO.0),
-        mix(GRADIENT_FROM.1, GRADIENT_TO.1),
-        mix(GRADIENT_FROM.2, GRADIENT_TO.2),
+        mix(BRAND_INDIGO.0, BRAND_CYAN.0),
+        mix(BRAND_INDIGO.1, BRAND_CYAN.1),
+        mix(BRAND_INDIGO.2, BRAND_CYAN.2),
     )
 }
 
-/// Render one wordmark row with a horizontal gradient.
+/// Position along the gradient for a cell, sweeping diagonally.
 ///
-/// The gradient runs across the *whole* wordmark rather than per row, so the
-/// three rows line up into one continuous sweep.
-fn gradient_row(row: &str) -> String {
-    let width = WORDMARK[0].chars().count().max(1) as f32;
+/// Weighted mostly horizontal with a vertical component, which approximates
+/// the website's 135° gradients — a purely horizontal ramp looks flat next to
+/// them.
+pub fn gradient_t(x: usize, y: usize, width: usize, height: usize) -> f32 {
+    let w = width.max(1) as f32;
+    let h = height.max(1) as f32;
+    (x as f32 / w) * 0.82 + (y as f32 / h) * 0.18
+}
+
+/// Whether the terminal advertises 24-bit colour.
+///
+/// Truecolor escapes on a 256-colour terminal render as the wrong colour or as
+/// literal garbage, so the banner falls back to a single ANSI colour rather
+/// than assuming.
+fn supports_truecolor() -> bool {
+    std::env::var("COLORTERM")
+        .map(|v| {
+            let v = v.to_ascii_lowercase();
+            v.contains("truecolor") || v.contains("24bit")
+        })
+        .unwrap_or(false)
+}
+
+/// Paint one row of art, offset by `y` within the whole block.
+fn paint(row: &str, y: usize, width: usize, height: usize, truecolor: bool) -> String {
     row.chars()
         .enumerate()
-        .map(|(i, ch)| {
+        .map(|(x, ch)| {
             if ch == ' ' {
                 return " ".to_string();
             }
-            let (r, g, b) = gradient_at(i as f32 / width);
+            if !truecolor {
+                return ch.cyan().to_string();
+            }
+            let (r, g, b) = gradient_at(gradient_t(x, y, width, height));
             ch.truecolor(r, g, b).to_string()
         })
         .collect()
@@ -185,33 +221,106 @@ fn gradient_row(row: &str) -> String {
 
 /// Print the Alexandria banner.
 ///
-/// The full wordmark is for a human at a terminal. Piped or redirected — a
-/// script reading `alexandria path`, a CI log — it collapses to one line,
-/// because three rows of box-drawing characters in a build log is vandalism.
+/// Three tiers, because this prints before every command and a wrapped
+/// wordmark is worse than no wordmark: mark plus wordmark when the terminal is
+/// wide enough, wordmark alone when it is not, and a single line when stderr
+/// is not a terminal at all — a script reading `alexandria path` or a CI log
+/// has no use for art.
 pub fn banner() {
     if is_json() {
         return;
     }
-    if std::io::stderr().is_terminal() {
-        wordmark_banner();
-    } else {
+    if !std::io::stderr().is_terminal() {
         eprintln!("Alexandria CLI v{}", env!("CARGO_PKG_VERSION"));
+        return;
     }
-}
 
-fn wordmark_banner() {
-    let version = env!("CARGO_PKG_VERSION");
-    eprintln!();
-    for row in WORDMARK {
-        eprintln!("  {}", gradient_row(row));
+    let cols = terminal_width();
+    let mark_width = MARK[0].chars().count();
+    let word_width = WORDMARK[0].chars().count();
+    let with_mark = cols >= mark_width + MARK_GAP + word_width + 4;
+    let wordmark_only = cols >= word_width + 4;
+
+    if !wordmark_only {
+        eprintln!();
+        eprintln!("  {}  {}", "⬡ Alexandria".bold(), dim_version());
+        eprintln!();
+        return;
     }
+
+    let truecolor = supports_truecolor();
+    let width = if with_mark {
+        mark_width + MARK_GAP + word_width
+    } else {
+        word_width
+    };
+
+    eprintln!();
+    for (y, word_row) in WORDMARK.iter().enumerate() {
+        if with_mark {
+            let mark = paint(MARK[y], y, width, MARK.len(), truecolor);
+            let word_x = mark_width + MARK_GAP;
+            let word = paint_offset(word_row, y, word_x, width, WORDMARK.len(), truecolor);
+            eprintln!("  {mark}{}{word}", " ".repeat(MARK_GAP));
+        } else {
+            eprintln!("  {}", paint(word_row, y, width, WORDMARK.len(), truecolor));
+        }
+    }
+
+    // Tagline indented to line up with the wordmark's left edge.
+    let indent = if with_mark { mark_width + MARK_GAP } else { 0 };
     eprintln!(
-        "   {}  {}  {}",
-        "⬡".truecolor(GRADIENT_TO.0, GRADIENT_TO.1, GRADIENT_TO.2),
-        "learning you own".dimmed(),
-        format!("v{version}").dimmed()
+        "  {}{}  {}",
+        " ".repeat(indent),
+        TAGLINE.dimmed(),
+        dim_version()
     );
     eprintln!();
+}
+
+/// Like [`paint`] but for art that starts at column `x0` of the whole block,
+/// so a continuous gradient runs across mark and wordmark together.
+fn paint_offset(
+    row: &str,
+    y: usize,
+    x0: usize,
+    width: usize,
+    height: usize,
+    truecolor: bool,
+) -> String {
+    row.chars()
+        .enumerate()
+        .map(|(x, ch)| {
+            if ch == ' ' {
+                return " ".to_string();
+            }
+            if !truecolor {
+                return ch.cyan().to_string();
+            }
+            let (r, g, b) = gradient_at(gradient_t(x0 + x, y, width, height));
+            ch.truecolor(r, g, b).to_string()
+        })
+        .collect()
+}
+
+fn dim_version() -> String {
+    format!("v{}", env!("CARGO_PKG_VERSION"))
+        .dimmed()
+        .to_string()
+}
+
+/// Terminal width, defaulting wide enough for the full banner when it cannot
+/// be determined — the art is the intended default, not the fallback.
+fn terminal_width() -> usize {
+    // A pty that has never been sized reports Ok((0, 0)) rather than an error,
+    // so zero has to be treated as "unknown" too — otherwise the banner
+    // silently downgrades to its narrowest form under `script`, in CI, and in
+    // anything else that allocates a pty without setting a window size.
+    crossterm::terminal::size()
+        .ok()
+        .map(|(w, _)| w as usize)
+        .filter(|w| *w > 0)
+        .unwrap_or(100)
 }
 
 #[cfg(test)]
@@ -219,72 +328,98 @@ mod tests {
     use super::*;
 
     #[test]
-    fn wordmark_rows_are_all_the_same_width() {
+    fn art_rows_are_all_the_same_width() {
         // Rows of differing width shear the letterforms apart. Counted in
         // chars, not bytes — every glyph here is multi-byte.
-        let widths: Vec<usize> = WORDMARK.iter().map(|r| r.chars().count()).collect();
-        assert!(
-            widths.windows(2).all(|w| w[0] == w[1]),
-            "wordmark rows differ in width: {widths:?}"
-        );
-    }
-
-    #[test]
-    fn wordmark_fits_a_narrow_terminal() {
-        // It is printed with a two-space indent and shown inside a bordered
-        // TUI modal, so it has to leave room for both.
-        assert!(
-            WORDMARK[0].chars().count() <= 44,
-            "wordmark is {} columns",
-            WORDMARK[0].chars().count()
-        );
-    }
-
-    #[test]
-    fn the_x_uses_plain_diagonals_not_hooked_arms() {
-        // Regression, and not a cosmetic one. The natural box-drawing X in
-        // this alphabet is `═╗ ╦` / `╔╩╦╝` / `╩ ╚═`, whose four right-angle
-        // arms read as a swastika. That shipped once. The X must stay built
-        // from plain diagonals.
-        let x_rows: Vec<String> = WORDMARK
-            .iter()
-            .map(|r| r.chars().skip(12).take(3).collect())
-            .collect();
-        assert_eq!(x_rows, vec!["╲ ╱", " ╳ ", "╱ ╲"], "the X glyph changed");
-
-        // The hooked middle row must not appear anywhere in the wordmark.
-        for row in WORDMARK {
-            assert!(!row.contains("╔╩╦╝"), "hooked X arms are back in: {row}");
-        }
-    }
-
-    #[test]
-    fn gradient_runs_from_cyan_to_violet_and_clamps() {
-        assert_eq!(gradient_at(0.0), GRADIENT_FROM);
-        assert_eq!(gradient_at(1.0), GRADIENT_TO);
-        // Out-of-range positions must not wrap around to a wild colour.
-        assert_eq!(gradient_at(-5.0), GRADIENT_FROM);
-        assert_eq!(gradient_at(5.0), GRADIENT_TO);
-        // The midpoint sits between the endpoints on every channel.
-        let mid = gradient_at(0.5);
-        assert!(mid.0 > GRADIENT_FROM.0 && mid.0 < GRADIENT_TO.0);
-        assert!(mid.2 > GRADIENT_FROM.2 && mid.2 < GRADIENT_TO.2);
-    }
-
-    #[test]
-    fn gradient_row_preserves_the_characters() {
-        // Colouring must not change what is drawn, only how it looks.
-        let colored = gradient_row(WORDMARK[0]);
-        let stripped: String = colored
-            .chars()
-            .filter(|c| !c.is_control())
-            .collect::<String>()
-            .replace(
-                |c: char| c == '[' || c == 'm' || c.is_ascii_digit() || c == ';',
-                "",
+        for (name, art) in [("mark", &MARK[..]), ("wordmark", &WORDMARK[..])] {
+            let widths: Vec<usize> = art.iter().map(|r| r.chars().count()).collect();
+            assert!(
+                widths.windows(2).all(|w| w[0] == w[1]),
+                "{name} rows differ in width: {widths:?}"
             );
-        for ch in WORDMARK[0].chars().filter(|c| *c != ' ') {
-            assert!(stripped.contains(ch), "lost `{ch}` while colouring");
         }
+    }
+
+    #[test]
+    fn the_art_is_built_only_from_half_blocks() {
+        // The structural guard against the swastika that shipped in the first
+        // version of this banner. That shape needs hooked corner pieces
+        // (╔ ╗ ╚ ╝ ╠ ╣ ╦ ╩ ╬); half-blocks and spaces cannot form it at all.
+        // Keeping the alphabet this narrow makes the whole class impossible
+        // rather than policing one glyph.
+        for (name, art) in [("mark", &MARK[..]), ("wordmark", &WORDMARK[..])] {
+            for row in art {
+                for ch in row.chars() {
+                    assert!(
+                        matches!(ch, ' ' | '▀' | '▄' | '█'),
+                        "{name} contains `{ch}`, which is not a half-block"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_banner_fits_a_standard_terminal() {
+        // Mark, gap, wordmark and a two-space indent have to clear 80 columns,
+        // or the art wraps and looks worse than no art at all.
+        let full = MARK[0].chars().count() + MARK_GAP + WORDMARK[0].chars().count() + 2;
+        assert!(full <= 80, "banner is {full} columns");
+    }
+
+    #[test]
+    fn gradient_runs_from_brand_indigo_to_cyan_and_clamps() {
+        assert_eq!(gradient_at(0.0), BRAND_INDIGO);
+        assert_eq!(gradient_at(1.0), BRAND_CYAN);
+        // Out-of-range positions must not wrap around to a wild colour.
+        assert_eq!(gradient_at(-5.0), BRAND_INDIGO);
+        assert_eq!(gradient_at(5.0), BRAND_CYAN);
+    }
+
+    #[test]
+    fn gradient_sweeps_diagonally() {
+        // Both axes must contribute, otherwise the ramp is flat and looks
+        // nothing like the website's 135° gradients.
+        let (w, h) = (60, 4);
+        assert!(
+            gradient_t(59, 0, w, h) > gradient_t(0, 0, w, h),
+            "no horizontal sweep"
+        );
+        assert!(
+            gradient_t(0, 3, w, h) > gradient_t(0, 0, w, h),
+            "no vertical sweep"
+        );
+        // Horizontal dominates, so the sweep reads left-to-right.
+        assert!(gradient_t(59, 0, w, h) > gradient_t(0, 3, w, h));
+        // And it stays in range for every cell of the real art.
+        let width = WORDMARK[0].chars().count();
+        for y in 0..WORDMARK.len() {
+            for x in 0..width {
+                let t = gradient_t(x, y, width, WORDMARK.len());
+                assert!((0.0..=1.0).contains(&t), "t={t} out of range at ({x},{y})");
+            }
+        }
+    }
+
+    #[test]
+    fn painting_preserves_the_characters() {
+        // Colouring must change how the art looks, never what it draws.
+        for truecolor in [true, false] {
+            let painted = paint(WORDMARK[0], 0, 60, 4, truecolor);
+            for ch in WORDMARK[0].chars().filter(|c| *c != ' ') {
+                assert!(painted.contains(ch), "lost `{ch}` (truecolor={truecolor})");
+            }
+        }
+    }
+
+    #[test]
+    fn paint_offset_continues_the_same_gradient() {
+        // The wordmark starts partway across the block, so its colours must
+        // continue the mark's ramp rather than restarting it.
+        let x0 = MARK[0].chars().count() + MARK_GAP;
+        let width = x0 + WORDMARK[0].chars().count();
+        let at_start = gradient_at(gradient_t(0, 0, width, 4));
+        let at_wordmark = gradient_at(gradient_t(x0, 0, width, 4));
+        assert_ne!(at_start, at_wordmark, "the wordmark restarts the gradient");
     }
 }

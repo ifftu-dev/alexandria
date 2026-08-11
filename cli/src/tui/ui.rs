@@ -24,15 +24,19 @@ pub fn draw(frame: &mut Frame, app: &App) {
 /// Build the wordmark as gradient-coloured lines, sharing the colour ramp with
 /// the CLI banner so the two surfaces look like one product.
 fn wordmark_lines() -> Vec<Line<'static>> {
-    let width = crate::output::WORDMARK[0].chars().count().max(1) as f32;
-    crate::output::WORDMARK
-        .iter()
-        .map(|row| {
+    let rows = crate::output::WORDMARK;
+    let width = rows[0].chars().count();
+    rows.iter()
+        .enumerate()
+        .map(|(y, row)| {
             let spans: Vec<Span> = row
                 .chars()
                 .enumerate()
-                .map(|(i, ch)| {
-                    let (r, g, b) = crate::output::gradient_at(i as f32 / width);
+                .map(|(x, ch)| {
+                    // Same diagonal sweep as the CLI banner, so the two
+                    // surfaces cannot drift apart.
+                    let t = crate::output::gradient_t(x, y, width, rows.len());
+                    let (r, g, b) = crate::output::gradient_at(t);
                     Span::styled(ch.to_string(), Style::default().fg(Color::Rgb(r, g, b)))
                 })
                 .collect();
@@ -46,21 +50,23 @@ fn draw_unlock(frame: &mut Frame, app: &App) {
         return;
     };
 
-    // The wordmark is 39 columns and 3 rows; drop it rather than let it wrap
+    // The wordmark is 57 columns and 4 rows; drop it rather than let it wrap
     // into noise when the terminal cannot hold it alongside the prompt.
+    let word_width = crate::output::WORDMARK[0].chars().count() as u16;
     let full = frame.area();
-    let show_wordmark = full.width >= 46 && full.height >= 15;
-    let height = if show_wordmark { 14 } else { 9 };
+    let show_wordmark = full.width >= word_width + 6 && full.height >= 16;
+    let modal_width = if show_wordmark { word_width + 4 } else { 60 };
+    let height = if show_wordmark { 15 } else { 9 };
 
-    let area = centered(full, 60, height);
+    let area = centered(full, modal_width, height);
     frame.render_widget(Clear, area);
 
     let mut lines: Vec<Line> = Vec::new();
     if show_wordmark {
         lines.push(Line::from(""));
         for row in wordmark_lines() {
-            // Indent to centre the 39-column wordmark in the usable width.
-            let mut spans = vec![Span::raw("         ")];
+            // One column of padding inside the border.
+            let mut spans = vec![Span::raw(" ")];
             spans.extend(row.spans);
             lines.push(Line::from(spans));
         }
@@ -744,17 +750,15 @@ mod render_tests {
             error: None,
         };
         // The wordmark's first row is distinctive enough to assert on.
+        let first_row = crate::output::WORDMARK[0];
         let roomy = render(&app, 80, 24);
-        assert!(roomy.contains("╔═╗ ╦   ╔═╗"), "wordmark missing at 80x24");
+        assert!(roomy.contains(first_row), "wordmark missing at 80x24");
         assert!(roomy.contains("Password"));
 
         // Too narrow or too short: the prompt survives, the wordmark does not
         // — a wrapped wordmark is unreadable noise.
         let cramped = render(&app, 44, 12);
-        assert!(
-            !cramped.contains("╔═╗ ╦   ╔═╗"),
-            "wordmark should be dropped"
-        );
+        assert!(!cramped.contains(first_row), "wordmark should be dropped");
         assert!(cramped.contains("Password"), "the prompt must still render");
     }
 
