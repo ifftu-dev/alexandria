@@ -102,3 +102,7 @@ cardano/governance/build/
 # Cardano signing keys (treasury etc.) — never commit
 keys/
 .claude/
+
+# CLI sidecar staged by scripts/build-cli-sidecar.sh for the release bundle.
+# Built artifact, never committed.
+src-tauri/binaries/

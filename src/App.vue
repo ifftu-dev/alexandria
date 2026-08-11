@@ -13,6 +13,7 @@ import { initShortcutsFromSettings } from '@/composables/useKeyboardShortcuts'
 import { initOmniRecentsFromSettings } from '@/composables/useOmniSearch'
 import { initSentinelFlagsFromSettings } from '@/composables/useSentinel'
 import SentinelDebugPip from '@/components/integrity/SentinelDebugPip.vue'
+import InstallCliDialog from '@/components/developer/InstallCliDialog.vue'
 import UpdateBanner from '@/components/update/UpdateBanner.vue'
 import { initUpdateCheck } from '@/composables/useAppUpdate'
 import { useDeepLinks } from '@/deeplink/useDeepLinks'
@@ -180,4 +181,7 @@ onUnmounted(() => {
   <!-- Live Sentinel observability PiP — stays hidden until toggled from the
        Develop menu (Sentinel Live View, ⌘⇧S), so it's safe to always mount. -->
   <SentinelDebugPip />
+
+  <!-- CLI installer — hidden until the Develop menu emits develop://install-cli. -->
+  <InstallCliDialog />
 </template>

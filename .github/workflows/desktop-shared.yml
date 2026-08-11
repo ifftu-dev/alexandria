@@ -207,6 +207,10 @@ jobs:
         if: inputs.mode == 'release' && inputs.sign_updater == true
         run: echo "${{ secrets.APPLE_API_KEY_P8 }}" > $RUNNER_TEMP/AuthKey.p8
 
+      - name: Build CLI sidecar
+        working-directory: alexandria
+        run: scripts/build-cli-sidecar.sh aarch64-apple-darwin
+
       - name: Build macOS validation artifacts
         if: inputs.mode == 'validate'
         uses: tauri-apps/tauri-action@v0
@@ -408,6 +412,10 @@ jobs:
         working-directory: alexandria
         run: node scripts/prepare-tauri-config.mjs desktop-validation
 
+      - name: Build CLI sidecar
+        working-directory: alexandria
+        run: scripts/build-cli-sidecar.sh
+
       - name: Build Linux validation artifacts
         if: inputs.mode == 'validate'
         uses: tauri-apps/tauri-action@v0
@@ -578,6 +586,10 @@ jobs:
         if: inputs.mode == 'validate' || inputs.sign_updater != true
         working-directory: alexandria
         run: node scripts/prepare-tauri-config.mjs desktop-validation
+
+      - name: Build CLI sidecar
+        working-directory: alexandria
+        run: scripts/build-cli-sidecar.sh
 
       - name: Build Linux ARM64 validation artifacts
         if: inputs.mode == 'validate'

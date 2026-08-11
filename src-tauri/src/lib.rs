@@ -613,10 +613,14 @@ pub fn run() {
                 tauri::menu::MenuItemBuilder::with_id("toggle_sentinel_pip", "Sentinel Live View")
                     .accelerator("CmdOrCtrl+Shift+S")
                     .build(handle)?;
+            let install_cli = tauri::menu::MenuItemBuilder::with_id("install_cli", "Install CLI…")
+                .build(handle)?;
             let develop = tauri::menu::SubmenuBuilder::new(handle, "Developer")
                 .item(&reload)
                 .item(&devtools)
                 .item(&pip)
+                .separator()
+                .item(&install_cli)
                 .build()?;
             menu.append(&develop)?;
 
@@ -656,6 +660,9 @@ pub fn run() {
                 "toggle_sentinel_pip" => {
                     let _ = app.emit("develop://toggle-sentinel", ());
                 }
+                "install_cli" => {
+                    let _ = app.emit("develop://install-cli", ());
+                }
                 _ => {}
             }
         });
@@ -668,6 +675,12 @@ pub fn run() {
                     .level(log::LevelFilter::Info)
                     .build(),
             )?;
+
+            // If the user installed the CLI, keep its symlink pointing at this
+            // build. Repair only — never creates a link the user did not ask
+            // for. See commands::cli_install.
+            #[cfg(desktop)]
+            commands::cli_install::refresh_link_if_installed();
 
             // Deep links (`alexandria://…` + https app-links) are consumed on
             // the frontend via the plugin's JS `onOpenUrl`/`getCurrent` API,
@@ -1205,6 +1218,9 @@ pub fn run() {
             commands::health::frontend_log,
             commands::health::release_secure_input,
             commands::updater::fetch_update_manifest,
+            commands::cli_install::cli_install_status,
+            commands::cli_install::cli_install,
+            commands::cli_install::cli_uninstall,
             // App settings (per-profile, scope=sync|device)
             commands::settings::list_settings,
             commands::settings::set_setting,
