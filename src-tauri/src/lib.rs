@@ -368,7 +368,7 @@ impl AppState {
         // only supported on-disk format. If we ever see a plaintext file, refuse
         // to touch it — silent deletion would lose data, silent open as encrypted
         // would corrupt the keystore mapping. Surface the error and let the user
-        // (or `alex db reset`) deal with it explicitly.
+        // (or `alexandria db reset`) deal with it explicitly.
         if Database::is_plaintext(&paths.db_path) {
             return Err(format!(
                 "refusing to open: {} is an unencrypted SQLite database. \
@@ -635,10 +635,14 @@ pub fn run() {
                 tauri::menu::MenuItemBuilder::with_id("toggle_sentinel_pip", "Sentinel Live View")
                     .accelerator("CmdOrCtrl+Shift+S")
                     .build(handle)?;
+            let install_cli = tauri::menu::MenuItemBuilder::with_id("install_cli", "Install CLI…")
+                .build(handle)?;
             let develop = tauri::menu::SubmenuBuilder::new(handle, "Developer")
                 .item(&reload)
                 .item(&devtools)
                 .item(&pip)
+                .separator()
+                .item(&install_cli)
                 .build()?;
             menu.append(&develop)?;
 
@@ -678,6 +682,9 @@ pub fn run() {
                 "toggle_sentinel_pip" => {
                     let _ = app.emit("develop://toggle-sentinel", ());
                 }
+                "install_cli" => {
+                    let _ = app.emit("develop://install-cli", ());
+                }
                 _ => {}
             }
         });
@@ -685,11 +692,45 @@ pub fn run() {
     builder
         .setup(|app| {
             // Initialize logging (always enabled so we can diagnose mobile crashes)
+            //
+            // The defaults are unusable for diagnosis: tauri-plugin-log caps a
+            // log file at 40 KB and keeps one rotation, so roughly 80 KB of
+            // history total. A connected session fills that in minutes, and by
+            // the time anyone reports a problem the lines that explain it have
+            // already been rotated away.
+            //
+            // Per-module levels matter as much as the size. The transport
+            // crates narrate every unreachable host and every stray datagram
+            // at WARN, which is noise the user cannot act on, and it competes
+            // for the same file as the events that actually explain a failure.
+            // Raising the ceiling without quietening those would just buy more
+            // room for them.
             app.handle().plugin(
                 tauri_plugin_log::Builder::default()
                     .level(log::LevelFilter::Info)
+                    // Our own crates keep their detail.
+                    .level_for("app_lib", log::LevelFilter::Debug)
+                    .level_for("alexandria_verify", log::LevelFilter::Debug)
+                    // Transport chatter: errors only.
+                    .level_for("quinn_udp", log::LevelFilter::Error)
+                    .level_for("quinn_proto", log::LevelFilter::Error)
+                    .level_for("iroh_quinn_udp", log::LevelFilter::Error)
+                    .level_for("iroh_quinn_proto", log::LevelFilter::Error)
+                    .level_for("netdev", log::LevelFilter::Error)
+                    .level_for("libp2p_quic", log::LevelFilter::Warn)
+                    .level_for("libp2p_tcp", log::LevelFilter::Warn)
+                    .level_for("hickory_proto", log::LevelFilter::Error)
+                    .level_for("hickory_resolver", log::LevelFilter::Error)
+                    .max_file_size(5_000_000)
+                    .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepSome(3))
                     .build(),
             )?;
+
+            // If the user installed the CLI, keep its symlink pointing at this
+            // build. Repair only — never creates a link the user did not ask
+            // for. See commands::cli_install.
+            #[cfg(desktop)]
+            commands::cli_install::refresh_link_if_installed();
 
             // Deep links (`alexandria://…` + https app-links) are consumed on
             // the frontend via the plugin's JS `onOpenUrl`/`getCurrent` API,
@@ -1228,6 +1269,9 @@ pub fn run() {
             commands::health::frontend_log,
             commands::health::release_secure_input,
             commands::updater::fetch_update_manifest,
+            commands::cli_install::cli_install_status,
+            commands::cli_install::cli_install,
+            commands::cli_install::cli_uninstall,
             // App settings (per-profile, scope=sync|device)
             commands::settings::list_settings,
             commands::settings::set_setting,

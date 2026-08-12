@@ -16,7 +16,7 @@ alexandria/
 │
 ├── src-tauri/              # Rust backend (Tauri v2 app)
 ├── src/                    # Vue 3 frontend
-├── cli/                    # Developer CLI (alex)
+├── cli/                    # Developer CLI (alexandria)
 ├── crates/                 # Workspace member crates (live, iroh-moq, moq-media)
 ├── patches/                # Local crate patches (netdev, if-watch, audiopus_sys, webrtc-audio-processing-sys, ffmpeg-sys-next, ffmpeg-next)
 ├── docs/                   # Documentation
@@ -315,7 +315,7 @@ src/
 
 ```
 cli/
-├── Cargo.toml              # alex binary crate
+├── Cargo.toml              # alexandria binary crate
 └── src/
     ├── main.rs             # clap CLI entry point
     ├── context.rs          # Project root detection, app data paths

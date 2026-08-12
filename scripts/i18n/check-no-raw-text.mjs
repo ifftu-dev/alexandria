@@ -20,7 +20,7 @@ const here = dirname(fileURLToPath(import.meta.url))
 const root = resolve(here, '../..')
 
 // Files exempt entirely — dev-only debug surfaces never shown in production.
-const FILE_SKIP = ['SentinelDebugPip.vue', 'EntitlementDevPanel.vue']
+const FILE_SKIP = ['SentinelDebugPip.vue', 'EntitlementDevPanel.vue', 'InstallCliDialog.vue']
 
 // Brand / proper nouns — matched as substrings.
 const ALLOW_SUBSTR = [

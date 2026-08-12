@@ -19,7 +19,7 @@
 
 | Action | Where | Tool |
 |--------|-------|------|
-| Generate synthetic training data | `cli/` | `cargo run -p alex -- synth-sentinel ...` |
+| Generate synthetic training data | `cli/` | `cargo run -p alexandria -- synth-sentinel ...` |
 | Train + export ONNX | `tools/sentinel-train/` | `python train.py` |
 | Verify holdout gate | `tools/sentinel-train/` | `python eval.py` |
 | Propose new model | Tauri app or IPC | `sentinel_propose_prior` |
@@ -35,14 +35,14 @@
 **Pre-requisites:**
 - You hold a Sentinel DAO voting key.
 - A reproducible Python env (`tools/sentinel-train/.venv` after `pip install -r requirements.txt`).
-- The `alex` CLI builds (`cargo build -p alex`).
+- The `alexandria` CLI builds (`cargo build -p alexandria`).
 
 ### Step 1 — Generate training + holdout corpora
 
 ```bash
 cd alexandria
-cargo run -p alex -- synth-sentinel generate-all     --out-dir tools/sentinel-train/priors
-cargo run -p alex -- synth-sentinel generate-holdout --out-dir tools/sentinel-train/holdout
+cargo run -p alexandria -- synth-sentinel generate-all     --out-dir tools/sentinel-train/priors
+cargo run -p alexandria -- synth-sentinel generate-holdout --out-dir tools/sentinel-train/holdout
 ```
 
 Output is deterministic per seed; the golden-hash test in
@@ -257,7 +257,7 @@ attack class), the golden hashes will fail. To bump cleanly:
    - Rename it to match the new version (e.g. `golden_hashes_match_synth_v3`).
    - Update the version assertion (e.g. `SYNTH_VERSION == "v3"`).
    - Regenerate hashes using the recipe in the test doc-comment.
-4. Run `cargo test -p alex synth` — must pass.
+4. Run `cargo test -p alexandria synth` — must pass.
 5. Retrain the classifier (Procedure 1), because the training corpus
    distribution has shifted.
 

@@ -15,16 +15,18 @@ import { initSentinelFlagsFromSettings, useSentinel } from '@/composables/useSen
 import SentinelDebugPip from '@/components/integrity/SentinelDebugPip.vue'
 import EvidenceConsentModal from '@/components/integrity/EvidenceConsentModal.vue'
 import SentinelLiveIndicator from '@/components/integrity/SentinelLiveIndicator.vue'
+import InstallCliDialog from '@/components/developer/InstallCliDialog.vue'
 import UpdateBanner from '@/components/update/UpdateBanner.vue'
 import { initUpdateCheck } from '@/composables/useAppUpdate'
 import { useDeepLinks } from '@/deeplink/useDeepLinks'
 
-/** Matches `APPEAL_WINDOW_DAYS` in `sentinel::evidence`. */
-const EVIDENCE_RETENTION_DAYS = 14
-const { pendingEvidenceConsent, clearPendingEvidenceConsent } = useSentinel()
 
 import { clearSettingsCache, useSettings } from '@/composables/useSettings'
 import { isMac } from '@/composables/usePlatform'
+
+/** Matches `APPEAL_WINDOW_DAYS` in `sentinel::evidence`. */
+const EVIDENCE_RETENTION_DAYS = 14
+const { pendingEvidenceConsent, clearPendingEvidenceConsent } = useSentinel()
 
 // Apply stored theme immediately (before first render)
 initTheme()
@@ -204,4 +206,7 @@ onUnmounted(() => {
     @close="clearPendingEvidenceConsent()"
     @decided="clearPendingEvidenceConsent()"
   />
+
+  <!-- CLI installer — hidden until the Develop menu emits develop://install-cli. -->
+  <InstallCliDialog />
 </template>

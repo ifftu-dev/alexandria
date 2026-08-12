@@ -316,7 +316,7 @@ mod tests {
     /// Recompute via:
     ///   for L in paste-macro typing-bot-constant typing-bot-jitter \
     ///            llm-paste-edit remote-control human-baseline; do
-    ///     cargo run -p alex -- synth-sentinel generate \
+    ///     cargo run -p alexandria -- synth-sentinel generate \
     ///       --label $L --count 64 --seed 42 --out /tmp/g-$L.json
     ///     openssl dgst -blake2b512 /tmp/g-$L.json
     ///   done
@@ -364,7 +364,7 @@ mod tests {
         }
     }
 
-    /// Regeneration helper: `cargo test -p alex --bin alex -- --ignored \
+    /// Regeneration helper: `cargo test -p alexandria --bin alexandria -- --ignored \
     /// --nocapture print_goldens` prints the GOLDEN_HASHES table to paste
     /// above after an intentional SYNTH_VERSION bump.
     #[test]

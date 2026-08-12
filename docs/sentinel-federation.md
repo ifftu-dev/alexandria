@@ -326,7 +326,7 @@ Option A without any one of those is a mission regression disguised as a feature
 | `sentinel_priors` table (migration 038) | ✅ shipped | `commands/sentinel_priors.rs` |
 | Holdout refs (migration 039) | ✅ shipped | `commands/sentinel_holdout.rs` |
 | Per-snapshot AI score plumbing | ✅ shipped | `useSentinel.ts`, migration 044 |
-| Synthetic-data generator | ✅ shipped | `alex synth-sentinel` subcommand, `cli/src/synth/` |
+| Synthetic-data generator | ✅ shipped | `alexandria synth-sentinel` subcommand, `cli/src/synth/` |
 | Offline training kit | ✅ shipped | `tools/sentinel-train/{featurize,train,eval}.py` |
 | ONNX paste classifier (bundled v1) | ✅ shipped | `src-tauri/resources/sentinel/paste-v1.onnx` (~4.6 KB / 4741 bytes), embedded via `include_bytes!`, SHA-pinned |
 | Backend ML rewrite (tract + candle) | ✅ shipped | `sentinel::paste_classifier` (tract), `sentinel::keystroke_ae` + `sentinel::mouse_cnn` (candle). Frontend only buffers events. |

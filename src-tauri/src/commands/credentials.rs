@@ -849,6 +849,136 @@ pub fn export_bundle_impl(conn: &Connection) -> Result<String, String> {
 /// This is the in-process analogue of "shell out to digitalbazaar/
 /// vc-js" — same offline guarantee, no Alexandria infrastructure
 /// required, except the verifier itself.
+/// What a piece of JSON handed to the offline verifier turned out to be.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum OfflineSource {
+    /// A §20.4 survivability bundle, carrying its own keys and status lists.
+    Bundle,
+    /// One bare credential.
+    Credential,
+    /// A JSON array of bare credentials.
+    Credentials,
+}
+
+/// Outcome of verifying whatever was handed in.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OfflineVerification {
+    pub source: OfflineSource,
+    pub total: u32,
+    pub accepted: u32,
+    /// Per-credential detail, so a rejection can say which check failed
+    /// instead of only that the count came up short.
+    pub results: Vec<VerificationResult>,
+    /// True when verification had no revocation context: a bare credential
+    /// carries no status list, so "not revoked" means "not known to be
+    /// revoked". A bundle carries its own, and is therefore conclusive.
+    pub revocation_unknown: bool,
+}
+
+/// Why a credential was rejected, in terms a reader can act on.
+///
+/// Order matters. When the issuer cannot be resolved, `verify_credential`
+/// returns before the signature is ever checked, so `valid_signature` is false
+/// because nothing was verified — not because a signature failed. Listing both
+/// would report two independent failures where only one thing happened, and
+/// would send the reader looking at the signature when the problem is the DID.
+pub fn rejection_reasons(result: &VerificationResult) -> Vec<&'static str> {
+    if !result.issuer_resolved {
+        return vec!["issuer DID could not be resolved — signature not checked"];
+    }
+
+    let mut reasons = Vec::new();
+    if !result.valid_signature {
+        reasons.push("signature does not match the issuer key");
+    }
+    if !result.subject_bound {
+        reasons.push("subject is not a DID");
+    }
+    if result.expired {
+        reasons.push("expired");
+    }
+    if result.revoked {
+        reasons.push("revoked");
+    }
+    if result.suspended {
+        reasons.push("suspended");
+    }
+    if result.superseded {
+        reasons.push("superseded");
+    }
+    reasons
+}
+
+/// Verify a bundle, a single credential, or an array of credentials.
+///
+/// Callers should not have to know which shape they were sent. A bare
+/// credential still verifies meaningfully offline — the signature checks
+/// against the issuer's `did:key`, which embeds the public key, and expiry and
+/// subject binding are properties of the document — so refusing it merely
+/// because it is not wrapped in a bundle would be an artificial limitation.
+///
+/// What a bare credential cannot tell you is revocation, suspension, or
+/// supersession: those are facts held elsewhere. [`NullStore`] reports them as
+/// "not known", and `revocation_unknown` says so rather than letting a caller
+/// read the result as a clean bill of health.
+pub fn verify_offline_impl(json: &str, now: &str) -> Result<OfflineVerification, String> {
+    use crate::domain::vc::{verify, AcceptanceDecision, NullStore, VerificationPolicy};
+
+    let policy = VerificationPolicy::default();
+    let tally = |results: Vec<VerificationResult>, source, revocation_unknown| {
+        let total = results.len() as u32;
+        let accepted = results
+            .iter()
+            .filter(|r| r.acceptance_decision == AcceptanceDecision::Accept)
+            .count() as u32;
+        OfflineVerification {
+            source,
+            total,
+            accepted,
+            results,
+            revocation_unknown,
+        }
+    };
+
+    // A bundle is the most specific shape, so it is tried first: it has a
+    // `format_version` that neither of the others carries.
+    if let Ok(bundle) = serde_json::from_str::<CredentialBundle>(json) {
+        if bundle.format_version != BUNDLE_FORMAT_VERSION {
+            return Err(format!(
+                "unsupported bundle format_version: {}",
+                bundle.format_version
+            ));
+        }
+        let store = BundleStore::new(&bundle)?;
+        let results = bundle
+            .credentials
+            .iter()
+            .map(|vc| verify::verify_credential(&store, vc, now, &policy))
+            .collect();
+        return Ok(tally(results, OfflineSource::Bundle, false));
+    }
+
+    if let Ok(vc) = serde_json::from_str::<VerifiableCredential>(json) {
+        let results = vec![verify::verify_credential(&NullStore, &vc, now, &policy)];
+        return Ok(tally(results, OfflineSource::Credential, true));
+    }
+
+    if let Ok(list) = serde_json::from_str::<Vec<VerifiableCredential>>(json) {
+        let results = list
+            .iter()
+            .map(|vc| verify::verify_credential(&NullStore, vc, now, &policy))
+            .collect();
+        return Ok(tally(results, OfflineSource::Credentials, true));
+    }
+
+    // Say what was expected rather than echoing whichever parse failed last —
+    // the bundle error ("missing field `format_version`") is confusing when
+    // the caller handed over a perfectly good credential.
+    Err("not recognised as a credential, a list of credentials, or a §20.4 bundle".into())
+}
+
 pub fn verify_bundle_offline_impl(
     bundle_json: &str,
     verification_time: &str,
@@ -1020,6 +1150,176 @@ mod tests {
             integrity_session_id: None,
             integrity_policy: None,
         }
+    }
+
+    // ---- Shape-agnostic offline verification ---------------------------
+
+    #[test]
+    fn verify_offline_accepts_a_bare_credential() {
+        // Reported as a bug: pasting a single credential into offline verify
+        // failed with "missing field `format_version`", because only the
+        // bundle shape was accepted. A credential signed by a `did:key` issuer
+        // is verifiable on its own — the DID embeds the public key.
+        let (db, issuer_key, issuer, subject) = setup();
+        let vc = issue_credential_impl(
+            db.conn(),
+            &issuer_key,
+            &issuer,
+            &sample_request(subject),
+            NOW,
+        )
+        .unwrap();
+
+        let json = serde_json::to_string(&vc).unwrap();
+        let report = verify_offline_impl(&json, NOW).unwrap();
+
+        assert_eq!(report.source, OfflineSource::Credential);
+        assert_eq!((report.accepted, report.total), (1, 1));
+        assert!(report.results[0].valid_signature);
+        assert!(report.results[0].issuer_resolved, "did:key self-resolution");
+        // A bare credential carries no status list, so this must not read as
+        // a clean bill of health.
+        assert!(report.revocation_unknown);
+    }
+
+    #[test]
+    fn verify_offline_still_accepts_a_bundle_and_knows_the_difference() {
+        let (db, issuer_key, issuer, subject) = setup();
+        issue_credential_impl(
+            db.conn(),
+            &issuer_key,
+            &issuer,
+            &sample_request(subject),
+            NOW,
+        )
+        .unwrap();
+        let bundle = export_bundle_impl(db.conn()).unwrap();
+
+        let report = verify_offline_impl(&bundle, NOW).unwrap();
+        assert_eq!(report.source, OfflineSource::Bundle);
+        assert_eq!((report.accepted, report.total), (1, 1));
+        // A bundle carries its own status lists, so revocation is conclusive.
+        assert!(!report.revocation_unknown);
+    }
+
+    #[test]
+    fn verify_offline_accepts_an_array_of_credentials() {
+        let (db, issuer_key, issuer, subject) = setup();
+        let vc = issue_credential_impl(
+            db.conn(),
+            &issuer_key,
+            &issuer,
+            &sample_request(subject),
+            NOW,
+        )
+        .unwrap();
+
+        let json = serde_json::to_string(&vec![vc.clone(), vc]).unwrap();
+        let report = verify_offline_impl(&json, NOW).unwrap();
+        assert_eq!(report.source, OfflineSource::Credentials);
+        assert_eq!((report.accepted, report.total), (2, 2));
+    }
+
+    #[test]
+    fn verify_offline_detects_a_tampered_credential() {
+        // The point of the whole exercise: a modified claim must fail the
+        // signature check rather than being waved through.
+        let (db, issuer_key, issuer, subject) = setup();
+        let vc = issue_credential_impl(
+            db.conn(),
+            &issuer_key,
+            &issuer,
+            &sample_request(subject),
+            NOW,
+        )
+        .unwrap();
+
+        let mut doc: serde_json::Value = serde_json::to_value(&vc).unwrap();
+        doc["credentialSubject"]["level"] = serde_json::json!(99);
+        let report = verify_offline_impl(&doc.to_string(), NOW).unwrap();
+
+        assert_eq!(report.accepted, 0, "a tampered credential must not verify");
+        assert!(!report.results[0].valid_signature);
+    }
+
+    #[test]
+    fn verify_offline_explains_unrecognised_json() {
+        // The old message leaked the bundle parser's complaint about
+        // `format_version`, which made no sense to someone holding a
+        // credential.
+        let err = verify_offline_impl(r#"{"hello":"world"}"#, NOW).unwrap_err();
+        assert!(err.contains("credential"), "got: {err}");
+        assert!(err.contains("bundle"), "got: {err}");
+        assert!(
+            !err.contains("format_version"),
+            "leaked parser detail: {err}"
+        );
+    }
+
+    #[test]
+    fn an_unresolvable_issuer_is_not_reported_as_a_bad_signature() {
+        // Seed/demo credentials carry a placeholder issuer DID and a
+        // placeholder JWS. verify_credential returns before checking the
+        // signature, so saying "bad signature" would describe a check that
+        // never ran and point the reader at the wrong field.
+        let placeholder = r#"{
+            "@context":["https://www.w3.org/ns/credentials/v2"],
+            "id":"urn:uuid:demo",
+            "type":["VerifiableCredential","AssessmentCredential"],
+            "issuer":"did:key:z6MkSeedAuthor5CivicsInstructorXXXXXXXXXXXXXXX",
+            "validFrom":"2026-04-08T11:15:00Z",
+            "credentialSubject":{"id":"did:key:z6MkDemoLearnerPlaceholderXXXXXXXXXXXXXXXXXXXX"},
+            "proof":{"type":"Ed25519Signature2020","created":"2026-04-08T11:15:00Z",
+                     "verificationMethod":"did:key:z6MkSeedAuthor5CivicsInstructorXXXXXXXXXXXXXXX#key-1",
+                     "proofPurpose":"assertionMethod","jws":"seed..signature"}
+        }"#;
+
+        let report = verify_offline_impl(placeholder, NOW).unwrap();
+        assert_eq!(
+            report.accepted, 0,
+            "a placeholder credential must not verify"
+        );
+
+        let reasons = rejection_reasons(&report.results[0]);
+        assert_eq!(
+            reasons.len(),
+            1,
+            "one failure happened, not two: {reasons:?}"
+        );
+        assert!(reasons[0].contains("issuer DID"), "got: {reasons:?}");
+        assert!(
+            !reasons
+                .iter()
+                .any(|r| r.contains("signature does not match")),
+            "the signature was never checked: {reasons:?}"
+        );
+    }
+
+    #[test]
+    fn a_resolvable_issuer_with_a_broken_signature_says_so() {
+        // The other side of the same coin: when the DID does resolve, a
+        // signature failure is a real finding and must be named.
+        let (db, issuer_key, issuer, subject) = setup();
+        let vc = issue_credential_impl(
+            db.conn(),
+            &issuer_key,
+            &issuer,
+            &sample_request(subject),
+            NOW,
+        )
+        .unwrap();
+        let mut doc: serde_json::Value = serde_json::to_value(&vc).unwrap();
+        doc["credentialSubject"]["level"] = serde_json::json!(99);
+
+        let report = verify_offline_impl(&doc.to_string(), NOW).unwrap();
+        let reasons = rejection_reasons(&report.results[0]);
+        assert!(report.results[0].issuer_resolved);
+        assert!(
+            reasons
+                .iter()
+                .any(|r| r.contains("signature does not match")),
+            "got: {reasons:?}"
+        );
     }
 
     /// Insert a terminal integrity session row for bridge tests.

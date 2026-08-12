@@ -66,17 +66,6 @@ pub fn run_step_with_env(
     Ok(())
 }
 
-/// Check if a command exists on PATH
-pub fn command_exists(name: &str) -> bool {
-    Command::new("which")
-        .arg(name)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
-}
-
 /// Create a spinner with the given message
 #[allow(dead_code)]
 pub fn spinner(msg: &str) -> ProgressBar {

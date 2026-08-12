@@ -1,5 +1,5 @@
 [package]
-name = "alex"
+name = "alexandria"
 version = "0.1.0"
 description = "Alexandria developer CLI"
 edition = "2021"
@@ -11,7 +11,7 @@ rust-version = "1.83.0"
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(has_app_lib)'] }
 
 [[bin]]
-name = "alex"
+name = "alexandria"
 path = "src/main.rs"
 
 [dependencies]
@@ -19,9 +19,7 @@ clap = { version = "4", features = ["derive"] }
 dialoguer = "0.12"
 owo-colors = "4"
 indicatif = "0.17"
-console = "0.16"
 rusqlite = { version = "0.38", features = ["bundled-sqlcipher"] }
-sysinfo = "0.33"
 dirs = "6"
 anyhow = "1"
 log = "0.4"
@@ -38,13 +36,20 @@ rand_chacha = "0.3"
 rand_distr = "0.4"
 blake2 = "0.10"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
+# Must stay on the same major as src-tauri's ed25519-dalek: the CLI hands a
+# `SigningKey` straight to `issue_credential_impl`, so the two crates have to
+# agree on the type. Cargo unifies them through the workspace lock.
+ed25519-dalek = { version = "2", features = ["serde", "rand_core"] }
+clap_complete = "4"
+ratatui = "0.29"
+crossterm = "0.28"
 
-# `alex credentials` shares its impl functions with the Tauri backend so
+# `alexandria credentials` shares its impl functions with the Tauri backend so
 # `list_credentials_impl`, `export_bundle_impl`, `verify_bundle_offline_impl`
 # stay one source of truth. The package name in src-tauri/Cargo.toml is
 # `alexandria-node`; the [lib] name is `app_lib`, which is what we use
 # for imports (`use app_lib::commands::credentials::*`). This pulls in
 # the full app_lib transitive tree (pallas, iroh, libp2p…) which slows
 # CLI builds, but it's the correctness vs ergonomics trade we're
-# explicitly making per the `alex credentials` design.
+# explicitly making per the `alexandria credentials` design.
 alexandria-node = { path = "../src-tauri" }

@@ -1,6 +1,6 @@
 //! Tests for schema migrations.
 //!
-//! These live outside `schema.rs` because the `alex` CLI `#[path]`-includes
+//! These live outside `schema.rs` because the `alexandria` CLI `#[path]`-includes
 //! that file into a crate with no `crate::db`, so a test module referencing
 //! it there would break the CLI build. Migration SQL is reached through the
 //! public `MIGRATIONS` table by version rather than by private const, which

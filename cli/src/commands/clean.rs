@@ -41,9 +41,9 @@ fn clean_build(ctx: &ProjectContext) -> Result<()> {
     output::header("Cleaning build artifacts");
 
     let targets = [
-        ("Rust target", ctx.tauri_dir.join("target")),
-        ("Vite dist", ctx.root.join("dist")),
-        ("Vite cache", ctx.root.join("node_modules/.vite")),
+        ("Rust target", ctx.require_tauri_dir()?.join("target")),
+        ("Vite dist", ctx.require_root()?.join("dist")),
+        ("Vite cache", ctx.require_root()?.join("node_modules/.vite")),
     ];
 
     let mut cleaned = false;

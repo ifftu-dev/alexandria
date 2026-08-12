@@ -131,7 +131,7 @@ alexandria/
 │   ├── components/   # UI components + auth + course + layout + profile (picker tiles + avatar)
 │   ├── composables/  # useProfiles (canonical), useSettings (per-profile prefs + cross-device sync), useAuth (compat shim), useTheme, useP2P, useSentinel, useLocalApi, useBiometricVault, useClassroom, useContentSync, useCredentials, useOmniSearch, usePlatform, useSkillGraphState, useSkillGraphHover, useTutoringRoom
 │   └── assets/       # Tailwind CSS v4 design system
-├── cli/              # Developer CLI (alex) — Rust + clap
+├── cli/              # Developer CLI (alexandria) — Rust + clap
 ├── crates/           # Workspace members: live (our room/session layer),
 │                     #   iroh-moq + moq-media (vendored MoQ transport + media)
 ├── patches/          # Local crate patches (6: netdev, if-watch, ffmpeg-sys-next, ffmpeg-next, audiopus_sys, webrtc-audio-processing-sys)
@@ -310,128 +310,165 @@ rm -rf src-tauri/gen/android/app/build
 
 > **Note:** Android safe area insets (`env(safe-area-inset-*)`) are not natively supported by Android WebView. `MainActivity.kt` reads actual `WindowInsets` and injects them as CSS custom properties (`--sat`, `--sab`, `--sal`, `--sar`).
 
-### Developer CLI (`alex`)
+### Developer CLI (`alexandria`)
 
-The `alex` CLI wraps common dev tasks, multi-platform builds, and data management into a single tool.
-
-```bash
-cargo install --path cli    # install globally as `alex`
-```
-
-#### Running
+The `alexandria` CLI operates on the same encrypted store the app uses. It is
+deliberately **not** general dev tooling — `scripts/check.sh`, `npm run check`,
+and `cargo tauri` own building and linting. The CLI covers what nothing else
+does: the vault and its credentials, the mobile device pickers, environment
+diagnostics, and the Sentinel synthetic-data generator.
 
 ```bash
-# Desktop (hot-reload dev server)
-alex run desktop                              # cargo tauri dev
-
-# iOS (interactive device/simulator picker)
-alex run ios                                  # pick from available simulators + devices
-alex run ios --device "iPhone 17 Pro"         # skip picker, run on specific device
-alex run ios --open                           # open in Xcode instead
-
-# Android (interactive emulator/device picker)
-alex run android                              # pick from available AVDs + devices
-alex run android --device "Pixel_9_Pro"       # skip picker, run on specific emulator
-alex run android --open                       # open in Android Studio instead
-
-# All run commands support --release for release mode
-alex run ios --release
+cargo install --path cli    # install globally as `alexandria`
 ```
 
-#### Code Quality
+Every command takes two global flags:
+
+| Flag | Purpose |
+|------|---------|
+| `--json` | Emit the result as JSON on stdout. Human output goes to stderr, so `alexandria --json … > out.json` captures exactly the result document. Failures emit `{"error": …}` on stderr. |
+| `--password-file <PATH>` | Read the vault password from a file instead of prompting, for CI and scripted runs. |
+| `--profile <ID\|NAME>` | Which profile's data to operate on — a profile id, an id prefix, or a display name. Defaults to the most recently unlocked profile, which is the one the app itself opens. |
+
+Every command that touches the vault or database operates on one profile's
+data under `profiles/<uuid>/`. `alexandria doctor` reports which profile was
+selected; an unrecognised `--profile` lists the ones that exist.
+
+#### Interactive UI
 
 ```bash
-alex dev test         # cargo test with host tutoring media feature
-alex dev clippy       # cargo clippy with host tutoring media feature
-alex dev fmt          # cargo fmt --check
-alex dev check        # vue-tsc type check
-alex dev all          # fmt + clippy + test + check (full CI pass)
+alexandria tui        # browse and act on credentials, roles, orgs, and the database
 ```
 
-`alex dev test`, `alex dev clippy`, and `alex build check` automatically enable the host tutoring media feature:
-- macOS / Windows: `tutoring-video`
-- Linux: `tutoring-video-static`
+Tabs for credentials, role assessments, organizations, the database,
+verification, and diagnostics. Select a row and act on it rather than copying a
+URN between commands. Press `?` for the full key list on the active tab.
 
-#### Building
+#### Credentials (`alexandria vc` is an alias)
 
 ```bash
-# Quick builds
-alex build check      # cargo check + vue-tsc with host tutoring feature
-alex build release    # Full desktop release (cargo tauri build + host tutoring feature)
+alexandria credentials list                      # every credential in the store
+alexandria credentials list --subject did:key:z6Mk…   # filter by subject
+alexandria credentials list --skill rust-basics       # filter by skill
 
-# Platform-specific builds
-alex build desktop                        # Current host (e.g. mac-arm64)
-alex build desktop --target mac-arm64 mac-x64   # Multiple targets
-alex build android                        # arm64 (default)
-alex build android --target arm64 armv7   # Multiple Android ABIs
-alex build ios                            # Simulator for current arch
-alex build ios --target device            # iOS device (needs signing)
-alex build ios --target device sim-arm64  # Device + simulator
+alexandria credentials get urn:uuid:…            # one credential as JSON
+alexandria credentials issue --request req.json  # mint and sign (reads stdin with `-`)
+alexandria credentials import bundle.json        # verify and store
 
-# All platforms at once (uses host defaults for each)
-alex build all
-alex build all --debug
+alexandria credentials revoke urn:uuid:… --reason "issued in error"
+alexandria credentials suspend urn:uuid:… --until 2026-12-01T00:00:00Z
+alexandria credentials reinstate urn:uuid:…
 
-# Debug builds (faster compile, larger binary)
-alex build desktop --debug
-alex build android --debug
-alex build ios --debug
-
-# Interactive wizard (prompts for platform, targets, profile)
-alex build platform
-
-# List all available build targets
-alex build list
+alexandria credentials export --out bundle.json  # §20.4 survivability bundle
+alexandria credentials verify bundle.json        # offline, no infrastructure needed
 ```
 
-**Available build targets:**
+Revocation is permanent and written to the credential's status list. Suspension
+is reversible — prefer it when the outcome is not yet settled.
 
-| Platform | Target | Description | Rust triple |
-|----------|--------|-------------|-------------|
-| Desktop | `mac-arm64` | macOS Apple Silicon | `aarch64-apple-darwin` |
-| Desktop | `mac-x64` | macOS Intel | `x86_64-apple-darwin` |
-| Desktop | `mac-universal` | macOS Universal | `universal-apple-darwin` |
-| Desktop | `linux-x64` | Linux x86_64 | `x86_64-unknown-linux-gnu` |
-| Desktop | `win-x64` | Windows x86_64 | `x86_64-pc-windows-msvc` |
-| Android | `arm64` | arm64-v8a | `aarch64-linux-android` |
-| Android | `armv7` | armeabi-v7a | `armv7-linux-androideabi` |
-| Android | `x86_64` | x86_64 (emulator) | `x86_64-linux-android` |
-| iOS | `device` | iOS device | `aarch64-apple-ios` |
-| iOS | `sim-arm64` | Simulator (ARM) | `aarch64-apple-ios-sim` |
-| iOS | `sim-x64` | Simulator (Intel) | `x86_64-apple-ios` |
+`issue` reads a JSON `IssueCredentialRequest` rather than taking a wall of
+flags, so the full shape (credential type, claim, evidence refs, supersession,
+integrity binding and policy) stays expressible. It unlocks the vault to obtain
+the issuer signing key, so a credential minted here is indistinguishable from
+one the app mints.
 
-Prerequisites are checked automatically before each build. Android requires `ANDROID_HOME`, NDK, and Java 21. iOS requires Xcode. Device builds require code signing.
-
-#### Database & Data
-
-The CLI operates on the same SQLCipher-encrypted database as the app. Commands that access the database prompt for the active profile's password.
+#### Presentations
 
 ```bash
-alex db status        # Table row counts, migration version, data sizes (active profile)
-alex db migrate       # Run pending schema migrations on the active profile DB
-alex db seed          # Seed demo data (taxonomy, courses, governance) into the active profile
-alex db seed --force  # Clear and re-seed the active profile
-alex db reset --force # Delete ALL app data on this device (every profile + sidecar index)
+alexandria vp verify envelope.json --audience acme-corp
 ```
 
-> **Note**: Each profile's database is encrypted with a key derived from that profile's vault password (Argon2id + HKDF-SHA256). The app must have been launched at least once to create the profile (via onboarding) before CLI database commands will work. `alex db reset --force` is destructive across every profile on the device — use the picker's per-profile delete to remove a single user instead.
+The audience is required: a presentation built for one verifier is rejected at
+another rather than silently accepted. The verdict is a result, not a command
+failure — branch on `accepted` in the JSON form.
 
-#### Configuration
+#### Role assessments (`alexandria ra` is an alias)
 
 ```bash
-alex config show      # Project paths, Tauri config, tool versions
-alex config path      # Print app data directory (for scripting)
+alexandria role-assessment org create "Acme Corp" --owner addr1…
+alexandria role-assessment org list
+
+alexandria role-assessment create --request role.json
+alexandria role-assessment list --org <org-id>
+alexandria role-assessment status <id> published      # draft | published | archived
+alexandria role-assessment issue <id> --subject did:key:z6Mk… --session <integrity-session-id>
 ```
 
-#### Health & Cleanup
+The headless half of the role-assessment surface, for callers with no Tauri
+window in the loop.
+
+#### Running on mobile
 
 ```bash
-alex health           # Check if the app process is running
+alexandria run ios                                  # pick from available simulators
+alexandria run ios --device "iPhone 17 Pro"         # skip the picker
+alexandria run ios --physical                       # target a connected iPhone
+alexandria run ios --open                           # open in Xcode instead
 
-alex clean build      # Remove target/, dist/, .vite cache
-alex clean data --force  # Remove app data
-alex clean all --force   # Remove everything
+alexandria run android                              # pick from available AVDs + devices
+alexandria run android --device "Pixel_9_Pro"
+alexandria run android --open                       # open in Android Studio
+
+alexandria run ios --release
 ```
+
+Android runs set up the NDK cross-compilation environment automatically. For
+desktop, use `npm run tauri dev`.
+
+#### Database & data
+
+The CLI operates on the same SQLCipher-encrypted database as the app, and
+prompts for the active profile's password.
+
+```bash
+alexandria db status        # Table row counts, migration version, data sizes
+alexandria db migrate       # Run pending schema migrations
+alexandria db seed          # Seed demo data (taxonomy, courses, governance)
+alexandria db seed --force  # Clear and re-seed
+alexandria db reset --force # Delete ALL app data on this device
+```
+
+> **Note**: Each profile's database is encrypted with a key derived from that
+> profile's vault password (Argon2id + HKDF-SHA256). The app must have been
+> launched at least once to create the profile (via onboarding) before CLI
+> database commands will work. `alexandria db reset --force` is destructive
+> across every profile on the device — use the picker's per-profile delete to
+> remove a single user instead.
+
+#### Diagnostics & cleanup
+
+```bash
+alexandria doctor              # project, app data, toolchain, mobile prerequisites
+alexandria doctor --no-mobile  # skip the Android/iOS checks
+
+alexandria path                # print the selected profile's data directory
+
+alexandria clean build         # Remove target/, dist/, .vite cache
+alexandria clean data --force  # Remove app data
+alexandria clean all --force   # Remove everything
+```
+
+`doctor` always exits 0 — a missing Android NDK is a fact to report, not a
+failure of the command. Branch on `ok` in the JSON form.
+
+#### Sentinel synthetic data
+
+```bash
+alexandria synth-sentinel generate-all --out-dir tools/sentinel-train/priors
+alexandria synth-sentinel generate-holdout --out-dir tools/sentinel-train/holdout
+alexandria synth-sentinel stats <blob.json>
+```
+
+Deterministic per seed. See [`docs/sentinel-runbook.md`](docs/sentinel-runbook.md).
+
+#### Shell completions
+
+```bash
+alexandria completions zsh > ~/.zfunc/_alexandria
+alexandria completions bash > /etc/bash_completion.d/alexandria
+```
+
+Supports bash, zsh, fish, elvish, and powershell.
 
 ### First-Time Onboarding
 
@@ -471,7 +508,7 @@ To use the same identity on another device, restore the mnemonic into a new prof
 To reset and start fresh:
 
 ```bash
-alex db reset --force   # Or manually: rm -rf ~/Library/Application\ Support/org.alexandria.node/
+alexandria db reset --force   # Or manually: rm -rf ~/Library/Application\ Support/org.alexandria.node/
 ```
 
 > **Upgrading from a single-vault install?** The first launch after upgrade auto-migrates the legacy `stronghold/`, `iroh/`, `plugins/`, and `videocache/` directories into a new `profiles/<uuid>/` slot named "My Profile". Rename and add avatars from the picker afterwards.
@@ -523,7 +560,7 @@ All data lives in `~/Library/Application Support/org.alexandria.node/` (macOS). 
 
 On first launch after upgrading from a single-vault install, the legacy top-level files (`alexandria.db`, `stronghold/` or `vault/`, `iroh/`, `plugins/`, `videocache/`) are atomically moved into a fresh `profiles/<uuid>/` slot.
 
-Use `alex config path` to print this directory on any platform.
+Use `alexandria path` to print the active profile's directory on any platform, and `alexandria --json path` for the app data root alongside it.
 
 ## Documentation
 
