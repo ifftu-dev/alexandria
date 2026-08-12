@@ -6,6 +6,7 @@ import { useLocalApi } from '@/composables/useLocalApi'
 import { AppButton, AppSpinner, EmptyState } from '@/components/ui'
 import ProfileHeader from '@/components/profile/ProfileHeader.vue'
 import TalentIndexConsent from '@/components/profile/TalentIndexConsent.vue'
+import HolderDirectories from '@/components/profile/HolderDirectories.vue'
 import type {
   FullReputationAssertion,
   Identity,
@@ -160,6 +161,10 @@ onMounted(async () => {
       </div>
 
       <TalentIndexConsent />
+      <!-- Directly after consent: that decides what may leave this device, this
+           shows what came of it. Split up, a learner could agree to be findable
+           and never see who then went looking. -->
+      <HolderDirectories />
     </div>
   </div>
 </template>

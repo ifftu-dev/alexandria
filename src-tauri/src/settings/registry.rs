@@ -407,6 +407,30 @@ pub mod keys {
         default: || JsonSetting(serde_json::json!({})),
     };
 
+    /// Directories the learner has chosen to check for records about
+    /// themselves. Shape: array of `{ "name": string, "url": string }`.
+    ///
+    /// Empty by default and never populated automatically. A directory is a
+    /// service somebody else runs that holds records about this person — an
+    /// institution's registry, an employer's index — and the only thing this
+    /// app does with one is ask it what it is holding, signing the request with
+    /// the learner's own key. Adding one is a decision to talk to a server,
+    /// which an offline-first application should never make on the user's
+    /// behalf.
+    ///
+    /// Deliberately a list rather than a single endpoint. A learner may be
+    /// enrolled at one institution and applying to three employers, and a
+    /// design that assumed one server would push everybody towards a single
+    /// one.
+    pub const HOLDER_DIRECTORIES: SettingKey<JsonSetting> = SettingKey {
+        key: "holder.directories",
+        scope: Scope::Sync,
+        category: "Privacy",
+        label: "Directories to check",
+        description: "Services you have chosen to ask what they hold about you.",
+        default: || JsonSetting(serde_json::json!([])),
+    };
+
     pub const INSTRUCTOR_GRAPH_PREFS: SettingKey<JsonSetting> = SettingKey {
         key: "instructor.graph_prefs",
         scope: Scope::Sync,
@@ -539,6 +563,7 @@ pub fn all_entries(
         entry!(P2P_RELAY_REGISTRY_CACHE),
         entry!(INSTRUCTOR_GRAPH_PREFS),
         entry!(TALENT_INDEX_CONSENT),
+        entry!(HOLDER_DIRECTORIES),
         entry!(LEARNER_TARGETS),
         entry!(IDENTITY_LOCAL_DID),
     ]
@@ -583,6 +608,7 @@ pub fn lookup_meta(key: &str) -> Option<(Scope, &'static str)> {
     check!(P2P_RELAY_REGISTRY_CACHE);
     check!(INSTRUCTOR_GRAPH_PREFS);
     check!(TALENT_INDEX_CONSENT);
+    check!(HOLDER_DIRECTORIES);
     check!(LEARNER_TARGETS);
     check!(IDENTITY_LOCAL_DID);
     None

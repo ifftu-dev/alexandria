@@ -20,6 +20,7 @@ pub mod governance;
 pub mod graph;
 pub mod guardian;
 pub mod health;
+pub mod holder_pull;
 pub mod identity;
 pub mod import;
 pub mod instructor;
