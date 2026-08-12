@@ -58,6 +58,8 @@ const PENDING_TRANSLATION = [
   // worth prioritising — it is a consent surface, and consent a learner cannot
   // read in their own language is not consent.
   'sentinel.evidence.',
+  // Settings -> Integrity nav entry, same pass as sentinel.evidence.*
+  'settings.nav.sections.integrity.',
   // Credential import surface. English-only pending a translate pass.
   'credentials.import.',
   'credentials.page.import',

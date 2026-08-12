@@ -27,6 +27,7 @@ import RelayManager from '@/components/settings/RelayManager.vue'
 import UpdatePanel from '@/components/settings/UpdatePanel.vue'
 import PluginsPanel from '@/components/settings/PluginsPanel.vue'
 import GuardianPanel from '@/components/settings/GuardianPanel.vue'
+import IntegrityHistorySection from '@/components/integrity/IntegrityHistorySection.vue'
 import LanguageSelector from '@/components/settings/LanguageSelector.vue'
 import type { Identity } from '@/types'
 
@@ -50,7 +51,7 @@ interface SectionMeta {
   keywords: string[]
 }
 const SECTION_IDS: SettingsSectionId[] = [
-  'account', 'security', 'personalization', 'system', 'plugins', 'guardian', 'advanced',
+  'account', 'security', 'personalization', 'system', 'plugins', 'guardian', 'integrity', 'advanced',
 ]
 const SECTIONS = computed<SectionMeta[]>(() => [
   { id: 'account', label: t('settings.nav.sections.account.label'), desc: t('settings.nav.sections.account.desc'),
@@ -65,6 +66,8 @@ const SECTIONS = computed<SectionMeta[]>(() => [
     keywords: ['plugin', 'install', 'uninstall', 'enable', 'disable', 'capability', 'donate', 'instructor', 'review', 'irl', 'music'] },
   { id: 'guardian', label: t('settings.nav.sections.guardian.label'), desc: t('settings.nav.sections.guardian.desc'),
     keywords: ['guardian', 'parent', 'oversight', 'minor', 'ward', 'family', 'link', 'unlink'] },
+  { id: 'integrity', label: t('settings.nav.sections.integrity.label'), desc: t('settings.nav.sections.integrity.desc'),
+    keywords: ['integrity', 'sentinel', 'flagged', 'evidence', 'appeal', 'camera', 'monitoring', 'proctoring', 'delete evidence'] },
   { id: 'advanced', label: t('settings.nav.sections.advanced.label'), desc: t('settings.nav.sections.advanced.desc'),
     keywords: ['advanced', 'all settings', 'sync', 'sentinel', 'notifications', 'flags'] },
 ])
@@ -920,6 +923,11 @@ function onSectionClick(id: SettingsSectionId) {
                 <!-- ──────────── Guardian (oversight transparency) ──────────── -->
                 <template v-else-if="activeSection === 'guardian'">
                   <GuardianPanel />
+                </template>
+
+                <!-- ──────────── Integrity — monitored sessions + kept evidence ──────────── -->
+                <template v-else-if="activeSection === 'integrity'">
+                  <IntegrityHistorySection />
                 </template>
 
                 <!-- ──────────── Advanced — every registered setting ──────────── -->

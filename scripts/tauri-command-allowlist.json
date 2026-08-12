@@ -82,8 +82,5 @@
   "assessment_start_adaptive": "adaptive delivery; turn-by-turn runner UI pending (fixed-form path is wired)",
   "assessment_submit_adaptive_item": "adaptive delivery; turn-by-turn runner UI pending",
   "assessment_finalize_adaptive": "adaptive delivery; turn-by-turn runner UI pending",
-  "get_skill_state_history": "confidence decay-curve + velocity data; curve UI pending",
-  "sentinel_evidence_stored": "Awaiting the Settings -> Integrity history surface; lets a learner see what they are currently holding.",
-  "sentinel_evidence_delete": "Awaiting the Settings -> Integrity history surface; learner-initiated early deletion of retained evidence.",
-  "sentinel_evidence_stored_preview": "Awaiting the Settings -> Integrity history surface; renders retained evidence for the learner's own review."
+  "get_skill_state_history": "confidence decay-curve + velocity data; curve UI pending"
 }

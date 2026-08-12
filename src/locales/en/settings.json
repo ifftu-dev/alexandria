@@ -32,6 +32,10 @@
       "advanced": {
         "label": "All settings",
         "desc": "Every setting for this account"
+      },
+      "integrity": {
+        "label": "Integrity",
+        "desc": "Monitored sessions and any evidence you kept"
       }
     }
   },

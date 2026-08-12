@@ -310,10 +310,11 @@ onMounted(async () => {
         }
       } catch { /* no progress yet */ }
 
-      // Start Sentinel monitoring for this enrollment
-      await sentinel.start(enrollment.value.id)
-      sentinelStarted.value = true
-
+      // Sentinel is NOT started here. Monitoring begins only when an
+      // assessment element is actually displayed — see the watcher below.
+      // Starting on mount meant keystrokes, mouse movement and (when opted in)
+      // the camera were captured while a learner read a text page, which is
+      // monitoring with nothing to monitor for.
       await refreshCompletionStatus()
     }
 
@@ -338,14 +339,32 @@ onMounted(async () => {
   }
 })
 
-// Notify Sentinel when element changes
-watch([activeChapter, activeElement], () => {
-  if (currentElement.value && sentinelStarted.value) {
-    sentinel.setElement(currentElement.value.id, currentElement.value.element_type)
+// Sentinel follows the element, not the course.
+//
+// It starts when an assessment element is displayed and stops when the learner
+// leaves it, so a session's boundaries are the thing being assessed. Reading
+// pages, videos and discussion are not monitored at all.
+watch([activeChapter, activeElement], async () => {
+  const el = currentElement.value
+  const shouldMonitor = !!el && !!enrollment.value && sentinel.isAssessmentElement(el.element_type)
+
+  if (shouldMonitor && !sentinelStarted.value) {
+    await sentinel.start(enrollment.value!.id)
+    sentinelStarted.value = true
   }
+  if (el && sentinelStarted.value) {
+    sentinel.setElement(el.id, el.element_type)
+  }
+  if (!shouldMonitor && sentinelStarted.value) {
+    // Ends the session, which is what surfaces the evidence-consent prompt if
+    // it was flagged.
+    await sentinel.stop()
+    sentinelStarted.value = false
+  }
+
   downloadError.value = null
   void markInProgress()
-})
+}, { immediate: true })
 
 onUnmounted(async () => {
   window.removeEventListener('keydown', onGlobalKeydown)
@@ -456,12 +475,13 @@ async function enrollFromPlayer() {
   enrolling.value = true
   try {
     enrollment.value = await invoke<Enrollment>('enroll', { courseId: course.value.id })
-    if (enrollment.value && !sentinelStarted.value) {
+    // Whether to monitor is the element watcher's call, not enrolment's — a
+    // learner who enrols while reading is not sitting an assessment.
+    const el = currentElement.value
+    if (enrollment.value && el && !sentinelStarted.value && sentinel.isAssessmentElement(el.element_type)) {
       await sentinel.start(enrollment.value.id)
       sentinelStarted.value = true
-      if (currentElement.value) {
-        sentinel.setElement(currentElement.value.id, currentElement.value.element_type)
-      }
+      sentinel.setElement(el.id, el.element_type)
     }
   } catch (e) {
     console.error('Failed to enroll from player:', e)

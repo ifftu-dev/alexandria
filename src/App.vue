@@ -14,6 +14,7 @@ import { initOmniRecentsFromSettings } from '@/composables/useOmniSearch'
 import { initSentinelFlagsFromSettings, useSentinel } from '@/composables/useSentinel'
 import SentinelDebugPip from '@/components/integrity/SentinelDebugPip.vue'
 import EvidenceConsentModal from '@/components/integrity/EvidenceConsentModal.vue'
+import SentinelLiveIndicator from '@/components/integrity/SentinelLiveIndicator.vue'
 import UpdateBanner from '@/components/update/UpdateBanner.vue'
 import { initUpdateCheck } from '@/composables/useAppUpdate'
 import { useDeepLinks } from '@/deeplink/useDeepLinks'
@@ -185,6 +186,10 @@ onUnmounted(() => {
   <!-- Live Sentinel observability PiP — stays hidden until toggled from the
        Develop menu (Sentinel Live View, ⌘⇧S), so it's safe to always mount. -->
   <SentinelDebugPip />
+
+  <!-- Shows what Sentinel can see while a session is running, so avoidable
+       flags can be avoided. Self-hides when no session is active. -->
+  <SentinelLiveIndicator />
 
   <!-- Offers the evidence decision when a session ends flagged. Mounted at the
        root because the assessment view that was running is usually gone by the
