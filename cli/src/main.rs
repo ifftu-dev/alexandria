@@ -95,7 +95,37 @@ enum Commands {
     },
 }
 
+/// Whether this invocation is going to print help rather than do work.
+///
+/// Clap handles help inside `parse()` and exits there, so anything that should
+/// accompany it has to happen first. Checked by scanning the raw arguments,
+/// because by the time there is a parsed `Cli`, clap has already printed and
+/// gone.
+///
+/// `--version` is deliberately excluded. The banner already carries the
+/// version, so printing both says it twice, and `-V` is the one thing here a
+/// script is most likely to parse.
+fn is_help(args: &[String]) -> bool {
+    // No arguments at all is clap's help too, since every path needs a
+    // subcommand.
+    if args.len() <= 1 {
+        return true;
+    }
+    args.iter()
+        .any(|a| matches!(a.as_str(), "-h" | "--help" | "help"))
+}
+
 fn main() {
+    let args: Vec<String> = std::env::args().collect();
+
+    // The banner belongs with help: help is where somebody meets this tool for
+    // the first time, and it is the one place the wordmark is doing a job
+    // rather than decorating a log line. Printed before `parse()` because clap
+    // prints help and exits without returning.
+    if is_help(&args) {
+        output::banner();
+    }
+
     let cli = Cli::parse();
     output::set_json(cli.json);
 
@@ -116,7 +146,14 @@ fn run(cli: Cli) -> Result<()> {
         return Ok(());
     }
 
-    output::banner();
+    // Not before the TUI. The TUI takes over the alternate screen, so a banner
+    // printed here is invisible for the whole session and then reappears intact
+    // the moment the alternate screen is dropped — which reads as the CLI
+    // printing a banner *after* you quit, which is exactly what it looked
+    // like.
+    if !matches!(cli.command, Commands::Tui) {
+        output::banner();
+    }
 
     let ctx = ProjectContext::detect(cli.profile.as_deref())?;
     let password_file = cli.password_file.as_deref();
