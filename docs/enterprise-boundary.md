@@ -60,6 +60,8 @@ If yes, it is core, and it is AGPL. There is no third category.
 | Appeal-evidence retention and its consent prompt | **Core** | It decides what is kept about a learner, on their device, by their choice |
 | Importing a credential someone handed you | **Core** | Receiving is not a commercial act |
 | Talent-index consent UI, publish client, wire schema | **Core** | A learner must audit what leaves their device |
+| Asking a directory what it holds about you, and answering when it asks | **Core** | Deciding whether to disclose is a decision about the learner's own data, made on their machine with their key. Also the only way the "every look is shown to the learner" promise is kept: a disclosure log nobody can read is a claim, not a control |
+| The signed-pull proof — challenge format, freshness window | **Core** | Both halves have to agree byte for byte, and the holder's half is what a learner is trusting. Defining it here means the service implements a published format rather than the client reverse-engineering whatever a server accepts |
 | SSO / SAML / OIDC, SCIM provisioning | **Enterprise** | Exists only because an org has many people |
 | Role-based access control, delegated admin | **Enterprise** | Same |
 | Immutable audit log, retention policy, data residency | **Enterprise** | Compliance obligation |
@@ -70,6 +72,7 @@ If yes, it is core, and it is AGPL. There is no third category.
 | Bulk verification | **Enterprise** | A metered enterprise operation |
 | Human review queue over Sentinel flags | **Enterprise** | An org process with an adjudication workflow — but it may not request evidence; see `sentinel.md` |
 | Cohort analytics, skills intelligence | **Enterprise** | Cross-user server-side aggregation |
+| The directory a learner points at — its records, its disclosure requests, its access log | **Enterprise** | Server-side state about many people, held by an organisation. Core asks it questions; it is not core |
 | Seat accounting and billing | **Enterprise** | Definitionally multi-tenant |
 
 Note the pattern in the split cases: the *client* is core and the *service* is
@@ -77,6 +80,13 @@ enterprise. The talent-index publish client is core because it decides what
 leaves a learner's device; the index that receives it is enterprise because it
 holds data about other people. The verification logic is core; the hosted API
 with an SLA in front of it is enterprise.
+
+The split runs in both directions, which is easy to miss. Publishing is a
+learner sending something out and the client is core; reading a disclosure log
+is a learner asking what came back, and that client is core for the same
+reason. A design where only the outbound half were auditable would let somebody
+agree to be findable and never see who went looking — the consent would be
+readable and its consequences would not.
 
 ## How the boundary is enforced
 
