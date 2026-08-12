@@ -25,7 +25,7 @@
 //! would mean every existing user's earned skills appeared in it the moment the
 //! feature shipped, with nobody having chosen that. So talent-index consent is
 //! its own preference, it starts empty, and
-//! [`TalentIndexRecord::build`] emits nothing that was not explicitly named.
+//! [`build_record`] emits nothing that was not explicitly named.
 //!
 //! ## The record is signed, and why it is not a presentation
 //!
@@ -97,200 +97,7 @@ impl TalentIndexConsent {
 
 /// One skill as it would appear to an employer.
 ///
-/// Carries the derived level and the evidence behind it, not the raw score.
-/// The level is the unit the rest of the product already speaks in, and
-/// exposing `raw_score`/`confidence` would invite employers to rank on numbers
-/// whose derivation they cannot audit.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PublishedSkill {
-    pub skill_id: String,
-    /// Human-readable name at publication time. Denormalized deliberately: an
-    /// index should not have to resolve a taxonomy to render a listing.
-    pub name: String,
-    /// Derived level, 1–5.
-    pub level: u8,
-    /// How many independent issuer clusters back this skill. An employer's
-    /// most useful single signal, and it cannot be inflated by one issuer
-    /// repeatedly attesting.
-    pub issuer_clusters: u32,
-}
-
-/// Exactly what leaves the device.
-///
-/// Serialized shape is the wire format. It is intentionally small and flat:
-/// everything here is something the learner ticked, and anything a learner
-/// cannot see in a preview has no business being in it.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TalentIndexRecord {
-    /// The learner's DID. Always present — a listing has to identify someone,
-    /// and this is the identifier an employer later verifies credentials
-    /// against.
-    pub subject_did: String,
-    /// Consented skills, in the order given by the source, deduplicated.
-    pub skills: Vec<PublishedSkill>,
-    /// Present only with explicit consent.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub display_name: Option<String>,
-    /// Present only with explicit consent.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub bio: Option<String>,
-    /// RFC 3339 instant after which this record must be ignored.
-    ///
-    /// Required, and inside the signed payload. This is the withdrawal
-    /// mechanism: a learner who unticks everything simply stops republishing,
-    /// and the record lapses without anyone having to honour a delete request.
-    /// An index that ignores expiry is misbehaving in a way a signature cannot
-    /// prevent — but a *stale* record cannot be passed off as current.
-    pub valid_until: String,
-}
-
-/// Detached-JWS proof over a [`TalentIndexRecord`].
-///
-/// Same shape as a credential's proof so there is one signature format in the
-/// system rather than two.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RecordProof {
-    #[serde(rename = "type")]
-    pub type_: String,
-    pub created: String,
-    /// The key that signed, as `<did>#key-1`.
-    pub verification_method: String,
-    /// Detached compact JWS: `header..signature`.
-    pub jws: String,
-}
-
-/// A record plus its signature — what actually leaves the device.
-///
-/// The proof sits alongside the payload rather than inside it, so signing needs
-/// no "clear the signature field first" dance and the consent preview can show
-/// the payload without a JWS blob in the middle of it.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SignedTalentIndexRecord {
-    pub record: TalentIndexRecord,
-    pub proof: RecordProof,
-}
-
-/// Why a signed record was not accepted.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RecordError {
-    /// `subjectDid` is not a resolvable `did:key`.
-    UnresolvableSubject,
-    /// Signature did not verify against the subject's key.
-    BadSignature,
-    /// Proof was not the expected shape.
-    MalformedProof(String),
-    /// The record's term has passed.
-    Expired,
-}
-
-impl std::fmt::Display for RecordError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::UnresolvableSubject => write!(f, "subject DID is not resolvable"),
-            Self::BadSignature => write!(f, "signature does not match the subject"),
-            Self::MalformedProof(why) => write!(f, "malformed proof: {why}"),
-            Self::Expired => write!(f, "record has expired"),
-        }
-    }
-}
-
-/// JWS protected header. Fixed, so it canonicalizes identically for signer and
-/// verifier — same constant as the credential path, for the same reason.
-const JWS_HEADER_JSON: &str = r#"{"alg":"EdDSA","b64":false,"crit":["b64"]}"#;
-
-/// Bytes that get signed: `header_b64 || '.' || JCS(record)`.
-fn signing_input(record: &TalentIndexRecord, header_b64: &str) -> Result<Vec<u8>, String> {
-    let value = serde_json::to_value(record).map_err(|e| e.to_string())?;
-    let canonical = crate::domain::vc::canonicalize::canonicalize(&value)
-        .map_err(|e| format!("canonicalize record: {e}"))?;
-    let mut out = Vec::with_capacity(header_b64.len() + 1 + canonical.len());
-    out.extend_from_slice(header_b64.as_bytes());
-    out.push(b'.');
-    out.extend_from_slice(&canonical);
-    Ok(out)
-}
-
-/// Sign a record with the subject's key.
-///
-/// Refuses when the key does not derive the DID the record names. Signing a
-/// record about somebody else would produce something that verifies against the
-/// wrong key and fails at the far end for a confusing reason; better to fail
-/// here, where the cause is obvious.
-pub fn sign_record(
-    record: &TalentIndexRecord,
-    signing_key: &ed25519_dalek::SigningKey,
-    now: &str,
-) -> Result<SignedTalentIndexRecord, String> {
-    use ed25519_dalek::Signer;
-
-    let did = crate::crypto::did::derive_did_key(signing_key);
-    if did.as_str() != record.subject_did {
-        return Err(format!(
-            "cannot sign a record for {} with the key for {}",
-            record.subject_did,
-            did.as_str()
-        ));
-    }
-
-    let header_b64 = crate::domain::vc::sign::b64url(JWS_HEADER_JSON.as_bytes());
-    let input = signing_input(record, &header_b64)?;
-    let sig = signing_key.sign(&input);
-    let sig_b64 = crate::domain::vc::sign::b64url(&sig.to_bytes());
-
-    Ok(SignedTalentIndexRecord {
-        record: record.clone(),
-        proof: RecordProof {
-            type_: "DataIntegrityProof".into(),
-            created: now.to_string(),
-            verification_method: format!("{}#key-1", did.as_str()),
-            jws: format!("{header_b64}..{sig_b64}"),
-        },
-    })
-}
-
-/// Verify a signed record against the subject DID it names.
-///
-/// The key comes from the record's own `subjectDid` via `did:key`
-/// self-resolution, **not** from `proof.verificationMethod`. Trusting the proof
-/// to name its own key would let a forger sign with any key and point the
-/// verifier at it — the whole check would become "is this internally
-/// consistent", which every forgery is.
-pub fn verify_record(
-    signed: &SignedTalentIndexRecord,
-    verification_time: &str,
-) -> Result<(), RecordError> {
-    use ed25519_dalek::Verifier;
-
-    if signed.record.valid_until.as_str() <= verification_time {
-        return Err(RecordError::Expired);
-    }
-
-    let subject = crate::crypto::did::Did(signed.record.subject_did.clone());
-    let key = crate::crypto::did::resolve_did_key(&subject)
-        .map_err(|_| RecordError::UnresolvableSubject)?;
-
-    let (header_b64, sig_b64) = signed
-        .proof
-        .jws
-        .split_once("..")
-        .ok_or_else(|| RecordError::MalformedProof("expected detached compact JWS".into()))?;
-
-    let sig_bytes = crate::domain::vc::sign::b64url_decode(sig_b64)
-        .ok_or_else(|| RecordError::MalformedProof("signature is not base64url".into()))?;
-    let sig_array: [u8; 64] = sig_bytes
-        .try_into()
-        .map_err(|_| RecordError::MalformedProof("signature is not 64 bytes".into()))?;
-    let sig = ed25519_dalek::Signature::from_bytes(&sig_array);
-
-    let input = signing_input(&signed.record, header_b64).map_err(RecordError::MalformedProof)?;
-
-    key.verify(&input, &sig)
-        .map_err(|_| RecordError::BadSignature)
-}
+pub use alexandria_verify::talent::*;
 
 /// A skill the learner *could* publish, with everything the preview needs.
 ///
@@ -316,63 +123,66 @@ pub struct ProfileFields {
     pub bio: Option<String>,
 }
 
-impl TalentIndexRecord {
-    /// Build the record that consent permits.
-    ///
-    /// Returns `None` when nothing would be published. That is distinct from an
-    /// empty record: publishing a bare DID would still tell an index this
-    /// learner exists and is listed, which nobody consented to.
-    ///
-    /// Skills not named in `consent` are dropped regardless of what
-    /// `candidates` contains. The caller is free to pass every earned skill —
-    /// filtering is this function's job, and centralising it is what makes the
-    /// guarantee testable.
-    pub fn build(
-        subject_did: &str,
-        candidates: &[CandidateSkill],
-        profile: &ProfileFields,
-        consent: &TalentIndexConsent,
-        valid_until: &str,
-    ) -> Option<Self> {
-        if !consent.publishes_anything() {
-            return None;
-        }
-
-        let mut skills: Vec<PublishedSkill> = Vec::new();
-        for c in candidates {
-            if !consent.allows_skill(&c.skill_id) {
-                continue;
-            }
-            // Consent naming the same skill twice must not duplicate a listing.
-            if skills.iter().any(|s| s.skill_id == c.skill_id) {
-                continue;
-            }
-            skills.push(PublishedSkill {
-                skill_id: c.skill_id.clone(),
-                name: c.name.clone(),
-                level: c.level,
-                issuer_clusters: c.issuer_clusters,
-            });
-        }
-
-        // Consent can name a skill the learner no longer has — a revoked
-        // credential, a renamed taxonomy entry. Nothing is invented to fill the
-        // gap; the record carries only what is currently backed by evidence.
-        if skills.is_empty() {
-            return None;
-        }
-
-        Some(Self {
-            subject_did: subject_did.to_string(),
-            skills,
-            display_name: consent
-                .display_name
-                .then(|| profile.display_name.clone())
-                .flatten(),
-            bio: consent.bio.then(|| profile.bio.clone()).flatten(),
-            valid_until: valid_until.to_string(),
-        })
+/// Build the record that consent permits.
+///
+/// A free function rather than a constructor on the type: the record's wire
+/// shape lives in `alexandria-verify` so that anyone can verify one, while the
+/// rules deciding what a learner is willing to publish are this application's
+/// business and stay here.
+///
+/// Returns `None` when nothing would be published. That is distinct from an
+/// empty record: publishing a bare DID would still tell an index this
+/// learner exists and is listed, which nobody consented to.
+///
+/// Skills not named in `consent` are dropped regardless of what
+/// `candidates` contains. The caller is free to pass every earned skill —
+/// filtering is this function's job, and centralising it is what makes the
+/// guarantee testable.
+pub fn build_record(
+    subject_did: &str,
+    candidates: &[CandidateSkill],
+    profile: &ProfileFields,
+    consent: &TalentIndexConsent,
+    valid_until: &str,
+) -> Option<TalentIndexRecord> {
+    if !consent.publishes_anything() {
+        return None;
     }
+
+    let mut skills: Vec<PublishedSkill> = Vec::new();
+    for c in candidates {
+        if !consent.allows_skill(&c.skill_id) {
+            continue;
+        }
+        // Consent naming the same skill twice must not duplicate a listing.
+        if skills.iter().any(|s| s.skill_id == c.skill_id) {
+            continue;
+        }
+        skills.push(PublishedSkill {
+            skill_id: c.skill_id.clone(),
+            name: c.name.clone(),
+            level: c.level,
+            issuer_clusters: c.issuer_clusters,
+        });
+    }
+
+    // Consent can name a skill the learner no longer has — a revoked
+    // credential, a renamed taxonomy entry. Nothing is invented to fill the
+    // gap; the record carries only what is currently backed by evidence.
+    if skills.is_empty() {
+        return None;
+    }
+
+    Some(TalentIndexRecord {
+        subject_did: subject_did.to_string(),
+        skills,
+        display_name: consent
+            .display_name
+            .then(|| profile.display_name.clone())
+            .flatten(),
+        bio: consent.bio.then(|| profile.bio.clone()).flatten(),
+        valid_until: valid_until.to_string(),
+    })
 }
 
 #[cfg(test)]
@@ -416,7 +226,7 @@ mod tests {
         let consent = TalentIndexConsent::default();
         assert!(!consent.publishes_anything());
         assert_eq!(
-            TalentIndexRecord::build(DID, &candidates(), &profile(), &consent, TERM),
+            build_record(DID, &candidates(), &profile(), &consent, TERM),
             None
         );
     }
@@ -429,8 +239,7 @@ mod tests {
             skills: vec!["skill_rust".into()],
             ..Default::default()
         };
-        let record =
-            TalentIndexRecord::build(DID, &candidates(), &profile(), &consent, TERM).unwrap();
+        let record = build_record(DID, &candidates(), &profile(), &consent, TERM).unwrap();
 
         assert_eq!(record.skills.len(), 1);
         assert_eq!(record.skills[0].skill_id, "skill_rust");
@@ -448,8 +257,7 @@ mod tests {
             skills: vec!["skill_rust".into()],
             ..Default::default()
         };
-        let record =
-            TalentIndexRecord::build(DID, &candidates(), &profile(), &consent, TERM).unwrap();
+        let record = build_record(DID, &candidates(), &profile(), &consent, TERM).unwrap();
         assert_eq!(record.display_name, None);
         assert_eq!(record.bio, None);
 
@@ -458,8 +266,7 @@ mod tests {
             display_name: true,
             bio: false,
         };
-        let record =
-            TalentIndexRecord::build(DID, &candidates(), &profile(), &named, TERM).unwrap();
+        let record = build_record(DID, &candidates(), &profile(), &named, TERM).unwrap();
         assert_eq!(record.display_name.as_deref(), Some("Ada"));
         assert_eq!(record.bio, None, "bio was not consented");
     }
@@ -473,8 +280,7 @@ mod tests {
             bio: true,
         };
         let empty_profile = ProfileFields::default();
-        let record =
-            TalentIndexRecord::build(DID, &candidates(), &empty_profile, &consent, TERM).unwrap();
+        let record = build_record(DID, &candidates(), &empty_profile, &consent, TERM).unwrap();
         assert_eq!(record.display_name, None);
         assert_eq!(record.bio, None);
     }
@@ -490,7 +296,7 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            TalentIndexRecord::build(DID, &candidates(), &profile(), &consent, TERM),
+            build_record(DID, &candidates(), &profile(), &consent, TERM),
             None,
             "a record with no skills must not be published just to carry a name"
         );
@@ -504,15 +310,14 @@ mod tests {
             skills: vec!["skill_rust".into(), "skill_async".into()],
             ..Default::default()
         };
-        let before = TalentIndexRecord::build(DID, &candidates(), &profile(), &both, TERM).unwrap();
+        let before = build_record(DID, &candidates(), &profile(), &both, TERM).unwrap();
         assert_eq!(before.skills.len(), 2);
 
         let withdrawn = TalentIndexConsent {
             skills: vec!["skill_rust".into()],
             ..Default::default()
         };
-        let after =
-            TalentIndexRecord::build(DID, &candidates(), &profile(), &withdrawn, TERM).unwrap();
+        let after = build_record(DID, &candidates(), &profile(), &withdrawn, TERM).unwrap();
         assert_eq!(after.skills.len(), 1);
         assert_eq!(after.skills[0].skill_id, "skill_rust");
     }
@@ -523,8 +328,7 @@ mod tests {
             skills: vec!["skill_rust".into(), "skill_rust".into()],
             ..Default::default()
         };
-        let record =
-            TalentIndexRecord::build(DID, &candidates(), &profile(), &consent, TERM).unwrap();
+        let record = build_record(DID, &candidates(), &profile(), &consent, TERM).unwrap();
         assert_eq!(record.skills.len(), 1);
     }
 
@@ -536,8 +340,7 @@ mod tests {
             skills: vec!["skill_rust".into()],
             ..Default::default()
         };
-        let record =
-            TalentIndexRecord::build(DID, &candidates(), &profile(), &consent, TERM).unwrap();
+        let record = build_record(DID, &candidates(), &profile(), &consent, TERM).unwrap();
         let json = serde_json::to_value(&record).unwrap();
 
         assert_eq!(
@@ -569,8 +372,7 @@ mod tests {
             skills: vec!["skill_rust".into()],
             ..Default::default()
         };
-        let record =
-            TalentIndexRecord::build(DID, &candidates(), &profile(), &consent, TERM).unwrap();
+        let record = build_record(DID, &candidates(), &profile(), &consent, TERM).unwrap();
         let json = serde_json::to_string(&record).unwrap();
         for leaked in ["rawScore", "confidence", "trustScore", "evidenceMass"] {
             assert!(!json.contains(leaked), "{leaked} must not reach the wire");
@@ -605,8 +407,7 @@ mod tests {
             ..Default::default()
         };
         let record =
-            TalentIndexRecord::build(did.as_str(), &candidates(), &profile(), &consent, SIGN_TERM)
-                .unwrap();
+            build_record(did.as_str(), &candidates(), &profile(), &consent, SIGN_TERM).unwrap();
         sign_record(&record, key, SIGN_NOW).unwrap()
     }
 
@@ -630,7 +431,7 @@ mod tests {
             skills: vec!["skill_rust".into()],
             ..Default::default()
         };
-        let record = TalentIndexRecord::build(
+        let record = build_record(
             victim.as_str(),
             &candidates(),
             &profile(),
@@ -771,8 +572,7 @@ mod tests {
             ..Default::default()
         };
         let record =
-            TalentIndexRecord::build(did.as_str(), &candidates(), &profile(), &consent, SIGN_TERM)
-                .unwrap();
+            build_record(did.as_str(), &candidates(), &profile(), &consent, SIGN_TERM).unwrap();
         let signed = sign_record(&record, &key, SIGN_NOW).unwrap();
         assert_eq!(signed.record, record);
     }

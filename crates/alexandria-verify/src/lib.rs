@@ -16,6 +16,7 @@
 
 pub mod did;
 pub mod hash;
+pub mod talent;
 pub mod vc;
 
 pub use did::{Did, DidError, KeyRegistryEntry, VerificationMethodRef};

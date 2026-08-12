@@ -17,8 +17,8 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::domain::talent_index::{
-    sign_record, CandidateSkill, ProfileFields, SignedTalentIndexRecord, TalentIndexConsent,
-    TalentIndexRecord,
+    build_record, sign_record, CandidateSkill, ProfileFields, SignedTalentIndexRecord,
+    TalentIndexConsent, TalentIndexRecord,
 };
 use crate::settings::registry::{keys, JsonSetting};
 use crate::settings::SettingsStore;
@@ -106,7 +106,7 @@ fn candidate_skills(conn: &Connection, subject_did: &str) -> Result<Vec<Candidat
 
 /// The learner's own profile fields, whether or not consent covers them.
 ///
-/// Filtering happens in [`TalentIndexRecord::build`], in one place, rather than
+/// Filtering happens in [`build_record`], in one place, rather than
 /// here — a second filter would be a second thing to get wrong.
 fn profile_fields(conn: &Connection) -> ProfileFields {
     conn.query_row(
@@ -152,7 +152,7 @@ pub fn get_talent_index_preview_impl(
 ) -> Result<TalentIndexPreview, String> {
     let consent = load_consent(conn);
     let candidates = candidate_skills(conn, subject_did)?;
-    let record = TalentIndexRecord::build(
+    let record = build_record(
         subject_did,
         &candidates,
         &profile_fields(conn),
