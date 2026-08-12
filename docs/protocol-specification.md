@@ -1295,6 +1295,32 @@ expiry and reads an expired credential as one that never expires. And a verifier
 written against this section needs no JSON-LD tooling at all, which is most of
 why an independent implementation is a few hundred lines rather than a project.
 
+### 14.12b What a bare credential cannot tell you
+
+A credential is self-verifying in the common case: `did:key` embeds the issuer's
+public key, so no lookup is needed and no service is consulted.
+
+Two situations break that, and an implementer should know before meeting one in
+production rather than after.
+
+**A rotated issuer key.** If the issuer rotated keys and signed with the new one
+while keeping their DID, self-resolution returns the *pre-rotation* key and the
+signature fails. Verifying it needs the key-registry entry whose
+`[validFrom, validUntil)` window contains the verification time. This is
+inherent to key rotation, not a defect: an identifier that embeds one key cannot
+also embed its successors.
+
+**Revocation.** A credential says where its status list lives, not what the list
+says. A verifier without the list cannot know, and MUST treat absence as "not
+known to be revoked" rather than as either answer.
+
+Both are why a §20.4 bundle carries the key registry and the status lists
+alongside the credentials — a bundle is verifiable entirely offline, whereas a
+bare credential is verifiable offline only under its original signing key and
+without revocation information. Neither case requires contacting Alexandria; it
+requires having been given the relevant data, which the bundle format exists to
+do.
+
 ### 14.13 Verification Algorithm
 
 #### 14.13.1 Verification Result Structure

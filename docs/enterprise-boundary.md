@@ -53,7 +53,7 @@ If yes, it is core, and it is AGPL. There is no third category.
 | Attempt policy and cooldowns | **Core** | A learner-side integrity rule |
 | Artifact grader plugins | **Core** | Scores must be re-derivable by anyone |
 | Credential issuance, holding, presentation | **Core** | The product |
-| Credential verification logic | **Core** | Permanently — see the guarantee above. Extracted as `alexandria-verify`, an I/O-free crate anyone can link |
+| Credential verification logic | **Core**, and permissively licensed | Permanently — see the guarantee above. `alexandria-verify` is I/O-free and MIT OR Apache-2.0, so anyone may embed it, including in closed software. An AGPL verifier would make checking a credential legally expensive for the registrars and employers the guarantee exists for |
 | Selective disclosure | **Core** | Every learner gets it |
 | Sentinel on-device integrity | **Core** | Runs on the learner's machine |
 | Telling a learner they were flagged | **Core** | An accusation the subject cannot see is not something they can answer |

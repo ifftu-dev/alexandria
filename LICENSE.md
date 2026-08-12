@@ -14,6 +14,19 @@ PARTICULAR PURPOSE. See the GNU Affero General Public License for more details.
 You should have received a copy of the GNU Affero General Public License along
 with this program. If not, see <https://www.gnu.org/licenses/>.
 
+One part of this repository is deliberately **not** copyleft.
+`crates/alexandria-verify` — the credential verification library — is
+Copyright (C) 2025-2026 Alexandria Pvt. Ltd. and licensed **MIT OR Apache-2.0**,
+with both texts in that directory.
+
+That is not a loophole; it is the guarantee made operable. Verification is
+promised to be free, offline-capable, permanent and implementable by anyone, and
+an AGPL verification library would defeat it: a registrar, an ATS or an HR
+platform embedding the verifier would have to publish their own product under
+the AGPL. Checking whether a credential is genuine has to be something anyone
+can do in any software, or the credential is not really the learner's to use.
+The application keeps its copyleft; the ability to check a signature does not.
+
 Third-party components incorporated into Alexandria remain under the licenses
 granted by their owners.
 

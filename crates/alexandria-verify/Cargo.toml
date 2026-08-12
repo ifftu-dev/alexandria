@@ -4,8 +4,21 @@ version = "0.1.0"
 description = "Alexandria credential verification — W3C VCs, did:key, JCS canonicalization, detached Ed25519 JWS"
 edition = "2021"
 rust-version = "1.83.0"
-license = "AGPL-3.0-or-later"
+license = "MIT OR Apache-2.0"
 
+# Permissive, deliberately, while the rest of Alexandria is AGPL-3.0-or-later.
+#
+# The project guarantees that credential verification is free, offline-capable
+# and permanent, and that anyone may implement it. An AGPL verification library
+# would contradict that: an HR platform, a registrar or an ATS embedding it
+# would have to publish their own product under the AGPL, which makes verifying
+# an Alexandria credential legally expensive for precisely the parties the
+# guarantee is aimed at. Protocol and verification libraries are normally
+# permissive even where the application is copyleft, for this reason.
+#
+# The application keeps its copyleft. What is permissive is the ability to check
+# a signature, which is the part that has to be everywhere to be worth anything.
+#
 # This crate is deliberately I/O-free. It has no database, no network, no
 # filesystem and no platform dependencies, so that anything which needs to
 # verify an Alexandria credential — the desktop app, the CLI, a server, or a

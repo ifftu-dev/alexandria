@@ -55,6 +55,22 @@ makes a credential signed before a key rotation still verify afterwards — see
 `08-rotated-issuer-key.json`, where self-resolution alone gives the wrong key
 and fails.
 
+## What a bare credential cannot tell you
+
+`did:key` is self-resolving, so most credentials verify with nothing but the
+document in front of you. Two cases need more, and both are inherent rather than
+defects:
+
+- **A rotated issuer key** — self-resolution returns the pre-rotation key, so a
+  credential signed after a rotation needs the registry entry covering the
+  verification time. An identifier that embeds one key cannot embed its
+  successors. See `08-rotated-issuer-key.json`.
+- **Revocation** — a credential names its status list; it does not carry it.
+
+Neither requires contacting Alexandria. Both require having been given the data,
+which is what a credential *bundle* is for: it carries the key registry and the
+status lists next to the credentials, and verifies entirely offline.
+
 ## Status lists
 
 `credentialStatus.statusListIndex` is a bit index into the list named by

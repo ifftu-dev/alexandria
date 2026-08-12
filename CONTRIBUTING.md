@@ -5,8 +5,12 @@ free for learners, permanently — and contributions are welcome.
 
 ## Licensing: read this first
 
-Alexandria is **AGPL-3.0-or-later, all of it**. There is no proprietary subtree
-in this repository and no contribution path that lands in one.
+Alexandria is **AGPL-3.0-or-later**, with one deliberate exception:
+`crates/alexandria-verify` is **MIT OR Apache-2.0**, because credential
+verification has to be embeddable in anyone's software — including closed
+software — or the promise that anyone can verify is not real. There is no
+proprietary subtree in this repository and no contribution path that lands in
+one.
 
 Copyleft is the point rather than an inconvenience: MIT would let someone take
 this work, improve it, and keep the improvements closed. The AGPL keeps the
@@ -50,30 +54,23 @@ you are asserting you wrote the change, or have the right to submit it under
 the AGPL. It is not a copyright assignment and it does not take anything from
 you.
 
-### Why a contributor agreement is coming
+### No contributor agreement is required
 
-Being straight about this, because discovering it later feels like a bait and
-switch.
+Inbound equals outbound. Contribute to the AGPL parts and your work is AGPL;
+contribute to `crates/alexandria-verify` and it is MIT OR Apache-2.0, as that
+directory's licence files say. The DCO sign-off is the whole of it. You keep
+your copyright and nobody asks you to sign anything else.
 
-The commercial Enterprise Edition is a separate, proprietary service. It links
-code from this repository. That is only lawful because Alexandria Pvt. Ltd.
-currently holds the copyright in all of it — a copyright holder is not bound by
-the licence it grants everyone else. The moment a contribution lands here whose
-copyright the company does not hold, that code becomes AGPL-only for every
-purpose, including ours, and the Enterprise Edition can never use it.
+This is worth stating because dual-licensed projects usually do demand a CLA, so
+the absence looks like an oversight. It is not. The commercial service links
+exactly one thing from this repository — the verification crate — and that crate
+is permissively licensed for everybody, us included. There is no arrangement
+where the company has rights to your contribution that you do not also grant to
+every other reader.
 
-So substantive external contributions will need a contributor agreement, and it
-is not drafted yet. Until it exists:
-
-- Small fixes — typos, bugs, docs, tests — are welcome now under the DCO alone.
-- If you are planning something larger, open an issue first so we can tell you
-  where the agreement stands rather than have you write code we cannot merge.
-
-What the agreement will and will not do: it will let the company license *your
-contribution* under terms other than the AGPL, which is what keeps the
-Enterprise Edition lawful. It will not assign your copyright away, it will not
-let anyone take this application proprietary, and it changes nothing about the
-AGPL rights everyone else has in the result.
+If that ever changes — if something commercial needs to link an AGPL part of
+this repository — it will need a contributor agreement, and this section will
+say so before it happens rather than afterwards.
 
 ## Before you push
 
