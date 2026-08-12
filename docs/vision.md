@@ -26,7 +26,7 @@ Even well-intentioned platforms reproduce this dependency. Any education system 
 
 ## What Alexandria Does
 
-Alexandria is a free, open-source, decentralized learning application that runs as a native desktop and mobile app. Every user runs a full node — a single binary that contains the entire platform: database, content store, peer-to-peer networking, wallet, and user interface. There are no servers, no Docker containers, and no external databases.
+Alexandria is a free, open-source, decentralized learning application that runs as a native desktop and mobile app. Every user runs a full node — a single binary that contains the entire platform: database, content store, peer-to-peer networking, wallet, and user interface. There is no application server, no Docker container, and no external database: nothing holds your data but your own device. Relays exist to help peers find each other and traverse NAT, but they store no application state and cannot read the traffic they forward.
 
 The application runs on macOS, Linux, Windows, iOS, and Android. It provides courses, assessments, classrooms, live tutoring, and APIs — all distributed through a peer-to-peer network (libp2p) so that no single organisation controls access.
 
@@ -138,7 +138,9 @@ The platform also accepts grants, donations, and impact investment — but never
 
 Alexandria is not another MOOC. It is an attempt to rebuild the infrastructure layer beneath education — the layer that determines how learning is recognised, how teaching quality is measured, how expertise governs decisions, and how credentials flow between people and institutions.
 
-By putting a full node on every device — desktop and mobile — and eliminating servers entirely, the platform's properties (credential ownership, censorship resistance, privacy) are guaranteed by architecture, not by policy. There is no server to shut down, no database to seize, no API to throttle.
+By putting a full node on every device — desktop and mobile — the platform's properties (credential ownership, censorship resistance, privacy) are guaranteed by architecture rather than by policy. There is no application server to shut down, no central database to seize, no API to throttle. A credential verifies with no network at all.
+
+The honest qualification: peers still need to find each other and get through NAT, and that is what relays do. Alexandria's libp2p relays are self-hosted, open-source, listed in an on-chain registry, and runnable by anyone — losing them degrades discovery, not ownership. The iroh side is weaker today: blob transfer and tutoring media fall back to relays and DNS discovery run by a third party. Traffic is end-to-end encrypted throughout, so a relay sees who talks to whom and never what is said. Closing that gap by self-hosting iroh relays is tracked work, not a settled property.
 
 The bet is simple: **if you make knowledge free and make proof of knowledge verifiable, the systems built on top — hiring, governance, funding, collaboration — get fairer by default.**
 

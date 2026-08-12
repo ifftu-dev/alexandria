@@ -74,7 +74,7 @@ This specification defines the data models, verifiable credentials, reputation m
 
 ### 2.1 Overview
 
-Alexandria is a **Tauri v2 application** — a single binary that bundles a Rust backend with a Vue 3 frontend. Every user runs a full node. There are no servers, no Docker containers, and no external databases.
+Alexandria is a **Tauri v2 application** — a single binary that bundles a Rust backend with a Vue 3 frontend. Every user runs a full node. There is no application server, no Docker container, and no external database. Relays assist peer discovery and NAT traversal; they hold no application state and cannot read the traffic they forward (see §6.1).
 
 All state lives on the user's device in three locations:
 
@@ -352,7 +352,14 @@ Any peer MAY challenge a **credential** by staking 5 ADA (5,000,000 lovelace), l
 
 ### 6.1 Overview
 
-Alexandria uses libp2p 0.56 to build a fully decentralized P2P network where every user runs a local node. The protocol has 8 logical layers:
+Alexandria uses libp2p 0.56 to build a decentralized P2P mesh where every user runs a local node. The protocol has 8 logical layers:
+
+This section describes the **libp2p mesh only**. Content blobs and live tutoring
+media travel over a second, independent stack (iroh + iroh-blobs + MoQ) with its
+own relays, discovery and node identity — see
+[`architecture.md`](./architecture.md#two-transports-and-which-does-what). Claims
+about relay independence in this section apply to the libp2p side; iroh currently
+falls back to relays operated by a third party.
 
 | Layer | Name | Description |
 |:-----:|------|-------------|

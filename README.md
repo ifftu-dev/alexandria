@@ -29,7 +29,7 @@
 
 - **Learn for free** — courses, tutorials, and interactive lessons that work offline.
 - **Earn credentials you truly own** — verified proof of your skills that no platform can revoke, shareable even offline.
-- **Keep your data on your device** — no accounts, no servers, no data collection; the app connects you directly to other learners.
+- **Keep your data on your device** — no accounts, no data collection, and nothing to sign up for; the app connects you directly to other learners.
 - **One device, many learners** — fully separate, private profiles for households, classrooms, and shared devices.
 - **In your language** — the interface ships in 9 languages, including right-to-left (Urdu).
 
@@ -45,7 +45,7 @@ The capabilities below describe how each of these works — the underlying techn
 - **Cardano's role** — (1) VC integrity anchoring (BLAKE3-of-VC metadata txs), (2) DAO governance (elections, proposals, reputation snapshots, CIP-68 soulbound reputation tokens), (3) the `completion.ak` validator that witnesses learner completion events to authorize VC issuance, and (4) the `challenge_escrow.ak` validator that holds a challenger's stake pending the DAO's revoke/refund decision. All validators are deployed as reference scripts on **preprod testnet** (block 4736927). Legacy skill-proof / course-registration NFT minting has been retired.
 - **Governance** — DAOs mirror the knowledge taxonomy. Elections, proposals, committee-gated taxonomy updates, and P2P propagation are implemented locally. The Aiken/Plutus governance validators are deployed as reference scripts on **preprod testnet** (block 4736927); the on-chain enforcement flows that reference them are still maturing.
 - **Assessment Integrity** — Sentinel anti-cheat fuses six on-device signals: a keystroke autoencoder and mouse-trajectory CNN (Rust + `candle`, trained per-user on-device), a paste/typing-bot classifier and YuNet face detector (Rust, frozen ONNX via `tract`), gaze/second-device detection (head-pose proxies + per-user calibration MLP), and frontmost-application detection. Only the LBP face embedder remains in TypeScript. `tract` is pure Rust, so every model compiles for all targets including iOS and Android. All processing stays client-side; snapshots are stored locally and feed downstream trust decisions without exposing raw biometrics.
-- **Peer-to-Peer** — Fully decentralized via libp2p with a private Alexandria Kademlia DHT, GossipSub, Circuit Relay v2, AutoNAT, and DCUtR. Devices discover each other through a relay bootstrap node — no central server required.
+- **Peer-to-Peer** — Two stacks. The mesh runs on libp2p with a private Alexandria Kademlia DHT, GossipSub, Circuit Relay v2, AutoNAT, and DCUtR; content blobs and live tutoring media run on iroh. There is no application server and no account server, but connectivity does rely on relays: the libp2p relays are self-hosted, listed in an on-chain registry, and anyone can run one, while iroh currently falls back to relays and DNS discovery operated by [N0, INC](https://n0.computer) when a direct connection can't be made. Traffic is end-to-end encrypted either way, so a relay can see connection metadata but never content. See [`docs/architecture.md`](docs/architecture.md#relay-and-discovery-dependency).
 - **Offline-First** — Local SQLite database, iroh content store, and encrypted vault (Stronghold on desktop, AES-256-GCM + Argon2id on mobile). Everything works without connectivity.
 - **Multi-User on One Device** — A single device can host any number of fully-isolated learner profiles. Each profile owns its own vault, SQLCipher database, iroh blob cache, and libp2p peer id; switching profiles tears all per-profile services down and brings the next one online. Designed for households, classrooms, and shared-device contexts in regions where personal hardware isn't a given. See [`docs/multi-user-profiles.md`](docs/multi-user-profiles.md).
 - **Cross-Device Synced Settings** — Every user preference (theme, sidebar layout, keyboard shortcuts, Sentinel toggles, notifications, ...) lives in one per-profile store and propagates to the user's other devices via peer-to-peer sync. Device-local settings (window geometry, disk quota) stay where they belong. See [`docs/settings.md`](docs/settings.md).
@@ -106,7 +106,7 @@ app doing an active sync.
 
 ## Architecture
 
-Alexandria is a **Tauri v2 application** — a single binary that bundles a Rust backend with a Vue 3 frontend. It runs on macOS, Linux, Windows, iOS, and Android. There are no servers, no Docker containers, and no external databases.
+Alexandria is a **Tauri v2 application** — a single binary that bundles a Rust backend with a Vue 3 frontend. It runs on macOS, Linux, Windows, iOS, and Android. There is no application server, no Docker container, and no external database — the app is the whole platform. Relays exist to help peers find each other and traverse NAT; they hold no application state and cannot read traffic.
 
 ```
 alexandria/

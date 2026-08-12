@@ -241,6 +241,50 @@ See [Database Schema](database-schema.md) for the full DDL.
 iroh provides a BLAKE3 content-addressed blob store. Content is
 identified by its hash, ensuring integrity and deduplication.
 
+### Two transports, and which does what
+
+Alexandria runs **two independent networking stacks**. They are not redundant
+and neither can currently do the other's job:
+
+| | libp2p (§6) | iroh (this section) |
+|---|---|---|
+| Carries | mesh: discovery, gossip, sync, pairing, guardian, username receipts | content blobs, tutoring media (MoQ), room presence |
+| Relays | Circuit Relay v2 + DCUtR, self-hosted | iroh relays |
+| Discovery | private Kademlia DHT | DNS / pkarr |
+| Identity | libp2p `PeerId` | iroh `EndpointId` |
+
+Each device therefore holds **two Ed25519 identities**, generated and persisted
+independently, and there are **two gossip implementations** in the binary
+(`libp2p::gossipsub` in `p2p/network.rs`, `iroh_gossip` in
+`content_store/node.rs`).
+
+### Relay and discovery dependency
+
+`ContentNode::start` builds its endpoint with
+`Endpoint::builder(iroh::endpoint::presets::N0)`, which is iroh's default
+preset: **n0's public relay servers and n0's DNS discovery**.
+
+This matters and is easy to miss. The libp2p relays are self-hosted, are
+listed in an on-chain registry, and anyone can run one. The iroh side is not
+equivalent — when a direct connection cannot be established, blob transfer and
+tutoring media fall back to relays operated by a third party (N0, INC), and
+node discovery resolves through their DNS. Traffic stays end-to-end encrypted,
+so a relay cannot read content, but it does observe connection metadata: which
+endpoints talk to each other, when, and how much.
+
+Self-hosting iroh relays and pointing the endpoint at a custom `RelayMap`
+removes the dependency. Until that happens, "no central server" is true of
+the libp2p mesh and of application state, but not of iroh's fallback path.
+
+### MoQ is registered unconditionally
+
+The router accepts three ALPNs — `iroh_blobs`, `iroh_gossip`, and `live::ALPN`
+(Media over QUIC). The MoQ handler is **not** gated behind the
+`tutoring-video*` features or any `cfg`, so every node accepts MoQ connections
+whether or not the user ever joins a tutoring session. The feature flags gate
+only the codec layer (ffmpeg, VideoToolbox, Opus), not the protocol
+registration.
+
 ### Operations
 
 | Operation | Description |
