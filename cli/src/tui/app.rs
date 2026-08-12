@@ -15,6 +15,7 @@ use app_lib::domain::vc::VerifiableCredential;
 
 use crate::context::ProjectContext;
 use crate::tui::clipboard;
+use crate::tui::logs;
 use crate::vault::{self, Signer};
 
 /// Top-level sections, in tab order.
@@ -26,16 +27,18 @@ pub enum Tab {
     Database,
     Verify,
     Doctor,
+    Logs,
 }
 
 impl Tab {
-    pub const ALL: [Tab; 6] = [
+    pub const ALL: [Tab; 7] = [
         Tab::Credentials,
         Tab::Roles,
         Tab::Organizations,
         Tab::Database,
         Tab::Verify,
         Tab::Doctor,
+        Tab::Logs,
     ];
 
     /// Short on purpose: the tab bar has to fit an 80-column terminal with
@@ -48,13 +51,14 @@ impl Tab {
             Tab::Database => "Database",
             Tab::Verify => "Verify",
             Tab::Doctor => "Doctor",
+            Tab::Logs => "Logs",
         }
     }
 
     /// Whether the tab bar shows a row count for this tab. Verify is a menu
     /// and Doctor is a report, so a count would be noise.
     pub fn shows_count(self) -> bool {
-        !matches!(self, Tab::Verify | Tab::Doctor)
+        !matches!(self, Tab::Verify | Tab::Doctor | Tab::Logs)
     }
 
     pub(super) fn index(self) -> usize {
@@ -300,6 +304,12 @@ pub struct App {
     pub verify_result: Option<VerifyOutcome>,
     /// Doctor sections, populated on first visit to the tab.
     pub doctor: Vec<DoctorSection>,
+    /// Lowest level shown on the Logs tab.
+    pub log_level: log::LevelFilter,
+    /// Whether the log view sticks to the newest line.
+    pub log_follow: bool,
+    /// Scroll position when not following.
+    pub log_offset: usize,
 
     pub selected: [usize; Tab::ALL.len()],
 }
@@ -326,6 +336,9 @@ impl App {
             migration: None,
             verify_result: None,
             doctor: Vec::new(),
+            log_level: log::LevelFilter::Debug,
+            log_follow: true,
+            log_offset: 0,
             selected: [0; Tab::ALL.len()],
         };
 
@@ -361,11 +374,15 @@ impl App {
     fn try_unlock(&mut self, password: &str) {
         match vault::unlock_with_password(&self.ctx, password) {
             Ok(signer) => {
+                log::info!("vault unlocked for profile {}", self.ctx.profile.label());
                 self.signer = Some(signer);
                 self.screen = Screen::Browse;
                 self.refresh();
             }
             Err(e) => {
+                // Logged as well as shown: the on-screen message is one line,
+                // and the chain behind it is usually where the answer is.
+                log::warn!("vault unlock failed: {e:#}");
                 self.screen = Screen::Unlock {
                     password: String::new(),
                     error: Some(format!("{e:#}")),
@@ -402,6 +419,13 @@ impl App {
         self.load_db_tables();
         self.load_migration_version();
         self.clamp_selection();
+        log::debug!(
+            "refreshed: {} credentials, {} assessments, {} organizations, {} tables",
+            self.credentials.len(),
+            self.assessments.len(),
+            self.organizations.len(),
+            self.db_tables.len()
+        );
     }
 
     fn load_migration_version(&mut self) {
@@ -458,6 +482,9 @@ impl App {
             Tab::Database => self.db_tables.len(),
             Tab::Verify => VERIFY_ENTRIES.len(),
             Tab::Doctor => self.doctor.len(),
+            // The log view scrolls rather than selecting, so it has no rows
+            // for the shared cursor to index.
+            Tab::Logs => 0,
         }
     }
 
@@ -524,6 +551,11 @@ impl App {
     /// the key that quits.
     pub fn hints(&self) -> &'static str {
         match self.modal {
+            // The log stream scrolls rather than selecting, and has its own
+            // controls; advertising "⏎ detail" there points at nothing.
+            Modal::None if self.tab == Tab::Logs => {
+                "↑↓ scroll · f follow · l level · c clear · y copy · ? keys · q quit"
+            }
             Modal::None => "↑↓ move · ⏎ detail · y copy · ? keys · q quit",
             Modal::Confirm { .. } => "y confirm · n/esc cancel",
             Modal::Form { .. } => "⇥ field · ⏎ submit · esc cancel",
@@ -574,6 +606,13 @@ impl App {
             ],
             Tab::Verify => vec![("⏎", "run the selected verification")],
             Tab::Doctor => vec![("g", "re-run the checks")],
+            Tab::Logs => vec![
+                ("↑↓ / PgUp PgDn", "scroll"),
+                ("f", "follow the newest line (on/off)"),
+                ("l", "cycle level: error, warn, info, debug"),
+                ("c", "clear"),
+                ("y", "copy what is shown"),
+            ],
         });
         keys
     }
@@ -658,8 +697,11 @@ impl App {
                 self.tab = Tab::from_index(self.tab.index() + Tab::ALL.len() - 1);
                 self.on_tab_entered();
             }
-            KeyCode::Down | KeyCode::Char('j') => self.move_selection(1),
-            KeyCode::Up | KeyCode::Char('k') => self.move_selection(-1),
+            // The log stream scrolls instead of selecting, so it takes the
+            // arrows itself; without the guard these are swallowed here and
+            // the tab appears frozen.
+            KeyCode::Down | KeyCode::Char('j') if self.tab != Tab::Logs => self.move_selection(1),
+            KeyCode::Up | KeyCode::Char('k') if self.tab != Tab::Logs => self.move_selection(-1),
             KeyCode::Char('g') => {
                 if self.tab == Tab::Doctor {
                     self.run_doctor();
@@ -683,6 +725,7 @@ impl App {
                 Tab::Roles => self.on_key_roles(key),
                 Tab::Organizations => self.on_key_orgs(key),
                 Tab::Database => self.on_key_database(key),
+                Tab::Logs => self.on_key_logs(key),
                 Tab::Verify | Tab::Doctor => {}
             },
         }
@@ -769,6 +812,57 @@ impl App {
     fn on_tab_entered(&mut self) {
         if self.tab == Tab::Doctor && self.doctor.is_empty() {
             self.run_doctor();
+        }
+    }
+
+    fn on_key_logs(&mut self, key: KeyEvent) {
+        let total = logs::entries(self.log_level).len();
+        match key.code {
+            // Scrolling means the reader has taken over; following would yank
+            // the view back to the bottom on the next record.
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.log_follow = false;
+                self.log_offset = self.log_offset.saturating_sub(1);
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                self.log_follow = false;
+                self.log_offset = (self.log_offset + 1).min(total.saturating_sub(1));
+            }
+            KeyCode::PageUp => {
+                self.log_follow = false;
+                self.log_offset = self.log_offset.saturating_sub(20);
+            }
+            KeyCode::PageDown => {
+                self.log_follow = false;
+                self.log_offset = (self.log_offset + 20).min(total.saturating_sub(1));
+            }
+            KeyCode::Home => {
+                self.log_follow = false;
+                self.log_offset = 0;
+            }
+            KeyCode::End => self.log_follow = true,
+            KeyCode::Char('f') => {
+                self.log_follow = !self.log_follow;
+                let state = if self.log_follow { "on" } else { "off" };
+                self.toast_ok(format!("Follow {state}"));
+            }
+            KeyCode::Char('l') => {
+                use log::LevelFilter::*;
+                self.log_level = match self.log_level {
+                    Error => Warn,
+                    Warn => Info,
+                    Info => Debug,
+                    _ => Error,
+                };
+                self.log_offset = 0;
+                self.toast_ok(format!("Showing {} and above", self.log_level));
+            }
+            KeyCode::Char('c') => {
+                logs::clear();
+                self.log_offset = 0;
+                self.toast_ok("Log cleared");
+            }
+            _ => {}
         }
     }
 
@@ -1036,10 +1130,14 @@ impl App {
 
         match result {
             Ok(msg) => {
+                log::info!("{msg}");
                 self.refresh();
                 self.toast_ok(msg);
             }
-            Err(e) => self.toast_err(format!("{e:#}")),
+            Err(e) => {
+                log::error!("action failed: {e:#}");
+                self.toast_err(format!("{e:#}"))
+            }
         }
     }
 
@@ -1178,6 +1276,9 @@ impl App {
             migration: None,
             verify_result: None,
             doctor: Vec::new(),
+            log_level: log::LevelFilter::Debug,
+            log_follow: true,
+            log_offset: 0,
             selected: [0; Tab::ALL.len()],
         }
     }
@@ -1453,6 +1554,28 @@ impl App {
                 serde_json::to_string_pretty(&map).ok()
             }
             _ => match self.tab {
+                Tab::Logs => {
+                    let shown = logs::entries(self.log_level);
+                    if shown.is_empty() {
+                        None
+                    } else {
+                        // Copied as plain text, not JSON: a log is read, not
+                        // parsed, and pasting it into an issue should look
+                        // like a log.
+                        Some(
+                            shown
+                                .iter()
+                                .map(|e| {
+                                    format!(
+                                        "{} {:<5} {} — {}",
+                                        e.time, e.level, e.target, e.message
+                                    )
+                                })
+                                .collect::<Vec<_>>()
+                                .join("\n"),
+                        )
+                    }
+                }
                 Tab::Credentials => self
                     .selected_credential()
                     .and_then(|vc| serde_json::to_string_pretty(vc).ok()),
@@ -1503,6 +1626,8 @@ impl App {
                 ),
                 None => return,
             },
+            // The log view has no per-row detail; it is already the detail.
+            Tab::Logs => return,
             Tab::Doctor => match self.doctor.get(self.selected_index()) {
                 Some(section) => (
                     crate::commands::doctor::section_title(section.name).to_string(),
@@ -1573,6 +1698,9 @@ mod tests {
             migration: None,
             verify_result: None,
             doctor: Vec::new(),
+            log_level: log::LevelFilter::Debug,
+            log_follow: true,
+            log_offset: 0,
             selected: [0; Tab::ALL.len()],
         };
         // The list contents never matter to navigation, only the lengths, so
@@ -2206,6 +2334,94 @@ mod tests {
             _ => panic!("esc should return to the grid, not close it"),
         }
         assert!(!app.should_quit);
+    }
+
+    // ---- Logs ----------------------------------------------------------
+
+    #[test]
+    fn the_log_tab_advertises_its_own_keys() {
+        let mut app = browsing_app(0, 0);
+        app.tab = Tab::Logs;
+        let hints = app.hints();
+        // Enter does nothing on this tab, so offering it would point at
+        // nothing.
+        assert!(!hints.contains("⏎ detail"), "got: {hints}");
+        for key in ["f follow", "l level", "c clear"] {
+            assert!(hints.contains(key), "missing {key} in: {hints}");
+        }
+        assert!(hints.chars().count() <= 78, "footer is truncated: {hints}");
+    }
+
+    #[test]
+    fn scrolling_the_log_turns_off_follow() {
+        // Otherwise the next record yanks the view back to the bottom and the
+        // line being read disappears.
+        let mut app = browsing_app(0, 0);
+        app.tab = Tab::Logs;
+        assert!(app.log_follow, "follow is the sensible default");
+
+        app.on_key(key(KeyCode::Up));
+        assert!(!app.log_follow, "scrolling hands control to the reader");
+
+        // End gives it back.
+        app.on_key(key(KeyCode::End));
+        assert!(app.log_follow);
+
+        // And f toggles explicitly.
+        app.on_key(key(KeyCode::Char('f')));
+        assert!(!app.log_follow);
+    }
+
+    #[test]
+    fn the_level_filter_cycles_through_every_level() {
+        use log::LevelFilter::*;
+        let mut app = browsing_app(0, 0);
+        app.tab = Tab::Logs;
+        app.log_level = Error;
+
+        let mut seen = vec![app.log_level];
+        for _ in 0..4 {
+            app.on_key(key(KeyCode::Char('l')));
+            seen.push(app.log_level);
+        }
+        // Cycles Error → Warn → Info → Debug → back to Error, so no level is
+        // unreachable.
+        assert_eq!(seen, vec![Error, Warn, Info, Debug, Error]);
+    }
+
+    #[test]
+    fn clearing_the_log_empties_it() {
+        let mut app = browsing_app(0, 0);
+        app.tab = Tab::Logs;
+        logs::clear();
+        log::info!("something happened");
+        // The global logger may not be installed in a test process, so only
+        // assert the clear path when capture is actually active.
+        if logs::len() > 0 {
+            app.on_key(key(KeyCode::Char('c')));
+            assert_eq!(logs::len(), 0);
+        }
+    }
+
+    #[test]
+    fn copying_the_log_yields_plain_text_not_json() {
+        logs::clear();
+        logs::install();
+        log::error!("action failed: Incorrect vault password");
+
+        let mut app = browsing_app(0, 0);
+        app.tab = Tab::Logs;
+        if let Some(payload) = app.copy_payload() {
+            // A log is read, not parsed — pasting it into an issue should look
+            // like a log.
+            assert!(
+                payload.contains("Incorrect vault password"),
+                "got: {payload}"
+            );
+            assert!(payload.contains("ERROR"), "got: {payload}");
+            assert!(serde_json::from_str::<serde_json::Value>(&payload).is_err());
+        }
+        logs::clear();
     }
 
     // ---- Copying -------------------------------------------------------

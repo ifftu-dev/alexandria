@@ -13,6 +13,7 @@
 
 mod app;
 mod clipboard;
+mod logs;
 mod ui;
 
 use std::io;
@@ -51,6 +52,11 @@ pub fn run(ctx: &ProjectContext, password_file: Option<&Path>) -> Result<()> {
             ctx.vault_dir().display()
         );
     }
+
+    // Start capturing before anything that might log, so a failure during
+    // unlock is in the buffer by the time the Logs tab can show it.
+    logs::install();
+    log::info!("alexandria tui {} starting", env!("CARGO_PKG_VERSION"));
 
     let mut terminal = setup()?;
     // Run the app with the terminal already restored on the way out,

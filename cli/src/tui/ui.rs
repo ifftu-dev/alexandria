@@ -172,6 +172,12 @@ fn draw_tabs(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn draw_body(frame: &mut Frame, app: &App, area: Rect) {
+    // The log stream wants the whole width: a list/detail split would leave
+    // messages truncated in a narrow column with nothing in the other one.
+    if app.tab == Tab::Logs {
+        return draw_logs(frame, app, area);
+    }
+
     let columns = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(45), Constraint::Percentage(55)])
@@ -243,6 +249,8 @@ fn draw_list(frame: &mut Frame, app: &App, area: Rect) {
             .iter()
             .map(|(name, _)| ListItem::new(Line::from(Span::raw(*name))))
             .collect(),
+        // Rendered as a stream by draw_logs, not as selectable rows.
+        Tab::Logs => Vec::new(),
         Tab::Doctor => app
             .doctor
             .iter()
@@ -303,6 +311,78 @@ fn draw_list(frame: &mut Frame, app: &App, area: Rect) {
     let mut state = ListState::default();
     state.select(Some(app.selected_index()));
     frame.render_stateful_widget(list, area, &mut state);
+}
+
+/// Draw the captured log as a stream.
+fn draw_logs(frame: &mut Frame, app: &App, area: Rect) {
+    let entries = crate::tui::logs::entries(app.log_level);
+    let total = crate::tui::logs::len();
+
+    let title = format!(
+        " Logs — {} shown of {total} · {} and above{} ",
+        entries.len(),
+        app.log_level,
+        if app.log_follow { " · following" } else { "" }
+    );
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(MUTED))
+        .title(title);
+
+    if entries.is_empty() {
+        let hint = if total == 0 {
+            "  nothing logged yet"
+        } else {
+            "  nothing at this level — press l to widen"
+        };
+        frame.render_widget(
+            Paragraph::new(hint)
+                .style(Style::default().fg(MUTED))
+                .block(block),
+            area,
+        );
+        return;
+    }
+
+    let rows = area.height.saturating_sub(2) as usize;
+    // Following pins the view to the newest line; otherwise the reader's
+    // scroll position stands, clamped so it cannot run off the end.
+    let first = if app.log_follow {
+        entries.len().saturating_sub(rows)
+    } else {
+        app.log_offset.min(entries.len().saturating_sub(1))
+    };
+
+    let lines: Vec<Line> = entries
+        .iter()
+        .skip(first)
+        .take(rows)
+        .map(|e| {
+            Line::from(vec![
+                Span::styled(format!("{} ", e.time), Style::default().fg(MUTED)),
+                Span::styled(
+                    format!("{:<5} ", e.level),
+                    Style::default()
+                        .fg(level_color(e.level))
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(format!("{} ", e.target), Style::default().fg(ACCENT)),
+                Span::raw(e.message.clone()),
+            ])
+        })
+        .collect();
+
+    frame.render_widget(Paragraph::new(lines).block(block), area);
+}
+
+fn level_color(level: log::Level) -> Color {
+    match level {
+        log::Level::Error => Color::Red,
+        log::Level::Warn => Color::Yellow,
+        log::Level::Info => Color::Green,
+        log::Level::Debug => Color::Cyan,
+        log::Level::Trace => MUTED,
+    }
 }
 
 fn status_style(status: &str) -> Style {
@@ -446,6 +526,7 @@ fn draw_detail_pane(frame: &mut Frame, app: &App, area: Rect) {
             }
             l
         }
+        Tab::Logs => Vec::new(),
         Tab::Doctor => match app.doctor.get(app.selected_index()) {
             Some(section) => section
                 .checks
@@ -982,6 +1063,18 @@ pub mod render_tests_support {
         out.push(("unlock in a small terminal", render_to_string(&a, 44, 12)));
         a.screen = Screen::Browse;
         out.push(("tab bar at 80 columns", render_to_string(&a, 80, 8)));
+        crate::tui::logs::clear();
+        crate::tui::logs::install();
+        log::info!("alexandria tui 0.1.0 starting");
+        log::info!("vault unlocked for profile HackRidesTest (52fce5a0)");
+        log::debug!("refreshed: 6 credentials, 2 assessments, 1 organizations, 34 tables");
+        log::warn!("status list for urn:uuid:aaa not found — treating as not revoked");
+        log::error!("action failed: Incorrect vault password");
+        a.tab = Tab::Logs;
+        out.push(("logs tab", render_to_string(&a, 108, 12)));
+        a.log_level = log::LevelFilter::Warn;
+        out.push(("logs, filtered to warn", render_to_string(&a, 108, 9)));
+        a.log_level = log::LevelFilter::Debug;
         a.tab = Tab::Verify;
         out.push(("verify tab", render_to_string(&a, 100, 18)));
         a.modal = Modal::Form {
