@@ -37,6 +37,44 @@ If you are unsure whether an idea belongs in the app or in the commercial
 shell, the test is: *would a single individual with no employer ever want
 this?* If yes, it belongs here. See `docs/enterprise-boundary.md`.
 
+### Sign your commits (DCO)
+
+Every commit must carry a `Signed-off-by:` line:
+
+```
+git commit -s -m "your message"
+```
+
+That line is the [Developer Certificate of Origin 1.1](https://developercertificate.org/):
+you are asserting you wrote the change, or have the right to submit it under
+the AGPL. It is not a copyright assignment and it does not take anything from
+you.
+
+### Why a contributor agreement is coming
+
+Being straight about this, because discovering it later feels like a bait and
+switch.
+
+The commercial Enterprise Edition is a separate, proprietary service. It links
+code from this repository. That is only lawful because Alexandria Pvt. Ltd.
+currently holds the copyright in all of it — a copyright holder is not bound by
+the licence it grants everyone else. The moment a contribution lands here whose
+copyright the company does not hold, that code becomes AGPL-only for every
+purpose, including ours, and the Enterprise Edition can never use it.
+
+So substantive external contributions will need a contributor agreement, and it
+is not drafted yet. Until it exists:
+
+- Small fixes — typos, bugs, docs, tests — are welcome now under the DCO alone.
+- If you are planning something larger, open an issue first so we can tell you
+  where the agreement stands rather than have you write code we cannot merge.
+
+What the agreement will and will not do: it will let the company license *your
+contribution* under terms other than the AGPL, which is what keeps the
+Enterprise Edition lawful. It will not assign your copyright away, it will not
+let anyone take this application proprietary, and it changes nothing about the
+AGPL rights everyone else has in the result.
+
 ## Before you push
 
 Run the local mirror of CI:
