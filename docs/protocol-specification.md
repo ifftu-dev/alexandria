@@ -930,7 +930,7 @@ These guarantees are architectural — they are enforced by the code structure, 
 
 **Threat**: Theft of an issuer's signing key enables the attacker to mint arbitrary VCs in the issuer's name.
 
-**Mitigations**: Key rotation is mandatory (§14.5.3); verifiers resolve the verification method valid at the credential's `issuanceDate` via the historical key registry, so rotating a compromised key does not invalidate pre-compromise credentials. The compromised issuer MUST revoke affected credentials via the §14.11.2 status list. §14.14.4 permits verifiers to downgrade the issuer weight for an issuer with a history of compromise or bad-faith revocation.
+**Mitigations**: Key rotation is mandatory (§14.5.3); verifiers resolve the verification method valid at the credential's `validFrom` via the historical key registry, so rotating a compromised key does not invalidate pre-compromise credentials. The compromised issuer MUST revoke affected credentials via the §14.11.2 status list. §14.14.4 permits verifiers to downgrade the issuer weight for an issuer with a history of compromise or bad-faith revocation.
 
 ### 13.11 Status List Poisoning
 
@@ -1088,14 +1088,14 @@ Each credential MUST conform to the following logical structure.
 ```json
 {
   "@context": [
-    "https://www.w3.org/2018/credentials/v1",
+    "https://www.w3.org/ns/credentials/v2",
     "https://alexandria.protocol/context/v1"
   ],
   "id": "urn:uuid:credential-id",
   "type": ["VerifiableCredential", "FormalCredential"],
   "issuer": "did:key:z6MkIssuer123",
-  "issuanceDate": "2026-04-13T00:00:00Z",
-  "expirationDate": "2028-04-13T00:00:00Z",
+  "validFrom": "2026-04-13T00:00:00Z",
+  "validUntil": "2028-04-13T00:00:00Z",
   "credentialSubject": {
     "id": "did:key:z6MkSubject456",
     "claim": {
@@ -1140,9 +1140,9 @@ The optional `integrity` block is the **Sentinel integrity attestation** (§14.9
 
 ### 14.8 Required Credential Fields
 
-Each credential MUST include: `id`, `type`, `issuer`, `issuanceDate`, `credentialSubject.id`, `proof`.
+Each credential MUST include: `id`, `type`, `issuer`, `validFrom`, `credentialSubject.id`, `proof`.
 
-Formal and assessment credentials SHOULD include: `expirationDate`, `credentialStatus`, claim metadata, evidence references, and rubric or evaluation metadata where relevant.
+Formal and assessment credentials SHOULD include: `validUntil`, `credentialStatus`, claim metadata, evidence references, and rubric or evaluation metadata where relevant.
 
 ### 14.9 Issuance Rules
 
@@ -1272,6 +1272,29 @@ A(c) = (H(c), t_i, issuer_ref)
 
 The full credential SHOULD NOT be stored on-chain unless explicitly required and privacy-compatible.
 
+### 14.12a Canonicalization is JCS, not JSON-LD
+
+Stated explicitly because an implementer will otherwise assume the wrong one and
+build a verifier that disagrees with every other one.
+
+The signing input is **JCS (RFC 8785)** applied to the credential's JSON
+document with `proof.jws` set to the empty string. It is **not** JSON-LD
+canonicalization (URDNA2015 / RDF Dataset Canonicalization). No JSON-LD
+expansion, no context resolution, and no network fetch happens at any point in
+signing or verification.
+
+`@context` is therefore declarative: it states which vocabulary the terms come
+from, and it is covered by the signature like any other field, but nothing
+processes it. A verifier needs a JCS implementation and an Ed25519
+implementation, and nothing else.
+
+Two consequences worth being plain about. The context value must still be
+correct, because a consumer that *does* process JSON-LD will act on it — and a
+context that fails to define `validUntil` means a strict processor drops the
+expiry and reads an expired credential as one that never expires. And a verifier
+written against this section needs no JSON-LD tooling at all, which is most of
+why an independent implementation is a few hundred lines rather than a project.
+
 ### 14.13 Verification Algorithm
 
 #### 14.13.1 Verification Result Structure
@@ -1300,7 +1323,7 @@ For credential `c` at verification time `t_v`, the verifier MUST execute, in ord
 2. canonicalize payload
 3. resolve issuer DID
 4. verify signature
-5. check `issuanceDate` sanity
+5. check `validFrom` sanity
 6. check expiration
 7. check status list
 8. validate subject binding

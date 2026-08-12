@@ -177,8 +177,10 @@ pub struct IssueCredentialRequest {
 
 const STATUS_LIST_BITS: usize = 16_384; // 2 KiB bitmap per list
 const STATUS_LIST_TYPE: &str = "RevocationList2020Status";
-const W3C_VC_V1: &str = "https://www.w3.org/2018/credentials/v1";
-const ALEXANDRIA_V1: &str = "https://alexandria.protocol/context/v1";
+// Imported rather than redeclared. These were local copies, and a duplicated
+// constant is exactly how the issuance path came to emit the v1 context while
+// the rest of the codebase had moved to v2.
+use alexandria_verify::vc::context::{ALEXANDRIA_V1, W3C_VC_V2};
 
 /// Pure-function issuance pipeline. Allocates the next status-list
 /// slot, builds the VC envelope, signs it, persists both the signed
@@ -250,7 +252,7 @@ pub fn issue_credential_impl(
     };
 
     let vc = VerifiableCredential {
-        context: vec![W3C_VC_V1.into(), ALEXANDRIA_V1.into()],
+        context: vec![W3C_VC_V2.into(), ALEXANDRIA_V1.into()],
         id: Some(credential_id.clone()),
         type_: vec!["VerifiableCredential".into(), type_name.to_string()],
         issuer: issuer_did.clone(),
