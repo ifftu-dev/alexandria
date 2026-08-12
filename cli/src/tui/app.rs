@@ -570,7 +570,8 @@ impl App {
     pub fn help_lines(&self) -> Vec<(&'static str, &'static str)> {
         let mut keys = vec![
             ("↑ ↓ / j k", "move the selection"),
-            ("⇥ / ⇧⇥", "switch tab"),
+            ("⇥ / ⇧⇥", "next / previous tab"),
+            ("1 … 7", "jump straight to a tab"),
             ("⏎", "open the full record"),
             ("g", "refresh from the database"),
             ("y", "copy what is on screen as JSON"),
@@ -709,6 +710,15 @@ impl App {
                 } else {
                     self.refresh();
                     self.toast_ok("Refreshed");
+                }
+            }
+            // Jump straight to a tab. Digits are bound nowhere else, and the
+            // numbers are shown in the tab bar so they are discoverable.
+            KeyCode::Char(c) if c.is_ascii_digit() && c != '0' => {
+                let index = c as usize - '1' as usize;
+                if index < Tab::ALL.len() {
+                    self.tab = Tab::ALL[index];
+                    self.on_tab_entered();
                 }
             }
             KeyCode::Char('?') => self.modal = Modal::Help,
@@ -2334,6 +2344,66 @@ mod tests {
             _ => panic!("esc should return to the grid, not close it"),
         }
         assert!(!app.should_quit);
+    }
+
+    // ---- Tab shortcuts -------------------------------------------------
+
+    #[test]
+    fn digits_jump_straight_to_a_tab() {
+        let mut app = browsing_app(0, 0);
+        for (digit, expected) in [
+            ('1', Tab::Credentials),
+            ('4', Tab::Database),
+            ('7', Tab::Logs),
+            ('2', Tab::Roles),
+        ] {
+            app.on_key(key(KeyCode::Char(digit)));
+            assert_eq!(app.tab, expected, "`{digit}` should select {expected:?}");
+        }
+    }
+
+    #[test]
+    fn digits_outside_the_tab_range_do_nothing() {
+        let mut app = browsing_app(0, 0);
+        app.tab = Tab::Roles;
+        // There is no tab 0, and no tab 8.
+        app.on_key(key(KeyCode::Char('0')));
+        assert_eq!(app.tab, Tab::Roles);
+        app.on_key(key(KeyCode::Char('8')));
+        assert_eq!(app.tab, Tab::Roles);
+        app.on_key(key(KeyCode::Char('9')));
+        assert_eq!(app.tab, Tab::Roles);
+    }
+
+    #[test]
+    fn a_digit_typed_into_a_form_stays_in_the_form() {
+        // The shortcut must not steal digits from input. A date typed into
+        // "Verify as of" would otherwise teleport the user to another tab
+        // mid-entry and drop what they had typed.
+        let mut app = browsing_app(0, 0);
+        app.tab = Tab::Organizations;
+        app.on_key(key(KeyCode::Char('n')));
+
+        for c in "2026-01-01".chars() {
+            app.on_key(key(KeyCode::Char(c)));
+        }
+
+        assert_eq!(app.tab, Tab::Organizations, "the form kept the digits");
+        match &app.modal {
+            Modal::Form { fields, .. } => assert_eq!(fields[0].value, "2026-01-01"),
+            _ => panic!("the form must still be open"),
+        }
+    }
+
+    #[test]
+    fn jumping_to_doctor_runs_its_checks() {
+        // The shortcut must do everything tabbing there does, not just move
+        // the index.
+        let mut app = browsing_app(0, 0);
+        assert!(app.doctor.is_empty());
+        app.on_key(key(KeyCode::Char('6')));
+        assert_eq!(app.tab, Tab::Doctor);
+        assert!(!app.doctor.is_empty(), "arriving must run the checks");
     }
 
     // ---- Logs ----------------------------------------------------------

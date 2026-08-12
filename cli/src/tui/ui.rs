@@ -142,24 +142,43 @@ fn draw_browse(frame: &mut Frame, app: &App) {
 }
 
 fn draw_tabs(frame: &mut Frame, app: &App, area: Rect) {
-    let titles: Vec<Line> = Tab::ALL
+    // Three forms, widest first. The numbers are the point — they are the
+    // shortcut — so counts are dropped before them, and the labels are dropped
+    // before the numbers.
+    let labelled: Vec<String> = Tab::ALL
         .iter()
-        .map(|t| {
-            if !t.shows_count() {
-                return Line::from(t.title());
+        .enumerate()
+        .map(|(i, t)| format!("{} {}", i + 1, t.title()))
+        .collect();
+    let with_counts: Vec<String> = Tab::ALL
+        .iter()
+        .enumerate()
+        .map(|(i, t)| {
+            if t.shows_count() {
+                format!("{} {} ({})", i + 1, t.title(), tab_count(app, *t))
+            } else {
+                format!("{} {}", i + 1, t.title())
             }
-            let count = match t {
-                Tab::Credentials => app.visible_credentials().len(),
-                Tab::Roles => app.assessments.len(),
-                Tab::Organizations => app.organizations.len(),
-                _ => 0,
-            };
-            Line::from(format!("{} ({})", t.title(), count))
         })
         .collect();
+    let numbers: Vec<String> = (1..=Tab::ALL.len()).map(|i| i.to_string()).collect();
+
+    // Two border columns, plus ratatui's " │ " between each pair.
+    let fits = |items: &[String]| -> bool {
+        let content: usize = items.iter().map(|i| i.chars().count()).sum();
+        content + 3 * items.len().saturating_sub(1) + 2 <= area.width as usize
+    };
+
+    let titles = if fits(&with_counts) {
+        with_counts
+    } else if fits(&labelled) {
+        labelled
+    } else {
+        numbers
+    };
 
     let index = Tab::ALL.iter().position(|t| *t == app.tab).unwrap_or(0);
-    let tabs = Tabs::new(titles)
+    let tabs = Tabs::new(titles.into_iter().map(Line::from).collect::<Vec<_>>())
         .select(index)
         .highlight_style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD))
         .block(
@@ -169,6 +188,16 @@ fn draw_tabs(frame: &mut Frame, app: &App, area: Rect) {
                 .title(" ⬡ Alexandria "),
         );
     frame.render_widget(tabs, area);
+}
+
+fn tab_count(app: &App, tab: Tab) -> usize {
+    match tab {
+        Tab::Credentials => app.visible_credentials().len(),
+        Tab::Roles => app.assessments.len(),
+        Tab::Organizations => app.organizations.len(),
+        Tab::Database => app.db_tables.len(),
+        _ => 0,
+    }
 }
 
 fn draw_body(frame: &mut Frame, app: &App, area: Rect) {
@@ -1062,7 +1091,12 @@ pub mod render_tests_support {
         };
         out.push(("unlock in a small terminal", render_to_string(&a, 44, 12)));
         a.screen = Screen::Browse;
-        out.push(("tab bar at 80 columns", render_to_string(&a, 80, 8)));
+        a.credentials = vec![];
+        a.db_tables = (0..34).map(|i| (format!("t{i}"), 0)).collect();
+        out.push(("tab bar at 120 columns", render_to_string(&a, 120, 6)));
+        out.push(("tab bar at 80 columns", render_to_string(&a, 80, 6)));
+        out.push(("tab bar at 40 columns", render_to_string(&a, 40, 6)));
+        a.db_tables = Vec::new();
         crate::tui::logs::clear();
         crate::tui::logs::install();
         log::info!("alexandria tui 0.1.0 starting");
@@ -1218,6 +1252,39 @@ mod render_tests {
             error: Some("wrong password".into()),
         };
         assert!(render(&app, 80, 24).contains("wrong password"));
+    }
+
+    #[test]
+    fn the_tab_bar_shows_shortcut_numbers_and_never_wraps() {
+        let mut app = test_app();
+        app.db_tables = (0..34).map(|i| (format!("t{i}"), 0)).collect();
+
+        // Wide: numbers, labels and counts all fit.
+        let wide = render(&app, 120, 8);
+        assert!(wide.contains("1 Credentials"), "missing numbers: {wide}");
+        assert!(wide.contains("4 Database (34)"), "missing counts: {wide}");
+        assert!(wide.contains("7 Logs"));
+
+        // Narrow: counts are dropped before the numbers, because the numbers
+        // are the shortcut.
+        let narrow = render(&app, 80, 8);
+        assert!(
+            narrow.contains("1 Credentials"),
+            "numbers must survive: {narrow}"
+        );
+        assert!(
+            !narrow.contains("(34)"),
+            "counts should have been dropped: {narrow}"
+        );
+
+        // Every rendered line must fit the terminal, or the bar has wrapped.
+        for line in narrow.lines() {
+            assert!(line.chars().count() <= 80, "line overflows: {line}");
+        }
+
+        // Very narrow: numbers alone, still usable as shortcuts.
+        let tiny = render(&app, 40, 8);
+        assert!(tiny.contains("1 │ 2"), "expected bare numbers: {tiny}");
     }
 
     #[test]
