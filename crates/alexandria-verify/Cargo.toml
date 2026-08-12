@@ -5,6 +5,12 @@ description = "Alexandria credential verification — W3C VCs, did:key, JCS cano
 edition = "2021"
 rust-version = "1.83.0"
 license = "MIT OR Apache-2.0"
+repository = "https://github.com/ifftu-dev/alexandria"
+homepage = "https://alexandria.ifftu.dev"
+documentation = "https://docs.rs/alexandria-verify"
+readme = "README.md"
+keywords = ["verifiable-credentials", "did", "ed25519", "jws", "w3c"]
+categories = ["cryptography", "authentication"]
 
 # Permissive, deliberately, while the rest of Alexandria is AGPL-3.0-or-later.
 #
