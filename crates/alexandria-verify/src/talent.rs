@@ -30,12 +30,49 @@ pub struct PublishedSkill {
     /// Human-readable name at publication time. Denormalized deliberately: an
     /// index should not have to resolve a taxonomy to render a listing.
     pub name: String,
-    /// Derived level, 1–5.
+    /// Bloom's taxonomy cognitive level, 0–5: remember, understand, apply,
+    /// analyze, evaluate, create. *What kind of thinking* the credentials
+    /// behind this skill attest, taken from `credentialSubject.level`.
+    ///
+    /// A separate axis from `level` below, and deliberately not merged with
+    /// it. An easy "create" task and a punishing "remember" task both exist,
+    /// so collapsing the two into one number would destroy the distinction an
+    /// employer most needs: whether someone can *do* the thinking the role
+    /// requires, as opposed to how strongly it has been evidenced.
+    pub bloom_level: u8,
+    /// Derived strength level, 1–5. *How well evidenced* the skill is, from
+    /// the aggregation pipeline — the discrete bucket of the trust score.
     pub level: u8,
-    /// How many independent issuer clusters back this skill. An employer's
-    /// most useful single signal, and it cannot be inflated by one issuer
-    /// repeatedly attesting.
+    /// U — independent issuer clusters backing the skill.
+    ///
+    /// A count, not a score. Q, C and T exist in the aggregation pipeline and
+    /// deliberately stay there: an employer ranking on a number whose
+    /// derivation they cannot audit is the failure this format is shaped to
+    /// avoid, so the wire carries the categorical summary — two levels and a
+    /// count — and nothing that invites a spurious sort. An organisation that
+    /// wants confidence figures can have them for candidates who assessed with
+    /// it, where it can see how they were produced.
     pub issuer_clusters: u32,
+}
+
+/// The six Bloom levels, weakest first, indexed by rank.
+///
+/// Duplicated from `domain::bloom` rather than shared: this crate is the
+/// permissively-licensed verification surface and must not depend on the
+/// application. The ordering is a published fact about the wire format, so a
+/// divergence between the two is a wire-format break — the test below pins it.
+pub const BLOOM_LEVELS: [&str; 6] = [
+    "remember",
+    "understand",
+    "apply",
+    "analyze",
+    "evaluate",
+    "create",
+];
+
+/// The canonical name for a Bloom rank, or `None` if out of range.
+pub fn bloom_name(rank: u8) -> Option<&'static str> {
+    BLOOM_LEVELS.get(rank as usize).copied()
 }
 
 /// Exactly what leaves the device.
@@ -212,4 +249,32 @@ pub fn verify_record(
 
     key.verify(&input, &sig)
         .map_err(|_| RecordError::BadSignature)
+}
+
+#[cfg(test)]
+mod bloom_tests {
+    use super::*;
+
+    /// This crate copies the Bloom ordering rather than importing it, so the
+    /// copy has to be pinned. A reordering in either place would silently
+    /// change what every published record means — a `bloom_level` of 3 would
+    /// stop meaning "analyze" without a single signature becoming invalid.
+    #[test]
+    fn bloom_ranks_are_the_published_ordering() {
+        assert_eq!(
+            BLOOM_LEVELS,
+            [
+                "remember",
+                "understand",
+                "apply",
+                "analyze",
+                "evaluate",
+                "create"
+            ],
+        );
+        assert_eq!(bloom_name(0), Some("remember"));
+        assert_eq!(bloom_name(3), Some("analyze"));
+        assert_eq!(bloom_name(5), Some("create"));
+        assert_eq!(bloom_name(6), None, "there is no seventh level");
+    }
 }

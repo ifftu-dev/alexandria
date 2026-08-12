@@ -48,6 +48,10 @@ pub struct PreviewCandidate {
     pub name: String,
     pub level: u8,
     pub issuer_clusters: u32,
+    pub bloom_level: u8,
+    pub score: f64,
+    pub confidence: f64,
+    pub trust_score: f64,
     /// Whether this skill is currently consented. Derived rather than stored,
     /// so it cannot drift from the consent record itself.
     pub consented: bool,
@@ -79,13 +83,34 @@ fn candidate_skills(conn: &Connection, subject_did: &str) -> Result<Vec<Candidat
             // select would list the same skill twice. GROUP BY with MAX picks
             // the newest — SQLite guarantees the bare columns come from the
             // row that produced the max.
+            // The two axes come from different places, because they measure
+            // different things. Strength (level, Q, C, T, U) is the
+            // aggregation pipeline's output. The Bloom level is the highest
+            // cognitive level any live credential attests — read from
+            // `credentialSubject.level`, the same field content ratification
+            // gates on, so "operates at analyze" means one thing everywhere.
+            //
+            // COALESCE to 2 (`apply`) matches BloomLevel::default(): a subject
+            // with a derived state but no readable rank is described the way
+            // the rest of the system describes an unknown level, rather than
+            // as `remember`, which would understate them.
             "SELECT d.skill_id, COALESCE(s.name, d.skill_id), d.level, \
-                    d.unique_issuer_clusters, MAX(d.computed_at) \
+                    d.unique_issuer_clusters, d.raw_score, d.confidence, \
+                    d.trust_score, \
+                    COALESCE(( \
+                        SELECT MAX(CAST(json_extract(c.signed_vc_json, \
+                                   '$.credentialSubject.level') AS INTEGER)) \
+                        FROM credentials c \
+                        WHERE c.subject_did = d.subject_did \
+                          AND c.skill_id = d.skill_id \
+                          AND c.claim_kind = 'skill' AND c.revoked = 0 \
+                    ), 2), \
+                    MAX(d.computed_at) \
              FROM derived_skill_states d \
              LEFT JOIN skills s ON s.id = d.skill_id \
              WHERE d.subject_did = ?1 \
              GROUP BY d.skill_id \
-             ORDER BY d.level DESC, d.skill_id ASC",
+             ORDER BY d.trust_score DESC, d.skill_id ASC",
         )
         .map_err(|e| e.to_string())?;
 
@@ -96,6 +121,10 @@ fn candidate_skills(conn: &Connection, subject_did: &str) -> Result<Vec<Candidat
                 name: r.get(1)?,
                 level: r.get::<_, i64>(2)? as u8,
                 issuer_clusters: r.get::<_, i64>(3)? as u32,
+                score: r.get::<_, f64>(4)?,
+                confidence: r.get::<_, f64>(5)?,
+                trust_score: r.get::<_, f64>(6)?,
+                bloom_level: r.get::<_, i64>(7)?.clamp(0, 5) as u8,
             })
         })
         .map_err(|e| e.to_string())?;
@@ -164,6 +193,10 @@ pub fn get_talent_index_preview_impl(
         candidates: candidates
             .iter()
             .map(|c| PreviewCandidate {
+                bloom_level: c.bloom_level,
+                score: c.score,
+                confidence: c.confidence,
+                trust_score: c.trust_score,
                 skill_id: c.skill_id.clone(),
                 name: c.name.clone(),
                 level: c.level,

@@ -110,6 +110,10 @@ pub struct CandidateSkill {
     pub name: String,
     pub level: u8,
     pub issuer_clusters: u32,
+    pub bloom_level: u8,
+    pub score: f64,
+    pub confidence: f64,
+    pub trust_score: f64,
 }
 
 /// The learner's own details, supplied whether or not consent covers them.
@@ -163,6 +167,7 @@ pub fn build_record(
             name: c.name.clone(),
             level: c.level,
             issuer_clusters: c.issuer_clusters,
+            bloom_level: c.bloom_level,
         });
     }
 
@@ -201,12 +206,20 @@ mod tests {
                 name: "Rust".into(),
                 level: 3,
                 issuer_clusters: 2,
+                bloom_level: 3,
+                score: 0.82,
+                confidence: 0.6,
+                trust_score: 0.49,
             },
             CandidateSkill {
                 skill_id: "skill_async".into(),
                 name: "Async".into(),
                 level: 2,
                 issuer_clusters: 1,
+                bloom_level: 3,
+                score: 0.82,
+                confidence: 0.6,
+                trust_score: 0.49,
             },
         ]
     }
@@ -350,6 +363,10 @@ mod tests {
                 "skills": [{
                     "skillId": "skill_rust",
                     "name": "Rust",
+                    // Two levels, because they answer different questions:
+                    // bloomLevel is the kind of thinking evidenced, level is
+                    // how strongly it is evidenced.
+                    "bloomLevel": 3,
                     "level": 3,
                     "issuerClusters": 2,
                 }],
@@ -496,6 +513,7 @@ mod tests {
             name: "Not Mine".into(),
             level: 5,
             issuer_clusters: 9,
+            bloom_level: 3,
         });
         assert_eq!(
             verify_record(&signed, SIGN_NOW),
