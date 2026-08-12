@@ -4,7 +4,7 @@
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Tabs, Wrap};
+use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Tabs, Wrap};
 use ratatui::Frame;
 
 use super::app::{App, Modal, Screen, Tab};
@@ -12,7 +12,7 @@ use super::app::{App, Modal, Screen, Tab};
 const ACCENT: Color = Color::Cyan;
 const MUTED: Color = Color::DarkGray;
 
-pub fn draw(frame: &mut Frame, app: &App) {
+pub fn draw(frame: &mut Frame, app: &mut App) {
     match app.screen {
         Screen::Unlock { .. } => draw_unlock(frame, app),
         Screen::Browse => draw_browse(frame, app),
@@ -103,7 +103,7 @@ fn draw_unlock(frame: &mut Frame, app: &App) {
 
 // ---- Browse -------------------------------------------------------------
 
-fn draw_browse(frame: &mut Frame, app: &App) {
+fn draw_browse(frame: &mut Frame, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -141,7 +141,7 @@ fn draw_browse(frame: &mut Frame, app: &App) {
     }
 }
 
-fn draw_tabs(frame: &mut Frame, app: &App, area: Rect) {
+fn draw_tabs(frame: &mut Frame, app: &mut App, area: Rect) {
     // Three forms, widest first. The numbers are the point — they are the
     // shortcut — so counts are dropped before them, and the labels are dropped
     // before the numbers.
@@ -177,6 +177,17 @@ fn draw_tabs(frame: &mut Frame, app: &App, area: Rect) {
         numbers
     };
 
+    // Record where each tab landed so a click can be resolved back to it.
+    // ratatui lays the bar out as: one space, title, then " │ " between pairs.
+    app.hits.tab_row = area.y + 1;
+    app.hits.tabs.clear();
+    let mut x = area.x + 2;
+    for (i, title) in titles.iter().enumerate() {
+        let width = title.chars().count() as u16;
+        app.hits.tabs.push((x, x + width, Tab::ALL[i]));
+        x += width + 3;
+    }
+
     let index = Tab::ALL.iter().position(|t| *t == app.tab).unwrap_or(0);
     let tabs = Tabs::new(titles.into_iter().map(Line::from).collect::<Vec<_>>())
         .select(index)
@@ -200,7 +211,7 @@ fn tab_count(app: &App, tab: Tab) -> usize {
     }
 }
 
-fn draw_body(frame: &mut Frame, app: &App, area: Rect) {
+fn draw_body(frame: &mut Frame, app: &mut App, area: Rect) {
     // The log stream wants the whole width: a list/detail split would leave
     // messages truncated in a narrow column with nothing in the other one.
     if app.tab == Tab::Logs {
@@ -216,7 +227,7 @@ fn draw_body(frame: &mut Frame, app: &App, area: Rect) {
     draw_detail_pane(frame, app, columns[1]);
 }
 
-fn draw_list(frame: &mut Frame, app: &App, area: Rect) {
+fn draw_list(frame: &mut Frame, app: &mut App, area: Rect) {
     let items: Vec<ListItem> = match app.tab {
         Tab::Credentials => app
             .visible_credentials()
@@ -334,12 +345,25 @@ fn draw_list(frame: &mut Frame, app: &App, area: Rect) {
                 .block(block),
             area,
         );
+        app.hits.list = None;
         return;
     }
 
-    let mut state = ListState::default();
-    state.select(Some(app.selected_index()));
+    // The list's own state persists across frames so its scroll offset can be
+    // read back here — that offset is what turns a clicked row on screen into
+    // an index in the data.
+    let selected = app.selected_index();
+    app.list_state.select(Some(selected));
+    let mut state = std::mem::take(&mut app.list_state);
     frame.render_stateful_widget(list, area, &mut state);
+    app.hits.list = Some(Rect {
+        x: area.x + 1,
+        y: area.y + 1,
+        width: area.width.saturating_sub(2),
+        height: area.height.saturating_sub(2),
+    });
+    app.hits.list_offset = state.offset();
+    app.list_state = state;
 }
 
 /// Draw the captured log as a stream.
@@ -611,6 +635,16 @@ fn draw_status(frame: &mut Frame, app: &App, area: Rect) {
                 })
                 .add_modifier(Modifier::BOLD),
         )),
+        None if app.mouse_enabled => Line::from(vec![
+            Span::styled(format!(" {} ", app.hints()), Style::default().fg(MUTED)),
+            Span::styled(
+                format!(
+                    "· mouse on (hold {} to select) ",
+                    crate::tui::app::select_modifier()
+                ),
+                Style::default().fg(ACCENT),
+            ),
+        ]),
         None => Line::from(Span::styled(
             format!(" {} ", app.hints()),
             Style::default().fg(MUTED),
@@ -1017,7 +1051,7 @@ pub mod render_tests_support {
         })
     }
 
-    pub fn render_to_string(app: &App, width: u16, height: u16) -> String {
+    pub fn render_to_string(app: &mut App, width: u16, height: u16) -> String {
         let backend = TestBackend::new(width, height);
         let mut terminal = Terminal::new(backend).expect("terminal");
         terminal.draw(|frame| draw(frame, app)).expect("draw");
@@ -1079,23 +1113,26 @@ pub mod render_tests_support {
             password: "hunter2".into(),
             error: None,
         };
-        out.push(("unlock screen", render_to_string(&a, 80, 24)));
+        out.push(("unlock screen", render_to_string(&mut a, 80, 24)));
         a.screen = Screen::Unlock {
             password: String::new(),
             error: Some("Incorrect vault password".into()),
         };
-        out.push(("unlock, wrong password", render_to_string(&a, 80, 20)));
+        out.push(("unlock, wrong password", render_to_string(&mut a, 80, 20)));
         a.screen = Screen::Unlock {
             password: "abc".into(),
             error: None,
         };
-        out.push(("unlock in a small terminal", render_to_string(&a, 44, 12)));
+        out.push((
+            "unlock in a small terminal",
+            render_to_string(&mut a, 44, 12),
+        ));
         a.screen = Screen::Browse;
         a.credentials = vec![];
         a.db_tables = (0..34).map(|i| (format!("t{i}"), 0)).collect();
-        out.push(("tab bar at 120 columns", render_to_string(&a, 120, 6)));
-        out.push(("tab bar at 80 columns", render_to_string(&a, 80, 6)));
-        out.push(("tab bar at 40 columns", render_to_string(&a, 40, 6)));
+        out.push(("tab bar at 120 columns", render_to_string(&mut a, 120, 6)));
+        out.push(("tab bar at 80 columns", render_to_string(&mut a, 80, 6)));
+        out.push(("tab bar at 40 columns", render_to_string(&mut a, 40, 6)));
         a.db_tables = Vec::new();
         crate::tui::logs::clear();
         crate::tui::logs::install();
@@ -1105,12 +1142,12 @@ pub mod render_tests_support {
         log::warn!("status list for urn:uuid:aaa not found — treating as not revoked");
         log::error!("action failed: Incorrect vault password");
         a.tab = Tab::Logs;
-        out.push(("logs tab", render_to_string(&a, 108, 12)));
+        out.push(("logs tab", render_to_string(&mut a, 108, 12)));
         a.log_level = log::LevelFilter::Warn;
-        out.push(("logs, filtered to warn", render_to_string(&a, 108, 9)));
+        out.push(("logs, filtered to warn", render_to_string(&mut a, 108, 9)));
         a.log_level = log::LevelFilter::Debug;
         a.tab = Tab::Verify;
-        out.push(("verify tab", render_to_string(&a, 100, 18)));
+        out.push(("verify tab", render_to_string(&mut a, 100, 18)));
         a.modal = Modal::Form {
             title: "Verify credential bundle".into(),
             fields: vec![
@@ -1129,20 +1166,23 @@ pub mod render_tests_support {
         };
         out.push((
             "verify form with a pasted bundle",
-            render_to_string(&a, 100, 14),
+            render_to_string(&mut a, 100, 14),
         ));
         a.modal = Modal::None;
         a.run_doctor();
         a.tab = Tab::Doctor;
-        out.push(("doctor tab", render_to_string(&a, 100, 18)));
+        out.push(("doctor tab", render_to_string(&mut a, 100, 18)));
         a.tab = Tab::Database;
         a.modal = Modal::Rows(sample_rows());
-        out.push(("table rows", render_to_string(&a, 100, 14)));
+        out.push(("table rows", render_to_string(&mut a, 100, 14)));
         let mut scrolled = sample_rows();
         scrolled.col_offset = 3;
         scrolled.selected = 1;
         a.modal = Modal::Rows(scrolled);
-        out.push(("table rows, scrolled right", render_to_string(&a, 60, 12)));
+        out.push((
+            "table rows, scrolled right",
+            render_to_string(&mut a, 60, 12),
+        ));
         let grid = sample_rows();
         let pairs: Vec<(String, String)> = grid
             .columns
@@ -1155,7 +1195,7 @@ pub mod render_tests_support {
             pairs,
             scroll: 0,
         };
-        out.push(("expanded row", render_to_string(&a, 76, 18)));
+        out.push(("expanded row", render_to_string(&mut a, 76, 18)));
         a.modal = Modal::None;
         a.tab = Tab::Credentials;
         a.tab = Tab::Database;
@@ -1164,15 +1204,15 @@ pub mod render_tests_support {
             ("organizations".into(), 3),
             ("role_assessments".into(), 7),
         ];
-        out.push(("database tab", render_to_string(&a, 110, 20)));
+        out.push(("database tab", render_to_string(&mut a, 110, 20)));
         a.modal = Modal::Help;
-        out.push(("help modal", render_to_string(&a, 110, 24)));
+        out.push(("help modal", render_to_string(&mut a, 110, 24)));
         a.modal = Modal::Confirm {
             title: "Revoke permanently?".into(),
             body: "urn:uuid:abc\n\nRevocation cannot be undone.".into(),
             action: Pending::ExportBundle,
         };
-        out.push(("confirm modal", render_to_string(&a, 110, 20)));
+        out.push(("confirm modal", render_to_string(&mut a, 110, 20)));
         out
     }
 }
@@ -1195,7 +1235,7 @@ mod render_tests {
     }
 
     /// Render into an off-screen buffer and return it as text.
-    fn render(app: &App, width: u16, height: u16) -> String {
+    fn render(app: &mut App, width: u16, height: u16) -> String {
         let backend = TestBackend::new(width, height);
         let mut terminal = Terminal::new(backend).expect("terminal");
         terminal.draw(|frame| draw(frame, app)).expect("draw");
@@ -1217,13 +1257,13 @@ mod render_tests {
         };
         // The wordmark's first row is distinctive enough to assert on.
         let first_row = crate::output::WORDMARK[0];
-        let roomy = render(&app, 80, 24);
+        let roomy = render(&mut app, 80, 24);
         assert!(roomy.contains(first_row), "wordmark missing at 80x24");
         assert!(roomy.contains("Password"));
 
         // Too narrow or too short: the prompt survives, the wordmark does not
         // — a wrapped wordmark is unreadable noise.
-        let cramped = render(&app, 44, 12);
+        let cramped = render(&mut app, 44, 12);
         assert!(!cramped.contains(first_row), "wordmark should be dropped");
         assert!(cramped.contains("Password"), "the prompt must still render");
     }
@@ -1235,7 +1275,7 @@ mod render_tests {
             password: "hunter2".into(),
             error: None,
         };
-        let out = render(&app, 80, 24);
+        let out = render(&mut app, 80, 24);
         assert!(out.contains("unlock vault"));
         assert!(out.contains("•••••••"), "password is masked");
         assert!(
@@ -1251,7 +1291,7 @@ mod render_tests {
             password: String::new(),
             error: Some("wrong password".into()),
         };
-        assert!(render(&app, 80, 24).contains("wrong password"));
+        assert!(render(&mut app, 80, 24).contains("wrong password"));
     }
 
     #[test]
@@ -1260,14 +1300,14 @@ mod render_tests {
         app.db_tables = (0..34).map(|i| (format!("t{i}"), 0)).collect();
 
         // Wide: numbers, labels and counts all fit.
-        let wide = render(&app, 120, 8);
+        let wide = render(&mut app, 120, 8);
         assert!(wide.contains("1 Credentials"), "missing numbers: {wide}");
         assert!(wide.contains("4 Database (34)"), "missing counts: {wide}");
         assert!(wide.contains("7 Logs"));
 
         // Narrow: counts are dropped before the numbers, because the numbers
         // are the shortcut.
-        let narrow = render(&app, 80, 8);
+        let narrow = render(&mut app, 80, 8);
         assert!(
             narrow.contains("1 Credentials"),
             "numbers must survive: {narrow}"
@@ -1283,14 +1323,14 @@ mod render_tests {
         }
 
         // Very narrow: numbers alone, still usable as shortcuts.
-        let tiny = render(&app, 40, 8);
+        let tiny = render(&mut app, 40, 8);
         assert!(tiny.contains("1 │ 2"), "expected bare numbers: {tiny}");
     }
 
     #[test]
     fn browse_screen_renders_tabs_and_the_empty_state() {
-        let app = test_app();
-        let out = render(&app, 100, 24);
+        let mut app = test_app();
+        let out = render(&mut app, 100, 24);
         assert!(out.contains("Credentials"));
         assert!(out.contains("Orgs"));
         assert!(out.contains("nothing here yet"));
@@ -1301,7 +1341,7 @@ mod render_tests {
         let mut app = test_app();
         app.tab = Tab::Database;
         app.db_tables = vec![("credentials".into(), 12), ("organizations".into(), 3)];
-        let out = render(&app, 100, 24);
+        let out = render(&mut app, 100, 24);
         assert!(out.contains("credentials"));
         assert!(out.contains("12"));
         assert!(out.contains("Tables"), "the detail pane renders alongside");
@@ -1310,9 +1350,9 @@ mod render_tests {
     #[test]
     fn a_toast_replaces_the_key_hints() {
         let mut app = test_app();
-        assert!(render(&app, 100, 24).contains("q quit"));
+        assert!(render(&mut app, 100, 24).contains("q quit"));
         app.set_toast_for_test("Revoked urn:uuid:abc", false);
-        assert!(render(&app, 100, 24).contains("Revoked urn:uuid:abc"));
+        assert!(render(&mut app, 100, 24).contains("Revoked urn:uuid:abc"));
     }
 
     #[test]
@@ -1323,7 +1363,7 @@ mod render_tests {
             body: "urn:uuid:abc".into(),
             action: Pending::ExportBundle,
         };
-        let out = render(&app, 100, 24);
+        let out = render(&mut app, 100, 24);
         assert!(out.contains("Revoke permanently?"));
         assert!(out.contains("confirm"));
     }
@@ -1356,13 +1396,13 @@ mod render_tests {
             active: 0,
             action: Pending::CreateOrg,
         };
-        render(&app, 8, 4);
+        render(&mut app, 8, 4);
 
         app.screen = Screen::Unlock {
             password: "x".into(),
             error: Some("a very long error message that cannot possibly fit".into()),
         };
-        render(&app, 8, 4);
+        render(&mut app, 8, 4);
     }
 }
 

@@ -22,7 +22,10 @@ use std::path::Path;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use crossterm::event::{self, DisableBracketedPaste, EnableBracketedPaste, Event};
+use crossterm::event::{
+    self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+    Event,
+};
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
@@ -92,7 +95,15 @@ fn setup() -> Result<Terminal<CrosstermBackend<io::Stdout>>> {
 
 fn restore() -> Result<()> {
     let _ = disable_raw_mode();
-    let _ = execute!(io::stdout(), DisableBracketedPaste, LeaveAlternateScreen);
+    // Mouse capture is disabled unconditionally: if it was never enabled this
+    // is a no-op, and leaving it on would have the terminal reporting clicks
+    // to the shell after the TUI exits.
+    let _ = execute!(
+        io::stdout(),
+        DisableMouseCapture,
+        DisableBracketedPaste,
+        LeaveAlternateScreen
+    );
     Ok(())
 }
 
@@ -107,13 +118,24 @@ fn event_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut A
             // `Press` only: crossterm on Windows reports key release as a
             // separate event, which would otherwise action every key twice.
             Event::Key(key) if key.kind == event::KeyEventKind::Press => {
+                let was_enabled = app.mouse_enabled;
                 app.on_key(key);
+                if app.mouse_enabled != was_enabled {
+                    // Telling the terminal is the event loop's job; the app
+                    // only owns the intent.
+                    let _ = if app.mouse_enabled {
+                        execute!(io::stdout(), EnableMouseCapture)
+                    } else {
+                        execute!(io::stdout(), DisableMouseCapture)
+                    };
+                }
                 if app.should_quit {
                     return Ok(());
                 }
             }
             // One event for the whole paste, however many lines it spans.
             Event::Paste(text) => app.on_paste(&text),
+            Event::Mouse(mouse) => app.on_mouse(mouse),
             _ => {}
         }
     }

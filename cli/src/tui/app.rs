@@ -7,7 +7,7 @@
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use rusqlite::Connection;
 
 use app_lib::commands::role_assessment::{Organization, RoleAssessment};
@@ -270,6 +270,35 @@ pub struct VerifyOutcome {
 
 pub(crate) use crate::commands::doctor::Section as DoctorSection;
 
+/// The modifier that bypasses mouse reporting so the terminal selects text
+/// itself. Terminals differ, and the app cannot ask which one it is in, so
+/// this is the convention for the platform rather than a certainty.
+pub fn select_modifier() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "⌥ option"
+    } else {
+        "shift"
+    }
+}
+
+/// Where things were drawn last frame, so a click can be resolved to what the
+/// user actually pointed at.
+///
+/// Recorded during render rather than recomputed here: the layout is decided
+/// by the draw code, and a second copy of that arithmetic would drift the
+/// moment either side changed.
+#[derive(Default)]
+pub struct Hitboxes {
+    /// Horizontal span of each tab label in the bar, with its tab.
+    pub tabs: Vec<(u16, u16, Tab)>,
+    /// Row of the tab bar.
+    pub tab_row: u16,
+    /// The list pane's inner area (inside its border).
+    pub list: Option<ratatui::layout::Rect>,
+    /// Index of the first list row on screen, for turning a y into a row.
+    pub list_offset: usize,
+}
+
 /// A transient message shown in the status bar.
 pub struct Toast {
     pub text: String,
@@ -310,6 +339,19 @@ pub struct App {
     pub log_follow: bool,
     /// Scroll position when not following.
     pub log_offset: usize,
+    /// Geometry from the last frame, for hit-testing clicks.
+    pub hits: Hitboxes,
+    /// List scroll state, kept across frames so its offset can be read back
+    /// when resolving a click to a row.
+    pub list_state: ratatui::widgets::ListState,
+    /// Whether the terminal's mouse reporting is on.
+    ///
+    /// Off by default, deliberately. Enabling it routes button presses to this
+    /// program, which stops the terminal doing its own drag-to-select — the
+    /// thing that makes `tmux mouse on` infamous. Losing text selection by
+    /// default to gain row-clicking is a bad trade for a tool people reach for
+    /// when something is wrong and they want to copy an error out of it.
+    pub mouse_enabled: bool,
 
     pub selected: [usize; Tab::ALL.len()],
 }
@@ -339,6 +381,9 @@ impl App {
             log_level: log::LevelFilter::Debug,
             log_follow: true,
             log_offset: 0,
+            hits: Hitboxes::default(),
+            list_state: ratatui::widgets::ListState::default(),
+            mouse_enabled: false,
             selected: [0; Tab::ALL.len()],
         };
 
@@ -575,6 +620,7 @@ impl App {
             ("⏎", "open the full record"),
             ("g", "refresh from the database"),
             ("y", "copy what is on screen as JSON"),
+            ("M", "mouse on/off (off keeps drag-to-select working)"),
             ("?", "this help"),
             ("q / esc", "quit"),
             ("ctrl-c", "quit from anywhere"),
@@ -655,6 +701,127 @@ impl App {
         }
     }
 
+    /// Toggle terminal mouse reporting.
+    ///
+    /// Returns whether it is now on, so the caller can tell the terminal —
+    /// the escape sequences are the event loop's business, not this module's.
+    pub fn toggle_mouse(&mut self) -> bool {
+        self.mouse_enabled = !self.mouse_enabled;
+        if self.mouse_enabled {
+            self.toast_ok(format!(
+                "Mouse on — hold {} to select text",
+                select_modifier()
+            ));
+        } else {
+            self.toast_ok("Mouse off — drag to select text as usual");
+        }
+        log::info!("mouse reporting {}", self.mouse_enabled);
+        self.mouse_enabled
+    }
+
+    /// Resolve a mouse event against the geometry of the last frame.
+    pub fn on_mouse(&mut self, event: MouseEvent) {
+        if !self.mouse_enabled {
+            return;
+        }
+        // The unlock screen has nothing to click, and a stray click there
+        // should not dismiss the prompt.
+        if matches!(self.screen, Screen::Unlock { .. }) {
+            return;
+        }
+
+        match event.kind {
+            MouseEventKind::ScrollDown => self.scroll_by(1),
+            MouseEventKind::ScrollUp => self.scroll_by(-1),
+            MouseEventKind::Down(MouseButton::Left) => self.click(event.column, event.row),
+            _ => {}
+        }
+    }
+
+    /// Wheel scrolling, routed to whatever is in front.
+    fn scroll_by(&mut self, delta: isize) {
+        match &mut self.modal {
+            Modal::Detail { scroll, .. } | Modal::Row { scroll, .. } => {
+                *scroll = if delta > 0 {
+                    scroll.saturating_add(1)
+                } else {
+                    scroll.saturating_sub(1)
+                };
+            }
+            Modal::Rows(view) => {
+                let last = view.rows.len().saturating_sub(1);
+                view.selected = if delta > 0 {
+                    (view.selected + 1).min(last)
+                } else {
+                    view.selected.saturating_sub(1)
+                };
+            }
+            Modal::Help | Modal::Confirm { .. } | Modal::Form { .. } => {}
+            Modal::None => {
+                if self.tab == Tab::Logs {
+                    // Scrolling means the reader has taken over, same as with
+                    // the keyboard.
+                    self.log_follow = false;
+                    let total = logs::entries(self.log_level).len();
+                    self.log_offset = if delta > 0 {
+                        (self.log_offset + 1).min(total.saturating_sub(1))
+                    } else {
+                        self.log_offset.saturating_sub(1)
+                    };
+                } else {
+                    self.move_selection(delta);
+                }
+            }
+        }
+    }
+
+    fn click(&mut self, column: u16, row: u16) {
+        // A modal owns the screen; clicking through it to the list behind
+        // would act on something the user cannot see.
+        if !matches!(self.modal, Modal::None) {
+            return;
+        }
+
+        if row == self.hits.tab_row {
+            if let Some((_, _, tab)) = self
+                .hits
+                .tabs
+                .iter()
+                .find(|(start, end, _)| column >= *start && column < *end)
+            {
+                self.tab = *tab;
+                self.on_tab_entered();
+            }
+            return;
+        }
+
+        let Some(area) = self.hits.list else { return };
+        let inside = column >= area.x
+            && column < area.x + area.width
+            && row >= area.y
+            && row < area.y + area.height;
+        if !inside {
+            return;
+        }
+
+        let clicked = self.hits.list_offset + (row - area.y) as usize;
+        if clicked >= self.list_len(self.tab) {
+            return;
+        }
+
+        // Clicking the highlighted row opens it — one click to aim, a second
+        // to act, so a misplaced click cannot trigger anything.
+        if clicked == self.selected_index() {
+            if self.tab == Tab::Verify {
+                self.open_verify_form();
+            } else {
+                self.open_detail();
+            }
+        } else {
+            self.selected[self.tab.index()] = clicked;
+        }
+    }
+
     fn on_key_unlock(&mut self, key: KeyEvent) {
         let Screen::Unlock { password, .. } = &mut self.screen else {
             return;
@@ -720,6 +887,12 @@ impl App {
                     self.tab = Tab::ALL[index];
                     self.on_tab_entered();
                 }
+            }
+            // Capital M: lowercase `m` already means import on Credentials
+            // and migrate on Database, and a key that means different things
+            // depending on where you are is worse than no key at all.
+            KeyCode::Char('M') => {
+                self.toggle_mouse();
             }
             KeyCode::Char('?') => self.modal = Modal::Help,
             KeyCode::Char('y') => self.copy_current(),
@@ -1289,6 +1462,9 @@ impl App {
             log_level: log::LevelFilter::Debug,
             log_follow: true,
             log_offset: 0,
+            hits: Hitboxes::default(),
+            list_state: ratatui::widgets::ListState::default(),
+            mouse_enabled: false,
             selected: [0; Tab::ALL.len()],
         }
     }
@@ -1711,6 +1887,9 @@ mod tests {
             log_level: log::LevelFilter::Debug,
             log_follow: true,
             log_offset: 0,
+            hits: Hitboxes::default(),
+            list_state: ratatui::widgets::ListState::default(),
+            mouse_enabled: false,
             selected: [0; Tab::ALL.len()],
         };
         // The list contents never matter to navigation, only the lengths, so
@@ -2346,6 +2525,179 @@ mod tests {
         assert!(!app.should_quit);
     }
 
+    // ---- Mouse ---------------------------------------------------------
+
+    fn mouse(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
+        MouseEvent {
+            kind,
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        }
+    }
+
+    #[test]
+    fn the_mouse_is_off_until_asked_for() {
+        // Enabling mouse reporting takes drag-to-select away from the
+        // terminal. That is not a cost to impose by default on a tool people
+        // open when something has gone wrong and they want to copy the error.
+        let mut app = browsing_app(0, 0);
+        assert!(!app.mouse_enabled);
+
+        // And while off, events are ignored rather than acted on.
+        app.tab = Tab::Database;
+        app.db_tables = vec![("a".into(), 0), ("b".into(), 0)];
+        app.hits.list = Some(ratatui::layout::Rect::new(0, 4, 40, 10));
+        app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 5, 5));
+        assert_eq!(app.selected_index(), 0, "a click must do nothing while off");
+    }
+
+    #[test]
+    fn capital_m_toggles_the_mouse_and_says_what_changed() {
+        let mut app = browsing_app(0, 0);
+        app.on_key(key(KeyCode::Char('M')));
+        assert!(app.mouse_enabled);
+        // The toast has to name the escape hatch, or losing selection looks
+        // like a bug rather than a mode.
+        let toast = app.toast.as_ref().expect("a toast");
+        assert!(toast.text.contains("select"), "got: {}", toast.text);
+
+        app.on_key(key(KeyCode::Char('M')));
+        assert!(!app.mouse_enabled);
+    }
+
+    #[test]
+    fn lowercase_m_keeps_its_existing_meaning() {
+        // `m` is import on Credentials and migrate on Database. Rebinding it
+        // would have made one key mean three things.
+        let mut app = app_with_credentials();
+        app.on_key(key(KeyCode::Char('m')));
+        assert!(!app.mouse_enabled, "m must not toggle the mouse");
+        assert!(matches!(app.modal, Modal::Form { .. }), "m still imports");
+    }
+
+    #[test]
+    fn clicking_the_tab_bar_selects_that_tab() {
+        let mut app = browsing_app(0, 0);
+        app.mouse_enabled = true;
+        app.hits.tab_row = 1;
+        app.hits.tabs = vec![(2, 15, Tab::Credentials), (18, 26, Tab::Logs)];
+
+        app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 20, 1));
+        assert_eq!(app.tab, Tab::Logs);
+
+        // A click in the gap between labels selects nothing rather than the
+        // nearest tab.
+        app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 16, 1));
+        assert_eq!(app.tab, Tab::Logs);
+    }
+
+    #[test]
+    fn a_click_aims_and_a_second_click_acts() {
+        // One click selects, a second on the same row opens it — so a
+        // misplaced click can never trigger an action.
+        let mut app = browsing_app(4, 0);
+        app.mouse_enabled = true;
+        app.tab = Tab::Database;
+        app.hits.list = Some(ratatui::layout::Rect::new(1, 5, 40, 10));
+        app.hits.list_offset = 0;
+
+        app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 5, 7));
+        assert_eq!(app.selected_index(), 2, "row under the cursor is selected");
+        assert!(matches!(app.modal, Modal::None), "one click must not open");
+    }
+
+    #[test]
+    fn clicks_account_for_the_scroll_offset() {
+        // Without this the wrong row is acted on the moment a list scrolls,
+        // which is a silent mistake rather than a visible one.
+        let mut app = browsing_app(50, 0);
+        app.mouse_enabled = true;
+        app.tab = Tab::Database;
+        app.hits.list = Some(ratatui::layout::Rect::new(1, 5, 40, 10));
+        app.hits.list_offset = 20;
+
+        app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 5, 8));
+        assert_eq!(app.selected_index(), 23, "offset 20 + 3 rows down");
+    }
+
+    #[test]
+    fn clicking_past_the_last_row_does_nothing() {
+        let mut app = browsing_app(2, 0);
+        app.mouse_enabled = true;
+        app.tab = Tab::Database;
+        app.hits.list = Some(ratatui::layout::Rect::new(1, 5, 40, 10));
+
+        app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 5, 12));
+        assert_eq!(app.selected_index(), 0, "empty space below the rows");
+    }
+
+    #[test]
+    fn a_modal_swallows_clicks_meant_for_it() {
+        // Clicking through a modal would act on a list the user cannot see.
+        let mut app = browsing_app(4, 0);
+        app.mouse_enabled = true;
+        app.tab = Tab::Database;
+        app.hits.list = Some(ratatui::layout::Rect::new(1, 5, 40, 10));
+        app.modal = Modal::Help;
+
+        app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 5, 7));
+        assert_eq!(app.selected_index(), 0);
+        assert!(matches!(app.modal, Modal::Help), "the modal stays put");
+    }
+
+    #[test]
+    fn the_wheel_scrolls_whatever_is_in_front() {
+        let mut app = browsing_app(5, 0);
+        app.mouse_enabled = true;
+        app.tab = Tab::Database;
+
+        app.on_mouse(mouse(MouseEventKind::ScrollDown, 5, 7));
+        assert_eq!(app.selected_index(), 1);
+        app.on_mouse(mouse(MouseEventKind::ScrollUp, 5, 7));
+        assert_eq!(app.selected_index(), 0);
+
+        // With a record open, the wheel scrolls the record instead.
+        app.modal = Modal::Detail {
+            title: "t".into(),
+            body: "body".into(),
+            scroll: 0,
+        };
+        app.on_mouse(mouse(MouseEventKind::ScrollDown, 5, 7));
+        match &app.modal {
+            Modal::Detail { scroll, .. } => assert_eq!(*scroll, 1),
+            _ => panic!("expected the detail view"),
+        }
+        assert_eq!(app.selected_index(), 0, "the list behind must not move");
+    }
+
+    #[test]
+    fn the_wheel_releases_log_follow_like_the_keyboard_does() {
+        let mut app = browsing_app(0, 0);
+        app.mouse_enabled = true;
+        app.tab = Tab::Logs;
+        assert!(app.log_follow);
+        app.on_mouse(mouse(MouseEventKind::ScrollUp, 5, 7));
+        assert!(!app.log_follow);
+    }
+
+    #[test]
+    fn clicks_are_ignored_on_the_unlock_screen() {
+        // Nothing there is clickable, and a stray click must not disturb a
+        // half-typed password.
+        let mut app = browsing_app(0, 0);
+        app.mouse_enabled = true;
+        app.screen = Screen::Unlock {
+            password: "half-typed".into(),
+            error: None,
+        };
+        app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 5, 7));
+        match &app.screen {
+            Screen::Unlock { password, .. } => assert_eq!(password, "half-typed"),
+            _ => panic!("still unlocking"),
+        }
+    }
+
     // ---- Tab shortcuts -------------------------------------------------
 
     #[test]
@@ -2461,6 +2813,7 @@ mod tests {
 
     #[test]
     fn clearing_the_log_empties_it() {
+        let _guard = logs::test_lock();
         let mut app = browsing_app(0, 0);
         app.tab = Tab::Logs;
         logs::clear();
@@ -2475,6 +2828,7 @@ mod tests {
 
     #[test]
     fn copying_the_log_yields_plain_text_not_json() {
+        let _guard = logs::test_lock();
         logs::clear();
         logs::install();
         log::error!("action failed: Incorrect vault password");

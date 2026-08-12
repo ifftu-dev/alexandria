@@ -119,6 +119,19 @@ pub fn clear() {
     }
 }
 
+/// Serializes tests that touch the global buffer.
+///
+/// The buffer is process-wide by design — it is a logger — so tests that
+/// clear it and assert on its contents cannot run alongside each other, or
+/// alongside anything else that logs.
+#[cfg(test)]
+pub(super) fn test_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -146,6 +159,7 @@ mod tests {
 
     #[test]
     fn the_buffer_drops_the_oldest_rather_than_growing() {
+        let _guard = test_lock();
         clear();
         for i in 0..CAPACITY + 25 {
             push(Level::Info, &format!("line {i}"));
@@ -166,6 +180,7 @@ mod tests {
 
     #[test]
     fn filtering_keeps_the_levels_at_or_above_the_threshold() {
+        let _guard = test_lock();
         clear();
         push(Level::Error, "an error");
         push(Level::Warn, "a warning");
@@ -186,6 +201,7 @@ mod tests {
 
     #[test]
     fn entries_are_returned_oldest_first() {
+        let _guard = test_lock();
         clear();
         push(Level::Info, "first");
         push(Level::Info, "second");
@@ -197,6 +213,7 @@ mod tests {
 
     #[test]
     fn a_record_keeps_its_level_target_and_message() {
+        let _guard = test_lock();
         clear();
         push(Level::Warn, "vault locked");
         let entry = &entries(LevelFilter::Trace)[0];
