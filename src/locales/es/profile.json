@@ -64,5 +64,37 @@
   "error": {
     "couldntLoad": "No se pudo cargar este perfil: {error}",
     "offlineHint": "Este perfil lo comparte directamente su propietario. Necesita estar en línea y tener su perfil configurado como público."
+  },
+  "directories": {
+    "title": "Quién ha preguntado por ti",
+    "description": "Los directorios son servicios que guardan registros sobre ti: el registro de una institución, el índice de un empleador. No se consulta ninguno salvo que lo añadas aquí, y cada petición va firmada con tu clave, así que solo tú recibes respuesta.",
+    "none": "No has añadido ningún directorio. Este dispositivo no contacta con ningún servidor sobre ti hasta que lo hagas.",
+    "addHeading": "Añadir un directorio",
+    "nameLabel": "Cómo lo llamas",
+    "namePlaceholder": "Mi universidad",
+    "urlLabel": "Dirección",
+    "urlPlaceholder": "https://registry.example.edu",
+    "add": "Añadir",
+    "remove": "Quitar",
+    "refresh": "Consultar ahora",
+    "checking": "Consultando…",
+    "requestsHeading": "Peticiones para ver tus competencias",
+    "noRequests": "Nadie está preguntando por ahora.",
+    "requestFrom": "{org} está preguntando",
+    "requestPurpose": "Su motivo: {purpose}",
+    "requestSkills": "Quieren ver: {skills}",
+    "requestExpires": "Caduca el {when}",
+    "share": "Compartir lo que he consentido",
+    "sharing": "Compartiendo…",
+    "shared": "Compartido.",
+    "ignoreNote": "No hacer nada también es una respuesta. Una petición que ignoras caduca, y no queda registro de que la rechazaste.",
+    "accessHeading": "Quién te ha consultado",
+    "noAccess": "Nadie te ha consultado, o ningún directorio que hayas añadido guarda un registro.",
+    "accessNamed": "{who} en {where} abrió tu expediente",
+    "accessAggregate": "{where} te contó en un informe que no nombraba a nadie",
+    "accessModule": "en {module}",
+    "problemsHeading": "No se pudo consultar",
+    "problem": "{directory}: {detail}",
+    "problemNote": "Un directorio inalcanzable se muestra en lugar de omitirse; de lo contrario parecería igual que uno que no tiene nada que informar."
   }
 }

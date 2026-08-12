@@ -64,5 +64,37 @@
   "error": {
     "couldntLoad": "无法加载此档案：{error}",
     "offlineHint": "此档案由其所有者直接分享。他们需要在线，且档案设为公开。"
+  },
+  "directories": {
+    "title": "谁查询过你",
+    "description": "目录是持有你记录的服务——院校的注册处、雇主的人才库。除非你在此添加，否则不会查询任何目录；每次请求都用你的密钥签名，因此只有你能得到答复。",
+    "none": "你还没有添加任何目录。在你添加之前，本设备不会就你的信息联系任何服务器。",
+    "addHeading": "添加目录",
+    "nameLabel": "你给它起的名称",
+    "namePlaceholder": "我的大学",
+    "urlLabel": "地址",
+    "urlPlaceholder": "https://registry.example.edu",
+    "add": "添加",
+    "remove": "移除",
+    "refresh": "立即查询",
+    "checking": "查询中…",
+    "requestsHeading": "查看你技能的请求",
+    "noRequests": "目前无人查询。",
+    "requestFrom": "{org} 正在请求",
+    "requestPurpose": "他们的理由：{purpose}",
+    "requestSkills": "他们想查看：{skills}",
+    "requestExpires": "{when} 过期",
+    "share": "分享我已同意的内容",
+    "sharing": "分享中…",
+    "shared": "已分享。",
+    "ignoreNote": "不作回应也是一种回应。你忽略的请求会过期，并且不会留下你拒绝的记录。",
+    "accessHeading": "谁查看过你",
+    "noAccess": "无人查看，或你添加的目录都不保存查看记录。",
+    "accessNamed": "{where} 的{who}打开了你的记录",
+    "accessAggregate": "{where} 在一份未点名的报告中统计了你",
+    "accessModule": "于 {module}",
+    "problemsHeading": "无法查询",
+    "problem": "{directory}：{detail}",
+    "problemNote": "无法连接的目录会显示出来而不是被跳过——否则它看起来就和没有任何记录的目录一样。"
   }
 }

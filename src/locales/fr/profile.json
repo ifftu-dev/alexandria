@@ -64,5 +64,37 @@
   "error": {
     "couldntLoad": "Impossible de charger ce profil : {error}",
     "offlineHint": "Ce profil est partagé directement par son propriétaire. Il doit être en ligne, et son profil doit être défini comme public."
+  },
+  "directories": {
+    "title": "Qui s'est renseigné sur vous",
+    "description": "Les annuaires sont des services qui détiennent des informations sur vous : le registre d'un établissement, l'index d'un employeur. Aucun n'est consulté tant que vous ne l'ajoutez pas ici, et chaque requête est signée avec votre clé, de sorte que vous seul obtenez une réponse.",
+    "none": "Vous n'avez ajouté aucun annuaire. Cet appareil ne contacte aucun serveur à votre sujet tant que vous ne l'avez pas fait.",
+    "addHeading": "Ajouter un annuaire",
+    "nameLabel": "Le nom que vous lui donnez",
+    "namePlaceholder": "Mon université",
+    "urlLabel": "Adresse",
+    "urlPlaceholder": "https://registry.example.edu",
+    "add": "Ajouter",
+    "remove": "Retirer",
+    "refresh": "Vérifier maintenant",
+    "checking": "Vérification…",
+    "requestsHeading": "Demandes pour consulter vos compétences",
+    "noRequests": "Personne ne demande pour le moment.",
+    "requestFrom": "{org} vous sollicite",
+    "requestPurpose": "Leur motif : {purpose}",
+    "requestSkills": "Ce qu'ils veulent voir : {skills}",
+    "requestExpires": "Expire le {when}",
+    "share": "Partager ce que j'ai accepté",
+    "sharing": "Partage…",
+    "shared": "Partagé.",
+    "ignoreNote": "Ne rien faire est une réponse. Une demande que vous ignorez expire, et rien n'enregistre que vous avez refusé.",
+    "accessHeading": "Qui a consulté votre dossier",
+    "noAccess": "Personne ne l'a consulté, ou aucun annuaire que vous avez ajouté n'en garde la trace.",
+    "accessNamed": "{who} à {where} a ouvert votre dossier",
+    "accessAggregate": "{where} vous a comptabilisé dans un rapport qui ne nommait personne",
+    "accessModule": "sur {module}",
+    "problemsHeading": "Consultation impossible",
+    "problem": "{directory} : {detail}",
+    "problemNote": "Un annuaire injoignable est affiché plutôt qu'ignoré — sinon il ressemblerait à un annuaire qui n'a rien à signaler."
   }
 }
