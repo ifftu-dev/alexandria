@@ -1,0 +1,65 @@
+{
+  "description": "The same expired credential under a policy that does not reject on expiry. `expired` stays true — policy changes the decision, never the facts.",
+  "verificationTime": "2026-06-01T00:00:00Z",
+  "policy": {
+    "reject_expired": false,
+    "require_integrity_anchor": false,
+    "allowed_types": [
+      "FormalCredential",
+      "AssessmentCredential",
+      "AttestationCredential",
+      "RoleCredential",
+      "DerivedCredential",
+      "SelfAssertion"
+    ],
+    "reject_suspended": true,
+    "reject_superseded": true
+  },
+  "credential": {
+    "@context": [
+      "https://www.w3.org/ns/credentials/v2",
+      "https://alexandria.protocol/context/v1"
+    ],
+    "id": "urn:uuid:vector-credential",
+    "type": [
+      "VerifiableCredential",
+      "FormalCredential"
+    ],
+    "issuer": "did:key:z6MkvwtuLDu19TcdGubq4U8c81JmgULwCSrdExbBCCZ6oVQT",
+    "validFrom": "2026-01-01T00:00:00Z",
+    "validUntil": "2026-03-01T00:00:00Z",
+    "credentialSubject": {
+      "id": "did:key:z6MknENeHzKx2gvkZPqYvz8B7xCyTeJHfH6FvnHSBJAEeagD",
+      "evidenceRefs": [],
+      "level": 3,
+      "score": 0.9,
+      "skillId": "skill_vector"
+    },
+    "proof": {
+      "type": "Ed25519Signature2020",
+      "created": "2026-01-01T00:00:00Z",
+      "verificationMethod": "",
+      "proofPurpose": "assertionMethod",
+      "jws": "eyJhbGciOiJFZERTQSIsImI2NCI6ZmFsc2UsImNyaXQiOlsiYjY0Il19..34POK51GrAmrJiV88vGHekFhdpPicQmaXZLws5wo_HiaWsFNIoJyIrAtcuo1qxIsqmCslNCmN8geZRFZVNcvCQ"
+    }
+  },
+  "store": {
+    "keyRegistry": [],
+    "statusLists": {},
+    "suspended": {},
+    "superseded": []
+  },
+  "expect": {
+    "credentialId": "urn:uuid:vector-credential",
+    "validSignature": true,
+    "issuerResolved": true,
+    "revoked": false,
+    "expired": true,
+    "subjectBound": true,
+    "integrityAnchored": false,
+    "suspended": false,
+    "superseded": false,
+    "verificationTime": "2026-06-01T00:00:00Z",
+    "acceptanceDecision": "accept"
+  }
+}

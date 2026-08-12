@@ -1,0 +1,73 @@
+{
+  "description": "The status list has the credential's index bit set. Index 9 is byte 1, bit 1 — little-endian within the byte, which is the detail an independent implementation most often gets backwards.",
+  "verificationTime": "2026-06-01T00:00:00Z",
+  "policy": {
+    "reject_expired": true,
+    "require_integrity_anchor": false,
+    "allowed_types": [
+      "FormalCredential",
+      "AssessmentCredential",
+      "AttestationCredential",
+      "RoleCredential",
+      "DerivedCredential",
+      "SelfAssertion"
+    ],
+    "reject_suspended": true,
+    "reject_superseded": true
+  },
+  "credential": {
+    "@context": [
+      "https://www.w3.org/ns/credentials/v2",
+      "https://alexandria.protocol/context/v1"
+    ],
+    "id": "urn:uuid:vector-credential",
+    "type": [
+      "VerifiableCredential",
+      "FormalCredential"
+    ],
+    "issuer": "did:key:z6MkvwtuLDu19TcdGubq4U8c81JmgULwCSrdExbBCCZ6oVQT",
+    "validFrom": "2026-01-01T00:00:00Z",
+    "credentialSubject": {
+      "id": "did:key:z6MknENeHzKx2gvkZPqYvz8B7xCyTeJHfH6FvnHSBJAEeagD",
+      "evidenceRefs": [],
+      "level": 3,
+      "score": 0.9,
+      "skillId": "skill_vector"
+    },
+    "credentialStatus": {
+      "id": "urn:uuid:status-entry",
+      "type": "RevocationList2020Status",
+      "statusPurpose": "revocation",
+      "statusListIndex": "9",
+      "statusListCredential": "urn:uuid:status-list-1"
+    },
+    "proof": {
+      "type": "Ed25519Signature2020",
+      "created": "2026-01-01T00:00:00Z",
+      "verificationMethod": "",
+      "proofPurpose": "assertionMethod",
+      "jws": "eyJhbGciOiJFZERTQSIsImI2NCI6ZmFsc2UsImNyaXQiOlsiYjY0Il19..fH9G3TOhPvR0Ih7wm0Ee0ipOs6Ufmz8USlX30KRJnP1cv4kGMUaElMLtbLUxvkQlnUjxIDgMSR0rK5Ct9MrvAg"
+    }
+  },
+  "store": {
+    "keyRegistry": [],
+    "statusLists": {
+      "urn:uuid:status-list-1": "0002000000000000"
+    },
+    "suspended": {},
+    "superseded": []
+  },
+  "expect": {
+    "credentialId": "urn:uuid:vector-credential",
+    "validSignature": true,
+    "issuerResolved": true,
+    "revoked": true,
+    "expired": false,
+    "subjectBound": true,
+    "integrityAnchored": false,
+    "suspended": false,
+    "superseded": false,
+    "verificationTime": "2026-06-01T00:00:00Z",
+    "acceptanceDecision": "reject"
+  }
+}

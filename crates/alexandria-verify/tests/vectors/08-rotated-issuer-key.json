@@ -1,0 +1,79 @@
+{
+  "description": "The issuer rotated keys and signed with the new one while keeping their DID. did:key self-resolution returns the pre-rotation key and fails; the registry entry covering the verification time is what makes this verify.",
+  "verificationTime": "2026-06-01T00:00:00Z",
+  "policy": {
+    "reject_expired": true,
+    "require_integrity_anchor": false,
+    "allowed_types": [
+      "FormalCredential",
+      "AssessmentCredential",
+      "AttestationCredential",
+      "RoleCredential",
+      "DerivedCredential",
+      "SelfAssertion"
+    ],
+    "reject_suspended": true,
+    "reject_superseded": true
+  },
+  "credential": {
+    "@context": [
+      "https://www.w3.org/ns/credentials/v2",
+      "https://alexandria.protocol/context/v1"
+    ],
+    "id": "urn:uuid:vector-credential",
+    "type": [
+      "VerifiableCredential",
+      "FormalCredential"
+    ],
+    "issuer": "did:key:z6MkvwtuLDu19TcdGubq4U8c81JmgULwCSrdExbBCCZ6oVQT",
+    "validFrom": "2026-01-01T00:00:00Z",
+    "credentialSubject": {
+      "id": "did:key:z6MknENeHzKx2gvkZPqYvz8B7xCyTeJHfH6FvnHSBJAEeagD",
+      "evidenceRefs": [],
+      "level": 3,
+      "score": 0.9,
+      "skillId": "skill_vector"
+    },
+    "proof": {
+      "type": "Ed25519Signature2020",
+      "created": "2026-01-01T00:00:00Z",
+      "verificationMethod": "",
+      "proofPurpose": "assertionMethod",
+      "jws": "eyJhbGciOiJFZERTQSIsImI2NCI6ZmFsc2UsImNyaXQiOlsiYjY0Il19..RVAPwW9fai7195c6k6EwpiXUmn3NS-SeOw8HnG9BbiIkzvLvEDKATbT6qwyMyrXUzvv7o79bov-gJ2jD-_kJAg"
+    }
+  },
+  "store": {
+    "keyRegistry": [
+      {
+        "did": "did:key:z6MkvwtuLDu19TcdGubq4U8c81JmgULwCSrdExbBCCZ6oVQT",
+        "keyId": "key-1",
+        "publicKeyHex": "f510edb23365ea32000e4d367e0210fbae27cfeeb39c431cd51fc3600124d800",
+        "validFrom": "1970-01-01T00:00:00Z",
+        "validUntil": "2026-02-01T00:00:00Z"
+      },
+      {
+        "did": "did:key:z6MkvwtuLDu19TcdGubq4U8c81JmgULwCSrdExbBCCZ6oVQT",
+        "keyId": "key-2",
+        "publicKeyHex": "b7ebf265e5f9104e83588f2b4584e336f69470351004bb160f033e84feced80a",
+        "validFrom": "2026-02-01T00:00:00Z",
+        "validUntil": null
+      }
+    ],
+    "statusLists": {},
+    "suspended": {},
+    "superseded": []
+  },
+  "expect": {
+    "credentialId": "urn:uuid:vector-credential",
+    "validSignature": true,
+    "issuerResolved": true,
+    "revoked": false,
+    "expired": false,
+    "subjectBound": true,
+    "integrityAnchored": false,
+    "suspended": false,
+    "superseded": false,
+    "verificationTime": "2026-06-01T00:00:00Z",
+    "acceptanceDecision": "accept"
+  }
+}
