@@ -670,9 +670,37 @@ pub fn run() {
     builder
         .setup(|app| {
             // Initialize logging (always enabled so we can diagnose mobile crashes)
+            //
+            // The defaults are unusable for diagnosis: tauri-plugin-log caps a
+            // log file at 40 KB and keeps one rotation, so roughly 80 KB of
+            // history total. A connected session fills that in minutes, and by
+            // the time anyone reports a problem the lines that explain it have
+            // already been rotated away.
+            //
+            // Per-module levels matter as much as the size. The transport
+            // crates narrate every unreachable host and every stray datagram
+            // at WARN, which is noise the user cannot act on, and it competes
+            // for the same file as the events that actually explain a failure.
+            // Raising the ceiling without quietening those would just buy more
+            // room for them.
             app.handle().plugin(
                 tauri_plugin_log::Builder::default()
                     .level(log::LevelFilter::Info)
+                    // Our own crates keep their detail.
+                    .level_for("app_lib", log::LevelFilter::Debug)
+                    .level_for("alexandria_verify", log::LevelFilter::Debug)
+                    // Transport chatter: errors only.
+                    .level_for("quinn_udp", log::LevelFilter::Error)
+                    .level_for("quinn_proto", log::LevelFilter::Error)
+                    .level_for("iroh_quinn_udp", log::LevelFilter::Error)
+                    .level_for("iroh_quinn_proto", log::LevelFilter::Error)
+                    .level_for("netdev", log::LevelFilter::Error)
+                    .level_for("libp2p_quic", log::LevelFilter::Warn)
+                    .level_for("libp2p_tcp", log::LevelFilter::Warn)
+                    .level_for("hickory_proto", log::LevelFilter::Error)
+                    .level_for("hickory_resolver", log::LevelFilter::Error)
+                    .max_file_size(5_000_000)
+                    .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepSome(3))
                     .build(),
             )?;
 
