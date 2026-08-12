@@ -403,10 +403,19 @@ jobs:
           java-version: '21'
           distribution: temurin
 
-      # Provision the SDK explicitly rather than assume ANDROID_SDK_ROOT is
-      # populated by the image.
+      # arm64 runner images do not reliably ship the Android SDK, so provision
+      # it explicitly rather than assume ANDROID_SDK_ROOT is populated.
+      #
+      # `packages` must be set: the action's default is `tools platform-tools`,
+      # and the obsolete `tools` package is gone from the SDK repository, so
+      # `sdkmanager tools` warns "Dependant package with key emulator not
+      # found!" and exits 1, failing the job at setup. platform-tools (adb) is
+      # the only part the emulator step actually needs; the NDK is installed by
+      # the pinned sdkmanager call below.
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools
 
       - name: Set up Android NDK (host-matching toolchain)
         run: |
