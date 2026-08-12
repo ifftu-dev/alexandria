@@ -394,9 +394,12 @@ jobs:
           distribution: temurin
 
       # arm64 runner images do not reliably ship the Android SDK, so provision
-      # it explicitly rather than assume ANDROID_SDK_ROOT is populated.
+      # it explicitly rather than assume ANDROID_SDK_ROOT is populated. v4 or
+      # newer only: v3 unconditionally installs the legacy `tools` package,
+      # which cmdline-tools 16.0 no longer carries, so sdkmanager exits 1
+      # before the job gets anywhere.
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
 
       - name: Set up Android NDK (host-matching toolchain)
         run: |
