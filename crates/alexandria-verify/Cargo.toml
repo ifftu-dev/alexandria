@@ -9,7 +9,7 @@ repository = "https://github.com/ifftu-dev/alexandria"
 homepage = "https://alexandria.ifftu.dev"
 documentation = "https://docs.rs/alexandria-verify"
 readme = "README.md"
-keywords = ["verifiable-credentials", "did", "ed25519", "jws", "w3c"]
+keywords = ["credentials", "did", "ed25519", "jws", "w3c"]
 categories = ["cryptography", "authentication"]
 
 # Permissive, deliberately, while the rest of Alexandria is AGPL-3.0-or-later.
