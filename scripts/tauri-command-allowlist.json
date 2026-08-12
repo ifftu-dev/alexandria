@@ -50,7 +50,6 @@
   "preview_completion_root": "completion witness; on-chain, documented",
   "submit_completion_witness": "completion witness; on-chain, documented",
   "integrity_get_session": "integrity flow; documented",
-  "integrity_list_snapshots": "integrity flow; documented",
   "integrity_record_attestation": "integrity flow; documented",
   "integrity_set_anchor": "integrity flow; on-chain, documented",
   "integrity_get_assurance": "integrity flow; documented",
@@ -84,8 +83,7 @@
   "assessment_submit_adaptive_item": "adaptive delivery; turn-by-turn runner UI pending",
   "assessment_finalize_adaptive": "adaptive delivery; turn-by-turn runner UI pending",
   "get_skill_state_history": "confidence decay-curve + velocity data; curve UI pending",
-  "sentinel_evidence_pending": "Backend landed ahead of the consent UI. The prompt that calls this \u2014 showing a learner exactly what would be retained before they answer \u2014 is the next piece; see docs/sentinel.md, Privacy Guarantee 3.",
-  "sentinel_evidence_decide": "Backend landed ahead of the consent UI. Nothing is persisted until this is called with granted=true, so until the prompt ships the retention path is inert by construction.",
-  "sentinel_evidence_stored": "Backend landed ahead of the consent UI. Lets a learner see what they are currently holding; needs the flagged-session review surface.",
-  "sentinel_evidence_delete": "Backend landed ahead of the consent UI. Learner-initiated early deletion of retained appeal evidence."
+  "sentinel_evidence_stored": "Awaiting the Settings -> Integrity history surface; lets a learner see what they are currently holding.",
+  "sentinel_evidence_delete": "Awaiting the Settings -> Integrity history surface; learner-initiated early deletion of retained evidence.",
+  "sentinel_evidence_stored_preview": "Awaiting the Settings -> Integrity history surface; renders retained evidence for the learner's own review."
 }

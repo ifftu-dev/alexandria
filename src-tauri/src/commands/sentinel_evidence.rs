@@ -11,7 +11,7 @@
 
 use tauri::State;
 
-use crate::sentinel::evidence::{self, EvidenceSummary};
+use crate::sentinel::evidence::{self, EvidencePreview, EvidenceSummary};
 use crate::AppState;
 
 fn now_iso() -> String {
@@ -79,4 +79,31 @@ pub async fn sentinel_evidence_delete(
     let guard = state.db.lock().map_err(|e| e.to_string())?;
     let db = guard.as_ref().ok_or("database not initialized")?;
     evidence::delete_for_session(db.conn(), &session_id).map_err(|e| e.to_string())
+}
+
+/// The staged evidence itself, rendered for display.
+///
+/// The consent prompt shows this before asking. A learner deciding whether to
+/// keep camera frames is entitled to look at them first — not least because the
+/// frame is often what shows the flag was wrong.
+#[tauri::command]
+pub async fn sentinel_evidence_preview(
+    state: State<'_, AppState>,
+    session_id: String,
+) -> Result<Vec<EvidencePreview>, String> {
+    Ok(evidence::preview_staged(
+        &state.evidence_staging,
+        &session_id,
+    ))
+}
+
+/// Retained evidence, rendered for review after consent was given.
+#[tauri::command]
+pub async fn sentinel_evidence_stored_preview(
+    state: State<'_, AppState>,
+    session_id: String,
+) -> Result<Vec<EvidencePreview>, String> {
+    let guard = state.db.lock().map_err(|e| e.to_string())?;
+    let db = guard.as_ref().ok_or("database not initialized")?;
+    evidence::preview_stored(db.conn(), &session_id).map_err(|e| e.to_string())
 }

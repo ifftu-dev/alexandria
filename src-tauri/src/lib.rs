@@ -1479,6 +1479,8 @@ pub fn run() {
             commands::sentinel_ml::sentinel_reset_user_models,
             // Sentinel gaze / second-device detection
             commands::sentinel_evidence::sentinel_evidence_pending,
+            commands::sentinel_evidence::sentinel_evidence_preview,
+            commands::sentinel_evidence::sentinel_evidence_stored_preview,
             commands::sentinel_evidence::sentinel_evidence_decide,
             commands::sentinel_evidence::sentinel_evidence_stored,
             commands::sentinel_evidence::sentinel_evidence_delete,

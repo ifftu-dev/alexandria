@@ -294,6 +294,80 @@ pub fn purge_expired(db: &Connection, now: &str) -> Result<usize, EvidenceError>
     Ok(n)
 }
 
+/// One piece of evidence rendered for the learner to look at.
+///
+/// Consent that cannot see what it is authorising is not informed. A learner
+/// deciding whether to keep camera frames is entitled to look at the frames
+/// first — including to discover that the "second face" was a poster.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EvidencePreview {
+    pub snapshot_id: String,
+    pub kind: String,
+    pub captured_at: String,
+    /// `data:` URL, ready for an `<img src>`. Camera frames only; other kinds
+    /// carry `None` and are described by `kind` alone.
+    pub data_url: Option<String>,
+}
+
+fn to_preview(snapshot_id: &str, kind: &str, captured_at: &str, payload: &[u8]) -> EvidencePreview {
+    use base64::Engine;
+    let data_url = (kind == "camera_frame").then(|| {
+        format!(
+            "data:image/jpeg;base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(payload)
+        )
+    });
+    EvidencePreview {
+        snapshot_id: snapshot_id.to_string(),
+        kind: kind.to_string(),
+        captured_at: captured_at.to_string(),
+        data_url,
+    }
+}
+
+/// Staged (not yet persisted) evidence, rendered for the consent prompt.
+pub fn preview_staged(staging: &EvidenceStaging, session_id: &str) -> Vec<EvidencePreview> {
+    let map = staging.by_session.lock().expect("staging lock");
+    map.get(session_id)
+        .map(|items| {
+            items
+                .iter()
+                .map(|it| to_preview(&it.snapshot_id, &it.kind, &it.captured_at, &it.payload))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Retained evidence, rendered for the learner's own review after consent.
+pub fn preview_stored(
+    db: &Connection,
+    session_id: &str,
+) -> Result<Vec<EvidencePreview>, EvidenceError> {
+    let mut stmt = db.prepare(
+        "SELECT snapshot_id, kind, captured_at, payload FROM integrity_evidence \
+         WHERE session_id = ?1 ORDER BY captured_at",
+    )?;
+    let rows = stmt.query_map(params![session_id], |r| {
+        Ok((
+            r.get::<_, Option<String>>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, String>(2)?,
+            r.get::<_, Vec<u8>>(3)?,
+        ))
+    })?;
+    let mut out = Vec::new();
+    for row in rows {
+        let (snap, kind, at, payload) = row?;
+        out.push(to_preview(
+            snap.as_deref().unwrap_or(""),
+            &kind,
+            &at,
+            &payload,
+        ));
+    }
+    Ok(out)
+}
+
 /// What is currently retained for a session, for the learner's own review.
 pub fn stored_summary(db: &Connection, session_id: &str) -> Result<EvidenceSummary, EvidenceError> {
     let mut stmt =

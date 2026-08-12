@@ -53,6 +53,11 @@ const PENDING_TRANSLATION = [
   // renders in English via the i18n fallback.
   'settings.personalization.shortcutsModal',
   'settings.personalization.shortcutNames.',
+  // Sentinel appeal-evidence consent + integrity history. English-only pending
+  // a translate pass; renders in English via the i18n fallback. This one is
+  // worth prioritising — it is a consent surface, and consent a learner cannot
+  // read in their own language is not consent.
+  'sentinel.evidence.',
   // Credential import surface. English-only pending a translate pass.
   'credentials.import.',
   'credentials.page.import',

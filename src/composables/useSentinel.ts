@@ -125,6 +125,15 @@ const sentinelDebug = reactive({
 // typing / mouse activity is visible in real time, not just at snapshot
 // cadence.
 let liveTimer: ReturnType<typeof setInterval> | null = null
+
+/**
+ * Set when a session ends flagged, so the host can offer the learner the
+ * evidence-consent decision. Cleared once they answer.
+ *
+ * Module-level rather than per-instance because the prompt must survive the
+ * component that was running the assessment being torn down at session end.
+ */
+const pendingEvidenceConsent = ref<{ sessionId: string; reasons: string[] } | null>(null)
 const cameraOptedIn = ref(false)
 
 // AI scoring is advisory until validated with labeled data (see
@@ -1202,13 +1211,25 @@ export function useSentinel() {
     updateProfile(deviceFp)
 
     try {
-      await invoke('integrity_end_session', {
+      const ended = await invoke<{ id: string; status: string }>('integrity_end_session', {
         sessionId: sessionId.value,
         req: {
           overall_integrity_score: integrity,
           overall_consistency_score: consistency,
         },
       })
+      // A flagged session is the only case where evidence was staged, and the
+      // only case where the learner has anything to decide about. Surfacing it
+      // here rather than silently is the point: until this shipped, Sentinel
+      // could flag a session and the person it flagged was never told.
+      if (ended?.status === 'flagged') {
+        const snaps = await invoke<Array<{ anomaly_flags: string[] }>>(
+          'integrity_list_snapshots',
+          { sessionId: ended.id },
+        ).catch(() => [])
+        const reasons = [...new Set(snaps.flatMap((s) => s.anomaly_flags ?? []))]
+        pendingEvidenceConsent.value = { sessionId: ended.id, reasons }
+      }
     } catch {
       console.warn('Sentinel: failed to end session')
     }
@@ -1788,6 +1809,10 @@ export function useSentinel() {
     getDebugState,
     getFinalScore,
     getSessionId,
+    pendingEvidenceConsent,
+    clearPendingEvidenceConsent: () => {
+      pendingEvidenceConsent.value = null
+    },
 
     // Training API
     startTrainingKeystrokes,

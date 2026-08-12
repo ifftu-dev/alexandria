@@ -11,11 +11,16 @@ import { initTheme, initThemeFromSettings } from '@/composables/useTheme'
 import { initLocaleFromSettings } from '@/composables/useLocale'
 import { initShortcutsFromSettings } from '@/composables/useKeyboardShortcuts'
 import { initOmniRecentsFromSettings } from '@/composables/useOmniSearch'
-import { initSentinelFlagsFromSettings } from '@/composables/useSentinel'
+import { initSentinelFlagsFromSettings, useSentinel } from '@/composables/useSentinel'
 import SentinelDebugPip from '@/components/integrity/SentinelDebugPip.vue'
+import EvidenceConsentModal from '@/components/integrity/EvidenceConsentModal.vue'
 import UpdateBanner from '@/components/update/UpdateBanner.vue'
 import { initUpdateCheck } from '@/composables/useAppUpdate'
 import { useDeepLinks } from '@/deeplink/useDeepLinks'
+
+/** Matches `APPEAL_WINDOW_DAYS` in `sentinel::evidence`. */
+const EVIDENCE_RETENTION_DAYS = 14
+const { pendingEvidenceConsent, clearPendingEvidenceConsent } = useSentinel()
 
 import { clearSettingsCache, useSettings } from '@/composables/useSettings'
 import { isMac } from '@/composables/usePlatform'
@@ -180,4 +185,18 @@ onUnmounted(() => {
   <!-- Live Sentinel observability PiP — stays hidden until toggled from the
        Develop menu (Sentinel Live View, ⌘⇧S), so it's safe to always mount. -->
   <SentinelDebugPip />
+
+  <!-- Offers the evidence decision when a session ends flagged. Mounted at the
+       root because the assessment view that was running is usually gone by the
+       time the session ends, and a learner must not miss this — it is the only
+       moment the decision is theirs to make. -->
+  <EvidenceConsentModal
+    v-if="pendingEvidenceConsent"
+    :open="true"
+    :session-id="pendingEvidenceConsent.sessionId"
+    :reasons="pendingEvidenceConsent.reasons"
+    :retention-days="EVIDENCE_RETENTION_DAYS"
+    @close="clearPendingEvidenceConsent()"
+    @decided="clearPendingEvidenceConsent()"
+  />
 </template>
