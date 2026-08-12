@@ -55,6 +55,13 @@ interface AccessEntry {
   at: string
 }
 
+interface Grant {
+  directory: string
+  organisationId: string
+  institution: string
+  visibleToAdministrators: boolean
+}
+
 interface PullResult<T> {
   items: T[]
   problems: Problem[]
@@ -65,12 +72,16 @@ const { t, locale } = useI18n()
 const directories = ref<Directory[]>([])
 const requests = ref<DisclosureRequest[]>([])
 const accesses = ref<AccessEntry[]>([])
+const grants = ref<Grant[]>([])
 const problems = ref<Problem[]>([])
 
 const newName = ref('')
 const newUrl = ref('')
 const checking = ref(false)
 const sharing = ref('')
+const publishing = ref('')
+const publishedTo = ref('')
+const changingGrant = ref('')
 const sharedIds = ref<Set<string>>(new Set())
 const error = ref('')
 
@@ -90,15 +101,17 @@ async function check() {
   checking.value = true
   error.value = ''
   try {
-    const [pending, log] = await Promise.all([
+    const [pending, log, visibility] = await Promise.all([
       invoke<PullResult<DisclosureRequest>>('fetch_disclosure_requests'),
       invoke<PullResult<AccessEntry>>('fetch_access_log'),
+      invoke<PullResult<Grant>>('fetch_visibility'),
     ])
     requests.value = pending.items
     accesses.value = log.items
+    grants.value = visibility.items
 
     const seen = new Map<string, Problem>()
-    for (const p of [...pending.problems, ...log.problems]) {
+    for (const p of [...pending.problems, ...log.problems, ...visibility.problems]) {
       if (!seen.has(p.directory)) seen.set(p.directory, p)
     }
     problems.value = [...seen.values()]
@@ -133,6 +146,7 @@ async function remove(url: string) {
     // removed on screen would suggest it is still being asked.
     requests.value = requests.value.filter((r) => next.some((n) => n.name === r.directory))
     accesses.value = accesses.value.filter((a) => next.some((n) => n.name === a.directory))
+    grants.value = grants.value.filter((g) => next.some((n) => n.name === g.directory))
     problems.value = problems.value.filter((p) => next.some((n) => n.name === p.directory))
   } catch (e) {
     error.value = String(e)
@@ -151,6 +165,45 @@ async function share(req: DisclosureRequest) {
     error.value = String(e)
   } finally {
     sharing.value = ''
+  }
+}
+
+async function publish(dir: Directory) {
+  publishing.value = dir.url
+  error.value = ''
+  try {
+    await invoke('publish_listing', { directoryUrl: dir.url })
+    publishedTo.value = dir.name
+  } catch (e) {
+    error.value = String(e)
+  } finally {
+    publishing.value = ''
+  }
+}
+
+/**
+ * Grant or withdraw one institution's administrators named visibility.
+ *
+ * Re-read afterwards rather than flipped locally. This is a permission held on
+ * a server; showing the toggle in a state the server has not confirmed would
+ * tell somebody they had withdrawn consent when the call had failed.
+ */
+async function toggleGrant(g: Grant) {
+  const dir = directories.value.find((x) => x.name === g.directory)
+  if (!dir) return
+  changingGrant.value = g.organisationId
+  error.value = ''
+  try {
+    await invoke('set_visibility', {
+      directoryUrl: dir.url,
+      organisationId: g.organisationId,
+      visible: !g.visibleToAdministrators,
+    })
+    grants.value = (await invoke<PullResult<Grant>>('fetch_visibility')).items
+  } catch (e) {
+    error.value = String(e)
+  } finally {
+    changingGrant.value = ''
   }
 }
 
@@ -285,6 +338,70 @@ onMounted(async () => {
         <p class="text-xs text-muted-foreground">
           {{ t('profile.directories.ignoreNote') }}
         </p>
+      </div>
+
+      <div class="space-y-2">
+        <h3 class="text-sm font-medium text-foreground">
+          {{ t('profile.directories.publishHeading') }}
+        </h3>
+        <p class="text-xs text-muted-foreground">{{ t('profile.directories.publishNote') }}</p>
+        <div class="flex flex-wrap gap-2">
+          <AppButton
+            v-for="dir in directories"
+            :key="dir.url"
+            variant="ghost"
+            size="sm"
+            :disabled="publishing === dir.url"
+            @click="publish(dir)"
+          >
+            {{
+              publishing === dir.url
+                ? t('profile.directories.publishing')
+                : t('profile.directories.publish', { directory: dir.name })
+            }}
+          </AppButton>
+        </div>
+        <p v-if="publishedTo" class="text-xs text-foreground">
+          {{ t('profile.directories.published', { directory: publishedTo }) }}
+        </p>
+      </div>
+
+      <div class="space-y-2">
+        <h3 class="text-sm font-medium text-foreground">
+          {{ t('profile.directories.visibilityHeading') }}
+        </h3>
+
+        <p v-if="!grants.length" class="text-sm text-muted-foreground">
+          {{ t('profile.directories.noGrants') }}
+        </p>
+
+        <div
+          v-for="g in grants"
+          :key="g.organisationId"
+          class="flex items-center gap-3 rounded-lg border border-border p-3"
+        >
+          <span class="min-w-0 flex-1 text-sm text-foreground">
+            {{
+              g.visibleToAdministrators
+                ? t('profile.directories.grantOn', { institution: g.institution })
+                : t('profile.directories.grantOff', { institution: g.institution })
+            }}
+          </span>
+          <AppButton
+            variant="ghost"
+            size="sm"
+            :disabled="changingGrant === g.organisationId"
+            @click="toggleGrant(g)"
+          >
+            {{
+              g.visibleToAdministrators
+                ? t('profile.directories.revoke')
+                : t('profile.directories.grant')
+            }}
+          </AppButton>
+        </div>
+
+        <p class="text-xs text-muted-foreground">{{ t('profile.directories.visibilityNote') }}</p>
       </div>
 
       <div class="space-y-2">

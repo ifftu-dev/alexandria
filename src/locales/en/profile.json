@@ -115,6 +115,18 @@
     "accessModule": "on {module}",
     "problemsHeading": "Couldn't ask",
     "problem": "{directory}: {detail}",
-    "problemNote": "A directory that cannot be reached is shown rather than skipped — otherwise it would look the same as one with nothing to report."
+    "problemNote": "A directory that cannot be reached is shown rather than skipped — otherwise it would look the same as one with nothing to report.",
+    "publishHeading": "Your listing",
+    "publishNote": "Publishing sends the record the section above previews. Sending it again replaces what a directory holds, so changing your consent and republishing is how you take a skill back.",
+    "publish": "Publish to {directory}",
+    "publishing": "Publishing…",
+    "published": "Published to {directory}.",
+    "visibilityHeading": "Institutions that can see you by name",
+    "noGrants": "No institution has been granted this.",
+    "visibilityNote": "Instructors see the learners in modules they teach either way — that is how somebody who is struggling gets helped. This is about administrators, who otherwise see only counts. It ends by itself when your enrolment does.",
+    "grantOn": "Administrators at {institution} can see your named outcomes",
+    "grantOff": "Administrators at {institution} see only aggregates",
+    "grant": "Allow",
+    "revoke": "Withdraw"
   }
 }

@@ -95,6 +95,18 @@
     "accessModule": "sur {module}",
     "problemsHeading": "Consultation impossible",
     "problem": "{directory} : {detail}",
-    "problemNote": "Un annuaire injoignable est affiché plutôt qu'ignoré — sinon il ressemblerait à un annuaire qui n'a rien à signaler."
+    "problemNote": "Un annuaire injoignable est affiché plutôt qu'ignoré — sinon il ressemblerait à un annuaire qui n'a rien à signaler.",
+    "publishHeading": "Votre fiche",
+    "publishNote": "Publier envoie l'enregistrement prévisualisé dans la section ci-dessus. Le renvoyer remplace ce que détient un annuaire : modifier votre consentement puis republier est donc la façon de retirer une compétence.",
+    "publish": "Publier sur {directory}",
+    "publishing": "Publication…",
+    "published": "Publié sur {directory}.",
+    "visibilityHeading": "Établissements pouvant vous voir nommément",
+    "noGrants": "Aucun établissement n'a cette autorisation.",
+    "visibilityNote": "Les enseignants voient de toute façon les apprenants des modules qu'ils enseignent : c'est ainsi qu'on aide quelqu'un en difficulté. Il s'agit ici des administrateurs, qui autrement ne voient que des totaux. Cela prend fin de soi-même à la fin de votre inscription.",
+    "grantOn": "Les administrateurs de {institution} peuvent voir vos résultats nominatifs",
+    "grantOff": "Les administrateurs de {institution} ne voient que des agrégats",
+    "grant": "Autoriser",
+    "revoke": "Retirer"
   }
 }

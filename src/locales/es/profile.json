@@ -95,6 +95,18 @@
     "accessModule": "en {module}",
     "problemsHeading": "No se pudo consultar",
     "problem": "{directory}: {detail}",
-    "problemNote": "Un directorio inalcanzable se muestra en lugar de omitirse; de lo contrario parecería igual que uno que no tiene nada que informar."
+    "problemNote": "Un directorio inalcanzable se muestra en lugar de omitirse; de lo contrario parecería igual que uno que no tiene nada que informar.",
+    "publishHeading": "Tu ficha",
+    "publishNote": "Al publicar se envía el registro que la sección anterior previsualiza. Volver a enviarlo reemplaza lo que guarda un directorio, así que cambiar tu consentimiento y republicar es la forma de retirar una competencia.",
+    "publish": "Publicar en {directory}",
+    "publishing": "Publicando…",
+    "published": "Publicado en {directory}.",
+    "visibilityHeading": "Instituciones que pueden verte por tu nombre",
+    "noGrants": "Ninguna institución tiene este permiso.",
+    "visibilityNote": "El profesorado ve al alumnado de las asignaturas que imparte en cualquier caso: así se ayuda a quien tiene dificultades. Esto se refiere al personal administrativo, que de otro modo solo ve recuentos. Termina por sí solo cuando acaba tu matrícula.",
+    "grantOn": "El personal administrativo de {institution} puede ver tus resultados con tu nombre",
+    "grantOff": "El personal administrativo de {institution} solo ve agregados",
+    "grant": "Permitir",
+    "revoke": "Retirar"
   }
 }

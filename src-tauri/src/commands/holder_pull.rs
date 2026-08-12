@@ -296,6 +296,151 @@ fn string_at(v: &serde_json::Value, key: &str) -> String {
         .to_string()
 }
 
+/// One institution's standing permission to see this person by name.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Grant {
+    pub directory: String,
+    /// Needed to withdraw it. A learner who can see the grant but cannot name
+    /// the institution back to the endpoint has been shown a control they
+    /// cannot reach.
+    pub organisation_id: String,
+    pub institution: String,
+    pub visible_to_administrators: bool,
+}
+
+/// What this person has granted, per institution, across every directory.
+#[tauri::command]
+pub async fn fetch_visibility(state: State<'_, AppState>) -> Result<PullResult<Grant>, String> {
+    let dirs = directories(&state)?;
+    let (sk, did) = crate::commands::credentials::load_issuer_key(&state).await?;
+    let client = reqwest::Client::new();
+
+    let mut items = Vec::new();
+    let mut problems = Vec::new();
+
+    for dir in &dirs {
+        let path = format!("/api/cohorts/visibility/{}", did.as_str());
+        match signed_get(&client, dir, &sk, &path).await {
+            Ok(value) => {
+                let rows: Vec<serde_json::Value> = value
+                    .get("grants")
+                    .and_then(|v| serde_json::from_value(v.clone()).ok())
+                    .unwrap_or_default();
+                for r in rows {
+                    items.push(Grant {
+                        directory: dir.name.clone(),
+                        organisation_id: string_at(&r, "organisationId"),
+                        institution: string_at(&r, "institution"),
+                        visible_to_administrators: r
+                            .get("visibleToAdministrators")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false),
+                    });
+                }
+            }
+            Err(detail) => problems.push(Problem {
+                directory: dir.name.clone(),
+                detail,
+            }),
+        }
+    }
+
+    Ok(PullResult { items, problems })
+}
+
+/// Grant or withdraw an institution's administrators named visibility.
+///
+/// Signed by the learner, because an institution that could set this for its
+/// own students would make the consent decorative. Withdrawal goes through the
+/// same call — a control that can only be switched on is not a control.
+#[tauri::command]
+pub async fn set_visibility(
+    state: State<'_, AppState>,
+    directory_url: String,
+    organisation_id: String,
+    visible: bool,
+) -> Result<(), String> {
+    if !directory_url.starts_with("https://") && !is_loopback(&directory_url) {
+        return Err("a directory must be https".into());
+    }
+
+    let (sk, did) = crate::commands::credentials::load_issuer_key(&state).await?;
+    let now = crate::commands::credentials::now_rfc3339();
+
+    // A record with no skills in it. The endpoint checks the signature and the
+    // subject, and nothing else; sending the published listing would attach a
+    // skill disclosure to what is only a consent change.
+    let record = crate::domain::talent_index::TalentIndexRecord {
+        subject_did: did.as_str().to_string(),
+        skills: vec![],
+        display_name: None,
+        bio: None,
+        valid_until: (chrono::Utc::now() + chrono::Duration::minutes(10))
+            .to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+    };
+    let signed = crate::domain::talent_index::sign_record(&record, &sk, &now)?;
+
+    let base = directory_url.trim_end_matches('/');
+    let resp = reqwest::Client::new()
+        .post(format!("{base}/api/cohorts/visibility/{}", did.as_str()))
+        .json(&serde_json::json!({
+            "org_id": organisation_id,
+            "visible": visible,
+            "presentation": signed,
+        }))
+        .timeout(std::time::Duration::from_secs(15))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if !resp.status().is_success() {
+        let code = resp.status().as_u16();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("{code}: {body}"));
+    }
+    Ok(())
+}
+
+/// Publish the consented listing to a directory.
+///
+/// The last step the talent-index consent screen was missing: it has always
+/// built and signed the record and had nowhere to send it. What goes is
+/// exactly what that screen previews, so the preview stays the audit surface
+/// and this is only delivery.
+#[tauri::command]
+pub async fn publish_listing(
+    state: State<'_, AppState>,
+    directory_url: String,
+) -> Result<(), String> {
+    if !directory_url.starts_with("https://") && !is_loopback(&directory_url) {
+        return Err("a directory must be https".into());
+    }
+
+    let signed = crate::commands::talent_index::sign_talent_index_record(state)
+        .await?
+        .ok_or_else(|| {
+            "you have not consented to publish any skills yet — choose what to share first"
+                .to_string()
+        })?;
+
+    let base = directory_url.trim_end_matches('/');
+    let resp = reqwest::Client::new()
+        .post(format!("{base}/api/index/records"))
+        .json(&signed)
+        .timeout(std::time::Duration::from_secs(15))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if !resp.status().is_success() {
+        let code = resp.status().as_u16();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("{code}: {body}"));
+    }
+    Ok(())
+}
+
 /// Answer a disclosure request by sharing a signed record.
 ///
 /// The record is the one the talent-index consent screen already builds and

@@ -95,6 +95,18 @@
     "accessModule": "于 {module}",
     "problemsHeading": "无法查询",
     "problem": "{directory}：{detail}",
-    "problemNote": "无法连接的目录会显示出来而不是被跳过——否则它看起来就和没有任何记录的目录一样。"
+    "problemNote": "无法连接的目录会显示出来而不是被跳过——否则它看起来就和没有任何记录的目录一样。",
+    "publishHeading": "你的公开信息",
+    "publishNote": "发布会把上面预览的记录发送出去。再次发送会替换目录中已有的内容，因此更改同意范围后重新发布，就是收回某项技能的方式。",
+    "publish": "发布到 {directory}",
+    "publishing": "发布中…",
+    "published": "已发布到 {directory}。",
+    "visibilityHeading": "可以按姓名查看你的院校",
+    "noGrants": "没有任何院校获得此权限。",
+    "visibilityNote": "无论如何，讲师都能看到自己所授课程的学员——这是帮助遇到困难的人的方式。此处指的是管理员，他们否则只能看到统计数字。你的学籍结束时，此权限会自动终止。",
+    "grantOn": "{institution} 的管理员可以看到你的具名成绩",
+    "grantOff": "{institution} 的管理员只能看到统计数字",
+    "grant": "允许",
+    "revoke": "撤回"
   }
 }
