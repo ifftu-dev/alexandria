@@ -87,6 +87,10 @@ pub struct AppState {
     pub last_activity: Arc<std::sync::Mutex<std::time::Instant>>,
     /// IPC rate limiter for sensitive commands.
     pub ipc_limiter: Arc<std::sync::Mutex<crate::commands::ratelimit::IpcRateLimiter>>,
+    /// Sentinel appeal evidence awaiting a learner's consent decision. Held in
+    /// memory only and cleared on lock — nothing here has been persisted, and
+    /// nothing will be unless the learner says yes. See `sentinel::evidence`.
+    pub evidence_staging: Arc<crate::sentinel::evidence::EvidenceStaging>,
 
     // ─── per-profile resources (populated while active) ─────────────
     pub db: Arc<std::sync::Mutex<Option<Database>>>,
@@ -295,6 +299,11 @@ impl AppState {
     /// Tear down the active profile's resources. Safe to call when no
     /// profile is active (becomes a no-op).
     pub async fn stop_active_profile(&self) -> Result<(), String> {
+        // 0. Drop any Sentinel evidence staged but never consented to. It has
+        // not been written anywhere, and it must not survive into the next
+        // profile's session — see `sentinel::evidence`.
+        self.evidence_staging.clear_all();
+
         // 1. Stop p2p first so its sync workers do not race the DB close.
         {
             let mut guard = self.p2p_node.lock().await;
@@ -374,6 +383,19 @@ impl AppState {
         database
             .run_migrations()
             .map_err(|e| format!("database migrations failed: {e}"))?;
+
+        // Expire Sentinel appeal evidence whose window has closed. Done on
+        // unlock rather than only on a timer, so evidence expires on schedule
+        // even when the app has been shut for the whole window — the deadline
+        // is an absolute timestamp, not elapsed uptime.
+        {
+            let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+            match crate::sentinel::evidence::purge_expired(database.conn(), &now) {
+                Ok(n) if n > 0 => log::info!("sentinel evidence: purged {n} expired row(s)"),
+                Ok(_) => {}
+                Err(e) => log::warn!("sentinel evidence: purge failed: {e}"),
+            }
+        }
 
         // Seed `stake_pubkey_registry` from the bundled
         // bootstrap snapshot. No-op when the placeholder file is still
@@ -1034,6 +1056,7 @@ pub fn run() {
                 ipc_limiter: Arc::new(std::sync::Mutex::new(
                     commands::ratelimit::IpcRateLimiter::new(),
                 )),
+                evidence_staging: Arc::new(sentinel::evidence::EvidenceStaging::new()),
                 db,
                 keystore,
                 content_node,
@@ -1455,6 +1478,10 @@ pub fn run() {
             commands::sentinel_ml::sentinel_user_models_status,
             commands::sentinel_ml::sentinel_reset_user_models,
             // Sentinel gaze / second-device detection
+            commands::sentinel_evidence::sentinel_evidence_pending,
+            commands::sentinel_evidence::sentinel_evidence_decide,
+            commands::sentinel_evidence::sentinel_evidence_stored,
+            commands::sentinel_evidence::sentinel_evidence_delete,
             commands::sentinel_gaze::sentinel_detect_face,
             commands::sentinel_gaze::sentinel_extract_gaze_features,
             commands::sentinel_gaze::sentinel_score_gaze,

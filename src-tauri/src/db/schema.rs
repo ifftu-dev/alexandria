@@ -85,6 +85,7 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (75, "assessment_adaptive_delivery", MIGRATION_075),
     (76, "derived_skill_state_history", MIGRATION_076),
     (77, "submission_evidence_published", MIGRATION_077),
+    (78, "sentinel_appeal_evidence", MIGRATION_078),
 ];
 
 const MIGRATION_001: &str = r#"
@@ -3061,6 +3062,67 @@ CREATE TABLE IF NOT EXISTS derived_skill_state_history (
 );
 CREATE INDEX IF NOT EXISTS idx_dss_history_subject_skill
     ON derived_skill_state_history(subject_did, skill_id, snapshot_date);
+"#;
+
+const MIGRATION_078: &str = r#"
+-- ============================================================
+-- Migration 078: Sentinel appeal evidence (learner-consented)
+--
+-- Sentinel persists derived scores only; raw behavioural capture and camera
+-- frames are processed in memory and dropped (see docs/sentinel.md, Privacy
+-- Guarantees). That leaves the appeal path in the same document unusable: a
+-- learner asked to contest a flag has nothing to release, because nothing was
+-- kept.
+--
+-- These tables close that gap without weakening the default. Nothing is
+-- written here unless a learner is shown their flag and explicitly chooses to
+-- preserve the evidence. Declining, or simply not answering, leaves the
+-- guarantee exactly as it was: nothing persisted.
+--
+-- What may be stored is bounded three ways. Only flagged sessions qualify.
+-- Only the snapshots that actually carried a flag are kept, not the session.
+-- And every row carries an expiry, after which it is deleted whether or not
+-- an appeal happened.
+--
+-- Retention is the learner's to end early: `sentinel_evidence_delete` drops
+-- everything for a session at any time, and it is never a precondition of an
+-- appeal being heard that the evidence still exists.
+-- ============================================================
+
+-- Consent state for a session's evidence. Absent row = never asked.
+CREATE TABLE IF NOT EXISTS integrity_evidence_consent (
+    session_id  TEXT PRIMARY KEY REFERENCES integrity_sessions(id) ON DELETE CASCADE,
+    -- 1 = learner chose to preserve, 0 = declined. There is no default:
+    -- a row exists only because a human answered.
+    granted     INTEGER NOT NULL CHECK (granted IN (0, 1)),
+    decided_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+    -- NULL when declined. Absolute deadline, not a duration, so a device
+    -- that is offline for a month still expires the evidence on next open.
+    expires_at  TEXT
+);
+
+-- The evidence itself. Rows exist only where consent.granted = 1.
+CREATE TABLE IF NOT EXISTS integrity_evidence (
+    id           TEXT PRIMARY KEY,
+    session_id   TEXT NOT NULL REFERENCES integrity_sessions(id) ON DELETE CASCADE,
+    -- The flagged snapshot this evidence belongs to.
+    snapshot_id  TEXT REFERENCES integrity_snapshots(id) ON DELETE CASCADE,
+    -- camera_frame | keystroke | mouse | gaze
+    kind         TEXT NOT NULL,
+    -- Opaque payload. Camera frames are stored encoded, not as raw RGBA.
+    -- The database file is SQLCipher-encrypted at rest under the profile
+    -- vault key, so this inherits that protection and nothing weaker.
+    payload      BLOB NOT NULL,
+    captured_at  TEXT NOT NULL,
+    expires_at   TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_integrity_evidence_session
+    ON integrity_evidence(session_id);
+
+-- Purge sweeps order by expiry, so index it.
+CREATE INDEX IF NOT EXISTS idx_integrity_evidence_expires
+    ON integrity_evidence(expires_at);
 "#;
 
 const MIGRATION_077: &str = r#"

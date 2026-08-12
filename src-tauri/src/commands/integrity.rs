@@ -266,6 +266,16 @@ pub async fn integrity_submit_snapshot(
         )
         .map_err(|e| e.to_string())?;
 
+    // A flagged snapshot is the only thing that makes appeal evidence relevant,
+    // so this is where the parked camera frame is moved into staging. Staging is
+    // memory-only: nothing reaches the database unless the learner is later
+    // shown the flag and chooses to keep it. See `sentinel::evidence`.
+    if snap_critical > 0 || snap_warning > 0 {
+        state
+            .evidence_staging
+            .stage_last_frame(&req.session_id, &snapshot_id);
+    }
+
     // Update the session's running integrity score (average of snapshots)
     // and cumulative severity counters in a single statement to keep them
     // consistent with each other.

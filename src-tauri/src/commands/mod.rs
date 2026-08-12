@@ -31,6 +31,7 @@ pub mod profile;
 pub mod reputation;
 pub mod role_assessment;
 pub mod sentinel_dao;
+pub mod sentinel_evidence;
 pub mod sentinel_gaze;
 pub mod sentinel_holdout;
 pub mod sentinel_ml;

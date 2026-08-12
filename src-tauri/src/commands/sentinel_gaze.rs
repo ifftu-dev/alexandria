@@ -81,6 +81,16 @@ pub async fn sentinel_score_gaze(
     let dets = face_detect::detect(&req.frame).map_err(|e| e.to_string())?;
     let best = pick_best(&dets);
 
+    // Park this frame in memory in case the snapshot about to be written turns
+    // out to be flagged. Nothing is persisted here, and an unflagged snapshot
+    // lets the next frame overwrite it — see `sentinel::evidence`.
+    state.evidence_staging.remember_frame(
+        req.frame.width,
+        req.frame.height,
+        &req.frame.rgba,
+        &chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+    );
+
     let calib = match load_user_model::<GazeCalibWeights>(
         &state,
         &req.user_address,

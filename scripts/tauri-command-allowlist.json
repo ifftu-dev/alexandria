@@ -83,5 +83,9 @@
   "assessment_start_adaptive": "adaptive delivery; turn-by-turn runner UI pending (fixed-form path is wired)",
   "assessment_submit_adaptive_item": "adaptive delivery; turn-by-turn runner UI pending",
   "assessment_finalize_adaptive": "adaptive delivery; turn-by-turn runner UI pending",
-  "get_skill_state_history": "confidence decay-curve + velocity data; curve UI pending"
+  "get_skill_state_history": "confidence decay-curve + velocity data; curve UI pending",
+  "sentinel_evidence_pending": "Backend landed ahead of the consent UI. The prompt that calls this \u2014 showing a learner exactly what would be retained before they answer \u2014 is the next piece; see docs/sentinel.md, Privacy Guarantee 3.",
+  "sentinel_evidence_decide": "Backend landed ahead of the consent UI. Nothing is persisted until this is called with granted=true, so until the prompt ships the retention path is inert by construction.",
+  "sentinel_evidence_stored": "Backend landed ahead of the consent UI. Lets a learner see what they are currently holding; needs the flagged-session review surface.",
+  "sentinel_evidence_delete": "Backend landed ahead of the consent UI. Learner-initiated early deletion of retained appeal evidence."
 }

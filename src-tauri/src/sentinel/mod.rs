@@ -9,12 +9,15 @@
 //!   calibration MLP (candle)
 //! - `types` — shared input shapes (keystroke events, mouse points,
 //!   digraphs, camera frames) mirrored from the legacy TS structs
+//! - `evidence` — learner-consented retention of appeal evidence for
+//!   flagged sessions; nothing is persisted without an explicit yes
 //!
 //! Replaces `src/utils/sentinel/*.ts`. The frontend now buffers raw
 //! events and sends them across IPC; everything else runs in this
 //! crate.
 
 pub mod active_app;
+pub mod evidence;
 pub mod face_detect;
 pub mod features;
 pub mod gaze;

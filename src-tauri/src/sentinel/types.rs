@@ -32,8 +32,13 @@ pub struct MousePoint {
 
 /// A raw camera frame forwarded from the frontend for backend face /
 /// gaze inference. `rgba` is row-major RGBA8 (canvas `ImageData`
-/// layout). Frames are processed in-place and **never persisted** —
+/// layout). Frames are processed in-place and not written to disk —
 /// only derived scores leave this crate.
+///
+/// One exception, gated on the learner: when a snapshot is flagged, the frame
+/// is held in memory by `sentinel::evidence` so the learner can be offered the
+/// chance to keep it as appeal evidence. It is persisted only if they say yes,
+/// and discarded on decline, on lock, and on exit.
 #[derive(Debug, Clone, Deserialize)]
 pub struct FaceFrame {
     pub width: u32,
