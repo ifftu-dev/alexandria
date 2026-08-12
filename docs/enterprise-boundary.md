@@ -53,9 +53,11 @@ If yes, it is core, and it is AGPL. There is no third category.
 | Attempt policy and cooldowns | **Core** | A learner-side integrity rule |
 | Artifact grader plugins | **Core** | Scores must be re-derivable by anyone |
 | Credential issuance, holding, presentation | **Core** | The product |
-| Credential verification logic | **Core** | Permanently — see the guarantee above |
+| Credential verification logic | **Core** | Permanently — see the guarantee above. Extracted as `alexandria-verify`, an I/O-free crate anyone can link |
 | Selective disclosure | **Core** | Every learner gets it |
 | Sentinel on-device integrity | **Core** | Runs on the learner's machine |
+| Telling a learner they were flagged | **Core** | An accusation the subject cannot see is not something they can answer |
+| Appeal-evidence retention and its consent prompt | **Core** | It decides what is kept about a learner, on their device, by their choice |
 | Importing a credential someone handed you | **Core** | Receiving is not a commercial act |
 | Talent-index consent UI, publish client, wire schema | **Core** | A learner must audit what leaves their device |
 | SSO / SAML / OIDC, SCIM provisioning | **Enterprise** | Exists only because an org has many people |
@@ -66,7 +68,7 @@ If yes, it is core, and it is AGPL. There is no third category.
 | Employer search console | **Enterprise** | Scoped to an organisation |
 | Hosted verification API — rate limits, keys, SLA | **Enterprise** | The hosted *operation*; the logic underneath stays core |
 | Bulk verification | **Enterprise** | A metered enterprise operation |
-| Human review queue over Sentinel flags | **Enterprise** | An org process with an adjudication workflow |
+| Human review queue over Sentinel flags | **Enterprise** | An org process with an adjudication workflow — but it may not request evidence; see `sentinel.md` |
 | Cohort analytics, skills intelligence | **Enterprise** | Cross-user server-side aggregation |
 | Seat accounting and billing | **Enterprise** | Definitionally multi-tenant |
 
