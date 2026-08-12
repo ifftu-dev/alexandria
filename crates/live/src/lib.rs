@@ -9,8 +9,14 @@
 //!   own MoQ session with exponential-backoff retry and periodic reconciliation.
 //!
 //! Media capture/codecs (`media`) and the MoQ transport (`moq`, [`ALPN`]) are
-//! re-exported from the sibling `moq-media` / `iroh-moq` crates, which are kept
-//! as-is — only the room/session layer is owned here.
+//! re-exported from the sibling `moq-media` / `iroh-moq` crates. Those are
+//! N0, INC's work under Apache-2.0, vendored from `n0-computer/iroh-live`;
+//! `iroh-moq` is unmodified, `moq-media` carries Alexandria changes and an
+//! Alexandria-written Android capture backend. See `crates/VENDORING.md`.
+//!
+//! This crate is Alexandria's, but `rooms` is a port of N0's room layer rather
+//! than a clean-room implementation, so it is a derivative work and carries the
+//! same licence.
 
 // The room actor's future-set type is intentionally explicit; allow the
 // complexity lint rather than obscure it.

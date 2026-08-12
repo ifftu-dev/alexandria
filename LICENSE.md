@@ -15,9 +15,20 @@ You should have received a copy of the GNU Affero General Public License along
 with this program. If not, see <https://www.gnu.org/licenses/>.
 
 Third-party components incorporated into Alexandria remain under the licenses
-granted by their owners. In particular `crates/iroh-moq` and `crates/moq-media`
-are Copyright (C) 2025 N0, INC and are licensed MIT OR Apache-2.0, as is
-`crates/live`.
+granted by their owners.
+
+In particular, `crates/iroh-moq`, `crates/moq-media` and `crates/live` derive
+from https://github.com/n0-computer/iroh-live, are Copyright (C) 2025 N0, INC,
+and are offered by their owner under MIT OR Apache-2.0. Alexandria distributes
+them under the **Apache License 2.0**; the full text is in each of those three
+directories as `LICENSE-APACHE`. `crates/moq-media` has been modified by
+Alexandria Pvt. Ltd. and the modified files say so, as Apache-2.0 § 4(b)
+requires. The provenance chain, the fork revision they were taken from, and the
+division between N0's work and Alexandria's are recorded in
+`crates/VENDORING.md`.
+
+Nothing in the AGPL terms above is a claim over that code. Where the two
+conflict as to those three directories, Apache-2.0 governs.
 
 ---
 
