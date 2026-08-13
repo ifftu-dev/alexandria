@@ -1032,7 +1032,7 @@ mod tests {
             .execute_batch("DELETE FROM assessment_attempts")
             .unwrap();
 
-        let plan = plan_goal_impl(&ctx.db.conn(), &ctx.did.0, &["skill_rust".into()], NOW).unwrap();
+        let plan = plan_goal_impl(ctx.db.conn(), &ctx.did.0, &["skill_rust".into()], NOW).unwrap();
         let rust = plan
             .steps
             .iter()
@@ -1053,8 +1053,7 @@ mod tests {
             .unwrap();
 
         // Goal is the advanced skill; its prerequisite must appear, earlier.
-        let plan =
-            plan_goal_impl(&ctx.db.conn(), &ctx.did.0, &["skill_async".into()], NOW).unwrap();
+        let plan = plan_goal_impl(ctx.db.conn(), &ctx.did.0, &["skill_async".into()], NOW).unwrap();
         let ids: Vec<&str> = plan.steps.iter().map(|s| s.skill_id.as_str()).collect();
         assert!(
             ids.contains(&"skill_rust"),
@@ -1077,8 +1076,7 @@ mod tests {
             .execute_batch("DELETE FROM assessment_attempts")
             .unwrap();
 
-        let plan =
-            plan_goal_impl(&ctx.db.conn(), &ctx.did.0, &["skill_async".into()], NOW).unwrap();
+        let plan = plan_goal_impl(ctx.db.conn(), &ctx.did.0, &["skill_async".into()], NOW).unwrap();
         let adv = plan
             .steps
             .iter()
@@ -1112,7 +1110,7 @@ mod tests {
             )
             .unwrap();
 
-        let plan = plan_goal_impl(&ctx.db.conn(), &ctx.did.0, &["skill_rust".into()], NOW).unwrap();
+        let plan = plan_goal_impl(ctx.db.conn(), &ctx.did.0, &["skill_rust".into()], NOW).unwrap();
         let rust = plan
             .steps
             .iter()
@@ -1138,7 +1136,7 @@ mod tests {
             )
             .unwrap();
 
-        let plan = plan_goal_impl(&ctx.db.conn(), &ctx.did.0, &["skill_rust".into()], NOW).unwrap();
+        let plan = plan_goal_impl(ctx.db.conn(), &ctx.did.0, &["skill_rust".into()], NOW).unwrap();
         let rust = plan
             .steps
             .iter()
