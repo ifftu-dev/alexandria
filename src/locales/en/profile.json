@@ -127,6 +127,7 @@
     "grantOn": "Administrators at {institution} can see your named outcomes",
     "grantOff": "Administrators at {institution} see only aggregates",
     "grant": "Allow",
-    "revoke": "Withdraw"
+    "revoke": "Withdraw",
+    "noDirectory": "That directory is no longer in your list."
   }
 }

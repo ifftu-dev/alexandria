@@ -79,6 +79,14 @@ const newName = ref('')
 const newUrl = ref('')
 const checking = ref(false)
 const sharing = ref('')
+/**
+ * Keyed by request, because a failure belongs beside the button that caused it.
+ *
+ * This used to set the shared `error` at the top of the section, which on a
+ * scrolled page is off-screen — so the commonest failure, having consented to
+ * publish nothing yet, looked exactly like a button that does nothing.
+ */
+const shareError = ref<Record<string, string>>({})
 const publishing = ref('')
 const publishedTo = ref('')
 const changingGrant = ref('')
@@ -155,14 +163,17 @@ async function remove(url: string) {
 
 async function share(req: DisclosureRequest) {
   const dir = directories.value.find((x) => x.name === req.directory)
-  if (!dir) return
+  if (!dir) {
+    shareError.value = { ...shareError.value, [req.id]: t('profile.directories.noDirectory') }
+    return
+  }
   sharing.value = req.id
-  error.value = ''
+  shareError.value = { ...shareError.value, [req.id]: '' }
   try {
     await invoke('share_disclosure', { directoryUrl: dir.url, requestId: req.id })
     sharedIds.value = new Set([...sharedIds.value, req.id])
   } catch (e) {
-    error.value = String(e)
+    shareError.value = { ...shareError.value, [req.id]: String(e) }
   } finally {
     sharing.value = ''
   }
@@ -333,6 +344,10 @@ onMounted(async () => {
             }}
           </AppButton>
           <p v-else class="text-xs text-foreground">{{ t('profile.directories.shared') }}</p>
+
+          <p v-if="shareError[r.id]" class="text-xs text-destructive">
+            {{ shareError[r.id] }}
+          </p>
         </div>
 
         <p class="text-xs text-muted-foreground">

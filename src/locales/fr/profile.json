@@ -107,6 +107,7 @@
     "grantOn": "Les administrateurs de {institution} peuvent voir vos résultats nominatifs",
     "grantOff": "Les administrateurs de {institution} ne voient que des agrégats",
     "grant": "Autoriser",
-    "revoke": "Retirer"
+    "revoke": "Retirer",
+    "noDirectory": "Cet annuaire ne figure plus dans votre liste."
   }
 }

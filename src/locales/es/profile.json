@@ -107,6 +107,7 @@
     "grantOn": "El personal administrativo de {institution} puede ver tus resultados con tu nombre",
     "grantOff": "El personal administrativo de {institution} solo ve agregados",
     "grant": "Permitir",
-    "revoke": "Retirar"
+    "revoke": "Retirar",
+    "noDirectory": "Ese directorio ya no está en tu lista."
   }
 }

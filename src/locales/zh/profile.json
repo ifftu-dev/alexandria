@@ -107,6 +107,7 @@
     "grantOn": "{institution} 的管理员可以看到你的具名成绩",
     "grantOff": "{institution} 的管理员只能看到统计数字",
     "grant": "允许",
-    "revoke": "撤回"
+    "revoke": "撤回",
+    "noDirectory": "该目录已不在你的列表中。"
   }
 }

@@ -1383,6 +1383,7 @@ export type MessageKey =
   | 'profile.directories.nameLabel'
   | 'profile.directories.namePlaceholder'
   | 'profile.directories.noAccess'
+  | 'profile.directories.noDirectory'
   | 'profile.directories.noGrants'
   | 'profile.directories.noRequests'
   | 'profile.directories.none'
