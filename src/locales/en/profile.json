@@ -118,6 +118,8 @@
     "problemNote": "A directory that cannot be reached is shown rather than skipped — otherwise it would look the same as one with nothing to report.",
     "publishHeading": "Your listing",
     "publishNote": "Publishing sends the record the section above previews. Sending it again replaces what a directory holds, so changing your consent and republishing is how you take a skill back.",
+    "consentLink": "Choose what you're willing to publish",
+    "consentHint": "Nothing to publish yet? You have to pick the skills first.",
     "publish": "Publish to {directory}",
     "publishing": "Publishing…",
     "published": "Published to {directory}.",

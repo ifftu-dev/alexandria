@@ -98,6 +98,8 @@
     "problemNote": "Un directorio inalcanzable se muestra en lugar de omitirse; de lo contrario parecería igual que uno que no tiene nada que informar.",
     "publishHeading": "Tu ficha",
     "publishNote": "Al publicar se envía el registro que la sección anterior previsualiza. Volver a enviarlo reemplaza lo que guarda un directorio, así que cambiar tu consentimiento y republicar es la forma de retirar una competencia.",
+    "consentLink": "Elige lo que quieres publicar",
+    "consentHint": "¿Nada que publicar todavía? Primero tienes que elegir las competencias.",
     "publish": "Publicar en {directory}",
     "publishing": "Publicando…",
     "published": "Publicado en {directory}.",

@@ -22,6 +22,7 @@
  */
 
 import { onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { invoke } from '@tauri-apps/api/core'
 import { useI18n } from 'vue-i18n'
 
@@ -68,6 +69,7 @@ interface PullResult<T> {
 }
 
 const { t, locale } = useI18n()
+const router = useRouter()
 
 const directories = ref<Directory[]>([])
 const requests = ref<DisclosureRequest[]>([])
@@ -89,6 +91,7 @@ const sharing = ref('')
 const shareError = ref<Record<string, string>>({})
 const publishing = ref('')
 const publishedTo = ref('')
+const publishError = ref<Record<string, string>>({})
 const changingGrant = ref('')
 const sharedIds = ref<Set<string>>(new Set())
 const error = ref('')
@@ -181,12 +184,12 @@ async function share(req: DisclosureRequest) {
 
 async function publish(dir: Directory) {
   publishing.value = dir.url
-  error.value = ''
+  publishError.value = { ...publishError.value, [dir.url]: '' }
   try {
     await invoke('publish_listing', { directoryUrl: dir.url })
     publishedTo.value = dir.name
   } catch (e) {
-    error.value = String(e)
+    publishError.value = { ...publishError.value, [dir.url]: String(e) }
   } finally {
     publishing.value = ''
   }
@@ -347,6 +350,13 @@ onMounted(async () => {
 
           <p v-if="shareError[r.id]" class="text-xs text-destructive">
             {{ shareError[r.id] }}
+            <button
+              type="button"
+              class="text-primary underline underline-offset-2"
+              @click="router.push('/profile')"
+            >
+              {{ t('profile.directories.consentLink') }}
+            </button>
           </p>
         </div>
 
@@ -360,11 +370,21 @@ onMounted(async () => {
           {{ t('profile.directories.publishHeading') }}
         </h3>
         <p class="text-xs text-muted-foreground">{{ t('profile.directories.publishNote') }}</p>
+        <p class="text-xs text-muted-foreground">
+          {{ t('profile.directories.consentHint') }}
+          <button
+            type="button"
+            class="text-primary underline underline-offset-2"
+            @click="router.push('/profile')"
+          >
+            {{ t('profile.directories.consentLink') }}
+          </button>
+        </p>
         <div class="flex flex-wrap gap-2">
           <AppButton
             v-for="dir in directories"
             :key="dir.url"
-            variant="ghost"
+            variant="outline"
             size="sm"
             :disabled="publishing === dir.url"
             @click="publish(dir)"
@@ -378,6 +398,22 @@ onMounted(async () => {
         </div>
         <p v-if="publishedTo" class="text-xs text-foreground">
           {{ t('profile.directories.published', { directory: publishedTo }) }}
+        </p>
+
+        <p
+          v-for="dir in directories"
+          v-show="publishError[dir.url]"
+          :key="`err-${dir.url}`"
+          class="text-xs text-destructive"
+        >
+          {{ publishError[dir.url] }}
+          <button
+            type="button"
+            class="text-primary underline underline-offset-2"
+            @click="router.push('/profile')"
+          >
+            {{ t('profile.directories.consentLink') }}
+          </button>
         </p>
       </div>
 

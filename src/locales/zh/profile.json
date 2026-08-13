@@ -98,6 +98,8 @@
     "problemNote": "无法连接的目录会显示出来而不是被跳过——否则它看起来就和没有任何记录的目录一样。",
     "publishHeading": "你的公开信息",
     "publishNote": "发布会把上面预览的记录发送出去。再次发送会替换目录中已有的内容，因此更改同意范围后重新发布，就是收回某项技能的方式。",
+    "consentLink": "选择你愿意公开的内容",
+    "consentHint": "还没有可发布的内容？你需要先选择技能。",
     "publish": "发布到 {directory}",
     "publishing": "发布中…",
     "published": "已发布到 {directory}。",

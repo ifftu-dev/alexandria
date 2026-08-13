@@ -1375,6 +1375,8 @@ export type MessageKey =
   | 'profile.directories.add'
   | 'profile.directories.addHeading'
   | 'profile.directories.checking'
+  | 'profile.directories.consentHint'
+  | 'profile.directories.consentLink'
   | 'profile.directories.description'
   | 'profile.directories.grant'
   | 'profile.directories.grantOff'

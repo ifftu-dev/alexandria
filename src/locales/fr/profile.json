@@ -98,6 +98,8 @@
     "problemNote": "Un annuaire injoignable est affiché plutôt qu'ignoré — sinon il ressemblerait à un annuaire qui n'a rien à signaler.",
     "publishHeading": "Votre fiche",
     "publishNote": "Publier envoie l'enregistrement prévisualisé dans la section ci-dessus. Le renvoyer remplace ce que détient un annuaire : modifier votre consentement puis republier est donc la façon de retirer une compétence.",
+    "consentLink": "Choisissez ce que vous acceptez de publier",
+    "consentHint": "Rien à publier ? Il faut d'abord choisir les compétences.",
     "publish": "Publier sur {directory}",
     "publishing": "Publication…",
     "published": "Publié sur {directory}.",
