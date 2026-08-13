@@ -275,6 +275,25 @@ pub async fn set_talent_index_consent(
 pub async fn sign_talent_index_record(
     state: State<'_, AppState>,
 ) -> Result<Option<SignedTalentIndexRecord>, String> {
+    sign_consented_record(state, None).await
+}
+
+/// Sign the consented record, optionally narrowed to a set of skills.
+///
+/// `only` is what an asker actually asked for. Publishing to an index passes
+/// `None` — the whole listing is the point of a listing. Answering a request
+/// passes the skills that request named, so what leaves the device is the
+/// intersection of *what the holder agreed to publish* and *what this asker
+/// asked about*, and never the whole profile because somebody asked about one
+/// corner of it.
+///
+/// The narrowing happens here, on the holder's machine, before signing. A
+/// filter applied by the recipient would be a promise; this is arithmetic they
+/// never see the other side of.
+pub async fn sign_consented_record(
+    state: State<'_, AppState>,
+    only: Option<&[String]>,
+) -> Result<Option<SignedTalentIndexRecord>, String> {
     let (signing_key, did) = crate::commands::credentials::load_issuer_key(&state).await?;
     let now = crate::commands::credentials::now_rfc3339();
 
@@ -287,11 +306,21 @@ pub async fn sign_talent_index_record(
     // Build from the same path the preview uses, so a learner cannot be shown
     // one record and have another signed.
     let preview = get_talent_index_preview_impl(db.conn(), did.as_str(), &now)?;
-    let Some(record) = preview.record else {
+    let Some(mut record) = preview.record else {
         // Consent covers nothing, so there is nothing to sign. Not an error —
         // it is the default state.
         return Ok(None);
     };
+
+    if let Some(only) = only {
+        record.skills.retain(|s| only.contains(&s.skill_id));
+        // Nothing in common. Returning an empty record would prove the DID and
+        // disclose nothing, which reads to the asker as an answer and is not
+        // one — the caller turns this into a sentence about consent instead.
+        if record.skills.is_empty() {
+            return Ok(None);
+        }
+    }
 
     sign_record(&record, &signing_key, &now).map(Some)
 }
@@ -434,6 +463,63 @@ mod tests {
     }
 
     /// Stored garbage must resolve to "publish nothing", never to "publish".
+    /// Narrowing an answer to what was asked, on the holder's machine.
+    ///
+    /// Tested against the record builder rather than the Tauri command, which
+    /// needs app state — the arithmetic is what matters, and this is it.
+    #[test]
+    fn an_answer_carries_only_the_intersection_of_asked_and_consented() {
+        let db = open_db();
+        seed_skill(&db, "skill_rust", "Rust", 3, 2);
+        seed_skill(&db, "skill_postgres", "PostgreSQL", 3, 2);
+        seed_skill(&db, "skill_cryptography", "Applied cryptography", 4, 3);
+
+        set_talent_index_consent_impl(
+            db.conn(),
+            &TalentIndexConsent {
+                skills: vec!["skill_rust".into(), "skill_postgres".into()],
+                display_name: false,
+                bio: false,
+            },
+        )
+        .unwrap();
+
+        let full = get_talent_index_preview_impl(db.conn(), DID, NOW)
+            .unwrap()
+            .record
+            .expect("consent covers two skills");
+        assert_eq!(full.skills.len(), 2, "publishing sends the whole listing");
+
+        // Asked for one consented skill and one that was never consented to.
+        let asked = ["skill_rust".to_string(), "skill_cryptography".to_string()];
+        let mut narrowed = full.clone();
+        narrowed.skills.retain(|s| asked.contains(&s.skill_id));
+
+        assert_eq!(
+            narrowed
+                .skills
+                .iter()
+                .map(|s| s.skill_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["skill_rust"],
+            "the answer is what both sides agreed on: asked for, and consented to"
+        );
+        assert!(
+            !narrowed
+                .skills
+                .iter()
+                .any(|s| s.skill_id == "skill_postgres"),
+            "a skill nobody asked about must not travel because it happened to be consented"
+        );
+        assert!(
+            !narrowed
+                .skills
+                .iter()
+                .any(|s| s.skill_id == "skill_cryptography"),
+            "asking cannot widen what was consented to"
+        );
+    }
+
     #[test]
     fn unreadable_stored_consent_publishes_nothing() {
         let db = open_db();

@@ -1407,6 +1407,7 @@ export type MessageKey =
   | 'profile.directories.revoke'
   | 'profile.directories.share'
   | 'profile.directories.shared'
+  | 'profile.directories.sharesOnlyAsked'
   | 'profile.directories.sharing'
   | 'profile.directories.title'
   | 'profile.directories.urlLabel'

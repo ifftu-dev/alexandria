@@ -173,7 +173,14 @@ async function share(req: DisclosureRequest) {
   sharing.value = req.id
   shareError.value = { ...shareError.value, [req.id]: '' }
   try {
-    await invoke('share_disclosure', { directoryUrl: dir.url, requestId: req.id })
+    await invoke('share_disclosure', {
+      directoryUrl: dir.url,
+      requestId: req.id,
+      // Only what this request asked for. The command intersects it with what
+      // has been consented to, so the asker cannot widen the answer by asking
+      // for more than the holder agreed to publish.
+      skillIds: req.skillIds,
+    })
     sharedIds.value = new Set([...sharedIds.value, req.id])
   } catch (e) {
     shareError.value = { ...shareError.value, [req.id]: String(e) }
@@ -360,6 +367,9 @@ onMounted(async () => {
           </p>
         </div>
 
+        <p class="text-xs text-muted-foreground">
+          {{ t('profile.directories.sharesOnlyAsked') }}
+        </p>
         <p class="text-xs text-muted-foreground">
           {{ t('profile.directories.ignoreNote') }}
         </p>

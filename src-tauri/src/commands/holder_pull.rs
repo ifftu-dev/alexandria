@@ -456,15 +456,26 @@ pub async fn share_disclosure(
     state: State<'_, AppState>,
     directory_url: String,
     request_id: String,
+    skill_ids: Vec<String>,
 ) -> Result<(), String> {
     if !directory_url.starts_with("https://") && !is_loopback(&directory_url) {
         return Err("a directory must be https".into());
     }
 
-    let signed = crate::commands::talent_index::sign_talent_index_record(state)
+    // Narrowed to what this request named. An asker who wanted one skill gets
+    // one skill, not the whole listing — the request said what it was for, and
+    // answering it with everything would make that statement decorative.
+    //
+    // An empty list means the request named nothing, which the service does not
+    // allow; treated as "no narrowing" rather than "disclose nothing", because
+    // the alternative is a share that silently sends an empty record.
+    let filter = (!skill_ids.is_empty()).then_some(skill_ids.as_slice());
+
+    let signed = crate::commands::talent_index::sign_consented_record(state, filter)
         .await?
         .ok_or_else(|| {
-            "you have not consented to publish any skills yet — choose what to share first"
+            "none of the skills they asked for are ones you have agreed to share — \
+             choose what to share first"
                 .to_string()
         })?;
 
