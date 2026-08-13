@@ -32,6 +32,10 @@
       "advanced": {
         "label": "Tous les paramètres",
         "desc": "Chaque paramètre pour ce compte"
+      },
+      "directories": {
+        "label": "Annuaires",
+        "desc": "Services à qui vous avez demandé ce qu'ils détiennent à votre sujet."
       }
     }
   },

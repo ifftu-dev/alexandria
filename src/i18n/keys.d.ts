@@ -1907,6 +1907,8 @@ export type MessageKey =
   | 'settings.nav.sections.account.label'
   | 'settings.nav.sections.advanced.desc'
   | 'settings.nav.sections.advanced.label'
+  | 'settings.nav.sections.directories.desc'
+  | 'settings.nav.sections.directories.label'
   | 'settings.nav.sections.guardian.desc'
   | 'settings.nav.sections.guardian.label'
   | 'settings.nav.sections.integrity.desc'

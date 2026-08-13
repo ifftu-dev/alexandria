@@ -12,5 +12,6 @@ export type SettingsSectionId =
   | 'system'
   | 'plugins'
   | 'guardian'
+  | 'directories'
   | 'integrity'
   | 'advanced'

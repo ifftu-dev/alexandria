@@ -32,6 +32,10 @@
       "advanced": {
         "label": "Todos los ajustes",
         "desc": "Todos los ajustes de esta cuenta"
+      },
+      "directories": {
+        "label": "Directorios",
+        "desc": "Servicios a los que has pedido que te digan qué guardan sobre ti."
       }
     }
   },

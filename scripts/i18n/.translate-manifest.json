@@ -2243,7 +2243,9 @@
     "update.settings.current": "75f4b2b14c44",
     "update.settings.uptodate": "f69ba82e1d14",
     "update.settings.available": "623053e0057a",
-    "update.settings.error": "efdb318e6818"
+    "update.settings.error": "efdb318e6818",
+    "settings.nav.sections.directories.label": "1029544ae8b4",
+    "settings.nav.sections.directories.desc": "ec6efced2292"
   },
   "es": {
     "classrooms.index.title": "f1649526e859",
@@ -4489,7 +4491,9 @@
     "update.settings.current": "75f4b2b14c44",
     "update.settings.uptodate": "f69ba82e1d14",
     "update.settings.available": "623053e0057a",
-    "update.settings.error": "efdb318e6818"
+    "update.settings.error": "efdb318e6818",
+    "settings.nav.sections.directories.label": "1029544ae8b4",
+    "settings.nav.sections.directories.desc": "ec6efced2292"
   },
   "fr": {
     "classrooms.index.title": "f1649526e859",
@@ -6735,7 +6739,9 @@
     "update.settings.current": "75f4b2b14c44",
     "update.settings.uptodate": "f69ba82e1d14",
     "update.settings.available": "623053e0057a",
-    "update.settings.error": "efdb318e6818"
+    "update.settings.error": "efdb318e6818",
+    "settings.nav.sections.directories.label": "1029544ae8b4",
+    "settings.nav.sections.directories.desc": "ec6efced2292"
   },
   "hi": {
     "classrooms.index.title": "f1649526e859",
@@ -8981,7 +8987,9 @@
     "update.settings.current": "75f4b2b14c44",
     "update.settings.uptodate": "f69ba82e1d14",
     "update.settings.available": "623053e0057a",
-    "update.settings.error": "efdb318e6818"
+    "update.settings.error": "efdb318e6818",
+    "settings.nav.sections.directories.label": "1029544ae8b4",
+    "settings.nav.sections.directories.desc": "ec6efced2292"
   },
   "ur": {
     "classrooms.index.title": "f1649526e859",
@@ -11227,7 +11235,9 @@
     "update.settings.current": "75f4b2b14c44",
     "update.settings.uptodate": "f69ba82e1d14",
     "update.settings.available": "623053e0057a",
-    "update.settings.error": "efdb318e6818"
+    "update.settings.error": "efdb318e6818",
+    "settings.nav.sections.directories.label": "1029544ae8b4",
+    "settings.nav.sections.directories.desc": "ec6efced2292"
   },
   "te": {
     "classrooms.index.title": "f1649526e859",
@@ -13473,7 +13483,9 @@
     "update.settings.current": "75f4b2b14c44",
     "update.settings.uptodate": "f69ba82e1d14",
     "update.settings.available": "623053e0057a",
-    "update.settings.error": "efdb318e6818"
+    "update.settings.error": "efdb318e6818",
+    "settings.nav.sections.directories.label": "1029544ae8b4",
+    "settings.nav.sections.directories.desc": "ec6efced2292"
   },
   "mr": {
     "classrooms.index.title": "f1649526e859",
@@ -15719,7 +15731,9 @@
     "update.settings.current": "75f4b2b14c44",
     "update.settings.uptodate": "f69ba82e1d14",
     "update.settings.available": "623053e0057a",
-    "update.settings.error": "efdb318e6818"
+    "update.settings.error": "efdb318e6818",
+    "settings.nav.sections.directories.label": "1029544ae8b4",
+    "settings.nav.sections.directories.desc": "ec6efced2292"
   },
   "bn": {
     "classrooms.index.title": "f1649526e859",
@@ -17965,6 +17979,8 @@
     "update.settings.current": "75f4b2b14c44",
     "update.settings.uptodate": "f69ba82e1d14",
     "update.settings.available": "623053e0057a",
-    "update.settings.error": "efdb318e6818"
+    "update.settings.error": "efdb318e6818",
+    "settings.nav.sections.directories.label": "1029544ae8b4",
+    "settings.nav.sections.directories.desc": "ec6efced2292"
   }
 }

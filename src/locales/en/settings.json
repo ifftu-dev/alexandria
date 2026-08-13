@@ -36,6 +36,10 @@
       "integrity": {
         "label": "Integrity",
         "desc": "Monitored sessions and any evidence you kept"
+      },
+      "directories": {
+        "label": "Directories",
+        "desc": "Services you have asked to tell you what they hold about you."
       }
     }
   },

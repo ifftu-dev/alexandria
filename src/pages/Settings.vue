@@ -27,6 +27,7 @@ import RelayManager from '@/components/settings/RelayManager.vue'
 import UpdatePanel from '@/components/settings/UpdatePanel.vue'
 import PluginsPanel from '@/components/settings/PluginsPanel.vue'
 import GuardianPanel from '@/components/settings/GuardianPanel.vue'
+import HolderDirectories from '@/components/profile/HolderDirectories.vue'
 import IntegrityHistorySection from '@/components/integrity/IntegrityHistorySection.vue'
 import LanguageSelector from '@/components/settings/LanguageSelector.vue'
 import type { Identity } from '@/types'
@@ -51,7 +52,8 @@ interface SectionMeta {
   keywords: string[]
 }
 const SECTION_IDS: SettingsSectionId[] = [
-  'account', 'security', 'personalization', 'system', 'plugins', 'guardian', 'integrity', 'advanced',
+  'account', 'security', 'personalization', 'system', 'plugins', 'guardian', 'integrity',
+  'directories', 'advanced',
 ]
 const SECTIONS = computed<SectionMeta[]>(() => [
   { id: 'account', label: t('settings.nav.sections.account.label'), desc: t('settings.nav.sections.account.desc'),
@@ -68,6 +70,9 @@ const SECTIONS = computed<SectionMeta[]>(() => [
     keywords: ['guardian', 'parent', 'oversight', 'minor', 'ward', 'family', 'link', 'unlink'] },
   { id: 'integrity', label: t('settings.nav.sections.integrity.label'), desc: t('settings.nav.sections.integrity.desc'),
     keywords: ['integrity', 'sentinel', 'flagged', 'evidence', 'appeal', 'camera', 'monitoring', 'proctoring', 'delete evidence'] },
+  { id: 'directories', label: t('settings.nav.sections.directories.label'), desc: t('settings.nav.sections.directories.desc'),
+    keywords: ['directory', 'directories', 'registry', 'employer', 'institution', 'who asked', 'who looked',
+               'access log', 'disclosure', 'requests', 'publish', 'talent index', 'consent', 'visibility'] },
   { id: 'advanced', label: t('settings.nav.sections.advanced.label'), desc: t('settings.nav.sections.advanced.desc'),
     keywords: ['advanced', 'all settings', 'sync', 'sentinel', 'notifications', 'flags'] },
 ])
@@ -928,6 +933,16 @@ function onSectionClick(id: SettingsSectionId) {
                 <!-- ──────────── Integrity — monitored sessions + kept evidence ──────────── -->
                 <template v-else-if="activeSection === 'integrity'">
                   <IntegrityHistorySection />
+                </template>
+
+                <!-- ──────────── Directories ──────────── -->
+                <!-- Reachable from the profile too, where it sits under the
+                     consent that produces the listing. It is here as well
+                     because "which servers am I talking to" is a question
+                     people take to settings, and a control nobody can find is
+                     one nobody uses. -->
+                <template v-else-if="activeSection === 'directories'">
+                  <HolderDirectories />
                 </template>
 
                 <!-- ──────────── Advanced — every registered setting ──────────── -->
