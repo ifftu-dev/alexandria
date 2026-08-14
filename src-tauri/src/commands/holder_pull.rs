@@ -528,6 +528,47 @@ mod tests {
         assert!(sk.verifying_key().verify(rebuilt.as_bytes(), &sig).is_ok());
     }
 
+    /// The same pinning for the two methods that change something.
+    ///
+    /// `holder_release` signs a POST to send evidence and a DELETE to take it
+    /// back, and the service binds a proof to its method precisely so that one
+    /// cannot be replayed as the other. A release replayable as a withdrawal —
+    /// or worse, the reverse — would be a proof that does the opposite of what
+    /// the person holding it intended.
+    #[test]
+    fn a_release_and_a_withdrawal_verify_against_what_the_server_rebuilds() {
+        use ed25519_dalek::Verifier;
+
+        let sk = key();
+        let path = "/api/runs/0b1e9f4a-0000-4000-8000-000000000000/evidence";
+
+        for method in ["POST", "DELETE"] {
+            let encoded = proof(&sk, method, path, 1_786_600_000);
+            let sig_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .decode(encoded.as_bytes())
+                .expect("proofs are unpadded url-safe base64");
+            let sig = ed25519_dalek::Signature::from_bytes(&sig_bytes.try_into().unwrap());
+
+            let rebuilt = format!("{method}\n{path}\n1786600000");
+            assert!(
+                sk.verifying_key().verify(rebuilt.as_bytes(), &sig).is_ok(),
+                "{method} proof did not verify against the challenge the service rebuilds"
+            );
+        }
+    }
+
+    /// Sending and taking back are different acts and must not share a proof.
+    #[test]
+    fn a_proof_is_specific_to_its_method() {
+        let sk = key();
+        let path = "/api/runs/abc/evidence";
+        assert_ne!(
+            proof(&sk, "POST", path, 1),
+            proof(&sk, "DELETE", path, 1),
+            "a proof to release must not also withdraw"
+        );
+    }
+
     #[test]
     fn a_proof_is_specific_to_its_path() {
         let sk = key();
