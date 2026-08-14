@@ -97,7 +97,7 @@ pub struct Problem {
     pub detail: String,
 }
 
-fn directories(state: &State<'_, AppState>) -> Result<Vec<Directory>, String> {
+pub(crate) fn directories(state: &State<'_, AppState>) -> Result<Vec<Directory>, String> {
     let db_guard = state
         .db
         .lock()
@@ -112,7 +112,7 @@ fn directories(state: &State<'_, AppState>) -> Result<Vec<Directory>, String> {
 /// The path is signed along with the method and the timestamp, so a proof
 /// handed to one endpoint cannot be replayed against another — including
 /// another person's record on the same server.
-fn proof(sk: &SigningKey, method: &str, path: &str, timestamp: i64) -> String {
+pub(crate) fn proof(sk: &SigningKey, method: &str, path: &str, timestamp: i64) -> String {
     let challenge = format!("{method}\n{path}\n{timestamp}");
     let sig = sk.sign(challenge.as_bytes());
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(sig.to_bytes())
@@ -158,7 +158,7 @@ async fn signed_get(
 /// `http://127.0.0.1.example.com`, which is a domain somebody else controls
 /// wearing a loopback address as a costume — and it would arrive over
 /// plaintext carrying a proof header.
-fn is_loopback(url: &str) -> bool {
+pub(crate) fn is_loopback(url: &str) -> bool {
     let Some(rest) = url.strip_prefix("http://") else {
         return false;
     };

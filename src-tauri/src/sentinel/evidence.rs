@@ -368,6 +368,35 @@ pub fn preview_stored(
     Ok(out)
 }
 
+/// Retained evidence as bytes, for sending somewhere the learner has chosen.
+///
+/// [`preview_stored`] renders for a screen: camera frames become `data:` URLs
+/// and every other kind loses its payload entirely, which is right for looking
+/// at and useless for releasing. Nothing else reads the payloads back out, so
+/// releasing evidence to contest a flag needed a way to get at them.
+///
+/// Ordered by capture time so that what arrives at the other end is in the
+/// order it happened, which is the order an appeal is argued in.
+pub fn stored_items(db: &Connection, session_id: &str) -> Result<Vec<EvidenceItem>, EvidenceError> {
+    let mut stmt = db.prepare(
+        "SELECT snapshot_id, kind, payload, captured_at FROM integrity_evidence \
+         WHERE session_id = ?1 ORDER BY captured_at",
+    )?;
+    let rows = stmt.query_map(params![session_id], |r| {
+        Ok(EvidenceItem {
+            snapshot_id: r.get::<_, Option<String>>(0)?.unwrap_or_default(),
+            kind: r.get::<_, String>(1)?,
+            payload: r.get::<_, Vec<u8>>(2)?,
+            captured_at: r.get::<_, String>(3)?,
+        })
+    })?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row?);
+    }
+    Ok(out)
+}
+
 /// What is currently retained for a session, for the learner's own review.
 pub fn stored_summary(db: &Connection, session_id: &str) -> Result<EvidenceSummary, EvidenceError> {
     let mut stmt =

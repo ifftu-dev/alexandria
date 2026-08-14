@@ -448,5 +448,20 @@
     "valYes": "అవును",
     "valNo": "కాదు",
     "valNa": "n/a"
+  },
+  "evidence": {
+    "releaseTitle": "Contest a flag",
+    "releaseIntro": "If a service has flagged one of your assessments, you can send it the evidence you kept. Only you can do this, and only for evidence you already chose to keep.",
+    "releaseChoose": "Send this to",
+    "releaseChooseNone": "No service you have added is reporting a flagged assessment.",
+    "releaseSend": "Send the evidence",
+    "releaseSending": "Sending…",
+    "releaseSent": "Sent {n} item(s).",
+    "releaseHeld": "{n} item(s) held by {org}",
+    "releaseWithdraw": "Ask them to delete it",
+    "releaseWithdrawn": "They have been asked to delete it.",
+    "releaseOwed": "{n} withdrawal(s) still to send. This device will keep trying.",
+    "releaseWarn": "This sends camera frames of you to the organisation that raised the flag. Only the reviewer handling your case can open them, and they expire after {days} days.",
+    "releaseDeleteAlso": "Deleting evidence here also asks any service you sent it to to delete their copy."
   }
 }

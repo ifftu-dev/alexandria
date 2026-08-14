@@ -86,6 +86,7 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (76, "derived_skill_state_history", MIGRATION_076),
     (77, "submission_evidence_published", MIGRATION_077),
     (78, "sentinel_appeal_evidence", MIGRATION_078),
+    (79, "sentinel_evidence_release", MIGRATION_079),
 ];
 
 const MIGRATION_001: &str = r#"
@@ -3140,4 +3141,54 @@ const MIGRATION_077: &str = r#"
 -- ============================================================
 
 ALTER TABLE element_submissions ADD COLUMN evidence_published INTEGER NOT NULL DEFAULT 0;
+"#;
+
+const MIGRATION_079: &str = r#"
+-- ============================================================
+-- Migration 079: where evidence was released, and taking it back
+--
+-- Migration 078 gave a learner evidence to release and nowhere to release it
+-- to. Contesting a flag means handing the frames to the service that raised
+-- it, and that leaves a copy on somebody else's disk — so this records which
+-- copies exist, in order to be able to end them.
+--
+-- The row is what makes deletion mean what a person thinks it means. Deleting
+-- evidence locally has always dropped it from this device; a copy released to
+-- an employer would have survived, expiring on its own two weeks later. A
+-- learner who deletes and is told it is gone has been told something untrue.
+-- So local deletion now withdraws the remote copy as well, and needs to know
+-- where to send that withdrawal.
+--
+-- `revoke_wanted_at` is the queue. A device is often offline exactly when
+-- somebody decides they want something taken down, and a withdrawal that
+-- depends on connectivity at the moment of the decision is one that silently
+-- does not happen. The row survives the local deletion of the evidence itself
+-- and is retried on unlock until the service confirms.
+--
+-- Deliberately no foreign key to integrity_sessions. Everything else about a
+-- session may be deleted while a withdrawal is still owed to a server, and a
+-- cascade would drop the instruction to withdraw along with the reason for it.
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS integrity_evidence_release (
+    session_id       TEXT NOT NULL,
+    -- The service it went to, as the learner's directory list spells it.
+    directory_url    TEXT NOT NULL,
+    -- Their identifier for the assessment, learned from that person's own
+    -- export. This device does not otherwise have a name for it.
+    run_id           TEXT NOT NULL,
+    released_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    item_count       INTEGER NOT NULL DEFAULT 0,
+    -- Set the moment the learner asks for it back. Cleared never; it is the
+    -- record that they asked.
+    revoke_wanted_at TEXT,
+    -- Set when the service confirmed. Until then the withdrawal is still owed.
+    revoked_at       TEXT,
+    PRIMARY KEY (session_id, directory_url, run_id)
+);
+
+-- The retry sweep asks one question: what is still owed?
+CREATE INDEX IF NOT EXISTS idx_evidence_release_owed
+    ON integrity_evidence_release(revoke_wanted_at)
+    WHERE revoke_wanted_at IS NOT NULL AND revoked_at IS NULL;
 "#;

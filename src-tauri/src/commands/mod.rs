@@ -21,6 +21,7 @@ pub mod graph;
 pub mod guardian;
 pub mod health;
 pub mod holder_pull;
+pub mod holder_release;
 pub mod identity;
 pub mod import;
 pub mod instructor;
