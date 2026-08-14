@@ -355,9 +355,14 @@ async fn withdraw_one(
 
 /// Retry every withdrawal this device still owes.
 ///
-/// Called on unlock. A person who deleted their evidence on a train and closed
-/// the laptop has asked for it to be gone; the asking is what matters, and this
-/// is what makes the asking survive the connection.
+/// Called when a profile is unlocked, and again whenever the Integrity screen
+/// is opened. A person who deleted their evidence on a train and closed the
+/// laptop has asked for it to be gone; the asking is what matters, and this is
+/// what makes the asking survive the connection.
+///
+/// Driven from the frontend rather than the Rust unlock path because the
+/// withdrawal is signed with the learner's own key, which is not available
+/// until the vault is open.
 ///
 /// Returns how many are still owed afterwards, so a screen can say "still
 /// trying" honestly rather than claiming a deletion that has not happened.

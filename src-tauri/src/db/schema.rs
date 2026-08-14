@@ -3163,7 +3163,7 @@ const MIGRATION_079: &str = r#"
 -- somebody decides they want something taken down, and a withdrawal that
 -- depends on connectivity at the moment of the decision is one that silently
 -- does not happen. The row survives the local deletion of the evidence itself
--- and is retried on unlock until the service confirms.
+-- and is retried whenever a profile is unlocked, until the service confirms.
 --
 -- Deliberately no foreign key to integrity_sessions. Everything else about a
 -- session may be deleted while a withdrawal is still owed to a server, and a

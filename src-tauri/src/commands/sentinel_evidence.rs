@@ -76,8 +76,8 @@ pub async fn sentinel_evidence_stored(
 /// in order to contest a flag, that service is asked to destroy its copy as
 /// part of the same action — because a person who deletes something and is told
 /// it is gone has been told something untrue otherwise. The request is recorded
-/// before it is attempted and retried on later unlocks, so being offline at the
-/// moment of the decision delays the withdrawal rather than losing it.
+/// before it is attempted and retried on every later unlock, so being offline at
+/// the moment of the decision delays the withdrawal rather than losing it.
 #[tauri::command]
 pub async fn sentinel_evidence_delete(
     state: State<'_, AppState>,

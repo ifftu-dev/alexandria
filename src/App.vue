@@ -71,6 +71,16 @@ onProfileReady(() => {
   // Secure Event Input now (no focus event fires since the window is
   // already key).
   void invoke('release_secure_input').catch(() => {})
+  // Anything this device still owes a service: a learner who deleted evidence
+  // they had released, while offline or with the service down, asked for a
+  // copy on somebody else's disk to be destroyed. That request is queued here
+  // and is owed until it lands. Retrying it only when the Integrity settings
+  // page happens to be opened would make it depend on the person going back to
+  // check up on a deletion they were already told had been requested.
+  //
+  // Needs the vault, which is why it is here rather than in the Rust unlock
+  // path: the withdrawal is signed with the learner's own key.
+  void invoke('holder_retry_withdrawals').catch(() => {})
 })
 onProfileLocked(() => {
   // Drop the in-memory settings cache so the picker (and the next
