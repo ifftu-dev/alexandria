@@ -14,6 +14,7 @@ import { initOmniRecentsFromSettings } from '@/composables/useOmniSearch'
 import { initSentinelFlagsFromSettings, useSentinel } from '@/composables/useSentinel'
 import SentinelDebugPip from '@/components/integrity/SentinelDebugPip.vue'
 import EvidenceConsentModal from '@/components/integrity/EvidenceConsentModal.vue'
+import FlaggedRunNotice from '@/components/integrity/FlaggedRunNotice.vue'
 import SentinelLiveIndicator from '@/components/integrity/SentinelLiveIndicator.vue'
 import InstallCliDialog from '@/components/developer/InstallCliDialog.vue'
 import UpdateBanner from '@/components/update/UpdateBanner.vue'
@@ -49,7 +50,7 @@ function onWheel(e: WheelEvent) {
 
 const route = useRoute()
 const router = useRouter()
-const { initialize } = useProfiles()
+const { initialize, isUnlocked } = useProfiles()
 const { refreshAccountStatus } = useAccountStatus()
 
 const ready = ref(false)
@@ -216,6 +217,12 @@ onUnmounted(() => {
     @close="clearPendingEvidenceConsent()"
     @decided="clearPendingEvidenceConsent()"
   />
+
+  <!-- Says so when a service has flagged one of this person's assessments.
+       Mounted at the root, and not on the Integrity settings page, because
+       finding out you have been accused of something by happening to open a
+       settings page is not being told. Self-hides when there is nothing new. -->
+  <FlaggedRunNotice v-if="isUnlocked" />
 
   <!-- CLI installer — hidden until the Develop menu emits develop://install-cli. -->
   <InstallCliDialog />

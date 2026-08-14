@@ -87,6 +87,7 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (77, "submission_evidence_published", MIGRATION_077),
     (78, "sentinel_appeal_evidence", MIGRATION_078),
     (79, "sentinel_evidence_release", MIGRATION_079),
+    (80, "sentinel_flag_notice", MIGRATION_080),
 ];
 
 const MIGRATION_001: &str = r#"
@@ -3191,4 +3192,43 @@ CREATE TABLE IF NOT EXISTS integrity_evidence_release (
 CREATE INDEX IF NOT EXISTS idx_evidence_release_owed
     ON integrity_evidence_release(revoke_wanted_at)
     WHERE revoke_wanted_at IS NOT NULL AND revoked_at IS NULL;
+"#;
+
+const MIGRATION_080: &str = r#"
+-- ============================================================
+-- Migration 080: knowing you have been flagged
+--
+-- A service can mark an assessment as one it could not explain, open a review
+-- case about it, and decide it — and until now the person it was about had no
+-- way to find out except by opening a settings page and reading a list. The
+-- right to contest a flag, which migrations 078 and 079 built the machinery
+-- for, is worth what the chance of hearing about the flag is worth.
+--
+-- This records which flags this device has already told the learner about, so
+-- that saying so once does not become saying so on every unlock. It is a
+-- record of what was shown, not of what was read: there is deliberately no
+-- "dismissed because it does not matter" state, because a person dismissing a
+-- notice has not thereby agreed with the accusation.
+--
+-- Only flags this device has *seen* are here. Nothing is fetched in order to
+-- populate it; it is written from the export that the Integrity screen and the
+-- unlock check already read, and a learner with no directories configured
+-- never has a row.
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS integrity_flag_notice (
+    directory_url  TEXT NOT NULL,
+    -- The service's identifier for the assessment.
+    run_id         TEXT NOT NULL,
+    -- What it was for, kept so the notice can name it without another fetch.
+    organisation   TEXT NOT NULL DEFAULT '',
+    role_label     TEXT NOT NULL DEFAULT '',
+    first_seen_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    -- When the learner was shown it. NULL means they have not been yet.
+    told_at        TEXT,
+    PRIMARY KEY (directory_url, run_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_flag_notice_untold
+    ON integrity_flag_notice(told_at) WHERE told_at IS NULL;
 "#;

@@ -1611,6 +1611,8 @@ pub fn run() {
             commands::holder_release::holder_release_evidence,
             commands::holder_release::holder_withdraw_evidence,
             commands::holder_release::holder_retry_withdrawals,
+            commands::holder_release::holder_unseen_flags,
+            commands::holder_release::holder_mark_flags_seen,
             commands::import::import_credential,
             commands::import::import_credentials,
             commands::import::import_credential_from_peer,

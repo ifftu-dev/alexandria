@@ -493,6 +493,13 @@
     "releaseWithdrawn": "They have been asked to delete it.",
     "releaseOwed": "{n} withdrawal(s) still to send. This device will keep trying.",
     "releaseWarn": "This sends camera frames of you to the organisation that raised the flag. Only the reviewer handling your case can open them, and they expire after {days} days.",
-    "releaseDeleteAlso": "Deleting evidence here also asks any service you sent it to to delete their copy."
+    "releaseDeleteAlso": "Deleting evidence here also asks any service you sent it to to delete their copy.",
+    "noticeTitle": "An assessment of yours was flagged",
+    "noticeOne": "{org} could not explain your {role} session, and has opened a review.",
+    "noticeMany": "{n} of your assessments have been flagged and are under review.",
+    "noticeNotAccusation": "This is not a finding, and it is not final. Sessions get flagged for ordinary reasons — someone walking behind you is enough.",
+    "noticeWhatYouCanDo": "If you kept the evidence from that session, you can send it to them to argue your case. You do not have to, and choosing not to may not be held against you.",
+    "noticeOpen": "See what they have",
+    "noticeLater": "Not now"
   }
 }

@@ -153,7 +153,112 @@ pub async fn holder_contestable_runs(state: State<'_, AppState>) -> Result<RunsR
         }
     }
 
+    // Noted as they go past. Whatever else this call was for, it is the moment
+    // this device learns that somebody has been accused of something.
+    note_flags(&state, &items)?;
+
     Ok(RunsResult { items, problems })
+}
+
+/// Record any flag seen here that this device has not recorded before.
+///
+/// Written from an export that was being read anyway. Nothing is fetched in
+/// order to do this, and a person with no directories configured never gets a
+/// row — the same rule the rest of this module follows.
+fn note_flags(state: &State<'_, AppState>, runs: &[ContestableRun]) -> Result<(), String> {
+    let flagged: Vec<&ContestableRun> = runs.iter().filter(|r| r.integrity_flagged).collect();
+    if flagged.is_empty() {
+        return Ok(());
+    }
+    let guard = state.db.lock().map_err(|e| e.to_string())?;
+    let db = guard.as_ref().ok_or("database not initialized")?;
+    for r in flagged {
+        // Left alone if it is already here. The row carries when this device
+        // first learned of the flag and whether the learner has been told, and
+        // re-reading the export must not reset either.
+        db.conn()
+            .execute(
+                "INSERT INTO integrity_flag_notice \
+                     (directory_url, run_id, organisation, role_label) \
+                 VALUES (?1, ?2, ?3, ?4) \
+                 ON CONFLICT (directory_url, run_id) DO NOTHING",
+                rusqlite::params![&r.directory_url, &r.run_id, &r.organisation, &r.role],
+            )
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// A flag this person has not been told about.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FlagNotice {
+    pub directory_url: String,
+    pub run_id: String,
+    pub organisation: String,
+    pub role: String,
+}
+
+/// Check every configured service for flags this person has not heard about.
+///
+/// Called on unlock. Being accused of something is not a thing to find out by
+/// happening to open a settings page, and the right to contest a flag is worth
+/// what the chance of hearing about it is worth.
+///
+/// Answers from what it can reach. A service that is down produces no notice
+/// rather than an error: this runs in the background behind whatever the person
+/// actually opened the application to do, and has no business interrupting it
+/// to report that a server was unreachable.
+#[tauri::command]
+pub async fn holder_unseen_flags(state: State<'_, AppState>) -> Result<Vec<FlagNotice>, String> {
+    // Refreshes the record as a side effect, which is the point: this is the
+    // call that notices a flag raised since the last time anybody looked.
+    let _ = holder_contestable_runs(state.clone()).await?;
+
+    let guard = state.db.lock().map_err(|e| e.to_string())?;
+    let db = guard.as_ref().ok_or("database not initialized")?;
+    let mut stmt = db
+        .conn()
+        .prepare(
+            "SELECT directory_url, run_id, organisation, role_label \
+             FROM integrity_flag_notice WHERE told_at IS NULL ORDER BY first_seen_at",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |r| {
+            Ok(FlagNotice {
+                directory_url: r.get(0)?,
+                run_id: r.get(1)?,
+                organisation: r.get(2)?,
+                role: r.get(3)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    Ok(rows.filter_map(Result::ok).collect())
+}
+
+/// Record that the learner has been shown these flags.
+///
+/// A record of what was displayed, not of agreement. Closing a notice about an
+/// accusation is not accepting it, and nothing here should ever be read as
+/// though it were — which is why the column is `told_at` and not `accepted_at`.
+#[tauri::command]
+pub async fn holder_mark_flags_seen(
+    state: State<'_, AppState>,
+    runs: Vec<FlagNotice>,
+) -> Result<(), String> {
+    let guard = state.db.lock().map_err(|e| e.to_string())?;
+    let db = guard.as_ref().ok_or("database not initialized")?;
+    for r in runs {
+        db.conn()
+            .execute(
+                "UPDATE integrity_flag_notice SET told_at = datetime('now') \
+                 WHERE directory_url = ?1 AND run_id = ?2 AND told_at IS NULL",
+                rusqlite::params![&r.directory_url, &r.run_id],
+            )
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 async fn export_from(
@@ -612,6 +717,91 @@ mod tests {
     #[test]
     fn nothing_produces_no_requests() {
         assert!(batches(&[]).is_empty());
+    }
+
+    fn untold(db: &Database) -> Vec<String> {
+        let mut stmt = db
+            .conn()
+            .prepare("SELECT run_id FROM integrity_flag_notice WHERE told_at IS NULL")
+            .expect("prepare");
+        let rows = stmt
+            .query_map([], |r| r.get::<_, String>(0))
+            .expect("query");
+        rows.filter_map(Result::ok).collect()
+    }
+
+    fn note(db: &Database, run: &str) {
+        db.conn()
+            .execute(
+                "INSERT INTO integrity_flag_notice (directory_url, run_id, organisation, role_label) \
+                 VALUES ('https://svc.example', ?1, 'Acme', 'Backend engineer') \
+                 ON CONFLICT (directory_url, run_id) DO NOTHING",
+                rusqlite::params![run],
+            )
+            .expect("note");
+    }
+
+    fn tell(db: &Database, run: &str) {
+        db.conn()
+            .execute(
+                "UPDATE integrity_flag_notice SET told_at = datetime('now') \
+                 WHERE run_id = ?1 AND told_at IS NULL",
+                rusqlite::params![run],
+            )
+            .expect("tell");
+    }
+
+    /// Being accused of something is said once. Repeating it on every unlock
+    /// would be its own kind of pressure.
+    #[test]
+    fn a_flag_is_raised_with_the_learner_once() {
+        let db = Database::open_in_memory().expect("open");
+        db.run_migrations().expect("migrate");
+
+        note(&db, "run-1");
+        assert_eq!(untold(&db), vec!["run-1".to_string()]);
+
+        tell(&db, "run-1");
+        assert!(untold(&db).is_empty(), "told once");
+
+        // The export is read again on the next unlock and reports the same
+        // flag; the person has already been told and must not be told again.
+        note(&db, "run-1");
+        assert!(untold(&db).is_empty(), "and not again");
+    }
+
+    /// A second, different flag is its own notice. Having been told about one
+    /// accusation is not being told about the next.
+    #[test]
+    fn a_later_flag_is_its_own_notice() {
+        let db = Database::open_in_memory().expect("open");
+        db.run_migrations().expect("migrate");
+
+        note(&db, "run-1");
+        tell(&db, "run-1");
+        note(&db, "run-2");
+
+        assert_eq!(untold(&db), vec!["run-2".to_string()]);
+    }
+
+    /// What the notice needs in order to name the assessment survives, so a
+    /// person is told *which* one rather than that something happened.
+    #[test]
+    fn a_notice_remembers_what_it_is_about() {
+        let db = Database::open_in_memory().expect("open");
+        db.run_migrations().expect("migrate");
+        note(&db, "run-1");
+
+        let (org, role): (String, String) = db
+            .conn()
+            .query_row(
+                "SELECT organisation, role_label FROM integrity_flag_notice WHERE run_id='run-1'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .expect("read");
+        assert_eq!(org, "Acme");
+        assert_eq!(role, "Backend engineer");
     }
 
     fn db_with_release() -> Database {
