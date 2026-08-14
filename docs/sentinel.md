@@ -549,11 +549,25 @@ is this product being the instrument of the ask.
 
 Two consequences follow:
 
-- **A learner's decision is not an event in the operator's audit log.** An
-  append-only, hash-chained log is exactly what makes an entry discoverable — by
-  administrators, in litigation, under subpoena. The operator's log records that a
-  review occurred and what the reviewer decided. Whether a learner was asked, and
-  what they chose, belongs in the learner's own record on their own device.
+- **A refusal is not an event in the operator's audit log.** An append-only,
+  hash-chained log is exactly what makes an entry discoverable — by
+  administrators, in litigation, under subpoena. Nothing records that a learner
+  could have released evidence and did not, because there is no asking and so
+  nothing to record; a learner who never releases anything leaves no trace of
+  having decided.
+
+  What *is* recorded is what the organisation did with data it actually held:
+  that evidence arrived, that a named reviewer opened it, and that it was
+  destroyed — whether the learner withdrew it or it expired. That last one was a
+  deliberate choice with a cost, and the cost is that "the candidate pulled their
+  evidence back" is now a discoverable sentence. It was taken because an
+  organisation that destroys data about a person should be able to show that it
+  did, and a custody record with a hole exactly where the destruction goes is
+  worth less than the inference is worth guarding against.
+
+  The constraint that follows is absolute and belongs beside the one below: **an
+  adjudication may not cite a withdrawal.** "They sent it and then took it back"
+  is the same penalty as a visible refusal, rebuilt in prose.
 - **An adjudication may not cite absent evidence.** "The learner did not
   substantiate this" is the same penalty as a visible refusal, rebuilt in prose. A
   decision rests on the scores or it does not stand.
@@ -576,7 +590,10 @@ Two further constraints follow from evidence actually being releasable:
 - **A withdrawal is honoured.** When the subject asks for released evidence to be
   destroyed, it is destroyed, without asking why and without the request being an
   event a reviewer is shown. What a reviewer has already read, they have read;
-  that is a limit of the world, not a licence to keep the copy.
+  that is a limit of the world, not a licence to keep the copy. The destruction
+  is recorded in the organisation's audit chain — an organisation that destroys
+  data about a person should be able to show that it did — and an adjudication
+  may not cite that record.
 
 If a customer asks for the raw evidence by default, the answer is no. This is not
 a configuration option.
