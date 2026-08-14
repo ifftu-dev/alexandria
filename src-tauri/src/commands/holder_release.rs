@@ -25,6 +25,11 @@
 //! - Only when they ask, once per asking. There is no retry on failure that
 //!   the learner did not initiate, because a release that happens later than
 //!   the decision is a release they may have changed their mind about.
+//! - All of it or none of it. A session larger than one request is sent in
+//!   several, and if any of them fails the part that arrived is withdrawn —
+//!   the service refuses partial releases because half a session's evidence
+//!   reads as the whole of what somebody chose to send, and batching must not
+//!   reintroduce at the session level what it forbids per request.
 //!
 //! Withdrawal is the mirror image and is *not* bounded that way: it retries
 //! until it succeeds. The asymmetry is deliberate. Sending is something a
@@ -315,14 +320,43 @@ pub async fn holder_release_evidence(
             if sent == 0 {
                 return Err(e);
             }
-            // Some of it is already on somebody else's disk. Recording that is
-            // more important than reporting the failure cleanly, because the
-            // record is what a withdrawal is addressed with.
+
+            // Part of it is already on somebody else's disk, and the service
+            // refuses a partial release for a reason it states plainly: half a
+            // session's evidence on a reviewer's screen is worse than none,
+            // because it looks like the whole of what somebody chose to send.
+            // Sending in batches would break that at the session level, so an
+            // incomplete release is taken back rather than left standing.
+            //
+            // Recorded first. The record is the address a withdrawal is sent
+            // to, and if this device dies here the retry on next unlock is what
+            // finishes the job.
             record_release(&state, &session_id, &directory_url, &run_id, sent)?;
-            return Err(format!(
-                "{sent} of {} item(s) were sent before this stopped: {e}",
-                items.len()
-            ));
+            {
+                let guard = state.db.lock().map_err(|e| e.to_string())?;
+                let db = guard.as_ref().ok_or("database not initialized")?;
+                want_withdrawal(db.conn(), &session_id, &directory_url, &run_id)
+                    .map_err(|e| e.to_string())?;
+            }
+            let taken_back = withdraw_one(&state, &sk, &session_id, &directory_url, &run_id)
+                .await
+                .is_ok();
+
+            return Err(if taken_back {
+                format!(
+                    "this stopped after {sent} of {} item(s), so the part that arrived was \
+                     taken back — a half-sent appeal reads as the whole of it. Nothing was \
+                     kept there. ({e})",
+                    items.len()
+                )
+            } else {
+                format!(
+                    "this stopped after {sent} of {} item(s). Taking that part back could \
+                     not be sent either, so it is queued and will be withdrawn when this \
+                     device next reaches them. ({e})",
+                    items.len()
+                )
+            });
         }
         sent += batch.len();
     }
