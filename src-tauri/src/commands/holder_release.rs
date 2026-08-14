@@ -209,6 +209,50 @@ pub struct Released {
     pub bytes: usize,
 }
 
+/// How many items the service accepts in one release.
+///
+/// Its limit, mirrored here so a person is not handed a refusal they cannot
+/// act on. A session that retained more than this is sent in several requests
+/// rather than rejected wholesale — the alternative is telling somebody
+/// contesting an accusation that they kept too much evidence.
+const BATCH_ITEMS: usize = 50;
+
+/// How many raw bytes go in one request.
+///
+/// The service caps a request body at twelve megabytes and payloads travel as
+/// base64, which is four bytes on the wire for every three of image. Eight
+/// megabytes of frames is about eleven of body, and the rest is JSON around it.
+const BATCH_BYTES: usize = 8 * 1024 * 1024;
+
+/// The most any one assessment can hold at the service.
+const RUN_CAPACITY: usize = 200;
+
+/// Split into requests the service will accept, preserving order.
+///
+/// An item too large to fit a batch on its own still gets its own batch: it
+/// will be refused by the service, with the service's own message about why,
+/// which is a better answer than this silently dropping it.
+fn batches(items: &[evidence::EvidenceItem]) -> Vec<&[evidence::EvidenceItem]> {
+    let mut out = Vec::new();
+    let mut start = 0;
+    let mut bytes = 0;
+
+    for i in 0..items.len() {
+        let size = items[i].payload.len();
+        let full = i - start >= BATCH_ITEMS || (i > start && bytes + size > BATCH_BYTES);
+        if full {
+            out.push(&items[start..i]);
+            start = i;
+            bytes = 0;
+        }
+        bytes += size;
+    }
+    if start < items.len() {
+        out.push(&items[start..]);
+    }
+    out
+}
+
 /// Send this session's retained evidence to the service that raised the flag.
 ///
 /// Reads only what consent already wrote to disk. A session whose evidence the
@@ -238,51 +282,83 @@ pub async fn holder_release_evidence(
         );
     }
 
-    let bytes = items.iter().map(|i| i.payload.len()).sum();
-    let b64 = base64::engine::general_purpose::STANDARD;
-    let body = serde_json::json!({
-        "items": items.iter().map(|i| serde_json::json!({
-            "kind": i.kind,
-            "captured_at": i.captured_at,
-            "payload": b64.encode(&i.payload),
-        })).collect::<Vec<_>>()
-    });
-
-    let path = format!("/api/runs/{run_id}/evidence");
-    signed_send(
-        &reqwest::Client::new(),
-        &directory_url,
-        &sk,
-        "POST",
-        &path,
-        Some(body),
-    )
-    .await?;
-
-    // Recorded after the service accepted it, not before. A row here is a claim
-    // that a copy exists somewhere, and the whole purpose of the row is to be
-    // able to end that copy — one written for a release that never landed would
-    // send a withdrawal for something that was never there.
-    {
-        let guard = state.db.lock().map_err(|e| e.to_string())?;
-        let db = guard.as_ref().ok_or("database not initialized")?;
-        db.conn()
-            .execute(
-                "INSERT INTO integrity_evidence_release \
-                     (session_id, directory_url, run_id, item_count) \
-                 VALUES (?1, ?2, ?3, ?4) \
-                 ON CONFLICT (session_id, directory_url, run_id) DO UPDATE SET \
-                     released_at = datetime('now'), item_count = excluded.item_count, \
-                     revoke_wanted_at = NULL, revoked_at = NULL",
-                rusqlite::params![&session_id, &directory_url, &run_id, items.len() as i64],
-            )
-            .map_err(|e| e.to_string())?;
+    // Said here rather than discovered halfway through sending. The service
+    // refuses the batch that crosses its ceiling, which would leave a partial
+    // release on a reviewer's screen and a person wondering which half arrived.
+    if items.len() > RUN_CAPACITY {
+        return Err(format!(
+            "this session kept {} items and an assessment can hold {RUN_CAPACITY} — \
+             delete some of what you kept, or withdraw an earlier release, before sending",
+            items.len()
+        ));
     }
 
-    Ok(Released {
-        items: items.len(),
-        bytes,
-    })
+    let bytes = items.iter().map(|i| i.payload.len()).sum();
+    let b64 = base64::engine::general_purpose::STANDARD;
+    let path = format!("/api/runs/{run_id}/evidence");
+    let client = reqwest::Client::new();
+
+    // Sent in the order it was captured, so that a release interrupted partway
+    // leaves the earlier part of the session at the other end rather than an
+    // arbitrary subset of it.
+    let mut sent = 0usize;
+    for batch in batches(&items) {
+        let body = serde_json::json!({
+            "items": batch.iter().map(|i| serde_json::json!({
+                "kind": i.kind,
+                "captured_at": i.captured_at,
+                "payload": b64.encode(&i.payload),
+            })).collect::<Vec<_>>()
+        });
+
+        if let Err(e) = signed_send(&client, &directory_url, &sk, "POST", &path, Some(body)).await {
+            if sent == 0 {
+                return Err(e);
+            }
+            // Some of it is already on somebody else's disk. Recording that is
+            // more important than reporting the failure cleanly, because the
+            // record is what a withdrawal is addressed with.
+            record_release(&state, &session_id, &directory_url, &run_id, sent)?;
+            return Err(format!(
+                "{sent} of {} item(s) were sent before this stopped: {e}",
+                items.len()
+            ));
+        }
+        sent += batch.len();
+    }
+
+    record_release(&state, &session_id, &directory_url, &run_id, sent)?;
+
+    Ok(Released { items: sent, bytes })
+}
+
+/// Note that a copy now exists at that service, so it can be ended later.
+///
+/// Written only after the service accepted something. A row is a claim that a
+/// copy exists somewhere, and the whole purpose of the row is to be able to
+/// destroy that copy — one written for a release that never landed would send a
+/// withdrawal for something that was never there.
+fn record_release(
+    state: &State<'_, AppState>,
+    session_id: &str,
+    directory_url: &str,
+    run_id: &str,
+    items: usize,
+) -> Result<(), String> {
+    let guard = state.db.lock().map_err(|e| e.to_string())?;
+    let db = guard.as_ref().ok_or("database not initialized")?;
+    db.conn()
+        .execute(
+            "INSERT INTO integrity_evidence_release \
+                 (session_id, directory_url, run_id, item_count) \
+             VALUES (?1, ?2, ?3, ?4) \
+             ON CONFLICT (session_id, directory_url, run_id) DO UPDATE SET \
+                 released_at = datetime('now'), item_count = excluded.item_count, \
+                 revoke_wanted_at = NULL, revoked_at = NULL",
+            rusqlite::params![session_id, directory_url, run_id, items as i64],
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 /// Ask a service to destroy what this person released to it.
@@ -429,6 +505,79 @@ mod tests {
         assert!(https_only("http://example.com").is_err());
         // The costume case: a host that merely begins with a loopback address.
         assert!(https_only("http://127.0.0.1.example.com").is_err());
+    }
+
+    fn item(bytes: usize) -> evidence::EvidenceItem {
+        evidence::EvidenceItem {
+            snapshot_id: "snap".into(),
+            kind: "camera_frame".into(),
+            payload: vec![0u8; bytes],
+            captured_at: "2026-08-14T09:15:00Z".into(),
+        }
+    }
+
+    /// Everything that fits goes in one request, because most sessions do.
+    #[test]
+    fn a_small_session_is_one_request() {
+        let items: Vec<_> = (0..10).map(|_| item(1024)).collect();
+        assert_eq!(batches(&items).len(), 1);
+        assert_eq!(batches(&items)[0].len(), 10);
+    }
+
+    /// The service refuses more than fifty in one release. A person who kept
+    /// sixty frames must not be told their appeal is too big to make.
+    #[test]
+    fn more_items_than_the_service_takes_are_split_not_refused() {
+        let items: Vec<_> = (0..120).map(|_| item(16)).collect();
+        let out = batches(&items);
+        assert_eq!(out.len(), 3, "fifty, fifty, twenty");
+        assert_eq!(
+            out.iter().map(|b| b.len()).collect::<Vec<_>>(),
+            [50, 50, 20]
+        );
+        assert_eq!(
+            out.iter().map(|b| b.len()).sum::<usize>(),
+            items.len(),
+            "every item is in exactly one batch"
+        );
+    }
+
+    /// Camera frames are large, so the byte ceiling binds before the count
+    /// does. Base64 inflates by a third and the service caps the body.
+    #[test]
+    fn heavy_frames_split_on_size_before_they_reach_the_count() {
+        // Three megabytes each: three fit under the eight-megabyte ceiling,
+        // the fourth starts a new request, and none of this is near fifty.
+        let items: Vec<_> = (0..7).map(|_| item(3 * 1024 * 1024)).collect();
+        let out = batches(&items);
+        assert_eq!(
+            out.iter().map(|b| b.len()).collect::<Vec<_>>(),
+            [2, 2, 2, 1]
+        );
+        for b in &out {
+            let bytes: usize = b.iter().map(|i| i.payload.len()).sum();
+            assert!(bytes <= BATCH_BYTES, "a batch exceeded the ceiling");
+        }
+    }
+
+    /// One item bigger than a whole batch still gets sent, alone, so that the
+    /// service's own explanation of why it will not take it reaches the person.
+    /// Dropping it here would be a silent refusal with no author.
+    #[test]
+    fn an_oversized_item_is_sent_alone_rather_than_dropped() {
+        let items = vec![item(16), item(BATCH_BYTES * 2), item(16)];
+        let out = batches(&items);
+        assert_eq!(out.iter().map(|b| b.len()).sum::<usize>(), 3);
+        assert!(
+            out.iter()
+                .any(|b| b.len() == 1 && b[0].payload.len() > BATCH_BYTES),
+            "the large item is in a batch of its own"
+        );
+    }
+
+    #[test]
+    fn nothing_produces_no_requests() {
+        assert!(batches(&[]).is_empty());
     }
 
     fn db_with_release() -> Database {
