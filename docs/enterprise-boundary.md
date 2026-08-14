@@ -58,6 +58,8 @@ If yes, it is core, and it is AGPL. There is no third category.
 | Sentinel on-device integrity | **Core** | Runs on the learner's machine |
 | Telling a learner they were flagged | **Core** | An accusation the subject cannot see is not something they can answer |
 | Appeal-evidence retention and its consent prompt | **Core** | It decides what is kept about a learner, on their device, by their choice |
+| Releasing appeal evidence, and withdrawing it | **Core** | The most consequential thing the application does with a camera frame. Which assessment it goes to is the learner's choice, made on their machine — nothing matches a local session to a remote one automatically, because a wrong match sends somebody's face to an organisation that never assessed them |
+| Noticing that a service has flagged you | **Core** | Read from the learner's own export with their own key. The service is not asked to notify anybody, and cannot be trusted to |
 | Importing a credential someone handed you | **Core** | Receiving is not a commercial act |
 | Talent-index consent UI, publish client, wire schema | **Core** | A learner must audit what leaves their device |
 | Asking a directory what it holds about you, and answering when it asks | **Core** | Deciding whether to disclose is a decision about the learner's own data, made on their machine with their key. Also the only way the "every look is shown to the learner" promise is kept: a disclosure log nobody can read is a claim, not a control |
@@ -70,7 +72,7 @@ If yes, it is core, and it is AGPL. There is no third category.
 | Employer search console | **Enterprise** | Scoped to an organisation |
 | Hosted verification API — rate limits, keys, SLA | **Enterprise** | The hosted *operation*; the logic underneath stays core |
 | Bulk verification | **Enterprise** | A metered enterprise operation |
-| Human review queue over Sentinel flags | **Enterprise** | An org process with an adjudication workflow — but it may not request evidence; see `sentinel.md` |
+| Human review queue over Sentinel flags | **Enterprise** | An org process with an adjudication workflow — but it may not request evidence, and released evidence is legible to the one reviewer assigned to the case rather than to the organisation; see `sentinel.md` |
 | Cohort analytics, skills intelligence | **Enterprise** | Cross-user server-side aggregation |
 | The directory a learner points at — its records, its disclosure requests, its access log | **Enterprise** | Server-side state about many people, held by an organisation. Core asks it questions; it is not core |
 | Seat accounting and billing | **Enterprise** | Definitionally multi-tenant |

@@ -9,7 +9,7 @@
 3. **Dual scoring** — Rule-based and AI-based systems run in parallel. Rule-based is authoritative today; AI is advisory until validated with labeled data.
 4. **On-device ML only — backend-resident.** All ML runs in the Rust backend. The paste classifier uses `tract` (pure-Rust ONNX inference) with weights embedded at compile time via `include_bytes!` or hot-swapped from a DAO-ratified CID. The per-user keystroke autoencoder and mouse-trajectory CNN train + score via `candle` (Apache-2.0, HuggingFace) inside the same crate. The face embedder remains pure-pixel LBP math — no ML framework involved. The frontend only buffers raw events and forwards them to the backend over Tauri IPC.
 5. **Incremental trust** — Behavioral profiles build over time. New users start with generous defaults; consistency scoring activates after 10+ samples.
-6. **Evidence is the learner's to release** — A flag may travel; the evidence behind it may not, unless the learner releases it themselves. Release is learner-initiated: a review console may not offer a control that asks for it, because a request that can be refused leaks the refusal. See [Review and adjudication](#review-and-adjudication).
+6. **Evidence is the learner's to release, and to take back** — A flag may travel; the evidence behind it may not, unless the learner releases it themselves. Release is learner-initiated: a review console may not offer a control that asks for it, because a request that can be refused leaks the refusal. What is released stays theirs to withdraw, and deleting it on their own device destroys the copy they sent. See [Review and adjudication](#review-and-adjudication).
 
 ## Architecture Overview
 
@@ -471,6 +471,56 @@ The learner can release the evidence for their own session, and only they can.
    retains its raw signals on-device for a bounded appeal window. Nothing is
    retained for unflagged sessions, and nothing is retained after the window.
 
+#### Being told there is something to contest
+
+A right to contest a flag is worth what the chance of hearing about the flag is
+worth. A service can decide it could not explain an assessment, open a review,
+have somebody read it and reach a conclusion, without the person it is about
+learning any of it — so the application checks, on unlock, whether any service
+the learner has added is reporting a flag it has not already told them about.
+
+It is learned from the learner's own export, which they can already fetch and
+which answers to nobody else. Nothing is fetched in order to check: a learner
+with no directories configured never has a row, and a service that cannot be
+reached produces no notice rather than an error.
+
+Each flag is raised with the learner **once** — repeating an accusation is its
+own kind of pressure — and the record is of what was shown, not of what was
+agreed. The column is `told_at`, not `accepted_at`: closing a notice about an
+accusation is not accepting it. The notice is not styled as an alarm, because
+sessions are flagged for ordinary reasons and a notice that reads like an
+emergency teaches people to expect the worst of a false positive. "Not now" and
+"See what they have" are equal actions; the application has no opinion about
+whether somebody should defend themselves.
+
+#### Where a release goes, and taking it back
+
+A release is addressed to the service's identifier for the assessment, which the
+device learns from that same export. It carries only evidence consent already
+wrote to disk — nothing is captured or retained in order to release it — and the
+learner chooses which assessment a local session belongs to. Nothing matches them
+automatically: a wrong match would send camera frames of somebody to an
+organisation that was never assessing them.
+
+At the other end, released evidence is legible to the one reviewer assigned to
+that case and to nobody else at the organisation. Consenting to the person
+deciding your case seeing your face is not consenting to everybody who can sign
+in seeing it, and opening it is recorded against that reviewer's name in the
+organisation's audit chain, where the learner can ask what it says.
+
+Release is all of it or none of it. A session too large for one request is sent
+in several, and if any of them fails the part that arrived is withdrawn — half a
+session's evidence reads as the whole of what somebody chose to send.
+
+**Deleting locally withdraws the copy.** A learner who deletes released evidence
+is asking for the copy on somebody else's disk to be destroyed too, and that is
+what happens; a person who deletes something and is told it is gone has been told
+something untrue otherwise. The request is recorded before it is attempted and
+retried on every later unlock, because a device is often offline exactly when
+somebody decides they want something taken down. Sending is something a person
+does once, when they ask. Taking back is something they are owed, so it retries
+until it succeeds.
+
 This inverts the usual arrangement deliberately. In most proctoring systems being
 accused is precisely when you lose control of your own data. Here it is the moment
 control matters most, so it stays with the learner — and the appeals path becomes
@@ -515,6 +565,18 @@ scores, verdicts, reviewer identity, decision and rationale. It may not store ra
 behavioural capture, and it may not make evidence release a condition of using the
 product, of employment, or of an appeal being heard — a release extracted under
 those terms is not a release.
+
+Two further constraints follow from evidence actually being releasable:
+
+- **Released evidence is readable by the reviewer on the case, not by the
+  organisation.** A control plane that shows a candidate's camera frames to
+  everyone who can sign in has widened a consent that was given to the person
+  deciding. Access follows an assignment somebody made deliberately, and reading
+  it is attributable to the individual who read it.
+- **A withdrawal is honoured.** When the subject asks for released evidence to be
+  destroyed, it is destroyed, without asking why and without the request being an
+  event a reviewer is shown. What a reviewer has already read, they have read;
+  that is a limit of the world, not a licence to keep the copy.
 
 If a customer asks for the raw evidence by default, the answer is no. This is not
 a configuration option.
