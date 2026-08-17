@@ -113,6 +113,9 @@
 | 75 | `assessment_adaptive_delivery` | `question_banks.delivery_mode` (default `fixed`), `adaptive_se_target`, `adaptive_min_items`, `adaptive_max_items` |
 | 76 | `derived_skill_state_history` | Adds `derived_skill_state_history` — append-only daily snapshots per `(subject, skill, day)` |
 | 77 | `submission_evidence_published` | `element_submissions.evidence_published INTEGER NOT NULL DEFAULT 0` |
+| 78 | `sentinel_appeal_evidence` | Adds `integrity_evidence_consent` and `integrity_evidence` — a flagged session's raw capture, written **only** on the learner's explicit consent, with an absolute 14-day expiry |
+| 79 | `sentinel_evidence_release` | Adds `integrity_evidence_release` — where a learner sent evidence to contest a flag, and whether a withdrawal is still owed. Deliberately no FK to `integrity_sessions`: a withdrawal must outlive the local deletion of everything that explains why it was wanted |
+| 80 | `sentinel_flag_notice` | Adds `integrity_flag_notice` — which remote flags this device has already told the learner about, so an accusation is raised once rather than on every unlock. `told_at`, not `accepted_at` |
 
 ---
 
