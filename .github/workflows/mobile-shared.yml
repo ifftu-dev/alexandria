@@ -272,23 +272,23 @@ jobs:
         run: sudo xcode-select --switch /Applications/Xcode_26.3.app
 
       - name: Checkout alexandria
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           path: alexandria
           ref: ${{ env.BUILD_REF }}
 
       - name: Setup Rust 1.91.0 (MSRV)
-        uses: dtolnay/rust-toolchain@1.91.0
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
         with:
           targets: aarch64-apple-ios,aarch64-apple-ios-sim
 
       - name: Cache Rust artifacts
-        uses: swatinem/rust-cache@v2
+        uses: swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
         with:
           workspaces: alexandria/src-tauri -> target
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: '24'
           cache: npm
@@ -566,7 +566,7 @@ jobs:
 
       - name: Upload iOS validation artifacts
         if: inputs.mode == 'validate'
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: mobile-ios
           path: alexandria/src-tauri/gen/apple/build/**/*
@@ -634,19 +634,19 @@ jobs:
           chmod 1777 /mnt/tmp
 
       - name: Checkout alexandria
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           path: alexandria
           ref: ${{ env.BUILD_REF }}
 
       - name: Setup Java 21
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           java-version: '21'
           distribution: temurin
 
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v4
+        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
 
       - name: Install CMake
         run: |
@@ -673,17 +673,17 @@ jobs:
           echo "SYSROOT=$SYSROOT_DIR" >> $GITHUB_ENV
 
       - name: Setup Rust 1.91.0 (MSRV)
-        uses: dtolnay/rust-toolchain@1.91.0
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
         with:
           targets: aarch64-linux-android
 
       - name: Cache Rust artifacts
-        uses: swatinem/rust-cache@v2
+        uses: swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
         with:
           workspaces: alexandria/src-tauri -> target
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: '24'
           cache: npm
@@ -848,7 +848,7 @@ jobs:
 
       - name: Upload Android validation artifacts
         if: inputs.mode == 'validate'
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: mobile-android
           path: |
@@ -875,7 +875,7 @@ jobs:
 
       - name: Upload to Google Play (internal testing)
         if: inputs.mode == 'release' && needs.prepare.outputs.android_signing_mode == 'secret'
-        uses: r0adkll/upload-google-play@v1
+        uses: r0adkll/upload-google-play@eb49699984a39f23558439581660aa6f088acfd6 # v1
         continue-on-error: true
         with:
           serviceAccountJsonPlainText: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}

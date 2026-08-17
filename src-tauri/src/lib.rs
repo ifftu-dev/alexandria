@@ -1640,6 +1640,8 @@ pub fn run() {
             commands::plugins::plugin_save_element_state,
             commands::plugins::plugin_load_element_state,
             commands::plugins::plugin_grant_capability,
+            commands::plugins::plugin_set_media_grants,
+            commands::plugins::plugin_clear_media_grants,
             commands::plugins::plugin_revoke_capability,
             commands::plugins::plugin_list_permissions,
             commands::plugins::plugin_set_enabled,

@@ -8,8 +8,20 @@
 //!   A's outbound future resolves with the deserialized response.
 
 use super::common::{await_peers_connected, new_test_db, start_test_node, start_test_node_with_db};
-use app_lib::crypto::did::Did;
-use app_lib::p2p::vc_fetch::{allow_fetch, handle_fetch_request, FetchRequest, FetchResponse};
+use app_lib::p2p::vc_fetch::{
+    allow_fetch, build_fetch_request, handle_fetch_request, FetchResponse,
+};
+
+/// Requests are signed now: `requestor` on its own proves nothing, because a
+/// subject DID is public. These helpers give each actor a real key so the
+/// tests exercise the same path a peer does.
+fn requestor_key(seed: u8) -> ed25519_dalek::SigningKey {
+    ed25519_dalek::SigningKey::from_bytes(&[seed; 32])
+}
+
+fn requestor_did(seed: u8) -> app_lib::crypto::did::Did {
+    alexandria_verify::did::derive_did_key(&requestor_key(seed))
+}
 
 fn seed_credential(conn: &rusqlite::Connection, id: &str, subject: &str) {
     let json = serde_json::json!({
@@ -52,12 +64,8 @@ async fn public_credential_fetch_returns_vc() {
     // For now, the public-fetch test exercises the authorized path:
     // subject fetches their own credential.
     let db = new_test_db();
-    seed_credential(db.conn(), "urn:uuid:public-vc", "did:key:zSubjectFetchTest");
-    let req = FetchRequest {
-        credential_id: "urn:uuid:public-vc".into(),
-        requestor: Did("did:key:zSubjectFetchTest".into()),
-        nonce: "n-public".into(),
-    };
+    seed_credential(db.conn(), "urn:uuid:public-vc", requestor_did(101).as_str());
+    let req = build_fetch_request(&requestor_key(101), "urn:uuid:public-vc", "n-public");
     let resp = handle_fetch_request(db.conn(), &req).unwrap();
     assert!(matches!(resp, FetchResponse::Ok(_)));
 }
@@ -70,13 +78,9 @@ async fn private_credential_fetch_returns_unauthorized() {
     seed_credential(
         db.conn(),
         "urn:uuid:private-vc",
-        "did:key:zSubjectFetchTest",
+        requestor_did(101).as_str(),
     );
-    let req = FetchRequest {
-        credential_id: "urn:uuid:private-vc".into(),
-        requestor: Did("did:key:zStrangerFetchTest".into()),
-        nonce: "n-private".into(),
-    };
+    let req = build_fetch_request(&requestor_key(102), "urn:uuid:private-vc", "n-private");
     let resp = handle_fetch_request(db.conn(), &req).unwrap();
     assert!(matches!(resp, FetchResponse::Unauthorized));
 }
@@ -89,28 +93,28 @@ async fn allowlisted_requestor_receives_private_credential() {
     seed_credential(
         db.conn(),
         "urn:uuid:allowlisted-vc",
-        "did:key:zSubjectFetchTest",
+        requestor_did(101).as_str(),
     );
     allow_fetch(
         db.conn(),
         "urn:uuid:allowlisted-vc",
-        "did:key:zRecruiterFetchTest",
+        requestor_did(103).as_str(),
     )
     .unwrap();
-    let req = FetchRequest {
-        credential_id: "urn:uuid:allowlisted-vc".into(),
-        requestor: Did("did:key:zRecruiterFetchTest".into()),
-        nonce: "n-allowlist".into(),
-    };
+    let req = build_fetch_request(
+        &requestor_key(103),
+        "urn:uuid:allowlisted-vc",
+        "n-allowlist",
+    );
     let resp = handle_fetch_request(db.conn(), &req).unwrap();
     assert!(matches!(resp, FetchResponse::Ok(_)));
 
     // Sanity: a different requestor still gets Unauthorized.
-    let req2 = FetchRequest {
-        credential_id: "urn:uuid:allowlisted-vc".into(),
-        requestor: Did("did:key:zNotOnList".into()),
-        nonce: "n-allowlist-2".into(),
-    };
+    let req2 = build_fetch_request(
+        &requestor_key(104),
+        "urn:uuid:allowlisted-vc",
+        "n-allowlist-2",
+    );
     let resp2 = handle_fetch_request(db.conn(), &req2).unwrap();
     assert!(matches!(resp2, FetchResponse::Unauthorized));
 }
@@ -123,14 +127,10 @@ async fn public_credential_fetch_returns_vc_via_public_flag() {
     seed_credential(
         db.conn(),
         "urn:uuid:public-flag",
-        "did:key:zSubjectFetchTest",
+        requestor_did(101).as_str(),
     );
     allow_fetch(db.conn(), "urn:uuid:public-flag", "public").unwrap();
-    let req = FetchRequest {
-        credential_id: "urn:uuid:public-flag".into(),
-        requestor: Did("did:key:zArbitraryRequestor".into()),
-        nonce: "n-pub-flag".into(),
-    };
+    let req = build_fetch_request(&requestor_key(105), "urn:uuid:public-flag", "n-pub-flag");
     let resp = handle_fetch_request(db.conn(), &req).unwrap();
     assert!(matches!(resp, FetchResponse::Ok(_)));
 }
@@ -148,9 +148,14 @@ async fn two_node_round_trip_over_vc_fetch_protocol() {
     seed_credential(
         db_b.conn(),
         "urn:uuid:two-node-vc",
-        "did:key:zSubjectFetchTest",
+        requestor_did(101).as_str(),
     );
-    allow_fetch(db_b.conn(), "urn:uuid:two-node-vc", "did:key:zRecruiterE2E").unwrap();
+    allow_fetch(
+        db_b.conn(),
+        "urn:uuid:two-node-vc",
+        requestor_did(106).as_str(),
+    )
+    .unwrap();
     let (mut node_b, _rx_b) = match start_test_node_with_db("vc-fetch-b", 32, db_b).await {
         Some(t) => t,
         None => return,
@@ -174,11 +179,7 @@ async fn two_node_round_trip_over_vc_fetch_protocol() {
     // Give request_response a moment to settle handshakes.
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
-    let req = FetchRequest {
-        credential_id: "urn:uuid:two-node-vc".into(),
-        requestor: Did("did:key:zRecruiterE2E".into()),
-        nonce: "n-two-node".into(),
-    };
+    let req = build_fetch_request(&requestor_key(106), "urn:uuid:two-node-vc", "n-two-node");
     let resp = node_a.fetch_credential(peer_b, req).await;
     let outcome = match resp {
         Ok(r) => r,

@@ -21,9 +21,19 @@ async fn credential_resolvable_when_subject_offline_via_pinboard() {
     // route a fetch. The transport plumbing (DHT + request-response)
     // is a follow-up, but the routing data is correct end-to-end.
     let db = new_test_db();
-    let pinner = Did("did:key:zPinnerSurv".into());
+    // A commitment is signed at declaration now — receivers verify it against
+    // the pinner DID, so the DID has to be one a key actually resolves to.
+    let pinner_key = ed25519_dalek::SigningKey::from_bytes(&[71u8; 32]);
+    let pinner = alexandria_verify::did::derive_did_key(&pinner_key);
     let subject = Did("did:key:zSubjectSurv".into());
-    declare_commitment(db.conn(), &pinner, &subject, &["credentials".into()]).unwrap();
+    declare_commitment(
+        db.conn(),
+        &pinner,
+        &subject,
+        &["credentials".into()],
+        &pinner_key,
+    )
+    .unwrap();
 
     let pinners = list_pinners_for(db.conn(), &subject).unwrap();
     assert_eq!(pinners.len(), 1);
@@ -117,9 +127,17 @@ async fn revoking_commitment_drops_pinboard_observation() {
     // stamp. This is what downstream eviction logic reads to
     // demote the pin from tier 2 to the default tier.
     let db = new_test_db();
-    let pinner = Did("did:key:zRevokerPinner".into());
+    let pinner_key = ed25519_dalek::SigningKey::from_bytes(&[72u8; 32]);
+    let pinner = alexandria_verify::did::derive_did_key(&pinner_key);
     let subject = Did("did:key:zRevokerSubject".into());
-    let commit = declare_commitment(db.conn(), &pinner, &subject, &["credentials".into()]).unwrap();
+    let commit = declare_commitment(
+        db.conn(),
+        &pinner,
+        &subject,
+        &["credentials".into()],
+        &pinner_key,
+    )
+    .unwrap();
 
     revoke_commitment(db.conn(), &commit.id).unwrap();
     let after = list_pinners_for(db.conn(), &subject).unwrap();

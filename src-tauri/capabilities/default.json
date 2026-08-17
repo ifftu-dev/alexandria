@@ -17,26 +17,46 @@
     "os:allow-locale",
     {
       "identifier": "fs:allow-read-file",
+      "comment": [
+        "Scoped to the directories a person picks files FROM, not to all of $HOME.",
+        "",
+        "There are exactly two callers — useSkillBootstrap.ts and PluginHost.vue —",
+        "and both read a file the user has just chosen in a native picker. That is",
+        "Downloads, Documents and Desktop; it is not the whole home directory.",
+        "",
+        "The previous scope was $HOME/** with a deny list for .ssh, .gnupg, .aws,",
+        ".config and Library. That list is macOS-shaped: Library covers the app data",
+        "directory on macOS, but on Linux it is $HOME/.local/share/<bundle>/ and on",
+        "Windows it is under $HOME/AppData — neither was denied, and both hold the",
+        "per-profile .stronghold snapshot, vault_salt.bin and the SQLite database.",
+        "So on those platforms any frontend code-execution primitive could read the",
+        "encrypted vault straight off disk and brute-force it offline at leisure.",
+        "Argon2id raises that cost; it does not prevent the exfiltration.",
+        "",
+        "An allowlist of pick-from directories rather than a denylist of secrets:",
+        "a denylist has to enumerate every sensitive path that will ever exist,",
+        "and the ones it missed are exactly the finding."
+      ],
       "allow": [
         {
-          "path": "$HOME/**"
+          "path": "$DOWNLOAD/**"
+        },
+        {
+          "path": "$DOCUMENT/**"
+        },
+        {
+          "path": "$DESKTOP/**"
         }
       ],
       "deny": [
         {
-          "path": "$HOME/.ssh/**"
+          "path": "$DOWNLOAD/**/.*"
         },
         {
-          "path": "$HOME/.gnupg/**"
+          "path": "$DOCUMENT/**/.*"
         },
         {
-          "path": "$HOME/.aws/**"
-        },
-        {
-          "path": "$HOME/.config/**"
-        },
-        {
-          "path": "$HOME/Library/**"
+          "path": "$DESKTOP/**/.*"
         }
       ]
     }

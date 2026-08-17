@@ -17,7 +17,7 @@
  * and emits `scored-complete` with the resulting score.
  */
 
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { open as openFileDialog } from '@tauri-apps/plugin-dialog'
 import { readFile } from '@tauri-apps/plugin-fs'
@@ -191,11 +191,38 @@ onMounted(async () => {
   }
 })
 
+// Mirror the granted media capabilities into the platform layer.
+//
+// On macOS, WKWebView asks the app's UIDelegate whether to allow getUserMedia,
+// and that delegate cannot see this component's state. Without this mirror it
+// would have to answer from nothing — and it used to answer "grant", which
+// meant a plugin could capture silently by calling getUserMedia directly
+// instead of going through the consent prompt below.
+watch(
+  grantedCapabilities,
+  async (granted) => {
+    try {
+      await invoke('plugin_set_media_grants', {
+        camera: granted.includes('camera'),
+        microphone: granted.includes('microphone'),
+      })
+    }
+    catch (e) {
+      // Non-fatal: the platform default is to deny, so a failure here costs a
+      // working camera rather than opening one.
+      console.warn('[PluginHost] could not sync media grants', e)
+    }
+  },
+  { immediate: true },
+)
+
 onBeforeUnmount(() => {
   // Once-grants do not persist beyond a single plugin mount.
   onceGrants.value.clear()
   pendingCapability.value = null
   pendingQueue.value = []
+  // Consent given to this plugin must not be inherited by the next one.
+  invoke('plugin_clear_media_grants').catch(() => {})
 })
 
 // Proxy plugin events back to the element registry.

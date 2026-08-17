@@ -109,6 +109,10 @@ ndarray = "0.16"
 anyhow = "1"
 bytes = "1"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+# Parsing URLs by hand is how an SSRF guard gets bypassed. Already in the tree
+# via reqwest; named explicitly because `content_store::resolver` depends on it
+# for a security check rather than for convenience.
+url = "2"
 uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 thiserror = "2"

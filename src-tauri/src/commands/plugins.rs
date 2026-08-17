@@ -447,6 +447,39 @@ pub async fn plugin_revoke_capability(
     registry::revoke_capability(db, &plugin_cid, cap)
 }
 
+/// Tell the platform which media captures the user has consented to for the
+/// plugin currently mounted.
+///
+/// macOS is the one that needs this. WKWebView asks the app's UIDelegate
+/// whether to allow `getUserMedia`, and the delegate has no way to reach the
+/// Vue consent state on its own — so the host pushes it here whenever the
+/// granted set changes, and on teardown pushes an empty set.
+///
+/// Without it the delegate would have to answer from nothing, and the only
+/// two options are "always deny" (which breaks every camera plugin) and
+/// "always grant" (which is what the audit found: a plugin could capture
+/// silently by calling `getUserMedia` directly and never asking the host).
+#[tauri::command]
+pub async fn plugin_set_media_grants(camera: bool, microphone: bool) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    crate::macos_media_delegate::grant(crate::macos_media_delegate::MediaGrants {
+        camera,
+        microphone,
+    });
+    #[cfg(not(target_os = "macos"))]
+    let _ = (camera, microphone);
+    Ok(())
+}
+
+/// Drop every media grant. Called when a plugin is unmounted, so consent given
+/// to one plugin cannot be inherited by the next.
+#[tauri::command]
+pub async fn plugin_clear_media_grants() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    crate::macos_media_delegate::revoke_all();
+    Ok(())
+}
+
 /// Enable or disable an installed plugin. Disabled plugins remain on
 /// disk and keep their capability grants, but the player refuses to
 /// mount them. Used by Settings → Plugins.

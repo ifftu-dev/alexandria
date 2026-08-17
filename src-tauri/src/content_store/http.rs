@@ -26,6 +26,10 @@ pub enum HttpError {
 
 const MAX_FETCH_BYTES: usize = 64 * 1024 * 1024;
 
+/// How many redirects a fetch may follow. Each one is re-checked against the
+/// SSRF guard, so this is a loop bound rather than a security control.
+const MAX_REDIRECTS: usize = 5;
+
 /// HTTP client that fetches content bytes from a public URL.
 #[derive(Clone)]
 pub struct HttpClient {
@@ -37,6 +41,23 @@ impl HttpClient {
     pub fn new(timeout: Duration) -> Result<Self, HttpError> {
         let http = reqwest::Client::builder()
             .timeout(timeout)
+            // Redirects are checked, not followed blindly. `resolver`'s SSRF
+            // guard runs on the URL the caller supplied; reqwest's default is
+            // to follow up to ten hops, so a public URL answering `302
+            // Location: http://169.254.169.254/` would reach cloud metadata
+            // without the guard ever seeing that address. Every hop is put
+            // back through the same check.
+            .redirect(reqwest::redirect::Policy::custom(|attempt| {
+                if attempt.previous().len() >= MAX_REDIRECTS {
+                    return attempt.error("too many redirects");
+                }
+                match crate::content_store::resolver::url_is_publicly_routable(
+                    attempt.url().as_str(),
+                ) {
+                    Ok(()) => attempt.follow(),
+                    Err(e) => attempt.error(e),
+                }
+            }))
             .build()
             .map_err(|e| HttpError::Http(e.to_string()))?;
 

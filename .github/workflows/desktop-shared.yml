@@ -71,7 +71,7 @@ jobs:
 
       - name: Setup Node.js for updater signing preflight
         if: inputs.mode == 'release' && inputs.sign_updater == true
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: '24'
 
@@ -142,26 +142,26 @@ jobs:
     timeout-minutes: 150
     steps:
       - name: Checkout alexandria
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           path: alexandria
           ref: ${{ env.BUILD_REF }}
 
       - name: Setup Rust 1.91.0 (MSRV)
-        uses: dtolnay/rust-toolchain@1.91.0
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
 
       - name: Add ARM64 Apple target
         run: rustup target add aarch64-apple-darwin
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: '24'
           cache: npm
           cache-dependency-path: alexandria/package-lock.json
 
       - name: Cache Rust artifacts
-        uses: swatinem/rust-cache@v2
+        uses: swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
         with:
           workspaces: alexandria/src-tauri -> target
 
@@ -213,7 +213,7 @@ jobs:
 
       - name: Build macOS validation artifacts
         if: inputs.mode == 'validate'
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@fce9c6108b31ea247710505d3aaaa893ee6768d4 # v0
         env:
           PKG_CONFIG_PATH: /opt/homebrew/lib/pkgconfig
           LIBRARY_PATH: /opt/homebrew/lib
@@ -224,7 +224,7 @@ jobs:
 
       - name: Build unsigned macOS release
         if: inputs.mode == 'release' && inputs.sign_updater != true
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@fce9c6108b31ea247710505d3aaaa893ee6768d4 # v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PKG_CONFIG_PATH: /opt/homebrew/lib/pkgconfig
@@ -237,7 +237,7 @@ jobs:
 
       - name: Build signed macOS release
         if: inputs.mode == 'release' && inputs.sign_updater == true
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@fce9c6108b31ea247710505d3aaaa893ee6768d4 # v0
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_MAC_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_MAC_CERTIFICATE_PASSWORD }}
@@ -313,7 +313,7 @@ jobs:
 
       - name: Upload macOS validation artifacts
         if: inputs.mode == 'validate'
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: desktop-macos-arm64
           path: ${{ steps.macos-artifacts.outputs.artifact_dir }}/*
@@ -321,7 +321,7 @@ jobs:
 
       - name: Upload macOS release artifacts for finalization
         if: inputs.mode == 'release' && inputs.sign_updater == true
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: release-macos-arm64
           path: ${{ steps.macos-artifacts.outputs.artifact_dir }}/*
@@ -379,23 +379,23 @@ jobs:
             xdg-utils
 
       - name: Checkout alexandria
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           path: alexandria
           ref: ${{ env.BUILD_REF }}
 
       - name: Setup Rust 1.91.0 (MSRV)
-        uses: dtolnay/rust-toolchain@1.91.0
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: '24'
           cache: npm
           cache-dependency-path: alexandria/package-lock.json
 
       - name: Cache Rust artifacts
-        uses: swatinem/rust-cache@v2
+        uses: swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
         with:
           workspaces: alexandria/src-tauri -> target
 
@@ -418,7 +418,7 @@ jobs:
 
       - name: Build Linux validation artifacts
         if: inputs.mode == 'validate'
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@fce9c6108b31ea247710505d3aaaa893ee6768d4 # v0
         with:
           projectPath: alexandria
           args: --bundles appimage,deb --config src-tauri/tauri.desktop.linux.conf.json
@@ -426,7 +426,7 @@ jobs:
 
       - name: Build Linux release
         if: inputs.mode == 'release'
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@fce9c6108b31ea247710505d3aaaa893ee6768d4 # v0
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ inputs.sign_updater && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ inputs.sign_updater && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
@@ -485,7 +485,7 @@ jobs:
 
       - name: Upload Linux validation artifacts
         if: inputs.mode == 'validate'
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: desktop-linux-x86_64
           path: ${{ steps.linux-x64-artifacts.outputs.artifact_dir }}/*
@@ -493,7 +493,7 @@ jobs:
 
       - name: Upload Linux release artifacts for finalization
         if: inputs.mode == 'release' && inputs.sign_updater == true
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: release-linux-x86_64
           path: ${{ steps.linux-x64-artifacts.outputs.artifact_dir }}/*
@@ -554,23 +554,23 @@ jobs:
             xdg-utils
 
       - name: Checkout alexandria
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           path: alexandria
           ref: ${{ env.BUILD_REF }}
 
       - name: Setup Rust 1.91.0 (MSRV)
-        uses: dtolnay/rust-toolchain@1.91.0
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: '24'
           cache: npm
           cache-dependency-path: alexandria/package-lock.json
 
       - name: Cache Rust artifacts
-        uses: swatinem/rust-cache@v2
+        uses: swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
         with:
           workspaces: alexandria/src-tauri -> target
 
@@ -593,7 +593,7 @@ jobs:
 
       - name: Build Linux ARM64 validation artifacts
         if: inputs.mode == 'validate'
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@fce9c6108b31ea247710505d3aaaa893ee6768d4 # v0
         with:
           projectPath: alexandria
           args: --bundles appimage,deb --config src-tauri/tauri.desktop.linux.conf.json
@@ -601,7 +601,7 @@ jobs:
 
       - name: Build Linux ARM64 release
         if: inputs.mode == 'release'
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@fce9c6108b31ea247710505d3aaaa893ee6768d4 # v0
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ inputs.sign_updater && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ inputs.sign_updater && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
@@ -660,7 +660,7 @@ jobs:
 
       - name: Upload Linux ARM64 validation artifacts
         if: inputs.mode == 'validate'
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: desktop-linux-arm64
           path: ${{ steps.linux-arm64-artifacts.outputs.artifact_dir }}/*
@@ -668,7 +668,7 @@ jobs:
 
       - name: Upload Linux ARM64 release artifacts for finalization
         if: inputs.mode == 'release' && inputs.sign_updater == true
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: release-linux-arm64
           path: ${{ steps.linux-arm64-artifacts.outputs.artifact_dir }}/*
@@ -684,13 +684,13 @@ jobs:
       HAS_WINDOWS_CERT: ${{ secrets.WINDOWS_CERTIFICATE != '' }}
     steps:
       - name: Checkout alexandria
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           path: alexandria
           ref: ${{ env.BUILD_REF }}
 
       - name: Setup MSVC developer environment
-        uses: ilammy/msvc-dev-cmd@v1
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
 
       - name: Download pre-built FFmpeg for Windows
         id: windows-ffmpeg
@@ -717,17 +717,17 @@ jobs:
           echo "$ffmpegDir\bin" >> $env:GITHUB_PATH
 
       - name: Setup Rust 1.91.0 (MSRV)
-        uses: dtolnay/rust-toolchain@1.91.0
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: '24'
           cache: npm
           cache-dependency-path: alexandria/package-lock.json
 
       - name: Cache Rust artifacts
-        uses: swatinem/rust-cache@v2
+        uses: swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
         with:
           workspaces: alexandria/src-tauri -> target
 
@@ -839,7 +839,7 @@ jobs:
 
       - name: Build Windows validation artifacts
         if: inputs.mode == 'validate'
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@fce9c6108b31ea247710505d3aaaa893ee6768d4 # v0
         env:
           PATH: ${{ steps.windows-build-env.outputs.path }}
           FFMPEG_DIR: ${{ steps.windows-build-env.outputs.ffmpeg_dir }}
@@ -853,7 +853,7 @@ jobs:
 
       - name: Build Windows release
         if: inputs.mode == 'release'
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@fce9c6108b31ea247710505d3aaaa893ee6768d4 # v0
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ inputs.sign_updater && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ inputs.sign_updater && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
@@ -942,7 +942,7 @@ jobs:
 
       - name: Upload Windows validation artifacts
         if: inputs.mode == 'validate'
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: desktop-windows-x86_64
           path: ${{ steps.windows-artifacts.outputs.artifact_dir }}/*
@@ -985,7 +985,7 @@ jobs:
 
       - name: Upload Windows release artifacts for finalization
         if: inputs.mode == 'release' && inputs.sign_updater == true
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: release-windows-x86_64
           path: ${{ steps.windows-artifacts.outputs.artifact_dir }}/*

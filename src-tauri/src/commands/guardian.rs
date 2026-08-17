@@ -479,6 +479,9 @@ async fn pull_from_ward(
             peer,
             GuardianRequest::ActivityPull {
                 link_id: link_id.to_string(),
+                // Proves we hold the link key, so the ward is not made to
+                // build and seal a full snapshot for anyone who learned the id.
+                sealed_marker: proto::seal(key, &format!("pull:{link_id}"))?,
             },
         )
         .await

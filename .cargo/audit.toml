@@ -1,32 +1,79 @@
-# cargo-audit configuration
+# cargo-audit configuration.
 #
-# Ignored advisories should always carry a `# reason:` line so the next
-# person who looks at this file knows why we accept the risk and what
-# to watch for. Re-evaluate on every iroh / libp2p bump.
+# Every ignore names the advisory, why it is not exploitable here, and what
+# would make it exploitable again. An ignore without that is how a real
+# advisory gets buried in a list nobody reads.
 
 [advisories]
 ignore = [
-  # RUSTSEC-2026-0119 — hickory-proto: O(n²) name compression CPU exhaustion.
-  # Fix: upgrade to >=0.26.1. Blocked: iroh 0.96.1 pins hickory-resolver = "^0.25",
-  # which transitively forces hickory-proto 0.25.x. Bumping iroh is its own
-  # tracked migration. We do not expose hickory's encoder to attacker-controlled
-  # input on the application path; the resolver is only used for libp2p-dns.
-  "RUSTSEC-2026-0119",
+    # tract-nnef 0.21.10 — integer overflow in the NNEF tensor parser giving an
+    # out-of-bounds read on model load (RUSTSEC-2026-0217, CVSS 6.1).
+    #
+    # NOT ignored because it is unreachable. It is reachable: the
+    # `sentinel_load_dao_classifier` IPC command takes ONNX bytes the frontend
+    # fetched over the network, and the two bundled models
+    # (`sentinel/face_detect.rs`, `sentinel/paste_classifier.rs`) are not the
+    # only thing that reaches the parser.
+    #
+    # Ignored because the upgrade is genuinely blocked: tract 0.21.16 pins
+    # `half = "=2.4.1"` (exact), and naga 27 — via wgpu, eframe, and the
+    # vendored moq-media crate — requires `half ^2.5`. There is no version of
+    # `half` that satisfies both, so `cargo update -p tract-onnx` fails to
+    # resolve.
+    #
+    # Mitigated instead at the call site: `sentinel_load_dao_classifier` now
+    # refuses any blob whose BLAKE3 is not a ratified `sentinel_priors.cid`, so
+    # only artifacts the Sentinel DAO voted on reach the parser. That check is
+    # the reason this is an acceptance rather than an open hole; if it is ever
+    # removed, this ignore must go with it.
+    #
+    # Revisit when tract relaxes its `half` pin, or when the media stack moves
+    # to a wgpu/naga release that accepts `half 2.4`.
+    "RUSTSEC-2026-0217",
 
-  # RUSTSEC-2026-0118 — hickory-proto: NSEC3 closest-encloser proof
-  # validation enters unbounded loop on cross-zone responses.
-  # Fix: NONE published yet upstream. Same blocker as above (iroh-pinned
-  # 0.25.x). We rely on libp2p-dns for peer discovery and do not validate
-  # DNSSEC NSEC3 chains in our application code path.
-  "RUSTSEC-2026-0118",
-  # RUSTSEC-2026-0194 / RUSTSEC-2026-0195 — quick-xml: unbounded
-  # allocation in NsReader / attribute parsing enables memory-exhaustion
-  # DoS on attacker-controlled XML. Fix: upgrade to >=0.41.0. Blocked:
-  # every dependent caps below it — plist 1.9 (^0.39), wayland-scanner
-  # 0.31 (^0.39), xcb 1.7 (^0.30). All three parse local/build-time XML
-  # (macOS plists, Wayland protocol codegen, X11 descriptors), never
-  # network- or user-supplied documents, so the DoS vector doesn't reach
-  # our application path. Re-evaluate on tauri / wayland / xcb bumps.
-  "RUSTSEC-2026-0194",
-  "RUSTSEC-2026-0195",
+    # rkyv 0.7.x — insufficient archive validation, out-of-bounds reads on
+    # archives containing Rc/Arc (RUSTSEC-2026-0235).
+    #
+    # Reached only transitively; nothing in this codebase constructs or
+    # deserializes an rkyv archive, and no rkyv-encoded bytes cross a trust
+    # boundary here. The fix is >= 0.8.17, a semver-major move that the
+    # dependency pinning it has not made.
+    #
+    # Revisit whenever `cargo tree -i rkyv` changes shape, and immediately if
+    # any code path starts deserializing rkyv data that came off the network.
+    "RUSTSEC-2026-0235",
+
+    # quick-xml 0.30.0 and 0.39.4 — unbounded namespace-declaration allocation
+    # (RUSTSEC-2026-0195) and quadratic runtime on duplicate attribute names
+    # (RUSTSEC-2026-0194). Both are denial-of-service on hostile XML.
+    #
+    # Neither copy parses anything an attacker supplies:
+    #   - 0.30.0 via `plist`, which reads macOS bundle Info.plist files that
+    #     ship inside the application.
+    #   - 0.39.4 via `wayland-scanner` and `xcb`, which parse protocol
+    #     definition XML at build time on Linux.
+    #
+    # Both are pinned by their dependents (`cargo update -p quick-xml@…` is a
+    # no-op), so the fix has to come from `plist`, `wayland-scanner` and `xcb`
+    # releasing against >= 0.41.
+    #
+    # Note the contrast with alexandria-cloud, where quick-xml parses uploaded
+    # .docx files and the same advisories were fixed by upgrading rather than
+    # accepted — same crate, different reachability, different answer.
+    "RUSTSEC-2026-0195",
+    "RUSTSEC-2026-0194",
+
+    # hickory-proto 0.25.x — CPU exhaustion in message encoding
+    # (RUSTSEC-2026-0119) and an unbounded NSEC3 validation loop
+    # (RUSTSEC-2026-0118, no fix at any version).
+    #
+    # Reached through `libp2p-mdns`, so the exposure is mDNS on the local link
+    # only — not names an internet peer chooses. libp2p 0.56 pins hickory 0.25
+    # and 0.26 is a semver-major move, so this cannot be taken here.
+    #
+    # Revisit when libp2p ships on hickory >= 0.26.1. Re-evaluate immediately
+    # if any peer-supplied hostname ever gets resolved by name rather than
+    # dialled by address.
+    "RUSTSEC-2026-0119",
+    "RUSTSEC-2026-0118",
 ]

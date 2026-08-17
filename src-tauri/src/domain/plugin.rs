@@ -140,6 +140,19 @@ pub struct PluginManifest {
     pub platforms: Vec<String>,
     /// Relative path to a small icon inside the bundle (optional).
     pub icon_path: Option<String>,
+    /// BLAKE3 (hex) of every file in the bundle, keyed by bundle-relative
+    /// path. Optional for compatibility with manifests written before this
+    /// field existed; when present it is enforced at install.
+    ///
+    /// Without it, `plugin_cid = BLAKE3(manifest.json)` identifies the
+    /// manifest and nothing else — so two bundles with identical manifests,
+    /// identical author signatures and identical CIDs could ship completely
+    /// different `ui/index.html`, and a Plugin DAO attestation over
+    /// `(plugin_cid, grader_cid)` would say nothing about the code the learner
+    /// actually runs. `grader.wasm` was already covered by
+    /// `PluginGraderRef::blake3`; this extends that to the rest of the bundle.
+    #[serde(default)]
+    pub files: Option<std::collections::BTreeMap<String, String>>,
     /// Relative path to the iframe entry HTML. Defaults to `ui/index.html`.
     #[serde(default = "default_entry")]
     pub entry: String,

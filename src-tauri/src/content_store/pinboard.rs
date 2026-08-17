@@ -14,25 +14,35 @@ use uuid::Uuid;
 use crate::crypto::did::Did;
 use crate::p2p::pinboard::PinboardCommitment;
 
+/// Build and persist a commitment, signed with `signing_key`.
+///
+/// Signing happens before the row is written rather than after. The previous
+/// shape wrote `signature: "unsigned"` and left it to the IPC layer to
+/// overwrite — which meant the durable state of a freshly declared commitment
+/// was a row that every peer would refuse, and the fix depended on a caller
+/// remembering. `signature` is now a field that is never legitimately absent.
+///
+/// `signing_key` must be the key `pinner_did` resolves to; receivers check
+/// that, so a mismatch produces a commitment nobody accepts.
 pub fn declare_commitment(
     db: &rusqlite::Connection,
     pinner_did: &Did,
     subject_did: &Did,
     scope: &[String],
+    signing_key: &ed25519_dalek::SigningKey,
 ) -> Result<PinboardCommitment, String> {
     let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    let commit = PinboardCommitment {
+    let mut commit = PinboardCommitment {
         id: format!("urn:uuid:{}", Uuid::new_v4()),
         pinner_did: pinner_did.as_str().to_string(),
         subject_did: subject_did.as_str().to_string(),
         scope: scope.to_vec(),
         commitment_since: now,
         revoked_at: None,
-        // Placeholders — the IPC command layer overwrites these with
-        // a real signature before the commitment is broadcast.
-        signature: "unsigned".into(),
-        public_key: pinner_did.as_str().to_string(),
+        signature: String::new(),
+        public_key: String::new(),
     };
+    crate::p2p::pinboard::sign_commitment(&mut commit, signing_key);
     insert_observation(db, &commit)?;
     Ok(commit)
 }
@@ -129,10 +139,11 @@ mod tests {
         // rebroadcast identically on replay.
         let db = Database::open_in_memory().unwrap();
         db.run_migrations().unwrap();
-        let pinner = Did("did:key:zPinner".into());
+        let sk = ed25519_dalek::SigningKey::from_bytes(&[1u8; 32]);
+        let pinner = crate::crypto::did::did_from_verifying_key(&sk.verifying_key());
         let subject = Did("did:key:zSubject".into());
         let commit =
-            declare_commitment(db.conn(), &pinner, &subject, &["credentials".into()]).unwrap();
+            declare_commitment(db.conn(), &pinner, &subject, &["credentials".into()], &sk).unwrap();
         assert!(!commit.signature.is_empty());
         assert!(!commit.public_key.is_empty());
         assert_eq!(commit.subject_did, subject.as_str());
@@ -144,9 +155,11 @@ mod tests {
         // this to demote content from the pinboard tier to cache tier.
         let db = Database::open_in_memory().unwrap();
         db.run_migrations().unwrap();
-        let pinner = Did("did:key:zPinner".into());
+        let sk = ed25519_dalek::SigningKey::from_bytes(&[2u8; 32]);
+        let pinner = crate::crypto::did::did_from_verifying_key(&sk.verifying_key());
         let subject = Did("did:key:zSubject".into());
-        let c = declare_commitment(db.conn(), &pinner, &subject, &["credentials".into()]).unwrap();
+        let c =
+            declare_commitment(db.conn(), &pinner, &subject, &["credentials".into()], &sk).unwrap();
         revoke_commitment(db.conn(), &c.id).unwrap();
         let rows = list_pinners_for(db.conn(), &subject).unwrap();
         assert!(

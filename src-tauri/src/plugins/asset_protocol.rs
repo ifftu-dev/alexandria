@@ -73,6 +73,16 @@ pub fn handle(plugins_dir: &Path, request: Request<Vec<u8>>) -> Response<Vec<u8>
         (host, raw_path)
     };
 
+    // Validate the CID before it is used as a path component or interpolated
+    // into the CSP header below. `registry::resolve_asset` checks this too;
+    // doing it here as well means the header build never sees an unchecked
+    // value, and the two checks are independent rather than one relying on the
+    // other's ordering.
+    if !registry::is_valid_plugin_cid(&plugin_cid) {
+        log::warn!("plugin asset refused: malformed cid {plugin_cid:?}");
+        return error_response(StatusCode::BAD_REQUEST, "invalid plugin cid");
+    }
+
     // Normalize the path: strip leading slash, default to entry file
     // when the URL is just `plugin://<cid>/`.
     let asset_path = if raw_path.is_empty() {

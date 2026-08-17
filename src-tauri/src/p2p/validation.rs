@@ -206,14 +206,18 @@ impl MessageValidator {
         Ok(())
     }
 
-    /// Step 3: Check for duplicate messages using Blake2b-256 of the payload.
+    /// Step 3: Check for duplicate messages using Blake2b-256 of the envelope.
     ///
-    /// If the payload hash has been seen before, the message is rejected.
-    /// Otherwise, the hash is added to the LRU cache. When the cache is
-    /// full, the least-recently-used entry is evicted — no full-clear
-    /// replay window.
+    /// If the hash has been seen before, the message is rejected. Otherwise it
+    /// is added to the LRU cache. When the cache is full, the least-recently-
+    /// used entry is evicted — no full-clear replay window.
+    ///
+    /// Keyed on the whole envelope rather than the payload alone. Payload-only
+    /// meant two different authors publishing identical JSON collided, and so
+    /// did the same payload on two topics — so one peer could suppress
+    /// another's message by publishing its bytes first.
     fn check_dedup(&self, message: &SignedGossipMessage) -> ValidationResult {
-        let hash = hex::encode(blake2b_256(&message.payload));
+        let hash = hex::encode(blake2b_256(&dedup_key(message)));
 
         let mut seen = self
             .seen
@@ -276,6 +280,29 @@ impl MessageValidator {
     pub fn seen_count(&self) -> usize {
         self.seen.lock().unwrap().len()
     }
+}
+
+/// The bytes a message is deduplicated on.
+///
+/// Everything that makes two envelopes genuinely different is in here: the
+/// topic, the author, the timestamp, and the payload. Deduplicating on the
+/// payload alone made "someone already sent these exact bytes" mean "drop
+/// this", which is wrong in two ways — two authors legitimately publish
+/// identical payloads (an identical vote, an identical opinion), and the same
+/// payload on a different topic is a different message. It also handed any
+/// peer a suppression primitive: publish a copy of what a victim is about to
+/// send, and the victim's message is dropped as a duplicate everywhere.
+///
+/// Length-prefixed so no two distinct envelopes can produce the same key.
+fn dedup_key(message: &SignedGossipMessage) -> Vec<u8> {
+    let mut out = Vec::with_capacity(message.payload.len() + 64);
+    for field in [message.topic.as_bytes(), message.stake_address.as_bytes()] {
+        out.extend_from_slice(&(field.len() as u64).to_be_bytes());
+        out.extend_from_slice(field);
+    }
+    out.extend_from_slice(&message.timestamp.to_be_bytes());
+    out.extend_from_slice(&message.payload);
+    out
 }
 
 impl Default for MessageValidator {
@@ -670,5 +697,64 @@ mod tests {
 
         let validator = MessageValidator::new();
         assert!(validator.check_authority(&msg).is_ok());
+    }
+
+    /// Two authors publishing identical bytes are two messages, not one. The
+    /// payload-only key made the second a "duplicate", which also let any peer
+    /// suppress another's message by publishing its bytes first.
+    #[test]
+    fn identical_payloads_from_different_authors_are_both_accepted() {
+        let victim = test_key();
+        let attacker = test_key();
+        let validator = MessageValidator::new();
+        let payload = b"{\"vote\":\"yes\"}".to_vec();
+
+        let first = sign_gossip_message(
+            "/alexandria/catalog/1.0",
+            payload.clone(),
+            &attacker,
+            "stake_test1attacker",
+        );
+        assert!(validator.validate(&first).is_ok());
+
+        let second = sign_gossip_message(
+            "/alexandria/catalog/1.0",
+            payload,
+            &victim,
+            "stake_test1victim",
+        );
+        assert!(
+            validator.validate(&second).is_ok(),
+            "a different author's identical payload must not be suppressed"
+        );
+    }
+
+    /// The same payload on a different topic is a different message.
+    #[test]
+    fn identical_payloads_on_different_topics_are_both_accepted() {
+        let key = test_key();
+        let validator = MessageValidator::new();
+        let payload = b"{\"id\":1}".to_vec();
+        let addr = "stake_test1uqfu74w3wh4gfzu8m6e7j987h4lq9r3t7ef5gaw497uu8q0kd9u4";
+
+        let a = sign_gossip_message("/alexandria/catalog/1.0", payload.clone(), &key, addr);
+        assert!(validator.validate(&a).is_ok());
+
+        let b = sign_gossip_message("/alexandria/profiles/1.0", payload, &key, addr);
+        assert!(validator.validate(&b).is_ok());
+    }
+
+    /// The actual replay case still has to be caught: same author, same topic,
+    /// same timestamp, same bytes.
+    #[test]
+    fn a_verbatim_replay_is_still_a_duplicate() {
+        let key = test_key();
+        let validator = MessageValidator::new();
+        let msg = valid_message(&key, "/alexandria/catalog/1.0");
+        assert!(validator.validate(&msg).is_ok());
+        assert!(matches!(
+            validator.validate(&msg),
+            Err(ValidationError::Duplicate { .. })
+        ));
     }
 }

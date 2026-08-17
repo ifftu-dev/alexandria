@@ -47,13 +47,26 @@ import { isAndroid, currentPlatform } from '@/composables/usePlatform'
 const props = defineProps<{
   pluginCid: string
   entry: string
-  /** Manifest-declared capabilities. Drives the iframe's Permissions
-   *  Policy `allow` attribute at load time — WKWebView/WebView2 read
-   *  this once and ignore later mutations, so we have to declare the
-   *  full set the plugin might use upfront. Runtime gating happens via
-   *  the host↔plugin `capability_granted`/`capability_revoked` messages
-   *  built from `grantedCapabilities`. */
+  /** Manifest-declared capabilities. Used for display and for deciding
+   *  what the plugin is allowed to *ask* for — NOT for the Permissions
+   *  Policy `allow` attribute. See `grantedCapabilities`. */
   declaredCapabilities: PluginCapability[]
+  /** Capabilities the user has actually granted. Drives the iframe's
+   *  Permissions Policy `allow` attribute.
+   *
+   *  WKWebView/WebView2 read `allow` once at load and ignore later
+   *  mutations, which is why this used to be built from
+   *  `declaredCapabilities` — declare everything upfront, gate at runtime
+   *  over the postMessage bridge. That gating is not a boundary: a plugin
+   *  is not obliged to use the bridge, and can call
+   *  `navigator.mediaDevices.getUserMedia()` directly. With the feature
+   *  delegated at mount and macOS auto-granting at the WebKit layer
+   *  (`macos_media_delegate.rs`), merely *declaring* `camera` was enough
+   *  to capture silently — no OS prompt, no in-app prompt.
+   *
+   *  The iframe is keyed on `allowAttribute`, so a grant re-mounts it with
+   *  the feature enabled. That costs a reload at the moment of granting,
+   *  which is the correct trade. */
   grantedCapabilities: PluginCapability[]
   /** Arbitrary content config the plugin's `init` sees. */
   content: unknown
@@ -120,6 +133,9 @@ const allowAttribute = computed(() => {
   // Browsers expect a space-separated list of feature names, not the
   // CSP directives. We map our capability names directly to Permissions
   // Policy feature names.
+  //
+  // Built from GRANTED capabilities, not declared ones. A declared
+  // capability is a request; only a grant delegates the feature.
   const map: Record<PluginCapability, string | null> = {
     microphone: 'microphone',
     camera: 'camera',
@@ -131,7 +147,7 @@ const allowAttribute = computed(() => {
     instructor_review: null, // host-side submit routing, no browser feature
   }
   const features: string[] = []
-  for (const cap of props.declaredCapabilities) {
+  for (const cap of props.grantedCapabilities) {
     const f = map[cap]
     if (f) features.push(f)
   }
@@ -174,7 +190,7 @@ function onIframeLoad() {
     if (w.__TAURI_INTERNALS__) {
       import('@tauri-apps/api/core').then(({ invoke }) => {
         void invoke('frontend_log', {
-          message: `[PluginIframe] onIframeLoad src=${srcUrl.value} declared=${props.declaredCapabilities.join(',')}`,
+          message: `[PluginIframe] onIframeLoad src=${srcUrl.value} declared=${props.declaredCapabilities.join(',')} granted=${props.grantedCapabilities.join(',')}`,
         })
       }).catch(() => {})
     }

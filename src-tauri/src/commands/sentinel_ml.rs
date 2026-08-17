@@ -85,12 +85,27 @@ pub struct LoadDaoClassifierRequest {
     pub version: String,
 }
 
-/// Load DAO-supplied ONNX bytes into the active session. Caller is
-/// responsible for envelope/eval verification — typically the
-/// front-end fetches bytes via `content_resolve_bytes` after
-/// `sentinel_get_active_paste_classifier` returns Some(...).
+/// Load DAO-supplied ONNX bytes into the active session.
+///
+/// The bytes must hash to a `weights_cid` the Sentinel DAO has ratified for
+/// this `version`. This used to be documented as the *caller's* job — "caller
+/// is responsible for envelope/eval verification" — with the frontend fetching
+/// bytes over the network and handing them straight in.
+///
+/// That is the wrong place for the check, twice over. It defers a security
+/// decision across an IPC boundary to code in another language, so anything
+/// that can call the IPC surface skips it entirely. And what it feeds is an
+/// ONNX parser: `tract-nnef` carries RUSTSEC-2026-0217, an integer overflow in
+/// the tensor parser giving an out-of-bounds read on model load, and the fix
+/// cannot be taken here because tract 0.21.16 pins `half =2.4.1` while the
+/// media stack needs `half ^2.5`. So the parser must not see bytes nobody
+/// vouched for.
+///
+/// The hash comparison is the whole gate: a ratified `weights_cid` is a BLAKE3
+/// of the exact artifact the DAO voted on.
 #[tauri::command]
 pub async fn sentinel_load_dao_classifier(
+    state: State<'_, AppState>,
     req: LoadDaoClassifierRequest,
 ) -> Result<LoadedClassifierInfo, String> {
     // 50 MiB cap matches MAX_WEIGHTS_BYTES in sentinel_priors.rs.
@@ -102,6 +117,35 @@ pub async fn sentinel_load_dao_classifier(
             MAX_BYTES
         ));
     }
+
+    let computed = blake3::hash(&req.bytes).to_hex().to_string();
+    {
+        let db_guard = state
+            .db
+            .lock()
+            .map_err(|_| "database lock poisoned".to_string())?;
+        let db = db_guard.as_ref().ok_or("database not initialized")?;
+        let ratified: i64 = db
+            .conn()
+            .query_row(
+                // `cid` is the BLAKE3 of the artifact the DAO voted on. Every
+                // row in this table is ratified — `ratified_at` is NOT NULL
+                // with a default — so presence is the check.
+                "SELECT COUNT(*) FROM sentinel_priors \
+                 WHERE model_kind = 'paste_classifier_weights' \
+                   AND cid = ?1",
+                params![&computed],
+                |r| r.get(0),
+            )
+            .map_err(|e| format!("checking ratified priors: {e}"))?;
+        if ratified == 0 {
+            return Err(format!(
+                "refusing to load classifier weights: BLAKE3 {computed} is not a \
+                 ratified Sentinel DAO artifact"
+            ));
+        }
+    }
+
     paste_classifier::set_dao_session(&req.bytes, req.version).map_err(|e| e.to_string())?;
     Ok(paste_classifier::loaded_info())
 }
@@ -515,4 +559,37 @@ fn synthetic_bot_segments() -> Vec<[f32; 50 * 3]> {
     // `ClassifierSource` enum has variants we don't pattern-match here.
     let _ = ClassifierSource::Bundled;
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The DAO-classifier loader feeds an ONNX parser that carries a live
+    /// out-of-bounds-read advisory (RUSTSEC-2026-0217) which cannot be patched
+    /// here — tract 0.21.16 pins `half =2.4.1` against the media stack's
+    /// `half ^2.5`. So the gate is that the bytes must hash to something the
+    /// Sentinel DAO ratified. Unratified bytes must never reach the parser.
+    #[test]
+    fn unratified_weights_are_refused_before_parsing() {
+        let db = crate::db::Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+
+        let bytes = b"not a ratified model".to_vec();
+        let computed = blake3::hash(&bytes).to_hex().to_string();
+
+        let ratified: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM sentinel_priors \
+                 WHERE model_kind = 'paste_classifier_weights' AND cid = ?1",
+                params![&computed],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            ratified, 0,
+            "arbitrary bytes must not match a ratified prior"
+        );
+    }
 }

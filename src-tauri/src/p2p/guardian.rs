@@ -75,8 +75,15 @@ pub enum GuardianRequest {
     },
     /// Child → guardian: sealed [`GuardianActivityPayload`].
     ActivityPush { link_id: String, sealed: Vec<u8> },
-    /// Guardian → child: request a fresh sealed snapshot.
-    ActivityPull { link_id: String },
+    /// Guardian → child: request a fresh sealed snapshot. `sealed_marker`
+    /// must open to `b"pull:<link_id>"` under the link key, proving the caller
+    /// holds it — otherwise knowing a `link_id` would be enough to make a ward
+    /// serialise and seal its whole synced dataset on demand.
+    ActivityPull {
+        link_id: String,
+        #[serde(default)]
+        sealed_marker: Vec<u8>,
+    },
     /// Either side: revoke the link. `sealed_marker` must open to
     /// `b"revoke:<link_id>"` under the link key (proves key possession).
     Revoke {
@@ -387,12 +394,28 @@ pub fn handle_guardian_request(
                 Err(e) => GuardianResponse::Error(format!("apply push: {e}")),
             }
         }
-        GuardianRequest::ActivityPull { link_id } => {
+        GuardianRequest::ActivityPull {
+            link_id,
+            sealed_marker,
+        } => {
             let key = match get_link_key(conn, link_id, "ward") {
                 Ok(Some(k)) => k,
                 Ok(None) => return GuardianResponse::Unauthorized,
                 Err(e) => return GuardianResponse::Error(e),
             };
+            // Prove key possession before doing any work. `Revoke` already
+            // required this; `ActivityPull` did not, so any peer that learned a
+            // link_id could make the ward build and seal a full snapshot across
+            // every guardian-synced table on demand. The reply was never
+            // readable by them — it is sealed under a key they do not have —
+            // but the work was free to demand.
+            let marker: String = match open(&key, sealed_marker) {
+                Ok(m) => m,
+                Err(e) => return GuardianResponse::Error(format!("open pull: {e}")),
+            };
+            if marker != format!("pull:{link_id}") {
+                return GuardianResponse::Unauthorized;
+            }
             let snapshot = match build_activity_snapshot(conn) {
                 Ok(s) => s,
                 Err(e) => return GuardianResponse::Error(format!("snapshot: {e}")),
@@ -813,6 +836,7 @@ mod tests {
             "12D3KooWParent",
             &GuardianRequest::ActivityPull {
                 link_id: "l1".into(),
+                sealed_marker: seal(&key, &"pull:l1".to_string()).unwrap(),
             },
         );
         let GuardianResponse::Sealed { sealed } = resp else {
@@ -902,5 +926,57 @@ mod tests {
             )
             .unwrap();
         assert_eq!(activation, "active");
+    }
+
+    /// The finding: `ActivityPull` took only a `link_id`, so any peer that
+    /// learned one could make the ward serialise and seal its whole synced
+    /// dataset on demand. The reply was never readable by them, but the work
+    /// was free to ask for. `Revoke` already required a marker; this now
+    /// matches it.
+    #[test]
+    fn a_pull_without_the_link_key_is_refused() {
+        let db = test_db();
+        seed_identity(db.conn(), Some("2012-01-01"), "active");
+        let key = [5u8; 32];
+        seed_guardian_link(db.conn(), "l1", "ward", key);
+        let resp = handle_guardian_request(
+            db.conn(),
+            "12D3KooWGuardian",
+            &GuardianRequest::ActivityPull {
+                link_id: "l1".into(),
+                sealed_marker: Vec::new(),
+            },
+        );
+        assert!(matches!(resp, GuardianResponse::Error(_)));
+
+        // A marker sealed under some other key is no better.
+        let wrong = [9u8; 32];
+        let resp = handle_guardian_request(
+            db.conn(),
+            "12D3KooWGuardian",
+            &GuardianRequest::ActivityPull {
+                link_id: "l1".into(),
+                sealed_marker: seal(&wrong, &"pull:l1".to_string()).unwrap(),
+            },
+        );
+        assert!(matches!(resp, GuardianResponse::Error(_)));
+    }
+
+    /// A marker for a different link must not open this one.
+    #[test]
+    fn a_pull_marker_does_not_transfer_between_links() {
+        let db = test_db();
+        seed_identity(db.conn(), Some("2012-01-01"), "active");
+        let key = [5u8; 32];
+        seed_guardian_link(db.conn(), "l1", "ward", key);
+        let resp = handle_guardian_request(
+            db.conn(),
+            "12D3KooWGuardian",
+            &GuardianRequest::ActivityPull {
+                link_id: "l1".into(),
+                sealed_marker: seal(&key, &"pull:some-other-link".to_string()).unwrap(),
+            },
+        );
+        assert!(matches!(resp, GuardianResponse::Unauthorized));
     }
 }

@@ -341,6 +341,9 @@ fn full_guardian_lifecycle_with_real_crypto() {
     // ── 6: parent pulls on demand; child serves a sealed snapshot ─
     let pull = GuardianRequest::ActivityPull {
         link_id: link_id.clone(),
+        // Proves the caller holds the link key; a bare link_id is no longer
+        // enough to make the ward build and seal a full snapshot.
+        sealed_marker: seal(&key, &format!("pull:{link_id}")).unwrap(),
     };
     let resp = handle_guardian_request(child.db.conn(), PARENT_PEER, &pull);
     let GuardianResponse::Sealed { sealed } = resp else {

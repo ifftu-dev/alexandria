@@ -366,17 +366,25 @@ impl GraderRuntime {
         }
 
         // Prefer the precompiled `.cwasm`: `deserialize` is an mmap of native
-        // code, orders of magnitude faster than a cranelift compile. It is
-        // `unsafe` because Wasmtime trusts the bytes are its own output for
-        // this exact engine config + version + arch; we only ever deserialize
-        // a file *we* wrote from the CID-verified wasm, and a mismatch is
-        // caught (returns Err) rather than trusted, so we fall back to JIT.
+        // code, orders of magnitude faster than a cranelift compile.
+        //
+        // It is also the one place in the plugin system where the wasm sandbox
+        // is not in the way, so the artifact must be proven to be ours before
+        // it is touched. `deserialize`'s own version header is a compatibility
+        // check, not an authenticity one — Wasmtime documents the call as
+        // unsafe for exactly this reason — so a crafted `.cwasm` with the right
+        // header runs as native code. The install path deletes any `.cwasm` a
+        // bundle ships, and this is the second lock: the digest sidecar is
+        // written only by `compile_and_persist`, from bytes this machine
+        // produced, so a file without a matching one is not ours.
         let module = match cwasm_path {
-            Some(path) if path.exists() => {
-                // SAFETY: `path` was written by `precompile_grader` on this
-                // machine from the CID-verified `grader.wasm`. A stale artifact
-                // (different wasmtime version/arch/config) fails deserialization
-                // with Err instead of executing, so this cannot run foreign code.
+            Some(path) if path.exists() && cwasm_digest_matches(path) => {
+                // SAFETY: `path` was written by `compile_and_persist` on this
+                // machine from the CID-verified `grader.wasm`, and its recorded
+                // BLAKE3 digest was just re-checked against the bytes on disk.
+                // A stale artifact (different wasmtime version/arch/config)
+                // additionally fails deserialization with Err rather than
+                // executing.
                 match unsafe { Module::deserialize_file(&self.engine, path) } {
                     Ok(m) => m,
                     Err(e) => {
@@ -388,6 +396,17 @@ impl GraderRuntime {
                         self.compile_and_persist(wasm_bytes, Some(path))?
                     }
                 }
+            }
+            Some(path) if path.exists() => {
+                // Present but unattested. Never deserialize it — recompile from
+                // the wasm, which `commands::plugins` has already checked
+                // against `manifest.grader.cid`, and overwrite.
+                log::warn!(
+                    "precompiled grader {grader_cid} has no matching digest at {}; \
+                     refusing to deserialize it and recompiling from wasm",
+                    path.display()
+                );
+                self.compile_and_persist(wasm_bytes, Some(path))?
             }
             other => self.compile_and_persist(wasm_bytes, other)?,
         };
@@ -416,6 +435,22 @@ impl GraderRuntime {
                             "failed to persist precompiled grader to {}: {e}",
                             path.display()
                         );
+                        // Leave nothing half-written where the loader looks.
+                        let _ = std::fs::remove_file(path);
+                        let _ =
+                            std::fs::remove_file(crate::plugins::registry::cwasm_digest_path(path));
+                    } else if let Err(e) = std::fs::write(
+                        crate::plugins::registry::cwasm_digest_path(path),
+                        blake3::hash(&bytes).to_hex().as_str(),
+                    ) {
+                        // An artifact with no digest will be refused on the next
+                        // cold load, so remove it rather than leaving a file
+                        // that costs a pointless deserialize attempt.
+                        log::warn!(
+                            "failed to persist precompiled grader digest for {}: {e}",
+                            path.display()
+                        );
+                        let _ = std::fs::remove_file(path);
                     }
                 }
                 Err(e) => log::warn!("failed to serialize grader for persistence: {e}"),
@@ -423,6 +458,31 @@ impl GraderRuntime {
         }
         Ok(module)
     }
+}
+
+/// Whether the `.cwasm` at `path` is one this machine wrote.
+///
+/// The digest file is written only by `compile_and_persist`, from the exact
+/// bytes it just serialized. So a `.cwasm` whose digest is missing, unreadable,
+/// or different is one that arrived some other way — most plausibly inside a
+/// plugin bundle — and must not reach `Module::deserialize_file`, which
+/// executes its argument as native code.
+///
+/// Returns `false` on any error. "Cannot tell" and "not ours" get the same
+/// answer here, because the cost of being wrong in one direction is a
+/// recompile and in the other is arbitrary code execution.
+pub fn cwasm_digest_matches(path: &Path) -> bool {
+    let Ok(recorded) = std::fs::read_to_string(crate::plugins::registry::cwasm_digest_path(path))
+    else {
+        return false;
+    };
+    let Ok(bytes) = std::fs::read(path) else {
+        return false;
+    };
+    let actual = blake3::hash(&bytes).to_hex();
+    // Trim: the file holds a bare hex digest, and an editor may have added a
+    // trailing newline.
+    recorded.trim().eq_ignore_ascii_case(actual.as_str())
 }
 
 /// Unpack the i64 return value of `alex_grade` into `(ptr, len)`. Both

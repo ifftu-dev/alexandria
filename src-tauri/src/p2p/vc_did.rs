@@ -23,6 +23,26 @@ pub enum DidIngest {
     Stored,
     UpdatedRegistry,
     Ignored,
+    /// The announcement was well-formed but the envelope signer does not
+    /// control the DID it speaks for.
+    IgnoredNotTheSubject,
+}
+
+/// Whether the gossip envelope was signed by the key `did` resolves to.
+///
+/// `did:key` is self-resolving, so this is a byte comparison against the
+/// envelope's public key — no registry lookup, no trust-on-first-use, nothing
+/// an attacker can arrange in advance. `p2p::signing` has already verified that
+/// the envelope signature is valid for that public key, so an equal key means
+/// the sender holds the DID's private key.
+fn envelope_signer_controls(did: &Did, message: &SignedGossipMessage) -> bool {
+    let Ok(vk_bytes): Result<[u8; 32], _> = message.public_key.clone().try_into() else {
+        return false;
+    };
+    let Ok(vk) = ed25519_dalek::VerifyingKey::from_bytes(&vk_bytes) else {
+        return false;
+    };
+    alexandria_verify::did::did_from_verifying_key(&vk).as_str() == did.as_str()
 }
 
 pub fn handle_did_message(
@@ -36,9 +56,29 @@ pub fn handle_did_message(
     };
     let did = Did(parsed.did);
 
-    // Rotation announcement: record the new entry. We trust the
-    // sender enough to mark a closed historical row — the signed
-    // gossip envelope already proves authenticity at this layer.
+    // A DID announcement speaks for exactly one identity, so only the holder
+    // of that identity's key may make one. Without this the handler accepted a
+    // rotation for *any* DID from *any* peer, which is a key-rollback
+    // primitive: forging a rotation closes the victim's current registry row
+    // and opens one with an empty key, so `resolve_issuer_key` falls through to
+    // `did:key` self-resolution — the pre-rotation key. If the rotation
+    // happened because that key was compromised, an attacker holding it can
+    // restore its acceptance across the network.
+    //
+    // It also closed the unauthenticated-insert path into `key_registry`, which
+    // was what let a peer manufacture the "known issuer" precondition the
+    // status-list handler used to rely on.
+    if !envelope_signer_controls(&did, message) {
+        log::warn!(
+            "vc-did: announcement for {} was not signed by that DID — dropping",
+            did.as_str()
+        );
+        return Ok(DidIngest::IgnoredNotTheSubject);
+    }
+
+    // Rotation announcement: record the new entry. The envelope is signed by
+    // the DID's own key (checked above), so the subject really is asking for
+    // this.
     if let Some(rotated_to) = parsed.rotated_to {
         let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
         let conn = db.conn();
@@ -223,13 +263,17 @@ pub fn queue_pending(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ed25519_dalek::SigningKey;
 
-    fn stub_msg(topic: &str, payload: &[u8]) -> SignedGossipMessage {
+    /// An envelope as `p2p::signing` would produce it: the `public_key` field
+    /// is what the signature was made with, and the pipeline has already
+    /// verified that pairing before a handler ever runs.
+    fn msg_from(sk: &SigningKey, payload: &[u8]) -> SignedGossipMessage {
         SignedGossipMessage {
-            topic: topic.into(),
+            topic: "/alexandria/vc-did/1.0".into(),
             payload: payload.to_vec(),
             signature: vec![0u8; 64],
-            public_key: vec![0u8; 32],
+            public_key: sk.verifying_key().to_bytes().to_vec(),
             stake_address: "stake_test1...".into(),
             timestamp: 1_712_880_000,
             encrypted: false,
@@ -237,12 +281,19 @@ mod tests {
         }
     }
 
-    #[test]
-    fn first_observation_of_unknown_did_is_stored() {
+    fn test_db() -> Database {
         let db = Database::open_in_memory().unwrap();
         db.run_migrations().unwrap();
-        let msg = stub_msg("/alexandria/vc-did/1.0", br#"{"did":"did:key:zNew"}"#);
-        let outcome = handle_did_message(&db, &msg).unwrap();
+        db
+    }
+
+    #[test]
+    fn first_observation_of_unknown_did_is_stored() {
+        let db = test_db();
+        let sk = SigningKey::from_bytes(&[1u8; 32]);
+        let did = alexandria_verify::did::derive_did_key(&sk);
+        let payload = format!(r#"{{"did":"{}"}}"#, did.as_str());
+        let outcome = handle_did_message(&db, &msg_from(&sk, payload.as_bytes())).unwrap();
         assert_eq!(outcome, DidIngest::Stored);
     }
 
@@ -252,16 +303,82 @@ mod tests {
         // from `Stored` on first sight to `UpdatedRegistry` on the key
         // rotation — this is what lets historical verification (§5.3)
         // survive across peers.
-        let db = Database::open_in_memory().unwrap();
-        db.run_migrations().unwrap();
-        let first = stub_msg("/alexandria/vc-did/1.0", br#"{"did":"did:key:zA"}"#);
-        let _ = handle_did_message(&db, &first).unwrap();
-        let rotation = stub_msg(
-            "/alexandria/vc-did/1.0",
-            br#"{"did":"did:key:zA","rotated_to":"did:key:zA2"}"#,
-        );
-        let outcome = handle_did_message(&db, &rotation).unwrap();
+        let db = test_db();
+        let sk = SigningKey::from_bytes(&[2u8; 32]);
+        let did = alexandria_verify::did::derive_did_key(&sk);
+        let first = format!(r#"{{"did":"{}"}}"#, did.as_str());
+        let _ = handle_did_message(&db, &msg_from(&sk, first.as_bytes())).unwrap();
+
+        let rotation = format!(r#"{{"did":"{}","rotated_to":"did:key:zA2"}}"#, did.as_str());
+        let outcome = handle_did_message(&db, &msg_from(&sk, rotation.as_bytes())).unwrap();
         assert_eq!(outcome, DidIngest::UpdatedRegistry);
+    }
+
+    /// The finding: any peer could announce a rotation for any DID. That
+    /// closes the victim's open registry row and opens an empty-key one, so
+    /// verification falls back to `did:key` self-resolution — the key the
+    /// rotation was performed to retire.
+    #[test]
+    fn a_rotation_announced_by_someone_else_is_dropped() {
+        let db = test_db();
+        let victim = SigningKey::from_bytes(&[3u8; 32]);
+        let attacker = SigningKey::from_bytes(&[4u8; 32]);
+        let victim_did = alexandria_verify::did::derive_did_key(&victim);
+
+        // The victim publishes their DID normally.
+        let announce = format!(r#"{{"did":"{}"}}"#, victim_did.as_str());
+        assert_eq!(
+            handle_did_message(&db, &msg_from(&victim, announce.as_bytes())).unwrap(),
+            DidIngest::Stored
+        );
+
+        // The attacker tries to rotate it out from under them.
+        let forged = format!(
+            r#"{{"did":"{}","rotated_to":"did:key:zAttacker"}}"#,
+            victim_did.as_str()
+        );
+        assert_eq!(
+            handle_did_message(&db, &msg_from(&attacker, forged.as_bytes())).unwrap(),
+            DidIngest::IgnoredNotTheSubject
+        );
+
+        // And the victim's row is untouched — still open, never rotated.
+        let closed: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM key_registry WHERE did = ?1 AND valid_until IS NOT NULL",
+                rusqlite::params![victim_did.as_str()],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(closed, 0, "a forged rotation closed the victim's key row");
+    }
+
+    /// The same gate stops the unauthenticated insert that let a peer
+    /// manufacture the "known issuer" precondition the status-list handler
+    /// used to rely on.
+    #[test]
+    fn an_announcement_for_someone_elses_did_does_not_populate_the_registry() {
+        let db = test_db();
+        let attacker = SigningKey::from_bytes(&[5u8; 32]);
+        let victim_did =
+            alexandria_verify::did::derive_did_key(&SigningKey::from_bytes(&[6u8; 32]));
+
+        let payload = format!(r#"{{"did":"{}"}}"#, victim_did.as_str());
+        assert_eq!(
+            handle_did_message(&db, &msg_from(&attacker, payload.as_bytes())).unwrap(),
+            DidIngest::IgnoredNotTheSubject
+        );
+
+        let rows: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM key_registry WHERE did = ?1",
+                rusqlite::params![victim_did.as_str()],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(rows, 0);
     }
 
     #[test]
@@ -269,10 +386,9 @@ mod tests {
         // Gossip is noisy. Garbage payloads should return `Ignored`
         // rather than propagating up as errors — an error stops the
         // whole gossip pump for that peer.
-        let db = Database::open_in_memory().unwrap();
-        db.run_migrations().unwrap();
-        let msg = stub_msg("/alexandria/vc-did/1.0", b"garbage");
-        let outcome = handle_did_message(&db, &msg).unwrap();
+        let db = test_db();
+        let sk = SigningKey::from_bytes(&[7u8; 32]);
+        let outcome = handle_did_message(&db, &msg_from(&sk, b"garbage")).unwrap();
         assert_eq!(outcome, DidIngest::Ignored);
     }
 }

@@ -1,6 +1,23 @@
 # Alexandria — Security Audit
 
-**Date**: 2026-02-24 (updated 2026-03-23)
+> **Two passes are recorded in this file.**
+>
+> - **Pass 1 (2026-02-24, remediation verified 2026-03-23)** — the original
+>   audit of the pre-VC codebase. Findings `C-1` … `I-5`. Everything from
+>   "Pass 1" down to "Deferred scope" below is that pass, unchanged.
+> - **Pass 2 (2026-08-18)** — covers the VC-layer, plugin-system, Tauri-config
+>   and dependency surface that Pass 1 explicitly deferred. Findings `P2-*`.
+>   **[Jump to Pass 2](#pass-2--2026-08-18)**.
+>
+> Repo-level audits for the other monorepo components live in
+> `../../docs/security-audit.md` (index), `alexandria-cloud/docs/security-audit.md`,
+> `alexandria-relay/docs/security-audit.md` and
+> `alexandria-monitoring/docs/security-audit.md`.
+
+---
+
+## Pass 1 — 2026-02-24 (remediation verified 2026-03-23)
+
 **Scope**: Full Rust backend (`src-tauri/src/`), Tauri configuration, Cargo dependencies, Vue frontend (`src/`), CI/CD workflows
 **Files audited**: Every file in `crypto/`, `p2p/`, `commands/`, `db/`, `cardano/`, `evidence/`, `content_store/`, plus `lib.rs`, `tauri.conf.json`, `capabilities/default.json`, both `Cargo.toml` files, all Vue components and composables
 
@@ -563,6 +580,12 @@ Evidence scores are constrained to `[0.0, 1.0]` before use. This prevents invali
 
 ## Deferred scope: VC-layer modules (PRs 2–19, post-audit)
 
+> **Status (2026-08-18): CLOSED — this deferred scope was audited in
+> [Pass 2](#pass-2--2026-08-18) below.** All five follow-up questions listed
+> here were answered; four of them turned up live findings (`P2-C1`, `P2-H1`,
+> `P2-H2`, `P2-M4`). The text below is kept as the original statement of
+> deferred scope.
+
 This audit's snapshot date (2026-03-23) precedes the VC-first
 credential migration that landed across PRs 2–19. The remediation
 status table above is accurate as-of-date — every "FIXED" claim
@@ -607,3 +630,719 @@ A follow-up audit pass should specifically cover:
 5. **Anchor queue resilience** — `cardano::anchor_queue` does
    exponential backoff but persists `last_error`; ensure errors
    don't leak Blockfrost API tokens into log lines.
+
+---
+---
+
+# Pass 2 — 2026-08-18
+
+**Scope**: everything Pass 1 deferred, plus everything added since
+2026-03-23 — the VC gossip/request-response layer, the community plugin
+system (manifest → install → `plugin://` asset protocol → Wasmtime grader),
+the current Tauri security configuration and capability set, the macOS
+webview delegates, and the Rust + npm dependency trees.
+
+**Files audited**: `p2p/{vc_did,vc_status,vc_fetch,presentation,pinboard,archive,signing,validation,types,registry,guardian,device_sync}.rs`,
+`crypto/{key_registry,did,keystore,pairing}.rs`,
+`crates/alexandria-verify/src/vc/verify.rs`, `domain/vc/mod.rs`,
+`content_store/{pinboard,resolver,http}.rs`,
+`plugins/{registry,verifier,manifest,asset_protocol,wasm_runtime}.rs`,
+`commands/p2p.rs`, `src-tauri/tauri.conf.json`,
+`src-tauri/capabilities/default.json`, `macos_media_delegate.rs`,
+`src/components/plugin/{PluginIframe,PluginHost}.vue`,
+`.github/workflows/*.yml`, `Cargo.lock`, `package-lock.json`.
+
+**Summary**: 1 critical, 4 high, 6 medium, 4 low, 3 informational.
+
+### Remediation status (2026-08-18, branch `fix/security-audit-2026-08`)
+
+| Finding | Status | Notes |
+|---------|--------|-------|
+| P2-C1 | **FIXED** | Three independent layers, because one was what failed before: (1) `purge_precompiled_graders` deletes every `.cwasm` right after `copy_tree`, unconditionally; (2) it runs again on every `write_precompiled_grader` failure path — the branch that used to leave the attacker's file in place; (3) `compile_and_persist` records a BLAKE3 sidecar and `load_module` refuses to `deserialize` any artifact without a matching one, so the `SAFETY` comment is now backed by a check. Test: `a_bundle_cannot_smuggle_in_a_precompiled_grader`. |
+| P2-H1 | **FIXED** | `vc-status` documents carry a detached Ed25519 `proof` over `canonical_status_bytes(list_id, issuer, version, bits)`, verified against the issuer's self-resolving `did:key`. Unsigned and impostor-signed documents are dropped. `build_signed_status_document` is the only supported producer, so the two sides cannot drift. Bitmap capped at 1 MiB. Six tests including bitmap- and version-tampering. |
+| P2-H2 | **FIXED** | `FetchRequest` carries a `proof` over `canonical_fetch_bytes(credential_id, requestor, nonce)`; `handle_fetch_request` verifies it before consulting the subject or the allowlist. Test `claiming_to_be_the_subject_without_the_key_is_refused` covers exactly the reported attack. |
+| P2-H3 | **FIXED** | `fs:allow-read-file` narrowed from `$HOME/**` to `$DOWNLOAD`, `$DOCUMENT`, `$DESKTOP` — the directories the two call sites actually pick files from — with dotfiles denied. An allowlist rather than a denylist, since the denylist's misses (`$HOME/.local/share`, `$HOME/AppData`) were the finding. |
+| P2-H4 | **FIXED** | The iframe `allow` attribute is built from **granted** capabilities, not declared ones, and the macOS delegate answers from a host-recorded grant table (`plugin_set_media_grants` / `plugin_clear_media_grants`) instead of granting unconditionally. Grants are cleared on plugin teardown. Device-orientation stays auto-granted, now with the reasoning written down rather than left as "symmetry". |
+| P2-M1 | **FIXED** | `handle_did_message` requires that the envelope's public key be the one the announced DID resolves to. Closes the key-rollback primitive and the unauthenticated `key_registry` insert that manufactured P2-H1's precondition. Four tests. |
+| P2-M2 | **FIXED** | `PluginManifest.files` pins BLAKE3 per bundle-relative path, enforced at install in both directions — a changed file **and** an unlisted extra file are both refused. Optional, so pre-existing manifests still install. Four tests. |
+| P2-M3 | **FIXED** | `is_valid_plugin_cid` requires 64 lowercase hex, checked in `asset_protocol::handle` before the CSP header is built and again in `resolve_asset` before the path join. Closes the traversal and the `;`-in-CID CSP injection together. |
+| P2-M4 | **FIXED** | Commitments are verified on ingest against `pinner_did`'s resolved key, and signed at declaration time rather than written as `"unsigned"` and fixed up later — so the durable state is never a row peers would refuse. Four tests. |
+| P2-M5 | **FIXED** | Rebuilt on the `url` crate: userinfo refused, host resolved and **every** resolved address checked, allowlist-of-public rather than blocklist-of-private, IPv4-mapped IPv6 normalised. The redirect policy re-runs the same check on each hop. Writing the tests caught a bug in the fix itself — `to_ipv4()` maps `::1` to the routable `0.0.0.1` — now `to_ipv4_mapped()` only, with a regression case. |
+| P2-M6 | **PARTIAL** | Fixed: DOMPurify (via `npm audit fix`, now 3.4.13), `nanoid`, `wasmtime` 36.0.12 → 36.0.13, `webbrowser` 1.2.1 → 1.2.4. `npm audit` reports zero. Accepted with written reasoning in `.cargo/audit.toml`: `tract-nnef`, `rkyv`, two `quick-xml` copies, two `hickory-proto`. See the correction below — the tract entry is not what the audit said it was. |
+| P2-L1 | **FIXED** | `encrypted` and `key_id` folded into `canonical_signed_bytes`, length-prefixed so `None` and `Some("")` differ. Three tests. |
+| P2-L2 | **FIXED** | Dedup keys on `(topic, stake_address, timestamp, payload)`. Tests cover the suppression primitive (two authors, identical payload) and confirm a verbatim replay is still caught. |
+| P2-L3 | **FIXED** | `ActivityPull` requires a `sealed_marker` opening to `pull:<link_id>`, matching what `Revoke` already required. Two tests. |
+| P2-L4 | **FIXED** | All 66 third-party action references across seven workflows pinned to full commit SHAs with the tag in a trailing comment. |
+
+`cargo audit` and `npm audit` both report zero, and `npm audit` was added
+alongside the existing `cargo audit` CI job.
+
+### Correction to P2-M6 (tract-nnef)
+
+The finding said the `tract-nnef` OOB-read advisory was "not remotely reachable
+today" because models are `include_bytes!`-bundled. **That was wrong.**
+`sentinel_load_dao_classifier` (`commands/sentinel_ml.rs`) accepts arbitrary
+ONNX bytes over IPC that the frontend fetched from the network, and its doc
+comment explicitly deferred verification to the caller — so attacker-supplied
+model bytes did reach the parser.
+
+The upgrade is genuinely blocked: tract 0.21.16 pins `half = "=2.4.1"` while
+naga 27 (via wgpu → eframe → the vendored `moq-media`) needs `half ^2.5`, and
+no version satisfies both. So the fix is at the call site instead — the command
+now refuses any blob whose BLAKE3 is not a ratified `sentinel_priors.cid`, and
+`.cargo/audit.toml` records that this mitigation is what the acceptance rests
+on.
+
+### Not fixed
+
+- **P2-M6 residue** — the six accepted advisories above. Each names in
+  `.cargo/audit.toml` why it is not exploitable here and what would change that.
+- **`clippy::items_after_test_module` in `cli/src/tui/app.rs`** — pre-existing
+  and unrelated to security; surfaced only because this pass ran clippy with
+  `--all-targets`, which CI does not. An attempt to move the trailing item
+  above the test module split a doc comment from its function, so it was
+  reverted rather than left half-done.
+- Everything under "Not re-audited in Pass 2" below.
+
+| # | Severity | Finding |
+|---|----------|---------|
+| P2-C1 | CRITICAL | Attacker-supplied `.cwasm` survives plugin install and is `unsafe`-deserialized → native code execution outside the Wasmtime sandbox |
+| P2-H1 | HIGH | `vc-status` gossip has no issuer authentication — any peer can forge or erase any issuer's revocation list |
+| P2-H2 | HIGH | `vc-fetch` trusts a self-asserted `requestor` DID — allowlist and private-credential gating are bypassable |
+| P2-H3 | HIGH | `fs:allow-read-file` scoped to `$HOME/**`; the deny list misses the Linux/Windows app-data directory holding the vault |
+| P2-H4 | HIGH | macOS WKWebView auto-grants camera/microphone to any plugin that *declares* the capability, bypassing the in-app consent prompt |
+| P2-M1 | MEDIUM | `vc-did` gossip accepts unauthenticated key-rotation records for arbitrary DIDs (key-rollback + unbounded table growth) |
+| P2-M2 | MEDIUM | Plugin CID covers only `manifest.json` — UI bundle contents are neither content-addressed nor attested |
+| P2-M3 | MEDIUM | `plugin_cid` is not charset-validated before `Path::join` and CSP-header interpolation |
+| P2-M4 | MEDIUM | PinBoard commitments are ingested from gossip without verifying the signature they carry |
+| P2-M5 | MEDIUM | SSRF blocklist in `content_store::resolver` is bypassable (userinfo, integer-literal IPs, DNS names, redirects) |
+| P2-M6 | MEDIUM | Known-vulnerable dependencies: DOMPurify sanitizer bypass, `rkyv`, `tract-nnef`, `wasmtime`, `webbrowser`, `nanoid` |
+| P2-L1 | LOW | `encrypted` / `key_id` envelope fields are outside the signed canonical bytes |
+| P2-L2 | LOW | Gossip dedup key is the payload hash alone — cross-topic and cross-author collisions |
+| P2-L3 | LOW | Guardian `ActivityPull` builds and seals a full snapshot before proving key possession |
+| P2-L4 | LOW | GitHub Actions pinned by tag, not by commit SHA |
+| P2-I1 | INFO | Wasmtime grader sandbox is correctly configured (zero imports, fuel, memory cap, deterministic) |
+| P2-I2 | INFO | Device-sync and guardian pairing authentication chains are sound |
+| P2-I3 | INFO | Pass 1 remediations re-verified: Argon2id KDF, canonical signed envelope, LRU dedup, restrictive CSP |
+
+---
+
+## CRITICAL
+
+### P2-C1: Untrusted precompiled `.cwasm` survives plugin install and is executed as native code
+
+**Files**: `src-tauri/src/plugins/registry.rs:145` (`copy_tree`), `:75-91`
+(`write_precompiled_grader`), `src-tauri/src/plugins/wasm_runtime.rs:380`
+(`Module::deserialize_file`)
+
+`install_from_directory` copies the entire community bundle verbatim:
+
+```rust
+copy_tree(src_dir, &dest_dir).map_err(|e| format!("failed to copy plugin bundle: {e}"))?;
+```
+
+`copy_tree` (`registry.rs:722-744`) filters symlinks only. It does **not**
+filter `grader.<os>-<arch>-<backend>.cwasm`, the precompiled-native-code
+artifact. The code immediately after is intended to neutralise that — the
+comment at `:157-158` says *"Never trust a `.cwasm` a community bundle might
+ship — regenerate it locally"* — but the regeneration is best-effort:
+
+```rust
+fn write_precompiled_grader(dest_dir: &Path, grader_bytes: &[u8]) {
+    match crate::plugins::wasm_runtime::precompile_grader(grader_bytes) {
+        Ok(cwasm) => { /* overwrites the shipped file */ }
+        Err(e) => log::warn!("failed to precompile grader (will JIT on first grade): {e}"),
+    }
+}
+```
+
+On the error branch the attacker's file is left in place. At grade time,
+`wasm_runtime.rs:378-390` **prefers** the on-disk `.cwasm`:
+
+```rust
+// SAFETY: `path` was written by `precompile_grader` on this machine ...
+match unsafe { Module::deserialize_file(&self.engine, path) } {
+```
+
+The `SAFETY` comment states an invariant the install path does not establish.
+Wasmtime documents `deserialize` as unsafe precisely because its version/config
+header is a compatibility check, not an authenticity check.
+
+**Exploit**: publish a bundle with (a) a validly signed `manifest.json`
+declaring a grader, (b) a `grader.wasm` whose BLAKE3 matches
+`manifest.grader.cid` but which fails Cranelift validation, and (c) a crafted
+`grader.<os>-<arch>-cranelift.cwasm`. The blake3 check at
+`commands/plugins.rs:639-643` compares hashes and passes. `precompile_grader`
+fails, leaving (c) intact. The first grade `deserialize`s (c).
+
+**Impact**: arbitrary native code execution in the host process on first
+grading — full escape from the Wasmtime sandbox the whole plugin design rests
+on. The process holds the unlocked vault, the Cardano signing key and the full
+IPC surface.
+
+**Fix** (defence in depth, all three):
+1. In `install_from_directory`, after `copy_tree`, delete every `*.cwasm` under
+   `dest_dir` — or reject the bundle outright if one is present. A bundle has
+   no legitimate reason to ship one.
+2. Make `write_precompiled_grader` remove any existing `.cwasm` on the failure
+   branch rather than logging and returning.
+3. Record the BLAKE3 of each `.cwasm` this machine writes (e.g. in
+   `plugin_installed`), and verify it before `deserialize_file`. Then the
+   `SAFETY` comment is backed by a check rather than by an assumption.
+
+---
+
+## HIGH
+
+### P2-H1: `vc-status` gossip applies revocation lists with no issuer authentication
+
+**File**: `src-tauri/src/p2p/vc_status.rs:34-105`, dispatched at
+`src-tauri/src/commands/p2p.rs:192`
+
+The module header claims *"Receivers verify the issuer is known to their
+`key_registry` (otherwise they have no public key to validate the inner
+signature against)"*. No inner signature is validated anywhere in the file.
+The only gate is existence:
+
+```rust
+let known: i64 = db.conn().query_row(
+    "SELECT COUNT(*) FROM key_registry WHERE did = ?1", ...)?;
+if known == 0 { return Ok(StatusIngest::IgnoredUnknownIssuer); }
+```
+
+`TOPIC_VC_STATUS` is not in `registry::is_privileged_topic`
+(`p2p/registry.rs:477-487`), so the envelope-level identity binding does not
+apply either. Any peer that can publish on the topic can therefore write any
+issuer's status list, with attacker-chosen `version` and `bits`:
+
+```rust
+"... ON CONFLICT(list_id) DO UPDATE SET version = excluded.version, bits = excluded.bits, ..."
+```
+
+`verify::verify_credential` reads those bits directly
+(`crates/alexandria-verify/src/vc/verify.rs:73-83`) and sets `revoked`.
+
+**Impact**, all remotely triggerable by any network participant:
+- **Mass forged revocation** — set every bit for a real issuer and every
+  credential that issuer ever signed reads as revoked on every receiving node.
+- **Forged un-revocation** — publish `version = prev + 1` with zeroed bits and
+  genuine revocations disappear. This is the more damaging direction: a
+  revoked credential silently returns to `Accept`.
+- **Permanent lockout** — publish `version = i64::MAX` and the rollback guard
+  (`if parsed.version <= prev`) then rejects every subsequent update from the
+  legitimate issuer, forever.
+- The `key_registry` precondition is not a real barrier: `P2-M1` lets any peer
+  insert any DID into that table first.
+
+`bits` is also unbounded — `base64::decode` then straight into the row, with
+no cap on the decoded length.
+
+**Fix**: require the status document to carry an issuer signature over
+`(list_id, version, bits)` and verify it against the issuer DID's key before
+the upsert; or add `TOPIC_VC_STATUS` to the privileged-topic set and require
+that the envelope signer resolve to the `issuer` DID. Cap the decoded `bits`
+length.
+
+---
+
+### P2-H2: `vc-fetch` authorises on a self-asserted requestor DID
+
+**File**: `src-tauri/src/p2p/vc_fetch.rs:41-80`, wired at
+`src-tauri/src/p2p/network.rs:2020-2046`
+
+The access-control decision is made against a field of the request body:
+
+```rust
+pub struct FetchRequest {
+    pub credential_id: String,
+    pub requestor: Did,   // self-asserted, unsigned
+    pub nonce: String,    // never read
+}
+
+if req.requestor.as_str() == subject_did
+    || is_allowlisted(db, &req.credential_id, req.requestor.as_str())
+```
+
+Nothing proves the caller controls `requestor`. The libp2p `PeerId` — which
+*is* authenticated, by the Noise handshake — is available at the call site
+(`network.rs:2020` binds `peer`) and is discarded.
+
+Subject DIDs are public: they are broadcast on `TOPIC_VC_DID`, appear inside
+every credential, and are the primary key of the talent index. So any peer can
+send `requestor = <the subject's own DID>` and take branch 2, retrieving any
+credential the node holds regardless of the `credential_allowlist`.
+
+**Impact**: the entire per-credential privacy model on the pull path is
+bypassable. Private credentials — the default state — are readable by any peer
+that knows or guesses a `credential_id`.
+
+The `nonce` field is accepted and never checked, so there is also no freshness
+or replay binding on this protocol.
+
+**Fix**: make the request prove control of `requestor` — either sign
+`(credential_id, requestor, nonce, timestamp)` with the requestor's DID key and
+verify it here, or bind the requestor DID to the authenticated `PeerId` at
+connection time and pass the `PeerId` into `handle_fetch_request`. Track
+`nonce` in a seen-cache with a freshness window.
+
+---
+
+### P2-H3: `fs:allow-read-file` grants `$HOME/**` with a deny list that misses the vault
+
+**File**: `src-tauri/capabilities/default.json`
+
+Pass 1's finding `I-3` recorded the capability set as "no filesystem access".
+That is no longer true:
+
+```json
+{ "identifier": "fs:allow-read-file",
+  "allow": [{ "path": "$HOME/**" }],
+  "deny":  [ "$HOME/.ssh/**", "$HOME/.gnupg/**", "$HOME/.aws/**",
+             "$HOME/.config/**", "$HOME/Library/**" ] }
+```
+
+The frontend can read any file under `$HOME` except those five subtrees. The
+deny list is macOS-shaped: `$HOME/Library/**` covers the app-data directory on
+macOS, but on Linux Tauri's app-data path is `$HOME/.local/share/<bundle>/`
+and on Windows it is under `$HOME/AppData/`. Neither is denied. That directory
+holds the per-profile `.stronghold` snapshot, `vault_salt.bin` and the SQLite
+database.
+
+Also absent from the deny list: `$HOME/.local/share/keyrings`,
+`$HOME/.mozilla`, `$HOME/.password-store`, `$HOME/.gitconfig`,
+`$HOME/.docker/config.json`, and every cryptocurrency wallet directory.
+
+**Impact**: on Linux and Windows, any frontend code-execution primitive — the
+XSS class Pass 1's `H-5` addressed, or a compromised dependency in the Vue
+bundle — reads the encrypted vault and salt straight off disk and can then
+brute-force offline at leisure. Argon2id (`C-1`, fixed) raises the cost of that
+offline attack but does not prevent the exfiltration.
+
+**Fix**: replace the `$HOME/**` allow with the narrowest set of scopes the two
+call sites actually need. Only `useSkillBootstrap.ts:39` and
+`PluginHost.vue:302` use the plugin, and both read a file the user just chose
+in a native picker — that is `$DOWNLOAD`, `$DOCUMENT` and `$DESKTOP`, not all
+of `$HOME`. If a broad scope must stay, add `$HOME/.local/share/**`,
+`$HOME/AppData/**` and `$HOME/.local/state/**` to the deny list.
+
+---
+
+### P2-H4: macOS auto-grants camera and microphone on capability *declaration*, not on consent
+
+**Files**: `src-tauri/src/macos_media_delegate.rs:31-105`,
+`src/components/plugin/PluginIframe.vue:119-139,492`
+
+Two independent decisions combine badly.
+
+The Vue host delegates the Permissions-Policy feature to the iframe based on
+what the plugin's manifest *declares*:
+
+```ts
+const allowAttribute = computed(() => {
+  const map = { microphone: 'microphone', camera: 'camera', ... }
+  for (const cap of props.declaredCapabilities) { ... }   // declared, not granted
+})
+```
+
+and the macOS `WKUIDelegate` answers every capture request with an
+unconditional grant:
+
+```rust
+const WK_PERMISSION_DECISION_GRANT: i64 = 1;
+unsafe extern "C-unwind" fn request_media_capture(
+    _this, _cmd, _webview, _origin, _frame, _capture_type, decision_handler) {
+    // `_origin` and `_capture_type` are both ignored
+    (*decision_handler).call((WK_PERMISSION_DECISION_GRANT,));
+}
+```
+
+The in-app consent UX (`PluginHost.vue` → `PermissionPrompt.vue`) runs over the
+postMessage bridge. A plugin is not obliged to use the bridge. It can call
+`navigator.mediaDevices.getUserMedia()` directly from its own iframe: the
+feature policy is already delegated at mount time, and WebKit grants without
+prompting.
+
+**Impact**: on macOS, any installed plugin that lists `camera` or `microphone`
+in its manifest can capture audio/video silently, with neither an OS prompt nor
+the app's own prompt. Given the product context — proctored assessment,
+learners including minors, guardian links — this is the worst place for a
+silent capture path.
+
+**Fix**:
+1. Derive `allowAttribute` from *granted* capabilities, not declared ones. The
+   iframe is already keyed on `allowAttribute`, so promoting a grant re-mounts
+   it with the feature enabled.
+2. In `request_media_capture`, check `_origin` is a `plugin://` origin and
+   consult a host-side grant table keyed by plugin CID and capture type before
+   returning `GRANT`; return `WK_PERMISSION_DECISION_DENY` otherwise.
+
+---
+
+## MEDIUM
+
+### P2-M1: `vc-did` gossip accepts unauthenticated key rotations for arbitrary DIDs
+
+**File**: `src-tauri/src/p2p/vc_did.rs:28-94`, dispatched at
+`src-tauri/src/commands/p2p.rs:190`
+
+`handle_did_message` never relates the message sender to the DID in the
+payload. `message.public_key` and `message.stake_address` are unused. A
+rotation announcement for any DID from any peer closes that DID's open registry
+row and opens a new one:
+
+```rust
+if let Some(rotated_to) = parsed.rotated_to {
+    conn.execute("UPDATE key_registry SET valid_until = ?2, rotated_by = ?3 \
+                  WHERE did = ?1 AND valid_until IS NULL", ...)?;
+    conn.execute("INSERT OR IGNORE INTO key_registry \
+                  (did, key_id, public_key_hex, valid_from, valid_until, rotated_by) \
+                  VALUES (?1, ?2, '', ?3, NULL, NULL)", ...)?;
+```
+
+The inserted row carries an **empty** `public_key_hex`. In
+`resolve_issuer_key` (`alexandria-verify/src/vc/verify.rs:138-149`) an empty
+key fails `verifying_key_from_slice` and the resolver falls through to
+`did:key` self-resolution — which is why this is not a signature-forgery bug.
+
+It is a **key-rollback** bug. After a legitimate local rotation
+(`crypto/key_registry.rs:81-145` stores the real post-rotation pubkey), a
+forged gossip rotation closes that row and inserts an empty-key row covering
+the present. Verification then falls back to `did:key` self-resolution — the
+*pre-rotation* key. If the rotation was performed because the old key was
+compromised, an attacker holding it can restore its acceptance network-wide.
+
+Secondarily, the bare-announcement branch is an unauthenticated
+`INSERT OR IGNORE` into `key_registry` with no rate limit or cap — unbounded
+local table growth, and the row that satisfies `P2-H1`'s "known issuer" gate.
+
+**Fix**: require that the envelope signer resolve to the announced DID —
+`did_from_verifying_key(&message.public_key) == parsed.did` for `did:key`, or a
+registry-backed binding otherwise. Refuse rotations whose new row would carry
+an empty `public_key_hex`; carry the rotated-to key material in the payload and
+verify it. Cap unauthenticated DID inserts per peer.
+
+---
+
+### P2-M2: Plugin CID covers only the manifest, not the bundle
+
+**File**: `src-tauri/src/plugins/verifier.rs:15-21`, `registry.rs:117-125`
+
+```rust
+pub fn compute_plugin_cid(manifest_bytes: &[u8]) -> String {
+    blake3::hash(manifest_bytes).to_hex().to_string()
+}
+```
+
+The identity of a plugin — the value courses pin, the value the Plugin DAO
+attests over on `TOPIC_PLUGIN_ATTESTATIONS`, the value that becomes the
+`plugin://<cid>` origin — is a hash of `manifest.json` alone. The manifest
+commits to the grader via `PluginGraderRef { cid, blake3 }`
+(`domain/plugin.rs:165-170`) and that *is* checked at grade time
+(`commands/plugins.rs:639-643`). Nothing commits to `ui/index.html` or any
+other bundle file.
+
+**Impact**: two bundles with byte-identical manifests, identical signatures and
+identical CIDs can ship completely different iframe code. A DAO attestation
+over `(plugin_cid, grader_cid)` therefore says nothing about the UI the learner
+actually runs, and a compromised distribution path can swap the UI without
+invalidating the author signature or the attestation.
+
+**Fix**: add a `files` map to the manifest — relative path → BLAKE3 — covering
+every file in the bundle, verified at install and on each asset read; or make
+the CID a Merkle root over the bundle tree rather than a hash of one file.
+
+---
+
+### P2-M3: `plugin_cid` is unvalidated before path join and CSP interpolation
+
+**File**: `src-tauri/src/plugins/registry.rs:748-776`,
+`src-tauri/src/plugins/asset_protocol.rs:51-127`
+
+`resolve_asset` guards the *relative path* and not the CID:
+
+```rust
+if relative_path.starts_with('/') || relative_path.contains("..") { return Err(...) }
+let root = plugins_dir.join(plugin_cid);          // plugin_cid unchecked
+let requested = root.join(relative_path);
+if !canonical_requested.starts_with(&canonical_root) { return Err(...) }
+```
+
+The containment check compares against `canonical_root`, which is itself
+derived from the untrusted `plugin_cid` — so a CID that escapes moves the root
+along with it and the check passes trivially. The only thing standing between
+that and an arbitrary-file-read is URL normalisation in the webview, which
+differs per platform (`plugin://<cid>/…` on WKWebView/webkit2gtk vs
+`http://plugin.localhost/<cid>/…` on WebView2/Android) and is not a security
+control this code owns.
+
+Separately, the CID is interpolated into a response header value:
+
+```rust
+let csp = PLUGIN_CSP_TEMPLATE.replace("{cid}", &plugin_cid).replace("{nonce}", &nonce);
+```
+
+A CID containing `;` injects CSP directives into that plugin's own policy.
+
+**Fix**: validate `plugin_cid` against `^[0-9a-f]{64}$` (it is a BLAKE3 hex
+digest) at the top of `asset_protocol::handle` and again in `resolve_asset`,
+rejecting anything else before either the join or the header build.
+
+---
+
+### P2-M4: PinBoard commitments are ingested without verifying their signature
+
+**Files**: `src-tauri/src/p2p/pinboard.rs:20-24`,
+`src-tauri/src/content_store/pinboard.rs:96-118`
+
+`PinboardCommitment` carries `signature` and `public_key` fields. The ingest
+path stores them and checks neither:
+
+```rust
+pub fn handle_pinboard_message(db: &Database, message: &SignedGossipMessage) -> Result<(), String> {
+    let commit: PinboardCommitment = serde_json::from_slice(&message.payload)?;
+    crate::content_store::pinboard::record_observation(db.conn(), &commit)
+}
+```
+
+`record_observation` → `insert_observation` is an unconditional
+`INSERT OR IGNORE`. There is no signature verification anywhere in the module,
+and the local declaration path writes the literal string `"unsigned"` into the
+column (`content_store/pinboard.rs:32-34`) — so the field is a control that
+exists in the schema and is enforced nowhere.
+
+**Impact today** is bounded: `list_pinners_for` is not yet consulted by
+`content_store::storage`'s eviction engine, which still keys off `auto_unpin`.
+So the live impact is an unauthenticated, uncapped, attacker-controlled write
+into `pinboard_observations` — local DB growth and poisoned redundancy
+reporting.
+
+**Impact when §12/§20.4 eviction lands** is data loss: forged commitments
+claiming that N peers pin a subject would let a node conclude its own copy is
+redundant and evict content that in fact exists nowhere else.
+
+**Fix**: verify `signature` over the canonical commitment fields against
+`public_key`, and check that `public_key` resolves to `pinner_did`, before
+`record_observation`. Do it now, before the eviction policy starts trusting the
+table.
+
+---
+
+### P2-M5: SSRF blocklist is bypassable
+
+**File**: `src-tauri/src/content_store/resolver.rs:45-105`, called at `:278`
+
+Pass 1's `L-7` was marked **FIXED**; the fix is a string-parsed host check and
+several standard bypasses get through it:
+
+```rust
+let authority = url.split("://").nth(1)...split('/').next()...;
+let host = /* strips port, unwraps [..] for v6 */;
+let blocked_hosts = ["localhost", "0.0.0.0"];
+if let Ok(ip) = host.parse::<std::net::IpAddr>() { /* private-range checks */ }
+```
+
+- **Userinfo** — `http://example.com@127.0.0.1/x` yields
+  `host = "example.com@127.0.0.1"`, which is neither in `blocked_hosts` nor
+  parseable as an `IpAddr`, so it is allowed. reqwest then connects to
+  127.0.0.1.
+- **Integer / octal literals** — `http://2130706433/` is loopback to every
+  resolver but `parse::<IpAddr>()` rejects it, so it is allowed.
+- **DNS names that resolve privately** — `127.0.0.1.nip.io`,
+  `metadata.google.internal`, or any attacker-controlled A record pointing at
+  169.254.169.254. The check never resolves the name.
+- **IPv4-mapped IPv6** — `[::ffff:127.0.0.1]` parses as `V6`, and
+  `Ipv6Addr::is_loopback()` is false for the mapped form.
+- **Redirects** — `content_store/http.rs:36-45` builds the client with a
+  timeout and no `redirect::Policy`, so reqwest's default follows up to 10
+  hops. A public URL that 302s to `http://169.254.169.254/…` is never
+  re-checked.
+
+**Fix**: parse with the `url` crate rather than by splitting; reject any URL
+with userinfo; resolve the host and check *every* resolved address against the
+private/reserved ranges (including `to_ipv4_mapped()`); set
+`redirect::Policy::custom(...)` that re-runs the same check on each hop, or
+`Policy::none()`.
+
+---
+
+### P2-M6: Known-vulnerable dependencies
+
+`cargo audit` and `npm audit --omit=dev`, run 2026-08-18.
+
+| Advisory | Crate/pkg | Severity | Relevance |
+|----------|-----------|----------|-----------|
+| GHSA-55q2-fjhq-7xh7 | `dompurify` ≤3.4.12 | moderate | **The sanitizer Pass 1 `H-5` relies on.** `IN_PLACE` hook removal leaves a detached subtree executable → XSS. Upgrade first. |
+| RUSTSEC-2026-0235 | `rkyv` <0.8.17 | — | OOB read on archives containing `Rc`/`Arc`. |
+| RUSTSEC-2026-0217 | `tract-nnef` | 6.1 med | Integer overflow → OOB read on model load. Models are `include_bytes!`-bundled (`sentinel/face_detect.rs:32`), so not remotely reachable today — but adversarial-prior federation is the direction of travel. |
+| RUSTSEC-2026-0222 | `wasmtime` | 3.8 low | Type-index mixup between engines. |
+| RUSTSEC-2026-0257 | `webbrowser` <1.2.2 | — | `BROWSER` argument injection on Unix. |
+| GHSA-2v37-7h3g-55p8 | `nanoid` <3.3.18 | high | Infinite loop on zero-size generator. |
+| RUSTSEC-2026-0253 / -0002 | `lru` 0.12.5 & 0.18.1 | unsound | Panic-safety UAF in `pop()`. `lru` is the dedup cache from Pass 1 `H-4`. |
+
+Roughly 28 further `unmaintained` warnings (the GTK3 binding family, `paste`,
+`bincode`, the `unic-*` family). Those are hygiene, not exposure.
+
+**Fix**: `npm audit fix` for DOMPurify and nanoid; bump `rkyv`, `wasmtime`,
+`webbrowser` and `tract`; add `cargo-deny` alongside the existing `cargo-audit`
+CI step (Pass 1 `L-4`) with an explicit `deny.toml` so unmaintained-crate
+warnings are triaged rather than accumulated.
+
+---
+
+## LOW
+
+### P2-L1: `encrypted` and `key_id` are outside the signed canonical bytes
+
+**File**: `src-tauri/src/p2p/signing.rs:28-40`, `p2p/types.rs:122-127`
+
+`canonical_signed_bytes` covers `topic || timestamp || stake_address ||
+payload`. `SignedGossipMessage` has two more fields:
+
+```rust
+#[serde(default)] pub encrypted: bool,
+#[serde(default)] pub key_id: Option<String>,
+```
+
+Both are attacker-mutable without invalidating the signature. No consumer reads
+either today — every producer writes `encrypted: false` and no code branches on
+it — so this is latent rather than live. It becomes exploitable the moment
+something selects a decryption key from `key_id` or branches on `encrypted`,
+which is exactly what those fields exist for.
+
+**Fix**: fold both into the canonical hash now, before a consumer appears.
+
+---
+
+### P2-L2: Dedup key is the payload hash alone
+
+**File**: `src-tauri/src/p2p/validation.rs:215-231`
+
+```rust
+let hash = hex::encode(blake2b_256(&message.payload));
+```
+
+Two consequences: an identical payload published by two different authors, or
+on two different topics, is dropped as a duplicate — so one peer can pre-seed
+the cache to suppress another's message. And because the LRU holds 100k
+entries, a peer that floods unique payloads evicts genuine entries and reopens
+a replay window for anything still inside the ±5-minute freshness window.
+
+**Fix**: key on `blake2b_256(topic || stake_address || timestamp || payload)`,
+and give entries a TTL of twice the freshness window so eviction is driven by
+age rather than by an attacker's fill rate.
+
+---
+
+### P2-L3: Guardian `ActivityPull` works before proving key possession
+
+**File**: `src-tauri/src/p2p/guardian.rs:~370-395`
+
+`ActivityPull { link_id }` carries no sealed marker. The handler looks the key
+up by `link_id`, then builds a full activity snapshot across all six
+`GUARDIAN_SYNC_TABLES` and seals it. Confidentiality holds — only the real
+guardian can open the reply — but any peer that learns a `link_id` can make the
+ward serialise its entire synced dataset on demand. `Revoke` gets this right
+(`sealed_marker` must open to `b"revoke:<link_id>"`); `ActivityPull` should
+match it.
+
+**Fix**: require a sealed marker on `ActivityPull` too, and rate-limit per link.
+
+---
+
+### P2-L4: GitHub Actions pinned by tag
+
+**File**: `.github/workflows/*.yml`
+
+`actions/checkout@v5`, `actions/setup-node@v6`, `swatinem/rust-cache@v2`,
+`android-actions/setup-android@v4`, `reactivecircus/android-emulator-runner@v2`
+and `dtolnay/rust-toolchain@stable` (`ci.yml:523`) are mutable references. The
+release workflows hold `TAURI_SIGNING_PRIVATE_KEY` and the Apple signing
+material, so a compromised action version reaches code-signing secrets.
+
+Positives worth recording: triggers are `pull_request` (never
+`pull_request_target`), `permissions: contents: read` is set at workflow level,
+and no workflow interpolates attacker-controlled text (`github.head_ref`, PR
+title/body) into a `run:` block.
+
+**Fix**: pin every third-party action to a full commit SHA with the tag in a
+trailing comment; enable Dependabot for `github-actions`.
+
+---
+
+## INFO (positive findings)
+
+### P2-I1: The Wasmtime grader sandbox is correctly built
+
+**File**: `src-tauri/src/plugins/wasm_runtime.rs`
+
+`Linker::new(&self.engine)` with no host functions defined — the guest has zero
+imports and therefore no syscall surface at all. `consume_fuel(true)` with a
+per-grade budget makes termination independent of wall-clock. `StoreLimits`
+caps memory. The config is pinned for determinism, and
+`pulley_matches_native_fuel_and_score` asserts that the iOS interpreter and the
+native JIT burn identical fuel and produce identical scores — a strong
+regression guard. This design is sound; `P2-C1` is a flaw in what gets *loaded*
+into it, not in the sandbox itself.
+
+### P2-I2: Device-sync and pairing authentication chains are sound
+
+**Files**: `src-tauri/src/p2p/device_sync.rs`, `src-tauri/src/crypto/pairing.rs`,
+`src-tauri/src/p2p/sync.rs:1035-1061`
+
+The documented four-step chain holds up: the `PeerId` is Noise-authenticated,
+the shared key is looked up per peer, the payload is AES-256-GCM sealed so a
+non-paired peer can neither forge nor read, and same-user is checked
+separately. Pairing codes carry a 256-bit `OsRng` key, are stored only as
+`blake2b_256` of the code string, are single-use (`take_pending_pairing`
+deletes unconditionally) and expire. `copy_tree` skipping symlinks
+(`registry.rs:729-735`) is the right call too.
+
+### P2-I3: Pass 1 remediations re-verified
+
+Spot-checked against current source: `crypto/keystore.rs:298-312` uses Argon2id
+at 64 MB / 3 iterations / 4 lanes (`C-1`); `p2p/signing.rs:28-40` signs a
+canonical hash over every envelope field, with tamper tests per field (`H-1`);
+`p2p/validation.rs:82,215-231` uses a capacity-bounded `LruCache` with no
+full-clear (`H-4`); `tauri.conf.json` carries a restrictive CSP with a
+nonce-based `style-src` (`M-8`); the updater `pubkey` is a real minisign key
+(`H-6`). The `stake_pubkey_registry` identity gate (`H-3`) is present and
+fails *closed* when a privileged-topic message arrives with no active profile
+DB — a good default, and test-enforced at
+`validation.rs:584-606`.
+
+---
+
+## Pass 2 remediation priority
+
+| # | Finding | Effort | Why first |
+|---|---------|--------|-----------|
+| 1 | P2-C1: strip `.cwasm` from bundles at install | Low | Sandbox escape → host RCE. Three-line fix. |
+| 2 | P2-M6 (DOMPurify): `npm audit fix` | Low | The sanitizer behind the `H-5` XSS-to-wallet chain is itself bypassable. |
+| 3 | P2-H1: authenticate `vc-status` documents | Medium | Forged un-revocation silently restores revoked credentials network-wide. |
+| 4 | P2-H2: bind `vc-fetch` requestor to a proof or PeerId | Medium | Whole pull-path privacy model is currently decorative. |
+| 5 | P2-H4: grant-based `allow`, origin-checked delegate | Low | Silent camera/mic on macOS, with minors in scope. |
+| 6 | P2-H3: narrow the `fs` scope | Low | Vault readable from the frontend on Linux/Windows. |
+| 7 | P2-M1: bind `vc-did` rotations to the signer | Medium | Key-rollback undoes a compromise-driven rotation. |
+| 8 | P2-M3: validate `plugin_cid` charset | Low | One regex; closes a traversal and a CSP-injection at once. |
+| 9 | P2-M4: verify PinBoard signatures | Low | Cheap now; becomes data loss once eviction consults the table. |
+| 10 | P2-M5: rebuild the SSRF guard on `url` + resolution | Medium | Current guard is bypassed by four one-line payloads. |
+| 11 | P2-M2: content-address the whole bundle | Medium | Attestations mean little while they cover only the manifest. |
+| 12 | P2-L1: fold `encrypted`/`key_id` into the signature | Low | Fix before a consumer starts trusting them. |
+| 13 | P2-L2, P2-L3, P2-L4 | Low | Hardening. |
+
+---
+
+## Not re-audited in Pass 2
+
+Named so the next pass knows where the gaps are:
+
+- `cardano/` — the transaction builders, `gov_onchain.rs`, `operator.rs`,
+  treasury handling and the Plutus data encoders. Pass 1 covered `blockfrost.rs`
+  only, and the on-chain governance bridge landed after it.
+- `assessment/` and `aggregation/` — anti-gaming (§15) and independence
+  weighting are adversarial by design and have never had a dedicated pass.
+- `classroom/` — group-key distribution and the encrypted classroom topics.
+- `sentinel/` — the integrity/proctoring pipeline beyond the model-loading
+  surface, and the client-trust boundary Pass 1 recorded as `L-2`.
+- `cli/` — `alex vault` and the credential subcommands.
+- `crates/{live,iroh-moq,moq-media}` — the vendored media stack.

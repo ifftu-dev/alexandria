@@ -80,14 +80,154 @@ fn write_precompiled_grader(dest_dir: &Path, grader_bytes: &[u8]) {
     #[cfg(grader)]
     match crate::plugins::wasm_runtime::precompile_grader(grader_bytes) {
         Ok(cwasm) => {
-            if let Err(e) = fs::write(dest_dir.join(grader_cwasm_filename()), &cwasm) {
+            let cwasm_path = dest_dir.join(grader_cwasm_filename());
+            if let Err(e) = fs::write(&cwasm_path, &cwasm) {
                 log::warn!("failed to write precompiled grader: {e}");
+                // A half-written or absent artifact must not be left where the
+                // loader will `deserialize` it.
+                purge_precompiled_graders(dest_dir);
+            } else if let Err(e) = fs::write(
+                cwasm_digest_path(&cwasm_path),
+                blake3::hash(&cwasm).to_hex().as_str(),
+            ) {
+                // Without the digest the loader will refuse the artifact and
+                // JIT instead, which is slow but correct. Remove it anyway so
+                // the state on disk is one thing rather than two.
+                log::warn!("failed to write precompiled grader digest: {e}");
+                purge_precompiled_graders(dest_dir);
             }
         }
-        Err(e) => log::warn!("failed to precompile grader (will JIT on first grade): {e}"),
+        Err(e) => {
+            log::warn!("failed to precompile grader (will JIT on first grade): {e}");
+            // The failure branch is the one that used to be exploitable: it
+            // left whatever `.cwasm` the bundle shipped exactly where the
+            // loader prefers to find it.
+            purge_precompiled_graders(dest_dir);
+        }
     }
     #[cfg(not(grader))]
     let _ = (dest_dir, grader_bytes);
+}
+
+/// Filename suffix for the digest recorded beside a `.cwasm`.
+///
+/// Lives here rather than in `wasm_runtime` because `purge_precompiled_graders`
+/// must run on every platform, and `wasm_runtime` is `#[cfg(grader)]`.
+pub const CWASM_DIGEST_SUFFIX: &str = ".blake3";
+
+/// Where the digest for `cwasm_path` lives.
+pub fn cwasm_digest_path(cwasm_path: &Path) -> PathBuf {
+    let mut name = cwasm_path.as_os_str().to_os_string();
+    name.push(CWASM_DIGEST_SUFFIX);
+    PathBuf::from(name)
+}
+
+/// Delete every `.cwasm` under `dest_dir`.
+///
+/// A `.cwasm` is serialized **native code**, and `Module::deserialize_file` is
+/// `unsafe` precisely because Wasmtime trusts those bytes to be its own output
+/// — the version header it checks is a compatibility check, not an
+/// authenticity one. So a `.cwasm` in a bundle is arbitrary machine code with
+/// a filename that gets it executed, and no bundle has a legitimate reason to
+/// ship one: the host always compiles its own from the CID-verified
+/// `grader.wasm`.
+///
+/// Called at two moments, and both matter:
+///
+/// 1. Immediately after `copy_tree`, so an attacker-supplied artifact never
+///    survives installation even briefly.
+/// 2. On every `write_precompiled_grader` failure path. That is the hole this
+///    closes: precompilation was best-effort, so a bundle shipping a
+///    deliberately uncompilable `grader.wasm` (whose BLAKE3 still matches its
+///    manifest, since the check compares hashes rather than validity)
+///    alongside a crafted `.cwasm` left the crafted file in place, and the
+///    first grade ran it as native code in the process holding the unlocked
+///    vault.
+fn purge_precompiled_graders(dest_dir: &Path) {
+    let Ok(entries) = fs::read_dir(dest_dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let is_artifact = path.extension().is_some_and(|e| e == "cwasm")
+            || path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.ends_with(CWASM_DIGEST_SUFFIX));
+        if is_artifact {
+            match fs::remove_file(&path) {
+                Ok(()) => log::info!("removed precompiled grader artifact {}", path.display()),
+                Err(e) => log::warn!("could not remove {}: {e}", path.display()),
+            }
+        }
+    }
+}
+
+/// Check every file the manifest pins against what is on disk.
+///
+/// Both directions are checked. A missing or altered file is the obvious case;
+/// an *extra* file is refused too, because "the manifest lists what is in the
+/// bundle" is only a useful statement if nothing else can be in it — otherwise
+/// an attacker adds `ui/evil.js` and has the entry point import it.
+fn verify_bundle_files(
+    dest_dir: &Path,
+    expected: &std::collections::BTreeMap<String, String>,
+) -> Result<(), String> {
+    // Everything actually present, as bundle-relative paths.
+    let mut found = std::collections::BTreeSet::new();
+    collect_files(dest_dir, dest_dir, &mut found)?;
+
+    for (rel, want) in expected {
+        if rel.starts_with('/') || rel.contains("..") {
+            return Err(format!("manifest lists an invalid file path '{rel}'"));
+        }
+        let bytes = fs::read(dest_dir.join(rel))
+            .map_err(|e| format!("manifest lists '{rel}' but it could not be read: {e}"))?;
+        let got = blake3::hash(&bytes).to_hex().to_string();
+        if !got.eq_ignore_ascii_case(want) {
+            return Err(format!(
+                "bundle file '{rel}' does not match the manifest: expected {want}, got {got}"
+            ));
+        }
+    }
+
+    // `manifest.json` and `manifest.sig` are the statement itself, so they are
+    // not listed inside it.
+    for rel in &found {
+        if rel == MANIFEST_FILENAME || rel == SIGNATURE_FILENAME {
+            continue;
+        }
+        if !expected.contains_key(rel) {
+            return Err(format!(
+                "bundle contains '{rel}', which the manifest does not list"
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+/// Every regular file under `dir`, as paths relative to `root`.
+fn collect_files(
+    root: &Path,
+    dir: &Path,
+    out: &mut std::collections::BTreeSet<String>,
+) -> Result<(), String> {
+    let entries = fs::read_dir(dir).map_err(|e| format!("reading {}: {e}", dir.display()))?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let ty = entry
+            .file_type()
+            .map_err(|e| format!("stat {}: {e}", path.display()))?;
+        if ty.is_dir() {
+            collect_files(root, &path, out)?;
+        } else if ty.is_file() {
+            if let Ok(rel) = path.strip_prefix(root) {
+                out.insert(rel.to_string_lossy().replace('\\', "/"));
+            }
+        }
+    }
+    Ok(())
 }
 
 pub fn install_from_directory(
@@ -144,6 +284,14 @@ pub fn install_from_directory(
 
     copy_tree(src_dir, &dest_dir).map_err(|e| format!("failed to copy plugin bundle: {e}"))?;
 
+    // `copy_tree` copies the bundle verbatim, so anything the author put in it
+    // is now on disk — including a `.cwasm`, which is native code that the
+    // grader loader prefers over `grader.wasm` and `deserialize`s unsafely.
+    // Delete them before anything else runs. This is unconditional and
+    // independent of whether the manifest declares a grader at all: the file
+    // that matters is the one on disk, not the one the manifest admits to.
+    purge_precompiled_graders(&dest_dir);
+
     // Safety net: if the manifest we just parsed ever diverged from what
     // we copied, abort. This catches races where the source dir changed
     // mid-install.
@@ -152,6 +300,20 @@ pub fn install_from_directory(
     if verifier::compute_plugin_cid(&copied_manifest) != plugin_cid {
         let _ = fs::remove_dir_all(&dest_dir);
         return Err("plugin bundle changed during install".into());
+    }
+
+    // Enforce the manifest's file digests, if it declares any.
+    //
+    // The plugin CID is BLAKE3 of manifest.json alone, so on its own it
+    // identifies the manifest and not the bundle: same manifest, same author
+    // signature, same CID, entirely different UI. `files` closes that, and a
+    // DAO attestation over the CID starts meaning something about the code
+    // that actually runs.
+    if let Some(expected) = &manifest.files {
+        if let Err(e) = verify_bundle_files(&dest_dir, expected) {
+            let _ = fs::remove_dir_all(&dest_dir);
+            return Err(e);
+        }
     }
 
     // Precompile the grader (if any) from the CID-verified copy on disk. Never
@@ -745,11 +907,35 @@ fn copy_tree(src: &Path, dst: &Path) -> io::Result<()> {
 
 /// Public helper for the asset protocol handler: resolve
 /// `plugins_dir/<cid>/<relative_path>` with path-traversal guard.
+/// Whether `cid` is the shape [`verifier::compute_plugin_cid`] produces.
+///
+/// A plugin CID is the hex of a BLAKE3 digest: exactly 64 lowercase hex
+/// characters, nothing else. Checking that before the value is used as a path
+/// component or interpolated into a header closes two things at once —
+/// directory traversal (the containment check in [`resolve_asset`] compares
+/// against a root derived from this same untrusted value, so an escaping CID
+/// moves the goalposts with it), and CSP injection via a `;` in the
+/// `plugin://{cid}` substitution in `asset_protocol`.
+pub fn is_valid_plugin_cid(cid: &str) -> bool {
+    cid.len() == 64
+        && cid
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
 pub fn resolve_asset(
     plugins_dir: &Path,
     plugin_cid: &str,
     relative_path: &str,
 ) -> Result<PathBuf, String> {
+    // The CID is the first thing checked, because everything below builds on
+    // it: `plugins_dir.join(plugin_cid)` becomes the root that the containment
+    // check itself uses, so an unvalidated CID that escapes takes the check
+    // with it and the comparison passes trivially.
+    if !is_valid_plugin_cid(plugin_cid) {
+        return Err("invalid plugin cid".into());
+    }
+
     // Reject traversal and absolute paths outright. Mirrors the
     // manifest::validate_relative_path check, but we don't trust the
     // request URL.
@@ -843,6 +1029,12 @@ mod tests {
     /// Build a signed bundle with a given slug + declared dependencies.
     /// Returns the plugin's manifest id (`did:key:...#slug`).
     fn build_bundle_slug(dir: &Path, slug: &str, deps: &[String]) -> String {
+        build_bundle_with_key(dir, slug, deps).0
+    }
+
+    /// As [`build_bundle_slug`], but hands back the author key so a test can
+    /// re-sign the manifest after editing it.
+    fn build_bundle_with_key(dir: &Path, slug: &str, deps: &[String]) -> (String, SigningKey) {
         let sk = SigningKey::generate(&mut OsRng);
         let did = did_from_verifying_key(&sk.verifying_key());
         let id = format!("{}#{}", did.as_str(), slug);
@@ -866,7 +1058,7 @@ mod tests {
         fs::write(dir.join(SIGNATURE_FILENAME), sig.to_bytes()).unwrap();
         fs::create_dir_all(dir.join("ui")).unwrap();
         fs::write(dir.join("ui/index.html"), "<html></html>").unwrap();
-        id
+        (id, sk)
     }
 
     #[test]
@@ -1019,15 +1211,195 @@ mod tests {
             .is_empty());
     }
 
+    /// A `.cwasm` is serialized native code, and `Module::deserialize_file`
+    /// executes it — Wasmtime's version header is a compatibility check, not
+    /// an authenticity one. So a bundle shipping one is shipping machine code
+    /// with a filename that gets it run, and install must not keep it.
+    ///
+    /// The exploitable shape was: a bundle with a `grader.wasm` that fails to
+    /// compile (its BLAKE3 still matches the manifest, because the check
+    /// compares hashes rather than validity) plus a crafted `.cwasm`.
+    /// Precompilation was best-effort, so it logged a warning and left the
+    /// crafted file exactly where the loader prefers to find it.
+    #[test]
+    fn a_bundle_cannot_smuggle_in_a_precompiled_grader() {
+        let db = test_db();
+        let plugins_dir = TempDir::new().unwrap();
+        let src = TempDir::new().unwrap();
+        build_bundle_slug(src.path(), "smuggler", &[]);
+
+        // The attacker's artifact, named exactly what the loader looks for.
+        let planted = src.path().join(grader_cwasm_filename());
+        fs::write(&planted, b"\x00this-would-be-native-code").unwrap();
+        // And one for another target, to prove the purge is not name-specific.
+        fs::write(src.path().join("grader.other-arch-cranelift.cwasm"), b"x").unwrap();
+
+        let installed = install_from_directory(&db, plugins_dir.path(), src.path()).unwrap();
+        let dest = plugins_dir.path().join(&installed.plugin_cid);
+
+        let leftovers: Vec<_> = fs::read_dir(&dest)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .filter(|n| n.ends_with(".cwasm"))
+            .collect();
+        assert!(
+            leftovers.is_empty(),
+            "a bundle-supplied .cwasm survived install: {leftovers:?}"
+        );
+        // The rest of the bundle is untouched — this is a targeted purge, not
+        // a refusal to install.
+        assert!(dest.join("ui/index.html").is_file());
+    }
+
+    /// The digest sidecar is what lets the loader tell "we compiled this" from
+    /// "this appeared". It must be derived from the artifact's own bytes.
+    #[test]
+    fn a_cwasm_digest_sits_beside_its_artifact() {
+        let dir = TempDir::new().unwrap();
+        let cwasm = dir.path().join(grader_cwasm_filename());
+        assert_eq!(
+            cwasm_digest_path(&cwasm)
+                .file_name()
+                .unwrap()
+                .to_string_lossy(),
+            format!("{}{}", grader_cwasm_filename(), CWASM_DIGEST_SUFFIX)
+        );
+    }
+
+    /// `plugin_cid` is BLAKE3 of manifest.json alone. A manifest that pins its
+    /// bundle's file digests is what makes the CID — and any DAO attestation
+    /// over it — a statement about the code that runs, rather than about one
+    /// JSON file.
+    #[test]
+    fn a_manifest_that_pins_files_rejects_a_swapped_bundle() {
+        let db = test_db();
+        let plugins_dir = TempDir::new().unwrap();
+        let src = TempDir::new().unwrap();
+        let (_, sk) = build_bundle_with_key(src.path(), "pinned", &[]);
+
+        // Pin the entry file as it stands, then swap it — same manifest, same
+        // signature, same CID, different code.
+        let entry = src.path().join("ui/index.html");
+        let digest = blake3::hash(&fs::read(&entry).unwrap())
+            .to_hex()
+            .to_string();
+        add_files_map(src.path(), &sk, &[("ui/index.html", &digest)]);
+        fs::write(&entry, "<html><script>stealTheVault()</script></html>").unwrap();
+
+        let err = install_from_directory(&db, plugins_dir.path(), src.path())
+            .expect_err("a bundle whose files do not match its manifest must be refused");
+        assert!(err.contains("does not match the manifest"), "{err}");
+        assert_eq!(list_installed(&db).unwrap().len(), 0);
+    }
+
+    /// An unlisted file is refused too — otherwise "the manifest lists what is
+    /// in the bundle" means nothing and an attacker just adds a file for the
+    /// entry point to import.
+    #[test]
+    fn a_manifest_that_pins_files_rejects_an_extra_file() {
+        let db = test_db();
+        let plugins_dir = TempDir::new().unwrap();
+        let src = TempDir::new().unwrap();
+        let (_, sk) = build_bundle_with_key(src.path(), "extra", &[]);
+
+        let entry = src.path().join("ui/index.html");
+        let digest = blake3::hash(&fs::read(&entry).unwrap())
+            .to_hex()
+            .to_string();
+        add_files_map(src.path(), &sk, &[("ui/index.html", &digest)]);
+        fs::write(src.path().join("ui/evil.js"), "stealTheVault()").unwrap();
+
+        let err = install_from_directory(&db, plugins_dir.path(), src.path())
+            .expect_err("an unlisted bundle file must be refused");
+        assert!(err.contains("does not list"), "{err}");
+    }
+
+    /// A bundle whose files match installs normally.
+    #[test]
+    fn a_manifest_that_pins_matching_files_installs() {
+        let db = test_db();
+        let plugins_dir = TempDir::new().unwrap();
+        let src = TempDir::new().unwrap();
+        let (_, sk) = build_bundle_with_key(src.path(), "honest", &[]);
+
+        let entry = src.path().join("ui/index.html");
+        let digest = blake3::hash(&fs::read(&entry).unwrap())
+            .to_hex()
+            .to_string();
+        add_files_map(src.path(), &sk, &[("ui/index.html", &digest)]);
+
+        install_from_directory(&db, plugins_dir.path(), src.path())
+            .expect("a bundle matching its manifest must install");
+    }
+
+    /// Manifests written before `files` existed keep working — the field is
+    /// optional, and absent means "not pinned" rather than "pinned to nothing".
+    #[test]
+    fn a_manifest_without_a_files_map_still_installs() {
+        let db = test_db();
+        let plugins_dir = TempDir::new().unwrap();
+        let src = TempDir::new().unwrap();
+        build_bundle_slug(src.path(), "legacy", &[]);
+        install_from_directory(&db, plugins_dir.path(), src.path()).expect("legacy bundle");
+    }
+
+    /// Rewrite the bundle's manifest with a `files` map and re-sign it.
+    fn add_files_map(dir: &Path, sk: &SigningKey, files: &[(&str, &str)]) {
+        let mut manifest: serde_json::Value =
+            serde_json::from_slice(&fs::read(dir.join(MANIFEST_FILENAME)).unwrap()).unwrap();
+        let map: serde_json::Map<String, serde_json::Value> = files
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), serde_json::json!(v)))
+            .collect();
+        manifest["files"] = serde_json::Value::Object(map);
+        let json = serde_json::to_string_pretty(&manifest).unwrap();
+        fs::write(dir.join(MANIFEST_FILENAME), &json).unwrap();
+        let sig = sk.sign(json.as_bytes());
+        fs::write(dir.join(SIGNATURE_FILENAME), sig.to_bytes()).unwrap();
+    }
+
     #[test]
     fn resolve_asset_rejects_traversal() {
+        // A real CID: 64 lowercase hex characters, which is what
+        // `compute_plugin_cid` produces.
+        let cid = "a".repeat(64);
         let plugins_dir = TempDir::new().unwrap();
-        let cid_dir = plugins_dir.path().join("abc123");
+        let cid_dir = plugins_dir.path().join(&cid);
         fs::create_dir_all(cid_dir.join("ui")).unwrap();
         fs::write(cid_dir.join("ui/index.html"), "<html></html>").unwrap();
 
-        assert!(resolve_asset(plugins_dir.path(), "abc123", "ui/index.html").is_ok());
-        assert!(resolve_asset(plugins_dir.path(), "abc123", "../outside").is_err());
-        assert!(resolve_asset(plugins_dir.path(), "abc123", "/etc/passwd").is_err());
+        assert!(resolve_asset(plugins_dir.path(), &cid, "ui/index.html").is_ok());
+        assert!(resolve_asset(plugins_dir.path(), &cid, "../outside").is_err());
+        assert!(resolve_asset(plugins_dir.path(), &cid, "/etc/passwd").is_err());
+    }
+
+    /// The CID is a path component *and* is interpolated into the per-plugin
+    /// CSP header, and the containment check in `resolve_asset` compares
+    /// against a root built from this same value — so an escaping CID moves
+    /// the goalposts with it and the check passes trivially. Validate first.
+    #[test]
+    fn resolve_asset_rejects_a_malformed_cid() {
+        let plugins_dir = TempDir::new().unwrap();
+
+        for bad in [
+            "..",
+            "../..",
+            "abc123",                                     // too short to be a BLAKE3 hex
+            &"a".repeat(63),                              // off by one
+            &"a".repeat(65),                              // off by one the other way
+            &format!("{}; script-src *", "a".repeat(50)), // CSP injection
+            &"A".repeat(64),                              // uppercase is not what we emit
+            &"g".repeat(64),                              // not hex
+            "",
+        ] {
+            assert!(
+                resolve_asset(plugins_dir.path(), bad, "ui/index.html").is_err(),
+                "cid {bad:?} should have been refused"
+            );
+            assert!(!is_valid_plugin_cid(bad), "cid {bad:?} should be invalid");
+        }
+
+        assert!(is_valid_plugin_cid(&"0123456789abcdef".repeat(4)));
     }
 }

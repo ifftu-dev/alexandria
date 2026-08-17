@@ -20,21 +20,43 @@ use super::types::SignedGossipMessage;
 
 /// Build the canonical bytes that are signed/verified.
 ///
-/// Format: `SHA-256(topic || timestamp_be_bytes || stake_address || payload)`
+/// Format:
+/// `SHA-256(topic || timestamp_be || stake_address || encrypted || key_id || payload)`
 ///
 /// Using SHA-256 as a pre-hash keeps the signed message a fixed 32 bytes
 /// regardless of payload size, and ensures all fields are unambiguously
 /// committed to the signature.
+///
+/// `encrypted` and `key_id` are in here because they are envelope fields like
+/// any other. Nothing reads them today — every producer writes
+/// `encrypted: false` and no code branches on either — but they exist to
+/// select a decryption key, and a field that will one day choose a key must
+/// not be one an attacker can edit in flight. Folding them in now costs
+/// nothing; doing it after a consumer appears would be a wire-format break at
+/// the worst moment.
 fn canonical_signed_bytes(
     topic: &str,
     timestamp: u64,
     stake_address: &str,
+    encrypted: bool,
+    key_id: Option<&str>,
     payload: &[u8],
 ) -> Vec<u8> {
     let mut hasher = Sha256::new();
     hasher.update(topic.as_bytes());
     hasher.update(timestamp.to_be_bytes());
     hasher.update(stake_address.as_bytes());
+    hasher.update([u8::from(encrypted)]);
+    // Length-prefixed and distinguished from the empty string, so `None` and
+    // `Some("")` cannot hash the same.
+    match key_id {
+        Some(k) => {
+            hasher.update([1u8]);
+            hasher.update((k.len() as u64).to_be_bytes());
+            hasher.update(k.as_bytes());
+        }
+        None => hasher.update([0u8]),
+    }
     hasher.update(payload);
     hasher.finalize().to_vec()
 }
@@ -59,7 +81,17 @@ pub fn sign_gossip_message(
         .unwrap_or_default()
         .as_secs();
 
-    let canonical = canonical_signed_bytes(topic, timestamp, stake_address, &payload);
+    // Signed with the same field values the envelope will carry.
+    let encrypted = false;
+    let key_id: Option<String> = None;
+    let canonical = canonical_signed_bytes(
+        topic,
+        timestamp,
+        stake_address,
+        encrypted,
+        key_id.as_deref(),
+        &payload,
+    );
     let signed = core_signing::sign(&canonical, signing_key);
 
     SignedGossipMessage {
@@ -69,8 +101,8 @@ pub fn sign_gossip_message(
         public_key: signed.public_key,
         stake_address: stake_address.to_string(),
         timestamp,
-        encrypted: false,
-        key_id: None,
+        encrypted,
+        key_id,
     }
 }
 
@@ -87,6 +119,8 @@ pub fn verify_gossip_signature(
         &message.topic,
         message.timestamp,
         &message.stake_address,
+        message.encrypted,
+        message.key_id.as_deref(),
         &message.payload,
     );
     let signed_msg = core_signing::SignedMessage {
@@ -255,5 +289,55 @@ mod tests {
         // Timestamp should be within 1 second of now
         assert!(msg.timestamp <= now);
         assert!(msg.timestamp >= now - 1);
+    }
+
+    #[test]
+    fn tampered_encrypted_flag_fails_verification() {
+        let key = test_key();
+        let msg = sign_gossip_message(
+            "/alexandria/catalog/1.0",
+            b"{\"test\":true}".to_vec(),
+            &key,
+            "stake_test1uqfu74w3wh4gfzu8m6e7j987h4lq9r3t7ef5gaw497uu8q0kd9u4",
+        );
+
+        let mut tampered = msg;
+        tampered.encrypted = !tampered.encrypted;
+
+        assert!(
+            verify_gossip_signature(&tampered).is_err(),
+            "flipping `encrypted` should invalidate the signature"
+        );
+    }
+
+    #[test]
+    fn tampered_key_id_fails_verification() {
+        // `key_id` selects which key a payload is opened with. Nothing reads
+        // it yet, which is exactly why it must be nailed down now rather than
+        // after something starts trusting it.
+        let key = test_key();
+        let msg = sign_gossip_message(
+            "/alexandria/catalog/1.0",
+            b"{\"test\":true}".to_vec(),
+            &key,
+            "stake_test1uqfu74w3wh4gfzu8m6e7j987h4lq9r3t7ef5gaw497uu8q0kd9u4",
+        );
+
+        let mut tampered = msg;
+        tampered.key_id = Some("attacker-chosen-key".into());
+
+        assert!(
+            verify_gossip_signature(&tampered).is_err(),
+            "setting `key_id` should invalidate the signature"
+        );
+    }
+
+    /// `None` and `Some("")` are different envelopes and must hash differently,
+    /// or a signature made for one would verify for the other.
+    #[test]
+    fn absent_and_empty_key_id_are_distinguished() {
+        let a = canonical_signed_bytes("t", 1, "addr", false, None, b"p");
+        let b = canonical_signed_bytes("t", 1, "addr", false, Some(""), b"p");
+        assert_ne!(a, b);
     }
 }

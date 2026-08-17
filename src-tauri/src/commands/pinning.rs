@@ -25,17 +25,18 @@ pub struct QuotaBreakdown {
 }
 
 /// Pure-function declare path. Inserts the commitment via
-/// `content_store::pinboard::declare_commitment`, returns the row to the
-/// caller. The signature/public_key fields are populated as
-/// `(unsigned, pinner_did)` placeholders — callers that want to
-/// broadcast must sign before publishing on `TOPIC_PINBOARD`.
+/// `content_store::pinboard::declare_commitment`, signs the row with the
+/// profile's key, and returns it ready to broadcast on `TOPIC_PINBOARD`.
+/// Receivers verify that signature against the pinner DID, so an unsigned row
+/// is one every peer drops.
 pub fn declare_my_commitment_impl(
     conn: &Connection,
     pinner_did: &Did,
     subject_did: &Did,
     scope: &[String],
+    signing_key: &ed25519_dalek::SigningKey,
 ) -> Result<PinboardCommitment, String> {
-    declare_commitment(conn, pinner_did, subject_did, scope)
+    declare_commitment(conn, pinner_did, subject_did, scope, signing_key)
 }
 
 pub fn list_my_commitments_impl(
@@ -137,13 +138,13 @@ pub async fn declare_pinboard_commitment(
     subject_did: String,
     scope: Vec<String>,
 ) -> Result<PinboardCommitment, String> {
-    let (_signing_key, pinner) = load_pinner_key(&state).await?;
+    let (signing_key, pinner) = load_pinner_key(&state).await?;
     let db_guard = state
         .db
         .lock()
         .map_err(|_| "database lock poisoned".to_string())?;
     let db = db_guard.as_ref().ok_or("database not initialized")?;
-    declare_my_commitment_impl(db.conn(), &pinner, &Did(subject_did), &scope)
+    declare_my_commitment_impl(db.conn(), &pinner, &Did(subject_did), &scope, &signing_key)
 }
 
 #[tauri::command]
@@ -240,10 +241,12 @@ mod tests {
         use crate::db::Database;
         let db = Database::open_in_memory().unwrap();
         db.run_migrations().unwrap();
-        let pinner = Did("did:key:zPinner".into());
+        let sk = ed25519_dalek::SigningKey::from_bytes(&[3u8; 32]);
+        let pinner = derive_did_key(&sk);
         let subject = Did("did:key:zSubject".into());
-        let c = declare_my_commitment_impl(db.conn(), &pinner, &subject, &["credentials".into()])
-            .unwrap();
+        let c =
+            declare_my_commitment_impl(db.conn(), &pinner, &subject, &["credentials".into()], &sk)
+                .unwrap();
         let mine = list_my_commitments_impl(db.conn(), &pinner).unwrap();
         assert!(mine.iter().any(|x| x.id == c.id));
     }
@@ -257,8 +260,10 @@ mod tests {
         let db = Database::open_in_memory().unwrap();
         db.run_migrations().unwrap();
         let me = Did("did:key:zMe".into());
-        let other = Did("did:key:zOther".into());
-        declare_my_commitment_impl(db.conn(), &other, &me, &["credentials".into()]).unwrap();
+        let other_sk = ed25519_dalek::SigningKey::from_bytes(&[4u8; 32]);
+        let other = derive_did_key(&other_sk);
+        declare_my_commitment_impl(db.conn(), &other, &me, &["credentials".into()], &other_sk)
+            .unwrap();
         let incoming = list_incoming_commitments_impl(db.conn(), &me).unwrap();
         assert!(incoming.iter().any(|c| c.pinner_did == other.as_str()));
     }

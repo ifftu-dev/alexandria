@@ -41,66 +41,153 @@ pub enum ResolveError {
     BlockedUrl(String),
 }
 
-/// Reject URLs that point to private/loopback/link-local IP addresses (SSRF defense).
+/// Reject URLs that would reach a private, loopback, link-local or otherwise
+/// non-public address (SSRF defence).
+///
+/// The previous version split the URL string by hand and only rejected a host
+/// that either literally read `localhost`/`0.0.0.0` or parsed as a private
+/// `IpAddr`. Four standard bypasses walked through it:
+///
+/// - **Userinfo** — `http://example.com@127.0.0.1/` produced a "host" of
+///   `example.com@127.0.0.1`, which is neither a blocked name nor a parseable
+///   address, so it passed and reqwest connected to loopback.
+/// - **Integer literals** — `http://2130706433/` is loopback to every resolver
+///   but is not parseable as an `IpAddr`, so it passed.
+/// - **Names that resolve privately** — `127.0.0.1.nip.io`,
+///   `metadata.google.internal`, or any A record the attacker controls. The
+///   check never resolved anything.
+/// - **IPv4-mapped IPv6** — `[::ffff:127.0.0.1]` parses as V6, and
+///   `Ipv6Addr::is_loopback()` is false for the mapped form.
+///
+/// So: parse with a real URL parser, refuse userinfo outright, then resolve
+/// the host and check *every* address it resolves to. Resolution is what makes
+/// this a real check rather than a syntactic one — but it also means a DNS
+/// answer can change between here and the connection (a rebinding attack), so
+/// the client is additionally pinned to a redirect policy that re-runs this on
+/// every hop. See [`crate::content_store::http`].
+///
+/// Exposed as `url_is_publicly_routable` so the redirect policy can call it
+/// with a plain `String` error, which is what `reqwest`'s policy hook wants.
+pub fn url_is_publicly_routable(url: &str) -> Result<(), String> {
+    reject_private_url(url).map_err(|e| e.to_string())
+}
+
 fn reject_private_url(url: &str) -> Result<(), ResolveError> {
-    // Extract host from URL (skip scheme, take authority up to / or ?)
-    let authority = url
-        .split("://")
-        .nth(1)
-        .unwrap_or("")
-        .split('/')
-        .next()
-        .unwrap_or("")
-        .split('?')
-        .next()
-        .unwrap_or("");
+    let parsed = url::Url::parse(url)
+        .map_err(|e| ResolveError::BlockedUrl(format!("unparseable URL: {e}")))?;
 
-    // Handle IPv6 bracket notation: [::1]:port → ::1
-    // Handle IPv4/hostname: host:port → host
-    let host = if authority.starts_with('[') {
-        // IPv6 bracket notation: extract between [ and ]
-        authority
-            .trim_start_matches('[')
-            .split(']')
-            .next()
-            .unwrap_or("")
-    } else {
-        // IPv4 or hostname: strip port
-        authority.split(':').next().unwrap_or("")
-    };
-
-    // Block known private/loopback hostnames
-    let blocked_hosts = ["localhost", "0.0.0.0"];
-    if blocked_hosts.contains(&host) {
-        return Err(ResolveError::BlockedUrl(
-            "URL points to loopback address".into(),
-        ));
-    }
-
-    // Block private IP ranges (now correctly parses both IPv4 and bracket-stripped IPv6)
-    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
-        let is_private = match ip {
-            std::net::IpAddr::V4(v4) => {
-                v4.is_loopback()
-                    || v4.is_private()
-                    || v4.is_link_local()
-                    || v4.is_broadcast()
-                    || v4.is_unspecified()
-            }
-            std::net::IpAddr::V6(v6) => {
-                v6.is_loopback()
-                    || v6.is_unspecified()
-                    // ULA (fc00::/7)
-                    || (v6.segments()[0] & 0xfe00) == 0xfc00
-            }
-        };
-        if is_private {
-            return Err(ResolveError::BlockedUrl(
-                "URL points to private/reserved IP address".into(),
-            ));
+    match parsed.scheme() {
+        "http" | "https" => {}
+        other => {
+            return Err(ResolveError::BlockedUrl(format!(
+                "scheme '{other}' is not fetchable"
+            )))
         }
     }
 
+    // Userinfo has no legitimate use here and is the oldest way to make a URL
+    // read as one host and connect to another.
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return Err(ResolveError::BlockedUrl(
+            "URLs with embedded credentials are refused".into(),
+        ));
+    }
+
+    let host = parsed
+        .host()
+        .ok_or_else(|| ResolveError::BlockedUrl("URL has no host".into()))?;
+
+    match host {
+        url::Host::Ipv4(v4) => reject_if_not_global(std::net::IpAddr::V4(v4)),
+        url::Host::Ipv6(v6) => reject_if_not_global(std::net::IpAddr::V6(v6)),
+        url::Host::Domain(name) => {
+            // A name that spells out loopback is refused before the resolver
+            // is consulted, so a hostile DNS answer is not needed to catch it.
+            let lowered = name.to_ascii_lowercase();
+            if lowered == "localhost" || lowered.ends_with(".localhost") {
+                return Err(ResolveError::BlockedUrl(
+                    "URL points to loopback address".into(),
+                ));
+            }
+
+            // Resolve and check every address. `to_socket_addrs` needs a port;
+            // the scheme's default is fine because the port does not affect
+            // which addresses a name resolves to.
+            use std::net::ToSocketAddrs;
+            let port = parsed.port_or_known_default().unwrap_or(80);
+            let resolved = (name, port).to_socket_addrs().map_err(|e| {
+                ResolveError::BlockedUrl(format!("could not resolve '{name}': {e}"))
+            })?;
+
+            let mut any = false;
+            for addr in resolved {
+                any = true;
+                reject_if_not_global(addr.ip())?;
+            }
+            if !any {
+                return Err(ResolveError::BlockedUrl(format!(
+                    "'{name}' resolved to no addresses"
+                )));
+            }
+            Ok(())
+        }
+    }
+}
+
+/// Refuse anything that is not a globally routable unicast address.
+///
+/// An allowlist of "is this public" rather than a blocklist of known-bad
+/// ranges: the blocklist shape is what let `2130706433` and `::ffff:127.0.0.1`
+/// through, because both are only bad once you have normalised them.
+fn reject_if_not_global(ip: std::net::IpAddr) -> Result<(), ResolveError> {
+    // Normalise IPv4-*mapped* IPv6 down to its v4 form, so
+    // `::ffff:127.0.0.1` is judged as 127.0.0.1.
+    //
+    // Deliberately not `to_ipv4()`, which also converts the deprecated
+    // IPv4-*compatible* form `::a.b.c.d` — and `::1` is `::0.0.0.1` under that
+    // reading, so loopback would normalise to the perfectly routable 0.0.0.1
+    // and be allowed. The v6 predicates below judge `::1` correctly, so the
+    // compatible form is left alone.
+    let ip = match ip {
+        std::net::IpAddr::V6(v6) => match v6.to_ipv4_mapped() {
+            Some(v4) => std::net::IpAddr::V4(v4),
+            None => std::net::IpAddr::V6(v6),
+        },
+        v4 => v4,
+    };
+
+    let blocked = match ip {
+        std::net::IpAddr::V4(v4) => {
+            v4.is_loopback()
+                || v4.is_private()
+                || v4.is_link_local()
+                || v4.is_broadcast()
+                || v4.is_unspecified()
+                || v4.is_multicast()
+                || v4.is_documentation()
+                // Shared address space (RFC 6598, carrier-grade NAT).
+                || (v4.octets()[0] == 100 && (64..128).contains(&v4.octets()[1]))
+                // Benchmarking (RFC 2544).
+                || (v4.octets()[0] == 198 && (v4.octets()[1] & 0xfe) == 18)
+                // Reserved / 240.0.0.0/4.
+                || v4.octets()[0] >= 240
+        }
+        std::net::IpAddr::V6(v6) => {
+            v6.is_loopback()
+                || v6.is_unspecified()
+                || v6.is_multicast()
+                // Unique local (fc00::/7).
+                || (v6.segments()[0] & 0xfe00) == 0xfc00
+                // Link-local unicast (fe80::/10).
+                || (v6.segments()[0] & 0xffc0) == 0xfe80
+        }
+    };
+
+    if blocked {
+        return Err(ResolveError::BlockedUrl(format!(
+            "URL resolves to the non-public address {ip}"
+        )));
+    }
     Ok(())
 }
 
@@ -499,5 +586,65 @@ mod tests {
         assert_eq!(result.external_id.as_deref(), Some(url));
 
         resolver.node.shutdown().await.expect("shutdown");
+    }
+
+    /// Each of these walked through the previous string-splitting guard.
+    #[test]
+    fn the_standard_ssrf_bypasses_are_refused() {
+        // Userinfo: reads as example.com, connects to loopback.
+        assert!(reject_private_url("http://example.com@127.0.0.1/x").is_err());
+        assert!(reject_private_url("http://user:pass@10.0.0.1/x").is_err());
+
+        // Integer literal for 127.0.0.1.
+        assert!(reject_private_url("http://2130706433/").is_err());
+
+        // IPv4-mapped IPv6 — Ipv6Addr::is_loopback() is false for this form.
+        assert!(reject_private_url("http://[::ffff:127.0.0.1]/").is_err());
+
+        // Cloud metadata, the usual target.
+        assert!(reject_private_url("http://169.254.169.254/latest/meta-data/").is_err());
+
+        // A name that spells out loopback, caught without consulting DNS.
+        assert!(reject_private_url("http://localhost:8080/x").is_err());
+        assert!(reject_private_url("http://anything.localhost/x").is_err());
+    }
+
+    #[test]
+    fn plain_private_ranges_are_still_refused() {
+        for url in [
+            "http://127.0.0.1/",
+            "http://10.1.2.3/",
+            "http://192.168.1.1/",
+            "http://172.16.0.1/",
+            "http://0.0.0.0/",
+            "http://[::1]/",
+            // The IPv4-compatible spelling of loopback, which normalising with
+            // `to_ipv4()` would have turned into the routable 0.0.0.1.
+            "http://[::0.0.0.1]/",
+            "http://[fc00::1]/",
+            "http://[fe80::1]/",
+            // Carrier-grade NAT and reserved space, which the old check missed.
+            "http://100.64.0.1/",
+            "http://240.0.0.1/",
+        ] {
+            assert!(
+                reject_private_url(url).is_err(),
+                "{url} should have been refused"
+            );
+        }
+    }
+
+    #[test]
+    fn non_http_schemes_are_refused() {
+        assert!(reject_private_url("file:///etc/passwd").is_err());
+        assert!(reject_private_url("gopher://example.com/").is_err());
+    }
+
+    #[test]
+    fn a_public_address_is_allowed() {
+        // Literal addresses, so this does not depend on DNS in CI.
+        assert!(reject_private_url("https://8.8.8.8/x").is_ok());
+        assert!(reject_private_url("http://93.184.216.34/").is_ok());
+        assert!(reject_private_url("https://[2001:4860:4860::8888]/").is_ok());
     }
 }
