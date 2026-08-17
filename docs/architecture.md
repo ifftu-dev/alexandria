@@ -646,8 +646,11 @@ Note: `tutoring` has platform-specific variants. Desktop and Android share the f
 
 ### Privacy Guarantees
 
-- Raw biometric data (keystrokes, mouse movements, face embeddings) **never leaves the device**
-- Only derived integrity scores (0.0-1.0) are stored and transmitted
+- Raw biometric data (keystrokes, mouse movements, face embeddings) **leaves the device only
+  when the learner sends it themselves** — a flagged session's evidence, released by them to
+  contest the flag. Nothing can request it and no automatic path exists. See
+  [`sentinel.md`](sentinel.md#review-and-adjudication).
+- Only derived integrity scores (0.0-1.0) are stored and transmitted otherwise
 - Cross-device sync is encrypted with a key derived from the wallet signing key
 - Public gossip contains only evidence scores and governance actions — no personal data beyond stake addresses
 

@@ -863,7 +863,7 @@ These guarantees are architectural — they are enforced by the code structure, 
 
 - Raw keystrokes never stored: Only anonymized timing features (dwell/flight in ms).
 - Raw mouse coordinates never transmitted: Only deltas used for CNN features.
-- Video frames never leave the device: Face processing happens on a canvas element.
+- Video frames leave the device only on a learner-initiated appeal: face processing happens on a canvas element and frames are never written to disk by default. A *flagged* session's frames may be retained on-device for 14 days at the learner's explicit choice, and released by them to contest the flag — see `sentinel.md` §Review and adjudication.
 - AI model weights are not biometric data: Weights encode statistical patterns, not recoverable input data.
 - Profile keyed to device: Profiles are device-specific.
 - No server-side data: All behavioral processing happens on-device.

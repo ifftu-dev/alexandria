@@ -1,5 +1,17 @@
 # Alexandria: Free Knowledge, Verified Skills, No Gatekeepers
 
+> **What this document is:** the destination, not a description of the
+> software as it stands. It argues for what Alexandria is trying to be and
+> why that is worth doing. Much of what follows is written in the present
+> tense because it reads better that way, and a reader is entitled to know
+> that the present tense here is rhetorical.
+>
+> For what actually runs today, and what does not, see the
+> [README](../README.md) — which is kept honest about the difference — and
+> the *Honest limits* section of the technology page on the website. Where
+> this document and the README disagree about whether something exists, the
+> README is right.
+
 > **⚠️ Post-VC-first cutover (migration 040, 2026-04-24):** This
 > document predates the retirement of the SkillProof pipeline.
 > Wherever it references `SkillProof`, `evidence_records`, or
@@ -59,7 +71,7 @@ The Sentinel anti-cheat system monitors assessment integrity through multi-signa
 
 `tract` is pure Rust — no WASM, no native ONNX runtime — so every model compiles for all Tauri targets including iOS and Android. The only ML remaining in TypeScript is the LBP face embedder (`src/utils/sentinel/face-embedder.ts`, pure pixel math), which consumes the boxes YuNet detects. The per-user models are trained on-device during a calibration wizard.
 
-Raw behavioral data — keystrokes, mouse movements, video frames — **never leaves the device**. Only derived integrity scores (0.0–1.0) and categorical flags are stored and transmitted. This is enforced by the code architecture, not by policy.
+Raw behavioral data — keystrokes, mouse movements, video frames — **leaves the device only if the learner sends it**. Only derived integrity scores (0.0–1.0) and categorical flags are stored and transmitted otherwise, and that is enforced by the code architecture rather than by policy. The single exception exists for the learner's benefit: if a session is flagged, they may keep that session's evidence on-device and release it to contest the accusation. Nothing can ask them for it.
 
 ### Governance Belongs to the Qualified
 
@@ -122,7 +134,7 @@ iOS and Android are not thin clients. The mobile app is a fully functional node 
 
 ## How Alexandria Sustains Itself
 
-Alexandria is structured as a non-profit. Learning content, credentials, and reputation data are free — permanently and unconditionally.
+Alexandria is *intended* to be structured as a non-profit: a permanent, dilution-proof veto over free learner access, held by IFFTU as a Section 8 non-profit, so that nobody — including us, including a future investor — can charge a learner for their own proof. **The instrument does not exist yet.** It has not been drafted or executed, and until it is, free access rests on the AGPL licence and on intent rather than on anything binding. Learning content, credentials, and reputation data are free today and the commitment is that they remain so permanently and unconditionally.
 
 Revenue comes from two sources that don't compromise the mission:
 
