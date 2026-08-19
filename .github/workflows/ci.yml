@@ -194,6 +194,11 @@ jobs:
         uses: swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
         with:
           workspaces: 'alexandria/src-tauri -> target'
+          # Save the build even when the job fails. Without this, a red run
+          # discards the cold build it just paid for, so the next run pays
+          # again — which is how one lint failure turned into three runs that
+          # each hit the ninety-minute ceiling and were cancelled.
+          cache-on-failure: true
 
       - name: Install frontend dependencies
         if: needs.changes.outputs.frontend == 'true'
@@ -340,6 +345,9 @@ jobs:
         with:
           workspaces: alexandria -> target
           key: mobile-${{ matrix.target }}
+          # See the note on the Lint & Test cache: a failed job that saves
+          # nothing makes the next run start cold.
+          cache-on-failure: true
 
       # Scoped to -p alexandria-node deliberately. A bare `cargo check` at the
       # workspace root also checks vendored members like patches/ffmpeg-sys-next,
@@ -459,6 +467,9 @@ jobs:
         with:
           workspaces: alexandria -> target
           key: android-ondevice
+          # This job is cancelled by its own timeout often enough that saving
+          # only on success meant it almost never seeded its cache.
+          cache-on-failure: true
 
       # Cross-compile the test binary now (host-side) so the emulator step only
       # pushes + runs — keeps the AVD alive for the minimum time.
