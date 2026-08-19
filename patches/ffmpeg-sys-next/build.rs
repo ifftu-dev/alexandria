@@ -305,6 +305,23 @@ fn build(sysroot: Option<&str>) -> io::Result<()> {
 
     let target = env::var("TARGET").unwrap();
     let host = env::var("HOST").unwrap();
+
+    // Do not let an iOS deployment target leak into a build that is not for
+    // iOS.
+    //
+    // The workspace sets `IPHONEOS_DEPLOYMENT_TARGET` in `.cargo/config.toml`
+    // so the `cc` crate stamps C dependencies with the app's minimum iOS
+    // version. That is correct for the `cc` crate, which only applies it when
+    // the target is iOS — and wrong for everything ffmpeg does here, because
+    // `configure` invokes the compiler directly and clang honours the variable
+    // whatever the target is. On a macOS host build the result was a compiler
+    // probe built for iPhone against the macOS sysroot: the kernel killed the
+    // resulting binary and configure reported only
+    // `configure: line 1685: Killed: 9`, which names neither the variable nor
+    // the reason.
+    if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("ios") {
+        configure.env_remove("IPHONEOS_DEPLOYMENT_TARGET");
+    }
     if target != host {
         configure.arg("--enable-cross-compile");
 
@@ -601,7 +618,22 @@ fn build(sysroot: Option<&str>) -> io::Result<()> {
         && matches!(target_os.as_str(), "ios" | "macos")
     {
         configure.arg("--enable-audiotoolbox");
-        configure.arg("--extra-cflags=-mios-version-min=11.0");
+
+        // Guarded the same way the videotoolbox block above is. This used to
+        // pass `-mios-version-min` unconditionally, which meant a *native
+        // macOS* build configured ffmpeg to target iOS while still using the
+        // macOS sysroot. ffmpeg's configure then compiled its "does the C
+        // compiler work" probe into an iOS binary, ran it on the host, and the
+        // kernel killed it — surfacing as `configure: line 1685: Killed: 9`
+        // with no mention of the real cause. That is why building this crate
+        // for the host on macOS has never worked.
+        if target != host && target_os == "ios" {
+            configure.arg("--extra-cflags=-mios-version-min=11.0");
+        }
+
+        if target != host && target_os == "macos" {
+            configure.arg("--extra-cflags=-mmacosx-version-min=10.11");
+        }
     }
 
     // Linux video acceleration API (VAAPI)

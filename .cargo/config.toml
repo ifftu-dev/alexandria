@@ -14,8 +14,15 @@ CMAKE_GENERATOR = "Ninja"
 # Pin the iOS deployment target for C dependencies (blake3's NEON stubs,
 # etc.). Without it the `cc` crate stamps the .o files with the host SDK
 # version (e.g. 26.4), and the linker warns they were "built for newer
-# iOS than being linked" against the app's 16.4 target. Ignored on
-# non-iOS builds. Keep in sync with tauri.conf.json `iOS.minimumSystemVersion`.
+# iOS than being linked" against the app's 16.4 target. Keep in sync with
+# tauri.conf.json `iOS.minimumSystemVersion`.
+#
+# NOT ignored on non-iOS builds, despite what this comment used to say. The
+# `cc` crate only applies it when the target is iOS, but clang honours it
+# whenever it is invoked directly — so any dependency that shells out to a
+# compiler (ffmpeg's ./configure, notably) will target iPhone on a macOS host
+# build and fail in a way that names neither this variable nor the reason. See
+# the guard in patches/ffmpeg-sys-next/build.rs.
 IPHONEOS_DEPLOYMENT_TARGET = "16.4"
 
 # Android + iOS targets — linker is managed by cargo-ndk / Tauri build toolchains.
