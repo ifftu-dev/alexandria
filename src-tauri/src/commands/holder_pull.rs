@@ -107,13 +107,32 @@ pub(crate) fn directories(state: &State<'_, AppState>) -> Result<Vec<Directory>,
     serde_json::from_value(raw).map_err(|e| format!("the directory list is unreadable: {e}"))
 }
 
+/// A value used once, so two identical requests do not sign identically.
+///
+/// Ed25519 is deterministic (RFC 8032), so without this a second request to the
+/// same path in the same second produces the same 64 bytes as the first. The
+/// service treats a proof as single-use — that is what stops a captured header
+/// being replayed — and cannot tell "asked twice" from "replayed" unless the
+/// client makes them different. Releasing evidence in several batches is
+/// exactly that case.
+pub(crate) fn nonce() -> String {
+    uuid::Uuid::new_v4().to_string()
+}
+
 /// Sign the challenge a directory will check.
 ///
-/// The path is signed along with the method and the timestamp, so a proof
-/// handed to one endpoint cannot be replayed against another — including
-/// another person's record on the same server.
-pub(crate) fn proof(sk: &SigningKey, method: &str, path: &str, timestamp: i64) -> String {
-    let challenge = format!("{method}\n{path}\n{timestamp}");
+/// The path is signed along with the method, the timestamp and a per-request
+/// nonce, so a proof handed to one endpoint cannot be replayed against another
+/// — including another person's record on the same server — and cannot be
+/// replayed against the same one twice.
+pub(crate) fn proof(
+    sk: &SigningKey,
+    method: &str,
+    path: &str,
+    timestamp: i64,
+    nonce: &str,
+) -> String {
+    let challenge = format!("{method}\n{path}\n{timestamp}\n{nonce}");
     let sig = sk.sign(challenge.as_bytes());
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(sig.to_bytes())
 }
@@ -133,11 +152,13 @@ async fn signed_get(
     }
 
     let timestamp = chrono::Utc::now().timestamp();
+    let n = nonce();
     let base = dir.url.trim_end_matches('/');
     let resp = client
         .get(format!("{base}{path}"))
         .header("x-alexandria-timestamp", timestamp.to_string())
-        .header("x-alexandria-proof", proof(sk, "GET", path, timestamp))
+        .header("x-alexandria-nonce", &n)
+        .header("x-alexandria-proof", proof(sk, "GET", path, timestamp, &n))
         .timeout(std::time::Duration::from_secs(15))
         .send()
         .await
@@ -518,13 +539,14 @@ mod tests {
             "GET",
             "/api/cohorts/access-log/did:key:zAbc",
             1_786_600_000,
+            "n0nce",
         );
         let sig_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
             .decode(encoded.as_bytes())
             .expect("proofs are unpadded url-safe base64");
         let sig = ed25519_dalek::Signature::from_bytes(&sig_bytes.try_into().unwrap());
 
-        let rebuilt = "GET\n/api/cohorts/access-log/did:key:zAbc\n1786600000";
+        let rebuilt = "GET\n/api/cohorts/access-log/did:key:zAbc\n1786600000\nn0nce";
         assert!(sk.verifying_key().verify(rebuilt.as_bytes(), &sig).is_ok());
     }
 
@@ -543,18 +565,41 @@ mod tests {
         let path = "/api/runs/0b1e9f4a-0000-4000-8000-000000000000/evidence";
 
         for method in ["POST", "DELETE"] {
-            let encoded = proof(&sk, method, path, 1_786_600_000);
+            let encoded = proof(&sk, method, path, 1_786_600_000, "n0nce");
             let sig_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
                 .decode(encoded.as_bytes())
                 .expect("proofs are unpadded url-safe base64");
             let sig = ed25519_dalek::Signature::from_bytes(&sig_bytes.try_into().unwrap());
 
-            let rebuilt = format!("{method}\n{path}\n1786600000");
+            let rebuilt = format!("{method}\n{path}\n1786600000\nn0nce");
             assert!(
                 sk.verifying_key().verify(rebuilt.as_bytes(), &sig).is_ok(),
                 "{method} proof did not verify against the challenge the service rebuilds"
             );
         }
+    }
+
+    /// Two identical requests must not sign identically.
+    ///
+    /// Ed25519 is deterministic, and the service refuses a proof it has already
+    /// seen. Without a per-request nonce, a release sent in several batches
+    /// signs the same bytes every time and every batch after the first is
+    /// refused as a replay — at the moment somebody is contesting a flag.
+    #[test]
+    fn the_same_request_twice_produces_different_proofs() {
+        let sk = key();
+        let path = "/api/runs/abc/evidence";
+        assert_ne!(
+            proof(&sk, "POST", path, 1, &nonce()),
+            proof(&sk, "POST", path, 1, &nonce()),
+            "asking twice must not look like a replay"
+        );
+    }
+
+    /// And a nonce is a value used once, not a constant.
+    #[test]
+    fn a_nonce_does_not_repeat() {
+        assert_ne!(nonce(), nonce());
     }
 
     /// Sending and taking back are different acts and must not share a proof.
@@ -563,8 +608,8 @@ mod tests {
         let sk = key();
         let path = "/api/runs/abc/evidence";
         assert_ne!(
-            proof(&sk, "POST", path, 1),
-            proof(&sk, "DELETE", path, 1),
+            proof(&sk, "POST", path, 1, "n"),
+            proof(&sk, "DELETE", path, 1, "n"),
             "a proof to release must not also withdraw"
         );
     }
@@ -572,8 +617,8 @@ mod tests {
     #[test]
     fn a_proof_is_specific_to_its_path() {
         let sk = key();
-        let a = proof(&sk, "GET", "/api/a", 1);
-        let b = proof(&sk, "GET", "/api/b", 1);
+        let a = proof(&sk, "GET", "/api/a", 1, "n");
+        let b = proof(&sk, "GET", "/api/b", 1, "n");
         assert_ne!(a, b, "a proof for one path must not open another");
     }
 
@@ -581,8 +626,8 @@ mod tests {
     fn a_proof_is_specific_to_its_moment() {
         let sk = key();
         assert_ne!(
-            proof(&sk, "GET", "/api/a", 1),
-            proof(&sk, "GET", "/api/a", 2)
+            proof(&sk, "GET", "/api/a", 1, "n"),
+            proof(&sk, "GET", "/api/a", 2, "n")
         );
     }
 
@@ -592,8 +637,8 @@ mod tests {
         let mine = key();
         let theirs = SigningKey::from_bytes(&[9u8; 32]);
         assert_ne!(
-            proof(&mine, "GET", "/api/a", 1),
-            proof(&theirs, "GET", "/api/a", 1)
+            proof(&mine, "GET", "/api/a", 1, "n"),
+            proof(&theirs, "GET", "/api/a", 1, "n")
         );
         assert_ne!(
             derive_did_key(&mine).as_str(),

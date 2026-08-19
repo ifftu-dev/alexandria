@@ -40,7 +40,7 @@ use base64::Engine;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
-use super::holder_pull::{directories, is_loopback, proof, Directory};
+use super::holder_pull::{directories, is_loopback, nonce, proof, Directory};
 use crate::sentinel::evidence;
 use crate::AppState;
 
@@ -99,6 +99,10 @@ async fn signed_send(
 ) -> Result<serde_json::Value, String> {
     https_only(base)?;
     let timestamp = chrono::Utc::now().timestamp();
+    // Fresh per request. A release is sent in several batches to the same path,
+    // and the service refuses a proof it has already seen — without this the
+    // second batch is indistinguishable from a replay of the first.
+    let n = nonce();
     let base = base.trim_end_matches('/');
     let url = format!("{base}{path}");
 
@@ -108,7 +112,8 @@ async fn signed_send(
         other => return Err(format!("{other} is not a method this sends")),
     }
     .header("x-alexandria-timestamp", timestamp.to_string())
-    .header("x-alexandria-proof", proof(sk, method, path, timestamp))
+    .header("x-alexandria-nonce", &n)
+    .header("x-alexandria-proof", proof(sk, method, path, timestamp, &n))
     // Camera frames are not small and a home connection is not fast. The read
     // timeout in `holder_pull` is fifteen seconds, which is right for a list
     // of names and would abandon an upload most of the way through.
@@ -270,12 +275,14 @@ async fn export_from(
     https_only(&dir.url)?;
     let path = format!("/api/export/{did}");
     let timestamp = chrono::Utc::now().timestamp();
+    let n = nonce();
     let base = dir.url.trim_end_matches('/');
 
     let resp = client
         .get(format!("{base}{path}"))
         .header("x-alexandria-timestamp", timestamp.to_string())
-        .header("x-alexandria-proof", proof(sk, "GET", &path, timestamp))
+        .header("x-alexandria-nonce", &n)
+        .header("x-alexandria-proof", proof(sk, "GET", &path, timestamp, &n))
         .timeout(std::time::Duration::from_secs(15))
         .send()
         .await
