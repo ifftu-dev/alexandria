@@ -177,7 +177,7 @@ pub fn evaluate_attempt_policy(
         .filter_map(|a| parse_time(&a.started_at).map(|t| (t, a)))
         .filter(|(t, _)| window_start.is_none_or(|w| *t >= w))
         .collect();
-    in_window.sort_by(|a, b| b.0.cmp(&a.0));
+    in_window.sort_by_key(|(started, _)| std::cmp::Reverse(*started));
 
     let attempts_used = in_window.len() as u32;
 
