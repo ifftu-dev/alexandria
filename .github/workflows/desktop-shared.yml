@@ -201,7 +201,14 @@ jobs:
           rm certificate.p12
 
       - name: Install FFmpeg and autotools
-        run: brew install cmake ffmpeg libtool automake autoconf
+        # ffmpeg@9, not ffmpeg. The bindings track a major version — see the
+        # `ffmpeg-next` pin in crates/moq-media/Cargo.toml — and an unpinned
+        # `brew install ffmpeg` follows Homebrew wherever it goes. That is not
+        # theoretical: Homebrew moved to 9 while the crates were on 8.1, and
+        # this job could not compile ffmpeg-next at all until they were bumped,
+        # because ffmpeg 9 adds enum values the older bindings have no arm for.
+        # Windows pins the same way a few jobs down. Bump both together.
+        run: brew install cmake ffmpeg@9 libtool automake autoconf
 
       - name: Write Apple API Key
         if: inputs.mode == 'release' && inputs.sign_updater == true
