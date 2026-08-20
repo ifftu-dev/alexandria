@@ -11,6 +11,8 @@
 use super::common::{await_gossip_on, await_peers_connected, new_test_db, start_test_node};
 use app_lib::p2p::vc_did::{handle_did_message, promote_pending_for, queue_pending, DidIngest};
 use app_lib::p2p::vc_status::{handle_status_message, StatusIngest};
+use base64::Engine as _;
+use ed25519_dalek::Signer as _;
 
 #[tokio::test]
 #[ignore = "flaky on CI: depends on libp2p DHT bootstrap to a discovery peer; \
@@ -121,11 +123,39 @@ async fn status_list_revocation_propagates() {
     }
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
-    // Base64("revoked-bits-snapshot") = "cmV2b2tlZC1iaXRzLXNuYXBzaG90"
-    let payload =
-        br#"{"issuer":"did:key:zStatusIssuer","version":1,"bits":"cmV2b2tlZC1iaXRzLXNuYXBzaG90"}"#
-            .to_vec();
+    // Signed by the issuer whose DID the payload names, because that is the
+    // only kind of status list the handler accepts.
+    //
+    // This used to be a literal with `"issuer":"did:key:zStatusIssuer"` — not a
+    // resolvable did:key — and no proof at all, asserting `Applied`. That is
+    // the behaviour the VC gossip layer had before it was authenticated: any
+    // peer could publish any issuer's status list, and zeroing the bits
+    // mass-*un*-revoked. The assertion outlived the fix, and survived only
+    // because the test skips out above whenever mDNS does not connect. Run it
+    // where discovery works and it failed on the fix that made it safe.
     let key = super::common::test_key("status-a");
+    let issuer = alexandria_verify::did::derive_did_key(&key);
+    let bits_b64 = "cmV2b2tlZC1iaXRzLXNuYXBzaG90"; // Base64("revoked-bits-snapshot")
+    let bits = base64::engine::general_purpose::STANDARD
+        .decode(bits_b64)
+        .expect("bits are valid base64");
+    let list_id = format!("urn:alexandria:status-list:{}:1", issuer.as_str());
+    let proof = base64::engine::general_purpose::STANDARD.encode(
+        key.sign(&app_lib::p2p::vc_status::canonical_status_bytes(
+            &list_id,
+            issuer.as_str(),
+            1,
+            &bits,
+        ))
+        .to_bytes(),
+    );
+    let payload = serde_json::to_vec(&serde_json::json!({
+        "issuer": issuer.as_str(),
+        "version": 1,
+        "bits": bits_b64,
+        "proof": proof,
+    }))
+    .expect("payload serialises");
     if let Err(e) = a
         .publish_vc_status(payload.clone(), &key, "stake_test1ustatus")
         .await
@@ -153,8 +183,8 @@ async fn status_list_revocation_propagates() {
     db.conn()
         .execute(
             "INSERT INTO key_registry (did, key_id, public_key_hex, valid_from) \
-             VALUES ('did:key:zStatusIssuer', 'key-1', '', '1970-01-01T00:00:00Z')",
-            [],
+             VALUES (?1, 'key-1', '', '1970-01-01T00:00:00Z')",
+            rusqlite::params![issuer.as_str()],
         )
         .unwrap();
     let msg = app_lib::p2p::types::SignedGossipMessage {
@@ -172,9 +202,8 @@ async fn status_list_revocation_propagates() {
     let version: i64 = db
         .conn()
         .query_row(
-            "SELECT version FROM credential_status_lists \
-             WHERE issuer_did = 'did:key:zStatusIssuer'",
-            [],
+            "SELECT version FROM credential_status_lists WHERE issuer_did = ?1",
+            rusqlite::params![issuer.as_str()],
             |r| r.get(0),
         )
         .unwrap();
