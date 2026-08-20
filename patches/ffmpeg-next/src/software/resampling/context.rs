@@ -1,12 +1,12 @@
 use std::ptr;
 
 use super::Delay;
-use ffi::*;
+use crate::Dictionary;
+use crate::ffi::*;
+use crate::util::format;
+use crate::{ChannelLayout, Error, frame};
 use libc::c_int;
 use std::ffi::c_void;
-use util::format;
-use Dictionary;
-use {frame, ChannelLayout, Error};
 
 #[derive(Eq, PartialEq, Copy, Clone)]
 pub struct Definition {
@@ -149,12 +149,7 @@ impl Context {
 
     /// Get the remaining delay.
     pub fn delay(&self) -> Option<Delay> {
-        unsafe {
-            match swr_get_delay(self.as_ptr() as *mut _, 1) {
-                0 => None,
-                _ => Some(Delay::from(self)),
-            }
-        }
+        Some(Delay::from(self)).filter(|d| d.output > 0)
     }
 
     /// Run the resampler from the given input to the given output.

@@ -10,8 +10,11 @@ pub use self::audio::Audio;
 pub mod flag;
 pub use self::flag::Flags;
 
-use ffi::*;
-use {Dictionary, DictionaryRef};
+pub mod decode_error;
+pub use self::decode_error::DecodeError;
+
+use crate::ffi::*;
+use crate::{Dictionary, DictionaryRef};
 
 #[derive(PartialEq, Eq, Copy, Clone, Debug)]
 pub struct Packet {
@@ -44,9 +47,11 @@ impl Frame {
 
     #[inline(always)]
     pub unsafe fn empty() -> Self {
-        Frame {
-            ptr: av_frame_alloc(),
-            _own: true,
+        unsafe {
+            Frame {
+                ptr: av_frame_alloc(),
+                _own: true,
+            }
         }
     }
 
@@ -62,7 +67,7 @@ impl Frame {
 
     #[inline(always)]
     pub unsafe fn is_empty(&self) -> bool {
-        (*self.as_ptr()).data[0].is_null()
+        unsafe { (*self.as_ptr()).data[0].is_null() }
     }
 }
 
@@ -82,6 +87,16 @@ impl Frame {
     #[inline]
     pub fn is_corrupt(&self) -> bool {
         self.flags().contains(Flags::CORRUPT)
+    }
+
+    #[inline]
+    pub fn decode_error_flags(&self) -> DecodeError {
+        unsafe { DecodeError::from_bits_truncate((*self.as_ptr()).decode_error_flags) }
+    }
+
+    #[inline]
+    pub fn has_decode_errors(&self) -> bool {
+        !self.decode_error_flags().is_empty()
     }
 
     #[inline]

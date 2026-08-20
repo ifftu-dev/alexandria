@@ -1,9 +1,9 @@
 extern crate ffmpeg_next as ffmpeg;
 
-use ffmpeg::format::{input, Pixel};
-use ffmpeg::media::Type;
-use ffmpeg::software::scaling::{context::Context, flag::Flags};
-use ffmpeg::util::frame::video::Video;
+use crate::ffmpeg::format::{Pixel, input};
+use crate::ffmpeg::media::Type;
+use crate::ffmpeg::software::scaling::{context::Context, flag::Flags};
+use crate::ffmpeg::util::frame::video::Video;
 use std::env;
 use std::fs::File;
 use std::io::prelude::*;
@@ -61,6 +61,10 @@ fn main() -> Result<(), ffmpeg::Error> {
 fn save_file(frame: &Video, index: usize) -> std::result::Result<(), std::io::Error> {
     let mut file = File::create(format!("frame{}.ppm", index))?;
     file.write_all(format!("P6\n{} {}\n255\n", frame.width(), frame.height()).as_bytes())?;
-    file.write_all(frame.data(0))?;
+    for i in 0..frame.height() as usize {
+        let start = i * frame.stride(0);
+        let len = 3 * frame.width() as usize;
+        file.write_all(&frame.data(0)[start..start + len])?;
+    }
     Ok(())
 }

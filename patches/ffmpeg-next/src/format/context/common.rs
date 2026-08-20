@@ -1,25 +1,42 @@
 use std::fmt;
 use std::mem;
 use std::ptr;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use super::destructor::{self, Destructor};
-use ffi::*;
+use crate::ffi::*;
+use crate::{Chapter, ChapterMut, DictionaryRef, Stream, StreamMut, media};
 use libc::{c_int, c_uint};
-use {media, Chapter, ChapterMut, DictionaryRef, Stream, StreamMut};
 
 pub struct Context {
     ptr: *mut AVFormatContext,
-    dtor: Rc<Destructor>,
+    dtor: Arc<Destructor>,
 }
 
+// SAFETY: the context owns its `AVFormatContext`; the keep-alive refcount
+// (`Arc`) is atomic.
 unsafe impl Send for Context {}
 
 impl Context {
     pub unsafe fn wrap(ptr: *mut AVFormatContext, mode: destructor::Mode) -> Self {
-        Context {
-            ptr,
-            dtor: Rc::new(Destructor::new(ptr, mode)),
+        unsafe {
+            Context {
+                ptr,
+                dtor: Arc::new(Destructor::new(ptr, mode)),
+            }
+        }
+    }
+
+    pub unsafe fn wrap_with_interrupt(
+        ptr: *mut AVFormatContext,
+        mode: destructor::Mode,
+        guard: crate::util::interrupt::InterruptGuard,
+    ) -> Self {
+        unsafe {
+            Context {
+                ptr,
+                dtor: Arc::new(Destructor::new_with_interrupt(ptr, mode, guard)),
+            }
         }
     }
 
@@ -31,8 +48,8 @@ impl Context {
         self.ptr
     }
 
-    pub unsafe fn destructor(&self) -> Rc<Destructor> {
-        Rc::clone(&self.dtor)
+    pub unsafe fn destructor(&self) -> Arc<Destructor> {
+        Arc::clone(&self.dtor)
     }
 }
 

@@ -2,8 +2,8 @@ use std::marker::PhantomData;
 use std::slice;
 
 use super::Packet;
-use ffi::AVPacketSideDataType::*;
-use ffi::*;
+use crate::ffi::AVPacketSideDataType::*;
+use crate::ffi::*;
 
 #[derive(Eq, PartialEq, Copy, Clone, Debug)]
 pub enum Type {
@@ -76,6 +76,21 @@ pub enum Type {
 
     #[cfg(feature = "ffmpeg_8_1")]
     EXIF,
+
+    #[cfg(feature = "ffmpeg_9_0")]
+    DYNAMIC_HDR_SMPTE_2094_APP5,
+    #[cfg(feature = "ffmpeg_9_0")]
+    HEVC_CONF,
+
+    /// A side-data type this crate does not know about.
+    ///
+    /// Upstream matches these with `unimplemented!()`, behind a feature flag —
+    /// so building against a newer ffmpeg than the crate targets either fails
+    /// to compile (flag off, match not exhaustive) or panics at runtime (flag
+    /// on). Neither is acceptable here: side data arrives from a remote peer's
+    /// stream during a live call, so a value we do not recognise must be
+    /// something we carry, not something that takes the process down.
+    Unknown(AVPacketSideDataType)
 }
 
 impl From<AVPacketSideDataType> for Type {
@@ -150,6 +165,13 @@ impl From<AVPacketSideDataType> for Type {
 
             #[cfg(feature = "ffmpeg_8_1")]
             AV_PKT_DATA_EXIF => Type::EXIF,
+
+            #[cfg(feature = "ffmpeg_9_0")]
+            AV_PKT_DATA_DYNAMIC_HDR_SMPTE_2094_APP5 => Type::DYNAMIC_HDR_SMPTE_2094_APP5,
+            #[cfg(feature = "ffmpeg_9_0")]
+            AV_PKT_DATA_HEVC_CONF => Type::HEVC_CONF,
+
+            value => Type::Unknown(value),
         }
     }
 }
@@ -226,6 +248,12 @@ impl From<Type> for AVPacketSideDataType {
 
             #[cfg(feature = "ffmpeg_8_1")]
             Type::EXIF => AV_PKT_DATA_EXIF,
+
+            #[cfg(feature = "ffmpeg_9_0")]
+            Type::DYNAMIC_HDR_SMPTE_2094_APP5 => AV_PKT_DATA_DYNAMIC_HDR_SMPTE_2094_APP5,
+            #[cfg(feature = "ffmpeg_9_0")]
+            Type::HEVC_CONF => AV_PKT_DATA_HEVC_CONF,
+            Type::Unknown(value) => value,
         }
     }
 }

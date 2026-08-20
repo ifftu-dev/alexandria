@@ -10,8 +10,9 @@
 # See Cargo.toml.orig for the original contents.
 
 [package]
+edition = "2024"
 name = "ffmpeg-next"
-version = "8.1.0"
+version = "9.0.0"
 authors = [
     "meh. <meh@schizofreni.co>",
     "Zhiming Wang <i@zhimingwang.org>",
@@ -156,11 +157,27 @@ path = "examples/transcode-audio.rs"
 name = "transcode-x264"
 path = "examples/transcode-x264.rs"
 
+[[test]]
+name = "audio_frame_slices"
+path = "tests/audio_frame_slices.rs"
+
+[[test]]
+name = "buffersink_reuse"
+path = "tests/buffersink_reuse.rs"
+
+[[test]]
+name = "send_rc_race"
+path = "tests/send_rc_race.rs"
+
+[[test]]
+name = "stream_io"
+path = "tests/stream_io.rs"
+
 [dependencies.bitflags]
-version = "2.11"
+version = "2.13"
 
 [dependencies.ffmpeg-sys-next]
-version = "8.1.0"
+version = "9.0.0"
 default-features = false
 
 [dependencies.image]

@@ -7,9 +7,16 @@ use libc;
 
 use super::common::Context;
 use super::destructor;
-use codec::traits;
-use ffi::*;
-use {codec, format, ChapterMut, Dictionary, Error, Rational, StreamMut};
+use crate::codec::traits;
+use crate::ffi::*;
+use crate::{ChapterMut, Dictionary, Error, Rational, StreamMut, codec, format};
+
+pub enum AvStreamInitStatus {
+    /// the codec had not already been fully initialized
+    InWriteHeader,
+    /// the codec had already been fully initialized
+    InInitOutput,
+}
 
 pub struct Output {
     ptr: *mut AVFormatContext,
@@ -20,9 +27,22 @@ unsafe impl Send for Output {}
 
 impl Output {
     pub unsafe fn wrap(ptr: *mut AVFormatContext) -> Self {
-        Output {
-            ptr,
-            ctx: Context::wrap(ptr, destructor::Mode::Output),
+        unsafe {
+            Output {
+                ptr,
+                ctx: Context::wrap(ptr, destructor::Mode::Output),
+            }
+        }
+    }
+    pub unsafe fn wrap_with_custom_io(
+        ptr: *mut AVFormatContext,
+        custom_io: format::context::StreamIo,
+    ) -> Self {
+        unsafe {
+            Output {
+                ptr,
+                ctx: Context::wrap(ptr, destructor::Mode::OutputCustomIo(custom_io)),
+            }
         }
     }
 
@@ -44,10 +64,11 @@ impl Output {
         }
     }
 
-    pub fn write_header(&mut self) -> Result<(), Error> {
+    pub fn write_header(&mut self) -> Result<AvStreamInitStatus, Error> {
         unsafe {
             match avformat_write_header(self.as_mut_ptr(), ptr::null_mut()) {
-                0 => Ok(()),
+                0 => Ok(AvStreamInitStatus::InWriteHeader),
+                1 => Ok(AvStreamInitStatus::InInitOutput),
                 e => Err(Error::from(e)),
             }
         }
@@ -58,8 +79,10 @@ impl Output {
             let mut opts = options.disown();
             let res = avformat_write_header(self.as_mut_ptr(), &mut opts);
 
+            let opts = Dictionary::own(opts);
             match res {
-                0 => Ok(Dictionary::own(opts)),
+                0 => Ok(opts),
+                1 => Ok(opts),
                 e => Err(Error::from(e)),
             }
         }
@@ -67,8 +90,12 @@ impl Output {
 
     pub fn write_trailer(&mut self) -> Result<(), Error> {
         unsafe {
+            // Documented as 0-or-negative, but muxers can leak a positive
+            // internal byte count through it (movenc returns the `mfra`
+            // atom size on the fragmented path); ffmpeg's own CLI treats
+            // any >= 0 as success (`if ((ret = av_write_trailer(ofmt_ctx)) < 0)`).
             match av_write_trailer(self.as_mut_ptr()) {
-                0 => Ok(()),
+                e if e >= 0 => Ok(()),
                 e => Err(Error::from(e)),
             }
         }

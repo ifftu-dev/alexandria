@@ -1,9 +1,10 @@
 use std::ffi::CStr;
+use std::fmt;
 use std::str::from_utf8_unchecked;
 
-use ffi::AVCodecID::*;
-use ffi::*;
-use util::media;
+use crate::ffi::AVCodecID::*;
+use crate::ffi::*;
+use crate::util::media;
 
 #[allow(non_camel_case_types)]
 #[derive(Eq, PartialEq, Clone, Copy, Debug)]
@@ -169,6 +170,7 @@ pub enum Id {
     BMV_VIDEO,
     VBLE,
     DXTORY,
+    #[cfg(not(feature = "ffmpeg_9_0"))]
     V410,
     XWD,
     CDXL,
@@ -214,7 +216,9 @@ pub enum Id {
     #[cfg(not(feature = "ffmpeg_7_0"))]
     AYUV,
     TARGA_Y216,
+    #[cfg(not(feature = "ffmpeg_9_0"))]
     V308,
+    #[cfg(not(feature = "ffmpeg_9_0"))]
     V408,
     YUV4,
     AVRN,
@@ -712,6 +716,11 @@ pub enum Id {
     ADPCM_IMA_ESCAPE,
     #[cfg(feature = "ffmpeg_8_1")]
     AHX,
+
+    #[cfg(feature = "ffmpeg_9_0")]
+    WEBP_ANIM,
+    #[cfg(feature = "ffmpeg_9_0")]
+    APPLE_APAC,
 }
 
 impl Id {
@@ -890,6 +899,7 @@ impl From<AVCodecID> for Id {
             AV_CODEC_ID_BMV_VIDEO => Id::BMV_VIDEO,
             AV_CODEC_ID_VBLE => Id::VBLE,
             AV_CODEC_ID_DXTORY => Id::DXTORY,
+            #[cfg(not(feature = "ffmpeg_9_0"))]
             AV_CODEC_ID_V410 => Id::V410,
             AV_CODEC_ID_XWD => Id::XWD,
             AV_CODEC_ID_CDXL => Id::CDXL,
@@ -934,7 +944,9 @@ impl From<AVCodecID> for Id {
             #[cfg(not(feature = "ffmpeg_7_0"))]
             AV_CODEC_ID_AYUV => Id::AYUV,
             AV_CODEC_ID_TARGA_Y216 => Id::TARGA_Y216,
+            #[cfg(not(feature = "ffmpeg_9_0"))]
             AV_CODEC_ID_V308 => Id::V308,
+            #[cfg(not(feature = "ffmpeg_9_0"))]
             AV_CODEC_ID_V408 => Id::V408,
             AV_CODEC_ID_YUV4 => Id::YUV4,
             AV_CODEC_ID_AVRN => Id::AVRN,
@@ -1431,6 +1443,14 @@ impl From<AVCodecID> for Id {
             AV_CODEC_ID_ADPCM_IMA_ESCAPE => Id::ADPCM_IMA_ESCAPE,
             #[cfg(feature = "ffmpeg_8_1")]
             AV_CODEC_ID_AHX => Id::AHX,
+
+            #[cfg(feature = "ffmpeg_9_0")]
+            AV_CODEC_ID_WEBP_ANIM => Id::WEBP_ANIM,
+            #[cfg(feature = "ffmpeg_9_0")]
+            AV_CODEC_ID_APPLE_APAC => Id::APPLE_APAC,
+
+            #[cfg(feature = "non-exhaustive-enums")]
+            _ => unimplemented!(),
         }
     }
 }
@@ -1599,6 +1619,7 @@ impl From<Id> for AVCodecID {
             Id::BMV_VIDEO => AV_CODEC_ID_BMV_VIDEO,
             Id::VBLE => AV_CODEC_ID_VBLE,
             Id::DXTORY => AV_CODEC_ID_DXTORY,
+            #[cfg(not(feature = "ffmpeg_9_0"))]
             Id::V410 => AV_CODEC_ID_V410,
             Id::XWD => AV_CODEC_ID_XWD,
             Id::CDXL => AV_CODEC_ID_CDXL,
@@ -1644,7 +1665,9 @@ impl From<Id> for AVCodecID {
             #[cfg(not(feature = "ffmpeg_7_0"))]
             Id::AYUV => AV_CODEC_ID_AYUV,
             Id::TARGA_Y216 => AV_CODEC_ID_TARGA_Y216,
+            #[cfg(not(feature = "ffmpeg_9_0"))]
             Id::V308 => AV_CODEC_ID_V308,
+            #[cfg(not(feature = "ffmpeg_9_0"))]
             Id::V408 => AV_CODEC_ID_V408,
             Id::YUV4 => AV_CODEC_ID_YUV4,
             Id::AVRN => AV_CODEC_ID_AVRN,
@@ -2142,6 +2165,17 @@ impl From<Id> for AVCodecID {
             Id::ADPCM_IMA_ESCAPE => AV_CODEC_ID_ADPCM_IMA_ESCAPE,
             #[cfg(feature = "ffmpeg_8_1")]
             Id::AHX => AV_CODEC_ID_AHX,
+
+            #[cfg(feature = "ffmpeg_9_0")]
+            Id::WEBP_ANIM => AV_CODEC_ID_WEBP_ANIM,
+            #[cfg(feature = "ffmpeg_9_0")]
+            Id::APPLE_APAC => AV_CODEC_ID_APPLE_APAC,
         }
+    }
+}
+
+impl fmt::Display for Id {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        write!(f, "{}", self.name())
     }
 }

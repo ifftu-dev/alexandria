@@ -1,19 +1,24 @@
 use std::any::Any;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use super::{Context, Id};
-use ffi::*;
-use media;
+use crate::ffi::*;
+use crate::media;
 
 pub struct Parameters {
     ptr: *mut AVCodecParameters,
-    owner: Option<Rc<dyn Any>>,
+    owner: Option<Arc<dyn Any + Send + Sync>>,
 }
 
+// SAFETY: the parameters either own their `AVCodecParameters` or keep their
+// owner alive through an atomically refcounted, thread-safe handle.
 unsafe impl Send for Parameters {}
 
 impl Parameters {
-    pub unsafe fn wrap(ptr: *mut AVCodecParameters, owner: Option<Rc<dyn Any>>) -> Self {
+    pub unsafe fn wrap(
+        ptr: *mut AVCodecParameters,
+        owner: Option<Arc<dyn Any + Send + Sync>>,
+    ) -> Self {
         Parameters { ptr, owner }
     }
 
@@ -40,8 +45,30 @@ impl Parameters {
         unsafe { media::Type::from((*self.as_ptr()).codec_type) }
     }
 
+    pub fn set_medium(&mut self, value: media::Type) {
+        unsafe {
+            (*self.as_mut_ptr()).codec_type = value.into();
+        }
+    }
+
     pub fn id(&self) -> Id {
         unsafe { Id::from((*self.as_ptr()).codec_id) }
+    }
+
+    pub fn set_id(&mut self, value: Id) {
+        unsafe {
+            (*self.as_mut_ptr()).codec_id = value.into();
+        }
+    }
+
+    pub fn bit_rate(&self) -> i64 {
+        unsafe { (*self.as_ptr()).bit_rate }
+    }
+
+    pub fn set_bit_rate(&mut self, value: i64) {
+        unsafe {
+            (*self.as_mut_ptr()).bit_rate = value;
+        }
     }
 }
 
@@ -84,5 +111,22 @@ impl<C: AsRef<Context>> From<C> for Parameters {
             avcodec_parameters_from_context(parameters.as_mut_ptr(), context.as_ptr());
         }
         parameters
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sets_codec_parameters() {
+        let mut parameters = Parameters::new();
+        parameters.set_medium(media::Type::Subtitle);
+        parameters.set_id(Id::WEBVTT);
+        parameters.set_bit_rate(64_000);
+
+        assert_eq!(parameters.medium(), media::Type::Subtitle);
+        assert_eq!(parameters.id(), Id::WEBVTT);
+        assert_eq!(parameters.bit_rate(), 64_000);
     }
 }

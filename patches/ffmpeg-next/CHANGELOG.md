@@ -1,9 +1,16 @@
+Unreleased
+----------
+
+- Fix unsound `Send` impls: replace the non-atomic `Rc` keep-alive shared by
+  format contexts and stream-derived `codec::{Context, Parameters}` with
+  `Arc`. Breaking for the unsafe `wrap`/`destructor` signatures.
+
 5.0.0
 -----
 
 - Introduce conditional compilation flags to preserve functions that are
   removed from ffmpeg 5.0 and onwards.
-- Fix examples so they are using the ffmpeg-sanctionned way of doing
+- Fix examples so they are using the ffmpeg-sanctioned way of doing
   things. More specifically, AVStream.codec has been removed, and the
   correct way of getting the codec from a stream is to use
   Context::from_parameters(stream.parameters()) and then that context's

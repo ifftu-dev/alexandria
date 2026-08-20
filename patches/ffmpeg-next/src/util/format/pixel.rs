@@ -1,10 +1,10 @@
 use std::error;
 use std::ffi::{CStr, CString, NulError};
 use std::fmt;
-use std::str::{from_utf8_unchecked, FromStr};
+use std::str::{FromStr, from_utf8_unchecked};
 
-use ffi::AVPixelFormat::*;
-use ffi::*;
+use crate::ffi::AVPixelFormat::*;
+use crate::ffi::*;
 
 #[derive(Eq, PartialEq, Copy, Clone, Debug)]
 pub enum Pixel {
@@ -572,6 +572,10 @@ impl Descriptor {
     pub fn log2_chroma_h(self) -> u8 {
         unsafe { (*self.as_ptr()).log2_chroma_h }
     }
+
+    pub fn bits_per_pixel(&self) -> i32 {
+        unsafe { av_get_bits_per_pixel(self.as_ptr()) }
+    }
 }
 
 impl From<AVPixelFormat> for Pixel {
@@ -1014,6 +1018,9 @@ impl From<AVPixelFormat> for Pixel {
             AV_PIX_FMT_RPI4_8 => Pixel::RPI4_8,
             #[cfg(feature = "rpi")]
             AV_PIX_FMT_RPI4_10 => Pixel::RPI4_10,
+
+            #[cfg(feature = "non-exhaustive-enums")]
+            _ => unimplemented!(),
         }
     }
 }
