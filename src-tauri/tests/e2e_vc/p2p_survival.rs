@@ -4,6 +4,8 @@ use super::common::{await_gossip_on, await_peers_connected, new_test_db, start_t
 use app_lib::content_store::pinboard::{declare_commitment, list_pinners_for, revoke_commitment};
 use app_lib::crypto::did::Did;
 use app_lib::p2p::pinboard::{handle_pinboard_message, PinboardCommitment};
+use base64::Engine as _;
+use ed25519_dalek::Signer as _;
 
 #[tokio::test]
 async fn credential_resolvable_when_subject_offline_via_pinboard() {
@@ -66,18 +68,35 @@ async fn pinboard_observation_propagates_via_gossip() {
     }
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
-    let commit = PinboardCommitment {
+    // Signed by the pinner it names.
+    //
+    // This used to carry `signature: "sig"` and `public_key: "pk"` with a
+    // `pinner_did` nothing could resolve, and the handler took it. That was the
+    // finding the security pass closed: the columns existed in the schema and
+    // were enforced nowhere, so ingest was an unauthenticated write into
+    // `pinboard_observations` by any peer — and forged commitments claiming N
+    // peers pin a subject are how a node talks itself into dropping content
+    // that exists nowhere else. The literal outlived the fix and was hidden by
+    // the SKIP above, which fires whenever mDNS does not connect.
+    let key = super::common::test_key("pinboard-b");
+    let pinner = alexandria_verify::did::derive_did_key(&key);
+    let mut commit = PinboardCommitment {
         id: "urn:uuid:commit-e2e".into(),
-        pinner_did: "did:key:zPinnerE2E".into(),
+        pinner_did: pinner.as_str().to_string(),
         subject_did: "did:key:zSubjectE2E".into(),
         scope: vec!["credentials".into()],
         commitment_since: "2026-04-13T00:00:00Z".into(),
         revoked_at: None,
-        signature: "sig".into(),
-        public_key: "pk".into(),
+        signature: String::new(),
+        public_key: String::new(),
     };
+    commit.public_key =
+        base64::engine::general_purpose::STANDARD.encode(key.verifying_key().to_bytes());
+    commit.signature = base64::engine::general_purpose::STANDARD.encode(
+        key.sign(&app_lib::p2p::pinboard::canonical_commitment_bytes(&commit))
+            .to_bytes(),
+    );
     let payload = serde_json::to_vec(&commit).unwrap();
-    let key = super::common::test_key("pinboard-b");
     if let Err(e) = b
         .publish_pinboard(payload.clone(), &key, "stake_test1upinb")
         .await
