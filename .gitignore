@@ -106,3 +106,4 @@ keys/
 # CLI sidecar staged by scripts/build-cli-sidecar.sh for the release bundle.
 # Built artifact, never committed.
 src-tauri/binaries/
+src-tauri/macos-frameworks/

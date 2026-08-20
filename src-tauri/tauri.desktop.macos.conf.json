@@ -3,11 +3,35 @@
   "build": {
     "features": [
       "tutoring-video-aec"
-    ]
+    ],
+    "beforeBundleCommand": "bash scripts/stage-macos-dylibs.sh"
   },
   "bundle": {
     "externalBin": [
       "binaries/alexandria-cli"
-    ]
+    ],
+    "macOS": {
+      "frameworks": [
+        "macos-frameworks/libSvtAv1Enc.dylib",
+        "macos-frameworks/libavcodec.dylib",
+        "macos-frameworks/libavdevice.dylib",
+        "macos-frameworks/libavfilter.dylib",
+        "macos-frameworks/libavformat.dylib",
+        "macos-frameworks/libavutil.dylib",
+        "macos-frameworks/libcrypto.dylib",
+        "macos-frameworks/libdav1d.dylib",
+        "macos-frameworks/liblzma.dylib",
+        "macos-frameworks/libmp3lame.dylib",
+        "macos-frameworks/libmpg123.dylib",
+        "macos-frameworks/libopus.dylib",
+        "macos-frameworks/libssl.dylib",
+        "macos-frameworks/libswresample.dylib",
+        "macos-frameworks/libswscale.dylib",
+        "macos-frameworks/libvmaf.dylib",
+        "macos-frameworks/libvpx.dylib",
+        "macos-frameworks/libx264.dylib",
+        "macos-frameworks/libx265.dylib"
+      ]
+    }
   }
 }

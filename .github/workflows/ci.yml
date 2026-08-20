@@ -489,12 +489,21 @@ jobs:
           force-avd-creation: true
           emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect
           disable-animations: true
-          script: |
-            cd alexandria
-            export CARGO_TARGET_X86_64_LINUX_ANDROID_RUNNER="$GITHUB_WORKSPACE/alexandria/scripts/ci/android-test-runner.sh"
-            cargo test -p alexandria-node --lib \
-              --target x86_64-linux-android --features tutoring-video-android \
-              plugins::builtins::tests::editor_js_install_to_grade_wiring -- --exact --nocapture
+          # One `sh -c`, chained with `&&`, deliberately.
+          #
+          # android-emulator-runner runs *each line* of `script` as its own
+          # `sh -c`. Written as three lines, the `cd` got a shell of its own and
+          # exited, the export got another, and `cargo test` ran from
+          # $GITHUB_WORKSPACE — where there is no Cargo.toml, because the repo
+          # is checked out into `alexandria/` beneath it. The job then failed
+          # with "could not find `Cargo.toml`", after a perfectly healthy
+          # emulator boot, and had never once passed.
+          script: >-
+            cd alexandria &&
+            export CARGO_TARGET_X86_64_LINUX_ANDROID_RUNNER="$GITHUB_WORKSPACE/alexandria/scripts/ci/android-test-runner.sh" &&
+            cargo test -p alexandria-node --lib
+            --target x86_64-linux-android --features tutoring-video-android
+            plugins::builtins::tests::editor_js_install_to_grade_wiring -- --exact --nocapture
 
   release-readiness:
     name: Release Readiness
