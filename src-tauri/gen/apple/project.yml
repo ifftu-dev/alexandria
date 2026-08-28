@@ -56,6 +56,39 @@ targets:
         # App uses only standard, exempt encryption — suppresses the
         # per-upload TestFlight export-compliance prompt.
         ITSAppUsesNonExemptEncryption: false
+        # Required from the iOS 26 SDK onwards, and fatal from iOS 27.
+        #
+        # UIKit checks for scene-lifecycle adoption when it creates the first
+        # scene. An app without this key used to get a runtime issue logged;
+        # built against the iOS 26+ SDK it now traps —
+        # _UIApplicationEvaluateRuntimeIssueForNoSceneLifecycleAdoption raises
+        # EXC_BREAKPOINT inside -[UIApplication workspace:didCreateScene:],
+        # which is before main.mm's start_app() has produced anything. The app
+        # dies on launch, no Rust code runs, and the crash report names UIKit
+        # rather than us.
+        #
+        # Declaring the key is the adoption UIKit looks for, and `true` is the
+        # value tao actually supports rather than the conservative-looking one.
+        # tao reads this key to decide whether it is in scene mode at all
+        # (`multiple_scenes_enabled`): only when it is true does it install
+        # `application:configurationForConnectingSceneSession:`, hand UIKit its
+        # TaoSceneDelegate, defer did_finish_launching to the first scene, and
+        # attach the UIWindow to a scene. Set to false, UIKit still runs the
+        # scene lifecycle but tao stays in its legacy path — the window is
+        # created with no windowScene and never becomes visible. A launch that
+        # no longer traps but shows nothing is not an improvement.
+        #
+        # No UISceneConfigurations entry, because tao supplies the configuration
+        # programmatically from that delegate method and the delegate method
+        # wins over the plist.
+        #
+        # On iPhone this changes nothing: UIApplication.supportsMultipleScenes
+        # is false there whatever the manifest says, and tao's own else-branch
+        # then moves the window onto the single connected scene. It does allow
+        # multiple windows on iPad, which is a behaviour change to make
+        # deliberately if iPad is ever a target.
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: true
     entitlements:
       path: alexandria-node_iOS/alexandria-node_iOS.entitlements
     scheme:

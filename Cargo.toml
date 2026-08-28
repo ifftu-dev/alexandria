@@ -50,6 +50,12 @@ ffmpeg-next = { path = "patches/ffmpeg-next" }
 # stay internal everywhere and no iOS link can resolve them. Our patch promotes
 # those three as weak globals, which coalesce across archives.
 swift-rs = { path = "patches/swift-rs" }
+# tao 0.35.3 returns the UISceneConfiguration from
+# application:configurationForConnectingSceneSession: with `Retained::as_ptr`,
+# which only borrows — the Retained then releases it as the function returns.
+# UIKit retains freed memory a moment later and the app dies in objc_retain
+# before its first frame. Our patch autoreleases the return instead.
+tao = { path = "patches/tao" }
 
 # live / iroh-moq / moq-media are owned in-tree under crates/ (on iroh 1.0),
 # referenced by path from src-tauri — no git dependency or patch. `live` is our
