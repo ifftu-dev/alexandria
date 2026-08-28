@@ -169,7 +169,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="min-h-screen">
+  <div class="min-h-full">
     <!-- Header -->
     <div>
       <h1 class="text-3xl font-bold">{{ $t('courses.dashboard.title') }}</h1>

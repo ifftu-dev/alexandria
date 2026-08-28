@@ -217,7 +217,7 @@ function onKeydown(event: KeyboardEvent) {
 
 <template>
   <div
-    class="min-h-screen flex items-center justify-center p-6 safe-area-top relative overflow-hidden"
+    class="min-h-full flex items-center justify-center p-6 relative overflow-hidden"
     @keydown="onKeydown"
   >
     <Starfield />

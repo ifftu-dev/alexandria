@@ -449,7 +449,7 @@ function enterApp() {
 </script>
 
 <template>
-  <div class="min-h-screen bg-background relative overflow-y-auto flex flex-col">
+  <div class="min-h-full bg-background relative flex flex-col">
     <div class="onb-stars">
       <Starfield />
     </div>
