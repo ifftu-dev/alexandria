@@ -44,6 +44,12 @@ audiopus_sys = { path = "patches/audiopus_sys" }
 webrtc-audio-processing-sys = { path = "patches/webrtc-audio-processing-sys" }
 ffmpeg-sys-next = { path = "patches/ffmpeg-sys-next" }
 ffmpeg-next = { path = "patches/ffmpeg-next" }
+# swift-rs 1.0.8 promotes Xcode 27's internalized @_cdecl exports back to global,
+# but only in each package's own object member. Its own Swift runtime is vendored
+# into every archive as SwiftRs.o, so retain_object/release_object/string_from_bytes
+# stay internal everywhere and no iOS link can resolve them. Our patch promotes
+# those three as weak globals, which coalesce across archives.
+swift-rs = { path = "patches/swift-rs" }
 
 # live / iroh-moq / moq-media are owned in-tree under crates/ (on iroh 1.0),
 # referenced by path from src-tauri — no git dependency or patch. `live` is our
