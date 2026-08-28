@@ -11,7 +11,7 @@ use tauri::State;
 
 use crate::content_store::profile as content_profile;
 use crate::crypto::wallet;
-use crate::domain::identity::{AccountStatus, Identity, ProfileUpdate, WalletInfo, ACCOUNT_ROLES};
+use crate::domain::identity::{AccountStatus, Identity, ProfileUpdate, WalletInfo};
 use crate::domain::profile::{ProfilePayload, PublishProfileResult, SignedProfile};
 use crate::AppState;
 
@@ -121,7 +121,7 @@ pub async fn get_account_status(
     };
 
     let result = db.conn().query_row(
-        "SELECT account_role, birthdate, activation_state FROM local_identity WHERE id = 1",
+        "SELECT account_roles, birthdate, activation_state FROM local_identity WHERE id = 1",
         [],
         |row| {
             Ok((
@@ -133,14 +133,16 @@ pub async fn get_account_status(
     );
 
     match result {
-        Ok((role, birthdate, activation_state)) => {
+        Ok((roles_json, birthdate, activation_state)) => {
             let today = chrono::Utc::now().date_naive();
             let is_minor = birthdate
                 .as_deref()
                 .map(|b| crate::domain::identity::is_minor(b, today))
                 .unwrap_or(false);
+            let roles = crate::domain::identity::roles_from_json(&roles_json);
             Ok(Some(AccountStatus {
-                role,
+                role: crate::domain::identity::legacy_role(&roles),
+                roles,
                 birthdate,
                 is_minor,
                 activation_state,
@@ -151,14 +153,15 @@ pub async fn get_account_status(
     }
 }
 
-/// Change the account role. Supports the learner → instructor upgrade
-/// from settings; a gated minor cannot re-role their way out of the
-/// guardian requirement.
+/// Replace the role set. Learner cannot be removed — `normalize_roles`
+/// puts it back — so this only ever adds or drops instructor / parent. A
+/// gated minor cannot re-role their way out of the guardian requirement.
 #[tauri::command]
-pub async fn set_account_role(state: State<'_, AppState>, role: String) -> Result<(), String> {
-    if !ACCOUNT_ROLES.contains(&role.as_str()) {
-        return Err(format!("unknown account role '{role}'"));
-    }
+pub async fn set_account_roles(
+    state: State<'_, AppState>,
+    roles: Vec<String>,
+) -> Result<(), String> {
+    let roles = crate::domain::identity::normalize_roles(&roles)?;
     let db_guard = state
         .db
         .lock()
@@ -179,8 +182,12 @@ pub async fn set_account_role(state: State<'_, AppState>, role: String) -> Resul
 
     db.conn()
         .execute(
-            "UPDATE local_identity SET account_role = ?1, updated_at = datetime('now') WHERE id = 1",
-            params![role],
+            "UPDATE local_identity SET account_role = ?1, account_roles = ?2, \
+             updated_at = datetime('now') WHERE id = 1",
+            params![
+                crate::domain::identity::legacy_role(&roles),
+                crate::domain::identity::roles_to_json(&roles)
+            ],
         )
         .map_err(|e| e.to_string())?;
     Ok(())

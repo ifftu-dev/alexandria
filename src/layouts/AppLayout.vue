@@ -42,7 +42,7 @@ const { isMobilePlatform } = usePlatform()
 // Mode/role drive the accent strip on the shell (see main.css
 // `[data-mode]` / `[data-role]`) so the active surface is obvious.
 const { mode } = useMode()
-const { role } = useAccountStatus()
+const { isParent } = useAccountStatus()
 
 onMounted(async () => {
   await useSettings().initialize()
@@ -102,7 +102,7 @@ function toggleSidebar() {
   <div
     class="flex flex-col h-full overflow-hidden bg-background safe-area-top safe-area-lr"
     :data-mode="mode === 'instructor' ? 'instructor' : undefined"
-    :data-role="role === 'parent' ? 'parent' : undefined"
+    :data-role="isParent ? 'parent' : undefined"
   >
     <!-- Topbar — spans full width above everything -->
     <AppTopBar :sidebar-collapsed="sidebarCollapsed" @toggle-sidebar="toggleSidebar" />

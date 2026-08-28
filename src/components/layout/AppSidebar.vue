@@ -27,7 +27,7 @@ const isActive = (path: string) => {
 // Primary nav — branches by surface: learner mode, instructor mode,
 // or parent role (parents get the oversight-first nav).
 const { isInstructorMode } = useMode()
-const { role } = useAccountStatus()
+const { isParent } = useAccountStatus()
 
 interface NavItem {
   path: string
@@ -51,21 +51,14 @@ const INSTRUCTOR_NAV: NavItem[] = [
   { path: '/community', labelKey: 'nav.primary.community', icon: 'M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3' },
 ]
 
-const PARENT_NAV: NavItem[] = [
-  { path: '/guardian', labelKey: 'nav.primary.myChildren', icon: 'M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z' },
-  { path: '/opinions', labelKey: 'nav.primary.opinions', icon: 'M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z' },
-  { path: '/community', labelKey: 'nav.primary.community', icon: 'M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3' },
-]
+// Parents get the learner navigation plus their oversight entry on top.
+const CHILDREN_NAV_ITEM: NavItem = { path: '/guardian', labelKey: 'nav.primary.myChildren', icon: 'M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z' }
 
 const primaryNav = computed<NavItem[]>(() => {
-  if (role.value === 'parent') return PARENT_NAV
   if (isInstructorMode.value) return INSTRUCTOR_NAV
-  return LEARNER_NAV
+  return isParent.value ? [CHILDREN_NAV_ITEM, ...LEARNER_NAV] : LEARNER_NAV
 })
 
-// Parents oversee rather than participate — hide the learner-centric
-// live sections for them.
-const showLiveSections = computed(() => role.value !== 'parent')
 
 // Pending-review count for the instructor Inbox badge. Refreshed on
 // route change so acting on an item clears the badge promptly.
@@ -186,12 +179,12 @@ const classroomPreviews = computed(() =>
         </button>
       </div>
 
-      <div v-if="showLiveSections" class="sb-separator" />
+      <div class="sb-separator" />
 
       <!-- ═══════════════════════════════════════ -->
       <!-- Live Tutoring — collapsible previews    -->
       <!-- ═══════════════════════════════════════ -->
-      <div v-if="showLiveSections" class="sb-group">
+      <div class="sb-group">
         <!-- Collapsed: icon-only -->
         <button
           v-if="collapsed"
@@ -254,12 +247,12 @@ const classroomPreviews = computed(() =>
         </Transition>
       </div>
 
-      <div v-if="showLiveSections" class="sb-separator" />
+      <div class="sb-separator" />
 
       <!-- ═══════════════════════════════════════ -->
       <!-- Classrooms — collapsible previews       -->
       <!-- ═══════════════════════════════════════ -->
-      <div v-if="showLiveSections" class="sb-group">
+      <div class="sb-group">
         <!-- Collapsed: icon-only -->
         <button
           v-if="collapsed"

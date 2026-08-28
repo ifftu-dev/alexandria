@@ -38,14 +38,57 @@ pub struct ProfileUpdate {
     pub visibility: Option<String>,
 }
 
-/// Account role chosen at onboarding.
+/// Account roles, in canonical order. Everybody is a learner; the other two
+/// are added on top, in any combination.
 pub const ACCOUNT_ROLES: &[&str] = &["learner", "instructor", "parent"];
+
+/// Validate and canonicalise a role set: known names only, deduplicated,
+/// in `ACCOUNT_ROLES` order, and always containing `learner` whether or not
+/// the caller passed it. Learner is not something a person opts into.
+pub fn normalize_roles(roles: &[String]) -> Result<Vec<String>, String> {
+    for r in roles {
+        if !ACCOUNT_ROLES.contains(&r.as_str()) {
+            return Err(format!("unknown account role '{r}'"));
+        }
+    }
+    Ok(ACCOUNT_ROLES
+        .iter()
+        .filter(|r| **r == "learner" || roles.iter().any(|x| x == *r))
+        .map(|r| r.to_string())
+        .collect())
+}
+
+/// The stored form: a JSON array.
+pub fn roles_to_json(roles: &[String]) -> String {
+    serde_json::to_string(roles).expect("a Vec<String> always serialises")
+}
+
+/// Read the stored form. A row from before the set existed, or one edited
+/// by hand into something unparseable, is a plain learner — the safe
+/// reading, since every extra role only adds capability.
+pub fn roles_from_json(raw: &str) -> Vec<String> {
+    let parsed: Vec<String> = serde_json::from_str(raw).unwrap_or_default();
+    normalize_roles(&parsed).unwrap_or_else(|_| vec!["learner".to_string()])
+}
+
+/// What the single-valued `account_role` column carries: the first extra
+/// role, or `learner`. Only there for builds that predate the set.
+pub fn legacy_role(roles: &[String]) -> String {
+    roles
+        .iter()
+        .find(|r| r.as_str() != "learner")
+        .cloned()
+        .unwrap_or_else(|| "learner".to_string())
+}
 
 /// Role + gating status surfaced to the frontend. Age is computed, never stored.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AccountStatus {
+    /// Canonical role set; always contains `learner`.
+    pub roles: Vec<String>,
+    /// `legacy_role(roles)`. Kept for anything still reading one value.
     pub role: String,
-    /// ISO-8601 date (`YYYY-MM-DD`), learners only. Local-only: never published.
+    /// ISO-8601 date (`YYYY-MM-DD`). Local-only: never published.
     pub birthdate: Option<String>,
     pub is_minor: bool,
     /// `"active"` or `"pending_guardian"` (minor awaiting guardian link).
@@ -107,6 +150,45 @@ pub fn validate_username(username: &str) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn v(xs: &[&str]) -> Vec<String> {
+        xs.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn learner_is_always_present_and_first() {
+        assert_eq!(normalize_roles(&[]).unwrap(), v(&["learner"]));
+        assert_eq!(
+            normalize_roles(&v(&["parent"])).unwrap(),
+            v(&["learner", "parent"])
+        );
+        assert_eq!(
+            normalize_roles(&v(&["parent", "instructor", "parent"])).unwrap(),
+            v(&["learner", "instructor", "parent"])
+        );
+    }
+
+    #[test]
+    fn unknown_roles_are_refused() {
+        assert!(normalize_roles(&v(&["admin"])).is_err());
+    }
+
+    #[test]
+    fn stored_form_round_trips_and_tolerates_garbage() {
+        let r = v(&["learner", "parent"]);
+        assert_eq!(roles_from_json(&roles_to_json(&r)), r);
+        assert_eq!(roles_from_json("not json"), v(&["learner"]));
+        assert_eq!(roles_from_json("[\"admin\"]"), v(&["learner"]));
+    }
+
+    #[test]
+    fn legacy_role_is_the_first_extra() {
+        assert_eq!(legacy_role(&v(&["learner"])), "learner");
+        assert_eq!(
+            legacy_role(&v(&["learner", "instructor", "parent"])),
+            "instructor"
+        );
+    }
 
     fn d(s: &str) -> chrono::NaiveDate {
         chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap()

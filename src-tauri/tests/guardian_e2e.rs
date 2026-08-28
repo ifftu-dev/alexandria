@@ -58,13 +58,18 @@ fn person(role: &str, birthdate: Option<&str>, activation: &str) -> Person {
     db.conn()
         .execute(
             "INSERT INTO local_identity \
-             (id, stake_address, payment_address, display_name, account_role, birthdate, activation_state) \
-             VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6)",
+             (id, stake_address, payment_address, display_name, account_role, account_roles, birthdate, activation_state) \
+             VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             rusqlite::params![
                 w.stake_address,
                 w.payment_address,
                 format!("{role}-person"),
                 role,
+                if role == "learner" {
+                    "[\"learner\"]".to_string()
+                } else {
+                    format!("[\"learner\",\"{role}\"]")
+                },
                 birthdate,
                 activation
             ],

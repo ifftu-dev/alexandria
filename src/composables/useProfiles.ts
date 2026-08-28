@@ -82,14 +82,14 @@ async function createProfile(
   display_name: string,
   password: string,
   avatar?: Avatar,
-  account?: { role?: AccountRole; birthdate?: string },
+  account?: { roles?: AccountRole[]; birthdate?: string },
 ): Promise<CreateProfileResponse> {
   const result = await invoke<CreateProfileResponse>('create_profile', {
     username,
     displayName: display_name,
     password,
     avatar,
-    role: account?.role,
+    roles: account?.roles,
     birthdate: account?.birthdate,
   })
   activeProfileId.value = result.summary.id
@@ -106,7 +106,7 @@ async function restoreProfileWithMnemonic(
   mnemonic: string,
   password: string,
   avatar?: Avatar,
-  account?: { role?: AccountRole; birthdate?: string },
+  account?: { roles?: AccountRole[]; birthdate?: string },
 ): Promise<UnlockProfileResponse> {
   const result = await invoke<UnlockProfileResponse>('restore_profile_with_mnemonic', {
     username,
@@ -114,7 +114,7 @@ async function restoreProfileWithMnemonic(
     mnemonic,
     password,
     avatar,
-    role: account?.role,
+    roles: account?.roles,
     birthdate: account?.birthdate,
   })
   activeWallet.value = result.wallet

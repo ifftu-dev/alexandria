@@ -83,13 +83,19 @@ type Mode = 'create' | 'import'
 const mode = ref<Mode>('create')
 const step = ref<Step>('welcome')
 
-// ── Role & birthdate (learners only) ────────────────────────────
-const selectedRole = ref<AccountRole | null>(null)
+// ── Roles & birthdate ───────────────────────────────────────────
+// Everybody is a learner. Instructor and parent are added on top, in any
+// combination, and can be changed later. Learner cannot be unselected —
+// the card is shown checked and does not respond.
+const extraRoles = ref<Set<AccountRole>>(new Set())
+const roles = computed<AccountRole[]>(() => ['learner', ...extraRoles.value])
+const isParent = computed(() => extraRoles.value.has('parent'))
 const birthdate = ref('')
 
-const roleCards = computed<{ id: AccountRole; title: string; desc: string; icon: string }[]>(() => [
+const roleCards = computed<{ id: AccountRole; title: string; desc: string; icon: string; locked?: boolean }[]>(() => [
   {
     id: 'learner',
+    locked: true,
     title: t('onboarding.roles.learnerTitle'),
     desc: t('onboarding.roles.learnerDesc'),
     icon: 'M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253',
@@ -123,9 +129,9 @@ const birthdateValid = computed(() => {
   const a = ageYears.value
   return a !== null && a >= 0 && a <= 120 && new Date(`${birthdate.value}T00:00:00Z`) <= new Date()
 })
-const isMinorLearner = computed(
-  () => selectedRole.value === 'learner' && ageYears.value !== null && ageYears.value < 18,
-)
+// Everybody gives a birthdate, so anybody under 18 is gated — an
+// instructor or a parent no less than a learner with nothing added.
+const isMinor = computed(() => ageYears.value !== null && ageYears.value < 18)
 const mnemonic = ref('')
 const importMnemonic = ref('')
 const password = ref('')
@@ -191,20 +197,18 @@ const wizardSteps = computed<{ id: Step; label: string }[]>(() => {
     { id: 'welcome', label: t('onboarding.wizard.welcome') },
     { id: 'role', label: t('onboarding.wizard.role') },
   ]
-  if (selectedRole.value === 'learner') steps.push({ id: 'birthdate', label: t('onboarding.wizard.birthdate') })
+  steps.push({ id: 'birthdate', label: t('onboarding.wizard.birthdate') })
   steps.push({ id: 'password', label: t('onboarding.wizard.password') })
   if (mode.value === 'create') {
     steps.push({ id: 'generating', label: t('onboarding.wizard.createAccount') }, { id: 'backup', label: t('onboarding.wizard.recoveryPhrase') })
   } else {
     steps.push({ id: 'generating', label: t('onboarding.wizard.restoreAccount') })
   }
-  // Learners set goals right after the account exists (goals persist to the
-  // vault-scoped `learner.targets` synced setting).
-  if (selectedRole.value === 'learner') {
-    steps.push({ id: 'goals', label: t('onboarding.wizard.goals') })
-    steps.push({ id: 'bootstrap', label: t('onboarding.wizard.skills') })
-  }
-  if (selectedRole.value === 'parent') steps.push({ id: 'link-child', label: t('onboarding.wizard.linkChild') })
+  // Everybody is a learner, so everybody sets goals right after the account
+  // exists (goals persist to the vault-scoped `learner.targets` setting).
+  steps.push({ id: 'goals', label: t('onboarding.wizard.goals') })
+  steps.push({ id: 'bootstrap', label: t('onboarding.wizard.skills') })
+  if (isParent.value) steps.push({ id: 'link-child', label: t('onboarding.wizard.linkChild') })
   steps.push({ id: 'done', label: t('onboarding.wizard.complete') })
   return steps
 })
@@ -272,11 +276,23 @@ function startImport() {
   error.value = ''
 }
 
-function chooseRole(role: AccountRole) {
-  selectedRole.value = role
+function toggleRole(role: AccountRole) {
+  if (role === 'learner') return
+  const next = new Set(extraRoles.value)
+  if (next.has(role)) next.delete(role)
+  else next.add(role)
+  extraRoles.value = next
   error.value = ''
-  if (role !== 'learner') birthdate.value = ''
-  step.value = role === 'learner' ? 'birthdate' : 'password'
+}
+
+function proceedFromRoles() {
+  error.value = ''
+  step.value = 'birthdate'
+}
+
+/** After skills: parents link a child, everyone else is done. */
+function afterBootstrap(): Step {
+  return isParent.value ? 'link-child' : 'done'
 }
 
 function proceedFromBirthdate() {
@@ -298,7 +314,7 @@ function goBack() {
     password.value = ''
     confirmPassword.value = ''
     importMnemonic.value = ''
-    step.value = selectedRole.value === 'learner' ? 'birthdate' : 'role'
+    step.value = 'birthdate'
   }
 }
 
@@ -347,8 +363,8 @@ async function createWallet() {
       password.value,
       undefined,
       {
-        role: selectedRole.value ?? undefined,
-        birthdate: selectedRole.value === 'learner' ? birthdate.value : undefined,
+        roles: roles.value,
+        birthdate: birthdate.value,
       },
     )
     mnemonic.value = result.mnemonic
@@ -394,8 +410,8 @@ async function restoreWallet() {
       password.value,
       undefined,
       {
-        role: selectedRole.value ?? undefined,
-        birthdate: selectedRole.value === 'learner' ? birthdate.value : undefined,
+        roles: roles.value,
+        birthdate: birthdate.value,
       },
     )
     try {
@@ -415,11 +431,9 @@ async function restoreWallet() {
   }
 }
 
-/** After the wallet exists: learners set goals, parents link a child. */
+/** After the wallet exists everybody sets goals; parents link a child after skills. */
 function nextAfterWallet(): Step {
-  if (selectedRole.value === 'learner') return 'goals'
-  if (selectedRole.value === 'parent') return 'link-child'
-  return 'done'
+  return 'goals'
 }
 
 async function copyMnemonic() {
@@ -438,9 +452,9 @@ function enterApp() {
   // Minors are gated until a parent/guardian accepts their invite;
   // the backend created the profile in `pending_guardian` state.
   // Parents land on their oversight dashboard.
-  if (isMinorLearner.value) {
+  if (isMinor.value) {
     router.replace('/guardian-gate')
-  } else if (selectedRole.value === 'parent') {
+  } else if (isParent.value) {
     router.replace('/guardian')
   } else {
     router.replace('/home')
@@ -579,13 +593,20 @@ function enterApp() {
         <h1 class="onb-h2">{{ $t('onboarding.role.heading') }}</h1>
         <p class="onb-sub">{{ $t('onboarding.role.subtitle') }}</p>
 
-        <div class="onb-roles">
+        <div class="onb-roles" role="group" :aria-label="$t('onboarding.role.heading')">
           <button
             v-for="card in roleCards"
             :key="card.id"
             class="onb-role"
-            :class="{ 'onb-role--sel': selectedRole === card.id }"
-            @click="chooseRole(card.id)"
+            :class="{
+              'onb-role--sel': card.locked || extraRoles.has(card.id),
+              'onb-role--locked': card.locked,
+            }"
+            role="checkbox"
+            :aria-checked="card.locked || extraRoles.has(card.id)"
+            :aria-disabled="card.locked || undefined"
+            :tabindex="card.locked ? -1 : 0"
+            @click="toggleRole(card.id)"
           >
             <span class="onb-role__ic">
               <svg class="w-[22px] h-[22px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
@@ -593,7 +614,10 @@ function enterApp() {
               </svg>
             </span>
             <span class="onb-role__body">
-              <span class="onb-role__title">{{ card.title }}</span>
+              <span class="onb-role__title">
+                {{ card.title }}
+                <span v-if="card.locked" class="onb-role__always">{{ $t('onboarding.roles.alwaysOn') }}</span>
+              </span>
               <span class="onb-role__desc">{{ card.desc }}</span>
             </span>
             <span class="onb-role__chk">
@@ -603,6 +627,10 @@ function enterApp() {
             </span>
           </button>
         </div>
+
+        <button class="onb-cta mt-6" @click="proceedFromRoles">
+          {{ $t('common.actions.continue') }}
+        </button>
       </div>
 
       <!-- ============================================ -->
@@ -634,7 +662,7 @@ function enterApp() {
           </p>
         </div>
 
-        <div v-if="isMinorLearner" class="card p-4 mb-4 border-warning bg-warning/5">
+        <div v-if="isMinor" class="card p-4 mb-4 border-warning bg-warning/5">
           <p class="text-sm text-warning font-medium">
             {{ $t('onboarding.birthdate.minorNotice') }}
           </p>
@@ -984,13 +1012,13 @@ function enterApp() {
         <div class="mt-6 flex items-center justify-between gap-3">
           <button
             class="text-sm text-muted-foreground hover:text-foreground transition-colors"
-            @click="step = 'done'"
+            @click="step = afterBootstrap()"
           >
             {{ $t('onboarding.bootstrap.skip') }}
           </button>
           <button
             class="py-2.5 px-5 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary-hover transition-colors"
-            @click="step = 'done'"
+            @click="step = afterBootstrap()"
           >
             {{ $t('onboarding.bootstrap.continue', { count: bootstrapClaimed }, bootstrapClaimed) }}
           </button>
@@ -1067,7 +1095,7 @@ function enterApp() {
           {{ biometricHint }}
         </p>
 
-        <div v-if="isMinorLearner" class="card p-4 mb-4 border-warning bg-warning/5 text-start">
+        <div v-if="isMinor" class="card p-4 mb-4 border-warning bg-warning/5 text-start">
           <p class="text-sm text-warning font-medium">
             {{ $t('onboarding.done.minorNotice') }}
           </p>
@@ -1081,7 +1109,7 @@ function enterApp() {
           class="onb-cta"
           @click="enterApp"
         >
-          {{ isMinorLearner ? $t('onboarding.done.enterGuardian') : selectedRole === 'parent' ? $t('onboarding.done.enterParent') : $t('onboarding.done.enterLearner') }}
+          {{ isMinor ? $t('onboarding.done.enterGuardian') : isParent ? $t('onboarding.done.enterParent') : $t('onboarding.done.enterLearner') }}
         </button>
 
         <p class="text-xs text-muted-foreground mt-4 italic tracking-wide">
@@ -1323,6 +1351,26 @@ function enterApp() {
 }
 .onb-role--sel .onb-role__chk svg {
   opacity: 1;
+}
+/* Learner: always on. Reads as selected, not as a control. */
+.onb-role--locked {
+  cursor: default;
+}
+.onb-role--locked:hover {
+  border-color: var(--app-primary);
+}
+.onb-role__always {
+  display: inline-block;
+  margin-inline-start: 0.4rem;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  vertical-align: middle;
+  background: color-mix(in srgb, var(--app-primary) 18%, transparent);
+  color: var(--app-primary);
 }
 /* Primary call-to-action — accent fill with a soft glow. */
 .onb-cta {

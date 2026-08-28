@@ -11,6 +11,12 @@ const { invoke } = useLocalApi()
 const status = ref<AccountStatus | null>(null)
 const loaded = ref(false)
 
+/** Canonical role set. Everybody is a learner, so this is never empty. */
+const roles = computed<AccountRole[]>(() => status.value?.roles ?? ['learner'])
+const hasRole = (r: AccountRole) => roles.value.includes(r)
+const isInstructor = computed(() => hasRole('instructor'))
+const isParent = computed(() => hasRole('parent'))
+/** Legacy single-valued view: the first extra role, or 'learner'. */
 const role = computed<AccountRole>(() => status.value?.role ?? 'learner')
 const isMinor = computed(() => status.value?.is_minor ?? false)
 const activationState = computed(() => status.value?.activation_state ?? 'active')
@@ -26,8 +32,9 @@ async function refreshAccountStatus(): Promise<AccountStatus | null> {
   return status.value
 }
 
-async function setAccountRole(newRole: AccountRole): Promise<void> {
-  await invoke('set_account_role', { role: newRole })
+/** Replace the extra roles. Learner cannot be removed; the backend puts it back. */
+async function setAccountRoles(next: AccountRole[]): Promise<void> {
+  await invoke('set_account_roles', { roles: next })
   await refreshAccountStatus()
 }
 
@@ -43,11 +50,15 @@ export function useAccountStatus() {
   return {
     status: readonly(status),
     loaded: readonly(loaded),
+    roles,
+    hasRole,
+    isInstructor,
+    isParent,
     role,
     isMinor,
     activationState,
     isPendingGuardian,
     refreshAccountStatus,
-    setAccountRole,
+    setAccountRoles,
   }
 }

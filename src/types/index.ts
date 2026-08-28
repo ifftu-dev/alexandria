@@ -20,14 +20,17 @@ export interface Identity {
   updated_at: string
 }
 
-/** Role chosen at onboarding. Instructors can also act as learners via modes. */
+/** Account roles. Everybody is a learner; instructor and parent are added on top. */
 export type AccountRole = 'learner' | 'instructor' | 'parent'
 
 /** Role + gating status for the active profile. `is_minor` is computed
  *  from the stored birthdate at call time — age is never stored. */
 export interface AccountStatus {
+  /** Canonical role set; always contains 'learner'. */
+  roles: AccountRole[]
+  /** First extra role, or 'learner'. Legacy single-valued view of `roles`. */
   role: AccountRole
-  /** ISO date (YYYY-MM-DD), learners only. Local-only: never published. */
+  /** ISO date (YYYY-MM-DD). Local-only: never published. */
   birthdate: string | null
   is_minor: boolean
   /** 'active' | 'pending_guardian' (minor awaiting guardian link). */

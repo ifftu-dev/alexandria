@@ -1292,7 +1292,7 @@ pub fn run() {
             commands::identity::get_wallet_info,
             commands::identity::get_local_did,
             commands::identity::get_account_status,
-            commands::identity::set_account_role,
+            commands::identity::set_account_roles,
             commands::identity::resolve_display_names,
             commands::users::resolve_profiles,
             commands::users::fetch_user_profile,

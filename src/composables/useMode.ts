@@ -1,7 +1,7 @@
 // Learner ⇄ Instructor mode.
 //
-// Parent is a *role* whose home is the oversight dashboard; modes only
-// apply to instructor accounts, which are implicitly also learners.
+// Modes apply to accounts that carry the instructor role; everybody is a
+// learner, so learner mode is always available and is the default.
 // The active mode is a per-profile device setting (`ui.active_mode`)
 // so it survives restarts without following the user across devices.
 
@@ -15,15 +15,15 @@ export type AppMode = 'learner' | 'instructor'
 const modeSetting = useSetting<string>('ui.active_mode')
 
 export function useMode() {
-  const { role } = useAccountStatus()
+  const { isInstructor } = useAccountStatus()
 
-  const canSwitchModes = computed(() => role.value === 'instructor')
+  const canSwitchModes = computed(() => isInstructor.value)
 
   const mode = computed<AppMode>(() => {
     // Only instructor accounts ever surface instructor mode; a role
     // downgrade (or another profile's leftover setting) falls back
     // to learner without touching the stored value.
-    if (role.value !== 'instructor') return 'learner'
+    if (!isInstructor.value) return 'learner'
     return modeSetting.ref.value === 'instructor' ? 'instructor' : 'learner'
   })
 

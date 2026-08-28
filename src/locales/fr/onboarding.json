@@ -25,7 +25,8 @@
     "instructorTitle": "Instructeur",
     "instructorDesc": "Créez des cours et des tutoriels, relisez les soumissions et accompagnez les apprenants. Vous pouvez basculer en mode apprenant à tout moment.",
     "parentTitle": "Parent / Tuteur",
-    "parentDesc": "Supervisez l'apprentissage de votre enfant : liez son compte et suivez sa progression depuis votre propre appareil."
+    "parentDesc": "Supervisez l'apprentissage de votre enfant : liez son compte et suivez sa progression depuis votre propre appareil.",
+    "alwaysOn": "Always on"
   },
   "welcome": {
     "tagline": "Apprentissage gratuit et décentralisé. Vos justificatifs. Votre identité. Votre contrôle.",

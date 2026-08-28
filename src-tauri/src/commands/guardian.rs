@@ -630,14 +630,13 @@ pub async fn guardian_revoke_link(
             .map_err(|_| "link not found".to_string())?;
 
         // A minor ward cannot remove their own oversight.
-        let (birthdate, role): (Option<String>, String) = conn
+        let birthdate: Option<String> = conn
             .query_row(
-                "SELECT birthdate, account_role FROM local_identity WHERE id = 1",
+                "SELECT birthdate FROM local_identity WHERE id = 1",
                 [],
-                |r| Ok((r.get(0)?, r.get(1)?)),
+                |r| r.get(0),
             )
             .map_err(|e| e.to_string())?;
-        let _ = role;
         let row_side: &str = &row.0;
         if row_side == "ward" {
             let is_minor = birthdate

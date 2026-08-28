@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import type { AccountRole } from '@/types'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -369,8 +370,9 @@ const router = createRouter({
 // 2. `requiresInstructorMode` routes need an instructor account with
 //    instructor mode active (mode flips are cheap, so send the user
 //    home rather than flipping silently).
-// 3. `requiresRole` routes (e.g. the guardian dashboard) are only for
-//    that account role.
+// 3. `requiresRole` routes (e.g. the guardian dashboard) need that role
+//    in the account's role set. Everybody is a learner; the check is for
+//    the roles added on top.
 router.beforeEach(async (to) => {
   const openNames = new Set(['onboarding', 'profiles', 'guardian-gate'])
   if (openNames.has(String(to.name))) return true
@@ -380,7 +382,7 @@ router.beforeEach(async (to) => {
   const { isUnlocked } = useProfiles()
   if (!isUnlocked.value) return true // App.vue handles onboarding/picker routing
 
-  const { loaded, refreshAccountStatus, isPendingGuardian, role } = useAccountStatus()
+  const { loaded, refreshAccountStatus, isPendingGuardian, hasRole } = useAccountStatus()
   if (!loaded.value) await refreshAccountStatus()
   if (isPendingGuardian.value) return { name: 'guardian-gate' }
 
@@ -389,13 +391,8 @@ router.beforeEach(async (to) => {
     if (!useMode().isInstructorMode.value) return { name: 'home' }
   }
 
-  if (to.meta.requiresRole && to.meta.requiresRole !== role.value) {
+  if (to.meta.requiresRole && !hasRole(to.meta.requiresRole as AccountRole)) {
     return { name: 'home' }
-  }
-
-  // Parents have no learner home; route them to their dashboard.
-  if (to.name === 'home' && role.value === 'parent') {
-    return { path: '/guardian' }
   }
 
   return true

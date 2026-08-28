@@ -27,7 +27,7 @@ const { theme, setTheme } = useTheme()
 const { status: p2pStatus, startPolling } = useP2P()
 const { displayName, lockProfile, activeProfile } = useProfiles()
 const { isInstructorMode, toggleMode, canSwitchModes } = useMode()
-const { role } = useAccountStatus()
+const { isInstructor, isParent } = useAccountStatus()
 const { isMobilePlatform, isMac } = usePlatform()
 const omniSearch = useOmniSearch()
 const { shortcuts, registerAction } = useKeyboardShortcuts()
@@ -244,7 +244,7 @@ const avatarEmoji = computed(() => {
         {{ $t('nav.topbar.instructorMode') }}
       </AppBadge>
       <AppBadge
-        v-else-if="role === 'parent'"
+        v-else-if="isParent"
         class="topbar-mode-badge topbar-mode-badge--guardian"
         :title="$t('nav.topbar.guardianHint')"
       >
@@ -368,7 +368,7 @@ const avatarEmoji = computed(() => {
                   {{ displayName || $t('nav.userMenu.anonymous') }}
                 </p>
                 <span class="inline-block rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium capitalize leading-none text-muted-foreground">
-                  {{ role === 'instructor' ? (isInstructorMode ? $t('nav.userMenu.roleInstructor') : $t('nav.userMenu.roleInstructorLearner')) : role }}
+                  {{ isInstructor ? (isInstructorMode ? $t('nav.userMenu.roleInstructor') : $t('nav.userMenu.roleInstructorLearner')) : isParent ? 'parent' : 'learner' }}
                 </span>
               </div>
               <p class="truncate text-xs text-muted-foreground mt-0.5">

@@ -88,6 +88,7 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (78, "sentinel_appeal_evidence", MIGRATION_078),
     (79, "sentinel_evidence_release", MIGRATION_079),
     (80, "sentinel_flag_notice", MIGRATION_080),
+    (81, "account_roles_set", MIGRATION_081),
 ];
 
 const MIGRATION_001: &str = r#"
@@ -3231,4 +3232,30 @@ CREATE TABLE IF NOT EXISTS integrity_flag_notice (
 
 CREATE INDEX IF NOT EXISTS idx_flag_notice_untold
     ON integrity_flag_notice(told_at) WHERE told_at IS NULL;
+"#;
+
+const MIGRATION_081: &str = r#"
+-- ============================================================
+-- Migration 081: Everyone is a learner; the extra roles are a set
+--
+-- `account_role` held exactly one of learner / instructor / parent, and
+-- the app treated the three as alternatives. They are not: an instructor
+-- was already a learner underneath (the mode switch), and a parent who
+-- wants to take a course themselves had no way to be both. Onboarding
+-- now makes learner the fixed baseline and lets a person add instructor
+-- and/or parent on top.
+--
+-- `account_roles` is a JSON array, canonical order, always containing
+-- "learner". `account_role` is kept and written as the first extra role
+-- (or "learner"), so a build from before this migration still reads a
+-- sensible value; nothing new reads it.
+--
+-- Local-only, like the rest of the row: never published, never gossiped.
+-- ============================================================
+
+ALTER TABLE local_identity ADD COLUMN account_roles TEXT NOT NULL DEFAULT '["learner"]';
+UPDATE local_identity SET account_roles = CASE account_role
+    WHEN 'learner' THEN '["learner"]'
+    ELSE '["learner","' || account_role || '"]'
+END;
 "#;

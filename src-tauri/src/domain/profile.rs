@@ -143,7 +143,14 @@ mod tests {
             serde_json::to_value(signed.payload()).unwrap(),
         ] {
             let obj = doc.as_object().unwrap();
-            for key in ["birthdate", "account_role", "activation_state", "age"] {
+            for key in [
+                "birthdate",
+                "account_role",
+                "account_roles",
+                "roles",
+                "activation_state",
+                "age",
+            ] {
                 assert!(!obj.contains_key(key), "public profile leaks `{key}`");
             }
         }

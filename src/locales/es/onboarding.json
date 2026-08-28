@@ -25,7 +25,8 @@
     "instructorTitle": "Instructor",
     "instructorDesc": "Crea cursos y tutoriales, revisa entregas y guía a los estudiantes. Puedes cambiar al modo estudiante en cualquier momento.",
     "parentTitle": "Padre / Tutor",
-    "parentDesc": "Supervisa el aprendizaje de tu hijo: vincula su cuenta y sigue su progreso desde tu propio dispositivo."
+    "parentDesc": "Supervisa el aprendizaje de tu hijo: vincula su cuenta y sigue su progreso desde tu propio dispositivo.",
+    "alwaysOn": "Always on"
   },
   "welcome": {
     "tagline": "Aprendizaje libre y descentralizado. Tus credenciales. Tu identidad. Tu control.",

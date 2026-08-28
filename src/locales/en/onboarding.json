@@ -4,7 +4,7 @@
   },
   "wizard": {
     "welcome": "Welcome",
-    "role": "Your Role",
+    "role": "Your Roles",
     "birthdate": "Birthdate",
     "password": "Set Password",
     "createAccount": "Create Account",
@@ -21,11 +21,12 @@
   },
   "roles": {
     "learnerTitle": "Learner",
-    "learnerDesc": "Take courses, earn credentials, and grow your skills.",
+    "learnerDesc": "Take courses, earn credentials, and grow your skills. Everyone starts here.",
     "instructorTitle": "Instructor",
-    "instructorDesc": "Author courses and tutorials, review submissions, and mentor learners. You can switch into learner mode any time.",
+    "instructorDesc": "Author courses and tutorials, review submissions, and mentor learners. Switch between teaching and learning any time.",
     "parentTitle": "Parent / Guardian",
-    "parentDesc": "Oversee your child's learning: link their account and follow their progress from your own device."
+    "parentDesc": "Oversee your child's learning: link their account and follow their progress from your own device.",
+    "alwaysOn": "Always on"
   },
   "welcome": {
     "tagline": "Free, decentralized learning. Your credentials. Your identity. Your control.",
@@ -39,8 +40,8 @@
     "signIn": "Sign in to an existing account"
   },
   "role": {
-    "heading": "How will you use Alexandria?",
-    "subtitle": "This shapes your home screen and tools. Instructors can switch into learner mode any time."
+    "heading": "What brings you here?",
+    "subtitle": "Everyone is a learner. Add anything else that applies — you can change this later in Settings."
   },
   "birthdate": {
     "heading": "When were you born?",

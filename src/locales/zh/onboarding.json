@@ -25,7 +25,8 @@
     "instructorTitle": "讲师",
     "instructorDesc": "创作课程和教程、审阅提交、指导学习者。你可以随时切换到学习者模式。",
     "parentTitle": "父母 / 监护人",
-    "parentDesc": "监督孩子的学习：关联他们的账户，并在你自己的设备上跟进他们的进度。"
+    "parentDesc": "监督孩子的学习：关联他们的账户，并在你自己的设备上跟进他们的进度。",
+    "alwaysOn": "Always on"
   },
   "welcome": {
     "tagline": "免费、去中心化的学习。你的凭证。你的身份。由你掌控。",

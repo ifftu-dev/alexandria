@@ -11,7 +11,7 @@ import { AppBadge, AppButton, EmptyState } from '@/components/ui'
 
 const { t } = useI18n()
 const { guardians, loaded, refreshLinks, revokeLink } = useGuardian()
-const { isMinor, role } = useAccountStatus()
+const { isMinor } = useAccountStatus()
 const { invoke } = useLocalApi()
 
 const revokingId = ref<string | null>(null)
@@ -71,9 +71,7 @@ const SHARED_DATA = [
     <EmptyState
       v-else-if="!guardians.length"
       :title="$t('settings.guardian.noneTitle')"
-      :description="role === 'learner'
-        ? $t('settings.guardian.noneLearner')
-        : $t('settings.guardian.noneOther')"
+      :description="$t('settings.guardian.noneLearner')"
     />
 
     <div v-else class="space-y-3">
@@ -131,7 +129,7 @@ const SHARED_DATA = [
       </p>
     </div>
 
-    <div v-if="role === 'learner'" class="rounded-xl border border-border bg-card p-4">
+    <div class="rounded-xl border border-border bg-card p-4">
       <div class="flex items-center justify-between mb-1">
         <h4 class="text-sm font-semibold text-foreground">{{ $t('settings.guardian.addTitle') }}</h4>
         <AppButton variant="outline" size="xs" :loading="generating" @click="generateInvite">
