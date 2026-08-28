@@ -234,6 +234,14 @@ jobs:
         if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.frontend == 'true'
         working-directory: alexandria
         run: node scripts/check-tauri-commands.mjs
+      - name: CSP style hashes match the libraries that inject styles
+        # style-src carries sha256 hashes for the <style> blocks two libraries
+        # inject at runtime. A version bump changes the CSS, the hash stops
+        # matching, and the graph loses its styling without an error anywhere
+        # but the webview console. Pure Node, reads node_modules.
+        if: needs.changes.outputs.frontend == 'true'
+        working-directory: alexandria
+        run: node scripts/check-csp-style-hashes.mjs
 
       - name: TypeScript type-check
         if: needs.changes.outputs.frontend == 'true'

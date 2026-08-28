@@ -1,5 +1,5 @@
 <template>
-  <div class="absolute inset-0 overflow-hidden" aria-hidden="true" style="transform: translateZ(0); contain: layout style paint;">
+  <div class="absolute inset-0 overflow-hidden sf-layer" aria-hidden="true">
     <!-- Base gradient -->
     <div class="absolute inset-0 bg-gradient-to-b from-primary/4 via-transparent to-muted/30" />
 
@@ -244,14 +244,14 @@
         </g>
         <!-- Pulsing rings on anchor stars -->
         <circle cx="220" cy="140" r="14" stroke="var(--app-primary)" stroke-width="0.5" fill="none" opacity="0.15" class="sf-pulse" />
-        <circle cx="1200" cy="100" r="12" stroke="var(--app-primary)" stroke-width="0.5" fill="none" opacity="0.12" class="sf-pulse" style="animation-delay: -2s" />
-        <circle cx="280" cy="600" r="12" stroke="var(--app-primary)" stroke-width="0.5" fill="none" opacity="0.1" class="sf-pulse" style="animation-delay: -3.5s" />
-        <circle cx="1320" cy="620" r="10" stroke="var(--app-primary)" stroke-width="0.5" fill="none" opacity="0.1" class="sf-pulse" style="animation-delay: -5s" />
-        <circle cx="1120" cy="90" r="10" stroke="rgb(34 211 238)" stroke-width="0.5" fill="none" opacity="0.1" class="sf-pulse" style="animation-delay: -1s" />
-        <circle cx="330" cy="680" r="8" stroke="rgb(34 211 238)" stroke-width="0.5" fill="none" opacity="0.08" class="sf-pulse" style="animation-delay: -4s" />
-        <circle cx="380" cy="100" r="8" stroke="rgb(244 114 182)" stroke-width="0.5" fill="none" opacity="0.08" class="sf-pulse" style="animation-delay: -1.5s" />
-        <circle cx="600" cy="90" r="10" stroke="var(--app-primary)" stroke-width="0.5" fill="none" opacity="0.08" class="sf-pulse" style="animation-delay: -2.5s" />
-        <circle cx="300" cy="370" r="6" stroke="rgb(251 191 36)" stroke-width="0.5" fill="none" opacity="0.06" class="sf-pulse" style="animation-delay: -0.5s" />
+        <circle cx="1200" cy="100" r="12" stroke="var(--app-primary)" stroke-width="0.5" fill="none" opacity="0.12" class="sf-pulse sf-delay-2" />
+        <circle cx="280" cy="600" r="12" stroke="var(--app-primary)" stroke-width="0.5" fill="none" opacity="0.1" class="sf-pulse sf-delay-35" />
+        <circle cx="1320" cy="620" r="10" stroke="var(--app-primary)" stroke-width="0.5" fill="none" opacity="0.1" class="sf-pulse sf-delay-5" />
+        <circle cx="1120" cy="90" r="10" stroke="rgb(34 211 238)" stroke-width="0.5" fill="none" opacity="0.1" class="sf-pulse sf-delay-1" />
+        <circle cx="330" cy="680" r="8" stroke="rgb(34 211 238)" stroke-width="0.5" fill="none" opacity="0.08" class="sf-pulse sf-delay-4" />
+        <circle cx="380" cy="100" r="8" stroke="rgb(244 114 182)" stroke-width="0.5" fill="none" opacity="0.08" class="sf-pulse sf-delay-15" />
+        <circle cx="600" cy="90" r="10" stroke="var(--app-primary)" stroke-width="0.5" fill="none" opacity="0.08" class="sf-pulse sf-delay-25" />
+        <circle cx="300" cy="370" r="6" stroke="rgb(251 191 36)" stroke-width="0.5" fill="none" opacity="0.06" class="sf-pulse sf-delay-05" />
       </svg>
     </div>
 

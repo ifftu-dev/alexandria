@@ -1063,6 +1063,32 @@ pre,
   animation: sf-pulse 10s ease-in-out infinite;
 }
 
+/*
+ * The starfield SVG is large and entirely static, so Vue's compiler
+ * stringifies it and inserts it with innerHTML. A `style` attribute that
+ * arrives that way is parser-inserted, and the CSP (style-src without
+ * 'unsafe-inline') refuses it — silently, apart from a console line per
+ * attribute. Everything that used to be an inline style on that markup is a
+ * class here instead; a class attribute is not subject to CSP.
+ */
+.sf-layer {
+  transform: translateZ(0);
+  contain: layout style paint;
+}
+.sf-delay-05 { animation-delay: -0.5s; }
+.sf-delay-1 { animation-delay: -1s; }
+.sf-delay-15 { animation-delay: -1.5s; }
+.sf-delay-2 { animation-delay: -2s; }
+.sf-delay-25 { animation-delay: -2.5s; }
+.sf-delay-35 { animation-delay: -3.5s; }
+.sf-delay-4 { animation-delay: -4s; }
+.sf-delay-5 { animation-delay: -5s; }
+
+/* Same reason, for the onboarding hero: a static subtree with a style
+   attribute is stringified and the attribute refused. */
+.anim-3s { animation-duration: 3s; }
+.anim-2s-reverse { animation-duration: 2s; animation-direction: reverse; }
+
 .sf-line-draw {
   stroke-dasharray: 1000;
   stroke-dashoffset: 1000;

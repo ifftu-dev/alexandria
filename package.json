@@ -17,7 +17,8 @@
     "i18n:parity": "node scripts/i18n/check-parity.mjs",
     "i18n:no-raw-text": "node scripts/i18n/check-no-raw-text.mjs",
     "i18n:translate": "node scripts/i18n/translate.mjs",
-    "bump": "bash scripts/bump-version.sh"
+    "bump": "bash scripts/bump-version.sh",
+    "check:csp": "node scripts/check-csp-style-hashes.mjs"
   },
   "dependencies": {
     "@choochmeque/tauri-plugin-biometry-api": "^0.2.3",

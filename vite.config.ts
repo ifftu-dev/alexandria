@@ -39,6 +39,15 @@ export default defineConfig(() => ({
       ignored: ['**/target/**'],
     },
   },
+  build: {
+    // Never inline an asset as a data: URI. Vite's default inlines anything
+    // under 4 KiB, which catches the smaller unicode-range subsets that
+    // @fontsource ships (noto-sans-sc has several), and the webview CSP's
+    // font-src is 'self' with no data: — so those subsets were refused and
+    // fell back to the system font, one console line each and nothing else.
+    // Emitting every asset as a file keeps them all under 'self'.
+    assetsInlineLimit: 0,
+  },
   // Prevent Vite from obscuring Rust errors
   clearScreen: false,
   // Tauri needs to know the dev server URL for the webview

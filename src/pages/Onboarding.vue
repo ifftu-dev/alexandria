@@ -500,7 +500,7 @@ function enterApp() {
 
         <!-- Alexandria logo -->
         <div class="relative w-16 h-16 mx-auto mb-6">
-          <div class="absolute inset-0 rounded-full bg-primary/8 animate-ping" style="animation-duration: 3s;" />
+          <div class="absolute inset-0 rounded-full bg-primary/8 animate-ping anim-3s" />
           <div class="relative w-16 h-16 flex items-center justify-center">
             <svg class="w-12 h-12 text-primary" viewBox="0 0 32 32" fill="none">
               <path d="M16 2L4 8v16l12 6 12-6V8L16 2z" stroke="currentColor" stroke-width="2" fill="none" />
@@ -843,12 +843,12 @@ function enterApp() {
         <div class="relative w-24 h-24 mx-auto mb-6">
           <!-- Outer orbit -->
           <div class="absolute inset-0 rounded-full border border-border/40" />
-          <div class="absolute inset-0 animate-spin" style="animation-duration: 3s;">
+          <div class="absolute inset-0 animate-spin anim-3s">
             <div class="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full bg-primary" />
           </div>
           <!-- Middle orbit -->
           <div class="absolute inset-3 rounded-full border border-border/30" />
-          <div class="absolute inset-3 animate-spin" style="animation-duration: 2s; animation-direction: reverse;">
+          <div class="absolute inset-3 animate-spin anim-2s-reverse">
             <div class="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-primary/70" />
           </div>
           <!-- Inner core -->
