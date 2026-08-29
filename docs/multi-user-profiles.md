@@ -25,8 +25,8 @@ Multi-user accounts let one device host several learners, each with their own cr
 - Per-profile parental controls / content filtering. **Update:** account roles
   and cross-device parental oversight shipped in a follow-up — a minor learner's
   profile stays gated until a parent on a *separate device* activates it. That
-  work builds on this per-profile foundation (each role is just a
-  `local_identity.account_role`); see
+  work builds on this per-profile foundation (roles are a set on
+  `local_identity.account_roles`, always including `learner`); see
   [`architecture.md`](architecture.md#roles-modes--guardianship) and
   [`protocol-specification.md`](protocol-specification.md#guardian-link-protocol).
 

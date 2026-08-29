@@ -101,7 +101,7 @@
 | 63 | `plugin_dependencies` | `plugin_dependencies` — declared inter-plugin dependencies (e.g. codejudge language plugins on a shared parent) |
 | 64 | `plugin_element_state` | `plugin_element_state` — per-element plugin state persisted across navigation and restart |
 | 65 | `element_submission_answers` | Add `answers_json` to `element_submissions` (persisted learner responses) |
-| 66 | `account_role_birthdate_activation` | Add `account_role` (`learner`/`instructor`/`parent`), `birthdate` (ISO-8601, on-device only), and `activation_state` (`active`/`pending_guardian`) to `local_identity`. Age is **recomputed** from `birthdate` each unlock — never stored — so turning 18 resolves automatically. |
+| 66 | `account_role_birthdate_activation` | Add `account_role` (`learner`/`instructor`/`parent`), `birthdate` (ISO-8601, on-device only), and `activation_state` (`active`/`pending_guardian`) to `local_identity`. Age is **recomputed** from `birthdate` each unlock — never stored — so turning 18 resolves automatically. Superseded as the source of truth by migration 81; still written for older builds. |
 | 67 | `guardian_links` | Cross-device parental oversight: `guardian_links` (ward↔guardian pairing, vault-sealed shared key, W3C VC ids, `status`), `guardian_pending_invites` (single-use `code_hash` PK, mirrors the pairing-code pattern), `guardian_activity_rows` (sealed activity the child pushes to the guardian). See [`protocol-specification.md`](protocol-specification.md#guardian-link-protocol). **Never** added to device-sync `SYNCABLE_TABLES` or gossip. |
 | 68 | `skill_provenance` | Add `provenance` to `credentials` (denormalized `ProvenanceTier` mirror of `credentialSubject.provenance`) and `dominant_provenance` to `derived_skill_states` (highest provenance tier backing the skill) |
 | 69 | `goal_templates` | `goal_templates` + `goal_template_versions` (DAO-ratified exam/curriculum/job-role → ideal skill graph); add `synonyms` to `skills` for on-device JD/resume matching |
@@ -116,6 +116,7 @@
 | 78 | `sentinel_appeal_evidence` | Adds `integrity_evidence_consent` and `integrity_evidence` — a flagged session's raw capture, written **only** on the learner's explicit consent, with an absolute 14-day expiry |
 | 79 | `sentinel_evidence_release` | Adds `integrity_evidence_release` — where a learner sent evidence to contest a flag, and whether a withdrawal is still owed. Deliberately no FK to `integrity_sessions`: a withdrawal must outlive the local deletion of everything that explains why it was wanted |
 | 80 | `sentinel_flag_notice` | Adds `integrity_flag_notice` — which remote flags this device has already told the learner about, so an accusation is raised once rather than on every unlock. `told_at`, not `accepted_at` |
+| 81 | `account_roles_set` | Add `account_roles` (JSON array, always containing `learner`, plus any of `instructor`/`parent`) to `local_identity`, backfilled from `account_role`. The app reads this; `account_role` keeps being written as the first extra role for older builds. |
 
 ---
 
@@ -137,8 +138,11 @@ columns and indexes, use `src-tauri/src/db/schema.rs`.
   [`multi-user-profiles.md`](multi-user-profiles.md).
   Migration 66 adds `account_role`, `birthdate` (kept on-device, excluded
   from the public `SignedProfile`), and `activation_state` — a minor
-  learner starts `pending_guardian` and flips to `active` only after a
-  guardian link is established.
+  starts `pending_guardian` and flips to `active` only after a guardian
+  link is established. Migration 81 adds `account_roles`, a JSON array
+  that always contains `learner` (everybody is one) plus any of
+  `instructor` / `parent`; it is the value the app reads, and it is just
+  as local-only as the rest of the row.
 
 ### Guardianship (3 tables)
 

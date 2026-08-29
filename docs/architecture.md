@@ -162,18 +162,24 @@ Both share the same lock/unlock cycle: lock clears in-memory keys, unlock re-der
 
 ### Roles, Modes & Guardianship
 
-Onboarding assigns each profile an `account_role` — **learner**, **instructor**,
-or **parent** (migration 66, on `local_identity`). The role shapes the home
-screen and available tools, and drives an obvious visual accent on the shell
-(amber for instructor mode, teal for the guardian role).
+Every profile is a **learner**; onboarding lets a person add **instructor**
+and/or **parent** on top, in any combination. The set lives in
+`local_identity.account_roles` (JSON array, migration 81; always contains
+`learner`), and `domain::identity::normalize_roles` is the one place it is
+validated — it re-inserts `learner` whatever a caller sends. The older
+single-valued `account_role` (migration 66) is still written as the first
+extra role for builds that predate the set; nothing new reads it. Roles shape
+the navigation and tools and drive a visual accent on the shell (amber for
+instructor mode, teal when the parent role is present).
 
-- **Role vs. mode.** Instructors are implicitly learners too, so they get a
+- **Role vs. mode.** An account with the instructor role gets a
   Learner↔Instructor **mode** switch (`active_mode` per-profile setting;
-  `useMode` composable; `Cmd/Ctrl+Shift+M`). Parent is a **role, not a mode** —
-  a parent's home *is* the guardian dashboard. A single `router.beforeEach`
-  guard enforces `requiresInstructorMode` on `/instructor/*` and
-  `requiresRole: 'parent'` on `/guardian/*`.
-- **Age gating.** Learners provide a `birthdate` (ISO-8601, kept on-device and
+  `useMode` composable; `Cmd/Ctrl+Shift+M`). Parent is a **role, not a mode**:
+  a parent keeps the learner home and navigation, with the guardian dashboard
+  added on top (`/guardian`). A single `router.beforeEach` guard enforces
+  `requiresInstructorMode` on `/instructor/*` and `requiresRole: 'parent'`
+  (checked against the role set via `hasRole`) on `/guardian/*`.
+- **Age gating.** Everybody provides a `birthdate` (ISO-8601, kept on-device and
   excluded from the public `SignedProfile`). Age is **recomputed** via
   `domain::identity::is_minor(birthdate, today)` on every unlock — never stored —
   so turning 18 resolves automatically. A self-asserted birthdate VC is issued

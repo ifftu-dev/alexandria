@@ -497,9 +497,10 @@ Supports bash, zsh, fish, elvish, and powershell.
 ### First-Time Onboarding
 
 1. Launch the app — you see the onboarding screen
-2. Pick your **role**: Learner, Instructor, or Parent/Guardian
-3. Learners give a **birthdate** (kept on-device, never published) — if you are
-   under 18 you will be asked to invite a guardian at the end
+2. Everyone is a **learner**. Add **Instructor** and/or **Parent/Guardian** on
+   top if they apply — you can change this later in Settings
+3. Give a **birthdate** (kept on-device, never published) — if you are under 18
+   you will be asked to invite a guardian at the end
 4. Pick a profile name / username (shown later on the picker — renameable)
 5. Create a password — this encrypts that profile's vault
 6. A 24-word BIP-39 mnemonic is generated (CIP-1852 derivation); payment and
