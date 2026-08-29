@@ -553,19 +553,21 @@ function enterApp() {
           </ul>
         </div>
 
-        <button
-          class="onb-cta"
-          @click="startCreate"
-        >
-          {{ $t('onboarding.welcome.createAccount') }}
-        </button>
+        <div class="onb-welcome-actions">
+          <button
+            class="onb-cta"
+            @click="startCreate"
+          >
+            {{ $t('onboarding.welcome.createAccount') }}
+          </button>
 
-        <button
-          class="w-full mt-3 py-2.5 px-4 rounded-md text-sm font-medium border border-border text-foreground hover:bg-muted/50 transition-colors"
-          @click="startImport"
-        >
-          {{ $t('onboarding.welcome.restoreAccount') }}
-        </button>
+          <button
+            class="onb-secondary"
+            @click="startImport"
+          >
+            {{ $t('onboarding.welcome.restoreAccount') }}
+          </button>
+        </div>
 
         <button
           v-if="vaultExists"
@@ -1141,7 +1143,7 @@ function enterApp() {
   background: transparent;
 }
 .onb-rail {
-  padding: 1.875rem 1.625rem;
+  padding: 1.875rem 1.75rem;
   background: linear-gradient(180deg, rgb(20, 27, 42), rgb(15, 21, 34));
   border-inline-end: 1px solid var(--app-border);
 }
@@ -1187,7 +1189,9 @@ function enterApp() {
   display: flex;
   flex-direction: column;
   gap: 0.125rem;
-  margin-top: auto;
+  /* Directly under the introduction, not pinned to the bottom of a tall
+     rail with a void in between. */
+  margin-top: 2.5rem;
 }
 .onb-step {
   display: flex;
@@ -1233,11 +1237,7 @@ function enterApp() {
 .onb-content {
   padding: 1.75rem 1.5rem;
 }
-@media (min-width: 1024px) {
-  .onb-content {
-    padding: 2.75rem 2.875rem;
-  }
-}
+
 .onb-kick {
   font-size: 0.6875rem;
   font-weight: 700;
@@ -1393,5 +1393,88 @@ function enterApp() {
   opacity: 0.5;
   cursor: default;
   box-shadow: none;
+}
+/* Welcome: primary above secondary on a phone, side by side on a desktop. */
+.onb-welcome-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.onb-secondary {
+  width: 100%;
+  height: 3rem;
+  padding: 0 1rem;
+  border-radius: 0.75rem;
+  border: 1px solid var(--app-border);
+  background: transparent;
+  color: var(--app-foreground);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.onb-secondary:hover {
+  background: color-mix(in srgb, var(--app-foreground) 6%, transparent);
+}
+/*
+ * Desktop is not a wide phone.
+ *
+ * Below `lg` the page is a single column and the "step n of m" kicker is the
+ * only progress indicator. At `lg` the rail exists and shows every step, so
+ * the kicker goes; the step block becomes a measured column, centred in the
+ * pane both ways (margin: auto rather than justify-content, so a tall step —
+ * goals, skills — scrolls from the top instead of clipping); and the primary
+ * action stops being an edge-to-edge bar and sits at the end of the row at
+ * its natural width, where a desktop wizard keeps it. The welcome and done
+ * screens are centred compositions and keep a centred button.
+ */
+@media (min-width: 1024px) {
+  .onb-content {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    padding: 3rem clamp(2.5rem, 7vw, 6.5rem);
+  }
+  .onb-content > .onb-kick {
+    display: none;
+  }
+  .onb-content > div {
+    width: 100%;
+    max-width: 38rem;
+    margin: auto;
+  }
+  .onb-h2 {
+    font-size: 2rem;
+  }
+  .onb-sub {
+    font-size: 0.9375rem;
+    margin-bottom: 2rem;
+  }
+  .onb-roles {
+    max-width: none;
+  }
+  .onb-cta {
+    display: block;
+    width: auto;
+    min-width: 12rem;
+    padding-inline: 2rem;
+    margin-inline-start: auto;
+  }
+  .onb-content > .text-center .onb-cta {
+    margin-inline: auto;
+  }
+  .onb-welcome-actions {
+    flex-direction: row;
+    justify-content: center;
+    gap: 0.875rem;
+  }
+  /* Beats the centred-composition rule above (it is more specific). */
+  .onb-content > .text-center .onb-welcome-actions .onb-cta,
+  .onb-welcome-actions .onb-secondary {
+    width: auto;
+    min-width: 12rem;
+    padding-inline: 2rem;
+    margin: 0;
+  }
 }
 </style>
