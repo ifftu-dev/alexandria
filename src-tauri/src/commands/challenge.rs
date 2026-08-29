@@ -213,7 +213,13 @@ pub async fn lock_challenge_stake(
     {
         let db_guard = state.db.lock().map_err(|_| "db lock poisoned")?;
         let db = db_guard.as_ref().ok_or("database not initialized")?;
-        challenge_logic::set_stake_locked(db.conn(), &challenge_id, &tx_hash)?;
+        challenge_logic::set_stake_locked(
+            db.conn(),
+            &challenge_id,
+            &tx_hash,
+            &hex::encode(wallet.payment_key_hash),
+            &hex::encode(treasury),
+        )?;
     }
     Ok(tx_hash)
 }
@@ -221,15 +227,14 @@ pub async fn lock_challenge_stake(
 /// Settle a resolved challenge's escrowed stake. The DAO authority
 /// spends the escrow UTxO, refunding the challenger (upheld) or
 /// forfeiting to the treasury (rejected). Gated on the escrow validator
-/// being deployed. `recipient_key_hash` is the destination (challenger
-/// pkh on refund, treasury pkh on forfeit).
+/// being deployed. The destination is read from what the lock tx recorded
+/// (challenger pkh on refund, treasury pkh on forfeit), never from the caller.
 #[tauri::command]
 pub async fn settle_challenge_stake(
     state: State<'_, AppState>,
     challenge_id: String,
     escrow_tx_hash: String,
     escrow_index: u64,
-    recipient_key_hash: String,
 ) -> Result<String, String> {
     let stake = {
         let db_guard = state.db.lock().map_err(|_| "db lock poisoned")?;
@@ -252,7 +257,21 @@ pub async fn settle_challenge_stake(
         }
     };
 
-    let recipient = parse_key_hash(&recipient_key_hash)?;
+    // The recipient is whatever the escrow datum says it is, and the datum
+    // was written by *this* app at lock time — so read it back rather than
+    // asking the frontend to repeat it. The on-chain validator would reject a
+    // wrong recipient anyway, but a settle that cannot be misdirected is
+    // better than one the ledger has to catch.
+    let recipient_hex = if refund {
+        stake.escrow_challenger_pkh.as_deref()
+    } else {
+        stake.escrow_treasury_pkh.as_deref()
+    }
+    .ok_or(
+        "this stake was locked before its escrow recipients were recorded — \
+         re-lock it, or settle it with a manually built transaction",
+    )?;
+    let recipient = parse_key_hash(recipient_hex)?;
     let (wallet, bf) = wallet_and_blockfrost(&state).await?;
 
     let result = challenge_escrow_tx_builder::build_settle_tx(

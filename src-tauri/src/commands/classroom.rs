@@ -1041,26 +1041,34 @@ pub async fn classroom_send_message(
 
                 match (encrypted_gk, content_key) {
                     (Some((enc_key, version)), Some(ck)) => {
-                        match crate::crypto::content_crypto::decrypt(&ck, &enc_key) {
-                            Ok(Some(gk_bytes)) if gk_bytes.len() == 32 => {
-                                let mut gk = [0u8; 32];
-                                gk.copy_from_slice(&gk_bytes);
-                                match crate::crypto::group_key::encrypt_message(
-                                    &gk,
-                                    content.as_bytes(),
-                                ) {
-                                    Ok(ct) => {
-                                        use base64::Engine;
-                                        let encoded =
-                                            base64::engine::general_purpose::STANDARD.encode(&ct);
-                                        (encoded, true, version as u32)
-                                    }
-                                    Err(_) => (content.clone(), false, 0),
-                                }
-                            }
-                            _ => (content.clone(), false, 0),
+                        // A classroom that has a group key must never emit
+                        // plaintext. The old arms fell back to `content.clone()`
+                        // on any failure here, which meant a corrupted or
+                        // attacker-substituted stored key silently downgraded
+                        // every subsequent message. Refuse instead: a message
+                        // that does not go out is recoverable; one that went out
+                        // unencrypted to a classroom of minors is not.
+                        let gk_bytes = crate::crypto::content_crypto::decrypt(&ck, &enc_key)
+                            .map_err(|e| format!("classroom group key would not open: {e}"))?
+                            .ok_or(
+                                "classroom group key is stored unencrypted — refusing to send",
+                            )?;
+                        if gk_bytes.len() != 32 {
+                            return Err(format!(
+                                "classroom group key is {} bytes, expected 32 — refusing to send",
+                                gk_bytes.len()
+                            ));
                         }
+                        let mut gk = [0u8; 32];
+                        gk.copy_from_slice(&gk_bytes);
+                        let ct = crate::crypto::group_key::encrypt_message(&gk, content.as_bytes())
+                            .map_err(|e| format!("classroom message encryption failed: {e}"))?;
+                        use base64::Engine;
+                        let encoded = base64::engine::general_purpose::STANDARD.encode(&ct);
+                        (encoded, true, version as u32)
                     }
+                    // No key has ever been distributed for this classroom: plaintext
+                    // is the only option and is what the classroom expects.
                     _ => (content.clone(), false, 0),
                 }
             };

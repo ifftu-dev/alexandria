@@ -42,7 +42,28 @@ pub async fn plugin_install_from_file(
         .map_err(|_| "database lock poisoned".to_string())?;
     let db = db_guard.as_ref().ok_or("database not initialized")?;
 
-    let src = PathBuf::from(&directory);
+    // The webview may only name a directory inside the places a person picks
+    // files from — the same set the `fs:allow-read-file` capability is scoped
+    // to. Without this the path is arbitrary, and although the signature check
+    // stops a hostile bundle from *installing*, walking an arbitrary directory
+    // is still a small disclosure primitive a compromised frontend should not
+    // have. Canonicalise first so `..` and symlinks cannot escape.
+    let src = std::fs::canonicalize(&directory)
+        .map_err(|e| format!("plugin source directory is not readable: {e}"))?;
+    let allowed_roots: Vec<PathBuf> = [
+        dirs::download_dir(),
+        dirs::document_dir(),
+        dirs::desktop_dir(),
+    ]
+    .into_iter()
+    .flatten()
+    .filter_map(|d| std::fs::canonicalize(d).ok())
+    .collect();
+    if !allowed_roots.iter().any(|root| src.starts_with(root)) {
+        return Err(
+            "plugin bundles can only be installed from Downloads, Documents or Desktop".into(),
+        );
+    }
     let plugins_dir = state.plugins_dir()?;
     registry::install_from_directory(db, &plugins_dir, &src)
 }

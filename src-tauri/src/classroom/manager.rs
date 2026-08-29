@@ -353,6 +353,19 @@ pub fn handle_classroom_meta(db: &Database, signed_msg: &SignedGossipMessage, ap
             if local_address.as_deref() != Some(stake_address.as_str()) {
                 return;
             }
+            // Only a moderator or owner rotates the classroom key. Every sibling
+            // arm checks the sender's role; this one did not, so any peer on the
+            // meta topic could INSERT OR REPLACE our stored key. The blob would
+            // not decrypt — but the send path used to fall back to plaintext on
+            // that failure, which turned this into an unauthenticated one-message
+            // encryption-downgrade primitive. Gate it like everything else.
+            if !sender_is_moderator {
+                log::warn!(
+                    "[classroom] ignoring KeyDistribution for {classroom_id} from non-moderator {}",
+                    signed_msg.stake_address
+                );
+                return;
+            }
             // Store the encrypted group key locally
             let _ = db.conn().execute(
                 "INSERT OR REPLACE INTO classroom_group_keys \

@@ -107,6 +107,9 @@ ndarray = "0.16"
 
 # Common utilities (all platforms)
 anyhow = "1"
+# Platform user-directories, for constraining where plugin bundles may be
+# installed from. Already in the tree at 4.0 via tauri.
+dirs = "4"
 bytes = "1"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 # Parsing URLs by hand is how an SSRF guard gets bypassed. Already in the tree
