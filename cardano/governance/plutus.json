@@ -25,16 +25,16 @@
           "$ref": "#/definitions/challenge_escrow~1EscrowRedeemer"
         }
       },
-      "compiledCode": "59019601010029800aba2aba1aab9faab9eaab9dab9a48888896600264653001300700198039804000cc01c0092225980099b8748008c01cdd500144c8cc8a60022b30013001300a375400513322332259800980298071baa00a8acc00400a2660020106eb8c044c03cdd50024528201a8acc00400a2660020106eb8c044c048c03cdd50024528201a40346466446600400400244b30010018a508acc004cdc79bae30120010038a518998010011809800a01c40446eb0c040c044c044c044c044c044c044c044c044c038dd50039bae3001300d37540044464660020026eb0c010c040dd5001912cc00400629422b30013259800980418089baa001899b8f375c602860246ea80040122941010180998089baa301330113754602600314a31330020023014001403c8090c034c02cdd50011180718079807800c590094c028dd50034c03400d2225980098020014566002601c6ea802600716403d15980099b874800800a2b3001300e37540130038b201e8b20184030300b300c001370e900018041baa0028b200c180380098019baa0078a4d1365640041",
-      "hash": "ead373d24790d337c0d94324988b11f760563ec3f09ff1ef48d1e519"
+      "compiledCode": "5902c001010029800aba2aba1aba0aab9faab9eaab9dab9a488888896600264653001300800198041804800cc0200092225980099b8748008c01cdd500144ca60026018003300c300d0019b87480012223322598009801800c566002601c6ea802600516403d15980099b87480080062b3001300e37540130028b201e8b201840302b30013001300b375400519800980798061baa0029180818089808800c8c8cc88cc008008004896600200300389919912cc004cdc8a45000028acc004cdc7a441000028800c01901144cc014014c05c0110111bae3010001375a602200260260028088c8c8cc004004010896600200300389919912cc004cdc8a441000028acc004cdc7a441000028800c01901244cc014014c0600110121bae3011001375660240026028002809052f5bded8c02900048c040c0440052222980099199119801001000912cc00400629422b30013371e6eb8c05800400e2946266004004602e00280890141bac301430153015301530153015301530153015301137540146eb8c00cc040dd50024c966002600c60206ea8006260066eacc008c044dd5180118089baa30143011375400316403c64660020026eb0c050c044dd5005112cc004006298103d87a80008992cc004cdd7980b18099baa00100a899ba548000cc0540052f5c113300300330170024044602a002809a44464660020026eb0c01cc050dd5002112cc00400629422b30013232598009806180b1baa0018acc004cdc79bae301a3017375400200d13371200a60126eacc020c05cdd50014528202a8a5040546032602c6ea8c064c058dd5000980c000c528c4cc008008c064005013202c488966002601060246ea803a2b30010038cc0040326eb8c058c04cdd5003c009001452820228acc00400e3300100c9bae30043013375400f002400514a08089011116402860166ea801c60106ea800a2c8030601000260066ea802229344d95900101",
+      "hash": "2f499b735479ab78674a7e0f2c7e12d690ce2ba579ba3460a9d16228"
     },
     {
       "title": "challenge_escrow.challenge_escrow.else",
       "redeemer": {
         "schema": {}
       },
-      "compiledCode": "59019601010029800aba2aba1aab9faab9eaab9dab9a48888896600264653001300700198039804000cc01c0092225980099b8748008c01cdd500144c8cc8a60022b30013001300a375400513322332259800980298071baa00a8acc00400a2660020106eb8c044c03cdd50024528201a8acc00400a2660020106eb8c044c048c03cdd50024528201a40346466446600400400244b30010018a508acc004cdc79bae30120010038a518998010011809800a01c40446eb0c040c044c044c044c044c044c044c044c044c038dd50039bae3001300d37540044464660020026eb0c010c040dd5001912cc00400629422b30013259800980418089baa001899b8f375c602860246ea80040122941010180998089baa301330113754602600314a31330020023014001403c8090c034c02cdd50011180718079807800c590094c028dd50034c03400d2225980098020014566002601c6ea802600716403d15980099b874800800a2b3001300e37540130038b201e8b20184030300b300c001370e900018041baa0028b200c180380098019baa0078a4d1365640041",
-      "hash": "ead373d24790d337c0d94324988b11f760563ec3f09ff1ef48d1e519"
+      "compiledCode": "5902c001010029800aba2aba1aba0aab9faab9eaab9dab9a488888896600264653001300800198041804800cc0200092225980099b8748008c01cdd500144ca60026018003300c300d0019b87480012223322598009801800c566002601c6ea802600516403d15980099b87480080062b3001300e37540130028b201e8b201840302b30013001300b375400519800980798061baa0029180818089808800c8c8cc88cc008008004896600200300389919912cc004cdc8a45000028acc004cdc7a441000028800c01901144cc014014c05c0110111bae3010001375a602200260260028088c8c8cc004004010896600200300389919912cc004cdc8a441000028acc004cdc7a441000028800c01901244cc014014c0600110121bae3011001375660240026028002809052f5bded8c02900048c040c0440052222980099199119801001000912cc00400629422b30013371e6eb8c05800400e2946266004004602e00280890141bac301430153015301530153015301530153015301137540146eb8c00cc040dd50024c966002600c60206ea8006260066eacc008c044dd5180118089baa30143011375400316403c64660020026eb0c050c044dd5005112cc004006298103d87a80008992cc004cdd7980b18099baa00100a899ba548000cc0540052f5c113300300330170024044602a002809a44464660020026eb0c01cc050dd5002112cc00400629422b30013232598009806180b1baa0018acc004cdc79bae301a3017375400200d13371200a60126eacc020c05cdd50014528202a8a5040546032602c6ea8c064c058dd5000980c000c528c4cc008008c064005013202c488966002601060246ea803a2b30010038cc0040326eb8c058c04cdd5003c009001452820228acc00400e3300100c9bae30043013375400f002400514a08089011116402860166ea801c60106ea800a2c8030601000260066ea802229344d95900101",
+      "hash": "2f499b735479ab78674a7e0f2c7e12d690ce2ba579ba3460a9d16228"
     },
     {
       "title": "completion.completion_minting.mint",
@@ -455,7 +455,7 @@
             },
             {
               "title": "reputation_policy",
-              "description": "Policy ID of the reputation minting policy — governance reads these tokens",
+              "description": "Policy ID of the reputation minting policy \u2014 governance reads these tokens",
               "$ref": "#/definitions/cardano~1assets~1PolicyId"
             },
             {
@@ -540,7 +540,7 @@
       "anyOf": [
         {
           "title": "SubjectFieldDao",
-          "description": "Top-level DAO for a Subject Field (whitepaper §4.2.1)",
+          "description": "Top-level DAO for a Subject Field (whitepaper \u00a74.2.1)",
           "dataType": "constructor",
           "index": 0,
           "fields": [
@@ -552,7 +552,7 @@
         },
         {
           "title": "SubjectDao",
-          "description": "Sub-DAO for a single Subject (whitepaper §4.2.2)",
+          "description": "Sub-DAO for a single Subject (whitepaper \u00a74.2.2)",
           "dataType": "constructor",
           "index": 1,
           "fields": [
@@ -861,7 +861,7 @@
             },
             {
               "title": "min_vote_proficiency",
-              "description": "Minimum proficiency to vote (whitepaper §4.5.1)",
+              "description": "Minimum proficiency to vote (whitepaper \u00a74.5.1)",
               "$ref": "#/definitions/alexandria~1types~1ProficiencyLevel"
             },
             {
@@ -1133,7 +1133,7 @@
     },
     "alexandria/types/StakePubkeyRegistrationDatum": {
       "title": "StakePubkeyRegistrationDatum",
-      "description": "On-chain attestation that a stake address has bound itself to a\n specific Ed25519 public key for gossip-envelope signing.\n\n Posted as an inline datum on a UTXO sent to the `stake_pubkey_registration`\n script address. The script is intentionally immutable (always fails on\n spend) — to invalidate a binding the issuer publishes a new\n registration with a non-overlapping validity window.\n\n Security is anchored off-chain: the verifier scanning the registry\n address rejects any entry whose creating transaction is NOT signed\n by the claimed `stake_key_hash` (`tx.extra_signatories`).\n\n Mirrors the SQLite `stake_pubkey_registry` schema (migration 052)\n and the Rust types in `src-tauri/src/p2p/registry.rs`.",
+      "description": "On-chain attestation that a stake address has bound itself to a\n specific Ed25519 public key for gossip-envelope signing.\n\n Posted as an inline datum on a UTXO sent to the `stake_pubkey_registration`\n script address. The script is intentionally immutable (always fails on\n spend) \u2014 to invalidate a binding the issuer publishes a new\n registration with a non-overlapping validity window.\n\n Security is anchored off-chain: the verifier scanning the registry\n address rejects any entry whose creating transaction is NOT signed\n by the claimed `stake_key_hash` (`tx.extra_signatories`).\n\n Mirrors the SQLite `stake_pubkey_registry` schema (migration 052)\n and the Rust types in `src-tauri/src/p2p/registry.rs`.",
       "anyOf": [
         {
           "title": "StakePubkeyRegistrationDatum",
@@ -1142,7 +1142,7 @@
           "fields": [
             {
               "title": "stake_key_hash",
-              "description": "Blake2b-224 hash of the stake key being registered. The off-chain\n reader recomputes this from the bech32 stake address (`stake1u…`)\n and matches it against the tx witness set.",
+              "description": "Blake2b-224 hash of the stake key being registered. The off-chain\n reader recomputes this from the bech32 stake address (`stake1u\u2026`)\n and matches it against the tx witness set.",
               "$ref": "#/definitions/aiken~1crypto~1VerificationKeyHash"
             },
             {
@@ -1152,12 +1152,12 @@
             },
             {
               "title": "valid_from",
-              "description": "POSIX seconds — start of the binding's validity window.",
+              "description": "POSIX seconds \u2014 start of the binding's validity window.",
               "$ref": "#/definitions/Int"
             },
             {
               "title": "valid_until",
-              "description": "POSIX seconds — end of the window, or 0 for an open-ended binding.",
+              "description": "POSIX seconds \u2014 end of the window, or 0 for an open-ended binding.",
               "$ref": "#/definitions/Int"
             }
           ]
@@ -1223,12 +1223,12 @@
           "fields": [
             {
               "title": "challenger",
-              "description": "Challenger's payment key hash — recipient on `Refund`.",
+              "description": "Challenger's payment key hash \u2014 recipient on `Refund`.",
               "$ref": "#/definitions/aiken~1crypto~1VerificationKeyHash"
             },
             {
               "title": "treasury",
-              "description": "DAO treasury payment key hash — recipient on `Forfeit`.",
+              "description": "DAO treasury payment key hash \u2014 recipient on `Forfeit`.",
               "$ref": "#/definitions/aiken~1crypto~1VerificationKeyHash"
             },
             {
