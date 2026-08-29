@@ -112,6 +112,8 @@ pub async fn tutoring_create_room(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<TutoringSessionInfo, String> {
+    // Same gate as join: the host opens the same devices.
+    crate::av_permissions::ensure_camera_and_microphone().await?;
     log::info!("[cmd] tutoring_create_room: start");
     let content_node = &state.content_node;
 
@@ -190,6 +192,9 @@ pub async fn tutoring_join_room(
     state: State<'_, AppState>,
 ) -> Result<TutoringSessionInfo, String> {
     log::info!("[cmd] tutoring_join_room: start");
+    // First consumption of the camera and microphone on this path: ask now,
+    // not at app launch, and refuse cleanly rather than abort inside cpal.
+    crate::av_permissions::ensure_camera_and_microphone().await?;
     let content_node = &state.content_node;
 
     let endpoint = content_node

@@ -1,5 +1,6 @@
 pub mod aggregation;
 pub mod assessment;
+pub mod av_permissions;
 pub mod cardano;
 pub mod classroom;
 pub mod commands;
