@@ -89,6 +89,7 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (79, "sentinel_evidence_release", MIGRATION_079),
     (80, "sentinel_flag_notice", MIGRATION_080),
     (81, "account_roles_set", MIGRATION_081),
+    (82, "escrow_datum_recipients", MIGRATION_082),
 ];
 
 const MIGRATION_001: &str = r#"
@@ -3258,4 +3259,23 @@ UPDATE local_identity SET account_roles = CASE account_role
     WHEN 'learner' THEN '["learner"]'
     ELSE '["learner","' || account_role || '"]'
 END;
+"#;
+
+const MIGRATION_082: &str = r#"
+-- ============================================================
+-- Migration 082: remember who the escrow datum names
+--
+-- `lock_challenge_stake` writes two payment key hashes into the escrow
+-- datum — the challenger (paid on Refund) and the treasury (paid on
+-- Forfeit) — and the on-chain validator enforces that settlement pays
+-- the right one. Nothing local remembered them, so `settle` took the
+-- recipient from the frontend. That was not fund theft (the validator
+-- rejects a wrong recipient) but it meant a compromised webview could
+-- build a doomed settle, and the correct value was always derivable
+-- from state the app itself committed. Persist it at lock time; derive
+-- it at settle time.
+-- ============================================================
+
+ALTER TABLE credential_challenges ADD COLUMN escrow_challenger_pkh TEXT;
+ALTER TABLE credential_challenges ADD COLUMN escrow_treasury_pkh TEXT;
 "#;

@@ -319,12 +319,19 @@ pub struct StakeInfo {
     pub stake_lovelace: i64,
     /// Lock tx hash, once the stake has been escrowed.
     pub lock_tx_hash: Option<String>,
+    /// Payment key hash the escrow datum names as the Refund recipient
+    /// (hex, 28 bytes). Set at lock time; `None` for stakes locked before
+    /// migration 081.
+    pub escrow_challenger_pkh: Option<String>,
+    /// Payment key hash the escrow datum names as the Forfeit recipient.
+    pub escrow_treasury_pkh: Option<String>,
 }
 
 /// Read the stake + resolution state for a challenge.
 pub fn get_stake_info(conn: &Connection, challenge_id: &str) -> Result<StakeInfo, String> {
     conn.query_row(
-        "SELECT stake_status, status, stake_lovelace, stake_tx_hash \
+        "SELECT stake_status, status, stake_lovelace, stake_tx_hash, \
+                escrow_challenger_pkh, escrow_treasury_pkh \
          FROM credential_challenges WHERE id = ?1",
         params![challenge_id],
         |row| {
@@ -333,6 +340,8 @@ pub fn get_stake_info(conn: &Connection, challenge_id: &str) -> Result<StakeInfo
                 challenge_status: row.get(1)?,
                 stake_lovelace: row.get(2)?,
                 lock_tx_hash: row.get(3)?,
+                escrow_challenger_pkh: row.get(4)?,
+                escrow_treasury_pkh: row.get(5)?,
             })
         },
     )
@@ -342,15 +351,28 @@ pub fn get_stake_info(conn: &Connection, challenge_id: &str) -> Result<StakeInfo
 }
 
 /// Mark a challenge's stake as escrowed (locked) at the escrow script.
+///
+/// Records the two recipients the escrow datum was built with, so that
+/// settlement can derive its destination from what was actually committed
+/// on-chain rather than trusting a caller to repeat it correctly.
 pub fn set_stake_locked(
     conn: &Connection,
     challenge_id: &str,
     lock_tx_hash: &str,
+    challenger_pkh_hex: &str,
+    treasury_pkh_hex: &str,
 ) -> Result<(), String> {
     conn.execute(
         "UPDATE credential_challenges \
-         SET stake_status = 'locked', stake_tx_hash = ?2 WHERE id = ?1",
-        params![challenge_id, lock_tx_hash],
+         SET stake_status = 'locked', stake_tx_hash = ?2, \
+             escrow_challenger_pkh = ?3, escrow_treasury_pkh = ?4 \
+         WHERE id = ?1",
+        params![
+            challenge_id,
+            lock_tx_hash,
+            challenger_pkh_hex,
+            treasury_pkh_hex
+        ],
     )
     .map_err(|e| e.to_string())?;
     Ok(())

@@ -107,3 +107,6 @@ keys/
 # Built artifact, never committed.
 src-tauri/binaries/
 src-tauri/macos-frameworks/
+
+# python bytecode from cardano/governance/deploy_*.py
+__pycache__/

@@ -257,6 +257,7 @@ dependencies = [
  "candle-nn",
  "cc",
  "chrono",
+ "dirs 4.0.0",
  "dotenvy",
  "ed25519-dalek 2.2.0",
  "futures",
