@@ -1932,10 +1932,15 @@ impl TutoringManager {
                         let img = frame.img();
                         let (width, height) = img.dimensions();
 
-                        // Convert RGBA -> RGB (JPEG does not support alpha channel)
+                        // Convert RGBA -> RGB (JPEG does not support alpha channel).
+                        // `as_chunks` rather than `chunks_exact`: the pixel
+                        // stride is a constant, so this hands back `[u8; 4]`
+                        // and the per-element bounds checks go with it.
                         let rgb_data: Vec<u8> = img
                             .as_raw()
-                            .chunks_exact(4)
+                            .as_chunks::<4>()
+                            .0
+                            .iter()
                             .flat_map(|px| [px[0], px[1], px[2]])
                             .collect();
 
