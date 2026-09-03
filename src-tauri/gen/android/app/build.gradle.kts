@@ -13,6 +13,18 @@ val tauriProperties = Properties().apply {
     }
 }
 
+// Release signing. CI writes this file from the ANDROID_KEYSTORE secrets before
+// building (see .github/workflows/mobile-shared.yml); it is gitignored and
+// absent on developer machines, where release builds stay unsigned as before.
+// A single `password` covers both the store and the key, matching what CI writes.
+val keystoreProperties = Properties().apply {
+    val propFile = rootProject.file("keystore.properties")
+    if (propFile.exists()) {
+        propFile.inputStream().use { load(it) }
+    }
+}
+val releaseKeystoreFile = keystoreProperties.getProperty("storeFile")?.let { file(it) }
+
 android {
     compileSdk = 36
     namespace = "org.alexandria.node"
@@ -23,6 +35,16 @@ android {
         targetSdk = 36
         versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
         versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")
+    }
+    signingConfigs {
+        if (releaseKeystoreFile != null) {
+            create("release") {
+                storeFile = releaseKeystoreFile
+                storePassword = keystoreProperties.getProperty("password")
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                keyPassword = keystoreProperties.getProperty("password")
+            }
+        }
     }
     buildTypes {
         getByName("debug") {
@@ -37,6 +59,9 @@ android {
             }
         }
         getByName("release") {
+            if (releaseKeystoreFile != null) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             isMinifyEnabled = true
             proguardFiles(
                 *fileTree(".") { include("**/*.pro") }

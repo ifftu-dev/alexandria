@@ -1,0 +1,50 @@
+# Prints the SHA-256 fingerprint of the Android release signing certificate.
+#
+# The fingerprint is a public value — it is what
+# https://alexandria.ifftu.dev/.well-known/assetlinks.json must publish for
+# Android App Links auto-verification to succeed. The keystore itself never
+# leaves the runner: only `keytool -list` output is printed, and the store
+# password is passed through the environment rather than the command line.
+#
+# Manual dispatch only. Run it when the release keystore changes, copy the
+# SHA-256 into the website's assetlinks.json, and redeploy the site.
+name: Android Signing Fingerprint
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fingerprint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Print release certificate fingerprint
+        env:
+          ANDROID_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${ANDROID_KEYSTORE}" ] || [ -z "${ANDROID_KEYSTORE_PASSWORD}" ] || [ -z "${ANDROID_KEY_ALIAS}" ]; then
+            echo "Android signing secrets are not configured on this repository." >&2
+            exit 1
+          fi
+
+          KEYSTORE="${RUNNER_TEMP}/release.jks"
+          echo "${ANDROID_KEYSTORE}" | base64 --decode > "${KEYSTORE}"
+
+          keytool -list -v \
+            -keystore "${KEYSTORE}" \
+            -alias "${ANDROID_KEY_ALIAS}" \
+            -storepass:env ANDROID_KEYSTORE_PASSWORD \
+            > "${RUNNER_TEMP}/keytool.txt"
+
+          rm -f "${KEYSTORE}"
+
+          # Only the identity and fingerprint lines — the full dump carries the
+          # certificate extensions, which are noise here.
+          grep -E '^(Alias name|Owner|Valid from):|^\s+SHA256:' "${RUNNER_TEMP}/keytool.txt" \
+            | tee -a "${GITHUB_STEP_SUMMARY}"
