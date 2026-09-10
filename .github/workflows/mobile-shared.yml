@@ -612,6 +612,18 @@ jobs:
             --apiIssuer "$APPLE_API_ISSUER"
           echo "TestFlight upload complete — build will appear after Apple processing (usually 5-15 minutes)"
 
+      - name: Verify TestFlight processing
+        if: inputs.mode == 'release' && inputs.ios_export_method == 'app-store-connect'
+        timeout-minutes: 20
+        env:
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER_ID }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_KEY_PATH: ${{ runner.temp }}/AuthKey.p8
+        run: |
+          set -euo pipefail
+          ipa_file=$(find alexandria/src-tauri/gen/apple/build -name '*.ipa' -type f | head -1)
+          python3 alexandria/scripts/check_testflight.py "$ipa_file"
+
   build-android:
     name: Build Android
     needs: prepare

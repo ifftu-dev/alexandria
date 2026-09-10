@@ -157,7 +157,7 @@ fn device_label() -> String {
     }
 }
 
-#[cfg(any(target_os = "macos", target_os = "ios"))]
+#[cfg(any(target_os = "macos", target_os = "ios", test))]
 fn humanize_apple_model(model: &str) -> String {
     let model = model.trim();
     if model.is_empty() {
@@ -183,26 +183,18 @@ fn humanize_apple_model(model: &str) -> String {
         return format!("Mac Pro ({model})");
     }
     if model.starts_with("iPhone") {
-        if let Some(gen) = extract_apple_generation(model, "iPhone") {
-            return format!("iPhone {gen} ({model})");
+        let names: HashMap<String, String> =
+            serde_json::from_str(include_str!("apple-models.json")).unwrap_or_default();
+        if let Some(name) = names.get(model) {
+            return format!("{name} ({model})");
         }
         return format!("iPhone ({model})");
     }
     if model.starts_with("iPad") {
-        if let Some(gen) = extract_apple_generation(model, "iPad") {
-            return format!("iPad {gen} ({model})");
-        }
         return format!("iPad ({model})");
     }
 
     format!("Apple device ({model})")
-}
-
-#[cfg(any(target_os = "macos", target_os = "ios"))]
-fn extract_apple_generation(model: &str, prefix: &str) -> Option<u32> {
-    let tail = model.strip_prefix(prefix)?;
-    let digits: String = tail.chars().take_while(|c| c.is_ascii_digit()).collect();
-    digits.parse::<u32>().ok()
 }
 
 #[cfg(any(target_os = "macos", target_os = "ios"))]
@@ -2727,6 +2719,22 @@ mod tests {
     use super::*;
 
     const TEST_DEVICE_ID: [u8; 32] = [0xCCu8; 32];
+
+    #[test]
+    fn apple_device_labels_use_retail_names_not_hardware_generations() {
+        assert_eq!(
+            humanize_apple_model("iPhone15,2"),
+            "iPhone 14 Pro (iPhone15,2)"
+        );
+        assert_eq!(humanize_apple_model("iPhone18,3"), "iPhone 17 (iPhone18,3)");
+        assert_eq!(humanize_apple_model("iPhone15,4"), "iPhone 15 (iPhone15,4)");
+        assert_eq!(humanize_apple_model("iPhone99,1"), "iPhone (iPhone99,1)");
+        assert_eq!(humanize_apple_model("iPad13,4"), "iPad (iPad13,4)");
+        assert_eq!(
+            humanize_apple_model("MacBookPro18,3"),
+            "MacBook Pro (MacBookPro18,3)"
+        );
+    }
 
     #[test]
     fn derive_libp2p_keypair_deterministic() {
