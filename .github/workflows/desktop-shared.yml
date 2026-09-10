@@ -213,7 +213,29 @@ jobs:
         # this job could not compile ffmpeg-next at all until they were bumped,
         # because ffmpeg 9 adds enum values the older bindings have no arm for.
         # Windows pins the same way a few jobs down. Bump both together.
-        run: brew install cmake ffmpeg@9 libtool automake autoconf
+        run: brew install cmake ffmpeg@9 libtool automake autoconf bash
+
+      - name: Stage declared macOS frameworks before compilation
+        working-directory: alexandria
+        run: |
+          python3 - <<'PYTHON'
+          import json
+          import pathlib
+          import shutil
+          import subprocess
+
+          prefix = pathlib.Path(subprocess.check_output(['brew', '--prefix'], text=True).strip())
+          config = json.loads(pathlib.Path('src-tauri/tauri.desktop.macos.conf.json').read_text())
+          for framework in config['bundle']['macOS']['frameworks']:
+              destination = pathlib.Path('src-tauri') / framework
+              candidates = [prefix / 'opt/ffmpeg@9/lib' / destination.name,
+                            prefix / 'lib' / destination.name]
+              source = next((candidate for candidate in candidates if candidate.is_file()), None)
+              if source is None:
+                  raise FileNotFoundError(f'Missing required macOS framework: {destination.name}')
+              destination.parent.mkdir(parents=True, exist_ok=True)
+              shutil.copy2(source, destination)
+          PYTHON
 
       - name: Write Apple API Key
         if: inputs.mode == 'release' && inputs.sign_updater == true
