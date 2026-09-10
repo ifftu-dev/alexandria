@@ -38,6 +38,9 @@ jobs:
   prepare:
     name: Mobile preflight
     runs-on: ubuntu-latest
+    concurrency:
+      group: release-draft-${{ inputs.tag }}
+      cancel-in-progress: false
     outputs:
       android_signing_mode: ${{ steps.android-signing.outputs.mode }}
     steps:

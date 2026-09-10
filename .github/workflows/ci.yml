@@ -548,6 +548,10 @@ jobs:
         working-directory: alexandria
         run: node scripts/check-release-readiness.mjs
 
+      - name: Release workflow regression tests
+        working-directory: alexandria
+        run: python3 -m unittest discover -s scripts -p 'test_*.py'
+
   security:
     name: Security Audit
     needs: changes
