@@ -597,8 +597,10 @@ Every incoming gossip message MUST pass through a 6-step validation pipeline. A 
 | 2. Identity | For privileged topics (taxonomy, governance, Sentinel priors, goal templates, question banks, and the reserved plugin-attestation compatibility topic), `(stake_address, public_key)` MUST appear in `stake_pubkey_registry` within the current validity window. Non-privileged topics skip. This check does not grant domain authority to the reserved topic. See [`docs/stake-pubkey-registry.md`](./stake-pubkey-registry.md). | `IdentityMismatch` |
 | 3. Freshness | Timestamp within ±5 minutes of local clock | `ExpiredMessage` |
 | 4. Dedup | Blake2b-256 hash not in LRU cache (100,000 entries) | `DuplicateMessage` |
-| 5. Schema | Payload deserialises to expected topic-specific type | `InvalidSchema` |
+| 5. Schema | Payload is strict JSON within the payload limits (64 KiB, depth 32, 4096 elements, 256 entries, 64 KiB strings) with no duplicate keys, integers outside ±(2^53−1), non-finite numbers or trailing bytes; topic handlers then decode the expected type | `InvalidSchema` |
 | 6. Authority | Topic-specific permission checks; release builds reject taxonomy, governance, goal-template and question-bank messages outright (§6.5) | `Unauthorized` |
+
+Before step 1, the envelope MUST decode as strict JSON within 64 KiB, depth 2, 65,536 array elements (the byte arrays), 16 entries and 1024-byte strings; otherwise it is a protocol violation. Unsigned peer exchange announcements are limited to depth 2, 64 addresses, 8 entries and 1024-byte strings.
 
 The first failing step rejects the message. Validation outcomes MUST feed gossipsub peer scoring via `report_message_validation_result` — `Reject` on protocol-violation failures (signature, envelope parse, identity binding), `Ignore` on rate-limit drops, `Accept` on success — so the source's per-topic `invalid_message_deliveries` score moves correctly.
 

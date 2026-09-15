@@ -1,4 +1,38 @@
+use alexandria_verify::json::JsonLimits;
 use serde::{Deserialize, Serialize};
+
+/// Largest gossip message the node publishes or accepts, in bytes.
+pub const MAX_GOSSIP_MESSAGE_BYTES: usize = 64 * 1024;
+
+/// Structural limits for a signed gossip envelope. The payload, signature and
+/// public key encode as JSON arrays of bytes, so an array may hold a whole
+/// message's worth of elements while nesting stays two levels deep.
+pub const GOSSIP_ENVELOPE_JSON_LIMITS: JsonLimits = JsonLimits {
+    max_bytes: MAX_GOSSIP_MESSAGE_BYTES,
+    max_depth: 2,
+    max_array_len: MAX_GOSSIP_MESSAGE_BYTES,
+    max_object_entries: 16,
+    max_string_bytes: 1024,
+};
+
+/// Structural limits for the topic payload inside a gossip envelope, checked
+/// before any topic handler decodes it.
+pub const GOSSIP_PAYLOAD_JSON_LIMITS: JsonLimits = JsonLimits {
+    max_bytes: MAX_GOSSIP_MESSAGE_BYTES,
+    max_depth: 32,
+    max_array_len: 4096,
+    max_object_entries: 256,
+    max_string_bytes: 64 * 1024,
+};
+
+/// Structural limits for an unsigned peer exchange announcement.
+pub const PEER_EXCHANGE_JSON_LIMITS: JsonLimits = JsonLimits {
+    max_bytes: MAX_GOSSIP_MESSAGE_BYTES,
+    max_depth: 2,
+    max_array_len: 64,
+    max_object_entries: 8,
+    max_string_bytes: 1024,
+};
 
 /// Gossip topic identifiers for the Alexandria P2P protocol.
 ///

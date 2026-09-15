@@ -10,11 +10,15 @@
 //!    `docs/stake-pubkey-registry.md` and [`crate::p2p::registry`].
 //! 3. **Freshness**: Timestamp is within ±5 minutes of local time.
 //! 4. **Deduplication**: Blake2b-256 hash of payload not in seen cache.
-//! 5. **Schema**: Payload is valid JSON (topic-specific schema validation
-//!    is deferred to the domain handlers in later PRs).
+//! 5. **Schema**: Payload is strict JSON within
+//!    [`GOSSIP_PAYLOAD_JSON_LIMITS`]: no duplicate keys, unsafe numbers or
+//!    trailing bytes (topic-specific decoding happens in the domain handlers).
 //! 6. **Authority**: For taxonomy updates, verify the signer is a DAO
 //!    committee member (the domain handler does the heavy check; this
 //!    step is a lightweight gate).
+//!
+//! The envelope itself is decoded under [`GOSSIP_ENVELOPE_JSON_LIMITS`]
+//! before any step runs; see [`decode_envelope`].
 //!
 //! Per spec (§7.3): "Invalid messages are dropped silently. Peers that
 //! repeatedly send invalid messages are scored down by GossipSub's
@@ -24,6 +28,7 @@ use std::num::NonZeroUsize;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use alexandria_verify::json::{decode_untrusted, parse_untrusted, UntrustedJsonError};
 use lru::LruCache;
 use thiserror::Error;
 
@@ -32,7 +37,22 @@ use crate::db::Database;
 
 use super::registry;
 use super::signing::verify_gossip_signature;
-use super::types::{SignedGossipMessage, TOPIC_TAXONOMY};
+use super::types::{
+    PeerExchangeMessage, SignedGossipMessage, GOSSIP_ENVELOPE_JSON_LIMITS,
+    GOSSIP_PAYLOAD_JSON_LIMITS, PEER_EXCHANGE_JSON_LIMITS, TOPIC_TAXONOMY,
+};
+
+/// Decode raw gossip bytes as a signed envelope under
+/// [`GOSSIP_ENVELOPE_JSON_LIMITS`]. A failure is a protocol violation.
+pub(crate) fn decode_envelope(data: &[u8]) -> Result<SignedGossipMessage, UntrustedJsonError> {
+    decode_untrusted(data, &GOSSIP_ENVELOPE_JSON_LIMITS)
+}
+
+/// Decode an unsigned peer exchange announcement under
+/// [`PEER_EXCHANGE_JSON_LIMITS`].
+pub(crate) fn decode_peer_exchange(data: &[u8]) -> Result<PeerExchangeMessage, UntrustedJsonError> {
+    decode_untrusted(data, &PEER_EXCHANGE_JSON_LIMITS)
+}
 
 /// Maximum age of a message in seconds (5 minutes per spec §7.3).
 const FRESHNESS_WINDOW_SECS: u64 = 5 * 60;
@@ -251,16 +271,16 @@ impl MessageValidator {
         Ok(())
     }
 
-    /// Step 4: Validate that the payload is well-formed JSON.
+    /// Step 4: Validate that the payload is strict JSON within
+    /// [`GOSSIP_PAYLOAD_JSON_LIMITS`].
     ///
-    /// Topic-specific schema validation (e.g., verifying a catalog
-    /// message has the required `course_id`, `title`, etc.) is deferred
-    /// to the domain handlers in later PRs (catalog PR 3, evidence PR 4,
-    /// taxonomy PR 5). This check only verifies syntactic validity.
+    /// Duplicate keys, numbers outside JavaScript's exact integer range,
+    /// hostile nesting, oversized collections and trailing bytes are refused
+    /// here, so no topic handler ever decodes them. Topic-specific decoding
+    /// and field checks remain the domain handlers' job.
     fn check_schema(&self, message: &SignedGossipMessage) -> ValidationResult {
-        // Payload must be valid JSON
-        serde_json::from_slice::<serde_json::Value>(&message.payload)
-            .map_err(|e| ValidationError::InvalidPayload(format!("invalid JSON: {e}")))?;
+        parse_untrusted(&message.payload, &GOSSIP_PAYLOAD_JSON_LIMITS)
+            .map_err(|e| ValidationError::InvalidPayload(e.to_string()))?;
         Ok(())
     }
 
@@ -349,6 +369,98 @@ mod tests {
             key,
             "stake_test1uqfu74w3wh4gfzu8m6e7j987h4lq9r3t7ef5gaw497uu8q0kd9u4",
         )
+    }
+
+    const STAKE: &str = "stake_test1uqfu74w3wh4gfzu8m6e7j987h4lq9r3t7ef5gaw497uu8q0kd9u4";
+
+    fn payload_error(validator: &MessageValidator, key: &SigningKey, payload: &[u8]) -> String {
+        let message = sign_gossip_message("/alexandria/catalog/1.0", payload.to_vec(), key, STAKE);
+        match validator.check_schema(&message) {
+            Err(ValidationError::InvalidPayload(reason)) => reason,
+            other => panic!("expected an invalid payload, got {other:?}"),
+        }
+    }
+
+    // -- Strict bounded JSON --
+
+    #[test]
+    fn payload_limits_accept_the_boundary_and_refuse_one_more() {
+        let key = test_key();
+        let validator = MessageValidator::new();
+        let max = GOSSIP_PAYLOAD_JSON_LIMITS.max_bytes;
+        let mut exact = b"{\"test\":true}".to_vec();
+        exact.resize(max, b' ');
+        let message = sign_gossip_message("/alexandria/catalog/1.0", exact.clone(), &key, STAKE);
+        assert!(validator.check_schema(&message).is_ok());
+        exact.push(b' ');
+        assert!(payload_error(&validator, &key, &exact).contains("exceeds"));
+
+        let depth = GOSSIP_PAYLOAD_JSON_LIMITS.max_depth;
+        let nested = |levels: usize| format!("{}{}", "[".repeat(levels), "]".repeat(levels));
+        let message = sign_gossip_message(
+            "/alexandria/catalog/1.0",
+            nested(depth).into_bytes(),
+            &key,
+            STAKE,
+        );
+        assert!(validator.check_schema(&message).is_ok());
+        assert!(payload_error(&validator, &key, nested(depth + 1).as_bytes()).contains("depth"));
+    }
+
+    #[test]
+    fn ambiguous_payloads_never_reach_topic_handlers() {
+        let key = test_key();
+        let validator = MessageValidator::new();
+        assert!(
+            payload_error(&validator, &key, br#"{"course_id":"a","course_id":"b"}"#)
+                .contains("duplicate")
+        );
+        assert!(
+            payload_error(&validator, &key, br#"{"version":9007199254740992}"#)
+                .contains("exactly representable")
+        );
+        assert!(payload_error(&validator, &key, br#"{"test":true} {}"#).contains("invalid JSON"));
+    }
+
+    #[test]
+    fn envelopes_and_peer_exchange_are_decoded_under_their_limits() {
+        let key = test_key();
+        let encoded = serde_json::to_vec(&valid_message(&key, "/alexandria/catalog/1.0")).unwrap();
+        assert!(decode_envelope(&encoded).is_ok());
+
+        let max = GOSSIP_ENVELOPE_JSON_LIMITS.max_bytes;
+        let mut exact = encoded.clone();
+        exact.resize(max, b' ');
+        assert!(decode_envelope(&exact).is_ok());
+        exact.push(b' ');
+        assert_eq!(
+            decode_envelope(&exact).unwrap_err(),
+            UntrustedJsonError::TooLarge { max }
+        );
+
+        let rest = std::str::from_utf8(&encoded)
+            .unwrap()
+            .strip_prefix('{')
+            .unwrap();
+        let duplicated = format!("{{\"topic\":\"/alexandria/opinions/1.0\",{rest}");
+        assert_eq!(
+            decode_envelope(duplicated.as_bytes()).unwrap_err(),
+            UntrustedJsonError::DuplicateKey("topic".into())
+        );
+
+        assert!(
+            decode_peer_exchange(br#"{"peer_id":"p","addresses":["/ip4/1.2.3.4/tcp/1"]}"#).is_ok()
+        );
+        let crowded = serde_json::json!({
+            "peer_id": "p",
+            "addresses": vec!["/ip4/1.2.3.4/tcp/1"; PEER_EXCHANGE_JSON_LIMITS.max_array_len + 1],
+        });
+        assert_eq!(
+            decode_peer_exchange(crowded.to_string().as_bytes()).unwrap_err(),
+            UntrustedJsonError::TooManyElements {
+                max: PEER_EXCHANGE_JSON_LIMITS.max_array_len
+            }
+        );
     }
 
     // -- Signature tests --

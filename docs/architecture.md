@@ -507,7 +507,7 @@ exchanges.
 2. **Identity Binding** — for privileged topics (taxonomy, governance, Sentinel priors, goal templates, question banks, and the reserved plugin-attestation compatibility topic) the `(stake_address, public_key)` pair MUST appear in the local `stake_pubkey_registry` within the current validity window; non-privileged topics skip this step. Registry validation of the reserved topic does not grant domain authority. See [`docs/stake-pubkey-registry.md`](./stake-pubkey-registry.md).
 3. **Freshness** — within ±5 minutes
 4. **Dedup** — Blake2b-256 hash in LRU cache (100K entries, least-recently-used eviction)
-5. **Schema** — valid JSON
+5. **Schema** — strict JSON within the gossip payload limits (no duplicate keys, unsafe numbers, hostile nesting, oversized collections or trailing bytes); the envelope itself is decoded under its own limits before step 1
 6. **Authority** — in release builds the taxonomy, governance, Sentinel-prior, and content-governance (goal-template, question-bank) handlers reject every message pending verified committee outcome certificates; their legacy committee-membership checks against local governance tables compile only in debug builds with the matching `legacy-*` feature
 
 Validation outcomes feed directly into gossipsub peer scoring: `Reject` on signature, envelope-parse, or identity-binding failure penalises the source through the per-topic `invalid_message_deliveries` weight (see `p2p/scoring.rs`); `Accept` rewards first-delivery scoring for valid messages.

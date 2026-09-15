@@ -33,8 +33,10 @@ use super::nat::build_autonat_config;
 use super::rate_limit::PeerRateLimiter;
 use super::registry;
 use super::scoring::{build_peer_score_params, build_peer_score_thresholds};
-use super::types::{NatState, NetworkStatus, P2pEvent, SignedGossipMessage, ALL_TOPICS};
-use super::validation::MessageValidator;
+use super::types::{
+    NatState, NetworkStatus, P2pEvent, SignedGossipMessage, ALL_TOPICS, MAX_GOSSIP_MESSAGE_BYTES,
+};
+use super::validation::{decode_envelope, decode_peer_exchange, MessageValidator};
 
 #[derive(Error, Debug)]
 pub enum NetworkError {
@@ -876,7 +878,7 @@ fn build_behaviour(
             let hash = blake2b_256(&msg.data);
             MessageId::from(hex::encode(hash))
         })
-        .max_transmit_size(65536) // 64KB max message size
+        .max_transmit_size(MAX_GOSSIP_MESSAGE_BYTES)
         // Mesh parameters: target 4 peers in mesh (small network),
         // allow down to 2 before grafting, up to 8 before pruning.
         .mesh_n(4)
@@ -1373,7 +1375,7 @@ async fn swarm_event_loop(
 
     /// Helper: handle an incoming peer exchange message.
     fn handle_peer_exchange(swarm: &mut Swarm<AlexandriaBehaviour>, data: &[u8]) {
-        let msg: PeerExchangeMessage = match serde_json::from_slice(data) {
+        let msg: PeerExchangeMessage = match decode_peer_exchange(data) {
             Ok(m) => m,
             Err(e) => {
                 log::debug!("Peer exchange: invalid message: {e}");
@@ -1879,9 +1881,7 @@ async fn swarm_event_loop(
                         // malformed envelope is a protocol violation —
                         // Reject so gossipsub scores the source down via
                         // the topic's invalid_message_deliveries weight.
-                        let envelope = match serde_json::from_slice::<SignedGossipMessage>(
-                            &message.data,
-                        ) {
+                        let envelope = match decode_envelope(&message.data) {
                             Ok(env) => env,
                             Err(e) => {
                                 log::debug!(
