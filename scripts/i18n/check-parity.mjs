@@ -66,6 +66,12 @@ const PENDING_TRANSLATION = [
   // Credential import surface. English-only pending a translate pass.
   'credentials.import.',
   'credentials.page.import',
+  // Exact course-completion policy and manual endorsement exchange. English
+  // fallback is temporary pending the next instructor/learner translation pass.
+  'instructor.compose.policy',
+  'instructor.compose.blockerPolicyUnsaved',
+  'instructor.inbox.endorsement',
+  'courses.completion.endorsement',
 ]
 
 const isPending = (key) => PENDING_TRANSLATION.some((p) => key.startsWith(p))

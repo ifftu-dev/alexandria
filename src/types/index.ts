@@ -800,7 +800,6 @@ export interface SyncHistoryEntry {
 // ---- Exact course-completion endorsements ----
 
 export interface CourseCompletionEndorsement {
-  format_version: number
   binding: CourseCompletionBinding
   attestor_did: string
   attestor_public_key_hex: string

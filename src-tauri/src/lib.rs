@@ -1386,6 +1386,7 @@ pub fn run() {
             commands::instructor::instructor_inbox,
             // Course publishing (iroh)
             commands::courses::publish_course,
+            commands::courses::get_course_completion_policy,
             commands::courses::set_course_completion_policy,
             // Opinions (Field Commentary)
             commands::opinions::publish_opinion,

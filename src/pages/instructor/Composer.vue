@@ -15,6 +15,7 @@ import ElementEditorHost from '@/components/composer/ElementEditorHost.vue'
 import type {
   Chapter,
   Course,
+  CourseCompletionPolicy,
   CreateCourseRequest,
   Element,
   PublishCourseResult,
@@ -38,6 +39,102 @@ const elements = ref<Record<string, Element[]>>({})
 const selectedElement = ref<Element | null>(null)
 const loading = ref(false)
 const error = ref('')
+
+interface AttestorDraft {
+  did: string
+  publicKeyHex: string
+}
+
+const policyEnabled = ref(false)
+const policyThreshold = ref('1')
+const policyAttestors = ref<AttestorDraft[]>([])
+const policyRequireLeaves = ref(false)
+const policySaving = ref(false)
+const policyMessage = ref('')
+const policyError = ref('')
+const savedPolicySnapshot = ref('')
+
+function policySnapshot(): string {
+  return JSON.stringify({
+    enabled: policyEnabled.value,
+    threshold: policyThreshold.value,
+    attestors: policyAttestors.value,
+    leaves: policyRequireLeaves.value,
+  })
+}
+
+const policyDirty = computed(() => policySnapshot() !== savedPolicySnapshot.value)
+
+function setPolicyForm(policy: CourseCompletionPolicy | null) {
+  policyEnabled.value = policy !== null
+  policyThreshold.value = String(policy?.required_attestors ?? 1)
+  policyAttestors.value = (policy?.authorized_attestors ?? []).map(attestor => ({
+    did: attestor.did,
+    publicKeyHex: attestor.public_key_hex,
+  }))
+  policyRequireLeaves.value = policy?.evidence_requirements.some(
+    requirement => requirement.kind === 'completion-leaf' && requirement.format_version === 1,
+  ) ?? false
+  savedPolicySnapshot.value = policySnapshot()
+}
+
+async function loadPolicy(courseId: string) {
+  const policy = await invoke<CourseCompletionPolicy | null>('get_course_completion_policy', { courseId })
+  setPolicyForm(policy)
+}
+
+function addPolicyAttestor() {
+  policyAttestors.value.push({ did: '', publicKeyHex: '' })
+}
+
+function removePolicyAttestor(index: number) {
+  policyAttestors.value.splice(index, 1)
+}
+
+function buildPolicy(): CourseCompletionPolicy {
+  const authorized_attestors = policyAttestors.value
+    .map(attestor => ({
+      did: attestor.did.trim(),
+      public_key_hex: attestor.publicKeyHex.trim(),
+    }))
+    .sort((left, right) => left.did < right.did ? -1 : left.did > right.did ? 1 : 0)
+  const required_attestors = Number(policyThreshold.value)
+  if (!Number.isInteger(required_attestors) || required_attestors < 1 || required_attestors > authorized_attestors.length) {
+    throw new Error(t('instructor.compose.policyThresholdError'))
+  }
+  if (authorized_attestors.some(attestor => !attestor.did || !attestor.public_key_hex)) {
+    throw new Error(t('instructor.compose.policyAttestorError'))
+  }
+  const evidence_requirements = [
+    ...(policyRequireLeaves.value ? [{ kind: 'completion-leaf', format_version: 1 }] : []),
+    { kind: 'completion-root', format_version: 1 },
+  ]
+  return {
+    format_version: 1,
+    required_attestors,
+    authorized_attestors,
+    evidence_requirements,
+  }
+}
+
+async function savePolicy() {
+  if (!course.value) return
+  policySaving.value = true
+  policyError.value = ''
+  policyMessage.value = ''
+  try {
+    const policy = policyEnabled.value ? buildPolicy() : null
+    await invoke('set_course_completion_policy', { courseId: course.value.id, policy })
+    setPolicyForm(policy)
+    policyMessage.value = policy
+      ? t('instructor.compose.policySaved')
+      : t('instructor.compose.policyCleared')
+  } catch (e) {
+    policyError.value = String(e)
+  } finally {
+    policySaving.value = false
+  }
+}
 
 // ── New draft form ──────────────────────────────────────────────
 const newTitle = ref('')
@@ -82,7 +179,7 @@ async function load(courseId: string) {
   error.value = ''
   try {
     course.value = await invoke<Course>('get_course', { courseId })
-    await reloadOutline()
+    await Promise.all([reloadOutline(), loadPolicy(courseId)])
   } catch (e) {
     error.value = String(e)
     course.value = null
@@ -180,6 +277,7 @@ const publishBlockers = computed<string[]>(() => {
   if (unbound.length) {
     blockers.push(t('instructor.compose.blockerUnboundPlugins', { count: unbound.length }, unbound.length))
   }
+  if (policyDirty.value) blockers.push(t('instructor.compose.blockerPolicyUnsaved'))
   return blockers
 })
 
@@ -289,6 +387,66 @@ async function deleteCourse() {
         <AppButton variant="danger" size="sm" @click="showDeleteConfirm = true">{{ $t('common.actions.delete') }}</AppButton>
       </div>
     </div>
+
+    <!-- Completion endorsement policy for the next signed publication -->
+    <section class="rounded-xl border border-border bg-card p-5 space-y-4">
+      <div class="flex items-start justify-between gap-4">
+        <div>
+          <h2 class="font-semibold text-foreground">{{ $t('instructor.compose.policyTitle') }}</h2>
+          <p class="mt-1 text-sm text-muted-foreground">{{ $t('instructor.compose.policyDescription') }}</p>
+        </div>
+        <label class="flex shrink-0 items-center gap-2 text-sm text-foreground">
+          <input v-model="policyEnabled" type="checkbox" class="h-4 w-4 accent-primary">
+          {{ $t('instructor.compose.policyRequire') }}
+        </label>
+      </div>
+
+      <template v-if="policyEnabled">
+        <label class="block max-w-xs text-sm text-foreground">
+          <span class="mb-1 block text-xs font-medium text-muted-foreground">{{ $t('instructor.compose.policyThreshold') }}</span>
+          <input
+            v-model="policyThreshold"
+            type="number"
+            min="1"
+            :max="Math.max(1, policyAttestors.length)"
+            class="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+          >
+        </label>
+
+        <div class="space-y-3">
+          <div
+            v-for="(attestor, index) in policyAttestors"
+            :key="index"
+            class="grid gap-2 rounded-lg border border-border/70 p-3 md:grid-cols-[1fr_1fr_auto]"
+          >
+            <AppInput v-model="attestor.did" :label="$t('instructor.compose.policyAttestorDid')" :placeholder="$t('instructor.compose.policyDidPlaceholder')" />
+            <AppInput v-model="attestor.publicKeyHex" :label="$t('instructor.compose.policyAttestorKey')" :placeholder="$t('instructor.compose.policyKeyPlaceholder')" />
+            <AppButton class="self-end" size="sm" variant="ghost" @click="removePolicyAttestor(index)">
+              {{ $t('common.actions.remove') }}
+            </AppButton>
+          </div>
+          <AppButton size="sm" variant="secondary" @click="addPolicyAttestor">
+            {{ $t('instructor.compose.policyAddAttestor') }}
+          </AppButton>
+        </div>
+
+        <label class="flex items-start gap-2 text-sm text-foreground">
+          <input v-model="policyRequireLeaves" type="checkbox" class="mt-0.5 h-4 w-4 accent-primary">
+          <span>
+            <span class="block font-medium">{{ $t('instructor.compose.policyRequireLeaves') }}</span>
+            <span class="block text-xs text-muted-foreground">{{ $t('instructor.compose.policyEvidenceNote') }}</span>
+          </span>
+        </label>
+      </template>
+
+      <div class="flex items-center gap-3">
+        <AppButton size="sm" :loading="policySaving" :disabled="!policyDirty" @click="savePolicy">
+          {{ $t('instructor.compose.policySave') }}
+        </AppButton>
+        <span v-if="policyMessage" class="text-sm text-success">{{ policyMessage }}</span>
+        <span v-if="policyError" class="text-sm text-error">{{ policyError }}</span>
+      </div>
+    </section>
 
     <!-- Publish blockers / result -->
     <div v-if="course.status === 'draft' && publishBlockers.length" class="rounded-lg border border-warning/30 bg-warning/5 px-4 py-3">

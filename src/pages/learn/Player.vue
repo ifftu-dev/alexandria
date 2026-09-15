@@ -119,6 +119,8 @@ async function mintAndCelebrate() {
     credentialIds: claimCredentialIds.value,
     claimId: receipt?.claim_id,
     witnessStatus: receipt?.witness_status,
+    endorsementRequest: receipt?.endorsement_request ?? null,
+    endorsementMissingEvidence: receipt?.endorsement_missing_evidence ?? [],
     isTutorial: isTutorial.value,
     unmetElements: completionStatus.value?.unmet_elements ?? [],
   })

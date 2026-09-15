@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { CompletionWitnessState } from '@/types'
+import type {
+  CompletionWitnessState,
+  CourseCompletionBinding,
+  CourseCompletionEndorsementStatus,
+} from '@/types'
 
 const mocks = vi.hoisted(() => ({
   invoke: vi.fn<(command: string, args?: Record<string, unknown>) => Promise<unknown>>(),
@@ -21,6 +25,24 @@ const credential = { id: 'vc', type: ['VerifiableCredential', 'SelfAssertion'], 
 const payload = {
   courseTitle: 'Private course', courseId: 'course', skillIds: [], credentialIds: ['vc'],
   txHash: null, claimId: 'claim', witnessStatus: 'pending' as const,
+}
+const binding: CourseCompletionBinding = {
+  format_version: 1,
+  network_id: 'preprod',
+  subject_did: 'did:key:learner',
+  course_id: 'course',
+  course_document_cid: 'bafy-course',
+  course_document_version: 2,
+  completion_root: 'root',
+  evidence: [{ kind: 'completion-root', format_version: 1, id: 'root', digest: 'digest' }],
+}
+const endorsementStatus: CourseCompletionEndorsementStatus = {
+  claim_id: 'claim',
+  required_attestors: 1,
+  valid_attestors: [],
+  rejected_endorsements: 0,
+  satisfied: false,
+  endorsements: [],
 }
 
 async function fresh() {
@@ -124,5 +146,35 @@ describe('durable completion witness display', () => {
     expect(service.mintStage.value).toBe('issued')
     expect(service.items.value).toHaveLength(1)
     expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('loads exact endorsement state and sends imported JSON through backend verification', async () => {
+    mocks.invoke.mockImplementation(async command => {
+      if (command === 'list_credentials') return [credential]
+      if (command === 'list_skills') return []
+      if (command === 'get_completion_witness_status') return { status: 'pending', tx_hash: null }
+      if (command === 'get_course_completion_endorsement_request') return binding
+      if (command === 'get_course_completion_endorsement_status') return endorsementStatus
+      if (command === 'import_course_completion_endorsement') return {
+        binding,
+        attestor_did: 'did:key:instructor',
+        attestor_public_key_hex: '00',
+        signature_hex: '11',
+      }
+      throw new Error(`Unexpected command ${command}`)
+    })
+    const service = await fresh()
+    await service.open({ ...payload, endorsementRequest: binding, endorsementMissingEvidence: [] })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(service.endorsementRequest.value).toEqual(binding)
+    expect(service.endorsementStatus.value).toEqual(endorsementStatus)
+
+    const json = JSON.stringify({ binding, attestor_did: 'did:key:instructor' })
+    expect(await service.importEndorsementJson(json)).toBe(true)
+    expect(mocks.invoke).toHaveBeenCalledWith('import_course_completion_endorsement', {
+      claimId: 'claim',
+      endorsement: JSON.parse(json),
+    })
+    expect(service.endorsementMessage.value).toBe('imported')
   })
 })

@@ -2,7 +2,17 @@ import { ref, readonly } from 'vue'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { onProfileLocked } from '@/composables/useProfiles'
 import { getProfileSessionToken } from '@/composables/profileSession'
-import { extractSkillClaim, type VerifiableCredential, type SkillInfo, type CompletionWitnessStatus, type CompletionWitnessState } from '@/types'
+import {
+  extractSkillClaim,
+  type CompletionWitnessState,
+  type CompletionWitnessStatus,
+  type CourseCompletionBinding,
+  type CourseCompletionEndorsement,
+  type CourseCompletionEndorsementStatus,
+  type CourseEvidenceRequirement,
+  type SkillInfo,
+  type VerifiableCredential,
+} from '@/types'
 import { classNameOf } from '@/components/credential/credentialKind'
 
 /**
@@ -47,6 +57,8 @@ interface CompletionPayload {
   credentialIds: string[]
   claimId?: string
   witnessStatus?: CompletionWitnessStatus
+  endorsementRequest?: CourseCompletionBinding | null
+  endorsementMissingEvidence?: CourseEvidenceRequirement[]
   isTutorial?: boolean
   unmetElements?: UnmetElement[]
 }
@@ -57,6 +69,13 @@ const courseId = ref('')
 const isTutorial = ref(false)
 const txHash = ref<string | null>(null)
 const witnessStatus = ref<CompletionWitnessStatus>('not_requested')
+const claimId = ref<string | null>(null)
+const endorsementRequest = ref<CourseCompletionBinding | null>(null)
+const endorsementMissingEvidence = ref<CourseEvidenceRequirement[]>([])
+const endorsementStatus = ref<CourseCompletionEndorsementStatus | null>(null)
+const endorsementLoading = ref(false)
+const endorsementError = ref('')
+const endorsementMessage = ref('')
 const mintStage = ref<MintStage>('minting')
 const items = ref<MintItem[]>([])
 /** First credential id — the target of "View credential" when unambiguous. */
@@ -94,6 +113,13 @@ onProfileLocked(() => {
   isTutorial.value = false
   txHash.value = null
   witnessStatus.value = 'not_requested'
+  claimId.value = null
+  endorsementRequest.value = null
+  endorsementMissingEvidence.value = []
+  endorsementStatus.value = null
+  endorsementLoading.value = false
+  endorsementError.value = ''
+  endorsementMessage.value = ''
   mintStage.value = 'unavailable'
   primaryCredentialId.value = null
   items.value = []
@@ -108,6 +134,58 @@ const awaitingWitness = (status: CompletionWitnessStatus) =>
 
 export function useCourseCompletion() {
   const { invoke } = useLocalApi()
+
+  async function refreshEndorsementStatus(): Promise<boolean> {
+    const currentClaimId = claimId.value
+    const currentGeneration = generation
+    if (!currentClaimId) return false
+    endorsementLoading.value = true
+    endorsementError.value = ''
+    try {
+      const status = await invoke<CourseCompletionEndorsementStatus>(
+        'get_course_completion_endorsement_status',
+        { claimId: currentClaimId },
+      )
+      if (!isOpen.value || claimId.value !== currentClaimId || generation !== currentGeneration) return false
+      endorsementStatus.value = status
+      return true
+    } catch (error) {
+      if (isOpen.value && claimId.value === currentClaimId && generation === currentGeneration) {
+        endorsementError.value = String(error)
+      }
+      return false
+    } finally {
+      if (claimId.value === currentClaimId && generation === currentGeneration) {
+        endorsementLoading.value = false
+      }
+    }
+  }
+
+  async function importEndorsementJson(json: string): Promise<boolean> {
+    const currentClaimId = claimId.value
+    const currentGeneration = generation
+    if (!currentClaimId) return false
+    endorsementLoading.value = true
+    endorsementError.value = ''
+    endorsementMessage.value = ''
+    try {
+      const endorsement: unknown = JSON.parse(json)
+      await invoke<CourseCompletionEndorsement>('import_course_completion_endorsement', {
+        claimId: currentClaimId,
+        endorsement,
+      })
+      if (!isOpen.value || claimId.value !== currentClaimId || generation !== currentGeneration) return false
+      endorsementMessage.value = 'imported'
+    } catch (error) {
+      if (isOpen.value && claimId.value === currentClaimId && generation === currentGeneration) {
+        endorsementError.value = String(error)
+        endorsementLoading.value = false
+      }
+      return false
+    }
+    endorsementLoading.value = false
+    return refreshEndorsementStatus()
+  }
 
   async function skillNameMap(): Promise<Map<string, string>> {
     const skills = (await invoke<SkillInfo[]>('list_skills', {}).catch(() => [])) ?? []
@@ -203,6 +281,13 @@ export function useCourseCompletion() {
     isTutorial.value = !!p.isTutorial
     txHash.value = p.txHash
     witnessStatus.value = p.witnessStatus ?? 'not_requested'
+    claimId.value = p.claimId ?? null
+    endorsementRequest.value = p.endorsementRequest ?? null
+    endorsementMissingEvidence.value = p.endorsementMissingEvidence ?? []
+    endorsementStatus.value = null
+    endorsementLoading.value = false
+    endorsementError.value = ''
+    endorsementMessage.value = ''
     primaryCredentialId.value = p.credentialIds[0] ?? null
     unmetElements.value = p.unmetElements ?? []
     items.value = []
@@ -211,6 +296,26 @@ export function useCourseCompletion() {
     progressPct.value = 0
     isOpen.value = true
     mintStage.value = p.credentialIds.length ? 'minting' : 'unavailable'
+
+    async function loadEndorsement() {
+      if (!active() || !p.claimId || !p.endorsementRequest) return
+      endorsementLoading.value = true
+      try {
+        const request = await invoke<CourseCompletionBinding>(
+          'get_course_completion_endorsement_request',
+          { claimId: p.claimId },
+        )
+        if (!active()) return
+        endorsementRequest.value = request
+      } catch (error) {
+        if (active()) endorsementError.value = String(error)
+        return
+      } finally {
+        if (active()) endorsementLoading.value = false
+      }
+      if (active()) await refreshEndorsementStatus()
+    }
+    void loadEndorsement()
 
     // Poll one indexed local receipt, never the entire credential collection.
     // Recursive timeout avoids overlapping requests when the backend is busy.
@@ -255,6 +360,13 @@ export function useCourseCompletion() {
     isTutorial: readonly(isTutorial),
     txHash: readonly(txHash),
     witnessStatus: readonly(witnessStatus),
+    claimId: readonly(claimId),
+    endorsementRequest: readonly(endorsementRequest),
+    endorsementMissingEvidence: readonly(endorsementMissingEvidence),
+    endorsementStatus: readonly(endorsementStatus),
+    endorsementLoading: readonly(endorsementLoading),
+    endorsementError: readonly(endorsementError),
+    endorsementMessage: readonly(endorsementMessage),
     mintStage: readonly(mintStage),
     items: readonly(items),
     primaryCredentialId: readonly(primaryCredentialId),
@@ -263,6 +375,8 @@ export function useCourseCompletion() {
     etaMs: readonly(etaMs),
     progressPct: readonly(progressPct),
     open,
+    refreshEndorsementStatus,
+    importEndorsementJson,
     close,
   }
 }

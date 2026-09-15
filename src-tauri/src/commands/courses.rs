@@ -1,5 +1,5 @@
 use crate::profile::scope::ProfileState as State;
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 
 use crate::crypto::hash::entity_id;
 use crate::db::executor::DatabaseWorkload;
@@ -620,6 +620,45 @@ pub async fn set_course_completion_policy(
         .await
 }
 
+/// Read the active author's unpublished policy for the next course version.
+#[tauri::command]
+pub async fn get_course_completion_policy(
+    state: State<'_, AppState>,
+    course_id: String,
+) -> Result<Option<CourseCompletionPolicy>, String> {
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Instructor,
+            state.profile_lease(),
+            "courses.completion-policy.read",
+            move |db| get_course_completion_policy_impl(db.conn(), &course_id),
+        )
+        .await
+}
+
+fn get_course_completion_policy_impl(
+    conn: &rusqlite::Connection,
+    course_id: &str,
+) -> Result<Option<CourseCompletionPolicy>, String> {
+    let row = conn
+        .query_row(
+            "SELECT draft_completion_policy_json FROM courses \
+             WHERE id = ?1 AND author_address = \
+               (SELECT stake_address FROM local_identity WHERE id = 1)",
+            [course_id],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?
+        .ok_or("course not found or active profile is not its author")?;
+    row.map(|json| {
+        serde_json::from_str(&json)
+            .map_err(|error| format!("invalid draft completion policy: {error}"))
+    })
+    .transpose()
+}
+
 fn set_course_completion_policy_impl(
     conn: &rusqlite::Connection,
     course_id: &str,
@@ -751,6 +790,10 @@ mod tests {
 
         set_course_completion_policy_impl(db.conn(), "owned", Some("{}"))
             .expect("owned draft policy");
+        assert!(
+            get_course_completion_policy_impl(db.conn(), "owned").is_err(),
+            "invalid stored policy must fail closed"
+        );
         let stored: Option<String> = db
             .conn()
             .query_row(
@@ -767,6 +810,9 @@ mod tests {
                 .contains("not found or active profile is not its author")
         );
         set_course_completion_policy_impl(db.conn(), "owned", None).expect("clear policy");
+        assert!(get_course_completion_policy_impl(db.conn(), "owned")
+            .expect("read cleared policy")
+            .is_none());
         let cleared: Option<String> = db
             .conn()
             .query_row(
@@ -776,6 +822,7 @@ mod tests {
             )
             .unwrap();
         assert!(cleared.is_none());
+        assert!(get_course_completion_policy_impl(db.conn(), "foreign").is_err());
     }
 
     #[test]
