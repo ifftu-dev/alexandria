@@ -696,3 +696,86 @@ fn diagnostics_exit_fields_preserve_ungraded_attempts_and_are_constrained() {
         )
         .is_err());
 }
+
+// ---- migration 091: exact course completion authority -------------------
+
+#[test]
+fn exact_course_binding_migration_does_not_rebind_legacy_rows() {
+    let db = Database::open_in_memory().expect("db");
+    for (_, _, sql) in MIGRATIONS.iter().filter(|(version, _, _)| *version <= 90) {
+        db.conn().execute_batch(sql).expect("pre-091 migration");
+    }
+    db.conn()
+        .execute_batch(
+            "INSERT INTO courses (id, title, author_address, content_cid)
+             VALUES ('course', 'Legacy', 'stake', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+             INSERT INTO enrollments (id, course_id) VALUES ('enrollment', 'course');
+             INSERT INTO completion_claims
+               (id, subject_did, course_id, completion_root, credential_ids_json)
+             VALUES
+               ('claim', 'did:key:zLegacy', 'course',
+                'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', '[]');
+             INSERT INTO completion_attestation_requirements
+               (course_id, required_attestors, dao_id)
+             VALUES ('course', 1, 'mutable-authority');
+             INSERT INTO completion_attestations
+               (id, witness_tx_hash, attestor_did, attestor_pubkey, signature)
+             VALUES ('old', 'tx', 'did:key:zOld', 'key', 'signature');",
+        )
+        .expect("legacy fixture");
+
+    let (_, _, migration) = MIGRATIONS
+        .iter()
+        .find(|(version, _, _)| *version == 91)
+        .expect("migration 091");
+    db.conn()
+        .execute_batch(migration)
+        .expect("migration 091 applies");
+
+    let enrollment_binding: (Option<String>, Option<i64>, Option<String>) = db
+        .conn()
+        .query_row(
+            "SELECT course_document_cid, course_document_version, completion_policy_json
+             FROM enrollments WHERE id = 'enrollment'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .expect("legacy enrollment");
+    assert_eq!(enrollment_binding, (None, None, None));
+
+    let claim_binding: (Option<String>, Option<i64>, Option<String>, Option<String>) = db
+        .conn()
+        .query_row(
+            "SELECT course_document_cid, course_document_version, completion_binding_json,
+                    enrollment_id FROM completion_claims WHERE id = 'claim'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .expect("legacy claim");
+    assert_eq!(claim_binding, (None, None, None, None));
+
+    for retired in [
+        "completion_attestation_requirements",
+        "completion_attestations",
+    ] {
+        let exists: bool = db
+            .conn()
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
+                [retired],
+                |row| row.get(0),
+            )
+            .expect("table lookup");
+        assert!(!exists, "{retired} must be retired");
+    }
+    let replacement_exists: bool = db
+        .conn()
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master
+                            WHERE type = 'table' AND name = 'course_completion_endorsements')",
+            [],
+            |row| row.get(0),
+        )
+        .expect("replacement table lookup");
+    assert!(replacement_exists);
+}

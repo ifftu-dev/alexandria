@@ -5,9 +5,10 @@
 //!   grader version), return the leaves + Merkle root the validator
 //!   will require. The frontend uses this to confirm what it's about
 //!   to submit before pulling the wallet.
-//! * [`submit_completion_witness`] — derives the Merkle root, unlocks
-//!   the vault, commits learner self-claims and queues an optional mint when
-//!   Blockfrost is configured. Network work belongs to the profile worker.
+//! * [`claim_course_completion`] — derives the Merkle root from persisted,
+//!   passing submissions, commits learner self-claims, and queues an optional
+//!   mint when Blockfrost is configured. Network work belongs to the profile
+//!   worker.
 //!
 //! These are the bridge between the plugin-reported completion state
 //! and the on-chain witness the observer later ingests.
@@ -23,12 +24,16 @@ use crate::cardano::{
     completion_recovery, completion_tx_builder, script_refs,
 };
 use crate::commands::credentials::{now_rfc3339, IssueCredentialRequest};
-use crate::crypto::did::did_from_verifying_key;
+use crate::crypto::did::{did_from_verifying_key, Did};
 use crate::crypto::wallet;
 use crate::db::executor::DatabaseWorkload;
 use crate::domain::completion::{element_leaf, merkle_root, ElementCompletion};
 use crate::domain::vc::{Claim, CredentialType, SkillClaim};
 use crate::AppState;
+use alexandria_verify::course::{
+    CompletionEvidence, CourseCompletionBinding, CourseCompletionPolicy,
+    COMPLETION_ENDORSEMENT_FORMAT_VERSION,
+};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct ElementCompletionInput {
@@ -94,6 +99,77 @@ pub struct CompletionWitnessResult {
     /// Original local learner self-claim IDs. A subsequently confirmed
     /// witnessed VC is issued separately without rewriting these claims.
     pub credential_ids: Vec<String>,
+    /// Canonical instructor-signing request for courses whose exact signed
+    /// document requires endorsement. Local self-claims do not wait for it.
+    pub endorsement_request: Option<CourseCompletionBinding>,
+    /// Policy requirements for which the local completion has no evidence yet.
+    /// The self-claim still succeeds; endorsement remains pending.
+    pub endorsement_missing_evidence: Vec<alexandria_verify::course::EvidenceRequirement>,
+}
+
+#[derive(Debug)]
+struct ExactEnrollment {
+    id: String,
+    course_document_cid: String,
+    course_document_version: u32,
+    completion_policy: Option<CourseCompletionPolicy>,
+}
+
+type ExactEnrollmentRow = (String, Option<String>, Option<i64>, Option<String>);
+
+fn exact_enrollment(conn: &Connection, course_id: &str) -> Result<ExactEnrollment, String> {
+    let row: Option<ExactEnrollmentRow> = conn
+        .query_row(
+            "SELECT e.id, e.course_document_cid, e.course_document_version, e.completion_policy_json \
+             FROM enrollments e WHERE e.course_id = ?1 AND e.status IN ('active', 'completed') \
+             ORDER BY CASE e.status WHEN 'active' THEN 0 ELSE 1 END, e.enrolled_at DESC, e.id DESC \
+             LIMIT 1",
+            [course_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    let Some((id, Some(cid), Some(version), policy_json)) = row else {
+        return Err("enrollment has no exact verified course document binding".into());
+    };
+    let completion_policy = policy_json
+        .as_deref()
+        .map(serde_json::from_str::<CourseCompletionPolicy>)
+        .transpose()
+        .map_err(|error| format!("invalid enrolled completion policy: {error}"))?;
+    if let Some(policy) = &completion_policy {
+        policy
+            .validate()
+            .map_err(|error| format!("invalid enrolled completion policy: {error}"))?;
+    }
+    Ok(ExactEnrollment {
+        id,
+        course_document_cid: cid,
+        course_document_version: u32::try_from(version)
+            .map_err(|_| "invalid enrolled course document version".to_string())?,
+        completion_policy,
+    })
+}
+
+fn ensure_enrollment_is_current(
+    conn: &Connection,
+    course_id: &str,
+    enrollment: &ExactEnrollment,
+) -> Result<(), String> {
+    let current_cid: Option<String> = conn
+        .query_row(
+            "SELECT content_cid FROM courses WHERE id = ?1",
+            [course_id],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())?;
+    if current_cid.as_deref() != Some(enrollment.course_document_cid.as_str()) {
+        return Err(
+            "course document changed after enrollment; finish against retained content or start a new enrollment"
+                .into(),
+        );
+    }
+    Ok(())
 }
 
 /// Minimum per-element score that counts as "passed" for the purpose
@@ -142,13 +218,9 @@ fn assemble_from_template(
     conn: &rusqlite::Connection,
     course_id: &str,
 ) -> Result<(Vec<ElementCompletionInput>, Vec<String>, usize), String> {
-    let enrollment_id: Option<String> = conn
-        .query_row(
-            "SELECT id FROM enrollments WHERE course_id = ?1 ORDER BY enrolled_at ASC LIMIT 1",
-            rusqlite::params![course_id],
-            |r| r.get(0),
-        )
-        .ok();
+    let enrollment = exact_enrollment(conn, course_id)?;
+    ensure_enrollment_is_current(conn, course_id, &enrollment)?;
+    let enrollment_id = enrollment.id;
 
     // Template = gradeable elements in chapter→element position order.
     let mut stmt = conn
@@ -171,15 +243,6 @@ fn assemble_from_template(
     let required_count = elements.len();
     let mut inputs = Vec::new();
     let mut missing = Vec::new();
-
-    let Some(enrollment_id) = enrollment_id else {
-        // Not enrolled → everything is missing.
-        return Ok((
-            inputs,
-            elements.into_iter().map(|(id, _)| id).collect(),
-            required_count,
-        ));
-    };
 
     for (element_id, element_type) in elements {
         // Best passing submission for this element on this enrollment.
@@ -362,16 +425,15 @@ pub async fn claim_course_completion(
     }
 }
 
-/// Mark the (single, local) enrollment for a course as completed. Idempotent;
-/// no-op if there is no enrollment row.
-fn mark_enrollment_completed(conn: &Connection, course_id: &str) -> Result<(), String> {
+/// Mark the exact enrollment that produced a completion as completed.
+fn mark_enrollment_completed(conn: &Connection, enrollment_id: &str) -> Result<(), String> {
     conn.execute(
         "UPDATE enrollments \
          SET status = 'completed', \
              completed_at = COALESCE(completed_at, datetime('now')), \
              updated_at = datetime('now') \
-         WHERE course_id = ?1",
-        rusqlite::params![course_id],
+         WHERE id = ?1",
+        [enrollment_id],
     )
     .map_err(|e| e.to_string())?;
     Ok(())
@@ -385,7 +447,7 @@ const CONTENT_COMPLETION_SCORE: f64 = 0.3;
 /// Issue local completion credentials for a content-only course. No on-chain
 /// witness (there are no graded leaves to anchor); learner self-claims
 /// are evidenced by a deterministic completion root
-/// derived from the course id.
+/// derived from the exact course document identity.
 async fn issue_content_completion(
     state: &State<'_, AppState>,
     course_id: &str,
@@ -399,9 +461,6 @@ async fn issue_content_completion(
     };
     let subject_pubkey: [u8; 32] = *wallet.signing_key.verifying_key().as_bytes();
 
-    // Synthetic, deterministic completion root — no graded leaves exist.
-    let root = hex::encode(blake3::hash(course_id.as_bytes()).as_bytes());
-
     let course_id = course_id.to_owned();
     state
         .db_executor
@@ -410,6 +469,13 @@ async fn issue_content_completion(
             state.profile_lease(),
             "completion.content.persist",
             move |db| {
+                let enrollment = exact_enrollment(db.conn(), &course_id)?;
+                ensure_enrollment_is_current(db.conn(), &course_id, &enrollment)?;
+                let root_material = format!(
+                    "alexandria/content-completion/v2\0{}\0{}",
+                    course_id, enrollment.course_document_cid
+                );
+                let root = hex::encode(blake3::hash(root_material.as_bytes()).as_bytes());
                 persist_completion(
                     db.conn(),
                     &wallet,
@@ -424,16 +490,6 @@ async fn issue_content_completion(
             },
         )
         .await
-}
-
-#[tauri::command]
-pub async fn submit_completion_witness(
-    state: State<'_, AppState>,
-    course_id: String,
-    elements: Vec<ElementCompletionInput>,
-    timestamp_ms: i64,
-) -> Result<CompletionWitnessResult, String> {
-    submit_witness(&state, &course_id, &elements, timestamp_ms).await
 }
 
 /// Shared witness builder: compute the root from `elements`, unlock the
@@ -512,6 +568,75 @@ async fn submit_witness(
         .await
 }
 
+fn build_endorsement_request(
+    subject: &Did,
+    course_id: &str,
+    enrollment: &ExactEnrollment,
+    root: &str,
+    leaves: &[String],
+) -> Result<
+    (
+        Option<CourseCompletionBinding>,
+        Vec<alexandria_verify::course::EvidenceRequirement>,
+    ),
+    String,
+> {
+    let Some(policy) = &enrollment.completion_policy else {
+        return Ok((None, Vec::new()));
+    };
+    let mut evidence = vec![CompletionEvidence {
+        kind: "completion-root".into(),
+        format_version: 1,
+        id: "course-completion".into(),
+        digest: root.to_owned(),
+    }];
+    evidence.extend(
+        leaves
+            .iter()
+            .enumerate()
+            .map(|(index, digest)| CompletionEvidence {
+                kind: "completion-leaf".into(),
+                format_version: 1,
+                id: format!("leaf-{index:04}"),
+                digest: digest.clone(),
+            }),
+    );
+    evidence.sort();
+    let missing = policy
+        .evidence_requirements
+        .iter()
+        .filter(|requirement| {
+            !evidence.iter().any(|candidate| {
+                candidate.kind == requirement.kind
+                    && candidate.format_version == requirement.format_version
+            })
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    if !missing.is_empty() {
+        return Ok((None, missing));
+    }
+    let network_id = crate::network_profile::embedded_preprod()
+        .map_err(|error| error.to_string())?
+        .network_id
+        .clone();
+    let binding = CourseCompletionBinding {
+        format_version: COMPLETION_ENDORSEMENT_FORMAT_VERSION,
+        network_id,
+        subject_did: subject.clone(),
+        course_id: course_id.to_owned(),
+        course_document_cid: enrollment.course_document_cid.clone(),
+        course_document_version: enrollment.course_document_version,
+        completion_root: root.to_owned(),
+        evidence,
+        witness_tx_hash: None,
+    };
+    binding
+        .validate(policy)
+        .map_err(|error| error.to_string())?;
+    Ok((Some(binding), Vec::new()))
+}
+
 // Receipt, credentials, enrollment state and optional intent commit together.
 // No provider calls are permitted on this local completion path.
 #[allow(clippy::too_many_arguments)]
@@ -527,25 +652,65 @@ fn persist_completion(
     witness: Option<&completion_recovery::CompletionContext>,
 ) -> Result<CompletionWitnessResult, String> {
     let subject = did_from_verifying_key(&wallet.signing_key.verifying_key());
-    let identity =
-        serde_json::to_vec(&(subject.as_str(), course_id, root)).map_err(|e| e.to_string())?;
+    let enrollment = exact_enrollment(conn, course_id)?;
+    let identity = serde_json::to_vec(&(
+        subject.as_str(),
+        course_id,
+        enrollment.course_document_cid.as_str(),
+        enrollment.course_document_version,
+        root,
+    ))
+    .map_err(|error| error.to_string())?;
     let claim_id = blake3::hash(&identity).to_hex().to_string();
+    let claim_exists: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM completion_claims WHERE id = ?1)",
+            [&claim_id],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())?;
+    if !claim_exists {
+        ensure_enrollment_is_current(conn, course_id, &enrollment)?;
+    }
+    let (endorsement_request, endorsement_missing_evidence) =
+        build_endorsement_request(&subject, course_id, &enrollment, root, &leaves)?;
+    let completion_binding_json = endorsement_request
+        .as_ref()
+        .map(serde_json_canonicalizer::to_string)
+        .transpose()
+        .map_err(|error| error.to_string())?;
     crate::db::with_transaction(conn, || {
-        let existing: Option<String> = conn
+        let existing: Option<(String, Option<String>)> = conn
             .query_row(
-                "SELECT credential_ids_json FROM completion_claims WHERE id = ?1",
+                "SELECT credential_ids_json, completion_binding_json \
+                 FROM completion_claims WHERE id = ?1",
                 [&claim_id],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .optional()
             .map_err(|e| e.to_string())?;
-        let credential_ids = if let Some(json) = existing {
-            serde_json::from_str::<Vec<String>>(&json).map_err(|e| e.to_string())?
+        let (credential_ids, stored_endorsement_request) = if let Some((json, binding_json)) =
+            existing
+        {
+            let stored_binding = binding_json
+                .as_deref()
+                .map(serde_json::from_str::<CourseCompletionBinding>)
+                .transpose()
+                .map_err(|error| format!("invalid stored completion binding: {error}"))?;
+            if stored_binding != endorsement_request {
+                return Err("stored completion binding differs from the exact enrollment".into());
+            }
+            (
+                serde_json::from_str::<Vec<String>>(&json).map_err(|e| e.to_string())?,
+                stored_binding,
+            )
         } else {
             let ids = self_issue_completion(
                 conn,
                 &wallet.signing_key,
                 course_id,
+                &enrollment.course_document_cid,
+                enrollment.course_document_version,
                 subject_pubkey,
                 &wallet.payment_key_hash,
                 root,
@@ -554,17 +719,29 @@ fn persist_completion(
                 timestamp_ms,
             )?;
             conn.execute(
-                "INSERT INTO completion_claims (id, subject_did, course_id, completion_root, credential_ids_json)
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
-                rusqlite::params![claim_id, subject.as_str(), course_id, root,
-                    serde_json::to_string(&ids).map_err(|e| e.to_string())?],
-            ).map_err(|e| e.to_string())?;
-            ids
+                "INSERT INTO completion_claims \
+                 (id, subject_did, course_id, course_document_cid, course_document_version, \
+                  completion_root, completion_binding_json, credential_ids_json, enrollment_id)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                rusqlite::params![
+                    claim_id,
+                    subject.as_str(),
+                    course_id,
+                    enrollment.course_document_cid,
+                    enrollment.course_document_version,
+                    root,
+                    completion_binding_json,
+                    serde_json::to_string(&ids).map_err(|e| e.to_string())?,
+                    enrollment.id,
+                ],
+            )
+            .map_err(|e| e.to_string())?;
+            (ids, endorsement_request.clone())
         };
         if let Some(context) = witness {
             completion_queue::enqueue(conn, &claim_id, context)?;
         }
-        mark_enrollment_completed(conn, course_id)?;
+        mark_enrollment_completed(conn, &enrollment.id)?;
         let status = completion_queue::state(conn, &claim_id)?;
         Ok(CompletionWitnessResult {
             claim_id: claim_id.clone(),
@@ -573,6 +750,8 @@ fn persist_completion(
             completion_root: root.to_owned(),
             leaves,
             credential_ids,
+            endorsement_request: stored_endorsement_request,
+            endorsement_missing_evidence,
         })
     })
 }
@@ -632,6 +811,8 @@ fn self_issue_completion(
     conn: &Connection,
     learner_key: &SigningKey,
     course_id: &str,
+    course_document_cid: &str,
+    course_document_version: u32,
     subject_pubkey: &[u8; 32],
     payment_key_hash: &[u8; completion_tx_builder::LEARNER_PKH_LENGTH],
     completion_root_hex: &str,
@@ -679,10 +860,13 @@ fn self_issue_completion(
 
     // (3) Self-claims do not imply an independent instructor endorsement.
     // Evidence is the confirmed witness or the local completion root.
-    let evidence = match tx_hash {
-        Some(tx) => format!("witness:{tx}"),
-        None => format!("completion-root:{completion_root_hex}"),
-    };
+    let mut evidence = vec![
+        format!("course-document:blake3:{course_document_cid}:v{course_document_version}"),
+        format!("completion-root:{completion_root_hex}"),
+    ];
+    if let Some(tx) = tx_hash {
+        evidence.push(format!("witness:{tx}"));
+    }
     let score = mean_score.clamp(0.0, 1.0);
     let level = (score * 5.0).round() as u8;
     let now = now_rfc3339();
@@ -694,12 +878,12 @@ fn self_issue_completion(
                 skill_id: skill_id.clone(),
                 level,
                 score,
-                evidence_refs: vec![evidence.clone()],
+                evidence_refs: evidence.clone(),
                 rubric_version: None,
                 assessment_method: Some("course_completion".into()),
                 provenance: None,
             }),
-            evidence_refs: vec![evidence.clone()],
+            evidence_refs: evidence.clone(),
             expiration_date: None,
             supersedes: None,
             integrity_session_id: None,
@@ -794,6 +978,12 @@ mod tests {
             .execute_batch("DROP TRIGGER fail_completion_request")
             .unwrap();
         let first = persist().unwrap();
+        db.conn()
+            .execute(
+                "UPDATE courses SET content_cid = ?1 WHERE id = 'c1'",
+                ["22".repeat(32)],
+            )
+            .unwrap();
         let retry = persist().unwrap();
         assert_eq!(first.credential_ids.len(), 2);
         assert_eq!(retry.credential_ids, first.credential_ids);
@@ -813,6 +1003,62 @@ mod tests {
             )
             .unwrap();
         assert_eq!(status, "completed");
+    }
+
+    #[test]
+    fn endorsement_request_uses_exact_enrollment_and_reports_missing_evidence() {
+        use alexandria_verify::course::{
+            AuthorizedAttestor, EvidenceRequirement, COMPLETION_POLICY_FORMAT_VERSION,
+        };
+
+        let attestor_key = SigningKey::from_bytes(&[4; 32]);
+        let policy = CourseCompletionPolicy {
+            format_version: COMPLETION_POLICY_FORMAT_VERSION,
+            required_attestors: 1,
+            authorized_attestors: vec![AuthorizedAttestor {
+                did: did_from_verifying_key(&attestor_key.verifying_key()),
+                public_key_hex: hex::encode(attestor_key.verifying_key().as_bytes()),
+            }],
+            evidence_requirements: vec![EvidenceRequirement {
+                kind: "completion-root".into(),
+                format_version: 1,
+            }],
+        };
+        let enrollment = ExactEnrollment {
+            id: "enrollment".into(),
+            course_document_cid: "11".repeat(32),
+            course_document_version: 2,
+            completion_policy: Some(policy),
+        };
+        let subject_key = SigningKey::from_bytes(&[9; 32]);
+        let subject = did_from_verifying_key(&subject_key.verifying_key());
+        let root = "22".repeat(32);
+
+        let (request, missing) =
+            build_endorsement_request(&subject, "course", &enrollment, &root, &[]).unwrap();
+        assert!(missing.is_empty());
+        let request = request.unwrap();
+        assert_eq!(request.subject_did, subject);
+        assert_eq!(request.course_document_cid, enrollment.course_document_cid);
+        assert_eq!(request.completion_root, root);
+
+        let mut missing_enrollment = enrollment;
+        missing_enrollment
+            .completion_policy
+            .as_mut()
+            .unwrap()
+            .evidence_requirements[0]
+            .kind = "oral-review".into();
+        let (request, missing) = build_endorsement_request(
+            &subject,
+            "course",
+            &missing_enrollment,
+            &"22".repeat(32),
+            &[],
+        )
+        .unwrap();
+        assert!(request.is_none());
+        assert_eq!(missing[0].kind, "oral-review");
     }
 
     #[test]
@@ -844,9 +1090,10 @@ mod tests {
     fn seed_course_with_elements(db: &crate::db::Database) {
         let conn = db.conn();
         conn.execute(
-            "INSERT INTO courses (id, title, author_address, status) \
-             VALUES ('c1', 'Course', 'stake_test1u', 'published')",
-            [],
+            "INSERT INTO courses \
+             (id, title, author_address, status, content_cid, course_document_version) \
+             VALUES ('c1', 'Course', 'stake_test1u', 'published', ?1, 2)",
+            ["11".repeat(32)],
         )
         .unwrap();
         conn.execute(
@@ -865,8 +1112,10 @@ mod tests {
         )
         .unwrap();
         conn.execute(
-            "INSERT INTO enrollments (id, course_id, status) VALUES ('enr1', 'c1', 'active')",
-            [],
+            "INSERT INTO enrollments \
+             (id, course_id, status, course_document_cid, course_document_version) \
+             VALUES ('enr1', 'c1', 'active', ?1, 2)",
+            ["11".repeat(32)],
         )
         .unwrap();
     }
@@ -945,6 +1194,8 @@ mod tests {
             db.conn(),
             &key,
             "c1",
+            &"11".repeat(32),
+            2,
             &subject_pubkey,
             &pkh,
             &root,
@@ -1056,6 +1307,8 @@ mod tests {
             db.conn(),
             &key,
             "offline",
+            &"11".repeat(32),
+            2,
             key.verifying_key().as_bytes(),
             &[1; 28],
             &"33".repeat(32),

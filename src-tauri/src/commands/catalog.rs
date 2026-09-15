@@ -257,6 +257,7 @@ mod tests {
             version: 1,
             course_id: row.course_id.clone(),
             author_address: row.author_address.clone(),
+            author_did: None,
             title: "Hydrated course".into(),
             description: None,
             thumbnail_hash: None,
@@ -466,15 +467,23 @@ fn hydrate_catalog_course_db(
         let tags_json = serde_json::to_string(&signed_doc.tags).map_err(|e| e.to_string())?;
         let skill_ids_json =
             serde_json::to_string(&signed_doc.skill_ids).map_err(|e| e.to_string())?;
+        let completion_policy_json = signed_doc
+            .completion_policy
+            .as_ref()
+            .map(serde_json_canonicalizer::to_string)
+            .transpose()
+            .map_err(|error| error.to_string())?;
 
         conn.execute(
-            "INSERT INTO courses (id, title, description, author_address, content_cid, thumbnail_cid, tags, skill_ids, version, status, published_at, updated_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'published', datetime('now'), datetime('now')) \
+            "INSERT INTO courses (id, title, description, author_address, content_cid, thumbnail_cid, tags, skill_ids, version, course_document_version, completion_policy_json, status, published_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 'published', datetime('now'), datetime('now')) \
              ON CONFLICT(id) DO UPDATE SET \
              title = excluded.title, description = excluded.description, \
              author_address = excluded.author_address, content_cid = excluded.content_cid, \
              thumbnail_cid = excluded.thumbnail_cid, tags = excluded.tags, \
              skill_ids = excluded.skill_ids, version = excluded.version, \
+             course_document_version = excluded.course_document_version, \
+             completion_policy_json = excluded.completion_policy_json, \
              status = 'published', published_at = datetime('now'), updated_at = datetime('now')",
             params![
                 signed_doc.course_id,
@@ -486,6 +495,8 @@ fn hydrate_catalog_course_db(
                 tags_json,
                 skill_ids_json,
                 row.version,
+                i64::from(signed_doc.version),
+                completion_policy_json,
             ],
         )
         .map_err(|e| format!("upsert course failed: {e}"))?;

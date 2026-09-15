@@ -5,6 +5,12 @@ use serde::{Deserialize, Serialize};
 pub struct Enrollment {
     pub id: String,
     pub course_id: String,
+    /// Exact verified course document selected when this enrollment began.
+    /// Historical rows created before migration 091 remain unbound.
+    pub course_document_cid: Option<String>,
+    pub course_document_version: Option<i64>,
+    /// Canonical author-signed policy projection for this exact CID.
+    pub completion_policy_json: Option<String>,
     pub enrolled_at: String,
     pub completed_at: Option<String>,
     pub status: String,

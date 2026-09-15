@@ -23,6 +23,10 @@ pub struct CourseDocumentPayload {
     pub course_id: String,
     /// Cardano stake address of the author.
     pub author_address: String,
+    /// Exact Ed25519 author identity. Required in v2 and bound to the embedded
+    /// document signing key; absent from legacy v1 documents.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author_did: Option<alexandria_verify::Did>,
     /// Course title.
     pub title: String,
     /// Course description.
@@ -109,6 +113,8 @@ pub struct SignedCourseDocument {
     pub version: u32,
     pub course_id: String,
     pub author_address: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author_did: Option<alexandria_verify::Did>,
     pub title: String,
     pub description: Option<String>,
     pub thumbnail_hash: Option<String>,
@@ -136,6 +142,7 @@ impl SignedCourseDocument {
             version: self.version,
             course_id: self.course_id.clone(),
             author_address: self.author_address.clone(),
+            author_did: self.author_did.clone(),
             title: self.title.clone(),
             description: self.description.clone(),
             thumbnail_hash: self.thumbnail_hash.clone(),
@@ -168,6 +175,7 @@ mod tests {
             version: 1,
             course_id: "course1".into(),
             author_address: "stake_test1u123".into(),
+            author_did: None,
             title: "Intro to Rust".into(),
             description: Some("Learn Rust".into()),
             thumbnail_hash: None,
@@ -227,6 +235,7 @@ mod tests {
             version: 1,
             course_id: "c1".into(),
             author_address: "addr1".into(),
+            author_did: None,
             title: "Test".into(),
             description: None,
             thumbnail_hash: None,

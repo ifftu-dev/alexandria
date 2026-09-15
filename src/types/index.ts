@@ -250,11 +250,31 @@ export interface PublishCourseResult {
   size: number
 }
 
+export interface AuthorizedCourseAttestor {
+  did: string
+  public_key_hex: string
+}
+
+export interface CourseEvidenceRequirement {
+  kind: string
+  format_version: number
+}
+
+export interface CourseCompletionPolicy {
+  format_version: number
+  required_attestors: number
+  authorized_attestors: AuthorizedCourseAttestor[]
+  evidence_requirements: CourseEvidenceRequirement[]
+}
+
 // ---- Enrollment ----
 
 export interface Enrollment {
   id: string
   course_id: string
+  course_document_cid: string | null
+  course_document_version: number | null
+  completion_policy_json: string | null
   enrolled_at: string
   completed_at: string | null
   status: string
@@ -777,50 +797,23 @@ export interface SyncHistoryEntry {
   direction: string
 }
 
-// ---- Completion Attestation (VC-first) ----
-//
-// Replaces the legacy evidence-cosigning types. Requirements now key
-// on `course_id`; attestations are Ed25519 signatures over the
-// 32-byte completion-witness tx hash.
+// ---- Exact course-completion endorsements ----
 
-export interface CompletionAttestationRequirement {
-  course_id: string
-  required_attestors: number
-  dao_id: string
-  set_by_proposal: string | null
-  created_at: string
-  updated_at: string
-}
-
-export interface CompletionAttestation {
-  id: string
-  witness_tx_hash: string
+export interface CourseCompletionEndorsement {
+  format_version: number
+  binding: CourseCompletionBinding
   attestor_did: string
-  attestor_pubkey: string
-  signature: string
-  note: string | null
-  created_at: string
+  attestor_public_key_hex: string
+  signature_hex: string
 }
 
-export interface CompletionAttestationStatus {
-  witness_tx_hash: string
-  course_id: string | null
+export interface CourseCompletionEndorsementStatus {
+  claim_id: string
   required_attestors: number
-  current_attestors: number
-  is_satisfied: boolean
-  attestations: CompletionAttestation[]
-}
-
-export interface SetCompletionRequirementParams {
-  course_id: string
-  required_attestors: number
-  dao_id: string
-  set_by_proposal: string | null
-}
-
-export interface SubmitCompletionAttestationParams {
-  witness_tx_hash: string
-  note: string | null
+  valid_attestors: string[]
+  rejected_endorsements: number
+  satisfied: boolean
+  endorsements: CourseCompletionEndorsement[]
 }
 
 // ---- Taxonomy (skill graph) ----
@@ -2082,4 +2075,25 @@ export interface CompletionWitnessResult {
   completion_root: string
   leaves: string[]
   credential_ids: string[]
+  endorsement_request: CourseCompletionBinding | null
+  endorsement_missing_evidence: CourseEvidenceRequirement[]
+}
+
+export interface CompletionEvidence {
+  kind: string
+  format_version: number
+  id: string
+  digest: string
+}
+
+export interface CourseCompletionBinding {
+  format_version: number
+  network_id: string
+  subject_did: string
+  course_id: string
+  course_document_cid: string
+  course_document_version: number
+  completion_root: string
+  evidence: CompletionEvidence[]
+  witness_tx_hash?: string | null
 }

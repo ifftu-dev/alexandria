@@ -98,7 +98,61 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (88, "credential_backed_reputation_snapshots", MIGRATION_088),
     (89, "assessment_diagnostics_exit", MIGRATION_089),
     (90, "governance_genesis_trust_anchors", MIGRATION_090),
+    (91, "exact_course_enrollment_binding", MIGRATION_091),
 ];
+
+const MIGRATION_091: &str = r#"
+-- Verified projections from an exact signed course document. These columns are
+-- populated only by local publication or verified catalog hydration. Existing
+-- rows stay NULL because the current course row is not proof of the document a
+-- historical learner actually used.
+ALTER TABLE courses ADD COLUMN course_document_version INTEGER
+    CHECK (course_document_version IS NULL OR course_document_version > 0);
+ALTER TABLE courses ADD COLUMN completion_policy_json TEXT
+    CHECK (completion_policy_json IS NULL OR json_valid(completion_policy_json));
+ALTER TABLE courses ADD COLUMN draft_completion_policy_json TEXT
+    CHECK (draft_completion_policy_json IS NULL OR json_valid(draft_completion_policy_json));
+
+-- A new enrollment freezes the verified source identity and completion policy.
+-- Author updates can change `courses`, but cannot rewrite these values.
+ALTER TABLE enrollments ADD COLUMN course_document_cid TEXT
+    CHECK (course_document_cid IS NULL OR length(course_document_cid) = 64);
+ALTER TABLE enrollments ADD COLUMN course_document_version INTEGER
+    CHECK (course_document_version IS NULL OR course_document_version > 0);
+ALTER TABLE enrollments ADD COLUMN completion_policy_json TEXT
+    CHECK (completion_policy_json IS NULL OR json_valid(completion_policy_json));
+CREATE INDEX idx_enrollments_course_document
+    ON enrollments(course_id, course_document_cid);
+
+-- Completion claims created after this migration carry the exact enrollment
+-- source and the canonical instructor-signing request. Historical claims stay
+-- NULL rather than being rebound to whichever course version is current now.
+ALTER TABLE completion_claims ADD COLUMN course_document_cid TEXT
+    CHECK (course_document_cid IS NULL OR length(course_document_cid) = 64);
+ALTER TABLE completion_claims ADD COLUMN course_document_version INTEGER
+    CHECK (course_document_version IS NULL OR course_document_version > 0);
+ALTER TABLE completion_claims ADD COLUMN completion_binding_json TEXT
+    CHECK (completion_binding_json IS NULL OR json_valid(completion_binding_json));
+ALTER TABLE completion_claims ADD COLUMN enrollment_id TEXT REFERENCES enrollments(id);
+
+-- Only shared-verifier-approved exact-binding endorsements are authoritative.
+CREATE TABLE course_completion_endorsements (
+    id TEXT PRIMARY KEY CHECK (length(id) = 64),
+    claim_id TEXT NOT NULL REFERENCES completion_claims(id) ON DELETE CASCADE,
+    attestor_did TEXT NOT NULL,
+    endorsement_json TEXT NOT NULL CHECK (json_valid(endorsement_json)),
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (claim_id, attestor_did)
+);
+CREATE INDEX idx_course_completion_endorsements_claim
+    ON course_completion_endorsements(claim_id, created_at);
+
+-- Migration 042's mutable course-id gate and raw transaction-hash signatures
+-- are obsolete authority. Historical rows cannot be safely promoted because
+-- they do not bind the subject, exact course document, evidence, or network.
+DROP TABLE completion_attestations;
+DROP TABLE completion_attestation_requirements;
+"#;
 
 const MIGRATION_090: &str = r#"
 -- A row exists only after an explicit local trust decision. Discovery, sync,

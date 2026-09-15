@@ -41,9 +41,6 @@ pub struct AutoIssuanceReport {
     /// Number of pending observations skipped because they did not
     /// belong to the local learner (subject pubkey mismatch).
     pub skipped_foreign: usize,
-    /// Number of pending observations skipped because the course's
-    /// attestation requirement is not yet met.
-    pub waiting_on_attestations: usize,
     /// Per-observation errors, recorded so the caller can surface them
     /// to the UI without stopping the loop.
     pub errors: Vec<String>,
@@ -63,34 +60,6 @@ pub fn tick(conn: &Connection, learner_key: &SigningKey) -> Result<AutoIssuanceR
         if obs.subject_pubkey != local_vk_hex {
             report.skipped_foreign += 1;
             continue;
-        }
-
-        // Attestation gate: if the course has an attestation
-        // requirement configured, the witness tx must have gathered
-        // enough validated signatures before we issue.
-        //
-        // `course_id` in the observation is a hex-encoded blob
-        // (derived from the on-chain datum); we don't currently have
-        // an authoritative mapping from that blob back to the local
-        // course table, so the gate is checked against the raw hex
-        // id. Callers who set a requirement keyed on that same hex
-        // get the gate; everyone else proceeds immediately.
-        match super::attestation::are_attestations_satisfied(
-            conn,
-            &obs.tx_hash,
-            Some(&obs.course_id),
-        ) {
-            Ok(true) => {}
-            Ok(false) => {
-                report.waiting_on_attestations += 1;
-                continue;
-            }
-            Err(e) => {
-                report
-                    .errors
-                    .push(format!("attestation gate({}): {e}", obs.tx_hash));
-                continue;
-            }
         }
 
         match issue_for_observation(conn, learner_key, &local_did, &obs) {
@@ -435,29 +404,12 @@ mod tests {
     }
 
     #[test]
-    fn tick_holds_back_when_attestation_requirement_unmet() {
-        use super::super::attestation::{set_requirement_impl, submit_attestation_impl};
-        use crate::domain::attestation::{
-            SetCompletionRequirementParams, SubmitCompletionAttestationParams,
-        };
-
+    fn tick_issues_self_claim_without_waiting_for_an_instructor() {
         let db = test_db();
         let key = SigningKey::from_bytes(&[21u8; 32]);
         let local_vk_hex = hex::encode(key.verifying_key().as_bytes());
         let tx_hash_hex: String = (0..32).map(|i| format!("{:02x}", i + 1)).collect();
         let course_hex = "22".repeat(16);
-
-        // Requirement: 1 attestor on this course.
-        set_requirement_impl(
-            db.conn(),
-            &SetCompletionRequirementParams {
-                course_id: course_hex.clone(),
-                required_attestors: 1,
-                dao_id: "dao_demo".into(),
-                set_by_proposal: None,
-            },
-        )
-        .unwrap();
 
         let obs = CompletionObservation {
             policy_id: "77".repeat(28),
@@ -473,33 +425,13 @@ mod tests {
         };
         seed_observation(&db, &obs);
 
-        // First tick: no attestor → hold.
-        let held = tick(db.conn(), &key).unwrap();
-        assert_eq!(held.issued, 0);
-        assert_eq!(held.waiting_on_attestations, 1);
-
-        let count_before: i64 = db
+        let issued = tick(db.conn(), &key).unwrap();
+        assert_eq!(issued.issued, 1);
+        let count: i64 = db
             .conn()
             .query_row("SELECT COUNT(*) FROM credentials", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(count_before, 0);
-
-        // An assessor attests on the witness tx.
-        let assessor = SigningKey::from_bytes(&[22u8; 32]);
-        submit_attestation_impl(
-            db.conn(),
-            &assessor,
-            &SubmitCompletionAttestationParams {
-                witness_tx_hash: tx_hash_hex.clone(),
-                note: None,
-            },
-        )
-        .unwrap();
-
-        // Second tick: requirement met → issue.
-        let issued = tick(db.conn(), &key).unwrap();
-        assert_eq!(issued.issued, 1);
-        assert_eq!(issued.waiting_on_attestations, 0);
+        assert_eq!(count, 1);
     }
 
     #[test]

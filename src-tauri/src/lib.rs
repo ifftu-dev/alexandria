@@ -1033,10 +1033,9 @@ pub fn run() {
                                     };
                                     match issuance {
                                         Some(Ok(report)) if report.issued > 0 => log::info!(
-                                    "auto-issuance: issued {} VC(s), {} waiting on attestation",
-                                    report.issued,
-                                    report.waiting_on_attestations,
-                                ),
+                                            "auto-issuance: issued {} VC(s)",
+                                            report.issued,
+                                        ),
                                         Some(Ok(report)) if !report.errors.is_empty() => {
                                             log::warn!(
                                                 "auto-issuance: {} error(s): {:?}",
@@ -1387,6 +1386,7 @@ pub fn run() {
             commands::instructor::instructor_inbox,
             // Course publishing (iroh)
             commands::courses::publish_course,
+            commands::courses::set_course_completion_policy,
             // Opinions (Field Commentary)
             commands::opinions::publish_opinion,
             commands::opinions::list_opinions,
@@ -1502,15 +1502,13 @@ pub fn run() {
             // Device pairing (bootstraps cross-device sync).
             commands::pairing::pairing_generate_code,
             commands::pairing::pairing_accept_code,
-            // Completion attestation (VC-first gate).
-            commands::attestation::set_completion_attestation_requirement,
-            commands::attestation::remove_completion_attestation_requirement,
-            commands::attestation::list_completion_attestation_requirements,
-            commands::attestation::submit_completion_attestation,
-            commands::attestation::get_completion_attestation_status,
+            // Exact course-completion endorsement flow.
+            commands::attestation::get_course_completion_endorsement_request,
+            commands::attestation::sign_course_completion_endorsement,
+            commands::attestation::import_course_completion_endorsement,
+            commands::attestation::get_course_completion_endorsement_status,
             // Completion-witness flow (Merkle root + tx submission).
             commands::completion::preview_completion_root,
-            commands::completion::submit_completion_witness,
             commands::completion::get_course_completion_status,
             commands::completion::claim_course_completion,
             commands::completion::get_completion_witness_status,

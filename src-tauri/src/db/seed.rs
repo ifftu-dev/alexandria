@@ -301,7 +301,6 @@ fn backfill_demo_data(conn: &Connection) -> Result<(), rusqlite::Error> {
         || needs_backfill("credentials")
         || needs_backfill("pinboard_observations")
         || needs_backfill("completion_observations")
-        || needs_backfill("completion_attestation_requirements")
     {
         log::info!("Backfilling demo data for new tables…");
         execute_backfill_sql(conn)?;
@@ -2129,17 +2128,9 @@ UPDATE opinions SET provenance = 'ai_generated' WHERE provenance IS NULL;
 
 -- ============================================================
 -- P16: VC-FIRST DEMO SEEDS
--- Populates a demo completion observation (waiting on auto-issuance
--- once the observer daemon ticks) and a demo attestation requirement
--- on a high-stakes civics course so the frontend can render the full
--- state machine: observation → attestation requirement → issued VC.
+-- Populates a demo completion observation waiting on auto-issuance once the
+-- observer daemon ticks. No instructor endorsement is fabricated.
 -- ============================================================
-INSERT OR IGNORE INTO completion_attestation_requirements
-    (course_id, required_attestors, dao_id, set_by_proposal)
-VALUES
-    ('course_civics_101',                   2, 'dao_civics', NULL),
-    ('636f757273655f636976696373203131',    2, 'dao_civics', NULL);
-
 -- A pending observation keyed on the civics course (hex-encoded
 -- bytes of "course_civics_101"). The credential_id is NULL, which
 -- means the observer saw a mint but has not yet auto-issued.
@@ -2158,20 +2149,6 @@ INSERT OR IGNORE INTO completion_observations (
     NULL,
     '2026-04-24 12:00:00',
     NULL
-);
-
--- A demo completion attestation on the pending observation. One
--- attestor signed the witness tx; a second is needed before the
--- observer will auto-issue.
-INSERT OR IGNORE INTO completion_attestations (
-    id, witness_tx_hash, attestor_did, attestor_pubkey, signature, note
-) VALUES (
-    'ca_demo_first',
-    'deadbeef00000000000000000000000000000000000000000000000000000000',
-    'did:key:zCivicsDemoAttestorX',
-    'cafef00dcafef00dcafef00dcafef00dcafef00dcafef00dcafef00dcafef00d',
-    'beefcafe0011223344556677889900aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabb',
-    'Witnessed live; integrity score 0.92'
 );
 
 "##;
@@ -2770,27 +2747,6 @@ mod tests {
             pending_completions >= 1,
             "expected >= 1 pending completion observation"
         );
-
-        let requirements: i64 = db
-            .conn()
-            .query_row(
-                "SELECT COUNT(*) FROM completion_attestation_requirements",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert!(
-            requirements >= 1,
-            "expected >= 1 completion attestation requirement"
-        );
-
-        let attestations: i64 = db
-            .conn()
-            .query_row("SELECT COUNT(*) FROM completion_attestations", [], |r| {
-                r.get(0)
-            })
-            .unwrap();
-        assert!(attestations >= 1, "expected >= 1 completion attestation");
     }
 
     #[test]

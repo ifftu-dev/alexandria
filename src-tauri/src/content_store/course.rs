@@ -6,6 +6,7 @@
 //! 3. Store the signed JSON as an iroh blob
 //! 4. Resolve (fetch + verify) course documents by BLAKE3 hash
 
+use alexandria_verify::did::did_from_verifying_key;
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use thiserror::Error;
 
@@ -46,6 +47,13 @@ pub fn sign_course_document(
     key: &SigningKey,
 ) -> Result<SignedCourseDocument, CourseDocError> {
     validate_payload(payload)?;
+    if payload.version == COURSE_DOCUMENT_VERSION
+        && payload.author_did.as_ref() != Some(&did_from_verifying_key(&key.verifying_key()))
+    {
+        return Err(CourseDocError::InvalidPublicKey(
+            "v2 author DID does not match the signing key".into(),
+        ));
+    }
     let payload_json = signing_bytes(payload)?;
 
     let signature = key.sign(&payload_json);
@@ -55,6 +63,7 @@ pub fn sign_course_document(
         version: payload.version,
         course_id: payload.course_id.clone(),
         author_address: payload.author_address.clone(),
+        author_did: payload.author_did.clone(),
         title: payload.title.clone(),
         description: payload.description.clone(),
         thumbnail_hash: payload.thumbnail_hash.clone(),
@@ -91,6 +100,13 @@ pub fn verify_course_document(signed: &SignedCourseDocument) -> Result<(), Cours
 
     let verifying_key = VerifyingKey::from_bytes(&pub_bytes)
         .map_err(|e| CourseDocError::InvalidPublicKey(e.to_string()))?;
+    if signed.version == COURSE_DOCUMENT_VERSION
+        && signed.author_did.as_ref() != Some(&did_from_verifying_key(&verifying_key))
+    {
+        return Err(CourseDocError::InvalidPublicKey(
+            "v2 author DID does not match the document key".into(),
+        ));
+    }
 
     let signature = Signature::from_bytes(&sig_bytes);
     verifying_key
@@ -108,6 +124,11 @@ fn validate_payload(payload: &CourseDocumentPayload) -> Result<(), CourseDocErro
             }
         }
         COURSE_DOCUMENT_VERSION => {
+            if payload.author_did.is_none() {
+                return Err(CourseDocError::InvalidPublicKey(
+                    "version 2 requires an author DID".into(),
+                ));
+            }
             if let Some(policy) = &payload.completion_policy {
                 policy
                     .validate()
@@ -211,6 +232,7 @@ mod tests {
             course_id: "test_course_001".to_string(),
             author_address: "stake_test1uqfu74w3wh4gfzu8m6e7j987h4lq9r3t7ef5gaw497uu85qsqfy"
                 .to_string(),
+            author_did: None,
             title: "Algorithm Design and Analysis".to_string(),
             description: Some("A comprehensive course on algorithms".to_string()),
             thumbnail_hash: None,
@@ -283,6 +305,7 @@ mod tests {
         let attestor_key = make_signing_key();
         let mut payload = make_payload();
         payload.version = COURSE_DOCUMENT_VERSION;
+        payload.author_did = Some(did_from_verifying_key(&author_key.verifying_key()));
         payload.completion_policy = Some(completion_policy(&attestor_key));
 
         let mut signed = sign_course_document(&payload, &author_key).unwrap();

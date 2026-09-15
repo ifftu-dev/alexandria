@@ -9,5 +9,11 @@
   "lock_challenge_stake": "retired challenge escrow",
   "settle_challenge_stake": "retired challenge escrow",
   "plugin_attestation_status": "retired legacy attestation projection",
-  "plugin_ingest_attestation": "retired event-supplied committee-key authority"
+  "plugin_ingest_attestation": "retired event-supplied committee-key authority",
+  "set_completion_attestation_requirement": "retired mutable local course authority",
+  "remove_completion_attestation_requirement": "retired mutable local course authority",
+  "list_completion_attestation_requirements": "retired mutable local course authority",
+  "submit_completion_attestation": "retired tx-hash-only endorsement surface",
+  "get_completion_attestation_status": "retired tx-hash-only endorsement surface",
+  "submit_completion_witness": "retired caller-supplied completion authority; use claim_course_completion"
 }

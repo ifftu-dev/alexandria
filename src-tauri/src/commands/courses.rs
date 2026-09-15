@@ -7,9 +7,11 @@ use crate::domain::course::{Course, CreateCourseRequest, UpdateCourseRequest};
 use crate::AppState;
 
 use crate::content_store::course as content_course;
+use crate::crypto::did::did_from_verifying_key;
 use crate::crypto::wallet;
 use crate::domain::course_document::{
-    CourseDocumentPayload, DocumentChapter, DocumentElement, PublishCourseResult,
+    CourseCompletionPolicy, CourseDocumentPayload, DocumentChapter, DocumentElement,
+    PublishCourseResult,
 };
 use crate::p2p::catalog;
 
@@ -339,6 +341,7 @@ pub async fn publish_course(
     drop(keystore);
 
     let w = wallet::wallet_from_mnemonic(&mnemonic).map_err(|e| e.to_string())?;
+    let author_did = did_from_verifying_key(&w.signing_key.verifying_key());
 
     // Read course data off the async runtime before iroh calls.
     let read_course_id = course_id.clone();
@@ -350,6 +353,24 @@ pub async fn publish_course(
             "courses.publish.read",
             move |db| {
                 let course = get_course_by_id(db.conn(), &read_course_id)?;
+                let draft_policy_json: Option<String> = db
+                    .conn()
+                    .query_row(
+                        "SELECT draft_completion_policy_json FROM courses WHERE id = ?1",
+                        params![read_course_id],
+                        |row| row.get(0),
+                    )
+                    .map_err(|error| error.to_string())?;
+                let completion_policy = draft_policy_json
+                    .as_deref()
+                    .map(serde_json::from_str::<CourseCompletionPolicy>)
+                    .transpose()
+                    .map_err(|error| format!("invalid draft completion policy: {error}"))?;
+                if let Some(policy) = &completion_policy {
+                    policy
+                        .validate()
+                        .map_err(|error| format!("invalid draft completion policy: {error}"))?;
+                }
 
                 // Read chapters with their elements
                 let chapter_rows: Vec<(String, String, Option<String>, i64)> = {
@@ -450,6 +471,7 @@ pub async fn publish_course(
                     version: crate::domain::course_document::COURSE_DOCUMENT_VERSION,
                     course_id: course.id.clone(),
                     author_address: course.author_address.clone(),
+                    author_did: Some(author_did),
                     title: course.title.clone(),
                     description: course.description.clone(),
                     thumbnail_hash: course.thumbnail_cid.clone(),
@@ -459,7 +481,7 @@ pub async fn publish_course(
                     created_at,
                     updated_at,
                     kind: course.kind.clone(),
-                    completion_policy: None,
+                    completion_policy,
                 })
             },
         )
@@ -478,6 +500,13 @@ pub async fn publish_course(
     let update_course_id = course_id.clone();
     let content_hash = result.content_hash.clone();
     let content_size = result.size;
+    let document_version = i64::from(signed.version);
+    let completion_policy_json = signed
+        .completion_policy
+        .as_ref()
+        .map(serde_json_canonicalizer::to_string)
+        .transpose()
+        .map_err(|error| error.to_string())?;
     let (announcement, signed_ann, version) = state
         .db_executor
         .execute(
@@ -487,10 +516,16 @@ pub async fn publish_course(
             move |db| {
                 db.conn()
                     .execute(
-                        "UPDATE courses SET content_cid = ?1, status = 'published', \
+                        "UPDATE courses SET content_cid = ?1, course_document_version = ?2, \
+                 completion_policy_json = ?3, status = 'published', \
                  version = version + 1, published_at = datetime('now'), \
-                 updated_at = datetime('now') WHERE id = ?2",
-                        params![content_hash, update_course_id],
+                 updated_at = datetime('now') WHERE id = ?4",
+                        params![
+                            content_hash,
+                            document_version,
+                            completion_policy_json,
+                            update_course_id,
+                        ],
                     )
                     .map_err(|e| e.to_string())?;
 
@@ -554,6 +589,55 @@ pub async fn publish_course(
     }
 
     Ok(result)
+}
+
+/// Update the local draft policy that will be covered by the next signed
+/// course publication. Passing `None` clears it. Published documents and
+/// existing enrollments remain immutable.
+#[tauri::command]
+pub async fn set_course_completion_policy(
+    state: State<'_, AppState>,
+    course_id: String,
+    policy: Option<CourseCompletionPolicy>,
+) -> Result<(), String> {
+    let canonical = policy
+        .as_ref()
+        .map(|policy| {
+            policy.validate().map_err(|error| error.to_string())?;
+            serde_json_canonicalizer::to_string(policy).map_err(|error| error.to_string())
+        })
+        .transpose()?;
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Instructor,
+            state.profile_lease(),
+            "courses.completion-policy.update",
+            move |db| {
+                set_course_completion_policy_impl(db.conn(), &course_id, canonical.as_deref())
+            },
+        )
+        .await
+}
+
+fn set_course_completion_policy_impl(
+    conn: &rusqlite::Connection,
+    course_id: &str,
+    canonical_policy: Option<&str>,
+) -> Result<(), String> {
+    let rows = conn
+        .execute(
+            "UPDATE courses SET draft_completion_policy_json = ?1, \
+             updated_at = datetime('now') \
+             WHERE id = ?2 AND author_address = \
+               (SELECT stake_address FROM local_identity WHERE id = 1)",
+            params![canonical_policy, course_id],
+        )
+        .map_err(|error| error.to_string())?;
+    if rows != 1 {
+        return Err("course not found or active profile is not its author".into());
+    }
+    Ok(())
 }
 
 /// Parse a SQLite datetime string to a Unix timestamp.
@@ -650,6 +734,48 @@ mod tests {
         let db = test_db();
         let result = get_course_by_id(db.conn(), "nonexistent");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn draft_completion_policy_is_author_scoped_and_clearable() {
+        let db = test_db();
+        setup_identity(&db);
+        insert_course(&db, "owned", "Owned", "draft");
+        db.conn()
+            .execute(
+                "INSERT INTO courses (id, title, author_address) \
+                 VALUES ('foreign', 'Foreign', 'stake_test1uother')",
+                [],
+            )
+            .unwrap();
+
+        set_course_completion_policy_impl(db.conn(), "owned", Some("{}"))
+            .expect("owned draft policy");
+        let stored: Option<String> = db
+            .conn()
+            .query_row(
+                "SELECT draft_completion_policy_json FROM courses WHERE id = 'owned'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(stored.as_deref(), Some("{}"));
+
+        assert!(
+            set_course_completion_policy_impl(db.conn(), "foreign", Some("{}"))
+                .unwrap_err()
+                .contains("not found or active profile is not its author")
+        );
+        set_course_completion_policy_impl(db.conn(), "owned", None).expect("clear policy");
+        let cleared: Option<String> = db
+            .conn()
+            .query_row(
+                "SELECT draft_completion_policy_json FROM courses WHERE id = 'owned'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(cleared.is_none());
     }
 
     #[test]

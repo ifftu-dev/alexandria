@@ -53,7 +53,8 @@ const course: Course = {
 }
 const enrollment: Enrollment = {
   id: 'enrollment-1', course_id: course.id, enrolled_at: '', completed_at: null,
-  status: 'active', updated_at: '',
+  status: 'active', updated_at: '', course_document_cid: null,
+  course_document_version: null, completion_policy_json: null,
 }
 const elements: Element[] = ['quiz', 'text'].map((type, index) => ({
   id: `element-${index}`, chapter_id: 'chapter-1', title: type === 'quiz' ? 'Quiz' : 'Reading',
