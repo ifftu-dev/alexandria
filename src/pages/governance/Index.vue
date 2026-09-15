@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { useLocalApi } from '@/composables/useLocalApi'
-import { StatusBadge } from '@/components/ui'
+import { AppButton, StatusBadge } from '@/components/ui'
 import OnChainBadge from '@/components/governance/OnChainBadge.vue'
 import type { DaoInfo } from '@/types'
 
@@ -54,6 +54,11 @@ onMounted(async () => {
           </p>
         </div>
       </div>
+      <router-link to="/community/import">
+        <AppButton variant="governance">
+          {{ $t('governanceGenesisImport.openImport') }}
+        </AppButton>
+      </router-link>
     </div>
 
     <!-- Skeleton -->

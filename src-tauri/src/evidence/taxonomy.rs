@@ -235,9 +235,8 @@ pub fn publish_taxonomy_ratification(
 ///
 /// Returns the total number of changes applied.
 ///
-/// Side effect: automatically creates a governance DAO for each new
-/// subject field or subject (INSERT OR IGNORE — idempotent). DAOs are
-/// never created manually; they exist as a by-product of the taxonomy.
+/// Governance DAOs are deliberately not created here. A taxonomy scope may
+/// acquire a DAO only through the separately verified founding-roster flow.
 fn apply_changes(conn: &Connection, changes: &TaxonomyChanges) -> Result<i64, String> {
     let mut count = 0i64;
 
@@ -252,17 +251,6 @@ fn apply_changes(conn: &Connection, changes: &TaxonomyChanges) -> Result<i64, St
         )
         .map_err(|e| format!("failed to upsert subject field '{}': {e}", sf.id))?;
         count += 1;
-
-        // Auto-create a DAO scoped to this subject field (idempotent).
-        let dao_id = entity_id(&[&sf.name, "subject_field", &sf.id]);
-        let dao_name = format!("{} DAO", sf.name);
-        conn.execute(
-            "INSERT OR IGNORE INTO governance_daos \
-             (id, name, description, scope_type, scope_id, status, committee_size, election_interval_days) \
-             VALUES (?1, ?2, ?3, 'subject_field', ?4, 'active', 5, 365)",
-            params![dao_id, dao_name, sf.description, sf.id],
-        )
-        .map_err(|e| format!("failed to auto-create DAO for subject field '{}': {e}", sf.id))?;
     }
 
     for subj in &changes.subjects {
@@ -276,17 +264,6 @@ fn apply_changes(conn: &Connection, changes: &TaxonomyChanges) -> Result<i64, St
         )
         .map_err(|e| format!("failed to upsert subject '{}': {e}", subj.id))?;
         count += 1;
-
-        // Auto-create a DAO scoped to this subject (idempotent).
-        let dao_id = entity_id(&[&subj.name, "subject", &subj.id]);
-        let dao_name = format!("{} DAO", subj.name);
-        conn.execute(
-            "INSERT OR IGNORE INTO governance_daos \
-             (id, name, description, scope_type, scope_id, status, committee_size, election_interval_days) \
-             VALUES (?1, ?2, ?3, 'subject', ?4, 'active', 5, 365)",
-            params![dao_id, dao_name, subj.description, subj.id],
-        )
-        .map_err(|e| format!("failed to auto-create DAO for subject '{}': {e}", subj.id))?;
     }
 
     for skill in &changes.skills {
@@ -729,6 +706,19 @@ mod tests {
             })
             .unwrap();
         assert_eq!(version, 1);
+
+        let auto_created_daos: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM governance_daos WHERE scope_id IN ('cs', 'algorithms')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            auto_created_daos, 0,
+            "taxonomy publication must not activate governance authority"
+        );
     }
 
     #[test]

@@ -23,13 +23,29 @@ use crate::p2p::types::SignedGossipMessage;
 
 /// Handle an incoming taxonomy update from the P2P network.
 ///
-/// The message is expected to have passed the validation pipeline, but this
-/// handler still enforces committee authority and previous_cid continuity
-/// before mutating local state.
-///
-/// Applies the taxonomy changes to local skill tables if the version
-/// is newer than what we have.
+/// Legacy updates carry only one transport signature and a caller-declared
+/// ratifier list, so production rejects them until the handler consumes the
+/// verified five-of-seven outcome certificate. The old compatibility path is
+/// available only in an explicitly enabled development build.
 pub fn handle_taxonomy_message(
+    db: &Database,
+    message: &SignedGossipMessage,
+) -> Result<TaxonomyUpdate, String> {
+    #[cfg(not(all(debug_assertions, feature = "legacy-taxonomy-ratification")))]
+    {
+        let _ = (db, message);
+        Err("legacy taxonomy gossip is disabled; a verified committee outcome certificate is required"
+            .into())
+    }
+
+    #[cfg(all(debug_assertions, feature = "legacy-taxonomy-ratification"))]
+    {
+        handle_legacy_taxonomy_message(db, message)
+    }
+}
+
+#[cfg(any(test, all(debug_assertions, feature = "legacy-taxonomy-ratification")))]
+fn handle_legacy_taxonomy_message(
     db: &Database,
     message: &SignedGossipMessage,
 ) -> Result<TaxonomyUpdate, String> {
@@ -82,44 +98,43 @@ pub fn handle_taxonomy_message(
         return Err("taxonomy update previous_cid does not match local head".into());
     }
 
-    // Apply changes to local skill tables
-    apply_taxonomy_changes(db, &update)?;
-
-    // Record the taxonomy version
     let ratified_by_json = serde_json::to_string(&update.ratified_by).unwrap_or_default();
     let ratified_at = chrono::DateTime::from_timestamp(update.ratified_at, 0)
         .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
         .unwrap_or_default();
     let signature_hex = hex::encode(&message.signature);
 
-    db.conn()
-        .execute(
-            "INSERT OR REPLACE INTO taxonomy_versions \
+    crate::db::with_transaction(db.conn(), || {
+        apply_taxonomy_changes(db, &update)?;
+        db.conn()
+            .execute(
+                "INSERT OR REPLACE INTO taxonomy_versions \
              (version, cid, previous_cid, ratified_by, ratified_at, signature) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![
-                update.version,
-                update.cid,
-                update.previous_cid,
-                ratified_by_json,
-                ratified_at,
-                signature_hex,
-            ],
-        )
-        .map_err(|e| format!("failed to record taxonomy version: {e}"))?;
+                params![
+                    update.version,
+                    update.cid,
+                    update.previous_cid,
+                    ratified_by_json,
+                    ratified_at,
+                    signature_hex,
+                ],
+            )
+            .map_err(|e| format!("failed to record taxonomy version: {e}"))?;
 
-    // Record in sync_log
-    db.conn()
-        .execute(
-            "INSERT INTO sync_log (entity_type, entity_id, direction, peer_id, signature) \
+        db.conn()
+            .execute(
+                "INSERT INTO sync_log (entity_type, entity_id, direction, peer_id, signature) \
              VALUES ('taxonomy', ?1, 'received', ?2, ?3)",
-            params![
-                format!("v{}", update.version),
-                message.stake_address,
-                signature_hex,
-            ],
-        )
-        .map_err(|e| format!("failed to record sync_log: {e}"))?;
+                params![
+                    format!("v{}", update.version),
+                    message.stake_address,
+                    signature_hex,
+                ],
+            )
+            .map_err(|e| format!("failed to record sync_log: {e}"))?;
+        Ok(())
+    })?;
 
     log::info!(
         "Taxonomy: applied v{} ({} fields, {} subjects, {} skills)",
@@ -136,6 +151,7 @@ pub fn handle_taxonomy_message(
 ///
 /// Uses INSERT OR REPLACE for upsert semantics — new items are inserted,
 /// existing items are updated.
+#[cfg(any(test, all(debug_assertions, feature = "legacy-taxonomy-ratification")))]
 fn apply_taxonomy_changes(db: &Database, update: &TaxonomyUpdate) -> Result<(), String> {
     // Apply subject fields
     for sf in &update.changes.subject_fields {
@@ -318,7 +334,7 @@ mod tests {
         let update = sample_update();
         let msg = sample_message(&update);
 
-        let result = handle_taxonomy_message(&db, &msg);
+        let result = handle_legacy_taxonomy_message(&db, &msg);
         assert!(result.is_ok());
 
         // Verify subject field was created
@@ -354,6 +370,46 @@ mod tests {
     }
 
     #[test]
+    fn legacy_taxonomy_apply_rolls_back_before_retry() {
+        let db = test_db();
+        seed_committee(&db);
+        let update = sample_update();
+        let message = sample_message(&update);
+        db.conn()
+            .execute_batch(
+                "CREATE TRIGGER fail_taxonomy_sync_log BEFORE INSERT ON sync_log \
+                 WHEN NEW.entity_type = 'taxonomy' \
+                 BEGIN SELECT RAISE(ABORT, 'injected taxonomy sync failure'); END;",
+            )
+            .unwrap();
+
+        let error = handle_legacy_taxonomy_message(&db, &message).unwrap_err();
+
+        assert!(error.contains("injected taxonomy sync failure"));
+        for table in ["skills", "taxonomy_versions"] {
+            let count: i64 = db
+                .conn()
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(count, 0, "partial taxonomy state survived in {table}");
+        }
+
+        db.conn()
+            .execute_batch("DROP TRIGGER fail_taxonomy_sync_log")
+            .unwrap();
+        handle_legacy_taxonomy_message(&db, &message).unwrap();
+        let version: i64 = db
+            .conn()
+            .query_row("SELECT MAX(version) FROM taxonomy_versions", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(version, 1);
+    }
+
+    #[test]
     fn handle_taxonomy_skips_older_version() {
         let db = test_db();
         seed_committee(&db);
@@ -361,10 +417,10 @@ mod tests {
         // Apply v1 first
         let update = sample_update();
         let msg = sample_message(&update);
-        handle_taxonomy_message(&db, &msg).unwrap();
+        handle_legacy_taxonomy_message(&db, &msg).unwrap();
 
         // Try to apply v1 again — should skip
-        let result = handle_taxonomy_message(&db, &msg);
+        let result = handle_legacy_taxonomy_message(&db, &msg);
         assert!(result.is_ok());
 
         // Only one version record
@@ -384,7 +440,7 @@ mod tests {
 
         // Apply v1
         let v1 = sample_update();
-        handle_taxonomy_message(&db, &sample_message(&v1)).unwrap();
+        handle_legacy_taxonomy_message(&db, &sample_message(&v1)).unwrap();
 
         // Apply v2 with a new skill
         let v2 = TaxonomyUpdate {
@@ -407,7 +463,7 @@ mod tests {
                 removed_prerequisites: vec![],
             },
         };
-        handle_taxonomy_message(&db, &sample_message(&v2)).unwrap();
+        handle_legacy_taxonomy_message(&db, &sample_message(&v2)).unwrap();
 
         // Both skills should exist
         let skill_count: i64 = db
@@ -435,7 +491,7 @@ mod tests {
         update.cid = String::new();
         let msg = sample_message(&update);
 
-        assert!(handle_taxonomy_message(&db, &msg).is_err());
+        assert!(handle_legacy_taxonomy_message(&db, &msg).is_err());
     }
 
     #[test]
@@ -443,7 +499,7 @@ mod tests {
         let db = test_db();
         let msg = sample_message(&sample_update());
 
-        assert!(handle_taxonomy_message(&db, &msg).is_err());
+        assert!(handle_legacy_taxonomy_message(&db, &msg).is_err());
     }
 
     #[test]
@@ -462,7 +518,25 @@ mod tests {
         update.previous_cid = Some("wrong_head".into());
         let msg = sample_message(&update);
 
-        assert!(handle_taxonomy_message(&db, &msg).is_err());
+        assert!(handle_legacy_taxonomy_message(&db, &msg).is_err());
+    }
+
+    #[cfg(not(all(debug_assertions, feature = "legacy-taxonomy-ratification")))]
+    #[test]
+    fn production_handler_rejects_legacy_taxonomy_gossip() {
+        let db = test_db();
+        seed_committee(&db);
+
+        let error = handle_taxonomy_message(&db, &sample_message(&sample_update())).unwrap_err();
+
+        assert!(error.contains("verified committee outcome certificate"));
+        let versions: i64 = db
+            .conn()
+            .query_row("SELECT COUNT(*) FROM taxonomy_versions", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(versions, 0);
     }
 
     #[test]

@@ -3,13 +3,30 @@
 //! direct apply for received/ratified version docs (gossip inbound / import).
 //! Thin wrappers over [`crate::domain::content_ratification`].
 
-use tauri::State;
+use crate::profile::scope::ProfileState as State;
 
 use crate::crypto::wallet;
+use crate::db::{executor::DatabaseWorkload, Database};
 use crate::domain::content_ratification::{self as cr, ContentKind, PublishResult, VersionDoc};
 use crate::p2p::signing::sign_gossip_message;
 use crate::p2p::types::{TOPIC_GOAL_TEMPLATES, TOPIC_QUESTION_BANKS};
 use crate::AppState;
+
+async fn content_governance_db<T, F>(
+    state: &State<'_, AppState>,
+    workload: DatabaseWorkload,
+    label: &'static str,
+    operation: F,
+) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce(&Database) -> Result<T, String> + Send + 'static,
+{
+    state
+        .db_executor
+        .execute(workload, state.profile_lease(), label, operation)
+        .await
+}
 
 fn topic_for_category(category: &str) -> Option<&'static str> {
     match category {
@@ -36,19 +53,25 @@ async fn propose(
     description: Option<String>,
     change_json: String,
 ) -> Result<String, String> {
-    let guard = state.db.lock().map_err(|_| "database lock poisoned")?;
-    let db = guard.as_ref().ok_or("database not initialized")?;
-    let conn = db.conn();
-    let who = proposer(conn)?;
-    cr::propose(
-        conn,
-        kind,
-        &dao_id,
-        &title,
-        description.as_deref(),
-        &change_json,
-        &who,
+    content_governance_db(
+        state,
+        DatabaseWorkload::Instructor,
+        "content-governance.propose",
+        move |db| {
+            let conn = db.conn();
+            let who = proposer(conn)?;
+            cr::propose(
+                conn,
+                kind,
+                &dao_id,
+                &title,
+                description.as_deref(),
+                &change_json,
+                &who,
+            )
+        },
     )
+    .await
 }
 
 async fn publish(
@@ -59,11 +82,13 @@ async fn publish(
 ) -> Result<PublishResult, String> {
     // Apply + record the version locally (scoped so the DB lock drops before
     // the async broadcast below).
-    let result = {
-        let guard = state.db.lock().map_err(|_| "database lock poisoned")?;
-        let db = guard.as_ref().ok_or("database not initialized")?;
-        cr::publish(db.conn(), &proposal_id, &ratified_by, &signature)?
-    };
+    let result = content_governance_db(
+        state,
+        DatabaseWorkload::Instructor,
+        "content-governance.publish",
+        move |db| cr::publish(db.conn(), &proposal_id, &ratified_by, &signature),
+    )
+    .await?;
 
     // Broadcast the ratified version doc to peers on its topic (best-effort:
     // a publish is durable locally even if the node is offline). Signed with
@@ -162,7 +187,11 @@ pub async fn apply_content_version(
     state: State<'_, AppState>,
     doc: VersionDoc,
 ) -> Result<usize, String> {
-    let guard = state.db.lock().map_err(|_| "database lock poisoned")?;
-    let db = guard.as_ref().ok_or("database not initialized")?;
-    cr::apply_version_doc(db.conn(), &doc)
+    content_governance_db(
+        &state,
+        DatabaseWorkload::Background,
+        "content-governance.apply-version",
+        move |db| cr::apply_version_doc(db.conn(), &doc),
+    )
+    .await
 }

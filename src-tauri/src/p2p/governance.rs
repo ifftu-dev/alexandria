@@ -10,9 +10,10 @@
 //! Committee updates are critical — they modify the `governance_dao_members`
 //! table which controls the authority check for taxonomy messages.
 
-use rusqlite::params;
+use rusqlite::{params, Transaction, TransactionBehavior};
 
 use crate::crypto::hash::entity_id;
+use crate::db::governance::{record_election_vote, record_proposal_vote, VoteEvidence};
 use crate::db::Database;
 use crate::domain::governance::{GovernanceAnnouncement, GovernanceEventType};
 use crate::p2p::types::SignedGossipMessage;
@@ -34,6 +35,8 @@ pub fn handle_governance_message(
         return Err("governance announcement missing dao_id".into());
     }
 
+    let tx = Transaction::new_unchecked(db.conn(), TransactionBehavior::Immediate)
+        .map_err(|e| e.to_string())?;
     let signature_hex = hex::encode(&message.signature);
 
     match &announcement.event_type {
@@ -45,7 +48,7 @@ pub fn handle_governance_message(
             proposer,
         } => {
             handle_proposal_created(
-                db,
+                &tx,
                 &announcement.dao_id,
                 proposal_id,
                 title,
@@ -62,7 +65,7 @@ pub fn handle_governance_message(
             on_chain_tx,
         } => {
             handle_proposal_resolved(
-                db,
+                &tx,
                 proposal_id,
                 status,
                 *votes_for,
@@ -74,7 +77,7 @@ pub fn handle_governance_message(
             members,
             on_chain_tx: _,
         } => {
-            handle_committee_updated(db, &announcement.dao_id, members, &message.stake_address)?;
+            handle_committee_updated(&tx, &announcement.dao_id, members, &message.stake_address)?;
         }
         GovernanceEventType::ElectionVoteRecorded {
             election_id,
@@ -82,7 +85,7 @@ pub fn handle_governance_message(
             nominee_id,
         } => {
             handle_election_vote_recorded(
-                db,
+                &tx,
                 election_id,
                 voter,
                 nominee_id,
@@ -97,7 +100,7 @@ pub fn handle_governance_message(
             in_favor,
         } => {
             handle_proposal_vote_recorded(
-                db,
+                &tx,
                 proposal_id,
                 voter,
                 *in_favor,
@@ -116,7 +119,7 @@ pub fn handle_governance_message(
             voting_end,
         } => {
             handle_election_opened(
-                db,
+                &tx,
                 &announcement.dao_id,
                 election_id,
                 title,
@@ -133,23 +136,29 @@ pub fn handle_governance_message(
             nominee_id,
             nominee,
         } => {
-            handle_nominee_submitted(db, election_id, nominee_id, nominee, &message.stake_address)?;
+            handle_nominee_submitted(
+                &tx,
+                election_id,
+                nominee_id,
+                nominee,
+                &message.stake_address,
+            )?;
         }
         GovernanceEventType::NomineeAccepted {
             election_id,
             nominee_id,
         } => {
-            handle_nominee_accepted(db, election_id, nominee_id, &message.stake_address)?;
+            handle_nominee_accepted(&tx, election_id, nominee_id, &message.stake_address)?;
         }
         GovernanceEventType::ElectionStarted { election_id } => {
-            handle_election_phase(db, election_id, "voting", &[], &message.stake_address)?;
+            handle_election_phase(&tx, election_id, "voting", &[], &message.stake_address)?;
         }
         GovernanceEventType::ElectionFinalized {
             election_id,
             winner_nominee_ids,
         } => {
             handle_election_phase(
-                db,
+                &tx,
                 election_id,
                 "finalized",
                 winner_nominee_ids,
@@ -178,20 +187,21 @@ pub fn handle_governance_message(
         | GovernanceEventType::ElectionFinalized { election_id, .. } => election_id.clone(),
     };
 
-    db.conn()
-        .execute(
-            "INSERT INTO sync_log (entity_type, entity_id, direction, peer_id, signature) \
+    tx.execute(
+        "INSERT INTO sync_log (entity_type, entity_id, direction, peer_id, signature) \
              VALUES ('governance', ?1, 'received', ?2, ?3)",
-            params![entity_id, message.stake_address, signature_hex],
-        )
-        .map_err(|e| format!("failed to record sync_log: {e}"))?;
+        params![entity_id, message.stake_address, signature_hex],
+    )
+    .map_err(|e| format!("failed to record sync_log: {e}"))?;
 
+    tx.commit()
+        .map_err(|e| format!("failed to commit governance event: {e}"))?;
     Ok(announcement)
 }
 
 /// Handle a new proposal creation announcement.
 fn handle_proposal_created(
-    db: &Database,
+    tx: &Transaction<'_>,
     dao_id: &str,
     proposal_id: &str,
     title: &str,
@@ -200,8 +210,7 @@ fn handle_proposal_created(
     proposer: &str,
 ) -> Result<(), String> {
     // Check if the DAO exists locally (best-effort — the DAO may not be synced yet)
-    let dao_exists: bool = db
-        .conn()
+    let dao_exists: bool = tx
         .query_row(
             "SELECT COUNT(*) > 0 FROM governance_daos WHERE id = ?1",
             params![dao_id],
@@ -218,14 +227,13 @@ fn handle_proposal_created(
         return Ok(());
     }
 
-    db.conn()
-        .execute(
-            "INSERT OR IGNORE INTO governance_proposals \
+    tx.execute(
+        "INSERT OR IGNORE INTO governance_proposals \
              (id, dao_id, title, description, category, proposer, status) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'published')",
-            params![proposal_id, dao_id, title, description, category, proposer],
-        )
-        .map_err(|e| format!("failed to insert proposal: {e}"))?;
+        params![proposal_id, dao_id, title, description, category, proposer],
+    )
+    .map_err(|e| format!("failed to insert proposal: {e}"))?;
 
     log::info!(
         "Governance: new proposal '{}' in DAO '{}' by {}",
@@ -239,7 +247,7 @@ fn handle_proposal_created(
 
 /// Handle a proposal resolution announcement.
 fn handle_proposal_resolved(
-    db: &Database,
+    tx: &Transaction<'_>,
     proposal_id: &str,
     status: &str,
     votes_for: i64,
@@ -251,8 +259,7 @@ fn handle_proposal_resolved(
         return Err(format!("invalid proposal status: '{status}'"));
     }
 
-    let rows = db
-        .conn()
+    let rows = tx
         .execute(
             "UPDATE governance_proposals SET \
              status = ?1, votes_for = ?2, votes_against = ?3, \
@@ -291,7 +298,7 @@ fn handle_proposal_resolved(
 /// Merkle root on-chain at finalize.
 #[allow(clippy::too_many_arguments)]
 fn handle_election_vote_recorded(
-    db: &Database,
+    tx: &Transaction<'_>,
     election_id: &str,
     voter: &str,
     nominee_id: &str,
@@ -307,8 +314,7 @@ fn handle_election_vote_recorded(
     }
 
     // Best-effort: skip if the election or accepted nominee isn't local.
-    let nominee_ok: bool = db
-        .conn()
+    let nominee_ok: bool = tx
         .query_row(
             "SELECT accepted FROM governance_election_nominees \
              WHERE id = ?1 AND election_id = ?2",
@@ -323,32 +329,18 @@ fn handle_election_vote_recorded(
         return Ok(());
     }
 
-    let vote_id = entity_id(&[election_id, voter]);
-    let inserted = db
-        .conn()
-        .execute(
-            "INSERT OR IGNORE INTO governance_election_votes \
-             (id, election_id, voter, nominee_id, signature, public_key) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![
-                vote_id,
-                election_id,
-                voter,
-                nominee_id,
-                signature_hex,
-                public_key_hex
-            ],
-        )
-        .map_err(|e| format!("failed to insert election vote: {e}"))?;
-
-    if inserted > 0 {
-        db.conn()
-            .execute(
-                "UPDATE governance_election_nominees \
-                 SET votes_received = votes_received + 1 WHERE id = ?1",
-                params![nominee_id],
-            )
-            .map_err(|e| format!("failed to increment nominee tally: {e}"))?;
+    let inserted = record_election_vote(
+        tx,
+        election_id,
+        nominee_id,
+        &VoteEvidence {
+            voter,
+            signature: signature_hex,
+            public_key: public_key_hex,
+        },
+    )
+    .map_err(|e| format!("failed to record election vote and tally: {e}"))?;
+    if inserted {
         log::info!("Governance: recorded gossiped election vote for nominee '{nominee_id}'");
     }
 
@@ -360,7 +352,7 @@ fn handle_election_vote_recorded(
 /// referenced proposal is usually present.
 #[allow(clippy::too_many_arguments)]
 fn handle_proposal_vote_recorded(
-    db: &Database,
+    tx: &Transaction<'_>,
     proposal_id: &str,
     voter: &str,
     in_favor: bool,
@@ -375,8 +367,7 @@ fn handle_proposal_vote_recorded(
     }
 
     // Best-effort: only count votes on a proposal that is locally Published.
-    let is_published: bool = db
-        .conn()
+    let is_published: bool = tx
         .query_row(
             "SELECT status = 'published' FROM governance_proposals WHERE id = ?1",
             params![proposal_id],
@@ -390,37 +381,18 @@ fn handle_proposal_vote_recorded(
         return Ok(());
     }
 
-    let vote_id = entity_id(&[proposal_id, voter]);
-    let in_favor_int: i64 = if in_favor { 1 } else { 0 };
-    let inserted = db
-        .conn()
-        .execute(
-            "INSERT OR IGNORE INTO governance_proposal_votes \
-             (id, proposal_id, voter, in_favor, signature, public_key) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![
-                vote_id,
-                proposal_id,
-                voter,
-                in_favor_int,
-                signature_hex,
-                public_key_hex
-            ],
-        )
-        .map_err(|e| format!("failed to insert proposal vote: {e}"))?;
-
-    if inserted > 0 {
-        let col = if in_favor {
-            "votes_for"
-        } else {
-            "votes_against"
-        };
-        db.conn()
-            .execute(
-                &format!("UPDATE governance_proposals SET {col} = {col} + 1 WHERE id = ?1"),
-                params![proposal_id],
-            )
-            .map_err(|e| format!("failed to increment proposal tally: {e}"))?;
+    let inserted = record_proposal_vote(
+        tx,
+        proposal_id,
+        in_favor,
+        &VoteEvidence {
+            voter,
+            signature: signature_hex,
+            public_key: public_key_hex,
+        },
+    )
+    .map_err(|e| format!("failed to record proposal vote and tally: {e}"))?;
+    if inserted {
         log::info!("Governance: recorded gossiped proposal vote ({in_favor}) on '{proposal_id}'");
     }
 
@@ -432,7 +404,7 @@ fn handle_proposal_vote_recorded(
 /// the DAO (mirrors the on-chain "committee opens elections" rule).
 #[allow(clippy::too_many_arguments)]
 fn handle_election_opened(
-    db: &Database,
+    tx: &Transaction<'_>,
     dao_id: &str,
     election_id: &str,
     title: &str,
@@ -443,8 +415,7 @@ fn handle_election_opened(
     voting_end: Option<&str>,
     sender_address: &str,
 ) -> Result<(), String> {
-    let dao_exists: bool = db
-        .conn()
+    let dao_exists: bool = tx
         .query_row(
             "SELECT COUNT(*) > 0 FROM governance_daos WHERE id = ?1",
             params![dao_id],
@@ -455,37 +426,36 @@ fn handle_election_opened(
         log::debug!("Governance: DAO '{dao_id}' not local — skipping election '{election_id}'");
         return Ok(());
     }
-    if !is_committee_authority(db, dao_id, sender_address) {
+    if !is_committee_authority(tx, dao_id, sender_address) {
         return Err(format!(
             "unauthorized election open: '{sender_address}' is not committee of DAO '{dao_id}'"
         ));
     }
 
-    db.conn()
-        .execute(
-            "INSERT OR IGNORE INTO governance_elections \
+    tx.execute(
+        "INSERT OR IGNORE INTO governance_elections \
              (id, dao_id, title, phase, seats, nominee_min_proficiency, \
               voter_min_proficiency, nomination_end, voting_end) \
              VALUES (?1, ?2, ?3, 'nomination', ?4, ?5, ?6, ?7, ?8)",
-            params![
-                election_id,
-                dao_id,
-                title,
-                seats,
-                nominee_min_proficiency,
-                voter_min_proficiency,
-                nomination_end,
-                voting_end
-            ],
-        )
-        .map_err(|e| format!("failed to insert election: {e}"))?;
+        params![
+            election_id,
+            dao_id,
+            title,
+            seats,
+            nominee_min_proficiency,
+            voter_min_proficiency,
+            nomination_end,
+            voting_end
+        ],
+    )
+    .map_err(|e| format!("failed to insert election: {e}"))?;
     log::info!("Governance: replicated election '{election_id}' in DAO '{dao_id}'");
     Ok(())
 }
 
 /// Handle a gossiped self-nomination. Sender must be the nominee.
 fn handle_nominee_submitted(
-    db: &Database,
+    tx: &Transaction<'_>,
     election_id: &str,
     nominee_id: &str,
     nominee: &str,
@@ -496,8 +466,7 @@ fn handle_nominee_submitted(
             "nomination nominee '{nominee}' does not match gossip sender '{sender_address}'"
         ));
     }
-    let election_exists: bool = db
-        .conn()
+    let election_exists: bool = tx
         .query_row(
             "SELECT COUNT(*) > 0 FROM governance_elections WHERE id = ?1",
             params![election_id],
@@ -508,26 +477,24 @@ fn handle_nominee_submitted(
         log::debug!("Governance: election '{election_id}' not local — skipping nominee");
         return Ok(());
     }
-    db.conn()
-        .execute(
-            "INSERT OR IGNORE INTO governance_election_nominees \
+    tx.execute(
+        "INSERT OR IGNORE INTO governance_election_nominees \
              (id, election_id, stake_address, accepted) VALUES (?1, ?2, ?3, 0)",
-            params![nominee_id, election_id, nominee],
-        )
-        .map_err(|e| format!("failed to insert nominee: {e}"))?;
+        params![nominee_id, election_id, nominee],
+    )
+    .map_err(|e| format!("failed to insert nominee: {e}"))?;
     Ok(())
 }
 
 /// Handle a gossiped nomination acceptance. Sender must be the nominee
 /// whose row is being accepted.
 fn handle_nominee_accepted(
-    db: &Database,
+    tx: &Transaction<'_>,
     election_id: &str,
     nominee_id: &str,
     sender_address: &str,
 ) -> Result<(), String> {
-    let nominee_addr: Option<String> = db
-        .conn()
+    let nominee_addr: Option<String> = tx
         .query_row(
             "SELECT stake_address FROM governance_election_nominees \
              WHERE id = ?1 AND election_id = ?2",
@@ -544,12 +511,11 @@ fn handle_nominee_accepted(
             "nominee accept by '{sender_address}' but nominee belongs to '{addr}'"
         ));
     }
-    db.conn()
-        .execute(
-            "UPDATE governance_election_nominees SET accepted = 1 WHERE id = ?1",
-            params![nominee_id],
-        )
-        .map_err(|e| format!("failed to accept nominee: {e}"))?;
+    tx.execute(
+        "UPDATE governance_election_nominees SET accepted = 1 WHERE id = ?1",
+        params![nominee_id],
+    )
+    .map_err(|e| format!("failed to accept nominee: {e}"))?;
     Ok(())
 }
 
@@ -558,14 +524,13 @@ fn handle_nominee_accepted(
 /// nomination, finalized only from voting). For `finalized`, the winning
 /// nominee rows are flagged.
 fn handle_election_phase(
-    db: &Database,
+    tx: &Transaction<'_>,
     election_id: &str,
     new_phase: &str,
     winner_nominee_ids: &[String],
     sender_address: &str,
 ) -> Result<(), String> {
-    let dao_id: Option<String> = db
-        .conn()
+    let dao_id: Option<String> = tx
         .query_row(
             "SELECT dao_id FROM governance_elections WHERE id = ?1",
             params![election_id],
@@ -576,7 +541,7 @@ fn handle_election_phase(
         log::debug!("Governance: election '{election_id}' not local — skipping phase change");
         return Ok(());
     };
-    if !is_committee_authority(db, &dao_id, sender_address) {
+    if !is_committee_authority(tx, &dao_id, sender_address) {
         return Err(format!(
             "unauthorized election phase change by '{sender_address}' for DAO '{dao_id}'"
         ));
@@ -587,22 +552,20 @@ fn handle_election_phase(
     } else {
         "voting"
     };
-    db.conn()
-        .execute(
-            "UPDATE governance_elections SET phase = ?1 WHERE id = ?2 AND phase = ?3",
-            params![new_phase, election_id, from_phase],
-        )
-        .map_err(|e| format!("failed to update election phase: {e}"))?;
+    tx.execute(
+        "UPDATE governance_elections SET phase = ?1 WHERE id = ?2 AND phase = ?3",
+        params![new_phase, election_id, from_phase],
+    )
+    .map_err(|e| format!("failed to update election phase: {e}"))?;
 
     if new_phase == "finalized" {
         for wid in winner_nominee_ids {
-            db.conn()
-                .execute(
-                    "UPDATE governance_election_nominees SET is_winner = 1 \
+            tx.execute(
+                "UPDATE governance_election_nominees SET is_winner = 1 \
                      WHERE id = ?1 AND election_id = ?2",
-                    params![wid, election_id],
-                )
-                .map_err(|e| format!("failed to flag winner: {e}"))?;
+                params![wid, election_id],
+            )
+            .map_err(|e| format!("failed to flag winner: {e}"))?;
         }
     }
     log::info!("Governance: election '{election_id}' → {new_phase}");
@@ -610,15 +573,14 @@ fn handle_election_phase(
 }
 
 /// Check if the given stake address is a committee member or chair for a DAO.
-fn is_committee_authority(db: &Database, dao_id: &str, stake_address: &str) -> bool {
-    db.conn()
-        .query_row(
-            "SELECT COUNT(*) > 0 FROM governance_dao_members \
+fn is_committee_authority(tx: &Transaction<'_>, dao_id: &str, stake_address: &str) -> bool {
+    tx.query_row(
+        "SELECT COUNT(*) > 0 FROM governance_dao_members \
              WHERE dao_id = ?1 AND stake_address = ?2 AND role IN ('committee', 'chair')",
-            params![dao_id, stake_address],
-            |row| row.get::<_, bool>(0),
-        )
-        .unwrap_or(false)
+        params![dao_id, stake_address],
+        |row| row.get::<_, bool>(0),
+    )
+    .unwrap_or(false)
 }
 
 /// Handle a committee membership update.
@@ -630,14 +592,13 @@ fn is_committee_authority(db: &Database, dao_id: &str, stake_address: &str) -> b
 /// chair of the DAO to authorize a committee change. Unauthenticated
 /// committee updates are rejected to prevent governance takeover.
 fn handle_committee_updated(
-    db: &Database,
+    tx: &Transaction<'_>,
     dao_id: &str,
     members: &[String],
     sender_address: &str,
 ) -> Result<(), String> {
     // Check if the DAO exists
-    let dao_exists: bool = db
-        .conn()
+    let dao_exists: bool = tx
         .query_row(
             "SELECT COUNT(*) > 0 FROM governance_daos WHERE id = ?1",
             params![dao_id],
@@ -654,18 +615,12 @@ fn handle_committee_updated(
     }
 
     // Verify sender is authorized (current committee member or chair)
-    if !is_committee_authority(db, dao_id, sender_address) {
+    if !is_committee_authority(tx, dao_id, sender_address) {
         return Err(format!(
             "unauthorized committee update: '{}' is not a committee member or chair of DAO '{}'",
             sender_address, dao_id,
         ));
     }
-
-    // Wrap in a transaction so the committee is never left empty on partial failure
-    let tx = db
-        .conn()
-        .unchecked_transaction()
-        .map_err(|e| format!("failed to begin transaction: {e}"))?;
 
     // Remove existing committee members for this DAO
     tx.execute(
@@ -683,9 +638,6 @@ fn handle_committee_updated(
         )
         .map_err(|e| format!("failed to insert committee member: {e}"))?;
     }
-
-    tx.commit()
-        .map_err(|e| format!("failed to commit committee update: {e}"))?;
 
     log::info!(
         "Governance: DAO '{}' committee updated by '{}' — {} members",
@@ -1016,6 +968,163 @@ mod tests {
             )
             .unwrap();
         assert!(has_sig);
+    }
+
+    #[test]
+    fn received_election_vote_rolls_back_if_tally_update_fails() {
+        let db = test_db();
+        insert_test_dao(&db);
+        let (elec, nom) = insert_voting_election(&db);
+        let ann = election_vote_ann(&elec, &nom, "stake_test1proposer");
+        db.conn().execute_batch(
+            "CREATE TRIGGER fail_tally BEFORE UPDATE OF votes_received ON governance_election_nominees \
+             BEGIN SELECT RAISE(ABORT, 'injected failure'); END;",
+        ).unwrap();
+        assert!(handle_governance_message(&db, &make_message(&ann)).is_err());
+        assert_eq!(
+            db.conn()
+                .query_row("SELECT COUNT(*) FROM governance_election_votes", [], |r| {
+                    r.get::<_, i64>(0)
+                })
+                .unwrap(),
+            0
+        );
+        db.conn().execute_batch("DROP TRIGGER fail_tally").unwrap();
+        handle_governance_message(&db, &make_message(&ann)).unwrap();
+        handle_governance_message(&db, &make_message(&ann)).unwrap();
+        assert_eq!(
+            db.conn()
+                .query_row(
+                    "SELECT votes_received FROM governance_election_nominees WHERE id = ?1",
+                    [nom],
+                    |r| r.get::<_, i64>(0)
+                )
+                .unwrap(),
+            1
+        );
+    }
+
+    #[test]
+    fn sync_log_failure_rolls_back_the_received_vote_and_tally() {
+        let db = test_db();
+        insert_test_dao(&db);
+        let (elec, nom) = insert_voting_election(&db);
+        let ann = election_vote_ann(&elec, &nom, "stake_test1proposer");
+        db.conn()
+            .execute_batch(
+                "CREATE TRIGGER fail_log BEFORE INSERT ON sync_log \
+             BEGIN SELECT RAISE(ABORT, 'injected log failure'); END;",
+            )
+            .unwrap();
+        assert!(handle_governance_message(&db, &make_message(&ann)).is_err());
+        assert_eq!(
+            db.conn()
+                .query_row("SELECT COUNT(*) FROM governance_election_votes", [], |r| {
+                    r.get::<_, i64>(0)
+                })
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            db.conn()
+                .query_row(
+                    "SELECT votes_received FROM governance_election_nominees WHERE id = ?1",
+                    [&nom],
+                    |r| r.get::<_, i64>(0)
+                )
+                .unwrap(),
+            0
+        );
+        assert!(db.conn().is_autocommit());
+        db.conn().execute_batch("DROP TRIGGER fail_log").unwrap();
+        handle_governance_message(&db, &make_message(&ann)).unwrap();
+        handle_governance_message(&db, &make_message(&ann)).unwrap();
+        assert_eq!(
+            db.conn()
+                .query_row(
+                    "SELECT votes_received FROM governance_election_nominees WHERE id = ?1",
+                    [nom],
+                    |r| r.get::<_, i64>(0)
+                )
+                .unwrap(),
+            1
+        );
+    }
+
+    #[test]
+    fn sync_log_failure_preserves_the_original_committee() {
+        let db = test_db();
+        insert_test_dao(&db);
+        make_sender_committee(&db);
+        let ann = GovernanceAnnouncement {
+            event_type: GovernanceEventType::CommitteeUpdated {
+                members: vec!["replacement".into()],
+                on_chain_tx: None,
+            },
+            dao_id: "dao1".into(),
+            timestamp: 1_700_000_000,
+        };
+        db.conn()
+            .execute_batch(
+                "CREATE TRIGGER fail_log BEFORE INSERT ON sync_log \
+             BEGIN SELECT RAISE(ABORT, 'injected log failure'); END;",
+            )
+            .unwrap();
+        assert!(handle_governance_message(&db, &make_message(&ann)).is_err());
+        let members: Vec<String> = db
+            .conn()
+            .prepare("SELECT stake_address FROM governance_dao_members WHERE dao_id = 'dao1'")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(members, ["stake_test1proposer"]);
+    }
+
+    #[test]
+    fn received_proposal_vote_rolls_back_if_tally_update_fails() {
+        let db = test_db();
+        insert_test_dao(&db);
+        db.conn()
+            .execute_batch(
+                "INSERT INTO governance_proposals (id, dao_id, title, category, proposer, status) \
+             VALUES ('prop1', 'dao1', 'P', 'policy', 'author', 'published'); \
+             CREATE TRIGGER fail_tally BEFORE UPDATE OF votes_for ON governance_proposals \
+             BEGIN SELECT RAISE(ABORT, 'injected failure'); END;",
+            )
+            .unwrap();
+        let ann = GovernanceAnnouncement {
+            event_type: GovernanceEventType::ProposalVoteRecorded {
+                proposal_id: "prop1".into(),
+                voter: "stake_test1proposer".into(),
+                in_favor: true,
+            },
+            dao_id: "dao1".into(),
+            timestamp: 1_700_000_000,
+        };
+        assert!(handle_governance_message(&db, &make_message(&ann)).is_err());
+        assert_eq!(
+            db.conn()
+                .query_row("SELECT COUNT(*) FROM governance_proposal_votes", [], |r| {
+                    r.get::<_, i64>(0)
+                })
+                .unwrap(),
+            0
+        );
+        db.conn().execute_batch("DROP TRIGGER fail_tally").unwrap();
+        handle_governance_message(&db, &make_message(&ann)).unwrap();
+        handle_governance_message(&db, &make_message(&ann)).unwrap();
+        assert_eq!(
+            db.conn()
+                .query_row(
+                    "SELECT votes_for FROM governance_proposals WHERE id = 'prop1'",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )
+                .unwrap(),
+            1
+        );
     }
 
     #[test]

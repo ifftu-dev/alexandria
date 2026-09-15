@@ -29,6 +29,10 @@ async function navigate(target: DeepLinkTarget): Promise<void> {
     await router.push({ path: '/guardian', query: { accept: target.code } })
     return
   }
+  if (target.kind === 'governance-genesis-locator') {
+    await router.push({ path: '/community/import', query: { locator: target.locator } })
+    return
+  }
   if (!isKnownRoute(target.path)) return
   await router.push(target.path)
 }
