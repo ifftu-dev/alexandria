@@ -25,6 +25,7 @@ use ed25519_dalek::{Signature, VerifyingKey};
 use rusqlite::params;
 
 use crate::crypto::hash::entity_id;
+use crate::db::opinion_eligibility::{check_opinion_credential, OpinionCredentialEligibility};
 use crate::db::Database;
 use crate::domain::opinions::OpinionPayload;
 use crate::p2p::types::SignedGossipMessage;
@@ -82,7 +83,8 @@ pub fn handle_opinion_message(
     }
 
     // Ed25519 signature verification over the canonical payload.
-    verify_payload_signature(&payload, message)?;
+    let verifying_key = verify_payload_signature(&payload, message)?;
+    let author_did = crate::crypto::did::did_from_verifying_key(&verifying_key);
 
     // subject_field must exist locally (can't verify credentials if
     // we don't know the taxonomy yet — drop, don't queue. Taxonomy
@@ -117,44 +119,22 @@ pub fn handle_opinion_message(
     // If (a) fails for ALL ids, queue the opinion — the credentials
     // may arrive later via VC gossip. If (a) passes for some but
     // (b)+(c) fail for all, reject outright.
-    const APPLY_LEVEL_IDX: i64 = 2;
     let mut any_known = false;
     let mut any_qualifying = false;
     for proof_id in &payload.credential_proof_ids {
-        let known: i64 = db
-            .conn()
-            .query_row(
-                "SELECT COUNT(*) FROM credentials WHERE id = ?1",
-                params![proof_id],
-                |row| row.get(0),
-            )
-            .map_err(|e| e.to_string())?;
-        if known == 0 {
-            continue;
-        }
-        any_known = true;
-        let ok: i64 = db
-            .conn()
-            .query_row(
-                "SELECT CASE WHEN EXISTS ( \
-                   SELECT 1 \
-                   FROM credentials c \
-                   JOIN skills s ON s.id = c.skill_id \
-                   JOIN subjects sub ON sub.id = s.subject_id \
-                   WHERE c.id = ?1 \
-                     AND c.claim_kind = 'skill' \
-                     AND c.revoked = 0 \
-                     AND sub.subject_field_id = ?2 \
-                     AND CAST(json_extract(c.signed_vc_json, \
-                         '$.credentialSubject.level') AS INTEGER) >= ?3 \
-                 ) THEN 1 ELSE 0 END",
-                params![proof_id, payload.subject_field_id, APPLY_LEVEL_IDX],
-                |row| row.get(0),
-            )
-            .map_err(|e| e.to_string())?;
-        if ok == 1 {
-            any_qualifying = true;
-            break;
+        match check_opinion_credential(
+            db.conn(),
+            proof_id,
+            author_did.as_str(),
+            &payload.subject_field_id,
+        )? {
+            OpinionCredentialEligibility::Unknown => {}
+            OpinionCredentialEligibility::Unqualified => any_known = true,
+            OpinionCredentialEligibility::Qualified => {
+                any_known = true;
+                any_qualifying = true;
+                break;
+            }
         }
     }
 
@@ -272,60 +252,59 @@ pub fn promote_pending_opinions(db: &Database) -> Result<u32, String> {
         .map_err(|e| e.to_string())?
         .filter_map(|r| r.ok())
         .collect();
+    drop(stmt);
 
-    let mut promoted = 0_u32;
-    for (opinion_id, subject_field_id, proof_ids_json, _pk) in rows {
-        let proof_ids: Vec<String> = serde_json::from_str(&proof_ids_json).unwrap_or_default();
-        let mut qualifies = false;
-        for pid in &proof_ids {
-            let ok: i64 = db
-                .conn()
-                .query_row(
-                    "SELECT CASE WHEN EXISTS ( \
-                       SELECT 1 FROM credentials c \
-                       JOIN skills s ON s.id = c.skill_id \
-                       JOIN subjects sub ON sub.id = s.subject_id \
-                       WHERE c.id = ?1 \
-                         AND c.claim_kind = 'skill' \
-                         AND c.revoked = 0 \
-                         AND sub.subject_field_id = ?2 \
-                         AND CAST(json_extract(c.signed_vc_json, \
-                             '$.credentialSubject.level') AS INTEGER) >= 2 \
-                     ) THEN 1 ELSE 0 END",
-                    params![pid, subject_field_id],
-                    |row| row.get(0),
+    crate::db::with_transaction(db.conn(), || {
+        let mut promoted = 0_u32;
+        for (opinion_id, subject_field_id, proof_ids_json, public_key_hex) in rows {
+            let public_key: [u8; 32] = match hex::decode(public_key_hex)
+                .ok()
+                .and_then(|bytes| bytes.try_into().ok())
+            {
+                Some(public_key) => public_key,
+                None => continue,
+            };
+            let verifying_key = match VerifyingKey::from_bytes(&public_key) {
+                Ok(verifying_key) => verifying_key,
+                Err(_) => continue,
+            };
+            let author_did = crate::crypto::did::did_from_verifying_key(&verifying_key);
+            let proof_ids: Vec<String> = serde_json::from_str(&proof_ids_json).unwrap_or_default();
+            let mut qualifies = false;
+            for pid in &proof_ids {
+                if check_opinion_credential(db.conn(), pid, author_did.as_str(), &subject_field_id)?
+                    == OpinionCredentialEligibility::Qualified
+                {
+                    qualifies = true;
+                    break;
+                }
+            }
+            if !qualifies {
+                continue;
+            }
+            db.conn()
+                .execute(
+                    "INSERT INTO opinions (id, author_address, subject_field_id, title, summary, \
+                     video_cid, thumbnail_cid, duration_seconds, credential_proof_ids, signature, \
+                     public_key, published_at) \
+                     SELECT id, author_address, subject_field_id, title, summary, \
+                            video_cid, thumbnail_cid, duration_seconds, credential_proof_ids, \
+                            signature, public_key, published_at \
+                     FROM opinions_pending_verification WHERE id = ?1 \
+                     ON CONFLICT(id) DO NOTHING",
+                    params![opinion_id],
+                )
+                .map_err(|e| format!("promote pending opinion: {e}"))?;
+            db.conn()
+                .execute(
+                    "DELETE FROM opinions_pending_verification WHERE id = ?1",
+                    params![opinion_id],
                 )
                 .map_err(|e| e.to_string())?;
-            if ok == 1 {
-                qualifies = true;
-                break;
-            }
+            promoted += 1;
         }
-        if !qualifies {
-            continue;
-        }
-        db.conn()
-            .execute(
-                "INSERT INTO opinions (id, author_address, subject_field_id, title, summary, \
-                 video_cid, thumbnail_cid, duration_seconds, credential_proof_ids, signature, \
-                 public_key, published_at) \
-                 SELECT id, author_address, subject_field_id, title, summary, \
-                        video_cid, thumbnail_cid, duration_seconds, credential_proof_ids, \
-                        signature, public_key, published_at \
-                 FROM opinions_pending_verification WHERE id = ?1 \
-                 ON CONFLICT(id) DO NOTHING",
-                params![opinion_id],
-            )
-            .map_err(|e| format!("promote pending opinion: {e}"))?;
-        db.conn()
-            .execute(
-                "DELETE FROM opinions_pending_verification WHERE id = ?1",
-                params![opinion_id],
-            )
-            .map_err(|e| e.to_string())?;
-        promoted += 1;
-    }
-    Ok(promoted)
+        Ok(promoted)
+    })
 }
 
 /// Verify the signature on a payload matches the envelope signer's key.
@@ -334,7 +313,7 @@ pub fn promote_pending_opinions(db: &Database) -> Result<u32, String> {
 fn verify_payload_signature(
     payload: &OpinionPayload,
     message: &SignedGossipMessage,
-) -> Result<(), String> {
+) -> Result<VerifyingKey, String> {
     let payload_bytes = serde_json::to_vec(payload)
         .map_err(|e| format!("serialize opinion payload for verify: {e}"))?;
 
@@ -355,7 +334,8 @@ fn verify_payload_signature(
 
     verifying_key
         .verify_strict(&payload_bytes, &signature)
-        .map_err(|e| format!("opinion signature verification failed: {e}"))
+        .map_err(|e| format!("opinion signature verification failed: {e}"))?;
+    Ok(verifying_key)
 }
 
 #[cfg(test)]
@@ -372,6 +352,12 @@ mod tests {
 
     fn test_key() -> SigningKey {
         SigningKey::from_bytes(&[7u8; 32])
+    }
+
+    fn test_did() -> String {
+        crate::crypto::did::did_from_verifying_key(&test_key().verifying_key())
+            .as_str()
+            .to_string()
     }
 
     fn seed_taxonomy(db: &Database) {
@@ -402,6 +388,10 @@ mod tests {
     }
 
     fn seed_credential(db: &Database, cred_id: &str, level: u8) {
+        seed_credential_for(db, cred_id, level, &test_did());
+    }
+
+    fn seed_credential_for(db: &Database, cred_id: &str, level: u8, subject_did: &str) {
         // Seeds a skill-claim VC with a SkillClaim.level the opinion
         // gate can read via `json_extract`. The signed_vc_json payload
         // mirrors the actual serialised W3C VC v2 shape that
@@ -410,7 +400,7 @@ mod tests {
         let vc_value = serde_json::json!({
             "@context": ["https://www.w3.org/ns/credentials/v2"],
             "credentialSubject": {
-                "id": "did:key:zTestAuthor",
+                "id": subject_did,
                 "skillId": "skill_graphs",
                 "level": level,
                 "score": 0.9,
@@ -423,13 +413,13 @@ mod tests {
                 "INSERT INTO credentials ( \
                    id, issuer_did, subject_did, credential_type, claim_kind, \
                    skill_id, issuance_date, signed_vc_json, integrity_hash, \
-                   revoked \
+                 revoked \
                  ) VALUES ( \
-                   ?1, 'did:key:zTestIssuer', 'did:key:zTestAuthor', \
+                   ?1, 'did:key:zTestIssuer', ?2, \
                    'SelfAssertion', 'skill', 'skill_graphs', \
-                   '2026-04-24T00:00:00Z', ?2, 'hash', 0 \
+                   '2026-04-24T00:00:00Z', ?3, 'hash', 0 \
                  )",
-                rusqlite::params![cred_id, vc_json],
+                rusqlite::params![cred_id, subject_did, vc_json],
             )
             .unwrap();
     }
@@ -534,6 +524,26 @@ mod tests {
     }
 
     #[test]
+    fn rejects_credential_owned_by_different_signer() {
+        let db = test_db();
+        seed_taxonomy(&db);
+        seed_credential_for(&db, "proof_foreign", 5, "did:key:zForeign");
+        let key = test_key();
+        let payload = build_payload(vec!["proof_foreign".into()], "cid_foreign");
+        let bytes = serde_json::to_vec(&payload).unwrap();
+        let message = sign_message(&key, "/alexandria/opinions/1.0", &bytes);
+
+        let error = handle_opinion_message(&db, &message).unwrap_err();
+
+        assert!(error.contains("none qualify"), "unexpected error: {error}");
+        let stored: i64 = db
+            .conn()
+            .query_row("SELECT COUNT(*) FROM opinions", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(stored, 0);
+    }
+
+    #[test]
     fn rejects_when_signer_mismatch() {
         let db = test_db();
         seed_taxonomy(&db);
@@ -575,6 +585,51 @@ mod tests {
             )
             .unwrap();
         assert_eq!(queued, 0);
+    }
+
+    #[test]
+    fn pending_promotion_rolls_back_when_queue_delete_fails() {
+        let db = test_db();
+        seed_taxonomy(&db);
+        let key = test_key();
+        let payload = build_payload(vec!["proof_late".into()], "cid_atomic");
+        let bytes = serde_json::to_vec(&payload).unwrap();
+        let message = sign_message(&key, "/alexandria/opinions/1.0", &bytes);
+        assert_eq!(
+            handle_opinion_message(&db, &message).unwrap(),
+            OpinionIngest::Pending
+        );
+        seed_qualifying_proof(&db, "proof_late");
+        db.conn()
+            .execute_batch(
+                "CREATE TRIGGER fail_pending_opinion_delete \
+                 BEFORE DELETE ON opinions_pending_verification \
+                 BEGIN SELECT RAISE(ABORT, 'injected delete failure'); END;",
+            )
+            .unwrap();
+
+        let error = promote_pending_opinions(&db).unwrap_err();
+
+        assert!(error.contains("injected delete failure"));
+        let stored: i64 = db
+            .conn()
+            .query_row("SELECT COUNT(*) FROM opinions", [], |row| row.get(0))
+            .unwrap();
+        let pending: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM opinions_pending_verification",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(stored, 0);
+        assert_eq!(pending, 1);
+
+        db.conn()
+            .execute_batch("DROP TRIGGER fail_pending_opinion_delete")
+            .unwrap();
+        assert_eq!(promote_pending_opinions(&db).unwrap(), 1);
     }
 
     #[test]

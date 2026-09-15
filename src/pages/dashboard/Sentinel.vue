@@ -12,6 +12,7 @@ import type {
   SentinelDaoInfo,
   SentinelHoldoutRef,
   ActivePasteClassifier,
+  BehavioralProfile,
 } from '@/types'
 
 const router = useRouter()
@@ -34,7 +35,7 @@ const activeDaoClassifier = ref<ActivePasteClassifier | null>(null)
 const showWizard = ref(false)
 const sessions = ref<IntegritySession[]>([])
 const loading = ref(true)
-const profile = ref<Record<string, unknown> | null>(null)
+const profile = ref<BehavioralProfile | null>(null)
 const sentinelDao = ref<SentinelDaoInfo | null>(null)
 const holdouts = ref<SentinelHoldoutRef[]>([])
 const aiStatus = ref<{
@@ -46,7 +47,7 @@ const aiStatus = ref<{
 const activeTab = ref<'overview' | 'sessions' | 'signals' | 'profile'>('overview')
 
 // ---------------------------------------------------------------------------
-// Signal weights (matches sentinel spec)
+// Relative weights; the scorer normalizes by the enabled signals' total.
 // ---------------------------------------------------------------------------
 const signalWeights = computed(() => [
   { name: t('sentinel.signals.items.typingConsistency.name'), key: 'typing_consistency', weight: 20, description: t('sentinel.signals.items.typingConsistency.description') },
@@ -54,7 +55,6 @@ const signalWeights = computed(() => [
   { name: t('sentinel.signals.items.isHuman.name'), key: 'is_human_likely', weight: 15, description: t('sentinel.signals.items.isHuman.description') },
   { name: t('sentinel.signals.items.tabSwitches.name'), key: 'tab_switches', weight: 15, description: t('sentinel.signals.items.tabSwitches.description') },
   { name: t('sentinel.signals.items.pasteEvents.name'), key: 'paste_events', weight: 10, description: t('sentinel.signals.items.pasteEvents.description') },
-  { name: t('sentinel.signals.items.devtools.name'), key: 'devtools_detected', weight: 10, description: t('sentinel.signals.items.devtools.description') },
   { name: t('sentinel.signals.items.facePresent.name'), key: 'face_present', weight: 15, description: t('sentinel.signals.items.facePresent.description') },
   { name: t('sentinel.signals.items.aiPasteAnomaly.name'), key: 'ai_paste_anomaly', weight: 5, description: t('sentinel.signals.items.aiPasteAnomaly.description') },
 ])
@@ -65,7 +65,6 @@ const signalWeights = computed(() => [
 const anomalyFlagTypes = computed(() => [
   { type: 'tab_switching', severity: 'warning' as const, description: t('sentinel.flags.items.tabSwitching.description'), trigger: t('sentinel.flags.items.tabSwitching.trigger') },
   { type: 'paste_detected', severity: 'warning' as const, description: t('sentinel.flags.items.pasteDetected.description'), trigger: t('sentinel.flags.items.pasteDetected.trigger') },
-  { type: 'devtools_detected', severity: 'critical' as const, description: t('sentinel.flags.items.devtoolsDetected.description'), trigger: t('sentinel.flags.items.devtoolsDetected.trigger') },
   { type: 'bot_suspected', severity: 'critical' as const, description: t('sentinel.flags.items.botSuspected.description'), trigger: t('sentinel.flags.items.botSuspected.trigger') },
   { type: 'no_face', severity: 'info' as const, description: t('sentinel.flags.items.noFace.description'), trigger: t('sentinel.flags.items.noFace.trigger') },
   { type: 'multiple_faces', severity: 'warning' as const, description: t('sentinel.flags.items.multipleFaces.description'), trigger: t('sentinel.flags.items.multipleFaces.trigger') },
@@ -142,7 +141,7 @@ async function loadData() {
   loading.value = true
   try {
     sessions.value = await invoke<IntegritySession[]>('integrity_list_sessions')
-    profile.value = getProfile() as unknown as Record<string, unknown>
+    profile.value = getProfile()
     aiStatus.value = getAIModelStatus()
     // Sentinel DAO + holdout data — both may be absent on fresh
     // installs; failures are logged but don't block the page.
@@ -521,7 +520,7 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
               </svg>
               <p class="mt-1 text-xs font-medium text-muted-foreground">{{ $t('sentinel.engine.typing') }}</p>
               <p class="text-sm font-semibold text-foreground">
-                {{ ((profile as any)?.typingPattern?.speedWpm ?? 0).toFixed(0) }} {{ $t('sentinel.engine.wpm') }}
+                {{ profile?.typingPattern.speedWpm.toFixed(0) ?? '0' }} {{ $t('sentinel.engine.wpm') }}
               </p>
             </div>
             <div class="rounded-lg shadow-sm p-3 text-center">
@@ -530,7 +529,7 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
               </svg>
               <p class="mt-1 text-xs font-medium text-muted-foreground">{{ $t('sentinel.engine.mouse') }}</p>
               <p class="text-sm font-semibold text-foreground">
-                {{ ((profile as any)?.mousePattern?.avgVelocity ?? 0).toFixed(1) }} px/ms
+                {{ profile?.mousePattern.avgVelocity.toFixed(1) ?? '0.0' }} px/ms
               </p>
             </div>
             <div class="rounded-lg shadow-sm p-3 text-center">
@@ -799,25 +798,25 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
                 <div class="flex items-center justify-between">
                   <span class="text-xs text-muted-foreground">{{ $t('sentinel.profile.avgDwell') }}</span>
                   <span class="font-mono text-xs font-medium text-foreground">
-                    {{ ((profile as any)?.typingPattern?.avgDwellTime ?? 0).toFixed(0) }}ms
+                    {{ profile?.typingPattern.avgDwellTime.toFixed(0) ?? '0' }}ms
                   </span>
                 </div>
                 <div class="flex items-center justify-between">
                   <span class="text-xs text-muted-foreground">{{ $t('sentinel.profile.avgFlight') }}</span>
                   <span class="font-mono text-xs font-medium text-foreground">
-                    {{ ((profile as any)?.typingPattern?.avgFlightTime ?? (profile as any)?.typingPattern?.avgFlightMs ?? 0).toFixed(0) }}ms
+                    {{ profile?.typingPattern.avgFlightTime.toFixed(0) ?? '0' }}ms
                   </span>
                 </div>
                 <div class="flex items-center justify-between">
                   <span class="text-xs text-muted-foreground">{{ $t('sentinel.profile.speed') }}</span>
                   <span class="font-mono text-xs font-medium text-foreground">
-                    {{ ((profile as any)?.typingPattern?.speedWpm ?? 0).toFixed(0) }} {{ $t('sentinel.engine.wpm') }}
+                    {{ profile?.typingPattern.speedWpm.toFixed(0) ?? '0' }} {{ $t('sentinel.engine.wpm') }}
                   </span>
                 </div>
                 <div class="flex items-center justify-between">
                   <span class="text-xs text-muted-foreground">{{ $t('sentinel.profile.samples') }}</span>
                   <span class="font-mono text-xs font-medium text-foreground">
-                    {{ (profile as any)?.typingPattern?.sampleCount ?? 0 }}
+                    {{ profile?.typingPattern.sampleCount ?? 0 }}
                   </span>
                 </div>
               </div>
@@ -830,25 +829,25 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
                 <div class="flex items-center justify-between">
                   <span class="text-xs text-muted-foreground">{{ $t('sentinel.profile.velocity') }}</span>
                   <span class="font-mono text-xs font-medium text-foreground">
-                    {{ ((profile as any)?.mousePattern?.avgVelocity ?? 0).toFixed(2) }} px/ms
+                    {{ profile?.mousePattern.avgVelocity.toFixed(2) ?? '0.00' }} px/ms
                   </span>
                 </div>
                 <div class="flex items-center justify-between">
                   <span class="text-xs text-muted-foreground">{{ $t('sentinel.profile.acceleration') }}</span>
                   <span class="font-mono text-xs font-medium text-foreground">
-                    {{ ((profile as any)?.mousePattern?.avgAcceleration ?? 0).toFixed(2) }} px/ms²
+                    {{ profile?.mousePattern.avgAcceleration.toFixed(2) ?? '0.00' }} px/ms²
                   </span>
                 </div>
                 <div class="flex items-center justify-between">
                   <span class="text-xs text-muted-foreground">{{ $t('sentinel.profile.clickPrecision') }}</span>
                   <span class="font-mono text-xs font-medium text-foreground">
-                    {{ ((profile as any)?.mousePattern?.clickPrecision ?? 0).toFixed(2) }}
+                    {{ profile?.mousePattern.clickPrecision.toFixed(2) ?? '0.00' }}
                   </span>
                 </div>
                 <div class="flex items-center justify-between">
                   <span class="text-xs text-muted-foreground">{{ $t('sentinel.profile.samples') }}</span>
                   <span class="font-mono text-xs font-medium text-foreground">
-                    {{ (profile as any)?.mousePattern?.sampleCount ?? 0 }}
+                    {{ profile?.mousePattern.sampleCount ?? 0 }}
                   </span>
                 </div>
               </div>

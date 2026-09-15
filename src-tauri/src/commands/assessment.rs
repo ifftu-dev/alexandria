@@ -15,9 +15,9 @@
 //! proctored. Passing raises the skill's confidence via aggregation (assessment
 //! type weight 0.90 >> self-assertion 0.25).
 
-use rusqlite::params;
+use crate::profile::scope::ProfileState as State;
+use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
-use tauri::State;
 
 use crate::assessment::items::{self, GradeEngine};
 use crate::assessment::policy::{
@@ -25,6 +25,7 @@ use crate::assessment::policy::{
 };
 use crate::assessment::randomizer::{draw, QuestionMeta};
 use crate::commands::credentials::load_issuer_key;
+use crate::db::executor::DatabaseWorkload;
 use crate::domain::vc::{Claim, CredentialType, SkillClaim};
 use crate::settings::{registry::keys, SettingsStore};
 use crate::AppState;
@@ -43,10 +44,13 @@ pub struct StartedAttempt {
     pub skill_id: String,
     pub pass_threshold: f64,
     pub questions: Vec<ServedQuestion>,
+    /// Locally saved selections when the same live monitoring session retries
+    /// the start request.
+    pub draft_answers: Vec<SubmittedAnswer>,
 }
 
 /// One submitted answer: the served option POSITIONS the learner selected.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SubmittedAnswer {
     pub question_id: String,
     pub selected: Vec<usize>,
@@ -75,7 +79,7 @@ pub(crate) fn load_attempt_history(
 ) -> Result<Vec<AttemptRecord>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT started_at, graded_at, passed FROM assessment_attempts \
+            "SELECT started_at, graded_at, ended_at, passed FROM assessment_attempts \
               WHERE subject_did = ?1 AND skill_id = ?2 \
               ORDER BY started_at DESC LIMIT 200",
         )
@@ -86,7 +90,8 @@ pub(crate) fn load_attempt_history(
             Ok(AttemptRecord {
                 started_at: r.get(0)?,
                 graded_at: r.get(1)?,
-                passed: r.get::<_, Option<i64>>(2)?.map(|p| p != 0),
+                ended_at: r.get(2)?,
+                passed: r.get::<_, Option<i64>>(3)?.map(|p| p != 0),
             })
         })
         .map_err(|e| e.to_string())?
@@ -132,6 +137,50 @@ pub(crate) fn resolve_bank_policy(
     })
 }
 
+/// Validate the monitoring lease supplied by the assessment UI. An ended or
+/// invented session cannot be attached to a credential-bearing attempt.
+pub(crate) fn require_live_integrity_session<'a>(
+    conn: &rusqlite::Connection,
+    integrity_session_id: Option<&'a str>,
+) -> Result<&'a str, String> {
+    let session_id = integrity_session_id.ok_or("assessment monitoring session is required")?;
+    let live: bool = conn
+        .query_row(
+            "SELECT ended_at IS NULL FROM integrity_sessions WHERE id = ?1",
+            [session_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?
+        .unwrap_or(false);
+    if !live {
+        return Err("assessment monitoring session is missing or already ended".into());
+    }
+    Ok(session_id)
+}
+
+/// Consume open attempts whose monitoring continuity has been lost. Seeing a
+/// question under one session and later presenting an answer under another
+/// must not be represented as one continuously monitored attempt.
+pub(crate) fn end_interrupted_attempts(
+    conn: &rusqlite::Connection,
+    subject_did: &str,
+    skill_id: &str,
+    current_integrity_session_id: &str,
+    now: &str,
+) -> Result<u32, String> {
+    conn.execute(
+        "UPDATE assessment_attempts \
+            SET ended_at = ?1, end_reason = 'interrupted' \
+          WHERE subject_did = ?2 AND skill_id = ?3 \
+            AND graded_at IS NULL AND ended_at IS NULL \
+            AND integrity_session_id IS NOT ?4",
+        params![now, subject_did, skill_id, current_integrity_session_id],
+    )
+    .map(|changed| changed as u32)
+    .map_err(|e| e.to_string())
+}
+
 /// Build a goal assessment plan: order the goal's skills by prerequisite,
 /// then annotate each with whether it can be assessed right now.
 ///
@@ -145,11 +194,19 @@ pub async fn assessment_plan_goal(
     goal_skill_ids: Vec<String>,
 ) -> Result<crate::assessment::goal_plan::GoalAssessmentPlan, String> {
     let now = crate::commands::credentials::now_rfc3339();
-    let guard = state.db.lock().map_err(|_| "database lock poisoned")?;
-    let db = guard.as_ref().ok_or("database not initialized")?;
-    let conn = db.conn();
-    let subject_did = SettingsStore::get(conn, keys::IDENTITY_LOCAL_DID);
-    plan_goal_impl(conn, &subject_did, &goal_skill_ids, &now)
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "assessment.plan_goal",
+            move |db| {
+                let conn = db.conn();
+                let subject_did = SettingsStore::get(conn, keys::IDENTITY_LOCAL_DID);
+                plan_goal_impl(conn, &subject_did, &goal_skill_ids, &now)
+            },
+        )
+        .await
 }
 
 /// Planning core, separated from Tauri state so the DB glue — bank
@@ -233,14 +290,36 @@ pub async fn assessment_start_attempt(
     let seed: u64 = rand::random();
     let attempt_id = crate::commands::credentials::now_rfc3339() + "-" + &seed.to_string();
     let now = crate::commands::credentials::now_rfc3339();
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "assessment.start_attempt",
+            move |db| start_attempt_db(db, skill_id, integrity_session_id, seed, attempt_id, now),
+        )
+        .await
+}
 
-    let guard = state.db.lock().map_err(|_| "database lock poisoned")?;
-    let db = guard.as_ref().ok_or("database not initialized")?;
+fn start_attempt_db(
+    db: &crate::db::Database,
+    skill_id: String,
+    integrity_session_id: Option<String>,
+    seed: u64,
+    attempt_id: String,
+    now: String,
+) -> Result<StartedAttempt, String> {
+    if crate::commands::diagnostics::is_enabled() {
+        return Err("exit diagnostics before starting an assessment".into());
+    }
     let conn = db.conn();
     let subject_did = SettingsStore::get(conn, keys::IDENTITY_LOCAL_DID);
     if subject_did.is_empty() {
         return Err("no local identity".into());
     }
+    let integrity_session_id =
+        require_live_integrity_session(conn, integrity_session_id.as_deref())?.to_string();
+    end_interrupted_attempts(conn, &subject_did, &skill_id, &integrity_session_id, &now)?;
 
     // Pick a ratified bank for the skill.
     let (bank_id, pass_threshold, draw_count, policy) = conn
@@ -348,7 +427,43 @@ pub async fn assessment_start_attempt(
             bloom: q.bloom,
         })
         .collect();
-    let drawn = draw(&metas, draw_count.max(1) as usize, seed);
+    // Resume the one open attempt verbatim. Re-drawing here would let a
+    // learner refresh until they receive a favourable question set.
+    let resumed: Option<(String, String, String, Option<String>)> = conn
+        .query_row(
+            "SELECT id, question_ids, option_orders, draft_answers_json \
+               FROM assessment_attempts \
+              WHERE subject_did = ?1 AND skill_id = ?2 \
+                AND graded_at IS NULL AND ended_at IS NULL \
+              ORDER BY started_at DESC LIMIT 1",
+            params![subject_did, skill_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+
+    let (attempt_id, drawn, draft_answers, is_resumed) =
+        if let Some((existing_id, question_ids_json, option_orders_json, draft_json)) = resumed {
+            (
+                existing_id,
+                crate::assessment::randomizer::Draw {
+                    question_ids: parse_json_vec(&question_ids_json),
+                    option_orders: parse_json_vec(&option_orders_json),
+                },
+                draft_json
+                    .as_deref()
+                    .map(parse_json_vec)
+                    .unwrap_or_default(),
+                true,
+            )
+        } else {
+            (
+                attempt_id,
+                draw(&metas, draw_count.max(1) as usize, seed),
+                Vec::new(),
+                false,
+            )
+        };
 
     // Build served questions with options reordered per the shuffle.
     let by_id: std::collections::HashMap<&str, &Q> =
@@ -367,35 +482,142 @@ pub async fn assessment_start_attempt(
         });
     }
 
-    conn.execute(
-        "INSERT INTO assessment_attempts \
-         (id, subject_did, bank_id, skill_id, seed, question_ids, option_orders, \
-          integrity_session_id, started_at, attempt_ordinal) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-        params![
-            attempt_id,
-            subject_did,
-            bank_id,
-            skill_id,
-            seed as i64,
-            serde_json::to_string(&drawn.question_ids).unwrap(),
-            serde_json::to_string(&drawn.option_orders).unwrap(),
-            integrity_session_id,
-            now,
-            attempt_ordinal as i64,
-        ],
-    )
-    .map_err(|e| e.to_string())?;
+    if !is_resumed {
+        conn.execute(
+            "INSERT INTO assessment_attempts \
+             (id, subject_did, bank_id, skill_id, seed, question_ids, option_orders, \
+              integrity_session_id, started_at, attempt_ordinal) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            params![
+                attempt_id,
+                subject_did,
+                bank_id,
+                skill_id,
+                seed as i64,
+                serde_json::to_string(&drawn.question_ids).unwrap_or_default(),
+                serde_json::to_string(&drawn.option_orders).unwrap_or_default(),
+                integrity_session_id,
+                now,
+                attempt_ordinal as i64,
+            ],
+        )
+        .map_err(|e| e.to_string())?;
+    }
 
     Ok(StartedAttempt {
         attempt_id,
         skill_id,
         pass_threshold,
         questions: served,
+        draft_answers,
     })
 }
 
+/// Save fixed-form selections without grading. This is used before entering
+/// diagnostics and for idempotent retries within the same monitoring session.
+#[tauri::command]
+pub async fn assessment_save_draft(
+    state: State<'_, AppState>,
+    attempt_id: String,
+    answers: Vec<SubmittedAnswer>,
+) -> Result<(), String> {
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "assessment.save_draft",
+            move |db| {
+                let conn = db.conn();
+                let actor_did = SettingsStore::get(conn, keys::IDENTITY_LOCAL_DID);
+                ensure_attempt_owner(conn, &attempt_id, &actor_did)?;
+                save_draft_impl(conn, &attempt_id, &answers)
+            },
+        )
+        .await
+}
+
+pub(crate) fn save_draft_impl(
+    conn: &rusqlite::Connection,
+    attempt_id: &str,
+    answers: &[SubmittedAnswer],
+) -> Result<(), String> {
+    let (question_ids_json, option_orders_json): (String, String) = conn
+        .query_row(
+            "SELECT question_ids, option_orders FROM assessment_attempts \
+              WHERE id = ?1 AND graded_at IS NULL AND ended_at IS NULL",
+            params![attempt_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => "attempt is not open".to_string(),
+            other => other.to_string(),
+        })?;
+    let question_ids: Vec<String> = parse_json_vec(&question_ids_json);
+    let option_orders: Vec<Vec<usize>> = parse_json_vec(&option_orders_json);
+    let allowed: std::collections::HashMap<&str, usize> = question_ids
+        .iter()
+        .zip(option_orders.iter())
+        .map(|(id, order)| (id.as_str(), order.len()))
+        .collect();
+    let mut seen = std::collections::HashSet::new();
+    for answer in answers {
+        let option_count = allowed
+            .get(answer.question_id.as_str())
+            .ok_or_else(|| format!("question '{}' was not served", answer.question_id))?;
+        if !seen.insert(answer.question_id.as_str()) {
+            return Err(format!(
+                "question '{}' was submitted twice",
+                answer.question_id
+            ));
+        }
+        if answer
+            .selected
+            .iter()
+            .any(|position| position >= option_count)
+        {
+            return Err(format!(
+                "question '{}' contains an invalid option position",
+                answer.question_id
+            ));
+        }
+    }
+    let json = serde_json::to_string(answers).map_err(|e| e.to_string())?;
+    let changed = conn
+        .execute(
+            "UPDATE assessment_attempts SET draft_answers_json = ?1 \
+              WHERE id = ?2 AND graded_at IS NULL AND ended_at IS NULL",
+            params![json, attempt_id],
+        )
+        .map_err(|e| e.to_string())?;
+    if changed == 0 {
+        return Err("attempt is not open".into());
+    }
+    Ok(())
+}
+
 // ---- grade attempt ------------------------------------------------------
+
+pub(crate) fn ensure_attempt_owner(
+    conn: &rusqlite::Connection,
+    attempt_id: &str,
+    actor_did: &str,
+) -> Result<(), String> {
+    if actor_did.is_empty() {
+        return Err("no local identity".into());
+    }
+    let owner: String = conn
+        .query_row(
+            "SELECT subject_did FROM assessment_attempts WHERE id = ?1",
+            params![attempt_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if owner != actor_did {
+        return Err("assessment attempt belongs to another learner".into());
+    }
+    Ok(())
+}
 
 /// Grade a submitted attempt host-side. On pass, issue an `AssessmentCredential`
 /// bound to the attempt's integrity session and recompute derived skill state.
@@ -407,27 +629,34 @@ pub async fn assessment_grade(
 ) -> Result<GradeResult, String> {
     let (signing_key, issuer_did) = load_issuer_key(&state).await?;
     let now = crate::commands::credentials::now_rfc3339();
-
-    let guard = state.db.lock().map_err(|_| "database lock poisoned")?;
-    let db = guard.as_ref().ok_or("database not initialized")?;
-
     #[cfg(desktop)]
-    let engine = GradeEngine {
-        runtime: &state.grader_runtime,
-        budgets: Default::default(),
-    };
-    #[cfg(not(desktop))]
-    let engine = GradeEngine::default();
-
-    grade_attempt_impl(
-        db,
-        &engine,
-        &signing_key,
-        &issuer_did,
-        &attempt_id,
-        &answers,
-        &now,
-    )
+    let grader_runtime = state.grader_runtime.clone();
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "assessment.grade",
+            move |db| {
+                #[cfg(desktop)]
+                let engine = GradeEngine {
+                    runtime: &grader_runtime,
+                    budgets: Default::default(),
+                };
+                #[cfg(not(desktop))]
+                let engine = GradeEngine::default();
+                grade_attempt_impl(
+                    db,
+                    &engine,
+                    &signing_key,
+                    &issuer_did,
+                    &attempt_id,
+                    &answers,
+                    &now,
+                )
+            },
+        )
+        .await
 }
 
 /// Grading core, separated from Tauri state so it is directly testable.
@@ -444,7 +673,13 @@ pub fn grade_attempt_impl(
     answers: &[SubmittedAnswer],
     now: &str,
 ) -> Result<GradeResult, String> {
+    if crate::crypto::did::derive_did_key(signing_key).as_str() != issuer_did.as_str() {
+        return Err("assessment signing key does not match the learner".into());
+    }
     let conn = db.conn();
+    let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)
+        .map_err(|e| e.to_string())?;
+    ensure_attempt_owner(conn, attempt_id, issuer_did.as_str())?;
 
     // Load attempt.
     #[allow(clippy::type_complexity)]
@@ -459,7 +694,8 @@ pub fn grade_attempt_impl(
         .query_row(
             "SELECT bank_id, skill_id, question_ids, option_orders, integrity_session_id, \
                     attempt_ordinal \
-               FROM assessment_attempts WHERE id = ?1 AND graded_at IS NULL",
+               FROM assessment_attempts \
+              WHERE id = ?1 AND graded_at IS NULL AND ended_at IS NULL",
             params![attempt_id],
             |r| {
                 Ok((
@@ -598,16 +834,14 @@ pub fn grade_attempt_impl(
             integrity_session_id: integrity_session_id.clone(),
             integrity_policy: None,
         };
-        match crate::commands::credentials::issue_credential_impl(
+        let vc = crate::commands::credentials::issue_credential_impl(
             conn,
             signing_key,
             issuer_did,
             &req,
             now,
-        ) {
-            Ok(vc) => credential_id = vc.id.clone(),
-            Err(e) => log::warn!("assessment: credential issuance failed: {e}"),
-        }
+        )?;
+        credential_id = Some(vc.id.ok_or("issued assessment credential has no ID")?);
     }
 
     conn.execute(
@@ -618,14 +852,119 @@ pub fn grade_attempt_impl(
     .map_err(|e| e.to_string())?;
 
     if passed {
-        let _ = crate::commands::aggregation::recompute_all_impl(conn, now);
+        crate::commands::aggregation::recompute_all_impl(conn, now)?;
     }
 
+    tx.commit().map_err(|e| e.to_string())?;
     Ok(GradeResult {
         score,
         passed,
         credential_id,
     })
+}
+
+#[cfg(test)]
+mod interruption_tests {
+    use super::*;
+    use crate::db::Database;
+
+    fn setup() -> Database {
+        let db = Database::open_in_memory().expect("db");
+        db.run_migrations().expect("migrations");
+        db.conn()
+            .execute_batch(
+                "INSERT INTO question_banks (id, skill_id, label, ratified)
+                 VALUES ('bank', 'skill', 'Skill', 1);
+                 INSERT INTO integrity_sessions (id, status) VALUES ('old', 'active');
+                 INSERT INTO integrity_sessions (id, status) VALUES ('current', 'active');
+                 INSERT INTO assessment_attempts
+                   (id, subject_did, bank_id, skill_id, seed, question_ids, option_orders,
+                    integrity_session_id, started_at)
+                 VALUES ('attempt', 'did:key:zLearner', 'bank', 'skill', 1, '[]', '[]',
+                         'old', '2026-09-14T00:00:00Z');",
+            )
+            .expect("fixture");
+        db
+    }
+
+    #[test]
+    fn a_different_monitoring_session_consumes_the_open_attempt() {
+        let db = setup();
+        assert_eq!(
+            end_interrupted_attempts(
+                db.conn(),
+                "did:key:zLearner",
+                "skill",
+                "current",
+                "2026-09-14T01:00:00Z",
+            )
+            .unwrap(),
+            1
+        );
+        let state: (Option<String>, Option<String>, Option<String>, Option<i64>) = db
+            .conn()
+            .query_row(
+                "SELECT ended_at, end_reason, graded_at, passed
+                   FROM assessment_attempts WHERE id = 'attempt'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(state.0.as_deref(), Some("2026-09-14T01:00:00Z"));
+        assert_eq!(state.1.as_deref(), Some("interrupted"));
+        assert!(state.2.is_none());
+        assert!(state.3.is_none());
+    }
+
+    #[test]
+    fn the_same_monitoring_session_can_retry_without_consuming_again() {
+        let db = setup();
+        assert_eq!(
+            end_interrupted_attempts(
+                db.conn(),
+                "did:key:zLearner",
+                "skill",
+                "old",
+                "2026-09-14T01:00:00Z",
+            )
+            .unwrap(),
+            0
+        );
+        let ended: Option<String> = db
+            .conn()
+            .query_row(
+                "SELECT ended_at FROM assessment_attempts WHERE id = 'attempt'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(ended.is_none());
+    }
+
+    #[test]
+    fn monitoring_session_must_exist_and_remain_open() {
+        let db = setup();
+        assert!(require_live_integrity_session(db.conn(), None)
+            .unwrap_err()
+            .contains("required"));
+        assert!(require_live_integrity_session(db.conn(), Some("missing"))
+            .unwrap_err()
+            .contains("missing"));
+        db.conn()
+            .execute(
+                "UPDATE integrity_sessions SET ended_at = '2026-09-14T00:30:00Z'
+                  WHERE id = 'current'",
+                [],
+            )
+            .unwrap();
+        assert!(require_live_integrity_session(db.conn(), Some("current"))
+            .unwrap_err()
+            .contains("ended"));
+        assert_eq!(
+            require_live_integrity_session(db.conn(), Some("old")).unwrap(),
+            "old"
+        );
+    }
 }
 
 /// Attempt grading, end to end, against a real database and the real
@@ -753,6 +1092,94 @@ mod tests {
             r.credential_id.is_some(),
             "a passing attempt must credential"
         );
+    }
+
+    #[test]
+    fn another_learner_or_mismatched_signing_key_cannot_grade_the_attempt() {
+        let ctx = setup();
+        let other_key = SigningKey::from_bytes(&[88; 32]);
+        for did in [&ctx.did, &derive_did_key(&other_key)] {
+            assert!(grade_attempt_impl(
+                &ctx.db,
+                &ctx.engine(),
+                &other_key,
+                did,
+                "att_1",
+                &[answer("q1", &[0]), answer("q2", &[1])],
+                NOW
+            )
+            .is_err());
+        }
+        let rows: i64 = ctx
+            .db
+            .conn()
+            .query_row("SELECT COUNT(*) FROM attempt_items", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(rows, 0);
+        assert!(grade(&ctx, &[answer("q1", &[0]), answer("q2", &[1])]).passed);
+    }
+
+    #[test]
+    fn failed_grading_rolls_back_items_credential_status_and_derived_state_before_retry() {
+        let ctx = setup();
+        let tables = [
+            "attempt_items",
+            "credentials",
+            "credential_status_lists",
+            "credential_anchors",
+            "derived_skill_states",
+            "derived_skill_state_history",
+            "reputation_assertions",
+        ];
+        let counts = || {
+            tables
+                .iter()
+                .map(|table| {
+                    ctx.db
+                        .conn()
+                        .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                            row.get::<_, i64>(0)
+                        })
+                        .unwrap()
+                })
+                .collect::<Vec<_>>()
+        };
+        let baseline = counts();
+        for trigger in [
+            "BEFORE INSERT ON attempt_items WHEN NEW.ordinal = 1",
+            "BEFORE INSERT ON credentials",
+            "BEFORE UPDATE OF graded_at ON assessment_attempts",
+            "BEFORE INSERT ON derived_skill_states",
+        ] {
+            ctx.db.conn().execute_batch(&format!(
+                "CREATE TEMP TRIGGER fail_grade {trigger} BEGIN SELECT RAISE(ABORT, 'injected grade failure'); END;"
+            )).unwrap();
+            let result = grade_attempt_impl(
+                &ctx.db,
+                &ctx.engine(),
+                &ctx.key,
+                &ctx.did,
+                "att_1",
+                &[answer("q1", &[0]), answer("q2", &[1])],
+                NOW,
+            );
+            assert!(result.unwrap_err().contains("injected grade failure"));
+            assert_eq!(counts(), baseline);
+            let unchanged: bool = ctx.db.conn().query_row(
+                "SELECT graded_at IS NULL AND score IS NULL AND passed IS NULL AND credential_id IS NULL
+                 FROM assessment_attempts WHERE id = 'att_1'", [], |row| row.get(0),
+            ).unwrap();
+            assert!(unchanged);
+            ctx.db
+                .conn()
+                .execute_batch("DROP TRIGGER fail_grade;")
+                .unwrap();
+        }
+        let result = grade(&ctx, &[answer("q1", &[0]), answer("q2", &[1])]);
+        assert!(result.passed);
+        assert!(result.credential_id.is_some());
+        assert_eq!(counts()[0], 2);
+        assert_eq!(counts()[1], baseline[1] + 1);
     }
 
     #[test]
@@ -962,6 +1389,69 @@ mod tests {
             "the seeded attempt has not been graded yet"
         );
         assert!(history[0].passed.is_none());
+    }
+
+    #[test]
+    fn fixed_attempt_draft_is_validated_and_saved() {
+        let ctx = setup();
+        save_draft_impl(
+            ctx.db.conn(),
+            "att_1",
+            &[answer("q1", &[0, 2]), answer("q2", &[])],
+        )
+        .unwrap();
+        let saved: String = ctx
+            .db
+            .conn()
+            .query_row(
+                "SELECT draft_answers_json FROM assessment_attempts WHERE id = 'att_1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let round_trip: Vec<SubmittedAnswer> = serde_json::from_str(&saved).unwrap();
+        assert_eq!(round_trip.len(), 2);
+        assert_eq!(round_trip[0].question_id, "q1");
+        assert_eq!(round_trip[0].selected, vec![0, 2]);
+
+        assert!(
+            save_draft_impl(ctx.db.conn(), "att_1", &[answer("not-served", &[0])])
+                .unwrap_err()
+                .contains("not served")
+        );
+        assert!(
+            save_draft_impl(ctx.db.conn(), "att_1", &[answer("q1", &[3])])
+                .unwrap_err()
+                .contains("invalid option")
+        );
+    }
+
+    #[test]
+    fn diagnostics_ended_attempt_rejects_draft_and_grading() {
+        let ctx = setup();
+        ctx.db
+            .conn()
+            .execute(
+                "UPDATE assessment_attempts SET ended_at = ?1, end_reason = 'diagnostics' \
+                  WHERE id = 'att_1'",
+                [NOW],
+            )
+            .unwrap();
+
+        assert!(save_draft_impl(ctx.db.conn(), "att_1", &[])
+            .unwrap_err()
+            .contains("not open"));
+        assert!(grade_attempt_impl(
+            &ctx.db,
+            &ctx.engine(),
+            &ctx.key,
+            &ctx.did,
+            "att_1",
+            &[],
+            NOW,
+        )
+        .unwrap_err()
+        .contains("not found or already graded"));
     }
 
     #[test]

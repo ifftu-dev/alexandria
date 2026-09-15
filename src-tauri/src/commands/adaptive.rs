@@ -27,16 +27,20 @@
 //! are a later, opt-in change. So adaptive delivery works on day one, just
 //! less sharply than it will once items are calibrated.
 
+use crate::profile::scope::ProfileState as State;
 use rusqlite::{params, OptionalExtension};
 use serde::Serialize;
-use tauri::State;
 
 use crate::assessment::adaptive::{select_next_item, should_stop, PoolItem, StopRule};
 use crate::assessment::irt::{estimate_theta_eap, theta_to_score, AbilityEstimate, ItemParams};
 use crate::assessment::items::{self, GradeEngine, ServedItem};
 use crate::assessment::{shuffle, SplitMix64};
-use crate::commands::assessment::{load_attempt_history, resolve_bank_policy, GradeResult};
+use crate::commands::assessment::{
+    end_interrupted_attempts, ensure_attempt_owner, load_attempt_history,
+    require_live_integrity_session, resolve_bank_policy, GradeResult,
+};
 use crate::commands::credentials::{load_issuer_key, now_rfc3339};
+use crate::db::executor::DatabaseWorkload;
 use crate::domain::vc::{Claim, CredentialType, SkillClaim};
 use crate::settings::{registry::keys, SettingsStore};
 use crate::AppState;
@@ -67,15 +71,37 @@ pub async fn assessment_start_adaptive(
     let seed: u64 = rand::random();
     let attempt_id = now_rfc3339() + "-a-" + &seed.to_string();
     let now = now_rfc3339();
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "assessment.start_adaptive",
+            move |db| start_adaptive_db(db, skill_id, integrity_session_id, seed, attempt_id, now),
+        )
+        .await
+}
 
-    let guard = state.db.lock().map_err(|_| "database lock poisoned")?;
-    let db = guard.as_ref().ok_or("database not initialized")?;
+fn start_adaptive_db(
+    db: &crate::db::Database,
+    skill_id: String,
+    integrity_session_id: Option<String>,
+    seed: u64,
+    attempt_id: String,
+    now: String,
+) -> Result<AdaptiveStep, String> {
+    if crate::commands::diagnostics::is_enabled() {
+        return Err("exit diagnostics before starting an assessment".into());
+    }
     let conn = db.conn();
 
     let subject_did = SettingsStore::get(conn, keys::IDENTITY_LOCAL_DID);
     if subject_did.is_empty() {
         return Err("no local identity".into());
     }
+    let integrity_session_id =
+        require_live_integrity_session(conn, integrity_session_id.as_deref())?.to_string();
+    end_interrupted_attempts(conn, &subject_did, &skill_id, &integrity_session_id, &now)?;
 
     // A ratified adaptive bank for the skill, with its policy.
     let (bank_id, policy) = resolve_bank_policy(conn, &skill_id)?
@@ -100,6 +126,60 @@ pub async fn assessment_start_adaptive(
             crate::assessment::policy::PolicyDecision::Allow { ordinal } => ordinal,
             refused => return Err(refused.refusal().unwrap_or_default()),
         };
+
+    // Interruption accounting above must remain committed even when policy
+    // now refuses a replacement. The transaction begins only for the
+    // idempotent resume read or the new attempt + first-item write.
+    let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)
+        .map_err(|e| e.to_string())?;
+
+    // Return the current state of an existing open attempt rather than
+    // creating a second adaptive draw. Answered turns are already durable in
+    // `attempt_items`; at most one pending item can be waiting for input.
+    let existing: Option<String> = conn
+        .query_row(
+            "SELECT id FROM assessment_attempts \
+              WHERE subject_did = ?1 AND skill_id = ?2 \
+                AND graded_at IS NULL AND ended_at IS NULL \
+              ORDER BY started_at DESC LIMIT 1",
+            params![subject_did, skill_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+    if let Some(existing_id) = existing {
+        let pending: Option<(String, String)> = conn
+            .query_row(
+                "SELECT item_id, option_order FROM attempt_items \
+                  WHERE attempt_id = ?1 AND score IS NULL ORDER BY ordinal LIMIT 1",
+                [&existing_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?;
+        let items_served: u32 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM attempt_items WHERE attempt_id = ?1",
+                [&existing_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(|e| e.to_string())?
+            .max(0) as u32;
+        let item = if let Some((item_id, order_json)) = pending {
+            let item = items::load_item(db, &item_id)?.ok_or("served item no longer exists")?;
+            let order: Vec<usize> = serde_json::from_str(&order_json).unwrap_or_default();
+            Some(items::served_item(&item, Some(&order)))
+        } else {
+            None
+        };
+        tx.commit().map_err(|e| e.to_string())?;
+        return Ok(AdaptiveStep {
+            attempt_id: existing_id,
+            finished: item.is_none(),
+            item,
+            items_served,
+        });
+    }
 
     conn.execute(
         "INSERT INTO assessment_attempts \
@@ -129,6 +209,7 @@ pub async fn assessment_start_adaptive(
     )?
     .ok_or("assessment bank is empty")?;
 
+    tx.commit().map_err(|e| e.to_string())?;
     Ok(AdaptiveStep {
         attempt_id,
         item: Some(served),
@@ -152,18 +233,26 @@ pub async fn assessment_submit_adaptive_item(
     selected: Vec<usize>,
 ) -> Result<AdaptiveStep, String> {
     let now = now_rfc3339();
-    let guard = state.db.lock().map_err(|_| "database lock poisoned")?;
-    let db = guard.as_ref().ok_or("database not initialized")?;
-
     #[cfg(desktop)]
-    let engine = GradeEngine {
-        runtime: &state.grader_runtime,
-        budgets: Default::default(),
-    };
-    #[cfg(not(desktop))]
-    let engine = GradeEngine::default();
-
-    submit_adaptive_impl(db, &engine, &attempt_id, &item_id, &selected, &now)
+    let grader_runtime = state.grader_runtime.clone();
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "assessment.submit_adaptive_item",
+            move |db| {
+                #[cfg(desktop)]
+                let engine = GradeEngine {
+                    runtime: &grader_runtime,
+                    budgets: Default::default(),
+                };
+                #[cfg(not(desktop))]
+                let engine = GradeEngine::default();
+                submit_adaptive_impl(db, &engine, &attempt_id, &item_id, &selected, &now)
+            },
+        )
+        .await
 }
 
 /// Core of `assessment_submit_adaptive_item`, separated from Tauri state so
@@ -177,18 +266,25 @@ pub fn submit_adaptive_impl(
     now: &str,
 ) -> Result<AdaptiveStep, String> {
     let conn = db.conn();
+    let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)
+        .map_err(|e| e.to_string())?;
+    let actor_did = SettingsStore::get(conn, keys::IDENTITY_LOCAL_DID);
+    ensure_attempt_owner(conn, attempt_id, &actor_did)?;
 
-    let (bank_id, seed, graded_at): (String, i64, Option<String>) = conn
+    let (bank_id, seed, graded_at, ended_at): (String, i64, Option<String>, Option<String>) = conn
         .query_row(
-            "SELECT bank_id, seed, graded_at FROM assessment_attempts WHERE id = ?1",
+            "SELECT bank_id, seed, graded_at, ended_at FROM assessment_attempts WHERE id = ?1",
             params![attempt_id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
         )
         .optional()
         .map_err(|e| e.to_string())?
         .ok_or("attempt not found")?;
     if graded_at.is_some() {
         return Err("attempt already finalized".into());
+    }
+    if ended_at.is_some() {
+        return Err("attempt was ended and cannot be resumed".into());
     }
 
     // The pending row for this item carries the shuffled order it was served
@@ -257,6 +353,7 @@ pub fn submit_adaptive_impl(
     let rule = stop_rule(conn, &bank_id)?;
 
     if should_stop(&estimate, answered, &rule) {
+        tx.commit().map_err(|e| e.to_string())?;
         return Ok(AdaptiveStep {
             attempt_id: attempt_id.to_string(),
             item: None,
@@ -267,20 +364,22 @@ pub fn submit_adaptive_impl(
 
     // Not stopping: serve the next item chosen from the current estimate. If
     // the pool is exhausted the attempt finishes regardless of precision.
-    match serve_next(db, attempt_id, &bank_id, seed as u64, estimate.theta)? {
-        Some(served) => Ok(AdaptiveStep {
+    let step = match serve_next(db, attempt_id, &bank_id, seed as u64, estimate.theta)? {
+        Some(served) => AdaptiveStep {
             attempt_id: attempt_id.to_string(),
             item: Some(served),
             items_served: answered + 1,
             finished: false,
-        }),
-        None => Ok(AdaptiveStep {
+        },
+        None => AdaptiveStep {
             attempt_id: attempt_id.to_string(),
             item: None,
             items_served: answered,
             finished: true,
-        }),
-    }
+        },
+    };
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(step)
 }
 
 // ---- finalize -----------------------------------------------------------
@@ -294,9 +393,15 @@ pub async fn assessment_finalize_adaptive(
 ) -> Result<GradeResult, String> {
     let (signing_key, issuer_did) = load_issuer_key(&state).await?;
     let now = now_rfc3339();
-    let guard = state.db.lock().map_err(|_| "database lock poisoned")?;
-    let db = guard.as_ref().ok_or("database not initialized")?;
-    finalize_adaptive_impl(db, &signing_key, &issuer_did, &attempt_id, &now)
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "assessment.finalize_adaptive",
+            move |db| finalize_adaptive_impl(db, &signing_key, &issuer_did, &attempt_id, &now),
+        )
+        .await
 }
 
 /// Core of `assessment_finalize_adaptive`, separated from Tauri state.
@@ -307,26 +412,45 @@ pub fn finalize_adaptive_impl(
     attempt_id: &str,
     now: &str,
 ) -> Result<GradeResult, String> {
+    if crate::crypto::did::derive_did_key(signing_key).as_str() != issuer_did.as_str() {
+        return Err("assessment signing key does not match the learner".into());
+    }
     let conn = db.conn();
+    let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)
+        .map_err(|e| e.to_string())?;
+    ensure_attempt_owner(conn, attempt_id, issuer_did.as_str())?;
 
-    let (bank_id, skill_id, integrity_session_id, attempt_ordinal, graded_at): (
+    let (bank_id, skill_id, integrity_session_id, attempt_ordinal, graded_at, ended_at): (
         String,
         String,
         Option<String>,
         Option<i64>,
         Option<String>,
+        Option<String>,
     ) = conn
         .query_row(
-            "SELECT bank_id, skill_id, integrity_session_id, attempt_ordinal, graded_at \
+            "SELECT bank_id, skill_id, integrity_session_id, attempt_ordinal, graded_at, ended_at \
                FROM assessment_attempts WHERE id = ?1",
             params![attempt_id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+            |r| {
+                Ok((
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    r.get(3)?,
+                    r.get(4)?,
+                    r.get(5)?,
+                ))
+            },
         )
         .optional()
         .map_err(|e| e.to_string())?
         .ok_or("attempt not found")?;
     if graded_at.is_some() {
         return Err("attempt already finalized".into());
+    }
+    if ended_at.is_some() {
+        return Err("attempt was ended and cannot be resumed".into());
     }
 
     let responses = graded_responses(conn, attempt_id)?;
@@ -335,6 +459,34 @@ pub fn finalize_adaptive_impl(
     }
     let estimate = estimate_theta_eap(&responses);
     let score = theta_to_score(estimate.theta);
+
+    let pending: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM attempt_items WHERE attempt_id = ?1 AND score IS NULL",
+            params![attempt_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if pending > 0 {
+        return Err("adaptive attempt still has an unanswered item".into());
+    }
+    let remaining: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM assessment_items i WHERE bank_id = ?1 AND NOT EXISTS
+         (SELECT 1 FROM attempt_items a WHERE a.attempt_id = ?2 AND a.item_id = i.id)",
+            params![bank_id, attempt_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if remaining > 0
+        && !should_stop(
+            &estimate,
+            responses.len() as u32,
+            &stop_rule(conn, &bank_id)?,
+        )
+    {
+        return Err("adaptive attempt has not reached its stopping rule".into());
+    }
 
     let threshold: f64 = conn
         .query_row(
@@ -389,16 +541,14 @@ pub fn finalize_adaptive_impl(
             integrity_session_id: integrity_session_id.clone(),
             integrity_policy: None,
         };
-        match crate::commands::credentials::issue_credential_impl(
+        let vc = crate::commands::credentials::issue_credential_impl(
             conn,
             signing_key,
             issuer_did,
             &req,
             now,
-        ) {
-            Ok(vc) => credential_id = vc.id.clone(),
-            Err(e) => log::warn!("adaptive: credential issuance failed: {e}"),
-        }
+        )?;
+        credential_id = Some(vc.id.ok_or("issued assessment credential has no ID")?);
     }
 
     conn.execute(
@@ -409,9 +559,10 @@ pub fn finalize_adaptive_impl(
     .map_err(|e| e.to_string())?;
 
     if passed {
-        let _ = crate::commands::aggregation::recompute_all_impl(conn, now);
+        crate::commands::aggregation::recompute_all_impl(conn, now)?;
     }
 
+    tx.commit().map_err(|e| e.to_string())?;
     Ok(GradeResult {
         score,
         passed,
@@ -714,6 +865,162 @@ mod tests {
             result.score
         );
         assert!(result.credential_id.is_none());
+    }
+
+    #[test]
+    fn another_learner_cannot_answer_or_finalize_an_attempt() {
+        let ctx = setup();
+        let mut step = start(&ctx);
+        let other_key = SigningKey::from_bytes(&[88; 32]);
+        let other_did = derive_did_key(&other_key);
+        SettingsStore::set(ctx.db.conn(), keys::IDENTITY_LOCAL_DID, other_did.0.clone()).unwrap();
+        let item = step.item.as_ref().unwrap();
+        assert!(submit_adaptive_impl(
+            &ctx.db,
+            &ctx.engine(),
+            &step.attempt_id,
+            &item.id,
+            &[0],
+            NOW
+        )
+        .unwrap_err()
+        .contains("another learner"));
+        SettingsStore::set(ctx.db.conn(), keys::IDENTITY_LOCAL_DID, ctx.did.0.clone()).unwrap();
+        while !step.finished {
+            step = answer(&ctx, &step, true);
+        }
+        assert!(
+            finalize_adaptive_impl(&ctx.db, &other_key, &other_did, &step.attempt_id, NOW)
+                .unwrap_err()
+                .contains("another learner")
+        );
+        assert!(
+            finalize_adaptive_impl(&ctx.db, &other_key, &ctx.did, &step.attempt_id, NOW)
+                .unwrap_err()
+                .contains("signing key")
+        );
+        assert!(
+            finalize_adaptive_impl(&ctx.db, &ctx.key, &ctx.did, &step.attempt_id, NOW)
+                .unwrap()
+                .passed
+        );
+    }
+
+    #[test]
+    fn next_item_failure_rolls_back_the_answer_and_allows_retry() {
+        let ctx = setup();
+        let step = start(&ctx);
+        ctx.db.conn().execute_batch(
+            "CREATE TEMP TRIGGER fail_next_item BEFORE INSERT ON attempt_items WHEN NEW.ordinal = 1
+             BEGIN SELECT RAISE(ABORT, 'injected next item failure'); END;",
+        ).unwrap();
+        let item = step.item.as_ref().unwrap();
+        assert!(submit_adaptive_impl(
+            &ctx.db,
+            &ctx.engine(),
+            &step.attempt_id,
+            &item.id,
+            &[0],
+            NOW
+        )
+        .unwrap_err()
+        .contains("injected next item failure"));
+        let unchanged: bool = ctx
+            .db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) = 1 AND SUM(score IS NOT NULL OR submission_json IS NOT NULL
+                OR graded_at IS NOT NULL OR theta_after IS NOT NULL) = 0 FROM attempt_items",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(unchanged);
+        ctx.db
+            .conn()
+            .execute_batch("DROP TRIGGER fail_next_item;")
+            .unwrap();
+        assert_eq!(answer(&ctx, &step, true).items_served, 2);
+    }
+
+    #[test]
+    fn unfinished_adaptive_attempt_cannot_issue_a_credential() {
+        let ctx = setup();
+        let step = answer(&ctx, &start(&ctx), true);
+        assert!(!step.finished);
+        assert!(
+            finalize_adaptive_impl(&ctx.db, &ctx.key, &ctx.did, &step.attempt_id, NOW)
+                .unwrap_err()
+                .contains("unanswered")
+        );
+        let count: i64 = ctx
+            .db
+            .conn()
+            .query_row("SELECT COUNT(*) FROM credentials", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn failed_finalization_preserves_answers_and_rolls_back_credential_writes() {
+        let ctx = setup();
+        let mut step = start(&ctx);
+        while !step.finished {
+            step = answer(&ctx, &step, true);
+        }
+        let tables = [
+            "attempt_items",
+            "credentials",
+            "credential_status_lists",
+            "credential_anchors",
+            "derived_skill_states",
+            "derived_skill_state_history",
+            "reputation_assertions",
+        ];
+        let counts = || {
+            tables
+                .iter()
+                .map(|table| {
+                    ctx.db
+                        .conn()
+                        .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                            row.get::<_, i64>(0)
+                        })
+                        .unwrap()
+                })
+                .collect::<Vec<_>>()
+        };
+        let baseline = counts();
+        for trigger in [
+            "BEFORE INSERT ON credentials",
+            "BEFORE UPDATE OF graded_at ON assessment_attempts",
+            "BEFORE INSERT ON derived_skill_states",
+        ] {
+            ctx.db.conn().execute_batch(&format!(
+                "CREATE TEMP TRIGGER fail_finalization {trigger} BEGIN SELECT RAISE(ABORT, 'injected finalization failure'); END;"
+            )).unwrap();
+            assert!(
+                finalize_adaptive_impl(&ctx.db, &ctx.key, &ctx.did, &step.attempt_id, NOW)
+                    .unwrap_err()
+                    .contains("injected finalization failure")
+            );
+            assert_eq!(counts(), baseline);
+            let unchanged: bool = ctx.db.conn().query_row(
+                "SELECT graded_at IS NULL AND score IS NULL AND passed IS NULL AND credential_id IS NULL
+                 FROM assessment_attempts WHERE id = ?1", [&step.attempt_id], |row| row.get(0),
+            ).unwrap();
+            assert!(unchanged);
+            ctx.db
+                .conn()
+                .execute_batch("DROP TRIGGER fail_finalization;")
+                .unwrap();
+        }
+        let result =
+            finalize_adaptive_impl(&ctx.db, &ctx.key, &ctx.did, &step.attempt_id, NOW).unwrap();
+        assert!(result.passed);
+        assert!(result.credential_id.is_some());
+        assert_eq!(counts()[0], baseline[0]);
+        assert_eq!(counts()[1], baseline[1] + 1);
     }
 
     #[test]

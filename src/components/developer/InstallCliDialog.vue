@@ -1,9 +1,9 @@
 <script setup lang="ts">
 /**
- * "Install CLI" dialog (Developer menu).
+ * "Install CLI" diagnostics dialog.
  *
- * Stays hidden until the native Develop menu emits `develop://install-cli`,
- * so it is safe to always mount — same arrangement as SentinelDebugPip.
+ * Mounted only in diagnostics mode and stays hidden until its diagnostics
+ * action emits `develop://install-cli`.
  *
  * Release builds ship the `alexandria` CLI beside the app binary and
  * installing symlinks it onto PATH, which is what lets the auto-updater carry
@@ -12,7 +12,7 @@
  * tree instead — that takes minutes, hence the streamed log below rather than
  * an indeterminate spinner.
  *
- * Dev-only surface: listed in scripts/i18n/check-no-raw-text.mjs FILE_SKIP,
+ * Diagnostics surface: listed in scripts/i18n/check-no-raw-text.mjs FILE_SKIP,
  * matching the precedent set by SentinelDebugPip.
  */
 import { ref, onMounted, onBeforeUnmount, nextTick } from 'vue'

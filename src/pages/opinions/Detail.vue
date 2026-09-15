@@ -2,7 +2,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
-import { invoke } from '@tauri-apps/api/core'
+import { useLocalApi } from "@/composables/useLocalApi"
 import {
   AppButton,
   AppBadge,
@@ -17,6 +17,8 @@ import {
   type SubjectFieldInfo,
   type VerifiableCredential,
 } from '@/types'
+
+const { invoke } = useLocalApi()
 
 const { t } = useI18n()
 const route = useRoute()

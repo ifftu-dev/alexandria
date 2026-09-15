@@ -8,8 +8,8 @@
 //! calibration model reuses the `sentinel_user_models` table under
 //! `model_kind = 'gaze_calib'`.
 
+use crate::profile::scope::ProfileState as State;
 use serde::{Deserialize, Serialize};
-use tauri::State;
 
 use crate::commands::sentinel_ml::{load_user_model, save_user_model};
 use crate::sentinel::face_detect;
@@ -22,14 +22,22 @@ const GAZE_CALIB_KIND: &str = "gaze_calib";
 /// Detect faces in a frame (bbox + 5 landmarks + score). Stateless;
 /// replaces the legacy JS skin-color detector.
 #[tauri::command]
-pub async fn sentinel_detect_face(frame: FaceFrame) -> Result<Vec<FaceDetection>, String> {
+pub async fn sentinel_detect_face(
+    _profile: crate::profile::scope::ProfileLease,
+    frame: FaceFrame,
+) -> Result<Vec<FaceDetection>, String> {
     let t0 = std::time::Instant::now();
-    let dets = face_detect::detect(&frame).map_err(|e| e.to_string())?;
+    let width = frame.width;
+    let height = frame.height;
+    let dets =
+        tokio::task::spawn_blocking(move || face_detect::detect(&frame).map_err(|e| e.to_string()))
+            .await
+            .map_err(|e| format!("face detection worker failed: {e}"))??;
     log::trace!(
         target: "sentinel",
         "detect_face: {}x{} faces={} total={}ms",
-        frame.width,
-        frame.height,
+        width,
+        height,
         dets.len(),
         t0.elapsed().as_millis(),
     );
@@ -42,13 +50,15 @@ pub async fn sentinel_detect_face(frame: FaceFrame) -> Result<Vec<FaceDetection>
 /// (no frontend re-implementation to drift).
 #[tauri::command]
 pub async fn sentinel_extract_gaze_features(
+    _profile: crate::profile::scope::ProfileLease,
     frame: FaceFrame,
 ) -> Result<Option<GazeFeatures>, String> {
-    let dets = face_detect::detect(&frame).map_err(|e| e.to_string())?;
-    let Some(best) = pick_best(&dets) else {
-        return Ok(None);
-    };
-    Ok(gaze::extract_features(&frame, best))
+    tokio::task::spawn_blocking(move || {
+        let dets = face_detect::detect(&frame).map_err(|e| e.to_string())?;
+        Ok::<_, String>(pick_best(&dets).and_then(|best| gaze::extract_features(&frame, best)))
+    })
+    .await
+    .map_err(|e| format!("gaze feature worker failed: {e}"))?
 }
 
 #[derive(Debug, Deserialize)]
@@ -78,43 +88,63 @@ pub async fn sentinel_score_gaze(
     req: ScoreGazeRequest,
 ) -> Result<ScoreGazeResponse, String> {
     let t0 = std::time::Instant::now();
-    let dets = face_detect::detect(&req.frame).map_err(|e| e.to_string())?;
-    let best = pick_best(&dets);
+    let ScoreGazeRequest {
+        frame,
+        user_address,
+        device_fp_prefix,
+    } = req;
+    let (frame, dets) = tokio::task::spawn_blocking(move || {
+        let dets = face_detect::detect(&frame).map_err(|e| e.to_string())?;
+        Ok::<_, String>((frame, dets))
+    })
+    .await
+    .map_err(|e| format!("face detection worker failed: {e}"))??;
 
     // Park this frame in memory in case the snapshot about to be written turns
     // out to be flagged. Nothing is persisted here, and an unflagged snapshot
     // lets the next frame overwrite it — see `sentinel::evidence`.
     state.evidence_staging.remember_frame(
-        req.frame.width,
-        req.frame.height,
-        &req.frame.rgba,
+        frame.width,
+        frame.height,
+        &frame.rgba,
         &chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
     );
 
-    let calib = match load_user_model::<GazeCalibWeights>(
+    let calib = load_user_model::<GazeCalibWeights>(
         &state,
-        &req.user_address,
-        &req.device_fp_prefix,
+        &user_address,
+        &device_fp_prefix,
         GAZE_CALIB_KIND,
-    )? {
-        Some(w) => Some(GazeCalibrator::from_weights(&w).map_err(|e| e.to_string())?),
-        None => None,
-    };
+    )
+    .await?;
 
-    let estimate = gaze::estimate(&req.frame, best, calib.as_ref()).map_err(|e| e.to_string())?;
+    let response = tokio::task::spawn_blocking(move || {
+        let calib = calib
+            .as_ref()
+            .map(GazeCalibrator::from_weights)
+            .transpose()
+            .map_err(|e| e.to_string())?;
+        let face_count = dets.len();
+        let detection = pick_best(&dets).cloned();
+        let estimate = gaze::estimate(&frame, detection.as_ref(), calib.as_ref())
+            .map_err(|e| e.to_string())?;
+        Ok::<_, String>(ScoreGazeResponse {
+            estimate,
+            face_count,
+            detection,
+        })
+    })
+    .await
+    .map_err(|e| format!("gaze scoring worker failed: {e}"))??;
     log::trace!(
         target: "sentinel",
         "score_gaze: faces={} on_screen={} occluded={} total={}ms",
-        dets.len(),
-        estimate.on_screen,
-        estimate.occluded,
+        response.face_count,
+        response.estimate.on_screen,
+        response.estimate.occluded,
         t0.elapsed().as_millis(),
     );
-    Ok(ScoreGazeResponse {
-        estimate,
-        face_count: dets.len(),
-        detection: best.cloned(),
-    })
+    Ok(response)
 }
 
 #[derive(Debug, Deserialize)]
@@ -140,20 +170,26 @@ pub async fn sentinel_train_gaze_calib(
     state: State<'_, AppState>,
     req: TrainGazeCalibRequest,
 ) -> Result<TrainGazeCalibResponse, String> {
-    let mut calib = match load_user_model::<GazeCalibWeights>(
+    let existing = load_user_model::<GazeCalibWeights>(
         &state,
         &req.user_address,
         &req.device_fp_prefix,
         GAZE_CALIB_KIND,
-    )? {
-        Some(w) => GazeCalibrator::from_weights(&w).map_err(|e| e.to_string())?,
-        None => GazeCalibrator::new().map_err(|e| e.to_string())?,
-    };
+    )
+    .await?;
     let epochs = req.epochs.unwrap_or_else(gaze::default_epochs);
-    let loss = calib
-        .train(&req.samples, epochs)
-        .map_err(|e| e.to_string())?;
-    let weights = calib.export_weights().map_err(|e| e.to_string())?;
+    let samples = req.samples;
+    let (loss, weights) = tokio::task::spawn_blocking(move || {
+        let mut calib = match existing {
+            Some(weights) => GazeCalibrator::from_weights(&weights).map_err(|e| e.to_string())?,
+            None => GazeCalibrator::new().map_err(|e| e.to_string())?,
+        };
+        let loss = calib.train(&samples, epochs).map_err(|e| e.to_string())?;
+        let weights = calib.export_weights().map_err(|e| e.to_string())?;
+        Ok::<_, String>((loss, weights))
+    })
+    .await
+    .map_err(|e| format!("gaze training worker failed: {e}"))??;
     save_user_model(
         &state,
         &req.user_address,
@@ -163,7 +199,8 @@ pub async fn sentinel_train_gaze_calib(
         weights.train_loss,
         weights.trained_epochs,
         weights.training_samples,
-    )?;
+    )
+    .await?;
     Ok(TrainGazeCalibResponse {
         train_loss: loss,
         training_samples: weights.training_samples,
@@ -175,7 +212,9 @@ pub async fn sentinel_train_gaze_calib(
 /// loses focus to identify what the learner switched to. `None` if it
 /// can't be resolved (unsupported platform, Wayland, permission).
 #[tauri::command]
-pub async fn sentinel_frontmost_app() -> Option<crate::sentinel::active_app::ActiveApp> {
+pub async fn sentinel_frontmost_app(
+    _profile: crate::profile::scope::ProfileLease,
+) -> Option<crate::sentinel::active_app::ActiveApp> {
     crate::sentinel::active_app::frontmost_app()
 }
 

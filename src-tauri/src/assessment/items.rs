@@ -251,6 +251,7 @@ pub fn map_selection_to_original(selected_positions: &[usize], option_order: &[u
 /// Where a grader's bytes live on disk, plus the CID that must match them.
 struct ResolvedGrader {
     cid: String,
+    #[cfg(desktop)]
     install_path: String,
 }
 
@@ -275,9 +276,12 @@ fn resolve_grader(db: &Database, item: &AssessmentItem) -> Result<ResolvedGrader
         .grader
         .as_ref()
         .ok_or_else(|| format!("plugin {plugin_cid} declares no grader"))?;
+    #[cfg(not(desktop))]
+    let _ = installed;
 
     Ok(ResolvedGrader {
         cid: grader.cid.clone(),
+        #[cfg(desktop)]
         install_path: installed.install_path,
     })
 }

@@ -19,14 +19,16 @@
 
 use std::str::FromStr;
 
-use rusqlite::params;
+use crate::profile::scope::ProfileState as State;
+use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
-use tauri::State;
 
 use crate::commands::sentinel_dao::{SENTINEL_DAO_ID, SENTINEL_PRIOR_CATEGORY};
-use crate::content_store::storage;
 use crate::crypto::hash::{blake2b_256, entity_id};
+#[cfg(all(debug_assertions, feature = "legacy-sentinel-prior-ratification"))]
 use crate::crypto::wallet;
+use crate::db::executor::DatabaseWorkload;
+#[cfg(all(debug_assertions, feature = "legacy-sentinel-prior-ratification"))]
 use crate::domain::sentinel::SentinelPriorAnnouncement;
 use crate::AppState;
 
@@ -34,6 +36,25 @@ use crate::AppState;
 /// so they survive eviction — priors have to stay resident to be usable
 /// during training.
 const PIN_TYPE_SENTINEL_PRIOR: &str = "sentinel_prior";
+
+fn upsert_sentinel_prior_pin(
+    conn: &rusqlite::Connection,
+    cid: &str,
+    size_bytes: u64,
+) -> Result<(), String> {
+    let size_bytes = i64::try_from(size_bytes)
+        .map_err(|_| format!("prior blob size {size_bytes} exceeds SQLite integer range"))?;
+    conn.execute(
+        "INSERT INTO pins (cid, pin_type, size_bytes, last_accessed, auto_unpin, pinned_at) \
+         VALUES (?1, ?2, ?3, datetime('now'), 0, datetime('now')) \
+         ON CONFLICT(cid) DO UPDATE SET \
+           pin_type = excluded.pin_type, size_bytes = excluded.size_bytes, \
+           auto_unpin = 0, last_accessed = datetime('now')",
+        params![cid, PIN_TYPE_SENTINEL_PRIOR, size_bytes],
+    )
+    .map_err(|error| format!("persist Sentinel prior pin: {error}"))?;
+    Ok(())
+}
 
 // ============================================================================
 // Constants
@@ -335,80 +356,72 @@ pub async fn sentinel_propose_prior(
         .bytes;
     let json =
         std::str::from_utf8(&bytes).map_err(|_| "blob is not valid UTF-8 JSON".to_string())?;
-    let blob = validate_prior_blob(json)?;
+    validate_prior_blob(json)?;
 
-    // DB-side checks + insert happen under one lock.
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    let conn = db.conn();
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Instructor,
+            state.profile_lease(),
+            "sentinel.prior.propose",
+            move |db| {
+                let conn = db.conn();
+                if let Some(ref session_id) = req.source_session_id {
+                    let status: Option<String> = conn
+                        .query_row(
+                            "SELECT status FROM integrity_sessions WHERE id = ?1",
+                            params![session_id],
+                            |row| row.get(0),
+                        )
+                        .optional()
+                        .map_err(|error| error.to_string())?;
+                    if matches!(status.as_deref(), Some("flagged" | "suspended")) {
+                        return Err(format!(
+                            "source session {session_id} is {} — cannot propose priors from it",
+                            status.as_deref().unwrap_or("unknown")
+                        ));
+                    }
+                }
 
-    // Forfeiture: a flagged or suspended session cannot source priors.
-    if let Some(ref session_id) = req.source_session_id {
-        let status: Option<String> = conn
-            .query_row(
-                "SELECT status FROM integrity_sessions WHERE id = ?1",
-                params![session_id],
-                |row| row.get(0),
-            )
-            .ok();
-        match status.as_deref() {
-            Some("flagged") | Some("suspended") => {
-                return Err(format!(
-                    "source session {session_id} is {} — cannot propose priors from it",
-                    status.as_deref().unwrap_or("unknown")
-                ));
-            }
-            Some(_) | None => {}
-        }
-    }
+                let proposer: String = conn
+                    .query_row(
+                        "SELECT stake_address FROM local_identity WHERE id = 1",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .map_err(|error| format!("no local identity: {error}"))?;
+                let dao_status: String = conn
+                    .query_row(
+                        "SELECT status FROM governance_daos WHERE id = ?1",
+                        params![SENTINEL_DAO_ID],
+                        |row| row.get(0),
+                    )
+                    .map_err(|_| "Sentinel DAO not seeded (run migration 037)".to_string())?;
+                if dao_status != "active" {
+                    return Err(format!("Sentinel DAO is not active (status: {dao_status})"));
+                }
 
-    // Proposer identity + DAO gate (scope_type='sentinel' skips proficiency).
-    let proposer: String = conn
-        .query_row(
-            "SELECT stake_address FROM local_identity WHERE id = 1",
-            [],
-            |row| row.get(0),
+                let proposal_id = entity_id(&[SENTINEL_DAO_ID, &req.blob_cid, &proposer]);
+                conn.execute(
+                    "INSERT INTO governance_proposals
+                         (id, dao_id, title, description, category, status, proposer,
+                          min_vote_proficiency, content_cid)
+                     VALUES (?1, ?2, ?3, ?4, ?5, 'draft', ?6, 'remember', ?7)",
+                    params![
+                        proposal_id,
+                        SENTINEL_DAO_ID,
+                        req.title,
+                        req.description,
+                        SENTINEL_PRIOR_CATEGORY,
+                        proposer,
+                        req.blob_cid,
+                    ],
+                )
+                .map_err(|error| format!("proposal insert failed: {error}"))?;
+                Ok(ProposePriorResponse { proposal_id })
+            },
         )
-        .map_err(|e| format!("no local identity: {e}"))?;
-
-    let dao_status: String = conn
-        .query_row(
-            "SELECT status FROM governance_daos WHERE id = ?1",
-            params![SENTINEL_DAO_ID],
-            |row| row.get(0),
-        )
-        .map_err(|_| "Sentinel DAO not seeded (run migration 037)".to_string())?;
-    if dao_status != "active" {
-        return Err(format!("Sentinel DAO is not active (status: {dao_status})"));
-    }
-
-    let proposal_id = entity_id(&[SENTINEL_DAO_ID, &req.blob_cid, &proposer]);
-
-    conn.execute(
-        "INSERT INTO governance_proposals
-             (id, dao_id, title, description, category, status, proposer,
-              min_vote_proficiency, content_cid)
-         VALUES (?1, ?2, ?3, ?4, ?5, 'draft', ?6, 'remember', ?7)",
-        params![
-            proposal_id,
-            SENTINEL_DAO_ID,
-            req.title,
-            req.description,
-            SENTINEL_PRIOR_CATEGORY,
-            proposer,
-            req.blob_cid,
-        ],
-    )
-    .map_err(|e| format!("proposal insert failed: {e}"))?;
-
-    // Silence unused-warning on the validated blob — we'll need it again
-    // at ratify time, but blobs are content-addressed so we can re-read.
-    let _ = blob;
-
-    Ok(ProposePriorResponse { proposal_id })
+        .await
 }
 
 /// Finalize an approved Sentinel prior proposal into the `sentinel_priors`
@@ -422,37 +435,168 @@ pub async fn sentinel_ratify_prior(
     state: State<'_, AppState>,
     proposal_id: String,
 ) -> Result<SentinelPrior, String> {
-    // Pull the proposal + blob CID (need the CID before fetching the blob,
-    // and we want to release the DB lock before async work).
-    let (status, category, content_cid, on_chain_tx) = {
-        let db_guard = state
-            .db
-            .lock()
-            .map_err(|_| "database lock poisoned".to_string())?;
-        let db = db_guard.as_ref().ok_or("database not initialized")?;
-        let conn = db.conn();
+    #[cfg(not(all(debug_assertions, feature = "legacy-sentinel-prior-ratification")))]
+    {
+        let _ = (state, proposal_id);
+        Err("legacy Sentinel prior ratification is disabled; use a verified committee outcome certificate"
+            .into())
+    }
 
-        // Short-circuit if already ratified (idempotent).
-        if let Ok(existing) = read_prior_by_proposal(conn, &proposal_id) {
+    #[cfg(all(debug_assertions, feature = "legacy-sentinel-prior-ratification"))]
+    {
+        sentinel_ratify_prior_legacy(state, proposal_id).await
+    }
+}
+
+#[cfg(all(debug_assertions, feature = "legacy-sentinel-prior-ratification"))]
+enum PriorRatificationLookup {
+    Existing(Box<SentinelPrior>),
+    Proposal {
+        status: String,
+        category: String,
+        cid: String,
+    },
+}
+
+#[cfg(any(
+    test,
+    all(debug_assertions, feature = "legacy-sentinel-prior-ratification")
+))]
+struct LegacyPriorRatificationWrite {
+    id: String,
+    proposal_id: String,
+    cid: String,
+    blob: PriorBlob,
+    sample_count: i64,
+    weights_meta: Option<WeightsBlobMeta>,
+    blob_size: u64,
+}
+
+#[cfg(any(
+    test,
+    all(debug_assertions, feature = "legacy-sentinel-prior-ratification")
+))]
+fn persist_legacy_ratification(
+    conn: &rusqlite::Connection,
+    write: LegacyPriorRatificationWrite,
+) -> Result<SentinelPrior, String> {
+    crate::db::with_transaction(conn, || {
+        if let Some(existing) = find_prior_by_proposal(conn, &write.proposal_id)? {
             return Ok(existing);
         }
+        let (status, category, content_cid, on_chain_tx): (
+            String,
+            String,
+            Option<String>,
+            Option<String>,
+        ) = conn
+            .query_row(
+                "SELECT status, category, content_cid, on_chain_tx \
+                 FROM governance_proposals WHERE id = ?1",
+                params![write.proposal_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .map_err(|error| format!("proposal not found: {error}"))?;
+        if status != "approved" || category != SENTINEL_PRIOR_CATEGORY {
+            return Err("proposal authority changed while the prior blob was loading".to_string());
+        }
+        if content_cid.as_deref() != Some(write.cid.as_str()) {
+            return Err("proposal content changed while the prior blob was loading".to_string());
+        }
 
-        conn.query_row(
-            "SELECT status, category, content_cid, on_chain_tx
-             FROM governance_proposals WHERE id = ?1",
-            params![proposal_id],
-            |row| {
-                Ok::<_, rusqlite::Error>((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, Option<String>>(2)?,
-                    row.get::<_, Option<String>>(3)?,
-                ))
+        let signature = on_chain_tx.unwrap_or_else(|| {
+            compute_prior_signature(
+                &write.cid,
+                &write.blob.label,
+                &write.blob.model_kind,
+                write.blob.schema_version,
+            )
+        });
+        let weights_cid = write
+            .weights_meta
+            .as_ref()
+            .map(|meta| meta.weights_cid.clone());
+        let eval_cid = write
+            .weights_meta
+            .as_ref()
+            .map(|meta| meta.eval_cid.clone());
+        let eval_tpr = write.weights_meta.as_ref().map(|meta| meta.eval_tpr);
+        let eval_fpr = write.weights_meta.as_ref().map(|meta| meta.eval_fpr);
+        let version = write.weights_meta.as_ref().map(|meta| meta.version.clone());
+
+        conn.execute(
+            "INSERT OR IGNORE INTO sentinel_priors
+                 (id, proposal_id, cid, model_kind, label, schema_version,
+                  sample_count, notes, signature,
+                  weights_cid, eval_cid, eval_tpr, eval_fpr, version)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+            params![
+                write.id,
+                write.proposal_id,
+                write.cid,
+                write.blob.model_kind,
+                write.blob.label,
+                i64::from(write.blob.schema_version),
+                write.sample_count,
+                write.blob.notes,
+                signature,
+                weights_cid,
+                eval_cid,
+                eval_tpr,
+                eval_fpr,
+                version,
+            ],
+        )
+        .map_err(|error| format!("prior insert failed: {error}"))?;
+        upsert_sentinel_prior_pin(conn, &write.cid, write.blob_size)?;
+        read_prior_by_proposal(conn, &write.proposal_id)
+    })
+}
+
+#[cfg(all(debug_assertions, feature = "legacy-sentinel-prior-ratification"))]
+async fn sentinel_ratify_prior_legacy(
+    state: State<'_, AppState>,
+    proposal_id: String,
+) -> Result<SentinelPrior, String> {
+    let proposal_id_for_read = proposal_id.clone();
+    let lookup = state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Instructor,
+            state.profile_lease(),
+            "sentinel.prior.ratification-source",
+            move |db| {
+                let conn = db.conn();
+                if let Some(existing) = find_prior_by_proposal(conn, &proposal_id_for_read)? {
+                    return Ok(PriorRatificationLookup::Existing(Box::new(existing)));
+                }
+                let (status, category, content_cid): (String, String, Option<String>) = conn
+                    .query_row(
+                        "SELECT status, category, content_cid \
+                         FROM governance_proposals WHERE id = ?1",
+                        params![proposal_id_for_read],
+                        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                    )
+                    .map_err(|error| format!("proposal not found: {error}"))?;
+                let cid = content_cid
+                    .ok_or_else(|| "sentinel_prior proposal is missing content_cid".to_string())?;
+                Ok(PriorRatificationLookup::Proposal {
+                    status,
+                    category,
+                    cid,
+                })
             },
         )
-        .map_err(|e| format!("proposal not found: {e}"))?
-    };
+        .await?;
 
+    let (status, category, cid) = match lookup {
+        PriorRatificationLookup::Existing(existing) => return Ok(*existing),
+        PriorRatificationLookup::Proposal {
+            status,
+            category,
+            cid,
+        } => (status, category, cid),
+    };
     if category != SENTINEL_PRIOR_CATEGORY {
         return Err(format!(
             "proposal {proposal_id} is not a sentinel_prior (category: {category})"
@@ -463,8 +607,6 @@ pub async fn sentinel_ratify_prior(
             "proposal must be approved to ratify (status: {status})"
         ));
     }
-    let cid =
-        content_cid.ok_or_else(|| "sentinel_prior proposal is missing content_cid".to_string())?;
 
     // Re-fetch + re-validate the blob. Content-addressing means the bytes
     // are immutable given the CID, but defense in depth is cheap.
@@ -498,57 +640,25 @@ pub async fn sentinel_ratify_prior(
     };
 
     let id = compute_prior_id(&cid, &blob.label, &blob.model_kind);
-    let signature = on_chain_tx.unwrap_or_else(|| {
-        compute_prior_signature(&cid, &blob.label, &blob.model_kind, blob.schema_version)
-    });
     let blob_size = bytes.len() as u64;
-
-    let row = {
-        let db_guard = state
-            .db
-            .lock()
-            .map_err(|_| "database lock poisoned".to_string())?;
-        let db = db_guard.as_ref().ok_or("database not initialized")?;
-        let conn = db.conn();
-
-        let weights_cid_val = weights_meta.as_ref().map(|m| m.weights_cid.clone());
-        let eval_cid_val = weights_meta.as_ref().map(|m| m.eval_cid.clone());
-        let eval_tpr_val = weights_meta.as_ref().map(|m| m.eval_tpr);
-        let eval_fpr_val = weights_meta.as_ref().map(|m| m.eval_fpr);
-        let version_val = weights_meta.as_ref().map(|m| m.version.clone());
-
-        conn.execute(
-            "INSERT OR IGNORE INTO sentinel_priors
-                 (id, proposal_id, cid, model_kind, label, schema_version,
-                  sample_count, notes, signature,
-                  weights_cid, eval_cid, eval_tpr, eval_fpr, version)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
-            params![
-                id,
-                proposal_id,
-                cid,
-                blob.model_kind,
-                blob.label,
-                blob.schema_version as i64,
-                sample_count,
-                blob.notes,
-                signature,
-                weights_cid_val,
-                eval_cid_val,
-                eval_tpr_val,
-                eval_fpr_val,
-                version_val,
-            ],
-        )
-        .map_err(|e| format!("prior insert failed: {e}"))?;
-
-        // Upgrade the pin from 'cache' (what content_resolve_bytes would
-        // have left) to 'sentinel_prior' with auto_unpin=false so it
-        // survives storage-pressure eviction.
-        storage::upsert_pin(conn, &cid, PIN_TYPE_SENTINEL_PRIOR, blob_size, false);
-
-        read_prior_by_proposal(conn, &proposal_id)?
+    let write = LegacyPriorRatificationWrite {
+        id,
+        proposal_id: proposal_id.clone(),
+        cid: cid.clone(),
+        blob,
+        sample_count,
+        weights_meta,
+        blob_size,
     };
+    let row = state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Instructor,
+            state.profile_lease(),
+            "sentinel.prior.ratify-legacy",
+            move |db| persist_legacy_ratification(db.conn(), write),
+        )
+        .await?;
 
     // Best-effort gossip broadcast. Failures are logged, never fatal —
     // the prior is already persisted locally and will be re-broadcast
@@ -562,6 +672,7 @@ pub async fn sentinel_ratify_prior(
 
 /// Fire-and-forget broadcast of a freshly ratified prior onto the
 /// Sentinel priors gossip topic. All error paths log + continue.
+#[cfg(all(debug_assertions, feature = "legacy-sentinel-prior-ratification"))]
 async fn broadcast_sentinel_prior(state: &State<'_, AppState>, row: &SentinelPrior) {
     let mnemonic = {
         let keystore = state.keystore.lock().await;
@@ -641,28 +752,27 @@ pub struct SyncResult {
 /// missing blob across the content-resolve path.
 #[tauri::command]
 pub async fn sentinel_priors_sync(state: State<'_, AppState>) -> Result<SyncResult, String> {
-    // Snapshot (id, cid) out of the DB so we don't hold the lock across
-    // awaits. `rows` is bound explicitly inside the block so `stmt` lives
-    // long enough to drive the iterator.
-    let priors: Vec<(String, String)> = {
-        let db_guard = state
-            .db
-            .lock()
-            .map_err(|_| "database lock poisoned".to_string())?;
-        let db = db_guard.as_ref().ok_or("database not initialized")?;
-        let mut stmt = db
-            .conn()
-            .prepare("SELECT id, cid FROM sentinel_priors")
-            .map_err(|e| e.to_string())?;
-        let rows: Vec<(String, String)> = stmt
-            .query_map([], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })
-            .map_err(|e| e.to_string())?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())?;
-        rows
-    };
+    let lease = state.profile_lease();
+    let priors: Vec<(String, String)> = state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Background,
+            lease.clone(),
+            "sentinel.priors.sync-list",
+            move |db| {
+                let mut stmt = db
+                    .conn()
+                    .prepare("SELECT id, cid FROM sentinel_priors")
+                    .map_err(|error| error.to_string())?;
+                let rows = stmt
+                    .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+                    .map_err(|error| error.to_string())?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|error| error.to_string())?;
+                Ok(rows)
+            },
+        )
+        .await?;
 
     let resolver = {
         let guard = state.resolver.lock().await;
@@ -677,18 +787,21 @@ pub async fn sentinel_priors_sync(state: State<'_, AppState>) -> Result<SyncResu
     for (id, cid) in &priors {
         match resolver.resolve(cid).await {
             Ok(result) => {
-                if let Ok(guard) = state.db.lock() {
-                    if let Some(db) = guard.as_ref() {
-                        storage::upsert_pin(
-                            db.conn(),
-                            &result.blake3_hash,
-                            PIN_TYPE_SENTINEL_PRIOR,
-                            result.size,
-                            false,
-                        );
-                    }
+                let resolved_cid = result.blake3_hash;
+                let size = result.size;
+                let pin_result = state
+                    .db_executor
+                    .execute(
+                        DatabaseWorkload::Background,
+                        lease.clone(),
+                        "sentinel.priors.sync-pin",
+                        move |db| upsert_sentinel_prior_pin(db.conn(), &resolved_cid, size),
+                    )
+                    .await;
+                match pin_result {
+                    Ok(()) => pinned += 1,
+                    Err(error) => errors.push(format!("{id}: {error}")),
                 }
-                pinned += 1;
             }
             Err(e) => errors.push(format!("{id}: {e}")),
         }
@@ -712,20 +825,23 @@ pub async fn sentinel_priors_load(
     state: State<'_, AppState>,
     prior_id: String,
 ) -> Result<PriorBlob, String> {
-    let cid: String = {
-        let db_guard = state
-            .db
-            .lock()
-            .map_err(|_| "database lock poisoned".to_string())?;
-        let db = db_guard.as_ref().ok_or("database not initialized")?;
-        db.conn()
-            .query_row(
-                "SELECT cid FROM sentinel_priors WHERE id = ?1",
-                params![prior_id],
-                |row| row.get::<_, String>(0),
-            )
-            .map_err(|e| format!("prior not found: {e}"))?
-    };
+    let cid: String = state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "sentinel.prior.load-cid",
+            move |db| {
+                db.conn()
+                    .query_row(
+                        "SELECT cid FROM sentinel_priors WHERE id = ?1",
+                        params![prior_id],
+                        |row| row.get(0),
+                    )
+                    .map_err(|error| format!("prior not found: {error}"))
+            },
+        )
+        .await?;
 
     let resolver = {
         let guard = state.resolver.lock().await;
@@ -750,51 +866,53 @@ pub async fn sentinel_priors_list(
     state: State<'_, AppState>,
     model_kind: Option<String>,
 ) -> Result<Vec<SentinelPrior>, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    let conn = db.conn();
-
     // Validate the filter so callers can't probe for `face` priors
     // expecting silence.
     if let Some(ref k) = model_kind {
         ModelKind::from_str(k)?;
     }
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "sentinel.priors.list",
+            move |db| list_priors(db.conn(), model_kind.as_deref()),
+        )
+        .await
+}
 
-    let (sql, param_values): (String, Vec<Box<dyn rusqlite::types::ToSql>>) =
-        if let Some(k) = model_kind {
-            (
-                "SELECT id, proposal_id, cid, model_kind, label, schema_version,
-                        sample_count, notes, ratified_at, signature,
-                        weights_cid, eval_cid, eval_tpr, eval_fpr, version
-                 FROM sentinel_priors WHERE model_kind = ?1
-                 ORDER BY ratified_at DESC"
-                    .to_string(),
-                vec![Box::new(k)],
-            )
-        } else {
-            (
-                "SELECT id, proposal_id, cid, model_kind, label, schema_version,
-                        sample_count, notes, ratified_at, signature,
-                        weights_cid, eval_cid, eval_tpr, eval_fpr, version
-                 FROM sentinel_priors
-                 ORDER BY ratified_at DESC"
-                    .to_string(),
-                vec![],
-            )
-        };
-
-    let params_ref: Vec<&dyn rusqlite::types::ToSql> =
-        param_values.iter().map(|v| v.as_ref()).collect();
-
-    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map(params_ref.as_slice(), map_prior_row)
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
+fn list_priors(
+    conn: &rusqlite::Connection,
+    model_kind: Option<&str>,
+) -> Result<Vec<SentinelPrior>, String> {
+    const SELECT_COLUMNS: &str = "SELECT id, proposal_id, cid, model_kind, label, schema_version,
+                sample_count, notes, ratified_at, signature,
+                weights_cid, eval_cid, eval_tpr, eval_fpr, version
+         FROM sentinel_priors";
+    let rows = if let Some(model_kind) = model_kind {
+        let mut stmt = conn
+            .prepare(&format!(
+                "{SELECT_COLUMNS} WHERE model_kind = ?1 ORDER BY ratified_at DESC"
+            ))
+            .map_err(|error| error.to_string())?;
+        let rows = stmt
+            .query_map(params![model_kind], map_prior_row)
+            .map_err(|error| error.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| error.to_string())?;
+        rows
+    } else {
+        let mut stmt = conn
+            .prepare(&format!("{SELECT_COLUMNS} ORDER BY ratified_at DESC"))
+            .map_err(|error| error.to_string())?;
+        let rows = stmt
+            .query_map([], map_prior_row)
+            .map_err(|error| error.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| error.to_string())?;
+        rows
+    };
     Ok(rows)
 }
 
@@ -838,7 +956,7 @@ pub fn blocklisted_versions(
     rows
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct SetKillSwitchRequest {
     pub model_kind: String,
     pub active: bool,
@@ -846,7 +964,7 @@ pub struct SetKillSwitchRequest {
     pub actor: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct BlocklistVersionRequest {
     pub model_kind: String,
     pub version: String,
@@ -877,32 +995,39 @@ pub async fn sentinel_set_kill_switch(
     req: SetKillSwitchRequest,
 ) -> Result<KillSwitchStatus, String> {
     let kind = ModelKind::from_str(&req.model_kind)?;
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    let conn = db.conn();
-
     let now = chrono::Utc::now().to_rfc3339();
-    conn.execute(
-        "INSERT INTO sentinel_kill_switch (model_kind, active, reason, activated_at, activated_by)
-         VALUES (?1, ?2, ?3, ?4, ?5)
-         ON CONFLICT(model_kind) DO UPDATE SET
-             active = excluded.active,
-             reason = excluded.reason,
-             activated_at = excluded.activated_at,
-             activated_by = excluded.activated_by",
-        params![
-            req.model_kind,
-            req.active as i64,
-            req.reason,
-            if req.active { Some(now.as_str()) } else { None },
-            req.actor,
-        ],
-    )
-    .map_err(|e| e.to_string())?;
-    drop(db_guard);
+    let req_for_db = req.clone();
+    let now_for_db = now.clone();
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Instructor,
+            state.profile_lease(),
+            "sentinel.kill-switch.set",
+            move |db| {
+                db.conn()
+                    .execute(
+                        "INSERT INTO sentinel_kill_switch \
+                             (model_kind, active, reason, activated_at, activated_by)
+                         VALUES (?1, ?2, ?3, ?4, ?5)
+                         ON CONFLICT(model_kind) DO UPDATE SET
+                             active = excluded.active,
+                             reason = excluded.reason,
+                             activated_at = excluded.activated_at,
+                             activated_by = excluded.activated_by",
+                        params![
+                            req_for_db.model_kind,
+                            i64::from(req_for_db.active),
+                            req_for_db.reason,
+                            req_for_db.active.then_some(now_for_db),
+                            req_for_db.actor,
+                        ],
+                    )
+                    .map_err(|error| error.to_string())?;
+                Ok(())
+            },
+        )
+        .await?;
 
     // Best-effort revert. Failure to revert (e.g. paste_classifier
     // module load issue) doesn't undo the kill-switch persist — the
@@ -932,45 +1057,49 @@ pub async fn sentinel_get_kill_switch(
     model_kind: String,
 ) -> Result<KillSwitchStatus, String> {
     ModelKind::from_str(&model_kind)?;
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    let conn = db.conn();
-
-    let row = conn
-        .query_row(
-            "SELECT active, reason, activated_at, activated_by
-             FROM sentinel_kill_switch WHERE model_kind = ?1",
-            params![model_kind],
-            |row| {
-                Ok((
-                    row.get::<_, i64>(0)?,
-                    row.get::<_, Option<String>>(1)?,
-                    row.get::<_, Option<String>>(2)?,
-                    row.get::<_, Option<String>>(3)?,
-                ))
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "sentinel.kill-switch.get",
+            move |db| {
+                let row = db
+                    .conn()
+                    .query_row(
+                        "SELECT active, reason, activated_at, activated_by
+                         FROM sentinel_kill_switch WHERE model_kind = ?1",
+                        params![model_kind],
+                        |row| {
+                            Ok((
+                                row.get::<_, i64>(0)?,
+                                row.get::<_, Option<String>>(1)?,
+                                row.get::<_, Option<String>>(2)?,
+                                row.get::<_, Option<String>>(3)?,
+                            ))
+                        },
+                    )
+                    .optional()
+                    .map_err(|error| error.to_string())?;
+                Ok(match row {
+                    Some((active, reason, activated_at, activated_by)) => KillSwitchStatus {
+                        model_kind,
+                        active: active != 0,
+                        reason,
+                        activated_at,
+                        activated_by,
+                    },
+                    None => KillSwitchStatus {
+                        model_kind,
+                        active: false,
+                        reason: None,
+                        activated_at: None,
+                        activated_by: None,
+                    },
+                })
             },
         )
-        .ok();
-
-    Ok(match row {
-        Some((active, reason, activated_at, activated_by)) => KillSwitchStatus {
-            model_kind,
-            active: active != 0,
-            reason,
-            activated_at,
-            activated_by,
-        },
-        None => KillSwitchStatus {
-            model_kind,
-            active: false,
-            reason: None,
-            activated_at: None,
-            activated_by: None,
-        },
-    })
+        .await
 }
 
 /// Add a (model_kind, version) pair to the blocklist. Idempotent.
@@ -986,21 +1115,31 @@ pub async fn sentinel_blocklist_version(
     req: BlocklistVersionRequest,
 ) -> Result<(), String> {
     let kind = ModelKind::from_str(&req.model_kind)?;
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    let conn = db.conn();
-
-    conn.execute(
-        "INSERT OR IGNORE INTO sentinel_weights_blocklist
-             (model_kind, version, reason, blocked_by)
-         VALUES (?1, ?2, ?3, ?4)",
-        params![req.model_kind, req.version, req.reason, req.actor],
-    )
-    .map_err(|e| e.to_string())?;
-    drop(db_guard);
+    let req_for_db = req.clone();
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Instructor,
+            state.profile_lease(),
+            "sentinel.weights.blocklist",
+            move |db| {
+                db.conn()
+                    .execute(
+                        "INSERT OR IGNORE INTO sentinel_weights_blocklist
+                             (model_kind, version, reason, blocked_by)
+                         VALUES (?1, ?2, ?3, ?4)",
+                        params![
+                            req_for_db.model_kind,
+                            req_for_db.version,
+                            req_for_db.reason,
+                            req_for_db.actor
+                        ],
+                    )
+                    .map_err(|error| error.to_string())?;
+                Ok(())
+            },
+        )
+        .await?;
 
     if matches!(kind, ModelKind::PasteClassifierWeights) {
         let info = crate::sentinel::paste_classifier::loaded_info();
@@ -1024,23 +1163,32 @@ pub async fn sentinel_unblocklist_version(
     version: String,
 ) -> Result<(), String> {
     ModelKind::from_str(&model_kind)?;
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    let conn = db.conn();
-    conn.execute(
-        "DELETE FROM sentinel_weights_blocklist
-         WHERE model_kind = ?1 AND version = ?2",
-        params![model_kind, version],
-    )
-    .map_err(|e| e.to_string())?;
-    Ok(())
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Instructor,
+            state.profile_lease(),
+            "sentinel.weights.unblocklist",
+            move |db| {
+                db.conn()
+                    .execute(
+                        "DELETE FROM sentinel_weights_blocklist
+                         WHERE model_kind = ?1 AND version = ?2",
+                        params![model_kind, version],
+                    )
+                    .map_err(|error| error.to_string())?;
+                Ok(())
+            },
+        )
+        .await
 }
 
 /// Candidate row pulled from `sentinel_priors` before content-blob
 /// re-verification. Lives only inside this module.
+#[cfg(any(
+    test,
+    all(debug_assertions, feature = "legacy-sentinel-prior-ratification")
+))]
 #[derive(Debug, Clone)]
 struct WeightsCandidate {
     prior_id: String,
@@ -1053,6 +1201,7 @@ struct WeightsCandidate {
     ratified_at: String,
 }
 
+#[cfg(all(debug_assertions, feature = "legacy-sentinel-prior-ratification"))]
 impl WeightsCandidate {
     fn into_active(self) -> ActivePasteClassifier {
         ActivePasteClassifier {
@@ -1067,11 +1216,13 @@ impl WeightsCandidate {
     }
 }
 
+#[cfg(all(debug_assertions, feature = "legacy-sentinel-prior-ratification"))]
 const F64_EPSILON: f64 = 1e-6;
 
 /// Max size in bytes for a weights envelope OR eval report JSON blob.
 /// Prevents OOM-by-design from a malicious envelope pointing at a huge
 /// CID. 1 MiB is generous — real envelopes are a few hundred bytes.
+#[cfg(all(debug_assertions, feature = "legacy-sentinel-prior-ratification"))]
 const MAX_WEIGHTS_BLOB_BYTES: usize = 1024 * 1024;
 
 /// Max size in bytes for a ratified ONNX weights binary. 50 MiB caps
@@ -1081,11 +1232,16 @@ pub const MAX_WEIGHTS_BYTES: usize = 50 * 1024 * 1024;
 /// Resolver round-trip timeout for envelope + eval fetches inside the
 /// active-classifier IPC. Prevents a hung Iroh peer from blocking session
 /// start indefinitely; the client falls back to bundled on timeout.
+#[cfg(all(debug_assertions, feature = "legacy-sentinel-prior-ratification"))]
 const WEIGHTS_RESOLVE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// Pull ratified `paste_classifier_weights` rows that pass the
 /// numeric gate, ordered newest-first. Pure DB query — split out so
 /// it's testable with an in-memory database.
+#[cfg(any(
+    test,
+    all(debug_assertions, feature = "legacy-sentinel-prior-ratification")
+))]
 fn select_weights_candidates(conn: &rusqlite::Connection) -> Result<Vec<WeightsCandidate>, String> {
     let mut stmt = conn
         .prepare(
@@ -1124,6 +1280,7 @@ fn select_weights_candidates(conn: &rusqlite::Connection) -> Result<Vec<WeightsC
 ///
 /// The Python eval harness (`tools/sentinel-train/eval.py`) emits this
 /// exact structure. Other keys are tolerated but ignored.
+#[cfg(all(debug_assertions, feature = "legacy-sentinel-prior-ratification"))]
 #[derive(Debug, Deserialize)]
 struct EvalReport {
     macro_tpr: f64,
@@ -1143,6 +1300,7 @@ struct EvalReport {
 /// three can lie consistently is if the DAO itself published a lying
 /// envelope/eval pair — at which point the signature check is the last
 /// line of defense (currently placeholder; see `compute_prior_signature`).
+#[cfg(all(debug_assertions, feature = "legacy-sentinel-prior-ratification"))]
 async fn verify_weights_candidate(
     resolver: &crate::content_store::resolver::ContentResolver,
     c: &WeightsCandidate,
@@ -1248,29 +1406,46 @@ async fn verify_weights_candidate(
 pub async fn sentinel_get_active_paste_classifier(
     state: State<'_, AppState>,
 ) -> Result<Option<ActivePasteClassifier>, String> {
-    let (candidates, blocked): (Vec<WeightsCandidate>, std::collections::HashSet<String>) = {
-        let db_guard = state
-            .db
-            .lock()
-            .map_err(|_| "database lock poisoned".to_string())?;
-        let db = db_guard.as_ref().ok_or("database not initialized")?;
-        let conn = db.conn();
+    #[cfg(not(all(debug_assertions, feature = "legacy-sentinel-prior-ratification")))]
+    {
+        let _ = state;
+        Ok(None)
+    }
 
-        // Kill switch short-circuits everything — return None so the
-        // client falls back to bundled and the bundled toggle (or
-        // disabling AI scoring entirely) is the operator's escape hatch.
-        if kill_switch_active(conn, ModelKind::PasteClassifierWeights.as_str())
-            .map_err(|e| e.to_string())?
-        {
-            log::warn!("[sentinel] paste_classifier_weights kill switch active — bundled fallback");
-            return Ok(None);
-        }
+    #[cfg(all(debug_assertions, feature = "legacy-sentinel-prior-ratification"))]
+    {
+        sentinel_get_active_paste_classifier_legacy(state).await
+    }
+}
 
-        let raw = select_weights_candidates(conn)?;
-        let blocked = blocklisted_versions(conn, ModelKind::PasteClassifierWeights.as_str())
-            .map_err(|e| e.to_string())?;
-        (raw, blocked)
-    };
+#[cfg(all(debug_assertions, feature = "legacy-sentinel-prior-ratification"))]
+async fn sentinel_get_active_paste_classifier_legacy(
+    state: State<'_, AppState>,
+) -> Result<Option<ActivePasteClassifier>, String> {
+    let (kill_switch, candidates, blocked) = state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "sentinel.weights.select-legacy",
+            move |db| {
+                let conn = db.conn();
+                let kill_switch =
+                    kill_switch_active(conn, ModelKind::PasteClassifierWeights.as_str())
+                        .map_err(|error| error.to_string())?;
+                let candidates = select_weights_candidates(conn)?;
+                let blocked =
+                    blocklisted_versions(conn, ModelKind::PasteClassifierWeights.as_str())
+                        .map_err(|error| error.to_string())?;
+                Ok((kill_switch, candidates, blocked))
+            },
+        )
+        .await?;
+
+    if kill_switch {
+        log::warn!("[sentinel] paste_classifier_weights kill switch active — bundled fallback");
+        return Ok(None);
+    }
 
     let candidates: Vec<WeightsCandidate> = candidates
         .into_iter()
@@ -1287,7 +1462,10 @@ pub async fn sentinel_get_active_paste_classifier(
         // for the first candidate. This path matters for tests + early
         // boot before the resolver spins up.
         log::warn!("[sentinel] resolver not initialized — returning gate-only selection");
-        return Ok(Some(candidates.into_iter().next().unwrap().into_active()));
+        return Ok(candidates
+            .into_iter()
+            .next()
+            .map(WeightsCandidate::into_active));
     };
 
     for c in candidates {
@@ -1328,10 +1506,26 @@ fn map_prior_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SentinelPrior> {
     })
 }
 
+#[cfg(any(
+    test,
+    all(debug_assertions, feature = "legacy-sentinel-prior-ratification")
+))]
 fn read_prior_by_proposal(
     conn: &rusqlite::Connection,
     proposal_id: &str,
 ) -> Result<SentinelPrior, String> {
+    find_prior_by_proposal(conn, proposal_id)?
+        .ok_or_else(|| format!("prior not found for proposal {proposal_id}"))
+}
+
+#[cfg(any(
+    test,
+    all(debug_assertions, feature = "legacy-sentinel-prior-ratification")
+))]
+fn find_prior_by_proposal(
+    conn: &rusqlite::Connection,
+    proposal_id: &str,
+) -> Result<Option<SentinelPrior>, String> {
     conn.query_row(
         "SELECT id, proposal_id, cid, model_kind, label, schema_version,
                 sample_count, notes, ratified_at, signature,
@@ -1340,6 +1534,7 @@ fn read_prior_by_proposal(
         params![proposal_id],
         map_prior_row,
     )
+    .optional()
     .map_err(|e| e.to_string())
 }
 
@@ -1655,6 +1850,13 @@ mod tests {
             rows[0].prior_id, "id-v2",
             "newer ratified row should rank first"
         );
+        assert_eq!(rows[0].envelope_cid, "env-v2");
+        assert_eq!(rows[0].weights_cid, "weights-v2");
+        assert_eq!(rows[0].version, "paste-v2");
+        assert_eq!(rows[0].eval_tpr, 0.98);
+        assert_eq!(rows[0].eval_fpr, 0.01);
+        assert_eq!(rows[0].signature, "placeholder-sig");
+        assert_eq!(rows[0].ratified_at, "2026-05-01 12:00:00");
         assert_eq!(rows[1].prior_id, "id-v1");
     }
 
@@ -1709,5 +1911,53 @@ mod tests {
             base,
             compute_prior_signature("cid-x", "paste_macro", "keystroke", 2)
         );
+    }
+
+    #[test]
+    fn ratification_rolls_back_when_pin_persistence_fails() {
+        let db = fresh_db();
+        insert_proposal(db.conn(), "prop-rollback");
+        db.conn()
+            .execute(
+                "UPDATE governance_proposals SET content_cid = 'cid-rollback' WHERE id = 'prop-rollback'",
+                [],
+            )
+            .unwrap();
+        db.conn()
+            .execute_batch(
+                "CREATE TRIGGER reject_sentinel_prior_pin
+                 BEFORE INSERT ON pins
+                 WHEN NEW.pin_type = 'sentinel_prior'
+                 BEGIN
+                     SELECT RAISE(ABORT, 'injected pin failure');
+                 END;",
+            )
+            .unwrap();
+
+        let blob = validate_prior_blob(&valid_keystroke_blob().to_string()).unwrap();
+        let error = persist_legacy_ratification(
+            db.conn(),
+            LegacyPriorRatificationWrite {
+                id: "prior-rollback".into(),
+                proposal_id: "prop-rollback".into(),
+                cid: "cid-rollback".into(),
+                sample_count: 25,
+                weights_meta: None,
+                blob,
+                blob_size: 1024,
+            },
+        )
+        .unwrap_err();
+
+        assert!(error.contains("injected pin failure"), "got: {error}");
+        let prior_count: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM sentinel_priors WHERE id = 'prior-rollback'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(prior_count, 0, "prior insert must roll back with its pin");
     }
 }

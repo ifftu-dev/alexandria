@@ -1,8 +1,9 @@
 import { ref, readonly, reactive } from 'vue'
-import { invoke as tauriInvoke } from '@tauri-apps/api/core'
+
 import { listen as tauriListen, type UnlistenFn } from '@tauri-apps/api/event'
 import { useLocalApi } from './useLocalApi'
 import { useAuth } from './useAuth'
+import { getProfileSessionToken } from './profileSession'
 import {
   FaceEmbedder,
   type EnrollmentEmbedding,
@@ -28,6 +29,8 @@ import type {
   GazeCalibSample,
   TrainGazeCalibResponse,
 } from '@/types'
+
+const { invoke: tauriInvoke } = useLocalApi()
 
 // Gaze flag thresholds (mirror docs/sentinel.md §Gaze). Off-screen
 // ratio over GAZE_WANDER → warning; repeated downward glances →
@@ -85,41 +88,57 @@ const consistencyScore = ref(1.0)
 // Live debug snapshot — populated each snapshot dispatch so the dev-only
 // Sentinel PiP can mirror exactly what the engine is computing. Module-
 // scoped + reactive so any useSentinel() consumer shares one view.
-const sentinelDebug = reactive({
-  active: false,
-  cameraOptedIn: false,
-  lastSnapshotAt: 0,
-  integrity: 1.0,
-  consistency: 1.0,
-  flags: [] as string[],
-  tabSwitches: 0,
-  pastedChars: 0,
-  keystrokeBufferLen: 0,
-  mouseBufferLen: 0,
-  gazeOffscreenRatio: null as number | null,
-  gazeTotalChecks: 0,
-  gazeOffscreenChecks: 0,
-  gazeOccludedChecks: 0,
-  gazeDownGlances: 0,
-  aiPasteAnomaly: -1,
-  aiKeystrokeAnomaly: -1,
-  aiMouseHumanProb: -1,
-  facePresent: false,
-  faceCount: 0,
-  appFocusLostCount: 0,
-  appFocusLostMs: 0,
-  lastApp: '' as string,
-  // Full rule + AI signal snapshot (computed each window).
-  signals: null as SignalData | null,
-  // Live session-gaze mirror (every camera tick, not just at snapshot) —
-  // lets the dev PiP show the real session sampling rate + latest read.
-  sessionGazeChecks: 0,
-  lastGazeAt: 0,
-  sessionGazeYaw: 0,
-  sessionGazePitch: 0,
-  sessionGazeOnScreen: true,
-  sessionGazeOccluded: false,
-})
+function emptySentinelDebug() {
+  return {
+    active: false,
+    cameraOptedIn: false,
+    lastSnapshotAt: 0,
+    integrity: 1.0,
+    consistency: 1.0,
+    flags: [] as string[],
+    tabSwitches: 0,
+    pastedChars: 0,
+    keystrokeBufferLen: 0,
+    mouseBufferLen: 0,
+    gazeOffscreenRatio: null as number | null,
+    gazeTotalChecks: 0,
+    gazeOffscreenChecks: 0,
+    gazeOccludedChecks: 0,
+    gazeDownGlances: 0,
+    aiPasteAnomaly: -1,
+    aiKeystrokeAnomaly: -1,
+    aiMouseHumanProb: -1,
+    facePresent: false,
+    faceCount: 0,
+    appFocusLostCount: 0,
+    appFocusLostMs: 0,
+    lastApp: '' as string,
+    // Full rule + AI signal snapshot (computed each window).
+    signals: null as SignalData | null,
+    // Live session-gaze mirror (every camera tick, not just at snapshot) —
+    // lets the dev PiP show the real session sampling rate + latest read.
+    sessionGazeChecks: 0,
+    lastGazeAt: 0,
+    sessionGazeYaw: 0,
+    sessionGazePitch: 0,
+    sessionGazeOnScreen: true,
+    sessionGazeOccluded: false,
+  }
+}
+const sentinelDebug = reactive(emptySentinelDebug())
+
+let profileStateGeneration = 0
+
+function profileStateGuard(signal?: AbortSignal): () => void {
+  const generation = profileStateGeneration
+  const token = getProfileSessionToken()
+  return () => {
+    if (signal?.aborted) throw new Error('Sentinel operation was cancelled')
+    if (generation !== profileStateGeneration || token !== getProfileSessionToken()) {
+      throw new Error('Sentinel profile operation was cancelled by locking')
+    }
+  }
+}
 
 // Fast timer (dev PiP) mirroring live event buffers between snapshots so
 // typing / mouse activity is visible in real time, not just at snapshot
@@ -137,34 +156,19 @@ const pendingEvidenceConsent = ref<{ sessionId: string; reasons: string[] } | nu
 const cameraOptedIn = ref(false)
 
 // AI scoring is advisory until validated with labeled data (see
-// docs/sentinel.md §AI Models). Off by default; can be toggled per-device
+// docs/sentinel.md §AI Models). Off by default; can be toggled per profile
 // via setAIScoringEnabled(). When enabled, each available AI signal
 // contributes a small advisory weight to the integrity score.
 const AI_SCORING_STORAGE_KEY = 'sentinel_ai_scoring_enabled'
 const AI_ADVISORY_WEIGHT = 0.05
-const aiScoringEnabled = ref<boolean>(readAIScoringPref())
+const aiScoringEnabled = ref(false)
 
 // Per-signal opt-out for the paste classifier. Defaults to true so it
 // contributes when the master AI toggle is on; users can disable it
 // alone if they hit false positives without losing the other AI
 // signals.
 const PASTE_CLASSIFIER_STORAGE_KEY = 'sentinel_paste_classifier_enabled'
-const pasteClassifierEnabled = ref<boolean>(readPasteClassifierPref())
-
-function readAIScoringPref(): boolean {
-  try { return localStorage.getItem(AI_SCORING_STORAGE_KEY) === '1' }
-  catch { return false }
-}
-
-function readPasteClassifierPref(): boolean {
-  try {
-    const v = localStorage.getItem(PASTE_CLASSIFIER_STORAGE_KEY)
-    // Default ON unless explicitly disabled.
-    return v !== '0'
-  } catch {
-    return true
-  }
-}
+const pasteClassifierEnabled = ref(true)
 
 /**
  * Reconcile the AI/paste-classifier flags with the per-profile
@@ -176,9 +180,12 @@ function readPasteClassifierPref(): boolean {
  * preferences and falls back to the registry defaults.
  */
 export async function initSentinelFlagsFromSettings(): Promise<void> {
+  const requireCurrent = profileStateGuard()
   const { useSettings } = await import('./useSettings')
+  requireCurrent()
   const { entries, initialize } = useSettings()
   await initialize()
+  requireCurrent()
   const ai = entries.value.find((e) => e.key === 'sentinel.ai_scoring_enabled')
   const paste = entries.value.find((e) => e.key === 'sentinel.paste_classifier_enabled')
   // Reset to defaults, then apply explicit overrides if present.
@@ -212,7 +219,6 @@ let totalUnfocusedMs = 0
 let lastBlurTime = 0
 let pasteEventCount = 0
 let pastedCharCount = 0
-let devtoolsDetected = false
 let environmentChanged = false
 let lastKeystrokeTime = 0
 
@@ -266,9 +272,8 @@ const mouseCnnStatus = ref<UserModelStatus | null>(null)
 // the Rust side (commands/sentinel_priors.rs).
 const MAX_DAO_WEIGHTS_BYTES = 50 * 1024 * 1024
 
-// DAO upgrade is process-wide once-only: lifted to module scope so
-// repeated `start()` calls in the same process don't re-fetch on every
-// session.
+// Share one DAO lookup across sessions in the active profile. Successful
+// profile cleanup invalidates this lookup so the next profile checks its own data.
 let daoUpgradePromise: Promise<void> | null = null
 const loadedClassifierInfo = ref<LoadedClassifierInfo>({ source: 'bundled', version: 'bundled-v1' })
 
@@ -278,23 +283,29 @@ export function getLoadedClassifierInfo(): LoadedClassifierInfo {
 
 async function upgradePasteClassifierOnce(): Promise<void> {
   if (daoUpgradePromise) return daoUpgradePromise
+  const requireCurrent = profileStateGuard()
   daoUpgradePromise = (async () => {
     try {
       // Pull the current backend-reported source so dashboard cards
       // can show "bundled" until / unless the DAO swap succeeds.
       try {
-        loadedClassifierInfo.value = await tauriInvoke<LoadedClassifierInfo>(
+        const info = await tauriInvoke<LoadedClassifierInfo>(
           'sentinel_paste_classifier_info',
         )
+        requireCurrent()
+        loadedClassifierInfo.value = info
       } catch { /* backend not ready yet */ }
+      requireCurrent()
 
       const active = await tauriInvoke<ActivePasteClassifier | null>(
         'sentinel_get_active_paste_classifier',
       )
+      requireCurrent()
       if (!active) return
       const bytes = await tauriInvoke<number[]>('content_resolve_bytes', {
         identifier: active.weights_cid,
       })
+      requireCurrent()
       if (bytes.length > MAX_DAO_WEIGHTS_BYTES) {
         console.warn(
           `[sentinel] DAO weights blob ${bytes.length} bytes exceeds ${MAX_DAO_WEIGHTS_BYTES}; staying on bundled`,
@@ -305,6 +316,7 @@ async function upgradePasteClassifierOnce(): Promise<void> {
         'sentinel_load_dao_classifier',
         { req: { bytes, version: active.version } },
       )
+      requireCurrent()
       loadedClassifierInfo.value = info
       console.info(
         `[sentinel] paste classifier upgraded to DAO model ${active.version} (TPR=${active.eval_tpr} FPR=${active.eval_fpr})`,
@@ -320,9 +332,26 @@ async function upgradePasteClassifierOnce(): Promise<void> {
 // Composable
 // ============================================================================
 
+let sentinelService: ReturnType<typeof createSentinelService> | undefined
+
 export function useSentinel() {
+  return sentinelService ??= createSentinelService()
+}
+
+function createSentinelService() {
   const { invoke } = useLocalApi()
   const { stakeAddress } = useAuth()
+  let lifecycleGeneration = 0
+  let cameraGeneration = 0
+  let lifecycleTransition: Promise<unknown> = Promise.resolve()
+  let trainingKeystrokesCleanup: (() => void) | null = null
+  let trainingMouseCleanup: (() => void) | null = null
+
+  const serializeTransition = <T>(operation: () => Promise<T>): Promise<T> => {
+    const result = lifecycleTransition.then(operation)
+    lifecycleTransition = result.catch(() => undefined)
+    return result
+  }
 
   // =========================================================================
   // Device fingerprint
@@ -371,35 +400,68 @@ export function useSentinel() {
   }
 
   // =========================================================================
-  // Profile management (localStorage)
+  // Profile management (profile-scoped SQLCipher storage)
   // =========================================================================
 
+  const legacyProfileKey = (userId: string, deviceFp: string) =>
+    `sentinel_profile_${userId}_${deviceFp.substring(0, 16)}`
+
   const loadProfile = async (userId: string, deviceFp: string): Promise<BehavioralProfile | null> => {
+    const deviceFpPrefix = deviceFp.substring(0, 16)
+    const stored = await tauriInvoke<BehavioralProfile | null>('sentinel_load_behavioral_profile', {
+      userAddress: userId,
+      deviceFpPrefix,
+    })
+    if (stored) {
+      try { localStorage.removeItem(legacyProfileKey(userId, deviceFp)) }
+      catch { /* localStorage not available */ }
+      return stored
+    }
+
+    // Pre-SQLCipher builds used one browser-storage key per exact learner and
+    // device fingerprint. Import only that exact key, require its embedded
+    // ownership fields to agree, and erase it only after the encrypted write
+    // succeeds. Keys belonging to other profiles are never inspected here.
+    const key = legacyProfileKey(userId, deviceFp)
+    let legacy: BehavioralProfile | null = null
     try {
-      const key = `sentinel_profile_${userId}_${deviceFp.substring(0, 16)}`
-      const stored = localStorage.getItem(key)
-      if (stored) {
-        const p: BehavioralProfile = JSON.parse(stored)
-        loadAIModels(p)
-        return p
+      const json = localStorage.getItem(key)
+      if (json) {
+        const candidate = JSON.parse(json) as Partial<BehavioralProfile>
+        if (candidate.userId === userId && candidate.deviceFingerprint === deviceFp) {
+          legacy = candidate as BehavioralProfile
+        } else {
+          localStorage.removeItem(key)
+        }
       }
-    } catch { /* localStorage not available */ }
-    return null
+    } catch {
+      // The exact active learner/device key is unusable. Do not leave a
+      // malformed private record readable after the profile locks again.
+      try { localStorage.removeItem(key) } catch { /* localStorage not available */ }
+    }
+    if (!legacy) return null
+
+    persistAIModels(legacy)
+    await tauriInvoke('sentinel_save_behavioral_profile', { profile: legacy })
+    try { localStorage.removeItem(key) } catch { /* localStorage not available */ }
+    return legacy
   }
 
-  const saveProfile = (userId: string, deviceFp: string, p: BehavioralProfile) => {
-    try {
-      persistAIModels(p)
-      const key = `sentinel_profile_${userId}_${deviceFp.substring(0, 16)}`
-      localStorage.setItem(key, JSON.stringify(p))
-    } catch { /* localStorage not available */ }
+  const saveProfile = async (userId: string, deviceFp: string, p: BehavioralProfile): Promise<void> => {
+    if (p.userId !== userId || p.deviceFingerprint !== deviceFp) {
+      throw new Error('Sentinel profile ownership changed before it was saved')
+    }
+    persistAIModels(p)
+    await tauriInvoke('sentinel_save_behavioral_profile', { profile: p })
+    try { localStorage.removeItem(legacyProfileKey(userId, deviceFp)) }
+    catch { /* localStorage not available */ }
   }
 
   const loadAIModels = (p: BehavioralProfile) => {
     // Keystroke AE + mouse CNN weights now persist in the backend
     // `sentinel_user_models` table (encrypted SQLite). Only the face
-    // enrollment remains client-side because the face embedder is
-    // pure pixel math with no ML framework — see docs/sentinel.md.
+    // enrollment shares the profile's encrypted database row with the
+    // behavioral baseline because the face embedder itself runs in the webview.
     if (!p.aiModels) return
     if (p.aiModels.faceEnrollment) {
       try { faceEmbedder = new FaceEmbedder(p.aiModels.faceEnrollment as EnrollmentEmbedding) }
@@ -411,24 +473,31 @@ export function useSentinel() {
     if (!p.aiModels) p.aiModels = {}
     if (faceEmbedder?.isEnrolled) p.aiModels.faceEnrollment = faceEmbedder.exportEnrollment() as EnrollmentEmbedding
     // Backend-stored model status is fetched on demand via
-    // `sentinel_user_models_status`. Don't shadow it in localStorage.
-    delete p.aiModels.keystrokeAutoencoder
-    delete p.aiModels.mouseCNN
+    // `sentinel_user_models_status`. Don't duplicate those weights here.
+    const legacyModels = p.aiModels as BehavioralProfile['aiModels'] & {
+      keystrokeAutoencoder?: unknown
+      mouseCNN?: unknown
+    }
+    delete legacyModels.keystrokeAutoencoder
+    delete legacyModels.mouseCNN
   }
 
   /**
    * Pull current per-user model status from the backend. Updates the
    * module-scoped refs that gate AI scoring in `computeScores()`.
    */
-  const refreshUserModelsStatus = async () => {
+  const refreshUserModelsStatus = async (signal?: AbortSignal) => {
+    const requireCurrent = profileStateGuard(signal)
     const userId = stakeAddress.value
     if (!userId) return
     const deviceFp = await computeDeviceFingerprint()
     try {
+      requireCurrent()
       const rows = await tauriInvoke<UserModelStatus[]>(
         'sentinel_user_models_status',
         { userAddress: userId, deviceFpPrefix: deviceFp.substring(0, 16) },
       )
+      requireCurrent()
       keystrokeAeStatus.value =
         rows.find(r => r.model_kind === 'keystroke_ae') ?? null
       mouseCnnStatus.value =
@@ -522,7 +591,6 @@ export function useSentinel() {
       is_human_likely: isHuman,
       tab_switches: tabSwitchCount,
       unfocused_ms: totalUnfocusedMs,
-      devtools_detected: devtoolsDetected,
       paste_events: pasteEventCount,
       pasted_chars: pastedCharCount,
       environment_changed: environmentChanged,
@@ -581,8 +649,6 @@ export function useSentinel() {
     const pasteScore = Math.max(0, 1 - pastedCharCount / 1000)
     integrity += pasteScore * 0.10; weights += 0.10
 
-    integrity += (devtoolsDetected ? 0 : 1) * 0.10; weights += 0.10
-
     if (cameraOptedIn.value && facePresent !== undefined) {
       const faceScore = facePresent && faceCount === 1 ? (faceConsistency ?? 0.8) : 0.2
       integrity += faceScore * 0.15; weights += 0.15
@@ -624,7 +690,6 @@ export function useSentinel() {
     if (boundedConsistency < 0.35) anomalies.push('behavior_shift')
     if (tabSwitchCount > 10) anomalies.push('tab_switching')
     if (pastedCharCount > 500) anomalies.push('paste_detected')
-    if (devtoolsDetected) anomalies.push('devtools_detected')
     if (!isHuman) anomalies.push('bot_suspected')
     if (cameraOptedIn.value && facePresent === false) anomalies.push('no_face')
     if (cameraOptedIn.value && faceCount !== undefined && faceCount > 1) anomalies.push('multiple_faces')
@@ -643,7 +708,7 @@ export function useSentinel() {
   // Profile update (EMA)
   // =========================================================================
 
-  const updateProfile = (deviceFp: string) => {
+  const updateProfile = async (deviceFp: string): Promise<void> => {
     const userId = stakeAddress.value
     if (!userId) return
 
@@ -690,7 +755,7 @@ export function useSentinel() {
     }
 
     profile.lastUpdated = Date.now()
-    saveProfile(profile.userId, deviceFp, profile)
+    await saveProfile(profile.userId, deviceFp, profile)
   }
 
   // =========================================================================
@@ -699,12 +764,16 @@ export function useSentinel() {
 
   const scheduleNextSnapshot = () => {
     if (!isActive.value || !sessionId.value) return
+    const generation = lifecycleGeneration
+    const snapshotSessionId = sessionId.value
+    const isCurrent = () => isActive.value
+      && generation === lifecycleGeneration && sessionId.value === snapshotSessionId
 
     const delay = 15000 + Math.random() * 30000
     if (snapshotWindowStartMs === 0) snapshotWindowStartMs = Date.now()
 
     snapshotTimer = setTimeout(async () => {
-      if (!isActive.value || !sessionId.value) return
+      if (!isCurrent()) return
 
       // Run the ONNX paste classifier before the (sync) score path so the
       // signal is folded into the weighted integrity calculation rather
@@ -722,6 +791,7 @@ export function useSentinel() {
       // available" — handled the same way as before: signal absent.
       const userId = stakeAddress.value
       const deviceFp = userId ? (await computeDeviceFingerprint()).substring(0, 16) : ''
+      if (!isCurrent()) return
 
       let pasteAnomaly = -1
       // Only run the paste classifier when there's enough typing for its
@@ -738,6 +808,7 @@ export function useSentinel() {
               window_ms: windowMs,
             },
           })
+          if (!isCurrent()) return
           pasteAnomaly = resp.score
           loadedClassifierInfo.value = resp.classifier
         } catch (err) {
@@ -746,6 +817,7 @@ export function useSentinel() {
       }
 
       let keystrokeAnomaly = -1
+      if (!isCurrent()) return
       if (userId && keystrokeAeStatus.value && keystrokeAeStatus.value.trained_epochs > 0 && keystrokeBuffer.length >= 5) {
         try {
           keystrokeAnomaly = await tauriInvoke<number>('sentinel_score_keystroke_ae', {
@@ -761,6 +833,7 @@ export function useSentinel() {
       }
 
       let mouseHumanProb = -1
+      if (!isCurrent()) return
       const movePoints = mouseBuffer
         .filter(m => m.type === 'move')
         .map(m => ({ x: m.x, y: m.y, t: m.t }))
@@ -778,6 +851,7 @@ export function useSentinel() {
         }
       }
 
+      if (!isCurrent()) return
       const { signals, integrity, consistency, anomalies } = computeScores({
         aiPasteAnomaly: pasteAnomaly,
         aiKeystrokeAnomaly: keystrokeAnomaly,
@@ -835,7 +909,7 @@ export function useSentinel() {
       try {
         await invoke('integrity_submit_snapshot', {
           req: {
-            session_id: sessionId.value,
+            session_id: snapshotSessionId,
             element_id: currentElementId,
             integrity_score: integrity,
             consistency_score: consistency,
@@ -844,7 +918,7 @@ export function useSentinel() {
             human_score: signals.is_human_likely ? 1.0 : 0.0,
             tab_score: Math.max(0, 1 - signals.tab_switches / 15),
             paste_score: Math.max(0, 1 - signals.pasted_chars / 1000),
-            devtools_score: signals.devtools_detected ? 0.0 : 1.0,
+            devtools_score: null,
             camera_score: signals.face_consistency ?? null,
             ai_paste_anomaly: signals.ai_paste_anomaly ?? null,
             gaze_offscreen_ratio: gazeOffscreenRatio,
@@ -852,6 +926,7 @@ export function useSentinel() {
           },
         })
       } catch { /* best effort */ }
+      if (!isCurrent()) return
 
       // Reset per-snapshot accumulators
       gazeTotalChecks = 0
@@ -866,7 +941,6 @@ export function useSentinel() {
       totalUnfocusedMs = 0
       pasteEventCount = 0
       pastedCharCount = 0
-      devtoolsDetected = false
       environmentChanged = false
       totalFaceChecks = 0
       faceAbsentChecks = 0
@@ -884,8 +958,7 @@ export function useSentinel() {
   // Event listeners
   // =========================================================================
 
-  const onKeyDown = (e: KeyboardEvent) => {
-    if (!isActive.value) return
+  const recordKeyDown = (e: KeyboardEvent) => {
     const now = performance.now()
     const flightMs = lastKeystrokeTime > 0 ? now - lastKeystrokeTime : 0
     keystrokeBuffer.push({
@@ -896,8 +969,7 @@ export function useSentinel() {
     lastKeystrokeTime = now
   }
 
-  const onKeyUp = (_e: KeyboardEvent) => {
-    if (!isActive.value) return
+  const recordKeyUp = () => {
     const now = performance.now()
     if (keystrokeBuffer.length > 0) {
       const last = keystrokeBuffer[keystrokeBuffer.length - 1]!
@@ -905,18 +977,21 @@ export function useSentinel() {
     }
   }
 
-  const onMouseMove = (e: MouseEvent) => {
-    if (!isActive.value) return
+  const recordMouseMove = (e: MouseEvent) => {
     const now = performance.now()
     if (mouseBuffer.length > 0 && now - mouseBuffer[mouseBuffer.length - 1]!.t < 50) return
     mouseBuffer.push({ x: e.clientX, y: e.clientY, t: now, type: 'move' })
     if (mouseBuffer.length > 200) mouseBuffer = mouseBuffer.slice(-100)
   }
 
-  const onMouseClick = (e: MouseEvent) => {
-    if (!isActive.value) return
+  const recordMouseClick = (e: MouseEvent) => {
     mouseBuffer.push({ x: e.clientX, y: e.clientY, t: performance.now(), type: 'click' })
   }
+
+  const onKeyDown = (e: KeyboardEvent) => { if (isActive.value) recordKeyDown(e) }
+  const onKeyUp = () => { if (isActive.value) recordKeyUp() }
+  const onMouseMove = (e: MouseEvent) => { if (isActive.value) recordMouseMove(e) }
+  const onMouseClick = (e: MouseEvent) => { if (isActive.value) recordMouseClick(e) }
 
   const onVisibilityChange = () => {
     if (!isActive.value) return
@@ -936,31 +1011,33 @@ export function useSentinel() {
     pastedCharCount += text.length
   }
 
-  const onDevToolsCheck = () => {
-    const widthThreshold = window.outerWidth - window.innerWidth > 160
-    const heightThreshold = window.outerHeight - window.innerHeight > 160
-    if (widthThreshold || heightThreshold) devtoolsDetected = true
-  }
-
   // =========================================================================
   // Public API
   // =========================================================================
 
-  const start = async (enrollmentId: string | null, optInCamera = false) => {
-    if (isActive.value) return
+  const startSession = async (enrollmentId: string | null, optInCamera: boolean, generation: number) => {
+    if (isActive.value || generation !== lifecycleGeneration) return
+    if (sessionId.value) throw new Error('Finish closing the previous Sentinel session before starting another')
 
+    cameraGeneration++
     cameraOptedIn.value = optInCamera
 
     const deviceFp = await computeDeviceFingerprint()
+    if (generation !== lifecycleGeneration) return
     const userId = stakeAddress.value
-    if (userId) {
-      profile = await loadProfile(userId, deviceFp)
-    }
+    faceEmbedder = null
+    profile = userId ? await loadProfile(userId, deviceFp) : null
+    if (profile) loadAIModels(profile)
+    if (generation !== lifecycleGeneration) return
 
     try {
       const response = await invoke<StartSessionResponse>('integrity_start_session', { enrollmentId })
       sessionId.value = response.session_id
+      clearTrainingBuffers()
       isActive.value = true
+      // A queued stop owns cleanup of an already-created backend session.
+      // Do not attach new listeners while that cleanup is pending.
+      if (generation !== lifecycleGeneration) return
       sentinelDebug.active = true
       sentinelDebug.sessionGazeChecks = 0
       snapshotWindowStartMs = Date.now()
@@ -980,7 +1057,6 @@ export function useSentinel() {
       document.addEventListener('click', onMouseClick, { passive: true })
       document.addEventListener('visibilitychange', onVisibilityChange)
       document.addEventListener('paste', onPaste)
-      window.addEventListener('resize', onDevToolsCheck)
 
       // Native window-focus signal — fires when the OS switches the
       // foreground app away from the assessment (webview can't see this).
@@ -1008,6 +1084,7 @@ export function useSentinel() {
       } catch (err) {
         console.warn('[sentinel] focus listener failed', err)
       }
+      if (generation !== lifecycleGeneration) return
 
       // Live activity mirror for the dev PiP (typing / mouse between snapshots).
       if (liveTimer) clearInterval(liveTimer)
@@ -1019,6 +1096,7 @@ export function useSentinel() {
       scheduleNextSnapshot()
     } catch (e) {
       console.warn('Sentinel: failed to start session', e)
+      throw e
     }
   }
 
@@ -1082,7 +1160,12 @@ export function useSentinel() {
   const scoreGaze = async (
     video: HTMLVideoElement,
   ): Promise<GazeEstimate | null> => {
-    if (!video || video.readyState < 2 || document.hidden) return null
+    if (!isActive.value || !sessionId.value || !cameraOptedIn.value || !video || video.readyState < 2 || document.hidden) return null
+    const generation = lifecycleGeneration
+    const captureGeneration = cameraGeneration
+    const gazeSessionId = sessionId.value
+    const isCurrent = () => isActive.value && generation === lifecycleGeneration
+      && sessionId.value === gazeSessionId && cameraOptedIn.value && captureGeneration === cameraGeneration
     const userId = stakeAddress.value
     if (!userId) return null
     try {
@@ -1102,6 +1185,7 @@ export function useSentinel() {
       ctx.drawImage(video, 0, 0, w, h)
       const img = ctx.getImageData(0, 0, w, h)
       const deviceFp = (await computeDeviceFingerprint()).substring(0, 16)
+      if (!isCurrent()) return null
       const resp = await tauriInvoke<ScoreGazeResponse>('sentinel_score_gaze', {
         req: {
           frame: { width: w, height: h, rgba: Array.from(img.data) },
@@ -1109,6 +1193,7 @@ export function useSentinel() {
           device_fp_prefix: deviceFp,
         },
       })
+      if (!isCurrent()) return null
       const est = resp.estimate
       gazeTotalChecks++
       // Live mirror so the dev PiP shows the real session sampling rate
@@ -1141,9 +1226,12 @@ export function useSentinel() {
   // 9-point calibration capture. Returns null if no usable face.
   const extractGazeFeatures = async (
     video: HTMLVideoElement,
+    signal?: AbortSignal,
   ): Promise<GazeFeatures | null> => {
     if (!video || video.readyState < 2) return null
+    const requireCurrent = profileStateGuard(signal)
     try {
+      requireCurrent()
       const vw = video.videoWidth || 640
       const vh = video.videoHeight || 480
       const scale = Math.min(1, 224 / Math.max(vw, vh))
@@ -1156,9 +1244,11 @@ export function useSentinel() {
       if (!ctx) return null
       ctx.drawImage(video, 0, 0, w, h)
       const img = ctx.getImageData(0, 0, w, h)
-      return await tauriInvoke<GazeFeatures | null>('sentinel_extract_gaze_features', {
+      const features = await tauriInvoke<GazeFeatures | null>('sentinel_extract_gaze_features', {
         frame: { width: w, height: h, rgba: Array.from(img.data) },
       })
+      requireCurrent()
+      return features
     } catch (err) {
       console.warn('[sentinel] extract gaze features IPC failed', err)
       return null
@@ -1168,15 +1258,20 @@ export function useSentinel() {
   // Fit the per-user gaze calibration MLP from collected samples.
   const trainGazeCalibration = async (
     samples: GazeCalibSample[],
+    signal?: AbortSignal,
   ): Promise<TrainGazeCalibResponse | null> => {
     const userId = stakeAddress.value
     if (!userId || samples.length === 0) return null
+    const requireCurrent = profileStateGuard(signal)
     try {
       const deviceFp = (await computeDeviceFingerprint()).substring(0, 16)
+      requireCurrent()
       const resp = await tauriInvoke<TrainGazeCalibResponse>('sentinel_train_gaze_calib', {
         req: { user_address: userId, device_fp_prefix: deviceFp, samples },
       })
-      await refreshUserModelsStatus()
+      requireCurrent()
+      await refreshUserModelsStatus(signal)
+      requireCurrent()
       return resp
     } catch (err) {
       console.warn('[sentinel] train gaze calibration IPC failed', err)
@@ -1184,13 +1279,10 @@ export function useSentinel() {
     }
   }
 
-  const stop = async () => {
-    if (!isActive.value || !sessionId.value) return
-
-    isActive.value = false
-    sentinelDebug.active = false
-
+  const detachMonitoringListeners = () => {
     if (snapshotTimer) { clearTimeout(snapshotTimer); snapshotTimer = null }
+    trainingKeystrokesCleanup?.()
+    trainingMouseCleanup?.()
 
     document.removeEventListener('keydown', onKeyDown)
     document.removeEventListener('keyup', onKeyUp)
@@ -1198,17 +1290,23 @@ export function useSentinel() {
     document.removeEventListener('click', onMouseClick)
     document.removeEventListener('visibilitychange', onVisibilityChange)
     document.removeEventListener('paste', onPaste)
-    window.removeEventListener('resize', onDevToolsCheck)
     if (unlistenFocus) { unlistenFocus(); unlistenFocus = null }
     if (liveTimer) { clearInterval(liveTimer); liveTimer = null }
+  }
+
+  const stopSession = async () => {
+    if (!sessionId.value) return
+
+    isActive.value = false
     sentinelDebug.active = false
+    detachMonitoringListeners()
 
     const { integrity, consistency } = computeScores()
     integrityScore.value = integrity
     consistencyScore.value = consistency
 
     const deviceFp = await computeDeviceFingerprint()
-    updateProfile(deviceFp)
+    await updateProfile(deviceFp)
 
     try {
       const ended = await invoke<{ id: string; status: string }>('integrity_end_session', {
@@ -1230,19 +1328,21 @@ export function useSentinel() {
         const reasons = [...new Set(snaps.flatMap((s) => s.anomaly_flags ?? []))]
         pendingEvidenceConsent.value = { sessionId: ended.id, reasons }
       }
-    } catch {
+    } catch (error) {
       console.warn('Sentinel: failed to end session')
+      throw error
     }
 
     const currentSessionId = sessionId.value
     sessionId.value = null
+    cameraOptedIn.value = false
+    sentinelDebug.cameraOptedIn = false
     keystrokeBuffer = []
     mouseBuffer = []
     tabSwitchCount = 0
     totalUnfocusedMs = 0
     pasteEventCount = 0
     pastedCharCount = 0
-    devtoolsDetected = false
     environmentChanged = false
     lastKeystrokeTime = 0
     snapshotWindowStartMs = 0
@@ -1262,6 +1362,77 @@ export function useSentinel() {
     return currentSessionId
   }
 
+  const start = (enrollmentId: string | null, optInCamera = false) => {
+    const generation = lifecycleGeneration
+    return serializeTransition(() => startSession(enrollmentId, optInCamera, generation))
+  }
+
+  const stop = () => {
+    lifecycleGeneration++
+    return serializeTransition(stopSession)
+  }
+
+  const stopForProfileLock = () => {
+    // Invalidate optional work immediately, but retain finalization evidence
+    // until the serialized backend close succeeds (including cleanup retries).
+    profileStateGeneration++
+    lifecycleGeneration++
+    cameraGeneration++
+    return serializeTransition(async () => {
+      await stopSession()
+      detachMonitoringListeners()
+      isActive.value = false
+      sessionId.value = null
+      profile = null
+      faceEmbedder = null
+      gazeCanvas = null
+      currentElementId = ''
+      currentElementType = ''
+      keystrokeBuffer = []
+      mouseBuffer = []
+      lastKeystrokeTime = 0
+      lastBlurTime = 0
+      snapshotWindowStartMs = 0
+      tabSwitchCount = 0
+      totalUnfocusedMs = 0
+      pasteEventCount = 0
+      pastedCharCount = 0
+      environmentChanged = false
+      appFocusLostCount = 0
+      appFocusLostMs = 0
+      focusLostAt = 0
+      lastFocusApp = ''
+      facePresent = undefined
+      faceCount = undefined
+      faceConsistency = undefined
+      faceSimilarity = undefined
+      faceMatch = undefined
+      consecutiveNoFaceChecks = 0
+      totalFaceChecks = 0
+      faceAbsentChecks = 0
+      gazeTotalChecks = 0
+      gazeOffscreenChecks = 0
+      gazeOccludedChecks = 0
+      gazeDownGlances = 0
+      keystrokeAeStatus.value = null
+      mouseCnnStatus.value = null
+      cameraOptedIn.value = false
+      integrityScore.value = 1
+      consistencyScore.value = 1
+      aiScoringEnabled.value = false
+      pasteClassifierEnabled.value = true
+      try {
+        localStorage.removeItem(AI_SCORING_STORAGE_KEY)
+        localStorage.removeItem(PASTE_CLASSIFIER_STORAGE_KEY)
+      } catch { /* localStorage disabled */ }
+      pendingEvidenceConsent.value = null
+      Object.assign(sentinelDebug, emptySentinelDebug())
+      // Keep last-known public classifier metadata, without pretending to
+      // unload Rust's model. The next profile retries its own DAO lookup.
+      daoUpgradePromise = null
+    })
+  }
+
   /** Returns the final integrity score for evidence attachment */
   const getFinalScore = (): number => integrityScore.value
 
@@ -1277,7 +1448,6 @@ export function useSentinel() {
     totalUnfocusedMs,
     pasteEventCount,
     pastedCharCount,
-    devtoolsDetected,
     facePresent,
     faceCount,
     faceConsistency,
@@ -1303,24 +1473,46 @@ export function useSentinel() {
   // =========================================================================
 
   const startTrainingKeystrokes = () => {
+    trainingKeystrokesCleanup?.()
+    const generation = profileStateGeneration
+    const token = getProfileSessionToken()
+    const canRecord = () => token !== null && generation === profileStateGeneration
+      && token === getProfileSessionToken() && !isActive.value
+    const keyDown = (event: KeyboardEvent) => { if (canRecord()) recordKeyDown(event) }
+    const keyUp = () => { if (canRecord()) recordKeyUp() }
     keystrokeBuffer = []
     lastKeystrokeTime = 0
-    document.addEventListener('keydown', onKeyDown, { passive: true })
-    document.addEventListener('keyup', onKeyUp, { passive: true })
-    return () => {
-      document.removeEventListener('keydown', onKeyDown)
-      document.removeEventListener('keyup', onKeyUp)
+    document.addEventListener('keydown', keyDown, { passive: true })
+    document.addEventListener('keyup', keyUp, { passive: true })
+    const cleanup = () => {
+      if (trainingKeystrokesCleanup !== cleanup) return
+      document.removeEventListener('keydown', keyDown)
+      document.removeEventListener('keyup', keyUp)
+      trainingKeystrokesCleanup = null
     }
+    trainingKeystrokesCleanup = cleanup
+    return cleanup
   }
 
   const startTrainingMouse = () => {
+    trainingMouseCleanup?.()
+    const generation = profileStateGeneration
+    const token = getProfileSessionToken()
+    const canRecord = () => token !== null && generation === profileStateGeneration
+      && token === getProfileSessionToken() && !isActive.value
+    const mouseMove = (event: MouseEvent) => { if (canRecord()) recordMouseMove(event) }
+    const mouseClick = (event: MouseEvent) => { if (canRecord()) recordMouseClick(event) }
     mouseBuffer = []
-    document.addEventListener('mousemove', onMouseMove, { passive: true })
-    document.addEventListener('click', onMouseClick, { passive: true })
-    return () => {
-      document.removeEventListener('mousemove', onMouseMove)
-      document.removeEventListener('click', onMouseClick)
+    document.addEventListener('mousemove', mouseMove, { passive: true })
+    document.addEventListener('click', mouseClick, { passive: true })
+    const cleanup = () => {
+      if (trainingMouseCleanup !== cleanup) return
+      document.removeEventListener('mousemove', mouseMove)
+      document.removeEventListener('click', mouseClick)
+      trainingMouseCleanup = null
     }
+    trainingMouseCleanup = cleanup
+    return cleanup
   }
 
   const getTrainingMetrics = () => {
@@ -1352,10 +1544,12 @@ export function useSentinel() {
 
   const getProfile = () => profile ? { ...profile } as BehavioralProfile : null
 
-  const saveTrainingProfile = async () => {
+  const saveTrainingProfile = async (signal?: AbortSignal) => {
+    const requireCurrent = profileStateGuard(signal)
     const userId = stakeAddress.value
     if (!userId) return
     const deviceFp = await computeDeviceFingerprint()
+    requireCurrent()
     const { speedWpm } = analyzeKeystrokes()
     const moves = mouseBuffer.filter(m => m.type === 'move')
     const alpha = profile && profile.typingPattern.sampleCount > 0 ? 0.5 : 1.0
@@ -1413,6 +1607,7 @@ export function useSentinel() {
             events: keystrokeBuffer.map(k => ({ key: k.key, dwellMs: k.dwellMs, flightMs: k.flightMs })),
           },
         })
+        requireCurrent()
         keystrokeAeStatus.value = {
           model_kind: 'keystroke_ae',
           trained_epochs: r.trained_epochs,
@@ -1425,6 +1620,7 @@ export function useSentinel() {
       }
     }
 
+    requireCurrent()
     if (moves.length >= 51) {
       try {
         const r = await tauriInvoke<TrainMouseCnnResponse>('sentinel_train_mouse_cnn', {
@@ -1434,6 +1630,7 @@ export function useSentinel() {
             points: moves.map(m => ({ x: m.x, y: m.y, t: m.t })),
           },
         })
+        requireCurrent()
         mouseCnnStatus.value = {
           model_kind: 'mouse_cnn',
           trained_epochs: r.trained_epochs,
@@ -1446,8 +1643,9 @@ export function useSentinel() {
       }
     }
 
+    requireCurrent()
     profile.lastUpdated = Date.now()
-    saveProfile(userId, deviceFp, profile)
+    await saveProfile(userId, deviceFp, profile)
   }
 
   /**
@@ -1488,7 +1686,9 @@ export function useSentinel() {
   ): Promise<{ meanScore: number; adversarialFraction: number; sampleCount: number } | null> => {
     const userId = stakeAddress.value
     if (!userId) return null
+    const requireCurrent = profileStateGuard()
     const deviceFp = (await computeDeviceFingerprint()).substring(0, 16)
+    requireCurrent()
 
     if (modelKind === 'keystroke') {
       if (!keystrokeAeStatus.value || keystrokeAeStatus.value.trained_epochs === 0) return null
@@ -1511,8 +1711,10 @@ export function useSentinel() {
           const s = await tauriInvoke<number>('sentinel_score_keystroke_ae', {
             req: { user_address: userId, device_fp_prefix: deviceFp, events },
           })
+          requireCurrent()
           if (s >= 0) scores.push(s)
         } catch { /* ignore single-window failure */ }
+        requireCurrent()
       }
       if (scores.length === 0) return null
       const mean = scores.reduce((a, b) => a + b, 0) / scores.length
@@ -1534,8 +1736,10 @@ export function useSentinel() {
         const humanProb = await tauriInvoke<number>('sentinel_score_mouse_cnn', {
           req: { user_address: userId, device_fp_prefix: deviceFp, points: t.trajectory },
         })
+        requireCurrent()
         if (humanProb >= 0) botScores.push(1 - humanProb)
       } catch { /* ignore single-trajectory failure */ }
+      requireCurrent()
     }
     if (botScores.length === 0) return null
     const mean = botScores.reduce((a, b) => a + b, 0) / botScores.length
@@ -1558,12 +1762,16 @@ export function useSentinel() {
     return out
   }
 
-  const fetchPriorTrajectories = async (): Promise<MousePoint[][]> => {
+  const fetchPriorTrajectories = async (signal?: AbortSignal): Promise<MousePoint[][]> => {
+    const requireCurrent = profileStateGuard(signal)
     try {
+      requireCurrent()
       const priors = await invoke<SentinelPrior[]>('sentinel_priors_list', { modelKind: 'mouse' })
+      requireCurrent()
       const blobs = await Promise.all(priors.map(p =>
         invoke<SentinelPriorBlob>('sentinel_priors_load', { priorId: p.id }).catch(() => null),
       ))
+      requireCurrent()
       const out: MousePoint[][] = []
       for (const blob of blobs) {
         if (!blob || blob.model_kind !== 'mouse') continue
@@ -1579,12 +1787,16 @@ export function useSentinel() {
     }
   }
 
-  const fetchKeystrokeNegatives = async (): Promise<DigraphFeatures[]> => {
+  const fetchKeystrokeNegatives = async (signal?: AbortSignal): Promise<DigraphFeatures[]> => {
+    const requireCurrent = profileStateGuard(signal)
     try {
+      requireCurrent()
       const priors = await invoke<SentinelPrior[]>('sentinel_priors_list', { modelKind: 'keystroke' })
+      requireCurrent()
       const blobs = await Promise.all(priors.map(p =>
         invoke<SentinelPriorBlob>('sentinel_priors_load', { priorId: p.id }).catch(() => null),
       ))
+      requireCurrent()
       const out: DigraphFeatures[] = []
       for (const blob of blobs) {
         if (!blob || blob.model_kind !== 'keystroke') continue
@@ -1602,11 +1814,12 @@ export function useSentinel() {
     }
   }
 
-  const trainAIModels = async (): Promise<{
+  const trainAIModels = async (signal?: AbortSignal): Promise<{
     keystrokeAE: { trained: boolean; loss: number; samples: number; priorDigraphs: number }
     mouseCNN: { trained: boolean; loss: number; samples: number; priorTrajectories: number }
     faceEmbedder: { enrolled: boolean; progress: number }
   }> => {
+    const requireCurrent = profileStateGuard(signal)
     const userId = stakeAddress.value
     if (!userId) {
       return {
@@ -1619,6 +1832,7 @@ export function useSentinel() {
       }
     }
     const deviceFp = (await computeDeviceFingerprint()).substring(0, 16)
+    requireCurrent()
 
     let aeLoss = -1
     let aeSamples = 0
@@ -1627,7 +1841,8 @@ export function useSentinel() {
     if (keystrokeBuffer.length >= 20) {
       // Hydrate ratified keystroke priors (labeled attack digraphs) to
       // drive the AE's contrastive "push-away" pass.
-      const ratifiedNegatives = await fetchKeystrokeNegatives()
+      const ratifiedNegatives = await fetchKeystrokeNegatives(signal)
+      requireCurrent()
       priorDigraphs = ratifiedNegatives.length
       try {
         const r = await tauriInvoke<TrainKeystrokeAeResponse>('sentinel_train_keystroke_ae', {
@@ -1638,6 +1853,7 @@ export function useSentinel() {
             negative_digraphs: ratifiedNegatives,
           },
         })
+        requireCurrent()
         aeLoss = r.train_loss
         aeSamples = r.training_samples
         aeTrained = r.trained_epochs > 0 && r.training_samples >= 20
@@ -1653,13 +1869,15 @@ export function useSentinel() {
       }
     }
 
+    requireCurrent()
     let cnnLoss = -1
     let cnnSamples = 0
     let cnnTrained = false
     let priorTrajectories = 0
     const moves = mouseBuffer.filter(m => m.type === 'move')
     if (moves.length >= 51) {
-      const ratifiedBots = await fetchPriorTrajectories()
+      const ratifiedBots = await fetchPriorTrajectories(signal)
+      requireCurrent()
       priorTrajectories = ratifiedBots.length
       try {
         const r = await tauriInvoke<TrainMouseCnnResponse>('sentinel_train_mouse_cnn', {
@@ -1669,6 +1887,7 @@ export function useSentinel() {
             points: moves.map(m => ({ x: m.x, y: m.y, t: m.t })),
           },
         })
+        requireCurrent()
         cnnLoss = r.train_loss
         cnnSamples = r.training_samples
         cnnTrained = r.trained_epochs > 0 && r.training_samples >= 1
@@ -1684,6 +1903,7 @@ export function useSentinel() {
       }
     }
 
+    requireCurrent()
     return {
       keystrokeAE: { trained: aeTrained, loss: aeLoss, samples: aeSamples, priorDigraphs },
       mouseCNN: { trained: cnnTrained, loss: cnnLoss, samples: cnnSamples, priorTrajectories },
@@ -1718,50 +1938,61 @@ export function useSentinel() {
       : null,
   })
 
-  const resetProfile = async () => {
+  const hydrateBehavioralProfile = async (signal?: AbortSignal): Promise<void> => {
+    const requireCurrent = profileStateGuard(signal)
     const userId = stakeAddress.value
     if (!userId) return
     const deviceFp = await computeDeviceFingerprint()
-    const key = `sentinel_profile_${userId}_${deviceFp.substring(0, 16)}`
-    try { localStorage.removeItem(key) } catch { /* ignore */ }
+    requireCurrent()
+    const loaded = await loadProfile(userId, deviceFp)
+    requireCurrent()
+    faceEmbedder = null
+    profile = loaded
+    if (loaded) loadAIModels(loaded)
+  }
+
+  const resetProfile = async (signal?: AbortSignal) => {
+    const requireCurrent = profileStateGuard(signal)
+    const userId = stakeAddress.value
+    if (!userId) return
+    const deviceFp = await computeDeviceFingerprint()
+    requireCurrent()
+    await tauriInvoke('sentinel_reset_user_models', {
+      userAddress: userId,
+      deviceFpPrefix: deviceFp.substring(0, 16),
+    })
+    requireCurrent()
+    try { localStorage.removeItem(legacyProfileKey(userId, deviceFp)) } catch { /* ignore */ }
     profile = null
     faceEmbedder = null
     keystrokeAeStatus.value = null
     mouseCnnStatus.value = null
-    try {
-      await tauriInvoke('sentinel_reset_user_models', {
-        userAddress: userId,
-        deviceFpPrefix: deviceFp.substring(0, 16),
-      })
-    } catch (err) {
-      console.warn('[sentinel] reset user models IPC failed', err)
-    }
   }
 
   const setAIScoringEnabled = (enabled: boolean) => {
+    const requireCurrent = profileStateGuard()
     aiScoringEnabled.value = enabled
-    try { localStorage.setItem(AI_SCORING_STORAGE_KEY, enabled ? '1' : '0') }
-    catch { /* localStorage not available */ }
     // Persist to per-profile settings (scope=sync) so the toggle
     // propagates to the user's other devices.
     void (async () => {
       const { useSettings } = await import('./useSettings')
+      requireCurrent()
       useSettings()
         .setSetting('sentinel.ai_scoring_enabled', enabled ? 'true' : 'false')
         .catch(() => { /* no profile yet */ })
-    })()
+    })().catch(() => { /* profile changed while loading settings */ })
   }
 
   const setPasteClassifierEnabled = (enabled: boolean) => {
+    const requireCurrent = profileStateGuard()
     pasteClassifierEnabled.value = enabled
-    try { localStorage.setItem(PASTE_CLASSIFIER_STORAGE_KEY, enabled ? '1' : '0') }
-    catch { /* localStorage not available */ }
     void (async () => {
       const { useSettings } = await import('./useSettings')
+      requireCurrent()
       useSettings()
         .setSetting('sentinel.paste_classifier_enabled', enabled ? 'true' : 'false')
         .catch(() => { /* no profile yet */ })
-    })()
+    })().catch(() => { /* profile changed while loading settings */ })
   }
 
   /** Toggle camera opt-in mid-session. Caller is responsible for acquiring
@@ -1769,6 +2000,7 @@ export function useSentinel() {
    * face-verification loop (see docs/sentinel.md §Camera). This only flips
    * the flag that gates face-related signals in computeScores(). */
   const setCameraOptedIn = (opted: boolean) => {
+    cameraGeneration++
     cameraOptedIn.value = opted
     if (!opted) {
       facePresent = undefined
@@ -1798,6 +2030,7 @@ export function useSentinel() {
     // Session controls
     start,
     stop,
+    stopForProfileLock,
     setElement,
     isAssessmentElement,
     reportFaceDetection,
@@ -1820,6 +2053,7 @@ export function useSentinel() {
     getTrainingMetrics,
     clearTrainingBuffers,
     getProfile,
+    hydrateBehavioralProfile,
     saveTrainingProfile,
     resetProfile,
 

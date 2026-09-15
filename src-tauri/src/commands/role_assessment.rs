@@ -11,16 +11,17 @@
 //! Thin `#[tauri::command]` handlers delegate to pure `*_impl` functions
 //! taking `&Connection`, keeping the logic unit-testable.
 
+use crate::profile::scope::ProfileState as State;
 use ed25519_dalek::SigningKey;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
-use tauri::State;
 
 use crate::commands::credentials::{
     issue_credential_impl, load_issuer_key, now_rfc3339, IssuancePolicy, IssueCredentialRequest,
 };
 use crate::crypto::did::{derive_did_key, Did};
 use crate::crypto::hash::entity_id;
+use crate::db::executor::DatabaseWorkload;
 use crate::domain::vc::{Claim, CredentialType, RoleClaim, VerifiableCredential};
 use crate::AppState;
 
@@ -359,6 +360,28 @@ pub fn issue_role_credential_impl(
     issue_credential_impl(conn, issuer_key, &org_issuer, &req, now)
 }
 
+fn issue_role_credential_transactional(
+    conn: &Connection,
+    issuer_key: &SigningKey,
+    issuer_did: &Did,
+    role_assessment_id: &str,
+    subject: &Did,
+    integrity_session_id: &str,
+    now: &str,
+) -> Result<VerifiableCredential, String> {
+    crate::db::with_transaction(conn, || {
+        issue_role_credential_impl(
+            conn,
+            issuer_key,
+            issuer_did,
+            role_assessment_id,
+            subject,
+            integrity_session_id,
+            now,
+        )
+    })
+}
+
 // ============================================================================
 // Tauri command handlers
 // ============================================================================
@@ -370,18 +393,18 @@ pub async fn create_organization(
     owner_address: String,
     did: Option<String>,
 ) -> Result<Organization, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "db lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    create_organization_impl(
-        db.conn(),
-        &name,
-        &owner_address,
-        did.as_deref(),
-        &now_rfc3339(),
-    )
+    let now = now_rfc3339();
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Instructor,
+            state.profile_lease(),
+            "role-assessment.organization.create",
+            move |db| {
+                create_organization_impl(db.conn(), &name, &owner_address, did.as_deref(), &now)
+            },
+        )
+        .await
 }
 
 #[tauri::command]
@@ -389,12 +412,15 @@ pub async fn list_organizations(
     state: State<'_, AppState>,
     owner_address: Option<String>,
 ) -> Result<Vec<Organization>, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "db lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    list_organizations_impl(db.conn(), owner_address.as_deref())
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Instructor,
+            state.profile_lease(),
+            "role-assessment.organization.list",
+            move |db| list_organizations_impl(db.conn(), owner_address.as_deref()),
+        )
+        .await
 }
 
 #[tauri::command]
@@ -402,12 +428,16 @@ pub async fn create_role_assessment(
     state: State<'_, AppState>,
     req: CreateRoleAssessmentRequest,
 ) -> Result<RoleAssessment, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "db lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    create_role_assessment_impl(db.conn(), &req, &now_rfc3339())
+    let now = now_rfc3339();
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Instructor,
+            state.profile_lease(),
+            "role-assessment.create",
+            move |db| create_role_assessment_impl(db.conn(), &req, &now),
+        )
+        .await
 }
 
 #[tauri::command]
@@ -415,12 +445,15 @@ pub async fn list_role_assessments(
     state: State<'_, AppState>,
     org_id: Option<String>,
 ) -> Result<Vec<RoleAssessment>, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "db lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    list_role_assessments_impl(db.conn(), org_id.as_deref())
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Instructor,
+            state.profile_lease(),
+            "role-assessment.list",
+            move |db| list_role_assessments_impl(db.conn(), org_id.as_deref()),
+        )
+        .await
 }
 
 #[tauri::command]
@@ -428,12 +461,15 @@ pub async fn get_role_assessment(
     state: State<'_, AppState>,
     id: String,
 ) -> Result<Option<RoleAssessment>, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "db lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    get_role_assessment_impl(db.conn(), &id)
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "role-assessment.get",
+            move |db| get_role_assessment_impl(db.conn(), &id),
+        )
+        .await
 }
 
 #[tauri::command]
@@ -442,12 +478,16 @@ pub async fn set_role_assessment_status(
     id: String,
     status: String,
 ) -> Result<RoleAssessment, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "db lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    set_role_assessment_status_impl(db.conn(), &id, &status, &now_rfc3339())
+    let now = now_rfc3339();
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Instructor,
+            state.profile_lease(),
+            "role-assessment.status.set",
+            move |db| set_role_assessment_status_impl(db.conn(), &id, &status, &now),
+        )
+        .await
 }
 
 #[tauri::command]
@@ -459,20 +499,25 @@ pub async fn issue_role_credential(
 ) -> Result<VerifiableCredential, String> {
     let (signing_key, issuer_did) = load_issuer_key(&state).await?;
     let now = now_rfc3339();
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "db lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    issue_role_credential_impl(
-        db.conn(),
-        &signing_key,
-        &issuer_did,
-        &role_assessment_id,
-        &Did(subject),
-        &integrity_session_id,
-        &now,
-    )
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Instructor,
+            state.profile_lease(),
+            "role-assessment.credential.issue",
+            move |db| {
+                issue_role_credential_transactional(
+                    db.conn(),
+                    &signing_key,
+                    &issuer_did,
+                    &role_assessment_id,
+                    &Did(subject),
+                    &integrity_session_id,
+                    &now,
+                )
+            },
+        )
+        .await
 }
 
 #[cfg(test)]
@@ -676,6 +721,59 @@ mod tests {
             .unwrap();
         let org = get_organization_impl(conn, &org_id).unwrap().unwrap();
         assert_eq!(org.did.as_deref(), Some(owner.0.as_str()));
+    }
+
+    #[test]
+    fn failed_credential_insert_rolls_back_org_did_adoption() {
+        let (db, key, owner, subject) = setup();
+        let conn = db.conn();
+        let role_assessment_id = ready_to_issue(conn, None);
+        conn.execute_batch(
+            "CREATE TRIGGER fail_role_credential_insert BEFORE INSERT ON credentials \
+             BEGIN SELECT RAISE(ABORT, 'injected credential failure'); END;",
+        )
+        .unwrap();
+
+        let error = issue_role_credential_transactional(
+            conn,
+            &key,
+            &owner,
+            &role_assessment_id,
+            &subject,
+            "sess_ok",
+            NOW,
+        )
+        .unwrap_err();
+
+        assert!(error.contains("injected credential failure"));
+        let organization_did: Option<String> = conn
+            .query_row(
+                "SELECT o.did FROM organizations o \
+                 JOIN role_assessments ra ON ra.org_id = o.id WHERE ra.id = ?1",
+                [&role_assessment_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(organization_did, None);
+        let status_lists: i64 = conn
+            .query_row("SELECT COUNT(*) FROM credential_status_lists", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(status_lists, 0);
+
+        conn.execute_batch("DROP TRIGGER fail_role_credential_insert")
+            .unwrap();
+        issue_role_credential_transactional(
+            conn,
+            &key,
+            &owner,
+            &role_assessment_id,
+            &subject,
+            "sess_ok",
+            NOW,
+        )
+        .unwrap();
     }
 
     #[test]

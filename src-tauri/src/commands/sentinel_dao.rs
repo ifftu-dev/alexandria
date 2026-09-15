@@ -8,10 +8,11 @@
 //! convenient read path for UI code that wants DAO metadata without caring
 //! about generic DAO listing.
 
+use crate::profile::scope::ProfileState as State;
 use rusqlite::params;
 use serde::Serialize;
-use tauri::State;
 
+use crate::db::executor::DatabaseWorkload;
 use crate::domain::governance::{DaoInfo, DaoMember};
 use crate::AppState;
 
@@ -41,13 +42,18 @@ pub struct SentinelDaoInfo {
 /// expected transient state, not an error.
 #[tauri::command]
 pub async fn sentinel_dao_get_info(state: State<'_, AppState>) -> Result<SentinelDaoInfo, String> {
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    let conn = db.conn();
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "sentinel_dao.get_info",
+            |db| sentinel_dao_get_info_db(db.conn()),
+        )
+        .await
+}
 
+fn sentinel_dao_get_info_db(conn: &rusqlite::Connection) -> Result<SentinelDaoInfo, String> {
     let dao = conn
         .query_row(
             "SELECT id, name, description, icon_emoji, scope_type, scope_id, status,
@@ -110,5 +116,17 @@ mod tests {
         // Guard against accidental rename — clients hard-code these.
         assert_eq!(SENTINEL_DAO_ID, "sentinel-dao");
         assert_eq!(SENTINEL_PRIOR_CATEGORY, "sentinel_prior");
+    }
+
+    #[test]
+    fn seeded_dao_can_be_loaded_through_the_command_query() {
+        let db = crate::db::Database::open_in_memory().expect("database");
+        db.run_migrations().expect("migrations");
+        let info = sentinel_dao_get_info_db(db.conn()).expect("Sentinel DAO");
+        assert_eq!(info.dao.id, SENTINEL_DAO_ID);
+        assert_eq!(
+            info.recognized_categories,
+            vec![SENTINEL_PRIOR_CATEGORY.to_string()]
+        );
     }
 }

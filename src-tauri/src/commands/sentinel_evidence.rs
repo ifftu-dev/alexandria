@@ -9,8 +9,9 @@
 //! There is deliberately no command that persists evidence without a decision,
 //! and none that re-opens a decision once made. See `sentinel::evidence`.
 
-use tauri::State;
+use crate::profile::scope::ProfileState as State;
 
+use crate::db::executor::DatabaseWorkload;
 use crate::sentinel::evidence::{self, EvidencePreview, EvidenceSummary};
 use crate::AppState;
 
@@ -42,16 +43,20 @@ pub async fn sentinel_evidence_decide(
     session_id: String,
     granted: bool,
 ) -> Result<usize, String> {
-    let guard = state.db.lock().map_err(|e| e.to_string())?;
-    let db = guard.as_ref().ok_or("database not initialized")?;
-    evidence::decide(
-        db.conn(),
-        &state.evidence_staging,
-        &session_id,
-        granted,
-        &now_iso(),
-    )
-    .map_err(|e| e.to_string())
+    let staging = state.evidence_staging.clone();
+    let now = now_iso();
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "sentinel_evidence.decide",
+            move |db| {
+                evidence::decide(db.conn(), &staging, &session_id, granted, &now)
+                    .map_err(|e| e.to_string())
+            },
+        )
+        .await
 }
 
 /// What is currently retained on disk for this session, so a learner can see
@@ -61,9 +66,15 @@ pub async fn sentinel_evidence_stored(
     state: State<'_, AppState>,
     session_id: String,
 ) -> Result<EvidenceSummary, String> {
-    let guard = state.db.lock().map_err(|e| e.to_string())?;
-    let db = guard.as_ref().ok_or("database not initialized")?;
-    evidence::stored_summary(db.conn(), &session_id).map_err(|e| e.to_string())
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "sentinel_evidence.stored",
+            move |db| evidence::stored_summary(db.conn(), &session_id).map_err(|e| e.to_string()),
+        )
+        .await
 }
 
 /// Delete this session's retained evidence now, ahead of expiry.
@@ -86,22 +97,15 @@ pub async fn sentinel_evidence_delete(
     // Marked first and inside the same lock as the local delete, so there is no
     // window where the local copy is gone and nothing records that the remote
     // ones were meant to follow it.
-    let deleted = {
-        let guard = state.db.lock().map_err(|e| e.to_string())?;
-        let db = guard.as_ref().ok_or("database not initialized")?;
-        let sent_to = crate::commands::holder_release::releases_for_session(db.conn(), &session_id)
-            .map_err(|e| e.to_string())?;
-        for (directory_url, run_id) in &sent_to {
-            crate::commands::holder_release::want_withdrawal(
-                db.conn(),
-                &session_id,
-                directory_url,
-                run_id,
-            )
-            .map_err(|e| e.to_string())?;
-        }
-        evidence::delete_for_session(db.conn(), &session_id).map_err(|e| e.to_string())?
-    };
+    let deleted = state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "sentinel_evidence.delete",
+            move |db| delete_and_queue_withdrawals(db.conn(), &session_id),
+        )
+        .await?;
 
     // Best effort, on purpose. A withdrawal that could not be sent is still
     // owed and still queued; reporting the local deletion as a failure because
@@ -114,6 +118,28 @@ pub async fn sentinel_evidence_delete(
         );
     }
 
+    Ok(deleted)
+}
+
+fn delete_and_queue_withdrawals(
+    conn: &rusqlite::Connection,
+    session_id: &str,
+) -> Result<usize, String> {
+    let transaction = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+    let sent_to = crate::commands::holder_release::releases_for_session(&transaction, session_id)
+        .map_err(|e| e.to_string())?;
+    for (directory_url, run_id) in &sent_to {
+        crate::commands::holder_release::want_withdrawal(
+            &transaction,
+            session_id,
+            directory_url,
+            run_id,
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    let deleted =
+        evidence::delete_for_session(&transaction, session_id).map_err(|e| e.to_string())?;
+    transaction.commit().map_err(|e| e.to_string())?;
     Ok(deleted)
 }
 
@@ -139,7 +165,73 @@ pub async fn sentinel_evidence_stored_preview(
     state: State<'_, AppState>,
     session_id: String,
 ) -> Result<Vec<EvidencePreview>, String> {
-    let guard = state.db.lock().map_err(|e| e.to_string())?;
-    let db = guard.as_ref().ok_or("database not initialized")?;
-    evidence::preview_stored(db.conn(), &session_id).map_err(|e| e.to_string())
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "sentinel_evidence.preview_stored",
+            move |db| evidence::preview_stored(db.conn(), &session_id).map_err(|e| e.to_string()),
+        )
+        .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deletion_and_remote_withdrawal_intent_commit_atomically() {
+        let conn = rusqlite::Connection::open_in_memory().expect("database");
+        conn.execute_batch(
+            "CREATE TABLE integrity_evidence_release (
+                 session_id TEXT NOT NULL,
+                 directory_url TEXT NOT NULL,
+                 run_id TEXT NOT NULL,
+                 revoked_at TEXT,
+                 revoke_wanted_at TEXT
+             );
+             CREATE TABLE integrity_evidence (session_id TEXT NOT NULL);
+             INSERT INTO integrity_evidence_release (session_id, directory_url, run_id)
+             VALUES ('session', 'https://holder.example', 'run');
+             INSERT INTO integrity_evidence (session_id) VALUES ('session');
+             CREATE TRIGGER reject_evidence_delete
+             BEFORE DELETE ON integrity_evidence
+             BEGIN
+                 SELECT RAISE(ABORT, 'injected evidence delete failure');
+             END;",
+        )
+        .expect("fixture");
+
+        assert!(delete_and_queue_withdrawals(&conn, "session").is_err());
+        let wanted: Option<String> = conn
+            .query_row(
+                "SELECT revoke_wanted_at FROM integrity_evidence_release",
+                [],
+                |row| row.get(0),
+            )
+            .expect("withdrawal row");
+        assert!(wanted.is_none(), "withdrawal intent must roll back");
+        let retained: i64 = conn
+            .query_row("SELECT COUNT(*) FROM integrity_evidence", [], |row| {
+                row.get(0)
+            })
+            .expect("evidence count");
+        assert_eq!(retained, 1);
+
+        conn.execute_batch("DROP TRIGGER reject_evidence_delete")
+            .expect("remove fault");
+        assert_eq!(
+            delete_and_queue_withdrawals(&conn, "session").expect("retry"),
+            1
+        );
+        let wanted: Option<String> = conn
+            .query_row(
+                "SELECT revoke_wanted_at FROM integrity_evidence_release",
+                [],
+                |row| row.get(0),
+            )
+            .expect("withdrawal row");
+        assert!(wanted.is_some());
+    }
 }
