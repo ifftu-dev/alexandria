@@ -33,7 +33,7 @@ opens the profile manager or activates a user profile.
 | `receipt_issuer_keys` | Relay PeerIds trusted to sign username receipts | Both configured relays |
 | `stake_registry_founder_keys` | Named Ed25519 keys that verify the bootstrap registry | Three founder public keys |
 | `signed_bootstrap_registry_identity` | Expected schema and SHA-256 of the bundled signed registry | Bound to `bootstrap_registry.json` |
-| `subject_qualification_policy_digests` | Approved subject-policy identities | Empty until T03 |
+| `subject_qualification_policy_digests` | SHA-256 digests of the exact canonical subject qualification policies this network pins; each needs its document embedded in the build, and app setup refuses a missing, extra or overlapping policy | Empty: no pinned policy, so field-opinion posting is refused until reviewed demo policies are pinned |
 | `cloud_https_origin` / `cloud_service_id` | Optional Alexandria Cloud identity | Disabled (`null`) |
 | `governance_locator` / committee fields | Optional governance/committee service identity | Disabled |
 | `protocol_namespace` | Namespace intended for all network protocols | `/alexandria/preprod` |

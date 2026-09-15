@@ -190,28 +190,47 @@ pub fn credential_trust_impl(
     };
     let policy = VerificationPolicy::default();
     let verification = verify_credential_db(conn, &credential, verification_time, &policy);
-    let context = match completion_claims_for_credential(conn, credential_id)?.as_slice() {
-        [] | [(_, None)] => None,
-        [(claim_id, Some(_))] => Some((
-            load_claim_context(conn, claim_id)?,
-            list_completion_endorsements(conn, claim_id)?,
-        )),
-        _ => return Err("credential is listed by more than one completion claim".into()),
-    };
-    let evidence = context
-        .as_ref()
-        .map(|(context, endorsements)| CourseEndorsementEvidence {
-            policy: &context.policy,
-            binding: &context.binding,
-            endorsements,
-        });
+    let evidence = stored_completion_evidence(conn, credential_id)?;
     Ok(Some(classify_credential(
         &credential,
         &verification,
         &policy,
         network_id,
-        evidence,
+        evidence.as_ref().map(StoredCompletionEvidence::as_evidence),
     )))
+}
+
+/// Exact completion policy, binding, and stored endorsements of the single
+/// claim that lists a credential.
+pub(crate) struct StoredCompletionEvidence {
+    context: ClaimContext,
+    endorsements: Vec<CourseCompletionEndorsement>,
+}
+
+impl StoredCompletionEvidence {
+    pub(crate) fn as_evidence(&self) -> CourseEndorsementEvidence<'_> {
+        CourseEndorsementEvidence {
+            policy: &self.context.policy,
+            binding: &self.context.binding,
+            endorsements: &self.endorsements,
+        }
+    }
+}
+
+/// Completion evidence for a credential, if a claim with an exact policy
+/// lists it. Corrupt or ambiguous stored evidence is an error.
+pub(crate) fn stored_completion_evidence(
+    conn: &Connection,
+    credential_id: &str,
+) -> Result<Option<StoredCompletionEvidence>, String> {
+    match completion_claims_for_credential(conn, credential_id)?.as_slice() {
+        [] | [(_, None)] => Ok(None),
+        [(claim_id, Some(_))] => Ok(Some(StoredCompletionEvidence {
+            context: load_claim_context(conn, claim_id)?,
+            endorsements: list_completion_endorsements(conn, claim_id)?,
+        })),
+        _ => Err("credential is listed by more than one completion claim".into()),
+    }
 }
 
 /// Claims listing a credential, with the frozen enrollment policy if any.

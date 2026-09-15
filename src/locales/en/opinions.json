@@ -24,7 +24,7 @@
   "new": {
     "title": "Post an Opinion",
     "intro": "Opinions belong to a topic. To post in a topic you need at least one credential at the apply level or higher for a skill in that topic.",
-    "noEligibleWarning": "You don't have a qualifying credential yet. Earn a credential at the apply level or higher in any skill, and you'll be able to post opinions in that skill's topic.",
+    "noEligibleWarning": "You don't have a qualifying credential yet. Posting in a topic needs an apply-level or higher credential issued, or endorsed through an exact course version, by someone this network's reviewed policy accepts for that topic. Your own claims stay visible but don't unlock posting, and topics without a reviewed policy are closed to posting.",
     "topicHeading": "Topic",
     "contentHeading": "Content",
     "titleLabel": "Title",
@@ -42,7 +42,7 @@
     "uploadedPrefix": "Uploaded:",
     "credentialsHeading": "Credentials",
     "credentialsHelp": "Choose which of your credentials back this opinion. At least one must qualify you to post in this topic — we've pre-selected those. You can add or remove credentials below.",
-    "noQualifying": "You don't have a qualifying credential for this topic. Pick a different topic.",
+    "noQualifying": "None of your credentials meet this topic's reviewed policy. Pick a topic where you hold an accepted credential.",
     "verified": "Verified",
     "credentialMeta": "score {score}% · issued {date}",
     "loadFailed": "Couldn't load topics: {error}",

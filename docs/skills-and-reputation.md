@@ -121,11 +121,16 @@ field-opinion posting or another proficiency-derived privilege. Self-issued
 course credentials and a second identity controlled by the same person therefore
 cannot satisfy a privilege unless the policy explicitly permits that route.
 
-This distinction is normative but the runtime policy gate is still pending in
-remediation package T03. The current `publish_opinion` implementation checks for
-an active `apply`-or-higher credential under the subject field without yet
-checking an accepted-issuer policy. Treat that as a known implementation gap,
-not the intended security model.
+Field-opinion posting enforces this through pinned subject qualification
+policies. `publish_opinion`, inbound opinion gossip, pending-opinion promotion,
+and the eligible-field picker share `db::opinion_eligibility`, which re-verifies
+each referenced credential from its signed bytes and evaluates it against the
+single pinned policy for the field. A field with no pinned policy cannot be
+posted in, and inbound opinions for it are rejected rather than queued. The
+preprod network profile pins no policies yet, so posting is refused with an
+explanation until reviewed demo policies are pinned. Aggregation, reputation,
+and talent-index readers still use their earlier inputs and are later T03
+slices.
 
 The shared credential verifier now classifies incomplete issuer-key or
 status-list evidence as `pending`, separately from `reject`. Only `accept` is an

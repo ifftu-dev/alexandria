@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::LazyLock;
 
+use alexandria_verify::qualification::QualificationPolicySet;
 use ed25519_dalek::VerifyingKey;
 use libp2p::PeerId;
 use serde::de::{MapAccess, SeqAccess, Visitor};
@@ -16,6 +17,11 @@ pub const MAX_NETWORK_PROFILE_BYTES: usize = 64 * 1024;
 const EMBEDDED_PREPROD_JSON: &[u8] = include_bytes!("../resources/networks/preprod.json");
 const EMBEDDED_BOOTSTRAP_REGISTRY_JSON: &[u8] =
     include_bytes!("../resources/bootstrap_registry.json");
+/// Exact canonical bytes of every reviewed subject qualification policy this
+/// build ships. Each must match a digest in
+/// `subject_qualification_policy_digests`, and every pinned digest must have
+/// its document here. None are pinned yet, so no opinion privilege applies.
+const EMBEDDED_QUALIFICATION_POLICY_DOCUMENTS: &[&[u8]] = &[];
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -75,10 +81,28 @@ pub enum NetworkProfileError {
     Invalid(String),
     #[error("embedded bootstrap registry digest does not match the network profile")]
     BootstrapRegistryMismatch,
+    #[error("subject qualification policies are invalid: {0}")]
+    QualificationPolicy(String),
 }
 
 static EMBEDDED_PREPROD: LazyLock<Result<NetworkProfile, NetworkProfileError>> =
     LazyLock::new(|| NetworkProfile::parse(EMBEDDED_PREPROD_JSON));
+
+static EMBEDDED_QUALIFICATION_POLICIES: LazyLock<
+    Result<QualificationPolicySet, NetworkProfileError>,
+> = LazyLock::new(|| {
+    embedded_preprod()
+        .map_err(|error| NetworkProfileError::Invalid(error.to_string()))?
+        .qualification_policies(EMBEDDED_QUALIFICATION_POLICY_DOCUMENTS)
+});
+
+/// The pinned subject qualification policies for the embedded network. App
+/// setup validates this set before any profile opens, so privilege checks
+/// never fall back to an empty or partial set after an error.
+pub fn embedded_qualification_policies(
+) -> Result<&'static QualificationPolicySet, &'static NetworkProfileError> {
+    EMBEDDED_QUALIFICATION_POLICIES.as_ref()
+}
 
 pub fn embedded_preprod() -> Result<&'static NetworkProfile, &'static NetworkProfileError> {
     EMBEDDED_PREPROD.as_ref()
@@ -245,7 +269,22 @@ impl NetworkProfile {
         if actual != self.signed_bootstrap_registry_identity.sha256 {
             return Err(NetworkProfileError::BootstrapRegistryMismatch);
         }
+        self.qualification_policies(EMBEDDED_QUALIFICATION_POLICY_DOCUMENTS)?;
         Ok(())
+    }
+
+    /// Build the policy set from exact policy documents. Every pinned digest
+    /// must be supplied exactly once and nothing unpinned is accepted.
+    pub fn qualification_policies(
+        &self,
+        documents: &[&[u8]],
+    ) -> Result<QualificationPolicySet, NetworkProfileError> {
+        QualificationPolicySet::from_pinned(
+            documents,
+            &self.subject_qualification_policy_digests,
+            &self.network_id,
+        )
+        .map_err(|error| NetworkProfileError::QualificationPolicy(error.to_string()))
     }
 }
 
@@ -489,6 +528,24 @@ mod tests {
         assert_eq!(profile.protocol_namespace, "/alexandria/preprod");
         assert!(profile.cloud_https_origin.is_none());
         assert!(profile.committee_instance_id.is_none());
+    }
+
+    #[test]
+    fn embedded_qualification_policies_are_complete_and_pinned_digests_need_documents() {
+        let set = embedded_qualification_policies().unwrap();
+        assert_eq!(set.network_id(), "preprod");
+        assert!(set.policies().is_empty());
+
+        let mut profile = valid_profile();
+        profile.subject_qualification_policy_digests = vec!["ab".repeat(32)];
+        assert!(matches!(
+            profile.qualification_policies(&[]),
+            Err(NetworkProfileError::QualificationPolicy(_))
+        ));
+        assert!(matches!(
+            profile.verify_embedded_resources(),
+            Err(NetworkProfileError::QualificationPolicy(_))
+        ));
     }
 
     #[test]
