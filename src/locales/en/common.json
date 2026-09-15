@@ -74,7 +74,12 @@
     "confirmHint": "Pinning trusts these exact genesis bytes on this device. Discovery and software updates cannot replace them.",
     "pin": "Pin trust anchor",
     "pinned": "The governance trust anchor is now pinned on this device.",
-    "alreadyPinned": "These exact genesis bytes were already pinned on this device."
+    "alreadyPinned": "These exact genesis bytes were already pinned on this device.",
+    "canonicalLocator": "Normalized locator (used for retrieval and the QR code)",
+    "coreHash": "Genesis core hash",
+    "envelopeHash": "Signed envelope hash",
+    "retrievedMismatch": "The retrieved genesis does not match the reviewed locator. Review the locator again.",
+    "equivalentAlreadyPinned": "An equivalent copy of this genesis with different signature bytes was already pinned on this device. The stored copy was kept."
   },
 
   "status": {

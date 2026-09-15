@@ -436,6 +436,12 @@ export interface GovernanceGenesisLocator {
   locations: string[]
 }
 
+/** Returned by `governance_preview_genesis_locator`. Retrieval and sharing
+ *  must use `canonical_uri`, never the text that was typed. */
+export interface ReviewedGenesisLocator extends GovernanceGenesisLocator {
+  canonical_uri: string
+}
+
 export interface GenesisMemberPreview {
   member_id: string
   identity_public_key_hex: string
@@ -445,7 +451,10 @@ export interface GenesisMemberPreview {
 
 export interface GenesisPreview {
   dao_id: string
-  genesis_hash: string
+  /** Hash of the genesis core; equals `dao_id` for every valid envelope. */
+  core_hash: string
+  /** BLAKE3 of the exact signed envelope bytes. */
+  envelope_hash: string
   name: string
   scope_type: string
   scope_id: string
@@ -478,6 +487,8 @@ export interface RetrievedGenesisPreview {
 export interface PinGenesisResponse {
   preview: GenesisPreview
   newly_pinned: boolean
+  /** A differently signed envelope over the same core was already pinned and kept. */
+  stored_envelope_differs: boolean
 }
 
 /** Returned by `sentinel_dao_get_info`. */

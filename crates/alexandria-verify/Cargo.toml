@@ -47,3 +47,8 @@ base64 = "0.21"
 thiserror = "2"
 hex = "0.4"
 bs58 = "0.5"
+
+[dev-dependencies]
+# `hazmat` signs with a non-default nonce, producing a second valid signature
+# over identical genesis bytes for the DAO-id regression test.
+ed25519-dalek = { version = "2", features = ["hazmat"] }

@@ -73,6 +73,39 @@ pub fn url_is_publicly_routable(url: &str) -> Result<(), String> {
 }
 
 fn reject_private_url(url: &str) -> Result<(), ResolveError> {
+    let parsed = parse_fetchable_url(url)?;
+    let Some(name) = reject_private_host_without_dns(&parsed)? else {
+        return Ok(());
+    };
+
+    // Resolve and check every address. `to_socket_addrs` needs a port;
+    // the scheme's default is fine because the port does not affect
+    // which addresses a name resolves to.
+    //
+    // This lookup blocks the calling thread and cannot be cancelled by a
+    // `tokio::time::timeout`. Time-budgeted callers use
+    // [`reject_unreviewable_https_source`] instead and rely on the client's
+    // connect-time resolver, which applies the same address check.
+    use std::net::ToSocketAddrs;
+    let port = parsed.port_or_known_default().unwrap_or(80);
+    let resolved = (name, port)
+        .to_socket_addrs()
+        .map_err(|e| ResolveError::BlockedUrl(format!("could not resolve '{name}': {e}")))?;
+
+    let mut any = false;
+    for addr in resolved {
+        any = true;
+        reject_if_not_global(addr.ip())?;
+    }
+    if !any {
+        return Err(ResolveError::BlockedUrl(format!(
+            "'{name}' resolved to no addresses"
+        )));
+    }
+    Ok(())
+}
+
+fn parse_fetchable_url(url: &str) -> Result<url::Url, ResolveError> {
     let parsed = url::Url::parse(url)
         .map_err(|e| ResolveError::BlockedUrl(format!("unparseable URL: {e}")))?;
 
@@ -92,14 +125,19 @@ fn reject_private_url(url: &str) -> Result<(), ResolveError> {
             "URLs with embedded credentials are refused".into(),
         ));
     }
+    Ok(parsed)
+}
 
+/// Every host check that needs no DNS. Returns the domain name that still has
+/// to be resolved, or `None` for an acceptable IP literal.
+fn reject_private_host_without_dns(parsed: &url::Url) -> Result<Option<&str>, ResolveError> {
     let host = parsed
         .host()
         .ok_or_else(|| ResolveError::BlockedUrl("URL has no host".into()))?;
 
     match host {
-        url::Host::Ipv4(v4) => reject_if_not_global(std::net::IpAddr::V4(v4)),
-        url::Host::Ipv6(v6) => reject_if_not_global(std::net::IpAddr::V6(v6)),
+        url::Host::Ipv4(v4) => reject_if_not_global(std::net::IpAddr::V4(v4)).map(|()| None),
+        url::Host::Ipv6(v6) => reject_if_not_global(std::net::IpAddr::V6(v6)).map(|()| None),
         url::Host::Domain(name) => {
             // A name that spells out loopback is refused before the resolver
             // is consulted, so a hostile DNS answer is not needed to catch it.
@@ -109,28 +147,73 @@ fn reject_private_url(url: &str) -> Result<(), ResolveError> {
                     "URL points to loopback address".into(),
                 ));
             }
-
-            // Resolve and check every address. `to_socket_addrs` needs a port;
-            // the scheme's default is fine because the port does not affect
-            // which addresses a name resolves to.
-            use std::net::ToSocketAddrs;
-            let port = parsed.port_or_known_default().unwrap_or(80);
-            let resolved = (name, port).to_socket_addrs().map_err(|e| {
-                ResolveError::BlockedUrl(format!("could not resolve '{name}': {e}"))
-            })?;
-
-            let mut any = false;
-            for addr in resolved {
-                any = true;
-                reject_if_not_global(addr.ip())?;
-            }
-            if !any {
-                return Err(ResolveError::BlockedUrl(format!(
-                    "'{name}' resolved to no addresses"
-                )));
-            }
-            Ok(())
+            Ok(Some(name))
         }
+    }
+}
+
+/// Names that never identify a public origin: single-label hosts and
+/// special-use or private-use suffixes (RFC 6761, 6762, 7686, 8375, 9476, and
+/// names ICANN withholds because they collide with private networks).
+pub(crate) fn is_special_use_domain(name: &str) -> bool {
+    const SPECIAL_USE_SUFFIXES: &[&str] = &[
+        "localhost",
+        "local",
+        "internal",
+        "intranet",
+        "home.arpa",
+        "arpa",
+        "onion",
+        "invalid",
+        "test",
+        "example",
+        "alt",
+        "lan",
+        "home",
+        "corp",
+    ];
+    let name = name.to_ascii_lowercase();
+    !name.contains('.')
+        || SPECIAL_USE_SUFFIXES.iter().any(|suffix| {
+            name == *suffix
+                || name
+                    .strip_suffix(suffix)
+                    .is_some_and(|prefix| prefix.ends_with('.'))
+        })
+}
+
+/// Decide, without DNS, whether `parsed` may be an explicitly reviewed
+/// content source such as a governance genesis mirror.
+///
+/// Reviewed sources must be HTTPS on the default port, carry no userinfo, and
+/// name a public DNS host: IP literals, trailing-dot hosts, and special-use
+/// names are refused so every source has one reviewable spelling. The check
+/// is synchronous but never blocks; the HTTP client's connect-time resolver
+/// rejects any non-public address the name resolves to.
+pub(crate) fn reject_unreviewable_https_source(parsed: &url::Url) -> Result<(), ResolveError> {
+    if parsed.scheme() != "https" {
+        return Err(ResolveError::BlockedUrl(
+            "reviewed sources must use HTTPS".into(),
+        ));
+    }
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return Err(ResolveError::BlockedUrl(
+            "URLs with embedded credentials are refused".into(),
+        ));
+    }
+    if parsed.port().is_some() {
+        return Err(ResolveError::BlockedUrl(
+            "reviewed sources must use the default HTTPS port".into(),
+        ));
+    }
+    match reject_private_host_without_dns(parsed)? {
+        None => Err(ResolveError::BlockedUrl(
+            "reviewed sources must name a DNS host, not an IP address".into(),
+        )),
+        Some(name) if name.ends_with('.') || is_special_use_domain(name) => Err(
+            ResolveError::BlockedUrl(format!("'{name}' is not a public DNS name")),
+        ),
+        Some(_) => Ok(()),
     }
 }
 
@@ -380,23 +463,28 @@ impl ContentResolver {
             }
         }
 
-        if let Some(mapped_url) = self.lookup_external_for_blake3(hash).await {
-            if is_http_url(&mapped_url) {
-                return self.fetch_url_preview_bounded(&mapped_url, max_bytes).await;
-            }
-        }
+        // Deliberately no mapped-URL fallback: a preview fetches only the
+        // identifiers its caller reviewed, and a mapping learned from other
+        // content is neither reviewed nor necessarily HTTPS.
         Err(ResolveError::NotFound(format!("blake3:{hash}")))
     }
 
+    /// Fetch one reviewed HTTPS source inside the caller's time budget.
+    ///
+    /// No synchronous DNS pre-check runs here: a blocking lookup cannot be
+    /// pre-empted by `tokio::time::timeout`. Hostnames are resolved by the
+    /// HTTP client's async resolver, which refuses non-public answers at
+    /// connect time, and redirects are not followed.
     async fn fetch_url_preview_bounded(
         &self,
         url: &str,
         max_bytes: usize,
     ) -> Result<ResolveResult, ResolveError> {
-        reject_private_url(url)?;
+        let parsed = parse_fetchable_url(url)?;
+        reject_unreviewable_https_source(&parsed)?;
         let bytes = self
             .http
-            .fetch_by_url_with_limit(url, max_bytes)
+            .fetch_exact_url_with_limit(url, max_bytes)
             .await
             .map_err(|error| ResolveError::Fetch(error.to_string()))?;
         let size = bytes.len() as u64;
@@ -843,5 +931,81 @@ mod tests {
         assert!(reject_private_url("https://8.8.8.8/x").is_ok());
         assert!(reject_private_url("http://93.184.216.34/").is_ok());
         assert!(reject_private_url("https://[2001:4860:4860::8888]/").is_ok());
+    }
+
+    #[test]
+    fn reviewed_sources_are_public_https_dns_names() {
+        for url in [
+            "http://mirror.example.org/g",
+            "https://user@mirror.example.org/g",
+            "https://mirror.example.org:8443/g",
+            "https://8.8.8.8/g",
+            "https://[2001:4860:4860::8888]/g",
+            "https://127.0.0.1/g",
+            "https://2130706433/g",
+            "https://localhost/g",
+            "https://intranet/g",
+            "https://mirror.example.org./g",
+            "https://printer.local/g",
+            "https://metadata.google.internal/g",
+            "https://router.home.arpa/g",
+            "https://mirror.example/g",
+            "https://mirror.test/g",
+            "https://example/g",
+        ] {
+            let parsed = url::Url::parse(url).unwrap();
+            assert!(
+                reject_unreviewable_https_source(&parsed).is_err(),
+                "{url} should have been refused"
+            );
+        }
+        for url in [
+            "https://mirror.example.org/g",
+            "https://MIRROR.example.org:443/g",
+            "https://example.com/genesis.json?v=1",
+            "https://notlocal.dev/g",
+        ] {
+            let parsed = url::Url::parse(url).unwrap();
+            assert!(
+                reject_unreviewable_https_source(&parsed).is_ok(),
+                "{url} should have been allowed"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn preview_never_falls_back_to_an_unreviewed_mapped_url() {
+        let (resolver, _tmp) = make_resolver().await;
+        let missing = blake3::hash(b"never stored locally").to_hex().to_string();
+        resolver
+            .save_mapping("http://mapped.example.org/plain-http", &missing, 20)
+            .await;
+
+        assert!(matches!(
+            resolver.resolve_preview_bounded(&missing, 1024).await,
+            Err(ResolveError::NotFound(_))
+        ));
+
+        resolver.node.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn preview_refuses_unreviewable_urls_before_any_lookup() {
+        let (resolver, _tmp) = make_resolver().await;
+        for url in [
+            "http://mirror.example.org/genesis.json",
+            "https://10.0.0.1/genesis.json",
+            "https://metadata.google.internal/genesis.json",
+        ] {
+            assert!(
+                matches!(
+                    resolver.resolve_preview_bounded(url, 1024).await,
+                    Err(ResolveError::BlockedUrl(_))
+                ),
+                "{url} should have been refused"
+            );
+        }
+
+        resolver.node.shutdown().await.expect("shutdown");
     }
 }

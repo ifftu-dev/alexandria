@@ -11,14 +11,33 @@ use std::collections::{BTreeMap, BTreeSet};
 use ed25519_dalek::{Signature, VerifyingKey};
 use serde::{Deserialize, Serialize};
 
+use crate::did::did_from_verifying_key;
+
 pub const GOVERNANCE_CERTIFICATE_VERSION: u16 = 1;
 pub const GOVERNANCE_GENESIS_VERSION: u16 = 1;
 pub const GOVERNANCE_COMMITTEE_SIZE: usize = 7;
 pub const GOVERNANCE_QUORUM: usize = 5;
 pub const MAX_GOVERNANCE_GENESIS_BYTES: usize = 256 * 1024;
+/// Largest integer JCS (RFC 8785) can encode exactly. JCS writes numbers as
+/// IEEE-754 doubles, so a larger value would collapse onto a neighbour and two
+/// distinct in-memory values would sign identical bytes.
+pub const MAX_JCS_SAFE_INTEGER: u64 = (1 << 53) - 1;
+/// UTF-8 byte limit for the human-readable DAO name.
+pub const MAX_GENESIS_NAME_BYTES: usize = 256;
+/// Byte limit for printable-ASCII identifiers: scope, versions, evidence
+/// kinds and committee member ids.
+pub const MAX_GENESIS_IDENTIFIER_BYTES: usize = 128;
+/// Byte limit for one accepted issuer identifier.
+pub const MAX_GENESIS_ISSUER_BYTES: usize = 256;
+/// Entry limit for each qualification-policy list.
+pub const MAX_GENESIS_POLICY_ENTRIES: usize = 64;
+/// CometBFT's own chain-id limit.
+pub const MAX_COMETBFT_CHAIN_ID_BYTES: usize = 50;
 
 const GENESIS_ACCEPTANCE_DOMAIN: &[u8] = b"alexandria/governance/genesis-acceptance/v1";
-const GENESIS_ID_DOMAIN: &[u8] = b"alexandria/governance/genesis-id/v1";
+/// Domain for the DAO id. It hashes the canonical core only, never the
+/// acceptances, so one core has exactly one DAO id however it was signed.
+const GENESIS_CORE_ID_DOMAIN: &[u8] = b"alexandria/governance/genesis-core-id/v1";
 const GENESIS_RULES_DOMAIN: &[u8] = b"alexandria/governance/genesis-rules/v1";
 const RECEIPT_DOMAIN: &[u8] = b"alexandria/governance/receipt/v1";
 const CLOSE_DOMAIN: &[u8] = b"alexandria/governance/close/v1";
@@ -29,17 +48,21 @@ pub enum GenesisError {
     UnsupportedVersion(u16),
     #[error("governance genesis contains an invalid scope, name, version, or activation value")]
     InvalidBinding,
+    #[error("governance genesis contains an integer above the JSON-safe maximum 2^53-1")]
+    IntegerOutOfRange,
     #[error("governance genesis must declare the approved seven-member, five-signature rules")]
     InvalidRules,
     #[error("governance genesis must contain seven canonically ordered independent members")]
     InvalidMembers,
+    #[error("governance genesis member id is not the did:key of that member's identity key")]
+    UnboundMemberId,
     #[error("governance genesis contains a malformed or reused member key")]
     InvalidMemberKey,
     #[error("governance genesis qualification policy is empty, duplicated, or not canonical")]
     InvalidQualificationPolicy,
     #[error("governance genesis must contain one valid acceptance from every founding member")]
     InvalidAcceptances,
-    #[error("claimed DAO id does not match the fully signed genesis envelope")]
+    #[error("claimed DAO id does not match the fully accepted genesis core")]
     DaoIdMismatch,
     #[error("governance genesis bytes are not the canonical envelope encoding")]
     NonCanonicalEncoding,
@@ -59,6 +82,7 @@ pub struct GenesisScope {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct GenesisMember {
+    /// Must equal the `did:key` derived from `identity_public_key_hex`.
     pub member_id: String,
     pub identity_public_key_hex: String,
     pub consensus_public_key_hex: String,
@@ -93,8 +117,9 @@ pub struct GenesisActivation {
 
 /// Canonical genesis statement signed by all seven founding members.
 ///
-/// It deliberately contains no DAO id or genesis hash. Those values are
-/// derived only after the seven acceptances have been verified.
+/// It deliberately contains no DAO id or genesis hash. The DAO id is the
+/// domain-separated hash of this core, and it identifies a DAO only once all
+/// seven founders' acceptances have been verified.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct FoundingGenesisCore {
     pub genesis_version: u16,
@@ -121,12 +146,39 @@ pub struct FoundingGenesisEnvelope {
     pub acceptances: Vec<FoundingAcceptance>,
 }
 
+/// Authority derived from a fully verified genesis envelope.
+///
+/// Fields are private so a value of this type can only come from
+/// [`FoundingGenesisEnvelope::verify`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VerifiedFoundingGenesis {
-    pub dao_id: String,
-    pub genesis_hash: String,
-    pub rules_hash: String,
-    pub committee: CommitteeEpoch,
+    dao_id: String,
+    genesis_hash: String,
+    rules_hash: String,
+    committee: CommitteeEpoch,
+}
+
+impl VerifiedFoundingGenesis {
+    /// The DAO id, equal to [`Self::genesis_hash`].
+    pub fn dao_id(&self) -> &str {
+        &self.dao_id
+    }
+
+    /// Domain-separated BLAKE2b-256 hash of the canonical genesis core. It is
+    /// independent of the acceptance signature bytes.
+    pub fn genesis_hash(&self) -> &str {
+        &self.genesis_hash
+    }
+
+    pub fn rules_hash(&self) -> &str {
+        &self.rules_hash
+    }
+
+    /// The initial committee epoch. This is the only way to obtain a
+    /// [`CommitteeEpoch`].
+    pub fn committee(&self) -> &CommitteeEpoch {
+        &self.committee
+    }
 }
 
 impl FoundingGenesisCore {
@@ -139,11 +191,18 @@ impl FoundingGenesisCore {
         if self.genesis_version != GOVERNANCE_GENESIS_VERSION {
             return Err(GenesisError::UnsupportedVersion(self.genesis_version));
         }
+        if self.rules.minimum_turnout_count > MAX_JCS_SAFE_INTEGER
+            || self.activation.initial_epoch > MAX_JCS_SAFE_INTEGER
+            || self.activation.initial_height > MAX_JCS_SAFE_INTEGER
+            || !is_jcs_safe_i64(self.activation.activation_time_unix)
+        {
+            return Err(GenesisError::IntegerOutOfRange);
+        }
         if self.protocol_version != GOVERNANCE_CERTIFICATE_VERSION
-            || !is_canonical_text(&self.name)
-            || !is_canonical_text(&self.scope.scope_type)
-            || !is_canonical_text(&self.scope.scope_id)
-            || !is_canonical_text(&self.activation.cometbft_chain_id)
+            || !is_display_text(&self.name, MAX_GENESIS_NAME_BYTES)
+            || !is_identifier(&self.scope.scope_type, MAX_GENESIS_IDENTIFIER_BYTES)
+            || !is_identifier(&self.scope.scope_id, MAX_GENESIS_IDENTIFIER_BYTES)
+            || !is_cometbft_chain_id(&self.activation.cometbft_chain_id)
             || self.activation.initial_epoch != 0
             || self.activation.initial_height == 0
             || self.activation.activation_time_unix < 0
@@ -156,16 +215,25 @@ impl FoundingGenesisCore {
             || self.rules.proposal_approval_numerator != 2
             || self.rules.proposal_approval_denominator != 3
             || self.rules.minimum_turnout_count == 0
-            || !is_canonical_text(&self.rules.rules_version)
+            || !is_identifier(&self.rules.rules_version, MAX_GENESIS_IDENTIFIER_BYTES)
         {
             return Err(GenesisError::InvalidRules);
         }
-        validate_sorted_unique_text(&self.qualification_policy.accepted_issuers)
-            .and_then(|_| {
-                validate_sorted_unique_text(&self.qualification_policy.accepted_assessment_evidence)
-            })
-            .map_err(|_| GenesisError::InvalidQualificationPolicy)?;
-        if !is_canonical_text(&self.qualification_policy.policy_version) {
+        validate_sorted_unique_identifiers(
+            &self.qualification_policy.accepted_issuers,
+            MAX_GENESIS_ISSUER_BYTES,
+        )
+        .and_then(|_| {
+            validate_sorted_unique_identifiers(
+                &self.qualification_policy.accepted_assessment_evidence,
+                MAX_GENESIS_IDENTIFIER_BYTES,
+            )
+        })
+        .map_err(|_| GenesisError::InvalidQualificationPolicy)?;
+        if !is_identifier(
+            &self.qualification_policy.policy_version,
+            MAX_GENESIS_IDENTIFIER_BYTES,
+        ) {
             return Err(GenesisError::InvalidQualificationPolicy);
         }
         if self.members.len() != GOVERNANCE_COMMITTEE_SIZE
@@ -180,7 +248,9 @@ impl FoundingGenesisCore {
         let mut member_ids = BTreeSet::new();
         let mut all_keys = BTreeSet::new();
         for member in &self.members {
-            if !is_canonical_text(&member.member_id) || !member_ids.insert(&member.member_id) {
+            if !is_identifier(&member.member_id, MAX_GENESIS_IDENTIFIER_BYTES)
+                || !member_ids.insert(&member.member_id)
+            {
                 return Err(GenesisError::InvalidMembers);
             }
             for encoded in [
@@ -193,6 +263,10 @@ impl FoundingGenesisCore {
                     return Err(GenesisError::InvalidMemberKey);
                 }
             }
+            let identity = decode_canonical_verifying_key(&member.identity_public_key_hex)?;
+            if member.member_id != did_from_verifying_key(&identity).as_str() {
+                return Err(GenesisError::UnboundMemberId);
+            }
         }
         Ok(())
     }
@@ -200,6 +274,16 @@ impl FoundingGenesisCore {
     pub fn acceptance_signing_bytes(&self) -> Result<Vec<u8>, GenesisError> {
         self.validate()?;
         canonical_genesis_bytes(GENESIS_ACCEPTANCE_DOMAIN, self)
+    }
+
+    /// Hash of `GENESIS_CORE_ID_DOMAIN || 0x00 || JCS(core)`.
+    ///
+    /// This is the DAO id and genesis hash the core will have once every
+    /// founder has accepted it. Re-signing the same core cannot change it.
+    pub fn core_hash(&self) -> Result<String, GenesisError> {
+        self.validate()?;
+        let bytes = canonical_genesis_bytes(GENESIS_CORE_ID_DOMAIN, self)?;
+        Ok(hex::encode(crate::hash::blake2b_256(&bytes)))
     }
 
     pub fn rules_hash(&self) -> Result<String, GenesisError> {
@@ -226,6 +310,11 @@ impl FoundingGenesisEnvelope {
             .map_err(|error| GenesisError::Canonicalization(error.to_string()))
     }
 
+    /// Verify every founder's acceptance and derive the initial authority.
+    ///
+    /// All seven founders must prove control of all three declared keys (21
+    /// signatures). The derived DAO id depends only on the core, so two valid
+    /// envelopes over the same core verify to the same authority.
     pub fn verify(
         &self,
         expected_dao_id: Option<&str>,
@@ -276,11 +365,7 @@ impl FoundingGenesisEnvelope {
         if encoded.len() > MAX_GOVERNANCE_GENESIS_BYTES {
             return Err(GenesisError::TooLarge);
         }
-        let mut id_material = Vec::with_capacity(GENESIS_ID_DOMAIN.len() + 1 + encoded.len());
-        id_material.extend_from_slice(GENESIS_ID_DOMAIN);
-        id_material.push(0);
-        id_material.extend_from_slice(&encoded);
-        let genesis_hash = hex::encode(crate::hash::blake2b_256(&id_material));
+        let genesis_hash = self.core.core_hash()?;
         let dao_id = genesis_hash.clone();
         if expected_dao_id.is_some_and(|expected| expected != dao_id) {
             return Err(GenesisError::DaoIdMismatch);
@@ -359,18 +444,106 @@ fn is_canonical_hex(encoded: &str, byte_length: usize) -> bool {
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
-fn is_canonical_text(value: &str) -> bool {
-    !value.is_empty() && value.trim() == value && !value.chars().any(char::is_control)
+fn is_jcs_safe_i64(value: i64) -> bool {
+    value.unsigned_abs() <= MAX_JCS_SAFE_INTEGER
 }
 
-fn validate_sorted_unique_text(values: &[String]) -> Result<(), ()> {
+/// Bounded printable ASCII without spaces. Identifiers therefore have one
+/// spelling: no Unicode normalization form, case folding or invisible
+/// character can make two different byte strings look alike.
+fn is_identifier(value: &str, max_bytes: usize) -> bool {
+    !value.is_empty()
+        && value.len() <= max_bytes
+        && value.bytes().all(|byte| byte.is_ascii_graphic())
+}
+
+/// A conservative CometBFT chain id: lowercase ASCII letters, digits, `-`,
+/// `_` and `.`, starting and ending with a letter or digit.
+fn is_cometbft_chain_id(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    let edge = |byte: &u8| byte.is_ascii_lowercase() || byte.is_ascii_digit();
+    !bytes.is_empty()
+        && bytes.len() <= MAX_COMETBFT_CHAIN_ID_BYTES
+        && bytes.first().is_some_and(edge)
+        && bytes.last().is_some_and(edge)
+        && bytes
+            .iter()
+            .all(|byte| edge(byte) || matches!(byte, b'-' | b'_' | b'.'))
+}
+
+/// Bounded human-readable text. Rejects control and format characters
+/// (including bidi overrides and zero-width characters), other invisible
+/// default-ignorable characters, private-use and noncharacter code points,
+/// and every whitespace character except an inner U+0020 space.
+fn is_display_text(value: &str, max_bytes: usize) -> bool {
+    !value.is_empty()
+        && value.len() <= max_bytes
+        && !value.starts_with(' ')
+        && !value.ends_with(' ')
+        && value.chars().all(|character| {
+            character == ' '
+                || !(character.is_control()
+                    || character.is_whitespace()
+                    || is_format_or_invisible(character)
+                    || is_private_use_or_noncharacter(character))
+        })
+}
+
+/// Unicode general category Cf plus the invisible default-ignorable code
+/// points commonly used for spoofing. Kept as a table so this I/O-free crate
+/// needs no Unicode property dependency.
+fn is_format_or_invisible(character: char) -> bool {
+    matches!(
+        u32::from(character),
+        0x00AD
+            | 0x034F
+            | 0x0600..=0x0605
+            | 0x061C
+            | 0x06DD
+            | 0x070F
+            | 0x0890..=0x0891
+            | 0x08E2
+            | 0x115F..=0x1160
+            | 0x17B4..=0x17B5
+            | 0x180B..=0x180F
+            | 0x200B..=0x200F
+            | 0x202A..=0x202E
+            | 0x2060..=0x206F
+            | 0x3164
+            | 0xFE00..=0xFE0F
+            | 0xFEFF
+            | 0xFFA0
+            | 0xFFF0..=0xFFFB
+            | 0x110BD
+            | 0x110CD
+            | 0x13430..=0x1345F
+            | 0x1BCA0..=0x1BCA3
+            | 0x1D173..=0x1D17A
+            | 0xE0000..=0xE0FFF
+    )
+}
+
+fn is_private_use_or_noncharacter(character: char) -> bool {
+    let code = u32::from(character);
+    matches!(code, 0xE000..=0xF8FF | 0xF0000..=0x10FFFF | 0xFDD0..=0xFDEF)
+        || (code & 0xFFFE) == 0xFFFE
+}
+
+fn validate_sorted_unique_identifiers(values: &[String], max_bytes: usize) -> Result<(), ()> {
     if values.is_empty()
-        || !values.iter().all(|value| is_canonical_text(value))
+        || values.len() > MAX_GENESIS_POLICY_ENTRIES
+        || !values.iter().all(|value| is_identifier(value, max_bytes))
         || !values.windows(2).all(|values| values[0] < values[1])
     {
         return Err(());
     }
     Ok(())
+}
+
+/// Text inside certificate bindings is display-safe and bounded like the
+/// genesis name.
+fn is_canonical_text(value: &str) -> bool {
+    is_display_text(value, MAX_GENESIS_NAME_BYTES)
 }
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
@@ -403,18 +576,67 @@ pub struct CommitteeMemberKey {
 }
 
 /// Immutable authority context to which every certificate is bound.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+///
+/// A committee epoch is authority, not data: its fields are private and it
+/// does not implement `Deserialize`, so the only way to obtain one is
+/// [`VerifiedFoundingGenesis::committee`] after all founding acceptances have
+/// been verified. Persist the genesis envelope and re-verify it instead of
+/// storing an epoch.
+///
+/// ```compile_fail
+/// use alexandria_verify::governance::CommitteeEpoch;
+/// let _: CommitteeEpoch = serde_json::from_str("{}").unwrap();
+/// ```
+///
+/// ```compile_fail
+/// use alexandria_verify::governance::CommitteeEpoch;
+/// let _ = CommitteeEpoch {
+///     dao_id: String::new(),
+///     epoch: 0,
+///     genesis_hash: String::new(),
+///     rules_hash: String::new(),
+///     members: Vec::new(),
+///     threshold: 5,
+/// };
+/// ```
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct CommitteeEpoch {
-    pub dao_id: String,
-    pub epoch: u64,
-    pub genesis_hash: String,
-    pub rules_hash: String,
-    pub members: Vec<CommitteeMemberKey>,
-    pub threshold: u8,
+    dao_id: String,
+    epoch: u64,
+    genesis_hash: String,
+    rules_hash: String,
+    members: Vec<CommitteeMemberKey>,
+    threshold: u8,
 }
 
 impl CommitteeEpoch {
-    pub fn validate(&self) -> Result<(), CertificateError> {
+    pub fn dao_id(&self) -> &str {
+        &self.dao_id
+    }
+
+    pub fn epoch(&self) -> u64 {
+        self.epoch
+    }
+
+    pub fn genesis_hash(&self) -> &str {
+        &self.genesis_hash
+    }
+
+    pub fn rules_hash(&self) -> &str {
+        &self.rules_hash
+    }
+
+    pub fn members(&self) -> &[CommitteeMemberKey] {
+        &self.members
+    }
+
+    pub fn threshold(&self) -> u8 {
+        self.threshold
+    }
+
+    /// Structural invariants only. Authenticity comes from construction: an
+    /// epoch exists only as the output of genesis verification.
+    fn validate(&self) -> Result<(), CertificateError> {
         if self.members.len() != GOVERNANCE_COMMITTEE_SIZE {
             return Err(CertificateError::InvalidCommitteeSize);
         }
@@ -422,6 +644,7 @@ impl CommitteeEpoch {
             return Err(CertificateError::InvalidThreshold);
         }
         if !is_canonical_digest(&self.dao_id)
+            || self.epoch > MAX_JCS_SAFE_INTEGER
             || self.dao_id != self.genesis_hash
             || !is_canonical_digest(&self.genesis_hash)
             || !is_canonical_digest(&self.rules_hash)
@@ -433,7 +656,7 @@ impl CommitteeEpoch {
         for member in &self.members {
             let key = decode_canonical_verifying_key(&member.public_key_hex)
                 .map_err(|_| CertificateError::MalformedCommitteeMember)?;
-            if !is_canonical_text(&member.member_id)
+            if !is_identifier(&member.member_id, MAX_GENESIS_IDENTIFIER_BYTES)
                 || !ids.insert(member.member_id.as_str())
                 || !keys.insert(key.to_bytes())
             {
@@ -602,6 +825,7 @@ impl CloseCertificate {
 
         for attestation in &self.attestations {
             if attestation.signed_at < self.binding.voting_cutoff
+                || !is_jcs_safe_i64(attestation.signed_at)
                 || valid.contains(attestation.member_id.as_str())
             {
                 continue;
@@ -687,6 +911,8 @@ fn validate_receipt_binding(
         committee,
     )?;
     if !is_canonical_text(&binding.contest_id)
+        || binding.log_position > MAX_JCS_SAFE_INTEGER
+        || !is_jcs_safe_i64(binding.voting_cutoff)
         || !is_canonical_digest(&binding.vote_hash)
         || !is_canonical_digest(&binding.log_root)
         || !is_canonical_digest(&binding.eligibility_evidence_hash)
@@ -710,6 +936,8 @@ fn validate_close_binding(
         committee,
     )?;
     if !is_canonical_text(&binding.contest_id)
+        || binding.log_length > MAX_JCS_SAFE_INTEGER
+        || !is_jcs_safe_i64(binding.voting_cutoff)
         || !is_canonical_digest(&binding.log_root)
         || !is_canonical_digest(&binding.vote_set_hash)
         || !is_canonical_digest(&binding.result_hash)
@@ -731,6 +959,9 @@ fn validate_authority_context(
     committee.validate()?;
     if protocol_version != GOVERNANCE_CERTIFICATE_VERSION {
         return Err(CertificateError::UnsupportedVersion(protocol_version));
+    }
+    if epoch > MAX_JCS_SAFE_INTEGER {
+        return Err(CertificateError::InvalidBinding);
     }
     if dao_id != committee.dao_id
         || epoch != committee.epoch
@@ -789,19 +1020,23 @@ mod tests {
         governance: SigningKey,
     }
 
+    fn member_id(keys: &FounderKeys) -> String {
+        did_from_verifying_key(&keys.identity.verifying_key()).0
+    }
+
     fn genesis() -> (FoundingGenesisEnvelope, Vec<FounderKeys>) {
-        let founder_keys: Vec<_> = (0..GOVERNANCE_COMMITTEE_SIZE)
+        let mut founder_keys: Vec<_> = (0..GOVERNANCE_COMMITTEE_SIZE)
             .map(|index| FounderKeys {
                 identity: SigningKey::from_bytes(&[20 + index as u8; 32]),
                 consensus: SigningKey::from_bytes(&[40 + index as u8; 32]),
                 governance: SigningKey::from_bytes(&[1 + index as u8; 32]),
             })
             .collect();
+        founder_keys.sort_by_key(member_id);
         let members = founder_keys
             .iter()
-            .enumerate()
-            .map(|(index, keys)| GenesisMember {
-                member_id: format!("member-{index}"),
+            .map(|keys| GenesisMember {
+                member_id: member_id(keys),
                 identity_public_key_hex: hex::encode(keys.identity.verifying_key().to_bytes()),
                 consensus_public_key_hex: hex::encode(keys.consensus.verifying_key().to_bytes()),
                 governance_public_key_hex: hex::encode(keys.governance.verifying_key().to_bytes()),
@@ -843,9 +1078,8 @@ mod tests {
         let signing_bytes = core.acceptance_signing_bytes().unwrap();
         let acceptances = founder_keys
             .iter()
-            .enumerate()
-            .map(|(index, keys)| FoundingAcceptance {
-                member_id: format!("member-{index}"),
+            .map(|keys| FoundingAcceptance {
+                member_id: member_id(keys),
                 identity_signature_hex: hex::encode(keys.identity.sign(&signing_bytes).to_bytes()),
                 consensus_signature_hex: hex::encode(
                     keys.consensus.sign(&signing_bytes).to_bytes(),
@@ -995,6 +1229,258 @@ mod tests {
         assert_ne!(
             first.verify(None).unwrap().dao_id,
             second.verify(None).unwrap().dao_id
+        );
+    }
+
+    /// Pins the DAO id derivation. A change here is a wire-format change.
+    const FIXTURE_DAO_ID: &str = "d7e67e0c8cae9c3714f47ec6eb9a353bd5eac209d6ac6989a2a5ee791356f928";
+
+    #[test]
+    fn dao_id_is_the_domain_separated_hash_of_the_core_alone() {
+        let (genesis, _) = genesis();
+        let verified = genesis.verify(None).unwrap();
+
+        let mut material = GENESIS_CORE_ID_DOMAIN.to_vec();
+        material.push(0);
+        material.extend(serde_json_canonicalizer::to_vec(&genesis.core).unwrap());
+        let expected = hex::encode(crate::hash::blake2b_256(&material));
+        assert_eq!(verified.dao_id(), expected);
+        assert_eq!(genesis.core.core_hash().unwrap(), expected);
+        assert_eq!(verified.dao_id(), FIXTURE_DAO_ID);
+
+        assert_ne!(GENESIS_CORE_ID_DOMAIN, GENESIS_ACCEPTANCE_DOMAIN);
+        let signing_bytes = genesis.core.acceptance_signing_bytes().unwrap();
+        assert_ne!(
+            hex::encode(crate::hash::blake2b_256(&signing_bytes)),
+            verified.dao_id()
+        );
+        let envelope_bytes = serde_json_canonicalizer::to_vec(&genesis).unwrap();
+        assert_ne!(
+            hex::encode(crate::hash::blake2b_256(&envelope_bytes)),
+            verified.dao_id()
+        );
+    }
+
+    #[test]
+    fn member_ids_must_be_the_did_key_of_the_identity_key() {
+        let (genesis, keys) = genesis();
+
+        // Claiming another key's did:key, even one of the member's own other
+        // keys, is not an identity binding.
+        let mut claimed = genesis.core.clone();
+        for (member, keys) in claimed.members.iter_mut().zip(&keys) {
+            member.member_id = did_from_verifying_key(&keys.consensus.verifying_key()).0;
+        }
+        claimed
+            .members
+            .sort_by(|left, right| left.member_id.cmp(&right.member_id));
+        assert_eq!(claimed.validate(), Err(GenesisError::UnboundMemberId));
+
+        let mut free_text = genesis.core.clone();
+        free_text.members[GOVERNANCE_COMMITTEE_SIZE - 1].member_id = "zz-founder".into();
+        assert_eq!(free_text.validate(), Err(GenesisError::UnboundMemberId));
+    }
+
+    #[test]
+    fn genesis_text_rejects_invisible_format_and_unbounded_values() {
+        let (genesis, _) = genesis();
+        type Mutation = fn(&mut FoundingGenesisCore);
+        let cases: &[(&str, Mutation, GenesisError)] = &[
+            (
+                "bidi override in name",
+                |core| core.name = "Computing DAO \u{202E}lanoiciffO".into(),
+                GenesisError::InvalidBinding,
+            ),
+            (
+                "zero-width space in name",
+                |core| core.name = "Computing\u{200B} DAO".into(),
+                GenesisError::InvalidBinding,
+            ),
+            (
+                "bidi isolate in name",
+                |core| core.name = "\u{2067}Computing DAO".into(),
+                GenesisError::InvalidBinding,
+            ),
+            (
+                "byte order mark in name",
+                |core| core.name = "Computing\u{FEFF}DAO".into(),
+                GenesisError::InvalidBinding,
+            ),
+            (
+                "tab in name",
+                |core| core.name = "Computing\tDAO".into(),
+                GenesisError::InvalidBinding,
+            ),
+            (
+                "no-break space in name",
+                |core| core.name = "Computing\u{00A0}DAO".into(),
+                GenesisError::InvalidBinding,
+            ),
+            (
+                "private use in name",
+                |core| core.name = "Computing \u{E000}".into(),
+                GenesisError::InvalidBinding,
+            ),
+            (
+                "oversized name",
+                |core| core.name = "n".repeat(MAX_GENESIS_NAME_BYTES + 1),
+                GenesisError::InvalidBinding,
+            ),
+            (
+                "zero-width joiner in scope",
+                |core| core.scope.scope_id = "computer\u{200D}science".into(),
+                GenesisError::InvalidBinding,
+            ),
+            (
+                "space in scope type",
+                |core| core.scope.scope_type = "sub ject".into(),
+                GenesisError::InvalidBinding,
+            ),
+            (
+                "oversized scope",
+                |core| core.scope.scope_id = "s".repeat(MAX_GENESIS_IDENTIFIER_BYTES + 1),
+                GenesisError::InvalidBinding,
+            ),
+            (
+                "oversized chain id",
+                |core| core.activation.cometbft_chain_id = "c".repeat(10_000),
+                GenesisError::InvalidBinding,
+            ),
+            (
+                "uppercase chain id",
+                |core| core.activation.cometbft_chain_id = "Alexandria-1".into(),
+                GenesisError::InvalidBinding,
+            ),
+            (
+                "chain id edge punctuation",
+                |core| core.activation.cometbft_chain_id = "alexandria-".into(),
+                GenesisError::InvalidBinding,
+            ),
+            (
+                "chain id slash",
+                |core| core.activation.cometbft_chain_id = "alexandria/1".into(),
+                GenesisError::InvalidBinding,
+            ),
+            (
+                "right-to-left mark in rules version",
+                |core| core.rules.rules_version = "1\u{200F}".into(),
+                GenesisError::InvalidRules,
+            ),
+            (
+                "issuer with a space",
+                |core| core.qualification_policy.accepted_issuers = vec!["anything at all".into()],
+                GenesisError::InvalidQualificationPolicy,
+            ),
+            (
+                "oversized issuer",
+                |core| {
+                    core.qualification_policy.accepted_issuers =
+                        vec!["i".repeat(MAX_GENESIS_ISSUER_BYTES + 1)]
+                },
+                GenesisError::InvalidQualificationPolicy,
+            ),
+            (
+                "too many issuers",
+                |core| {
+                    let mut issuers: Vec<String> = (0..=MAX_GENESIS_POLICY_ENTRIES)
+                        .map(|index| format!("did:key:issuer-{index:03}"))
+                        .collect();
+                    issuers.sort();
+                    core.qualification_policy.accepted_issuers = issuers;
+                },
+                GenesisError::InvalidQualificationPolicy,
+            ),
+            (
+                "format character in evidence",
+                |core| {
+                    core.qualification_policy.accepted_assessment_evidence =
+                        vec!["assessment\u{2060}credential".into()]
+                },
+                GenesisError::InvalidQualificationPolicy,
+            ),
+            (
+                "format character in policy version",
+                |core| core.qualification_policy.policy_version = "\u{00AD}1".into(),
+                GenesisError::InvalidQualificationPolicy,
+            ),
+        ];
+        for (label, mutate, expected) in cases {
+            let mut core = genesis.core.clone();
+            mutate(&mut core);
+            assert_eq!(core.validate().as_ref(), Err(expected), "{label}");
+        }
+
+        let mut bounded = genesis.core.clone();
+        bounded.name = "n".repeat(MAX_GENESIS_NAME_BYTES);
+        bounded.activation.cometbft_chain_id = "c".repeat(MAX_COMETBFT_CHAIN_ID_BYTES);
+        assert_eq!(bounded.validate(), Ok(()));
+    }
+
+    #[test]
+    fn integers_above_the_jcs_safe_maximum_cannot_be_signed() {
+        let (genesis, _) = genesis();
+
+        // Distinct in-memory values that would otherwise sign identical bytes.
+        let mut above = genesis.core.clone();
+        above.rules.minimum_turnout_count = MAX_JCS_SAFE_INTEGER + 2;
+        let mut collapsed = genesis.core.clone();
+        collapsed.rules.minimum_turnout_count = MAX_JCS_SAFE_INTEGER + 1;
+        assert_eq!(
+            above.acceptance_signing_bytes(),
+            Err(GenesisError::IntegerOutOfRange)
+        );
+        assert_eq!(
+            collapsed.acceptance_signing_bytes(),
+            Err(GenesisError::IntegerOutOfRange)
+        );
+
+        type Mutation = fn(&mut FoundingGenesisCore);
+        let unsafe_values: &[Mutation] = &[
+            |core| core.rules.minimum_turnout_count = u64::MAX,
+            |core| core.activation.initial_height = MAX_JCS_SAFE_INTEGER + 1,
+            |core| core.activation.initial_epoch = MAX_JCS_SAFE_INTEGER + 1,
+            |core| core.activation.activation_time_unix = MAX_JCS_SAFE_INTEGER as i64 + 1,
+            |core| core.activation.activation_time_unix = i64::MAX,
+        ];
+        for mutate in unsafe_values {
+            let mut core = genesis.core.clone();
+            mutate(&mut core);
+            assert_eq!(core.validate(), Err(GenesisError::IntegerOutOfRange));
+        }
+
+        let mut largest = genesis.core.clone();
+        largest.rules.minimum_turnout_count = MAX_JCS_SAFE_INTEGER;
+        largest.activation.initial_height = MAX_JCS_SAFE_INTEGER;
+        largest.activation.activation_time_unix = MAX_JCS_SAFE_INTEGER as i64;
+        assert_eq!(largest.validate(), Ok(()));
+        let encoded =
+            String::from_utf8(serde_json_canonicalizer::to_vec(&largest).unwrap()).unwrap();
+        assert!(encoded.contains("\"minimum_turnout_count\":9007199254740991"));
+    }
+
+    #[test]
+    fn certificate_bindings_reject_unsafe_integers() {
+        let keys = keys();
+        let committee = committee(&keys);
+        let mut receipt = signed_receipt(&keys, 5);
+        receipt.binding.log_position = MAX_JCS_SAFE_INTEGER + 1;
+        assert_eq!(
+            receipt.verify(&committee),
+            Err(CertificateError::InvalidBinding)
+        );
+
+        let mut close = signed_close(&keys, 5);
+        close.binding.log_length = MAX_JCS_SAFE_INTEGER + 1;
+        assert_eq!(
+            close.verify(&committee),
+            Err(CertificateError::InvalidBinding)
+        );
+
+        let mut unsafe_epoch = committee.clone();
+        unsafe_epoch.epoch = MAX_JCS_SAFE_INTEGER + 1;
+        assert_eq!(
+            unsafe_epoch.validate(),
+            Err(CertificateError::InvalidBinding)
         );
     }
 

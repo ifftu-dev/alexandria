@@ -68,35 +68,65 @@ fn boxed_dns_error(message: String) -> Box<dyn std::error::Error + Send + Sync> 
 #[derive(Clone)]
 pub struct HttpClient {
     http: reqwest::Client,
+    /// Same timeout and connect-time DNS filtering, but never follows a
+    /// redirect. A redirect target is a source nobody reviewed, and the
+    /// redirect policy hook can only run the synchronous SSRF check, which
+    /// would block inside a caller's cancellable time budget.
+    exact: reqwest::Client,
 }
 
 impl HttpClient {
     /// Create a new HTTP client with the given per-request timeout.
     pub fn new(timeout: Duration) -> Result<Self, HttpError> {
-        let http = reqwest::Client::builder()
-            .timeout(timeout)
-            .dns_resolver(Arc::new(PublicDnsResolver))
-            // Redirects are checked, not followed blindly. `resolver`'s SSRF
-            // guard runs on the URL the caller supplied; reqwest's default is
-            // to follow up to ten hops, so a public URL answering `302
-            // Location: http://169.254.169.254/` would reach cloud metadata
-            // without the guard ever seeing that address. Every hop is put
-            // back through the same check.
-            .redirect(reqwest::redirect::Policy::custom(|attempt| {
-                if attempt.previous().len() >= MAX_REDIRECTS {
-                    return attempt.error("too many redirects");
-                }
-                match crate::content_store::resolver::url_is_publicly_routable(
-                    attempt.url().as_str(),
-                ) {
-                    Ok(()) => attempt.follow(),
-                    Err(e) => attempt.error(e),
-                }
-            }))
-            .build()
-            .map_err(|e| HttpError::Http(e.to_string()))?;
+        Self::build(timeout, Arc::new(PublicDnsResolver), false)
+    }
 
-        Ok(Self { http })
+    /// Test seam: replace connect-time DNS and ignore proxy settings, so a
+    /// test controls every name lookup the client performs.
+    #[cfg(test)]
+    pub(crate) fn with_dns_resolver<R: reqwest::dns::Resolve + 'static>(
+        timeout: Duration,
+        resolver: Arc<R>,
+    ) -> Result<Self, HttpError> {
+        Self::build(timeout, resolver, true)
+    }
+
+    fn build<R: reqwest::dns::Resolve + 'static>(
+        timeout: Duration,
+        resolver: Arc<R>,
+        no_proxy: bool,
+    ) -> Result<Self, HttpError> {
+        let builder = |redirect: reqwest::redirect::Policy| {
+            let builder = reqwest::Client::builder()
+                .timeout(timeout)
+                .dns_resolver(resolver.clone())
+                .redirect(redirect);
+            let builder = if no_proxy {
+                builder.no_proxy()
+            } else {
+                builder
+            };
+            builder.build().map_err(|e| HttpError::Http(e.to_string()))
+        };
+
+        // Redirects are checked, not followed blindly. `resolver`'s SSRF
+        // guard runs on the URL the caller supplied; reqwest's default is
+        // to follow up to ten hops, so a public URL answering `302
+        // Location: http://169.254.169.254/` would reach cloud metadata
+        // without the guard ever seeing that address. Every hop is put
+        // back through the same check.
+        let http = builder(reqwest::redirect::Policy::custom(|attempt| {
+            if attempt.previous().len() >= MAX_REDIRECTS {
+                return attempt.error("too many redirects");
+            }
+            match crate::content_store::resolver::url_is_publicly_routable(attempt.url().as_str()) {
+                Ok(()) => attempt.follow(),
+                Err(e) => attempt.error(e),
+            }
+        }))?;
+        let exact = builder(reqwest::redirect::Policy::none())?;
+
+        Ok(Self { http, exact })
     }
 
     /// Create an HTTP client with the default 30s timeout.
@@ -116,51 +146,68 @@ impl HttpClient {
         url: &str,
         max_bytes: usize,
     ) -> Result<Vec<u8>, HttpError> {
-        let max_bytes = max_bytes.min(MAX_FETCH_BYTES);
-        let response = self
-            .http
-            .get(url)
-            .send()
-            .await
-            .map_err(|e| HttpError::Http(e.to_string()))?;
+        fetch_bounded(&self.http, url, max_bytes).await
+    }
 
-        let status = response.status().as_u16();
-        if !(200..300).contains(&status) {
-            return Err(HttpError::BadStatus {
-                status,
+    /// Fetch exactly `url` with a caller-specific cap. A redirect response is
+    /// returned as a non-success status rather than followed.
+    pub async fn fetch_exact_url_with_limit(
+        &self,
+        url: &str,
+        max_bytes: usize,
+    ) -> Result<Vec<u8>, HttpError> {
+        fetch_bounded(&self.exact, url, max_bytes).await
+    }
+}
+
+async fn fetch_bounded(
+    client: &reqwest::Client,
+    url: &str,
+    max_bytes: usize,
+) -> Result<Vec<u8>, HttpError> {
+    let max_bytes = max_bytes.min(MAX_FETCH_BYTES);
+    let response = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| HttpError::Http(e.to_string()))?;
+
+    let status = response.status().as_u16();
+    if !(200..300).contains(&status) {
+        return Err(HttpError::BadStatus {
+            status,
+            url: url.to_string(),
+        });
+    }
+    if let Some(content_length) = response.content_length() {
+        if content_length > max_bytes as u64 {
+            return Err(HttpError::TooLarge {
                 url: url.to_string(),
+                size: content_length,
+                max_bytes,
             });
         }
-        if let Some(content_length) = response.content_length() {
-            if content_length > max_bytes as u64 {
-                return Err(HttpError::TooLarge {
-                    url: url.to_string(),
-                    size: content_length,
-                    max_bytes,
-                });
-            }
-        }
-
-        let mut bytes = Vec::new();
-        let mut response = response;
-        while let Some(chunk) = response
-            .chunk()
-            .await
-            .map_err(|e| HttpError::Http(e.to_string()))?
-        {
-            let new_len = bytes.len().saturating_add(chunk.len());
-            if new_len > max_bytes {
-                return Err(HttpError::TooLarge {
-                    url: url.to_string(),
-                    size: new_len as u64,
-                    max_bytes,
-                });
-            }
-            bytes.extend_from_slice(&chunk);
-        }
-
-        Ok(bytes)
     }
+
+    let mut bytes = Vec::new();
+    let mut response = response;
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|e| HttpError::Http(e.to_string()))?
+    {
+        let new_len = bytes.len().saturating_add(chunk.len());
+        if new_len > max_bytes {
+            return Err(HttpError::TooLarge {
+                url: url.to_string(),
+                size: new_len as u64,
+                max_bytes,
+            });
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+
+    Ok(bytes)
 }
 
 #[cfg(test)]
@@ -222,6 +269,21 @@ mod tests {
         let client = HttpClient::new(Duration::from_millis(100)).unwrap();
         let result = client.fetch_by_url("http://127.0.0.1:1/nope").await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn exact_fetch_reports_redirects_instead_of_following_them() {
+        let url = serve_once(
+            b"HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:1/elsewhere\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                .to_vec(),
+        )
+        .await;
+        let client = HttpClient::new(Duration::from_secs(2)).expect("client");
+
+        assert!(matches!(
+            client.fetch_exact_url_with_limit(&url, 8).await,
+            Err(HttpError::BadStatus { status: 302, .. })
+        ));
     }
 
     #[tokio::test]

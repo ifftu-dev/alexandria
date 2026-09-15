@@ -43,7 +43,12 @@ pub struct GenesisMemberPreview {
 #[derive(Debug, Clone, Serialize)]
 pub struct GenesisPreview {
     pub dao_id: String,
-    pub genesis_hash: String,
+    /// Domain-separated hash of the canonical genesis core. Equal to `dao_id`,
+    /// and identical for every valid envelope over the same core.
+    pub core_hash: String,
+    /// BLAKE3 of these exact canonical envelope bytes, including signatures.
+    /// A locator's content hash names this value.
+    pub envelope_hash: String,
     pub name: String,
     pub scope_type: String,
     pub scope_id: String,
@@ -70,6 +75,18 @@ pub struct GenesisPreview {
 pub struct PinGenesisResponse {
     pub preview: GenesisPreview,
     pub newly_pinned: bool,
+    /// A differently signed envelope over the same core was already pinned.
+    /// The stored bytes were kept and the reviewed bytes were not stored.
+    pub stored_envelope_differs: bool,
+}
+
+/// A parsed locator plus its canonical encoding. Retrieval and sharing use
+/// `canonical_uri`, never the text the user typed.
+#[derive(Debug, Clone, Serialize)]
+pub struct ReviewedGenesisLocator {
+    #[serde(flatten)]
+    pub locator: GovernanceGenesisLocator,
+    pub canonical_uri: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -96,16 +113,18 @@ fn checked_genesis(
 fn preview(
     envelope: &FoundingGenesisEnvelope,
     verified: &VerifiedFoundingGenesis,
+    canonical_bytes: &[u8],
 ) -> GenesisPreview {
     GenesisPreview {
-        dao_id: verified.dao_id.clone(),
-        genesis_hash: verified.genesis_hash.clone(),
+        dao_id: verified.dao_id().to_owned(),
+        core_hash: verified.genesis_hash().to_owned(),
+        envelope_hash: blake3::hash(canonical_bytes).to_hex().to_string(),
         name: envelope.core.name.clone(),
         scope_type: envelope.core.scope.scope_type.clone(),
         scope_id: envelope.core.scope.scope_id.clone(),
         protocol_version: envelope.core.protocol_version,
         rules_version: envelope.core.rules.rules_version.clone(),
-        rules_hash: verified.rules_hash.clone(),
+        rules_hash: verified.rules_hash().to_owned(),
         proposal_approval_numerator: envelope.core.rules.proposal_approval_numerator,
         proposal_approval_denominator: envelope.core.rules.proposal_approval_denominator,
         minimum_turnout_count: envelope.core.rules.minimum_turnout_count,
@@ -135,6 +154,16 @@ fn preview(
             })
             .collect(),
     }
+}
+
+fn reviewed_locator(locator_uri: &str) -> Result<ReviewedGenesisLocator, String> {
+    let locator =
+        GovernanceGenesisLocator::parse(locator_uri).map_err(|error| error.to_string())?;
+    let canonical_uri = locator.encode().map_err(|error| error.to_string())?;
+    Ok(ReviewedGenesisLocator {
+        locator,
+        canonical_uri,
+    })
 }
 
 async fn first_success_with_policy<Source, Value, Attempt, AttemptFuture>(
@@ -208,7 +237,8 @@ async fn retrieve_verified_source(
             return None;
         }
     };
-    Some((identifier, genesis_json, preview(&envelope, &verified)))
+    let preview = preview(&envelope, &verified, genesis_json.as_bytes());
+    Some((identifier, genesis_json, preview))
 }
 
 /// Verify canonical genesis bytes and return every material trust fact without
@@ -219,7 +249,7 @@ pub async fn governance_preview_genesis(
     genesis_json: String,
 ) -> Result<GenesisPreview, String> {
     let (envelope, verified) = checked_genesis(&genesis_json, None)?;
-    Ok(preview(&envelope, &verified))
+    Ok(preview(&envelope, &verified, genesis_json.as_bytes()))
 }
 
 /// Parse and normalize a portable locator without fetching content or
@@ -228,13 +258,14 @@ pub async fn governance_preview_genesis(
 pub async fn governance_preview_genesis_locator(
     _profile: crate::profile::scope::ProfileLease,
     locator_uri: String,
-) -> Result<GovernanceGenesisLocator, String> {
-    GovernanceGenesisLocator::parse(&locator_uri).map_err(|error| error.to_string())
+) -> Result<ReviewedGenesisLocator, String> {
+    reviewed_locator(&locator_uri)
 }
 
 /// Retrieve a locator's canonical JSON and verify both layers of content
 /// addressing. This deliberately stops at preview: only
-/// `governance_pin_genesis` can create the local trust anchor.
+/// `governance_pin_genesis` can create the local trust anchor. Only the
+/// locator's own normalized sources are fetched.
 #[tauri::command]
 pub async fn governance_retrieve_genesis(
     state: State<'_, AppState>,
@@ -284,7 +315,7 @@ pub async fn governance_pin_genesis(
     expected_dao_id: String,
 ) -> Result<PinGenesisResponse, String> {
     let (envelope, verified) = checked_genesis(&genesis_json, Some(&expected_dao_id))?;
-    let expected_preview = preview(&envelope, &verified);
+    let expected_preview = preview(&envelope, &verified, genesis_json.as_bytes());
     let bytes = genesis_json.into_bytes();
     let pinned = state
         .db_executor
@@ -295,12 +326,14 @@ pub async fn governance_pin_genesis(
             move |db| pin_genesis(db.conn(), &bytes).map_err(|error| error.to_string()),
         )
         .await?;
-    if pinned.verified.dao_id != expected_preview.dao_id || pinned.envelope != envelope {
+    if pinned.verified.dao_id() != expected_preview.dao_id || pinned.envelope.core != envelope.core
+    {
         return Err("pinned governance genesis did not match the reviewed envelope".to_string());
     }
     Ok(PinGenesisResponse {
         preview: expected_preview,
         newly_pinned: pinned.newly_pinned,
+        stored_envelope_differs: pinned.stored_envelope_differs,
     })
 }
 
@@ -330,9 +363,13 @@ pub async fn governance_get_pinned_genesis(
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
+    use std::time::Instant;
 
     use super::*;
+    use crate::content_store::http::HttpClient;
+    use crate::content_store::node::ContentNode;
+    use crate::domain::governance_certificate::test_support::signed_genesis;
 
     struct ActiveAttempt {
         active: Arc<AtomicUsize>,
@@ -439,5 +476,136 @@ mod tests {
         .await;
 
         assert!(result.is_err());
+    }
+
+    /// Connect-time resolver that never answers within any test budget.
+    #[derive(Default)]
+    struct SlowResolver {
+        lookups: AtomicUsize,
+    }
+
+    impl reqwest::dns::Resolve for SlowResolver {
+        fn resolve(&self, _name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+            self.lookups.fetch_add(1, Ordering::SeqCst);
+            Box::pin(async {
+                tokio::time::sleep(Duration::from_secs(30)).await;
+                Err::<reqwest::dns::Addrs, _>(
+                    Box::new(std::io::Error::other("slow resolver")) as Box<_>
+                )
+            })
+        }
+    }
+
+    fn slow_dns_resolver() -> (ContentResolver, Arc<SlowResolver>, tempfile::TempDir) {
+        let directory = tempfile::TempDir::new().unwrap();
+        let dns = Arc::new(SlowResolver::default());
+        let http = HttpClient::with_dns_resolver(Duration::from_secs(60), dns.clone()).unwrap();
+        let resolver = ContentResolver::new(
+            Arc::new(ContentNode::new(directory.path())),
+            http,
+            Arc::new(Mutex::new(None)),
+        );
+        (resolver, dns, directory)
+    }
+
+    fn slow_sources(count: usize) -> Vec<String> {
+        (0..count)
+            .map(|index| format!("https://slow-{index}.example.org/genesis.json"))
+            .collect()
+    }
+
+    // Regression: the preview path used to run a blocking `to_socket_addrs`
+    // pre-check inside the race, which no tokio timeout can pre-empt. Every
+    // name here would stall DNS; the budgets must still hold, and the lookups
+    // must reach the async connect-time resolver rather than a blocking one.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn slow_dns_cannot_stretch_the_per_source_budget() {
+        let (resolver, dns, _directory) = slow_dns_resolver();
+        let policy = RetrievalPolicy {
+            max_concurrent: 3,
+            per_source_timeout: Duration::from_millis(100),
+            overall_timeout: Duration::from_secs(5),
+        };
+
+        let started = Instant::now();
+        let result = first_success_with_policy(
+            slow_sources(8),
+            |url| {
+                let resolver = resolver.clone();
+                async move { resolver.resolve_preview_bounded(&url, 1024).await.ok() }
+            },
+            policy,
+        )
+        .await;
+        let elapsed = started.elapsed();
+
+        assert!(matches!(result, Ok(None)));
+        // Three 100 ms rounds for eight sources; generous slack for CI.
+        assert!(elapsed < Duration::from_millis(1_500), "took {elapsed:?}");
+        assert_eq!(dns.lookups.load(Ordering::SeqCst), 8);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn slow_dns_cannot_stretch_the_overall_budget() {
+        let (resolver, dns, _directory) = slow_dns_resolver();
+        let policy = RetrievalPolicy {
+            max_concurrent: 3,
+            per_source_timeout: Duration::from_secs(10),
+            overall_timeout: Duration::from_millis(200),
+        };
+
+        let started = Instant::now();
+        let result = first_success_with_policy(
+            slow_sources(8),
+            |url| {
+                let resolver = resolver.clone();
+                async move { resolver.resolve_preview_bounded(&url, 1024).await.ok() }
+            },
+            policy,
+        )
+        .await;
+        let elapsed = started.elapsed();
+
+        assert!(result.is_err());
+        assert!(elapsed < Duration::from_millis(1_200), "took {elapsed:?}");
+        assert!(dns.lookups.load(Ordering::SeqCst) >= 1);
+    }
+
+    #[test]
+    fn reviewed_locator_returns_the_canonical_encoding() {
+        let hash = "ab".repeat(32);
+        let dao = "cd".repeat(32);
+        let typed = format!(
+            "https://alexandria.ifftu.dev/governance/genesis/{dao}?content={hash}\
+             &source=https%3A%2F%2FMirror.Example.ORG%3A443%2F%2567enesis.json%3F%23blake3%3D{hash}\
+             &source=iroh%3A%2F%2F{hash}"
+        );
+        let reviewed = reviewed_locator(&typed).unwrap();
+        assert_ne!(reviewed.canonical_uri, typed);
+        assert!(reviewed
+            .canonical_uri
+            .starts_with("alexandria://governance/genesis/"));
+        assert_eq!(
+            reviewed.locator.locations[0],
+            format!("https://mirror.example.org/genesis.json#blake3={hash}")
+        );
+        let reparsed = reviewed_locator(&reviewed.canonical_uri).unwrap();
+        assert_eq!(reparsed.locator, reviewed.locator);
+        assert_eq!(reparsed.canonical_uri, reviewed.canonical_uri);
+    }
+
+    #[test]
+    fn preview_exposes_one_core_hash_and_the_exact_envelope_hash() {
+        let bytes = signed_genesis("computer-science");
+        let json = String::from_utf8(bytes.clone()).unwrap();
+        let (envelope, verified) = checked_genesis(&json, None).unwrap();
+        let preview = preview(&envelope, &verified, &bytes);
+        assert_eq!(preview.core_hash, preview.dao_id);
+        assert_eq!(preview.core_hash, envelope.core.core_hash().unwrap());
+        assert_eq!(
+            preview.envelope_hash,
+            blake3::hash(&bytes).to_hex().to_string()
+        );
+        assert_ne!(preview.envelope_hash, preview.core_hash);
     }
 }
