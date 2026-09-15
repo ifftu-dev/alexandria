@@ -1,0 +1,30 @@
+{
+  "jsonrpc": "2.0",
+  "id": -1,
+  "result": {
+    "hash": "F679230253E596B02442B1CA20083DA5EFD7BF5DFE48A9814AFB6FE8EBE58BC9",
+    "height": "15",
+    "index": 0,
+    "tx_result": {
+      "code": 0,
+      "data": null,
+      "log": "accepted",
+      "info": "",
+      "gas_wanted": "0",
+      "gas_used": "0",
+      "events": [],
+      "codespace": ""
+    },
+    "tx": "aW5jcmVtZW50",
+    "proof": {
+      "root_hash": "C80F5AC45DD16522CAD7B0D2A115336542E45AE509C6680A9BC7CDC67B39EFEA",
+      "data": "aW5jcmVtZW50",
+      "proof": {
+        "total": "1",
+        "index": "0",
+        "leaf_hash": "yA9axF3RZSLK17DSoRUzZULkWuUJxmgKm8fNxns57+o=",
+        "aunts": []
+      }
+    }
+  }
+}

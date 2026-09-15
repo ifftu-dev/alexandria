@@ -1,0 +1,12 @@
+[package]
+name = "alexandria-g01-verifier"
+version = "0.0.0"
+edition = "2021"
+publish = false
+rust-version = "1.91"
+
+[workspace]
+
+[dependencies]
+cometbft = { version = "=0.1.0-alpha.2", default-features = false, features = ["rust-crypto"] }
+cometbft-light-client-verifier = { version = "=0.1.0-alpha.2", default-features = false, features = ["rust-crypto"] }
