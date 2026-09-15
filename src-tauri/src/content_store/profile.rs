@@ -6,6 +6,7 @@
 //! 3. Store the signed JSON as an iroh blob
 //! 4. Resolve (fetch + verify) profiles by BLAKE3 hash
 
+use alexandria_verify::json::{decode_untrusted, JsonLimits, UntrustedJsonError};
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use thiserror::Error;
 
@@ -29,6 +30,29 @@ pub enum ProfileError {
     InvalidPublicKey(String),
     #[error("deserialization failed: {0}")]
     Deserialization(String),
+    #[error("profile document JSON rejected: {0}")]
+    UntrustedJson(UntrustedJsonError),
+}
+
+/// Structural limits for an untrusted signed profile document, checked before
+/// typed decoding and signature verification. A profile is one flat object of
+/// short fields; publication applies the same limits, so an owner cannot
+/// publish a profile peers would refuse.
+pub const PROFILE_DOCUMENT_JSON_LIMITS: JsonLimits = JsonLimits {
+    max_bytes: 64 * 1024,
+    max_depth: 2,
+    max_array_len: 16,
+    max_object_entries: 16,
+    max_string_bytes: 16 * 1024,
+};
+
+/// Decode an untrusted signed profile document under
+/// [`PROFILE_DOCUMENT_JSON_LIMITS`]. The result is not yet verified.
+pub fn decode_profile_document(bytes: &[u8]) -> Result<SignedProfile, ProfileError> {
+    decode_untrusted(bytes, &PROFILE_DOCUMENT_JSON_LIMITS).map_err(|error| match error {
+        UntrustedJsonError::Invalid(message) => ProfileError::Deserialization(message),
+        rejected => ProfileError::UntrustedJson(rejected),
+    })
 }
 
 /// Sign a profile payload with the given Ed25519 signing key.
@@ -99,6 +123,7 @@ pub async fn publish_profile(
 ) -> Result<PublishProfileResult, ProfileError> {
     let json = serde_json::to_vec_pretty(signed)
         .map_err(|e| ProfileError::Serialization(e.to_string()))?;
+    decode_profile_document(&json)?;
 
     let result = content::add_bytes(node, &json)
         .await
@@ -122,8 +147,7 @@ pub async fn resolve_profile(
         .await
         .map_err(|e| ProfileError::NotFound(e.to_string()))?;
 
-    let signed: SignedProfile =
-        serde_json::from_slice(&bytes).map_err(|e| ProfileError::Deserialization(e.to_string()))?;
+    let signed = decode_profile_document(&bytes)?;
 
     // Verify the signature before returning
     verify_profile(&signed)?;
@@ -237,6 +261,55 @@ mod tests {
         let extracted = signed.payload();
 
         assert_eq!(payload, extracted);
+    }
+
+    #[test]
+    fn profile_documents_are_bounded_before_verification() {
+        let signed =
+            sign_profile(&make_test_payload("stake_test1limits"), &make_test_key()).expect("sign");
+        let bytes = serde_json::to_vec(&signed).expect("serialize");
+        let max = PROFILE_DOCUMENT_JSON_LIMITS.max_bytes;
+
+        let mut exact = bytes.clone();
+        exact.resize(max, b' ');
+        verify_profile(&decode_profile_document(&exact).expect("exact boundary decodes"))
+            .expect("exact boundary verifies");
+        exact.push(b' ');
+        assert!(matches!(
+            decode_profile_document(&exact),
+            Err(ProfileError::UntrustedJson(UntrustedJsonError::TooLarge { max: limit }))
+                if limit == max
+        ));
+
+        let rest = std::str::from_utf8(&bytes)
+            .expect("utf-8")
+            .strip_prefix('{')
+            .expect("object");
+        let duplicated = format!("{{\"name\":\"Mallory\",{rest}");
+        assert!(matches!(
+            decode_profile_document(duplicated.as_bytes()),
+            Err(ProfileError::UntrustedJson(UntrustedJsonError::DuplicateKey(field)))
+                if field == "name"
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_profile_over_the_limits_is_not_published() {
+        let tmp = tempfile::TempDir::new().expect("create temp dir");
+        let node = ContentNode::new(tmp.path());
+        node.start(None).await.expect("start node");
+
+        let mut payload = make_test_payload("stake_test1oversized");
+        payload.bio = Some("a".repeat(PROFILE_DOCUMENT_JSON_LIMITS.max_string_bytes + 1));
+        let signed = sign_profile(&payload, &make_test_key()).expect("sign");
+        assert!(matches!(
+            publish_profile(&node, &signed).await,
+            Err(ProfileError::UntrustedJson(
+                UntrustedJsonError::StringTooLong { .. }
+            ))
+        ));
+
+        node.shutdown().await.expect("shutdown");
     }
 
     #[tokio::test]

@@ -888,12 +888,13 @@ numbers and trailing bytes. Limits by boundary:
 | Credential payload (bundle, list or single credential) | 16 MiB | 32 | 4096 | 256 | 1,398,104 (base64 of the 1 MiB status bitmap) |
 | Each credential in a payload | 256 KiB | 32 | 4096 | 256 | 64 KiB |
 | Signed course document | 1 MiB | 16 | 4096 | 64 | 64 KiB |
+| Signed profile document | 64 KiB | 2 | 16 | 16 | 16 KiB |
 
 The per-credential limit applies wherever a credential arrives: file import,
 offline verification, a guardian link, and peer import. Peer import also stops
 the transfer at 256 KiB and does not retain the fetched blob. Publishing a
-course document applies the same limits peers enforce on resolution, so an
-author cannot publish a document other nodes would refuse.
+course or profile document applies the same limits peers enforce on
+resolution, so an author cannot publish a document other nodes would refuse.
 
 ### P2P propagation
 
