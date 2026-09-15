@@ -4,33 +4,12 @@ use std::sync::RwLock;
 use libp2p::{Multiaddr, PeerId};
 use serde::{Deserialize, Serialize};
 
-/// Alexandria relay bootstrap nodes.
-///
-/// These are the entry points into the private Alexandria Kademlia DHT
-/// (`/alexandria/kad/1.0`). Relays run Circuit Relay v2 so NATted peers
-/// (phones, laptops behind routers) can connect through them.
-///
-/// Relays have NO special authority — they cannot read encrypted traffic,
-/// forge identities, or censor content. They're dumb pipes + phonebooks.
-///
-/// ## Adding a new relay
-///
-/// 1. Deploy `alexandria-relay` to a new Fly.io region
-/// 2. Run `alexandria-relay --generate-key` to get a deterministic PeerId
-/// 3. Set `RELAY_SEED` env var on the server
-/// 4. Add the new relay's info to the `RELAYS` array below
-///
-struct RelayInfo {
-    peer_id: &'static str,
-    host: &'static str,
-    ipv4: &'static str,
-    port: u16,
-}
+use crate::network_profile::{embedded_preprod, RelayProfile};
 
 /// User-configured additional relays (federation step 1): anyone can
 /// run `alexandria-relay` and point their node at it via the
 /// `p2p.extra_relays` setting. Loaded at `p2p_start`; merged into every
-/// discovery surface below alongside the built-in [`RELAYS`].
+/// discovery surface below alongside the relays in the active network profile.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ExtraRelay {
     pub peer_id: String,
@@ -56,37 +35,19 @@ fn extra_relays() -> Vec<ExtraRelay> {
     EXTRA_RELAYS.read().map(|g| g.clone()).unwrap_or_default()
 }
 
-/// All known relay nodes. The client bootstraps to all of them and
-/// requests circuit relay reservations from each.
-const RELAYS: &[RelayInfo] = &[
-    // Mumbai (primary)
-    RelayInfo {
-        peer_id: "12D3KooWENHQjSydcHUXVTuq4wVNvCP4VGXzxueBtdKi1D3mS6wR",
-        host: "alexandria-relay.fly.dev",
-        ipv4: "168.220.86.30",
-        port: 4001,
-    },
-    // Frankfurt (EU)
-    RelayInfo {
-        peer_id: "12D3KooWFDVfPBwa6EVEp8v8cqXpgmiksV7qMarHCYLF174XV9xj",
-        host: "alexandria-relay-eu.fly.dev",
-        ipv4: "66.51.123.68",
-        port: 4001,
-    },
-];
+fn built_in_relays() -> &'static [RelayProfile] {
+    &embedded_preprod()
+        .expect("embedded network profile is validated during app setup")
+        .relays
+}
 
-/// Relay HTTP endpoints (metrics/registry server, port 9090). Used by
+/// Relay HTTPS registry origins. Used by
 /// the signup-time username availability check, which runs before the
 /// profile (and thus the P2P identity) exists.
 pub fn relay_http_endpoints() -> Vec<String> {
-    RELAYS
+    built_in_relays()
         .iter()
-        .map(|r| format!("http://{}:9090", r.host))
-        .chain(
-            extra_relays()
-                .iter()
-                .map(|r| format!("http://{}:9090", r.host)),
-        )
+        .map(|relay| relay.registry_https_origin.clone())
         .collect()
 }
 
@@ -95,9 +56,8 @@ pub fn relay_http_endpoints() -> Vec<String> {
 /// Used by the event loop to identify relay peers after Identify handshake
 /// and trigger relay reservation + Kademlia bootstrap.
 pub fn relay_peer_ids() -> HashSet<PeerId> {
-    RELAYS
+    built_in_relays()
         .iter()
-        .filter(|r| !r.peer_id.starts_with("PLACEHOLDER"))
         .filter_map(|r| r.peer_id.parse().ok())
         .chain(extra_relays().iter().filter_map(|r| r.peer_id.parse().ok()))
         .collect()
@@ -106,19 +66,18 @@ pub fn relay_peer_ids() -> HashSet<PeerId> {
 /// Build circuit relay listen addresses for all configured relays.
 ///
 /// Returns multiaddrs like:
-/// `/ip4/{ip}/tcp/{port}/p2p/{relay_peer_id}/p2p-circuit`
+/// `/dns4/{host}/tcp/{port}/p2p/{relay_peer_id}/p2p-circuit`
 ///
 /// When passed to `Swarm::listen_on`, each tells the relay client to
 /// connect to that relay and request a circuit reservation so other
 /// NATted peers can reach us through it.
 pub fn relay_circuit_addrs() -> Vec<Multiaddr> {
-    RELAYS
+    built_in_relays()
         .iter()
-        .filter(|r| !r.peer_id.starts_with("PLACEHOLDER"))
         .filter_map(|r| {
             format!(
-                "/ip4/{}/tcp/{}/p2p/{}/p2p-circuit",
-                r.ipv4, r.port, r.peer_id
+                "/dns4/{}/tcp/{}/p2p/{}/p2p-circuit",
+                r.dns_name, r.port, r.peer_id
             )
             .parse()
             .ok()
@@ -137,10 +96,10 @@ pub fn relay_circuit_addrs() -> Vec<Multiaddr> {
 /// Build the circuit address for a specific relay peer.
 pub fn relay_circuit_addr_for(peer_id: &PeerId) -> Option<Multiaddr> {
     let pid_str = peer_id.to_string();
-    if let Some(r) = RELAYS.iter().find(|r| r.peer_id == pid_str) {
+    if let Some(r) = built_in_relays().iter().find(|r| r.peer_id == pid_str) {
         return format!(
-            "/ip4/{}/tcp/{}/p2p/{}/p2p-circuit",
-            r.ipv4, r.port, r.peer_id
+            "/dns4/{}/tcp/{}/p2p/{}/p2p-circuit",
+            r.dns_name, r.port, r.peer_id
         )
         .parse()
         .ok();
@@ -174,13 +133,12 @@ pub fn relay_circuit_addr_for(peer_id: &PeerId) -> Option<Multiaddr> {
 /// keeps relay pressure proportional to the number of *relays*, not
 /// `relays × transport_variants`.
 pub fn relay_circuit_dial_addrs(peer_id: &PeerId) -> Vec<Multiaddr> {
-    RELAYS
+    built_in_relays()
         .iter()
-        .filter(|r| !r.peer_id.starts_with("PLACEHOLDER"))
         .filter_map(|relay| {
             format!(
                 "/dns4/{}/tcp/{}/p2p/{}/p2p-circuit/p2p/{}",
-                relay.host, relay.port, relay.peer_id, peer_id
+                relay.dns_name, relay.port, relay.peer_id, peer_id
             )
             .parse::<Multiaddr>()
             .ok()
@@ -199,15 +157,11 @@ pub fn relay_circuit_dial_addrs(peer_id: &PeerId) -> Vec<Multiaddr> {
 pub fn bootstrap_peers() -> Vec<Multiaddr> {
     let mut addrs = Vec::new();
 
-    for relay in RELAYS {
-        if relay.peer_id.starts_with("PLACEHOLDER") {
-            continue;
-        }
-
+    for relay in built_in_relays() {
         // TCP via DNS
         if let Ok(addr) = format!(
             "/dns4/{}/tcp/{}/p2p/{}",
-            relay.host, relay.port, relay.peer_id
+            relay.dns_name, relay.port, relay.peer_id
         )
         .parse::<Multiaddr>()
         {
@@ -217,31 +171,26 @@ pub fn bootstrap_peers() -> Vec<Multiaddr> {
         // QUIC via DNS
         if let Ok(addr) = format!(
             "/dns4/{}/udp/{}/quic-v1/p2p/{}",
-            relay.host, relay.port, relay.peer_id
+            relay.dns_name, relay.port, relay.peer_id
         )
         .parse::<Multiaddr>()
         {
             addrs.push(addr);
         }
 
-        // Direct IPv4 TCP (fallback — DNS resolution can fail on some mobile networks)
-        if let Ok(addr) = format!(
-            "/ip4/{}/tcp/{}/p2p/{}",
-            relay.ipv4, relay.port, relay.peer_id
-        )
-        .parse::<Multiaddr>()
-        {
-            addrs.push(addr);
-        }
-
-        // Direct IPv4 QUIC (fallback)
-        if let Ok(addr) = format!(
-            "/ip4/{}/udp/{}/quic-v1/p2p/{}",
-            relay.ipv4, relay.port, relay.peer_id
-        )
-        .parse::<Multiaddr>()
-        {
-            addrs.push(addr);
+        for ip in &relay.fallback_ips {
+            let family = if ip.is_ipv4() { "ip4" } else { "ip6" };
+            for transport in [
+                format!("/{family}/{ip}/tcp/{}/p2p/{}", relay.port, relay.peer_id),
+                format!(
+                    "/{family}/{ip}/udp/{}/quic-v1/p2p/{}",
+                    relay.port, relay.peer_id
+                ),
+            ] {
+                if let Ok(addr) = transport.parse::<Multiaddr>() {
+                    addrs.push(addr);
+                }
+            }
         }
     }
 
@@ -274,13 +223,14 @@ pub fn bootstrap_peers() -> Vec<Multiaddr> {
 /// All Alexandria nodes publish a provider record for this key.
 /// To discover other Alexandria peers, query `get_providers(namespace_key())`.
 ///
-/// The key is the SHA-256 hash of the namespace string "ifftu.alexandria",
-/// which is a valid Kademlia record key. On the private DHT, every node
+/// The key is a SHA-256 hash bound to the configured network namespace.
+/// On the private DHT, every node
 /// is an Alexandria node, but provider records still allow targeted discovery
 /// of nodes that are actively providing content.
 pub fn namespace_key() -> libp2p::kad::RecordKey {
     use sha2::{Digest, Sha256};
-    let hash = Sha256::digest(b"ifftu.alexandria");
+    let profile = embedded_preprod().expect("embedded network profile is valid");
+    let hash = Sha256::digest(format!("{}.providers", profile.protocol_namespace));
     libp2p::kad::RecordKey::new(&hash)
 }
 
@@ -290,7 +240,8 @@ pub fn namespace_key() -> libp2p::kad::RecordKey {
 /// request reservations from them, rather than learning every peer.
 pub fn relay_namespace_key() -> libp2p::kad::RecordKey {
     use sha2::{Digest, Sha256};
-    let hash = Sha256::digest(b"ifftu.alexandria.relays");
+    let profile = embedded_preprod().expect("embedded network profile is valid");
+    let hash = Sha256::digest(format!("{}.relays", profile.protocol_namespace));
     libp2p::kad::RecordKey::new(&hash)
 }
 
@@ -307,6 +258,16 @@ mod tests {
         assert!(peers[0].to_string().contains("alexandria-relay.fly.dev"));
         // Second relay addresses
         assert!(peers[4].to_string().contains("alexandria-relay-eu.fly.dev"));
+    }
+
+    #[test]
+    fn registry_lookup_uses_https_profile_origins_only() {
+        let endpoints = relay_http_endpoints();
+        assert_eq!(endpoints.len(), 2);
+        assert!(endpoints
+            .iter()
+            .all(|endpoint| endpoint.starts_with("https://")));
+        assert!(endpoints.iter().all(|endpoint| !endpoint.contains(":9090")));
     }
 
     #[test]

@@ -8,7 +8,7 @@
 //! community relay, but naming trust is not — otherwise a Sybil relay
 //! could forge handle ownership simply by issuing receipts.
 //!
-//! Authority = the GENESIS operator relays plus a Cardano-anchored
+//! Authority = the network-profile receipt issuers plus a Cardano-anchored
 //! registry governed by a governance key (later a DAO). The on-chain
 //! set is layered in by the relay-registry reader; until it lands,
 //! genesis is the sole authority. On-chain entries only *add* issuers —
@@ -20,24 +20,18 @@ use std::sync::RwLock;
 
 use libp2p::PeerId;
 
-/// Project-operated relays trusted to issue receipts before the
-/// on-chain registry exists. MUST stay a subset of the hardcoded
-/// `discovery::RELAYS` operator nodes — never `extra_relays`.
-const GENESIS_ISSUERS: &[&str] = &[
-    "12D3KooWENHQjSydcHUXVTuq4wVNvCP4VGXzxueBtdKi1D3mS6wR", // Mumbai
-    "12D3KooWFDVfPBwa6EVEp8v8cqXpgmiksV7qMarHCYLF174XV9xj", // Frankfurt
-];
+use crate::network_profile::embedded_preprod;
 
 /// Cardano transaction-metadata label carrying the relay registry.
 /// Sits alongside the credential (1697) and username (1698) anchors.
 pub const REGISTRY_LABEL: u64 = 1699;
 
-/// Governance address (preprod). A label-[`REGISTRY_LABEL`] metadata tx
-/// is only honoured as a registry update if it was authored by this
-/// address (one of its UTxOs is spent as an input — only the gov key
-/// can do that). Phase 1: a dedicated gov key; migrates to a DAO script
-/// address later. Clients pin it so no single relay can rewrite the set.
-pub const GOV_ADDRESS: &str = "addr_test1vzdrft6lj8p2ca7t0ru0wc3tsjtgcws2cyhaa3zemw7hgechm5qry";
+pub fn governance_anchor_address() -> Option<&'static str> {
+    embedded_preprod()
+        .expect("embedded network profile is validated during app setup")
+        .optional_governance_anchor_address
+        .as_deref()
+}
 
 /// On-chain / cached authorized issuers, layered over genesis.
 /// Populated by the Cardano relay-registry reader once it has fetched
@@ -58,7 +52,12 @@ pub fn set_onchain_issuers(issuers: Vec<String>) {
 /// broader decision — see [`super::discovery::relay_peer_ids`].
 pub fn is_authorized_issuer(peer_id: &PeerId) -> bool {
     let s = peer_id.to_string();
-    if GENESIS_ISSUERS.contains(&s.as_str()) {
+    if embedded_preprod()
+        .expect("embedded network profile is valid")
+        .receipt_issuer_keys
+        .iter()
+        .any(|issuer| issuer == &s)
+    {
         return true;
     }
     ONCHAIN_ISSUERS
@@ -70,7 +69,12 @@ pub fn is_authorized_issuer(peer_id: &PeerId) -> bool {
 /// The full authorized-issuer set (genesis ∪ on-chain), for diagnostics
 /// and UI surfaces.
 pub fn authorized_issuers() -> HashSet<String> {
-    let mut set: HashSet<String> = GENESIS_ISSUERS.iter().map(|s| s.to_string()).collect();
+    let mut set: HashSet<String> = embedded_preprod()
+        .expect("embedded network profile is valid")
+        .receipt_issuer_keys
+        .iter()
+        .cloned()
+        .collect();
     if let Ok(g) = ONCHAIN_ISSUERS.read() {
         set.extend(g.iter().cloned());
     }
@@ -89,7 +93,7 @@ mod tests {
 
     #[test]
     fn genesis_relays_are_authorized() {
-        for g in GENESIS_ISSUERS {
+        for g in &embedded_preprod().unwrap().receipt_issuer_keys {
             let pid: PeerId = g.parse().expect("genesis peer id parses");
             assert!(is_authorized_issuer(&pid));
         }

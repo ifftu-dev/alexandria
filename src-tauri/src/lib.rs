@@ -11,6 +11,7 @@ pub mod diag;
 pub mod domain;
 pub mod evidence;
 pub mod goals;
+pub mod network_profile;
 pub mod p2p;
 pub mod plugins;
 pub mod profile;
@@ -460,13 +461,12 @@ impl AppState {
             }
         }
 
-        // Seed `stake_pubkey_registry` from the bundled
-        // bootstrap snapshot. No-op when the placeholder file is still
-        // empty (pre-launch). See `docs/stake-pubkey-registry.md`.
-        match crate::p2p::registry::load_embedded_bootstrap(database.conn()) {
-            Ok(n) if n > 0 => log::info!("stake-pubkey registry: seeded {n} rows from bootstrap"),
-            Ok(_) => {}
-            Err(e) => log::warn!("stake-pubkey registry: bootstrap seed failed: {e}"),
+        // A profile must not activate under a bootstrap trust document that
+        // fails the network profile's pinned verifier configuration.
+        let seeded = crate::p2p::registry::load_embedded_bootstrap(database.conn())
+            .map_err(|e| format!("stake-pubkey registry bootstrap is invalid: {e}"))?;
+        if seeded > 0 {
+            log::info!("stake-pubkey registry: seeded {seeded} rows from bootstrap");
         }
 
         // Seed the skill taxonomy, goal templates, and browsable demo courses
@@ -788,6 +788,16 @@ pub fn run() {
             diag::install_panic_hook();
             diag::log("app setup started");
             diag::log("app data directory resolved");
+
+            let network_profile = network_profile::embedded_preprod()
+                .map_err(|error| std::io::Error::other(error.to_string()))?;
+            network_profile
+                .verify_embedded_resources()
+                .map_err(|error| std::io::Error::other(error.to_string()))?;
+            diag::log(&format!(
+                "network profile validated: {} revision {}",
+                network_profile.network_id, network_profile.profile_revision
+            ));
 
             // Migrate any legacy single-vault layout into the new
             // per-profile layout. Runs at most once; no-op if a
