@@ -6,19 +6,19 @@
 //! completes the pair on the initiator side (see
 //! [`crate::p2p::device_sync`]).
 
-use tauri::State;
+use crate::profile::scope::ProfileState as State;
 
 use crate::crypto::pairing::{self, PairingCode};
+use crate::db::executor::{DatabaseExecutor, DatabaseWorkload};
 use crate::domain::sync::SyncResult;
 use crate::p2p::device_sync::{PairingHandshake, SyncRequest, SyncResponse};
 use crate::p2p::sync;
+use crate::profile::scope::ProfileLease;
 use crate::AppState;
 
 /// How long a generated pairing code stays valid (seconds).
 const PAIRING_TTL_SECS: i64 = 600;
 
-/// Shared handle to the per-profile database.
-pub(crate) type DbHandle = std::sync::Arc<std::sync::Mutex<Option<crate::db::Database>>>;
 /// Shared handle to the running P2P node.
 pub(crate) type NodeHandle =
     std::sync::Arc<tokio::sync::Mutex<Option<crate::p2p::network::P2pNode>>>;
@@ -51,22 +51,28 @@ pub async fn pairing_generate_code(state: State<'_, AppState>) -> Result<String,
 
     let shared_key = pairing::generate_shared_key();
 
-    let (stake_address, device_id, device_name) = {
-        let db_guard = state.db.lock().map_err(|_| "db lock poisoned")?;
-        let db = db_guard.as_ref().ok_or("database not initialized")?;
-        let conn = db.conn();
-        let stake = sync::local_stake_address(conn)?
-            .ok_or("no local identity — finish onboarding first")?;
-        let device_id = sync::get_or_create_local_device(conn, std::env::consts::OS)?;
-        let name: Option<String> = conn
-            .query_row(
-                "SELECT device_name FROM devices WHERE is_local = 1",
-                [],
-                |r| r.get(0),
-            )
-            .ok();
-        (stake, device_id, name)
-    };
+    let (stake_address, device_id, device_name) = state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "pairing.code.identity",
+            move |db| {
+                let stake = sync::local_stake_address(db.conn())?
+                    .ok_or("no local identity — finish onboarding first")?;
+                let device_id = sync::get_or_create_local_device(db.conn(), std::env::consts::OS)?;
+                let name: Option<String> = db
+                    .conn()
+                    .query_row(
+                        "SELECT device_name FROM devices WHERE is_local = 1",
+                        [],
+                        |r| r.get(0),
+                    )
+                    .ok();
+                Ok((stake, device_id, name))
+            },
+        )
+        .await?;
 
     let code = PairingCode {
         peer_id,
@@ -79,16 +85,23 @@ pub async fn pairing_generate_code(state: State<'_, AppState>) -> Result<String,
     };
     let code_str = pairing::encode(&code)?;
 
-    {
-        let db_guard = state.db.lock().map_err(|_| "db lock poisoned")?;
-        let db = db_guard.as_ref().ok_or("database not initialized")?;
-        sync::record_pending_pairing(
-            db.conn(),
-            &pairing::code_hash(&code_str),
-            &shared_key,
-            PAIRING_TTL_SECS,
-        )?;
-    }
+    let pending_hash = pairing::code_hash(&code_str);
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "pairing.code.persist",
+            move |db| {
+                sync::record_pending_pairing(
+                    db.conn(),
+                    &pending_hash,
+                    &shared_key,
+                    PAIRING_TTL_SECS,
+                )
+            },
+        )
+        .await?;
 
     Ok(code_str)
 }
@@ -107,35 +120,38 @@ pub async fn pairing_accept_code(
     let code_hash = pairing::code_hash(&code);
     let parsed = pairing::decode(&code)?;
 
-    // Local identity context + same-user guard + record the pair.
-    let (local_device_id, local_name) = {
-        let db_guard = state.db.lock().map_err(|_| "db lock poisoned")?;
-        let db = db_guard.as_ref().ok_or("database not initialized")?;
-        let conn = db.conn();
-        let local_stake = sync::local_stake_address(conn)?
-            .ok_or("no local identity — finish onboarding first")?;
-        if local_stake != parsed.stake_address {
-            return Err("this pairing code belongs to a different account".to_string());
-        }
-        sync::complete_pairing(conn, &parsed)?;
-        let device_id = sync::get_or_create_local_device(conn, std::env::consts::OS)?;
-        let name: Option<String> = conn
-            .query_row(
-                "SELECT device_name FROM devices WHERE is_local = 1",
-                [],
-                |r| r.get(0),
-            )
-            .ok();
-        (device_id, name)
-    };
-
-    // Seal our current state under the shared key.
-    let sealed = {
-        let db_guard = state.db.lock().map_err(|_| "db lock poisoned")?;
-        let db = db_guard.as_ref().ok_or("database not initialized")?;
-        let payload = sync::build_sync_payload(db.conn())?;
-        sync::seal_payload(&parsed.shared_key, &payload)?
-    };
+    let parsed_for_db = parsed.clone();
+    let (local_device_id, local_name, sealed) = state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "pairing.accept.prepare",
+            move |db| {
+                crate::db::with_transaction(db.conn(), || {
+                    let local_stake = sync::local_stake_address(db.conn())?
+                        .ok_or("no local identity — finish onboarding first")?;
+                    if local_stake != parsed_for_db.stake_address {
+                        return Err("this pairing code belongs to a different account".to_string());
+                    }
+                    sync::complete_pairing(db.conn(), &parsed_for_db)?;
+                    let device_id =
+                        sync::get_or_create_local_device(db.conn(), std::env::consts::OS)?;
+                    let name: Option<String> = db
+                        .conn()
+                        .query_row(
+                            "SELECT device_name FROM devices WHERE is_local = 1",
+                            [],
+                            |r| r.get(0),
+                        )
+                        .ok();
+                    let payload = sync::build_sync_payload(db.conn())?;
+                    let sealed = sync::seal_payload(&parsed_for_db.shared_key, &payload)?;
+                    Ok((device_id, name, sealed))
+                })
+            },
+        )
+        .await?;
 
     let peer: libp2p::PeerId = parsed
         .peer_id
@@ -169,34 +185,38 @@ pub async fn pairing_accept_code(
     };
 
     finish_exchange(
-        &state.db,
+        &state.db_executor,
+        state.profile_lease(),
+        DatabaseWorkload::Learner,
         &parsed.peer_id,
         &parsed.shared_key,
         response,
         started,
     )
+    .await
 }
 
 /// Apply a peer's [`SyncResponse`] to the local DB and assemble a
 /// [`SyncResult`]. Shared by pairing and the routine sync driver.
-pub(crate) fn finish_exchange(
-    db: &DbHandle,
+pub(crate) async fn finish_exchange(
+    db_executor: &DatabaseExecutor,
+    lease: ProfileLease,
+    workload: DatabaseWorkload,
     peer_id: &str,
     key: &[u8; 32],
     response: SyncResponse,
     started: std::time::Instant,
 ) -> Result<SyncResult, String> {
-    let db_guard = db.lock().map_err(|_| "db lock poisoned")?;
-    let db = db_guard.as_ref().ok_or("database not initialized")?;
-    let conn = db.conn();
-
     match response {
         SyncResponse::Ok { sealed, merged } => {
             let payload = sync::open_payload(key, &sealed)?;
             let received = sync::payload_row_count(&payload);
-            let (rows, settings) = sync::apply_sync_payload(conn, &payload)?;
-            let locally_merged = rows + settings;
-            let _ = sync::record_sync_event(conn, peer_id, "bidirectional", locally_merged);
+            let peer_id = peer_id.to_string();
+            let locally_merged = db_executor
+                .execute(workload, lease, "sync.payload.apply", move |db| {
+                    apply_exchange_payload(db.conn(), &peer_id, &payload)
+                })
+                .await?;
             Ok(SyncResult {
                 rows_sent: merged,
                 rows_received: received,
@@ -209,5 +229,78 @@ pub(crate) fn finish_exchange(
             Err("peer rejected sync — not a paired device of this account".to_string())
         }
         SyncResponse::Error(e) => Err(format!("peer sync error: {e}")),
+    }
+}
+
+fn apply_exchange_payload(
+    conn: &rusqlite::Connection,
+    peer_id: &str,
+    payload: &sync::SyncPayload,
+) -> Result<i64, String> {
+    crate::db::with_transaction(conn, || {
+        let (rows, settings) = sync::apply_sync_payload(conn, payload)?;
+        let locally_merged = rows + settings;
+        sync::record_sync_event(conn, peer_id, "bidirectional", locally_merged)?;
+        Ok(locally_merged)
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::Database;
+    use crate::domain::sync::SyncRow;
+
+    #[test]
+    fn inbound_merge_rolls_back_when_sync_history_write_fails() {
+        let db = Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO courses (id, title, author_address) VALUES ('c1', 'Test', 'addr1')",
+                [],
+            )
+            .unwrap();
+        db.conn()
+            .execute_batch(
+                "CREATE TRIGGER reject_sync_history
+                 BEFORE INSERT ON sync_log
+                 WHEN NEW.entity_type = 'sync'
+                 BEGIN
+                     SELECT RAISE(ABORT, 'injected sync history failure');
+                 END;",
+            )
+            .unwrap();
+        let payload = sync::SyncPayload {
+            settings: vec![],
+            tables: vec![(
+                "enrollments".into(),
+                vec![SyncRow {
+                    row_id: "enrollment-sync".into(),
+                    operation: "insert".into(),
+                    data: Some(serde_json::json!({
+                        "course_id": "c1",
+                        "status": "active",
+                        "updated_at": "2026-09-15T00:00:00Z"
+                    })),
+                    updated_at: "2026-09-15T00:00:00Z".into(),
+                }],
+            )],
+        };
+
+        let error = apply_exchange_payload(db.conn(), "peer-test", &payload).unwrap_err();
+        assert!(
+            error.contains("injected sync history failure"),
+            "got: {error}"
+        );
+        let count: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM enrollments WHERE id = 'enrollment-sync'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 0, "the inbound row must roll back with its history");
     }
 }

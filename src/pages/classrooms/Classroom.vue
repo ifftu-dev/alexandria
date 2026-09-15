@@ -343,13 +343,14 @@ import { useClassroom } from '@/composables/useClassroom'
 import { useAuth } from '@/composables/useAuth'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppModal from '@/components/ui/AppModal.vue'
+import type { ClassroomChannel, ClassroomMember } from '@/types'
 
 // ── Inline sub-components ────────────────────────────────────────────
 
 /** Channel list — shared between desktop sidebar and mobile drawer */
 const ChannelList = defineComponent({
   props: {
-    channels: { type: Array as PropType<readonly any[]>, required: true },
+    channels: { type: Array as PropType<readonly ClassroomChannel[]>, required: true },
     activeChannelId: { type: String, default: undefined },
     canManage: { type: Boolean, default: false },
   },
@@ -372,7 +373,7 @@ const ChannelList = defineComponent({
               )
             : null,
         ]),
-        ...(props.channels as any[]).map((ch: any) =>
+        ...props.channels.map((ch) =>
           h(
             'button',
             {
@@ -401,18 +402,18 @@ const ChannelList = defineComponent({
 /** Member list — shared between desktop sidebar and mobile drawer */
 const MemberList = defineComponent({
   props: {
-    members: { type: Array as PropType<readonly any[]>, required: true },
+    members: { type: Array as PropType<readonly ClassroomMember[]>, required: true },
   },
   setup(props) {
     const { t } = useI18n()
     function formatAddr(addr: string): string {
       return addr.length > 12 ? `${addr.slice(0, 8)}...${addr.slice(-4)}` : addr
     }
-    function roleSection(label: string, filtered: any[], avatarClass: string) {
+    function roleSection(label: string, filtered: readonly ClassroomMember[], avatarClass: string) {
       if (filtered.length === 0) return null
       return h('div', { class: 'mb-3' }, [
         h('div', { class: 'text-xs text-muted-foreground/60 mb-1' }, label),
-        ...filtered.map((m: any) =>
+        ...filtered.map((m) =>
           h('div', { key: m.stake_address, class: 'flex items-center gap-2 py-1' }, [
             h(
               'div',
@@ -429,7 +430,7 @@ const MemberList = defineComponent({
       ])
     }
     return () => {
-      const all = props.members as any[]
+      const all = props.members
       return h('div', { class: 'px-3 py-3' }, [
         h('div', { class: 'text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2' }, t('classrooms.members.heading')),
         roleSection(t('classrooms.roles.ownerSection'), all.filter((m) => m.role === 'owner'), 'bg-warning/20 text-warning'),

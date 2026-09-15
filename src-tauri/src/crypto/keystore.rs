@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use argon2::Argon2;
 use iota_stronghold::{KeyProvider, SnapshotPath, Stronghold};
 use thiserror::Error;
-use zeroize::Zeroizing;
+use zeroize::{Zeroize, Zeroizing};
 
 /// Store record key for the mnemonic.
 const MNEMONIC_KEY: &[u8] = b"mnemonic";
@@ -67,7 +67,7 @@ pub struct Keystore {
 impl std::fmt::Debug for Keystore {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Keystore")
-            .field("vault_dir", &self.vault_dir)
+            .field("state", &"<redacted>")
             .finish_non_exhaustive()
     }
 }
@@ -255,13 +255,20 @@ impl Keystore {
     ///
     /// After this call, the Keystore is consumed. A new `open()` call
     /// is required to access secrets again.
-    pub fn lock(self) -> Result<(), KeystoreError> {
-        self.stronghold
-            .clear()
-            .map_err(|e| KeystoreError::Stronghold(format!("{e:?}")))?;
+    pub fn lock(mut self) -> Result<(), KeystoreError> {
+        self.clear_secrets()?;
         // `self.password` is `Zeroizing<String>` — dropped and zeroed here.
         log::info!("Keystore locked");
         Ok(())
+    }
+
+    pub(crate) fn clear_secrets(&mut self) -> Result<(), KeystoreError> {
+        // Zeroize first: a failed Stronghold clear leaves this keystore in
+        // shared state, and it must not keep the password alive there.
+        self.password.zeroize();
+        self.stronghold
+            .clear()
+            .map_err(|e| KeystoreError::Stronghold(format!("{e:?}")))
     }
 
     /// Get the vault directory path.
@@ -424,6 +431,20 @@ mod tests {
     use super::*;
     use std::fs;
 
+    #[test]
+    fn clear_secrets_erases_password_and_vault_memory_and_is_repeatable() {
+        let directory = tempfile::TempDir::new().expect("temporary vault");
+        let mut keystore =
+            Keystore::create(directory.path(), "testpassword").expect("create vault");
+        keystore
+            .store_mnemonic("test mnemonic")
+            .expect("store mnemonic");
+        keystore.clear_secrets().expect("clear secrets");
+        assert!(keystore.password.is_empty());
+        assert!(keystore.retrieve_mnemonic().is_err());
+        keystore.clear_secrets().expect("repeat cleanup");
+    }
+
     fn temp_vault_dir() -> PathBuf {
         let dir = std::env::temp_dir()
             .join("alexandria_test_vault")
@@ -442,8 +463,12 @@ mod tests {
     #[test]
     fn create_vault_and_check_exists() {
         let dir = temp_vault_dir();
-        let _ks = Keystore::create(&dir, "testpassword").expect("create failed");
+        let ks = Keystore::create(&dir, "testpassword").expect("create failed");
         assert!(Keystore::exists(&dir));
+        let debug = format!("{ks:?}");
+        assert!(debug.contains("<redacted>"));
+        assert!(!debug.contains(dir.to_string_lossy().as_ref()));
+        assert!(!debug.contains("testpassword"));
         fs::remove_dir_all(&dir).ok();
     }
 

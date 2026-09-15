@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::{Aes256Gcm, Nonce};
 use thiserror::Error;
-use zeroize::Zeroizing;
+use zeroize::{Zeroize, Zeroizing};
 
 /// Encrypted vault filename.
 const VAULT_FILENAME: &str = "vault.bin";
@@ -63,7 +63,7 @@ pub struct Keystore {
 impl std::fmt::Debug for Keystore {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Keystore")
-            .field("vault_dir", &self.vault_dir)
+            .field("state", &"<redacted>")
             .finish_non_exhaustive()
     }
 }
@@ -90,7 +90,7 @@ impl Keystore {
         let salt = generate_salt();
         write_salt_with_hmac(vault_dir, &salt, password)?;
 
-        log::info!("Portable keystore created at {}", vault_dir.display());
+        log::info!("portable keystore created");
 
         Ok(Self {
             vault_dir: vault_dir.to_path_buf(),
@@ -129,7 +129,7 @@ impl Keystore {
         let mnemonic = String::from_utf8(plaintext)
             .map_err(|e| KeystoreError::Crypto(format!("invalid UTF-8: {e}")))?;
 
-        log::info!("Portable keystore unlocked from {}", vault_dir.display());
+        log::info!("portable keystore unlocked");
 
         Ok(Self {
             vault_dir: vault_dir.to_path_buf(),
@@ -197,9 +197,15 @@ impl Keystore {
 
     /// Lock the vault, clearing in-memory secrets.
     pub fn lock(mut self) -> Result<(), KeystoreError> {
-        self.mnemonic = None;
+        self.clear_secrets()?;
         // password is Zeroizing — dropped and zeroed here
         log::info!("Portable keystore locked");
+        Ok(())
+    }
+
+    pub(crate) fn clear_secrets(&mut self) -> Result<(), KeystoreError> {
+        self.mnemonic = None;
+        self.password.zeroize();
         Ok(())
     }
 
@@ -349,6 +355,20 @@ mod tests {
     use super::*;
     use std::fs;
 
+    #[test]
+    fn clear_secrets_erases_password_and_vault_memory_and_is_repeatable() {
+        let directory = tempfile::TempDir::new().expect("temporary vault");
+        let mut keystore =
+            Keystore::create(directory.path(), "testpassword").expect("create vault");
+        keystore
+            .store_mnemonic("test mnemonic")
+            .expect("store mnemonic");
+        keystore.clear_secrets().expect("clear secrets");
+        assert!(keystore.password.is_empty());
+        assert!(keystore.retrieve_mnemonic().is_err());
+        keystore.clear_secrets().expect("repeat cleanup");
+    }
+
     fn temp_vault_dir() -> PathBuf {
         let dir = std::env::temp_dir()
             .join("alexandria_test_portable_vault")
@@ -370,6 +390,11 @@ mod tests {
         let mut ks = Keystore::create(&dir, "testpassword").expect("create failed");
         ks.store_mnemonic("test mnemonic").expect("store failed");
         assert!(Keystore::exists(&dir));
+        let debug = format!("{ks:?}");
+        assert!(debug.contains("<redacted>"));
+        assert!(!debug.contains(dir.to_string_lossy().as_ref()));
+        assert!(!debug.contains("testpassword"));
+        assert!(!debug.contains("test mnemonic"));
         fs::remove_dir_all(&dir).ok();
     }
 

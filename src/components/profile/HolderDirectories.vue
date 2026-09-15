@@ -23,10 +23,12 @@
 
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { invoke } from '@tauri-apps/api/core'
+import { useLocalApi } from "@/composables/useLocalApi"
 import { useI18n } from 'vue-i18n'
 
 import { AppButton } from '@/components/ui'
+
+const { invoke } = useLocalApi()
 
 interface Directory {
   name: string

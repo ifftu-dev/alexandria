@@ -13,35 +13,41 @@ const { invoke } = useLocalApi()
 
 const links = ref<GuardianLinkInfo[]>([])
 const loaded = ref(false)
+let profileGeneration = 0
 
 const children = computed(() => links.value.filter(l => l.side === 'guardian' && l.status !== 'revoked'))
 const guardians = computed(() => links.value.filter(l => l.side === 'ward' && l.status !== 'revoked'))
 
 async function refreshLinks(): Promise<GuardianLinkInfo[]> {
+  const generation = profileGeneration
   try {
-    links.value = await invoke<GuardianLinkInfo[]>('guardian_list_links')
+    const refreshed = await invoke<GuardianLinkInfo[]>('guardian_list_links')
+    if (generation === profileGeneration) links.value = refreshed
   } catch {
-    links.value = []
+    if (generation === profileGeneration) links.value = []
   }
-  loaded.value = true
-  return links.value
+  if (generation === profileGeneration) loaded.value = true
+  return generation === profileGeneration ? links.value : []
 }
 
 async function acceptInvite(code: string): Promise<GuardianLinkInfo> {
+  const generation = profileGeneration
   const link = await invoke<GuardianLinkInfo>('guardian_accept_invite', { code })
-  await refreshLinks()
+  if (generation === profileGeneration) await refreshLinks()
   return link
 }
 
 async function syncNow(): Promise<number> {
+  const generation = profileGeneration
   const rows = await invoke<number>('guardian_sync_now')
-  await refreshLinks()
+  if (generation === profileGeneration) await refreshLinks()
   return rows
 }
 
 async function revokeLink(linkId: string): Promise<void> {
+  const generation = profileGeneration
   await invoke('guardian_revoke_link', { linkId })
-  await refreshLinks()
+  if (generation === profileGeneration) await refreshLinks()
 }
 
 /** Mirrored child activity rows for one table (guardian side). */
@@ -68,6 +74,7 @@ onProfileReady(() => {
   void refreshLinks()
 })
 onProfileLocked(() => {
+  profileGeneration += 1
   links.value = []
   loaded.value = false
 })

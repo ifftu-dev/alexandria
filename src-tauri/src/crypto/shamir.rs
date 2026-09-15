@@ -16,6 +16,7 @@
 use rand::rngs::OsRng;
 use rand::RngCore;
 use thiserror::Error;
+use zeroize::Zeroize;
 
 #[derive(Error, Debug)]
 pub enum ShamirError {
@@ -34,10 +35,25 @@ pub enum ShamirError {
 /// One Shamir share: an x coordinate in 1..=255 plus the same number
 /// of bytes as the original secret (each byte is `P_i(x)` where
 /// `P_i` is the polynomial for secret byte `i`).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Share {
     pub x: u8,
     pub y: Vec<u8>,
+}
+
+impl std::fmt::Debug for Share {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Share")
+            .field("x", &self.x)
+            .field("y", &"<redacted>")
+            .finish()
+    }
+}
+
+impl Drop for Share {
+    fn drop(&mut self) {
+        self.y.zeroize();
+    }
 }
 
 // ---------- GF(256) arithmetic ----------
@@ -339,5 +355,18 @@ mod tests {
             let combo = combine(&shares[..t]).unwrap();
             assert_eq!(combo, key, "t={t} n={n} failed");
         }
+    }
+
+    #[test]
+    fn share_debug_output_redacts_secret_bytes() {
+        let share = Share {
+            x: 7,
+            y: vec![19, 23, 29, 31],
+        };
+        let debug = format!("{share:?}");
+
+        assert!(debug.contains("x: 7"));
+        assert!(debug.contains("<redacted>"));
+        assert!(!debug.contains("19, 23, 29, 31"));
     }
 }

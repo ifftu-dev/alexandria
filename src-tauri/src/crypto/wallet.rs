@@ -7,7 +7,7 @@ use pallas_crypto::hash::Hasher;
 use pallas_crypto::key::ed25519::SecretKeyExtended;
 use pallas_wallet::hd::Bip32PrivateKey;
 use thiserror::Error;
-use zeroize::Zeroize;
+use zeroize::{Zeroize, Zeroizing};
 
 #[derive(Error, Debug)]
 pub enum WalletError {
@@ -31,7 +31,6 @@ pub enum WalletError {
 /// bech32 address encoding (addr_test1... / stake_test1... for preprod).
 /// Note: `Clone` intentionally not derived — prevents accidental duplication
 /// of secret key material in memory. `Drop` zeros all sensitive fields.
-#[derive(Debug)]
 pub struct Wallet {
     /// The BIP-39 mnemonic phrase (24 words).
     pub mnemonic: String,
@@ -59,15 +58,25 @@ pub struct Wallet {
     pub stake_key_hash: [u8; 28],
 }
 
+impl std::fmt::Debug for Wallet {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Wallet values are routinely carried through async/background error
+        // paths. Keep Debug safe for contextual logging: even the public
+        // addresses and key hashes identify the learner and do not belong in
+        // an automatic diagnostic dump.
+        f.debug_struct("Wallet")
+            .field("secret_material", &"<redacted>")
+            .field("public_identity", &"<redacted>")
+            .finish()
+    }
+}
+
 impl Drop for Wallet {
     fn drop(&mut self) {
         self.mnemonic.zeroize();
-        // `SigningKey` no longer implements `Zeroize`, so overwrite it in
-        // place with a deterministic zero key instead of dropping the
-        // original secret bytes untouched.
-        unsafe {
-            std::ptr::addr_of_mut!(self.signing_key).write(SigningKey::from_bytes(&[0u8; 32]));
-        }
+        // `SigningKey` has `ZeroizeOnDrop` enabled through its default
+        // features. Rust drops fields after this method returns, so its own
+        // implementation clears the secret without raw-pointer replacement.
         self.payment_key_extended.zeroize();
         self.stake_key_extended.zeroize();
         self.payment_key_hash.zeroize();
@@ -86,6 +95,9 @@ const ACCOUNT: u32 = 0;
 const PAYMENT_ROLE: u32 = 0;
 const STAKE_ROLE: u32 = 2;
 const ADDRESS_INDEX: u32 = 0;
+/// Pallas encodes an HD private key as a 64-byte extended Ed25519 secret
+/// followed by a 32-byte chain code.
+const BIP32_PRIVATE_KEY_SIZE: usize = SecretKeyExtended::SIZE + 32;
 
 /// Generate a new wallet with a fresh 24-word mnemonic.
 pub fn generate_wallet() -> Result<Wallet, WalletError> {
@@ -185,23 +197,19 @@ fn harden(index: u32) -> u32 {
 /// Both halves are needed for pallas-txbuilder's `PrivateKey::Extended` signing.
 /// The first 32 bytes alone serve as the Ed25519 scalar for ed25519-dalek.
 fn extract_extended_key_bytes(bip32_key: &Bip32PrivateKey) -> Result<[u8; 64], WalletError> {
-    let pallas_private = bip32_key.to_ed25519_private_key();
-
-    match pallas_private {
-        pallas_wallet::PrivateKey::Normal(sk) => {
-            // Normal key is only 32 bytes — pad with zeros for the extension half.
-            let bytes: [u8; 32] =
-                unsafe { pallas_crypto::key::ed25519::SecretKey::leak_into_bytes(sk) };
-            let mut extended = [0u8; 64];
-            extended[..32].copy_from_slice(&bytes);
-            Ok(extended)
-        }
-        pallas_wallet::PrivateKey::Extended(xsk) => {
-            let bytes: [u8; SecretKeyExtended::SIZE] =
-                unsafe { SecretKeyExtended::leak_into_bytes(xsk) };
-            Ok(bytes)
-        }
+    // `as_bytes` is Pallas's safe serialization boundary. Keep its temporary
+    // allocation zeroizing because it contains both the signing key and chain
+    // code; only the signing portion moves into the Wallet's zeroized field.
+    let encoded = Zeroizing::new(bip32_key.as_bytes());
+    if encoded.len() != BIP32_PRIVATE_KEY_SIZE {
+        return Err(WalletError::DerivationFailed(format!(
+            "unexpected BIP32 private key length: expected {BIP32_PRIVATE_KEY_SIZE}, got {}",
+            encoded.len()
+        )));
     }
+    encoded[..SecretKeyExtended::SIZE]
+        .try_into()
+        .map_err(|_| WalletError::DerivationFailed("extended signing key extraction failed".into()))
 }
 
 #[cfg(test)]
@@ -297,6 +305,37 @@ mod tests {
         let verifying_key = wallet.signing_key.verifying_key();
         use ed25519_dalek::Verifier;
         assert!(verifying_key.verify(message, &signature).is_ok());
+    }
+
+    #[test]
+    fn extracted_extended_keys_match_the_derived_address_credentials() {
+        let wallet = generate_wallet().expect("wallet generation failed");
+        let payment = SecretKeyExtended::from_bytes(wallet.payment_key_extended)
+            .expect("derived payment key must be structurally valid");
+        let stake = SecretKeyExtended::from_bytes(wallet.stake_key_extended)
+            .expect("derived stake key must be structurally valid");
+
+        assert_eq!(
+            Hasher::<224>::hash(payment.public_key().as_ref()).as_ref(),
+            wallet.payment_key_hash.as_slice()
+        );
+        assert_eq!(
+            Hasher::<224>::hash(stake.public_key().as_ref()).as_ref(),
+            wallet.stake_key_hash.as_slice()
+        );
+    }
+
+    #[test]
+    fn debug_output_redacts_secrets_and_public_identity() {
+        let wallet = generate_wallet().expect("wallet generation failed");
+        let debug = format!("{wallet:?}");
+
+        assert!(debug.contains("<redacted>"));
+        assert!(!debug.contains(&wallet.mnemonic));
+        assert!(!debug.contains(&wallet.payment_address));
+        assert!(!debug.contains(&wallet.stake_address));
+        assert!(!debug.contains(&hex::encode(wallet.payment_key_extended)));
+        assert!(!debug.contains(&hex::encode(wallet.stake_key_extended)));
     }
 
     #[test]
