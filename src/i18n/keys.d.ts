@@ -406,6 +406,7 @@ export type MessageKey =
   | 'credentials.detail.revoked'
   | 'credentials.detail.signature'
   | 'credentials.detail.status'
+  | 'credentials.detail.statusEvidenceNote'
   | 'credentials.detail.subjectBound'
   | 'credentials.detail.tamperProof'
   | 'credentials.detail.trustDetail.courseEndorsement'

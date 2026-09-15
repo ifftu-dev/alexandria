@@ -222,6 +222,10 @@ distinguishes pending from rejection. The credential detail page also shows a
 provenance panel from `get_credential_trust`: invalid, pending, own claim, signed
 by another issuer, or endorsed for an exact course version, with the reason or
 endorsement count. The panel states that provenance does not grant privileges.
+The proof panel reports revocation as pending, not "no", while the issuer's
+status list is missing or unreadable, and notes that a check on this device uses
+the status information it holds and cannot see a revocation the issuer published
+after the device last received that list.
 
 ## Deploy prerequisites
 

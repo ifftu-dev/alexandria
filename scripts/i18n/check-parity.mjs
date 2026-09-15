@@ -68,6 +68,8 @@ const PENDING_TRANSLATION = [
   'credentials.page.import',
   // Credential provenance classification. English-only pending a translate pass.
   'credentials.detail.trust',
+  // Local status-evidence limitation note. English-only pending a translate pass.
+  'credentials.detail.statusEvidence',
   // Exact course-completion policy and manual endorsement exchange. English
   // fallback is temporary pending the next instructor/learner translation pass.
   'instructor.compose.policy',

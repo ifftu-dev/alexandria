@@ -171,6 +171,13 @@ function back() {
   router.push({ name: 'credentials' })
 }
 
+// A missing or unreadable status list means revocation is unknown, not "no".
+const statusEvidencePending = computed(() =>
+  (verification.value?.pendingReasons ?? []).some(
+    (reason) => reason === 'status_list_missing' || reason === 'status_list_unavailable',
+  ),
+)
+
 const decisionVariant = computed(() => {
   if (!verification.value) return 'secondary'
   if (verification.value.acceptanceDecision === 'accept') return 'success'
@@ -253,7 +260,10 @@ const decisionVariant = computed(() => {
           <div>
             <dt class="text-xs text-muted-foreground">{{ $t('credentials.detail.revoked') }}</dt>
             <dd>
-              <AppBadge :variant="verification.revoked ? 'error' : 'success'">
+              <AppBadge v-if="statusEvidencePending && !verification.revoked" variant="warning">
+                {{ $t('credentials.value.pending') }}
+              </AppBadge>
+              <AppBadge v-else :variant="verification.revoked ? 'error' : 'success'">
                 {{ verification.revoked ? $t('credentials.value.yes') : $t('credentials.value.no') }}
               </AppBadge>
             </dd>
@@ -277,6 +287,9 @@ const decisionVariant = computed(() => {
         </dl>
         <p class="mt-3 text-xs text-muted-foreground">
           {{ $t('credentials.detail.verifiedAt', { time: verification.verificationTime }) }}
+        </p>
+        <p class="mt-1 text-xs text-muted-foreground">
+          {{ $t('credentials.detail.statusEvidenceNote') }}
         </p>
       </section>
 
