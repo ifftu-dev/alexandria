@@ -11,7 +11,10 @@
 use crate::profile::scope::ProfileState as State;
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 
+use crate::content_store::http::HttpClient;
+use crate::content_store::resolver::url_is_publicly_routable;
 use crate::db::executor::DatabaseWorkload;
 use crate::goals::jd_parser::{extract_skills, SkillEntry};
 use crate::AppState;
@@ -253,6 +256,34 @@ pub async fn get_goal_template(
         .await
 }
 
+/// Largest job-description page fetched for on-device skill extraction.
+const MAX_JD_BYTES: usize = 2 * 1024 * 1024;
+const JD_FETCH_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// Fetch a user-supplied job-description link and reduce it to plain text.
+///
+/// This used a bare `reqwest::get`, which followed redirects to private
+/// addresses, had no timeout, and buffered a body of any size. The link now
+/// goes through the same SSRF guard and connect-time DNS filtering as content
+/// fetches, with a narrow size cap.
+async fn fetch_jd_text(url: &str) -> Result<String, String> {
+    // The pre-flight check also refuses IP-literal hosts, which never reach
+    // the client's DNS resolver. It resolves names synchronously, so it runs
+    // off the async worker.
+    let checked = url.to_owned();
+    tokio::task::spawn_blocking(move || url_is_publicly_routable(&checked))
+        .await
+        .map_err(|e| format!("check JD link: {e}"))?
+        .map_err(|e| format!("job-description link refused: {e}"))?;
+
+    let client = HttpClient::new(JD_FETCH_TIMEOUT).map_err(|e| format!("fetch JD: {e}"))?;
+    let bytes = client
+        .fetch_by_url_with_limit(url, MAX_JD_BYTES)
+        .await
+        .map_err(|e| format!("fetch JD: {e}"))?;
+    Ok(strip_html(&String::from_utf8_lossy(&bytes)))
+}
+
 #[tauri::command]
 pub async fn resolve_goal(
     state: State<'_, AppState>,
@@ -263,13 +294,7 @@ pub async fn resolve_goal(
         if !(url.starts_with("https://") || url.starts_with("http://")) {
             return Err("job-description link must be an http(s) URL".into());
         }
-        let body = reqwest::get(url)
-            .await
-            .map_err(|e| format!("fetch JD: {e}"))?
-            .text()
-            .await
-            .map_err(|e| format!("read JD: {e}"))?;
-        let text = strip_html(&body);
+        let text = fetch_jd_text(url).await?;
         return state
             .db_executor
             .execute(
@@ -365,6 +390,25 @@ mod tests {
         assert_eq!(jobs.len(), 1);
         assert_eq!(jobs[0].key, "engineering_manager");
         assert_eq!(list_goal_templates_impl(&conn, None).unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn jd_link_to_a_non_public_address_is_refused_before_fetching() {
+        for url in [
+            "http://127.0.0.1/jd",
+            "http://[::1]/jd",
+            "http://192.168.1.1/jd",
+            "http://169.254.169.254/latest/meta-data/",
+            "http://localhost:8080/jd",
+        ] {
+            let error = fetch_jd_text(url)
+                .await
+                .expect_err("a non-public link must be refused");
+            assert!(
+                error.starts_with("job-description link refused"),
+                "{url}: {error}"
+            );
+        }
     }
 
     #[test]
