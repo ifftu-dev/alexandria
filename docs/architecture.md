@@ -112,7 +112,7 @@ All state lives on the user's machine, organised **per profile** so a single dev
 
 Default data directory: `~/Library/Application Support/org.alexandria.node/` (macOS).
 
-On first launch after upgrading from a single-vault install, the legacy top-level layout is atomically migrated into a freshly-created `profiles/<uuid>/` slot named "My Profile" (see `src-tauri/src/profile/migration.rs`).
+The pre-profile single-vault layout is unsupported: it is detected, reported and left untouched, and the app onboards a fresh profile (see `src-tauri/src/profile/legacy_layout.rs`).
 
 ---
 

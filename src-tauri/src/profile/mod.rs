@@ -25,8 +25,8 @@
 //! stake addresses, or other cryptographically identifying material.
 
 pub mod index;
+pub mod legacy_layout;
 pub mod manager;
-pub mod migration;
 pub(crate) mod operations;
 pub mod scope;
 

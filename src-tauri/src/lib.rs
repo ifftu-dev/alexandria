@@ -767,27 +767,17 @@ pub fn run() {
                 network_profile.network_id, network_profile.profile_revision
             ));
 
-            // Migrate any legacy single-vault layout into the new
-            // per-profile layout. Runs at most once; no-op if a
-            // profiles/ dir already exists.
+            // The pre-profile single-vault layout is unsupported. It is never
+            // migrated, converted or deleted: report it and continue into
+            // onboarding, leaving the old files available to copy out by hand.
             let profile_manager = Arc::new(
                 profile::ProfileManager::open(&app_dir).expect("failed to open profile manager"),
             );
-            let legacy = profile::migration::LegacyLayout::at(&app_dir);
-            match profile::migration::migrate_if_needed(&profile_manager, &legacy) {
-                Ok(profile::migration::MigrationReport::Migrated { id, .. }) => {
-                    log::info!("migrated legacy single-vault layout into profile {id}");
-                    diag::log(&format!("legacy migration: created profile {id}"));
-                }
-                Ok(profile::migration::MigrationReport::Failed { error, moved }) => {
-                    log::error!("legacy migration failed: {error}");
-                    diag::log(&format!("legacy migration FAILED: {error}"));
-                    if let Err(e) = profile::migration::rollback(&moved) {
-                        log::error!("legacy migration rollback also failed: {e}");
-                    }
-                }
-                Ok(_) => {}
-                Err(e) => log::error!("legacy migration error: {e}"),
+            let legacy_entries = profile::legacy_layout::detect(&app_dir);
+            if !legacy_entries.is_empty() {
+                let report = profile::legacy_layout::report(&legacy_entries);
+                log::error!("{report}");
+                diag::log(&report);
             }
 
             // Per-profile resources start empty — populated when a

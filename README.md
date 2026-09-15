@@ -154,7 +154,7 @@ alexandria/
 │       ├── network_profile.rs # Strict, versioned network identity and trust-root configuration
 │       ├── content_store/ # iroh node, BLAKE3 content-addressed blobs, URL resolution
 │       ├── p2p/      # libp2p swarm — DHT, relay, gossip, peer exchange, vc-fetch, graph-fetch, profile-fetch, username-reg
-│       ├── profile/  # Multi-user profile manager + public profiles_index.json sidecar + auto-migrator
+│       ├── profile/  # Multi-user profile manager + public profiles_index.json sidecar (the pre-profile layout is refused, not migrated)
 │       ├── settings/ # Unified per-profile settings: typed registry + sync/device-scoped store
 │       └── tutoring/ # Live audio/video tutoring (desktop + mobile managers)
 ├── src/              # Vue 3 + TypeScript frontend
@@ -541,7 +541,7 @@ To reset and start fresh:
 alexandria db reset --force   # Or manually: rm -rf ~/Library/Application\ Support/org.alexandria.node/
 ```
 
-> **Upgrading from a single-vault install?** The first launch after upgrade auto-migrates the legacy `stronghold/`, `iroh/`, `plugins/`, and `videocache/` directories into a new `profiles/<uuid>/` slot named "My Profile". Rename and add avatars from the picker afterwards.
+> **Upgrading from a single-vault install?** That layout is no longer supported and is never migrated. The app leaves the legacy `alexandria.db`, `stronghold/` or `vault/`, `iroh/`, `plugins/` and `videocache/` entries untouched, reports them, and starts onboarding for a fresh profile. Move them aside once you have exported anything you still need.
 >
 > ⚠ **Encrypted databases only:** this build refuses to open an unencrypted legacy `alexandria.db`. If your install ever ran in plaintext mode, move that file aside (or delete it) and re-run onboarding before launching — the app will surface an explicit error rather than touch it. The earlier "no data loss" auto-conversion path was removed because it overwrote the legacy file instead of converting it.
 
@@ -588,7 +588,7 @@ All data lives in `~/Library/Application Support/org.alexandria.node/` (macOS). 
 | `profiles/<uuid>/plugins/` | Per-profile installed plugin bundles |
 | `profiles/<uuid>/videocache/` | Per-profile materialized video files (served via Tauri's asset protocol) |
 
-On first launch after upgrading from a single-vault install, the legacy top-level files (`alexandria.db`, `stronghold/` or `vault/`, `iroh/`, `plugins/`, `videocache/`) are atomically moved into a fresh `profiles/<uuid>/` slot.
+Legacy top-level files from the pre-profile layout (`alexandria.db`, `stronghold/` or `vault/`, `iroh/`, `plugins/`, `videocache/`) are not migrated. They are reported and left in place, and the app onboards a fresh profile.
 
 Use `alexandria path` to print the active profile's directory on any platform, and `alexandria --json path` for the app data root alongside it.
 
@@ -597,7 +597,7 @@ Use `alexandria path` to print the active profile's directory on any platform, a
 | Document | Description |
 |----------|-------------|
 | [Architecture](docs/architecture.md) | System design — offline-first, trustless, multi-platform |
-| [Multi-User Profiles](docs/multi-user-profiles.md) | Per-profile vault + DB + iroh isolation, picker UX, auto-migration |
+| [Multi-User Profiles](docs/multi-user-profiles.md) | Per-profile vault + DB + iroh isolation, picker UX, refusal of the pre-profile layout |
 | [Settings](docs/settings.md) | Unified per-profile settings store + cross-device sync + how to add a new setting |
 | [Database Schema](docs/database-schema.md) | All tables + per-profile DB layout |
 | [Protocol Specification](docs/protocol-specification.md) | Wire formats, VC protocol, 15 gossip topics, validation, peer scoring |

@@ -15,7 +15,7 @@ Rust backend for the Tauri v2 desktop/mobile app. Core responsibilities include 
 | Task | Location | Notes |
 |------|----------|-------|
 | Network identity | `network_profile.rs`, `../resources/networks/preprod.json` | Strict network/service/trust-root profile plus embedded-resource identity checks. Currently supplies DHT provider-record namespacing; remaining wire IDs await the coordinated app/relay/monitoring N01 slice. |
-| Profile lifecycle | `profile/` | ProfileManager, network-bound format-v2 `profiles_index.json` sidecar, first-launch auto-migrator from the legacy single-vault layout |
+| Profile lifecycle | `profile/` | ProfileManager, network-bound format-v2 `profiles_index.json` sidecar; the pre-profile single-vault layout is detected, reported and left untouched rather than migrated |
 | Settings | `settings/` | Typed registry (`registry::keys`) + R/W store. Drives the unified per-profile `app_settings` table; `scope='sync'` rows propagate via cross-device sync (`p2p::sync::settings_outbound_snapshot` / `settings_apply_inbound`). See [`docs/settings.md`](../../docs/settings.md). |
 | Tauri commands | `commands/` | Domain-oriented IPC handlers plus platform-specific tutoring variants. `commands/profile.rs` owns multi-user lifecycle; `commands/identity.rs` is active-profile-only; `commands/settings.rs` owns the per-profile settings store IPC. |
 | Domain models | `domain/` | Core app types plus the `vc/` protocol submodule |

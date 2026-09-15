@@ -14,7 +14,7 @@ Multi-user accounts let one device host several learners, each with their own cr
 - A profile picker that is the first thing the user sees once any profile exists.
 - Full isolation of identity, vault, database, content cache, and peer ID per profile.
 - Painless switch: lock current, pick another, unlock with that profile's password.
-- Auto-migrate the existing single-vault layout on first launch.
+- Detect the pre-profile single-vault layout, refuse it with an explicit report, and leave it untouched.
 - Beautiful and clean UI — avatar tiles, large hit targets, friendly enough for a child.
 
 ## Non-Goals (this RFC)
@@ -144,19 +144,14 @@ The cost: in-flight tutoring sessions are terminated on switch. We surface a con
 
 Each DB's encryption key is derived from that profile's password via the existing `db_key` derivation. No cross-profile key reuse. Forgetting a profile password means that profile's data is unrecoverable — same trust model as today, scoped per profile.
 
-## Migration
+## Pre-profile layout
 
-On first launch after upgrade, if `<app_data>/alexandria.db` exists at the legacy path and `<app_data>/profiles/` does not, run the migrator:
-
-1. Generate `new_uuid`.
-2. Create `<app_data>/profiles/<new_uuid>/`.
-3. **Move** (not copy): `alexandria.db`, `alexandria.db-wal`, `alexandria.db-shm`, `stronghold/` or `vault/`, `iroh/`, `plugins/`, `videocache/` into the new directory.
-4. Write a format-version-2 `profiles_index.json` entry bound to the active
-   embedded network profile. Display name defaults to `"My Profile"`
-   (renameable later); avatar is a random emoji.
-5. If any step fails: rollback by moving any partially-moved files back, leave legacy layout intact, surface a `migration_failed` event the picker can show as a banner.
-
-The migration runs **before** `AppState` is constructed, so the rest of the app boots in the new layout from the very first frame. The user does **not** see a migration spinner — the move is filesystem-rename-fast.
+The pre-profile single-vault layout is **not** migrated. Before `AppState` is
+constructed, startup checks `<app_data>` for `alexandria.db`, `stronghold/` or
+`vault/`; when they are present it logs and records an explicit unsupported-data
+report naming each entry, leaves every file where it is, and continues into
+onboarding for a fresh profile. Nothing is moved, converted or deleted, so the
+data remains available to copy out by hand.
 
 ## Frontend flow
 
@@ -265,7 +260,7 @@ From the investigation pass:
 ## Test plan
 
 - `cargo test -p alexandria-node profile::` — unit tests for ProfileManager (create, list, delete, rename, atomic dir creation, index round-trip).
-- `cargo test -p alexandria-node migration::` — migration round-trip on tempfile fixture (legacy layout → new layout, with verification that all files moved and SQLCipher still opens).
+- `cargo test -p alexandria-node legacy_layout::` — detection on a tempfile fixture: a legacy install is reported and left untouched, and an established profile install reports nothing.
 - `cargo test -p alexandria-node` — full suite (regression).
 - `vue-tsc -b --noEmit` — strict-mode type check on the new composable and components.
 - Manual UI: onboarding from zero profiles, picker with 1/3/6 profiles, switch with active tutoring session (cancel + confirm dialog), delete profile, rename, change avatar.

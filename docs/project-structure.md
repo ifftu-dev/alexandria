@@ -123,7 +123,7 @@ src-tauri/
     │   ├── mod.rs          # Module exports
     │   ├── index.rs        # format-v2 profiles_index.json (public network IDs/names/avatars)
     │   ├── manager.rs      # ProfileManager: list/create/rename/delete/touch + ProfilePaths
-    │   └── migration.rs    # First-launch auto-migrator from legacy single-vault layout
+    │   └── legacy_layout.rs # Detects and reports the unsupported pre-profile layout
     │
     ├── settings/           # Unified per-profile settings (sync + device scope)
     │   ├── mod.rs          # Module exports

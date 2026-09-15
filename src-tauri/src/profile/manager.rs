@@ -274,48 +274,6 @@ impl ProfileManager {
         Ok(paths)
     }
 
-    /// Adopt an existing on-disk directory under a fresh id. Used by the
-    /// auto-migration path: the legacy layout is moved into `profiles/<id>/`
-    /// and then registered through this method.
-    pub fn adopt_existing(
-        &self,
-        id: ProfileId,
-        display_name: &str,
-        avatar: Avatar,
-    ) -> Result<ProfilePaths, ProfileError> {
-        let network_id = &embedded_preprod()
-            .expect("embedded network profile is valid")
-            .network_id;
-        let display_name = display_name.trim();
-        if display_name.is_empty() || display_name.chars().count() > 64 {
-            return Err(ProfileError::InvalidDisplayName);
-        }
-
-        let paths = ProfilePaths::for_id(&self.app_data_dir, &id);
-        // Caller is expected to have populated the directory before
-        // calling adopt_existing, but we still ensure the subdirs exist
-        // so subsequent writes don't fail on a missing entry.
-        paths.ensure_dirs()?;
-
-        let summary = ProfileSummary {
-            id: id.clone(),
-            network_id: network_id.clone(),
-            display_name: display_name.to_string(),
-            avatar,
-            color: pick_color(&id),
-            created_at: Utc::now(),
-            last_unlocked_at: None,
-        };
-
-        {
-            let mut guard = self.index.lock().expect("profile index mutex poisoned");
-            guard.upsert(summary);
-            guard.save(&self.app_data_dir)?;
-        }
-        log::info!("adopted existing profile {id}");
-        Ok(paths)
-    }
-
     /// Rename a profile. Display-name validation matches `create`.
     pub fn rename(&self, id: &ProfileId, new_name: &str) -> Result<(), ProfileError> {
         let new_name = new_name.trim();
@@ -536,16 +494,5 @@ mod tests {
         assert!(ProfileId::parse("not-a-uuid").is_err());
         let id = ProfileId::new();
         assert!(ProfileId::parse(id.as_str()).is_ok());
-    }
-
-    #[test]
-    fn adopt_existing_keeps_supplied_id() {
-        let (_tmp, m) = manager();
-        let id = ProfileId::new();
-        let paths = m
-            .adopt_existing(id.clone(), "Migrated", Avatar::default())
-            .unwrap();
-        assert_eq!(paths.id, id);
-        assert_eq!(m.get(&id).unwrap().display_name, "Migrated");
     }
 }
