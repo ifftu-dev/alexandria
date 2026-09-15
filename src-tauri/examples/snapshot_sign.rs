@@ -13,8 +13,9 @@
 //!
 //! Run once per founder (offline, on each founder's machine), pointing
 //! `--key` at that founder's `.sk` from `snapshot_keygen`. The
-//! `--signer` label is advisory only — verification just counts how
-//! many distinct keys in `SNAPSHOT_VERIFIERS` produced valid sigs.
+//! `--signer` label is advisory only — verification counts how many distinct
+//! founder keys configured by the embedded network profile produced valid
+//! signatures.
 //!
 //! The signed file in `--out` is what ships in the release bundle.
 

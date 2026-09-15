@@ -68,13 +68,14 @@ impl PluginCapability {
 pub enum PluginKind {
     /// UI only. Progress-tracked, never credential-eligible.
     Interactive,
-    /// Requires a deterministic WASM grader (Phase 2+). Eligible for
-    /// credential issuance subject to Plugin DAO attestation.
+    /// Requires a deterministic WASM grader (Phase 2+). Credential
+    /// eligibility is a separate host policy; today it requires exact
+    /// bundled manifest and grader bytes.
     Graded,
 }
 
-/// When a plugin is installed on a learner's machine. Author-declared and part
-/// of what the Plugin DAO attests (the attestation covers the whole manifest).
+/// When a plugin is installed on a learner's machine. Author-declared and
+/// covered by the signed manifest.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum PluginScope {
@@ -147,7 +148,7 @@ pub struct PluginManifest {
     /// Without it, `plugin_cid = BLAKE3(manifest.json)` identifies the
     /// manifest and nothing else — so two bundles with identical manifests,
     /// identical author signatures and identical CIDs could ship completely
-    /// different `ui/index.html`, and a Plugin DAO attestation over
+    /// different `ui/index.html`, while any policy that named only
     /// `(plugin_cid, grader_cid)` would say nothing about the code the learner
     /// actually runs. `grader.wasm` is also required in this map even though
     /// `PluginGraderRef::blake3` independently covers it.

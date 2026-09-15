@@ -1818,8 +1818,9 @@ const MIGRATION_033: &str = r#"
 --
 -- The signed_attestation column carries the host-side Ed25519 signature
 -- over the bundle (using the learner's DID-Key), suitable for inclusion
--- in a Verifiable Credential. Phase 3 will add the Plugin DAO attestation
--- step that elevates it to a recognized credential.
+-- in a Verifiable Credential. The later Plugin DAO attestation experiment was
+-- retired; active issuance requires exact bundled manifest/grader bytes until
+-- the policy-backed community grader path is implemented.
 -- ============================================================
 
 CREATE TABLE IF NOT EXISTS element_submissions (
@@ -1886,13 +1887,9 @@ CREATE INDEX IF NOT EXISTS idx_plugin_catalog_source
 
 const MIGRATION_035: &str = r#"
 -- ============================================================
--- Migration 035: Alexandria Plugin DAO attestations
+-- Migration 035: historical Alexandria Plugin DAO attestations (retired)
 --
--- The single top-level community DAO that gates *credential recognition*
--- (not existence — anyone can publish, anyone can install, anyone can run).
--- A row here is a multi-sig committee attestation that a specific
--- (plugin_cid, grader_cid) pair is recognized for issuing credentials
--- under the default verifier policy.
+-- Retained pre-launch storage only. Rows do not grant credential authority.
 --
 -- Append-only by design: a captured DAO cannot retroactively invalidate
 -- credentials issued in good faith. Advisory notes (deprecated /
@@ -2190,12 +2187,10 @@ CREATE INDEX IF NOT EXISTS idx_completion_att_tx
 
 const MIGRATION_043: &str = r#"
 -- ============================================================
--- Migration 043: Credential challenge workflow
+-- Migration 043: historical credential challenge workflow (retired)
 --
--- Replaces the legacy evidence-challenge tables (`evidence_challenges`
--- + `challenge_votes`, both dropped by migration 040). A challenger
--- stakes ADA to dispute a credential; the DAO committee reviews; if
--- upheld, the credential is revoked via its status list.
+-- Replaced the legacy evidence-challenge tables during an experiment that was
+-- later retired. These rows no longer drive credential status.
 -- ============================================================
 
 CREATE TABLE IF NOT EXISTS credential_challenges (
@@ -2430,13 +2425,9 @@ CREATE TABLE IF NOT EXISTS pending_pairings (
 
 const MIGRATION_050: &str = r#"
 -- ============================================================
--- Migration 050: Challenge stake lifecycle
+-- Migration 050: historical challenge stake lifecycle (retired)
 --
--- A credential challenger locks their stake (default 5 ADA) at the
--- challenge-escrow validator when opening a challenge. On resolution
--- the DAO authority settles the escrow: returned to the challenger if
--- the challenge was upheld, or forfeited to the DAO treasury if it was
--- rejected.
+-- Retained pre-launch columns from the removed challenge-escrow flow.
 --
 -- `credential_challenges` already carries `stake_lovelace` and the
 -- lock `stake_tx_hash`. This migration adds the settlement lifecycle:

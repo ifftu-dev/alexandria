@@ -1,6 +1,6 @@
 //! Offline verifier for `bootstrap_registry.json`. Smoke-checks that a
-//! snapshot parses + meets the 2-of-3 multisig quorum against the
-//! `SNAPSHOT_VERIFIERS` baked into the current build.
+//! snapshot parses + meets the 2-of-3 multisig quorum against the founder
+//! keys in the embedded preprod network profile.
 //!
 //! Usage:
 //!   cargo run --manifest-path src-tauri/Cargo.toml --example snapshot_verify -- \
@@ -29,7 +29,7 @@ fn main() -> Result<()> {
     let snap =
         BootstrapSnapshot::parse_and_verify(&bytes).map_err(|e| anyhow!("verify failed: {e}"))?;
     println!(
-        "OK: {} entries, {} signatures verified against SNAPSHOT_VERIFIERS",
+        "OK: {} entries, {} signatures verified against embedded network-profile founder keys",
         snap.entries.len(),
         snap.signatures.len()
     );

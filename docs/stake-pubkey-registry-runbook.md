@@ -116,12 +116,8 @@ cargo run --manifest-path src-tauri/Cargo.toml \
 Expected output:
 
 ```
-OK: <N> entries, <M> signatures verified against SNAPSHOT_VERIFIERS
+OK: <N> entries, <M> signatures verified against embedded network-profile founder keys
 ```
-
-The command's `SNAPSHOT_VERIFIERS` label is retained for compatibility; the
-keys are loaded from `stake_registry_founder_keys` in the embedded network
-profile.
 
 If verification fails on `SnapshotQuorum`, one signature is missing
 or invalid. If it fails on `VerifierKey`, the corresponding network-profile

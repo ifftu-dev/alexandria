@@ -8,9 +8,9 @@
 //!   cargo run --manifest-path src-tauri/Cargo.toml \
 //!       --example snapshot_keygen -- --out ./founder_a.sk
 //!
-//! Then paste the printed hex into
-//! `src-tauri/src/p2p/registry.rs::SNAPSHOT_VERIFIERS` and commit. The
-//! `.sk` files themselves MUST NOT enter version control.
+//! Then add the printed hex to `stake_registry_founder_keys` in
+//! `src-tauri/resources/networks/preprod.json` and commit the public profile
+//! change. The `.sk` files themselves MUST NOT enter version control.
 
 use anyhow::{anyhow, Context, Result};
 use ed25519_dalek::SigningKey;
@@ -54,7 +54,9 @@ fn main() -> Result<()> {
     println!("WROTE  {} (32 bytes, mode 0600)", out_path);
     println!("PUBKEY {}", hex::encode(vk.to_bytes()));
     println!();
-    println!("Paste PUBKEY into SNAPSHOT_VERIFIERS in src-tauri/src/p2p/registry.rs.");
+    println!(
+        "Add PUBKEY to stake_registry_founder_keys in src-tauri/resources/networks/preprod.json."
+    );
     println!("Keep the .sk file offline. Required to sign bootstrap_registry.json.");
     Ok(())
 }

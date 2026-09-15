@@ -148,8 +148,9 @@ impl MessageValidator {
     /// Step 1.5: identity binding via the persistent stake-pubkey
     /// registry.
     ///
-    /// For **privileged** topics (taxonomy, governance, Sentinel
-    /// priors, plugin DAO attestations) the
+    /// For **privileged** topics (taxonomy, governance, Sentinel priors,
+    /// goal templates, question banks, and the reserved plugin-attestation
+    /// compatibility topic) the
     /// `(stake_address, public_key)` pair MUST appear in
     /// `stake_pubkey_registry` within a window covering the current
     /// time. Non-privileged topics skip the check so arbitrary peers
