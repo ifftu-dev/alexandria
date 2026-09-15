@@ -8,8 +8,7 @@
 //! redeemer so the validator can reconstruct the Merkle root.
 //!
 //! Gated behind [`super::script_refs::COMPLETION_MINTING_REF_UTXO`]
-//! being deployed — matches the posture of the other governance tx
-//! builders on main. Callers get a descriptive error while the
+//! being deployed. Callers get a descriptive error while the
 //! reference script deployment is pending.
 
 use blake2::digest::consts::U28;

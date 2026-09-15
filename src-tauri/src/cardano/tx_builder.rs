@@ -4,7 +4,7 @@
 //! SkillProof-NFT or course-registration minters — those were the
 //! only users of CIP-25 metadata in-app. What remains is the generic
 //! substrate used by the VC integrity-anchor flow (`anchor_tx`), the
-//! soulbound reputation minter, and the DAO governance tx builder:
+//! soulbound reputation minter, and the remaining Plutus builders:
 //!
 //! * `TxBuildError`
 //! * `MIN_UTXO_LOVELACE`, `MIN_NFT_LOVELACE`, `TTL_OFFSET`

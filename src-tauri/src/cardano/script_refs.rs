@@ -5,8 +5,7 @@
 //!
 //! Reference UTxO locations must be populated after the one-time deployment
 //! of each validator as a reference script on preprod. Until deployed, the
-//! `ref_utxos_deployed()` function returns false and governance tx builders
-//! will queue actions without on-chain submission.
+//! `ref_utxos_deployed()` function returns false.
 
 // ---- Script Hashes (computed from plutus.json) ----
 

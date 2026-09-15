@@ -838,17 +838,16 @@ pub fn run() {
                 Arc::new(std::sync::RwLock::new(None));
             let profile_operations = profile::operations::ProfileOperations::default();
 
-            // Spawn on-chain queue processor (runs every 60s).
-            // Processes both the governance tx queue and the credential
-            // anchor queue. Both silently skip when BLOCKFROST_PROJECT_ID
-            // is unset or the vault isn't unlocked yet.
+            // Spawn on-chain queue processor (runs every 60s). Its passes
+            // silently skip when BLOCKFROST_PROJECT_ID is unset or the vault
+            // isn't unlocked yet.
             {
                 let db_for_queue = db.clone();
                 let db_executor_for_queue = db_executor.clone();
                 let ks_for_queue = keystore.clone();
                 let node_for_sync = p2p_node.clone();
                 let operations_for_queue = profile_operations.clone();
-                diag::log("spawning on-chain queue processor (governance + credential anchors)");
+                diag::log("spawning on-chain queue processor");
                 tauri::async_runtime::spawn(async move {
                     // Wait for app to fully initialize before processing
                     tokio::time::sleep(std::time::Duration::from_secs(10)).await;
