@@ -12,7 +12,7 @@
 // depends on it; it is here so the claim can be checked rather than believed.
 //
 // Note what is absent: no network, no JSON-LD processor, no DID resolver
-// service, no Alexandria anything. About seventy lines, most of it base58.
+// service, no Alexandria anything. It is intentionally small and auditable.
 import { readFileSync, readdirSync } from 'node:fs'
 import { createPublicKey, verify } from 'node:crypto'
 

@@ -61,6 +61,12 @@ cutover and that current state.
   completion claims and endorsements bind that exact snapshot.
 - `course_completion_endorsements` stores only artifacts accepted by the
   shared I/O-free verifier. Each authorized attestor is counted once.
+- Credential verification now returns `accept`, `pending`, or `reject`.
+  `VerificationStore` adapters distinguish confirmed missing rows from failed
+  lookups, and the wire result carries `statusValid` plus typed
+  `pendingReasons`. A missing referenced status list or external issuer key no
+  longer becomes an accepted credential. Imports leave pending credentials out
+  of the active store.
 
 **Staying:**
 
@@ -205,7 +211,8 @@ The credential pages use the VC IPC surface, and the learner UI calls
 `claim_course_completion`. Backend commands now support exact endorsement
 request export, local authorized signing, verified import, and threshold
 status. The author policy editor and explicit human review/import UI are still
-pending.
+pending. Credential verification DTOs use their actual camelCase Tauri wire
+shape in TypeScript, and the detail badge distinguishes pending from rejection.
 
 ## Deploy prerequisites
 
@@ -215,6 +222,12 @@ The auto-issuance path, credential-sourced reputation engine
 surface ship. Credential challenges do not. Hosted or peer delivery of an
 endorsement request must authenticate the addressed instructor before it is a
 complete acquisition flow.
+
+Status-bearing bare credentials can prove their signatures offline but remain
+pending until their referenced status list is available. Exported survivability
+bundles carry the status lists and historical key bindings needed for a
+conclusive offline decision. The independent Node verifier and twelve published
+vectors exercise accepted, rejected, and pending outcomes.
 
 Eight retained Aiken/Plutus v3 reference scripts are deployed on
 **preprod testnet** (2026-05-22, block 4736927) via

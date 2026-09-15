@@ -16,7 +16,7 @@
 > schema remains only as pre-launch legacy storage pending migration D03.
 
 **Status**: In progress — core local/P2P flows are implemented, with some on-chain and VC presentation surfaces still partial
-**Last updated**: 2026-09-15 (legacy authority retirement, versioned preprod network profile, immutable profile network identity, exact course enrollment/completion binding and endorsement persistence, snapshot credential anchoring, shared migration path, profile cleanup ownership, staged database executor, release governance gating, and genesis core identity)
+**Last updated**: 2026-09-15 (legacy authority retirement, typed credential verification outcomes, versioned preprod network profile, immutable profile network identity, exact course enrollment/completion binding and endorsement persistence, snapshot credential anchoring, shared migration path, profile cleanup ownership, staged database executor, release governance gating, and genesis core identity)
 
 ---
 
@@ -836,14 +836,24 @@ skill-proof + NFT pipeline it replaced has been deleted (no
    to (audience, nonce); replay-protected via `presentations_seen`.
    PR 11.
 
+Verification is shared by the app and CLI/bundle adapters through the I/O-free
+`alexandria-verify` crate. The same vectors are also checked by an independent
+Node implementation. The crate's
+`VerificationStore` lookups distinguish `Found`, `Missing`, and `Unavailable`.
+The result distinguishes `accept`, `pending`, and `reject`: a missing referenced
+status list or external issuer key stays pending; malformed evidence, a bad
+signature, or a failed policy check is rejected. Pending credentials do not
+count as accepted inputs.
+
 ### Survivability (§20.4)
 
 The `commands::credentials::export_credentials_bundle` IPC produces
 a JCS-canonical JSON bundle with credentials + key registry +
 status lists. `verify_bundle_offline_impl` re-loads the bundle
-into a fresh ephemeral DB and runs the full §13.2 verification
-pipeline — proving the bundle is self-contained and survives
-Alexandria shutdown. PR 12.
+through an in-memory `VerificationStore` adapter and runs the shared §13.2
+verification pipeline without opening a database. A bare status-bearing
+credential can prove its signature but remains pending without the referenced
+list; the bundle supplies that missing evidence. PR 12 plus remediation T02.
 
 ### P2P propagation
 
@@ -876,7 +886,7 @@ this on every test run.
 | §8–§10 (required fields, issuance, non-transferability) | PR 4–5 | Implemented |
 | §11 (expiration, revocation, suspension, supersession) | PR 5 | Implemented |
 | §12 (storage, durability, integrity anchoring) | PR 8 + PR 10 + PR 145 | Storage + anchor queue + PinBoard implemented. Anchor tick runs every 60s with wallet derived from the unlocked keystore; metadata-only txs submit to Cardano preprod when a Blockfrost project id is configured (Settings → Cardano, or `BLOCKFROST_PROJECT_ID` env var). Mainnet reference-script deployment still pending. |
-| §13 (verification algorithm + acceptance predicate) | PR 4–5 | Implemented |
+| §13 (verification algorithm + acceptance predicate) | PR 4–5 + T02 | Implemented with typed accept/pending/reject results and missing/unavailable store evidence |
 | §14 (trust aggregation, weights, confidence, levels) | PR 6 | Implemented |
 | §15 (anti-gaming controls) | PR 7 | Cluster cap + inflation penalty implemented; cluster_issuers is per-DID until governance signals land |
 | §16 (derived skill state output) | PR 6 + PR 13 | Implemented + cached |

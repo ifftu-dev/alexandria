@@ -127,6 +127,11 @@ an active `apply`-or-higher credential under the subject field without yet
 checking an accepted-issuer policy. Treat that as a known implementation gap,
 not the intended security model.
 
+The shared credential verifier now classifies incomplete issuer-key or
+status-list evidence as `pending`, separately from `reject`. Only `accept` is an
+active verification result; pending credentials must not be treated as clean
+inputs while T03 connects this result to every scoring and privilege boundary.
+
 Plugin grading has a narrower temporary rule. New credential issuance accepts
 only the exact manifest and grader bytes embedded for a bundled plugin. A
 matching CID string or a row in the legacy `plugin_attestations` table is

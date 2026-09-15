@@ -1390,15 +1390,17 @@ inherent to key rotation, not a defect: an identifier that embeds one key cannot
 also embed its successors.
 
 **Revocation.** A credential says where its status list lives, not what the list
-says. A verifier without the list cannot know, and MUST treat absence as "not
-known to be revoked" rather than as either answer.
+says. A verifier without the list cannot know. It MUST return a pending outcome
+that identifies the missing status list; it MUST NOT accept the credential or
+label it revoked. An unavailable lookup and a confirmed missing list are
+distinct pending reasons.
 
 Both are why a §20.4 bundle carries the key registry and the status lists
-alongside the credentials — a bundle is verifiable entirely offline, whereas a
-bare credential is verifiable offline only under its original signing key and
-without revocation information. Neither case requires contacting Alexandria; it
-requires having been given the relevant data, which the bundle format exists to
-do.
+alongside the credentials. A bundle is verifiable entirely offline. A bare
+credential can still have its signature and signed claims checked, but a
+status-bearing credential remains pending until its list is supplied. Neither
+case requires contacting Alexandria; it requires having been given the relevant
+data, which the bundle format exists to do.
 
 ### 14.13 Verification Algorithm
 
@@ -1412,28 +1414,48 @@ The verifier MUST output a structured result:
   "validSignature": true,
   "issuerResolved": true,
   "revoked": false,
+  "statusValid": true,
   "expired": false,
   "subjectBound": true,
   "integrityAnchored": true,
+  "suspended": false,
+  "superseded": false,
   "verificationTime": "2026-04-13T00:00:00Z",
+  "pendingReasons": [],
   "acceptanceDecision": "accept"
 }
 ```
 
+`acceptanceDecision` is one of `accept`, `pending`, or `reject`.
+`pendingReasons` contains stable snake-case reason codes:
+`issuer_key_missing`, `issuer_key_unavailable`, `status_list_missing`,
+`status_list_unavailable`, `suspension_state_unavailable`, and
+`supersession_state_unavailable`. `statusValid` is false when a present status
+reference is malformed or its bit index lies outside the supplied list.
+The current shared verifier does not independently resolve Cardano integrity
+anchors, so `integrityAnchored` remains false; a policy that requires it rejects
+until an anchor verifier supplies that fact.
+
 #### 14.13.2 Verification Procedure
 
-For credential `c` at verification time `t_v`, the verifier MUST execute, in order:
+For credential `c` at verification time `t_v`, the verifier MUST perform these
+checks. An implementation MAY reorder independent checks if it returns the same
+facts and final classification:
 
-1. validate schema
-2. canonicalize payload
-3. resolve issuer DID
-4. verify signature
-5. check `validFrom` sanity
-6. check expiration
-7. check status list
-8. validate subject binding
-9. optionally verify integrity anchor
-10. emit decision and metadata
+1. validate the credential envelope and bounded field shapes
+2. validate subject binding and applicable time fields
+3. resolve each referenced status-list bit
+4. consult applicable suspension and supersession state
+5. resolve the issuer key at the verification time, preferring a supplied
+   historical key binding and otherwise using `did:key` self-resolution
+6. canonicalize the payload and verify the detached JWS
+7. evaluate credential type, expiry, lifecycle, and integrity-anchor policy
+8. emit all check facts, pending reason codes, and the decision
+
+A malformed key, proof, status index, or other completed mandatory check is a
+rejection. Missing or unavailable data needed to finish a check is pending.
+Database or service failure MUST NOT be converted to a missing row or a clean
+active status.
 
 #### 14.13.3 Acceptance Predicate
 
@@ -1444,19 +1466,35 @@ Define the boolean components:
 - `B(c)` ∈ {0,1} — subject binding valid
 - `R(c)` ∈ {0,1} — revoked flag (1 means revoked)
 - `E(c)` ∈ {0,1} — expired flag (1 means expired)
-- `P(c)` ∈ {0,1} — policy compatibility
+- `U(c)` ∈ {0,1} — suspended flag (1 means suspended)
+- `Q(c)` ∈ {0,1} — superseded flag (1 means superseded)
+- `X(c)` ∈ {0,1} — a present status reference is structurally valid
+- `P(c)` ∈ {0,1} — all completed policy checks pass
+- `C(c)` ∈ {0,1} — every required issuer, status, suspension, and supersession
+  lookup is conclusive
 
-Baseline acceptance:
-
-```
-Accept(c) = 1  if S(c)=1 ∧ D(c)=1 ∧ B(c)=1 ∧ R(c)=0 ∧ P(c)=1
-          = 0  otherwise
-```
-
-Expiration handling MAY be policy-specific. The strict default is:
+Baseline classification:
 
 ```
-AcceptStrict(c) = 1  if Accept(c)=1 ∧ E(c)=0
+ValidKnown(c) = S(c)=1 ∧ D(c)=1 ∧ B(c)=1 ∧ R(c)=0 ∧ X(c)=1 ∧ P(c)=1
+
+Accept(c)  if ValidKnown(c) ∧ C(c)=1
+Pending(c) if no completed mandatory check failed ∧ C(c)=0
+Reject(c)  if any completed mandatory check failed
+```
+
+When issuer-key evidence is missing, signature verification is unperformed
+rather than failed; this can therefore produce `pending` with
+`validSignature=false` and `issuerResolved=false`. A known issuer key followed
+by a bad signature is a rejection. Pending credentials MUST NOT enter active
+aggregation or privilege evaluation.
+
+Expiration, suspension, supersession, allowed credential classes, and required
+integrity anchoring MAY be policy-specific. The strict default rejects expired,
+suspended, and superseded credentials:
+
+```
+AcceptStrict(c) = 1  if Accept(c)=1 ∧ E(c)=0 ∧ U(c)=0 ∧ Q(c)=0
                 = 0  otherwise
 ```
 

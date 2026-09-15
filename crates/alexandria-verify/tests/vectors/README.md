@@ -40,7 +40,11 @@ expands or dereferences it. See §14.12a of the protocol specification.
    A verifier that assumes ordinary JWS will base64url the canonical bytes,
    produce a different signing input, and reject every credential ever issued —
    with no clue as to why, because every other check passes.
-6. Apply the remaining checks: expiry, subject binding, status list.
+6. Apply the remaining checks: expiry, subject binding, status list, local
+   suspension, supersession, and the supplied verification policy.
+7. Return `accept`, `pending`, or `reject`. Missing issuer-key or referenced
+   status-list evidence is pending. A failed cryptographic/policy check or an
+   invalid status reference is rejected.
 
 ## Resolving the issuer key
 
@@ -79,8 +83,11 @@ within the byte** — so index 9 is byte 1, mask `0x02`. Getting this backwards 
 the single most common interoperability bug, which is why
 `07-revoked.json` exists.
 
-A status list the verifier does not have is not evidence of revocation. Absence
-means "not known to be revoked", never "revoked".
+A status list the verifier does not have is not evidence of revocation or active
+status. The verifier returns `pending` with `status_list_missing`; it does not
+accept the credential or label it revoked. A storage failure is separately
+reported as `status_list_unavailable`. A malformed or out-of-range bit index
+sets `statusValid` to false and rejects the credential.
 
 ## File format
 
@@ -100,10 +107,11 @@ means "not known to be revoked", never "revoked".
 }
 ```
 
-Compare at least `validSignature`, `issuerResolved`, `expired`, `revoked`,
-`subjectBound` and `acceptanceDecision`. The booleans matter independently of
-the decision: policy changes the decision, never the facts. `09` and `05` are
-the same expired credential, and differ only in what the policy does about it.
+Compare at least `validSignature`, `issuerResolved`, `statusValid`, `expired`,
+`revoked`, `subjectBound`, `pendingReasons`, and `acceptanceDecision`. The
+booleans matter independently of the decision: policy changes the decision,
+never the facts. `09` and `05` are the same expired credential, and differ only
+in what the policy does about it.
 
 ## The suite
 
@@ -119,15 +127,18 @@ the same expired credential, and differ only in what the policy does about it.
 | `08-rotated-issuer-key` | Signed with a rotated key; only the registry resolves it |
 | `09-expired-permissive-policy` | Same expired credential, policy does not reject. `expired` stays true |
 | `10-type-not-allowed` | Every cryptographic check passes; policy still rejects |
+| `11-missing-status-list` | Signature verifies, but the referenced status list is absent; decision is pending |
+| `12-missing-issuer-key` | A non-self-resolving issuer has no supplied key binding; decision is pending |
 
-Every column of that matrix has both outcomes present, so an implementation
-cannot pass by hardcoding any single check.
+The suite contains accepted, rejected, and pending cases, including independent
+signature, expiry, subject-binding, revocation, type-policy, key-registry, and
+missing-evidence outcomes.
 
 ## A worked implementation
 
 `independent-verifier.mjs` in this directory is a complete verifier written from
 this document alone — no Alexandria library, nothing but Node's standard crypto,
-JCS implemented by hand. It passes all ten vectors.
+JCS implemented by hand. It passes all twelve vectors.
 
 ```sh
 node independent-verifier.mjs

@@ -19,16 +19,21 @@ list's bits, a local suspension flag, and whether something supersedes the
 credential — and each arrives through the `VerificationStore` trait.
 
 ```rust
-use alexandria_verify::{NullStore, vc::{VerificationPolicy, verify::verify_credential}};
+use alexandria_verify::{
+    NullStore,
+    vc::{AcceptanceDecision, VerificationPolicy, verify::verify_credential},
+};
 
-// NullStore answers "no revocation, no suspension, no supersession" to
-// everything. Correct for a self-contained check; wrong if you hold status
-// data and forgot to wire it in.
+// NullStore supplies no external status or key-registry state. A signed
+// credential that references an absent status list remains pending.
 let store = NullStore;
 let policy = VerificationPolicy::default();
 let result = verify_credential(&store, &credential, "2026-08-13T00:00:00Z", &policy);
 
 assert!(result.valid_signature);
+if credential.credential_status.is_some() {
+    assert_eq!(result.acceptance_decision, AcceptanceDecision::Pending);
+}
 ```
 
 Implement `VerificationStore` over whatever you actually have — SQLite, a
@@ -39,9 +44,9 @@ world is ever added.
 ## Interoperability
 
 `tests/vectors/` holds signed credentials with known-good and known-bad
-outcomes, plus `independent-verifier.mjs` — a ~70-line Node implementation
+outcomes, plus `independent-verifier.mjs` — a small Node implementation
 written against the specification rather than against this code. It passes all
-ten vectors. If you are writing your own verifier in another language, start
+twelve vectors. If you are writing your own verifier in another language, start
 there: the vectors are the contract, and this crate is one implementation of it.
 
 The signing input is **raw payload bytes**, not base64url — RFC 7797 with

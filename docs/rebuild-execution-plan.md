@@ -28,16 +28,16 @@ package record. At this documentation checkpoint:
 | F04 | Verified | Proxy bypass closure and actual-workspace CI classification |
 | G01 | Source complete | CometBFT/ABCI spike and no-std verifier compile checks; target-runtime known-answer execution and G02 timing design remain |
 | T01 | Verified | `530831d`: challenge/escrow and arbitrary plugin-attestation authority retired; credential status lifecycle issuer-bound |
-| T02 | In progress | `f183607`: shared bounded endorsement verifier and author-signed course-document v2 policy; `758b09a`: exact enrollment/claim binding, verified endorsement import/status, migration-042 authority removal, and caller-supplied completion IPC retirement; user-facing acquisition and trust-state integration remain |
+| T02 | In progress | `f183607`: shared bounded endorsement verifier and author-signed course-document v2 policy; `758b09a`: exact enrollment/claim binding, verified endorsement import/status, migration-042 authority removal, and caller-supplied completion IPC retirement; `664b0b9`: typed pending credential verification and conclusive status handling; author/instructor UI, authenticated acquisition, and trust-state integration remain |
 | N01 | In progress | `79d6688`: strict preprod profile and centralized trust/service contract; `26cb204`: immutable profile network identity; wire/service migration pending |
-| Documentation | Current through T02 exact-binding slice | Active architecture, protocol, schema, VC migration, and skills docs describe migration 091 and the remaining UI/trust-state work |
+| Documentation | Current through T02 typed-verification slice | Active architecture, protocol, schema, VC migration, verifier README/vectors, and skills docs describe migration 091, accepted/pending/rejected verification, and the remaining UI/trust-state work |
 
-The next T02 slice makes missing issuer-key/status evidence a typed pending
-verification outcome instead of collapsing it into absence, adds the author
-policy and explicit endorsement review UI, and connects accepted endorsement
-thresholds to privilege-bearing trust state. Authenticated addressed request
-delivery remains part of the hosted/headless integration; the current backend
-supports explicit request export, local signing, verified import, and status.
+The next T02 slice adds the author policy and explicit endorsement review UI,
+then connects accepted endorsement thresholds to privilege-bearing trust state.
+Authenticated addressed request delivery remains part of the hosted/headless
+integration; the current backend supports explicit request export, local
+signing, verified import, and status. Missing issuer-key or referenced status
+evidence now remains typed pending and cannot enter the active credential store.
 N01 wire migration can proceed independently,
 using separate sequential commits across the recorded service worktrees; deploy no
 part of that protocol change until all three repositories have compatible
@@ -109,8 +109,8 @@ Use isolated service worktrees/branches when beginning service edits. Record the
 The app's committed diff contained 284 changed files. Counts describe review scope, not quality or a target for additional churn.
 
 The initial dirty app work was preserved and then integrated into scoped commits.
-The current app branch at this checkpoint is `rebuild/foundation` at
-`f569efc`. Relay and monitoring remain at their clean base revisions in the
+The current app code checkpoint is `rebuild/foundation` at `664b0b9`. Relay and
+monitoring remain at their clean base revisions in the
 isolated N01 worktrees listed above. The cloud UX work remains preserved on its
 dirty worktree plus recovery commit; do not replace it with cloud main.
 
@@ -443,6 +443,17 @@ compiler, with that target previously green at F03.
 5. Bind each attestation to the network/domain, subject, exact course CID, completion/attempt evidence identity, and relevant witness identity if used. Do not accept an arbitrary signature over unrelated tx bytes as course completion endorsement.
 6. Preserve immediate offline self-claims. No requirement means self-attested completion; even if a learner verifies an assessment locally, the app must not manufacture an instructor signature.
 7. Build real instructor acquisition through authenticated addressed requests or an explicit sign/import workflow; a hosted instructor must verify the requested evidence and course binding before signing.
+
+**Implementation checkpoint (`664b0b9`).** Items 1–6 are implemented for the
+backend path. Shared store adapters return `Found`, `Missing`, or `Unavailable`;
+credential results return `accept`, `pending`, or `reject` with stable reason
+codes. Bare status-bearing credentials and unresolved external issuers remain
+pending, database lookup failure remains unavailable, and import does not place
+pending credentials in the active table. Exact endorsement request export,
+local authorized signing, verified import, and threshold status implement the
+explicit artifact path in item 7. Author policy editing, human request review,
+authenticated addressed delivery, and promotion into privilege-bearing trust
+state remain.
 
 **Required tests:** unlisted attestor refused; malformed DID fails rather than bypassing consistency check; one attestor counts once; threshold bounds; altered subject/course/evidence/network fails; newer course requirements do not affect old completion; missing status/key binding is pending; offline self-claim succeeds without any network; instructor unavailable does not block local completion.
 
