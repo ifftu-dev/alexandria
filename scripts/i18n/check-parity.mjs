@@ -66,6 +66,8 @@ const PENDING_TRANSLATION = [
   // Credential import surface. English-only pending a translate pass.
   'credentials.import.',
   'credentials.page.import',
+  // Credential provenance classification. English-only pending a translate pass.
+  'credentials.detail.trust',
   // Exact course-completion policy and manual endorsement exchange. English
   // fallback is temporary pending the next instructor/learner translation pass.
   'instructor.compose.policy',

@@ -41,6 +41,22 @@ credential bundle, Postgres — and the same verification logic runs against it.
 `tests/no_io_deps.rs` fails the build if a dependency that reaches the outside
 world is ever added.
 
+## Trust classification
+
+A valid signature says who signed a credential, not that the signer is approved
+for anything. `trust::classify_credential` turns a verification result into a
+provenance state: `Invalid` (with reason codes), `Pending` (with the missing
+evidence), `VerifiedSelfClaim`, `VerifiedIssuerSigned`, or
+`VerifiedCourseEndorsement`. It rechecks the supplied result against the
+credential, so a result for another credential or an `accept` that contradicts
+its own flags is invalid.
+
+A self-claim is only classified as course-endorsed when its signed evidence
+references name the exact course document and completion root of a supplied
+`CourseCompletionBinding`, the binding matches the expected network and subject,
+and distinct authorized attestors meet the signed policy threshold. These states
+carry no privilege; policy qualification is a separate decision.
+
 ## Interoperability
 
 `tests/vectors/` holds signed credentials with known-good and known-bad

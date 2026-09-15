@@ -270,7 +270,7 @@ fn verify_detached_jws(
 /// its class, so this looks for *any* member that is an allowed class. A
 /// credential naming several classes is accepted if any one is allowed, which
 /// is the same permissive reading the rest of the type handling uses.
-fn type_allowed(credential: &VerifiableCredential, policy: &VerificationPolicy) -> bool {
+pub(crate) fn type_allowed(credential: &VerifiableCredential, policy: &VerificationPolicy) -> bool {
     if policy.allowed_types.is_empty() {
         return true;
     }

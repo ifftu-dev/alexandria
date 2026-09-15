@@ -19,6 +19,7 @@ pub mod did;
 pub mod governance;
 pub mod hash;
 pub mod talent;
+pub mod trust;
 pub mod vc;
 
 pub use did::{Did, DidError, KeyRegistryEntry, VerificationMethodRef};

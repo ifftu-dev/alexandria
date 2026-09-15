@@ -1508,6 +1508,7 @@ pub fn run() {
             commands::attestation::sign_course_completion_endorsement,
             commands::attestation::import_course_completion_endorsement,
             commands::attestation::get_course_completion_endorsement_status,
+            commands::attestation::get_credential_trust,
             // Completion-witness flow (Merkle root + tx submission).
             commands::completion::preview_completion_root,
             commands::completion::get_course_completion_status,

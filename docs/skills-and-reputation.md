@@ -86,7 +86,7 @@ Course elements (`course_elements`) are tagged with skills via `element_skill_ta
 
 The verifiable outcome of an assessment is now a **W3C Verifiable Credential** (see [`vc-migration.md`](./vc-migration.md) and `domain::vc`), not an `evidence_records` row. There are three issuance paths:
 
-1. **Course completion** — `claim_course_completion` assembles completion leaves from the learner's persisted graded `element_submissions`, verifies them against the course template (gradeable elements in order, ≥0.6 pass), and computes a Merkle root. New enrollments freeze the verified signed course-document CID, version, and author-selected completion policy; the completion claim and any instructor endorsement bind those exact values. It issues one learner-signed **`SelfAssertion` per course skill** immediately. If the exact course policy requires instructor endorsements, the result includes a canonical signing request and the separately imported endorsements count only after shared verification against the policy allowlist and threshold. Authors edit this policy before publication; learners export/import the exact JSON artifacts; instructors review every bound fact before signing locally. The exchange remains manual, and a satisfied endorsement is not yet promoted into privilege-bearing trust state. An optional Cardano completion-witness mint is treasury-funded when configured (the learner still signs), otherwise learner-funded. A witnessed completion credential requires a confirmed successful ledger receipt and its matching stored observation; a submission acknowledgement is insufficient. Courses with no gradeable elements use `CONTENT_COMPLETION_SCORE = 0.3`, a deterministic completion root bound to the exact course document, and no on-chain witness. `get_course_completion_status` reports still-unmet gradeable elements.
+1. **Course completion** — `claim_course_completion` assembles completion leaves from the learner's persisted graded `element_submissions`, verifies them against the course template (gradeable elements in order, ≥0.6 pass), and computes a Merkle root. New enrollments freeze the verified signed course-document CID, version, and author-selected completion policy; the completion claim and any instructor endorsement bind those exact values. It issues one learner-signed **`SelfAssertion` per course skill** immediately. If the exact course policy requires instructor endorsements, the result includes a canonical signing request and the separately imported endorsements count only after shared verification against the policy allowlist and threshold. Authors edit this policy before publication; learners export/import the exact JSON artifacts; instructors review every bound fact before signing locally. The exchange remains manual. A satisfied endorsement is classified as exact course-endorsement provenance (§6.1) but is not yet promoted into privilege-bearing trust state. An optional Cardano completion-witness mint is treasury-funded when configured (the learner still signs), otherwise learner-funded. A witnessed completion credential requires a confirmed successful ledger receipt and its matching stored observation; a submission acknowledgement is insufficient. Courses with no gradeable elements use `CONTENT_COMPLETION_SCORE = 0.3`, a deterministic completion root bound to the exact course document, and no on-chain witness. `get_course_completion_status` reports still-unmet gradeable elements.
 2. **Document bootstrap** — skills confirmed from an uploaded resume / transcript are self-issued as `SelfAssertion` credentials carrying a provenance tier (see §6.1).
 3. **Assessment** — passing a dynamic, Sentinel-gated question-bank attempt issues an `AssessmentCredential` bound to the integrity session (see §6.2).
 
@@ -131,6 +131,23 @@ The shared credential verifier now classifies incomplete issuer-key or
 status-list evidence as `pending`, separately from `reject`. Only `accept` is an
 active verification result; pending credentials must not be treated as clean
 inputs while T03 connects this result to every scoring and privilege boundary.
+
+`alexandria_verify::trust::classify_credential` layers a typed provenance state
+on that result: `invalid` with stable reason codes, `pending` with the missing
+evidence, `verified_self_claim`, `verified_issuer_signed`, or
+`verified_course_endorsement`. The classifier rechecks the supplied verifier
+result against the credential and fails closed on any contradiction. A
+self-claim becomes `verified_course_endorsement` only when its signed evidence
+references name the exact course document and completion root of a claim
+binding for the configured network and subject, and distinct authorized
+attestors meet that binding's signed policy threshold. Otherwise it stays a
+self-claim with an explicit endorsement outcome (`not_supplied`,
+`not_applicable`, `invalid_evidence`, or `threshold_unmet`). A different issuer
+is reported as `verified_issuer_signed`, never as independent or approved.
+`get_credential_trust` applies this rule to stored credentials; corrupt or
+ambiguous stored completion evidence is an error rather than a lower trust
+state. These states describe provenance only. None of them grants a privilege;
+T03 adds the policy-qualified state that privilege checks will require.
 
 Plugin grading has a narrower temporary rule. New credential issuance accepts
 only the exact manifest and grader bytes embedded for a bundled plugin. A

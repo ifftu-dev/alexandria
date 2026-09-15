@@ -3,6 +3,7 @@ import { useLocalApi } from './useLocalApi'
 import type {
   CreatePresentationRequest,
   CredentialBundle,
+  CredentialTrust,
   DerivedSkillState,
   IssueCredentialRequest,
   PinboardCommitment,
@@ -80,6 +81,13 @@ export function useCredentials() {
   async function verify(credential: VerifiableCredential) {
     return run(() =>
       invoke<VerificationResult>('verify_credential_cmd', { credential }),
+    )
+  }
+
+  /** Provenance of a stored credential; `null` when it is not stored locally. */
+  async function trust(credentialId: string) {
+    return run(() =>
+      invoke<CredentialTrust | null>('get_credential_trust', { credentialId }),
     )
   }
 
@@ -175,6 +183,7 @@ export function useCredentials() {
     issue,
     revoke,
     verify,
+    trust,
     exportBundle,
 
     // presentations

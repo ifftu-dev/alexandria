@@ -1774,6 +1774,52 @@ export interface VerificationResult {
   acceptanceDecision: AcceptanceDecision
 }
 
+/** Mirrors `alexandria_verify::trust::TrustInvalidReason`. */
+export type TrustInvalidReason =
+  | 'inconsistent_verification_result'
+  | 'issuer_unresolved'
+  | 'invalid_signature'
+  | 'subject_not_bound'
+  | 'invalid_status_reference'
+  | 'revoked'
+  | 'expired'
+  | 'suspended'
+  | 'superseded'
+  | 'integrity_anchor_missing'
+  | 'type_not_allowed'
+
+/** Mirrors `alexandria_verify::trust::EndorsementMismatch`. */
+export type EndorsementMismatch =
+  | 'wrong_network'
+  | 'subject_mismatch'
+  | 'not_skill_claim'
+  | 'course_document_not_claimed'
+  | 'completion_root_not_claimed'
+
+/** Mirrors `alexandria_verify::trust::EndorsementOutcome`. */
+export type EndorsementOutcome =
+  | { outcome: 'not_supplied' }
+  | { outcome: 'not_applicable'; reason: EndorsementMismatch }
+  | { outcome: 'invalid_evidence' }
+  | { outcome: 'threshold_unmet'; required_attestors: number; valid_attestors: number }
+
+/**
+ * Mirrors `alexandria_verify::trust::CredentialTrust`. A trust state describes
+ * provenance only; it never grants a privilege by itself.
+ */
+export type CredentialTrust =
+  | { state: 'invalid'; reasons: TrustInvalidReason[] }
+  | { state: 'pending'; reasons: VerificationPendingReason[] }
+  | { state: 'verified_self_claim'; endorsement: EndorsementOutcome }
+  | { state: 'verified_issuer_signed'; issuer: string }
+  | {
+    state: 'verified_course_endorsement'
+    course_id: string
+    course_document_cid: string
+    course_document_version: number
+    attestors: string[]
+  }
+
 // --- Survivability bundle (§20.4) ----------------------------------------
 
 export interface KeyRegistryRow {

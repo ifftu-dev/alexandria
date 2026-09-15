@@ -102,6 +102,7 @@ export const TAURI_COMMANDS = [
   "get_course_completion_policy",
   "get_course_completion_status",
   "get_credential",
+  "get_credential_trust",
   "get_dao",
   "get_derived_skill_state",
   "get_election",

@@ -218,7 +218,10 @@ parse-and-review step before it will call the authorized local signer, then
 exports the resulting signed JSON. This workflow is manual; authenticated
 addressed transport remains pending. Credential verification DTOs use their
 actual camelCase Tauri wire shape in TypeScript, and the detail badge
-distinguishes pending from rejection.
+distinguishes pending from rejection. The credential detail page also shows a
+provenance panel from `get_credential_trust`: invalid, pending, own claim, signed
+by another issuer, or endorsed for an exact course version, with the reason or
+endorsement count. The panel states that provenance does not grant privileges.
 
 ## Deploy prerequisites
 

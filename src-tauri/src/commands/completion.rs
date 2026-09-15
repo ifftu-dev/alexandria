@@ -860,9 +860,14 @@ fn self_issue_completion(
 
     // (3) Self-claims do not imply an independent instructor endorsement.
     // Evidence is the confirmed witness or the local completion root.
+    // The trust classifier matches these exact signed references against a
+    // claim's completion binding before counting endorsements.
     let mut evidence = vec![
-        format!("course-document:blake3:{course_document_cid}:v{course_document_version}"),
-        format!("completion-root:{completion_root_hex}"),
+        alexandria_verify::trust::course_document_evidence_ref(
+            course_document_cid,
+            course_document_version,
+        ),
+        alexandria_verify::trust::completion_root_evidence_ref(completion_root_hex),
     ];
     if let Some(tx) = tx_hash {
         evidence.push(format!("witness:{tx}"));
