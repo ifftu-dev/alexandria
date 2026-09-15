@@ -354,11 +354,11 @@ pub struct Witness {
 /// issuer attests to these numbers and they cannot be altered after the
 /// fact.
 ///
-/// `assurance_level` distinguishes the privacy-first local default
-/// (`"local"`) from a future independently-attested high-assurance mode
-/// (`"high_assurance"`); under the local level the figures are
-/// device-reported and a determined attacker could suppress flags, so
-/// downstream verifiers should weight `local` accordingly.
+/// `assurance_level` is `"local"` for every credential Alexandria issues:
+/// the figures are device-reported and a determined attacker could
+/// suppress flags, so downstream verifiers should weight it accordingly.
+/// `"anchored"` and `"high_assurance"` are reserved ladder values with no
+/// verified production path; the value alone is not evidence of either.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct IntegrityAssertion {
@@ -372,15 +372,14 @@ pub struct IntegrityAssertion {
     pub integrity_score: Option<f64>,
     pub critical_count: i64,
     pub warning_count: i64,
-    /// Resolved assurance ladder: `"local"` (privacy-first default) /
-    /// `"anchored"` (commitment chain anchored) / `"high_assurance"`
-    /// (committee-co-signed).
+    /// Achieved assurance: `"local"`. `"anchored"` and `"high_assurance"`
+    /// are reserved ladder values.
     pub assurance_level: String,
-    /// Terminal commitment root of the snapshot stream, when the session
-    /// was attested. Lets a verifier tie the attestation to the anchor.
+    /// Terminal commitment root of the device's snapshot stream.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub commitment_root: Option<String>,
-    /// Anchor reference (DHT/chain) for the commitment root, if anchored.
+    /// Reserved anchor reference for the commitment root; Alexandria
+    /// issuers do not set it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub anchor_ref: Option<String>,
     /// RFC3339 timestamp the assertion was generated (issuance time).

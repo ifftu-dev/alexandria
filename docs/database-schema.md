@@ -295,8 +295,9 @@ discovery (Phase 3).
   `integrity_score`, `critical_count` / `warning_count` (migration 040),
   `started_at`, and `ended_at`. `enrollment_id` is **nullable** — standalone
   assessment attempts run with a NULL enrollment (migration 070). The
-  assurance ladder (migration 061) adds `assurance_level` (`'local'` default
-  / `'anchored'` / `'high_assurance'`), `commitment_root`, and `anchor_ref`.
+  assurance ladder (migration 061) adds `assurance_level` (`'local'` default),
+  `commitment_root`, and `anchor_ref`; issuance ignores the stored level and
+  anchor, which have no verified writer.
   Migration 083 adds `purpose` (`'assessment'` default / `'interview'`) so
   interview monitoring can use observational lifecycle rules and avoid the
   assessment appeal-evidence staging path.
@@ -307,9 +308,9 @@ discovery (Phase 3).
   ONNX paste/typing-bot classifier output `ai_paste_anomaly` (nullable),
   `gaze_offscreen_ratio` (migration 060), and `commitment_hash` (the running
   chained commitment, migration 061).
-- **`integrity_attestations`** (migration 061) — committee co-signatures per
-  session for the assurance ladder: `session_id`, `attestor_address`,
-  `public_key`, `signature`.
+- **`integrity_attestations`** (migration 061) — Retired committee
+  co-signature table (`session_id`, `attestor_address`, `public_key`,
+  `signature`); nothing reads or writes it.
 - **`sentinel_priors`**, **`sentinel_kill_switch`**, and
   **`sentinel_weights_blocklist`** — Retired community prior-library
   tables. The prior ratification, runtime weights replacement, kill

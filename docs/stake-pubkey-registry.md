@@ -51,7 +51,7 @@ Consequences:
 - Anonymous/unlinkable committee membership. Stake-address bindings are
   intentionally public.
 - Solving general PKI for end users. Only privileged-topic authors
-  (committee, chair, Sentinel co-signers) need a registry entry.
+  (committee and chair) need a registry entry.
 
 ## 4. Design
 

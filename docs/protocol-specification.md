@@ -1283,8 +1283,7 @@ A credential MAY be bound to a Sentinel integrity session at issuance. The reque
 When a session is bound, the issuer summarises its terminal state into the `integrity` attestation block (§14.7) and embeds it in the signed envelope. The attestation carries `assuranceLevel`:
 
 - `"local"` — privacy-first default. Figures are device-reported; under this level a determined attacker could suppress flags, so verifiers SHOULD weight `local` attestations accordingly.
-- `"anchored"` — the session's snapshot-commitment root is anchored (timestamp + immutability proof).
-- `"high_assurance"` — a Sentinel-DAO committee supermajority independently co-signed the session. The on-device attestation core, ladder resolution, and co-sign ingest exist; the committee attestor-node daemon that auto-produces co-signatures is integration-pending (see docs/sentinel.md §Automated Attestation).
+- `"anchored"` and `"high_assurance"` — reserved for a snapshot-commitment root anchored with a timestamp and immutability proof, and for an independently witnessed session. The implementation has no verified path to either: issuers embed only `"local"`, and a policy requiring a reserved level refuses issuance.
 
 The `integrityPolicy` bounds — `minIntegrity`, `maxCritical`, `maxWarning`, `requireClean`, `requiredAssuranceLevel` — are each optional. If **any** set bound is violated, issuance MUST be refused (no credential is minted); the issuer returns the first violated bound. A policy without a bound session is a request error. A bound session without a policy embeds the attestation but gates on nothing.
 

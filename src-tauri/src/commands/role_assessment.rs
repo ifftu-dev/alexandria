@@ -154,8 +154,14 @@ pub fn create_role_assessment_impl(
         return Err(format!("organization {} not found", req.org_id));
     }
     if let Some(level) = &req.required_assurance_level {
-        if !matches!(level.as_str(), "local" | "anchored" | "high_assurance") {
-            return Err(format!("invalid required_assurance_level: {level}"));
+        match level.as_str() {
+            crate::commands::integrity::ACHIEVED_ASSURANCE_LEVEL => {}
+            "anchored" | "high_assurance" => {
+                return Err(format!(
+                    "required_assurance_level '{level}' is unavailable: no verified path can achieve it"
+                ))
+            }
+            _ => return Err(format!("invalid required_assurance_level: {level}")),
         }
     }
     let id = entity_id(&[&req.org_id, &req.role_title, now]);
@@ -563,16 +569,13 @@ mod tests {
                 require_clean: true,
                 ..Default::default()
             }),
-            required_assurance_level: Some("anchored".into()),
+            required_assurance_level: Some("local".into()),
         };
         let ra = create_role_assessment_impl(conn, &req, NOW).unwrap();
         let fetched = get_role_assessment_impl(conn, &ra.id).unwrap().unwrap();
         assert_eq!(fetched.role_title, "SRE L4");
         assert_eq!(fetched.skill_ids, vec!["skill:sre".to_string()]);
-        assert_eq!(
-            fetched.required_assurance_level.as_deref(),
-            Some("anchored")
-        );
+        assert_eq!(fetched.required_assurance_level.as_deref(), Some("local"));
         assert!(fetched.issuance_policy.unwrap().require_clean);
         assert_eq!(
             list_role_assessments_impl(conn, Some(&org.id))
@@ -580,6 +583,26 @@ mod tests {
                 .len(),
             1
         );
+    }
+
+    #[test]
+    fn unavailable_assurance_level_is_distinct_from_invalid() {
+        let (db, ..) = setup();
+        let conn = db.conn();
+        let org = create_organization_impl(conn, "Acme", "stake_owner", None, NOW).unwrap();
+        for level in ["anchored", "high_assurance"] {
+            let req = CreateRoleAssessmentRequest {
+                org_id: org.id.clone(),
+                role_title: format!("Role {level}"),
+                job_description: None,
+                course_id: None,
+                skill_ids: vec![],
+                issuance_policy: None,
+                required_assurance_level: Some(level.into()),
+            };
+            let error = create_role_assessment_impl(conn, &req, NOW).unwrap_err();
+            assert!(error.contains("is unavailable"), "{error}");
+        }
     }
 
     #[test]

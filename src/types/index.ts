@@ -1458,7 +1458,7 @@ export interface IntegrityAssertion {
   integrityScore?: number | null
   criticalCount: number
   warningCount: number
-  /** Assurance ladder: 'local' | 'anchored' | 'high_assurance'. */
+  /** Achieved assurance. Alexandria issuers only produce 'local'; 'anchored' and 'high_assurance' are reserved. */
   assuranceLevel: string
   /** Terminal commitment root of the snapshot stream, if attested. */
   commitmentRoot?: string | null

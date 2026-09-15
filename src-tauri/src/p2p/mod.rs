@@ -8,7 +8,6 @@ pub mod governance;
 pub mod graph_fetch;
 pub mod guardian;
 pub(crate) mod inbound;
-pub mod integrity_attest;
 pub mod nat;
 pub mod network;
 pub mod opinions;

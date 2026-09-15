@@ -13,8 +13,6 @@ default-run = "alexandria-node"
 [features]
 default = []
 dev-seed = []
-legacy-integrity-attestation = []
-
 
 # Enable desktop tutoring video without acoustic echo cancellation.
 # This keeps Windows buildable on GitHub's MSVC runners, where the bundled

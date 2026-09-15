@@ -24,7 +24,9 @@ const tabs = computed(() => [
   { key: 'issue', label: t('dashboard.sponsor.tabs.issue') },
 ])
 
-const ASSURANCE_LEVELS = ['local', 'anchored', 'high_assurance']
+// Only device-reported assurance is achievable; anchoring and committee
+// co-signing have no verified path.
+const ASSURANCE_LEVELS = ['local']
 
 // --- Organizations -------------------------------------------------------
 const orgModalOpen = ref(false)

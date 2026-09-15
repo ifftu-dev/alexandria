@@ -42,8 +42,8 @@ pub struct IssuancePolicy {
     /// `flagged` / `suspended` are rejected.
     #[serde(default)]
     pub require_clean: bool,
-    /// If set, the assertion's `assurance_level` must equal this
-    /// (e.g. `"high_assurance"`).
+    /// If set, the assertion's `assurance_level` must equal this. Only
+    /// `"local"` is currently achievable.
     #[serde(default)]
     pub required_assurance_level: Option<String>,
 }
@@ -102,8 +102,10 @@ impl IssuancePolicy {
 }
 
 /// Load an integrity session and summarise it as an `IntegrityAssertion`
-/// for embedding at issuance. `assurance_level` is `"local"` until the
-/// independently-attested high-assurance mode lands.
+/// for embedding at issuance. `assurance_level` is always
+/// [`ACHIEVED_ASSURANCE_LEVEL`](crate::commands::integrity::ACHIEVED_ASSURANCE_LEVEL),
+/// and no anchor reference is embedded: the stored assurance and anchor
+/// columns are not verified evidence.
 fn build_integrity_assertion(
     conn: &Connection,
     session_id: &str,
@@ -111,8 +113,7 @@ fn build_integrity_assertion(
 ) -> Result<IntegrityAssertion, String> {
     let row = conn
         .query_row(
-            "SELECT status, integrity_score, critical_count, warning_count,
-                    assurance_level, commitment_root, anchor_ref
+            "SELECT status, integrity_score, critical_count, warning_count, commitment_root
              FROM integrity_sessions WHERE id = ?1",
             params![session_id],
             |r| {
@@ -121,37 +122,23 @@ fn build_integrity_assertion(
                     r.get::<_, Option<f64>>(1)?,
                     r.get::<_, i64>(2)?,
                     r.get::<_, i64>(3)?,
-                    r.get::<_, String>(4)?,
-                    r.get::<_, Option<String>>(5)?,
-                    r.get::<_, Option<String>>(6)?,
+                    r.get::<_, Option<String>>(4)?,
                 ))
             },
         )
         .optional()
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("integrity session {session_id} not found"))?;
-    let (
-        status,
-        integrity_score,
-        critical_count,
-        warning_count,
-        assurance_level,
-        commitment_root,
-        anchor_ref,
-    ) = row;
-    let assurance_level = crate::commands::integrity::effective_assurance_level(
-        &assurance_level,
-        anchor_ref.is_some(),
-    );
+    let (status, integrity_score, critical_count, warning_count, commitment_root) = row;
     Ok(IntegrityAssertion {
         session_id: session_id.to_string(),
         status,
         integrity_score,
         critical_count,
         warning_count,
-        assurance_level,
+        assurance_level: crate::commands::integrity::ACHIEVED_ASSURANCE_LEVEL.to_string(),
         commitment_root,
-        anchor_ref,
+        anchor_ref: None,
         generated_at: now.to_string(),
     })
 }
@@ -1577,6 +1564,37 @@ mod tests {
         // Assertion is inside the signed envelope.
         let v = serde_json::to_value(&vc).unwrap();
         assert!(v.get("integrity").is_some(), "integrity not serialized");
+    }
+
+    #[test]
+    fn stored_assurance_claims_never_raise_the_embedded_level() {
+        let (db, key, issuer, subject) = setup();
+        seed_session(db.conn(), "sess_claimed", "completed", Some(0.95), 0, 0);
+        db.conn()
+            .execute(
+                "UPDATE integrity_sessions
+                 SET assurance_level = 'high_assurance', anchor_ref = 'dht:unverified'
+                 WHERE id = 'sess_claimed'",
+                [],
+            )
+            .unwrap();
+        let mut req = sample_request(subject);
+        req.integrity_session_id = Some("sess_claimed".into());
+
+        for required in ["anchored", "high_assurance"] {
+            req.integrity_policy = Some(IssuancePolicy {
+                required_assurance_level: Some(required.into()),
+                ..Default::default()
+            });
+            let error = issue_credential_impl(db.conn(), &key, &issuer, &req, NOW).unwrap_err();
+            assert!(error.contains("does not meet required"), "{error}");
+        }
+
+        req.integrity_policy = None;
+        let vc = issue_credential_impl(db.conn(), &key, &issuer, &req, NOW).unwrap();
+        let assertion = vc.integrity.as_ref().expect("integrity assertion embedded");
+        assert_eq!(assertion.assurance_level, "local");
+        assert_eq!(assertion.anchor_ref, None);
     }
 
     #[test]

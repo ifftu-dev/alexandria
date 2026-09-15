@@ -308,40 +308,17 @@ The paste classifier has one model source: `src-tauri/resources/sentinel/paste-v
 
 The earlier community prior library and runtime weights replacement are deleted: Sentinel DAO proposals, approved-status ratification, placeholder signatures, the prior gossip mirror, and the kill switch and version blocklist that guarded replacement weights. Their tables stay in the schema until the baseline squash, and nothing reads or writes them. Inbound `/alexandria/sentinel-priors/1.0` messages are rejected before any database access until the topic is removed.
 
-## Automated Attestation (High-Assurance)
+## Integrity Assurance
 
-Local integrity flags are device-reported — a determined attacker who controls the client could suppress them. High-assurance mode makes integrity **independently verifiable without any human in the loop**, layered into an assurance ladder embedded in the issued credential (see [protocol-specification.md](protocol-specification.md) §14.9.5):
-
-| Level | Meaning | How |
-|-------|---------|-----|
-| `local` | Device-reported only (default). | No attestation. |
-| `anchored` | Snapshot stream is timestamped + immutable. | Commitment root anchored (DHT/chain). |
-| `high_assurance` | An independent party witnessed the session. | ≥2/3 of the Sentinel DAO committee co-signed. |
+Local integrity flags are device-reported — a determined attacker who controls the client could suppress them. Every credential Alexandria issues carries `assuranceLevel: "local"` in its signed `integrity` block (see [protocol-specification.md](protocol-specification.md) §14.9.5). `"anchored"` and `"high_assurance"` remain reserved ladder values with no verified production path: a sponsor role cannot require them, and an `IssuancePolicy.requiredAssuranceLevel` naming either refuses issuance.
 
 ### Commitment chain
 
-Every `integrity_submit_snapshot` folds the snapshot into a running hash (`fold_commitment`, `domain::integrity_attestation`): `root_n = blake2b(tag | root_{n-1} | canonical(snapshot_n))`. The chain fixes the order and contents of the flag stream — changing or reordering any snapshot changes the terminal `commitment_root`. Per-snapshot hashes persist on `integrity_snapshots.commitment_hash`; the running root on `integrity_sessions.commitment_root`.
+Every `integrity_submit_snapshot` folds the snapshot into a running hash (`fold_commitment`, `domain::integrity_commitment`): `root_n = blake2b(tag | root_{n-1} | canonical(snapshot_n))`. The chain fixes the order and contents of the flag stream — changing or reordering any snapshot changes the terminal `commitment_root`. Per-snapshot hashes persist on `integrity_snapshots.commitment_hash`, the running root on `integrity_sessions.commitment_root`, and the signed `integrity` block carries it as `commitmentRoot`. It is local tamper evidence, not an independent witness.
 
-### Attestation (no manual signing)
+### Deleted attestation paths
 
-- **Anchor (baseline)** — the terminal `commitment_root` is anchored; `integrity_set_anchor` records the reference and promotes the session to `anchored`. Proves timing + immutability (the data existed before the learner saw the result).
-- **Committee co-sign (upgrade)** — committee-operated **attestor nodes auto-counter-sign** the terminal attestation payload (`attestation_payload`, binding session_id/status/score/counts/commitment_root/ended_at). Signatures are plain ed25519 collected M-of-N (no aggregate threshold crypto); a 2/3 supermajority of valid committee co-signatures promotes the session to `high_assurance`. No person ever hand-signs — committee keys sign programmatically.
-
-`record_attestation_impl` is the shared ingest core (behind the `integrity_record_attestation` IPC and the P2P handler). It rejects non-committee signers, **unregistered key bindings** (`stake_pubkey_registry` — blocks pairing a real member's stake address with an attacker pubkey), and signatures that don't verify over the terminal payload, then re-resolves the ladder (`recompute_assurance` → `resolve_assurance`). `integrity_get_assurance` reads the current level + valid co-sign count.
-
-### Propagation
-
-Co-signatures travel on `/alexandria/integrity-attestation/1.0`. `p2p::integrity_attest::handle_integrity_cosign_message` is the learner-side inbound handler (mirrors `p2p::sentinel`): it binds the gossip broadcaster to the claimed attestor, then feeds the announcement through `record_attestation_impl` so every trust check re-runs on receipt. The committee attestor-node daemon (which auto-produces co-signatures after independently witnessing the live snapshot-commitment stream) and the network-layer topic dispatch are the remaining integration work — see the productization roadmap.
-
-The issued credential carries the resolved `assuranceLevel` plus `commitmentRoot` / `anchorRef` in its signed `integrity` block, and `IssuancePolicy.requiredAssuranceLevel` can gate issuance on it.
-
-### Operator / committee IPCs
-
-| Command | Description |
-|---------|-------------|
-| `integrity_record_attestation` | Ingest + verify a committee co-signature; re-resolve assurance. |
-| `integrity_set_anchor` | Record the commitment-root anchor reference; promote to `anchored`. |
-| `integrity_get_assurance` | Read assurance level + valid attestation count for a session. |
+The unverified anchor setter (`integrity_set_anchor`), which let any caller mark a session `anchored`, and the local committee co-sign path (`integrity_record_attestation`, `integrity_get_assurance`, the Sentinel DAO committee check and the unwired co-sign gossip handler) are deleted with the `legacy-integrity-attestation` feature. Issuance ignores the stored `assurance_level` and `anchor_ref` columns until the baseline schema squash removes them. An independent witness must return through verified committee outcome certificates.
 
 ## Database Schema
 

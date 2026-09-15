@@ -6,14 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::crypto::hash::entity_id;
 use crate::db::executor::DatabaseWorkload;
-use crate::domain::integrity_attestation::{
-    attestation_payload, count_valid_committee_cosigs, resolve_assurance, AssuranceLevel,
-    CoSignature,
-};
 use crate::AppState;
-
-/// DAO row whose committee members co-sign integrity attestations.
-const SENTINEL_DAO_ID: &str = "sentinel-dao";
 
 // ============================================================================
 // Types
@@ -137,34 +130,10 @@ fn trust_penalty(critical_count: i64, warning_count: i64) -> f64 {
     (critical_count as f64) * 0.20 + (warning_count as f64) * 0.10
 }
 
-pub(crate) const fn legacy_integrity_attestation_enabled() -> bool {
-    cfg!(any(
-        test,
-        all(debug_assertions, feature = "legacy-integrity-attestation")
-    ))
-}
-
-fn effective_assurance_level_with_legacy(
-    stored_level: &str,
-    anchored: bool,
-    allow_legacy_attestation: bool,
-) -> String {
-    if allow_legacy_attestation {
-        AssuranceLevel::from_label(stored_level)
-            .as_str()
-            .to_string()
-    } else {
-        resolve_assurance(anchored, 0, 0).as_str().to_string()
-    }
-}
-
-pub(crate) fn effective_assurance_level(stored_level: &str, anchored: bool) -> String {
-    effective_assurance_level_with_legacy(
-        stored_level,
-        anchored,
-        legacy_integrity_attestation_enabled(),
-    )
-}
+/// The only assurance level a session can currently achieve. Commitment
+/// anchoring and committee co-signing have no verified path, so a stored
+/// `assurance_level` or `anchor_ref` never raises what a credential claims.
+pub(crate) const ACHIEVED_ASSURANCE_LEVEL: &str = "local";
 
 // ============================================================================
 // Commands
@@ -326,10 +295,10 @@ fn persist_snapshot(
     let anomaly_flags_json =
         serde_json::to_string(&req.anomaly_flags).map_err(|e| e.to_string())?;
 
-    // Fold this snapshot into the session's running commitment chain
-    // (P1 attestation): the chained root fixes the order + contents of
-    // the flag stream so it is tamper-evident and can be anchored /
-    // co-signed. Canonical bytes cover the immutable persisted fields.
+    // Fold this snapshot into the session's running commitment chain:
+    // the chained root fixes the order + contents of the flag stream so
+    // it is tamper-evident. Canonical bytes cover the immutable persisted
+    // fields.
     let prev_root: Option<String> = conn
         .query_row(
             "SELECT commitment_root FROM integrity_sessions WHERE id = ?1",
@@ -338,7 +307,7 @@ fn persist_snapshot(
         )
         .map_err(|e| e.to_string())?;
     let snapshot_canonical = format!("{snapshot_id}|{composite}|{anomaly_flags_json}");
-    let commitment_hash = crate::domain::integrity_attestation::fold_commitment(
+    let commitment_hash = crate::domain::integrity_commitment::fold_commitment(
         prev_root.as_deref().unwrap_or(""),
         snapshot_canonical.as_bytes(),
     );
@@ -490,7 +459,7 @@ fn finish_session(
         })?;
 
     // A lost IPC response must not strand cleanup or permit a retry to
-    // overwrite an already finalized attestation payload.
+    // overwrite already finalized terminal evidence.
     if ended_at.is_some() || current_status == "completed" {
         return read_session(conn, session_id);
     }
@@ -514,7 +483,6 @@ fn finish_session(
     )
     .map_err(|e| e.to_string())?;
 
-    recompute_assurance(conn, session_id)?;
     let session = read_session(conn, session_id)?;
     tx.commit().map_err(|e| e.to_string())?;
 
@@ -536,392 +504,6 @@ fn finish_session(
     }
 
     Ok(session)
-}
-
-// ============================================================================
-// Automated attestation (P1) — anchor + committee co-signatures
-// ============================================================================
-
-#[derive(Debug, Serialize)]
-pub struct AssuranceInfo {
-    pub session_id: String,
-    pub assurance_level: String,
-    pub committee_size: usize,
-    pub valid_attestations: usize,
-    pub anchored: bool,
-    pub commitment_root: Option<String>,
-}
-
-/// Current Sentinel-DAO committee stake addresses.
-fn load_committee(conn: &rusqlite::Connection) -> Result<HashSet<String>, String> {
-    if !legacy_integrity_attestation_enabled() {
-        return Ok(HashSet::new());
-    }
-    let mut stmt = conn
-        .prepare(
-            "SELECT stake_address FROM governance_dao_members
-             WHERE dao_id = ?1 AND role = 'committee'",
-        )
-        .map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map(params![SENTINEL_DAO_ID], |r| r.get::<_, String>(0))
-        .map_err(|e| e.to_string())?;
-    let mut set = HashSet::new();
-    for r in rows {
-        set.insert(r.map_err(|e| e.to_string())?);
-    }
-    Ok(set)
-}
-
-/// True if `(stake_address, public_key_hex)` is a registered key binding
-/// — defends against pairing a real committee member's address with an
-/// attacker-controlled pubkey.
-fn pubkey_registered(
-    conn: &rusqlite::Connection,
-    stake_address: &str,
-    public_key_hex: &str,
-) -> Result<bool, String> {
-    let n: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM stake_pubkey_registry
-             WHERE stake_address = ?1 AND public_key_hex = ?2",
-            params![stake_address, public_key_hex.to_lowercase()],
-            |r| r.get(0),
-        )
-        .map_err(|e| e.to_string())?;
-    Ok(n > 0)
-}
-
-/// `(status, integrity_score, critical, warning, commitment_root,
-/// anchor_ref, ended_at)` — the terminal session fields attestation
-/// resolution reads.
-type SessionAttestRow = (
-    String,
-    Option<f64>,
-    i64,
-    i64,
-    Option<String>,
-    Option<String>,
-    Option<String>,
-);
-
-/// Re-derive and persist `assurance_level` for a session from its
-/// terminal state + recorded anchor + committee co-signatures. Pure
-/// resolution lives in `domain::integrity_attestation`.
-fn recompute_assurance(conn: &rusqlite::Connection, session_id: &str) -> Result<String, String> {
-    let (status, score, critical, warning, root, anchor, ended): SessionAttestRow = conn
-        .query_row(
-            "SELECT status, integrity_score, critical_count, warning_count,
-                    commitment_root, anchor_ref, ended_at
-             FROM integrity_sessions WHERE id = ?1",
-            params![session_id],
-            |r| {
-                Ok((
-                    r.get(0)?,
-                    r.get(1)?,
-                    r.get(2)?,
-                    r.get(3)?,
-                    r.get(4)?,
-                    r.get(5)?,
-                    r.get(6)?,
-                ))
-            },
-        )
-        .map_err(|e| match e {
-            rusqlite::Error::QueryReturnedNoRows => "session not found".to_string(),
-            other => other.to_string(),
-        })?;
-
-    let root_str = root.clone().unwrap_or_default();
-    let payload = attestation_payload(
-        session_id,
-        &status,
-        score,
-        critical,
-        warning,
-        &root_str,
-        ended.as_deref().unwrap_or(""),
-    );
-
-    let committee = load_committee(conn)?;
-    let cosigs = load_attestations(conn, session_id)?;
-    let valid = count_valid_committee_cosigs(&payload, &cosigs, &committee);
-    let level = resolve_assurance(anchor.is_some(), valid, committee.len());
-
-    conn.execute(
-        "UPDATE integrity_sessions SET assurance_level = ?2 WHERE id = ?1",
-        params![session_id, level.as_str()],
-    )
-    .map_err(|e| e.to_string())?;
-    Ok(level.as_str().to_string())
-}
-
-fn load_attestations(
-    conn: &rusqlite::Connection,
-    session_id: &str,
-) -> Result<Vec<CoSignature>, String> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT attestor_address, public_key, signature
-             FROM integrity_attestations WHERE session_id = ?1",
-        )
-        .map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map(params![session_id], |r| {
-            Ok(CoSignature {
-                attestor_address: r.get(0)?,
-                public_key_hex: r.get(1)?,
-                signature_hex: r.get(2)?,
-            })
-        })
-        .map_err(|e| e.to_string())?;
-    let mut out = Vec::new();
-    for r in rows {
-        out.push(r.map_err(|e| e.to_string())?);
-    }
-    Ok(out)
-}
-
-/// Record a committee co-signature over a finalized session's terminal
-/// attestation payload, then re-resolve the assurance ladder. Called by
-/// the P2P co-sign ingest path (and directly in tests). Rejects
-/// non-committee signers, unregistered keys, and invalid signatures.
-#[tauri::command]
-pub async fn integrity_record_attestation(
-    state: State<'_, AppState>,
-    session_id: String,
-    attestor_address: String,
-    public_key: String,
-    signature: String,
-) -> Result<String, String> {
-    state
-        .db_executor
-        .execute(
-            DatabaseWorkload::Background,
-            state.profile_lease(),
-            "integrity.record-attestation",
-            move |db| {
-                record_attestation_impl(
-                    db.conn(),
-                    &session_id,
-                    &attestor_address,
-                    &public_key,
-                    &signature,
-                )
-            },
-        )
-        .await
-}
-
-/// Verify + store one committee co-signature over a finalized session's
-/// terminal payload, then re-resolve the assurance ladder. Shared by the
-/// IPC command and the P2P co-sign ingest handler. Rejects non-committee
-/// signers, unregistered key bindings, unfinalized sessions, and
-/// signatures that don't verify.
-pub(crate) fn record_attestation_impl(
-    conn: &rusqlite::Connection,
-    session_id: &str,
-    attestor_address: &str,
-    public_key: &str,
-    signature: &str,
-) -> Result<String, String> {
-    if !legacy_integrity_attestation_enabled() {
-        return Err(
-            "legacy integrity attestation is disabled pending verified committee certificates"
-                .into(),
-        );
-    }
-    let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)
-        .map_err(|e| e.to_string())?;
-    let conn = &tx;
-
-    // Session must be finalized — co-signatures are over the terminal
-    // payload (status/score/root/ended_at).
-    let ended: Option<String> = conn
-        .query_row(
-            "SELECT ended_at FROM integrity_sessions WHERE id = ?1",
-            params![session_id],
-            |r| r.get(0),
-        )
-        .map_err(|e| match e {
-            rusqlite::Error::QueryReturnedNoRows => "session not found".to_string(),
-            other => other.to_string(),
-        })?;
-    if ended.is_none() {
-        return Err("session not finalized — cannot attest".into());
-    }
-
-    // Authorization: committee membership + registered key binding.
-    if !load_committee(conn)?.contains(attestor_address) {
-        return Err("attestor is not a Sentinel DAO committee member".into());
-    }
-    if !pubkey_registered(conn, attestor_address, public_key)? {
-        return Err("attestor public key is not a registered binding".into());
-    }
-
-    // Signature must verify over the terminal payload before we store it.
-    let committee: HashSet<String> = std::iter::once(attestor_address.to_string()).collect();
-    let cosig = CoSignature {
-        attestor_address: attestor_address.to_string(),
-        public_key_hex: public_key.to_string(),
-        signature_hex: signature.to_string(),
-    };
-    let payload = terminal_payload(conn, session_id)?;
-    if count_valid_committee_cosigs(&payload, std::slice::from_ref(&cosig), &committee) != 1 {
-        return Err("attestation signature failed verification".into());
-    }
-
-    conn.execute(
-        "INSERT INTO integrity_attestations (session_id, attestor_address, public_key, signature)
-         VALUES (?1, ?2, ?3, ?4)
-         ON CONFLICT(session_id, attestor_address) DO UPDATE SET
-             public_key = excluded.public_key,
-             signature = excluded.signature,
-             signed_at = datetime('now')",
-        params![
-            session_id,
-            attestor_address,
-            public_key.to_lowercase(),
-            signature
-        ],
-    )
-    .map_err(|e| e.to_string())?;
-
-    let assurance = recompute_assurance(conn, session_id)?;
-    tx.commit().map_err(|e| e.to_string())?;
-    Ok(assurance)
-}
-
-/// Record a confirmed anchor reference (DHT/chain) for the session's
-/// commitment root, then re-resolve the assurance ladder (→ at least
-/// `anchored`).
-#[tauri::command]
-pub async fn integrity_set_anchor(
-    state: State<'_, AppState>,
-    session_id: String,
-    anchor_ref: String,
-) -> Result<String, String> {
-    state
-        .db_executor
-        .execute(
-            DatabaseWorkload::Background,
-            state.profile_lease(),
-            "integrity.set-anchor",
-            move |db| set_anchor_impl(db.conn(), &session_id, &anchor_ref),
-        )
-        .await
-}
-
-fn set_anchor_impl(
-    conn: &rusqlite::Connection,
-    session_id: &str,
-    anchor_ref: &str,
-) -> Result<String, String> {
-    let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)
-        .map_err(|e| e.to_string())?;
-    let n = tx
-        .execute(
-            "UPDATE integrity_sessions SET anchor_ref = ?2 WHERE id = ?1",
-            params![session_id, anchor_ref],
-        )
-        .map_err(|e| e.to_string())?;
-    if n == 0 {
-        return Err("session not found".into());
-    }
-    let assurance = recompute_assurance(&tx, session_id)?;
-    tx.commit().map_err(|e| e.to_string())?;
-    Ok(assurance)
-}
-
-/// Read the current assurance state of a session.
-#[tauri::command]
-pub async fn integrity_get_assurance(
-    state: State<'_, AppState>,
-    session_id: String,
-) -> Result<AssuranceInfo, String> {
-    state
-        .db_executor
-        .execute(
-            DatabaseWorkload::Learner,
-            state.profile_lease(),
-            "integrity.get-assurance",
-            move |db| {
-                let conn = db.conn();
-                let (level, root, anchor): (String, Option<String>, Option<String>) = conn
-                    .query_row(
-                        "SELECT assurance_level, commitment_root, anchor_ref
-                         FROM integrity_sessions WHERE id = ?1",
-                        params![session_id],
-                        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-                    )
-                    .map_err(|e| match e {
-                        rusqlite::Error::QueryReturnedNoRows => "session not found".to_string(),
-                        other => other.to_string(),
-                    })?;
-                let committee = load_committee(conn)?;
-                let payload = terminal_payload(conn, &session_id)?;
-                let cosigs = load_attestations(conn, &session_id)?;
-                let valid = count_valid_committee_cosigs(&payload, &cosigs, &committee);
-                Ok(AssuranceInfo {
-                    session_id,
-                    assurance_level: effective_assurance_level(&level, anchor.is_some()),
-                    committee_size: committee.len(),
-                    valid_attestations: valid,
-                    anchored: anchor.is_some(),
-                    commitment_root: root,
-                })
-            },
-        )
-        .await
-}
-
-/// Build the terminal attestation payload for a session (shared by the
-/// record + read paths).
-fn terminal_payload(conn: &rusqlite::Connection, session_id: &str) -> Result<Vec<u8>, String> {
-    let (status, score, critical, warning, root, ended): (
-        String,
-        Option<f64>,
-        i64,
-        i64,
-        Option<String>,
-        Option<String>,
-    ) = conn
-        .query_row(
-            "SELECT status, integrity_score, critical_count, warning_count,
-                    commitment_root, ended_at
-             FROM integrity_sessions WHERE id = ?1",
-            params![session_id],
-            |r| {
-                Ok((
-                    r.get(0)?,
-                    r.get(1)?,
-                    r.get(2)?,
-                    r.get(3)?,
-                    r.get(4)?,
-                    r.get(5)?,
-                ))
-            },
-        )
-        .map_err(|e| e.to_string())?;
-    Ok(attestation_payload(
-        session_id,
-        &status,
-        score,
-        critical,
-        warning,
-        root.as_deref().unwrap_or(""),
-        ended.as_deref().unwrap_or(""),
-    ))
-}
-
-/// Build the canonical terminal payload a committee attestor signs for a
-/// session — exposed so the attestor node / tests produce identical
-/// bytes. Returns hex of the payload for transport convenience.
-pub fn attestation_payload_hex(
-    conn: &rusqlite::Connection,
-    session_id: &str,
-) -> Result<String, String> {
-    Ok(hex::encode(terminal_payload(conn, session_id)?))
 }
 
 /// Get the current integrity session for an enrollment.
@@ -1140,30 +722,7 @@ mod tests {
         assert_eq!(flag_severity("totally_made_up"), Severity::Info);
     }
 
-    #[test]
-    fn unverified_legacy_assurance_is_clamped_to_supported_evidence() {
-        assert_eq!(
-            effective_assurance_level_with_legacy("high_assurance", false, false),
-            "local"
-        );
-        assert_eq!(
-            effective_assurance_level_with_legacy("high_assurance", true, false),
-            "anchored"
-        );
-        assert_eq!(
-            effective_assurance_level_with_legacy("high_assurance", false, true),
-            "high_assurance"
-        );
-        assert_eq!(
-            effective_assurance_level_with_legacy("unexpected", false, true),
-            "local"
-        );
-    }
-
-    // ---- Attestation (P1 inc 2) DB-backed flow ----------------------
-    use crate::crypto::signing::sign;
     use crate::db::Database;
-    use ed25519_dalek::SigningKey;
 
     fn snapshot_db() -> Database {
         let db = Database::open_in_memory().unwrap();
@@ -1223,7 +782,6 @@ mod tests {
                     "flagged"
                 }
             );
-            let payload = terminal_payload(db.conn(), &request.session_id).unwrap();
             let retry = finish_session(
                 db.conn(),
                 &request.session_id,
@@ -1237,42 +795,8 @@ mod tests {
                 serde_json::to_value(first).unwrap(),
                 serde_json::to_value(retry).unwrap()
             );
-            assert_eq!(
-                terminal_payload(db.conn(), &request.session_id).unwrap(),
-                payload
-            );
             assert!(persist_snapshot(db.conn(), &request).is_err());
         }
-    }
-
-    #[test]
-    fn session_finish_rolls_back_if_assurance_update_fails() {
-        let db = snapshot_db();
-        let request = snapshot_request();
-        persist_snapshot(db.conn(), &request).unwrap();
-        let original =
-            serde_json::to_value(read_session(db.conn(), &request.session_id).unwrap()).unwrap();
-        db.conn().execute_batch(
-            "CREATE TEMP TRIGGER fail_finish_assurance BEFORE UPDATE OF assurance_level ON integrity_sessions
-             BEGIN SELECT RAISE(ABORT, 'injected assurance failure'); END;",
-        ).unwrap();
-        let ending = EndSessionRequest {
-            overall_integrity_score: 0.8,
-            overall_consistency_score: 0.7,
-        };
-        assert!(finish_session(db.conn(), &request.session_id, &ending)
-            .unwrap_err()
-            .contains("injected assurance failure"));
-        assert_eq!(
-            serde_json::to_value(read_session(db.conn(), &request.session_id).unwrap()).unwrap(),
-            original
-        );
-        db.conn()
-            .execute_batch("DROP TRIGGER fail_finish_assurance;")
-            .unwrap();
-        let ended = finish_session(db.conn(), &request.session_id, &ending).unwrap();
-        assert_eq!(ended.status, "completed");
-        assert_eq!(ended.integrity_score, Some(0.8));
     }
 
     #[test]
@@ -1386,7 +910,7 @@ mod tests {
         let canonical = format!("{}|0.9|[\"bot_suspected\"]", snapshot.id);
         assert_eq!(
             root,
-            crate::domain::integrity_attestation::fold_commitment("", canonical.as_bytes())
+            crate::domain::integrity_commitment::fold_commitment("", canonical.as_bytes())
         );
     }
 
@@ -1419,180 +943,6 @@ mod tests {
             })
             .unwrap();
         assert_eq!(count, 0);
-    }
-
-    fn key(seed: u8) -> SigningKey {
-        SigningKey::from_bytes(&[seed; 32])
-    }
-
-    /// Seed a finalized session + a committee of `n` members (registered
-    /// keys) and return their signing keys + stake addresses.
-    fn seed_attestation_env(conn: &rusqlite::Connection, n: u8) -> Vec<(String, SigningKey)> {
-        conn.execute(
-            "INSERT INTO integrity_sessions
-                (id, enrollment_id, status, integrity_score, critical_count, warning_count,
-                 started_at, ended_at, commitment_root)
-             VALUES ('sess1', NULL, 'completed', 0.9, 0, 1, '2026-01-01T00:00:00Z',
-                 '2026-01-01T01:00:00Z', 'root_abc')",
-            [],
-        )
-        .unwrap();
-        let mut members = Vec::new();
-        for i in 0..n {
-            let addr = format!("stake_member_{i}");
-            let k = key(i + 1);
-            let pk_hex = hex::encode(k.verifying_key().to_bytes());
-            conn.execute(
-                "INSERT INTO governance_dao_members (dao_id, stake_address, role, joined_at)
-                 VALUES ('sentinel-dao', ?1, 'committee', '2026-01-01')",
-                params![addr],
-            )
-            .unwrap();
-            conn.execute(
-                "INSERT INTO stake_pubkey_registry
-                    (stake_address, public_key_hex, valid_from, source)
-                 VALUES (?1, ?2, 0, 'snapshot')",
-                params![addr, pk_hex],
-            )
-            .unwrap();
-            members.push((addr, k));
-        }
-        members
-    }
-
-    #[test]
-    fn anchor_promotes_to_anchored() {
-        let db = Database::open_in_memory().unwrap();
-        db.run_migrations().unwrap();
-        let conn = db.conn();
-        seed_attestation_env(conn, 3);
-        conn.execute(
-            "UPDATE integrity_sessions SET anchor_ref = 'dht:abc' WHERE id = 'sess1'",
-            [],
-        )
-        .unwrap();
-        assert_eq!(recompute_assurance(conn, "sess1").unwrap(), "anchored");
-    }
-
-    #[test]
-    fn anchor_and_assurance_update_are_atomic_and_retryable() {
-        let db = Database::open_in_memory().unwrap();
-        db.run_migrations().unwrap();
-        let conn = db.conn();
-        seed_attestation_env(conn, 3);
-        conn.execute_batch(
-            "CREATE TEMP TRIGGER fail_anchor_assurance BEFORE UPDATE OF assurance_level ON integrity_sessions
-             BEGIN SELECT RAISE(ABORT, 'injected anchor assurance failure'); END;",
-        )
-        .unwrap();
-
-        let error = set_anchor_impl(conn, "sess1", "dht:abc").unwrap_err();
-        assert!(error.contains("injected anchor assurance failure"));
-        let anchor: Option<String> = conn
-            .query_row(
-                "SELECT anchor_ref FROM integrity_sessions WHERE id = 'sess1'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(anchor, None);
-
-        conn.execute_batch("DROP TRIGGER fail_anchor_assurance;")
-            .unwrap();
-        assert_eq!(
-            set_anchor_impl(conn, "sess1", "dht:abc").unwrap(),
-            "anchored"
-        );
-    }
-
-    #[test]
-    fn attestation_and_assurance_update_are_atomic_and_retryable() {
-        let db = Database::open_in_memory().unwrap();
-        db.run_migrations().unwrap();
-        let conn = db.conn();
-        let members = seed_attestation_env(conn, 3);
-        let payload = terminal_payload(conn, "sess1").unwrap();
-        let (address, signing_key) = &members[0];
-        let signed = sign(&payload, signing_key);
-        let public_key = hex::encode(signed.public_key);
-        let signature = hex::encode(signed.signature);
-        conn.execute_batch(
-            "CREATE TEMP TRIGGER fail_attestation_assurance BEFORE UPDATE OF assurance_level ON integrity_sessions
-             BEGIN SELECT RAISE(ABORT, 'injected attestation assurance failure'); END;",
-        )
-        .unwrap();
-
-        let error =
-            record_attestation_impl(conn, "sess1", address, &public_key, &signature).unwrap_err();
-        assert!(error.contains("injected attestation assurance failure"));
-        let count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM integrity_attestations", [], |row| {
-                row.get(0)
-            })
-            .unwrap();
-        assert_eq!(count, 0);
-
-        conn.execute_batch("DROP TRIGGER fail_attestation_assurance;")
-            .unwrap();
-        assert_eq!(
-            record_attestation_impl(conn, "sess1", address, &public_key, &signature).unwrap(),
-            "local"
-        );
-    }
-
-    #[test]
-    fn committee_supermajority_promotes_to_high_assurance() {
-        let db = Database::open_in_memory().unwrap();
-        db.run_migrations().unwrap();
-        let conn = db.conn();
-        let members = seed_attestation_env(conn, 3); // threshold = 2
-        let payload = terminal_payload(conn, "sess1").unwrap();
-
-        // One valid co-sig → still below threshold (anchored=false → local).
-        let (a0, k0) = &members[0];
-        let s0 = sign(&payload, k0);
-        conn.execute(
-            "INSERT INTO integrity_attestations (session_id, attestor_address, public_key, signature)
-             VALUES ('sess1', ?1, ?2, ?3)",
-            params![a0, hex::encode(&s0.public_key), hex::encode(&s0.signature)],
-        )
-        .unwrap();
-        assert_eq!(recompute_assurance(conn, "sess1").unwrap(), "local");
-
-        // Second valid co-sig → 2/3 supermajority → high_assurance.
-        let (a1, k1) = &members[1];
-        let s1 = sign(&payload, k1);
-        conn.execute(
-            "INSERT INTO integrity_attestations (session_id, attestor_address, public_key, signature)
-             VALUES ('sess1', ?1, ?2, ?3)",
-            params![a1, hex::encode(&s1.public_key), hex::encode(&s1.signature)],
-        )
-        .unwrap();
-        assert_eq!(
-            recompute_assurance(conn, "sess1").unwrap(),
-            "high_assurance"
-        );
-    }
-
-    #[test]
-    fn forged_cosig_with_wrong_payload_does_not_count() {
-        let db = Database::open_in_memory().unwrap();
-        db.run_migrations().unwrap();
-        let conn = db.conn();
-        let members = seed_attestation_env(conn, 3);
-        // Sign a DIFFERENT payload than the session's terminal one.
-        let bogus = b"not-the-real-payload".to_vec();
-        for (addr, k) in &members {
-            let s = sign(&bogus, k);
-            conn.execute(
-                "INSERT INTO integrity_attestations (session_id, attestor_address, public_key, signature)
-                 VALUES ('sess1', ?1, ?2, ?3)",
-                params![addr, hex::encode(&s.public_key), hex::encode(&s.signature)],
-            )
-            .unwrap();
-        }
-        // None verify against the terminal payload → stays local.
-        assert_eq!(recompute_assurance(conn, "sess1").unwrap(), "local");
     }
 
     #[test]

@@ -59,5 +59,8 @@
   "publish_goal_template_ratification": "retired caller-declared content ratification",
   "propose_question_bank_change": "retired local content proposal authority",
   "publish_question_bank_ratification": "retired caller-declared content ratification",
-  "apply_content_version": "retired caller-supplied content version apply"
+  "apply_content_version": "retired caller-supplied content version apply",
+  "integrity_record_attestation": "retired local committee co-sign authority",
+  "integrity_set_anchor": "retired unverified anchor assurance setter",
+  "integrity_get_assurance": "retired committee assurance projection"
 }
