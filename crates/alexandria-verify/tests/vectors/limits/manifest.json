@@ -1,0 +1,131 @@
+{
+  "limits": {
+    "maxBytes": 262144,
+    "maxDepth": 32,
+    "maxArrayLen": 4096,
+    "maxObjectEntries": 256,
+    "maxStringBytes": 65536
+  },
+  "cases": [
+    {
+      "file": "01-valid.json",
+      "description": "The unmodified valid credential.",
+      "expect": "accept"
+    },
+    {
+      "file": "02-bytes-at-limit.json",
+      "description": "Padded with trailing whitespace to exactly the byte limit.",
+      "expect": "accept"
+    },
+    {
+      "file": "03-bytes-over-limit.json",
+      "description": "One byte over the byte limit, refused before parsing.",
+      "expect": "too_large"
+    },
+    {
+      "file": "04-depth-at-limit.json",
+      "description": "A member nested to exactly the depth limit; the credential object is depth 1.",
+      "expect": "accept"
+    },
+    {
+      "file": "05-depth-over-limit.json",
+      "description": "An empty array opened one level beyond the depth limit.",
+      "expect": "too_deep"
+    },
+    {
+      "file": "06-array-at-limit.json",
+      "description": "An array with exactly the element limit.",
+      "expect": "accept"
+    },
+    {
+      "file": "07-array-over-limit.json",
+      "description": "An array with one element over the limit.",
+      "expect": "too_many_elements"
+    },
+    {
+      "file": "08-entries-at-limit.json",
+      "description": "The credential object with exactly the entry limit.",
+      "expect": "accept"
+    },
+    {
+      "file": "09-entries-over-limit.json",
+      "description": "The credential object with one entry over the limit.",
+      "expect": "too_many_entries"
+    },
+    {
+      "file": "10-string-at-limit-multibyte.json",
+      "description": "A string of two-byte characters decoding to exactly the string limit in UTF-8 bytes.",
+      "expect": "accept"
+    },
+    {
+      "file": "11-string-over-limit.json",
+      "description": "The same string with one more byte.",
+      "expect": "string_too_long"
+    },
+    {
+      "file": "12-string-escapes-at-limit.json",
+      "description": "Escaped characters are counted by their decoded UTF-8 bytes, not their escaped spelling.",
+      "expect": "accept"
+    },
+    {
+      "file": "13-string-escapes-over-limit.json",
+      "description": "The same escaped string with one more decoded byte.",
+      "expect": "string_too_long"
+    },
+    {
+      "file": "14-duplicate-top-level-key.json",
+      "description": "The issuer key appears twice.",
+      "expect": "duplicate_key"
+    },
+    {
+      "file": "15-duplicate-nested-key.json",
+      "description": "A key repeated inside the credential subject.",
+      "expect": "duplicate_key"
+    },
+    {
+      "file": "16-integers-at-safe-limit.json",
+      "description": "Integers at exactly plus and minus 2^53-1.",
+      "expect": "accept"
+    },
+    {
+      "file": "17-integer-over-safe-limit.json",
+      "description": "An integer of 2^53.",
+      "expect": "unsafe_number"
+    },
+    {
+      "file": "18-negative-integer-over-safe-limit.json",
+      "description": "An integer of -2^53.",
+      "expect": "unsafe_number"
+    },
+    {
+      "file": "19-exponent-over-safe-magnitude.json",
+      "description": "A finite exponent literal whose magnitude exceeds 2^53-1.",
+      "expect": "unsafe_number"
+    },
+    {
+      "file": "20-exponent-overflow.json",
+      "description": "An exponent literal that overflows a double is malformed.",
+      "expect": "invalid"
+    },
+    {
+      "file": "21-trailing-bytes.json",
+      "description": "A second JSON value after the credential.",
+      "expect": "invalid"
+    },
+    {
+      "file": "22-byte-order-mark.json",
+      "description": "A UTF-8 byte-order mark before the credential.",
+      "expect": "invalid"
+    },
+    {
+      "file": "23-lone-surrogate-escape.json",
+      "description": "A leading surrogate escape with no trailing surrogate.",
+      "expect": "invalid"
+    },
+    {
+      "file": "24-invalid-utf8.json",
+      "description": "A string containing a byte that is not valid UTF-8.",
+      "expect": "invalid"
+    }
+  ]
+}

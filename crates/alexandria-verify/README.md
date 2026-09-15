@@ -86,8 +86,10 @@ carry no privilege; policy qualification is a separate decision.
 `tests/vectors/` holds signed credentials with known-good and known-bad
 outcomes, plus `independent-verifier.mjs` — a small Node implementation
 written against the specification rather than against this code. It passes all
-twelve vectors. If you are writing your own verifier in another language, start
-there: the vectors are the contract, and this crate is one implementation of it.
+twelve credential vectors and the exact-byte limit vectors in
+`tests/vectors/limits/`, which `tests/limit_vectors.rs` checks against this
+crate. If you are writing your own verifier in another language, start there:
+the vectors are the contract, and this crate is one implementation of it.
 
 The signing input is **raw payload bytes**, not base64url — RFC 7797 with
 `b64:false`. This is the detail most independent implementations get wrong.

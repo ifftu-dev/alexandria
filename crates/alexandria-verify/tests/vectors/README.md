@@ -134,6 +134,41 @@ The suite contains accepted, rejected, and pending cases, including independent
 signature, expiry, subject-binding, revocation, type-policy, key-registry, and
 missing-evidence outcomes.
 
+## Untrusted input limits
+
+Before typed decoding or any signature work, a credential document is parsed
+as strict JSON under these limits:
+
+| Limit | Value |
+|---|---|
+| Document bytes (checked before parsing) | 262,144 |
+| Nesting depth (the credential object is 1) | 32 |
+| Elements in one array | 4,096 |
+| Entries in one object | 256 |
+| UTF-8 bytes in one decoded string or key | 65,536 |
+
+A verifier refuses a document as the first of these that applies:
+
+| Outcome | Refused when |
+|---|---|
+| `too_large` | The document exceeds the byte limit |
+| `too_deep` | An array or object would open beyond the depth limit. This is checked on entering it, even when empty |
+| `too_many_elements` | An array receives one element more than the limit |
+| `too_many_entries` | An object receives one entry more than the limit |
+| `string_too_long` | A decoded string or key exceeds the string limit |
+| `duplicate_key` | An object repeats a key at any depth |
+| `unsafe_number` | An integer literal is outside ±(2^53−1), or a fractional/exponent literal's magnitude exceeds 2^53−1 |
+| `invalid` | Malformed JSON, including invalid UTF-8, a byte-order mark, a lone surrogate escape, a literal that overflows a double, or trailing bytes |
+
+Checks happen in document order. An array element is parsed before the count is
+checked. An object key is length-checked, then duplicate-checked, then counted,
+and only then is its value parsed.
+
+`limits/manifest.json` lists the exact byte files in `limits/` and the outcome
+each must produce. Every case starts from the credential in `01-valid.json` and
+changes one structural property, so a failure names exactly one limit. `accept`
+means the bytes pass these limits; it says nothing about the signature.
+
 ## A worked implementation
 
 `independent-verifier.mjs` in this directory is a complete verifier written from

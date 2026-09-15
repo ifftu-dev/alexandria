@@ -4,7 +4,8 @@
 // library, imports nothing but Node's standard crypto, and implements JCS by
 // hand in a dozen lines. If this file passes every vector — and it does — then
 // the format is documented well enough for somebody else to implement, which is
-// the whole claim.
+// the whole claim. It also implements the strict bounded JSON limits by hand
+// and checks them against the exact bytes in `limits/`.
 //
 //   node independent-verifier.mjs
 //
@@ -148,4 +149,140 @@ for (const f of readdirSync('.').filter(f => f.endsWith('.json')).sort()) {
     fail++
   } else pass++
 }
+// Untrusted input limits (README.md, "Untrusted input limits"). Each case is
+// exact raw bytes: a verifier must accept them, or refuse them for the same
+// reason, before any typed decoding or signature work.
+function strictParse(bytes, limits) {
+  if (bytes.length > limits.maxBytes) return 'too_large'
+  let text
+  try {
+    text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes)
+  } catch {
+    return 'invalid'
+  }
+  const MAX_SAFE = 2n ** 53n - 1n
+  const NUMBER = /-?(0|[1-9]\d*)(\.\d+)?([eE][+-]?\d+)?/y
+  const ESCAPES = { '"': '"', '\\': '\\', '/': '/', b: '\b', f: '\f', n: '\n', r: '\r', t: '\t' }
+  class Refusal { constructor(kind) { this.kind = kind } }
+  const refuse = kind => { throw new Refusal(kind) }
+  let i = 0
+
+  const skipWhitespace = () => { while (i < text.length && ' \t\n\r'.includes(text[i])) i++ }
+  const hex4 = () => {
+    const digits = text.slice(i, i + 4)
+    if (!/^[0-9a-fA-F]{4}$/.test(digits)) refuse('invalid')
+    i += 4
+    return parseInt(digits, 16)
+  }
+  const string = () => {
+    if (text[i] !== '"') refuse('invalid')
+    i++
+    let out = ''
+    for (;;) {
+      if (i >= text.length) refuse('invalid')
+      const c = text[i++]
+      if (c === '"') break
+      if (c === '\\') {
+        const e = text[i++]
+        if (Object.hasOwn(ESCAPES, e)) out += ESCAPES[e]
+        else if (e === 'u') {
+          const unit = hex4()
+          if (unit >= 0xd800 && unit <= 0xdbff) {
+            if (text.slice(i, i + 2) !== '\\u') refuse('invalid')
+            i += 2
+            const low = hex4()
+            if (low < 0xdc00 || low > 0xdfff) refuse('invalid')
+            out += String.fromCharCode(unit, low)
+          } else if (unit >= 0xdc00 && unit <= 0xdfff) refuse('invalid')
+          else out += String.fromCharCode(unit)
+        } else refuse('invalid')
+      } else if (c < ' ') refuse('invalid')
+      else out += c
+    }
+    if (Buffer.byteLength(out, 'utf8') > limits.maxStringBytes) refuse('string_too_long')
+    return out
+  }
+  const number = () => {
+    NUMBER.lastIndex = i
+    const m = NUMBER.exec(text)
+    if (!m) refuse('invalid')
+    i += m[0].length
+    if (!m[2] && !m[3]) {
+      const n = BigInt(m[0])
+      if ((n < 0n ? -n : n) > MAX_SAFE) refuse('unsafe_number')
+    } else {
+      const x = Number(m[0])
+      // A literal that overflows a double is malformed, not merely unsafe.
+      if (!Number.isFinite(x)) refuse('invalid')
+      if (Math.abs(x) > Number(MAX_SAFE)) refuse('unsafe_number')
+    }
+  }
+  const value = depth => {
+    skipWhitespace()
+    const c = text[i]
+    if (c === '[' || c === '{') {
+      if (depth + 1 > limits.maxDepth) refuse('too_deep')
+      i++
+      skipWhitespace()
+      if (c === '[') {
+        if (text[i] === ']') { i++; return }
+        let count = 0
+        for (;;) {
+          value(depth + 1)
+          if (count === limits.maxArrayLen) refuse('too_many_elements')
+          count++
+          skipWhitespace()
+          if (text[i] === ',') { i++; continue }
+          if (text[i] === ']') { i++; return }
+          refuse('invalid')
+        }
+      }
+      if (text[i] === '}') { i++; return }
+      const keys = new Set()
+      for (;;) {
+        skipWhitespace()
+        const key = string()
+        if (keys.has(key)) refuse('duplicate_key')
+        if (keys.size === limits.maxObjectEntries) refuse('too_many_entries')
+        keys.add(key)
+        skipWhitespace()
+        if (text[i] !== ':') refuse('invalid')
+        i++
+        value(depth + 1)
+        skipWhitespace()
+        if (text[i] === ',') { i++; continue }
+        if (text[i] === '}') { i++; return }
+        refuse('invalid')
+      }
+    }
+    if (c === '"') { string(); return }
+    for (const literal of ['true', 'false', 'null']) {
+      if (text.startsWith(literal, i)) { i += literal.length; return }
+    }
+    number()
+  }
+
+  try {
+    value(0)
+    skipWhitespace()
+    if (i !== text.length) refuse('invalid')
+    return 'accept'
+  } catch (error) {
+    if (error instanceof Refusal) return error.kind
+    throw error
+  }
+}
+
+const manifest = JSON.parse(readFileSync('limits/manifest.json', 'utf8'))
+for (const c of manifest.cases) {
+  const got = strictParse(readFileSync(`limits/${c.file}`), manifest.limits)
+  const ok = got === c.expect
+  console.log(`${ok ? 'PASS' : 'FAIL'}  limits/${c.file}`)
+  if (!ok) {
+    console.log(`      got=${got} want=${c.expect}`)
+    fail++
+  } else pass++
+}
+
 console.log(`\n${pass} passed, ${fail} failed`)
+process.exitCode = fail ? 1 : 0
