@@ -191,8 +191,8 @@ impl ContentNode {
     /// accept loop.
     ///
     /// If `node_enc_key` is provided, the node's Ed25519 secret key is
-    /// encrypted at rest using AES-256-GCM. Legacy plaintext keys are
-    /// auto-migrated on first start with an encryption key.
+    /// persisted encrypted at rest using AES-256-GCM. Without one the node
+    /// runs under an ephemeral identity that is never written to disk.
     pub async fn start(&self, node_enc_key: Option<&[u8; 32]>) -> Result<(), NodeError> {
         let mut inner = self.inner.lock().await;
         Self::finish_pending_close(&mut inner).await?;
@@ -463,13 +463,14 @@ const KEY_VERSION_AES_GCM: u8 = 0x01;
 
 /// Load the node's secret key from disk, or generate a new one.
 ///
-/// When `enc_key` is provided, the key file is encrypted at rest using
-/// AES-256-GCM. The file format is:
-///   `version(1) || nonce(12) || ciphertext(32 + 16 auth tag)`
+/// The key is only ever persisted encrypted, as
+/// `version(1) || nonce(12) || ciphertext(32 + 16 auth tag)`. Without an
+/// encryption key the generated identity stays in memory and no file is
+/// written, so a secret key never lands on disk in the clear.
 ///
-/// Legacy plaintext files (32 raw bytes with no version prefix) are
-/// auto-migrated to encrypted format on first read when an encryption key
-/// is available.
+/// A pre-encryption 32-byte plaintext key file is refused rather than read
+/// or converted: it is unsupported data, and the operator decides whether to
+/// keep or remove it.
 fn load_or_generate_secret_key(
     data_dir: &Path,
     enc_key: Option<&[u8; 32]>,
@@ -480,34 +481,22 @@ fn load_or_generate_secret_key(
         let bytes = std::fs::read(&key_path)
             .map_err(|e| NodeError::KeyPersistence(format!("read key: {e}")))?;
 
-        let key_bytes = if bytes.len() == 32 {
-            // Legacy plaintext format (version 0x00 implicit)
-            let mut kb = [0u8; 32];
-            kb.copy_from_slice(&bytes);
-
-            // Auto-migrate to encrypted if we have an encryption key
-            if let Some(ek) = enc_key {
-                let encrypted = encrypt_node_key(&kb, ek)?;
-                std::fs::write(&key_path, &encrypted)
-                    .map_err(|e| NodeError::KeyPersistence(format!("migrate key: {e}")))?;
-                log::info!("migrated node key to encrypted format");
-            }
-
-            kb
-        } else if bytes.first() == Some(&KEY_VERSION_AES_GCM) && bytes.len() == 1 + 12 + 32 + 16 {
-            // Encrypted format: version(1) || nonce(12) || ciphertext(48)
-            let ek = enc_key.ok_or_else(|| {
-                NodeError::KeyPersistence(
-                    "node key is encrypted but no decryption key provided".into(),
-                )
-            })?;
-            decrypt_node_key(&bytes[1..], ek)?
-        } else {
-            return Err(NodeError::KeyPersistence(format!(
-                "key file has unexpected length: {} bytes",
-                bytes.len()
-            )));
-        };
+        let key_bytes =
+            if bytes.first() == Some(&KEY_VERSION_AES_GCM) && bytes.len() == 1 + 12 + 32 + 16 {
+                // Encrypted format: version(1) || nonce(12) || ciphertext(48)
+                let ek = enc_key.ok_or_else(|| {
+                    NodeError::KeyPersistence(
+                        "node key is encrypted but no decryption key provided".into(),
+                    )
+                })?;
+                decrypt_node_key(&bytes[1..], ek)?
+            } else {
+                return Err(NodeError::KeyPersistence(format!(
+                    "unsupported node key file: {} bytes; expected an encrypted key of {} bytes",
+                    bytes.len(),
+                    1 + 12 + 32 + 16
+                )));
+            };
 
         let key = SecretKey::from_bytes(&key_bytes);
         log::info!("loaded existing encrypted iroh node key");
@@ -519,14 +508,14 @@ fn load_or_generate_secret_key(
         rand::rngs::OsRng.fill_bytes(&mut key_bytes);
         let key = SecretKey::from_bytes(&key_bytes);
 
-        // Write encrypted if we have an encryption key, plaintext otherwise
+        // Persist only when the key can be encrypted. Without an encryption
+        // key the identity stays in memory for this run.
         if let Some(ek) = enc_key {
             let encrypted = encrypt_node_key(&key_bytes, ek)?;
             std::fs::write(&key_path, &encrypted)
                 .map_err(|e| NodeError::KeyPersistence(format!("write key: {e}")))?;
         } else {
-            std::fs::write(&key_path, key.to_bytes())
-                .map_err(|e| NodeError::KeyPersistence(format!("write key: {e}")))?;
+            log::debug!("no node encryption key: using an ephemeral node identity");
         }
 
         log::info!(
@@ -621,14 +610,15 @@ mod tests {
     async fn node_id_is_stable_across_restart() {
         let tmp = TempDir::new().expect("create temp dir");
         let node = ContentNode::new(tmp.path());
+        let enc_key = [7u8; 32];
 
-        // The secret key is persisted to disk, so the node ID should be
-        // stable across restarts from the same data directory.
-        node.start(None).await.expect("start failed");
+        // With an encryption key the secret key is persisted encrypted, so
+        // the node ID is stable across restarts from the same directory.
+        node.start(Some(&enc_key)).await.expect("start failed");
         let id1 = node.node_id().await.unwrap();
         node.shutdown().await.expect("shutdown failed");
 
-        node.start(None).await.expect("restart failed");
+        node.start(Some(&enc_key)).await.expect("restart failed");
         let id2 = node.node_id().await.unwrap();
         node.shutdown().await.expect("shutdown failed");
 
@@ -730,23 +720,37 @@ mod tests {
     }
 
     #[test]
-    fn secret_key_persists_to_disk() {
+    fn secret_key_persists_only_when_it_can_be_encrypted() {
         let tmp = TempDir::new().expect("create temp dir");
+        let enc_key = [7u8; 32];
 
-        // First call generates and saves (plaintext, no encryption key)
-        let key1 = load_or_generate_secret_key(tmp.path(), None).expect("gen key");
-
-        // Second call loads from file
-        let key2 = load_or_generate_secret_key(tmp.path(), None).expect("load key");
+        let key1 = load_or_generate_secret_key(tmp.path(), Some(&enc_key)).expect("gen key");
+        let key2 = load_or_generate_secret_key(tmp.path(), Some(&enc_key)).expect("load key");
 
         assert_eq!(
             key1.to_bytes(),
             key2.to_bytes(),
             "key should persist across loads"
         );
-
-        // File should exist
         assert!(tmp.path().join(SECRET_KEY_FILE).exists());
+    }
+
+    #[test]
+    fn without_an_encryption_key_nothing_is_written_to_disk() {
+        let tmp = TempDir::new().expect("create temp dir");
+
+        let key1 = load_or_generate_secret_key(tmp.path(), None).expect("gen key");
+        let key2 = load_or_generate_secret_key(tmp.path(), None).expect("gen key again");
+
+        assert!(
+            !tmp.path().join(SECRET_KEY_FILE).exists(),
+            "a secret key must never be written in the clear"
+        );
+        assert_ne!(
+            key1.to_bytes(),
+            key2.to_bytes(),
+            "each run gets its own ephemeral identity"
+        );
     }
 
     #[test]
@@ -772,21 +776,23 @@ mod tests {
     }
 
     #[test]
-    fn plaintext_key_auto_migrates_to_encrypted() {
+    fn plaintext_key_file_is_refused_and_left_untouched() {
         let tmp = TempDir::new().expect("create temp dir");
-
-        // Create plaintext key
-        let key1 = load_or_generate_secret_key(tmp.path(), None).expect("gen key");
-        let file = std::fs::read(tmp.path().join(SECRET_KEY_FILE)).expect("read");
-        assert_eq!(file.len(), 32, "should be plaintext");
-
-        // Load with encryption key — should auto-migrate
+        let key_path = tmp.path().join(SECRET_KEY_FILE);
+        std::fs::write(&key_path, [3u8; 32]).expect("write plaintext key");
         let enc_key = [42u8; 32];
-        let key2 = load_or_generate_secret_key(tmp.path(), Some(&enc_key)).expect("migrate");
-        assert_eq!(key1.to_bytes(), key2.to_bytes());
 
-        // File should now be encrypted
-        let file = std::fs::read(tmp.path().join(SECRET_KEY_FILE)).expect("read");
-        assert_eq!(file.len(), 61, "should be encrypted after migration");
+        let error = load_or_generate_secret_key(tmp.path(), Some(&enc_key))
+            .expect_err("a plaintext key file must be refused");
+
+        assert!(
+            format!("{error}").contains("unsupported node key file"),
+            "{error}"
+        );
+        assert_eq!(
+            std::fs::read(&key_path).expect("key file still readable"),
+            [3u8; 32],
+            "the refused file must be left as it was"
+        );
     }
 }

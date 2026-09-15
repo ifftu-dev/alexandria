@@ -142,8 +142,10 @@ pub async fn add_bytes_unencrypted(
 /// Returns the raw bytes. Returns `ContentError::NotFound` if the
 /// content is not available locally.
 ///
-/// If content is encrypted (version byte prefix), decrypts transparently.
-/// Legacy unencrypted content is returned as-is.
+/// Content stored with a version byte prefix is decrypted transparently.
+/// Content stored without one was published in the clear on purpose (see
+/// [`add_bytes_unencrypted`]) and is returned as stored. A decryption that
+/// fails is an error: the bytes are not silently returned undecrypted.
 pub async fn get_bytes(node: &ContentNode, hash_hex: &str) -> Result<Vec<u8>, ContentError> {
     get_bytes_inner(node, hash_hex, None).await
 }
@@ -204,12 +206,13 @@ async fn get_bytes_inner(
         match crate::crypto::content_crypto::decrypt(&key, &raw) {
             Ok(Some(plaintext)) => return Ok(plaintext),
             Ok(None) => {
-                // Not encrypted (legacy content) — return raw bytes
+                // Stored unencrypted on purpose (published evidence).
                 return Ok(raw);
             }
             Err(e) => {
-                log::warn!("content decryption failed for {hash_hex}: {e}, returning raw");
-                return Ok(raw);
+                return Err(ContentError::Store(format!(
+                    "content decryption failed for {hash_hex}: {e}"
+                )));
             }
         }
     }
