@@ -30,12 +30,11 @@
 
 use std::collections::VecDeque;
 use std::ffi::c_void;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::ptr;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
-use anyhow::{Context, Result, bail};
-use buf_list::BufList;
+use anyhow::{Result, bail};
 use bytes::Bytes;
 use moq_mux::container::Timestamp;
 
@@ -55,7 +54,6 @@ type CMSampleBufferRef = *const c_void;
 type CMFormatDescriptionRef = *const c_void;
 type CMBlockBufferRef = *const c_void;
 type CVPixelBufferRef = *const c_void;
-type CVPixelBufferPoolRef = *const c_void;
 type VTCompressionSessionRef = *mut c_void;
 type OSStatus = i32;
 
@@ -121,11 +119,6 @@ unsafe extern "C" {
     static kCVPixelBufferHeightKey: CFStringRef;
     static kCVPixelBufferIOSurfacePropertiesKey: CFStringRef;
 
-    fn CVPixelBufferPoolCreatePixelBuffer(
-        allocator: CFAllocatorRef,
-        pool: CVPixelBufferPoolRef,
-        pixel_buffer_out: *mut CVPixelBufferRef,
-    ) -> OSStatus;
     fn CVPixelBufferCreateWithBytes(
         allocator: CFAllocatorRef,
         width: usize,
@@ -138,10 +131,6 @@ unsafe extern "C" {
         pixel_buffer_attributes: CFDictionaryRef,
         pixel_buffer_out: *mut CVPixelBufferRef,
     ) -> OSStatus;
-    fn CVPixelBufferLockBaseAddress(pixel_buffer: CVPixelBufferRef, flags: u64) -> OSStatus;
-    fn CVPixelBufferUnlockBaseAddress(pixel_buffer: CVPixelBufferRef, flags: u64) -> OSStatus;
-    fn CVPixelBufferGetBaseAddress(pixel_buffer: CVPixelBufferRef) -> *const c_void;
-    fn CVPixelBufferGetBytesPerRow(pixel_buffer: CVPixelBufferRef) -> usize;
 
     // CoreMedia
     fn CMSampleBufferGetFormatDescription(sbuf: CMSampleBufferRef) -> CMFormatDescriptionRef;
@@ -204,9 +193,6 @@ unsafe extern "C" {
         complete_until_presentation_timestamp: CMTime,
     ) -> OSStatus;
     fn VTCompressionSessionInvalidate(session: VTCompressionSessionRef);
-    fn VTCompressionSessionGetPixelBufferPool(
-        session: VTCompressionSessionRef,
-    ) -> CVPixelBufferPoolRef;
     fn VTSessionSetProperty(
         session: *mut c_void,
         property_key: CFStringRef,
@@ -247,26 +233,37 @@ struct EncodedPacket {
 pub struct VtEncoder {
     session: VTCompressionSessionRef,
     output: Arc<Mutex<OutputQueue>>,
-    width: u32,
-    height: u32,
+    callback_context: *const Mutex<OutputQueue>,
     fps: f64,
-    bitrate: u32,
     frame_index: u64,
     config: hang::catalog::VideoConfig,
 }
 
-// SAFETY: The VTCompressionSession handle is thread-safe for the operations
-// we perform (encode, complete, invalidate). The output queue is Mutex-guarded.
+// SAFETY: The VTCompressionSession handle supports encoding and invalidation
+// from a non-creating thread. This non-Sync owner exposes mutation only through
+// `&mut self`; its callback state is Mutex-guarded and outlives all callbacks.
 unsafe impl Send for VtEncoder {}
 
 impl Drop for VtEncoder {
     fn drop(&mut self) {
         if !self.session.is_null() {
             unsafe {
+                let status = VTCompressionSessionCompleteFrames(self.session, K_CM_TIME_INVALID);
+                if status != 0 {
+                    tracing::warn!(
+                        "VTCompressionSessionCompleteFrames failed during drop: {status}"
+                    );
+                }
                 VTCompressionSessionInvalidate(self.session);
                 CFRelease(self.session as CFTypeRef);
             }
             self.session = ptr::null_mut();
+        }
+        if !self.callback_context.is_null() {
+            // SAFETY: session invalidation completes the callback lifetime. This
+            // consumes the one strong reference passed to VideoToolbox at create.
+            unsafe { drop(Arc::from_raw(self.callback_context)) };
+            self.callback_context = ptr::null();
         }
     }
 }
@@ -285,8 +282,8 @@ impl VtEncoder {
             let dict = CFDictionaryCreateMutable(
                 kCFAllocatorDefault,
                 4,
-                &kCFTypeDictionaryKeyCallBacks as *const _ as *const c_void,
-                &kCFTypeDictionaryValueCallBacks as *const _ as *const c_void,
+                &kCFTypeDictionaryKeyCallBacks as *const _,
+                &kCFTypeDictionaryValueCallBacks as *const _,
             );
             let fmt = K_CV_PIXEL_FORMAT_TYPE_32_BGRA as i32;
             let fmt_num = CFNumberCreate(
@@ -319,8 +316,8 @@ impl VtEncoder {
             let io_dict = CFDictionaryCreateMutable(
                 kCFAllocatorDefault,
                 0,
-                &kCFTypeDictionaryKeyCallBacks as *const _ as *const c_void,
-                &kCFTypeDictionaryValueCallBacks as *const _ as *const c_void,
+                &kCFTypeDictionaryKeyCallBacks as *const _,
+                &kCFTypeDictionaryValueCallBacks as *const _,
             );
             CFDictionarySetValue(
                 dict,
@@ -451,10 +448,8 @@ impl VtEncoder {
         Ok(Self {
             session,
             output,
-            width,
-            height,
+            callback_context: output_ptr.cast(),
             fps,
-            bitrate,
             frame_index: 0,
             config,
         })
@@ -486,12 +481,11 @@ impl VideoEncoderInner for VtEncoder {
     fn config(&self) -> hang::catalog::VideoConfig {
         // Re-read extradata if it's been captured
         let mut cfg = self.config.clone();
-        if cfg.description.is_none() {
-            if let Ok(q) = self.output.lock() {
-                if let Some(ref ed) = q.extradata {
-                    cfg.description = Some(ed.clone());
-                }
-            }
+        if cfg.description.is_none()
+            && let Ok(q) = self.output.lock()
+            && let Some(ref ed) = q.extradata
+        {
+            cfg.description = Some(ed.clone());
         }
         cfg
     }
@@ -501,8 +495,12 @@ impl VideoEncoderInner for VtEncoder {
         // so CVPixelBuffer must use the frame's actual dimensions, not the encoder's.
         let frame_width = frame.format.dimensions[0] as usize;
         let frame_height = frame.format.dimensions[1] as usize;
-        let bytes_per_row = frame_width * 4;
-        let expected_len = bytes_per_row * frame_height;
+        let bytes_per_row = frame_width
+            .checked_mul(4)
+            .ok_or_else(|| anyhow::anyhow!("frame row size overflow"))?;
+        let expected_len = bytes_per_row
+            .checked_mul(frame_height)
+            .ok_or_else(|| anyhow::anyhow!("frame size overflow"))?;
         if frame.raw.len() < expected_len {
             bail!(
                 "frame too small: {} bytes, expected {} ({}x{}x4)",
@@ -515,8 +513,10 @@ impl VideoEncoderInner for VtEncoder {
 
         let mut pixel_buffer: CVPixelBufferRef = ptr::null();
 
-        // We need a mutable copy because CVPixelBufferCreateWithBytes wants *mut
-        let mut raw_copy = frame.raw.to_vec();
+        // CoreVideo may retain the pixel buffer after EncodeFrame returns. Give
+        // it an owned Vec and reclaim that Vec only through the release callback.
+        let raw_copy = Box::new(frame.raw.to_vec());
+        let raw_copy_ptr = Box::into_raw(raw_copy);
 
         let status = unsafe {
             CVPixelBufferCreateWithBytes(
@@ -524,16 +524,18 @@ impl VideoEncoderInner for VtEncoder {
                 frame_width,
                 frame_height,
                 K_CV_PIXEL_FORMAT_TYPE_32_BGRA,
-                raw_copy.as_mut_ptr() as *mut c_void,
+                (*raw_copy_ptr).as_mut_ptr().cast(),
                 bytes_per_row,
-                ptr::null(), // no release callback — we own the data
-                ptr::null_mut(),
+                release_pixel_bytes as *const c_void,
+                raw_copy_ptr.cast(),
                 ptr::null(), // no attributes
                 &mut pixel_buffer,
             )
         };
 
         if status != 0 || pixel_buffer.is_null() {
+            // SAFETY: CoreVideo did not accept ownership when creation failed.
+            unsafe { drop(Box::from_raw(raw_copy_ptr)) };
             bail!("CVPixelBufferCreateWithBytes failed: OSStatus {status}");
         }
 
@@ -557,9 +559,6 @@ impl VideoEncoderInner for VtEncoder {
         // Release the pixel buffer
         unsafe { CFRelease(pixel_buffer as _) };
 
-        // Keep raw_copy alive until here
-        drop(raw_copy);
-
         if enc_status != 0 {
             bail!("VTCompressionSessionEncodeFrame failed: OSStatus {enc_status}");
         }
@@ -575,10 +574,10 @@ impl VideoEncoderInner for VtEncoder {
             .map_err(|e| anyhow::anyhow!("lock: {e}"))?;
 
         // Update config with extradata if available
-        if self.config.description.is_none() {
-            if let Some(ref ed) = q.extradata {
-                self.config.description = Some(ed.clone());
-            }
+        if self.config.description.is_none()
+            && let Some(ref ed) = q.extradata
+        {
+            self.config.description = Some(ed.clone());
         }
 
         let pkt = match q.packets.pop_front() {
@@ -610,6 +609,22 @@ unsafe extern "C" fn vt_output_callback(
     _info_flags: u32,
     sample_buffer: CMSampleBufferRef,
 ) {
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        // SAFETY: VideoToolbox supplies valid buffers for this call, and the
+        // callback context is reclaimed only after completing and invalidating
+        // the compression session.
+        unsafe { vt_output_callback_inner(output_callback_ref_con, status, sample_buffer) }
+    }));
+    if result.is_err() {
+        tracing::error!("panic contained inside VideoToolbox encoder callback");
+    }
+}
+
+unsafe fn vt_output_callback_inner(
+    output_callback_ref_con: *mut c_void,
+    status: OSStatus,
+    sample_buffer: CMSampleBufferRef,
+) {
     if status != 0 || sample_buffer.is_null() {
         tracing::warn!(
             "VT output callback: status={status}, buffer null={}",
@@ -618,49 +633,57 @@ unsafe extern "C" fn vt_output_callback(
         return;
     }
 
-    let output = &*(output_callback_ref_con as *const Mutex<OutputQueue>);
+    if output_callback_ref_con.is_null() {
+        tracing::error!("VT output callback received a null context");
+        return;
+    }
 
-    // Check if keyframe
-    let keyframe = is_keyframe(sample_buffer);
+    // SAFETY: the callback contract above establishes live CoreMedia objects
+    // and a context retained until after session invalidation.
+    unsafe {
+        let output = &*(output_callback_ref_con as *const Mutex<OutputQueue>);
 
-    // Extract extradata from format description on keyframes
-    if keyframe {
-        let fmt = CMSampleBufferGetFormatDescription(sample_buffer);
-        if !fmt.is_null() {
-            if let Some(extradata) = extract_avcc_extradata(fmt) {
-                if let Ok(mut q) = output.lock() {
-                    q.extradata = Some(extradata);
-                }
+        // Check if keyframe
+        let keyframe = is_keyframe(sample_buffer);
+
+        // Extract extradata from format description on keyframes
+        if keyframe {
+            let fmt = CMSampleBufferGetFormatDescription(sample_buffer);
+            if !fmt.is_null()
+                && let Some(extradata) = extract_avcc_extradata(fmt)
+                && let Ok(mut q) = output.lock()
+            {
+                q.extradata = Some(extradata);
             }
         }
-    }
 
-    // Extract encoded data
-    let block = CMSampleBufferGetDataBuffer(sample_buffer);
-    if block.is_null() {
-        return;
-    }
+        // Extract encoded data
+        let block = CMSampleBufferGetDataBuffer(sample_buffer);
+        if block.is_null() {
+            return;
+        }
 
-    let data_len = CMBlockBufferGetDataLength(block);
-    if data_len == 0 {
-        return;
-    }
+        let data_len = CMBlockBufferGetDataLength(block);
+        if data_len == 0 {
+            return;
+        }
 
-    let mut buf = vec![0u8; data_len];
-    let copy_status =
-        CMBlockBufferCopyDataBytes(block, 0, data_len, buf.as_mut_ptr() as *mut c_void);
-    if copy_status != 0 {
-        tracing::warn!("CMBlockBufferCopyDataBytes failed: {copy_status}");
-        return;
-    }
+        let mut buf = vec![0u8; data_len];
+        let copy_status =
+            CMBlockBufferCopyDataBytes(block, 0, data_len, buf.as_mut_ptr() as *mut c_void);
+        if copy_status != 0 {
+            tracing::warn!("CMBlockBufferCopyDataBytes failed: {copy_status}");
+            return;
+        }
 
-    // For keyframes, prepend SPS+PPS as AVCC NAL units so the bitstream
-    // is self-contained. This allows decoders that missed the out-of-band
-    // avcC description (catalog race) to initialize from inline parameter sets.
-    if keyframe {
-        let fmt = CMSampleBufferGetFormatDescription(sample_buffer);
-        if !fmt.is_null() {
-            if let Some(sps_pps_nals) = extract_sps_pps_as_avcc_nals(fmt) {
+        // For keyframes, prepend SPS+PPS as AVCC NAL units so the bitstream
+        // is self-contained. This allows decoders that missed the out-of-band
+        // avcC description (catalog race) to initialize from inline parameter sets.
+        if keyframe {
+            let fmt = CMSampleBufferGetFormatDescription(sample_buffer);
+            if !fmt.is_null()
+                && let Some(sps_pps_nals) = extract_sps_pps_as_avcc_nals(fmt)
+            {
                 let prefix_len = sps_pps_nals.len();
                 let mut combined = Vec::with_capacity(prefix_len + buf.len());
                 combined.extend_from_slice(&sps_pps_nals);
@@ -674,45 +697,54 @@ unsafe extern "C" fn vt_output_callback(
                 buf = combined;
             }
         }
+
+        // Get presentation timestamp
+        let pts = CMSampleBufferGetPresentationTimeStamp(sample_buffer);
+        let timestamp = if pts.flags & K_CM_TIME_FLAGS_VALID != 0 && pts.timescale > 0 {
+            let micros = (pts.value as f64 / pts.timescale as f64 * 1_000_000.0) as u64;
+            Timestamp::from_micros(micros).unwrap_or(Timestamp::ZERO)
+        } else {
+            Timestamp::ZERO
+        };
+
+        let pkt = EncodedPacket {
+            data: Bytes::from(buf),
+            timestamp,
+            keyframe,
+        };
+
+        if let Ok(mut q) = output.lock() {
+            q.packets.push_back(pkt);
+        }
     }
+}
 
-    // Get presentation timestamp
-    let pts = CMSampleBufferGetPresentationTimeStamp(sample_buffer);
-    let timestamp = if pts.flags & K_CM_TIME_FLAGS_VALID != 0 && pts.timescale > 0 {
-        let micros = (pts.value as f64 / pts.timescale as f64 * 1_000_000.0) as u64;
-        Timestamp::from_micros(micros).unwrap_or(Timestamp::ZERO)
-    } else {
-        Timestamp::ZERO
-    };
-
-    let pkt = EncodedPacket {
-        data: Bytes::from(buf),
-        timestamp,
-        keyframe,
-    };
-
-    if let Ok(mut q) = output.lock() {
-        q.packets.push_back(pkt);
+extern "C" fn release_pixel_bytes(release_ref_con: *mut c_void, _base_address: *const c_void) {
+    if release_ref_con.is_null() {
+        return;
     }
+    // SAFETY: each successful CVPixelBufferCreateWithBytes call transfers one
+    // `Box<Vec<u8>>` pointer, and CoreVideo invokes this callback exactly once.
+    unsafe { drop(Box::from_raw(release_ref_con.cast::<Vec<u8>>())) };
 }
 
 /// Check if a sample buffer represents a keyframe.
 unsafe fn is_keyframe(sbuf: CMSampleBufferRef) -> bool {
-    let attachments = CMSampleBufferGetSampleAttachmentsArray(sbuf, 0);
-    if attachments.is_null() {
-        return true; // no attachments → assume keyframe
-    }
-    let dict = CFArrayGetValueAtIndex(attachments, 0);
-    if dict.is_null() {
-        return true;
-    }
-    let mut value: *const c_void = ptr::null();
-    let has_not_sync =
-        CFDictionaryGetValueIfPresent(dict, kCMSampleAttachmentKey_NotSync as _, &mut value);
-    if has_not_sync != 0 && value == kCFBooleanTrue as *const c_void {
-        false // NotSync = true → not a keyframe
-    } else {
-        true
+    // SAFETY: `sbuf` is live for the VideoToolbox callback. The returned
+    // attachments and dictionary are borrowed from it for this call only.
+    unsafe {
+        let attachments = CMSampleBufferGetSampleAttachmentsArray(sbuf, 0);
+        if attachments.is_null() {
+            return true; // no attachments → assume keyframe
+        }
+        let dict = CFArrayGetValueAtIndex(attachments, 0);
+        if dict.is_null() {
+            return true;
+        }
+        let mut value: *const c_void = ptr::null();
+        let has_not_sync =
+            CFDictionaryGetValueIfPresent(dict, kCMSampleAttachmentKey_NotSync as _, &mut value);
+        has_not_sync == 0 || !std::ptr::eq(value, kCFBooleanTrue)
     }
 }
 
@@ -723,47 +755,53 @@ unsafe fn is_keyframe(sbuf: CMSampleBufferRef) -> bool {
 /// inline parameter sets, even without the out-of-band avcC description
 /// (which may be missing due to catalog race conditions).
 unsafe fn extract_sps_pps_as_avcc_nals(fmt: CMFormatDescriptionRef) -> Option<Vec<u8>> {
-    let mut sps_ptr: *const u8 = ptr::null();
-    let mut sps_size: usize = 0;
-    let mut param_count: usize = 0;
-    let mut nal_header_len: i32 = 0;
+    // SAFETY: `fmt` is live for the callback. VideoToolbox owns the parameter
+    // bytes, which remain borrowed only while the format description is live.
+    unsafe {
+        let mut sps_ptr: *const u8 = ptr::null();
+        let mut sps_size: usize = 0;
+        let mut param_count: usize = 0;
+        let mut nal_header_len: i32 = 0;
 
-    let status = CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
-        fmt,
-        0,
-        &mut sps_ptr,
-        &mut sps_size,
-        &mut param_count,
-        &mut nal_header_len,
-    );
-    if status != 0 || sps_ptr.is_null() || sps_size == 0 {
-        return None;
+        let status = CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
+            fmt,
+            0,
+            &mut sps_ptr,
+            &mut sps_size,
+            &mut param_count,
+            &mut nal_header_len,
+        );
+        let sps_len = u32::try_from(sps_size).ok()?;
+        if status != 0 || sps_ptr.is_null() || sps_size == 0 {
+            return None;
+        }
+        let sps = std::slice::from_raw_parts(sps_ptr, sps_size);
+
+        let mut pps_ptr: *const u8 = ptr::null();
+        let mut pps_size: usize = 0;
+        let status = CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
+            fmt,
+            1,
+            &mut pps_ptr,
+            &mut pps_size,
+            &mut param_count,
+            &mut nal_header_len,
+        );
+        let pps_len = u32::try_from(pps_size).ok()?;
+        if status != 0 || pps_ptr.is_null() || pps_size == 0 {
+            return None;
+        }
+        let pps = std::slice::from_raw_parts(pps_ptr, pps_size);
+
+        let capacity = 8usize.checked_add(sps_size)?.checked_add(pps_size)?;
+        let mut out = Vec::with_capacity(capacity);
+        out.extend_from_slice(&sps_len.to_be_bytes());
+        out.extend_from_slice(sps);
+        out.extend_from_slice(&pps_len.to_be_bytes());
+        out.extend_from_slice(pps);
+
+        Some(out)
     }
-    let sps = std::slice::from_raw_parts(sps_ptr, sps_size);
-
-    let mut pps_ptr: *const u8 = ptr::null();
-    let mut pps_size: usize = 0;
-    let status = CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
-        fmt,
-        1,
-        &mut pps_ptr,
-        &mut pps_size,
-        &mut param_count,
-        &mut nal_header_len,
-    );
-    if status != 0 || pps_ptr.is_null() || pps_size == 0 {
-        return None;
-    }
-    let pps = std::slice::from_raw_parts(pps_ptr, pps_size);
-
-    // Build AVCC NAL units: [4-byte big-endian length][NAL data] for each
-    let mut out = Vec::with_capacity(8 + sps_size + pps_size);
-    out.extend_from_slice(&(sps_size as u32).to_be_bytes());
-    out.extend_from_slice(sps);
-    out.extend_from_slice(&(pps_size as u32).to_be_bytes());
-    out.extend_from_slice(pps);
-
-    Some(out)
 }
 
 /// Extract avcC extradata (SPS + PPS) from a CMFormatDescription.
@@ -783,58 +821,58 @@ unsafe fn extract_sps_pps_as_avcc_nals(fmt: CMFormatDescriptionRef) -> Option<Ve
 /// [pps_length bytes] pps_data
 /// ```
 unsafe fn extract_avcc_extradata(fmt: CMFormatDescriptionRef) -> Option<Bytes> {
-    let mut sps_ptr: *const u8 = ptr::null();
-    let mut sps_size: usize = 0;
-    let mut param_count: usize = 0;
-    let mut nal_header_len: i32 = 0;
+    // SAFETY: `fmt` is live for the callback. Parameter-set pointers remain
+    // borrowed only until this function copies their contents.
+    unsafe {
+        let mut sps_ptr: *const u8 = ptr::null();
+        let mut sps_size: usize = 0;
+        let mut param_count: usize = 0;
+        let mut nal_header_len: i32 = 0;
 
-    // Get SPS (index 0)
-    let status = CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
-        fmt,
-        0,
-        &mut sps_ptr,
-        &mut sps_size,
-        &mut param_count,
-        &mut nal_header_len,
-    );
-    if status != 0 || sps_ptr.is_null() || sps_size < 4 {
-        return None;
+        let status = CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
+            fmt,
+            0,
+            &mut sps_ptr,
+            &mut sps_size,
+            &mut param_count,
+            &mut nal_header_len,
+        );
+        let sps_len = u16::try_from(sps_size).ok()?;
+        if status != 0 || sps_ptr.is_null() || sps_size < 4 {
+            return None;
+        }
+        let sps = std::slice::from_raw_parts(sps_ptr, sps_size);
+
+        let mut pps_ptr: *const u8 = ptr::null();
+        let mut pps_size: usize = 0;
+        let status = CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
+            fmt,
+            1,
+            &mut pps_ptr,
+            &mut pps_size,
+            &mut param_count,
+            &mut nal_header_len,
+        );
+        let pps_len = u16::try_from(pps_size).ok()?;
+        if status != 0 || pps_ptr.is_null() || pps_size == 0 {
+            return None;
+        }
+        let pps = std::slice::from_raw_parts(pps_ptr, pps_size);
+
+        let capacity = 11usize.checked_add(sps_size)?.checked_add(pps_size)?;
+        let mut avcc = Vec::with_capacity(capacity);
+        avcc.push(1);
+        avcc.push(sps[1]);
+        avcc.push(sps[2]);
+        avcc.push(sps[3]);
+        avcc.push(0xFF);
+        avcc.push(0xE1);
+        avcc.extend_from_slice(&sps_len.to_be_bytes());
+        avcc.extend_from_slice(sps);
+        avcc.push(1);
+        avcc.extend_from_slice(&pps_len.to_be_bytes());
+        avcc.extend_from_slice(pps);
+
+        Some(Bytes::from(avcc))
     }
-
-    let sps = std::slice::from_raw_parts(sps_ptr, sps_size);
-
-    // Get PPS (index 1)
-    let mut pps_ptr: *const u8 = ptr::null();
-    let mut pps_size: usize = 0;
-    let status = CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
-        fmt,
-        1,
-        &mut pps_ptr,
-        &mut pps_size,
-        &mut param_count,
-        &mut nal_header_len,
-    );
-    if status != 0 || pps_ptr.is_null() || pps_size == 0 {
-        return None;
-    }
-
-    let pps = std::slice::from_raw_parts(pps_ptr, pps_size);
-
-    // Build avcC box
-    let mut avcc = Vec::with_capacity(11 + sps_size + pps_size);
-    avcc.push(1); // version
-    avcc.push(sps[1]); // profile
-    avcc.push(sps[2]); // profile_compat
-    avcc.push(sps[3]); // level
-    avcc.push(0xFF); // length_size_minus_one = 3 (4-byte) | reserved 0xFC
-    avcc.push(0xE1); // num_sps = 1 | reserved 0xE0
-    avcc.push((sps_size >> 8) as u8);
-    avcc.push(sps_size as u8);
-    avcc.extend_from_slice(sps);
-    avcc.push(1); // num_pps
-    avcc.push((pps_size >> 8) as u8);
-    avcc.push(pps_size as u8);
-    avcc.extend_from_slice(pps);
-
-    Some(Bytes::from(avcc))
 }

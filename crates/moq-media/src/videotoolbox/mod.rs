@@ -29,7 +29,7 @@ pub use camera::IosCameraSource;
 pub use decoder::VtDecoder;
 pub use encoder::VtEncoder;
 
-use crate::av::{AudioDecoder, Decoders, VideoDecoder};
+use crate::av::Decoders;
 use crate::opus::PureOpusDecoder;
 
 /// Decoder bundle for iOS: pure-Rust Opus audio + VideoToolbox H.264 video.

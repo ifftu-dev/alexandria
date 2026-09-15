@@ -19,6 +19,16 @@
 // backends hand back.
 #[cfg(not(target_os = "android"))]
 use std::str::FromStr;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+use std::{
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+        mpsc::{self, Receiver, RecvTimeoutError, SyncSender, TrySendError},
+    },
+    thread::JoinHandle,
+    time::Duration,
+};
 
 #[cfg(not(target_os = "android"))]
 use anyhow::Context;
@@ -33,7 +43,7 @@ use nokhwa::{
 #[cfg(not(target_os = "android"))]
 use tracing::{debug, info, trace, warn};
 #[cfg(any(target_os = "macos", target_os = "windows"))]
-use xcap::{Monitor, VideoRecorder};
+use xcap::Monitor;
 
 use crate::av::{PixelFormat, VideoFormat, VideoFrame, VideoSource};
 #[cfg(not(target_os = "android"))]
@@ -41,24 +51,33 @@ use crate::ffmpeg::util::MjpgDecoder;
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 pub struct ScreenCapturer {
-    pub(crate) _monitor: Monitor,
     pub(crate) width: u32,
     pub(crate) height: u32,
-    pub(crate) video_recorder: VideoRecorder,
-    pub(crate) rx: std::sync::mpsc::Receiver<xcap::Frame>,
+    command_tx: SyncSender<ScreenCaptureCommand>,
+    frame_rx: Receiver<xcap::Frame>,
+    worker: Option<JoinHandle<()>>,
 }
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+enum ScreenCaptureCommand {
+    Start(SyncSender<Result<(), String>>),
+    Stop(SyncSender<Result<(), String>>),
+    Shutdown,
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+type ScreenCaptureInit = Result<(u32, u32, Receiver<xcap::Frame>), String>;
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub struct ScreenCapturer;
 
-// TODO: Review if sound.
-#[cfg(any(target_os = "macos", target_os = "windows"))]
-unsafe impl Send for ScreenCapturer {}
-
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 impl Drop for ScreenCapturer {
     fn drop(&mut self) {
-        self.video_recorder.stop().ok();
+        let _ = self.command_tx.send(ScreenCaptureCommand::Shutdown);
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
     }
 }
 
@@ -67,30 +86,128 @@ impl ScreenCapturer {
     pub fn new() -> Result<Self> {
         info!("Initializing screen capturer (xcap)");
 
-        let monitors = Monitor::all().context("Failed to get monitors")?;
-        if monitors.is_empty() {
-            return Err(anyhow::anyhow!("No monitors available"));
-        }
-        info!("Available monitors: {monitors:?}");
+        let (command_tx, command_rx) = mpsc::sync_channel(1);
+        let (init_tx, init_rx) = mpsc::sync_channel::<ScreenCaptureInit>(1);
+        let worker = std::thread::Builder::new()
+            .name("screen-capture-native".into())
+            .spawn(move || {
+                let initialized = (|| -> Result<_, String> {
+                    let monitors = Monitor::all()
+                        .context("failed to enumerate monitors")
+                        .map_err(|e| e.to_string())?;
+                    info!("Available monitors: {monitors:?}");
+                    let monitor = monitors
+                        .into_iter()
+                        .next()
+                        .ok_or_else(|| "no monitors available".to_string())?;
+                    let width = monitor.width().map_err(|e| e.to_string())?;
+                    let height = monitor.height().map_err(|e| e.to_string())?;
+                    let name = monitor
+                        .name()
+                        .unwrap_or_else(|_| "Unknown Monitor".to_string());
+                    info!("Using monitor: {name} ({width}x{height})");
+                    let (recorder, frame_rx) =
+                        monitor.video_recorder().map_err(|e| e.to_string())?;
+                    Ok((monitor, recorder, frame_rx, width, height))
+                })();
 
-        let monitor = monitors.into_iter().next().unwrap();
-        let width = monitor.width()?;
-        let height = monitor.height()?;
-        let name = monitor
-            .name()
-            .unwrap_or_else(|_| "Unknown Monitor".to_string());
+                let (_monitor, recorder, native_frame_rx, width, height) = match initialized {
+                    Ok(parts) => parts,
+                    Err(error) => {
+                        let _ = init_tx.send(Err(error));
+                        return;
+                    }
+                };
+                // xcap uses a zero-capacity callback channel. Keep draining it
+                // on a dedicated thread while stop/shutdown waits in this
+                // owner, otherwise a callback blocked in `send` can deadlock
+                // the native recorder's synchronous stop operation. The
+                // outward capacity of one bounds memory when encoding lags.
+                let (frame_tx, frame_rx) = mpsc::sync_channel(1);
+                let frame_shutdown = Arc::new(AtomicBool::new(false));
+                let relay_shutdown = Arc::clone(&frame_shutdown);
+                let frame_worker = match std::thread::Builder::new()
+                    .name("screen-capture-frames".into())
+                    .spawn(move || {
+                        while !relay_shutdown.load(Ordering::Relaxed) {
+                            match native_frame_rx.recv_timeout(Duration::from_millis(50)) {
+                                Ok(frame) => match frame_tx.try_send(frame) {
+                                    Ok(()) | Err(TrySendError::Full(_)) => {}
+                                    Err(TrySendError::Disconnected(_)) => break,
+                                },
+                                Err(RecvTimeoutError::Timeout) => {}
+                                Err(RecvTimeoutError::Disconnected) => break,
+                            }
+                        }
+                    }) {
+                    Ok(worker) => worker,
+                    Err(error) => {
+                        let _ = init_tx.send(Err(format!(
+                            "failed to start screen-capture frame relay: {error}"
+                        )));
+                        return;
+                    }
+                };
+                if init_tx.send(Ok((width, height, frame_rx))).is_err() {
+                    frame_shutdown.store(true, Ordering::Relaxed);
+                    drop(recorder);
+                    let _ = frame_worker.join();
+                    return;
+                }
 
-        info!("Using monitor: {} ({}x{})", name, width, height);
+                while let Ok(command) = command_rx.recv() {
+                    match command {
+                        ScreenCaptureCommand::Start(reply) => {
+                            let _ = reply.send(recorder.start().map_err(|e| e.to_string()));
+                        }
+                        ScreenCaptureCommand::Stop(reply) => {
+                            let _ = reply.send(recorder.stop().map_err(|e| e.to_string()));
+                        }
+                        ScreenCaptureCommand::Shutdown => break,
+                    }
+                }
+                let _ = recorder.stop();
+                frame_shutdown.store(true, Ordering::Relaxed);
+                drop(recorder);
+                let _ = frame_worker.join();
+            })
+            .context("failed to start native screen-capture owner")?;
 
-        let (video_recorder, rx) = monitor.video_recorder()?;
+        let (width, height, frame_rx) = match init_rx.recv() {
+            Ok(Ok(initialized)) => initialized,
+            Ok(Err(error)) => {
+                let _ = worker.join();
+                return Err(anyhow::anyhow!(error));
+            }
+            Err(error) => {
+                let _ = worker.join();
+                return Err(anyhow::anyhow!(
+                    "native screen-capture owner stopped during initialization: {error}"
+                ));
+            }
+        };
 
         Ok(Self {
-            _monitor: monitor,
-            video_recorder,
-            rx,
             width,
             height,
+            command_tx,
+            frame_rx,
+            worker: Some(worker),
         })
+    }
+
+    fn send_control(
+        &self,
+        command: impl FnOnce(SyncSender<Result<(), String>>) -> ScreenCaptureCommand,
+    ) -> Result<()> {
+        let (reply_tx, reply_rx) = mpsc::sync_channel(1);
+        self.command_tx
+            .send(command(reply_tx))
+            .context("native screen-capture owner is unavailable")?;
+        reply_rx
+            .recv()
+            .context("native screen-capture owner stopped before replying")?
+            .map_err(anyhow::Error::msg)
     }
 }
 
@@ -117,28 +234,30 @@ impl VideoSource for ScreenCapturer {
     }
 
     fn start(&mut self) -> Result<()> {
-        self.video_recorder.start()?;
-        Ok(())
+        while self.frame_rx.try_recv().is_ok() {}
+        self.send_control(ScreenCaptureCommand::Start)
     }
 
     fn stop(&mut self) -> Result<()> {
-        self.video_recorder.stop()?;
-        Ok(())
+        self.send_control(ScreenCaptureCommand::Stop)
     }
 
     fn pop_frame(&mut self) -> anyhow::Result<Option<VideoFrame>> {
         let mut raw_frame = None;
         // We are only interested in the latest frame.
         // Drain the channel to not build up memory.
-        while let Ok(next) = self.rx.try_recv() {
+        while let Ok(next) = self.frame_rx.try_recv() {
             raw_frame = Some(next)
         }
         let raw_frame = match raw_frame {
             Some(frame) => frame,
-            None => self
-                .rx
-                .recv()
-                .context("Screen recorder did not produce new frame")?,
+            None => match self.frame_rx.recv_timeout(Duration::from_millis(250)) {
+                Ok(frame) => frame,
+                Err(RecvTimeoutError::Timeout) => return Ok(None),
+                Err(RecvTimeoutError::Disconnected) => {
+                    return Err(anyhow::anyhow!("screen recorder frame stream disconnected"));
+                }
+            },
         };
         Ok(Some(VideoFrame {
             format: VideoFormat {
@@ -333,5 +452,16 @@ impl VideoSource for CameraCapturer {
         };
         trace!("pop frame: decode took {:?}", start.elapsed());
         Ok(Some(frame))
+    }
+}
+
+#[cfg(all(test, any(target_os = "macos", target_os = "windows")))]
+mod tests {
+    use super::ScreenCapturer;
+
+    #[test]
+    fn screen_capturer_is_send_without_moving_native_handles() {
+        fn assert_send<T: Send>() {}
+        assert_send::<ScreenCapturer>();
     }
 }

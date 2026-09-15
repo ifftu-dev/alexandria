@@ -27,8 +27,12 @@ pub(crate) struct Rescaler {
     pub(crate) out_frame: FfmpegFrame,
 }
 
-// I think the ffmpeg structs are send-safe.
-// We want to create the encoder before moving it to a thread.
+// SAFETY: `Rescaler` exclusively owns its `SwsContext` and output `AVFrame`.
+// Their FFmpeg allocations have no creating-thread affinity, neither wrapper
+// is cloneable here, and every operation that mutates or dereferences them
+// requires `&mut self`. Moving that unique ownership to an encoder/decoder
+// thread therefore cannot introduce concurrent access; `Rescaler` is not
+// declared `Sync`.
 unsafe impl Send for Rescaler {}
 
 impl Rescaler {

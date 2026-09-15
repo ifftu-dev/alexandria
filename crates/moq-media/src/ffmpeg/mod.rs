@@ -93,8 +93,12 @@ pub(crate) mod ext {
     }
 
     impl CodecContextExt for ffmpeg::codec::Context {
-        // SAFETY: Written by ChatGPT, so, dunno.
         fn extradata(&self) -> Option<&[u8]> {
+            // SAFETY: `Context` owns a live `AVCodecContext` for the duration
+            // of `&self`. FFmpeg maintains `extradata` as either null/empty or
+            // a readable allocation of `extradata_size` bytes. The returned
+            // slice cannot outlive that shared borrow, so mutation or context
+            // destruction cannot invalidate it while it is in use.
             unsafe {
                 let ctx = self.as_ptr();
                 if (*ctx).extradata.is_null() || (*ctx).extradata_size <= 0 {
@@ -107,26 +111,61 @@ pub(crate) mod ext {
             }
         }
 
-        // SAFETY: Written by ChatGPT, so, dunno.
         fn set_extradata(&mut self, extradata: &[u8]) -> Result<(), ffmpeg::Error> {
+            let data_size =
+                i32::try_from(extradata.len()).map_err(|_| ffmpeg::Error::InvalidData)?;
+            let padding = ffmpeg::ffi::AV_INPUT_BUFFER_PADDING_SIZE as usize;
+            let allocation_size = extradata
+                .len()
+                .checked_add(padding)
+                .ok_or(ffmpeg::Error::InvalidData)?;
+
+            // SAFETY: `&mut self` provides exclusive access to the live
+            // `AVCodecContext`. New storage comes from FFmpeg's zeroing
+            // allocator with its required input padding. We allocate before
+            // releasing the old FFmpeg-owned buffer, copy exactly the source
+            // length into the checked allocation, and leave ownership with the
+            // context so `avcodec_free_context` can release it normally.
             unsafe {
                 let ctx = self.as_mut_ptr();
-                // allocate extradata + padding
-                let pad = ffmpeg::ffi::AV_INPUT_BUFFER_PADDING_SIZE as usize;
-                let size = extradata.len() + pad;
-                (*ctx).extradata = ffmpeg::ffi::av_mallocz(size).cast::<u8>();
-                if (*ctx).extradata.is_null() {
+                let new_data = if extradata.is_empty() {
+                    std::ptr::null_mut()
+                } else {
+                    ffmpeg::ffi::av_mallocz(allocation_size).cast::<u8>()
+                };
+                if !extradata.is_empty() && new_data.is_null() {
                     return Err(ffmpeg::Error::Bug);
                 }
-                // copy bytes and zero the padding
-                std::ptr::copy_nonoverlapping(
-                    extradata.as_ptr(),
-                    (*ctx).extradata,
-                    extradata.len(),
-                );
-                (*ctx).extradata_size = extradata.len() as i32;
+                if !new_data.is_null() {
+                    std::ptr::copy_nonoverlapping(extradata.as_ptr(), new_data, extradata.len());
+                }
+
+                ffmpeg::ffi::av_freep(std::ptr::addr_of_mut!((*ctx).extradata).cast());
+                (*ctx).extradata = new_data;
+                (*ctx).extradata_size = data_size;
             }
             Ok(())
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::CodecContextExt;
+        use ffmpeg_next as ffmpeg;
+
+        #[test]
+        fn codec_extradata_can_be_replaced_and_cleared() {
+            let mut context = ffmpeg::codec::Context::new();
+            assert_eq!(context.extradata(), None);
+
+            context.set_extradata(&[1, 2, 3]).expect("initial data");
+            assert_eq!(context.extradata(), Some([1, 2, 3].as_slice()));
+
+            context.set_extradata(&[4, 5]).expect("replacement data");
+            assert_eq!(context.extradata(), Some([4, 5].as_slice()));
+
+            context.set_extradata(&[]).expect("clear data");
+            assert_eq!(context.extradata(), None);
         }
     }
 }
